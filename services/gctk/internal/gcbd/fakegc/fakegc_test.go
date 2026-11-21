@@ -218,7 +218,7 @@ func TestAStoreFailureIsLoud(t *testing.T) {
 	if err := os.Chmod(f.dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(f.dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(f.dir, 0o700) })
 	r = f.gc("bd", "update", "a", "--status=closed")
 	if r.status != exitStore || r.out != "" || !strings.Contains(r.err, "beads.json") {
 		t.Errorf("an unwritable store: %+v", r)
@@ -451,6 +451,41 @@ func TestRigListAnswersTheSetting(t *testing.T) {
 	}
 }
 
+func TestOrderListAnswersTheSetting(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("order", "list", "--json"); r.status != 0 || r.out != "" {
+		t.Errorf("no setting: %+v, want nothing at exit 0", r)
+	}
+	f.write("orders.json", `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}`)
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "orders.json")}, "order", "list", "--json"); r.status != 0 || r.out != `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}` {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "missing.json")}, "order", "list", "--json"); r.out != `{"orders":[]}`+"\n" {
+		t.Errorf("a file that cannot be read: %+v, want an empty registry", r)
+	}
+	if r := f.gc("order", "run", "o"); r.status != 2 {
+		t.Errorf("another order verb: %+v", r)
+	}
+}
+
+func TestConfigShowAnswersTheSetting(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("config", "show", "--json"); r.status != 0 || r.out != noConfig+"\n" {
+		t.Errorf("no setting: %+v, want a config that names no agent", r)
+	}
+	cfg := `{"ok":true,"config":{"Agents":[{"Name":"pool","Dir":"rig","DefaultSlingFormula":"mol-polecat-work"}]}}`
+	f.write("config.json", cfg)
+	if r := f.run([]string{"STUB_CONFIG=" + filepath.Join(f.dir, "config.json")}, "config", "show", "--json"); r.out != cfg {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.run([]string{"STUB_CONFIG=" + filepath.Join(f.dir, "none.json")}, "config", "show", "--json"); r.out != noConfig+"\n" {
+		t.Errorf("a file that does not read: %+v, want a config that names no agent", r)
+	}
+	if r := f.gc("config", "validate"); r.status != 2 {
+		t.Errorf("another config verb: %+v", r)
+	}
+}
+
 func TestHookRunsBeforeTheCallItNames(t *testing.T) {
 	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
 	hook := filepath.Join(f.dir, "hook.sh")
@@ -666,6 +701,25 @@ func TestFailOnRefusesAnyCallThatCarriesTheText(t *testing.T) {
 	}
 }
 
+func TestListFailAfterFailsEveryListOnceTheTextIsLogged(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
+	set := []string{"STUB_LIST_FAIL_AFTER=--status=closed"}
+	if r := f.run(set, "bd", "list", "--json"); r.status != 0 {
+		t.Errorf("a list before any call carries the text: %+v", r)
+	}
+	if r := f.run(set, "bd", "update", "a", "--status=closed"); r.status != 0 {
+		t.Fatalf("the update that carries it: %+v", r)
+	}
+	if r := f.run(set, "bd", "list", "--id", "a", "--all", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("a list after it: %+v, want it failed", r)
+	}
+	for _, args := range [][]string{{"bd", "show", "a", "--json"}, {"bd", "dep", "list", "a", "--json"}} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Errorf("%v, which is not a list: %+v", args, r)
+		}
+	}
+}
+
 func TestAHookThatFailsFailsItsCall(t *testing.T) {
 	f := newFixture(t, `[{"id":"a","status":"open"}]`, "")
 	f.write("second.sh", "#!/bin/sh\n[ -e \""+filepath.Join(f.dir, "seen")+"\" ] && exit 1\n: > \""+filepath.Join(f.dir, "seen")+"\"\n")
@@ -678,6 +732,68 @@ func TestAHookThatFailsFailsItsCall(t *testing.T) {
 	}
 	if r := f.run(set, "bd", "show", "a", "--json"); r.status != 1 || r.out != "" {
 		t.Errorf("the second show, whose hook fails: %+v", r)
+	}
+}
+
+func TestAfterWriteRunsOnceEachWriteHasLanded(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"g","status":"open","issue_type":"gate"}]`, "")
+	fired := filepath.Join(f.dir, "fired")
+	// The program records its arguments, whether the setting reached it, and
+	// the store as it finds it, so each line shows the write had landed.
+	prog := filepath.Join(f.dir, "after.sh")
+	f.write("after.sh", "#!/bin/sh\nIFS= read -r s < \"$STUB_STORE\"\nprintf '%s|%s|%s\\n' \"$*\" \"$STUB_AFTER_WRITE\" \"$s\" >> \""+fired+"\"\nexit 3\n")
+	if err := os.Chmod(prog, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	set := []string{"STUB_AFTER_WRITE=" + prog}
+	for _, args := range [][]string{
+		{"bd", "show", "a", "--json"},
+		{"bd", "list", "--json"},
+		{"bd", "dep", "list", "a", "--json"},
+		{"bd", "gate", "list", "--json"},
+		{"rig", "list", "--json"},
+		{"bd", "create", "a preview", "--dry-run", "--json"},
+	} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	if _, err := os.Stat(fired); err == nil {
+		t.Fatalf("a read or a dry run ran the program: %s", f.file("fired"))
+	}
+	if r := f.run(set, "bd", "update", "a", "--if-status=in_progress", "--status=closed"); r.status != 13 {
+		t.Fatalf("a guarded update that does not hold: %+v", r)
+	}
+	if _, err := os.Stat(fired); err == nil {
+		t.Fatalf("a write that did not land ran the program: %s", f.file("fired"))
+	}
+	if r := f.run(set, "bd", "--db", "/x/.beads", "update", "a", "--status=in_progress"); r.status != 0 {
+		t.Errorf("an update whose program exits 3: %+v, want the update's own 0", r)
+	}
+	want := "bd --db /x/.beads update a --status=in_progress||" + `[{"id":"a","status":"in_progress"},{"id":"g","status":"open","issue_type":"gate"}]` + "\n"
+	if got := f.file("fired"); got != want {
+		t.Errorf("after the update the program ran with %q, want %q", got, want)
+	}
+	f.write("fired", "")
+	for _, args := range [][]string{
+		{"bd", "dep", "add", "a", "g"},
+		{"bd", "dep", "remove", "a", "g"},
+		{"bd", "gate", "resolve", "g", "--reason", "ruled: no"},
+		{"bd", "close", "a"},
+	} {
+		if r := f.run(set, args...); r.status != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	var verbs []string
+	for _, l := range strings.Split(strings.TrimSuffix(f.file("fired"), "\n"), "\n") {
+		verbs = append(verbs, strings.SplitN(l, "|", 2)[0])
+	}
+	if got := strings.Join(verbs, ","); got != "bd dep add a g,bd dep remove a g,bd gate resolve g --reason ruled: no,bd close a" {
+		t.Errorf("the program ran after %q, want once after each write", got)
+	}
+	if r := f.run([]string{"STUB_AFTER_WRITE=" + filepath.Join(f.dir, "missing.sh")}, "bd", "update", "a", "--assignee=x"); r.status == 0 {
+		t.Errorf("a program that does not start: %+v, want the call failed", r)
 	}
 }
 
@@ -808,5 +924,185 @@ func TestListObjectAnswersAnObjectAtExitZero(t *testing.T) {
 	}
 	if r := f.run(limited, "bd", "list", "--json"); r.status != 0 || !strings.HasPrefix(r.out, `[{"id":"a"`) {
 		t.Errorf("a list without the text: %+v", r)
+	}
+}
+
+func TestSetStateSwapsTheDimensionsLabelAndRecordsAnEvent(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open","labels":["x","situation:active"]}]`, "")
+	r := f.gc("bd", "set-state", "a", "situation=cleared", "--reason", "fixed")
+	if r.status != 0 || r.out != "✓ Set situation = cleared on a\n  Previous: active\n  Event: new-2\n" {
+		t.Fatalf("set-state: %d %q %s", r.status, r.out, r.err)
+	}
+	if r := f.gc(readFlag, "field", "a", "labels"); r.out != `["x","situation:cleared"]`+"\n" {
+		t.Errorf("labels %q, want the dimension's one label swapped", r.out)
+	}
+	for field, want := range map[string]string{"status": "closed", "issue_type": "event", "priority": "4",
+		"title": "State change: situation → cleared", "description": "Changed situation from active to cleared\n\nReason: fixed"} {
+		if r := f.gc(readFlag, "field", "new-2", field); r.out != want+"\n" {
+			t.Errorf("the event's %s is %q, want %q", field, r.out, want)
+		}
+	}
+	if r := f.gc(readFlag, "parents", "new-2"); r.out != "a\n" {
+		t.Errorf("the event's parents are %q, want the bead", r.out)
+	}
+	r = f.gc("bd", "set-state", "a", "situation=cleared", "--json")
+	if r.status != 0 || r.out != `{"changed":false,"dimension":"situation","issue_id":"a","value":"cleared"}`+"\n" {
+		t.Errorf("a set-state to the value the bead holds: %d %q", r.status, r.out)
+	}
+	if n := strings.Count(f.file("beads.json"), `"issue_type":"event"`); n != 1 {
+		t.Errorf("%d events after a set-state that changed nothing, want 1", n)
+	}
+	r = f.gc("bd", "set-state", "a", "mode=degraded", "--json")
+	if r.out != `{"changed":true,"dimension":"mode","event_id":"new-3","issue_id":"a","new_value":"degraded","old_value":null}`+"\n" {
+		t.Errorf("a first value for a dimension: %q", r.out)
+	}
+	if r := f.gc(readFlag, "field", "new-3", "description"); r.out != "Set mode to degraded\n" {
+		t.Errorf("the first value's event says %q", r.out)
+	}
+	before := f.file("beads.json")
+	for _, args := range [][]string{{"nope", "situation=active"}, {"a", "situation"}, {"a", "=active"}, {"a"}} {
+		if r := f.gc(append([]string{"bd", "set-state"}, args...)...); r.status != 1 {
+			t.Errorf("set-state %v: exit %d, want 1", args, r.status)
+		}
+	}
+	if f.file("beads.json") != before {
+		t.Errorf("a refused set-state wrote the store")
+	}
+}
+
+func TestKvListAnswersEveryKeyByKey(t *testing.T) {
+	f := newFixture(t, "[]", "")
+	if r := f.gc("bd", "kv", "list", "--json"); r.status != 0 || r.out != `{"schema_version":1}`+"\n" {
+		t.Errorf("an empty kv's list: %d %q", r.status, r.out)
+	}
+	f.gc("bd", "kv", "set", "b", "2")
+	f.gc("bd", "kv", "set", "a", "x=1")
+	if r := f.gc("bd", "kv", "list", "--json"); r.out != `{"a":"x=1","b":"2","schema_version":1}`+"\n" {
+		t.Errorf("kv list --json: %q", r.out)
+	}
+	if r := f.gc("bd", "kv", "list"); r.out != "\nKey-Value Store:\n  a = x=1\n  b = 2\n" {
+		t.Errorf("kv list: %q", r.out)
+	}
+	if r := f.run([]string{"STUB_KV_FAIL=1"}, "bd", "kv", "list", "--json"); r.status != 1 || r.out != "" {
+		t.Errorf("kv list under STUB_KV_FAIL: %+v", r)
+	}
+}
+
+func TestUpdateWritesTheTitleAndRefusesABlankOne(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","title":"old","status":"open"},{"id":"b","title":"old","status":"open"}]`, "")
+	if r := f.gc("bd", "update", "a", "--title", "new a", "--set-metadata", "k=v"); r.status != 0 {
+		t.Errorf("--title: %+v", r)
+	}
+	if r := f.gc("bd", "update", "b", "--title=new b"); r.status != 0 {
+		t.Errorf("--title=: %+v", r)
+	}
+	for _, blank := range []string{"", "  "} {
+		if r := f.gc("bd", "update", "b", "--title", blank, "--set-metadata", "k=v"); r.status != 1 || !strings.Contains(r.err, "title cannot be empty") {
+			t.Errorf("--title %q: %+v, want bd's refusal", blank, r)
+		}
+	}
+	want := `[{"id":"a","title":"new a","status":"open","metadata":{"k":"v"}},{"id":"b","title":"new b","status":"open"}]` + "\n"
+	if got := f.file("beads.json"); got != want {
+		t.Errorf("store = %s, want %s", got, want)
+	}
+}
+
+func TestConvoyStatusAnswersItsMembersAsGcReadsThem(t *testing.T) {
+	f := newFixture(t, `[{"id":"cv","title":"the convoy","status":"open","issue_type":"convoy","labels":["owned","x"],"metadata":{"target":"main","convoy.owner":"me","other":"o"}},`+
+		`{"id":"c-late","title":"late child","status":"closed","parent":"cv","created_at":"2026-01-03T00:00:00Z"},`+
+		`{"id":"c-early","title":"early child","status":"open","created_at":"2026-01-01T00:00:00Z"},`+
+		`{"id":"t-both","title":"tracked child","status":"in_progress","assignee":"bob","issue_type":"bug","parent":"cv","created_at":"2026-01-02T00:00:00Z"},`+
+		`{"id":"t-only","title":"tracked","status":"open","created_at":"2026-01-02T00:00:00Z"},`+
+		`{"id":"other","title":"no member","status":"open","created_at":"2026-01-01T00:00:00Z"},`+
+		`{"id":"empty","title":"no members","status":"open","issue_type":"convoy"},{"id":"task","title":"a task","status":"open"}]`,
+		"c-early|parent-child|cv\ncv|tracks|t-both\ncv|tracks|t-only\ncv|tracks|gone\nother|tracks|t-only\n")
+	want := `{"children":[{"id":"gone","title":"gone","status":"unknown","type":"task","dangling_track":true},` +
+		`{"id":"c-early","title":"early child","status":"open","type":"task"},` +
+		`{"id":"t-both","title":"tracked child","status":"in_progress","type":"bug","assignee":"bob"},` +
+		`{"id":"t-only","title":"tracked","status":"open","type":"task"},` +
+		`{"id":"c-late","title":"late child","status":"closed","type":"task"}],` +
+		`"convoy":{"id":"cv","title":"the convoy","status":"open","owned":true,"fields":{"owner":"me","target":"main"},"labels":["owned","x"]},` +
+		`"ok":true,"progress":{"closed":1,"total":5,"dangling_tracks":1},"schema_version":"1"}` + "\n"
+	if r := f.gc("convoy", "status", "cv", "--json"); r.status != 0 || r.out != want {
+		t.Errorf("a convoy's members:\n got %+v\nwant %s", r, want)
+	}
+	none := `{"children":[],"convoy":{"id":"empty","title":"no members","status":"open","owned":false,"fields":{}},"ok":true,"progress":{"closed":0,"total":0},"schema_version":"1"}` + "\n"
+	if r := f.gc("convoy", "status", "--json", "empty"); r.status != 0 || r.out != none {
+		t.Errorf("a convoy with no members:\n got %+v\nwant %s", r, none)
+	}
+	failed := `{"schema_version":"1","ok":false,"error":{"code":"command_failed","message":"command failed; see stderr for diagnostics","exit_code":1}}` + "\n"
+	for id, why := range map[string]string{"task": "bead task is not a convoy", "nope": "convoy nope not found"} {
+		if r := f.gc("convoy", "status", id, "--json"); r.status != 1 || r.out != failed || !strings.Contains(r.err, why) {
+			t.Errorf("convoy status %s: %+v, want gc's refusal: %s", id, r, why)
+		}
+	}
+	if r := f.gc("convoy", "status", "cv"); r.status != 2 {
+		t.Errorf("the text answer: %+v, want unsupported", r)
+	}
+}
+
+func TestShowCarriesItsDependentsWhenAsked(t *testing.T) {
+	f := newFixture(t, `[{"id":"s","title":"the subject","status":"closed"},`+
+		`{"id":"w2","title":"second waiter","status":"open","priority":1,"issue_type":"task"},`+
+		`{"id":"kid","title":"a child","status":"in_progress","parent":"s"},`+
+		`{"id":"w1","title":"first waiter","status":"closed","issue_type":"bug","dependencies":[{"id":"s","dependency_type":"until"}]},`+
+		`{"id":"far","title":"another store's","status":"open","dependencies":[{"id":"s","dependency_type":"blocks","external":true}]},`+
+		`{"id":"lone","title":"no dependent","status":"open"}]`,
+		"s|blocks|w2\nw2|tracks|lone\n")
+	want := `[{"id":"s","title":"the subject","status":"closed","priority":2,"dependents":[` +
+		`{"id":"w2","title":"second waiter","status":"open","priority":1,"issue_type":"task","dependency_type":"blocks"},` +
+		`{"id":"kid","title":"a child","status":"in_progress","priority":2,"dependency_type":"parent-child"},` +
+		`{"id":"w1","title":"first waiter","status":"closed","priority":2,"issue_type":"bug","dependency_type":"until"}]}]` + "\n"
+	if r := f.gc("bd", "show", "s", "--brief-deps", "--include-dependents", "--json"); r.status != 0 || r.out != want {
+		t.Errorf("show --include-dependents:\n got %+v\nwant %s", r, want)
+	}
+	if r := f.gc("bd", "show", "s", "--json"); r.status != 0 || strings.Contains(r.out, "dependents") {
+		t.Errorf("a show that does not ask for its dependents: %+v", r)
+	}
+	if r := f.gc("bd", "show", "w2", "--include-dependents", "--json"); r.status != 0 || strings.Contains(r.out, "dependents") {
+		t.Errorf("a bead nothing waits on carries no dependents key: %+v", r)
+	}
+}
+
+func TestShowLeavesOutAnEdgeIntoAnotherStore(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`, "b|blocks|a\nzz-gone|blocks|a\na|tracks|zz-far\n")
+	if r := f.gc("bd", "show", "a", "--json"); r.status != 0 || r.out != `[{"id":"a","status":"open","priority":2,"dependencies":[{"id":"b","status":"open","dependency_type":"blocks"}]}]`+"\n" {
+		t.Errorf("show keeps only the edge whose far bead the store holds: %+v", r)
+	}
+	want := `"dependencies":[{"issue_id":"a","depends_on_id":"b","type":"blocks"},{"issue_id":"a","depends_on_id":"zz-gone","type":"blocks"},{"issue_id":"a","depends_on_id":"zz-far","type":"tracks"}]`
+	if r := f.gc("bd", "list", "--id", "a", "--json"); r.status != 0 || !strings.Contains(r.out, want) {
+		t.Errorf("a listing keeps every edge: %+v", r)
+	}
+}
+
+func TestADefaultListingLeavesOutClosedAndPinnedBeads(t *testing.T) {
+	f := newFixture(t, `[{"id":"p","status":"open"},{"id":"o","status":"open","parent":"p"},{"id":"c","status":"closed","parent":"p"},`+
+		`{"id":"pin","status":"pinned","parent":"p"},{"id":"own","status":"in_review","parent":"p"},{"id":"h","status":"hooked","parent":"p"}]`, "")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--parent", "p"}, "o,own,h"},
+		{[]string{"--parent", "p", "--all"}, "o,c,pin,own,h"},
+		{[]string{"--parent", "p", "--status", "open,pinned"}, "o,pin"},
+		{nil, "p,o,own,h"},
+	} {
+		if got := ids(t, f.gc(append(append([]string{"bd", "list"}, c.args...), "--json")...)); got != c.want {
+			t.Errorf("list %v = %s, want %s", c.args, got, c.want)
+		}
+	}
+}
+
+func TestShowRawControlPrintsAControlByteRaw(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open"}]`, "")
+	if r := f.gc("bd", "show", "a", "--json"); r.status != 0 || r.out != `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open","priority":2}]`+"\n" {
+		t.Errorf("a show escapes a control character, as bd does: %+v", r)
+	}
+	r := f.run([]string{"STUB_SHOW_RAW_CONTROL=1"}, "bd", "show", "a", "--json")
+	if r.status != 0 || r.out != "[{\"id\":\"a\",\"title\":\"ctl\x01note\",\"notes\":\"a\x00b\tc\",\"status\":\"open\",\"priority\":2}]\n" {
+		t.Errorf("STUB_SHOW_RAW_CONTROL: %q", r.out)
+	}
+	if got := f.file("beads.json"); got != `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open"}]` {
+		t.Errorf("the store keeps its escapes: %s", got)
 	}
 }

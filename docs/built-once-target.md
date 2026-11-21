@@ -238,8 +238,8 @@ yet. Each remaining difference names its reason and what ends it:
   an ask, which the run takes. A sitting that edits the branch with the
   operator can push while a run works it, and the lease keeps either push from
   overwriting the other. A conflict on a branch whose rework child is still
-  open goes to that child's notes, on a rig not yet cut over and for a child a
-  cutover left to finish, until the old path's retirement (tk-1tfzr71.122). Gas
+  open goes to that child's notes, until the old review path's retirement
+  (tk-1tfzr71.122). Gas
   Town has no review run and no asks. Two workers on one branch would move it
   under each other, and the lease refuses the second push until its worker
   merges the first. No end is planned.
@@ -337,8 +337,7 @@ and what ends it:
   because code does the work that needs no judgment (conversation tk-9l9pg0x).
   This ends when Gas Town's witness runs its scripted steps outside its session.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the retirements of the old merge path (tk-1tfzr71.70) and the
-  old review path (tk-1tfzr71.122) land.
+  This ends as the old review path's retirement (tk-1tfzr71.122) lands.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
@@ -384,19 +383,20 @@ The wrapper that provisions an agent's home stays under its warrant, because
 
 `gctk rig` runs a rig's declared checks and records each result against the
 commit it ran at, and runs a copy of the rig's UI from a checkout, which a demo
-capture records and a sitting shows the operator. The copy came after the
-baseline, so the estimate above does not weigh it.
+capture records and a sitting shows the operator. `gctk memory` keeps the
+learning loop's memory intake. The copy and the intake came after the baseline,
+so the estimate above weighs neither.
 
-The trade: `gctk merge`'s approval rule goes with the merge member, and its
-compiled copy of the key registry goes with the registry. A domain moves into
-gctk only when it survives the migration map, and it moves whole: the change
+The trade: a domain moves into gctk only when it survives the migration map,
+and it moves whole: the change
 that ports it deletes the shell it replaces, and the PR's size line
 ([rule 3](#the-rules)) shows the port's net.
 
 ### Feedback, config and doctrine
 
-Feedback is the miner and distiller formulas, the learning-distill skill and
-their orders, and saying each fact once is the only cut its estimate takes.
+Feedback is the miner and distiller formulas, the distiller's memory step, the
+learning-distill skill and their orders, and saying each fact once is the only
+cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
 key registry that declares only the keys of surviving warranted nouns, as data:
 1,494 of the registry's 1,854 lines are comments today. Doctrine is the shared
@@ -442,10 +442,6 @@ home.
   that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
   its own run, because it returns the review to its pool through `gc sling` once
   the cancel has landed.
-- A rule kept in two languages, with a test holding the copies equal:
-  `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
-  and the board's Go contract and its TypeScript mirror. Carried by
-  tk-1tfzr71.70, the old merge path's retirement, and tk-1tfzr71.25.
 
 ### Compatibility debt
 
@@ -490,21 +486,19 @@ more than its size. A branch already in flight shows its measured net instead.
 ### 3. The lanes
 
 Each member is armed behind the one before it, and at most two migrations are
-in flight at once, on disjoint subsystems. The two retirements last in lane A
-are the exceptions. The old merge path's (tk-1tfzr71.70) is armed behind every
-rig's cutover, and the old review path's (tk-1tfzr71.122) behind every cutover
-and tk-1tfzr71.21. A member whose method is a design convoy lands only after
+in flight at once, on disjoint subsystems. The retirement last in lane A is the
+exception: the old review path's (tk-1tfzr71.122) is armed behind every rig's
+cutover and tk-1tfzr71.21. A member whose method is a design convoy lands only after
 the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
 | A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record and the GitHub intake has landed: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
 | B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
-| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
+| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |
 
 The whole files that the migration members name come to 55k of
 the 220k between the baseline and the built-once estimate. Their partial

@@ -116,8 +116,10 @@ func ready() *world {
 	}
 	g := ghfake.New(self)
 	g.Put(p)
+	s := fake.New()
+	s.IDPrefix = "tk"
 	return &world{
-		store: fake.New(), github: g, pr: p,
+		store: s, github: g, pr: p,
 		rule: &rule{notFeedback: map[int64]bool{}, awaits: map[string]bool{}},
 		md: map[string]string{
 			"merge_result": "pull_request_pending", "pr_url": prURL, "pr_number": "7", "pr_repo": repo,
@@ -257,6 +259,10 @@ func TestApproval(t *testing.T) {
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
 				{ID: 101, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindApproval, pr.KindChangesRequested}},
+		{"an approval still counts once the same account's later request for changes is dismissed",
+			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+			nil},
 		{"an approval after the same account's request for changes lifts it",
 			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
 				approve(101, "operator", "2026-11-12T02:00:00Z")},

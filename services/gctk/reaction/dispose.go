@@ -10,11 +10,12 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
 // Dispose is one exit a reaction takes on its subject, Bead: the exit, why it
-// was chosen, the board's headline, the run that reacted, who disposed it, and
+// was chosen, the subject's headline, the run that reacted, who disposed it, and
 // the exit's own flags. Set names each flag the call set, by its name, so a
 // flag set to an empty value is still refused by an exit that takes none.
 type Dispose struct {
@@ -102,7 +103,7 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 		return usage("--reason is required: the record of why this exit was chosen is what makes a wrong call visible")
 	}
 	if d.Takeaway == "" {
-		return usage("--takeaway is required: it is the board headline the operator reads")
+		return usage("--takeaway is required: it is the subject's one-line headline")
 	}
 	if d.Set["run"] {
 		if !runID.MatchString(d.Run) {
@@ -167,7 +168,7 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 		}
 	case Recommend, Ruling:
 		if n := utf8.RuneCountInString(oneLine(d.Takeaway)); n > 140 {
-			return usage("--takeaway is %d characters, and the cap is 140, because it is the gate's title and the board headline", n)
+			return usage("--takeaway is %d characters, and the cap is 140, because it is the gate's title and the subject's headline", n)
 		}
 		if d.Disposition == Recommend {
 			if d.RecommendedFormula == "" {
@@ -466,32 +467,29 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		r.say("intake wrote priority P0 on %s", d.Bead)
 	}
 
-	// The act: gc-helm.sh takeaway writes the headline, the release and the
-	// wait edges. A blocked exit waits on its blockers, and a ruling or a
-	// recommend on its gate, whose edge the gate's create already wrote.
-	args := []string{"takeaway", d.Bead, d.Takeaway, "--by", d.By, "--release"}
+	// The act: the takeaway writes the headline, the release and the wait
+	// edges. A blocked exit waits on its blockers, and a ruling or a recommend
+	// on its gate, whose edge the gate's create already wrote.
+	req := takeaway.Request{Bead: d.Bead, Text: d.Takeaway, By: d.By, Release: true}
 	switch d.Disposition {
 	case Actionable:
+		req.NoWait = true
 		switch {
 		case d.Assign == "" && admit != "":
-			args = append(args, "--route", d.Route, "--no-wait")
+			req.Route = d.Route
 		case form == formAssignee:
-			args = append(args, "--assign", d.Assign, "--no-wait")
-		default:
-			args = append(args, "--no-wait")
+			req.Assign = d.Assign
 		}
 	case Blocked:
-		for _, w := range waiting {
-			args = append(args, "--waiting-on", w)
-		}
+		req.WaitingOn = waiting
 		if form == formAssignee {
-			args = append(args, "--assign", d.ThenAssign)
+			req.Assign = d.ThenAssign
 		}
 	case Recommend, Ruling:
-		args = append(args, "--waiting-on", gate)
+		req.WaitingOn = []string{gate}
 	}
-	if res := r.Runtime.Script("gc-helm.sh", args...); res.Failure() != "" {
-		return out, fmt.Errorf("gc-helm.sh takeaway failed on %s (%s); its message names what landed and what did not. Clear the cause and re-run this command", d.Bead, scriptFailure(res))
+	if _, err := r.Takeaway(req); err != nil {
+		return out, fmt.Errorf("the takeaway on %s stopped: %v. Clear the cause and re-run this command", d.Bead, err)
 	}
 
 	// A requested arm is part of the write-back: held with no arm, the bead
@@ -545,8 +543,8 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Dispo
 	if err := r.Ledger.Commit(w); err != nil {
 		return out, fmt.Errorf("could not append the close brief to %s's notes (%v); the validating closer reads it there, so nothing was dispatched. Clear the cause and re-run this command", d.Bead, err)
 	}
-	if res := r.Runtime.Script("gc-helm.sh", "takeaway", d.Bead, d.Takeaway, "--by", d.By); res.Failure() != "" {
-		return out, fmt.Errorf("the close brief is on %s, but its board headline did not land (gc-helm.sh takeaway: %s), so no closer was dispatched. Clear the cause and re-run this command", d.Bead, scriptFailure(res))
+	if _, err := r.Takeaway(takeaway.Request{Bead: d.Bead, Text: d.Takeaway, By: d.By}); err != nil {
+		return out, fmt.Errorf("the close brief is on %s, but its headline did not land (%v), so no closer was dispatched. Clear the cause and re-run this command", d.Bead, err)
 	}
 	if len(waiting) > 0 {
 		for _, h := range waiting {
@@ -618,14 +616,4 @@ func (r *Reactions) dbFlag() string {
 		return ""
 	}
 	return " --db " + r.DB
-}
-
-// scriptFailure is a script's failure in one line, with the last line it
-// printed, which names what landed.
-func scriptFailure(res gascity.Result) string {
-	f := res.Failure()
-	if f == "" {
-		return "it exited 0"
-	}
-	return f
 }

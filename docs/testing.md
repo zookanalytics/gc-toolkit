@@ -87,13 +87,21 @@ A shell suite reaches it through the shared harness,
    `$STUB_DEPS`, and a fault, such as a failed list or a refused update, as a
    `STUB_*` setting. Another writer's change that lands between two of the
    script's calls is a program the fake runs before the call it names
-   (`STUB_HOOK_AT` and `STUB_HOOK`).
+   (`STUB_HOOK_AT` and `STUB_HOOK`), and another process that runs at each
+   moment a write leaves, such as the deferred-dispatch order's pass, is a
+   program the fake runs after each write that lands (`STUB_AFTER_WRITE`). A
+   script that acts in more than one store, such as two rigs' stores, gets a
+   store per rig: `harness_store <path>/.beads` for each rig the rig list
+   `STUB_RIGS` names. The fake acts in the store gc would pick for each call,
+   and the readers and writers in the store a call naming the bead would act
+   in.
 3. Run the script under test.
 4. Assert on the state that results, through the harness's readers (`meta`,
    `bstatus`, `bassignee`, `bprio`, `bpoured`, `bparents`, `notes`, `bfield`,
-   `bedges`, `bonto`, `bcomments` and `bids`), on the calls the script made, in
-   `$STUB_GC_LOG`, and on a JSON answer the script printed, through
-   `json_get`, `json_get_strs` and `json_get_ids`, which read it in bash.
+   `bedges`, `bonto`, `bedge`, `brecord`, `bcomments` and `bids`), on the calls
+   the script made, in `$STUB_GC_LOG`, and on a JSON answer the script printed,
+   through `json_get`, `json_get_strs` and `json_get_ids`, which read it in
+   bash.
 
 A test sets state and asserts on state and calls. It does not script a canned
 answer for each call. A store file the fake cannot read or write ends the call

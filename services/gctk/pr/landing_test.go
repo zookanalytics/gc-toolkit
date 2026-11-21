@@ -408,39 +408,6 @@ func TestAMarkerOnlyOpenRecordGoesBackForRevalidation(t *testing.T) {
 	}
 }
 
-// A bead that waits on its PR's merge, blocked and pending, while the refinery
-// is still assigned it, is one no publication of the record leaves. The run
-// assigns it to nobody in one write that changes nothing else and reads no
-// GitHub, and the next run works it as a waiting bead. A blocked bead the
-// refinery is assigned whose record reads no pending merge is read as before.
-func TestAWaitingBeadTheRefineryIsStillAssignedIsAssignedToNobody(t *testing.T) {
-	d := newLand(t)
-	d.put("blocked", refinery)
-	o := d.once(t)
-	is(t, o, pr.ActUnassigned)
-	ws := d.store.Writes()
-	if len(ws) != 1 || !slices.Equal(ws[0].Args, []string{"--if-status=blocked", "--if-assignee=" + refinery, "--assignee="}) {
-		t.Fatalf("the run wrote %+v, want one guarded write that assigns the bead to nobody", ws)
-	}
-	if readsPR(d.github) {
-		t.Fatalf("the run read GitHub: %v", d.github.Reads())
-	}
-	b := d.row(t)
-	if b.Status != "blocked" || b.Assignee != "" {
-		t.Fatalf("the bead is %s under %q, want blocked and assigned to nobody", b.Status, b.Assignee)
-	}
-	meta(t, b, map[string]string{"merge_result": record.Pending, "pr_reconcile_pending": "true"})
-	is(t, d.once(t), pr.ActRequested)
-
-	e := newLand(t)
-	e.md["merge_result"] = record.ClosedUnmerged
-	e.put("blocked", refinery)
-	is(t, e.once(t), pr.ActExcepted)
-	if b := e.row(t); b.Assignee != refinery {
-		t.Fatalf("an exception's bead is assigned to %q, want it left to the refinery", b.Assignee)
-	}
-}
-
 func TestACompleteOpenPendingRecordFinishesItsBlockFirst(t *testing.T) {
 	d := newLand(t)
 	d.pr.Reviews = nil
@@ -1857,7 +1824,7 @@ func TestTheShellsFlockAndTheRecordLockExcludeEachOther(t *testing.T) {
 	if err := hold.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer hold.Wait()
+	defer func() { _ = hold.Wait() }()
 	time.Sleep(300 * time.Millisecond)
 	if _, err := record.Lock(dir, 100*time.Millisecond); !errors.Is(err, record.ErrLockWait) {
 		t.Fatalf("gctk took the lock while flock(1) held it: %v", err)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic test for queue-priority.sh and the gc-helm `priority` verb that runs
-# its move (docs/steering.md, "Priority").
+# Hermetic test for queue-priority.sh, whose move is the priority move the po and
+# a sitting run (docs/steering.md, "Priority").
 #
 # THE CONTRACT this pins:
 #   (SETTLE)    settle writes a bead's computed priority to the bead and to every
@@ -13,7 +13,7 @@
 #               a lock held past the wait each exit 1. A writer records itself
 #               as the lock's holder while it holds it and clears the record as
 #               it exits.
-#   (MOVE)      gc-helm.sh priority <bead> <P> sets a bead that follows nothing,
+#   (MOVE)      queue-priority.sh move <bead> <P> sets a bead that follows nothing,
 #               and --shift sets a bead that follows a parent or an anchor; the
 #               move then writes every bead that follows it, held ones and gates
 #               included, their live workflows and their anchors' PR-finishing
@@ -22,8 +22,8 @@
 #               is refused naming the shift that lands it there; a shift on a
 #               bead that follows nothing, either form on a workflow's convoy,
 #               root or step, a closed bead and malformed input are refused with
-#               nothing written. A move that fails busts the board cache, and a
-#               refusal leaves it.
+#               nothing written. With no --db, the move finds the bead's store by
+#               its id prefix, and a bead in no rig's store exits 1.
 #   (CLASSES)   settle, the move and the pass read gates, infra beads,
 #               templates and ephemeral beads, which bd hides from a listing
 #               that does not ask for them, and agree on the priority of each.
@@ -65,7 +65,7 @@
 #   (REGISTRY)  every metadata key the script writes is registered in
 #               lifecycle/lifecycle.toml.
 #
-# It runs the REAL queue-priority.sh and gc-helm.sh against a stateful stub
+# It runs the REAL queue-priority.sh against a stateful stub
 # `gc`: a JSON store that `bd list`, `bd ready`, `bd dep list` and `bd update`
 # read and write in the shapes bd prints, so each assertion reads the store the
 # writers left behind. The test floor sits beneath the stub.
@@ -74,7 +74,6 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 QP="$HERE/queue-priority.sh"
-HELM="$HERE/gc-helm.sh"
 FX="$HERE/priority-lib.fixture.json"
 FLOOR="$(cd "$HERE/../../tools/test-floor" 2>/dev/null && pwd)" || FLOOR=""
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-queue-priority-test.XXXXXX")"
@@ -325,7 +324,6 @@ run() {
   OUT="$(cat "$TMP/out")"; ERR="$(cat "$TMP/err")"; CALLS="$(cat "$STUB_CALLS")"
 }
 qp() { run "$QP" "$@"; }
-helm() { run sh "$HELM" "$@"; }
 # held_record <cmd...> -> RC, OUT, ERR as run gives them, and HELD, the lock's
 # holder record read while the writer holds the lock: the writer's first
 # priority write waits at a gate until the record is read.
@@ -387,7 +385,7 @@ reset_store() {
  {"id":"tk-g1","status":"open","issue_type":"gate","priority":2,"metadata":{},"dependencies":[]},
  {"id":"tk-wc","status":"in_progress","issue_type":"task","priority":3,"assignee":"polecat-2","metadata":{},
   "dependencies":[{"issue_id":"tk-wc","depends_on_id":"tk-e1","type":"parent-child"}]},
- {"id":"tk-an","status":"open","issue_type":"task","priority":2,"metadata":{"branch":"polecat/tk-an","merge_result":"pull_request"},
+ {"id":"tk-an","status":"open","issue_type":"task","priority":2,"metadata":{"branch":"polecat/tk-an","merge_result":"pull_request_pending"},
   "dependencies":[{"issue_id":"tk-an","depends_on_id":"tk-e1","type":"parent-child"}]},
  {"id":"tk-rw","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-an","task_kind":"rework","priority_shift":"-1"},
   "dependencies":[{"issue_id":"tk-rw","depends_on_id":"tk-an","type":"blocks"}]},
@@ -507,8 +505,8 @@ kill "${HOLDERS[-1]}" 2>/dev/null; wait "${HOLDERS[-1]}" 2>/dev/null
 
 echo "# the priority move"
 reset_store
-helm priority tk-e1 P2
-eq "$RC" 0 "(MOVE) gc-helm.sh priority on an epic exits 0"
+qp move tk-e1 P2
+eq "$RC" 0 "(MOVE) a move on an epic exits 0"
 has "$OUT" "priority tk-e1 P2, set directly" "(MOVE) it names the new priority"
 eq "$(prio tk-e1)" 2 "(MOVE) the epic takes the P-value"
 eq "$(prio tk-w1)" 2 "(MOVE) a member with no shift follows it"
@@ -527,7 +525,7 @@ eq "$(prio tk-e0)" 0 "(MOVE) another epic is not touched"
 eq "$(prio tk-solo)" 3 "(MOVE) a bead that follows nothing elsewhere is not touched"
 hasnt "$CALLS" "bd update tk-wc" "(MOVE) no write names the claimed member"
 reset_store
-held_record sh "$HELM" priority tk-e1 P2
+held_record "$QP" move tk-e1 P2
 eq "$RC" 0 "(MOVE) a move held at its first write exits 0 once let go"
 eq "$(awk '{print $3}' <<< "$HELD")" "move" "(MOVE) while the move holds the lock beside the store, the holder record names it"
 eq "$(cat "$DB/queue-priority.holder" 2>/dev/null)" "" "(MOVE) the record is cleared once the move exits"
@@ -546,14 +544,14 @@ qp settle tk-two --print; eq "$OUT" "2" "(RULES) a bead with two parents queues 
 reset_store
 add_beads '[
  {"id":"tk-e2","status":"open","issue_type":"epic","priority":2,"metadata":{},"dependencies":[]},
- {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
+ {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
   "dependencies":[{"issue_id":"tk-ap","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-ra","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-ap","task_kind":"rework","priority_shift":-1},"dependencies":[]},
  {"id":"tk-cvra","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
   "dependencies":[{"issue_id":"tk-cvra","depends_on_id":"tk-ra","type":"tracks"}]},
  {"id":"tk-rra","status":"in_progress","issue_type":"task","priority":2,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvra"},"dependencies":[]},
  {"id":"tk-sra","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-rra","gc.step_ref":"mol-polecat-work.implement","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]},
- {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
+ {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
   "dependencies":[{"issue_id":"tk-cm","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-rc","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-cm","task_kind":"rework","priority_shift":-1},"dependencies":[]}
 ]'
@@ -563,32 +561,32 @@ has "$OUT" "settled tk-ra at P0: anchor tk-ap has an approved PR, shift -1 aside
 for b in tk-ra tk-cvra tk-rra tk-sra; do eq "$(prio "$b")" 0 "(APPROVED) $b, the work or its live workflow, is written P0"; done
 qp settle tk-rc --print
 eq "$OUT" "1" "(APPROVED) finishing work of a PR that is not approved, at shift -1 under a P2 epic, is P1"
-helm priority tk-ra P2
+qp move tk-ra P2
 eq "$RC" 2 "(APPROVED) a P-value on an approved PR's finishing work is refused, as on any bead that follows another"
 has "$ERR" "While the PR of tk-ap is approved, it runs at P0 whatever its shift." "(APPROVED) and the refusal says the approval holds it at P0"
-helm priority tk-ra --shift +2
+qp move tk-ra --shift +2
 eq "$RC" 0 "(APPROVED) a shift on it exits 0"
 eq "$(meta tk-ra priority_shift)" "2" "(APPROVED) the shift is written, for when the PR is no longer approved"
 eq "$(prio tk-ra)" 0 "(APPROVED) and the work stays P0"
-helm priority tk-e2 P1
+qp move tk-e2 P1
 eq "$(prio tk-ap)" 1 "(APPROVED) a move of the epic reaches the approved anchor"
 eq "$(prio tk-ra)" 0 "(APPROVED) and leaves its finishing work at P0"
 eq "$(prio tk-rc)" 0 "(APPROVED) while the other anchor's finishing work follows it, one level sooner"
 
 reset_store
-helm priority tk-w1 P3
+qp move tk-w1 P3
 eq "$RC" 2 "(MOVE) a P-value on a member is refused (exit 2)"
-has "$ERR" "P3 is --shift +2: gc-helm.sh priority tk-w1 --shift +2" "(MOVE) the refusal names the shift that lands it there"
+has "$ERR" "P3 is --shift +2: queue-priority.sh move tk-w1 --shift +2" "(MOVE) the refusal names the shift that lands it there"
 eq "$(updates)" 0 "(MOVE) and nothing is written"
-helm priority tk-w2 P1
+qp move tk-w2 P1
 has "$ERR" "P1 is --shift 0" "(MOVE) a refusal at the epic's own level names shift 0"
-helm priority tk-w1 --shift +2
+qp move tk-w1 --shift +2
 eq "$RC" 0 "(MOVE) --shift on a member exits 0"
 eq "$(meta tk-w1 priority_shift)" "2" "(MOVE) the shift is written"
 eq "$(prio tk-w1)" 3 "(MOVE) and the member is P3"
 for b in tk-cv1 tk-r1 tk-s1a tk-s1b; do eq "$(prio "$b")" 3 "(MOVE) $b, of its workflow, follows"; done
 eq "$(prio tk-w2)" 2 "(MOVE) a sibling is not touched"
-helm priority tk-w1 --shift -9
+qp move tk-w1 --shift -9
 eq "$(prio tk-w1)" 0 "(MOVE) a shift past P0 stops at P0"
 eq "$(meta tk-w1 priority_shift)" "-9" "(MOVE) and keeps the shift as written"
 
@@ -596,76 +594,68 @@ eq "$(meta tk-w1 priority_shift)" "-9" "(MOVE) and keeps the shift as written"
 # bead is computed from it. A claimed bead's computed priority stays.
 reset_store
 jq -c 'map(if .id == "tk-solo" then .status = "in_progress" | .assignee = "polecat-3" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-helm priority tk-solo P1
+qp move tk-solo P1
 eq "$RC" 0 "(MOVE) a P-value on a claimed bead that follows nothing exits 0"
 eq "$(prio tk-solo)" 1 "(MOVE) the P-value is written, since it is the bead's own input"
 for b in tk-cvs tk-rs tk-ss; do eq "$(prio "$b")" 1 "(MOVE) $b, of the claimed bead's workflow, follows"; done
-helm priority tk-wc --shift +1
+qp move tk-wc --shift +1
 eq "$RC" 0 "(MOVE) a shift on a claimed member exits 0"
 eq "$(meta tk-wc priority_shift)" "1" "(MOVE) the shift is written, since it is the bead's own input"
 eq "$(prio tk-wc)" 3 "(MOVE) and the claimed member keeps the priority it was claimed at"
 has "$OUT" "claimed, left as they are: tk-wc (in_progress, P2 once released)" "(MOVE) naming the priority it takes once released"
 
 reset_store
-helm priority tk-e1 --shift -1
+qp move tk-e1 --shift -1
 eq "$RC" 2 "(MOVE) a shift on a bead that follows nothing is refused"
 has "$ERR" "tk-e1 follows nothing, so it has no shift" "(MOVE) and says so"
 for b in tk-s1a tk-r1 tk-cv1; do
-  helm priority "$b" P0
+  qp move "$b" P0
   eq "$RC" 2 "(MOVE) a P-value on $b, part of a workflow, is refused"
   has "$ERR" "part of the workflow poured for tk-w1" "(MOVE) naming the bead it was poured for"
 done
-helm priority tk-s1a --shift -1
+qp move tk-s1a --shift -1
 eq "$RC" 2 "(MOVE) a shift on a workflow step is refused"
 eq "$(updates)" 0 "(MOVE) and nothing is written"
 jq -c 'map(if .id == "tk-e3" then .status = "closed" else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-helm priority tk-e3 P1
+qp move tk-e3 P1
 eq "$RC" 2 "(MOVE) a closed bead is refused"
 has "$ERR" "tk-e3 is closed" "(MOVE) and says so"
-helm priority tk-g1 P0
+qp move tk-g1 P0
 eq "$RC" 0 "(MOVE) a gate that follows nothing takes a P-value"
 eq "$(prio tk-g1)" 0 "(MOVE) and is written"
 jq -c '. + [{"id":"tk-ag","status":"open","issue_type":"agent","priority":2,"metadata":{},"dependencies":[]}]' \
   "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-helm priority tk-ag P1
+qp move tk-ag P1
 eq "$RC" 0 "(MOVE) a live infra bead that follows nothing takes a P-value"
 eq "$(prio tk-ag)" 1 "(MOVE) and is written"
-helm priority tk-e1 P7;         eq "$RC" 2 "(MOVE) a priority past P4 is refused"
-helm priority tk-e1 --shift up; eq "$RC" 2 "(MOVE) a shift that is not a number is refused"
-helm priority tk-e1 P1 --shift -1; eq "$RC" 2 "(MOVE) both forms at once are refused"
-helm priority tk-e1;            eq "$RC" 2 "(MOVE) neither form is refused"
-helm priority;                  eq "$RC" 2 "(MOVE) no bead is refused"
-helm priority zz-e1 P1
-eq "$RC" 4 "(MOVE) a bead in no rig's store exits 4"
+qp move tk-e1 P7;         eq "$RC" 2 "(MOVE) a priority past P4 is refused"
+qp move tk-e1 --shift up; eq "$RC" 2 "(MOVE) a shift that is not a number is refused"
+qp move tk-e1 P1 --shift -1; eq "$RC" 2 "(MOVE) both forms at once are refused"
+qp move tk-e1;            eq "$RC" 2 "(MOVE) neither form is refused"
+qp move;                  eq "$RC" 2 "(MOVE) no bead is refused"
+qp move zz-e1 P1
+eq "$RC" 1 "(MOVE) a bead in no rig's store exits 1"
 eq "$(updates)" 0 "(MOVE) none of these wrote anything"
 
 reset_store
-STUB_LIST_FAIL=1 helm priority tk-e1 P0
-eq "$RC" 4 "(MOVE) a store that does not answer exits 4"
+STUB_LIST_FAIL=1 qp move tk-e1 P0
+eq "$RC" 1 "(MOVE) a store that does not answer exits 1"
 has "$ERR" "could not list the store" "(MOVE) and says so"
 eq "$(updates)" 0 "(MOVE) with nothing written"
 
 reset_store
-helm priority tk-e1 P0 --dry-run
+qp move tk-e1 P0 --dry-run
 eq "$RC" 0 "(MOVE) --dry-run exits 0"
 has "$OUT" "tk-w1 P2->P0" "(MOVE) --dry-run names what it would write"
 eq "$(updates)" 0 "(MOVE) --dry-run writes nothing"
 eq "$(prio tk-e1)" 1 "(MOVE) and leaves the epic as it is"
 
-# A move that fails can fail after it wrote, so gc-helm.sh busts the board cache
-# on every exit but a refusal, which writes nothing.
 reset_store
-CACHE="$TMP/gc-helm-cache.$(id -u 2>/dev/null || echo 0)/board2-$(printf '%s' default | cksum | cut -d' ' -f1).ndjson"
-mkdir -p "${CACHE%/*}"; : > "$CACHE"
-STUB_UPDATE_FAIL_ID=tk-w1 helm priority tk-e1 P0
-eq "$RC" 4 "(MOVE) a move whose later writes the store refuses exits 4"
+STUB_UPDATE_FAIL_ID=tk-w1 qp move tk-e1 P0
+eq "$RC" 1 "(MOVE) a move whose later writes the store refuses exits 1"
 has "$ERR" "did not all settle" "(MOVE) and says so"
-[ ! -e "$CACHE" ] && ok "(MOVE) a move that fails after writing busts the board cache" || bad "(MOVE) a move that fails after writing busts the board cache"
-: > "$CACHE"
-helm priority tk-w1 P3
+qp move tk-w1 P3
 eq "$RC" 2 "(MOVE) a refused move exits 2"
-[ -e "$CACHE" ] && ok "(MOVE) and leaves the board cache, since it wrote nothing" || bad "(MOVE) and leaves the board cache, since it wrote nothing"
-rm -f "$CACHE"
 
 # A park on the epic: its members are out of every queue, and the move still
 # reaches them, so each is at its priority when the park is released.
@@ -673,7 +663,7 @@ reset_store
 jq -c '. + [{"id":"tk-park","status":"open","issue_type":"gate","priority":2,"metadata":{},"dependencies":[]}]
   | map(if .id == "tk-e1" then .dependencies += [{"issue_id":"tk-e1","depends_on_id":"tk-park","type":"blocks"}] else . end)' \
   "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-helm priority tk-e1 P0
+qp move tk-e1 P0
 eq "$RC" 0 "(RULES) a move on a parked epic exits 0"
 eq "$(prio tk-w1)" 0 "(RULES) a parked epic's member takes the new priority while the park holds it"
 eq "$(prio tk-s1a)" 0 "(RULES) and so does its workflow"
@@ -685,7 +675,7 @@ reset_store
 jq -c '. + [{"id":"tk-gd","status":"open","issue_type":"gate","priority":1,"metadata":{},
   "dependencies":[{"issue_id":"tk-gd","depends_on_id":"tk-e1","type":"parent-child"}]}]' \
   "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
-helm priority tk-e1 P0
+qp move tk-e1 P0
 eq "$RC" 0 "(MOVE) a move on an epic with a gate among its members exits 0"
 eq "$(prio tk-gd)" 0 "(MOVE) the gate takes the epic's new priority"
 has "$OUT" "tk-gd P1->P0" "(MOVE) and the move names it"
@@ -711,7 +701,7 @@ roots="$(bash -c '. "$1" && jq -r "$PRIORITY_JQ"'"'"'(map({key: .id, value: .}) 
 move_rc=0
 while read -r b p; do
   [ -n "$b" ] || continue
-  helm priority "$b" "P$p"; [ "$RC" = 0 ] || { move_rc=1; echo "    move of $b exited $RC: $ERR"; }
+  qp move "$b" "P$p"; [ "$RC" = 0 ] || { move_rc=1; echo "    move of $b exited $RC: $ERR"; }
 done <<< "$roots"
 eq "$move_rc" 0 "(FIXTURE) every move over the fixture exits 0"
 cp "$STUB_STORE" "$TMP/fx-moved.json"
@@ -904,13 +894,13 @@ eq "$(prio tk-s1g)" 1 "(CLASSES) settle writes the gate step"
 eq "$(prio tk-s1e)" 1 "(CLASSES) and the ephemeral step"
 
 reset_store; add_beads "$CLASS_BEADS"
-helm priority tk-e1 P0
+qp move tk-e1 P0
 eq "$RC" 0 "(CLASSES) a move on an epic with an ephemeral member exits 0"
 eq "$(prio tk-we)" 0 "(CLASSES) the move re-ranks the ephemeral member"
 eq "$(prio tk-s1e)" 0 "(CLASSES) and an ephemeral step of a member's workflow"
 qp settle tk-we --print
 eq "$OUT" "0" "(CLASSES) at the priority settle computes for it"
-helm priority tk-e3 P2
+qp move tk-e3 P2
 eq "$RC" 0 "(CLASSES) a move on an epic whose members have a more urgent parent of a hidden class exits 0"
 qp settle tk-ti --print
 eq "$OUT" "0" "(CLASSES) settle computes P0 for a member whose more urgent parent is an infra bead"
@@ -989,7 +979,7 @@ STUB_GATE="$STUB_GATE_FILE" "$QP" reconcile --db "$DB" --pool "$POOL" > "$TMP/pa
 pass_pid=$!
 n=0; until [ -e "$STUB_GATE_FILE.reached" ] || [ "$n" -ge 100 ]; do sleep 0.1; n=$((n + 1)); done
 [ -e "$STUB_GATE_FILE.reached" ] && ok "(CROSSING) the pass reaches its first write" || bad "(CROSSING) the pass reaches its first write"
-sh "$HELM" priority tk-e1 P0 > "$TMP/move.out" 2>&1 &
+"$QP" move tk-e1 P0 > "$TMP/move.out" 2>&1 &
 move_pid=$!
 sleep 1
 eq "$(prio tk-e1)" 1 "(CROSSING) the move waits while the pass holds the lock"

@@ -124,12 +124,13 @@ type claim struct {
 // seat and its pane printed within Printing. It is stalled when its newest
 // write as that identity, to the claim's store or the city's, and no earlier
 // than its last wake, is Bound old or more. A read that fails for one rig or
-// one claim leaves it out of the record and makes the run fail.
-func (p *Progress) Run() Outcome {
-	ctx, cancel := context.WithTimeout(context.Background(), Deadline)
+// one claim leaves it out of the record and makes the run fail. Its session
+// list, its store reads and its event end when ctx does.
+func (p *Progress) Run(ctx context.Context) Outcome {
+	reads, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	now := p.Now().UTC().Truncate(time.Second)
-	list, err := p.City.Sessions(ctx)
+	list, err := p.City.Sessions(reads)
 	if err != nil {
 		return Outcome{Failures: []string{"the session list did not read, so no seat was judged: " + err.Error()}}
 	}
@@ -152,7 +153,7 @@ func (p *Progress) Run() Outcome {
 		if rig.Suspended && !rig.HQ {
 			continue
 		}
-		l, found, err := p.claims(ctx, rig, live)
+		l, found, err := p.claims(reads, rig, live)
 		if err != nil {
 			rec.Unread = append(rec.Unread, Unread{Rig: rig.Name, Why: err.Error()})
 			continue
@@ -171,7 +172,7 @@ func (p *Progress) Run() Outcome {
 	claims = p.seats(city, claims, now, rec)
 	p.judge(stores, cityDB, claims, now, rec)
 	slices.SortFunc(rec.Stalled, func(a, b Stalled) int { return cmp.Or(cmp.Compare(a.Rig, b.Rig), cmp.Compare(a.Bead, b.Bead)) })
-	return p.finish(rec)
+	return p.finish(ctx, rec)
 }
 
 // claims reads one rig's in-progress beads that name a session, and keeps each
@@ -316,7 +317,7 @@ func (p *Progress) judge(stores map[string]*ledger.Ledger, cityDB string, claims
 
 // finish records the event when the record names a seat, and fails the run for
 // each read that failed.
-func (p *Progress) finish(rec *Record) Outcome {
+func (p *Progress) finish(ctx context.Context, rec *Record) Outcome {
 	out := Outcome{Record: rec}
 	for _, u := range rec.Unread {
 		out.Failures = append(out.Failures, unreadLine(u))
@@ -326,8 +327,8 @@ func (p *Progress) finish(rec *Record) Outcome {
 	}
 	payload, err := json.Marshal(rec)
 	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), CallBound)
-		err = p.City.Emit(ctx, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
+		emit, cancel := context.WithTimeout(ctx, CallBound)
+		err = p.City.Emit(emit, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
 		cancel()
 	}
 	if err != nil {

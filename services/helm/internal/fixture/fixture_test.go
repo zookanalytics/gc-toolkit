@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-const testBoard = `{"generated_at":"2026-10-17T00:00:00Z","rows":[]}`
-
 const testRig = `{"rig":"example-rig","rows":{"tk-abc12":{"id":"tk-abc12","title":"A & B"}},"epics":[]}`
 
 const testCity = `{"doctor":{"ran":true,"late":false,"completed":true,"count":1,"failing":[{"name":"orphan-sessions & co","status":"warning"}],"not_measured":[],"accepted":[],"monitors":[]}}`
@@ -32,7 +30,7 @@ func serve(t *testing.T, h http.Handler, method, path string) *httptest.Response
 
 func mustHandler(t *testing.T, answers map[string]Answer) http.Handler {
 	t.Helper()
-	h, err := Handler([]byte(testBoard), []byte(testRig), []byte(testCity), answers, spaStub)
+	h, err := Handler([]byte(testRig), []byte(testCity), answers, spaStub)
 	if err != nil {
 		t.Fatalf("Handler: %v", err)
 	}
@@ -48,22 +46,6 @@ func readError(t *testing.T, rec *httptest.ResponseRecorder) errorBody {
 	return e
 }
 
-func TestTheBoardIsServedAsJSONAtItsOwnPath(t *testing.T) {
-	h := mustHandler(t, nil)
-	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
-		rec := serve(t, h, method, "/helm")
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s /helm: status %d, want 200", method, rec.Code)
-		}
-		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
-			t.Errorf("%s /helm: Content-Type %q, want application/json", method, ct)
-		}
-		if method != http.MethodHead && rec.Body.String() != testBoard {
-			t.Errorf("%s /helm: body %q, want the board answer byte for byte", method, rec.Body.String())
-		}
-	}
-}
-
 func TestEveryOtherPathGoesToTheApp(t *testing.T) {
 	h := mustHandler(t, nil)
 	for _, path := range []string{"/", "/index.html", "/assets/index-abc.js", "/v0/city/x/beads"} {
@@ -76,26 +58,26 @@ func TestEveryOtherPathGoesToTheApp(t *testing.T) {
 
 func TestAVerbAnswersWithItsCannedAnswer(t *testing.T) {
 	h := mustHandler(t, map[string]Answer{
-		"dismiss": {Status: http.StatusOK, Body: []byte(`{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}`)},
-		"accept":  {Status: http.StatusConflict, Body: []byte(`{"error":"already running engage on tk-abc12","reason":"busy"}`)},
+		"engage": {Status: http.StatusOK, Body: []byte(`{"bead":"tk-abc12","verb":"engage","message":"engaged"}`)},
+		"open":   {Status: http.StatusConflict, Body: []byte(`{"error":"already running engage on tk-abc12","reason":"busy"}`)},
 	})
-	rec := serve(t, h, http.MethodPost, "/helm/dismiss")
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}` {
-		t.Errorf("POST /helm/dismiss: %d %q, want the canned 200 answer", rec.Code, rec.Body.String())
+	rec := serve(t, h, http.MethodPost, "/helm/engage")
+	if rec.Code != http.StatusOK || rec.Body.String() != `{"bead":"tk-abc12","verb":"engage","message":"engaged"}` {
+		t.Errorf("POST /helm/engage: %d %q, want the canned 200 answer", rec.Code, rec.Body.String())
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("POST /helm/dismiss: Content-Type %q, want application/json", ct)
+		t.Errorf("POST /helm/engage: Content-Type %q, want application/json", ct)
 	}
-	rec = serve(t, h, http.MethodPost, "/helm/accept")
+	rec = serve(t, h, http.MethodPost, "/helm/open")
 	if rec.Code != http.StatusConflict || readError(t, rec).Reason != "busy" {
-		t.Errorf("POST /helm/accept: %d %q, want the canned 409 answer", rec.Code, rec.Body.String())
+		t.Errorf("POST /helm/open: %d %q, want the canned 409 answer", rec.Code, rec.Body.String())
 	}
 }
 
 func TestAVerbWithNoAnswerIsRefusedAsUnavailable(t *testing.T) {
-	h := mustHandler(t, map[string]Answer{"dismiss": {Status: http.StatusOK, Body: []byte(`{}`)}})
-	// open, the verbs the app knows, and one the service might add later.
-	for _, verb := range []string{"open", "accept", "engage", "park"} {
+	h := mustHandler(t, map[string]Answer{"engage": {Status: http.StatusOK, Body: []byte(`{}`)}})
+	// open, a verb the app knows, and one the service might add later.
+	for _, verb := range []string{"open", "park"} {
 		rec := serve(t, h, http.MethodPost, "/helm/"+verb)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("POST /helm/%s: status %d, want 503", verb, rec.Code)
@@ -109,41 +91,36 @@ func TestAVerbWithNoAnswerIsRefusedAsUnavailable(t *testing.T) {
 }
 
 func TestAVerbAcceptsPOSTOnly(t *testing.T) {
-	h := mustHandler(t, map[string]Answer{"dismiss": {Status: http.StatusOK, Body: []byte(`{}`)}})
+	h := mustHandler(t, map[string]Answer{"engage": {Status: http.StatusOK, Body: []byte(`{}`)}})
 	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		rec := serve(t, h, method, "/helm/dismiss")
+		rec := serve(t, h, method, "/helm/engage")
 		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != http.MethodPost {
-			t.Errorf("%s /helm/dismiss: %d Allow=%q, want 405 with Allow: POST", method, rec.Code, rec.Header().Get("Allow"))
+			t.Errorf("%s /helm/engage: %d Allow=%q, want 405 with Allow: POST", method, rec.Code, rec.Header().Get("Allow"))
 		}
 		if e := readError(t, rec); e.Reason != "usage" {
-			t.Errorf("%s /helm/dismiss: reason %q, want usage", method, e.Reason)
+			t.Errorf("%s /helm/engage: reason %q, want usage", method, e.Reason)
 		}
 	}
 }
 
 func TestAPathThatNamesNoVerbIsNotFound(t *testing.T) {
 	h := mustHandler(t, nil)
-	for _, path := range []string{"/helm/", "/helm/dismiss/extra", "/helm/Dismiss", "/helm/1x"} {
+	for _, path := range []string{"/helm/", "/helm/engage/extra", "/helm/Engage", "/helm/1x"} {
 		if rec := serve(t, h, http.MethodPost, path); rec.Code != http.StatusNotFound {
 			t.Errorf("POST %s: status %d, want 404", path, rec.Code)
 		}
 	}
 }
 
-func TestHandlerRefusesABoardThatIsNotAJSONObject(t *testing.T) {
-	for _, board := range []string{"", "not json", "[1,2]", `"board"`, "{"} {
-		if _, err := Handler([]byte(board), []byte(testRig), []byte(testCity), nil, spaStub); err == nil {
-			t.Errorf("Handler(%q): no error, want a refusal", board)
-		}
-	}
-	if _, err := Handler([]byte(testBoard), []byte(testRig), []byte(testCity), nil, nil); err == nil {
+func TestHandlerRefusesNoAppHandler(t *testing.T) {
+	if _, err := Handler([]byte(testRig), []byte(testCity), nil, nil); err == nil {
 		t.Error("Handler with no app handler: no error, want a refusal")
 	}
 }
 
 func TestHandlerRefusesARigDocumentThatNamesNoRig(t *testing.T) {
 	for _, rig := range []string{"", "not json", "[1,2]", `{"rows":{}}`, `{"rig":""}`} {
-		if _, err := Handler([]byte(testBoard), []byte(rig), []byte(testCity), nil, spaStub); err == nil {
+		if _, err := Handler([]byte(rig), []byte(testCity), nil, spaStub); err == nil {
 			t.Errorf("Handler with the rig document %q: no error, want a refusal", rig)
 		}
 	}
@@ -151,7 +128,7 @@ func TestHandlerRefusesARigDocumentThatNamesNoRig(t *testing.T) {
 
 func TestHandlerRefusesACityDocumentThatHoldsNoDoctorRun(t *testing.T) {
 	for _, city := range []string{"", "not json", "[1,2]", `{}`, `{"doctor":null}`} {
-		if _, err := Handler([]byte(testBoard), []byte(testRig), []byte(city), nil, spaStub); err == nil {
+		if _, err := Handler([]byte(testRig), []byte(city), nil, spaStub); err == nil {
 			t.Errorf("Handler with the city document %q: no error, want a refusal", city)
 		}
 	}

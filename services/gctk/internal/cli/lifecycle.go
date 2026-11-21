@@ -1,17 +1,12 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"os/signal"
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -19,15 +14,15 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
-// `gctk lifecycle` is THE writer of anchor lifecycle transitions, and the only
-// implementation of assets/scripts/lifecycle.sh, which execs it. The CLI is the
-// script's contract — same verbs, same flags, same exit codes, same stdout
-// grammar — because its callers (pr-open, merge, pr-facts, mol-refinery-patrol)
-// invoke lifecycle.sh as an opaque command.
+// `gctk lifecycle` is the plain write of a bead's merge_result, and the only
+// implementation of assets/scripts/lifecycle.sh, which execs it. It checks no
+// edge between values: the doctor checks the beads after the write
+// (doctor/check-closed-implies-landed among them). The CLI is the script's
+// contract, same flags, same exit codes, same stdout grammar, because its
+// callers invoke lifecycle.sh as an opaque command.
 //
-// Exits: 0 ok; 1 illegal edge / --expect mismatch / bd refusal / usage;
-// 2 the bead could not be read before the write, or a landed transition could
-// not be reported as JSON.
+// Exits: 0 ok; 1 --expect mismatch / bd refusal / usage; 2 the bead could not
+// be read before the write, or a landed write could not be reported as JSON.
 //
 // CAVEAT (docs/gascity/routing-model.md, "Clearing an assignee can be refused"):
 // clearing an assignee on a bead another actor holds in_progress is refused by
@@ -39,10 +34,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <state> [--expect <state>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
-       gctk lifecycle state <bead-id>
-       gctk lifecycle reopen <bead-id>   # repair a bead closed on a non-closed merge_result
-       gctk lifecycle --dump-machine     # the declared machine, for the lifecycle.toml drift test
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <value> [--expect <value>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent> | --keep-route] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
 `
 
 // Lifecycle dispatches the subcommand's verbs. It returns a process exit code
@@ -55,69 +47,19 @@ func Lifecycle(args []string, stdout, stderr io.Writer) int {
 	switch verb {
 	case "transition":
 		return cmdTransition(args[1:], stdout, stderr)
-	case "state":
-		return cmdState(args[1:], stdout, stderr)
-	case "reopen":
-		return cmdReopen(args[1:], stdout, stderr)
-	case "--dump-machine":
-		return dumpMachine(stdout)
 	default:
 		fmt.Fprint(stderr, lifecycleUsage)
 		return 1
 	}
 }
 
-// dumpMachine prints the declared machine in one greppable line-oriented form.
-// It exists for the drift test: lifecycle.toml and this binary must agree, and
-// the comparison has to read both without a TOML parser on either side.
-func dumpMachine(stdout io.Writer) int {
-	fmt.Fprintf(stdout, "states %s\n", strings.Join(lifecycle.States, " "))
-	fmt.Fprintf(stdout, "detached_states %s\n", strings.Join(lifecycle.DetachedStates, " "))
-	fmt.Fprintf(stdout, "closed_states %s\n", strings.Join(lifecycle.ClosedStates, " "))
-	exits := make([]string, 0, len(lifecycle.ExitSets))
-	for _, e := range lifecycle.ExitSets {
-		exits = append(exits, e.State+":"+e.Key+"="+e.Value)
+// currentOf reads the merge_result a bead carries, with "unanchored" for none,
+// the name --to and --expect give an absent value.
+func currentOf(b *gcbd.Bead) string {
+	if mr := b.Meta("merge_result"); mr != "" {
+		return mr
 	}
-	fmt.Fprintf(stdout, "exit_sets %s\n", strings.Join(exits, " "))
-	fmt.Fprintf(stdout, "takeaway_max %d\n", lifecycle.TakeawayMax)
-	for _, e := range lifecycle.Transitions {
-		fmt.Fprintf(stdout, "transition %s>%s\n", e.From, e.To)
-	}
-	return 0
-}
-
-// stateOf reads a bead's current state. An absent merge_result is "unanchored";
-// a value the machine does not declare returns ok=false with the raw value, so
-// the caller can name it in the refusal.
-func stateOf(b *gcbd.Bead) (string, bool) {
-	mr := b.Meta("merge_result")
-	if mr == "" {
-		return "unanchored", true
-	}
-	if lifecycle.IsState(mr) && mr != "unanchored" {
-		return mr, true
-	}
-	return mr, false
-}
-
-func cmdState(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] == "" {
-		fmt.Fprintf(stderr, "%s: state needs a bead id\n", prog)
-		return 1
-	}
-	id := args[0]
-	bead := gcbd.New().Show(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s unreadable — cannot answer its state\n", prog, id)
-		return 2
-	}
-	st, ok := stateOf(bead)
-	if !ok {
-		fmt.Fprintf(stderr, "%s: %s carries undeclared merge_result '%s' — not a state lifecycle.toml declares\n", prog, id, st)
-		return 1
-	}
-	fmt.Fprintf(stdout, "%s\n", st)
-	return 0
+	return "unanchored"
 }
 
 // kv splits a --set argument the way the shell's ${v%%=*} / ${v#*=} pair did:
@@ -138,9 +80,8 @@ var objectID = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // landingOf reads the landing a transition into `merged` records. The commit is
 // the merged_sha this call sets, when that value is an object id. The branch is
-// the merged_target this call sets, else the one the bead carries: every path
-// into pull_request stamps it, and the direct strategy passes it with the
-// landing. Either is empty when the landing does not name it.
+// the merged_target this call sets, else the one the bead carries; the direct
+// landing passes it. Either is empty when the landing does not name it.
 func landingOf(sets []string, bead *gcbd.Bead) (commit, branch string) {
 	branch = bead.Meta("merged_target")
 	for _, s := range sets {
@@ -166,166 +107,6 @@ func callerWrite(sets, unsets []string, key string) (value string, ok bool) {
 		}
 	}
 	return "", slices.Contains(unsets, key)
-}
-
-// exitWrites returns the key=value writes a transition from cur to to owes to
-// lifecycle.ExitSets: those of cur, when to is another state and an open one,
-// less any key the caller sets or clears itself.
-func exitWrites(cur, to string, sets, unsets []string) []string {
-	if cur == to || lifecycle.IsClosedState(to) {
-		return nil
-	}
-	var out []string
-	for _, e := range lifecycle.ExitSets {
-		if e.State != cur {
-			continue
-		}
-		if _, own := callerWrite(sets, unsets, e.Key); !own {
-			out = append(out, e.Key+"="+e.Value)
-		}
-	}
-	return out
-}
-
-// landingFetchTimeout bounds each git call fetchLanding makes, so a remote that
-// does not answer delays the record rather than stalling it. A variable so a
-// test can shorten it.
-var landingFetchTimeout = 60 * time.Second
-
-// fetchLanding makes the commit a `merged` close records reachable where the
-// runtime's work-record gate looks for it. The gate runs inside the close's own
-// `gc bd update` and asks the rig's checkout whether gc.work_commit is an
-// ancestor of refs/remotes/origin/<gc.work_branch>. It runs git in the bead's
-// gc.work_dir when the bead records one, and the pack's worker checkouts are
-// worktrees of the rig checkout that share its refs, so the answer is the rig
-// checkout's either way. A merge GitHub performed is on origin before the rig
-// checkout has fetched it, whether merge.sh's squash made it or pr-facts.sh
-// found it already done, and the gate reads such a commit as unreachable. Under
-// GC_WORK_RECORD_ENFORCE it then refuses the close. So when the ref does not
-// already hold the commit, the branch is fetched before the write. The direct
-// strategy fetches its target before it records, which leaves nothing to fetch
-// here.
-//
-// The checkout is $GC_RIG_ROOT. The merge cadence exports the root it runs in,
-// and the refinery's direct strategy hands its transition the root it resolved.
-// A landing this cannot make visible still records, and the gate judges it as
-// it would have. Each way that happens prints one line, because the gate's own
-// warning goes to output the writer discards on a successful update: no
-// checkout is named, the branch is not a name git accepts as a branch, or the
-// fetch does not bring the commit.
-//
-// commit and branch are the gc.work_commit and gc.work_branch the closing
-// update records, empty when it records none. A commit that is not an object id
-// names nothing to fetch.
-func fetchLanding(id, commit, branch string, stderr io.Writer) {
-	if !objectID.MatchString(commit) || branch == "" {
-		return
-	}
-	root := strings.TrimSpace(os.Getenv("GC_RIG_ROOT"))
-	if root == "" {
-		fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, but GC_RIG_ROOT names no rig checkout, so none was checked for it or fetched; the work-record gate reads it as unreachable if the rig checkout lacks it on origin/%s\n",
-			prog, id, commit, branch, branch)
-		return
-	}
-	if !validBranch(branch) {
-		fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, which git does not accept as a branch name, so origin/%s was not fetched into %s\n",
-			prog, id, commit, branch, branch, root)
-		return
-	}
-	ref := "refs/remotes/origin/" + branch
-	if gitIn(root, "merge-base", "--is-ancestor", commit, ref) == 0 {
-		return
-	}
-	rc := gitIn(root, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+branch+":"+ref)
-	if rc == 0 && gitIn(root, "merge-base", "--is-ancestor", commit, ref) == 0 {
-		return
-	}
-	fmt.Fprintf(stderr, "%s: WARN %s records gc.work_commit=%s on gc.work_branch=%s, but %s does not hold it on origin/%s (fetch rc=%d); the work-record gate reads it as unreachable until that checkout fetches it\n",
-		prog, id, commit, branch, root, branch, rc)
-}
-
-// validBranch reports whether git accepts name, exactly as written, as a branch
-// name. The name comes from bead metadata and goes into a refspec, where a `*`
-// would turn the fetch into a glob over every matching branch and a `:` would
-// split it. `git check-ref-format --branch` refuses both, and a leading `-`.
-// It also expands @{-N} to a branch the checkout had before, so a name passes
-// only when git hands it back unchanged.
-func validBranch(name string) bool {
-	out, err := exec.Command("git", "check-ref-format", "--branch", name).Output()
-	return err == nil && strings.TrimSuffix(string(out), "\n") == name
-}
-
-// landingStopGrace is how long a git call stopped at its bound has to exit
-// before it is killed outright. A variable so a test can shorten it.
-var landingStopGrace = 5 * time.Second
-
-// exitProcess ends this process. A variable so a test can watch the exit a
-// relayed signal makes instead of taking it.
-var exitProcess = os.Exit
-
-// gitIn runs one git command in dir, bounded by landingFetchTimeout, and
-// returns its exit status. GIT_TERMINAL_PROMPT=0 makes a remote that asks for
-// credentials fail the call instead of waiting on a terminal nobody is at.
-// git's output goes to the null device, never to a pipe, so nothing that
-// outlives git can hold the wait open.
-//
-// git leads a process group of its own, and every stop is a SIGTERM to that
-// group. A fetch holds lock files in the rig checkout, such as
-// refs/remotes/origin/<branch>.lock. git removes them on SIGTERM and cannot on
-// SIGKILL, and a lock left behind fails every later fetch in that checkout
-// until a person deletes it. The ssh that carries the fetch is git's child and
-// keeps running after a signal sent to git alone, so the group is what stops
-// both. A git still running landingStopGrace after the stop is killed outright.
-//
-// Its own group also puts git out of reach of a signal sent to this process's
-// group, which is how the order runner stops a pass that outlives its timeout
-// and how a terminal delivers Ctrl-C. So a SIGTERM or SIGINT that arrives during
-// the call is passed on to git's group, and this process then exits with the
-// status that signal gives, writing nothing more. A signal this process
-// inherited as ignored stays ignored.
-func gitIn(dir string, args ...string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), landingFetchTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
-	cmd.WaitDelay = landingStopGrace
-
-	stop := make(chan os.Signal, 1)
-	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
-		if !signal.Ignored(s) {
-			signal.Notify(stop, s)
-		}
-	}
-	var got os.Signal
-	rc := 0
-	if err := cmd.Start(); err != nil {
-		rc = gcbd.ExitCode(err)
-	} else {
-		waited := make(chan error, 1)
-		go func() { waited <- cmd.Wait() }()
-		select {
-		case err := <-waited:
-			rc = gcbd.ExitCode(err)
-		case got = <-stop:
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		}
-	}
-	// A signal that arrived as git finished is still this process's to take.
-	signal.Stop(stop)
-	if got == nil {
-		select {
-		case got = <-stop:
-		default:
-		}
-	}
-	if got != nil {
-		code := 128 + int(got.(syscall.Signal))
-		exitProcess(code)
-		return code
-	}
-	return rc
 }
 
 // squeezeSpace collapses every run of POSIX whitespace to one space and trims
@@ -356,30 +137,30 @@ func squeezeSpace(s string) string {
 	return b.String()
 }
 
-// normalizeTakeaway applies the two gates the board's NEEDS cell imposes,
-// returning the text to write or the lines that refuse it.
+// normalizeTakeaway applies the two gates a bead's headline takes, returning
+// the text to write or the lines that refuse it.
 //
 // The flag's presence is not a takeaway: whitespace normalizes to nothing, and
 // an empty one would overwrite the headline a bead carries with nothing, under
-// a fresh date and author. gc-helm.sh, the other writer of that cell, refuses
-// it the same way.
+// a fresh date and author. The takeaway package, the other writer of the
+// headline, refuses it the same way.
 //
 // Over the cap it REJECTS rather than truncating: only the author knows which
-// clause is the headline. The length is CODEPOINTS, which is what both renderers
-// measure — counting bytes would refuse a takeaway well inside the cap the
+// clause is the headline. The length is CODEPOINTS, as lifecycle.Headline
+// counts it — counting bytes would refuse a takeaway well inside the cap the
 // moment it carried an em dash.
 func normalizeTakeaway(s string) (string, []string) {
 	s = squeezeSpace(s)
 	if s == "" {
 		return "", []string{
-			"--takeaway is empty; it renders as the board's NEEDS cell, and an empty one tells the operator nothing",
+			"--takeaway is empty; it is the bead's headline, and an empty one tells the operator nothing",
 			"give it the one sentence the operator needs, or drop the flag.",
 		}
 	}
 	if n := utf8.RuneCountInString(s); n > lifecycle.TakeawayMax {
 		return "", []string{
 			fmt.Sprintf("--takeaway is %d chars; the cap is %d", n, lifecycle.TakeawayMax),
-			"it renders as the board's NEEDS cell — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes.",
+			"it is the bead's headline — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes.",
 		}
 	}
 	return s, nil
@@ -508,44 +289,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if o.to == "" {
-		fmt.Fprintf(stderr, "%s: transition needs --to <state>\n", prog)
+		fmt.Fprintf(stderr, "%s: transition needs --to <value>\n", prog)
 		return 1
-	}
-	if !lifecycle.IsState(o.to) {
-		fmt.Fprintf(stderr, "%s: '%s' is not a declared state\n", prog, o.to)
-		return 1
-	}
-	// status and merge_result move together: a close on a non-terminal state (or
-	// a terminal state left open) is the closed-means-landed violation (I5).
-	if o.closeIt && !lifecycle.IsClosedState(o.to) {
-		fmt.Fprintf(stderr, "%s: --close refused with --to %s — '%s' is not a closed state (closed_states: %s); a closed bead on a non-terminal merge_result is invisible to every open-bead consumer\n",
-			prog, o.to, o.to, strings.Join(lifecycle.ClosedStates, " "))
-		return 1
-	}
-	if !o.closeIt && lifecycle.IsClosedState(o.to) {
-		fmt.Fprintf(stderr, "%s: --to %s requires --close — a closed state must close in the same atomic write, or the bead is left open+%s\n", prog, o.to, o.to)
-		return 1
-	}
-	// `merged` carries the evidence its own definition names: lifecycle.toml
-	// declares [states.merged] meaning = "landed; merged_sha recorded". Require
-	// that sha in the same atomic write, so the state cannot be entered with no
-	// landing to point at — the closed-implies-landed violation
-	// doctor/check-closed-implies-landed reports after the fact, refused here at
-	// the write instead. Every sanctioned writer (merge.sh, pr-facts.sh, the
-	// gctk merge port, mol-refinery-patrol) passes --set merged_sha=<oid>. What
-	// this refuses is a bead that never had a PR: it is no merge anchor, and it
-	// closes with a plain `gc bd close`, not a false landing.
-	if o.to == "merged" {
-		haveSha := false
-		for _, s := range o.sets {
-			if k, v := kv(s); k == "merged_sha" && v != "" {
-				haveSha = true
-			}
-		}
-		if !haveSha {
-			fmt.Fprintf(stderr, "%s: --to merged requires --set merged_sha=<oid> — 'merged' means 'landed; merged_sha recorded' (lifecycle.toml), so it cannot be entered without the landing that defines it. A bead that never had a PR has not landed and is no merge anchor: with merge_result absent, close it with a plain 'gc bd close %s', not --to merged\n", prog, id)
-			return 1
-		}
 	}
 	// --keep-route writes no route at all, so it cannot also name one.
 	if o.keepRoute && o.routeSet {
@@ -603,72 +348,24 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 
 	client := gcbd.New()
-	// This read governs the write: --expect's compare-and-swap, edge legality,
-	// the dated-value resolution, and the idle-skip below all decide from it, and
-	// nothing re-checks the backing store at write time. So it takes the
-	// authoritative path, not the daemon's cache — a stale read would let --expect
-	// pass against an old state and then stamp one the real state forbids.
+	// This read governs the write: --expect's compare-and-swap, the dated-value
+	// resolution, and the idle-skip below all decide from it, and nothing
+	// re-checks the backing store at write time. So it takes the authoritative
+	// path, not the daemon's cache — a stale read would let --expect pass against
+	// an old value.
 	bead := client.ShowDirect(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to transition blind\n", prog, id)
 		return 2
 	}
-	cur, ok := stateOf(bead)
-	if !ok {
-		fmt.Fprintf(stderr, "%s: %s carries undeclared merge_result '%s'; repair it before transitioning\n", prog, id, cur)
-		return 1
-	}
+	cur := currentOf(bead)
 	if o.expect != "" && cur != o.expect {
 		fmt.Fprintf(stderr, "%s: %s is '%s', not the expected '%s'; transition refused\n", prog, id, cur, o.expect)
 		return 1
 	}
-	if !lifecycle.EdgeLegal(cur, o.to) {
-		fmt.Fprintf(stderr, "%s: illegal edge %s -> %s for %s (declared machine: lifecycle/lifecycle.toml)\n", prog, cur, o.to, id)
-		return 1
-	}
-	// A record a caller keeps on the anchor, such as the rank its PR-finishing
-	// work settled at, is bookkeeping, and a write of it should move no route.
-	// --keep-route is that write: the bead keeps the gc.routed_to it carries, and
-	// a detached state's clear does not run. It is refused on an edge into
-	// another state, because entering a state takes that state's routing.
-	if o.keepRoute && cur != o.to {
-		fmt.Fprintf(stderr, "%s: --keep-route is refused on %s -> %s for %s: it records on a bead staying in its state, and entering a state takes that state's routing\n", prog, cur, o.to, id)
-		return 1
-	}
-	// A detached anchor rests unrouted, so the transition clears whatever route
-	// the bead carries. A person's wait on the anchor is the human gate filed on
-	// it, which holds the anchor whatever its route. Setting routeSet puts the
-	// clear in the transition's one write, so a clear bd refuses fails the
-	// transition rather than leaving a silent pool offer.
-	if !o.routeSet && !o.keepRoute && lifecycle.IsDetachedState(o.to) {
-		o.route, o.routeSet = "", true
-	}
-
-	// The unheld half of the same property. An anchor's assignee is the polecat
-	// handoff pointer, and mol-refinery-patrol's find-work enumerates by it: a
-	// bead carrying a merge_result found in that queue is flagged, never taken,
-	// so a survivor sits there for the life of the anchor with nothing converging
-	// it. Setting assigneeSet puts the clear in the same write, as the route arm
-	// does.
-	//
-	// Only at status=open. That is the status every detached state declares, and
-	// it is the term of bd's anti-steal guard that decides whether the edit lands
-	// at all: against an in_progress bead the clear is refused and takes the whole
-	// atomic update down with it. A live claim there is the retraction this must
-	// not perform. An assignee already empty emits no flag, so a healthy
-	// transition issues the same bd call it always did.
-	if !o.assigneeSet && lifecycle.IsDetachedState(o.to) {
-		if bead.AssigneeString() != "" && bead.StatusLower() == "open" {
-			o.assignee, o.assigneeSet = "", true
-		}
-	}
-
-	// The executor identity is the third field of the same let-go. gc.session_id
-	// and gc.session_name name the session that claimed the bead, so they belong
-	// to the assignee and go with it whenever the assignee is cleared — the
-	// repool that hands a rejected rework back to the pool, the park that leaves
-	// a bead to the human gate filed on it, and the detached-state clear above
-	// all reach here with an empty assignee. A survivor is residue the moment the
+	// The executor identity goes with the assignee. gc.session_id and
+	// gc.session_name name the session that claimed the bead, so they belong to
+	// the assignee and go with it whenever a write clears the assignee. A survivor is residue the moment the
 	// bead next carries a route (doctor/executor-identity-residue reports it) and
 	// a stale orphan-recovery pin the runtime resolves a dead owner from.
 	// --unset-metadata bypasses bd's anti-steal guard, so no status gate is
@@ -707,10 +404,8 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	//
 	// Only a pure re-assertion qualifies. --append-notes accumulates, --takeaway
 	// stamps a fresh instant, and --close and --assignee move fields this
-	// comparison does not cover, so any of them writes unconditionally. The
-	// validation above — --expect and edge legality — has already run and is not
-	// what is being skipped: an illegal edge is still refused, and an edge that
-	// is legal but idle is what returns here.
+	// comparison does not cover, so any of them writes unconditionally. --expect
+	// has already run and is not what is being skipped.
 	if !o.notesSet && !o.takeawaySet && !o.closeIt && !o.assigneeSet && cur == o.to {
 		idle := true
 		for _, sv := range o.sets {
@@ -736,20 +431,14 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Leaving a state writes what lifecycle.toml's exit_sets declares for it, in
-	// this same write, so no writer of a transition out of that state can leave
-	// the key behind. Into a closed state it writes none: the anchor's life ends
-	// there.
-	o.sets = append(o.sets, exitWrites(cur, o.to, o.sets, o.unsets)...)
-
-	// A transition into a closed state is a terminal land, and a landed bead
-	// carries no live objection: a rejection or a hold reason still on it now
-	// contradicts the record — a merged bead that still reads "do not merge".
-	// Clear every live-objection marker here, at the one writer every close
-	// passes through, so a caller or a field added later cannot reintroduce the
+	// A write of `merged` is a landing, and a landed bead carries no live
+	// objection: a rejection or a hold reason still on it now contradicts the
+	// record — a merged bead that still reads "do not merge". Clear every
+	// live-objection marker here, at the one writer every landing of it passes
+	// through, so a caller or a field added later cannot reintroduce the
 	// divergence by listing some fields and forgetting others. Deduped against
 	// the caller's own --unset list so the clear is never written twice.
-	if lifecycle.IsClosedState(o.to) {
+	if o.to == "merged" {
 		for _, obj := range []string{"rejection_reason", "blocked_reason"} {
 			seen := false
 			for _, u := range o.unsets {
@@ -784,21 +473,17 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// caller's value either way.
 	if o.to == "merged" {
 		commit, branch := landingOf(o.sets, bead)
-		whole := commit != "" && branch != ""
-		recorded := map[string]string{}
-		for _, w := range [][2]string{
-			{"gc.work_outcome", "shipped"},
-			{"gc.work_commit", commit},
-			{"gc.work_branch", branch},
-		} {
-			if v, own := callerWrite(o.sets, o.unsets, w[0]); own {
-				recorded[w[0]] = v
-			} else if whole {
-				o.sets = append(o.sets, w[0]+"="+w[1])
-				recorded[w[0]] = w[1]
+		if commit != "" && branch != "" {
+			for _, w := range [][2]string{
+				{"gc.work_outcome", "shipped"},
+				{"gc.work_commit", commit},
+				{"gc.work_branch", branch},
+			} {
+				if _, own := callerWrite(o.sets, o.unsets, w[0]); !own {
+					o.sets = append(o.sets, w[0]+"="+w[1])
+				}
 			}
 		}
-		fetchLanding(id, recorded["gc.work_commit"], recorded["gc.work_branch"], stderr)
 	}
 
 	var updateArgs []string
@@ -864,56 +549,5 @@ func reportTransition(stdout, stderr io.Writer, asJSON bool, id, from, to string
 		return 0
 	}
 	fmt.Fprintf(stdout, "%s: %s %s -> %s\n", prog, id, from, to)
-	return 0
-}
-
-// cmdReopen repairs a bead closed while its merge_result is a NON-closed state:
-// status=open, merge_result untouched. Human-invoked only
-// (docs/authority-map.md).
-func cmdReopen(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] == "" {
-		fmt.Fprintf(stderr, "%s: reopen needs a bead id\n", prog)
-		return 1
-	}
-	id := args[0]
-	if len(args) > 1 {
-		fmt.Fprintf(stderr, "%s: reopen takes no options — it only sets status=open\n", prog)
-		return 1
-	}
-	client := gcbd.New()
-	// This read governs the write: reopen proceeds only when the bead is closed on
-	// a non-closed merge_result, and nothing re-checks that at write time. So it
-	// takes the authoritative path, not the daemon's cache — a stale read could
-	// show a non-closed state and reopen a bead already legitimately closed.
-	bead := client.ShowDirect(id)
-	if bead == nil {
-		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to reopen blind\n", prog, id)
-		return 2
-	}
-	st, ok := stateOf(bead)
-	if !ok {
-		fmt.Fprintf(stderr, "%s: %s carries undeclared merge_result '%s'; repair it before reopening\n", prog, id, st)
-		return 1
-	}
-	status := bead.StatusLower()
-	if status != "closed" {
-		fmt.Fprintf(stderr, "%s: %s is not closed (status='%s') — nothing to repair\n", prog, id, status)
-		return 1
-	}
-	if st == "unanchored" {
-		fmt.Fprintf(stderr, "%s: %s is closed with no merge_result — a closed unanchored bead is legal; reopen refused\n", prog, id)
-		return 1
-	}
-	if lifecycle.IsClosedState(st) {
-		fmt.Fprintf(stderr, "%s: %s is closed as '%s', a closed state — that close is legitimate; reopen refused\n", prog, id, st)
-		return 1
-	}
-
-	out, err := client.Update(id, "--status=open")
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: %s reopen refused by bd (rc=%d): %s\n", prog, id, gcbd.ExitCode(err), out)
-		return 1
-	}
-	fmt.Fprintf(stdout, "%s: %s reopened — status closed -> open, merge_result '%s' unchanged\n", prog, id, st)
 	return 0
 }

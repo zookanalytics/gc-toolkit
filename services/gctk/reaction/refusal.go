@@ -22,9 +22,10 @@ const Formula = "mol-first-reaction"
 // through (agents/proactive/agent.toml).
 const proactivePool = "gc-toolkit.proactive"
 
-// The codes of the refusals, which three callers branch on: gc-helm.sh react
-// maps them to its own, the reaction's check text in the proactive prompt names
-// them, and the sweep counts its skips by them.
+// The codes of the refusals, which three callers branch on: operator-intake.sh
+// names the cause of each in the conversation it files instead, the reaction's
+// check text in the proactive prompt names them, and the sweep counts its skips
+// by them.
 const (
 	// Reacting is a subject a first reaction already runs on, or one an open
 	// conversation tracks.
@@ -59,12 +60,6 @@ var (
 			"takes no step.")
 	taskKindKey = ledger.ReadOnly("task_kind", ledger.String,
 		"A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane.")
-	takeawayKey = ledger.ReadOnly("gc.takeaway", ledger.String,
-		"The headline gc-helm.sh takeaway writes, which every exit of a first reaction leaves. The sweep passes "+
-			"over a bead that carries one, as one already triaged.")
-	takeawayByKey = ledger.ReadOnly("gc.takeaway_by", ledger.String,
-		"Who wrote a bead's headline, which gc-helm.sh takeaway writes with it. The sweep passes over a bead that "+
-			"carries one, as one already triaged.")
 	workDirKey = ledger.ReadOnly("work_dir", ledger.String,
 		"The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that "+
 			"carries one, as work in flight.")

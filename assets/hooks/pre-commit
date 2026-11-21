@@ -8,8 +8,10 @@
 # the whole source tree, so a branch stays current only against its own base:
 # a commit that bypasses hooks, a host with no `gc` (which exits 0 below), and
 # a rebase that replays commits without running hooks all leave a render that
-# a later merge lands over inputs it never saw. `merge.sh` is what refuses that
-# merge; `assets/scripts/render-seed-audit.sh --check` reports it in a checkout.
+# a later merge lands over inputs it never saw. The landing order checks the
+# default branch's audit once a PR lands and asks for its re-render
+# (orders/pr-reconcile.toml); `assets/scripts/render-seed-audit.sh --check`
+# reports a stale one in a checkout.
 # Install once: assets/scripts/render-seed-audit.sh --install-hook
 # (sets core.hooksPath = assets/hooks; relative, so worktrees resolve too).
 # Sharp edge: the render reads the WORKING TREE, not the index — under a
@@ -21,9 +23,8 @@ set -uo pipefail
 # The paths a commit has to touch for the render to be worth its cost. The
 # renderer itself is on the list: it CARRIES the synthetic city the prompts
 # render against. The list decides when to render and judges nothing: a path
-# it misses leaves this branch's audit stale, and merge.sh's --check-merge,
-# which renders the merge instead of reading a list, holds the merge that
-# would land it.
+# it misses leaves this branch's audit stale until the re-render after its
+# landing.
 INPUT_RE='^(agents/|template-fragments/|formulas/|packs/|pack\.toml$|assets/scripts/render-seed-audit\.sh$)'
 
 staged="$(git diff --cached --name-only --diff-filter=ACMRD 2>/dev/null)"

@@ -107,9 +107,10 @@ mark may be posted as it is.
 ## The boundary is an origin, not an organization
 
 The allowed repository is resolved from a rig's own `origin` remote. This is
-the same shape `assets/scripts/pr-open.sh` already proves, where every read and
-the create are pinned to `ORIGIN_REPO_Q` derived from `git remote get-url
-origin`.
+the same shape `assets/scripts/refinery-publish.sh` already proves, where every
+read and the create are pinned to the repository `origin_repo`
+(`assets/scripts/refinery-lib.sh`) derives from the checkout's `origin`
+remote.
 
 An organization-keyed rule would be wrong in both directions. A rig's origin
 can sit outside the operator's org, under another owner's account, and an org
@@ -312,8 +313,8 @@ directory is refused. A write that names its repository with `--repo`, a URL,
 
 The hook inspects the command an agent types into Bash. These are outside it:
 
-- **`gh` inside a script.** Running `assets/scripts/pr-open.sh` shows the hook
-  that command, not the `gh` calls the script makes. Those scripts already pin
+- **`gh` inside a script.** Running `assets/scripts/refinery-publish.sh` shows
+  the hook that command, not the `gh` calls the script makes. Those scripts already pin
   `--repo` to an origin they resolve themselves.
 - **graphql and non-repository `gh api` endpoints.** A `gh api` write to a
   `repos/OWNER/REPO` endpoint is covered, but a graphql mutation carries its

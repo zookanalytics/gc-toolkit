@@ -14,9 +14,9 @@ import (
 
 // The rig board's routes: GET /helm/rigs lists the city's rigs, and
 // GET /helm/rigs/{rig} answers one rig's document. Each answer is cached whole
-// by the same rule the board's cache keeps: a time to live, one gather of a
-// key at a time, and every key dropped when a write route succeeds, since a
-// write changes what the store answers. The drop also lets the next request
+// for a time to live, with one gather of a key at a time, and every key is
+// dropped when a write route succeeds, since a write changes what the store
+// answers. The drop also lets the next request
 // gather beside a gather that began before the write, whose answer stays out
 // of the cache.
 
@@ -66,7 +66,7 @@ func WithRigBoard(gc rigboard.GC, ttl time.Duration) Option {
 		}
 		now := func() time.Time { return s.now() }
 		s.rigBoard = &rigBoard{gc: gc, read: rigboard.Read,
-			rigs: newKeyedCache[rigList](ttl, now), docs: newKeyedCache[rigboard.Response](ttl, now)}
+			rigs: newKeyedCache[rigList](ttl, now, s.gathers), docs: newKeyedCache[rigboard.Response](ttl, now, s.gathers)}
 	}
 }
 
@@ -141,6 +141,8 @@ type keyedCache[T any] struct {
 	asked  map[string]bool
 	gen    uint64
 	flight singleflight.Group
+	// gathers is the server's, so its stop ends this cache's gathers too.
+	gathers *gathers
 }
 
 type cached[T any] struct {
@@ -148,8 +150,8 @@ type cached[T any] struct {
 	expiry time.Time
 }
 
-func newKeyedCache[T any](ttl time.Duration, now func() time.Time) *keyedCache[T] {
-	return &keyedCache[T]{ttl: ttl, now: now, entries: map[string]cached[T]{}, asked: map[string]bool{}}
+func newKeyedCache[T any](ttl time.Duration, now func() time.Time, g *gathers) *keyedCache[T] {
+	return &keyedCache[T]{ttl: ttl, now: now, entries: map[string]cached[T]{}, asked: map[string]bool{}, gathers: g}
 }
 
 func (c *keyedCache[T]) fresh(key string) (T, bool) {
@@ -163,11 +165,10 @@ func (c *keyedCache[T]) fresh(key string) (T, bool) {
 	return zero, false
 }
 
-// get answers key from the cache while it is fresh, and otherwise gathers it.
-// The gather runs on a context detached from the request's, so one client
-// leaving does not cancel the gather the others wait on, and gatherTimeout
-// bounds it. A rig's read stops its store calls when that bound runs out
-// (rigboard.Read), so a gather that has returned leaves none running.
+// get answers key from the cache while it is fresh, and otherwise gathers it,
+// on the context the server's gathers give it (gathers.start). A rig's read
+// stops its store calls when that context ends (rigboard.Read), so a gather
+// that has returned leaves none running.
 func (c *keyedCache[T]) get(ctx context.Context, key string, gather func(context.Context) (T, error)) (T, error) {
 	if v, ok := c.fresh(key); ok {
 		return v, nil
@@ -182,8 +183,11 @@ func (c *keyedCache[T]) get(ctx context.Context, key string, gather func(context
 		c.mu.Lock()
 		startGen := c.gen
 		c.mu.Unlock()
-		gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gatherTimeout)
-		defer cancel()
+		gctx, done, err := c.gathers.start(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
 		v, err := gather(gctx)
 		if err != nil {
 			return v, err

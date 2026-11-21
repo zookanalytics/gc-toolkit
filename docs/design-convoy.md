@@ -27,8 +27,7 @@ branch and land, is the `work` skill's effort recipe
 (`skills/work/integration-effort.md`). How a summary task writes its PR summary
 is the polecat doctrine's (`template-fragments/polecat-doctrine.template.md`).
 The merge rule the gates apply is the pack's approval contract, which the
-evaluator in `gctk`'s pr domain decides for the landing order, and which
-`gctk merge` applies on a rig still on the old path
+evaluator in `gctk`'s pr domain decides for the landing order
 ([refinery-merge-cadence.md](refinery-merge-cadence.md)); this page says how the
 pattern meets that rule and does not define it.
 
@@ -125,11 +124,10 @@ the subject's PR into the default branch both pass through it. The pattern's
 two gates are the two approvals that decide what moves next.
 
 The rule runs in the default branch's `gctk`, the binary the `gctk-build` order
-builds from the deployed pack: the landing order's `gctk pr reconcile`, or
-`gctk merge` on a rig still on the old path. It gates PRs onto an integration
-branch as well. An integration branch's own copy of `services/gctk` can predate
-the rule. Neither the landing order nor the merge cadence runs a build of that
-copy, and an effort that changes nothing under `services/gctk` leaves the
+builds from the deployed pack: the landing order's `gctk pr reconcile`. It
+gates PRs onto an integration branch as well. An integration branch's own copy
+of `services/gctk` can predate the rule. The landing order runs no build of
+that copy, and an effort that changes nothing under `services/gctk` leaves the
 default branch's version in place when its PR merges.
 
 **Gate 1, the design checkpoint** (design-gated only). The design child is a
@@ -151,8 +149,7 @@ line, because the PR's title is composed from the subject's. Once it closes,
 nothing the subject waits on is open. The refinery takes the subject, brings
 its branch current with the default branch, and publishes the PR from the
 integration branch into the default branch, with the summary task's account as
-its `## Summary`. On a rig still on the old path it parks the subject for the
-merge cadence, which opens the PR. The same rule holds that PR until an
+its `## Summary`. The same rule holds that PR until an
 operator's approval stands on it, so the operator reviews the whole unit, design
 and implementation together, before the default branch moves.
 
@@ -165,13 +162,12 @@ merge is verified on the default branch, as any PR's owning bead does. Work that
 ## Design-gated versus all-in-one
 
 `design_gated` is a var, default `true`. The operator settles it per initiative
-when acting on the recommendation. The board's Accept passes no var, so an
-Accept from the board takes the design-gated default, except when it finishes
-an acceptance a sitting's sign-off left unfinished: that sling carries the var
-the acceptance recorded on the recommendation's gate. For all-in-one, the
-operator takes the recommendation to a sitting (Discuss) instead, and the
-sitting's sign-off takes it with `--accept --var design_gated=false`. The
-sign-off hands the var to Accept's writer, which answers the gate that put the
+when acting on the recommendation, in the sitting whose sign-off takes it with
+`--accept`, and `--accept --var design_gated=false` selects all-in-one. An
+Accept given no var takes the design-gated default, except when it finishes an
+acceptance an earlier run left unfinished: that sling carries the var the
+acceptance recorded on the recommendation's gate. The sign-off hands the var
+to Accept's writer, which answers the gate that put the
 recommendation to the operator, slings the formula with the var under the
 bead's acceptance lock, and records the dispatch (the `work` skill). The var is
 read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
@@ -198,8 +194,8 @@ implementation.
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
 handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
-the subject, and the board offers Accept while that key is non-empty. Accept
-(`gc-helm.sh accept`) runs
+the subject, and Accept (`gctk reaction accept`, which a sitting's sign-off
+runs with `--accept`) takes it only while that key is non-empty. Accept runs
 `gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
 `--rig` pin resolves the subject in its own rig's store, whatever directory the
 sling runs from. The sling carries no `issue` var, because graph.v2 reserves

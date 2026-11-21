@@ -34,8 +34,8 @@ one rule for whether a bead is blocked by
 
 ## The boundary
 
-Four parties, one data plane. Lifecycle transitions, dispositions, routes,
-waits, review verdicts and review results are all written on beads.
+Four parties, one data plane. Work's lifecycle transitions, dispositions,
+routes and waits, review verdicts and review results are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -132,6 +132,14 @@ are recorded and where the records live.
   run that replaces that record needs a judgment of its own.
   `--publish-bead` copies a record onto a bead's `rig_check.<check>` key for
   whoever reads that bead. The record, not the copy, answers `gctk rig`.
+
+The memory intake's lists differ too, because a list is the one record of what
+an agent memory note waits on. A list holds the notes of one memory directory
+that the feedback distiller's judge kept, with the bead each waits on or the
+day it comes due again, and beside it the intake keeps the text of each note it
+removed. `gctk memory` is their one writer, and it reads the beads a note waits
+on without writing them
+([feedback-learning.md](feedback-learning.md#the-memory-intake)).
 
 ## How work moves
 
@@ -397,28 +405,27 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
 - **A takeaway records what a sitting concluded**, and its `--waiting-on` edge
   is what makes the wait machine-answerable
   ([lifecycle-composition.md](lifecycle-composition.md)).
-- **A park decides when work runs.** `gc-helm.sh park` gives a bead a `blocks`
-  edge onto a gate of its own, titled with why it is parked and what releases
-  it. bd's cascade keeps the routed work under the bead out of every pool's
+- **A park decides when work runs.** A park gives a bead a `blocks` edge onto
+  a gate of its own, titled with why it is parked and what releases it. bd's
+  cascade keeps the routed work under the bead out of every pool's
   offer, work already in flight finishes, and closing the gate releases the
   park. [steering.md](steering.md) says what a park holds and what it does not.
 - **A priority decides the order work runs in.** A bead's priority is the
   priority of the bead it follows plus its own shift, so work under an epic
   queues at the epic's priority. A PR's finishing work, which never has a
   parent, runs one level sooner than its anchor, and at P0 once the PR is
-  approved. `gc-helm.sh priority` sets an epic's priority, or a member's shift,
-  and re-ranks the work that follows it, workflows already poured included
+  approved. Setting an epic's priority, or a member's shift, re-ranks the work
+  that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render from the ledger and from Gas City's event log, which holds
-  doctor's runs and each monitor order's last good run. Its city page counts
-  the messages waiting in Gas City's `human` mailbox and lists none, since the
-  postmaster works through them with the operator. `gc-helm.sh` carries the
-  write verbs open, engage, react, takeaway, dismiss, accept, park, priority
-  and place, and the read-only verb resolve. Accept clears a first reaction's
-  recommendation gate and nothing else, under the bead's acceptance lock, and
-  is offered only while no other human gate blocks the bead. The po's
-  backlog refinement works the queue, every bead `hold:mayor` holds in any
+  per render through gctk's shared readers over the ledger, and from Gas City's
+  event log, which holds doctor's runs and each monitor order's last good run.
+  It reads no store of its own. Its city page counts the messages waiting in
+  Gas City's `human` mailbox and lists none, since the postmaster works through
+  them with the operator. The write verbs are gctk commands, which skills,
+  prompts and the board's write routes call. Accept clears a first reaction's
+  recommendation gate and nothing else, under the bead's acceptance lock. The
+  po's backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
   longer than one render.
@@ -440,7 +447,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
    holds what should change the next agent's behavior, and an observation
    holds what is to be evaluated. The distiller judges notes beside
    observations onto the same patterns, and a note leaves memory once its
-   pattern closes or it holds nothing worth keeping.
+   pattern's fix has landed or the distiller finds nothing worth keeping in
+   it.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
@@ -524,19 +532,9 @@ first. Either way the change is a decision on the record, not a drift.
 Each entry is a place where what is built falls short of the sections above,
 why a reader must know it, and the work that retires it.
 
-- **The pack still merges each PR itself, and closes on its own record.** Until
-  a rig's cutover, the pack merges that rig's PRs under its own approval rule,
-  takes a PR open on a work bead's branch whoever opened it, keeps its own
-  record of an open PR, and checks each landing write against its transition
-  machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
-  bead moves the rig onto the pending record, along with a sitting's
-  retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
-  waits on every cutover, deletes the old path once no open bead is on it.
-- **The agents' board derives a pending PR's status by another rule.**
-  `helm-svc board` phases a PR on the pending record with the old path's rule
-  over the keys its beads source reads, so its phase can differ from the PR's
-  status label. The board member (tk-1tfzr71.24) replaces that source with a
-  reader of the evaluator's rule over the saved GitHub read.
+- **`gc-helm.sh` still carries the conversation verbs.** open, engage,
+  attach, dismiss and handback run as shell, and gctk reaches open and the
+  read-only resolve through the script. tk-ssm8qns.15 moves them into gctk.
 - **The merge cadence still admits work on a pending record.** It files work
   for a PR on the pending record beside the landing order
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
@@ -548,18 +546,9 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The distiller reads no memory notes yet.** A note stays in its memory
-  directory until an agent or a person removes it, and what it shows reaches
-  the learning loop only when an agent also reports it. Epic tk-zlot608 builds
-  the memory intake.
-- **A PR's checks still run as review beads.** Until a rig's cutover, the merge
-  cadence sends each check on a PR there out as a review bead, `signoff.sh`
-  records its verdict and files its findings, and a validation pass rules them
-  for a rework child to fix, so step 7 is not what runs there, and a ruling
-  that changes such a PR's branch files a rework child where a sitting on the
-  pending record edits the branch itself. On that path a
-  check no index declares is approved with `--needs-you`, so the operator
-  decides whether it stays in the anchor's `check_set`. Each rig's cutover bead
-  moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
-  deletes the old path once every rig has moved and the GitHub intake
+- **The old review path's code still runs.** The merge cadence still runs the
+  old review path beside the review run
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
+  PR is on it, so step 7 is not yet the one review path in the code. The
+  retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
   (tk-1tfzr71.21) has landed.

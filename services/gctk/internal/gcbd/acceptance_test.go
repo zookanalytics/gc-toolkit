@@ -1,7 +1,10 @@
 package gcbd
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -182,7 +185,7 @@ func TestStoreAcceptance(t *testing.T) {
 	// The adapter's edge is bd's blocks edge, which leaves the bead's status as
 	// it stands. bd refuses an edge onto an id of its own prefix it does not
 	// hold, and adds one onto an id of another prefix, which its show leaves
-	// out: the edge the ledger refuses to write.
+	// out.
 	waits, run := s.Create("the bead"), s.Create("the run")
 	s.Run("update", waits, "--status=blocked")
 	if out, err := c.AddEdge(waits, run, EdgeBlocks); err != nil {
@@ -203,27 +206,6 @@ func TestStoreAcceptance(t *testing.T) {
 		t.Errorf("adapter: an edge onto an id of another prefix = %v: %s; want exit 0 and no edge a show names", err, out)
 	}
 
-	// A find widened to closed beads finds a closed run by its var, and bd adds
-	// the edge onto it, which the listing the order reads the bead by carries:
-	// how the order attaches a run that ended before its edge landed.
-	ended := s.Create("the run that ended")
-	s.Run("update", ended, "--set-metadata", "gc.var.pr_bead="+waits)
-	s.Run("close", ended)
-	if rows, err := c.Find(Query{Key: "gc.var.pr_bead", Value: waits, Closed: true}); err != nil || len(rows) != 1 || rows[0].ID != ended {
-		t.Errorf("adapter: the closed run's var found %+v (%v), want %s", rows, err, ended)
-	}
-	if out, err := c.AddEdge(waits, ended, EdgeBlocks); err != nil {
-		t.Fatalf("adapter: the edge from %s onto the closed %s = %v: %s", waits, ended, err, out)
-	}
-	held, err := c.Find(Query{IDs: []string{waits}, Closed: true})
-	if err != nil || len(held) != 1 {
-		t.Fatalf("adapter: %s listed %+v (%v)", waits, held, err)
-	}
-	edges, err = held[0].Edges()
-	if err != nil || !slices.ContainsFunc(edges, func(e Edge) bool { return e.ID == ended && e.Type == EdgeBlocks }) || held[0].StatusLower() != "blocked" {
-		t.Errorf("adapter: the bead lists %s with edges %+v (%v), want blocked with a blocks edge onto the closed %s", held[0].StatusLower(), edges, err, ended)
-	}
-
 	// One update names several beads, and gives each the priority.
 	second := s.Create("the run's step")
 	if out, err := c.Update(run, second, "--priority=1"); err != nil {
@@ -231,6 +213,40 @@ func TestStoreAcceptance(t *testing.T) {
 	}
 	if rows, err := c.Rows([]string{run, second}); err != nil || len(rows) != 2 || rows[0].PriorityInt() != 1 || rows[1].PriorityInt() != 1 {
 		t.Errorf("adapter: the beads read %+v (%v), want both at P1", rows, err)
+	}
+}
+
+// The prefix the adapter reads is the one bd's create mints an id from, in a
+// store whose config.yaml names another prefix, which bd's where names instead.
+func TestStoreAcceptanceTheCreatesPrefix(t *testing.T) {
+	if !gcbdtest.Asked() {
+		t.Skip("the store acceptance test runs the city's bd on a scratch store; GCTK_STORE_ACCEPTANCE=1 runs it")
+	}
+	s := gcbdtest.New(t, "pb")
+	yaml, err := os.OpenFile(filepath.Join(s.DB(), "config.yaml"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := yaml.WriteString("issue-prefix: rb\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var where struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal([]byte(s.Run("where", "--json")), &where); err != nil || where.Prefix != "rb" {
+		t.Fatalf("bd where names the prefix %q (%v); want rb, the one config.yaml names", where.Prefix, err)
+	}
+	minted := s.Create("minted")
+	if !strings.HasPrefix(minted, "pb-") {
+		t.Fatalf("bd's create minted %s; want an id of the store's setting pb", minted)
+	}
+
+	s.Enter(t, "")
+	if p, err := (&Client{bin: "gc"}).In(s.DB()).Prefix(); err != nil || p != "pb" {
+		t.Errorf("adapter: Prefix() = %q, %v; want pb, the prefix of %s", p, err, minted)
 	}
 }
 

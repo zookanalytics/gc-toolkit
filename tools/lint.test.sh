@@ -1,29 +1,31 @@
 #!/usr/bin/env bash
-# Hermetic test for lint.sh — the rig's shell, step text, go vet and gofmt lint
-# entry point, which also prints the warrants a branch touches.
+# Test for lint.sh — the rig's shell, step text and Go lint entry point, which
+# also prints the warrants a branch touches.
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
 # a tracked shell file goes unlinted because no change names it, because git
 # quotes its path or because its name reads as an option, a listing of
 # the tracked files that could not be written or read back reads as a tree with
-# no shell, no module and no Go in it, a Go leg takes its files from a listing
-# of its own that no check covers, one call's shell findings are lost among the
-# calls the tree is split across, a go module is silently skipped, a module or
-# a Go file goes unchecked because git quotes its path or because its name reads
-# as an option, a Go file gofmt would rewrite passes, or go vet on macOS
-# is not pointed at the icu4c headers services/helm's cgo needs, or a warrant
-# list that could not run reads as nothing touched, or one that ran fails the
-# lint or goes unprinted.
+# no shell and no module in it, the Go lint takes its modules from a listing of
+# its own that no check covers, one call's shell findings are lost among the
+# calls the tree is split across, a go module is silently skipped, or goes
+# unlinted because git quotes its path or because its name reads as an option,
+# the Go lint runs a golangci-lint other than the release .golangci-lint-version
+# names, or runs at all when the pin is missing or names no release, a finding
+# of a linter .golangci.yml enables passes, or a warrant list that could not
+# run reads as nothing touched, or one that ran fails the lint or goes
+# unprinted.
 #
-# Hermetic: a throwaway git repo holds a stub shellcheck-run.sh, a stub
-# lint-step-text.sh and a stub warrants-touched.sh whose exit codes the test
-# sets, and a tracked go.mod, and lint.sh runs with PATH pointing at a
-# stub bin — so whether shellcheck, go and gofmt "ran" and what they returned
-# is the test's to decide, and a stub nproc sets how many calls the shell lint
-# makes. No real shellcheck or go toolchain is required. The host is stubbed the
-# same way: a stub uname names it and a stub brew answers for icu4c, so the
-# macOS path runs on any platform.
+# Hermetic but for the last section: a throwaway git repo holds stubs of
+# assets/scripts/shellcheck-run.sh, tools/lint-step-text.sh and
+# tools/warrants-touched.sh whose exit codes the test sets, a tracked go.mod and
+# a pin, and lint.sh runs with PATH pointing at a stub bin. So the test decides
+# whether shellcheck and go "ran" and what they returned, and a stub nproc sets
+# how many calls the shell lint makes.
+# The last section runs the real golangci-lint, at the repository's pin on the
+# repository's config, over a module of its own, so it needs the Go toolchain
+# and, before Go has cached the linter's build, the network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,6 +51,10 @@ git -C "$REPO" config user.name t
 git -C "$REPO" config commit.gpgsign false
 printf 'module foo\n\ngo 1.27\n' > "$REPO/services/foo/go.mod"
 printf '#!/usr/bin/env bash\ntrue\n' > "$REPO/subject.sh"
+# The fixture's pin names no real release: only the stub go ever sees it.
+PIN=v9.9.9
+GOLANGCI=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+printf '%s\n' "$PIN" > "$REPO/.golangci-lint-version"
 git -C "$REPO" add -A
 git -C "$REPO" commit -qm init
 
@@ -96,8 +102,8 @@ EOF
 make_warrants 0
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
-# lint.sh needs git, dirname, mktemp and rm; go and gofmt are stubbed so their
-# presence and exit codes are the test's to set. The stub nproc prints
+# lint.sh needs git, dirname, mktemp and rm; go is stubbed so its presence and
+# exit code are the test's to set. The stub nproc prints
 # STUB_NPROC, and with none set fails as on a host without nproc, which leaves
 # the shell lint one call, since the bin holds no getconf or sysctl. Everything
 # else lint.sh uses is a builtin.
@@ -110,48 +116,27 @@ echo "$STUB_NPROC"
 EOF
 chmod +x "$STUB/nproc"
 
-# The stub go records the CGO flags it was handed, one run at a time.
+# The stub go stands in for `go run` of golangci-lint. It logs its argv and the
+# directory it ran in.
 make_go() {  # $1 = exit code
   cat > "$STUB/go" <<EOF
 #!/bin/sh
 echo "stub-go ran: \$*" >> "$TMP/go.log"
-printf 'CGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "\${CGO_CPPFLAGS:-}" "\${CGO_LDFLAGS:-}" > "$TMP/go-cgo.log"
+pwd >> "$TMP/go-dirs.log"
 exit $1
 EOF
   chmod +x "$STUB/go"
 }
 
-# The host is a fixture too. lint.sh points go vet's cgo at Homebrew's icu4c
-# only on macOS, so uname and brew are stubs and every run names its host:
-# HOST_OS is what uname prints (Linux when empty), ICU_PREFIX is what
-# `brew --prefix icu4c` prints (nothing when empty), and $TMP/brew.log records
-# every brew call. CGO_CPPFLAGS_IN and CGO_LDFLAGS_IN are the CGO flags the run
-# starts with, so one the caller's shell exports cannot leak into a case.
-cat > "$STUB/uname" <<'EOF'
-#!/bin/sh
-echo "${STUB_HOST_OS:-Linux}"
-EOF
-cat > "$STUB/brew" <<EOF
-#!/bin/sh
-echo "\$*" >> "$TMP/brew.log"
-if [ "\$*" = "--prefix icu4c" ] && [ -n "\${STUB_ICU_PREFIX:-}" ]; then
-  echo "\$STUB_ICU_PREFIX"
-  exit 0
-fi
-exit 1
-EOF
-chmod +x "$STUB/uname" "$STUB/brew"
-HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""; NPROC=""
+NPROC=""
 
 # Invoke bash by absolute path: with PATH=$STUB the command word itself resolves
 # against the stub, where there is no bash. Each run gets a TMPDIR of its own,
 # so a case can see what a run left there.
 BASH_BIN="${BASH:-$(command -v bash)}"
 LINT_TMP="$TMP/lint-tmp"; mkdir -p "$LINT_TMP"
-run_sut() {  # args = files; runs in $REPO with the stubbed PATH and host
-  if ( cd "$REPO" && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
-         STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
-         CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+run_sut() {  # args = files; runs in $REPO with the stubbed PATH
+  if ( cd "$REPO" && PATH="$STUB" STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
          "$BASH_BIN" "$SUT" "$@" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 }
 
@@ -172,10 +157,13 @@ run_sut subject.sh
 grep -qi 'could not run' "$TMP/out" && ok "shell no-runner: report names the fail-closed" \
   || bad "shell no-runner: report is silent about the fail-closed"
 
-# --- D: go vet findings (stub go exit 1) -> exit 1. --------------------------
+# --- D: golangci-lint findings (stub go exit 1) -> exit 1. -------------------
 make_wrapper 0; make_go 1
 run_sut subject.sh
 [ "$rc" -eq 1 ] && ok "go findings: exit 1" || bad "go findings: expected 1, got $rc"
+grep -qF "go: FAIL — services/foo golangci-lint $PIN exit 1" "$TMP/out" \
+  && ok "go findings: the summary names the module and the version" \
+  || bad "go findings: no failure line: $(cat "$TMP/out")"
 
 # --- E: no go on PATH -> exit 1, fail-closed. --------------------------------
 make_wrapper 0; rm -f "$STUB/go"
@@ -186,7 +174,7 @@ grep -qi 'not on PATH' "$TMP/out" && ok "go missing: report names the missing ru
 
 # --- F: no files given -> the shell lint still covers the tracked tree. -----
 # lint.sh lists the tracked shell files itself, so a run handed no file still
-# lints subject.sh, and go vet still runs.
+# lints subject.sh, and the Go lint still runs.
 make_wrapper 0; make_go 0; : > "$TMP/go.log"; : > "$TMP/wrapper.log"
 run_sut
 [ "$rc" -eq 0 ] && ok "no files: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "no files: expected 0, got $rc"; }
@@ -195,7 +183,7 @@ grep -q 'subject.sh' "$TMP/wrapper.log" \
   || bad "no files: subject.sh never reached shellcheck-run.sh"
 grep -q 'shell: 1 file(s) clean' "$TMP/out" && ok "no files: the shell lint reports it clean" \
   || bad "no files: no clean shell line: $(cat "$TMP/out")"
-grep -q 'stub-go ran' "$TMP/go.log" && ok "no files: go vet still ran" || bad "no files: go vet did not run"
+grep -q 'stub-go ran' "$TMP/go.log" && ok "no files: the Go lint still ran" || bad "no files: the Go lint did not run"
 
 # --- F2: the files given do not narrow the shell lint. -----------------------
 # Handed only a non-shell file, it still lints every tracked shell file. An
@@ -212,6 +200,41 @@ grep -q 'loose.sh' "$TMP/wrapper.log" \
   && bad "files given: an untracked shell file was linted" \
   || ok "files given: an untracked shell file is out of scope"
 rm -f "$REPO/loose.sh"
+
+# --- F3: the Go lint is golangci-lint at the pin, run over the module. ------
+# go run builds the release .golangci-lint-version names, from the module, and
+# golangci-lint lints every package under it.
+make_wrapper 0; make_go 0; : > "$TMP/go.log"; : > "$TMP/go-dirs.log"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "pinned run: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "pinned run: expected 0, got $rc"; }
+eq "$(cat "$TMP/go.log")" "stub-go ran: run $GOLANGCI@$PIN run ./..." \
+  "pinned run: go runs golangci-lint at the pinned release over every package"
+eq "$(cat "$TMP/go-dirs.log")" "$(cd "$REPO/services/foo" && pwd -P)" "pinned run: from the module's directory"
+grep -qxF "  go: services/foo golangci-lint $PIN clean" "$TMP/out" \
+  && ok "pinned run: the summary names the module and the version" \
+  || bad "pinned run: no clean line: $(cat "$TMP/out")"
+
+# --- F4: a pin with no line end is still the pin. ----------------------------
+printf '%s' "$PIN" > "$REPO/.golangci-lint-version"; : > "$TMP/go.log"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "pin with no line end: exit 0" || bad "pin with no line end: expected 0, got $rc"
+grep -qF "@$PIN run" "$TMP/go.log" && ok "pin with no line end: go runs the pinned release" \
+  || bad "pin with no line end: go got: $(cat "$TMP/go.log")"
+printf '%s\n' "$PIN" > "$REPO/.golangci-lint-version"
+
+# --- F5: no pin, or a pin that names no release -> exit 1, nothing runs. ----
+# A name such as latest pins nothing, so it is refused like no pin at all.
+for pin in missing latest v2.15 ''; do
+  if [ "$pin" = missing ]; then rm -f "$REPO/.golangci-lint-version"; else printf '%s\n' "$pin" > "$REPO/.golangci-lint-version"; fi
+  : > "$TMP/go.log"
+  run_sut subject.sh
+  [ "$rc" -eq 1 ] && ok "pin '$pin': exit 1 (fail-closed)" || bad "pin '$pin': expected 1, got $rc"
+  [ ! -s "$TMP/go.log" ] && ok "pin '$pin': go never runs" || bad "pin '$pin': go ran: $(cat "$TMP/go.log")"
+  grep -q 'golangci-lint-version is missing or names no golangci-lint release' "$TMP/out" \
+    && ok "pin '$pin': the summary names the pin" \
+    || bad "pin '$pin': the summary is silent: $(cat "$TMP/out")"
+done
+printf '%s\n' "$PIN" > "$REPO/.golangci-lint-version"
 
 # --- G: wrapper missing -> structural error (exit 2). ------------------------
 make_go 0; rm -f "$WRAP"
@@ -423,9 +446,7 @@ for ((i = 0; i < 1000; i++)); do pads+=("pad-$(printf '%064d' "$i").txt"); done
 ( cd "$REPO" && for p in "${pads[@]}"; do : > "$p"; done )
 git -C "$REPO" add -- "${pads[@]}"
 if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 0 \
-       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
-          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
-          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+       && PATH="$STUB" STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
           "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
 printf '%s\n' "$out" > "$TMP/out"
 [ "$rc" -eq 2 ] && ok "listing not written: structural error (exit 2)" \
@@ -433,9 +454,9 @@ printf '%s\n' "$out" > "$TMP/out"
 grep -q 'cannot enumerate tracked files under' "$TMP/out" \
   && ok "listing not written: error names the failed listing" \
   || bad "listing not written: error is silent about the listing: $(cat "$TMP/out")"
-grep -q -e 'no tracked shell files' -e 'no go.mod modules' -e 'no tracked Go files' "$TMP/out" \
-  && bad "listing not written: read as a tree with no shell, no module or no Go in it" \
-  || ok "listing not written: not read as a tree with no shell, no module or no Go in it"
+grep -q -e 'no tracked shell files' -e 'no go.mod modules' "$TMP/out" \
+  && bad "listing not written: read as a tree with no shell or no module in it" \
+  || ok "listing not written: not read as a tree with no shell or no module in it"
 eq "$(ls -A "$LINT_TMP")" "" "listing not written: the run leaves nothing in TMPDIR"
 git -C "$REPO" rm -q --cached -- "${pads[@]}"
 ( cd "$REPO" && rm -f -- "${pads[@]}" )
@@ -470,103 +491,12 @@ grep -q "cannot make a directory for the lint's files" "$TMP/err" \
   || bad "no directory for its files: error is silent about it"
 rm -f "$STUB/mktemp"; ln -s "$(command -v mktemp)" "$STUB/mktemp"
 
-# --- Gofmt: a tracked Go file, judged by a stub gofmt. -----------------------
-# Real gofmt -l prints each file it would rewrite and exits 0, and exits 2 when
-# it cannot read or parse a file. The stub logs its argv, both on one line and
-# one argument to a line, prints the files the test names, and exits the code
-# the test sets.
-printf 'package foo\n' > "$REPO/services/foo/foo.go"
-git -C "$REPO" add services/foo/foo.go
-git -C "$REPO" commit -qm 'add a Go file'
-
-make_gofmt() {  # $1 = exit code; further args = files to list as not gofmt-clean
-  local code=$1 f; shift
-  {
-    echo '#!/bin/sh'
-    echo "echo \"stub-gofmt ran: \$*\" >> \"$TMP/gofmt.log\""
-    echo "printf '%s\\n' \"\$@\" >> \"$TMP/gofmt-args.log\""
-    for f in "$@"; do echo "echo '$f'"; done
-    echo "exit $code"
-  } > "$STUB/gofmt"
-  chmod +x "$STUB/gofmt"
-}
-
-# --- K: gofmt clean -> exit 0, over the whole tracked tree, listing only. ----
-# lint.sh is handed subject.sh alone, so foo.go reaching gofmt is the whole-tree
-# scope. An untracked Go file is not part of the merge and stays out.
-make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/gofmt.log"
-printf 'package foo\n' > "$REPO/services/foo/scratch.go"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "gofmt clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "gofmt clean: expected 0, got $rc"; }
-grep -q 'gofmt: 1 Go file(s) clean' "$TMP/out" && ok "gofmt clean: reported clean" \
-  || bad "gofmt clean: no clean line in the report"
-grep -q '^stub-gofmt ran: -l .*services/foo/foo.go' "$TMP/gofmt.log" \
-  && ok "gofmt clean: gofmt -l received a tracked Go file lint.sh was not handed" \
-  || bad "gofmt clean: gofmt -l never received services/foo/foo.go"
-grep -q -- ' -w' "$TMP/gofmt.log" \
-  && bad "gofmt clean: gofmt was asked to rewrite files (-w)" \
-  || ok "gofmt clean: gofmt only lists, never rewrites"
-grep -q 'scratch.go' "$TMP/gofmt.log" \
-  && bad "gofmt clean: an untracked Go file was checked" \
-  || ok "gofmt clean: an untracked Go file is out of scope"
-rm -f "$REPO/services/foo/scratch.go"
-
-# --- L: gofmt lists files -> exit 1, and the report names each. --------------
-make_wrapper 0; make_go 0; make_gofmt 0 services/foo/foo.go services/foo/bar.go
-run_sut subject.sh
-[ "$rc" -eq 1 ] && ok "gofmt drift: exit 1" || bad "gofmt drift: expected 1, got $rc"
-for f in services/foo/foo.go services/foo/bar.go; do
-  grep -qF "$f is not gofmt-clean" "$TMP/out" \
-    && ok "gofmt drift: report names $f" \
-    || bad "gofmt drift: report does not name $f: $(cat "$TMP/out")"
-done
-
-# --- L2: a long gofmt list is reported whole, though no file can be written. -
-# Read from a here-string, a list past 64 KiB is backed by a temp file bash
-# writes, and when that write fails the loop reads nothing and the leg reports
-# the tree clean. The run refuses every file write past 1 KiB, with SIGXFSZ
-# ignored, which leaves room for the tracked listing, and the stub gofmt lists
-# 2000 files. Its output comes back through a pipe, which the limit leaves
-# alone.
+# --- O: the Go lint takes its modules from the tracked listing. -------------
+# A listing the Go lint made of its own would sit outside the listing's checks
+# above, and one that failed would read as a tree with no module in it. The git
+# wrapper refuses every listing but the whole tree's and hands every other git
+# call on, and the module is still linted.
 make_wrapper 0; make_go 0
-cat > "$STUB/gofmt" <<'EOF'
-#!/bin/sh
-i=0
-while [ "$i" -lt 2000 ]; do printf 'services/foo/%060d.go\n' "$i"; i=$((i + 1)); done
-EOF
-chmod +x "$STUB/gofmt"
-if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 1 \
-       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
-          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
-          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
-          "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
-printf '%s\n' "$out" > "$TMP/out"
-[ "$rc" -eq 1 ] && ok "long gofmt list: exit 1" \
-  || bad "long gofmt list: expected 1, got $rc: $(tail -5 "$TMP/out")"
-eq "$(grep -c 'is not gofmt-clean' "$TMP/out")" 2000 "long gofmt list: the report names every listed file"
-
-# --- M: gofmt cannot parse a file (exit 2, nothing listed) -> exit 1. --------
-# The listing is empty, so only the exit code shows a file went unchecked.
-make_wrapper 0; make_go 0; make_gofmt 2
-run_sut subject.sh
-[ "$rc" -eq 1 ] && ok "gofmt error: exit 1, not read as clean" || bad "gofmt error: expected 1, got $rc"
-grep -q 'gofmt exit 2' "$TMP/out" && ok "gofmt error: report names the gofmt exit" \
-  || bad "gofmt error: report is silent about the gofmt exit"
-
-# --- N: no gofmt on PATH while Go files are tracked -> exit 1, fail-closed. --
-make_wrapper 0; make_go 0; rm -f "$STUB/gofmt"
-run_sut subject.sh
-[ "$rc" -eq 1 ] && ok "gofmt missing: exit 1 (fail-closed)" || bad "gofmt missing: expected 1, got $rc"
-grep -q "'gofmt' not on PATH" "$TMP/out" && ok "gofmt missing: report names the missing gofmt" \
-  || bad "gofmt missing: report is silent about the missing gofmt"
-
-# --- O: the Go legs take their files from the tracked listing. ---------------
-# A listing a Go leg made of its own would sit outside the listing's checks
-# above, and one that failed would read as a tree with no module or no Go in
-# it. The git wrapper refuses every listing but the whole tree's and hands
-# every other git call on, and the module is still vetted and the Go file
-# still checked.
-make_wrapper 0; make_go 0; make_gofmt 0
 REAL_GIT="$(command -v git)"
 rm -f "$STUB/git"
 cat > "$STUB/git" <<EOF
@@ -579,124 +509,37 @@ exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$STUB/git"
 run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "Go legs: exit 0 with every narrower listing refused" \
-  || { cat "$TMP/out" "$TMP/err"; bad "Go legs: expected 0, got $rc"; }
-grep -q 'go: services/foo vet clean' "$TMP/out" && ok "Go legs: go vet still vets the module" \
-  || bad "Go legs: the module went unvetted: $(cat "$TMP/out")"
-grep -q 'gofmt: 1 Go file(s) clean' "$TMP/out" && ok "Go legs: gofmt still checks the Go file" \
-  || bad "Go legs: the Go file went unchecked: $(cat "$TMP/out")"
+[ "$rc" -eq 0 ] && ok "Go lint: exit 0 with every narrower listing refused" \
+  || { cat "$TMP/out" "$TMP/err"; bad "Go lint: expected 0, got $rc"; }
+grep -qF "go: services/foo golangci-lint $PIN clean" "$TMP/out" && ok "Go lint: the module is still linted" \
+  || bad "Go lint: the module went unlinted: $(cat "$TMP/out")"
 rm -f "$STUB/git"; ln -s "$REAL_GIT" "$STUB/git"
 
 # --- Every tracked go.mod is a module, whatever its directory is called. -----
 # The root's go.mod, one under a directory named like an option and one under a
-# directory whose path git quotes are each vetted. Handed to basename or
+# directory whose path git quotes are each linted. Handed to basename or
 # dirname, -m/go.mod reads as their options, and git's default listing names
 # the quoted directory under a name no directory has.
 QDIR=$'q"d\\ir\tm'
 mkdir -p "$REPO/-m" "$REPO/$QDIR"
 for d in . -m "$QDIR"; do printf 'module m\n\ngo 1.27\n' > "$REPO/$d/go.mod"; done
 git -C "$REPO" add -- go.mod -m/go.mod "$QDIR/go.mod"
-make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/go.log"
+make_wrapper 0; make_go 0; : > "$TMP/go.log"; : > "$TMP/go-dirs.log"
 run_sut subject.sh
 [ "$rc" -eq 0 ] && ok "modules: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "modules: expected 0, got $rc"; }
 for m in . services/foo -m "$QDIR"; do
-  grep -qxF -- "  go: $m vet clean" "$TMP/out" && ok "modules: $m is vetted" \
-    || bad "modules: $m went unvetted: $(cat "$TMP/out")"
+  grep -qxF -- "  go: $m golangci-lint $PIN clean" "$TMP/out" && ok "modules: $m is linted" \
+    || bad "modules: $m went unlinted: $(cat "$TMP/out")"
+  grep -qxF -- "$(cd "$REPO/$m" && pwd -P)" "$TMP/go-dirs.log" && ok "modules: golangci-lint runs in $m" \
+    || bad "modules: no run in $m: $(cat "$TMP/go-dirs.log")"
 done
-eq "$(grep -c 'stub-go ran' "$TMP/go.log")" 4 "modules: go vet runs once in each module"
+eq "$(grep -c 'stub-go ran' "$TMP/go.log")" 4 "modules: golangci-lint runs once in each module"
 git -C "$REPO" rm -q --cached -- go.mod -m/go.mod "$QDIR/go.mod"
 rm -f -- "$REPO/go.mod" "$REPO/-m/go.mod" "$REPO/$QDIR/go.mod"
 rmdir -- "$REPO/-m" "$REPO/$QDIR"
 
-# --- Every tracked Go file reaches gofmt under its own name. -----------------
-# A Go file named like an option, listed first, reaches gofmt as a flag, and
-# git's default listing names a path that holds a double quote, a backslash or
-# a control character under a quoted name gofmt cannot open.
-QGO=$'odd"na\\me\tx.go'
-printf 'package foo\n' > "$REPO/-x.go"
-printf 'package foo\n' > "$REPO/$QGO"
-git -C "$REPO" add -- -x.go "$QGO"
-make_wrapper 0; make_go 0; make_gofmt 0; : > "$TMP/gofmt-args.log"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "Go file names: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "Go file names: expected 0, got $rc"; }
-grep -qxF -- ./-x.go "$TMP/gofmt-args.log" \
-  && ok "Go file names: a file named like an option reaches gofmt as a path" \
-  || bad "Go file names: gofmt got: $(cat "$TMP/gofmt-args.log")"
-grep -qxF -- "./$QGO" "$TMP/gofmt-args.log" \
-  && ok "Go file names: a file whose path git quotes reaches gofmt under its own name" \
-  || bad "Go file names: gofmt got: $(cat "$TMP/gofmt-args.log")"
-grep -q 'gofmt: 3 Go file(s) clean' "$TMP/out" && ok "Go file names: counted with the tracked Go files" \
-  || bad "Go file names: not counted: $(cat "$TMP/out")"
-git -C "$REPO" rm -q --cached -- -x.go "$QGO"
-rm -f -- "$REPO/-x.go" "$REPO/$QGO"
-
-# --- The icu4c cgo flags go vet is handed. -----------------------------------
-# services/helm reaches ICU through Dolt's go-icu-regex, a cgo package, and go
-# vet runs cgo. On macOS Homebrew keeps icu4c off every default search path, so
-# a vet that is not pointed at the keg stops at 'unicode/regex.h' file not found.
-cgo_of() { sed -n "s/^$1=//p" "$TMP/go-cgo.log"; }  # as the stub go saw it
-KEG="$TMP/opt/icu4c"
-mkdir -p "$KEG/include/unicode" "$KEG/lib"
-make_wrapper 0; make_go 0; make_gofmt 0
-
-# --- P: on macOS, vet's cgo is pointed at the keg. ---------------------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; rm -f "$TMP/brew.log" "$TMP/go-cgo.log"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "icu4c: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "icu4c: expected 0, got $rc"; }
-eq "$(cgo_of CGO_CPPFLAGS)" "-I$KEG/include" "icu4c: vet's cgo is handed the keg's headers"
-eq "$(cgo_of CGO_LDFLAGS)" "-L$KEG/lib" "icu4c: and its libraries"
-eq "$(cat "$TMP/brew.log" 2>/dev/null)" "--prefix icu4c" "icu4c: brew is asked for icu4c's prefix"
-grep -qF "icu4c at $KEG" "$TMP/out" && ok "icu4c: the output names the icu4c vet used" \
-  || bad "icu4c: the output does not name $KEG"
-
-# --- Q: CGO flags already set are kept, with the keg's appended. -------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; CGO_CPPFLAGS_IN=-DFROM_ENV; CGO_LDFLAGS_IN=-L/from/env
-run_sut subject.sh
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$KEG/include" "icu4c keep: CGO_CPPFLAGS keeps its value, the keg's headers after it"
-eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$KEG/lib" "icu4c keep: CGO_LDFLAGS keeps its value, the keg's libraries after it"
-CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
-
-# --- R: a prefix with no icu4c installed under it adds nothing, and says so. --
-# brew prints a formula's prefix whether or not it is installed.
-HOST_OS=Darwin; ICU_PREFIX="$TMP/opt/not-installed"; mkdir -p "$ICU_PREFIX"; : > "$TMP/go.log"
-run_sut subject.sh
-eq "$(cgo_of CGO_CPPFLAGS)" "" "icu4c missing: no include path is added for a keg that is not there"
-eq "$(cgo_of CGO_LDFLAGS)" "" "icu4c missing: nor a library path"
-grep -q 'brew install icu4c' "$TMP/err" && ok "icu4c missing: the output names the missing prerequisite" \
-  || bad "icu4c missing: nothing names the missing icu4c"
-grep -q 'stub-go ran' "$TMP/go.log" && ok "icu4c missing: vet still runs and reports for itself" \
-  || bad "icu4c missing: vet did not run"
-
-# --- S: off macOS nothing is added, and brew is never asked. ------------------
-# The system libicu is on the default search path there.
-HOST_OS=""; ICU_PREFIX="$KEG"; CGO_CPPFLAGS_IN=-DFROM_ENV; rm -f "$TMP/brew.log"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "icu4c off macOS: exit 0" || bad "icu4c off macOS: expected 0, got $rc"
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "icu4c off macOS: CGO_CPPFLAGS passes through untouched"
-eq "$(cgo_of CGO_LDFLAGS)" "" "icu4c off macOS: and no library path is added"
-[ ! -e "$TMP/brew.log" ] && ok "icu4c off macOS: brew is never asked" || bad "icu4c off macOS: brew was asked"
-CGO_CPPFLAGS_IN=""
-
-# --- T: a run with no vet to make never asks brew. ---------------------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; rm -f "$STUB/go" "$TMP/brew.log"
-run_sut subject.sh
-[ "$rc" -eq 1 ] && ok "icu4c no go: exit 1 (fail-closed)" || bad "icu4c no go: expected 1, got $rc"
-[ ! -e "$TMP/brew.log" ] && ok "icu4c no go: brew is never asked" || bad "icu4c no go: brew was asked"
-make_go 0
-
-# --- U: the icu4c helper missing -> structural error (exit 2). ---------------
-# lint.sh sources it from its own checkout, so a lint.sh with no
-# assets/scripts/icu4c-cgo.sh beside it is a packaging error, not a clean vet.
-HOST_OS=""; ICU_PREFIX=""
-mkdir -p "$TMP/lone/tools"; cp "$SUT" "$TMP/lone/tools/lint.sh"
-if ( cd "$REPO" && PATH="$STUB" "$BASH_BIN" "$TMP/lone/tools/lint.sh" subject.sh ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
-[ "$rc" -eq 2 ] && ok "helper missing: structural error (exit 2)" || bad "helper missing: expected 2, got $rc"
-grep -q 'cannot source assets/scripts/icu4c-cgo.sh' "$TMP/err" \
-  && ok "helper missing: error names the helper" \
-  || bad "helper missing: error is silent about icu4c-cgo.sh"
-
 # --- V: the warrant list prints, and only a list that could not run fails. ---
-make_wrapper 0; make_go 0; make_gofmt 0; make_step_text 0; make_warrants 0
+make_wrapper 0; make_go 0; make_step_text 0; make_warrants 0
 run_sut subject.sh
 [ "$rc" -eq 0 ] && ok "warrants none: exit 0" || bad "warrants none: expected 0, got $rc"
 grep -q 'warrants: none touched' "$TMP/out" && ok "warrants none: summary says so" \
@@ -733,8 +576,7 @@ make_warrants 0
 
 # --- W: the step-text lint gets every file, and its verdict is the gate's. ---
 # It picks the formulas out itself, so lint.sh hands it the whole list.
-HOST_OS=""; ICU_PREFIX=""
-make_wrapper 0; make_go 0; make_gofmt 0; make_step_text 0; : > "$TMP/step.log"
+make_wrapper 0; make_go 0; make_step_text 0; : > "$TMP/step.log"
 run_sut subject.sh formulas/mol-x.toml
 [ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
 grep -qx 'stub-step-text ran: subject.sh formulas/mol-x.toml' "$TMP/step.log" \
@@ -765,14 +607,80 @@ grep -q 'step-text lint missing' "$TMP/err" \
   || bad "step-text lint missing: error is silent about it"
 make_step_text 0
 
-# --- V: invoked by a relative path from a subdirectory, it still finds it. ---
-# lint.sh cds to the repo root, after which a relative invocation path names a
-# different directory; the helper is located before that cd.
+# --- V: invoked by a relative path from a subdirectory, it lints the tree. ---
+# lint.sh finds the repository root through git and cds to it, so a run from a
+# subdirectory by a relative path lints the same tree.
 mkdir -p "$REPO/tools"; cp "$SUT" "$REPO/tools/lint.sh"
-cp "$HERE/../assets/scripts/icu4c-cgo.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 if ( cd "$REPO/services/foo" && PATH="$STUB" "$BASH_BIN" ../../tools/lint.sh ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 0 ] && ok "relative invocation: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "relative invocation: expected 0, got $rc"; }
-rm -f "$REPO/tools/lint.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
+rm -f "$REPO/tools/lint.sh"
+
+# --- The real linter: a finding of each enabled linter fails the lint. -------
+# lint.sh runs the real golangci-lint, at the repository's pin and on the
+# repository's .golangci.yml, over a module of its own whose go line is the
+# repository's. golangci-lint itself names the linters and formatters the
+# config enables, so a config that enables one with no finding below fails
+# here. Each finding sits alone in the module, and the run fails naming its
+# linter. The real go follows the stubs on PATH, and golangci-lint's own calls
+# to go find it there.
+ROOT_DIR="$(cd "$HERE/.." && pwd)"
+REAL_GO="$(command -v go || true)"
+plant() {  # $1 = a linter or formatter; writes a module file it reports
+  case "$1" in
+    errcheck) printf 'package fx\n\nimport "os"\n\n// Drop removes a file and drops its error.\nfunc Drop() { os.Remove("x") }\n' ;;
+    govet) printf 'package fx\n\nimport "fmt"\n\n// Say formats a string as a number.\nfunc Say() string { return fmt.Sprintf("%%d", "x") }\n' ;;
+    ineffassign) printf 'package fx\n\n// Last assigns values it never reads.\nfunc Last() int {\n\tn := 1\n\tn = 2\n\tn = 3\n\treturn n\n}\n' ;;
+    staticcheck) printf 'package fx\n\n// Same compares a value with itself.\nfunc Same(n int) bool { return n == n }\n' ;;
+    unused) printf 'package fx\n\nfunc unusedHelper() int { return 1 }\n' ;;
+    gofmt) printf 'package fx\n\n// Odd is spaced as gofmt never spaces it.\nfunc   Odd() int { return 1 }\n' ;;
+    *) return 1 ;;
+  esac > "$REAL/finding.go"
+}
+if [ -z "$REAL_GO" ]; then
+  bad "real linter: no go on PATH, so the real linter cannot run"
+else
+  REAL="$TMP/real"
+  mkdir -p "$REAL/assets/scripts" "$REAL/tools"
+  git -C "$REAL" init -q
+  cp "$ROOT_DIR/.golangci.yml" "$ROOT_DIR/.golangci-lint-version" "$REAL/"
+  printf 'module fx\n\ngo %s\n' "$(sed -n 's/^go //p' "$ROOT_DIR/go.mod")" > "$REAL/go.mod"
+  printf 'package fx\n\n// Sum adds two numbers.\nfunc Sum(a, b int) int { return a + b }\n' > "$REAL/sum.go"
+  for f in assets/scripts/shellcheck-run.sh tools/lint-step-text.sh tools/warrants-touched.sh; do
+    printf '#!/bin/sh\nexit 0\n' > "$REAL/$f"; chmod +x "$REAL/$f"
+  done
+  git -C "$REAL" add -A
+  REAL_PIN="$(cat "$REAL/.golangci-lint-version")"
+  rm -f "$STUB/go"
+  run_real() {
+    if ( cd "$REAL" && PATH="$STUB:$(dirname "$REAL_GO"):$PATH" TMPDIR="$LINT_TMP" \
+           CGO_CPPFLAGS="" CGO_LDFLAGS="" "$BASH_BIN" "$SUT" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
+  }
+
+  run_real
+  [ "$rc" -eq 0 ] && ok "real linter: a clean module passes" || { cat "$TMP/out" "$TMP/err"; bad "real linter: clean module: expected 0, got $rc"; }
+  grep -qxF "  go: . golangci-lint $REAL_PIN clean" "$TMP/out" && ok "real linter: the summary names the pinned release" \
+    || bad "real linter: no clean line: $(cat "$TMP/out")"
+
+  if enabled="$(cd "$REAL" && { go run "$GOLANGCI@$REAL_PIN" linters --json && go run "$GOLANGCI@$REAL_PIN" formatters --json; } \
+                 | jq -r '.Enabled[].name' | sort)"; then
+    eq "$(printf '%s\n' "$enabled" | tr '\n' ' ')" "errcheck gofmt govet ineffassign staticcheck unused " \
+      "real linter: the config enables the standard set and gofmt"
+  else
+    bad "real linter: golangci-lint did not name the linters the config enables"
+  fi
+  for linter in $enabled; do
+    if ! plant "$linter"; then
+      bad "real linter: no finding is planted for $linter, which the config enables"
+      continue
+    fi
+    run_real
+    [ "$rc" -eq 1 ] && ok "real linter: a finding of $linter fails the lint" || bad "real linter: a finding of $linter: expected 1, got $rc"
+    grep -q "($linter)\$" "$TMP/out" && ok "real linter: the report names $linter" \
+      || bad "real linter: $linter is not in the report: $(cat "$TMP/out")"
+    rm -f "$REAL/finding.go"
+  done
+  eq "$(ls -A "$LINT_TMP")" "" "real linter: the runs leave nothing in TMPDIR"
+fi
 
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"

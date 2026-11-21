@@ -50,6 +50,9 @@ changed since the script read it.
 
 ## Find a memory directory
 
+The build asks Claude Code where each place keeps memory instead of applying the
+rules below ([specs/tk-zlot608.8/gas-city-search.md](../tk-zlot608.8/gas-city-search.md#find-a-memory-directory)).
+
 **Partly covered: Claude Code's storage-location rules and Gas City's settings
 file.** The memory page ("Storage location") gives the directory as
 `~/.claude/projects/<project>/memory/`, where `<project>` "is derived from the
@@ -153,6 +156,22 @@ cover this need:
   memory directories hold about 2,070 notes, which would land in every session.
 - A memory is a key and a value (`memoryops/memories.go`), with no time it was
   written and no writer, so the intake would still keep its own list.
+
+**Searched on 2026-11-19: bd's Memory Beads proposal** (`gastownhall/beads`
+issue #5877, open, at its Revision 4 of 2026-09-22). It would answer the last
+two points. `bd prime` would load no memory body, and a session would find a
+memory by a compact listing and read the one it needs (R8, R6, R7). A memory
+would be a bead of its own kind (R1), with who changed it and when (R12), a
+deletion that keeps its history (R5), and links to work that carry metadata
+(R17), where the judge's decisions could sit in place of the intake's list.
+Judging a memory stays with tools outside bd (R30), which here is the
+distiller. It is a proposal with no implementation in bd: bd main at
+3a274fbf8f76 has no memory type in `internal/types/types.go`, and the graph CLI
+specification read beside it (issue #6703) is a draft whose memory commands run
+only in a preview built from `versioned-beads/beads`. The build goes ahead now
+because the proposal has no date and the operator's ruling in the first point
+stands. The intake's warrant retires when bd ships memory as a kind of bead
+with links to work ([docs/warrants.md](../../docs/warrants.md#memory-note-waits)).
 
 The gc-toolkit rig's store holds no bd memories (`gc bd memories`, 2026-11-11).
 bd's plane is the natural intake for Codex agents, which have none, if the

@@ -91,8 +91,8 @@ and both layers hold it until it is ruled close.
 1. **The finalize-gate clause** (`finalize-gate.sh` `clause_epic_ruling_recorded`)
    refuses to finalize an epic the predicate holds, on every close path that
    runs the gate. A review of an epic runs it on each Delivery it closes and,
-   once it has recorded the close ruling, on the epic. `merge.sh` finalizes
-   merge anchors, and `bead-rehome.sh` asks the gate about the epic as its
+   once it has recorded the close ruling, on the epic. `bead-rehome.sh` asks
+   the gate about the epic as its
    disposition will leave it (`--as-disposed`), before it writes anything and
    in its read-only `--check`, so `stand-down.sh` carries out a person's ruling
    that an epic will not go on. The clause is the precondition any

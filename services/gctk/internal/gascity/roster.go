@@ -1,17 +1,14 @@
 package gascity
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -235,33 +232,22 @@ func (c *City) ShowFormula(name string) Result {
 // on standard error and still exits 0 with its whole answer (doAgentList hands
 // its stderr to the config load's warnings, in cmd/gc/cmd_agent.go at
 // gastownhall/gascity 191c6b5b8b), so standard error is read only to say why a
-// read that exits non-zero failed. Once limit passes, the command's whole
-// process group is killed and the read says it did not answer in time.
+// read that exits non-zero failed. It runs through runBounded: once limit
+// passes, the command's whole process group is killed and the read says it did
+// not answer in time, and a stop this process is sent kills the group too.
 func (c *City) readBounded(limit time.Duration, bin string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = c.dir
-	if c.actor != "" {
-		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 2 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	var ee *exec.ExitError
+	out := c.runBounded(ctx, bin, args...)
 	switch {
-	case ctx.Err() != nil:
+	case errors.Is(out.Err, ErrDeadline):
 		return nil, fmt.Errorf("%s did not answer within %s", bin+" "+args[0]+" "+args[1], limit)
-	case err == nil:
-		return stdout.Bytes(), nil
-	case errors.As(err, &ee):
-		return nil, errors.New(Result{Code: ee.ExitCode(), Output: stdout.String() + "\n" + stderr.String()}.why())
-	default:
-		return nil, err
+	case out.Err != nil:
+		return nil, out.Err
+	case out.Code != 0:
+		return nil, errors.New(Result{Code: out.Code, Output: out.Stdout + "\n" + out.Stderr}.why())
 	}
+	return []byte(out.Stdout), nil
 }
 
 // clipLine is output in one line of at most 200 bytes, for a message that

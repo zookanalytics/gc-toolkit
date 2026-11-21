@@ -159,8 +159,9 @@ biased toward moving work forward:
   trigger before it runs: an authority-gated action (retire an in-flight PR,
   supersede an anchor) or a consequential, partly-uncertain call you have a
   clear lean on. Put it to the operator as a human gate AND name the execution
-  mol, so the subject's row on the board offers **Accept** (runs the mol at the
-  subject) beside **Discuss**. The bridge between `actionable` and `ruling` —
+  mol: the board shows the gate as a question, and when the operator rules in a
+  sitting on it to take the recommendation, the sign-off's **Accept** runs the
+  mol at the subject. The bridge between `actionable` and `ruling` —
   NOT "actionable with a card": reach for it only when the action is
   determinable but you want the operator to trigger it.
 - **blocked** — the bead cannot move until something else does: hold it on the
@@ -384,6 +385,8 @@ main. Never `--merge direct`.
 {{ template "scratch-reclaim" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}
 
 ## Communication
 

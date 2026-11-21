@@ -44,11 +44,27 @@ type Store interface {
 	// AddEdge makes one `gc bd dep add` of an edge of type typ from id onto
 	// target, returning its output. An error is a write that did not land.
 	AddEdge(id, target, typ string) (string, error)
+	// Unrelate makes one `gc bd dep unrelate` of id and other, which removes
+	// the relates-to link between them in both directions, returning its
+	// output. An error is a write that did not land.
+	Unrelate(id, other string) (string, error)
+	// ResolveGate makes one `gc bd gate resolve` of the gate id with reason,
+	// returning its output. bd closes the gate with the reason, and exits 0
+	// on a gate already closed without changing it, so its exit does not say
+	// whose answer the gate holds. An error is a write that did not land.
+	ResolveGate(id, reason string) (string, error)
+	// Reopen makes one `gc bd reopen` of id with reason, returning its output:
+	// bd clears the close and its reason, so what the bead blocked waits on it
+	// again. An error is a write that did not land.
+	Reopen(id, reason string) (string, error)
 	// Create makes one `gc bd create` titled title with args, and returns the
 	// new bead's id. An error may still have filed the bead: bd answers a
 	// create whose commit result it lost with the same reply and exit as a
 	// refusal, so the caller finds the bead before it files again.
 	Create(title string, args ...string) (string, error)
+	// Prefix reads the id prefix the store gives a bead it files. A read that
+	// fails or names none returns a *ReadError.
+	Prefix() (string, error)
 }
 
 var _ Store = (*Client)(nil)

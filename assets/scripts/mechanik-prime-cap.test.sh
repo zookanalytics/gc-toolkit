@@ -19,11 +19,12 @@
 # grows, so a promotion that pushes the prime over the cap fails here, at its
 # own PR.
 #
-# The work-quality standards do not fit beside the rest, so the prime gives the
-# command that reads them from the pack instead of composing them. The suite
-# runs that command as the render writes it, with this tree where the pack root
-# stands, and it has to print exactly the files in STANDARDS. A fragment
-# renamed or moved fails here instead of leaving the mechanik a dead pointer.
+# The work-quality standards and the memory-notes guidance do not fit beside
+# the rest, so the prime gives the command that reads them from the pack
+# instead of composing them. The suite runs that command as the render writes
+# it, with this tree where the pack root stands, and it has to print exactly the
+# files in STANDARDS. A fragment renamed or moved fails here instead of leaving
+# the mechanik a dead pointer.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +32,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 PROMPT="agents/mechanik/prompt.template.md"
 RENDER="generated/seed-audit/agents/mechanik.md"
 FRAGMENTS=(template-fragments/ask-for-work.template.md template-fragments/operator-profile.template.md template-fragments/learned-conventions-mechanik.template.md)
-STANDARDS=(template-fragments/work-quality-base.template.md template-fragments/work-quality-system.template.md)
+STANDARDS=(template-fragments/work-quality-base.template.md template-fragments/work-quality-system.template.md template-fragments/memory-notes.template.md)
 CAP=10000
 ALLOWANCE=600
 
@@ -89,10 +90,10 @@ done
 # The render writes the pack root as a placeholder. A link by that name to this
 # tree, in the directory the command runs from, resolves it.
 if [ -f "$ROOT/$RENDER" ]; then
-  read_cmd=$(grep -oE '`cat [^`]*template-fragments/work-quality-[^`]*`' "$ROOT/$RENDER" | tr -d '`')
+  read_cmd=$(grep -oE '`cat [^`]*template-fragments/[^`]*\.template\.md`' "$ROOT/$RENDER" | tr -d '`')
   found=$(printf '%s' "$read_cmd" | grep -c . || true)
   if [ "$found" -ne 1 ]; then
-    bad "the mechanik's prime gives one command that reads its standards" "$RENDER has $found commands that cat a work-quality fragment"
+    bad "the mechanik's prime gives one command that reads its standards" "$RENDER has $found commands that cat a fragment"
   else
     case "$read_cmd" in
       *[\;\|\&\$\<\>\(\)]*)

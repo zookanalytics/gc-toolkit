@@ -45,8 +45,8 @@ func WithCityPage(log cityboard.Log, box cityboard.Mailbox, ttl time.Duration) O
 			return
 		}
 		now := func() time.Time { return s.now() }
-		s.cityPage = &cityPage{log: log, docs: newKeyedCache[cityboard.Response](ttl, now),
-			box: box, mail: newKeyedCache[cityboard.Mail](CityMailTTL, now)}
+		s.cityPage = &cityPage{log: log, docs: newKeyedCache[cityboard.Response](ttl, now, s.gathers),
+			box: box, mail: newKeyedCache[cityboard.Mail](CityMailTTL, now, s.gathers)}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,9 @@ type Call struct {
 	// command holds its lock. With none set, the process ignores SIGTERM and
 	// sleeps.
 	Stall func(d time.Duration)
+
+	// home is the store the call acts in, once route has picked it.
+	home store
 }
 
 // getenv is the value of name in the call's environment, the last one when
@@ -77,7 +81,7 @@ func (c *Call) fail(status int, msg string) error {
 	return exit(status)
 }
 
-func (c *Call) out(s string) { io.WriteString(c.Stdout, s) }
+func (c *Call) out(s string) { _, _ = io.WriteString(c.Stdout, s) }
 
 // required is a setting the harness always exports, read the way the stub's
 // ${NAME:?} reads it.
@@ -139,11 +143,26 @@ func run(c *Call) error {
 			}
 			return c.catOr(c.getenv("STUB_RIGS"), `{"rigs":[]}`)
 		}
+	case "config":
+		if first(args) == "show" {
+			if c.getenv("STUB_CONFIG") == "" {
+				c.out(noConfig + "\n")
+				return nil
+			}
+			return c.catOr(c.getenv("STUB_CONFIG"), noConfig)
+		}
 	case "convoy":
-		if first(args) == "list" {
+		switch first(args) {
+		case "list":
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
+		case "status":
+			return c.convoyStatus(s, d, args[1:])
 		}
 		return nil
+	case "order":
+		if first(args) == "list" {
+			return c.catOr(c.getenv("STUB_ORDERS"), `{"orders":[]}`)
+		}
 	case "hook":
 		if first(args) == "current" {
 			return c.hookCurrent(args[1:])
@@ -157,9 +176,18 @@ func run(c *Call) error {
 	case "mail":
 		return nil
 	case "workflow":
-		return c.workflow(s, args)
+		sid := ""
+		if len(args) > 1 {
+			sid = args[1]
+		}
+		st := c.route(c.defaultStore(s, d), "", "", sid)
+		c.use(st)
+		return c.workflow(st.beads, args)
 	case "sling":
-		return c.sling(s, args)
+		rigName, bead := slingTarget(args)
+		st := c.route(c.defaultStore(s, d), "", rigName, bead)
+		c.use(st)
+		return c.sling(st.beads, args)
 	case "bd":
 		return c.bd(s, d, args)
 	}
@@ -193,6 +221,45 @@ func (c *Call) hook() error {
 		return exit(status)
 	}
 	return nil
+}
+
+// noConfig is `gc config show --json` for a city whose config names no agent.
+const noConfig = `{"ok":true,"config":{"Agents":[]}}`
+
+// afterWrite runs the program STUB_AFTER_WRITE names once a bd call that writes
+// the store has landed, so a test can run another process, such as the
+// deferred-dispatch order's pass, at each moment a script's write leaves. The
+// program gets the call's arguments as its own, and an environment without the
+// setting, so its own writes do not run it again. Its output goes to the call's
+// stderr. The write has landed, so the program's exit status leaves the call's
+// as it is, and only a program that does not start fails the call.
+func (c *Call) afterWrite() error {
+	prog := c.getenv("STUB_AFTER_WRITE")
+	if prog == "" {
+		return nil
+	}
+	env, stdin := c.Env, c.Stdin
+	c.Env, c.Stdin = withEnv(env, "STUB_AFTER_WRITE="), strings.NewReader("")
+	status, err := c.spawn(c.Stderr, append([]string{prog}, c.Args...)...)
+	c.Env, c.Stdin = env, stdin
+	if err != nil {
+		return c.fail(status, "fake gc: the program "+prog+" after the write: "+err.Error())
+	}
+	return nil
+}
+
+// made reports whether a call whose arguments carry text is in the call log,
+// this call's own line included.
+func (c *Call) made(text string) (bool, error) {
+	logPath, err := c.required("STUB_GC_LOG")
+	if err != nil {
+		return false, err
+	}
+	lines, err := readLines(logPath)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, text) }), nil
 }
 
 // carries reports whether the setting names a text the call's arguments carry,

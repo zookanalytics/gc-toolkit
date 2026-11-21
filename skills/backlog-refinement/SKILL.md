@@ -62,11 +62,16 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
 
   A list that printed no JSON array did not answer: file nothing, and tell the
   operator their words wait for the store.
-- **Send the request on**, so a normal PR writes the page. While `hold:mayor`
-  holds it, place it, which sends it and lifts the hold:
-  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --standalone`.
-  Otherwise sling it: `gc sling <rig>/<binding>.polecat <bead>`. A request
-  already routed or in progress is on its way, so send it nothing.
+- **Send the request on**, so a normal PR writes the page. A request already
+  routed or in progress is on its way, so send it nothing. While `hold:mayor`
+  holds it, place it, which sends it and lifts the hold, and otherwise sling it
+  (`gc sling <rig>/<binding>.polecat <bead>`):
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --standalone
+```
 
 When the operator changes goals the rig already keeps, file the change once they
 agree on its words, with

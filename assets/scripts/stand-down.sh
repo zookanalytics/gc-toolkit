@@ -17,7 +17,7 @@
 #      the gate closed reads the arm gone, and it retires an arm it finds on a
 #      closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
-#      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
+#      pins through gctk bead takeaway --release --no-wait, whose exit says the
 #      release landed, so the bead is left with no route. So nothing is still
 #      building the work and no pool is offered it once it is ready.
 #   3. It answers each gate under the key with the ruling, and reads each back
@@ -145,7 +145,6 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
 
 refuse() { echo "$PROG: $1 Nothing was written." >&2; exit 1; }
@@ -160,10 +159,10 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
 esac
 WORK_MR=$(row_meta "$WORK_JSON" merge_result)
 case "$WORK_MR" in
-  # An open PR, on the old record or on the pending record, retires through the
-  # writer that records its disposition and then closes it, which the PR's
-  # closer, pr-facts or the landing order, carries out once the PR reads closed.
-  pull_request|pull_request_pending|pull_request_head_changed)
+  # An open PR on the pending record retires through the writer that records its
+  # disposition and then closes it, which the landing order carries out once the
+  # PR reads closed.
+  pull_request_pending|pull_request_head_changed)
     refuse "$WORK owns an open PR ($WORK_MR), which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
 esac
 
@@ -284,8 +283,11 @@ stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exi
 "$GCTK" bead disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
   || stopped "the arm on $WORK was not removed, so no gate was answered."
 
-"$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
-  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gc-helm.sh says above, so no gate was answered."
+# The release ends the run beneath the bead through the pack's run-cancel.sh,
+# which gctk runs from GCTK_SCRIPTS_DIR, this script's own directory unless the
+# caller names one.
+GCTK_SCRIPTS_DIR="${GCTK_SCRIPTS_DIR:-$SCRIPT_DIR}" "$GCTK" bead takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
+  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gctk bead takeaway says above, so no gate was answered."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   case " $SHARED " in

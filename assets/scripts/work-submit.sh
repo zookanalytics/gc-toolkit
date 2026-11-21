@@ -26,10 +26,9 @@
 # the witness both act on a released bead that still carries a session pin.
 #
 # The bead the summary and a retitle belong on is the anchor: the open bead that
-# carries a merge_result for this branch, which pr-open.sh, the refinery and
-# merge.sh read. On fresh work that is this bead. A convoy's rebuild child, a rework that
-# answers no review and no ruling, has the convoy it names, as merge-push resolves
-# it. A rework child's metadata.anchor_bead answers when the branch list cannot.
+# carries a merge_result for this branch, which the refinery reads. On fresh
+# work that is this bead. A rework child's metadata.anchor_bead answers when the
+# branch list cannot.
 # The summary and a retitle go onto the anchor in one write, `gctk pr summary`,
 # which the pr domain owns. It is its own write, ahead of the handoff, because a
 # failure to land it costs the PR a current body or title, not the handoff.
@@ -282,7 +281,7 @@ COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) 
 # The list of open beads on this branch, read once. Parked and claimed beads count,
 # because every state that carries a merge_result is an anchor state.
 resolve_anchor() {
-  local ANCHOR_ROWS SELF_ROW NAMED LANDS_ON LIST_OK=1
+  local ANCHOR_ROWS LIST_OK=1
   ANCHOR=""
   ANCHOR_ROWS=""
   if [ -n "${CURRENT_BRANCH:-}" ]; then
@@ -293,19 +292,6 @@ resolve_anchor() {
           | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
         | sort_by(.created_at // .created // .id) | .[0].id // empty' 2>/dev/null) || ANCHOR=""
   fi
-  SELF_ROW="$WORK_ROW"
-# >>> rebuild-child-lands-on
-LANDS_ON=""
-NAMED=$(printf '%s' "$SELF_ROW" | jq -r '(.[0].metadata // {}) as $m
-  | if (($m.task_kind // "") | tostring) == "rework"
-       and (($m.source_review_bead // "") | tostring) == ""
-       and (($m.source_ruling_bead // "") | tostring) == ""
-    then (($m.anchor_bead // "") | tostring) else "" end' 2>/dev/null) || NAMED=""
-[ -z "$NAMED" ] || LANDS_ON=$(printf '%s' "$ANCHOR_ROWS" | jq -r --arg n "$NAMED" '
-  [ .[]? | select(.id == $n) | select(((.issue_type // .type // "") | tostring) == "convoy") ]
-  | .[0].id // empty' 2>/dev/null) || LANDS_ON=""
-# <<< rebuild-child-lands-on
-  ANCHOR="${ANCHOR:-$LANDS_ON}"
   if [ "$LIST_OK" = 0 ] && [ -z "$ANCHOR" ]; then
     ANCHOR=$(work_meta anchor_bead)
     [ -z "$ANCHOR" ] || echo "$PROG: could not list the branch's beads; using $WORK_ID's anchor_bead, $ANCHOR" >&2

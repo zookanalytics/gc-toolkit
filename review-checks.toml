@@ -25,8 +25,9 @@
 # REFINERY_RECONCILE_CHECK_SET, gate-ensure.sh's --default and
 # lifecycle/lifecycle.toml's check_set_default. Triage may widen an anchor's
 # check_set by any check the effective index declares and may not invent one.
-# `approval` is not a check here: it is a universal merge rule (merge.sh)
-# requiring a standing non-city APPROVED review.
+# `approval` is not a check here: it is a universal merge rule (the landing
+# order's evaluator) requiring a standing APPROVED review from an account that
+# can push to the repository.
 #
 # The other review file a rig may keep is a check's guidance,
 # docs/review-<check>.md, which holds that one check's guidance. The review

@@ -90,7 +90,7 @@ func openReq(body string) *http.Request {
 
 func serveOpen(t *testing.T, o Actuator, r *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
-	s := New(newFake(), time.Minute, WithActuator(o))
+	s := New(WithActuator(o))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, r)
 	return rr
@@ -354,12 +354,11 @@ func TestOpenSurvivesClientDisconnect(t *testing.T) {
 	}
 }
 
-// A SUCCESSFUL OPEN DROPS THE CACHED BOARD (review of PR#421, P2). `gc-helm.sh`
-// busts its own on-disk cache, which this binary never reads; Server.Board
-// serves s.cached until s.expiry. Without the invalidate, the row the operator
-// just acted on keeps rendering unheld for up to the TTL, which invites a second
-// click on work already in flight.
-func TestOpenInvalidatesTheBoardCache(t *testing.T) {
+// A SUCCESSFUL OPEN DROPS THE RIG BOARD'S CACHED ANSWERS. The rig board serves
+// them until they expire, so without the drop the row the operator just acted on
+// keeps rendering as it did for up to the TTL, which invites a second click on
+// work already in flight.
+func TestOpenInvalidatesTheRigBoardCache(t *testing.T) {
 	for _, tc := range []struct {
 		name, stdout string
 	}{
@@ -367,18 +366,10 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 		{"existing", "gc-helm: conversation tk-v1 is already open for tk-abc12 — x.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeActuator{res: ToolResult{Stdout: tc.stdout}}
-			s := New(newFake(), time.Minute, WithActuator(f))
-			// Warm the cache the way a board read does.
-			if _, err := s.Board(context.Background()); err != nil {
-				t.Fatalf("warm the board: %v", err)
-			}
-			s.mu.Lock()
-			warm := s.cached != nil
-			s.mu.Unlock()
-			if !warm {
-				t.Fatal("precondition: the board cache did not warm, so this test proves nothing")
-			}
+			reads := &rigReads{}
+			s := newRigServer(reads)
+			s.actuator = &fakeActuator{res: ToolResult{Stdout: tc.stdout}}
+			get(t, s, "/helm/rigs/gc-toolkit")
 
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
@@ -386,11 +377,9 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
 			}
 
-			s.mu.Lock()
-			still := s.cached != nil
-			s.mu.Unlock()
-			if still {
-				t.Error("the board cache survived a successful open; the next refresh can show the pre-open board")
+			get(t, s, "/helm/rigs/gc-toolkit")
+			if reads.reads != 2 {
+				t.Errorf("the rig was read %d times, want twice: the cache survived a successful open", reads.reads)
 			}
 		})
 	}
@@ -398,21 +387,19 @@ func TestOpenInvalidatesTheBoardCache(t *testing.T) {
 
 // ...and a FAILED open must leave the cache alone: nothing changed, and dropping
 // it would make every bad click pay for a fresh gather.
-func TestOpenFailureKeepsTheBoardCache(t *testing.T) {
-	f := &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
-	s := New(newFake(), time.Minute, WithActuator(f))
-	if _, err := s.Board(context.Background()); err != nil {
-		t.Fatalf("warm the board: %v", err)
-	}
+func TestOpenFailureKeepsTheRigBoardCache(t *testing.T) {
+	reads := &rigReads{}
+	s := newRigServer(reads)
+	s.actuator = &fakeActuator{err: fmt.Errorf("%w after 2m0s", ErrToolTimeout)}
+	get(t, s, "/helm/rigs/gc-toolkit")
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code == http.StatusOK {
 		t.Fatalf("precondition: wanted a failure, got 200")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cached == nil {
-		t.Error("a failed open dropped the board cache; nothing changed, so nothing needed dropping")
+	get(t, s, "/helm/rigs/gc-toolkit")
+	if reads.reads != 1 {
+		t.Errorf("the rig was read %d times, want once: a failed open dropped the cache", reads.reads)
 	}
 }
 
@@ -531,7 +518,7 @@ func TestOpenCollapsesConcurrentOpensOfTheSameBead(t *testing.T) {
 		res:   ToolResult{Stdout: "gc-helm: conversation tk-v filed on tk-abc12 — x.\n"},
 		block: make(chan struct{}),
 	}
-	s := New(newFake(), time.Minute, WithActuator(f))
+	s := New(WithActuator(f))
 
 	first := make(chan int, 1)
 	go func() {
@@ -587,7 +574,7 @@ func TestOpenDoesNotBlockADifferentBead(t *testing.T) {
 
 func TestOpenRejectsNonPost(t *testing.T) {
 	f := &fakeActuator{}
-	s := New(newFake(), time.Minute, WithActuator(f))
+	s := New(WithActuator(f))
 	for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(m, "/helm/open", nil))
@@ -617,7 +604,7 @@ func TestOpenMalformedBody(t *testing.T) {
 // Without an opener the board still serves; the route says why rather than
 // 404ing as though it were a typo.
 func TestOpenWithoutOpenerIsHonest(t *testing.T) {
-	s := New(newFake(), time.Minute)
+	s := New()
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusServiceUnavailable {
@@ -636,7 +623,7 @@ func TestOpenRouteBeatsTheSPACatchAll(t *testing.T) {
 		t.Fatalf("web.NewHandler: %v", err)
 	}
 	f := &fakeActuator{res: ToolResult{Stdout: "gc-helm: conversation tk-v filed on tk-abc12 — x.\n"}}
-	s := New(newFake(), time.Minute, WithSPA(spa), WithActuator(f))
+	s := New(WithSPA(spa), WithActuator(f))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, openReq(`{"bead":"tk-abc12"}`))
 	if rr.Code != http.StatusOK {
@@ -650,11 +637,11 @@ func TestOpenRouteBeatsTheSPACatchAll(t *testing.T) {
 	}
 }
 
-// The board itself must be unaffected by the new route.
+// The rig board's routes must be unaffected by the write route.
 func TestBoardStillServesAlongsideOpen(t *testing.T) {
-	f := &fakeActuator{}
-	s := New(newFake(), time.Minute, WithActuator(f))
-	for _, path := range []string{"/helm", "/", "/healthz"} {
+	s := newRigServer(&rigReads{})
+	s.actuator = &fakeActuator{}
+	for _, path := range []string{"/helm/rigs", "/helm/rigs/gc-toolkit", "/healthz"} {
 		rr := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusOK {
