@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # lint.test.sh — guards lint.yml, the lint check on GitHub: the events that run
 # it, the one job and its id, the draft gate that is the job's whole if:, the
-# concurrency group the job holds, and the version of golangci-lint it runs,
-# which only .golangci-lint-version names.
+# concurrency group the job holds, the platforms it lints for, and the version
+# of golangci-lint it runs, which only .golangci-lint-version names.
 #
 # A draft pull request must not run the lint, and a push to main, a manual
 # dispatch and the marking of a draft as ready must. Main's ruleset names a
@@ -14,9 +14,15 @@
 # cancels the run in progress, and the workflow holds none, for the reasons
 # tests.test.sh gives for tests.yml.
 #
+# The job lints every package twice, for the reason lint.yml's header gives:
+# for Linux, the platform of the ubuntu-latest runner, in a step whose env
+# names no GOOS, and for macOS on arm64 in a step whose env names both. A GOOS
+# set for the whole job or workflow would leave no run for the runner's
+# platform.
+#
 # tools/lint.sh and this job lint with the same release because each reads it
-# from .golangci-lint-version, so the job reads the file and names no release
-# of its own.
+# from .golangci-lint-version, so each golangci-lint the job builds reads the
+# file, and the job names no release of its own, nor a query such as latest.
 #
 # Hermetic: reads lint.yml with Psych, the YAML parser Ruby ships, as
 # action-pins.test.sh reads every workflow. Needs ruby.
@@ -70,11 +76,22 @@ conc = job['concurrency'].is_a?(Hash) ? job['concurrency'] : {}
 fail_with.("job lint's concurrency group must be #{group}") unless conc['group'] == group
 fail_with.("job lint's concurrency must cancel the run in progress") unless conc['cancel-in-progress'] == true
 
-runs = Array(job['steps']).map { |s| s.is_a?(Hash) ? s['run'].to_s : '' }
+steps = Array(job['steps']).select { |s| s.is_a?(Hash) }
+runs = steps.map { |s| s['run'].to_s }
 pinned = runs.select { |r| r.include?('golangci-lint@$(cat .golangci-lint-version)') }
 fail_with.("job lint must run golangci-lint at the release .golangci-lint-version names") if pinned.empty?
-named = runs.join("\n").scan(/golangci-lint@(v[0-9][^\s"']*)/).flatten
+named = runs.join("\n").scan(/golangci-lint@(?!\$\(cat \.golangci-lint-version\))([^\s"']*)/).flatten
 fail_with.("job lint names a release of its own, #{named.join(', ')}; it reads .golangci-lint-version") unless named.empty?
+
+fail_with.("job lint must run on ubuntu-latest, the platform its run with no GOOS lints for, and runs on #{job['runs-on'].inspect}") unless job['runs-on'] == 'ubuntu-latest'
+{ 'the workflow' => doc, 'job lint' => job }.each do |what, holder|
+  env = holder['env'].is_a?(Hash) ? holder['env'] : {}
+  fail_with.("#{what} must not set GOOS in its env, which every step would lint for") if env.key?('GOOS')
+end
+lints = steps.select { |s| s['run'].to_s.include?('golangci-lint') && s['run'].to_s.match?(%r{(^|\s)run\s+\./\.\.\.(\s|$)}) }
+env_of = ->(s) { s['env'].is_a?(Hash) ? s['env'] : {} }
+fail_with.("job lint must lint every package for Linux, in a step whose env names no GOOS") unless lints.any? { |s| !env_of.(s).key?('GOOS') }
+fail_with.("job lint must lint every package for macOS on arm64, in a step whose env sets GOOS darwin and GOARCH arm64") unless lints.any? { |s| env_of.(s)['GOOS'] == 'darwin' && env_of.(s)['GOARCH'] == 'arm64' }
 
 failures.each { |f| warn "lint.test.sh: FAIL — #{f}" }
 exit 1 unless failures.empty?

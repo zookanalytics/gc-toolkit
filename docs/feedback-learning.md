@@ -165,8 +165,10 @@ run. The judge gives each due note one outcome by the rubric's memory section,
 whose tests are the operator's three questions as
 `specs/tk-zlot608.2/design.md` quotes them. It drops a note that holds nothing
 worth keeping, once what the note shows is carried to where it goes. It sets a
-note on the feedback pattern its lesson joins, or on the bead in another rig's
-store that carries its fix, or keeps it until a date it chooses. A note it
+note on the feedback pattern its lesson joins, or keeps it until a date it
+chooses. A note whose fix is in code another rig or project owns waits instead
+on the bead in that rig's store that carries the fix, or on the upstream
+finding that records the problem. A note it
 cannot substantiate either way stays, and a line in it asks its users to record
 the days they use it, one dated line a day, for the judge's next look. A
 decision that does not ask again takes that line out, and the use lines stay as
