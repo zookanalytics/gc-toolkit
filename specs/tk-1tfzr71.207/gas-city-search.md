@@ -76,9 +76,10 @@ which the board's form reads from `gc-helm.sh conversations --json`. It grows
 gc-helm.sh rather than gctk as an exception the operator granted to AGENTS.md's
 rule that new pack code is written in Go, in gctk. Their words, in conversation
 tk-218zv3n on 2026-11-21: "Yes, this shoudl go where the current standing
-agents sit. it'll get moved over when the other agents move over." Moving
-gc-helm's verbs that only call Gas City is tk-1tfzr71.24's, the deletion
-schedule's board member.
+agents sit. it'll get moved over when the other agents move over." The three
+seats' commands move into gctk together, with the conversation commands, in
+tk-ssm8qns.15. The board's move, tk-1tfzr71.24 (#1617), took takeaway, park,
+place and accept into gctk and left the seat commands in shell.
 
 ## Listing the mailbox for the postmaster
 
