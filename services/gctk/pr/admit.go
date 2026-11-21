@@ -62,7 +62,7 @@ const pourReserve = 10 * time.Second
 // validated head, on the act's own read of the PR, and asks the asks on the
 // bead. A run owed is held off, as checked, only while a run, a gate or
 // another writer holds the branch, and a read that did not answer, or a pour
-// this run cannot make, is a retry (ActChecked).
+// this run cannot make, is a retry (ActRetry).
 func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	var takeable []string
 	for _, a := range asks {
