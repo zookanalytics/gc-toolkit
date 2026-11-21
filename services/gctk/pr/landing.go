@@ -3,12 +3,12 @@ package pr
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -1410,7 +1410,7 @@ func (l Landing) originDiffers(host, repo string) string {
 // outsideOrigin says why a PR on host in repo is not in the repository the
 // origin URL raw names, and is empty when it is.
 func outsideOrigin(raw, host, repo string) string {
-	oh, orepo, ok := originRepo(raw)
+	oh, orepo, ok := git.RemoteRepository(raw)
 	if !ok {
 		return fmt.Sprintf("the rig's origin %s names no repository on a host", raw)
 	}
@@ -1418,24 +1418,6 @@ func outsideOrigin(raw, host, repo string) string {
 		return fmt.Sprintf("the PR's repository %s/%s is not the rig's origin %s/%s", host, repo, oh, orepo)
 	}
 	return ""
-}
-
-// originForms are the forms a clone's origin URL takes: https, with or without
-// credentials, scp-like ssh, and ssh.
-var originForms = []*regexp.Regexp{
-	regexp.MustCompile(`^https://(?:[^@/]+@)?([^/]+)/([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^[^@/]+@([^:/]+):([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^ssh://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/([^/]+/[^/]+?)(?:\.git)?/?$`),
-}
-
-// originRepo reads an origin URL into its host and its repository, owner/name.
-func originRepo(u string) (host, repo string, ok bool) {
-	for _, f := range originForms {
-		if m := f.FindStringSubmatch(strings.TrimSpace(u)); m != nil {
-			return m[1], m[2], true
-		}
-	}
-	return "", "", false
 }
 
 // mergeEvidence reports whether a recorded merge is whole: its commit, its

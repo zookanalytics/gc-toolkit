@@ -167,6 +167,25 @@ func OriginURLs(dir string) (fetch, push []string, err error) {
 	return fetch, push, nil
 }
 
+// remoteForms are the forms a remote's URL takes: https, with or without
+// credentials, scp-like ssh, and ssh.
+var remoteForms = []*regexp.Regexp{
+	regexp.MustCompile(`^https://(?:[^@/]+@)?([^/]+)/([^/]+/[^/]+?)(?:\.git)?/?$`),
+	regexp.MustCompile(`^[^@/]+@([^:/]+):([^/]+/[^/]+?)(?:\.git)?/?$`),
+	regexp.MustCompile(`^ssh://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/([^/]+/[^/]+?)(?:\.git)?/?$`),
+}
+
+// RemoteRepository reads a remote's URL into its host and its repository,
+// owner/name. ok is false for a URL in none of the forms a remote takes.
+func RemoteRepository(url string) (host, repo string, ok bool) {
+	for _, f := range remoteForms {
+		if m := f.FindStringSubmatch(strings.TrimSpace(url)); m != nil {
+			return m[1], m[2], true
+		}
+	}
+	return "", "", false
+}
+
 // remoteURLs lists every URL `git remote get-url --all` prints for origin with
 // flags, one a line.
 func remoteURLs(dir string, flags ...string) ([]string, error) {
