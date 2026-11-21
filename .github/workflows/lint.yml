@@ -3,9 +3,10 @@ name: lint
 # Runs golangci-lint, the repository's Go lint, off-host on pull requests to
 # main and on pushes to main: the release .golangci-lint-version names, on
 # .golangci.yml, which are the version and config tools/lint.sh runs at each
-# polecat self-review and merge. The job builds that release from source with
-# the Go setup-go installs, the version go.mod names, as lint.sh does, and the
-# release lints every package of the repository's one module.
+# polecat self-review and merge. Its first run is lint.sh's command: `go run`
+# builds the pinned release from source with the Go setup-go installs, the
+# version go.mod names, and the release lints every package of the
+# repository's one module.
 # A lint type-checks the files Go builds for one platform, the one it runs on
 # unless GOOS and GOARCH name another. So a file built for one platform only,
 # by a //go:build line or a name such as x_darwin.go, is linted only by a run
@@ -64,20 +65,18 @@ jobs:
 
       # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
       # includes unicode/regex.h, which the image installs without headers,
-      # and the Linux run type-checks it.
+      # and the lint type-checks it.
       - name: Install ICU's headers for helm's cgo
         run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
 
-      # `go install` builds the linter for the runner, whatever platform a run
-      # then lints for. `go run`, which tools/lint.sh calls on the host, builds
-      # it for the GOOS and GOARCH it is handed, and the runner cannot start a
-      # macOS binary.
-      - name: Build golangci-lint at the pinned release
-        run: GOBIN="$RUNNER_TEMP/bin" go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat .golangci-lint-version)"
+      - name: Lint every package with golangci-lint
+        run: go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat .golangci-lint-version)" run ./...
 
-      - name: Lint every package for Linux
-        run: |
-          "$RUNNER_TEMP/bin/golangci-lint" run ./...
+      # The macOS run lints with the same release, built for the runner by `go
+      # install`. `go run` builds the linter for the GOOS and GOARCH it is
+      # handed, and the runner cannot start a macOS binary.
+      - name: Build golangci-lint for the runner
+        run: GOBIN="$RUNNER_TEMP/bin" go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat .golangci-lint-version)"
 
       # Go turns cgo off for a build for another platform, and this run turns
       # it off by name. No file of the module imports C or carries a cgo build
