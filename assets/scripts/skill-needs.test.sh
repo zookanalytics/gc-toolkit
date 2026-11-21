@@ -614,6 +614,21 @@ for f in "$TMP/prompt-stay" "$TMP/settle-early" "$TMP/edit-early"; do
     lacks "$(basename "$f"): …nor for low context" 'for low context' "$f" \
         "a sitting whose context fills is compacted and goes on"
 done
+# A compaction keeps the thread and the claim, so the entry reads a hold that
+# stands as interrupted. A turn of the operator's that the sitting had not
+# finished, such as a ruling a summary quotes, comes before the wait.
+have "the prompt reads an interrupted entry as a restart or a compaction" \
+    '| `interrupted` | A restart or a compaction came in the middle of the sitting. |' "$TMP/prompt-stay"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-restart"
+have "the continue skill picks a sitting up after a compaction as after a restart" \
+    'names this skill when a restart or a compaction came while the hold stood' "$TMP/continue-restart"
+have "…and first takes up each turn of the operator's it has not finished, whether the thread or the summary shows it" \
+    'First take up each turn of the operator'"'"'s that you have not finished, such as a ruling you have not carried out or a question you have not answered, whether the thread or the summary shows it' "$TMP/continue-restart"
+have "…and waits for the operator only once none is left" \
+    'Once none is left, wait for the operator: there is nothing else to do.' "$TMP/continue-restart"
+lacks "…and never waits while a turn of the operator's is unfinished" \
+    'Your thread holds the framing you posted.** Wait for the operator' "$TMP/continue-restart" \
+    "a compaction's summary can quote a ruling the sitting has not carried out"
 # Gas City refuses a session's own drain-ack while the session holds a claim it
 # started and has not finished, so a sitting that holds its conversation when
 # Gas City stops the session goes on with it, and acknowledges the drain once

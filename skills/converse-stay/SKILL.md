@@ -104,11 +104,11 @@ that hold (`converse-hold`).
 
 ## While the work is out
 
-The entry says `waiting` when an attach, a restart or a notice brought the
-sitting back before all its work closed. Nothing needs registering again: the
-conversation's edge onto the work is still the wait, and Gas City sleeps and
-brings back the session as it does after the stay (above). Take the case that
-fits:
+The entry says `waiting` when an attach, a restart, a compaction or a notice
+brought the sitting back before all its work closed. Nothing needs registering
+again: the conversation's edge onto the work is still the wait, and Gas City
+sleeps and brings back the session as it does after the stay (above). Take the
+case that fits:
 
 - **The operator speaks.** Answer their turns as `converse-continue` says,
   through the sign-off's `--answer`. Do not hold: a hold keeps its

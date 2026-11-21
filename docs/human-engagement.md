@@ -778,15 +778,18 @@ for word what the operator said that the record does not hold yet, to state the
 open decision and the recommendation and quote the last hand-back, to copy the
 entry's `CONV`, `CONVERSATION`, `SUBJECT` and `GATES` lines, and to end by
 telling the sitting to run the entry again before anything else, as the prompt
-also tells it. The hook always exits 0, because exit 2 would block the
-compaction. The city's own PreCompact hook still runs `gc handoff --auto`,
-which mails the session a note and requests no restart. No sitting gets Gas
-City's context advisory, which tells a session past 60% of its window to plan a
-handoff and reset itself and past 80% to run `gc session reset` on itself.
-Every `converse-<model>` template sets `context_advisory = { enabled = false }`,
-which Gas City merges over the city's setting and its built-in default. No
-other agent sets it, so each keeps the advisory. A Codex sitting has the
-advisory off and no summary steer.
+also tells it. The entry's claim then returns the conversation as an existing
+assignment, so the entry reads a hold that stands as `interrupted`, and the
+sitting first takes up each turn of the operator's that it had not finished,
+such as a ruling the summary quotes, before it waits (`converse-continue`). The
+hook always exits 0, because exit 2 would block the compaction. The city's own
+PreCompact hook still runs `gc handoff --auto`, which mails the session a note
+and requests no restart. No sitting gets Gas City's context advisory, which
+tells a session past 60% of its window to plan a handoff and reset itself and
+past 80% to run `gc session reset` on itself. Every `converse-<model>` template
+sets `context_advisory = { enabled = false }`, which Gas City merges over the
+city's setting and its built-in default. No other agent sets it, so each keeps
+the advisory. A Codex sitting has the advisory off and no summary steer.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a
@@ -799,7 +802,7 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `interrupted` | A restart or a compaction, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
 | `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
 | `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |

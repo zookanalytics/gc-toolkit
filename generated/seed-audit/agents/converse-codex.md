@@ -55,8 +55,8 @@ one call to the next, so at the top of every later call, set `CONV`,
 | ENTRY | What it means | What to do |
 |---|---|---|
 | `fresh` | You have just taken up the conversation. | `converse-recheck-premise` |
-| `interrupted` | A restart came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
-| `waiting` | You are staying for work that is still out, and an attach, a restart or a notice brought you back before it closed. | `converse-stay` |
+| `interrupted` | A restart or a compaction came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
+| `waiting` | You are staying for work that is still out, and an attach, a restart, a compaction or a notice brought you back before it closed. | `converse-stay` |
 | `returned` | The work you stayed for has closed. | `converse-stay` |
 | `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | Acknowledge the drain, as the cases below say. |
