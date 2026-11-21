@@ -237,14 +237,10 @@ runs_bd() { bounded gc bd --db "$RUNS_DB" "$@"; }
 #              worked by a live run: run-lib.sh's map of its store names it as
 #                the bead of a run whose root is open. The pour leaves that bead
 #                open, unassigned and unrouted.
-#              a merge anchor the cadence acts on: its recorded machine axis is
-#                progressing, or settled before a PR exists (the PR-open pass
-#                publishes it), or settled with a PR that needs no further review.
-#              a PR on Gas Town's pending record, where no machine axis is
-#                written: one whose new head the refinery validates
-#                (pull_request_head_changed), or one that waits on its merge
-#                (pull_request_pending) with a recorded posture that needs no
-#                further review.
+#              a PR on Gas Town's pending record: one whose new head the
+#                refinery validates (pull_request_head_changed), or one that
+#                waits on its merge (pull_request_pending) with a recorded
+#                posture that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
 #                carries no route), a bead assigned to the reserved `human`, a
 #                decision, a finding that needs the operator, an anchor parked
@@ -256,15 +252,11 @@ runs_bd() { bounded gc bd --db "$RUNS_DB" "$@"; }
 #                this classifier does not know, so it fails closed. The blocked
 #                status the pending record gives a PR that waits on its merge is
 #                no such hold, so that PR is read as an anchor.
-#              approval: an open PR settled and waiting on the operator's review
-#                (review required, or changes requested) at its live head, or a
-#                PR on the pending record whose recorded posture says so.
+#              approval: a PR on the pending record whose recorded posture says
+#                it waits on the operator's review (review required, or changes
+#                requested).
 #              merge-hold: an operator merge or rebase hold on an anchor.
-#              merge-blocked: the anchor's machine axis says no automated actor
-#                can move it.
-#              unread: an anchor whose machine axis, or whose PR posture at that
-#                axis's head, is not recorded, or a PR on the pending record
-#                with no posture recorded.
+#              unread: a PR on the pending record with no posture recorded.
 #              capped: an armed dispatch that hit its sling-failure cap.
 #              unknown: open with no route, arm or assignee, read from a store
 #                the walk could not place or whose runs did not read, so whether
@@ -293,22 +285,12 @@ def adv_dated: ((. // "") | tostring | split("@")) as $p
   | if ($p | length) == 3 and $p[0] != "" and $p[1] != "" then {value: $p[0], head: $p[1]} else null end;
 def adv_record($mr): $mr == "pull_request_pending" or $mr == "pull_request_head_changed";
 def adv_anchor($m; $mr):
-  if $mr != "pre_open_gate" and $mr != "pull_request" and (adv_record($mr) | not) then {state: "stuck", why: "human"}
+  if (adv_record($mr) | not) then {state: "stuck", why: "human"}
   elif ($m["merge_hold"] | adv_truthy) or ($m["rebase_hold"] | adv_truthy) then {state: "stuck", why: "merge-hold"}
   elif $mr == "pull_request_head_changed" then {state: "advancing"}
-  elif $mr == "pull_request_pending" then
+  else
     ($m["pr_posture"] | adv_dated) as $po
     | if $po == null then {state: "stuck", why: "unread"}
-      elif $po.value == "review_required" or $po.value == "changes_requested" then {state: "stuck", why: "approval"}
-      elif $po.value == "approved" or $po.value == "commented" or $po.value == "none" then {state: "advancing"}
-      else {state: "stuck", why: "unread"} end
-  else ($m["pr.machine"] | adv_dated) as $ma | ($m["pr_posture"] | adv_dated) as $po
-    | if $ma == null then {state: "stuck", why: "unread"}
-      elif $ma.value == "progressing" then {state: "advancing"}
-      elif $ma.value == "blocked" then {state: "stuck", why: "merge-blocked"}
-      elif $ma.value != "settled" then {state: "stuck", why: "unread"}
-      elif $mr == "pre_open_gate" then {state: "advancing"}
-      elif $po == null or $po.head != $ma.head then {state: "stuck", why: "unread"}
       elif $po.value == "review_required" or $po.value == "changes_requested" then {state: "stuck", why: "approval"}
       elif $po.value == "approved" or $po.value == "commented" or $po.value == "none" then {state: "advancing"}
       else {state: "stuck", why: "unread"} end

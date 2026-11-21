@@ -20,8 +20,7 @@ through `gc bd` and the supervisor's API.
 | `doctor run` | the doctor order's run: `gc doctor --json` under a deadline, never with `--fix`, recorded as one `gc-toolkit.doctor.ran` event whose payload names each failing check with the time it first failed and its streak, each check the run did not measure, each the accepted file accepts, and each monitor order's last good run; a run that did not complete carries the previous run's lists and exits 1 | `gctk doctor run --help`, `internal/cli/doctor.go`, `doctor` |
 | `epic create` | filing an epic with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic create --help`, `internal/cli/epic.go` |
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
-| `lifecycle` | anchor lifecycle transitions over the state machine `lifecycle/lifecycle.toml` declares. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go`, `internal/lifecycle` |
-| `merge` | arm 2 of the merge cadence, the single writer of merged truth | `internal/cli/merge.go` |
+| `lifecycle` | the plain write of a bead's `merge_result` outside the pending record, with the work record a landing writes, in one atomic update whose exit decides. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go` |
 | `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the landing order saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
@@ -55,16 +54,15 @@ A shell script that only execs a gctk command is a bridge for callers that do
 not call gctk yet, and it goes away once they do. A bridge is not a contract
 gctk keeps: matching a script's flags and output byte for byte is not a goal,
 and neither are tests that pin usage text. `assets/scripts/lifecycle.sh` execs
-`gctk lifecycle`, `assets/scripts/merge.sh` execs `gctk merge`, and
-`assets/scripts/epic.sh` execs `gctk epic` for the work skill, whose examples
-call every writer through the pack command. Each finds the binary through
-`assets/scripts/gctk-resolve.sh`, which states the resolution chain, and none
-has a shell fallback. With no binary to run, a bridge refuses the call with
-exit 1 and names the `gctk-build` order that publishes the binary. The merge
-cadence reads a refused transition as a failed one and a refused merge pass as
-`merge rc=1`, and retries both on its next pass. A fresh city has no binary
-until that order's first build, and a city whose build failed keeps serving the
-last good binary.
+`gctk lifecycle`, and `assets/scripts/epic.sh` execs `gctk epic` for the work
+skill, whose examples call every writer through the pack command. Each finds
+the binary through `assets/scripts/gctk-resolve.sh`, which states the
+resolution chain, and none has a shell fallback. With no binary to run, a
+bridge refuses the call with exit 1 and names the `gctk-build` order that
+publishes the binary. A caller reads a refused write as a failed one: the merge
+cadence's arms try it again on their next pass, and the refinery's direct
+landing on its next patrol. A fresh city has no binary until that order's first
+build, and a city whose build failed keeps serving the last good binary.
 
 `assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
 shell and takes their values from `gctk pr status`. It resolves the
@@ -77,9 +75,9 @@ pending record, the verb and the rig board ask the pr domain's evaluator over
 the store and the GitHub read the landing order saved on the PR's bead, the
 board through its listing (`listing.PRAnswers`), so none of them reads GitHub.
 
-`assets/scripts/pr-open.sh` and the refinery's merge-push step
-(`refinery-publish.sh`, `refinery-land.sh`) take a PR's title and body from
-`gctk pr compose`, so an opened PR and a later refresh read one composer.
+The refinery's merge-push step (`refinery-publish.sh`) takes a PR's title and
+body from `gctk pr compose`, so an opened PR and a later refresh read one
+composer.
 Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
 binary, or one too old to carry the verb, it opens no PR and edits no body or
 title that pass.
@@ -172,7 +170,6 @@ built from sources other than the checkout's.
 ```
 cmd/gctk/            the binary's entry point, and the revision `version` prints
 internal/cli/        the command tree, each command with its help, flags and exit codes
-internal/lifecycle/  the lifecycle state machine, which lifecycle/lifecycle.toml declares
 internal/ledger/     typed bead records: each key's declaration, one write per act
                      whose exit decides, snapshots, and a pass that reads each bead once
 internal/host/       the host adapter: the processes gctk starts and signals, the process
@@ -232,10 +229,9 @@ cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write ke
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
-bash assets/scripts/merge.test.sh          # merge through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge
 bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs
 ```
 
-A shell suite that reaches `lifecycle.sh`, `merge.sh` or `epic.sh` builds the
+A shell suite that reaches `lifecycle.sh` or `epic.sh` builds the
 binary from the checkout itself, and fails if it cannot.

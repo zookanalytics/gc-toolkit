@@ -99,7 +99,7 @@ SUBJ_JSON=$(gc bd show "$SUBJECT" --json 2>/dev/null | grep -av '^gc bd:' | scru
 PR=$(printf '%s' "$SUBJ_JSON" | jq -r '.[0].metadata as $m | ($m.pr_number // "" | tostring) as $n | if $n != "" then $n else (($m.pr_url // "") | split("/pull/") | if length > 1 then ((.[1] | capture("^(?<d>[0-9]+)") | .d) // "") else "" end) end' 2>/dev/null || true)
 case "$PR" in ''|*[!0-9]*) exit 0 ;; esac   # no PR, or non-numeric — nothing to comment on
 
-# The url -> owner/repo derivation pr-open.sh uses, on the caller's checkout.
+# The url -> owner/repo derivation, on the caller's checkout.
 ORIGIN_HOST=""; ORIGIN_REPO=""
 u=$(git remote get-url origin 2>/dev/null | tr -d '[:space:]')
 case "$u" in

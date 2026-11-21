@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # doctor/check-one-anchor-per-pr — I4: every PR has exactly one owning anchor.
 # Groups OPEN ANCHORS city-wide (all stores) by their pr_url metadata: only
-# merge_result-carrying beads count (anchors stamp pr_url and merge_result in
-# one lifecycle.sh write; review beads and rework children carry pr_url with
+# merge_result-carrying beads count (the refinery's record stamps pr_url and
+# merge_result on the anchor; review beads and rework children carry pr_url with
 # NO merge_result), and task_kind=review is excluded outright. A blocked bead
 # counts when its merge_result is an open PR's: Gas Town's pending record keeps
 # a bead blocked at pull_request_pending while its PR waits on the merge, and
 # blocks the bead at an exception once its PR is no longer open. Two or
-# more open anchors naming the same PR is an error — N claimants on one PR means
-# the weakest check-set decides the merge, and merge.sh's refuse-on-sight hold
-# is only a runtime backstop that fires when someone tries to land it.
+# more open anchors naming the same PR is an error: a PR has one owning bead,
+# whose record the landing order acts on.
 # Ledger-only, read-only. Exit 0=OK 1=Warning 2=Error. stdout: first line =
 # message, then "  - detail" lines. Live probes are bounded; an UNREADABLE
 # store warns (1), never passes — a store we cannot read could hide the twin.

@@ -525,7 +525,7 @@ reset_store
 run_park tk-pr "Parked for a reason"
 eq "$RC" "2" "(FLIGHT) a bead carrying merge_result is refused (exit 2)"
 has "$ERR" "in flight (merge_result=pull_request)" "(FLIGHT) the refusal names merge_result"
-has "$ERR" "merge.sh holds an anchor's merge" "(FLIGHT) the refusal says why"
+has "$ERR" "the landing order's evaluator holds an anchor's merge" "(FLIGHT) the refusal says why"
 nothing_written "(FLIGHT) merge_result"
 run_park tk-epic.2 "Parked for a reason"
 eq "$RC" "2" "(FLIGHT) a bead carrying a branch is refused (exit 2)"

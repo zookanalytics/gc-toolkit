@@ -66,7 +66,6 @@ eq "$RC" "2" "a stewarded closed epic carrying no epic_ruling is an ERROR"
 has "$OUT" "E3" "the unruled epic is named"
 has "$OUT" "update E3 --set-metadata epic_ruling=close --set-metadata epic_ruling_reason=" "the remedy records the close ruling and its outcome on the closed epic"
 has "$OUT" "reopen E3" "the remedy offers reopening to rule"
-hasnt "$OUT" "lifecycle.sh reopen" "the remedy does not offer lifecycle.sh reopen, which refuses an epic"
 has "$OUT" "--db $TMP/alpha/.beads" "the remedy names the store the epic lives in"
 has "$OUT" "docs/epics.md" "the finding cites the contract"
 

@@ -124,8 +124,8 @@ func TestBlockedFilesItsMissingBlocker(t *testing.T) {
 		!strings.Contains(strings.Join(creates[0].Args, " "), "-t task") {
 		t.Fatalf("(BLKNEW) the creates were %+v", creates)
 	}
-	w.has("--waiting-on fk-1", "(BLKNEW) the subject waits on the bead filed")
-	w.before("CREATE fk-1", "HELM takeaway", "(BLKNEW) filed before the release writes the wait")
+	w.has("--waiting-on tk-1", "(BLKNEW) the subject waits on the bead filed")
+	w.before("CREATE tk-1", "HELM takeaway", "(BLKNEW) filed before the release writes the wait")
 
 	w = newWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", strings.Repeat("x", 501), "--run", root)
@@ -163,10 +163,10 @@ func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 	if n := len(w.store.Creates()); n != 1 {
 		t.Errorf("(BLKRETRY) %d creates across both runs, want 1", n)
 	}
-	if h := w.lines("HELM takeaway"); !strings.Contains(h[len(h)-1], "--waiting-on fk-1") {
+	if h := w.lines("HELM takeaway"); !strings.Contains(h[len(h)-1], "--waiting-on tk-1") {
 		t.Errorf("(BLKRETRY) the re-run's release was %q", h[len(h)-1])
 	}
-	w.saidHas("already tk-sub's pending wait fk-1", "(BLKRETRY) saying so")
+	w.saidHas("already tk-sub's pending wait tk-1", "(BLKRETRY) saying so")
 
 	w = newWorld(t)
 	lossy := &lossyStore{Store: w.store, lose: true}
@@ -181,7 +181,7 @@ func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 	if n := len(w.store.Creates()); n != 1 {
 		t.Errorf("(BLKLOST) %d creates, want the one that landed", n)
 	}
-	w.has("--waiting-on fk-1", "(BLKLOST) the release names the blocker that landed")
+	w.has("--waiting-on tk-1", "(BLKLOST) the release names the blocker that landed")
 
 	w = newWorld(t)
 	w.store.Put(fake.Bead{ID: "tk-already", Title: "Migrate the seed schema", Status: "open", IssueType: "task"})

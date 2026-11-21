@@ -30,6 +30,9 @@ type Call struct {
 	// command holds its lock. With none set, the process ignores SIGTERM and
 	// sleeps.
 	Stall func(d time.Duration)
+
+	// home is the store the call acts in, once route has picked it.
+	home store
 }
 
 // getenv is the value of name in the call's environment, the last one when
@@ -149,10 +152,17 @@ func run(c *Call) error {
 			return c.catOr(c.getenv("STUB_CONFIG"), noConfig)
 		}
 	case "convoy":
-		if first(args) == "list" {
+		switch first(args) {
+		case "list":
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
+		case "status":
+			return c.convoyStatus(s, d, args[1:])
 		}
 		return nil
+	case "order":
+		if first(args) == "list" {
+			return c.catOr(c.getenv("STUB_ORDERS"), `{"orders":[]}`)
+		}
 	case "hook":
 		if first(args) == "current" {
 			return c.hookCurrent(args[1:])
@@ -166,9 +176,18 @@ func run(c *Call) error {
 	case "mail":
 		return nil
 	case "workflow":
-		return c.workflow(s, args)
+		sid := ""
+		if len(args) > 1 {
+			sid = args[1]
+		}
+		st := c.route(c.defaultStore(s, d), "", "", sid)
+		c.use(st)
+		return c.workflow(st.beads, args)
 	case "sling":
-		return c.sling(s, args)
+		rigName, bead := slingTarget(args)
+		st := c.route(c.defaultStore(s, d), "", rigName, bead)
+		c.use(st)
+		return c.sling(st.beads, args)
 	case "bd":
 		return c.bd(s, d, args)
 	}
