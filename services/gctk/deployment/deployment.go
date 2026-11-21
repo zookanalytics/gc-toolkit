@@ -279,7 +279,7 @@ func message(repo, environment string, v Verdict) string {
 		fmt.Fprintf(&b, "%d deployments in a row have failed, the first of %s at %s. The one before them, of %s at %s, succeeded, and the changes from it to the first failure are %s\n\n",
 			len(v.Failed), named(first), stamp(first.Created), named(v.Good), stamp(v.Good.Created), compare(repo, v.Good, first))
 	case v.Through:
-		fmt.Fprintf(&b, "None of the newest %d %s deployments succeeded, so the failures began before them.\n\n", Window, environment)
+		fmt.Fprintf(&b, "None of the newest %d %s deployments succeeded, so the failures may have begun before them.\n\n", Window, environment)
 	default:
 		fmt.Fprintf(&b, "No %s deployment has succeeded. %d have failed, the first of %s at %s.\n\n",
 			environment, len(v.Failed), named(first), stamp(first.Created))
