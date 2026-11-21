@@ -10,7 +10,7 @@ The postmaster adds a seat (`agents/postmaster`), an opener verb
 (the waiting count on the city page). Upstream was read at
 `gastownhall/gascity` main bfe7a19cc23a and `gastownhall/gascity-packs` main
 23d007dac5d4, on 2026-11-19. The rulings it answers are on tk-1tfzr71.190 and
-tk-1tfzr71.207 (conversation tk-9wz6v2b).
+tk-1tfzr71.207 (conversations tk-9wz6v2b and tk-218zv3n).
 
 ## Someone who works through the operator's mail
 
@@ -73,11 +73,12 @@ po is of its rig, and its opener is that attach.
 **The opener verb.** `gc-helm postmaster` is a third seat on gc-helm's seat
 verb, beside `po` and `mechanik`, and a row of the People page's seat list,
 which the board's form reads from `gc-helm.sh conversations --json`. It grows
-gc-helm.sh rather than gctk because the seat verbs and that list are one intent
-in the script: an opener in gctk would hold one seat of it while the other two
-stay, and the domain-move rules in `docs/gctk-architecture.md` move an intent
-only whole. Moving gc-helm's verbs that only call Gas City is tk-1tfzr71.24's,
-the deletion schedule's board member.
+gc-helm.sh rather than gctk as an exception the operator granted to AGENTS.md's
+rule that new pack code is written in Go, in gctk. Their words, in conversation
+tk-218zv3n on 2026-11-21: "Yes, this shoudl go where the current standing
+agents sit. it'll get moved over when the other agents move over." Moving
+gc-helm's verbs that only call Gas City is tk-1tfzr71.24's, the deletion
+schedule's board member.
 
 ## Listing the mailbox for the postmaster
 
