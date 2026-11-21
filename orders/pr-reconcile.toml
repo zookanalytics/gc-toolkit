@@ -49,13 +49,13 @@
 # webhook fires skips Gas City's gates and each event would start a run of its
 # own.
 #
-# Every minute, because a run reads GitHub only for the records that changed:
-# it reads the store once and takes no --count. A change on the store's side
-# that no writer announces, such as a gate a person clears, reaches its act at
-# the next run, and a change a cheap sign shows reaches it within about four
-# minutes at the most, the PR watch's two and each run's start at the next lane
-# pass included (specs/tk-1tfzr71.149/design.md, section 6). A run takes the
-# records that changed in a shuffled order, starts none more than 45 seconds
+# Every minute, because a run reads GitHub only for the records that changed
+# or whose hour is up: it reads the store once and takes no --count. A change
+# on the store's side that no writer announces, such as a gate a person clears,
+# reaches its act at the next run, and a change a cheap sign shows reaches it
+# within about three minutes at the most, the PR watch's minute, this order's
+# minute and each run's start at the next lane pass included. A run takes the
+# records it decides in a shuffled order, starts none more than 45 seconds
 # in, and stops each at 30 seconds with whatever GitHub call, fetch, store read
 # or write, human gate's filing or refinery's wake it is making: a fetch gets a
 # SIGTERM to git's process group, so git removes the lock files it holds in the
@@ -72,7 +72,7 @@
 # below it. A pour or a disposition writer that runs past its act's 30 seconds
 # is ended only by `timeout`. Tune from city.toml [[orders.overrides]].
 [order]
-description = "Landing order: decide each PR the refinery recorded as pending on its own read once it moved or its bead changed, merge a ready one with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
+description = "Landing order: decide each PR the refinery recorded as pending on its own read once it moved or its bead changed and at least once an hour, merge a ready one with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
 trigger = "cooldown"
 interval = "1m"
 timeout = "120s"

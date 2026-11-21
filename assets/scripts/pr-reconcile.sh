@@ -5,9 +5,10 @@
 #
 # `gctk pr reconcile` (services/gctk/internal/cli/prland.go) is the run: it
 # decides each PR the refinery recorded as pending on its own read once the PR
-# moved or its bead changed, merges a ready one with its head pinned, and closes
-# its bead once the merge commit is on the target, and it writes each owned PR's status: and held:
-# labels where they differ from what the store derives. This script names the
+# moved or its bead changed and at least once an hour, merges a ready one with
+# its head pinned, and closes its bead once the merge commit is on the target,
+# and it writes each owned PR's status: and held: labels where they differ from
+# what the store derives. This script names the
 # refinery the run acts for, which the order's environment does not carry: the
 # agent the roster places in $GC_RIG under the name refinery (resolve-route.sh),
 # whose name carries the binding the rig imports the pack under. A run works a
