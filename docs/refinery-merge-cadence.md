@@ -934,8 +934,10 @@ the PR watch saves one, and a PR more than one live bead owns owes none. So a
 change on the store's side, such as a gate a person files or clears, reaches
 the labels at the next run, and a label a person changes on GitHub is put back
 once the PR watch saves it. A PR the run lands has its labels cleared in the
-same run, and once its bead closes, the net clears any the run did not
-([The PR watch](#the-pr-watch)).
+same run when the comparison finds them differing, as it does once the PR
+watch has saved the merge. When the saved read still shows the PR open, with
+the labels the store derives for it, the run lands it and writes no label, and
+once its bead closes, the net clears them ([The PR watch](#the-pr-watch)).
 
 **The seed audit after a landing.** In a rig whose clone carries
 `generated/seed-audit`, a run that closes a bead on a merge into the rig's
