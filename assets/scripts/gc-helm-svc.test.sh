@@ -104,8 +104,13 @@
 #                 succeeds, none is owed
 #   (DUEHAND)     a hand-run build's publish is owed its restart five minutes
 #                 after the build
-#   (DUEROOT)     with the city in its environment, the check reads
-#                 <city>/.gc/services/<name> and asks gc nothing
+#   (DUEROOT)     with the city in its environment and a listing that does not
+#                 name the service, or none that reads, the check reads
+#                 <city>/.gc/services/<name>, and says nothing on stderr
+#   (DUELIST)     the check reads the state root the listing reports, the root
+#                 the deploy publishes to, and not a binary or a record left at
+#                 <city>/.gc/services/<name>
+#   every check case: the check asks gc for nothing but the service listing
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -973,6 +978,16 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
 # THE ORDER'S CHECK (--due) — whether the helm-build order runs this pass
 # ==============================================================================
 
+# The check writes nothing and restarts nothing, so the one gc call it may make
+# is the service listing.
+listed_only() { # <label> — every gc call since the case emptied the log listed services
+    if grep -qvx 'service list --json' "$GCLOG"; then
+        bad "$1 (the check called gc: $(tr '\n' ';' < "$GCLOG"))"
+    else
+        ok "$1"
+    fi
+}
+
 # --- case: a city with no helm service is owed a run every five minutes -------
 # The binary never appears in such a city, so a run stays owed. The run's record
 # is what keeps the check from owing one on every pass.
@@ -991,8 +1006,7 @@ eq "$ERR" "" "(DUESKIP) and says nothing on stderr"
 age_record 360
 run_build --due
 eq "$RC" 0 "(DUESKIP) five minutes after the run, the next is due"
-[ ! -s "$GCLOG" ] && ok "(DUESKIP) and the check asked gc nothing" \
-                  || bad "(DUESKIP) the check called gc: $(tr '\n' ';' < "$GCLOG")"
+listed_only "(DUESKIP) and the check asked gc for nothing but the service listing"
 
 # --- case: a restart that failed is owed again five minutes later -------------
 fixture
@@ -1009,8 +1023,7 @@ age_record 360
 run_build --due
 eq "$RC" 0 "(DUEPEND) five minutes after the failed run, the restart is owed"
 has "$OUT" "has not restarted" "(DUEPEND) and the check names the restart as what is owed"
-[ ! -s "$GCLOG" ] && ok "(DUEPEND) the check asked gc nothing" \
-                  || bad "(DUEPEND) the check called gc: $(tr '\n' ';' < "$GCLOG")"
+listed_only "(DUEPEND) the check asked gc for nothing but the service listing"
 run_build --deploy
 eq "$RC" 0 "(DUEPEND) the owed run restarts the service"
 absent "$STATE/restart-pending" "(DUEPEND) and clears the marker"
@@ -1030,10 +1043,11 @@ age_record 360
 run_build --due
 eq "$RC" 0 "(DUEHAND) five minutes after the build, the restart is owed"
 
-# --- case: the check finds the state root without asking gc -------------------
-# The city in the environment and no override: the check reads Gas City's
-# default root for the service, under the sacrificial name, and never lists
-# services. The record there is from a run ten minutes ago, so the run a missing
+# --- case: a listing that does not name the service ---------------------------
+# The city in the environment, no override, and a listing with no entry for the
+# service, under the sacrificial name: the check reads Gas City's default root
+# for the service, as a deploy would. A listing that does not read lands on the
+# same root. The record there is from a run ten minutes ago, so the run a missing
 # binary owes is due.
 fixture
 REV_ROOT="$(commit_fixture "$ROOT" || true)"
@@ -1045,22 +1059,69 @@ RAN_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 600 ))" '$t | todate')"
 jq -n --arg n "$SAFE_NAME" --arg rev "$REV_ROOT" --arg at "$RAN_AT" \
     '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
       last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$CITY_STATE/build-status.json"
-due_in_city() { # -> OUT RC
+due_in_city() { # -> OUT ERR RC
+    local err="$TMP/case$CASE/stderr-due"
     set +e
     OUT="$(GC_CITY_PATH="$STATE_CITY" GC_HELM_SERVICE_NAME="$SAFE_NAME" GC_HELM_GC_BIN="$GCBIN" \
-           STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
-           bash "$ROOT/assets/scripts/gc-build.sh" helm --due 2>/dev/null)"
+           STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" STUB_GC_LIST_FAIL="${LIST_FAIL:-}" \
+           bash "$ROOT/assets/scripts/gc-build.sh" helm --due 2>"$err")"
     RC=$?
     set -e
+    ERR="$(cat "$err")"
 }
 : > "$GCLOG"
 due_in_city
 eq "$RC" 1 "(DUEROOT) a current binary at <city>/.gc/services/<name> owes no run"
+LIST_FAIL=1
+due_in_city
+LIST_FAIL=""
+eq "$RC" 1 "(DUEROOT) nor does it when the listing does not read"
+eq "$ERR" "" "(DUEROOT) and the check says nothing on stderr about the listing"
 rm -f "$CITY_STATE/bin/helm-svc"
 due_in_city
 eq "$RC" 0 "(DUEROOT) and with no binary there, a run is owed"
-[ ! -s "$GCLOG" ] && ok "(DUEROOT) the check asked gc nothing" \
-                  || bad "(DUEROOT) the check called gc: $(tr '\n' ';' < "$GCLOG")"
+listed_only "(DUEROOT) the check asked gc for nothing but the service listing"
+
+# --- case: the check reads the state root the listing reports -----------------
+# A service whose declaration names its own state_root is served from that root,
+# and the deploy publishes there. The check reads the same root: a current
+# binary and record left at <city>/.gc/services/<name> owe nothing to the
+# configured root, which has no binary, and the configured root's record paces
+# the next run.
+fixture
+REV_LIST="$(commit_fixture "$ROOT" || true)"
+printf '{"city_path":"%s","services":[{"service_name":"%s","state_root":"custom-helm"}]}' \
+    "$STATE_CITY" "$SAFE_NAME" > "$SERVICES"
+OLD_STATE="$STATE_CITY/.gc/services/$SAFE_NAME"
+NEW_STATE="$STATE_CITY/custom-helm"
+mkdir -p "$OLD_STATE/bin" "$NEW_STATE"
+printf '#!/bin/sh\n' > "$OLD_STATE/bin/helm-svc"
+chmod +x "$OLD_STATE/bin/helm-svc"
+RAN_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 600 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$OLD_STATE/build-status.json"
+: > "$GCLOG"
+due_in_city
+eq "$RC" 0 "(DUELIST) a configured root with no binary owes a run, whatever the default root holds"
+has "$OUT" "$NEW_STATE/bin/helm-svc" "(DUELIST) and the check names the configured root's binary"
+FRESH_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 60 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$FRESH_AT" \
+    '{component: $n, built_at: "", source_rev: $rev, binary_rev: "",
+      last_build_rc: 1, restart_pending: false, checked_at: $at}' > "$NEW_STATE/build-status.json"
+due_in_city
+eq "$RC" 1 "(DUELIST) a run there a minute ago that saw this revision paces the next"
+has "$OUT" "not yet due" "(DUELIST) which the check says it waits for"
+mkdir -p "$NEW_STATE/bin"
+printf '#!/bin/sh\n' > "$NEW_STATE/bin/helm-svc"
+chmod +x "$NEW_STATE/bin/helm-svc"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$NEW_STATE/build-status.json"
+due_in_city
+eq "$RC" 1 "(DUELIST) a current binary at the configured root owes no run"
+eq "$ERR" "" "(DUELIST) and the check says nothing on stderr"
+listed_only "(DUELIST) the check asked gc for nothing but the service listing"
 
 # ==============================================================================
 # STATIC GUARDS

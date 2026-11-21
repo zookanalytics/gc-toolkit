@@ -211,9 +211,10 @@ it as `gc-build.sh gctk`, which builds the merge cadence's binary the same way,
 without the restart described below.
 
 Both orders are condition orders. On each pass the order dispatcher runs
-`gc-build.sh <component> --due`, which reads the checkout and the record and
-asks gc nothing, and the order runs only when it answers that a run is owed and
-due. A run is owed while the binary is missing or was built from a revision
+`gc-build.sh <component> --due`, which reads the checkout and the record. For
+helm it reads them under the state root the city's service listing reports,
+the root the deploy publishes to and the service is served from. The order runs
+only when the check answers that a run is owed and due. A run is owed while the binary is missing or was built from a revision
 other than the checkout's, and for helm while a publish waits for its restart.
 It is due on the first pass after the checkout moves, and otherwise five
 minutes after the last run, so a build or a restart that failed is tried again

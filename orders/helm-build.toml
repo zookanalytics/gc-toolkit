@@ -5,8 +5,9 @@
 # 5s readiness probe), so the build runs here and build-and-restart is ONE
 # step. A condition order: each pass runs the check, `gc-build.sh helm --due`,
 # and the order runs only when it answers that a run is owed and due, by the
-# rule at the script's check. The check reads the checkout and the service's
-# state root and asks gc nothing, so the default check_timeout holds it.
+# rule at the script's check. The check reads the checkout, and asks one
+# `gc service list` where the service's state root is, the root the deploy
+# publishes to, so the default check_timeout holds it.
 # timeout 900s: a cold build must be allowed to finish, under any load.
 # A city that declares no helm service never gets a binary, so a run stays
 # owed there, every five minutes, and each one records that there is nothing

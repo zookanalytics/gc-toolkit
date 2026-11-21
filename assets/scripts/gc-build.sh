@@ -126,18 +126,13 @@ CITY_ROOT="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
 # where that service's state root is (authoritative: it beats reproducing
 # gascity's StateRootOrDefault here), and which city this is when the
 # environment does not say. A command component whose environment names its city
-# has nothing to ask it. Neither has the check (--due) whose environment names
-# its city or its state root: the order dispatcher runs the check on every pass
-# and waits for it, so the check takes the root Gas City gives a service that
-# declares no state_root, <city>/.gc/services/<name> below. A city whose service
-# declares one sets GC_<C>_STATE_ROOT in the order's env ([[orders.overrides]]).
+# has nothing to ask it. The check (--due) asks it as a deploy does, so the two
+# read one state root, the one the service is served from.
 # Only a SUCCESSFUL listing that omits the service is proof of absence; an
 # erroring one must not silently stop deploys.
 SERVICES=""
 ASK_LISTING=0
-if [ "$DUE" -eq 1 ]; then
-    [ -n "$CITY_ROOT" ] || [ -n "${!STATE_ROOT_ENV:-}" ] || ASK_LISTING=1
-elif [ -n "$SERVICE" ] || [ -z "$CITY_ROOT" ]; then
+if [ -n "$SERVICE" ] || [ -z "$CITY_ROOT" ]; then
     ASK_LISTING=1
 fi
 NO_SERVICE=0
