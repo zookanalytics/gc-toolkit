@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -94,9 +95,8 @@ func TestAnExitWritesOnlyToAnOpenSubject(t *testing.T) {
 }
 
 // The actionable exit releases the bead to the pool in the one write it makes,
-// with the route, and says nothing waits on it. The pool is asked whether it
-// can claim this bead first, and one that cannot refuses the exit, naming the
-// named agent's address before the operator's exits.
+// with the route, and says nothing waits on it. It asks nothing about the pool
+// first, so a pool that does not run is routed to as any other is.
 func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition and a branch",
@@ -111,16 +111,18 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	if want := "tk-sub disposed as actionable (gc-toolkit/gc-toolkit.polecat)"; out != want {
 		t.Errorf("(ACT) the exit reported %q, want %q", out, want)
 	}
-	if asked, want := w.rt.Previews(), (gascity.Sling{Target: "gc-toolkit/gc-toolkit.polecat", Bead: "tk-sub", NoFormula: true}); len(asked) != 1 || asked[0] != want {
-		t.Errorf("(ACTPOOL) the exit previewed %+v; want the release's own raw route, %+v", asked, want)
+	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(ACTPOOL) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
 	}
 
 	w = newWorld(t)
-	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
-	wantCode(t, code, 2, err, "(ACTPOOL) a pool that cannot claim")
-	w.hasnt("HELM", "(ACTPOOL) the bead is not released")
-	errHas(t, err, "hand it with --assign", "(ACTPOOL) the refusal names the named agent's address")
-	errHas(t, err, "only when the next move is the operator's", "(ACTPOOL) …keeping the operator's exits for the operator's move")
+	w.rt.Roster[0].Suspended = true
+	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
+		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
+	}
+	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(ACTPOOL) a pool that does not run")
+	w.has("HELM takeaway tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(ACTPOOL) the bead is routed to it all the same")
 
 	w = newWorld(t)
 	w.helmFails = true

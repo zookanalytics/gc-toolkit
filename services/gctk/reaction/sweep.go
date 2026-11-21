@@ -137,18 +137,18 @@ func (e *SweepError) Error() string { return e.Msg }
 // one ready read is unassigned beads that are not epics, by priority, and the
 // candidate rule keeps the raw input among them (isCandidate). It then drops
 // every bead a live run works, by waits' run link, and a run map that does not
-// read drops nothing, which it says. Only then does it ask whether the rig's
-// pool can take a reaction, by Gas City's preview of its first candidate's
-// sling (poolRefuses), so a pass that finds no candidate never asks, and a
-// pool that cannot take one skips the rig. A slung run waits for a pool slot
-// at no cost, so the sweep has no cap. It has a deadline, since the order's
-// timeout stops a pour in progress: it starts no sling once less of the
-// deadline is left than its slowest sling took, each figure taken in whole
-// seconds as its upper bound, and leaves the rest for the next sweep. With
-// dryRun it slings nothing and passes each candidate as one it would sling,
-// whose refusals its sling would read again. It returns the summary, which
-// counts each skip by its cause. A *SweepError is a ready read or a candidate
-// rule that failed, with nothing slung, and any other error a sweep in no rig.
+// read drops nothing, which it says. Each reaction goes to the rig's proactive
+// pool whether or not the pool runs, and a sling gc sling refuses, such as to a
+// pool the city does not configure, fails that candidate alone. A slung run
+// waits for a pool slot at no cost, so the sweep has no cap. It has a deadline,
+// since the order's timeout stops a pour in progress: it starts no sling once
+// less of the deadline is left than its slowest sling took, each figure taken
+// in whole seconds as its upper bound, and leaves the rest for the next sweep.
+// With dryRun it slings nothing and passes each candidate as one it would
+// sling, whose refusals its sling would read again. It returns the summary,
+// which counts each skip by its cause. A *SweepError is a ready read or a
+// candidate rule that failed, with nothing slung, and any other error a sweep
+// in no rig.
 func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept)) (string, error) {
 	start := r.now()
 	if _, err := r.proactiveTarget(); err != nil {
@@ -169,11 +169,6 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 		}
 	}
 	cands = r.dropInFlight(cands)
-	if len(cands) > 0 {
-		if why := r.poolRefuses(cands[0].ID); why != "" {
-			return "no sweep in this rig: " + why, nil
-		}
-	}
 
 	if dryRun {
 		for _, c := range cands {
@@ -232,31 +227,6 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 		summary += fmt.Sprintf("; %d candidate(s) left for the next sweep, since less of the sweep's %ds (GC_PROACTIVE_SWEEP_TIMEOUT) was left than its slowest sling took", left, limit)
 	}
 	return summary, nil
-}
-
-// poolRefuses is why the rig's proactive pool cannot take the sweep's
-// reactions, empty when nothing says it cannot, by Gas City's preview of the
-// sling of first, the first candidate. Only a target the city resolves no agent
-// by and the preview's warnings about the target are the pool's no. A refusal
-// about the candidate itself says nothing of the pool, and that candidate's own
-// sling meets it, and a preview that does not answer is no evidence that the
-// pool is gone.
-func (r *Reactions) poolRefuses(first string) string {
-	target, err := r.proactiveTarget()
-	if err != nil {
-		return err.Error()
-	}
-	p := r.Runtime.Preview(gascity.Sling{Rig: r.Rig, Target: target, Bead: first, Formula: Formula})
-	switch {
-	case !p.Answered:
-		r.say("Gas City's preview of the sling of %s to %s did not answer (%s), so the sweep goes on: it is no evidence that the pool is gone", first, target, p.Unanswered())
-	case p.Unresolved:
-		return fmt.Sprintf("the city resolves no agent at %s, so work routed there is routed to nobody (%s)", target, p.Refused)
-	}
-	if warned := targetWords(target, p.TargetWarnings()); len(warned) > 0 {
-		return fmt.Sprintf("Gas City's preview of a first reaction's sling warns that %s, so a reaction slung there sits unclaimed", strings.Join(warned, " and "))
-	}
-	return ""
 }
 
 // upper is d in whole seconds, rounded up past any part of a second, the upper

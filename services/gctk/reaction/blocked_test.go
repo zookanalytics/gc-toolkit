@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -215,7 +216,8 @@ func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 // --then-route arms the dispatch that resumes the work, a plain arm on the
 // target's default, after the release writes the wait. An edge takeaway could
 // not write, and an arm that did not land, each fail the exit, and nothing is
-// armed after a release that did not land; a re-run arms.
+// armed after a release that did not land; a re-run arms. A pool that does not
+// run is armed for as any other is.
 func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	w := newWorld(t)
 	code, _, err := w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
@@ -254,14 +256,16 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	wantCode(t, code, 0, err, "(BLKARMFAIL) the re-run after a failed arm")
 
 	w = newWorld(t)
-	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
-		"--then-route", "gc-toolkit/gc-toolkit.nosuchpool", "--run", root)
-	wantCode(t, code, 2, err, "(BLKROUTE) --then-route to a pool nothing runs")
-	if got := w.writes(); len(got) != 0 {
-		t.Errorf("(BLKROUTE) wrote %q", got)
+	w.rt.Roster[0].Suspended = true
+	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
+		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
 	}
-	if asked, want := w.rt.Previews(), (gascity.Sling{Rig: "gc-toolkit", Target: "gc-toolkit/gc-toolkit.nosuchpool", Bead: "tk-sub"}); len(asked) != 1 || asked[0] != want {
-		t.Errorf("(BLKROUTE) previewed %+v; want the arm's own sling, with the formula the target pours by default, %+v", asked, want)
+	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
+		"--then-route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(BLKROUTE) --then-route to a pool that does not run")
+	w.has("ARM tk-sub --target gc-toolkit/gc-toolkit.polecat", "(BLKROUTE) the dispatch is armed for it all the same")
+	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(BLKROUTE) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
 	}
 }
 

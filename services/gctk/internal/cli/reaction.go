@@ -170,9 +170,10 @@ with a description that is no workflow root, scope, spec or step, no standing
 record, feedback pattern or review lane, carries no headline, no work marker
 and no parent, has no route or arm, and carries no hold:mayor or hold:external.
 It drops every bead a live run works, and a run map that does not read drops
-nothing, which it says. Only once a candidate remains does it ask whether the
-rig's proactive pool can take a reaction, and a pool that cannot skips the
-rig. Each sling applies sling's refusals again.
+nothing, which it says. Each reaction goes to the rig's proactive pool whether
+or not the pool runs, and each sling applies sling's refusals again. A sling gc
+sling refuses, as it refuses a pool the city does not configure, fails that
+candidate alone.
 
 A slung run waits for a pool slot at no cost, so the sweep has no cap. It
 starts no sling once less of its deadline is left than its slowest sling took,
@@ -189,7 +190,7 @@ would-sling: its sling reads the refusals again.
 --db names the store, a store's .beads directory. Without it the store is the
 one gc resolves here.
 
-exit: 0 swept, or no sweep in a rig whose pool cannot take a reaction
+exit: 0 swept
       1 nothing slung: the ready read or the candidate rule failed, GC_RIG is
         unset, or the deadline does not read
       2 usage`
@@ -321,8 +322,10 @@ Intake decides whether a pool route or a --then-route arm is written at all:
 only a member of an epic, PR-finishing work (anchor_bead) or an emergency the
 named check confirms on the default branch's head reaches a pool, and any
 other bead is held with hold:mayor for the operator's placement sitting
-(docs/steering.md). A route or a hand-off nothing would claim is refused, and
-so is a hand-off to the po, the deacon, the witness or the keeper.
+(docs/steering.md). A route goes to its pool whether or not the pool runs, and
+a route gc sling refuses, as it refuses a pool the city does not configure,
+stops the exit at that sling. A hand-off nothing would offer the bead to is
+refused, and so is a hand-off to the po, the deacon, the witness or the keeper.
 
 Each exit's writes keep their order, so the write that dispatches, holds or
 gates the subject comes last, and a re-run of the same call after an exit
@@ -335,7 +338,7 @@ before anything is read.
 store is the one gc routes the bead to.
 
 exit: 0 disposed
-      2 usage, or a route or hand-off nothing would claim: nothing written
+      2 usage, or a hand-off nothing would offer the bead to: nothing written
       3 the subject is not open: nothing written
       4 stopped part way: the message says what landed, and a re-run resumes`
 

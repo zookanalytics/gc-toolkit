@@ -320,8 +320,7 @@ func TestReactionCheckReadsABlockedSetLargerThanArgMax(t *testing.T) {
 }
 
 // The sweep's dry run, over the same city, lists the subject as a candidate it
-// would sling, from one read of the ready set by priority, and slings nothing:
-// its one call of gc sling is the preview of its first candidate's sling.
+// would sling, from one read of the ready set by priority, and slings nothing.
 func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 	log, _ := stubCity(t, bigBlocked(argMax(t)))
 	var out, errb bytes.Buffer
@@ -332,7 +331,7 @@ func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &line); err != nil || line.ID != "tk-sub" || line.Outcome != reaction.WouldSling || line.Priority != 2 {
 		t.Errorf("the dry run printed %q (%v)", out.String(), err)
 	}
-	if ready := calls(t, log, "bd "); !slices.Equal(calls(t, log, "sling"), []string{"sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction --dry-run --json"}) || !slices.ContainsFunc(ready, func(l string) bool {
+	if ready := calls(t, log, "bd "); len(calls(t, log, "sling")) > 0 || !slices.ContainsFunc(ready, func(l string) bool {
 		return strings.HasSuffix(l, "ready --unassigned --exclude-type=epic --sort priority --json --limit 0")
 	}) {
 		t.Errorf("the dry run's calls were %v", calls(t, log, ""))
@@ -340,9 +339,9 @@ func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 }
 
 // No command reads the city's rig list, however many questions it asks: the
-// dispose asks Gas City's preview of its sling whether the pool it routes to
-// can take the bead, the sling's subject is in the store gc resolves here, and
-// the order gives the sweep its store. Each makes one ready read at most.
+// dispose slings its closer with no question about the pool first, the sling's
+// subject is in the store gc resolves here, and the order gives the sweep its
+// store. Each makes one ready read at most.
 func TestReactionVerbsReadNoRigList(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
 	for name, c := range map[string]struct {

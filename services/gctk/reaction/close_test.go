@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,9 +13,10 @@ import (
 
 // The close exit hands the subject to a validating closer, rig-pinned, after
 // the close brief and the headline, and never closes it or releases it to a
-// pool as a raw bead; a closer that cannot claim is refused; a brief or a
-// headline that does not land dispatches nothing; a failed sling names gc
-// sling's reason; and a closer already live is the subject's closer.
+// pool as a raw bead; a closer pool that does not run is slung to as any other
+// is; a brief or a headline that does not land dispatches nothing; a failed
+// sling names gc sling's reason; and a closer already live is the subject's
+// closer.
 func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "close", "--reason", "already fixed, nothing to merge", "--takeaway", "close: fixed in #123", "--run", root)
@@ -41,17 +43,15 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	}
 
 	w = newWorld(t)
+	w.rt.Roster[0].Suspended = true
 	w.rt.OnPreview = func(gascity.Sling) gascity.SlingPreview {
-		return gascity.SlingPreview{Answered: true, Unresolved: true, Refused: `gc sling: agent "gc-toolkit/gc-toolkit.polecat" not found in city.toml`}
+		return gascity.SlingPreview{Answered: true, Warnings: []string{gascity.AgentSuspended, gascity.PoolEmpty}}
 	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
-	wantCode(t, code, 2, err, "(CLOSE) a closer pool that cannot claim")
-	errHas(t, err, "Put it to the operator instead", "(CLOSE) naming the exits that reach a person")
-	if got := w.writes(); len(got) != 0 {
-		t.Errorf("(CLOSE) wrote %q", got)
-	}
-	if asked, want := w.rt.Previews(), (gascity.Sling{Rig: "gc-toolkit", Target: "gc-toolkit/gc-toolkit.polecat", Bead: "tk-sub", Formula: closer}); len(asked) != 1 || asked[0] != want {
-		t.Errorf("(CLOSE) previewed %+v; want the closer's own sling, %+v", asked, want)
+	wantCode(t, code, 0, err, "(CLOSE) a closer pool that does not run")
+	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) the closer is slung to it all the same")
+	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(CLOSE) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
 	}
 
 	w = newWorld(t)

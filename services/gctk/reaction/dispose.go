@@ -229,8 +229,9 @@ func (d Disposed) String() string {
 // Dispose takes the exit d names on its subject, a call Validate passed. It
 // reads the subject's status before its first write and writes nothing to a
 // subject that is not open (NotOpen). A call that asks for what cannot land,
-// such as a route no pool claims, is a *UsageError, with nothing written. Any
-// other error stops the exit part way, and its message says what landed; a
+// such as a hand-off to an agent whose hook would not offer the bead, is a
+// *UsageError, with nothing written. Any other error, a route gc sling refuses
+// among them, stops the exit part way, and its message says what landed; a
 // re-run of the same call resumes it.
 func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	out := Disposed{Bead: d.Bead, Disposition: d.Disposition}
@@ -304,26 +305,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		}
 	}
 
-	// Route and hand off only where something can claim, by Gas City's preview
-	// of the sling each would make: the actionable exit's release routes the
-	// bead raw (gc-helm.sh takeaway's --route), and the close exit slings, or
-	// arms, the validating closer. A route intake holds is never written, so it
-	// is not asked about.
-	claimRoute, claim := "", gascity.Sling{}
-	switch {
-	case d.Disposition == Actionable && admit != "" && d.Assign == "":
-		claimRoute, claim = d.Route, gascity.Sling{Target: d.Route, Bead: d.Bead, NoFormula: true}
-	case d.Disposition == Close:
-		claimRoute, claim = d.Route, gascity.Sling{Rig: r.Rig, Target: d.Route, Bead: d.Bead, Formula: closer}
-	}
-	if claimRoute != "" {
-		if ok, why := r.Deliverable(claim); !ok {
-			if d.Disposition == Actionable {
-				return out, usage("%s cannot pick this bead up: %s. Routing there would leave %s open, unassigned and offered to nobody. Route it to a pool that can claim it, or hand it with --assign to the named agent whose work it is (a town-repo edit is gc-toolkit.mechanik's). Put it to the operator (--disposition recommend or ruling) only when the next move is the operator's", claimRoute, why, d.Bead)
-			}
-			return out, usage("%s cannot pick this bead up: %s. Routing there would leave %s open, unassigned and offered to nobody. Put it to the operator instead (--disposition recommend or ruling)", claimRoute, why, d.Bead)
-		}
-	}
+	// A route goes to its pool whether or not the pool runs. One that cannot
+	// work is refused where the exit makes it: gc sling refuses a target the
+	// city configures no agent for and a route into a store the target does not
+	// read, before it writes anything (cmdSlingWithJSON in cmd/gc/cmd_sling.go
+	// and preflight in internal/sling/sling_core.go, at gastownhall/gascity
+	// 781c975d79), and the arm refuses a --then-route whose default formula
+	// does not read. A hand-off is made only to a named agent whose hook would
+	// offer the bead.
 	who, form := d.Assign, ""
 	if who == "" {
 		who = d.ThenAssign
@@ -332,13 +321,6 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		form, _ = handoffForm(who, "", "", d.Bead)
 		if ok, why := r.Assignable(who, d.Bead); !ok {
 			return out, usage("%s cannot be handed this bead: %s. Handing it there would leave %s offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route or --then-route", who, why, d.Bead)
-		}
-	}
-	if d.Disposition == Blocked && d.ThenRoute != "" && admit != "" {
-		// The arm's start slings the bead with the formula the target pours by
-		// default.
-		if ok, why := r.Deliverable(gascity.Sling{Rig: r.Rig, Target: d.ThenRoute, Bead: d.Bead}); !ok {
-			return out, usage("--then-route %s cannot pick this bead up: %s. Arming it would record a dispatch the deferred-dispatch order replays into a failure every pass. Pass a pool that runs, such as <rig>/gc-toolkit.polecat, or omit --then-route when no pool takes this bead", d.ThenRoute, why)
 		}
 	}
 
