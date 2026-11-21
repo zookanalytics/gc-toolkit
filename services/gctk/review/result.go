@@ -46,8 +46,7 @@ type Gates interface {
 // Recorded is what Record did: the result it wrote on the bead, nil with
 // NoResult saying why when the run has none, whether the loop exhausted, each
 // gate of a question still open, each ask it closed, and the gate it filed
-// when the loop exhausted. Shadow says it wrote nothing, because the run is a
-// shadow, and what it would have written.
+// when the loop exhausted.
 type Recorded struct {
 	Bead      string
 	Result    *Result
@@ -56,7 +55,6 @@ type Recorded struct {
 	Open      []string
 	Closed    []ClosedAsk
 	Gated     bool
-	Shadow    bool
 }
 
 // ClosedAsk is an ask Record closed: its ruling, and the work record its close
@@ -89,7 +87,7 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, v *Verdict, filer 
 		return nil, fmt.Errorf("iteration %d of %s neither passed nor is its loop's last attempt, so the run has no result yet",
 			v.Iteration, run.Root)
 	}
-	out := &Recorded{Bead: run.PRBead, Shadow: run.Shadow, Exhausted: !v.Passed}
+	out := &Recorded{Bead: run.PRBead, Exhausted: !v.Passed}
 	last := run.Last()
 	if last == 0 {
 		out.NoResult = "the run judged no head"
@@ -109,10 +107,6 @@ func Record(l *ledger.Ledger, dir string, wait time.Duration, v *Verdict, filer 
 	}
 	out.Result = &Result{Head: head, Target: run.Target, Passed: passed, Run: run.Root}
 	answered := answeredAsks(run, last)
-	if run.Shadow {
-		out.Closed = answered
-		return out, nil
-	}
 	url, err := out.write(l, dir, wait, run, head, answered)
 	if err != nil {
 		return out, err

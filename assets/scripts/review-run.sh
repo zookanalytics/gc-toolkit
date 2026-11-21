@@ -10,11 +10,6 @@
 # PR, its branch and target, the iteration and the head it judges. A verb the
 # step does not own is refused, so a lane cannot push and triage cannot post.
 #
-# A shadow run (its shadow var reads true) writes nothing outside itself. Each
-# verb that would write prints what it would have written instead, and the
-# repair's are kept in <workspace>/repair/shadow-writes.txt, which its output
-# carries. A demo lane's capture stays in the run's workspace.
-#
 # The run's result belongs to no step: the loop's check records it as it ends
 # the loop (review-passed-check.sh), and the review-workspace-reap order
 # removes the workspace once the run's root closes.
@@ -127,20 +122,11 @@ owns() {
 load() {
     step_facts
     RUN=$(fact .run); PR_BEAD=$(fact .pr_bead); PR=$(fact .pr); BRANCH=$(fact .branch)
-    TARGET=$(fact .target); HEAD=$(fact .head); N=$(fact .iteration); SHADOW=$(fact .shadow)
+    TARGET=$(fact .target); HEAD=$(fact .head); N=$(fact .iteration)
     case "$(fact .output)" in
         triage) STEP=triage ;; lane) STEP=lane ;; repair) STEP=rule-and-repair ;; *) STEP=other ;;
     esac
     WS=$("$HERE/review-workspace.sh" path --root "$RUN") || die 1 "no workspace path for $RUN"
-    SHADOW_WRITES="$WS/repair/shadow-writes.txt"
-}
-
-# would <line> — what a shadow run's step would have written, kept for its output.
-would() {
-    echo "shadow run: wrote nothing: $1"
-    if [ "$STEP" = rule-and-repair ]; then
-        mkdir -p "$WS/repair" && printf '%s\n' "$1" >> "$SHADOW_WRITES"
-    fi
 }
 
 # The rig's checkout, with the PR's branch and target fetched and the head held.
@@ -169,7 +155,6 @@ worktree() {
 
 print_run() {
     printf '%s\n' "== The run: $RUN, reviewing $PR ($PR_BEAD) from $BRANCH into $TARGET"
-    [ "$SHADOW" = true ] && printf '%s\n' "== A shadow run: it writes nothing outside itself"
     [ -z "$N" ] || [ "$N" = 0 ] || printf '%s\n' "== Iteration $N, at the head $HEAD"
     return 0
 }
@@ -295,9 +280,8 @@ cmd_output() {
         esac
     fi
     [ -s "$FILE" ] || die 64 "$FILE holds no output; write it there first"
-    local json rc writes=()
-    [ "$SHADOW" = true ] && [ "$STEP" = rule-and-repair ] && writes=(--writes "$SHADOW_WRITES")
-    json=$("$gctk" review output "$ID" --file "$FILE" ${writes[@]+"${writes[@]}"}); rc=$?
+    local json rc
+    json=$("$gctk" review output "$ID" --file "$FILE"); rc=$?
     case "$rc" in
         0) ;;
         3) exit 3 ;;
@@ -311,7 +295,6 @@ cmd_output() {
 cmd_withdraw() {
     [ -n "$REASON" ] || usage
     load; owns triage
-    if [ "$SHADOW" = true ]; then would "withdraw: the approvals given before $HEAD: $REASON"; return 0; fi
     "$gctk" pr withdraw "$PR_BEAD" --head "$HEAD" --reason "$REASON"
 }
 
@@ -323,10 +306,6 @@ cmd_push() {
     new=$(git -C "$wt" rev-parse HEAD) || die 2 "the run's worktree does not read"
     if [ "$new" = "$HEAD" ]; then echo "$PROG: nothing to push: the worktree is at the head the round judged"; return 0; fi
     git -C "$wt" merge-base --is-ancestor "$HEAD" "$new" || die 3 "$new does not descend from $HEAD, so the push is no fast-forward"
-    if [ "$SHADOW" = true ]; then
-        would "push: $(git -C "$wt" rev-list --count "$HEAD..$new") commit(s) onto $BRANCH, to $new"
-        return 0
-    fi
     local rc
     (cd "$wt" && "$gctk" pr draft "$PR_BEAD"); rc=$?
     case "$rc" in
@@ -356,11 +335,6 @@ cmd_post() {
     local body file mark host repo number id
     body=$("$gctk" review comment "$RUN" --iteration "$N") || die 2 "the head's comment did not render"
     if [ -z "$body" ]; then echo "$PROG: nothing to answer at $HEAD, so nothing is posted"; return 0; fi
-    if [ "$SHADOW" = true ]; then
-        printf '%s\n' "$body"
-        echo "shadow run: posted nothing; the round's output carries this comment"
-        return 0
-    fi
     [[ "$PR" =~ ^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)$ ]] || die 3 "$PR is not a PR's URL"
     host=${BASH_REMATCH[1]}; repo=${BASH_REMATCH[2]}; number=${BASH_REMATCH[3]}
     mark=$(printf '%s\n' "$body" | head -1)
@@ -388,7 +362,6 @@ cmd_defer() {
     [ -n "$TITLE" ] && [ -n "$FILE" ] || usage
     load; owns rule-and-repair
     [ -s "$FILE" ] || die 64 "--file $FILE holds no description"
-    if [ "$SHADOW" = true ]; then would "bead: $TITLE, waiting on $PR_BEAD and armed to start once it lands"; return 0; fi
     local pool rows found id status routed arm
     pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
     [ -n "$pool" ] || die 1 "the run names no repair pool to arm a deferred fix for, so nothing is filed"
@@ -428,7 +401,6 @@ cmd_question() {
     [ -n "$KEY" ] && [ -n "$MESSAGE" ] || usage
     case "$KEY" in *[!a-z0-9-]*) die 64 "--key takes a slug of a-z, 0-9 and -, got '$KEY'" ;; esac
     load; owns rule-and-repair
-    if [ "$SHADOW" = true ]; then would "gate review-question-$KEY on $PR_BEAD: $MESSAGE"; return 0; fi
     "$HERE/human-gate.sh" --subject "$PR_BEAD" --key "review-question-$KEY" --message "$MESSAGE" \
         || die 1 "the gate did not land"
 }
@@ -448,7 +420,6 @@ cmd_finding() {
                   disp=needs-you; args=(--visit "$GATE") ;;
         *) die 64 "--ruling takes must-fix, declined, deferred, answered or question, got '$RULING'" ;;
     esac
-    if [ "$SHADOW" = true ]; then would "finding $FINDING: $disp: $REASON"; return 0; fi
     if [ "$disp" = deferred ]; then
         local pool
         pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
@@ -476,7 +447,6 @@ cmd_deliver() {
     [ -n "$FILE" ] || usage
     load; owns lane
     [ -s "$FILE" ] || die 64 "--file $FILE is empty or missing"
-    if [ "$SHADOW" = true ]; then would "deliver: $FILE, kept in the run's workspace"; return 0; fi
     "$HERE/demo-deliver.sh" --file "$FILE" --pr "$PR"
 }
 

@@ -31,6 +31,10 @@ type Runtime struct {
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
+	// Settings is the settings file Claude sessions start with, and
+	// SettingsErr fails the read of it.
+	Settings    string
+	SettingsErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
 	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
 	// with a root of its own. OnWake answers a session's wake and OnNudge its
@@ -194,6 +198,14 @@ func (r *Runtime) CityRoot() (string, error) {
 		return "", r.RootErr
 	}
 	return r.Root, nil
+}
+
+// ClaudeSettings answers the settings file the test set.
+func (r *Runtime) ClaudeSettings() (string, error) {
+	if r.SettingsErr != nil {
+		return "", r.SettingsErr
+	}
+	return r.Settings, nil
 }
 
 // Slings returns every sling the domain made, in order.

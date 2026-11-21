@@ -21,8 +21,6 @@
 # dispatch path: the doctor checks check-blocked-work-armed, which flags blocked
 # work that has none, and check-step-terminal, which counts a step as offerable
 # only when it has one.
-# refinery-lib.sh asks both questions of a rework child the refinery's requeue
-# filed: one with no dispatch path and no hold is one the patrol sends on.
 # The readers that leave a held bead alone source it too:
 # check-blocked-work-armed, which owes one no arm; check-po-queue-only, which
 # reads a bead routed or assigned to the po as reaching it only when no hold

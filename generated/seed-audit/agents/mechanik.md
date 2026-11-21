@@ -128,10 +128,9 @@ URL with the title and body filled in for gascity's PR template.
 
 ## Standards for what you produce
 
-Before you write anything that outlives the turn, such as a bead or its notes,
-a doc or spec, or a `city.toml` edit, read these standards if they are not in
-your context:
-`cat "[[PACK-ROOT]]"/template-fragments/work-quality-{base,system}.template.md`
+Before you write what outlives the turn, such as a bead, a doc, your memory or
+a `city.toml` edit, read these if your context lacks them:
+`cat "[[PACK-ROOT]]"/template-fragments/{work-quality-{base,system},memory-notes}.template.md`
 
 
 ## Learned conventions

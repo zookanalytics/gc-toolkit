@@ -386,6 +386,8 @@ main. Never `--merge direct`.
 
 {{ template "where-to-search" . }}
 
+{{ template "memory-notes" . }}
+
 ## Communication
 
 ```bash

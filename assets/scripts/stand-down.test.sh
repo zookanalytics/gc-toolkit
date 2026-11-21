@@ -40,7 +40,6 @@
 #     the route go before the edge, passes after every write and mid-pass sling
 #     nothing, a stop at the edge converges on a re-run, and the gate stays open and
 #     asking about the other bead;
-#   * a graduated convoy the refinery parked, which its gate's message sends here;
 #   * an epic that carries a hypothesis, whatever its ruling reads: the close's
 #     disposition is its terminal reason, so the check ahead of the first write lets
 #     it through, what the check refuses is what the close holds on, and every other
@@ -695,11 +694,6 @@ run tk-w --key polecat-x --ruling "parked for a person"
 eq "$RC" 0 "a subject parked on the person route stands down"
 eq "$(field tk-w status)" closed "…and closes"
 eq "$(meta tk-w gc.routed_to)" "" "…with its person route cleared"
-fresh; bset tk-w issue_type=convoy 'metadata:={"merge_result":"blocked","gc.routed_to":"human"}'
-run tk-w --key polecat-x --ruling "drop the graduation"
-eq "$RC" 0 "a graduated convoy the refinery parked stands down, as its gate's message says"
-eq "$(field tk-w status)" closed "…and closes"
-eq "$(field tk-g close_reason)" "ruled: drop the graduation" "…with the gate answered"
 fresh; bset tk-w metadata.branch=polecat/tk-w
 run tk-w --key polecat-x --ruling "drop the branch"
 has "$(cat "$STUB_GC_LOG")" "branch-end --rig tkrig --branch polecat/tk-w" "the bead's branch ends with the close"

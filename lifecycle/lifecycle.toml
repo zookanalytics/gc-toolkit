@@ -345,11 +345,11 @@ keys = [
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
-# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh,
-#   rework-child.sh and refinery-requeue.sh stamp it on the rework child each
-#   files, equal to the PR the anchor owns; the refinery's requeue keeps it on a
-#   bead it sends back, and the pending record writes it (gctk pr record's first
-#   write, and the landing order's requeue of a changed head). Read by
+# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
+#   and rework-child.sh stamp it on the rework child each files, equal to the PR
+#   the anchor owns; the refinery's requeue keeps it on a bead it sends back,
+#   and the pending record writes it (gctk pr record's first write, and the
+#   landing order's requeue of a changed head). Read by
 #   refinery-land.sh, which lands a bead that names one through its PR, by
 #   refinery-publish.sh as the PR to take, and by pr-facts.sh and
 #   rework-child.sh to verify the child each files. Absent means no PR to reuse.
@@ -364,9 +364,9 @@ keys = [
 #   resolves to `mr`, so the default branch takes work only through a PR
 #   (docs/warrants.md), and existing_pr forces `mr` too. Any other value,
 #   `local` among them, parks the bead behind a human gate. `mr` is stamped by
-#   pr-facts.sh, rework-child.sh, refinery-requeue.sh and
-#   mol-feedback-distiller.toml, and by direct-merge-push.sh, promoting a bead
-#   whose direct push was refused for branch protection into the PR path. Read
+#   pr-facts.sh, rework-child.sh and mol-feedback-distiller.toml, and by
+#   direct-merge-push.sh, promoting a bead whose direct push was refused for
+#   branch protection into the PR path. Read
 #   by refinery-land.sh, and read back by pr-facts.sh and rework-child.sh on
 #   the rework child each stamps. Never cleared. Enum
 #   `mr | pr | direct | local`.

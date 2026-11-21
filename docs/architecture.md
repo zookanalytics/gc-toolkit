@@ -34,8 +34,8 @@ one rule for whether a bead is blocked by
 
 ## The boundary
 
-Four parties, one data plane. Lifecycle transitions, dispositions, routes,
-waits, review verdicts and review results are all written on beads.
+Four parties, one data plane. Work's lifecycle transitions, dispositions,
+routes and waits, review verdicts and review results are all written on beads.
 
 ```mermaid
 flowchart LR
@@ -132,6 +132,14 @@ are recorded and where the records live.
   run that replaces that record needs a judgment of its own.
   `--publish-bead` copies a record onto a bead's `rig_check.<check>` key for
   whoever reads that bead. The record, not the copy, answers `gctk rig`.
+
+The memory intake's lists differ too, because a list is the one record of what
+an agent memory note waits on. A list holds the notes of one memory directory
+that the feedback distiller's judge kept, with the bead each waits on or the
+day it comes due again, and beside it the intake keeps the text of each note it
+removed. `gctk memory` is their one writer, and it reads the beads a note waits
+on without writing them
+([feedback-learning.md](feedback-learning.md#the-memory-intake)).
 
 ## How work moves
 
@@ -431,7 +439,8 @@ corrective feedback into standing behavior, so attention is never spent twice:
    holds what should change the next agent's behavior, and an observation
    holds what is to be evaluated. The distiller judges notes beside
    observations onto the same patterns, and a note leaves memory once its
-   pattern closes or it holds nothing worth keeping.
+   pattern's fix has landed or the distiller finds nothing worth keeping in
+   it.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.
@@ -532,10 +541,6 @@ why a reader must know it, and the work that retires it.
 - **The board lists no mailbox yet.** It neither reads Gas City's `human`
   mailbox nor archives a message in it, so no message there reaches the
   operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
-- **The distiller reads no memory notes yet.** A note stays in its memory
-  directory until an agent or a person removes it, and what it shows reaches
-  the learning loop only when an agent also reports it. Epic tk-zlot608 builds
-  the memory intake.
 - **The old review path's code still runs.** The merge cadence still runs the
   old review path beside the review run
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no

@@ -42,7 +42,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 	head := it.Triage.Head
 	var b strings.Builder
 	fmt.Fprintln(&b, Mark(run.Root, head))
-	fmt.Fprintf(&b, "**Review at `%s`**: %s\n\n", short(head), summary(it, run.Shadow))
+	fmt.Fprintf(&b, "**Review at `%s`**: %s\n\n", short(head), summary(it))
 	for _, ln := range it.Lanes {
 		if ln.NeedsYou != "" {
 			fmt.Fprintf(&b, "**Needs you (%s):** %s\n\n", ln.Check, oneLine(ln.NeedsYou))
@@ -77,7 +77,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 			}
 			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, oneLine(f.Message))
 			r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
-			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, rp, run.Shadow))
+			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, rp))
 		}
 		fmt.Fprintln(&b, "\n</details>")
 		fmt.Fprintln(&b)
@@ -92,7 +92,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 					what = fmt.Sprintf("%s (%s)", oneLine(a.Reason), r.Ask)
 				}
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", what, answer(r, true, rp, run.Shadow))
+			fmt.Fprintf(&b, "- %s: %s\n", what, answer(r, true, rp))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -102,7 +102,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 
 // summary is the comment's first sentence: each lane's verdict, and what the
 // round did.
-func summary(it *Iteration, shadow bool) string {
+func summary(it *Iteration) string {
 	var lanes []string
 	for _, ln := range it.Lanes {
 		v := "approved"
@@ -122,8 +122,6 @@ func summary(it *Iteration, shadow bool) string {
 	var did []string
 	if c := count[RulingMustFix]; c > 0 {
 		switch {
-		case shadow:
-			did = append(did, fmt.Sprintf("would fix %d (a shadow run changes nothing)", c))
 		case it.Repair.Pushed != "":
 			did = append(did, fmt.Sprintf("fixed %d in `%s`", c, short(it.Repair.Pushed)))
 		default:
@@ -201,7 +199,7 @@ func tally(ln Lane, rp *Repair) string {
 }
 
 // answer is one point's answer: its ruling, and what the head carries for it.
-func answer(r Ruling, ok bool, rp *Repair, shadow bool) string {
+func answer(r Ruling, ok bool, rp *Repair) string {
 	if !ok {
 		return "Not ruled."
 	}
@@ -209,8 +207,6 @@ func answer(r Ruling, ok bool, rp *Repair, shadow bool) string {
 	switch r.Ruling {
 	case RulingMustFix:
 		switch {
-		case shadow:
-			return "Must fix, and a shadow run fixes nothing: " + reason
 		case rp.Pushed != "":
 			return fmt.Sprintf("Fixed by `%s`, which `%s` carries: %s", short(r.Commit), short(rp.Pushed), reason)
 		default:

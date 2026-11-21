@@ -42,7 +42,7 @@ func askShapes() []askShape {
 			metadata: rework},
 		{name: "a fix unit whose workflow's steps are claimed", status: "in_progress", issueType: "task", branch: branch,
 			metadata: rework},
-		{name: "a rework child the refinery filed and never sent on", status: "open", issueType: "task", branch: branch,
+		{name: "a rework child no one has routed or assigned", status: "open", issueType: "task", branch: branch,
 			metadata: map[string]string{"task_kind": "rework", "anchor_bead": prBead}},
 		{name: "a task whose workflow the sling started, with no role", status: "open", issueType: "task", branch: branch,
 			metadata: map[string]string{"gc.execution_routed_to": "rig/gc-toolkit.polecat"}},

@@ -369,14 +369,12 @@ handed-off bead back, `refinery-requeue.sh` records the `rejection_reason` on it
 and dispatches the rebuild through `gc sling` as a fresh `mol-polecat-work`
 pour. A bead that records an open PR (`pull_request_head_changed`) keeps what it
 carries, and the reason goes to the PR's review run as an ask, which the landing
-order pours a run for. A convoy keeps what it carries too, and the reason and the
-pour go to a rework child on its branch instead. The cascade
-does not reach a poured workflow, and the rejected bead is in flight, so
-load-context holds it only by its own waits and the rebuild runs. When that
-sling fails, the script arms a retry. Deferred dispatch slings it once bd reports
-the bead ready, which a park on its epic delays until the park lifts, because
-bd's readiness holds a bead on its ancestors' waits whether or not its work has
-started.
+order pours a run for. The cascade does not reach a poured workflow, and the
+rejected bead is in flight, so load-context holds it only by its own waits and
+the rebuild runs. When that sling fails, the script arms a retry. Deferred
+dispatch slings it once bd reports the bead ready, which a park on its epic
+delays until the park lifts, because bd's readiness holds a bead on its
+ancestors' waits whether or not its work has started.
 
 ### What a park holds
 
@@ -555,8 +553,6 @@ are the scripts that make it claimable:
   record it files each as an ask instead.
 - On the old review path, `rework-child.sh` slings the rework that a review
   verdict or an operator ruling asks for.
-- `refinery-requeue.sh` slings the rework the refinery sends back on the branch
-  of a convoy, where a bead that keeps its open PR gets an ask instead.
 
 Each child carries `anchor_bead` and follows its anchor. A review run and its
 asks are no children. The landing order pours the run onto the anchor itself,
@@ -601,17 +597,11 @@ decision, so either ranks as not approved.
 
 **Where it is written.** Each creator runs `queue-priority.sh settle` on a child
 before it makes the child claimable, in the order [Settle](#settle) gives.
-`rework-child.sh`, `gate-ensure.sh` and `refinery-requeue.sh` then sling the
-child, and the pour copies its priority. `pr-facts.sh` then routes it, in a
-write that carries no priority. A child whose priority does
-not settle is neither slung nor routed, and the creator's retry settles it: the
-next pass of the cadence arm, or the caller of `rework-child.sh` running it
-again. `refinery-requeue.sh` has no retry that runs on its own. Its retry would
-be the refinery's next patrol, but the child holds the bead that patrol takes,
-and Gas City counts open work assigned to the refinery as demand that wakes it
-only once the work is ready. So it arms the child instead (`gctk bead arm`):
-the deferred-dispatch order pours the child with no settle, and
-[the pass](#the-pass) settles it with its workflow once that is queued.
+`rework-child.sh` and `gate-ensure.sh` then sling the child, and the pour copies
+its priority. `pr-facts.sh` then routes it, in a write that carries no priority.
+A child whose priority does not settle is neither slung nor routed, and the
+creator's retry settles it: the next pass of the cadence arm, or the caller of
+`rework-child.sh` running it again.
 
 **Re-ranked when its rank moves.** The rank moves when the posture or the PR
 head `pr-facts.sh` records moves the anchor into or out of an approval at that

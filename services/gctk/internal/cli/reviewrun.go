@@ -30,9 +30,7 @@ With --stands it also refuses a run that must stop with no result, which
 triage's read asks before it judges a head: the run's vars do not name the
 record the bead that owns the PR carries (its validated head, its target and
 its branch), or GitHub's PR is not open from that branch into that target at
-the head the step's iteration judges. A shadow run needs only the PR, its
-branch and its head, since its bead may be on no record. --json prints one
-object.
+the head the step's iteration judges. --json prints one object.
 
 exit: 0 printed
       1 usage
@@ -80,7 +78,6 @@ type stepFacts struct {
 	Target    string `json:"target"`
 	FirstHead string `json:"first_head"`
 	Head      string `json:"head"`
-	Shadow    bool   `json:"shadow"`
 	Change    *struct {
 		From string `json:"from,omitempty"`
 		Head string `json:"head"`
@@ -111,7 +108,7 @@ func reviewStepIn(l *ledger.Ledger, bead string, stands, asJSON bool, repos []st
 	run := st.Run
 	f := stepFacts{Step: st.ID, Ref: st.Ref, Output: st.Output, Iteration: st.Iteration, Run: run.Root,
 		PRBead: run.PRBead, PR: st.PR(), Branch: st.Branch, Target: run.Target, FirstHead: run.Head,
-		Head: run.Head, Shadow: run.Shadow}
+		Head: run.Head}
 	if stands {
 		why, err := st.MustStop(reviewGitHubFor)
 		if err != nil {
@@ -143,9 +140,6 @@ func reviewStepIn(l *ledger.Ledger, bead string, stands, asJSON bool, repos []st
 	}
 	fmt.Fprintf(stdout, "step %s (%s)\n", f.Step, f.Ref)
 	fmt.Fprintf(stdout, "run %s on %s, %s from %s into %s, first head %s\n", f.Run, f.PRBead, f.PR, f.Branch, f.Target, f.FirstHead)
-	if f.Shadow {
-		fmt.Fprintln(stdout, "shadow: the run writes nothing outside itself")
-	}
 	if st.Iteration > 0 {
 		fmt.Fprintf(stdout, "iteration %d judges %s\n", f.Iteration, f.Head)
 		ch := review.Change{From: f.Change.From, Head: f.Change.Head, Why: f.Change.Why}
@@ -164,27 +158,22 @@ It fills in the iteration the step runs in and an empty list of picks,
 findings or rulings, and refuses an output the run would read as not written
 or as a slip: another step's shape, another iteration, another head, a pick or
 a finding twice, a triage that rules its head material while no withdrawal for
-that head is filed on the bead that owns the PR (a shadow run files none, so
-its ruling stands alone), a lane triage did not pick, a finding that breaks
-the finding contract (a grade of P0, P1 or P2, which every correctness finding
-carries, with a category and a failure_scenario; on a P0 or P1 a verification
-opening CONFIRMED or PLAUSIBLE; never a REFUTED candidate), an approve that
-carries a blocking finding (a P0, a P1 or an ungraded one) and a
-request-changes that carries none, a demo verdict with no visual decision or
-one its rules refuse (none only with an approve; a fallback, screenshot or
-video, costlier than the modality delivered), a visual on another check's
-verdict, a ruling of a finding no lane raised or of an ask the round cannot
-take, a finding or an ask left unruled, a must-fix with no fixing commit, a
-commit on a ruling that changes no code, a question with no gate, and a fix
-for an ask an earlier round of the run declined. A correctness lane's approve
-on a change that edits its own review guidance (review-checks.toml,
-docs/review-*.md) is refused until needs_you names the edit for the person who
-approves the merge, and when the paths cannot be listed, needs_you says the
-edit is unchecked.
-
-A shadow run's round fixes, pushes and files nothing, and its output carries
-the comment it would have posted, which this renders, and each write it made
-none of, the lines --writes names.
+that head is filed on the bead that owns the PR, a lane triage did not pick, a
+finding that breaks the finding contract (a grade of P0, P1 or P2, which every
+correctness finding carries, with a category and a failure_scenario; on a P0
+or P1 a verification opening CONFIRMED or PLAUSIBLE; never a REFUTED
+candidate), an approve that carries a blocking finding (a P0, a P1 or an
+ungraded one) and a request-changes that carries none, a demo verdict with no
+visual decision or one its rules refuse (none only with an approve; a
+fallback, screenshot or video, costlier than the modality delivered), a visual
+on another check's verdict, a ruling of a finding no lane raised or of an ask
+the round cannot take, a finding or an ask left unruled, a must-fix with no
+fixing commit, a commit on a ruling that changes no code, a question with no
+gate, and a fix for an ask an earlier round of the run declined. A correctness
+lane's approve on a change that edits its own review guidance
+(review-checks.toml, docs/review-*.md) is refused until needs_you names the
+edit for the person who approves the merge, and when the paths cannot be
+listed, needs_you says the edit is unchecked.
 
 exit: 0 printed
       1 usage
@@ -193,9 +182,9 @@ exit: 0 printed
         does not stand, and the command says why`
 
 func newReviewOutputCmd(stdout, stderr io.Writer) *cobra.Command {
-	var db, file, writes string
+	var db, file string
 	cmd := &cobra.Command{
-		Use:         "output <bead> --file <path> [--writes <path>]",
+		Use:         "output <bead> --file <path>",
 		Short:       "check a review run's step output and print it as the store keeps it",
 		Long:        reviewOutputLong,
 		Args:        cobra.ExactArgs(1),
@@ -205,41 +194,27 @@ func newReviewOutputCmd(stdout, stderr io.Writer) *cobra.Command {
 			if bead == "" || file == "" {
 				return errors.New("name the step's bead and --file, the output it wrote")
 			}
-			return exit(reviewOutput(bead, db, file, writes, stdout, stderr))
+			return exit(reviewOutput(bead, db, file, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the bead to")
 	cmd.Flags().StringVar(&file, "file", "", "the JSON object the step wrote")
-	cmd.Flags().StringVar(&writes, "writes", "", "for a shadow run's round, each write it made none of, one a line")
 	return cmd
 }
 
-func reviewOutput(bead, db, file, writes string, stdout, stderr io.Writer) int {
+func reviewOutput(bead, db, file string, stdout, stderr io.Writer) int {
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review output: %v\n", err)
 		return 1
-	}
-	var lines []string
-	if writes != "" {
-		text, err := os.ReadFile(writes)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(stderr, "gctk review output: %v\n", err)
-			return 1
-		}
-		for _, w := range strings.Split(string(text), "\n") {
-			if w = strings.TrimSpace(w); w != "" {
-				lines = append(lines, w)
-			}
-		}
 	}
 	_, l, err := storeOf(db, bead)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review output: the store did not answer: %v\n", err)
 		return 2
 	}
-	return reviewOutputIn(l, review.OutputRequest{Step: bead, Raw: raw, Repos: review.Repos(".", os.Getenv("GC_RIG_ROOT")),
-		Writes: lines}, stdout, stderr)
+	return reviewOutputIn(l, review.OutputRequest{Step: bead, Raw: raw, Repos: review.Repos(".", os.Getenv("GC_RIG_ROOT"))},
+		stdout, stderr)
 }
 
 // reviewOutputIn checks the output over l. The withdrawal a material head

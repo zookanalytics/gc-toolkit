@@ -54,9 +54,6 @@ var (
 		"A review run's head var: the head the refinery validated, the run's first head.")
 	targetVar = ledger.ReadOnly("gc.var.target", ledger.String,
 		"A review run's target var: the branch the PR merges into, the target its result is for.")
-	shadowVar = ledger.ReadOnly("gc.var.shadow", ledger.String,
-		"A review run's shadow var. Reading true, the run writes nothing outside itself, so the loop's check "+
-			"records no result, closes no ask and files no gate.")
 	maxAttemptsVar = ledger.ReadOnly("gc.var.max_attempts", ledger.String,
 		"A review run's max_attempts var: the loop's bound, which Gas City compiles the loop's check from, so the "+
 			"iteration that reaches it is the loop's last and its check records the run's result when it does not pass.")

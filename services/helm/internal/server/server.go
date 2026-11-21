@@ -22,6 +22,10 @@ type Server struct {
 	actuator Actuator
 	gate     *actuationGate
 
+	// gathers is every gather in flight, each cache's, which StopGathers ends
+	// (gathers.go).
+	gathers *gathers
+
 	// rigBoard serves the rig board's routes, GET /helm/rigs and
 	// GET /helm/rigs/{rig}; nil leaves them answering 503 (see rigboard.go).
 	rigBoard *rigBoard
@@ -63,7 +67,7 @@ func WithActuator(a Actuator) Option {
 
 // New builds a Server.
 func New(opts ...Option) *Server {
-	s := &Server{now: time.Now, gate: newActuationGate()}
+	s := &Server{now: time.Now, gate: newActuationGate(), gathers: newGathers()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -116,9 +120,3 @@ func (s *Server) invalidate() {
 		s.rigBoard.docs.invalidate()
 	}
 }
-
-// gatherTimeout bounds one gather of a cached answer. The gather runs on a
-// context detached from the caller's, so one client disconnecting mid-read does
-// not cancel the shared gather the cache and the other waiters depend on, and
-// this bound keeps such a gather from running unbounded.
-const gatherTimeout = 30 * time.Second

@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and
-  `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
+  `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -233,9 +233,9 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
-  `internal/sling/sling.go`), and at `gastownhall/beads` main 3a274fbf8f76 and
+  `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -581,17 +581,18 @@ no warrant.
     `mol-adopt-pr` and `mol-pr-merge-only` formulas. Gas Town's
     refinery patrol and its `pr-merge-reconcile` read a PR through the pulls
     API and none of its reviews (`gastown/formulas/mol-refinery-patrol.toml`
-    and `gastown/commands/pr-merge-reconcile/run.sh`), at packs main and at the
-    pin Gas City bundles. The approvals the `gascity` and `gastown` packs
+    and `gastown/commands/pr-merge-reconcile/run.sh`) at packs main, and the
+    patrol does the same at the pin Gas City bundles, which carries no
+    `pr-merge-reconcile`. The approvals the `gascity` and `gastown` packs
     record are review workflows' verdicts on beads
     (`gascity/assets/scripts/checks/implementation-review-approved.sh` and
     `gastown/assets/scripts/checks/adopt-pr-review-approved.sh`), not GitHub
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-18, at `gastownhall/gascity` main 5b7728de34, with
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 0f07496d2fa4.
+  main 132914b3e42e.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
   a head, or keeps a write to GitHub that a later pass carries out. The
   withdrawal then moves onto that operation.
@@ -819,3 +820,60 @@ no warrant.
 - **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
+
+## Memory note waits
+
+- **Covers.** `services/gctk/memory`, and the state it keeps for each memory
+  directory under the city's `.gc/runtime/packs/gc-toolkit/memory-intake`: the
+  list of the notes the distiller kept, each with the bead it waits on or the
+  date it is next due, the text of each note it removed, and the names of the
+  removed notes whose pointers did not all come out. It also covers the folder
+  in each memory directory that holds each file the intake displaced.
+- **Stands in for.** Agent memory kept as beads. A memory that is a bead has
+  its versions, its writer and its links to work in the ledger, and bd keeps
+  the text of one that is deleted. Claude Code keeps memory as files, so the
+  pack keeps those records itself.
+- **Evidence.**
+  - In `gastownhall/gascity`, nothing reads or empties an agent's memory. No
+    file outside the tests names `MEMORY.md`, auto memory or
+    `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and the audit of Gas Town's commits
+    defers agent memory (`engdocs/archive/analysis/gastown-upstream-audit.md`,
+    "22g. Agent memory").
+  - In `gastownhall/beads`, a wait holds only an issue. `bd defer --until`
+    snoozes an issue (`cmd/bd/defer.go`), and a dependency joins an issue to a
+    bd id or an `external:<project>:<capability>` reference (`cmd/bd/dep.go`).
+    A note is a file, which neither can hold. bd's own memory plane,
+    `bd remember` (`rememberCmd` in `cmd/bd/memory.go`), keeps a key and a
+    value that `bd prime` injects into every session, with no wait.
+  - In `gastownhall/beads`, the Memory Beads proposal (issue #5877, open, at
+    its Revision 4 of 2026-09-22) would keep agent memory as beads. It is a
+    proposal with no implementation in bd: no memory type is in
+    `internal/types/types.go`, and the graph CLI specification read beside it
+    (issue #6703) is a draft whose memory commands run only in a preview built
+    from `versioned-beads/beads`. It would replace what the pack keeps. A
+    memory would be a bead of its own kind, outside readiness and closure
+    (R1), and deleting one would keep its history (R5). A compact listing
+    would find a memory and a recall would read the whole of one, with who
+    changed it and when (R6, R7, R12), and `bd prime` would load no memory
+    body (R8). A reference could name one exact version of a memory (R18), and
+    a link could join a memory to work and carry metadata (R17). It would not
+    replace the judging: a link never blocks readiness (R17), and bd leaves
+    judging whether a memory is true, current or useful to tools outside it
+    (R30), so the distiller would still judge each memory and decide when the
+    work it waits on is done.
+  - Claude Code keeps memory files out of its retention sweep: "`MEMORY.md`
+    and topic files stay until you or Claude edits or deletes them"
+    ([memory](https://code.claude.com/docs/en/memory), "Storage location"). It
+    turns memory off only whole, for a session, a project or every project of a
+    user ("Enable or disable auto memory").
+  - The search is
+    [specs/tk-zlot608.8/gas-city-search.md](../specs/tk-zlot608.8/gas-city-search.md).
+- **Verified.** 2026-11-19, at `gastownhall/gascity` main f5302d1dcfd5 and
+  `gastownhall/beads` main 3a274fbf8f76, with the Memory Beads proposal at its
+  Revision 4. Claude Code's memory page as read on 2026-11-19.
+- **Retires when.** bd ships memory as a kind of bead with links to work (the
+  Memory Beads proposal, `gastownhall/beads` issue #5877). The move is then
+  the city's Claude agents keeping their memory there in place of Claude
+  Code's directory, with the judge's decisions on those beads and their links,
+  and the list, the kept text and the read of Claude Code's directories
+  retire.
