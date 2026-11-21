@@ -740,16 +740,17 @@ has no such clock: its work closing does not end it, idleness only sleeps it,
 and attaching wakes it. The idle sleep its template sets never reaches a sitting
 that holds its conversation or has a client attached.
 
-**The claim.** The sitting enters through `converse-entry.sh`, which its
-prompt runs first each time the session starts or wakes, and which claims with
-a plain `gc hook --claim`. The default work query finds the task assigned to the
-session, open through its second tier and in progress through its first, and
-its routed tier is closed to a session whose alias is not its template's name,
-so the sitting is offered nothing but its task. The claim sets `in_progress`,
-a lease and the session stamps under the session's alias. The converse
-templates declare a pool at zero (`min_active_sessions = 0`) with no
-`scale_check` and no work routed to them, so no demand pass counts anything for
-one, and `assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
+**The claim.** The sitting enters through `converse-entry.sh`, which its prompt
+runs first each time the session starts or wakes, and again after each
+compaction of its context, and which claims with a plain `gc hook --claim`. The
+default work query finds the task assigned to the session, open through its
+second tier and in progress through its first, and its routed tier is closed to
+a session whose alias is not its template's name, so the sitting is offered
+nothing but its task. The claim sets `in_progress`, a lease and the session
+stamps under the session's alias. The converse templates declare a pool at zero
+(`min_active_sessions = 0`) with no `scale_check` and no work routed to them, so
+no demand pass counts anything for one, and
+`assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
 
 **Recovery resumes the sitting through its alias.** A sitting whose session
 sleeps, or whose runtime stopped, resumes when the operator attaches:
@@ -761,6 +762,31 @@ not reserve, and the new session takes the in-progress task as its own. The
 record carries over in the task's and the subject's notes. Nothing in Gas City
 releases a sitting's claim on its own, and the pack's witness recovery skips a
 conversation too, so the alias is the way back in.
+
+**A full context is compacted, and the sitting goes on.** Claude Code and Codex
+compact a thread on their own as it nears its limit. Claude Code also compacts
+a long conversation left idle for about an hour, so the next message sends a
+summary rather than the whole thread (code.claude.com/docs/en/settings-reference,
+`idleCompaction`). The session, its claim and the operator's tab stay as they
+were, and the saved transcript keeps every earlier line. The prompt reaches a
+sitting as a message, so after a compaction only the summary carries it, and
+the record holds only what the sitting wrote to it. A Claude sitting's
+overlay, `overlays/converse-compact`, adds a PreCompact hook, whose output
+Claude Code takes as instructions for the summary
+(code.claude.com/docs/en/hooks, PreCompact). It asks the summary to quote word
+for word what the operator said that the record does not hold yet, to state the
+open decision and the recommendation and quote the last hand-back, to copy the
+entry's `CONV`, `CONVERSATION`, `SUBJECT` and `GATES` lines, and to end by
+telling the sitting to run the entry again before anything else, as the prompt
+also tells it. The hook always exits 0, because exit 2 would block the
+compaction. The city's own PreCompact hook still runs `gc handoff --auto`,
+which mails the session a note and requests no restart. No sitting gets Gas
+City's context advisory, which tells a session past 60% of its window to plan a
+handoff and reset itself and past 80% to run `gc session reset` on itself.
+Every `converse-<model>` template sets `context_advisory = { enabled = false }`,
+which Gas City merges over the city's setting and its built-in default. No
+other agent sets it, so each keeps the advisory. A Codex sitting has the
+advisory off and no summary steer.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a
@@ -985,7 +1011,8 @@ account is the operator's, so each line reads true whichever it is. A status on
 the old record carries no conditions, so needs-review there asks for the
 Approve.
 
-**A sitting cut short** writes its record, signs off with `--ruled no`, which
+**A sitting cut short**, which the operator asks to end before they rule,
+writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write
 guarded on the sitting that holds it and on the status it read, and drains.
@@ -1537,11 +1564,9 @@ alias, which drops the claim. Gas City does the rest with what it already has
   the return from the record.
 - **Low context during the return.** The comparison stays owed when the
   sitting's context runs low, so the sitting neither signs off nor holds for
-  that reason. Claude Code and Codex compact a thread on their own, and the
-  city's PreCompact hook runs `gc handoff --auto`, which mails the session a
-  note and requests no restart, so the sitting keeps its conversation through
-  a compaction and goes on with the return. When a fresh session must take the
-  return over, the sitting appends a `## Return hand-over` block to the
+  that reason. The sitting keeps its conversation through a compaction (*The
+  sitting*, above) and goes on with the return. When a fresh session must take
+  the return over, the sitting appends a `## Return hand-over` block to the
   conversation's notes: what was agreed and where it is recorded, the returned
   work and the revision to examine, the comparison so far with its evidence,
   what remains, and the conversation and its waits. It posts a hand-back that
@@ -1636,8 +1661,8 @@ session, the sitting's own and an operator's alike
 so nothing in the pack writes the title at the ending, and a tab reads done
 once its sitting has drained, whichever way the sitting ended: its
 conversation closed by the sign-off, a moot or benign close or a dismiss, or
-handed back to the queue by a sitting low on context. tmux reads the flag when
-it next draws the title. It does so at once when the pane prints, as the
+handed back to the operator's queue by a sitting cut short. tmux reads the flag
+when it next draws the title. It does so at once when the pane prints, as the
 agent's pane does after the sitting's own drain-ack, and otherwise at the
 client's next status refresh, every 15 seconds on the city's tmux server,
 which keeps tmux's default `status-interval`. So a dismiss from outside the

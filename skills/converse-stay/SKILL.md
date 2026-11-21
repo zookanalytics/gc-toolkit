@@ -240,9 +240,8 @@ open with its waits as they are.
   compaction. After a compaction, run the entry again, which prints `AGREED`
   and `WORK`, and carry the return on from where your summary and what you
   already posted show it stopped.
-- **Hand the return to a fresh session** when compaction cannot carry it, or
-  when Gas City's context notice asks you to reset this session. Never reset
-  during a return without this hand-over.
+- **Hand the return to a fresh session** when compaction cannot carry it.
+  Never reset during a return without this hand-over.
 
 To hand the return over, first append the hand-over to the conversation's
 notes. No line of it may start with `holding:` or `staying:`, because the

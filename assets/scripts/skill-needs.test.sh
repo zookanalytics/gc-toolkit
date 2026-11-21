@@ -593,6 +593,27 @@ have "the prompt enters through converse-entry.sh, which tells each entry apart"
 # that a blocker closed, so the prompt runs the entry on that notice too.
 have "…and runs it on Gas City's notice that a blocker closed, which a sitting still up gets in place of a wake" \
     'and on Gas City'"'"'s notice that a blocker closed and your conversation may be unblocked, run the entry before anything else' "$TMP/prompt-stay"
+# A full context ends no sitting. The provider compacts the thread, and the
+# sitting runs the entry again before anything else and goes on with its
+# conversation, so the only early ending left is one the operator asks for.
+have "…and runs it again after each compaction of its context" \
+    'Each time this session starts or wakes, after each compaction of its context, and on Gas City' "$TMP/prompt-stay"
+have "…and says a full context ends nothing, because the provider compacts it and the sitting carries on" \
+    'A full context ends nothing either: your provider compacts the thread into a summary, and the sitting carries on with its conversation. After a compaction, run the entry again before anything else' "$TMP/prompt-stay"
+have "…and hands the conversation back to the operator's queue only when the operator asks to end the sitting before they rule" \
+    'When the operator asks to end the sitting before they rule, hand the conversation back to their queue (`converse-settle`, Ending early).' "$TMP/prompt-stay"
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-early"
+have "the settle skill ends a sitting early when the operator asks to end it before they rule" \
+    'When the operator asks to end the sitting before they rule, such as asking to put the conversation back in their queue or for a handoff, end the sitting early:' "$TMP/settle-early"
+have "…and never because its context filled, since a full context is compacted and the sitting goes on" \
+    'or because its context filled: the provider compacts a full context, and the sitting runs its entry again and goes on' "$TMP/settle-early"
+tr -s '[:space:]' ' ' <"$REPO/skills/converse-edit/SKILL.md" >"$TMP/edit-early"
+for f in "$TMP/prompt-stay" "$TMP/settle-early" "$TMP/edit-early"; do
+    lacks "$(basename "$f"): no sitting ends because its context runs low" 'context runs low' "$f" \
+        "a sitting whose context fills is compacted and goes on"
+    lacks "$(basename "$f"): …nor for low context" 'for low context' "$f" \
+        "a sitting whose context fills is compacted and goes on"
+done
 # Gas City refuses a session's own drain-ack while the session holds a claim it
 # started and has not finished, so a sitting that holds its conversation when
 # Gas City stops the session goes on with it, and acknowledges the drain once
@@ -629,6 +650,10 @@ lacks "…nor lets a sitting sign off without it" 'say so in a hand-back and sig
     "the comparison stays owed when context runs low, and another session finishes it"
 have "…which a fresh session takes over only from a hand-over recorded before the reset" \
     'Never reset during a return without this hand-over.' "$TMP/stay-squeezed"
+# Gas City's context advisory, which tells a session to reset itself, is off
+# for every sitting, so no return is handed over on its notice.
+lacks "…and no return is handed over on Gas City's context notice, which no sitting gets" \
+    "context notice" "$TMP/stay-squeezed" "every converse template turns the advisory off"
 have "…and the return starts from a hand-over an earlier session left" \
     'The conversation'"'"'s notes carry a return hand-over** from an earlier session' "$TMP/stay-squeezed"
 for f in "$PROMPT" "$SETTLE" "$STAY" "$CONTINUE" "$HOLD"; do

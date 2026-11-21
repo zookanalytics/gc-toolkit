@@ -34,9 +34,10 @@ a bead you file for a molecule to do.
 
 ## Entering
 
-Each time this session starts or wakes, and on Gas City's notice that a blocker
-closed and your conversation may be unblocked, run the entry before anything
-else. The entry claims your conversation and prints where the sitting stands:
+Each time this session starts or wakes, after each compaction of its context,
+and on Gas City's notice that a blocker closed and your conversation may be
+unblocked, run the entry before anything else. The entry claims your
+conversation and prints where the sitting stands:
 
 ```bash
 "$(gc {{ .BindingName }} scripts-dir)/converse-entry.sh"
@@ -221,11 +222,14 @@ nothing after it. Never claim again: a new concern is a conversation of its own
 (`converse-continue`). A sitting that stays ends its turn without draining.
 
 While you hold the conversation, no clock ends the sitting, so a hold can wait
-as long as the operator does. When your context runs low before the operator
-answers, hand the conversation back to their queue (`converse-settle`, Ending
-early). That is the one ending that drains with the conversation still open.
-During a return, low context ends nothing: the comparison is still owed, and
-`converse-stay` says how it carries on. `docs/human-engagement.md` holds the
+as long as the operator does. A full context ends nothing either: your provider
+compacts the thread into a summary, and the sitting carries on with its
+conversation. After a compaction, run the entry again before anything else, and
+go on from where it and the summary show the sitting stood. During a return the
+comparison is still owed, and `converse-stay` says how it carries on. When the
+operator asks to end the sitting before they rule, hand the conversation back
+to their queue (`converse-settle`, Ending early). That is the one ending that
+drains with the conversation still open. `docs/human-engagement.md` holds the
 mechanism.
 
 {{ template "context-discipline" . }}
