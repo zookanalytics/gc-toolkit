@@ -81,39 +81,39 @@ func TestReadAskedJudgesTheNewestPassThatExitedZero(t *testing.T) {
 	}{
 		{
 			name:     "a recent pass that exited 0",
-			interval: "2m",
+			interval: "1m",
 			runs:     []string{run(time.Minute, "exec"), run(3*time.Minute, "exec")},
 			want:     Asked{State: AskedStateAsked, At: at(time.Minute)},
 		},
 		{
 			name:     "the newest pass failed after an older one exited 0",
-			interval: "2m",
-			runs:     []string{run(time.Minute, "exec-failed"), run(3*time.Minute, "exec")},
-			want:     Asked{State: AskedStateAsked, At: at(3 * time.Minute)},
+			interval: "1m",
+			runs:     []string{run(30*time.Second, "exec-failed"), run(90*time.Second, "exec")},
+			want:     Asked{State: AskedStateAsked, At: at(90 * time.Second)},
 		},
 		{
 			name:     "a pass that could not build its environment counts as failed",
-			interval: "2m",
-			runs:     []string{run(time.Minute, "exec-env-failed"), run(5*time.Minute, "exec")},
-			want:     Asked{State: AskedStateAsked, At: at(5 * time.Minute)},
+			interval: "1m",
+			runs:     []string{run(30*time.Second, "exec-env-failed"), run(150*time.Second, "exec")},
+			want:     Asked{State: AskedStateAsked, At: at(150 * time.Second)},
 		},
 		{
 			name:     "a pass still going leaves the line at the last one that exited 0",
-			interval: "2m",
+			interval: "1m",
 			runs:     []string{run(10*time.Second, ""), run(2*time.Minute, "exec")},
 			want:     Asked{State: AskedStateAsked, At: at(2 * time.Minute)},
 		},
 		{
 			name:     "a pass exactly three intervals old",
-			interval: "2m",
-			runs:     []string{run(6*time.Minute, "exec")},
-			want:     Asked{State: AskedStateAsked, At: at(6 * time.Minute)},
+			interval: "1m",
+			runs:     []string{run(3*time.Minute, "exec")},
+			want:     Asked{State: AskedStateAsked, At: at(3 * time.Minute)},
 		},
 		{
 			name:     "a pass older than three intervals",
-			interval: "2m",
-			runs:     []string{run(time.Minute, "exec-failed"), run(3*time.Minute, "exec-failed"), run(6*time.Minute+time.Second, "exec")},
-			want:     Asked{State: AskedStateStale, At: at(6*time.Minute + time.Second)},
+			interval: "1m",
+			runs:     []string{run(30*time.Second, "exec-failed"), run(90*time.Second, "exec-failed"), run(3*time.Minute+time.Second, "exec")},
+			want:     Asked{State: AskedStateStale, At: at(3*time.Minute + time.Second)},
 		},
 		{
 			name:     "the city's interval for the order sets the three",
@@ -123,13 +123,13 @@ func TestReadAskedJudgesTheNewestPassThatExitedZero(t *testing.T) {
 		},
 		{
 			name:     "every pass the history holds failed",
-			interval: "2m",
+			interval: "1m",
 			runs:     []string{run(time.Minute, "exec-failed"), run(29*time.Minute, "exec-failed")},
 			want:     Asked{State: AskedStateNotAsked, Since: at(29 * time.Minute)},
 		},
 		{
 			name:     "an empty history",
-			interval: "2m",
+			interval: "1m",
 			want:     Asked{State: AskedStateNotAsked},
 		},
 	}
@@ -163,7 +163,7 @@ func TestReadAskedSaysARigNoPassWatches(t *testing.T) {
 	missing := supervisorWith("2m")
 	missing.answers["/order/pr-poll:rig:gc-toolkit"] = supervisorAnswer{notFound: true}
 	disabled := supervisorWith("2m", run(time.Minute, "exec"))
-	disabled.answers["/order/pr-poll:rig:gc-toolkit"] = supervisorAnswer{body: `{"interval":"2m","enabled":false}`}
+	disabled.answers["/order/pr-poll:rig:gc-toolkit"] = supervisorAnswer{body: `{"interval":"1m","enabled":false}`}
 	for name, api := range map[string]*fakeSupervisor{"no such order": missing, "the order is disabled": disabled} {
 		if got := ReadAsked(context.Background(), api, "gc-toolkit", pollAt); got != (Asked{State: AskedStateUnwatched}) {
 			t.Errorf("%s: ReadAsked = %+v, want unwatched", name, got)

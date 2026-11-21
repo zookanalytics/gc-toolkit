@@ -533,8 +533,11 @@ per rig that the order is registered and firing within its interval.
 
 ## The PR watch
 
-`orders/pr-poll.toml` asks GitHub every 2 minutes whether each PR the rig's
-beads own moved, and saves GitHub's side of each PR that did on its bead. It is
+`orders/pr-poll.toml` asks GitHub every minute whether each PR the rig's beads
+own moved, and saves GitHub's side of each PR that did on its bead. Its signs
+show what people do on a PR, a push, a comment, a review, a label, a move into
+or out of draft, a close, a reopen or a merge, and every check's result, so the
+saved read takes such a change within a minute. It is
 a rig-scoped cooldown exec order with a 180-second timeout, which runs
 `gctk pr poll --db "$GC_RIG_ROOT/.beads"`. `orders/pr-compare.toml`, the net,
 reads each of those PRs in full every 10 minutes and saves each one that
@@ -545,14 +548,15 @@ it only to choose which records to decide, each on its own read of GitHub
 ([The landing order](#the-landing-order)).
 
 These two orders and the landing order run at their set intervals, `pr-poll`
-every 2 minutes, `pr-compare` every 10 and `pr-reconcile` every minute, only
-while the city's order budget lets each clock-driven order start at its own
-interval. Gas City's orders lane starts at most `[orders]
-max_dispatches_per_tick` of them a 30-second pass, 4 by default, and the
-city's clock-driven orders, these three among them, need more than 4 a pass,
-so the city's `city.toml` sets the budget to 16 and holds the old refinery
-pass, `refinery-reconcile`, at 5 minutes until the GitHub intake retires it.
-Under a smaller budget each order starts later than its interval.
+and `pr-reconcile` every minute and `pr-compare` every 10, only while the
+city's order budget lets each clock-driven order start at its own interval.
+Gas City's orders lane starts at most `[orders] max_dispatches_per_tick` of
+them a 30-second pass, 4 by default. The city's clock-driven orders, these
+three among them, need about 12 starts a pass, counted from the intervals
+`gc order list` gave on 2026-11-20 with these three at theirs, so the city's
+`city.toml` sets the budget to 16 and holds the old refinery pass,
+`refinery-reconcile`, at 5 minutes until the GitHub intake retires it. Under a
+smaller budget each order starts later than its interval.
 
 A PR is owned when a live bead names it as its own and is no other bead's
 child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the

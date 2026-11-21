@@ -16,7 +16,7 @@ func TestThePRWatchOrdersHoldAPass(t *testing.T) {
 		order, interval, verb string
 		window                time.Duration
 	}{
-		{"pr-poll", "2m", "poll", pollWindow},
+		{"pr-poll", "1m", "poll", pollWindow},
 		{"pr-compare", "10m", "compare", compareWindow},
 	} {
 		t.Run(tc.order, func(t *testing.T) {

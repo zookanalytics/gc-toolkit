@@ -44,7 +44,7 @@ func (r *rigReads) read(_ context.Context, rig rigboard.Rig) (rigboard.Document,
 }
 
 // rigAPI answers the reads of the line saying when GitHub was last asked
-// about gc-toolkit's pull requests: its pr-poll order every 2 minutes, and one
+// about gc-toolkit's pull requests: its pr-poll order every minute, and one
 // pass that exited 0 at passAt. A fail fails every read.
 type rigAPI struct {
 	passAt time.Time
@@ -59,7 +59,7 @@ func (a rigAPI) JSON(_ context.Context, out any, path string, _ url.Values) (boo
 	case "/orders/history":
 		return true, json.Unmarshal([]byte(`{"entries":[{"created_at":"`+a.passAt.Format(time.RFC3339)+`","labels":["exec"]}]}`), out)
 	case "/order/pr-poll:rig:gc-toolkit":
-		return true, json.Unmarshal([]byte(`{"interval":"2m","enabled":true}`), out)
+		return true, json.Unmarshal([]byte(`{"interval":"1m","enabled":true}`), out)
 	}
 	return false, nil
 }

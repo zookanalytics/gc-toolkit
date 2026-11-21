@@ -1026,7 +1026,7 @@ sequenceDiagram
   participant G as GitHub
   participant L as ledger
   participant R as refinery (mol-refinery-patrol)
-  participant W as PR watch (2m)
+  participant W as PR watch (1m)
   participant O as landing order (1m)
   P->>G: push polecat/BEAD under the lease on the commit it read
   P->>G: git ls-remote — verify HEAD == remote

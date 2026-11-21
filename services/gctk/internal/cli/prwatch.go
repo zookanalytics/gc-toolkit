@@ -36,8 +36,11 @@ import (
 // does not get it saves nothing, so the next pass reads the PR again.
 const watchLockWait = 30 * time.Second
 
-// pollWindow is how long into a pass the pass starts another update, so the
-// pass ends before the next one is due two minutes after it started.
+// pollWindow is how long into a pass the pass starts another update. A pass
+// in which many PRs moved can run past its order's minute, and Gas City starts
+// the next pass only once it ends, or once its watchdog closes the run's record
+// two minutes in, so the window bounds how long such a pass holds the next one
+// back.
 const pollWindow = 90 * time.Second
 
 // compareWindow is how long into a pass of the net the pass starts another

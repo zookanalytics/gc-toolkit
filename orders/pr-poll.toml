@@ -24,7 +24,7 @@
 [order]
 description = "PR watch: ask GitHub whether each PR the rig's beads own moved, and read and save on its bead each one that did"
 trigger = "cooldown"
-interval = "2m"
+interval = "1m"
 timeout = "180s"
 exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" pr poll --db \"$GC_RIG_ROOT/.beads\""
 scope = "rig"
