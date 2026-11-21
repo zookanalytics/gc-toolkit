@@ -203,9 +203,7 @@ differently from a plain sling:
   above never covers a convoy target, because nothing tracks one, while the
   launch lock the lookup and the pour run under is keyed by the convoy. A
   formula that works one bead, such as `mol-polecat-work`, takes the one bead
-  its input convoy tracks and refuses any other count. So the refinery's
-  requeue pours no convoy: it sends a rejected graduation back as a rework
-  child on the graduation's branch (`assets/scripts/refinery-requeue.sh`).
+  its input convoy tracks and refuses any other count.
 - **A poured node withholds delivery** in `gc.deferred_routed_to`,
   `gc.deferred_execution_routed_to` and, for a node with an assignee,
   `gc.deferred_assignee`, each promoted into its live key when the node

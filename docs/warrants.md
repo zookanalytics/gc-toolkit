@@ -117,8 +117,8 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and
-  `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
+  `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
@@ -233,8 +233,8 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and `gastownhall/beads`
-  main 3a274fbf8f76 (`BuildReadyWorkOrder` in
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and `gastownhall/beads`
+  main 786241099046 (`BuildReadyWorkOrder` in
   `internal/storage/sqlbuild/ready.go` orders the priority policy by the
   bead's own priority). The bd 1.3.4 (7ef2fd05e) binary was read on
   2026-11-15.

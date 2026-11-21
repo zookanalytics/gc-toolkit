@@ -26,9 +26,9 @@
 #     landing onto the owner's branch the lifecycle stub logged, and the fake
 #     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
-#     a blocks edge a create or `gc bd dep` writes is added there, `gc bd dep
-#     list` reads them, and `gctk bead holds` answers from the ones whose far
-#     bead the store does not hold closed. `gctk bead holds` asked about the
+#     a blocks edge a create writes is added there, `gc bd dep list` reads
+#     them, and `gctk bead holds` answers from the ones whose far bead the
+#     store does not hold closed. `gctk bead holds` asked about the
 #     bead $STUB_HOLDS_FAIL names exits 1 with no answer. `gc session list`
 #     prints $STUB_SESSIONS_JSON, and nothing when it is unset, which is a list
 #     that cannot be read. `gctk review` is the real one's, the binary
@@ -52,7 +52,7 @@ rt_init() {
   here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   SUT="$TMP/sut"; BIN="$TMP/bin"; GH_DIR="$TMP/gh"; LOGS="$TMP/logs"
   mkdir -p "$SUT" "$BIN" "$GH_DIR" "$LOGS"
-  for f in bd-lib.sh refinery-lib.sh dispatch-path.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh conversation.sh "$@"; do
+  for f in bd-lib.sh refinery-lib.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh conversation.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
   for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
@@ -195,6 +195,9 @@ case "$verb" in
     printf '%s\n' "$row" ;;
   list)
     [ -z "${STUB_GC_LIST_FAIL:-}" ] || { echo "store unreachable" >&2; exit 1; }
+    # STUB_GC_LIST_OUT, when set, is what every list prints in place of the
+    # store's answer, and STUB_GC_LIST_RC is that list's exit.
+    [ -z "${STUB_GC_LIST_OUT+set}" ] || { printf '%s\n' "$STUB_GC_LIST_OUT"; exit "${STUB_GC_LIST_RC:-0}"; }
     # A read by id (--id) answers in every status, as bd's --all does, and
     # STUB_GC_ID_FAIL fails that read alone.
     case " $* " in *" --id "*) [ -z "${STUB_GC_ID_FAIL:-}" ] || { echo "store unreachable" >&2; exit 1; } ;; esac
@@ -239,7 +242,6 @@ case "$verb" in
     done
     st --arg id "$id" "map(if .id == \$id then $prog else . end)" ;;
   create)
-    [ -z "${STUB_BD_CREATE_FAIL:-}" ] || { echo "create refused" >&2; exit 1; }
     title="$1"; shift; meta='{}'; type=task; waiters=""
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -254,16 +256,10 @@ case "$verb" in
     st --arg id "$id" --arg t "$title" --arg ty "$type" --argjson m "$meta" \
       '. + [{id: $id, title: $t, status: "open", assignee: "", issue_type: $ty, priority: 2, created_at: "2026-11-12T01:00:00Z", notes: "", metadata: $m}]'
     for w in $waiters; do echo "$w $id" >> "$STUB_HOLDS"; done
-    # A create whose reply is lost lands whole and prints nothing.
-    [ -n "${STUB_CREATE_REPLY_LOST:-}" ] || printf '{"id":"%s"}\n' "$id" ;;
+    printf '{"id":"%s"}\n' "$id" ;;
   dep)
-    if [ "$1" = list ]; then
-      awk -v i="$2" '$1 == i { print $2 }' "$STUB_HOLDS" | jq -Rsc 'split("\n") | map(select(. != "") | {id: .})'
-      exit 0
-    fi
-    [ "${STUB_DEP_RC:-0}" = 0 ] || exit "$STUB_DEP_RC"
-    [ "$2" = --blocks ] && echo "$3 $1" >> "$STUB_HOLDS"
-    exit 0 ;;
+    [ "$1" = list ] || { echo "gc stub: unsupported bd dep $*" >&2; exit 2; }
+    awk -v i="$2" '$1 == i { print $2 }' "$STUB_HOLDS" | jq -Rsc 'split("\n") | map(select(. != "") | {id: .})' ;;
   close)
     id="$1"
     st --arg id "$id" 'map(if .id == $id then .status = "closed" else . end)' ;;

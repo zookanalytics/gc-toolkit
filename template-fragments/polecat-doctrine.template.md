@@ -214,9 +214,8 @@ facts and the landing order for the merge. A write aimed at the claimed bead
 lands, errors nowhere, and is never read.
 
 `work-submit.sh` resolves it: the open bead on this branch that carries a
-`merge_result`. While none does, a convoy's rebuild child has the convoy it
-names as its `anchor_bead` for its anchor. Write to the anchor what the
-anchor's readers read, and to your claimed bead everything else.
+`merge_result`. Write to the anchor what the anchor's readers read, and to your
+claimed bead everything else.
 
 ## Beads: what you close and what you never close
 
