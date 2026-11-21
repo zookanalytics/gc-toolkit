@@ -168,7 +168,8 @@ func unhandled(rc receipts, n NewestFeedback) []Condition {
 // watermark and the mark the threads have answered through. It is the rule a
 // dismisser waits by (unrouted_comment_ids in
 // assets/scripts/review-dismissal.sh), over the newest such comment each
-// approval keeps: the saved read's, or the act's own read's (readUnrouted).
+// approval carries on the act's own read of the PR's review threads
+// (readUnrouted).
 func unrouted(rc receipts, targets []Approval) []int64 {
 	floor := max(rc.comment, rc.commentAnswered)
 	var out []int64

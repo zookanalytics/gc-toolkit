@@ -84,8 +84,7 @@ type CheckSigns struct {
 // definition of feedback applied from Since: the accounts whose approval or
 // request for changes stands, the newest feedback in each id space, the review
 // threads waiting on the city's answer, the unresolved threads and GitHub's
-// review decision. Approvals is each approval that stands, which an approval's
-// withdrawal reads.
+// review decision. Approvals is each approval that stands.
 type SavedConversation struct {
 	ReadAt         string            `json:"read_at"`
 	Since          string            `json:"since"`
