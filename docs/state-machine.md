@@ -225,7 +225,7 @@ record when it files one. A head that only conversations and asks hold is
 handed to the refinery in two writes with the wake between them: the order
 assigns the bead to the refinery and keeps the marker, wakes and nudges the
 refinery, and only then clears the marker. A wake that does not land leaves the
-bead assigned to the refinery and marked, with why in `pr_reconcile_error`, and
+bead assigned to the refinery and marked, the run prints why and exits 2, and
 the next run wakes the refinery again
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). A
 bead at any other status, such as one claimed or deferred, keeps its marker,
