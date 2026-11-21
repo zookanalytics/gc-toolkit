@@ -468,6 +468,50 @@ func TestAPRTwoLiveBeadsOwnIsSavedOnNeither(t *testing.T) {
 	}
 }
 
+// Each spelling of a PR's URL that GitHub reads as that PR names it: its host or
+// its repository in another case, or its number zero-padded. A refresh by any
+// of them updates the bead that owns the PR, a second bead that names the PR in
+// another spelling owns it too, so the pass saves it on neither, and a bead
+// whose URL is respelled while its update reads still owns the PR it saves.
+func TestEverySpellingOfAPRsURLNamesThePR(t *testing.T) {
+	for _, url := range []string{"https://GitHub.com/acme/widgets/pull/7", "https://github.com/ACME/Widgets/pull/7",
+		"https://github.com/acme/widgets/pull/007"} {
+		t.Run("a refresh by "+url, func(t *testing.T) {
+			d := newWatched(t)
+			got, err := d.w.Refresh(url)
+			if err != nil || got.Action != pr.ActSaved || got.Bead != bead {
+				t.Fatalf("the refresh answered %+v, %v", got, err)
+			}
+			if s := d.saved(t, bead); s == nil || s.PR == nil || s.PR.Number != 7 {
+				t.Fatalf("the refresh saved %+v", s)
+			}
+		})
+		t.Run("a second bead naming "+url, func(t *testing.T) {
+			d := newWatched(t)
+			md := maps.Clone(d.md)
+			md["pr_url"] = url
+			d.store.Put(fake.Bead{ID: "tk-twin", Status: "blocked", Assignee: refinery, Metadata: md})
+			rep := d.poll(t)
+			if err := rep.Failed[prURL]; err == nil || !strings.Contains(err.Error(), "tk-1, tk-twin") {
+				t.Fatalf("a PR two beads own in two spellings failed as %v", err)
+			}
+			if len(d.store.Writes()) != 0 || len(d.github.SignsAsked()) != 0 {
+				t.Fatalf("a PR two beads own was asked %v or saved %+v", d.github.SignsAsked(), d.store.Writes())
+			}
+		})
+		t.Run("the bead respelled to "+url+" while its update reads", func(t *testing.T) {
+			d := newWatched(t)
+			d.github.OnRead = func(string, *ghfake.PR) {
+				b, _ := d.store.Row(bead)
+				b.Metadata = maps.Clone(b.Metadata)
+				b.Metadata["pr_url"] = url
+				d.store.Put(b)
+			}
+			updated(t, d.poll(t), "pr, checks, conversation, labels")
+		})
+	}
+}
+
 // A pass starts no update past its window, and the PRs it leaves keep their
 // signs, so the next pass reads them.
 func TestThePollStartsNoUpdatePastItsWindow(t *testing.T) {

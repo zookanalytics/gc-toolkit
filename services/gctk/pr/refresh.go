@@ -112,10 +112,21 @@ func (u *watchRun) feedback() (Feedback, error) {
 	return u.rule, nil
 }
 
-// owners lists the live beads that own a PR, by the PR's URL (ownersIn).
+// owners lists the live beads that own a PR, by the PR's identity (ownersIn).
 func (w Watcher) owners() (map[string][]owned, error) { return ownersIn(w.Ledger) }
 
-// ownersIn lists the live beads that own a PR, by the PR's URL, read through l.
+// identity is the URL of the PR at host, repo and number in the one spelling
+// that each spelling ParseURL reads of that PR shares, since GitHub reads a
+// host and a repository's name in any case.
+func identity(host, repo string, number int) string {
+	return fmt.Sprintf("https://%s/%s/pull/%d", strings.ToLower(host), strings.ToLower(repo), number)
+}
+
+// key is the identity of the PR o owns.
+func (o owned) key() string { return identity(o.host, o.repo, o.number) }
+
+// ownersIn lists the live beads that own a PR, by the PR's identity, read
+// through l.
 // A bead owns a PR when it names it as its own and is no other bead's child: an
 // anchor names it in pr_url beside a merge_result, and a bead the refinery sent
 // back to the pool names it in existing_pr. A bead whose anchor_bead names
@@ -135,7 +146,7 @@ func ownersIn(l *ledger.Ledger) (map[string][]owned, error) {
 	for _, id := range slices.Sorted(maps.Keys(byID)) {
 		o, ok := ownerOf(byID[id])
 		if ok {
-			out[o.url] = append(out[o.url], o)
+			out[o.key()] = append(out[o.key()], o)
 		}
 	}
 	return out, nil
@@ -199,9 +210,9 @@ func one(owners []owned, url string) (owned, error) {
 }
 
 // Refresh is the one-PR update called alone, as a webhook's rule can call it: it
-// finds the live bead that owns the PR at url, reads the PR's signs itself, and
-// reads and saves what they say moved. A PR no live bead owns has nothing to
-// save, which it reports with no error.
+// finds the live bead that owns the PR at url, in any spelling of the PR's URL,
+// reads the PR's signs itself, and reads and saves what they say moved. A PR no
+// live bead owns has nothing to save, which it reports with no error.
 func (w Watcher) Refresh(url string) (Refreshed, error) {
 	host, repo, number, ok := record.ParseURL(url)
 	if !ok {
@@ -211,7 +222,7 @@ func (w Watcher) Refresh(url string) (Refreshed, error) {
 	if err != nil {
 		return Refreshed{}, err
 	}
-	o, err := one(all[url], url)
+	o, err := one(all[identity(host, repo, number)], url)
 	if err != nil {
 		return Refreshed{URL: url}, err
 	}
@@ -219,9 +230,9 @@ func (w Watcher) Refresh(url string) (Refreshed, error) {
 		return Refreshed{URL: url, Action: ActUnowned, Detail: "no live bead owns the PR, so there is nothing to save"}, nil
 	}
 	u := w.run()
-	hub := w.GitHub(host)
+	hub := w.GitHub(o.host)
 	at := instant(w.Now)
-	signs, failed := hub.Signs(repo, []int{number})
+	signs, failed := hub.Signs(o.repo, []int{number})
 	if err := failed[number]; err != nil {
 		return Refreshed{URL: url, Bead: o.id}, fmt.Errorf("the PR's signs did not read: %w", err)
 	}
@@ -370,7 +381,7 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 		return out, nil
 	}
 	now, ok := ownerOf(rows[0])
-	if !ok || now.url != o.url {
+	if !ok || now.key() != o.key() {
 		out.Action, out.Detail = ActUnowned, "the bead no longer owns the PR"
 		return out, nil
 	}
