@@ -161,7 +161,8 @@ What each noun owns:
   The read is GitHub's facts about the PR, in four parts that each keep the
   instant their read was sent, over which the evaluator's rule decides for the
   displays without reading GitHub, and it holds no answer. The read stands on
-  its warrant ([warrants.md](warrants.md#saved-github-read)).
+  its warrant ([warrants.md](warrants.md#saved-github-read)), and the digest
+  on its own ([warrants.md](warrants.md#the-landing-orders-last-decision)).
   The noun starts
   from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and

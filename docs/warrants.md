@@ -519,6 +519,73 @@ no warrant.
   Town's pending record carries them, or once a webhook receiver keeps them
   from GitHub's events. The saved read then moves onto that record.
 
+## The landing order's last decision
+
+- **Covers.** The `pr_landing_digest` key, declared as `decidedKey` in
+  `services/gctk/pr/keys.go`. The landing order is its one writer and its one
+  reader: `keep` writes it after a decision that owed no act, and `unchanged`
+  compares it with `digest`, the digest of the store as a run reads it, in
+  `services/gctk/pr/landing.go`, which `gctk pr reconcile` runs.
+- **Stands in for.** A trigger an order keeps for each record it works. It is
+  a token that changes once anything a record's last decision read has
+  changed, in the store or in the read the PR watch saved, and that a run
+  reads with the store's listing and no read of GitHub, and a clock that only
+  a decision moves. A run decides a record whose token differs or whose last
+  decision is an hour old, and passes over the rest.
+- **Evidence.**
+  - In `gastownhall/gascity`, an order keeps its trigger's state for itself and
+    none for a record it works. A cooldown times the order by its own last run
+    (`checkCooldown` in `internal/orders/triggers.go` reads
+    `lastRunFn(a.ScopedName())`). An event order keeps one cursor over the
+    event log and matches events by their type, leaving out only the order
+    engine's own bookkeeping (`checkEvent` there). Its run moves the cursor to
+    the log's head before the command runs (`dispatchExec` in
+    `cmd/gc/order_dispatch.go`), and the command's environment carries nothing
+    about the events (`orderExecEnvWithError` in `cmd/gc/order_store.go`). A
+    convergence loop repeats a formula on one root bead, an iteration at each
+    close of the last, until its gate passes or its iterations run out
+    (`gc converge` in `docs/reference/cli.md`), with no clock between
+    iterations.
+  - In `gastownhall/beads`, a bead's revision covers its own row. A label
+    edit, a dependency edit, a comment, and the blocked state that a blocker's
+    close recomputes on the beads it blocks leave it as it is, and the detail
+    view is the one place bd publishes it (`RowVersion` and
+    `IssueDetails.Revision` in `internal/types/types.go`), so the listing a
+    run reads carries none. A decision also reads beads other than the
+    record's own: those its blocks edges name, what holds each ask on it, the
+    work anchored to it and the other open work on its branch. A bead's
+    `updated_at` moves on writes to it, the PR watch's saves among them, which
+    decide nothing, and on no write to another bead. Its `defer_until`
+    hides it from `bd ready` until a time, which is the bead's readiness for
+    every reader and not one order's clock.
+  - In `gastownhall/gascity-packs`, Gas Town's pending record keeps one clock
+    for each record, `pr_last_checked_at`, which its reconcile stamps at each
+    check and takes the record it stamped longest ago by (`reconcile_one` in
+    `gastown/commands/pr-merge-reconcile/run.sh`), since one step there both
+    reads the PR and decides. Here the one-PR update stamps it with each save
+    of what it read (`checkedAtKey` in `services/gctk/pr/record/keys.go`), a
+    write that decides nothing, so it would start a record's hour again with
+    no decision made.
+  - bd's open proposals would give a run what changed since its last read.
+    The `bd watch` proposal (gastownhall/beads#5267) has
+    `bd watch --since <cursor> --json` name each bead created, updated,
+    labeled or closed since the cursor, and Versioned Beads (#5898, built in
+    phases under #6132) keeps a history record of each write. Neither has
+    landed. A search of `gastownhall/gascity`'s issues for an order's state
+    kept for each record, a work queue and an outbox found no proposal.
+  - The search is [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-landing-orders-digest-of-what-it-last-decided-a-record-on-the-three-uses-rework).
+- **Verified.** 2026-11-21, at `gastownhall/gascity` main 43462b2e3d45,
+  `gastownhall/gascity-packs` main 44b9db7168f6 and `gastownhall/beads` main
+  786241099046, with gastownhall/beads#5267, #5898 and #6132 open.
+- **Retires when.** bd ships a read of which beads changed since a cursor,
+  label and dependency edits included, a form of which `bd watch --since`
+  (gastownhall/beads#5267) and Versioned Beads' history (#5898, #6132) each
+  propose. The landing order then decides each record that read names, and
+  the digest goes. The decision's time goes once the landing order's decisions
+  stamp Gas Town's `pr_last_checked_at`, as Gas Town's reconcile does, in
+  place of the one-PR update's saves, or once Gas City keeps a clock for each
+  record an order works.
+
 ## Unanswered review threads
 
 - **Covers.** The `pr.unanswered_threads` key, in the

@@ -77,7 +77,8 @@ var decidedKey = ledger.Declare("pr_landing_digest", ledger.JSON[decided](),
 		"the digest does not show waits an hour at most. Each decision that owes no act writes it again, so a "+
 		"decision made for any reason starts the hour again, and a run in which nothing moved on GitHub, nothing "+
 		"changed in the store and no record's hour is up asks GitHub nothing. An act that does not complete leaves "+
-		"it as it is, and nothing clears it.")
+		"it as it is, and nothing clears it.",
+	ledger.Warrant("the-landing-orders-last-decision"))
 
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review
