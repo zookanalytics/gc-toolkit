@@ -27,15 +27,19 @@ type Frontier struct {
 	Waits   []Waited
 }
 
-// Verdict is a frontier in one word: ready when nothing holds the bead,
-// advancing when every wait behind what holds it advances, and stuck when one
-// does not.
+// Verdict is a frontier in one word, one of the three below.
+// docs/bead-store-resolution.md ("Reading a bead's whole context") gives them
+// as bead-context.sh prints them.
 type Verdict string
 
 const (
-	VerdictReady     Verdict = "ready"
+	// VerdictReady: nothing holds the bead, as waits answers it.
+	VerdictReady Verdict = "ready"
+	// VerdictAdvancing: every wait behind what holds the bead advances.
 	VerdictAdvancing Verdict = "advancing"
-	VerdictStuck     Verdict = "stuck"
+	// VerdictStuck: a wait behind what holds the bead does not advance, or
+	// waits could not answer what holds it.
+	VerdictStuck Verdict = "stuck"
 )
 
 // Waited is one wait behind what holds a bead, and how far the city carries it
@@ -68,12 +72,10 @@ func (r *Reading) Advance(id string) (Advance, bool) {
 }
 
 // Frontier is where a bead the read was asked about stands by the beads it
-// waits on, and false for a closed bead and for one it was not asked about or
-// did not answer. It is ready when waits answers that nothing holds it, and
-// otherwise advancing when every wait behind that answer advances and stuck
-// when one does not, or when waits could not answer what holds it. Each wait
-// reads as it does in the bead's advance: a waits-for wait is stuck on itself,
-// unread, and a wait that is the bead's own work advances.
+// waits on ([Verdict] says what each verdict means), and false for a closed
+// bead and for one it was not asked about or did not answer. Each wait reads as
+// it does in the bead's advance: a waits-for wait is stuck on itself, unread,
+// and a wait that is the bead's own work advances.
 func (r *Reading) Frontier(id string) (Frontier, bool) {
 	b, ok := r.beads[id]
 	if !ok || !r.asked[id] || !isOpen(b) {

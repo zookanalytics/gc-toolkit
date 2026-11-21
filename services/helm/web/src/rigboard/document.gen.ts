@@ -316,10 +316,10 @@ export interface PriorityGroup {
 // source: table.go
 
 /**
- * Group is where a row's work stands: it waits on you, it will be done
- * without you, it will not be done as things stand, or it is closed. A row no
- * group holds, such as a gate, or a bead a reader could not answer, carries
- * none.
+ * Group is the label the board shows for where a row's work stands, one for
+ * each of standing's groups, which [standing.Group] defines. A row no group
+ * holds, such as a gate, or a bead a reader could not answer, carries none.
+ * docs/bead-standing.md gives each label to a person.
  */
 export const GroupWaitingOnYou = "Waiting on you";
 export const GroupQueued = "Queued";
@@ -328,7 +328,8 @@ export const GroupClosed = "Closed";
 export type Group = typeof GroupWaitingOnYou | typeof GroupQueued | typeof GroupNotMoving | typeof GroupClosed;
 /**
  * Ask is the kind of thing a person owes a move on, for a row that is an
- * ask.
+ * ask, one for each of standing's asks, which [standing.Ask] defines.
+ * docs/bead-standing.md gives each to a person.
  */
 export const AskQuestion = "Question";
 export const AskConversation = "Conversation";

@@ -25,9 +25,11 @@ func IsMachineGate(b person.Blocker) bool {
 }
 
 // mergeResultPullRequest is the merge_result of a merge anchor whose pull
-// request is open on the old record. On Gas Town's pending record an open pull
-// request is [record.Pending], or [record.HeadChanged] while the refinery
-// validates a head it has not.
+// request is open on the old record. Gas Town's pending record is the record a
+// PR's bead carries from its publication to its merge, whose values
+// services/gctk/pr/record declares and docs/state-machine.md ("The pending
+// record") defines. On it an open pull request is [record.Pending], or
+// [record.HeadChanged] while the refinery validates a head it has not.
 const mergeResultPullRequest = "pull_request"
 
 // awaitsPerson reports whether a merge anchor the walk reached is a person's to

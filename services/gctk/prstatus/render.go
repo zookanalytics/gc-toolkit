@@ -12,7 +12,10 @@ import (
 // Render returns where a PR on Gas Town's pending record stands, in the status
 // vocabulary, from the evaluator's answer for its anchor and the facts [Read]
 // gathers about the anchor, whose walk names the human gates and the beads a
-// person owes the next move on. A display asks the evaluator over the GitHub
+// person owes the next move on. The pending record is the record a PR's bead
+// carries from its publication to its merge, whose values
+// services/gctk/pr/record declares and docs/state-machine.md ("The pending
+// record") defines. A display asks the evaluator over the GitHub
 // read the landing order saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //

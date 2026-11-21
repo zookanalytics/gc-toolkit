@@ -1,12 +1,13 @@
 // Package standing answers where a bead stands and whose move it is: its group
 // in the helm board's words, the rule that placed it there, what a person owes
 // when the bead is itself the ask, and the beads that rule names
-// (docs/gctk-architecture.md, "The bead stands contract"). It computes no wait,
-// no pull request's status and no place in the queue: it gathers its facts
-// through a [Store] and asks waits what holds a bead, prstatus where a pull
-// request stands and what a person owes along a bead's waits, queue whether the
-// city takes a bead, conversation a conversation's shape, and standing/person
-// the rules about one bead.
+// (docs/gctk-architecture.md, "The bead stands contract"), and
+// docs/bead-standing.md gives the groups and the asks to a person. It computes
+// no wait, no pull request's status and no place in the queue: it gathers its
+// facts through a [Store] and asks waits what holds a bead, prstatus where a
+// pull request stands and what a person owes along a bead's waits, queue
+// whether the city takes a bead, conversation a conversation's shape, and
+// standing/person the rules about one bead.
 package standing
 
 import (
@@ -58,7 +59,10 @@ type Edge struct {
 
 // Store is the reads the answer gathers its facts through, one store's worth:
 // queue's and prstatus's reads, the saved answers for pull requests on Gas
-// Town's pending record, and the beads themselves.
+// Town's pending record, and the beads themselves. That record is the one a
+// PR's bead carries from its publication to its merge, whose values
+// services/gctk/pr/record declares and docs/state-machine.md ("The pending
+// record") defines.
 type Store interface {
 	queue.Store
 	prstatus.Store

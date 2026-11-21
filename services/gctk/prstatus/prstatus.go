@@ -49,8 +49,11 @@
 // draft the city opened is known by its markers, and a draft someone else made
 // reads like any other PR.
 //
-// A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
-// domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
+// Gas Town's pending record is the record a PR's bead carries from its
+// publication to its merge, whose values services/gctk/pr/record declares and
+// docs/state-machine.md ("The pending record") defines. A PR on that record
+// ([pr.OnRecord]) stands where the pr domain's evaluator says, in the same
+// vocabulary: [Render], [RenderHeld] and
 // [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
 // status`, and through it the labels and engage, and the rig board
 // (services/helm/internal/rigboard) ask the evaluator over the GitHub read the
@@ -74,6 +77,8 @@ import (
 // State is a PR anchor's status value: the live, mutually-exclusive `status:`
 // label group (working, merging, needs-review, needs-attention) plus the
 // board-only terminal states (merged, closed) a resolved anchor shows.
+// docs/pull-request-states.md ("The labels on a pull request") gives each live
+// value to a person, with what the person can do.
 type State string
 
 const (
@@ -121,7 +126,8 @@ const (
 
 // Hold is a held: value, one thing that holds an open PR which the city will
 // not clear on its own. Each value is a `held:` label of its own, beside the one
-// status value, so more than one can stand at once.
+// status value, so more than one can stand at once. docs/pull-request-states.md
+// gives each value to a person, with what the person can do.
 type Hold string
 
 const (

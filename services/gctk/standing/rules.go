@@ -12,61 +12,139 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// Group is where a bead's work stands: a person owes its next move, the city
-// takes it as things stand, nothing moves it as things stand, or it is closed.
-// A bead with no move of its own, and a bead a reader could not answer, has
-// none.
+// Group is where a bead's work stands, one of the four below. A bead with no
+// move of its own, and a bead a reader could not answer, has none.
+// docs/bead-standing.md gives each group to a person, beside the label the
+// board shows for it (services/helm/internal/rigboard), with what the person
+// can do.
 type Group string
 
 const (
+	// GroupWaitingOnYou: a person owes the bead's next move. The bead is
+	// itself an ask ([RuleAsk]), or a human gate or a bead only a person
+	// clears holds it ([RuleOwnWait], [RuleFurtherAlong]).
 	GroupWaitingOnYou Group = "waiting-on-you"
-	GroupQueued       Group = "queued"
-	GroupNotMoving    Group = "not-moving"
-	GroupClosed       Group = "closed"
+	// GroupQueued: the city takes the bead as things stand. It is work in
+	// flight ([RuleInFlight]), work the city sends ([RuleScheduled]), or a
+	// conversation or a decision that waits on the work it sent
+	// ([RuleStaying]).
+	GroupQueued Group = "queued"
+	// GroupNotMoving: nothing moves the bead as things stand. A park holds it
+	// ([RuleParked]), its status is one no pool offers ([RuleStatus]), or it
+	// is work nothing sends ([RuleNotScheduled]).
+	GroupNotMoving Group = "not-moving"
+	// GroupClosed: the bead is closed ([RuleClosed]).
+	GroupClosed Group = "closed"
 )
 
 // Rule is the rule that placed a bead: the first that applies, in the order
-// docs/gctk-architecture.md gives them ("The bead stands contract").
+// table tries them, which docs/gctk-architecture.md gives as well ("The bead
+// stands contract"). The rules below are declared in that order, unread aside.
+// Each applies only where none above it did, and says the group it gives.
 type Rule string
 
 const (
-	RuleClosed       Rule = "closed"
-	RuleAsk          Rule = "ask"
-	RuleOwnWait      Rule = "own-wait"
+	// RuleClosed: the bead is closed. Group closed.
+	RuleClosed Rule = "closed"
+	// RuleAsk: the bead is itself an ask, which the answer's Ask names
+	// ([Ask]). Group waiting-on-you.
+	RuleAsk Rule = "ask"
+	// RuleOwnWait: a human gate, or a bead only a person clears
+	// ([person.Clears]), holds the bead through a wait of its own, as
+	// prstatus.Holding walks what a person owes. Group waiting-on-you.
+	RuleOwnWait Rule = "own-wait"
+	// RuleFurtherAlong: such a gate or bead holds the bead further along its
+	// waits, an ancestor's included. Group waiting-on-you.
 	RuleFurtherAlong Rule = "further-along"
-	RuleParked       Rule = "parked"
-	RuleStatus       Rule = "status"
-	RuleStaying      Rule = "staying"
-	RuleAnswers      Rule = "answers"
-	RuleMembers      Rule = "members"
-	RuleGate         Rule = "gate"
-	RuleInFlight     Rule = "in-flight"
-	RuleScheduled    Rule = "scheduled"
+	// RuleParked: a gate that is no human gate, such as a park
+	// (docs/steering.md, "A park"), holds the bead through a wait of its own
+	// or an ancestor's, as gateHold reads it. Group not-moving.
+	RuleParked Rule = "parked"
+	// RuleStatus: the bead's status is one no pool offers, such as deferred.
+	// Gas Town's pending record, the record a PR's bead carries from its
+	// publication to its merge (services/gctk/pr/record declares its values,
+	// and docs/state-machine.md, "The pending record", defines them), writes a
+	// blocked status on a bead whose pull request it holds. That status is the
+	// record's own and holds nothing, so it is not one of these. Group
+	// not-moving.
+	RuleStatus Rule = "status"
+	// RuleStaying: the bead is a conversation its sitting stays in, or a
+	// decision a ruling left waiting on the work it sent ([person.Stays]). It
+	// is a person's move again once that work closes. Group queued.
+	RuleStaying Rule = "staying"
+	// RuleAnswers: the bead is a conversation that is no ask, which answers a
+	// question whose row carries it. No group: it has no move of its own.
+	RuleAnswers Rule = "answers"
+	// RuleMembers: the bead is an epic or a Delivery that is no ruling, with
+	// open members or none at all. No group: it has no move of its own.
+	RuleMembers Rule = "members"
+	// RuleGate: the bead is a gate that is no human gate, which holds what
+	// waits on it and asks no one. No group: it has no move of its own.
+	RuleGate Rule = "gate"
+	// RuleInFlight: the bead is work in flight, as waits answers it
+	// (docs/steering.md, "In flight"), or work a live run works, from the
+	// run's start. Group queued.
+	RuleInFlight Rule = "in-flight"
+	// RuleScheduled: the city takes the work as things stand, as its place in
+	// queue's order says (queue.Place): it is armed, routed to a pool or
+	// assigned to an agent, and no dispatch hold holds it. Group queued.
+	RuleScheduled Rule = "scheduled"
+	// RuleNotScheduled: any other work, which nothing sends as things stand.
+	// Group not-moving.
 	RuleNotScheduled Rule = "not-scheduled"
-	// RuleUnread is the answer at a rule whose part a reader could not answer.
+	// RuleUnread: a reader could not answer the part a rule needs, so the
+	// answer stops at that rule, in no group, and its Why says what it could
+	// not answer.
 	RuleUnread Rule = "unread"
 )
 
-// Ask is what a person owes when a bead is itself the ask.
+// Ask is what a person owes when a bead is itself the ask, one of the five
+// below, which askOf reads. docs/bead-standing.md gives each ask to a person,
+// beside the words the board shows for it (services/helm/internal/rigboard),
+// with what the person can do.
 type Ask string
 
 const (
-	AskQuestion     Ask = "question"
+	// AskQuestion: an open human gate, or an open decision that does not wait
+	// on work of its own first ([person.Stays]). A decision that waits on the
+	// work a ruling sent is no person's move until that work closes.
+	AskQuestion Ask = "question"
+	// AskConversation: an open conversation that its sitting does not stay
+	// in, that replies to no open human gate, and that tracks no open
+	// decision that is a question. One that replies to such a gate or tracks
+	// such a decision answers that question instead. One its sitting stays
+	// in waits for the return of the work it sent, which comes back to the
+	// operator once that work closes, so until then it is no person's move.
 	AskConversation Ask = "conversation"
-	AskPullRequest  Ask = "pull-request"
-	AskRoutedToYou  Ask = "routed-to-you"
-	AskRuling       Ask = "ruling"
+	// AskPullRequest: a bead whose pull request reads needs-review or
+	// needs-attention ([prstatus.NeedsReview], [prstatus.NeedsAttention]).
+	AskPullRequest Ask = "pull-request"
+	// AskRoutedToYou: any other open bead only a person clears
+	// ([person.Clears]), such as one assigned to human.
+	AskRoutedToYou Ask = "routed-to-you"
+	// AskRuling: an epic with members and none of them open, or a landed
+	// Delivery, which waits for the operator's review of the epic
+	// (docs/epics.md, "Reviewing an epic").
+	AskRuling Ask = "ruling"
 )
 
-// Kind is what a bead is.
+// Kind is what a bead is, one of the six below, which kindOf reads.
 type Kind string
 
 const (
-	KindEpic         Kind = "epic"
-	KindDelivery     Kind = "delivery"
-	KindWork         Kind = "work"
-	KindGate         Kind = "gate"
-	KindDecision     Kind = "decision"
+	// KindEpic: a bead whose type is epic, other than a Delivery.
+	KindEpic Kind = "epic"
+	// KindDelivery: an epic whose parent is an epic and which carries no
+	// hypothesis (docs/epics.md, "What a Delivery is as a bead").
+	KindDelivery Kind = "delivery"
+	// KindWork: a bead that is none of the others, such as a task or a bug.
+	KindWork Kind = "work"
+	// KindGate: a bead whose type is gate, a human gate or any other.
+	KindGate Kind = "gate"
+	// KindDecision: a bead whose type is decision.
+	KindDecision Kind = "decision"
+	// KindConversation: a conversation, a task in the shape conversation.Shape
+	// reads.
 	KindConversation Kind = "conversation"
 )
 
@@ -93,8 +171,8 @@ type Answer struct {
 	Why string
 }
 
-// kindOf is what a bead is. A Delivery is an epic whose parent is an epic and
-// which carries no hypothesis (docs/epics.md, "What a Delivery is as a bead").
+// kindOf is what a bead is ([Kind]): its own kind, or a Delivery, which takes
+// its parent to tell.
 func (r *Reading) kindOf(b Bead) Kind {
 	k := ownKind(b)
 	if k == KindEpic && b.Hypothesis == "" {
@@ -108,8 +186,7 @@ func (r *Reading) kindOf(b Bead) Kind {
 }
 
 // ownKind is what a bead is by its own row, an epic and a Delivery alike
-// reading as an epic. A conversation is a task in the shape conversation.Shape
-// reads.
+// reading as an epic.
 func ownKind(b Bead) Kind {
 	switch issueType(b) {
 	case "gate":
@@ -227,24 +304,12 @@ func (r *Reading) reach(ids []string) []string {
 	return next
 }
 
-// askOf is whether a bead is itself an ask, and which: what the shared readers
-// count as a person's move, and a ruling.
-//
-//   - Question: an open human gate, or an open decision that does not wait on
-//     work of its own first (staying). One that waits on the work a ruling
-//     sent is no person's move until that work closes.
-//   - Conversation: an open conversation that replies to no open human gate,
-//     tracks no open decision that is a question, and that its sitting does
-//     not stay in. One that replies to such a gate or tracks such a decision
-//     answers that question. One its sitting stays in (staying) waits for the
-//     return of the work it sent, which comes back to the operator once that
-//     work closes, so until then it is no person's move.
-//   - Pull request: a bead whose pull request reads needs-review or
-//     needs-attention.
-//   - Routed to you: any other open bead only a person clears ([person.Clears]).
-//   - Ruling: an epic with members and none open, or a landed Delivery.
-//
-// A gate that is no human gate is never an ask.
+// askOf is whether a bead is itself an ask, and which ([Ask] says when each
+// applies): what the shared readers count as a person's move, and a ruling. A
+// gate, a decision and a conversation are each answered by their kind alone,
+// so a gate that is no human gate is never an ask. An epic or a Delivery is
+// tried as a ruling first. Any other bead, and an epic or a Delivery that is
+// no ruling, is tried as a pull request, then as routed to you.
 func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, members int) Ask {
 	if !isOpen(b) {
 		return ""
@@ -300,36 +365,23 @@ func (r *Reading) questionOf(b Bead, stays map[string]bool) (Ref, bool) {
 	return Ref{}, false
 }
 
-// table answers one bead, whose ask askOf read. The first row that applies
-// answers:
+// table answers one bead, whose ask askOf read. The first rule that applies
+// answers, tried in this order ([Rule] says when each applies and the group it
+// gives):
 //
-//  1. closed: the bead is closed. Group closed.
-//  2. ask: it is an ask. Group waiting-on-you.
-//  3. own-wait or further-along: prstatus.Holding names a gate or a bead a
-//     person owes for it, through one of its own waits or further along.
-//     Group waiting-on-you.
-//  4. parked: a wait behind its status is a gate that is no human gate, its
-//     own or an ancestor's. Group not-moving.
-//  5. status: its status is one no pool offers, such as deferred, other than
-//     the blocked status Gas Town's pending record writes on a bead whose pull
-//     request it holds, which is the record's own and holds nothing. Group
-//     not-moving.
-//  6. staying: it is a conversation its sitting stays in, or a decision a
-//     ruling left waiting on the work it sent. Group queued: it is a person's
-//     move again once that work closes.
-//  7. answers, members or gate: it has no move of its own. A conversation
-//     that is no ask answers a question, whose row carries it. An epic or a
-//     Delivery that is no ruling has open members or none at all. A gate that
-//     is no human gate holds what waits on it. No group.
-//  8. in-flight: waits says it is work in flight, or a live run works it,
-//     from the run's start. Group queued.
-//  9. scheduled: the city takes it as things stand, as its place in queue's
-//     order says (queue.Place): it is armed, routed to a pool or assigned to
-//     an agent, and no dispatch hold holds it. Group queued.
-//  10. not-scheduled: any other work. Group not-moving.
+//  1. closed
+//  2. ask
+//  3. own-wait, or further-along
+//  4. parked
+//  5. status
+//  6. staying
+//  7. answers, members or gate, by the bead's kind
+//  8. in-flight
+//  9. scheduled
+//  10. not-scheduled
 //
-// A bead a reader could not answer reads unread at the row that needs the
-// answer, in no group.
+// A bead a reader could not answer reads unread at the rule that needs the
+// answer.
 func (r *Reading) table(b Bead, k Kind, ask Ask, stays map[string]bool) Answer {
 	if !isOpen(b) {
 		return Answer{Group: GroupClosed, Rule: RuleClosed}
