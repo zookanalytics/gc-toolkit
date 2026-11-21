@@ -507,13 +507,10 @@ first. Either way the change is a decision on the record, not a drift.
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
-- **Every PR the city owns is watched, and one update is the only way GitHub's
-  side of a PR reaches its bead.**
 - **The landing order decides a record again once its PR moved or its bead
   changed, and at least once an hour,** since a run decided it with no act
-  owed. So a change it does not see delays a decision by an hour at most, and a
-  run in which nothing changed and no record's hour is up asks GitHub nothing.
-  It keeps the labels of each PR the city owns equal to what the store derives.
+  owed. So a change it does not see delays a decision by an hour at most. It
+  keeps the labels of each PR the city owns equal to what the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
