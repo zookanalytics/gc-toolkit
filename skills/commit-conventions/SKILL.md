@@ -54,9 +54,9 @@ A `!` before the colon marks a change that breaks a caller.
 
 ## A PR's summary
 
-`pr-open.sh` publishes the summary recorded on the branch's anchor, the bead its PR
-is composed from, as the PR's `## Summary`. With none it falls back to the anchor's
-description: the dispatch text, written before the diff existed and addressed to
+The refinery publishes the summary recorded on the branch's anchor, the bead its
+PR is composed from, as the PR's `## Summary`. With none it falls back to the
+anchor's description: the dispatch text, written before the diff existed and addressed to
 the agent doing the work, not to a reviewer. You are the one who has read the
 diff, so say what changed and why, for a reviewer who was not in the conversation
 the work came from.

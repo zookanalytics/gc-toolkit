@@ -451,6 +451,23 @@ func TestRigListAnswersTheSetting(t *testing.T) {
 	}
 }
 
+func TestOrderListAnswersTheSetting(t *testing.T) {
+	f := newFixture(t, `[]`, "")
+	if r := f.gc("order", "list", "--json"); r.status != 0 || r.out != "" {
+		t.Errorf("no setting: %+v, want nothing at exit 0", r)
+	}
+	f.write("orders.json", `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}`)
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "orders.json")}, "order", "list", "--json"); r.status != 0 || r.out != `{"orders":[{"name":"o","trigger":"cooldown","interval":"5m"}]}` {
+		t.Errorf("the setting's file: %+v", r)
+	}
+	if r := f.run([]string{"STUB_ORDERS=" + filepath.Join(f.dir, "missing.json")}, "order", "list", "--json"); r.out != `{"orders":[]}`+"\n" {
+		t.Errorf("a file that cannot be read: %+v, want an empty registry", r)
+	}
+	if r := f.gc("order", "run", "o"); r.status != 2 {
+		t.Errorf("another order verb: %+v", r)
+	}
+}
+
 func TestConfigShowAnswersTheSetting(t *testing.T) {
 	f := newFixture(t, `[]`, "")
 	if r := f.gc("config", "show", "--json"); r.status != 0 || r.out != noConfig+"\n" {
@@ -735,13 +752,14 @@ func TestAfterWriteRunsOnceEachWriteHasLanded(t *testing.T) {
 		{"bd", "dep", "list", "a", "--json"},
 		{"bd", "gate", "list", "--json"},
 		{"rig", "list", "--json"},
+		{"bd", "create", "a preview", "--dry-run", "--json"},
 	} {
 		if r := f.run(set, args...); r.status != 0 {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
 	if _, err := os.Stat(fired); err == nil {
-		t.Fatalf("a read ran the program: %s", f.file("fired"))
+		t.Fatalf("a read or a dry run ran the program: %s", f.file("fired"))
 	}
 	if r := f.run(set, "bd", "update", "a", "--if-status=in_progress", "--status=closed"); r.status != 13 {
 		t.Fatalf("a guarded update that does not hold: %+v", r)
@@ -1020,5 +1038,71 @@ func TestConvoyStatusAnswersItsMembersAsGcReadsThem(t *testing.T) {
 	}
 	if r := f.gc("convoy", "status", "cv"); r.status != 2 {
 		t.Errorf("the text answer: %+v, want unsupported", r)
+	}
+}
+
+func TestShowCarriesItsDependentsWhenAsked(t *testing.T) {
+	f := newFixture(t, `[{"id":"s","title":"the subject","status":"closed"},`+
+		`{"id":"w2","title":"second waiter","status":"open","priority":1,"issue_type":"task"},`+
+		`{"id":"kid","title":"a child","status":"in_progress","parent":"s"},`+
+		`{"id":"w1","title":"first waiter","status":"closed","issue_type":"bug","dependencies":[{"id":"s","dependency_type":"until"}]},`+
+		`{"id":"far","title":"another store's","status":"open","dependencies":[{"id":"s","dependency_type":"blocks","external":true}]},`+
+		`{"id":"lone","title":"no dependent","status":"open"}]`,
+		"s|blocks|w2\nw2|tracks|lone\n")
+	want := `[{"id":"s","title":"the subject","status":"closed","priority":2,"dependents":[` +
+		`{"id":"w2","title":"second waiter","status":"open","priority":1,"issue_type":"task","dependency_type":"blocks"},` +
+		`{"id":"kid","title":"a child","status":"in_progress","priority":2,"dependency_type":"parent-child"},` +
+		`{"id":"w1","title":"first waiter","status":"closed","priority":2,"issue_type":"bug","dependency_type":"until"}]}]` + "\n"
+	if r := f.gc("bd", "show", "s", "--brief-deps", "--include-dependents", "--json"); r.status != 0 || r.out != want {
+		t.Errorf("show --include-dependents:\n got %+v\nwant %s", r, want)
+	}
+	if r := f.gc("bd", "show", "s", "--json"); r.status != 0 || strings.Contains(r.out, "dependents") {
+		t.Errorf("a show that does not ask for its dependents: %+v", r)
+	}
+	if r := f.gc("bd", "show", "w2", "--include-dependents", "--json"); r.status != 0 || strings.Contains(r.out, "dependents") {
+		t.Errorf("a bead nothing waits on carries no dependents key: %+v", r)
+	}
+}
+
+func TestShowLeavesOutAnEdgeIntoAnotherStore(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","status":"open"},{"id":"b","status":"open"}]`, "b|blocks|a\nzz-gone|blocks|a\na|tracks|zz-far\n")
+	if r := f.gc("bd", "show", "a", "--json"); r.status != 0 || r.out != `[{"id":"a","status":"open","priority":2,"dependencies":[{"id":"b","status":"open","dependency_type":"blocks"}]}]`+"\n" {
+		t.Errorf("show keeps only the edge whose far bead the store holds: %+v", r)
+	}
+	want := `"dependencies":[{"issue_id":"a","depends_on_id":"b","type":"blocks"},{"issue_id":"a","depends_on_id":"zz-gone","type":"blocks"},{"issue_id":"a","depends_on_id":"zz-far","type":"tracks"}]`
+	if r := f.gc("bd", "list", "--id", "a", "--json"); r.status != 0 || !strings.Contains(r.out, want) {
+		t.Errorf("a listing keeps every edge: %+v", r)
+	}
+}
+
+func TestADefaultListingLeavesOutClosedAndPinnedBeads(t *testing.T) {
+	f := newFixture(t, `[{"id":"p","status":"open"},{"id":"o","status":"open","parent":"p"},{"id":"c","status":"closed","parent":"p"},`+
+		`{"id":"pin","status":"pinned","parent":"p"},{"id":"own","status":"in_review","parent":"p"},{"id":"h","status":"hooked","parent":"p"}]`, "")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--parent", "p"}, "o,own,h"},
+		{[]string{"--parent", "p", "--all"}, "o,c,pin,own,h"},
+		{[]string{"--parent", "p", "--status", "open,pinned"}, "o,pin"},
+		{nil, "p,o,own,h"},
+	} {
+		if got := ids(t, f.gc(append(append([]string{"bd", "list"}, c.args...), "--json")...)); got != c.want {
+			t.Errorf("list %v = %s, want %s", c.args, got, c.want)
+		}
+	}
+}
+
+func TestShowRawControlPrintsAControlByteRaw(t *testing.T) {
+	f := newFixture(t, `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open"}]`, "")
+	if r := f.gc("bd", "show", "a", "--json"); r.status != 0 || r.out != `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open","priority":2}]`+"\n" {
+		t.Errorf("a show escapes a control character, as bd does: %+v", r)
+	}
+	r := f.run([]string{"STUB_SHOW_RAW_CONTROL=1"}, "bd", "show", "a", "--json")
+	if r.status != 0 || r.out != "[{\"id\":\"a\",\"title\":\"ctl\x01note\",\"notes\":\"a\x00b\tc\",\"status\":\"open\",\"priority\":2}]\n" {
+		t.Errorf("STUB_SHOW_RAW_CONTROL: %q", r.out)
+	}
+	if got := f.file("beads.json"); got != `[{"id":"a","title":"ctl\u0001note","notes":"a\u0000b\tc","status":"open"}]` {
+		t.Errorf("the store keeps its escapes: %s", got)
 	}
 }

@@ -387,7 +387,7 @@ reset_store() {
  {"id":"tk-g1","status":"open","issue_type":"gate","priority":2,"metadata":{},"dependencies":[]},
  {"id":"tk-wc","status":"in_progress","issue_type":"task","priority":3,"assignee":"polecat-2","metadata":{},
   "dependencies":[{"issue_id":"tk-wc","depends_on_id":"tk-e1","type":"parent-child"}]},
- {"id":"tk-an","status":"open","issue_type":"task","priority":2,"metadata":{"branch":"polecat/tk-an","merge_result":"pull_request"},
+ {"id":"tk-an","status":"open","issue_type":"task","priority":2,"metadata":{"branch":"polecat/tk-an","merge_result":"pull_request_pending"},
   "dependencies":[{"issue_id":"tk-an","depends_on_id":"tk-e1","type":"parent-child"}]},
  {"id":"tk-rw","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-an","task_kind":"rework","priority_shift":"-1"},
   "dependencies":[{"issue_id":"tk-rw","depends_on_id":"tk-an","type":"blocks"}]},
@@ -546,14 +546,14 @@ qp settle tk-two --print; eq "$OUT" "2" "(RULES) a bead with two parents queues 
 reset_store
 add_beads '[
  {"id":"tk-e2","status":"open","issue_type":"epic","priority":2,"metadata":{},"dependencies":[]},
- {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
+ {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
   "dependencies":[{"issue_id":"tk-ap","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-ra","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-ap","task_kind":"rework","priority_shift":-1},"dependencies":[]},
  {"id":"tk-cvra","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
   "dependencies":[{"issue_id":"tk-cvra","depends_on_id":"tk-ra","type":"tracks"}]},
  {"id":"tk-rra","status":"in_progress","issue_type":"task","priority":2,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvra"},"dependencies":[]},
  {"id":"tk-sra","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-rra","gc.step_ref":"mol-polecat-work.implement","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]},
- {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
+ {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
   "dependencies":[{"issue_id":"tk-cm","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-rc","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-cm","task_kind":"rework","priority_shift":-1},"dependencies":[]}
 ]'

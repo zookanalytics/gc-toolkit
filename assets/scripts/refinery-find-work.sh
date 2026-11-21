@@ -35,10 +35,6 @@
 #     the conversation were not there, whether it waits in the operator's
 #     queue, a sitting holds it or its sitting stays.
 #
-# A bead on the old path's cadence, merge_result pull_request or
-# pre_open_gate, is the cadence's to drive, never this queue's, so it is named
-# and left.
-#
 # stdout: the id of the bead to take, one line, and nothing else. What it
 # leaves, and why, goes to stderr.
 # Exit: 0 a bead was named · 1 a read did not answer, so nothing was taken: the
@@ -73,11 +69,7 @@ ROWS=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --assignee="$GC_AGENT" --status=o
   --exclude-type=epic --has-metadata-key=branch --limit=0) || unread "the beads assigned to $GC_AGENT did not list"
 printf '%s' "$ROWS" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "the beads assigned to $GC_AGENT did not parse"
 
-CADENCE=$(printf '%s' "$ROWS" | jq -r '[ .[] | select(((.metadata.merge_result // "") | tostring) as $m | $m == "pull_request" or $m == "pre_open_gate")
-  | .id + "(" + .metadata.merge_result + ")" ] | join(" ")')
-[ -z "$CADENCE" ] || echo "$PROG: leaving bead(s) the old path's cadence drives, which carry an assignee: $CADENCE" >&2
-CANDS=$(printf '%s' "$ROWS" | jq -c '[ .[] | select(((.metadata.merge_result // "") | tostring) as $m | $m != "pull_request" and $m != "pre_open_gate") ]')
-[ "$(printf '%s' "$CANDS" | jq 'length')" != 0 ] || exit 3
+[ "$(printf '%s' "$ROWS" | jq 'length')" != 0 ] || exit 3
 
 gctk=$(gctk_path) || unread "no gctk binary to read what holds the beads with"
 # judge <rows> <holds>: each row with the answer `gctk bead holds` gave for it,
@@ -86,10 +78,10 @@ judge() {
   { printf '%s\n' "$1"; printf '%s\n' "$2"; } | jq -sc '.[0] as $c | (.[1:] | map({key: .id, value: .}) | from_entries) as $h
     | if all($c[]; $h[.id] != null and $h[.id].error == null) then [ $c[] | . + {holds: $h[.id]} ] else empty end' 2>/dev/null
 }
-IDS=$(printf '%s' "$CANDS" | jq -r '.[].id')
+IDS=$(printf '%s' "$ROWS" | jq -r '.[].id')
 # shellcheck disable=SC2086  # one argument per bead id
 HOLDS=$("$gctk" bead holds $IDS </dev/null 2>/dev/null) || unread "gctk bead holds did not answer for every bead"
-JUDGED=$(judge "$CANDS" "$HOLDS")
+JUDGED=$(judge "$ROWS" "$HOLDS")
 printf '%s' "$JUDGED" | jq -e 'type == "array"' >/dev/null 2>&1 || unread "gctk bead holds did not answer for every bead"
 
 # The open beads on each bead's branch, read once per branch.

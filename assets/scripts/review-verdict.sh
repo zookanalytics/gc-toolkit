@@ -5,11 +5,7 @@
 #
 # Sourced (never executed) by each shell script that acts on a PR's approval.
 # One definition, no copies: review-verdict.test.sh lists those readers and
-# fails when one stops sourcing this file or carries a rule of its own. gctk
-# merge (services/gctk/internal/cli/merge.go, reviewVerdict) states the same
-# rule natively for the universal approval merge rule and the visit order that
-# predicts it, and merge.test.sh runs both over the same review histories and
-# fails when their verdicts differ.
+# fails when one stops sourcing this file or carries a rule of its own.
 #
 # The input is a list of reviews in the REST shape that
 # `GET /repos/{owner}/{repo}/pulls/{n}/reviews` returns: `.user.login`,

@@ -18,7 +18,7 @@
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
 # its own error rather than being buried beside an intended disable.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
-# the one this checkout describes: lifecycle.sh and merge.sh exec it and have
+# the one this checkout describes: lifecycle.sh and epic.sh exec it and have
 # no other implementation, and orders that fire on schedule can still be
 # running logic several commits old. A fourth asks whether flock(1) resolves,
 # since refinery-reconcile's pass lock needs it.
@@ -300,8 +300,8 @@ done <<< "$order_rows"
 # see it, and the board's PACK row is where a persistent one shows up.
 #
 # A MISSING binary is an error, like an order that never runs: lifecycle.sh and
-# merge.sh have nothing else to exec, so every lifecycle transition and every
-# merge pass is refused until the gctk-build order publishes one.
+# epic.sh have nothing else to exec, so every lifecycle write and every epic the
+# work skill files is refused until the gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -326,7 +326,7 @@ tree_rev=$(gctk_identity HEAD)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
 elif [ ! -x "$gctk_bin" ]; then
-    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and merge.sh exec it and have no other implementation, so every lifecycle transition and every merge pass is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and epic.sh exec it and have no other implementation, so every lifecycle write and every epic the work skill files is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's gctk revision (\`git -C $dir ls-tree HEAD -- go.mod go.sum services/gctk\`) — the deployed binary cannot be compared against it")
 else

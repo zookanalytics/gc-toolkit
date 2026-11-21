@@ -2,81 +2,43 @@
 # converse-rework.sh — an operator ruling's entry to rework. A converse sitting
 # can reach a ruling that changes what an already-published PR's branch must
 # contain, while the PR still reads review-ready against a head that predates the
-# ruling. This files the fix unit a review verdict would file, through
-# rework-child.sh, the one writer of a rework child, with the conversation the
-# ruling was reached in as its provenance (source_ruling_bead).
-#
-# What is the ruling's own to decide is decided here: the anchor must be an open
-# PR, the child resumes the anchor's own branch and lands where the anchor lands,
-# and its rejection_reason carries the ruling. Resuming the branch keeps the PR
-# and its history, which closing the PR and re-pouring would discard. A ruling
-# whose change the sitting does not make itself, on the branch of a PR on the
-# pending record with the operator (`gctk pr push`), changes an open PR through
-# this rework, which a polecat runs, or through the ask below
-# (docs/authority-map.md).
-#
-# On Gas Town's pending record (merge_result pull_request_pending or
-# pull_request_head_changed) the PR's branch has one worker, its review run
+# ruling. A PR on Gas Town's pending record (merge_result pull_request_pending or
+# pull_request_head_changed) has one worker on its branch, its review run
 # (specs/tk-1tfzr71.108/design.md, section 1), so the ruling goes to the run as
-# an ask (`gctk review ask`) instead: the ruling as its reason, the conversation
-# as its source, the checks the ruling names (--check), which the run picks at
-# the first head it judges once it can take the ask, and each bead the ruling
-# waits for (--waiting-on), which holds the ask from the create that files it
-# until that bead closes. The run applies the ruling as ruled and triages the
-# head its fix pushes, so nothing is superseded and no rework child is filed. A
-# re-run of the same ruling finds the ask the first filed, open or closed, by
-# its source and reason, and files nothing.
-#
-# A ruling has no lane of its own. Like a human feedback batch the validator rules
-# not converged, it is operator input the whole diff was never reviewed against,
-# so once the child is filed every lane the anchor declares returns to
-# unreviewed (review-outcome.sh supersede-anchor). The child's blocks edge holds
-# the merge and gate-ensure's quiescence holds every review dispatch while it is
-# open; when it lands, each lane is re-reviewed at the new head. Without this,
-# the reviews of the pre-ruling head would keep every lane green, and the merge
-# would pass on content no review read. Two backings outlast the supersede, as
-# docs/state-machine.md states: a review already in flight when the ruling is
-# filed, and an operator's GitHub approval.
+# an ask (`gctk review ask`): the ruling as its reason, the conversation as its
+# source, the checks the ruling names (--check), which the run picks at the
+# first head it judges once it can take the ask, and each bead the ruling waits
+# for (--waiting-on), which holds the ask from the create that files it until
+# that bead closes. The run applies the ruling as ruled and triages the head its
+# fix pushes. A re-run of the same ruling finds the ask the first filed, open or
+# closed, by its source and reason, and files nothing. A ruling whose change the
+# sitting makes itself, on the branch with the operator, goes through
+# `gctk pr push` instead (docs/authority-map.md).
 #
 # Usage:
 #   converse-rework.sh --anchor <anchor-bead> --ruling-bead <conversation> \
-#     --ruling "<the ruling, one line>" [--pool <pool-name>] [--check <check>]... \
+#     --ruling "<the ruling, one line>" [--check <check>]... \
 #     [--waiting-on <bead>]...
 #   The anchor must be an open PR: live in the store, at merge_result
-#   pull_request or, on the pending record, pull_request_pending or
-#   pull_request_head_changed, carrying no disposition (gc.pr_close_disposition_kind
-#   or a duplicates or supersedes edge onto a successor), and naming its branch,
-#   its landing target and its PR.
-#   Its rig checkout, the one its id prefix names in `gc rig list`, must resolve,
-#   and its branch's head must read from that checkout's origin, since the lanes
-#   the supersede returns to unreviewed are resolved at that commit, in that
-#   checkout.
-#   --ruling-bead is the conversation the ruling was reached in. While a rework
-#   it filed for another ruling is open, this ruling is refused. --pool defaults
-#   to rework-child.sh's default.
+#   pull_request_pending or pull_request_head_changed on the pending record,
+#   carrying no disposition (gc.pr_close_disposition_kind or a duplicates or
+#   supersedes edge onto a successor), and naming its branch, its landing
+#   target and its PR.
+#   --ruling-bead is the conversation the ruling was reached in.
 #   --check names a check the ruling sends back, once per check, from the
-#   check index: an ask carries it, so it applies only to a PR on the pending
-#   record, and the old path refuses it.
+#   check index.
 #   --waiting-on names a bead the ruling's ask waits on, once per bead, such as
 #   the anchor of another PR that must land first, carrying the anchor's id
 #   prefix.
-#   It applies only to a PR on the pending record, and the old path, whose
-#   rework child is sent the moment it is filed, refuses it.
-# Output: rework-child.sh's result line, "<child> <route> <filed|adopted|in-flight>",
-#   or on the pending record "<ask> ask <filed|found>".
-# Exit: rework-child.sh's when it does not dispatch the child. Otherwise 0 once
-#   every lane is back to unreviewed, and 2 when that supersede fails: the child
-#   stands dispatched, and a re-run adopts it and retries the supersede. On the
-#   pending record, 0 once the ask stands, filed or found, and 2 when it was
-#   refused or did not answer. A refusal here, before the writer runs, exits 2
-#   with nothing written.
+# Output: "<ask> ask <filed|found>".
+# Exit: 0 once the ask stands, filed or found, and 2 when it was refused or did
+#   not answer. A refusal here, before the ask is filed, exits 2 with nothing
+#   written.
 set -u
 
 _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 2; }
-# shellcheck source=git-lib.sh
-. "$_lib_dir/git-lib.sh" || { echo "cannot source git-lib.sh beside this script" >&2; exit 2; }
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
 # The ask a ruling files on the pending record is gctk's, from the binary the
 # city builds.
@@ -87,13 +49,12 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 DIE_STATUS=2
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-ANCHOR=""; RULING_BEAD=""; RULING=""; POOL_NAME=""; CHECKS=(); WAITS=()
+ANCHOR=""; RULING_BEAD=""; RULING=""; CHECKS=(); WAITS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --anchor)      shift; [ $# -gt 0 ] || die "--anchor needs a value"; ANCHOR="$1" ;;
     --ruling-bead) shift; [ $# -gt 0 ] || die "--ruling-bead needs a value"; RULING_BEAD="$1" ;;
     --ruling)      shift; [ $# -gt 0 ] || die "--ruling needs a value"; RULING="$1" ;;
-    --pool)        shift; [ $# -gt 0 ] || die "--pool needs a value"; POOL_NAME="$1" ;;
     --check)       shift; [ $# -gt 0 ] || die "--check needs a check's name"; CHECKS+=("$1") ;;
     --waiting-on)  shift; [ -n "${1:-}" ] || die "--waiting-on needs a bead id"; WAITS+=("$1") ;;
     -h|--help)     sed -n '2,/^set -u$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -114,8 +75,8 @@ printf '%s' "$ANCHOR_ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>
 # A ruling on an anchor in any other state reaches it by another route (a pre-PR
 # hold, a dispose), so no child is filed against a non-PR anchor. merge_result
 # alone does not prove the PR open: a hand-closed anchor keeps the field, and an
-# anchor pr-dispose.sh has disposed sits at pull_request with its PR already
-# closed until pr-facts.sh consummates the close. A child filed on either would
+# anchor pr-dispose.sh has disposed keeps its record with its PR already closed
+# until the landing order consummates the close. A child filed on either would
 # block a bead on its way to closed and send a worker to a branch whose PR is
 # gone. So the anchor must also be live and carry no disposition.
 STATUS=$(printf '%s' "$ANCHOR_ROW" | jq -r '(.[0].status // "") | tostring | ascii_downcase' 2>/dev/null)
@@ -125,8 +86,8 @@ case ",$LIVE_STATUSES," in
 esac
 MERGE_RESULT=$(row_meta "$ANCHOR_ROW" merge_result)
 case "$MERGE_RESULT" in
-  pull_request|pull_request_pending|pull_request_head_changed) : ;;
-  *) die "anchor $ANCHOR is merge_result='${MERGE_RESULT:-unset}', not an open PR's (pull_request, pull_request_pending or pull_request_head_changed); the ruling-rework path applies only to an open PR" ;;
+  pull_request_pending|pull_request_head_changed) : ;;
+  *) die "anchor $ANCHOR is merge_result='${MERGE_RESULT:-unset}', not an open PR's (pull_request_pending or pull_request_head_changed); the ruling-rework path applies only to an open PR" ;;
 esac
 DISPOSITION=$(row_meta "$ANCHOR_ROW" gc.pr_close_disposition_kind)
 [ -z "$DISPOSITION" ] \
@@ -135,104 +96,32 @@ SUCCESSOR=$(printf '%s' "$ANCHOR_ROW" | jq -r "$DISPOSITION_JQ"'.[0] | disposed_
 [ -z "$SUCCESSOR" ] \
   || die "anchor $ANCHOR is superseded by $SUCCESSOR (its disposition edge names it); nothing filed"
 
-# branch is authoritative for the resume: mol-polecat-work checks it out and never
-# cuts a new one.
 BRANCH=$(row_meta "$ANCHOR_ROW" branch)
 [ -n "$BRANCH" ] || die "anchor $ANCHOR names no branch; cannot resume it"
 TARGET=$(row_meta "$ANCHOR_ROW" merged_target)
 [ -n "$TARGET" ] || TARGET=$(row_meta "$ANCHOR_ROW" target)
 [ -n "$TARGET" ] || die "anchor $ANCHOR names no landing target (merged_target and target both empty)"
 # The script's contract is an open PR, and an anchor that names no PR is not
-# one. The URL also rides the child as existing_pr, which the refinery's
-# merge-push checks (open, on this branch, toward this target) before it closes
-# the child as landed, so a PR closed while the rework ran blocks the child for a
-# person rather than taking its landing.
+# one.
 PR_URL=$(row_meta "$ANCHOR_ROW" existing_pr)
 [ -n "$PR_URL" ] || PR_URL=$(row_meta "$ANCHOR_ROW" pr_url)
 [ -n "$PR_URL" ] || die "anchor $ANCHOR names no PR (existing_pr and pr_url both empty), so it is not an open PR; nothing filed"
-PR_NUMBER=$(row_meta "$ANCHOR_ROW" pr_number)
 REASON="operator ruling (conversation $RULING_BEAD): $RULING"
 
-case "$MERGE_RESULT" in
-  pull_request_pending|pull_request_head_changed)
-    ASK_ARGS=(review ask "$ANCHOR" --reason "$REASON" --source "$RULING_BEAD")
-    for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do ASK_ARGS+=(--check "$c"); done
-    for w in "${WAITS[@]+"${WAITS[@]}"}"; do ASK_ARGS+=(--waiting-on "$w"); done
-    # The checks --check names are read from the pack's check index beside
-    # the pack's scripts directory, this script's own, whatever binding the rig
-    # imports the pack under.
-    ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1); rc=$?
-    case "$rc" in
-      0) ;;
-      1) die "gctk review ask did not take the arguments of the ask that would carry the ruling to $ANCHOR's review run, and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
-      3) die "gctk review ask refused the ask that would carry the ruling to $ANCHOR's review run and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
-      *) die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed" ;;
-    esac
-    read -r ASK HOW _ <<< "$(printf '%s\n' "$ASK_OUT" | tail -n 1)"
-    [ -n "$ASK" ] || die "gctk review ask named no ask for $ANCHOR; a re-run finds one that landed"
-    echo "converse-rework: the ruling goes to the review run of $ANCHOR's PR as ask $ASK, which holds its merge; nothing is superseded, because the run triages the head its fix pushes" >&2
-    printf '%s ask %s\n' "$ASK" "$HOW"
-    exit 0 ;;
+ASK_ARGS=(review ask "$ANCHOR" --reason "$REASON" --source "$RULING_BEAD")
+for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do ASK_ARGS+=(--check "$c"); done
+for w in "${WAITS[@]+"${WAITS[@]}"}"; do ASK_ARGS+=(--waiting-on "$w"); done
+# The checks --check names are read from the pack's check index beside the
+# pack's scripts directory, this script's own, whatever binding the rig imports
+# the pack under.
+ASK_OUT=$(GCTK_SCRIPTS_DIR="$SCRIPT_DIR" "$GCTK" "${ASK_ARGS[@]}" 2>&1); rc=$?
+case "$rc" in
+  0) ;;
+  1) die "gctk review ask did not take the arguments of the ask that would carry the ruling to $ANCHOR's review run, and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
+  3) die "gctk review ask refused the ask that would carry the ruling to $ANCHOR's review run and filed nothing ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' '))" ;;
+  *) die "the ask that carries the ruling to $ANCHOR's review run did not stand ($(printf '%s' "$ASK_OUT" | tr -s '[:space:]' ' ')); a re-run finds one that landed" ;;
 esac
-[ "${#CHECKS[@]}" -eq 0 ] \
-  || die "--check names the checks an ask sends back, and $ANCHOR is on the old path (merge_result $MERGE_RESULT), where every lane returns to unreviewed instead; re-run without --check"
-[ "${#WAITS[@]}" -eq 0 ] \
-  || die "--waiting-on names a bead the ruling's ask waits on, and $ANCHOR is on the old path (merge_result $MERGE_RESULT), whose rework child is sent the moment it is filed and cannot wait; nothing filed"
-# The anchor's rig checkout. Its branch lives on that checkout's origin and its
-# check index is that checkout's, while a sitting runs from the city or another
-# rig's checkout, so the head is read and the lanes are resolved there.
-RIG_ROOT=$("$SCRIPT_DIR/bead-store.sh" --path "$ANCHOR") || RIG_ROOT=""
-{ [ -n "$RIG_ROOT" ] && git -C "$RIG_ROOT" rev-parse --git-dir >/dev/null 2>&1; } \
-  || die "anchor $ANCHOR's rig checkout did not resolve to a repository (bead-store.sh --path $ANCHOR), so its branch head cannot be read; nothing filed"
-# The commit the ruling judged, which the supersede below resolves the anchor's
-# lanes at: the head of its branch on that checkout's origin, read through
-# git-lib.sh. Read before anything is filed, so a head that does not read
-# refuses with nothing written rather than leave a dispatched child beside lanes
-# still green.
-HEAD_OID=$(remote_branch_head "$RIG_ROOT" "$BRANCH")
-[ -n "$HEAD_OID" ] || die "the head of $ANCHOR's branch $BRANCH did not read from origin in $RIG_ROOT (git ls-remote), so no commit names the lanes the ruling returns to unreviewed; nothing filed"
-
-if [ -n "$PR_NUMBER" ]; then
-  TITLE="Rework PR#$PR_NUMBER: apply operator ruling"
-else
-  TITLE="Rework branch $BRANCH: apply operator ruling"
-fi
-
-# A conversation can rule more than once: on a turn that does not sign off
-# (converse-signoff.sh --answer), and again at its sign-off. Its rework children
-# share one source key, and the writer adopts the live one with the work order
-# it was filed with, which is right for a re-run of the same ruling. A live child
-# that records another reason would carry that reason to the branch and never
-# this ruling, so the filing is refused, with nothing written.
-PRIOR=$(bd_list --metadata-field "source_ruling_bead=$RULING_BEAD" --status="$LIVE_STATUSES") \
-  || die "could not read the live rework children of conversation $RULING_BEAD; nothing filed"
-OTHER=$(printf '%s' "$PRIOR" | jq -r --arg v "$RULING_BEAD" --arg a "$ANCHOR" --arg r "$REASON" '
-    [ .[]? | select(((.metadata.source_ruling_bead // "") | tostring) == $v)
-           | select(((.metadata.anchor_bead // "") | tostring) as $on | $on == $a or $on == "")
-           | ((.metadata.rejection_reason // "") | tostring) as $was
-           | select($was != "" and $was != $r)
-           | "\(.id), which records \"\($was)\"" ] | first // empty' 2>/dev/null)
-[ -z "$OTHER" ] \
-  || die "conversation $RULING_BEAD already has an open rework, $OTHER. It keeps the work order it was filed with, so this ruling would not reach the branch; nothing filed. A ruling that asks nothing of the branch beyond that rework takes --no-rework. One that asks for more waits for that rework to land: keep the gate it answers open, and re-run once the rework has closed"
-
-ARGS=(--anchor "$ANCHOR" --ruling-bead "$RULING_BEAD" --branch "$BRANCH" --target "$TARGET"
-      --title "$TITLE" --reason "$REASON"
-      --pr-url "$PR_URL")
-[ -z "$PR_NUMBER" ] || ARGS+=(--pr-number "$PR_NUMBER")
-[ -z "$POOL_NAME" ] || ARGS+=(--pool "$POOL_NAME")
-FILED=$("$SCRIPT_DIR/rework-child.sh" "${ARGS[@]}"); rc=$?
-[ "$rc" -eq 0 ] || exit "$rc"
-read -r CHILD _ <<< "$FILED"
-
-# Run on every filing, an adopted or in-flight child's included, so a re-run
-# finishes a supersede an earlier run did not. It is idempotent: a lane whose
-# reviews are already superseded has nothing left to retire. It runs in the
-# rig checkout, with GC_RIG_ROOT naming it, so the resolver reads the lanes at
-# HEAD_OID there.
-if ! RETIRED=$(cd "$RIG_ROOT" && GC_RIG_ROOT="$RIG_ROOT" "$SCRIPT_DIR/review-outcome.sh" supersede-anchor --anchor "$ANCHOR" --oid "$HEAD_OID" \
-       --by "operator ruling (conversation $RULING_BEAD)" \
-       --reason "rework $CHILD changes what the branch must contain; every lane re-reviews it once it lands"); then
-  die "rework $CHILD is dispatched, but the review lanes on $ANCHOR did not return to unreviewed (review-outcome.sh supersede-anchor failed), so its landing would read green on reviews of the branch before the ruling. Re-run: the writer adopts $CHILD and the supersede retries"
-fi
-echo "converse-rework: returned $ANCHOR's lanes to unreviewed ($RETIRED standing review(s) superseded); each is re-reviewed once $CHILD lands" >&2
-printf '%s\n' "$FILED"
+read -r ASK HOW _ <<< "$(printf '%s\n' "$ASK_OUT" | tail -n 1)"
+[ -n "$ASK" ] || die "gctk review ask named no ask for $ANCHOR; a re-run finds one that landed"
+echo "converse-rework: the ruling goes to the review run of $ANCHOR's PR as ask $ASK, which holds its merge; nothing is superseded, because the run triages the head its fix pushes" >&2
+printf '%s ask %s\n' "$ASK" "$HOW"

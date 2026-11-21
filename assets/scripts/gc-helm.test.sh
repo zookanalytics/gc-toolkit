@@ -13,7 +13,7 @@
 #   a claim a live session holds is kept: the headline alone, a nudge to its
 #     holder and exit 4, while a gone holder's or this session's is released
 #   --route through gc sling once the run has ended, and the refusal of a route
-#     or an assignee on a detached anchor and of a route beside a named wait
+#     beside a named wait
 #   --waiting-on edges, and the refusal of a wait in another store
 #   the ≤140-codepoint length gate
 #   the retired board verb refuses and names helm-svc board
@@ -638,8 +638,8 @@ grep -q -- '--set-metadata gc.takeaway=no edges here' "$TMP/updates" \
 # A landed rider both rode A's branch (X.branch == A.branch) and has already put
 # its work there, proven by a post-push state: X closed (merged), or handed off
 # to the refinery. Then A's own merge is what lands X, and an edge would gate
-# that merge on work that merges WITH A — merge.sh's dep-edge lane holds on it
-# with no release and the PR wedges forever. So a landed rider is written as NO
+# that merge on work that merges WITH A — the landing order's evaluator holds
+# the merge on that wait with no release and the PR wedges forever. So a landed rider is written as NO
 # edge, and when every wait is one the sitting is stamped settled (I1: no held
 # marker without an edge). Same branch WITHOUT the landing proof is not that
 # case: metadata.branch is set at workspace-setup, before X pushes, so a
@@ -1364,8 +1364,6 @@ mv "$TMP/assignees.orig" "$TMP/assignees"
 #   (GONE)       a claim whose holder the list does not name is released in the
 #                park's one guarded write
 #   (MINE)       this session's own claim is released with no session list read
-#   (DETACHED)   --route and --assign are refused on a detached anchor before
-#                any write, and --release alone still lands
 #   (NAMEDWAIT)  a --route beside a named wait that is open and no human gate,
 #                or whose row does not read, is refused before any write; one
 #                onto a human gate or a closed bead still routes
@@ -1504,25 +1502,6 @@ GC_AGENT=gc-toolkit.mechanik FAKE_SESSIONS_RC=1 sh "$SCRIPT" takeaway A-MINE2 "r
    --release --no-wait >/dev/null 2>&1 || MNRC=$?
 eq "$MNRC" "0" "(MINE) …and so is a named agent's, under its agent address"
 mv "$TMP/assignees.gone" "$TMP/assignees"; : > "$TMP/statuses"; : > "$TMP/sessions"
-
-# (DETACHED) the merge cadence drives an anchor in pre_open_gate or pull_request.
-printf 'A-DETPR|pull_request\nA-DETPRE|pre_open_gate\n' > "$TMP/merge"
-: > "$TMP/updates"; : > "$TMP/slings"
-DTRC=0
-sh "$SCRIPT" takeaway A-DETPR "routed" --release --route "$POOL" >/dev/null 2>"$TMP/dterr" || DTRC=$?
-eq "$DTRC" "2" "(DETACHED) --route on an anchor in pull_request is refused"
-eq "$(grep -c . "$TMP/updates" || true)|$(grep -c . "$TMP/slings" || true)" "0|0" "(DETACHED) …before anything is written"
-grep -q 'merge_result is pull_request' "$TMP/dterr" \
-  && ok "(DETACHED) …naming the state" || bad "(DETACHED) the state is unnamed (stderr: $(cat "$TMP/dterr"))"
-DTRC=0
-sh "$SCRIPT" takeaway A-DETPRE "assigned" --release --assign gc-toolkit.mechanik --no-wait >/dev/null 2>&1 || DTRC=$?
-eq "$DTRC|$(grep -c . "$TMP/updates" || true)" "2|0" "(DETACHED) --assign on an anchor at its pre-open gate is refused too, before any write"
-DTRC=0
-sh "$SCRIPT" takeaway A-DETPR "stopped" --release --no-wait >/dev/null 2>&1 || DTRC=$?
-eq "$DTRC" "0" "(DETACHED) --release alone on a detached anchor still lands"
-grep -qE '^bd update A-DETPR .*--status=open' "$TMP/updates" \
-  && ok "(DETACHED) …with its park" || bad "(DETACHED) the park was lost: $(cat "$TMP/updates")"
-: > "$TMP/merge"
 
 # (RECORD) a bead whose PR waits on the pending record is assigned to nobody
 # while the landing order works it, so --release, which would leave the order

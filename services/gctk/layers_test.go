@@ -56,7 +56,6 @@ var pkgLayer = map[string]struct {
 	"internal/claudecode":      {adapter, "claude"},
 	"internal/claudecode/fake": {adapter, "claude"},
 	"internal/ledger":          {layer: theLedger},
-	"internal/lifecycle":       {layer: domain},
 	"internal/rig":             {layer: domain},
 	"arm":                      {layer: domain},
 	"arm/record":               {layer: domain},

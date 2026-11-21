@@ -525,14 +525,6 @@ first. Either way the change is a decision on the record, not a drift.
 Each entry is a place where what is built falls short of the sections above,
 why a reader must know it, and the work that retires it.
 
-- **The pack still merges each PR itself, and closes on its own record.** Until
-  a rig's cutover, the pack merges that rig's PRs under its own approval rule,
-  takes a PR open on a work bead's branch whoever opened it, keeps its own
-  record of an open PR, and checks each landing write against its transition
-  machine, so steps 6 to 8 are not what runs there today. Each rig's cutover
-  bead moves the rig onto the pending record, along with a sitting's
-  retirement of one (tk-1tfzr71.89). The retirement bead (tk-1tfzr71.70), which
-  waits on every cutover, deletes the old path once no open bead is on it.
 - **The agents' board derives a pending PR's status by another rule.**
   `helm-svc board` phases a PR on the pending record with the old path's rule
   over the keys its beads source reads, so its phase can differ from the PR's
@@ -552,14 +544,9 @@ why a reader must know it, and the work that retires it.
 - **The board lists no mailbox yet.** It neither reads Gas City's `human`
   mailbox nor archives a message in it, so no message there reaches the
   operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
-- **A PR's checks still run as review beads.** Until a rig's cutover, the merge
-  cadence sends each check on a PR there out as a review bead, `signoff.sh`
-  records its verdict and files its findings, and a validation pass rules them
-  for a rework child to fix, so step 7 is not what runs there, and a ruling
-  that changes such a PR's branch files a rework child where a sitting on the
-  pending record edits the branch itself. On that path a
-  check no index declares is approved with `--needs-you`, so the operator
-  decides whether it stays in the anchor's `check_set`. Each rig's cutover bead
-  moves the rig onto the review run, and the retirement bead (tk-1tfzr71.122)
-  deletes the old path once every rig has moved and the GitHub intake
+- **The old review path's code still runs.** The merge cadence still runs the
+  old review path beside the review run
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
+  PR is on it, so step 7 is not yet the one review path in the code. The
+  retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
   (tk-1tfzr71.21) has landed.
