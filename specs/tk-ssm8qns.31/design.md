@@ -33,7 +33,10 @@ it.
 Each row is one ruling, and you can take or refuse each one alone. Approving the
 design as it stands takes every recommendation, and refusing a row takes the
 other way it names. You ruled rows 6a to 6c in conversation tk-fp92h81 on
-2026-11-19, and what they send is filed: section 6 names each bead.
+2026-11-19, and what they send is filed: section 6 names each bead. After you
+approved the design, you ruled in conversation tk-6rrf9w5 on 2026-11-21 that
+the pool question rows 3a and 3b kept comes out, which departs from both rows.
+Section 3 quotes that ruling and says what the effort built in their place.
 
 | # | The finding | Recommended | What approving it ships | The other way |
 |---|---|---|---|---|
@@ -41,8 +44,8 @@ other way it names. You ruled rows 6a to 6c in conversation tk-fp92h81 on
 | 1b | Each sweep reads the city's roster, 2.5 MB, before it knows whether it has anything to sling | Ask about the pool only once a candidate exists | About 0.9 GB a day less read across the four rigs that sweep while passes find nothing, with the same slings | Keep reading the roster on every pass |
 | 1c | Each check reads the store's whole blocked set, 2.8 MB, to learn what holds one bead | Ask bd for a blocked read of named beads, and change no code now | One ask, which you send or drop | Copy bd's blocked rule into gctk, which must then follow every change bd makes to it |
 | 2 | The recommend exit, the only setter of the key your Accept takes, unused since 2026-10-13 | Keep it, and leave its future to the board's easy-approvals epic | Nothing changes | Retire the exit with the key, Accept, a sitting's invalidation and the sign-off's accept |
-| 3a | The pool rule reads Gas City's "no cap", -1, as a pool that runs no sessions | Read only a cap of 0 that way | A route to an uncapped pool is no longer refused | Keep refusing routes to 49 of the city's 135 agents |
-| 3b | `gctk reaction deliverable` works out from the roster what `gc sling`'s dry run reports | Ask the dry run wherever a bead is in hand | Gas City's own preview of the sling, in place of gctk's copy of its rule, with the dry run's time measured first and stated in the effort's summary. A process that sets `GC_SUSPENDED=1` then reads a pool the city has not suspended as able to take work, as the sling does | Keep gctk's copy of the rule, with 3a's fix |
+| 3a | The pool rule reads Gas City's "no cap", -1, as a pool that runs no sessions | Read only a cap of 0 that way | A route to an uncapped pool is no longer refused. Ruled out after approval, with the question it fixed (section 3) | Keep refusing routes to 49 of the city's 135 agents |
+| 3b | `gctk reaction deliverable` works out from the roster what `gc sling`'s dry run reports | Ask the dry run wherever a bead is in hand | Gas City's own preview of the sling, in place of gctk's copy of its rule, with the dry run's time measured first and stated in the effort's summary. A process that sets `GC_SUSPENDED=1` then reads a pool the city has not suspended as able to take work, as the sling does. Ruled out after approval: no sender asks the question (section 3) | Keep gctk's copy of the rule, with 3a's fix |
 | 4 | How work reaches an interactive agent such as the mechanik | Design it as a bead under Steer work by epic, the epic that owns placement | A design bead there, and none of its design here | An epic of its own, or another home you name |
 | 5a | One exit code per kind of refusal, though no caller acts differently on them | Leave it to the parked reaction redesign, whose target 2 removes the codes | A note on that bead | Collapse the codes now, in the five places that read them |
 | 5b | "May this bead take a reaction" is asked at four points under two rules, and in one case the check and the sling disagree | Leave it to the same redesign, whose target 1 moves the question to the offer path | A note on that bead | Make the check apply the sling's rule exactly now |
@@ -294,6 +297,34 @@ this design's measurements ran nothing that slings. Unit 2 times the call before
 it builds on it, and the effort's summary states the figure beside the roster
 read's 0.15 s, so you see the cost before the effort reaches main (section 7).
 The other way keeps gctk's rule, with 3a's fix.
+
+### The ruling after approval: no pool question
+
+You approved the design with 3a and 3b as recommended, and the effort built
+3b. On the built PR, in conversation tk-6rrf9w5 on 2026-11-21, you ruled the
+question out, in your words:
+
+> So PR origianl behavior: If we suspend or disable a pool in a rig, do not send there.
+> Proposed behavior: send to a pool that is the proper pool regardless of whether it has workers, etc.
+>
+> If that's it, the latter is fine, it should go to the proper pool. If we disable a pool, something else should detect that something is routed there and figure out how to surface or handle it.
+>
+> A bad route, like a non-existant pool is different, imho.
+
+So no sender asks whether a pool runs. Your intake, a patrol finding's filing,
+the sweep and the dispose's route, closer and `--then-route` send work to its
+proper pool whether or not that pool runs, where it waits until the pool does.
+`gctk reaction deliverable`, the pool rule and the adapter's dry run of a sling
+are removed, and 3a's comparison is not built, since the rule it fixed is gone.
+A bad route still fails, where the sender makes it: gc sling refuses a target
+the city configures no agent for and a route into a store the target does not
+read, before it writes anything (the target's resolution in `cmdSlingWithJSON`,
+`cmd/gc/cmd_sling.go`, and `preflight`, `internal/sling/sling_core.go`, at
+upstream main 781c975d79), and the arm refuses a `--then-route` whose default
+formula does not read. Your words put noticing work that waits at a pool that
+does not run with something other than the sender, and nothing here builds it.
+The rest of the design stands as approved, 1b's order of the sweep's reads among
+it: with the question gone, the sweep reads no roster on any pass.
 
 ## 4. How work reaches an interactive agent
 
