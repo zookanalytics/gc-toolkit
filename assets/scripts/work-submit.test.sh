@@ -673,13 +673,6 @@ prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 submit -- --convoy cv-1 --base main --notes n --anchor "" --title "T"
 eq "$(field title)" "T" "(29b) an empty --anchor names none: the claimed bead is the anchor"
 
-REBUILD='[{"id":"tk-cv","status":"open","issue_type":"convoy","metadata":{"branch":"integration/x"}}]'
-prepare integration/x '{"branch":"integration/x","task_kind":"rework","anchor_bead":"tk-cv"}' "$REBUILD"
-submit -- --anchor-only --convoy cv-1
-has "$OUT" "anchor: tk-cv" "(30) a rebuild child's anchor is the convoy it names"
-prepare integration/x '{"branch":"integration/x","task_kind":"rework","anchor_bead":"tk-cv","source_review_bead":"tk-r"}' "$REBUILD"
-submit -- --anchor-only --convoy cv-1
-has "$OUT" "none other" "(30b) a review's rework never anchors the convoy"
 prepare polecat/tk-a '{"branch":"polecat/tk-a","anchor_bead":"tk-a"}' "$ANCHOR_ROW"
 submit STUB_LIST_FAIL=1 -- --anchor-only --convoy cv-1
 has "$OUT" "could not list the branch's beads" "(31) a list that fails says so"

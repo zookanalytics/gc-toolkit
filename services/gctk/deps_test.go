@@ -13,17 +13,19 @@ import (
 
 // gctkModules are the modules gctk's code may import besides the standard
 // library and gctk itself: cobra, the modules cobra requires that gctk's build
-// compiles, and go-toml, which requires none and reads the name and prefix a
-// city's .gc/site.toml binds. gctk shares the repository's one Go module with
-// the board, whose go.mod also requires the beads store library and its cgo, so
-// this list is what keeps the board's dependencies out of gctk: a build of gctk
-// alone downloads cobra, pflag and go-toml and nothing else. A module gctk
+// compiles, go-toml, which requires none and reads the name and prefix a city's
+// .gc/site.toml binds, and x/sys, whose unix package gctk memory and its Claude
+// Code adapter call. gctk shares the repository's one Go module with the board,
+// whose go.mod also requires the beads store library and its cgo, so this list
+// is what keeps the board's dependencies out of gctk: a build of gctk alone
+// downloads cobra, pflag, go-toml and x/sys and nothing else. A module gctk
 // starts to import is added here in the change that imports it.
 var gctkModules = []string{
 	"github.com/spf13/cobra",
 	"github.com/spf13/pflag",
 	"github.com/inconshreveable/mousetrap",
 	"github.com/pelletier/go-toml/v2",
+	"golang.org/x/sys",
 }
 
 func TestImportsStayInsideGctksModules(t *testing.T) {

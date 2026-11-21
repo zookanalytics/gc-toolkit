@@ -134,7 +134,7 @@ route a person gave an anchor.
 | handed_off → pull_request_pending | `refinery-publish.sh`, the refinery's merge-push step for the `mr` strategy, through `gctk pr record` | the PR is published at the prepared head ([The pending record](#the-pending-record)) |
 | handed_off → blocked | the refinery's parks, one `gc bd update` guarded on the assignee, after the park's human gate: `refinery-prep.sh`, `refinery-land.sh`, `refinery-publish.sh` | a target or branch origin does not carry, a `merge_strategy` the refinery does not land, a recorded PR it cannot reuse, or a PR another account opened; the bead stays assigned to the refinery, and clearing the gate hands it back |
 | handed_off → refused_false_completion | `refinery-land.sh`'s park, as above | the zero-diff check found no change on the handed-off branch, and the target carries no `direct_landing_sha` stamp |
-| handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`) and is not a convoy: one write guarded on the assignee and status reopens it unassigned with `rejection_reason` and clears the `merge_result` and `blocked_reason` a park or a half-written record left, and `gc sling` pours `mol-polecat-work` on it, keeping its branch and the PR it may reuse |
+| handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`): one write guarded on the assignee and status reopens it unassigned with `rejection_reason` and clears the `merge_result` and `blocked_reason` a park or a half-written record left, and `gc sling` pours `mol-polecat-work` on it, keeping its branch and the PR it may reuse |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 
 A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
@@ -1091,20 +1091,9 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   the ask holding its merge. A record that does not land for any other reason
   also leaves the ask holding the merge, and files a human gate keyed
   `refinery-requeue-failed` on the bead, which names the record to write by
-  hand. A convoy, such as a
-  graduation's anchor, is never poured, because a run poured onto a convoy works
-  on the beads it tracks, so it comes back as a rework child instead: a task on
-  the same branch that carries the reason and blocks the bead, which stays
-  assigned to the refinery, since the refinery still works it: the child's
-  hand-back publishes on it. A child whose settle or sling fails is armed,
-  and the deferred-dispatch order sends it on. A child a run filed and never
-  sent on, as when the run ends before its sling, holds the bead until the
-  refinery's next patrol sends it on (`refinery-lib.sh`), which comes once
-  other work wakes the refinery. The child's hand-back lands its work on the
-  branch: it records the bead's PR pending again at the new head, and a convoy
-  is the refinery's to take again once the child closes. One worker per branch: when an
-  open rework child is already on the branch, running or parked, the reason
-  goes to that child's notes and nothing else is filed.
+  hand. One worker per branch: when an open rework child is already on the
+  branch of a bead that records an open PR, running or parked, the reason goes
+  to that child's notes and nothing else is filed.
 - **Rework** (review verdict): `signoff.sh --verdict request-changes` files
   and slings exactly one rework child through `rework-child.sh`, with the
   reviewer's findings and the lane's validation pass beside it. The validator

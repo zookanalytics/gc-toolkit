@@ -376,9 +376,8 @@ facts and the landing order for the merge. A write aimed at the claimed bead
 lands, errors nowhere, and is never read.
 
 `work-submit.sh` resolves it: the open bead on this branch that carries a
-`merge_result`. While none does, a convoy's rebuild child has the convoy it
-names as its `anchor_bead` for its anchor. Write to the anchor what the
-anchor's readers read, and to your claimed bead everything else.
+`merge_result`. Write to the anchor what the anchor's readers read, and to your
+claimed bead everything else.
 
 ## Beads: what you close and what you never close
 
@@ -700,6 +699,22 @@ yours is not to filter.
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, and `"obs.source": "operator"` plus
 `"obs.endorsed": "operator"` in its metadata.
+
+
+
+## Where what you learn goes
+
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
+
+Leave out what the pack already says.
 
 
 

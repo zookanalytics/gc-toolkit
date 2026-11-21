@@ -169,4 +169,6 @@ gate on the bead it is about, through `"$(gc {{ .BindingName }} scripts-dir)/hum
 
 {{ template "where-to-search" . }}
 
+{{ template "memory-notes" . }}
+
 {{ template "operator-next-step-trailing" . }}

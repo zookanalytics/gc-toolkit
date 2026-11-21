@@ -400,8 +400,9 @@ The wrapper that provisions an agent's home stays under its warrant, because
 
 `gctk rig` runs a rig's declared checks and records each result against the
 commit it ran at, and runs a copy of the rig's UI from a checkout, which a demo
-capture records and a sitting shows the operator. The copy came after the
-baseline, so the estimate above does not weigh it.
+capture records and a sitting shows the operator. `gctk memory` keeps the
+learning loop's memory intake. The copy and the intake came after the baseline,
+so the estimate above weighs neither.
 
 The trade: a domain moves into gctk only when it survives the migration map,
 and it moves whole: the change
@@ -410,8 +411,9 @@ that ports it deletes the shell it replaces, and the PR's size line
 
 ### Feedback, config and doctrine
 
-Feedback is the miner and distiller formulas, the learning-distill skill and
-their orders, and saying each fact once is the only cut its estimate takes.
+Feedback is the miner and distiller formulas, the distiller's memory step, the
+learning-distill skill and their orders, and saying each fact once is the only
+cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
 key registry that declares only the keys of surviving warranted nouns, as data:
 1,494 of the registry's 1,854 lines are comments today. Doctrine is the shared

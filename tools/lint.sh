@@ -31,8 +31,11 @@
 #   package the diff did not name, or a toolchain whose gofmt formats
 #   differently. It checks every file of the packages it type-checks. The Go
 #   files it never sees are the ones Go itself ignores: under testdata, named
-#   with a leading _ or ., or built only for another platform. It only reports,
-#   and never rewrites a file.
+#   with a leading _ or ., or built only for a platform other than the one it
+#   runs on. On the city's host, macOS, it lints the files built only for macOS
+#   and none of those built only for Linux. The lint check on GitHub,
+#   .github/workflows/lint.yml, lints the module for both platforms. It only
+#   reports, and never rewrites a file.
 #   The version is the release .golangci-lint-version names, which the lint
 #   check on GitHub reads too. `go run` builds it from source, and Go caches the
 #   build. Run from the module, the build takes the newest of the local Go, the

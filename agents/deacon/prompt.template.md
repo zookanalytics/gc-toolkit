@@ -176,3 +176,5 @@ back to skipping it.
 {{ template "scratch-reclaim" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}

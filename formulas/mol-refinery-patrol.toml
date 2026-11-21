@@ -107,10 +107,8 @@ description = """
 ```
 It lists the beads assigned to you, open or in progress, that carry a branch,
 and leaves a bead something holds and a bead whose branch another open bead
-works on; its stderr names each one left.
-A rework child an earlier requeue filed and never sent on is neither a hold nor
-a writer, so its bead is taken, and the rebase step sends the child on. Among
-the rest it takes a rework child handed back before its anchor.
+works on; its stderr names each one left. Among the rest it takes a rework child
+handed back before its anchor.
 
 Exit 0: the one line it printed is the bead this iteration acts for. Note it
 and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
@@ -133,12 +131,11 @@ under your own worktree. A branch is never rebased.
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-prep.sh" --bead <the bead> --pool {{binding_prefix}}polecat
 ```
 - Exit 0: prepared. Close this step and run the gate.
-- Exit 3: the merge conflicted, and the work went back to the pool with the
-  reason "Conflicts with <target> at <commit>": the bead itself through
-  `gc sling` when it records no open PR, or its PR's rework child when it does.
-  Or the bead's rework child, filed by an earlier requeue and never sent on,
-  was sent on, or the bead had left you before the requeue wrote. Jump to
-  next-iteration.
+- Exit 3: the merge conflicted, and the work went back with the reason
+  "Conflicts with <target> at <commit>": the bead itself to the pool through
+  `gc sling` when it records no open PR, or, when it does, to its PR's review
+  run as an ask, or to the rework child already on its branch. Or the bead had
+  left you before the requeue wrote. Jump to next-iteration.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
   a human gate. Jump to next-iteration.
 - Exit 1: nothing prepared, and the bead stays with you. End the session with
@@ -198,9 +195,10 @@ failure.**
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-requeue.sh" --bead <the bead> --reason "<failure summary>" --pool {{binding_prefix}}polecat
 ```
-It goes back as the bead itself through `gc sling`, unassigned, or as its PR's
-rework child when it records an open PR. Exit 0 or 3: jump to
-next-iteration. Exit 1: end the session with `gc runtime drain-ack`.
+It goes back as the bead itself through `gc sling`, unassigned, or, when it
+records an open PR, to its PR's review run as an ask, or to the rework child
+already on its branch. Exit 0 or 3: jump to next-iteration. Exit 1: end the
+session with `gc runtime drain-ack`.
 
 **Pre-existing on the target:** track each failure once, then land. Run it
 once per failure (each failing test function, each failing target with none,

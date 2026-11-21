@@ -3,13 +3,14 @@
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
 // when it names none, reads the city's roster, its named sessions, its
 // session list, its rigs and whether a formula resolves, wakes and nudges a
-// session, names the city's root, runs the pack's scripts that ask a person,
-// runs gc doctor, and reads and records the city's events. A domain reaches
-// them only through Runtime, or through an interface of its own that City
-// meets. City is the city gctk runs in, and gascity/fake records what a
-// domain asked and answers as its test says, so a domain's rules are tested
-// in Go with no Gas City. It also states Gas City's dispatch holds (hold.go),
-// the one rule of them each domain asks.
+// session, names the city's root and the settings file its Claude sessions
+// start with, runs the pack's scripts that ask a person, runs gc doctor, and
+// reads and records the city's events. A domain reaches them only through
+// Runtime, or through an interface of its own that City meets. City is the
+// city gctk runs in, and gascity/fake records what a domain asked and answers
+// as its test says, so a domain's rules are tested in Go with no Gas City. It
+// also states Gas City's dispatch holds (hold.go), the one rule of them each
+// domain asks.
 package gascity
 
 import (
@@ -65,6 +66,9 @@ type Runtime interface {
 	// Within returns the runtime with every command it runs stopped once ctx
 	// ends, for an act a caller bounds.
 	Within(ctx context.Context) Runtime
+	// ClaudeSettings is the settings file Gas City starts each Claude session
+	// with, whether or not it is there.
+	ClaudeSettings() (string, error)
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
@@ -462,6 +466,17 @@ func (c *City) CityRoot() (string, error) {
 		}
 	}
 	return "", errors.New("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list names no HQ rig holding .gc")
+}
+
+// ClaudeSettings is <city root>/.gc/settings.json, which Gas City projects
+// before each Claude start and passes with --settings (ensureClaudeSettingsArgs
+// and settingsArgs in cmd/gc/cmd_start.go at gastownhall/gascity 5f7cd988a6).
+func (c *City) ClaudeSettings() (string, error) {
+	root, err := c.CityRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".gc", "settings.json"), nil
 }
 
 func isDir(p string) bool {
