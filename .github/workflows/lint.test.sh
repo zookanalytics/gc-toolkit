@@ -21,8 +21,8 @@
 # platform.
 #
 # tools/lint.sh and this job lint with the same release because each reads it
-# from .golangci-lint-version, so the job reads the file and names no release
-# of its own.
+# from .golangci-lint-version, so each golangci-lint the job builds reads the
+# file, and the job names no release of its own, nor a query such as latest.
 #
 # Hermetic: reads lint.yml with Psych, the YAML parser Ruby ships, as
 # action-pins.test.sh reads every workflow. Needs ruby.
@@ -80,7 +80,7 @@ steps = Array(job['steps']).select { |s| s.is_a?(Hash) }
 runs = steps.map { |s| s['run'].to_s }
 pinned = runs.select { |r| r.include?('golangci-lint@$(cat .golangci-lint-version)') }
 fail_with.("job lint must run golangci-lint at the release .golangci-lint-version names") if pinned.empty?
-named = runs.join("\n").scan(/golangci-lint@(v[0-9][^\s"']*)/).flatten
+named = runs.join("\n").scan(/golangci-lint@(?!\$\(cat \.golangci-lint-version\))([^\s"']*)/).flatten
 fail_with.("job lint names a release of its own, #{named.join(', ')}; it reads .golangci-lint-version") unless named.empty?
 
 fail_with.("job lint must run on ubuntu-latest, the platform its run with no GOOS lints for, and runs on #{job['runs-on'].inspect}") unless job['runs-on'] == 'ubuntu-latest'
