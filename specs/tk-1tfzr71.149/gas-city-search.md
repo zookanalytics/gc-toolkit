@@ -269,6 +269,25 @@ due, and a decision whose act changed the record leaves a digest the next run
 finds different, so that run decides the record again. Nothing clears it,
 since a digest that matches nothing makes the record due.
 
+The second rework, which the operator ruled on 2026-11-20 in conversation
+tk-k2ebtki, has the order decide each record again at least once an hour,
+whatever the digest, so a change the digest does not show waits an hour at
+most, and a decision made for any reason starts the hour again. The need is a
+clock for each record that a run reads with no read of GitHub.
+
+- **Gas City's cooldown.** `checkCooldown` in `internal/orders/triggers.go`,
+  read at `gastownhall/gascity` main e6e47235027b, times an order by its own
+  last run (`lastRunFn(a.ScopedName())`): one clock for the order, and none for
+  a record. Not covered.
+- **bd's `updated_at`.** Every write to the bead moves it (above), the PR
+  watch's saves among them, which decide nothing, so it would start the hour
+  again on a write no decision made. Not covered.
+
+Conclusion: none covers it. The order keeps the decision's time beside the
+digest in the key it already keeps, `pr_landing_digest`, now one JSON object
+of `digest` and `at`, and a run decides a record whose kept time is an hour old
+or older. No key is added.
+
 ## The board's line saying when GitHub was last asked (unit 5)
 
 The need: one value, for each rig, saying when the cheap question last read
