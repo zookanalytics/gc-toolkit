@@ -153,8 +153,10 @@ watching.
 - The pack's patrol finding (`assets/scripts/patrol-finding.sh`), for the one
   task a run of failures keeps. Its warrant
   ([warrants.md](../../docs/warrants.md#patrol-findings)) stands: the searches
-  above found no keyed problem record in Gas City or bd. The change adds no key
-  to the finding and does not touch its writer.
+  above found no keyed problem record in Gas City or bd, and its evidence reads
+  the same at `gastownhall/gascity` main 781c975d7921. The change adds no key
+  to the finding and leaves what its writer does as it is: the writer's list of
+  its callers gains the report.
 - GitHub's deployments, read as the host posted them.
 
 ## The error line
