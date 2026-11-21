@@ -18,11 +18,11 @@
 # path to the core pack (specs/2026-08-rewrite/plan.md:62).
 #
 # OVERLAY WIRING. Claude-hook overlays (overlays/cycle-recycle,
-# overlays/work-context, overlays/gh-origin-guard) are staged into an agent's
-# work dir via `overlay_dir`, which the pack format carries only on
-# [[patches.agent]] — agent.toml has no overlay key. A patch modifies an
-# EXISTING agent, and a pack may patch its own, so each stanza below targets one
-# of our native agents and carries nothing but the overlay.
+# overlays/work-context, overlays/converse-compact, overlays/gh-origin-guard)
+# are staged into an agent's work dir via `overlay_dir`, which this pack sets on
+# [[patches.agent]] stanzas. A patch modifies an EXISTING agent, and a pack may
+# patch its own, so each stanza below targets one of our native agents and
+# carries nothing but the overlay.
 #
 # An agent takes exactly ONE overlay_dir, so an agent that needs both its own
 # hook and the shared gh guard gets the guard registered inside its own
@@ -73,27 +73,32 @@ overlay_dir = "overlays/cycle-recycle"
 name = "deacon"
 overlay_dir = "overlays/cycle-recycle"
 
+# A Claude converse sitting's context is compacted when it nears its limit, or
+# when a long one sits idle, and the sitting goes on from the summary. A
+# PreCompact hook steers that summary to keep what the sitting's record does
+# not hold yet (docs/human-engagement.md, "The sitting"). The steer is for the
+# Claude sittings alone.
+[[patches.agent]]
+name = "converse-claude-fable"
+overlay_dir = "overlays/converse-compact"
+
+[[patches.agent]]
+name = "converse-claude-opus"
+overlay_dir = "overlays/converse-compact"
+
+[[patches.agent]]
+name = "converse-fable"
+overlay_dir = "overlays/converse-compact"
+
+[[patches.agent]]
+name = "converse-opus"
+overlay_dir = "overlays/converse-compact"
+
 # One bot account backs every agent's gh token, so an agent can write to any
 # repository that token reaches. A PreToolUse hook refuses the gh write verbs
 # aimed outside the origin of a rig we own (docs/gh-origin-guard.md). The agents
 # listed here carry no hook of their own; for the rest the same hook rides their
 # overlay.
-[[patches.agent]]
-name = "converse-claude-fable"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "converse-claude-opus"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "converse-fable"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "converse-opus"
-overlay_dir = "overlays/gh-origin-guard"
-
 [[patches.agent]]
 name = "mechanik"
 overlay_dir = "overlays/gh-origin-guard"

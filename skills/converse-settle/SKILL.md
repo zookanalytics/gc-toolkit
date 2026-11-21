@@ -460,7 +460,9 @@ sign-off, because a conversation closed by hand answers none of its gates.
 
 ## Ending early
 
-When your context runs low before the operator answers, end the sitting early:
+When the operator asks to end the sitting before they rule, such as asking to
+put the conversation back in their queue or for a handoff, end the sitting
+early:
 
 1. Record the outcome so far.
 2. Sign off with `--ruled no`. This sign-off answers nothing: every gate stays
@@ -472,5 +474,7 @@ When your context runs low before the operator answers, end the sitting early:
 
 The next engagement takes the conversation up from its record. Ending early is
 the one ending that drains with the conversation open. Never end a sitting the
-operator has not ruled on to unblock something else. During a return, low
-context ends nothing: `converse-stay` says how the comparison carries on.
+operator has not ruled on to unblock something else, or because its context
+filled: the provider compacts a full context, and the sitting runs its entry
+again and goes on (the prompt's "How a sitting ends"). During a return,
+`converse-stay` says how the comparison carries on through a compaction.

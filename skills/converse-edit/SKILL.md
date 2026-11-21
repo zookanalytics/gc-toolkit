@@ -592,8 +592,8 @@ own.
   at its hold (`converse-continue`). The conversation's record names
   the change: run Work's setup again, and it re-enters the tree. An open PR's
   tree is found again by the tree block of An open PR's branch.
-- **A sitting that must end with the change in flight**, for low context or
-  because it was cut short, commits what the tree holds, records on the
+- **A sitting that must end with the change in flight**, because the operator
+  asks to end it before they rule, commits what the tree holds, records on the
   conversation where the change stands, and hands the conversation back
   (`converse-settle`, ending early). The conversation stays open, so the change stays
   held, and the next sitting resumes it from the record. A sitting on another

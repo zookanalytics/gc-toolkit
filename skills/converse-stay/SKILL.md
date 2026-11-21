@@ -104,11 +104,11 @@ that hold (`converse-hold`).
 
 ## While the work is out
 
-The entry says `waiting` when an attach, a restart or a notice brought the
-sitting back before all its work closed. Nothing needs registering again: the
-conversation's edge onto the work is still the wait, and Gas City sleeps and
-brings back the session as it does after the stay (above). Take the case that
-fits:
+The entry says `waiting` when an attach, a restart, a compaction or a notice
+brought the sitting back before all its work closed. Nothing needs registering
+again: the conversation's edge onto the work is still the wait, and Gas City
+sleeps and brings back the session as it does after the stay (above). Take the
+case that fits:
 
 - **The operator speaks.** Answer their turns as `converse-continue` says,
   through the sign-off's `--answer`. Do not hold: a hold keeps its
@@ -240,9 +240,8 @@ open with its waits as they are.
   compaction. After a compaction, run the entry again, which prints `AGREED`
   and `WORK`, and carry the return on from where your summary and what you
   already posted show it stopped.
-- **Hand the return to a fresh session** when compaction cannot carry it, or
-  when Gas City's context notice asks you to reset this session. Never reset
-  during a return without this hand-over.
+- **Hand the return to a fresh session** when compaction cannot carry it.
+  Never reset during a return without this hand-over.
 
 To hand the return over, first append the hand-over to the conversation's
 notes. No line of it may start with `holding:` or `staying:`, because the

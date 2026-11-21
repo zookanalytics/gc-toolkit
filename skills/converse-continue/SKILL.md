@@ -1,6 +1,6 @@
 ---
 name: converse-continue
-description: Converse's continuation of an open conversation, which answers the operator's turns, carries out a ruling given before the end, opens a conversation on a new concern, and picks a sitting up after a restart while its hold stands.
+description: Converse's continuation of an open conversation, which answers the operator's turns, carries out a ruling given before the end, opens a conversation on a new concern, and picks a sitting up after a restart or a compaction while its hold stands.
 ---
 
 # Continue the conversation
@@ -56,13 +56,16 @@ another subject turns out to need them. Open it on its bead, where it waits in
 the operator's queue until they engage it:
 `"$CONV/gc-helm.sh" open <bead> --reason "<what it is about>" --body "<the ask the sitting reads>"`.
 
-## After a restart
+## After a restart or a compaction
 
-The entry says `interrupted` and names this skill when a restart came while the
-hold stood. Take the case that fits:
+The entry says `interrupted` and names this skill when a restart or a
+compaction came while the hold stood. Take the case that fits:
 
-- **Your thread holds the framing you posted.** Wait for the operator: there is
-  nothing else to do.
+- **Your thread holds the framing you posted**, whole or in a compaction's
+  summary. First take up each turn of the operator's that you have not
+  finished, such as a ruling you have not carried out or a question you have
+  not answered, whether the thread or the summary shows it, as Each turn says.
+  Once none is left, wait for the operator: there is nothing else to do.
 - **Your thread does not hold the framing.** Re-open the sitting from the
   record: prepare it again (`converse-prep`), then hold again
   (`converse-hold`). The new framing can repeat the hand-back the entry

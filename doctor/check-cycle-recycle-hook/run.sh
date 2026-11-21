@@ -13,8 +13,8 @@
 # asserts the hook can fire, but neither asserts the two name the same set of
 # roles. This asserts that set equality.
 #
-# The hook signal is the overlay_dir stanza alone: overlay_dir lives only on a
-# [[patches.agent]] stanza (pack.toml: "agent.toml has no overlay key"), and the
+# The hook signal is the overlay_dir stanza alone: the pack sets overlay_dir only
+# on [[patches.agent]] stanzas (pack.toml, "OVERLAY WIRING"), and the
 # cycle-recycle Stop hook is registered in no other overlay's settings.json. The
 # doctrine signal is a `{{ template "heartbeat-no-consent-ui" . }}` call in the
 # agent's resolved prompt template (pack.toml: "each agent's prompt.template.md

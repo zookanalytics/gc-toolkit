@@ -95,16 +95,25 @@ nudge = ""
 # ladder kills and restarts a session after no terminal output, and an operator
 # reading a held thread produces none.
 idle_timeout = "0"
+# Gas City's context advisory is off. It tells a session past 60% of its
+# context window to plan a handoff and reset itself, and past 80% to run
+# `gc session reset` on itself. A reset would restart the session under the
+# operator's tab and lose what the sitting's record does not hold yet, so a
+# sitting goes on instead when its context fills: its provider compacts the
+# thread, and the sitting runs its entry again (the prompt's "How a sitting
+# ends"). Gas City merges this table over the city's [agent_defaults] and its
+# built-in default, which is on, so every other agent keeps the advisory.
+context_advisory = { enabled = false }
 # How a sitting ends. Its conversation is done only when the agent's sign-off
 # or the operator's bare `gc-helm dismiss` (it infers the conversation) closes
 # it, and each then runs `gc runtime drain-ack`, whose flag marks the tab done
 # (session_live above). The v2 reconciler holds that stop while a client is
 # attached, so the pane stays live while the operator watches, and stops the
 # agent within about five minutes of the detach. The record then reads drained,
-# and the core reaper closes it a day later. A sitting cut short while it holds
-# its conversation keeps running until the operator re-attaches or dismisses,
-# and a low-context sitting hands its conversation back to the operator's queue
-# and drains.
+# and the core reaper closes it a day later. A sitting the operator walks away
+# from before any sign-off keeps running, holding its conversation, until they
+# re-attach or dismiss it, and one the operator asks to end before they rule
+# hands its conversation back to their queue and drains.
 # A sitting that holds no open conversation, such as one whose conversation was
 # closed by hand, is stopped by this idle sleep. v2 sleeps a session that holds
 # no claimed or assigned work and has no client attached once this long has

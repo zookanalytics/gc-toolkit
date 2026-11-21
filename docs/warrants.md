@@ -247,8 +247,8 @@ no warrant.
   `assets/scripts/gh-origin-guard-codex.sh`, `overlays/gh-origin-guard/`,
   [gh-origin-guard.md](gh-origin-guard.md), and the guard's wiring, which
   carries the `gh-origin-guard` or `gh-origin-guard-codex` name: the overlay
-  stanzas in pack.toml, the hook in the work-context and cycle-recycle overlays,
-  and each Codex agent's `pre_start`.
+  stanzas in pack.toml, the hook in the work-context, cycle-recycle and
+  converse-compact overlays, and each Codex agent's `pre_start`.
 - **Stands in for.** Scoping an agent's outbound writes to the repositories its
   rig owns.
 - **Evidence.**
@@ -263,8 +263,8 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and
-  `gastownhall/gascity-packs` main aa55b477d4c2. The config reference's
+- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921 and
+  `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.
   GitHub's *Managing your personal access tokens* page was read on 2026-11-20.
