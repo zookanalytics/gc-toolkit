@@ -110,10 +110,10 @@ context_advisory = { enabled = false }
 # (session_live above). The v2 reconciler holds that stop while a client is
 # attached, so the pane stays live while the operator watches, and stops the
 # agent within about five minutes of the detach. The record then reads drained,
-# and the core reaper closes it a day later. A sitting cut short while it holds
-# its conversation keeps running until the operator re-attaches or dismisses,
-# and one the operator asks to end before they rule hands its conversation back
-# to their queue and drains.
+# and the core reaper closes it a day later. A sitting the operator walks away
+# from before any sign-off keeps running, holding its conversation, until they
+# re-attach or dismiss it, and one the operator asks to end before they rule
+# hands its conversation back to their queue and drains.
 # A sitting that holds no open conversation, such as one whose conversation was
 # closed by hand, is stopped by this idle sleep. v2 sleeps a session that holds
 # no claimed or assigned work and has no client attached once this long has
