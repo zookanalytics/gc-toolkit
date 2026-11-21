@@ -12,6 +12,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // rankSeverityMultiplier and rankWeightMultiplier keep the three rank_score
@@ -1174,10 +1175,10 @@ func asksAPerson(b Blocker) bool {
 // demand reports whether an open blocker is one a person owes that is not a
 // human gate: a ruling only the operator can give (a `decision`), or a
 // conversation, which holds a PR's merge until it closes. It is
-// prstatus.IsPersonBlocker, the rule a PR's held: blocked value reads, beside
+// person.Clears, the rule a PR's held: blocked value reads, beside
 // the human gate its held: gate value reads, so one gate never counts as both.
 func demand(b Blocker) bool {
-	return prstatus.IsPersonBlocker(prstatus.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
+	return person.Clears(person.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
 		Assignee: b.Assignee})
 }
 
@@ -2459,11 +2460,11 @@ func beadPhase(a Anchor, f Facts) string {
 func beadFacts(a Anchor, f Facts) prstatus.Facts {
 	pf := prstatus.RowFacts(a.Metadata)
 	for _, g := range f.human.gates[a.ID] {
-		pf.Gates = append(pf.Gates, prstatus.Blocker{ID: g})
+		pf.Gates = append(pf.Gates, person.Blocker{ID: g})
 	}
 	for _, b := range a.Blockers {
 		if openHumanGate(b) {
-			pf.Gates = append(pf.Gates, prstatus.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType})
+			pf.Gates = append(pf.Gates, person.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType})
 		}
 	}
 	pf.InFlightCount = f.anchorInFlight(a)

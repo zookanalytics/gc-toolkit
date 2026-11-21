@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // The operator's side of the board is two kinds of bead the gather admits as
@@ -101,7 +101,7 @@ func dropConversationTwins(anchors []Anchor) []Anchor {
 }
 
 // humanGate reports whether a blocker is a human gate, open or closed.
-func humanGate(b Blocker) bool { return prstatus.IsHumanGate(b.IssueType, b.AwaitType) }
+func humanGate(b Blocker) bool { return person.IsHumanGate(b.IssueType, b.AwaitType) }
 
 // openHumanGate reports whether a blocker is a human gate that is still open.
 func openHumanGate(b Blocker) bool { return humanGate(b) && b.Status != "closed" }

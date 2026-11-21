@@ -25,6 +25,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -75,9 +76,6 @@ type Bead struct {
 	// Run is true for one of a run's own beads, its root or a step poured under
 	// it ([waits.IsRootOrStep]).
 	Run bool
-	// PersonBlocker is true for a bead only a person clears and that is no
-	// human gate ([prstatus.IsPersonBlocker]).
-	PersonBlocker bool
 }
 
 // Edge is one of a bead's own edges: the far bead and the edge's type.
@@ -102,18 +100,22 @@ type Epic struct {
 type Listing struct {
 	pass *ledger.Ledger
 	live []*ledger.Record
-	// beads is each bead decoded, by id.
-	mu    sync.Mutex
-	beads map[string]Bead
+	// beads is each bead decoded, by id, and closed each parent's closed beads
+	// as closedUnder read them, which the store answers only by a read of its
+	// own.
+	mu     sync.Mutex
+	beads  map[string]Bead
+	closed map[string][]Bead
 }
 
 // Read lists the store at db, a store's .beads directory, once: every live
-// bead it holds. With db empty it reads the store gc resolves. A read that
-// fails returns its error and no listing. Every read of the store the listing
-// makes, then and for each question asked of it later, ends when ctx does, and
-// the processes it started end with it.
-func Read(ctx context.Context, db string) (*Listing, error) {
-	l, err := ledger.OpenContext(ctx, db)
+// bead it holds. With db empty it reads the store gc routes a read of the
+// first of ids to, as [ledger.Open] does, and the store gc resolves when ids
+// names none. A read that fails returns its error and no listing. Every read of
+// the store the listing makes, then and for each question asked of it later,
+// ends when ctx does, and the processes it started end with it.
+func Read(ctx context.Context, db string, ids ...string) (*Listing, error) {
+	l, err := ledger.OpenContext(ctx, db, ids...)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +124,7 @@ func Read(ctx context.Context, db string) (*Listing, error) {
 
 // read lists every live bead through a pass over l.
 func read(l *ledger.Ledger) (*Listing, error) {
-	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}}
+	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}, closed: map[string][]Bead{}}
 	live, err := ls.pass.Find(ledger.Every())
 	if err != nil {
 		return nil, err
@@ -181,7 +183,7 @@ func beadOf(r *ledger.Record) (Bead, error) {
 			RulingReason: text(epicRulingReasonKey, r), RulingAt: text(epicRulingAtKey, r),
 		},
 		Handback: text(handbackKey, r), HandbackAt: text(handbackAtKey, r),
-		Run: waits.IsRootOrStep(r), PersonBlocker: prstatus.IsPersonBlocker(blockerOf(r))}
+		Run: waits.IsRootOrStep(r)}
 	for _, e := range edges {
 		b.Edges = append(b.Edges, Edge{ID: e.ID, Type: e.Type})
 	}
@@ -232,6 +234,12 @@ func (ls *Listing) ClosedUnder(parents []string) ([]Bead, error) {
 }
 
 func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
+	ls.mu.Lock()
+	kept, ok := ls.closed[parent]
+	ls.mu.Unlock()
+	if ok {
+		return kept, nil
+	}
 	recs, err := ls.pass.Find(ledger.Under(parent).WithClosed())
 	if err != nil {
 		return nil, fmt.Errorf("list the closed beads under %s: %w", parent, err)
@@ -254,6 +262,9 @@ func (ls *Listing) closedUnder(parent string) ([]Bead, error) {
 		}
 		out = append(out, b)
 	}
+	ls.mu.Lock()
+	ls.closed[parent] = out
+	ls.mu.Unlock()
 	return out, nil
 }
 
@@ -335,7 +346,7 @@ func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]prsta
 // for each bead named, the far bead of each of its blocks edges. An edge onto a
 // bead the store does not hold is one into another store, which holds
 // nothing.
-func (ls *Listing) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
+func (ls *Listing) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	recs, err := ls.byID(ids)
 	if err != nil {
 		return nil, err
@@ -356,9 +367,9 @@ func (ls *Listing) Blockers(ids []string) (map[string][]prstatus.Blocker, error)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string][]prstatus.Blocker, len(ids))
+	out := make(map[string][]person.Blocker, len(ids))
 	for _, id := range ids {
-		out[id] = []prstatus.Blocker{}
+		out[id] = []person.Blocker{}
 		f, _ := blocksOf(recs[id]) // decoded above
 		for _, x := range f {
 			if fr, ok := farRecs[x]; ok {
@@ -398,7 +409,7 @@ func blocksOf(r *ledger.Record) ([]string, error) {
 }
 
 // blockerOf is r in the fields prstatus reads of a blocker.
-func blockerOf(r *ledger.Record) prstatus.Blocker {
-	return prstatus.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
+func blockerOf(r *ledger.Record) person.Blocker {
+	return person.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
 		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Metadata: r.Rendered()}
 }

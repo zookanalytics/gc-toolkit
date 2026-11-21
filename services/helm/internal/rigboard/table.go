@@ -5,53 +5,43 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// The table that turns the readers' answers into a row's group and signal.
-// It is the only place those words are chosen, and the first row that
-// matches answers:
+// The board's words for where a row's bead stands. standing answers the bead's
+// group, the rule that placed it, its ask and the beads that rule names, and
+// this file is the only place the row's words for that answer are chosen:
 //
-//  1. The bead is closed: "Closed", with how it closed. Group Closed.
-//  2. It is an ask: the ask's words. Group Waiting on you.
-//  3. prstatus.Holding names a gate or a bead a person owes for it. When that
-//     is one of its own waits: "Waits on your answer" for a human gate or a
-//     decision, "Conversation waits for you" or "In conversation" for a
-//     conversation, and otherwise "Waits on <id>" naming each of its waits, so
-//     a bead behind another bead's pull request names that bead and never
-//     takes its words. When it is further along: "Waits on <id>", with line 3
-//     naming what Holding returned first. Group Waiting on you.
-//  4. A wait behind its status is a gate that is no human gate, its own or an
-//     ancestor's: "Held by a gate", with the gate's title. Group Not moving.
-//  5. Its status is deferred: "Deferred". Any other status that is neither
-//     open nor a claim reads as the store's word, except the blocked status
-//     Gas Town's pending record writes on a bead whose pull request it holds,
-//     which is the record's own and holds nothing. Group Not moving. A
-//     conversation its sitting stays in, or a decision a ruling left waiting
-//     on the work it sent (staying), then reads "Waits on <id>", naming each
-//     wait, in Group Queued: it is a person's move again once that work
-//     closes.
-//  6. waits says it is in flight. With an open pull request: "Pull request
-//     #<n>", with where it stands. Otherwise "In flight", with its assignee.
-//     Group Queued.
-//  7. The city takes it as things stand, as its place in queue's order says
-//     (queue.Place): it is armed, routed to a pool or assigned to an agent,
-//     and no dispatch hold holds it. "Queued" when nothing holds it, and
-//     "Waits on <id>" naming each wait when one does. Group Queued.
-//  8. Otherwise: "Not scheduled", with line 3 naming each wait when one holds
-//     it. Group Not moving.
-//
-// Rows 6 to 8 apply only to a piece of work: an epic, a Delivery, a gate, a
-// decision and a conversation are never sent to a pool. A bead a reader could
-// not answer reads "unread" and sits in no group.
+//   - closed: "Closed", with how it closed.
+//   - ask: the ask's words. A question reads "Question", or the words of the
+//     conversation that answers it. A conversation reads whether it waits for
+//     you or a sitting holds it. A pull request reads where it stands, a
+//     ruling what it waits for, and a bead only a person clears "Routed to
+//     you".
+//   - own-wait: "Waits on your answer" for a human gate or a decision, the
+//     conversation's words for a conversation, and otherwise "Waits on <id>"
+//     naming each of its waits, so a bead behind another bead's pull request
+//     names that bead and never takes its words.
+//   - further-along: "Waits on <id>", naming each of its waits, with line 3
+//     naming the gate or the bead a person owes.
+//   - parked: "Held by a gate", with the gate's title.
+//   - status: "Deferred", or the store's word for any other status.
+//   - staying: "Waits on <id>", naming each wait.
+//   - answers: the conversation's words. members and gate: nothing.
+//   - in-flight: "Pull request #<n>", with where it stands, or "In flight",
+//     with its assignee.
+//   - scheduled: "Queued" when nothing holds it, and "Waits on <id>" naming
+//     each wait when one does.
+//   - not-scheduled: "Not scheduled", with line 3 naming each wait when one
+//     holds it.
+//   - unread: "unread", in no group.
 
-// Group is where a row's work stands: it waits on you, it will be done
-// without you, it will not be done as things stand, or it is closed. A row no
-// group holds, such as a gate, or a bead a reader could not answer, carries
-// none.
+// Group is the label the board shows for where a row's work stands, one for
+// each of standing's groups, which [standing.Group] defines. A row no group
+// holds, such as a gate, or a bead a reader could not answer, carries none.
+// docs/bead-standing.md gives each label to a person.
 type Group string
 
 const (
@@ -61,8 +51,24 @@ const (
 	GroupClosed       Group = "Closed"
 )
 
+// groupOf is a standing group's label.
+func groupOf(g standing.Group) Group {
+	switch g {
+	case standing.GroupWaitingOnYou:
+		return GroupWaitingOnYou
+	case standing.GroupQueued:
+		return GroupQueued
+	case standing.GroupNotMoving:
+		return GroupNotMoving
+	case standing.GroupClosed:
+		return GroupClosed
+	}
+	return ""
+}
+
 // Ask is the kind of thing a person owes a move on, for a row that is an
-// ask.
+// ask, one for each of standing's asks, which [standing.Ask] defines.
+// docs/bead-standing.md gives each to a person.
 type Ask string
 
 const (
@@ -89,28 +95,9 @@ const (
 	NeedKindRoutedToYou    NeedKind = "Routed to you"
 )
 
-// outcome is the row of the table that answered.
-type outcome int
-
-const (
-	outNone outcome = iota
-	outUnread
-	outClosed
-	outAsk
-	outOwnWait
-	outEndsOnYou
-	outHeldByGate
-	outNotOpen
-	outInFlight
-	outPullRequest
-	outQueued
-	outQueuedBehind
-	outNotScheduled
-)
-
-// verdict is the table's answer for one row.
+// verdict is a row's words for its standing.
 type verdict struct {
-	out    outcome
+	rule   standing.Rule
 	group  Group
 	signal string
 	note   string
@@ -125,7 +112,7 @@ type askAnswer struct {
 	need  NeedKind
 }
 
-// Words the table writes that another document already gives.
+// Words the board writes that another document already gives.
 const (
 	signalUnread = "unread"
 	// docs/epics.md, "How a Delivery ends", gives a landed Delivery's row.
@@ -145,157 +132,115 @@ func conversationKind(assignee string) NeedKind {
 // conversationWords is what a conversation's row says: its kind, in words.
 func conversationWords(assignee string) string { return string(conversationKind(assignee)) }
 
-// gateHold is the first wait behind a bead's status, its own or an ancestor's,
-// on a gate that is no human gate, and nil when none is. Row 4 reads such a
-// wait as "Held by a gate", and a Needs you view reads it as a park
-// (docs/steering.md, "A park"), whose gate gc-helm.sh park files with no await
-// type. A gate of a type bd closes by itself, such as a timer, reads as one
-// too, so a row and the count read a gate one way.
-func gateHold(h waits.Holds) *waits.Wait {
-	for i, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
-			return &h.Waits[i]
+// askWords is a row's ask in the board's words, nil for a row that is no ask.
+func (bt *built) askWords(id string, a standing.Answer) *askAnswer {
+	if a.Rule != standing.RuleAsk {
+		return nil
+	}
+	ix := bt.ix
+	b := ix.beads[id]
+	switch a.Ask {
+	case standing.AskQuestion:
+		conv := ix.answeredBy[id]
+		return questionAsk(conv, ix.beads[conv].Assignee)
+	case standing.AskConversation:
+		return &askAnswer{kind: AskConversation, words: conversationWords(b.Assignee), need: conversationKind(b.Assignee)}
+	case standing.AskPullRequest:
+		st := ""
+		if p := ix.g.reading.PullRequest(id); p != nil {
+			st = string(p.State())
 		}
+		return &askAnswer{kind: AskPullRequest, words: st, need: NeedKindPullRequest}
+	case standing.AskRoutedToYou:
+		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou), need: NeedKindRoutedToYou}
+	case standing.AskRuling:
+		if ix.kinds[id] == KindDelivery {
+			return &askAnswer{kind: AskRuling, words: signalLandedDelivery, need: NeedKindRuling}
+		}
+		return &askAnswer{kind: AskRuling, words: signalNeedsRuling, need: NeedKindRuling}
 	}
 	return nil
 }
 
-// staying reports whether a conversation's or a decision's row waits on work of
-// its own first (prstatus.Stays): a conversation its sitting stays in, or a
-// decision a ruling left waiting on the work it sent. Its own waits are the
-// ones waits names behind a blocked status, which are each the bead's own.
-// prstatus reads a bead a pull request waits on by the same rule, so the bead's
-// row and its pull request's agree on whether the operator owes a move.
-func staying(b bead, h waits.Holds) bool {
-	var own []prstatus.Blocker
-	if h.Status == waits.Blocked {
-		for _, w := range h.Waits {
-			own = append(own, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType,
-				AwaitType: w.AwaitType})
-		}
+// questionAsk is a question's ask: "Question", or its conversation's words when
+// one answers it, a conversation that replies to a gate or tracks a decision.
+// It is in conversation once a sitting holds that conversation, and a question
+// otherwise.
+func questionAsk(answeredBy, assignee string) *askAnswer {
+	if answeredBy == "" {
+		return &askAnswer{kind: AskQuestion, words: string(AskQuestion), need: NeedKindQuestion}
 	}
-	return prstatus.Stays(prstatus.Blocker{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType,
-		AwaitType: b.AwaitType, Assignee: b.Assignee}, own)
+	a := &askAnswer{kind: AskQuestion, words: conversationWords(assignee), need: NeedKindQuestion}
+	if conversationKind(assignee) == NeedKindInConversation {
+		a.need = NeedKindInConversation
+	}
+	return a
 }
 
-// table answers one row. in carries the readers' answers about it.
-type tableInput struct {
-	b       bead
-	kind    Kind
-	ask     *askAnswer
-	holds   *waits.Holds
-	holding *prstatus.Holds
-	// unwalked is true when the row needs Holding's answer and its walk ran
-	// past its bound.
-	unwalked bool
-	// facts is what the read knows of the row's pull request, nil when it has
-	// no open pull request, and prUnread is true when it has one a reader could
-	// not answer for.
-	facts    *prFacts
-	prUnread bool
-	// place is the row's place in queue's order, nil when queue placed it
-	// nowhere.
-	place *queue.Place
-}
-
-func table(in tableInput) verdict {
-	b := in.b
-	if !isOpen(b) {
-		return verdict{out: outClosed, group: GroupClosed, signal: "Closed", note: b.WorkOutcome}
-	}
-	if in.prUnread {
-		return verdict{out: outUnread, signal: signalUnread}
-	}
-	if in.ask != nil {
-		return verdict{out: outAsk, group: GroupWaitingOnYou, signal: in.ask.words}
-	}
-	if in.holds == nil || in.unwalked {
-		return verdict{out: outUnread, signal: signalUnread}
-	}
-	h := *in.holds
-	if in.holding != nil && (len(in.holding.Gates) > 0 || len(in.holding.Owed) > 0) {
-		return holdingVerdict(h, *in.holding)
-	}
-	if w := gateHold(h); w != nil {
-		return verdict{out: outHeldByGate, group: GroupNotMoving, signal: "Held by a gate", note: w.Title}
-	}
-	switch st := status(b); {
-	case st == "open", st == "in_progress", st == "hooked":
-	case st == "blocked" && pr.OnRecord(b.MergeResult):
-	case st == "deferred":
-		return verdict{out: outNotOpen, group: GroupNotMoving, signal: "Deferred"}
-	default:
-		return verdict{out: outNotOpen, group: GroupNotMoving, signal: st}
-	}
-	if (in.kind == KindConversation || in.kind == KindDecision) && staying(b, h) {
-		return verdict{out: outNone, group: GroupQueued, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
-	}
-	if in.kind == KindConversation {
-		return verdict{out: outNone, signal: conversationWords(b.Assignee)}
-	}
-	if in.kind != KindWork {
-		return verdict{out: outNone}
-	}
-	if h.InFlight != "" {
-		if in.facts != nil && b.PRNumber != "" {
-			return verdict{out: outPullRequest, group: GroupQueued, signal: "Pull request #" + b.PRNumber,
-				note: string(in.facts.state())}
-		}
-		return verdict{out: outInFlight, group: GroupQueued, signal: "In flight", note: b.Assignee}
-	}
-	if in.place == nil {
-		return verdict{out: outUnread, signal: signalUnread}
-	}
+// verdictOf is a row's words for its standing.
+func (bt *built) verdictOf(id string, a standing.Answer) verdict {
+	b := bt.ix.beads[id]
+	v := verdict{rule: a.Rule, group: groupOf(a.Group)}
+	h, _ := bt.ix.g.reading.Holds(id)
 	waitRefs := refsOf(h.Waits)
-	if in.place.Scheduled {
-		if h.Status == waits.Clear {
-			return verdict{out: outQueued, group: GroupQueued, signal: "Queued"}
+	switch a.Rule {
+	case standing.RuleClosed:
+		v.signal, v.note = "Closed", b.WorkOutcome
+	case standing.RuleUnread:
+		v.signal = signalUnread
+	case standing.RuleAsk:
+		if ask := bt.asks[id]; ask != nil {
+			v.signal = ask.words
 		}
-		return verdict{out: outQueuedBehind, group: GroupQueued, signal: "Waits on " + joinIDs(waitRefs)}
+	case standing.RuleOwnWait:
+		v.signal = ownWaitWords(a.Owed, waitRefs)
+	case standing.RuleFurtherAlong:
+		first := a.Names[0]
+		v.line3 = []Ref{{ID: first.ID, Title: first.Title}}
+		v.signal = "Waits on " + first.ID
+		if len(waitRefs) > 0 {
+			v.signal = "Waits on " + joinIDs(waitRefs)
+		}
+	case standing.RuleParked:
+		v.signal, v.note = "Held by a gate", a.Names[0].Title
+	case standing.RuleStatus:
+		v.signal = status(b)
+		if v.signal == "deferred" {
+			v.signal = "Deferred"
+		}
+	case standing.RuleStaying:
+		v.signal = "Waits on " + joinIDs(waitRefs)
+	case standing.RuleAnswers:
+		v.signal = conversationWords(b.Assignee)
+	case standing.RuleInFlight:
+		if p := bt.ix.g.reading.PullRequest(id); p != nil && b.PRNumber != "" {
+			v.signal, v.note = "Pull request #"+b.PRNumber, string(p.State())
+		} else {
+			v.signal, v.note = "In flight", b.Assignee
+		}
+	case standing.RuleScheduled:
+		v.signal = "Queued"
+		if h.Status != waits.Clear {
+			v.signal = "Waits on " + joinIDs(waitRefs)
+		}
+	case standing.RuleNotScheduled:
+		v.signal, v.line3 = "Not scheduled", waitRefs
 	}
-	return verdict{out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: waitRefs}
+	return v
 }
 
-// holdingVerdict is row 3: what Holding names for the row, through one of its
-// own waits or further along. Holding lists the gates and the beads a person
-// owes each nearest first, and the gates come first, as prstatus.Reasons
-// orders them.
-func holdingVerdict(h waits.Holds, hold prstatus.Holds) verdict {
-	own := map[string]bool{}
-	if h.Status == waits.Blocked || h.Status == waits.Unjudged {
-		for _, w := range h.Waits {
-			if w.Ancestor == "" {
-				own[w.ID] = true
-			}
-		}
+// ownWaitWords is the words of a row a gate or a bead a person owes holds
+// through one of its own waits.
+func ownWaitWords(o *person.Blocker, waitRefs []Ref) string {
+	switch {
+	case person.IsHumanGate(o.IssueType, o.AwaitType):
+		return "Waits on your answer"
+	case conversation.IsCandidate(strings.ToLower(o.IssueType), o.Assignee, o.ID):
+		return conversationWords(o.Assignee)
+	case strings.EqualFold(strings.TrimSpace(o.IssueType), "decision"):
+		return "Waits on your answer"
 	}
-	for _, g := range hold.Gates {
-		if own[g.ID] {
-			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"}
-		}
-	}
-	for _, o := range hold.Owed {
-		if !own[o.ID] {
-			continue
-		}
-		if conversation.IsCandidate(strings.ToLower(o.IssueType), o.Assignee, o.ID) {
-			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: conversationWords(o.Assignee)}
-		}
-		if strings.EqualFold(strings.TrimSpace(o.IssueType), "decision") {
-			return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on your answer"}
-		}
-		return verdict{out: outOwnWait, group: GroupWaitingOnYou, signal: "Waits on " + joinIDs(refsOf(h.Waits))}
-	}
-	first := hold.Owed
-	if len(hold.Gates) > 0 {
-		first = hold.Gates
-	}
-	ends := []Ref{{ID: first[0].ID, Title: first[0].Title}}
-	signal := "Waits on " + first[0].ID
-	if len(h.Waits) > 0 {
-		signal = "Waits on " + joinIDs(refsOf(h.Waits))
-	}
-	return verdict{out: outEndsOnYou, group: GroupWaitingOnYou, signal: signal, line3: ends}
+	return "Waits on " + joinIDs(waitRefs)
 }
 
 // refsOf names each wait once.
@@ -317,103 +262,17 @@ func joinIDs(refs []Ref) string {
 	return strings.Join(ids, ", ")
 }
 
-// askOf is row 2's question: whether a row is an ask, and its words. An ask is
-// what the shared readers count as a person's move, and a ruling.
-//
-//   - Question: an open human gate, or an open decision that does not wait on
-//     work of its own first (staying). One that waits on the work a ruling
-//     sent is no person's move until that work closes. A question an open
-//     conversation answers reads that conversation's words.
-//   - Conversation: an open conversation that replies to no open gate a
-//     person answers, tracks no open decision that is a question, and that its
-//     sitting does not stay in. One that replies to such a gate or tracks such
-//     a decision belongs to that question's ask, as its conversation. One its
-//     sitting stays in (staying) waits for the return of the work it sent,
-//     which comes back to the operator once that work closes, so until then it
-//     is no person's move.
-//   - Pull request: a bead whose pull request reads needs-review or
-//     needs-attention, in those words.
-//   - Routed to you: any other open bead prstatus.IsPersonBlocker counts, as
-//     the listing answers it for the bead.
-//   - Ruling: an epic with members and none open, or a landed Delivery.
-//
-// A gate that is no human gate is never an ask. openQuestionGate reports
-// whether a bead is an open human gate, and askingDecision whether it is an
-// open decision that does not stay.
-func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate, askingDecision func(string) bool,
-	facts *prFacts, membersOpen, members int, stay bool) *askAnswer {
-	if !isOpen(b) {
-		return nil
-	}
-	switch k {
-	case KindGate:
-		if !prstatus.IsHumanGate(b.IssueType, b.AwaitType) {
-			return nil
-		}
-		return questionAsk(answeredBy, answeredByAssignee)
-	case KindDecision:
-		if stay {
-			return nil
-		}
-		return questionAsk(answeredBy, answeredByAssignee)
-	case KindConversation:
-		if stay {
-			return nil
-		}
-		for _, g := range edgesOf(b, "replies-to") {
-			if openQuestionGate(g) {
-				return nil
-			}
-		}
-		if subject, _, ok := conversation.Shape(conversationEdges(b)); ok && askingDecision(subject) {
-			return nil
-		}
-		return &askAnswer{kind: AskConversation, words: conversationWords(b.Assignee), need: conversationKind(b.Assignee)}
-	case KindEpic, KindDelivery:
-		if members > 0 && membersOpen == 0 {
-			if k == KindDelivery {
-				return &askAnswer{kind: AskRuling, words: signalLandedDelivery, need: NeedKindRuling}
-			}
-			return &askAnswer{kind: AskRuling, words: signalNeedsRuling, need: NeedKindRuling}
-		}
-	}
-	if facts != nil {
-		if st := facts.state(); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
-			return &askAnswer{kind: AskPullRequest, words: string(st), need: NeedKindPullRequest}
-		}
-	}
-	if b.PersonBlocker {
-		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou), need: NeedKindRoutedToYou}
-	}
-	return nil
-}
-
-// questionAsk is a question's ask: "Question", or its conversation's words when
-// one answers it, a conversation that replies to a gate or tracks a decision.
-// It is in conversation once a sitting holds that conversation, and a question
-// otherwise.
-func questionAsk(answeredBy, assignee string) *askAnswer {
-	if answeredBy == "" {
-		return &askAnswer{kind: AskQuestion, words: string(AskQuestion), need: NeedKindQuestion}
-	}
-	a := &askAnswer{kind: AskQuestion, words: conversationWords(assignee), need: NeedKindQuestion}
-	if conversationKind(assignee) == NeedKindInConversation {
-		a.need = NeedKindInConversation
-	}
-	return a
-}
-
 // pullRequestOf is a bead's pull request in the pack's words, nil when it
 // records none.
-func pullRequestOf(b bead, facts *prFacts) *PullRequest {
+func pullRequestOf(b bead, p *standing.PR) *PullRequest {
 	n := b.PRNumber
 	if n == "" {
 		return nil
 	}
 	out := &PullRequest{Number: n, URL: b.PRURL}
-	if facts != nil {
-		out.State = string(facts.state())
-		for _, h := range facts.held() {
+	if p != nil {
+		out.State = string(p.State())
+		for _, h := range p.Held() {
 			out.Held = append(out.Held, string(h))
 		}
 	}
@@ -421,12 +280,12 @@ func pullRequestOf(b bead, facts *prFacts) *PullRequest {
 }
 
 // reasonsOf is what holds a pull request, in the pack's words.
-func reasonsOf(facts *prFacts) []Reason {
-	if facts == nil {
+func reasonsOf(p *standing.PR) []Reason {
+	if p == nil {
 		return nil
 	}
 	var out []Reason
-	for _, r := range facts.reasons() {
+	for _, r := range p.Reasons() {
 		out = append(out, Reason{Held: string(r.Held), ID: r.ID, Title: r.Title})
 	}
 	return out

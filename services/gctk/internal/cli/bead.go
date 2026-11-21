@@ -20,7 +20,8 @@ import (
 
 // `gctk bead holds <bead>...` answers what holds each bead, through the waits
 // package, from one snapshot of the store (docs/gctk-architecture.md, "The
-// bead holds contract"). `gctk bead arm`, `gctk bead disarm` and `gctk bead
+// bead holds contract"), and `gctk bead stands` where each stands
+// (beadstands.go). `gctk bead arm`, `gctk bead disarm` and `gctk bead
 // start-armed` are the arm's verbs, through the arm package
 // (docs/deferred-dispatch.md). None holds a rule: the domain decides, and the
 // command prints its answer.
@@ -93,9 +94,10 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
-	return group("bead", "what holds a bead, and its arm",
-		"A bead's waits, what holds it, read from the store, and the arm that starts it by itself once nothing does.",
-		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr))
+	return group("bead", "what holds a bead, where it stands, and its arm",
+		"A bead's waits, what holds it, read from the store, where it stands and whose move it is, and the arm that starts it by itself once nothing does.",
+		holds, newBeadStandsCmd(stdout, stderr), newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr),
+		newBeadStartArmedCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the

@@ -16,6 +16,7 @@ import (
 
 	"github.com/steveyegge/beads"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/board"
 )
@@ -1010,7 +1011,7 @@ func (l *libraryPRStore) Anchored(ids []string, statuses []string) (map[string][
 // Blockers answers each id's `blocks` edges, each far bead as it hydrated, its
 // metadata whole. An edge whose far bead did not hydrate is dropped, as the
 // library drops a dangling or cross-store edge.
-func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
+func (l *libraryPRStore) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	recs := make(map[string][]*beads.Dependency, len(ids))
 	var unread []string
 	for _, id := range ids {
@@ -1040,7 +1041,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 		return nil, err
 	}
 	maps.Copy(l.issues, hydrated)
-	out := make(map[string][]prstatus.Blocker, len(ids))
+	out := make(map[string][]person.Blocker, len(ids))
 	for _, id := range ids {
 		out[id] = nil
 		for _, d := range recs[id] {
@@ -1048,7 +1049,7 @@ func (l *libraryPRStore) Blockers(ids []string) (map[string][]prstatus.Blocker, 
 				continue
 			}
 			if iss := l.issues[d.DependsOnID]; iss != nil {
-				out[id] = append(out[id], prstatus.Blocker{
+				out[id] = append(out[id], person.Blocker{
 					ID:        iss.ID,
 					Title:     iss.Title,
 					Status:    string(iss.Status),

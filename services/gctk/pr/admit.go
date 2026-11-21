@@ -11,6 +11,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // The landing order admits the review run (specs/tk-1tfzr71.108/design.md,
@@ -129,17 +130,11 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 // and nothing else.
 func heldBy(s state) string {
 	for _, b := range s.blockers {
-		if b.Status() != "closed" && isHumanGate(b) {
+		if b.Status() != "closed" && person.IsHumanGate(b.IssueType(), b.AwaitType()) {
 			return fmt.Sprintf("human gate %s (%s) holds the bead", b.ID, firstOf(b.AwaitID(), "no key"))
 		}
 	}
 	return ""
-}
-
-// isHumanGate reports whether b is a human gate: Gas City's native bead for a
-// wait a person must clear, the rule prstatus.IsHumanGate states.
-func isHumanGate(b *ledger.Record) bool {
-	return strings.EqualFold(b.IssueType(), "gate") && b.AwaitType() == "human"
 }
 
 // writers names the open beads other than the bead s read and its asks that
@@ -168,7 +163,7 @@ func (u *run) writers(s state) ([]string, error) {
 func (u *run) failedRuns(s state) ([]review.Ending, error) {
 	since := time.Time{}
 	for _, b := range s.blockers {
-		if !isHumanGate(b) || b.AwaitID() != runFailedKey || b.Status() != "closed" {
+		if !person.IsHumanGate(b.IssueType(), b.AwaitType()) || b.AwaitID() != runFailedKey || b.Status() != "closed" {
 			continue
 		}
 		at, err := closedTime(b)

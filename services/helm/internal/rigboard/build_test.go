@@ -6,9 +6,12 @@ import (
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -16,7 +19,7 @@ import (
 // gate holding work under both epics, a park gate, and the Product Owner's
 // desk. tk-b.1 and tk-b.2 are armed and tk-loose is routed to a pool, so the
 // city takes them, and nobody has scheduled tk-a.1.1 or tk-loose2.
-func graph() *gathered {
+func graph() *testRead {
 	parent := func(p string) []listing.Edge { return []listing.Edge{{ID: p, Type: "parent-child"}} }
 	blocks := func(id string) listing.Edge { return listing.Edge{ID: id, Type: "blocks"} }
 	open := []bead{
@@ -39,10 +42,10 @@ func graph() *gathered {
 	}
 	wq := waits.Wait{ID: "tk-q", Type: "blocks", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	wpark := waits.Wait{ID: "tk-park", Type: "blocks", Title: "parked", Status: "open", IssueType: "gate"}
-	q := prstatus.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	q := person.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
 	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
 	armed := &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}
-	return &gathered{
+	return &testRead{
 		rig: "gc-toolkit", open: open, closed: closed,
 		holds: map[string]waits.Holds{
 			"tk-a": clear("tk-a"), "tk-b": clear("tk-b"), "tk-a.1": clear("tk-a.1"),
@@ -54,26 +57,48 @@ func graph() *gathered {
 			"tk-desk1":  clear("tk-desk1"), "tk-desk2": clear("tk-desk2"),
 			"tk-q": clear("tk-q"), "tk-park": clear("tk-park"),
 		},
-		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
-			"tk-a.1.1":  {Gates: []prstatus.Blocker{q}},
-			"tk-b.1":    {Gates: []prstatus.Blocker{q}},
-			"tk-b.2":    {Gates: []prstatus.Blocker{q}},
+			"tk-a.1.1":  {Gates: []person.Blocker{q}},
+			"tk-b.1":    {Gates: []person.Blocker{q}},
+			"tk-b.2":    {Gates: []person.Blocker{q}},
 			"tk-loose":  {},
 			"tk-loose2": {},
 		},
-		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{},
+		noFacts: map[string]bool{},
 	}
 }
 
-// readOf is queue's read of a test's beads and what holds them, as the listing
-// gives it from its rows: a bead with no answer about what holds it is one
-// waits could not answer.
-type readOf struct{ g *gathered }
+// testRead is a test's read of a rig: its beads, and what the readers answer
+// about them as the test states it. holds is waits' answer for each bead, and a
+// bead with none is one waits could not answer. holding is the gates and the
+// beads a person owes that prstatus's walk names for each bead, which the store
+// gives as that bead's blockers. noFacts holds each bead whose pull request a
+// reader could not answer for, and answers the evaluator's answer for each pull
+// request on the pending record. prs, when a test gives one, is a prstatus
+// store over the same beads, which answers prstatus's reads instead, and runs
+// are the live runs.
+type testRead struct {
+	rig        string
+	open       []bead
+	closed     []bead
+	holds      map[string]waits.Holds
+	holding    map[string]prstatus.Holds
+	noFacts    map[string]bool
+	answers    map[string]pr.Answer
+	prs        prstatus.Store
+	runs       []waits.Run
+	handedBack []bead
+}
 
-func (r readOf) Rows(ids []string) (map[string]queue.Row, error) {
+// storeOf is standing's read of a test's beads, as the listing gives it from
+// its rows.
+type storeOf struct{ r *testRead }
+
+func (s storeOf) all() []bead { return append(slices.Clone(s.r.open), s.r.closed...) }
+
+func (s storeOf) Rows(ids []string) (map[string]queue.Row, error) {
 	out := map[string]queue.Row{}
-	for _, b := range append(slices.Clone(r.g.open), r.g.closed...) {
+	for _, b := range s.all() {
 		if _, dup := out[b.ID]; !dup && slices.Contains(ids, b.ID) {
 			out[b.ID] = queue.Row{ID: b.ID, Status: b.Status, Priority: b.Priority, CreatedAt: b.CreatedAt,
 				RoutedTo: b.RoutedTo, Assignee: b.Assignee, Labels: b.Labels, Anchor: b.Anchor}
@@ -82,10 +107,10 @@ func (r readOf) Rows(ids []string) (map[string]queue.Row, error) {
 	return out, nil
 }
 
-func (r readOf) Holds(ids []string) (map[string]waits.Holds, map[string]error, error) {
+func (s storeOf) Holds(ids []string) (map[string]waits.Holds, map[string]error, error) {
 	holds, failed := map[string]waits.Holds{}, map[string]error{}
 	for _, id := range ids {
-		if h, ok := r.g.holds[id]; ok {
+		if h, ok := s.r.holds[id]; ok {
 			holds[id] = h
 		} else {
 			failed[id] = errors.New("waits could not answer it")
@@ -94,15 +119,100 @@ func (r readOf) Holds(ids []string) (map[string]waits.Holds, map[string]error, e
 	return holds, failed, nil
 }
 
-// boardOf builds the document from a test's read, with the order the read asks
-// queue for.
-func boardOf(t *testing.T, g *gathered) Document {
+// Beads is a row for each bead named whose pull request reads, with no
+// metadata of its own.
+func (s storeOf) Beads(ids []string) (map[string]prstatus.Row, error) {
+	if s.r.prs != nil {
+		return s.r.prs.Beads(ids)
+	}
+	out := map[string]prstatus.Row{}
+	for _, b := range s.all() {
+		if slices.Contains(ids, b.ID) && !s.r.noFacts[b.ID] {
+			out[b.ID] = prstatus.Row{ID: b.ID, Metadata: map[string]string{}}
+		}
+	}
+	return out, nil
+}
+
+func (s storeOf) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
+	if s.r.prs != nil {
+		return s.r.prs.Anchored(ids, statuses)
+	}
+	out := map[string][]prstatus.Row{}
+	for _, id := range ids {
+		out[id] = nil
+	}
+	return out, nil
+}
+
+// Blockers is, for each bead named, the gates and the beads a person owes that
+// the test states prstatus's walk names for it.
+func (s storeOf) Blockers(ids []string) (map[string][]person.Blocker, error) {
+	if s.r.prs != nil {
+		return s.r.prs.Blockers(ids)
+	}
+	out := map[string][]person.Blocker{}
+	for _, id := range ids {
+		h := s.r.holding[id]
+		out[id] = append(slices.Clone(h.Gates), h.Owed...)
+	}
+	return out, nil
+}
+
+func (s storeOf) PRAnswers(ids []string) (map[string]pr.Answer, map[string]error) {
+	out, failed := map[string]pr.Answer{}, map[string]error{}
+	for _, id := range ids {
+		if a, ok := s.r.answers[id]; ok {
+			out[id] = a
+		} else {
+			failed[id] = errors.New("no answer")
+		}
+	}
+	return out, failed
+}
+
+func (s storeOf) Every() []standing.Bead {
+	var out []standing.Bead
+	for _, b := range s.r.open {
+		out = append(out, b.Standing())
+	}
+	return out
+}
+
+func (s storeOf) Find(ids []string) (map[string]standing.Bead, error) {
+	out := map[string]standing.Bead{}
+	for _, b := range s.all() {
+		if slices.Contains(ids, b.ID) {
+			out[b.ID] = b.Standing()
+		}
+	}
+	return out, nil
+}
+
+func (s storeOf) ClosedBeneath(parents []string) ([]standing.Bead, error) {
+	var out []standing.Bead
+	for _, b := range s.r.closed {
+		if slices.ContainsFunc(parentsOf(b), func(p string) bool { return slices.Contains(parents, p) }) {
+			out = append(out, b.Standing())
+		}
+	}
+	return out, nil
+}
+
+func (s storeOf) LiveRuns() ([]waits.Run, error) { return s.r.runs, nil }
+
+func parentsOf(b bead) []string { return parents(b) }
+
+// boardOf builds the document from a test's read, with standing's reading of
+// it.
+func boardOf(t *testing.T, r *testRead) Document {
 	t.Helper()
-	o, err := queue.Order(openWork(g.open), readOf{g})
+	g := &gathered{rig: r.rig, open: r.open, closed: r.closed, handedBack: r.handedBack}
+	reading, err := standing.Read(rowIDs(g), storeOf{r})
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.order = o
+	g.reading = reading
 	return build(g)
 }
 
@@ -247,13 +357,12 @@ func TestWorkWhoseWaitsAreUnread(t *testing.T) {
 		g := graph()
 		for i := range g.open {
 			if g.open[i].ID == "tk-loose" {
-				g.open[i].PersonBlocker = true
+				g.open[i].IssueType, g.open[i].Assignee = "task", "human"
 			}
 		}
 		if !answered {
 			delete(g.holds, "tk-loose")
 			delete(g.holding, "tk-loose")
-			g.unread["tk-loose"] = errors.New("its edges did not decode")
 		}
 		return boardOf(t, g)
 	}
@@ -275,7 +384,7 @@ func TestWorkWhoseWaitsAreUnread(t *testing.T) {
 // Unprioritized page while the work behind it still waits on it. In graph,
 // tk-b.1 is armed and waits on question tk-q, and armed tk-b.2 waits on tk-b.1.
 func TestWorkForTheProductOwner(t *testing.T) {
-	hold := func(g *gathered, id string) {
+	hold := func(g *testRead, id string) {
 		for i := range g.open {
 			if g.open[i].ID == id {
 				g.open[i].Labels = append(g.open[i].Labels, "hold:mayor")
@@ -346,7 +455,7 @@ func TestWorkForTheProductOwner(t *testing.T) {
 			}
 			for i := range g.open {
 				if g.open[i].ID == "tk-b.1" {
-					g.open[i].PersonBlocker = true
+					g.open[i].IssueType, g.open[i].Assignee = "task", "human"
 				}
 			}
 			return boardOf(t, g)
@@ -382,11 +491,11 @@ func TestNeedOrder(t *testing.T) {
 	wait := func(id, issueType, awaitType string) waits.Wait {
 		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: issueType, AwaitType: awaitType}
 	}
-	gate := func(id string) prstatus.Blocker {
-		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	gate := func(id string) person.Blocker {
+		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
-	pr := prstatus.Blocker{ID: "tk-pr", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}
-	g := &gathered{rig: "gc-toolkit",
+	pr := person.Blocker{ID: "tk-pr", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}
+	g := &testRead{rig: "gc-toolkit",
 		open: []bead{
 			{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"},
 			{ID: "tk-g1", Title: "first question", Status: "open", Priority: 2, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-01"},
@@ -407,14 +516,13 @@ func TestNeedOrder(t *testing.T) {
 			"tk-w2": {ID: "tk-w2", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-g1", "gate", "human")}, Arm: armed},
 			"tk-w3": {ID: "tk-w3", Status: waits.Blocked, Waits: []waits.Wait{wait("tk-g2", "gate", "human")}},
 		},
-		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
 			"tk-pr": {},
-			"tk-w1": {Owed: []prstatus.Blocker{pr}},
-			"tk-w2": {Gates: []prstatus.Blocker{gate("tk-g1")}},
-			"tk-w3": {Gates: []prstatus.Blocker{gate("tk-g2")}},
+			"tk-w1": {Owed: []person.Blocker{pr}},
+			"tk-w2": {Gates: []person.Blocker{gate("tk-g1")}},
+			"tk-w3": {Gates: []person.Blocker{gate("tk-g2")}},
 		},
-		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}}, noFacts: map[string]bool{},
+		noFacts: map[string]bool{},
 	}
 	doc := boardOf(t, g)
 
@@ -453,9 +561,8 @@ func TestWorkUnderTwoParents(t *testing.T) {
 		return bead{ID: id, Title: "Epic " + id, Status: "open", Priority: p, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"}
 	}
 	clear := func(id string) waits.Holds { return waits.Holds{ID: id, Status: waits.Clear} }
-	empty := func(open, closed []bead, holds map[string]waits.Holds) *gathered {
-		return &gathered{rig: "gc-toolkit", open: open, closed: closed, holds: holds, unread: map[string]error{},
-			holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{}}
+	empty := func(open, closed []bead, holds map[string]waits.Holds) *testRead {
+		return &testRead{rig: "gc-toolkit", open: open, closed: closed, holds: holds, holding: map[string]prstatus.Holds{}, noFacts: map[string]bool{}}
 	}
 	entry := func(doc Document, e string) EpicEntry {
 		for _, x := range doc.Epics {
@@ -489,7 +596,7 @@ func TestWorkUnderTwoParents(t *testing.T) {
 				Edges: []listing.Edge{parent("tk-e1"), parent("tk-e2"), {ID: "tk-q", Type: "blocks"}}, CreatedAt: "2026-01-03"},
 		}, nil, map[string]waits.Holds{"tk-e1": clear("tk-e1"), "tk-e2": clear("tk-e2"), "tk-q": clear("tk-q"),
 			"tk-w": {ID: "tk-w", Status: waits.Blocked, Waits: []waits.Wait{wq}}})
-		g.holding["tk-w"] = prstatus.Holds{Gates: []prstatus.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
+		g.holding["tk-w"] = prstatus.Holds{Gates: []person.Blocker{{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}}}
 		doc := boardOf(t, g)
 		for _, e := range []string{"tk-e1", "tk-e2"} {
 			x := entry(doc, e)
@@ -519,8 +626,7 @@ func TestAChildEpicIsAMember(t *testing.T) {
 			Epic: listing.Epic{Hypothesis: "its part works"}, Edges: under, CreatedAt: "2026-01-03"}
 	}
 	read := func(members ...bead) Document {
-		g := &gathered{rig: "gc-toolkit", holds: map[string]waits.Holds{}, unread: map[string]error{},
-			holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{}, noFacts: map[string]bool{}}
+		g := &testRead{rig: "gc-toolkit", holds: map[string]waits.Holds{}, holding: map[string]prstatus.Holds{}, noFacts: map[string]bool{}}
 		for _, b := range append([]bead{epic}, members...) {
 			if !isOpen(b) {
 				g.closed = append(g.closed, b)
@@ -592,9 +698,9 @@ func TestAConversationAnsweringTwoQuestions(t *testing.T) {
 	for _, id := range []string{"tk-q2", "tk-c"} {
 		g.holds[id] = waits.Holds{ID: id, Status: waits.Clear}
 	}
-	conv := prstatus.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}
+	conv := person.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}
 	g.holds["tk-b.3"] = waits.Holds{ID: "tk-b.3", Status: waits.Blocked, Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Status: "open", IssueType: "task"}}}
-	g.holding["tk-b.3"] = prstatus.Holds{Owed: []prstatus.Blocker{conv}}
+	g.holding["tk-b.3"] = prstatus.Holds{Owed: []person.Blocker{conv}}
 	for range 20 {
 		doc := boardOf(t, g)
 		if !slices.Contains(doc.Rows["tk-q"].Holds, "tk-b.3") || slices.Contains(doc.Rows["tk-q2"].Holds, "tk-b.3") {
@@ -681,12 +787,12 @@ func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 				Edges: []listing.Edge{{ID: "tk-c", Type: "blocks"}, {ID: "tk-rw", Type: "blocks"}}}
 			cb := bead{ID: "tk-c", Title: "should this land as built?", Status: "open", Priority: 2, IssueType: "task", Assignee: sitting,
 				CreatedAt: "2026-01-02", Edges: []listing.Edge{{ID: "tk-pr", Type: "tracks"}, {ID: "tk-rw", Type: "blocks"}}}
-			g := &gathered{rig: "gc-toolkit", open: []bead{pr, cb},
+			g := &testRead{rig: "gc-toolkit", open: []bead{pr, cb},
 				holds: map[string]waits.Holds{
 					"tk-pr": {ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{conv}, InFlight: "carries merge_result"},
 					"tk-c":  {ID: "tk-c", Status: waits.Clear},
 				},
-				unread: map[string]error{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+				noFacts: map[string]bool{}}
 			if c.rework != "closed" {
 				g.open = append(g.open, bead{ID: "tk-rw", Title: "rework the change", Status: c.rework, Priority: 2, IssueType: "task",
 					Assignee: "gc-toolkit/gc-toolkit.polecat-1", Anchor: "tk-pr", CreatedAt: "2026-01-03"})
@@ -694,17 +800,7 @@ func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 				g.holds["tk-c"] = waits.Holds{ID: "tk-c", Status: waits.Blocked, Waits: []waits.Wait{rework}}
 				g.holds["tk-rw"] = waits.Holds{ID: "tk-rw", Status: waits.Clear, InFlight: "claimed"}
 			}
-			var ids []string
-			for _, b := range g.open {
-				ids = append(ids, b.ID)
-			}
-			var err error
-			if g.holding, err = prstatus.Holding(holdingRoots(ids, g.holds), store.Blockers); err != nil {
-				t.Fatal(err)
-			}
-			if g.facts, err = prstatus.Read([]string{"tk-pr"}, store); err != nil {
-				t.Fatal(err)
-			}
+			g.prs = store
 			doc := boardOf(t, g)
 			var counted []string
 			for _, n := range doc.NeedsYou.Counted {
@@ -765,8 +861,8 @@ func TestADecisionThatWaitsOnItsWork(t *testing.T) {
 			if c.holds.Status == waits.Blocked {
 				var owed prstatus.Holds
 				for _, w := range c.holds.Waits {
-					if prstatus.IsHumanGate(w.IssueType, w.AwaitType) {
-						owed.Gates = append(owed.Gates, prstatus.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType, AwaitType: w.AwaitType})
+					if person.IsHumanGate(w.IssueType, w.AwaitType) {
+						owed.Gates = append(owed.Gates, person.Blocker{ID: w.ID, Title: w.Title, Status: w.Status, IssueType: w.IssueType, AwaitType: w.AwaitType})
 					}
 				}
 				g.holding["tk-d"] = owed
@@ -813,12 +909,12 @@ func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 				Assignee: "gc-toolkit/refinery", CreatedAt: "2026-01-01", Edges: []listing.Edge{{ID: "tk-d", Type: "blocks"}}}
 			d := bead{ID: "tk-d", Title: "keep the old flag?", Status: "open", Priority: 2, IssueType: "decision",
 				CreatedAt: "2026-01-02", Edges: []listing.Edge{{ID: "tk-w", Type: "blocks"}}}
-			g := &gathered{rig: "gc-toolkit", open: []bead{pr, d},
+			g := &testRead{rig: "gc-toolkit", open: []bead{pr, d},
 				holds: map[string]waits.Holds{
 					"tk-pr": {ID: "tk-pr", Status: waits.Blocked, Waits: []waits.Wait{decision}, InFlight: "carries merge_result"},
 					"tk-d":  {ID: "tk-d", Status: waits.Clear},
 				},
-				unread: map[string]error{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+				noFacts: map[string]bool{}}
 			if c.work != "closed" {
 				g.open = append(g.open, bead{ID: "tk-w", Title: "drop the flag's callers", Status: "open", Priority: 2, IssueType: "task",
 					RoutedTo: "gc-toolkit/gc-toolkit.polecat", CreatedAt: "2026-01-03"})
@@ -826,17 +922,7 @@ func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 					Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Title: "drop the flag's callers", Status: "open", IssueType: "task"}}}
 				g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Clear}
 			}
-			var ids []string
-			for _, b := range g.open {
-				ids = append(ids, b.ID)
-			}
-			var err error
-			if g.holding, err = prstatus.Holding(holdingRoots(ids, g.holds), store.Blockers); err != nil {
-				t.Fatal(err)
-			}
-			if g.facts, err = prstatus.Read([]string{"tk-pr"}, store); err != nil {
-				t.Fatal(err)
-			}
+			g.prs = store
 			doc := boardOf(t, g)
 			var counted []string
 			for _, n := range doc.NeedsYou.Counted {
@@ -936,7 +1022,7 @@ func TestWorkThatWaitsOnADecisionsConversation(t *testing.T) {
 	}
 	g.holds["tk-w"] = waits.Holds{ID: "tk-w", Status: waits.Blocked,
 		Waits: []waits.Wait{{ID: "tk-c", Type: "blocks", Title: "talk it through", Status: "open", IssueType: "task"}}}
-	g.holding["tk-w"] = prstatus.Holds{Owed: []prstatus.Blocker{{ID: "tk-c", Title: "talk it through", Status: "open", IssueType: "task", Assignee: "human"}}}
+	g.holding["tk-w"] = prstatus.Holds{Owed: []person.Blocker{{ID: "tk-c", Title: "talk it through", Status: "open", IssueType: "task", Assignee: "human"}}}
 	doc := boardOf(t, g)
 	if got := doc.Rows["tk-d"].Holds; !slices.Equal(got, []string{"tk-w"}) {
 		t.Errorf("tk-d holds %v, want the work behind its conversation", got)
@@ -1018,8 +1104,8 @@ func TestNeedsThatCount(t *testing.T) {
 	question := func(id string) waits.Wait {
 		return waits.Wait{ID: id, Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
-	gate := func(id string) prstatus.Blocker {
-		return prstatus.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
+	gate := func(id string) person.Blocker {
+		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
 	blocked := func(id string, ws ...waits.Wait) waits.Holds {
 		return waits.Holds{ID: id, Status: waits.Blocked, Waits: ws}
@@ -1048,7 +1134,7 @@ func TestNeedsThatCount(t *testing.T) {
 	pq.Edges = []listing.Edge{blocks("tk-park")}
 	desk, desk2 := task("tk-desk", blocks("tk-qd")), task("tk-desk2", blocks("tk-qf"))
 	desk.Labels, desk2.Labels = []string{"hold:mayor"}, []string{"hold:mayor"}
-	g := &gathered{rig: "gc-toolkit",
+	g := &testRead{rig: "gc-toolkit",
 		open: []bead{
 			epic("tk-e"), epic("tk-pe", blocks("tk-park")), epic("tk-pf", blocks("tk-park")),
 			{ID: "tk-park", Title: "parked", Status: "open", Priority: 2, IssueType: "gate", CreatedAt: "2026-01-01"},
@@ -1073,17 +1159,16 @@ func TestNeedsThatCount(t *testing.T) {
 			"tk-d": clear("tk-d"), "tk-c1": clear("tk-c1"), "tk-c2": clear("tk-c2"),
 			"tk-qs": clear("tk-qs"), "tk-ws": blocked("tk-ws", question("tk-qs")), "tk-cs": clear("tk-cs"),
 		},
-		unread: map[string]error{},
 		holding: map[string]prstatus.Holds{
 			"tk-pe": {}, "tk-pf": {}, "tk-pq": {},
-			"tk-wb":    {Owed: []prstatus.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}}},
-			"tk-wp":    {Gates: []prstatus.Blocker{gate("tk-qp")}},
-			"tk-desk":  {Gates: []prstatus.Blocker{gate("tk-qd")}},
-			"tk-wf":    {Gates: []prstatus.Blocker{gate("tk-qf")}},
-			"tk-desk2": {Gates: []prstatus.Blocker{gate("tk-qf")}},
-			"tk-ws":    {Gates: []prstatus.Blocker{gate("tk-qs")}},
+			"tk-wb":    {Owed: []person.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task", Metadata: map[string]string{"merge_result": "pull_request"}}}},
+			"tk-wp":    {Gates: []person.Blocker{gate("tk-qp")}},
+			"tk-desk":  {Gates: []person.Blocker{gate("tk-qd")}},
+			"tk-wf":    {Gates: []person.Blocker{gate("tk-qf")}},
+			"tk-desk2": {Gates: []person.Blocker{gate("tk-qf")}},
+			"tk-ws":    {Gates: []person.Blocker{gate("tk-qs")}},
 		},
-		unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{"tk-pr": {}, "tk-pr2": {}}, noFacts: map[string]bool{},
+		noFacts: map[string]bool{},
 	}
 	doc := boardOf(t, g)
 	ids := func(needs []Need) []string {
@@ -1166,7 +1251,7 @@ func TestNeedsThatCount(t *testing.T) {
 			g := graph()
 			for i := range g.open {
 				if g.open[i].ID == id {
-					g.open[i].PersonBlocker = true
+					g.open[i].IssueType, g.open[i].Assignee = "task", "human"
 				}
 			}
 			return boardOf(t, g).NeedsYou
