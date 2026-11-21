@@ -28,10 +28,10 @@ type SavedRead struct {
 	Labels       *SavedLabels       `json:"labels,omitempty"`
 }
 
-// SavedPR is the PR's own facts: its node id, which a request to GitHub names
-// it by, its identity, head branch and base, its head, state, draft flag and
-// merge state, whether it is in a merge queue and whether its base requires
-// one, and, once it merged, its merge commit and when it merged.
+// SavedPR is the PR's own facts: its node id, its identity, head branch and
+// base, its head, state, draft flag and merge state, whether it is in a merge
+// queue and whether its base requires one, and, once it merged, its merge
+// commit and when it merged.
 type SavedPR struct {
 	ReadAt            string  `json:"read_at"`
 	ID                string  `json:"id"`
@@ -80,11 +80,12 @@ type CheckSigns struct {
 	Statuses  map[string]int `json:"statuses"`
 }
 
-// SavedConversation is what the rule reads of the PR's conversation, with the
-// definition of feedback applied from Since: the accounts whose approval or
-// request for changes stands, the newest feedback in each id space, the review
-// threads waiting on the city's answer, the unresolved threads and GitHub's
-// review decision. Approvals is each approval that stands.
+// SavedConversation is the PR's conversation as the one-PR update read it, with
+// the definition of feedback applied from Since: the accounts whose approval or
+// request for changes stands, the newest feedback in each id space and the
+// review threads waiting on the city's answer, which the rule reads, and the
+// unresolved threads and GitHub's review decision, which the net compares
+// (differs). Approvals is each approval that stands.
 type SavedConversation struct {
 	ReadAt         string            `json:"read_at"`
 	Since          string            `json:"since"`

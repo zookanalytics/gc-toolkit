@@ -508,8 +508,9 @@ first. Either way the change is a decision on the record, not a drift.
   for the displays. The landing order decides every act that depends on
   GitHub's state on its own read of GitHub, made in the act, together with the
   store's record of what the city did, and the watch's output only chooses which
-  records a run decides. A stale saved read or a change the watch has not seen
-  yet delays a decision or shows an old screen, and causes no act. The
+  records a run decides and which PRs' labels it writes. A stale saved read or a
+  change the watch has not seen yet delays a decision or shows an old screen,
+  and no act rests on it. The
   evaluator's answer is computed at each read and stored nowhere.
 - **A review, a hold or a change of base that arrives after the landing
   order's read is not part of its decision to merge,** even when GitHub carries

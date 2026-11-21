@@ -121,8 +121,10 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 // A head a review run's repair pushed waits on that run while it is attached:
 // the requeue keeps the marker and the bead assigned to nobody, since Gas City
 // retires a run whose input bead an agent outside it is assigned, and wakes no
-// one, and each run that decides the record while the review run lives writes
-// nothing and reads no PR. The first run after the review run ends wakes the
+// one. The first run that decides the record while the review run lives reads
+// no PR and writes only the digest of what it decided on, and a run after it in
+// which nothing changed decides nothing. The first run after the review run
+// ends wakes the
 // refinery, since the conversation still holds the bead, and hands the head to
 // it in the write that clears the marker.
 func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {

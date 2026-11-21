@@ -65,9 +65,10 @@ each part read after the saved one's instant: the part when it differs from
 the saved one, and its read's instant alone when it holds the same, so a read
 sent before it is never saved after it. A bead on
 Gas Town's pending record gets pr_state and pr_last_checked_at in the same
-write. A merge state GitHub reads as UNKNOWN is saved with the PR part's
-earlier signs, so the next pass reads it again. It prints the bead, the PR and
-what it did, as <bead> <url> <action>: <detail>.
+write. A merge state GitHub reads as UNKNOWN on an open PR is saved as read,
+and the PR watch's next pass reads the PR part again, until GitHub has computed
+one. It prints the bead, the PR and what it did, as <bead> <url> <action>:
+<detail>.
 
 exit: 0 saved, unchanged, or no live bead owns the PR
       1 usage, or --pr is no PR's URL
@@ -77,9 +78,10 @@ exit: 0 saved, unchanged, or no live bead owns the PR
 const prPollLong = `One pass of the PR watch over the store's live beads: it lists the PRs they
 own, asks GitHub for each one's cheap signs in one request for each 50 PRs in
 a repository, and runs the one-PR update (gctk pr refresh) for each PR whose
-signs moved from the ones saved on its bead, or whose bead holds no read, or
-one not current for it. It starts no update more than 90 seconds in. A pass in
-which nothing moved writes no bead.
+signs moved from the ones saved on its bead, whose bead holds no read or one
+not current for it, or that is open with a merge state GitHub had not computed
+when it was saved. It starts no update more than 90 seconds in. A pass in which
+none of these holds writes no bead.
 
 The signs are the PR's state and draft flag, its head, its base and the base's
 tip, when GitHub last changed it, its comments, reviews and dismissed reviews
@@ -100,8 +102,8 @@ const prCompareLong = `One pass of the net over the store's live beads: it lists
 reads each in full in one request for each 10 PRs in a repository, and runs
 the one-PR update (gctk pr refresh) for each PR whose read differs from the
 read saved on its bead, over each part that differs or whose cheap signs
-moved. It starts no update more than 3 minutes in. A pass in which nothing
-differs writes no bead.
+moved, as gctk pr poll tells them. It starts no update more than 3 minutes in.
+A pass in which no part differs or moved writes no bead.
 
 The full read is the cheap signs gctk pr poll reads and the facts no sign
 shows: the PR's merge state, its review decision, whether it is in a merge

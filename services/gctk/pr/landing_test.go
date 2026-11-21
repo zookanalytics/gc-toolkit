@@ -28,18 +28,18 @@ import (
 // gascity-packs 7f86098c04ea (gastown/tests/test_pr_merge_reconcile.sh), each
 // named for the case it ports, and add the pack's: the merge request, the merge
 // queue, the order of the record's writers under the store's record lock, and
-// the run that decides each changed record on its own read
-// (specs/tk-1tfzr71.149/design.md, section 5).
+// the run that decides each record on its own read once it changed or its hour
+// is up (specs/tk-1tfzr71.149/design.md, section 5).
 // Gas Town's cases about its artifact cleanup after the close, its REST lookup
 // without gh, its witness's wake of the refinery and its formula's wiring have
 // no counterpart: the pack runs no artifact cleanup, reads GitHub through gh,
 // runs the order with no agent, and the refinery's formula is unit 4's.
 //
-// A run decides a record on its own read of the PR, and only once the store,
-// the read the one-PR update saved on the bead among it, changed since a run
-// decided it with no act owed. So a case that changes GitHub has the PR watch
-// save it first (once), as its next pass would, and asserts on what the run
-// itself read and wrote.
+// A run decides a record on its own read of the PR, once the store, the read
+// the one-PR update saved on the bead among it, changed since a run decided it
+// with no act owed, or once that decision is an hour old. So a case that
+// changes GitHub has the PR watch save it first (once), as its next pass would,
+// and asserts on what the run itself read and wrote.
 
 const (
 	refinery = "rig/refinery"
@@ -159,7 +159,8 @@ func (c *clock) advance(d time.Duration) {
 	c.t = c.t.Add(d)
 }
 
-// timed gives the run a clock the test moves, which a run's window reads.
+// timed gives the run a clock the test moves, which a run's window and a
+// decision's hour read.
 func (d *land) timed() *clock {
 	c := &clock{t: time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)}
 	d.l.Now = c.now
@@ -543,7 +544,7 @@ func TestOpenUnchangedPRStaysBlocked(t *testing.T) {
 	// asks GitHub nothing and writes nothing.
 	o := d.run(t)
 	is(t, o, pr.ActChecked)
-	if !strings.Contains(o.Detail, "nothing moved on GitHub and nothing changed in the store") {
+	if !strings.Contains(o.Detail, "nothing the decision reads of the store, the PR watch's saved read among it, changed") {
 		t.Fatalf("an unchanged record says %q", o.Detail)
 	}
 	readsNoGitHub(t, d)
@@ -691,7 +692,7 @@ func TestAChangedHeadOpenMarkerIsSettled(t *testing.T) {
 	readsNoGitHub(t, d)
 }
 
-func TestAnInvalidBlockedRecordIsAnExceptionBeforeTheSavedReadIsRead(t *testing.T) {
+func TestAnInvalidBlockedRecordIsAnExceptionBeforeThePRIsRead(t *testing.T) {
 	for _, result := range []string{"", "pull_request", "merged", record.Invalid, record.Merged} {
 		t.Run(result, func(t *testing.T) {
 			d := newLand(t)
@@ -900,9 +901,9 @@ func TestAClosedUnmergedPRStaysBlockedBehindAGate(t *testing.T) {
 // An exception holds the work behind a person, so it is decided on the act's
 // own read of the PR, never on the saved read. A PR the watch read closed that a
 // person reopened, whose work the refinery published again before the watch
-// read it, gets no exception and no
-// gate and keeps its marker, and once the watch reads it the record stands
-// pending.
+// read it, gets no exception and no gate: the run finds it open and ready on its
+// own read and requests its merge, and the record stands pending with its
+// marker.
 func TestARepublishedPRIsNotExceptedOnAClosedReadFromBeforeIt(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.State = "CLOSED"
@@ -1229,8 +1230,9 @@ func TestARecordWithNoSavedReadIsDecidedOnTheRunsOwnRead(t *testing.T) {
 
 // --- the run's order and bounds ---------------------------------------------
 
-// A run decides every record and takes the ones that owe an act in the order
-// Shuffle gives them. A record that owes none reports what it waits on first.
+// A run takes the records that owe a decision in the order Shuffle gives them,
+// and reports first each record it passes over, one a run decided with no act
+// owed less than an hour ago while nothing that decision read has changed.
 func TestARunTakesTheRecordsThatOweAnActInAShuffledOrder(t *testing.T) {
 	d := newLand(t)
 	d.pr.Reviews = nil
@@ -1250,7 +1252,7 @@ func TestARunTakesTheRecordsThatOweAnActInAShuffledOrder(t *testing.T) {
 	}
 	out := d.reconcile(t, pr.Options{})
 	if !slices.Equal(given, []string{"tk-o0", "tk-o1", "tk-o2"}) {
-		t.Fatalf("the shuffle was given %v, want the records that owe an act", given)
+		t.Fatalf("the shuffle was given %v, want the records that owe a decision", given)
 	}
 	var order []string
 	for _, o := range out {
@@ -1412,8 +1414,7 @@ func (stalledWake) Wake(ctx context.Context, _, _ string) error {
 	return fmt.Errorf("gc session wake was stopped: %w", ctx.Err())
 }
 
-// stalled is GitHub answering no merge's read or request until the act's
-// context ends.
+// stalled is GitHub answering no read of the PR until the act's context ends.
 type stalled struct {
 	*ghfake.GitHub
 	ctx context.Context

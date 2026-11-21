@@ -7,7 +7,9 @@
 # whose signs moved. The update reads only the parts that moved and saves them
 # on the bead as pr_github_read, the one writer of that read, with pr_state and
 # pr_last_checked_at on a bead on the pending record. A pass in which nothing
-# moved writes no bead, and costs one GitHub point for each 50 owned PRs.
+# moved writes no bead but that of an open PR whose merge state GitHub had not
+# yet computed, which it reads again, and otherwise costs one GitHub point for
+# each 50 owned PRs.
 # Exec, not a formula: reads and guarded writes need no LLM. Rig-scoped: one
 # pass per importing rig against its own store, named by --db, loading the
 # pack's definition of feedback in the rig's checkout. GCTK_SCRIPTS_DIR names

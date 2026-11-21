@@ -85,7 +85,8 @@ func TestTheLandingOrderHoldsARun(t *testing.T) {
 
 // A store whose beads own no PR gives a pass nothing to ask GitHub, and a
 // refresh of a PR no bead owns saves nothing; each exits 0. The store stub has
-// no answer for an update, and no gh is asked.
+// no answer for an update, and gh is asked only for the net's search for the
+// city's labels.
 func TestThePRWatchOverAStoreThatOwnsNoPR(t *testing.T) {
 	store := `[{"id":"st-1","status":"open"},{"id":"st-2","status":"open","metadata":{"pr_url":"https://github.com/acme/widgets/pull/9"}}]`
 	out, errs, code := landingCmd(t, store, "git@github.com:acme/widgets.git", "pr", "poll", "--db", t.TempDir())

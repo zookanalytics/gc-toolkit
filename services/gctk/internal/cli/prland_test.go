@@ -72,8 +72,9 @@ func TestPRReconcileWithNoPendingRecordSaysSo(t *testing.T) {
 	}
 }
 
-// A run decides every record from the beads, so it takes no count of records
-// and no budget: its bounds are its own.
+// A run decides only the records whose PR moved, whose bead changed or whose
+// hour is up, so it takes no count of records and no budget: its bounds are its
+// own.
 func TestPRReconcileUsage(t *testing.T) {
 	for _, args := range [][]string{
 		{"pr", "reconcile"},

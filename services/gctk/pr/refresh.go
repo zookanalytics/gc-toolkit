@@ -311,11 +311,12 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 	return fresh, nil
 }
 
-// savedConversation is what the rule reads of a PR's conversation c, by the
-// definition of feedback applied from since as the account self acts as, with
-// the newest time any post changed as its post time and the reactions the
-// account the read runs as left on the review threads' comments, which the
-// rule reads and which move no time, as signs the net compares.
+// savedConversation is the conversation part of a PR's saved read, from its
+// conversation c, by the definition of feedback applied from since as the
+// account self acts as, with the newest time any post changed as its post time
+// and the reactions the account the read runs as left on the review threads'
+// comments, which the definition reads as answers and which move no time, as
+// signs the net compares.
 func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
 	f, err := feedbackOf(rule, self, since, c.Reviews, c.Threads, c.Comments)
 	if err != nil {

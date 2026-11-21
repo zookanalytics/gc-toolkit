@@ -120,9 +120,6 @@ func TestARetiredPRStillOpenIsNeverMerged(t *testing.T) {
 	meta(t, b, map[string]string{"pr_state": "open", "pr_reconcile_pending": "true", "merge_result": record.Pending})
 }
 
-// Once the retired PR has closed, the bead goes to the disposition writer under
-// the ruling's kind and successor, with no gate filed, and once it has closed
-// no later run reads it.
 // A retired PR's close is decided on the run's own read of the PR: one the
 // watch saved closed that a person reopened before the run is not closed.
 func TestARetiredPRReopenedAfterTheWatchsReadIsNotClosed(t *testing.T) {
@@ -147,6 +144,9 @@ func TestARetiredPRReopenedAfterTheWatchsReadIsNotClosed(t *testing.T) {
 	readsThePR(t, d)
 }
 
+// Once the retired PR has closed, the bead goes to the disposition writer under
+// the ruling's kind and successor, with no gate filed, and once it has closed
+// no later run reads it.
 func TestARetiredPRThatClosedGoesToTheDispositionWriter(t *testing.T) {
 	d, r := retired(t)
 	d.edit(t, func(b *fake.Bead) { b.Metadata["gc.pr_close_disposition_successor_store"] = "rig:gc-toolkit" })

@@ -6,7 +6,8 @@ package rigboard
 // about every one of them exits non-zero. The line is the start of the newest
 // pass that exited 0, read from Gas City's record of the order's runs through
 // the supervisor's API. A pass in which nothing moved writes nothing to a pull
-// request's bead, so Gas City's record of the run is all it leaves, and the
+// request's bead, but for one whose merge state GitHub had not computed, so Gas
+// City's record of the run is all it leaves, and the
 // record closes when the run ends, where the rig's listing reads live beads.
 
 import (

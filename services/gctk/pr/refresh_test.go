@@ -642,9 +642,9 @@ func TestTheSavedReadsFields(t *testing.T) {
 	}
 }
 
-// The PR part keeps the node id a request names the PR by, and once it merged,
-// its merge commit and when it merged, which the landing order lands it from.
-func TestThePRPartKeepsWhatTheLandingOrderActsOn(t *testing.T) {
+// The PR part keeps the PR's node id and, once it merged, its merge commit and
+// when it merged.
+func TestThePRPartKeepsItsNodeIDAndItsMerge(t *testing.T) {
 	d := newWatched(t)
 	d.pr.Facts.ID = "PR_7"
 	d.pr.Facts.State, d.pr.Facts.MergeCommit, d.pr.Facts.MergedAt = "MERGED", strings.Repeat("e", 40), "2026-11-16T09:00:00Z"

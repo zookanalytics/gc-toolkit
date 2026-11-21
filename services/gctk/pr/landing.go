@@ -29,7 +29,9 @@ import (
 // what the city did: the head the refinery validated, the merge a run verified,
 // the exceptions a run recorded and the waits on the bead. The read holds what
 // GitHub shows now. The read the one-PR update (refresh.go) saved on the bead is
-// the displays', and a run decides nothing from it. On its own read a run
+// the displays', and a run decides no act from it: a change to it only makes a
+// record due (unchanged), and its labels only choose the PRs whose labels a run
+// writes (labelPlans). On its own read a run
 // requests a merge pinned to the head the evaluator judged, closes a bead once
 // the merge commit is on the target, hands a changed head to the refinery and
 // sees that the refinery hears of it, keeps the exceptions blocked behind a
@@ -54,9 +56,10 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order and the draft cycle reach it: the
-// evaluator's reads, which the merge makes, a merge request or an enqueue
-// pinned to the head it judged, the PR's moves between draft and ready, and the
+// Hub is GitHub as the landing order and the draft cycle reach it: the reads
+// an act decides on, the PR and, where its decision needs them, its reviews,
+// threads, checks and comments, a merge request or an enqueue pinned to the
+// head the evaluator judged, the PR's moves between draft and ready, and the
 // dismissal of a review.
 type Hub interface {
 	GitHub
@@ -171,8 +174,8 @@ func (e *HeldClose) Error() string { return e.Why }
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
 // waiting for it takes it. Shuffle orders the acts a run takes, at random when
-// nil. Now is the clock a write's stamp and a run's window read, the system's
-// when nil.
+// nil. Now is the clock a write's stamp, a run's window and a decision's hour
+// read, the system's when nil.
 type Landing struct {
 	Ledger       *ledger.Ledger
 	Dir          string
@@ -276,8 +279,9 @@ type RunOutcome struct {
 
 // The actions a run reports.
 const (
-	// ActChecked: the record owes no act, and the run wrote nothing on the bead:
-	// the PR stands as the record says, or the disposition writer holds a
+	// ActChecked: the record owes no act, and the run wrote nothing on the bead
+	// but the digest of what it decided on (keep), where it keeps one: the PR
+	// stands as the record says, or the disposition writer holds a
 	// retired PR's close for now, and the next run hands it over again. A run
 	// keeps the digest of what a decision that owed no act read (one), and
 	// decides the record again only once that changes or freshCheck has passed,
@@ -317,9 +321,11 @@ const (
 	// act stopped at its bound. Nothing records it, the difference stays on the
 	// bead, and the next run acts on it again.
 	ActRetry = "retry"
-	// ActLabeled: the status: and held: labels the PR shows differ from the
-	// ones the store derives, and the run had the labels' writer write them:
-	// the derived labels on an open PR, and none on one that merged or closed.
+	// ActLabeled: the status: and held: labels the one-PR update saved for the
+	// PR differ from the ones the store derives, and on the act's own read of the
+	// PR the run had the labels' writer, which reads the PR's labels itself,
+	// write them: the derived labels on an open PR, and none on one that merged
+	// or closed.
 	ActLabeled = "labeled"
 	// ActAssigned: the bead is assigned to someone other than the refinery, who
 	// works it now, so the act wrote nothing to it, requested no merge and
@@ -366,22 +372,24 @@ type Options struct {
 // ledger pass that lists the beads that carry the marker, closed ones too, and
 // every live bead, and takes each record that carries the marker, and each bead
 // on the record that carries a ruling's disposition (disposing), an open or
-// blocked one only while it is assigned to nobody or to the refinery
-// (mayWork). With Labels set, each PR the live beads own whose saved labels
-// differ from the ones the store derives owes a label write too (labelPlans).
-// The records and the PRs that owe an act are taken in a shuffled order, so one
-// whose act is slow or keeps failing holds no other back, and none is started
-// past o.Window. Each record's act reads its record again under the record
-// lock, decides it from that read and from its own read of the PR wherever the
+// blocked one only while it is assigned to nobody or to the refinery (mayWork),
+// and passes over each that a run decided with no act owed less than an hour
+// ago while nothing that decision read has changed (unchanged). With Labels
+// set, each PR the live beads own whose saved labels differ from the ones the
+// store derives owes a label write too (labelPlans). The records it takes and
+// the PRs whose labels owe a write are taken in a shuffled order, so one whose
+// act is slow or keeps failing holds no other back, and none is started past
+// o.Window. Each record's act reads its record again under the record lock,
+// decides it from that read and from its own read of the PR wherever the
 // decision depends on GitHub, and acts within o.Stop, its writes guarded on the
 // status and assignee it read there. A label write takes no lock and writes
 // nothing on the bead, and stops at o.Stop too. A bead whose PR closed under a
-// ruling's disposition goes to the disposition writer once the lock is
-// released (dispose). A record that lands on the rig's default branch has the
-// branch's seed audit checked once the lock is released, inside the window,
-// and its outcome says what the check found. It reports each outcome to report
-// as it goes, and returns an error when the listing did not answer, or when a
-// record or a PR's labels could not be decided or its act did not complete.
+// ruling's disposition goes to the disposition writer once the lock is released
+// (dispose). A record that lands on the rig's default branch has the branch's
+// seed audit checked once the lock is released, inside the window, and its
+// outcome says what the check found. It reports each outcome to report as it
+// goes, and returns an error when the listing did not answer, or when a record
+// or a PR's labels could not be decided or its act did not complete.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	u := &run{Landing: l}
 	start := u.clock()
@@ -454,8 +462,8 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	return nil
 }
 
-// clock is the time the run's window is read by: Now, or the system's clock
-// when Now is nil.
+// clock is the time the run's window and a decision's hour are read by: Now,
+// or the system's clock when Now is nil.
 func (l Landing) clock() time.Time {
 	if l.Now == nil {
 		return time.Now()
@@ -805,9 +813,9 @@ func (u *run) plan() ([]plan, error) {
 	var out []plan
 	for _, r := range due {
 		if at, ok := u.unchanged(pass, r); ok {
-			out = append(out, plan{id: r.ID, out: RunOutcome{Bead: r.ID, Action: ActChecked, Detail: "nothing moved " +
-				"on GitHub and nothing changed in the store since a run decided the record at " + at +
-				", less than an hour ago, so the run read nothing of GitHub"}})
+			out = append(out, plan{id: r.ID, out: RunOutcome{Bead: r.ID, Action: ActChecked, Detail: "nothing the " +
+				"decision reads of the store, the PR watch's saved read among it, changed since a run decided the " +
+				"record at " + at + ", less than an hour ago, so the run read nothing of GitHub for it"}})
 			continue
 		}
 		out = append(out, plan{id: r.ID, due: true})
@@ -967,8 +975,9 @@ type decidedAsk struct {
 
 // digest is the digest of what a decision of the record s reads of the store,
 // through s.reads (decision), empty for a record a run keeps none for: one
-// closed, assigned to anyone but nobody or the refinery, or whose parts did
-// not read, which the run decides each time.
+// closed or whose parts did not read, which a run decides each time it takes
+// it, and one assigned to anyone but nobody or the refinery, which a run leaves
+// to its assignee.
 func (u *run) digest(s state) string {
 	if (s.status != "open" && s.status != "blocked") || !u.mayWork(s.row) {
 		return ""

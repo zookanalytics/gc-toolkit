@@ -67,9 +67,9 @@ type NewestFeedback struct {
 // is the one-PR update (refresh.go).
 var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 	"GitHub's side of a PR as the one-PR update (gctk pr refresh) last read and saved it, one JSON object on "+
-		"the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and "+
-		"signs, the cheap signs read no later than its facts. pr: the PR's id, the node id a request to GitHub "+
-		"names it by, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
+		"the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and, but "+
+		"for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on "+
+		"GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
 		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
 		"state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at "+
 		"that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and "+

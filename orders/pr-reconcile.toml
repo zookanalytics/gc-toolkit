@@ -7,9 +7,9 @@
 # withdrawal's dismissals and close. A run decides a record once its PR moved
 # or its bead changed since a run decided it with no act owed, which it tells
 # from the store, the read the one-PR update saves for orders/pr-poll.toml and
-# orders/pr-compare.toml among it, and at least once an hour, so a run in which
-# nothing changed and no record's hour is up asks GitHub nothing. Its bead
-# closes once the merge commit is on the freshly
+# orders/pr-compare.toml among it, and at least once an hour, so in a run in
+# which nothing changed and no record's hour is up, no record is decided and
+# none reads GitHub. Its bead closes once the merge commit is on the freshly
 # fetched target. A PR open at another head goes
 # back to the refinery, which a run wakes and nudges for it when only a
 # conversation or an ask holds the PR's bead, and the exceptions stay blocked
@@ -19,7 +19,7 @@
 # there, or with an ask a run can take, gets its review run poured here
 # (gctk pr reconcile's help says when), and a run that ends without a result is
 # poured again once before a human gate asks you. A PR that waits on your
-# approval or its checks holds no agent: the wait is this order's next run.
+# approval or its checks holds no agent: this order carries the wait.
 # Once a PR lands on the rig's default branch, a run checks that branch's seed
 # audit, where the rig's clone carries one, and hands the pages stale there to
 # seed-audit-reaudit.sh, which slings the branch's one re-render. No PR waits

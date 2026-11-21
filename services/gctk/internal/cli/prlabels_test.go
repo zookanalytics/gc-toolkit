@@ -16,9 +16,10 @@ import (
 
 // The landing order and the net keep the PRs' labels through the writer's two
 // verbs: reconcile with the bead, the PR and its repository pinned to the
-// host, and clear with the PR, each with the labels the PR shows as one comma
-// list, and with none when there are none, so the writer reads them itself. A
-// write the writer does not make is an error carrying its words.
+// host, and clear with the PR. Each hands the writer the labels it is given as
+// one comma list, and none when it is given none, as the landing order and the
+// net give it, so the writer reads them itself. A write the writer does not
+// make is an error carrying its words.
 func TestTheLabelsAreWrittenThroughTheWriter(t *testing.T) {
 	db := filepath.Join(t.TempDir(), ".beads")
 	l, err := landing(db, "rig/refinery")

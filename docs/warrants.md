@@ -436,9 +436,10 @@ no warrant.
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a retry that a pack can hand a failed write
   to an outside service, such as an outbox that a later pass drains, or its
-  writer retires, since the landing order and the net make the clears it
-  retries by comparing the labels a PR shows with the ones the store derives,
-  and record nothing.
+  writer retires, since the landing order makes the clears it retries by
+  comparing the labels the PR watch saved for a PR with the ones the store
+  derives, and the net by searching for the city's labels on PRs no live bead
+  owns, and neither records anything.
 
 ## Saved GitHub read
 
@@ -509,7 +510,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921,
+- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -689,9 +690,9 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with
+- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
-  main 132914b3e42e.
+  main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
   a head, or keeps a write to GitHub that a later pass carries out. The
   withdrawal then moves onto that operation.

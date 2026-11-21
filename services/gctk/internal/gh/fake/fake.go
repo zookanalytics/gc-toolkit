@@ -17,10 +17,11 @@ import (
 )
 
 // PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid. The rest is what the cheap question reads beside
+// each commit, by its oid. ReviewDecision is what the net's read and the read
+// of the conversation give. The rest is what the cheap question reads beside
 // what it counts from the rest: its labels, when GitHub last changed it, its
-// base's tip, its review decision, and its head's check rollup state and the
-// commit statuses there, counted by state.
+// base's tip, and its head's check rollup state and the commit statuses there,
+// counted by state.
 type PR struct {
 	Facts          gh.PullRequest
 	Reviews        []gh.Review

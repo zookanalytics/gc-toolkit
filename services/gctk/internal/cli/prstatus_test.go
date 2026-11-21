@@ -722,7 +722,7 @@ func TestPRStatusOnThePendingRecord(t *testing.T) {
 		}
 	})
 
-	t.Run("a head the refinery published after the read reads working until the landing order reads it", func(t *testing.T) {
+	t.Run("a head the refinery published after the read reads working until the PR watch reads it", func(t *testing.T) {
 		plain(t, pendingStore(t, map[string]any{"pr_head_sha": other}, nil),
 			"working\n"+unread(other)+"the read is at head "+validated+"\n")
 	})

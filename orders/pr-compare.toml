@@ -14,9 +14,9 @@
 # comment, and the check runs at its last commit with whether the PR requires
 # each, in one request for each 10 PRs in a repository, with each
 # list read on past its first page. It reads no post's text. For each part of a
-# PR that differs, or whose signs moved, it runs the one-PR update, `gctk pr
-# refresh`, the one writer of pr_github_read, so a pass in which nothing
-# differs writes no bead.
+# PR that differs, or whose signs moved as orders/pr-poll.toml tells them, it
+# runs the one-PR update, `gctk pr refresh`, the one writer of pr_github_read,
+# so a pass in which no part differs or moved writes no bead.
 # It then clears the city's labels off the PRs no live bead owns, such as one
 # whose bead closed, which no bead holds for the landing order to find (design,
 # section 9): it searches the rig's own repository, the one its checkout's origin

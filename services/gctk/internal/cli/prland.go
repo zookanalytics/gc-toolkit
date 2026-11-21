@@ -23,8 +23,9 @@ import (
 
 // `gctk pr record <bead>` and `gctk pr reconcile` are the two writers of Gas
 // Town's pending-through-merge record (specs/tk-1tfzr71.66/design.md, sections
-// 4 and 6): the refinery publishes a PR's record, and the landing order's runs
-// act on it every minute (orders/pr-reconcile.toml). Each command builds the pr
+// 4 and 6): the refinery publishes a PR's record, and the landing order's runs,
+// every minute, decide it once it is due (orders/pr-reconcile.toml). Each
+// command builds the pr
 // domain's Landing over the adapters and prints what it did.
 
 // recordLockWait is how long a verb other than a run waits for the store's
@@ -89,8 +90,9 @@ decided again.
 It decides a record on its own read of the PR, made in the act, wherever the
 decision depends on GitHub, and on the store alone where it does not, such as
 clearing the marker of a bead closed on a verified merge. The read the one-PR
-update saved only chooses the records a run decides, so a saved read that is
-out of date delays a decision and causes no act on the record:
+update saved only chooses the records a run decides and the PRs whose labels it
+writes, so a saved read that is out of date delays a decision and causes no act
+on the record:
 
   - open at the head the refinery validated: one in its base's merge queue
     owes nothing; a draft whose review result passed at that head and target,
@@ -232,8 +234,8 @@ merge and pours no review run, and works it again once the assignee is gone.
 Each outcome prints on a line of its own, as <bead> <action>: <detail>, where
 a label write's action is labeled.
 
-exit: 0 every record and every PR's labels were decided, and every act the
-        run started completed
+exit: 0 each record and each PR's labels the run took up were decided, and
+        no act it started failed
       1 usage
       2 the listing did not answer, or a record or a PR's labels could not be
         decided or its act did not complete: a store read or write failed, a

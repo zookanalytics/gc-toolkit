@@ -110,9 +110,7 @@ func feedbackOf(rule Feedback, self, since string, reviews []gh.Review, threads 
 
 // approvals is each review among reviews that approves and has not been
 // dismissed, whoever gave it, in id order, with the newest feedback comment it
-// carries among threads (newestCarried). The definition reads an inline comment
-// alone, so the comments a dismissal of the review would retire unread are
-// those, past the comment watermark (unrouted).
+// carries among threads (newestCarried).
 func approvals(reviews []gh.Review, threads []gh.Thread, inline []int64) []Approval {
 	out := []Approval{}
 	for _, v := range reviews {

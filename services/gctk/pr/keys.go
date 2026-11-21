@@ -75,9 +75,9 @@ var decidedKey = ledger.Declare("pr_landing_digest", ledger.JSON[decided](),
 		"decision was made. A run decides the record, on its own read of GitHub, while the digest of the store as "+
 		"it reads it differs from this one, and once an hour has passed since at, whatever the digest, so a change "+
 		"the digest does not show waits an hour at most. Each decision that owes no act writes it again, so a "+
-		"decision made for any reason starts the hour again, and a run in which nothing moved on GitHub, nothing "+
-		"changed in the store and no record's hour is up asks GitHub nothing. An act that does not complete leaves "+
-		"it as it is, and nothing clears it.",
+		"decision made for any reason starts the hour again, and in a run in which nothing moved on GitHub, nothing "+
+		"changed in the store and no record's hour is up, no record is decided and none reads GitHub. An act that "+
+		"does not complete leaves it as it is, and nothing clears it.",
 	ledger.Warrant("the-landing-orders-last-decision"))
 
 // The runtime's stamps on a workflow root, which tell the landing order that a

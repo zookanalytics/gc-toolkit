@@ -1569,7 +1569,8 @@ document and says the read failed.
 **When GitHub was last asked.** The rig's `pr-poll` order asks GitHub, once a
 pass, whether each pull request the rig's beads own moved, and a pass that
 could not ask about every one of them exits non-zero. A pass in which nothing
-moved writes nothing to a pull request's bead, so the line reads Gas City's
+moved writes nothing to a pull request's bead, but for one whose merge state
+GitHub had not computed, so the line reads Gas City's
 record of the order's runs, through the supervisor's API
 (`internal/rigboard/asked.go`, read by `source.SupervisorAPI`). It reads the
 order's newest 50 runs,

@@ -352,8 +352,9 @@ func TestNoLabelWriteWithoutOneBeadsReadOfThePR(t *testing.T) {
 	}
 }
 
-// A PR on the pending record has its labels kept in the same run as its
-// record: the run lands the merged PR and clears its labels.
+// A PR on the pending record whose merge the PR watch has saved has its labels
+// kept in the same run as its record: the run lands the merged PR, and the
+// comparison finds its saved labels differ from none and clears them.
 func TestTheLandingOrderClearsTheLabelsOfAPRItLands(t *testing.T) {
 	d := newLand(t)
 	lw := &labelWriter{github: d.github}

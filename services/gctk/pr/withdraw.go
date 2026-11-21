@@ -441,7 +441,7 @@ func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
 func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
 	waits := func(why string, failed bool) (string, bool, bool, []gh.Review) {
-		return at + " waits for the next run: " + why, true, failed, reviews
+		return at + " waits for a later run: " + why, true, failed, reviews
 	}
 	p := f.pr
 	targets, err := u.withoutHead(approvalsIn(reviews), w.head, gone)
@@ -526,7 +526,8 @@ func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, revi
 		}
 		if len(left) > 0 {
 			return waits(fmt.Sprintf("the reviews read after the dismissals show %s standing on a commit without the "+
-				"head, and the next run dismisses it", approvalNames(left)), false)
+				"head, which a run dismisses once the PR watch saves the reviews that moved, or the record's hour is up",
+				approvalNames(left)), false)
 		}
 	}
 	note := fmt.Sprintf("The landing order carried out this withdrawal (%s): ", u.stamp())

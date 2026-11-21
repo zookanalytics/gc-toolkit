@@ -202,8 +202,9 @@ merge commit not yet on the fetched target, or a close the store failed for a
 reason of its own, records nothing: its difference stays on the bead, the next
 run acts on it, and it never closes the bead. Its runs also keep the PR's
 `status:` and `held:` labels equal to what the store derives through every
-value, an exception's among them, and take them off once the PR merged or
-closed, and a label write that does not land records nothing either
+value, an exception's among them, and take them off once the PR watch saves the
+PR merged or closed, the net taking them off a PR whose bead closed first, and
+a label write that does not land records nothing either
 ([The status label](#the-status-label-github-projection)). `merged`, the
 machine's value, is the record of a `direct` landing on either path, and the
 doctor's landing checks (I2 and I5) read it and `mr_merged` alike as landed.
@@ -1043,7 +1044,7 @@ sequenceDiagram
   O->>L: the bead changed since a run last decided it, so the run decides it
   O->>G: the act's own read of the PR; the evaluator finds it ready
   O->>G: mergePullRequest, pinned to the head that read judged (expectedHeadOid)
-  W->>L: gctk pr refresh — save the PR merged, with its merge commit
+  O->>G: the next run's own read finds the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
 
