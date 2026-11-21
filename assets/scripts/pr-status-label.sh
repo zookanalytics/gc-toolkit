@@ -48,9 +48,9 @@
 #   reconcile --anchor ID --pr N --repo Q [--host H] [--current-labels CSV] derive both families and write them
 #   clear     --pr N --repo Q [--host H] [--current-labels CSV]   take every status: and held: label off
 #
-# Exit: 0 done (set and clear may be no-ops) · 1 usage/refused · 2 a read did not
-# resolve (the caller leaves the label as-is rather than flipping it blind). Not
-# set -e.
+# Exit: 0 done (set and clear may be no-ops) · 1 usage/refused, or gh or jq is
+# missing and nothing was done · 2 a read did not resolve (the caller leaves the
+# label as-is rather than flipping it blind). Not set -e.
 set -u
 
 PROG="pr-status-label"
@@ -120,8 +120,8 @@ owned_labels() {
   done <<< "$HELD_VALUES"
 }
 
-command -v gh >/dev/null 2>&1 || { warn "gh not found; nothing done"; exit 0; }
-command -v jq >/dev/null 2>&1 || { warn "jq not found; nothing done"; exit 0; }
+command -v gh >/dev/null 2>&1 || { warn "gh is required; nothing done"; exit 1; }
+command -v jq >/dev/null 2>&1 || { warn "jq is required; nothing done"; exit 1; }
 
 # --- repository identity --------------------------------------------------
 
