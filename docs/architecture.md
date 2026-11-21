@@ -492,8 +492,7 @@ first. Either way the change is a decision on the record, not a drift.
 - **No display reads GitHub.** The board, a PR's status label and
   `gctk pr status` derive a PR's status by the evaluator's one rule from the
   GitHub read the one-PR update saved on the PR's bead and the store as it is
-  at the read. The board says for each rig when GitHub was last asked. Every
-  reader of GitHub draws on one API allowance.
+  at the read. Every reader of GitHub draws on one API allowance.
 - **GitHub's data serves three uses, and only a real-time decision acts.** The
   PR watch asks GitHub which PRs the city owns have changed, and its one-PR
   update saves each changed PR's read on its bead. That saved read is a cache
@@ -507,10 +506,9 @@ first. Either way the change is a decision on the record, not a drift.
   order's read is not part of its decision to merge,** even when GitHub carries
   out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
-- **The landing order decides a record again once its PR moved or its bead
-  changed, and at least once an hour,** since a run decided it with no act
-  owed. So a change it does not see delays a decision by an hour at most. It
-  keeps the labels of each PR the city owns equal to what the store derives.
+- **The landing order decides each record at least once an hour,** so a
+  change it does not see delays a decision by an hour at most. It keeps the
+  labels of each PR the city owns equal to what the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
