@@ -22,13 +22,21 @@ Every open message, read or not, newest first:
 
 ```bash
 U=$(gc dashboard serve | grep -o 'http://[^ ]*') && C=$(gc status --json | jq -r .city_name) \
-  && curl -s "$U/v0/city/$C/mail?agent=human&status=all&limit=1000" \
-  | jq -r '.total, (.items[] | "\(.id)\t\(.created_at)\t\(.from)\t\(.subject)")'
+  && curl -sS "$U/v0/city/$C/mail?agent=human&status=all&limit=1000" \
+  | jq -r 'if .items then "total \(.total)",
+      (select(.partial) | "partial: \(.partial_errors | join("; "))"),
+      (.next_cursor // empty | "next_cursor \(.)"),
+      (.items[] | "\(.id)\t\(.created_at)\t\(.from)\t\(.subject)")
+    else . end'
 ```
 
-It prints the total first. When the total is more than the lines, the answer's
-`next_cursor`, passed as `&cursor=<it>`, reads the next page. Read a message
-with `gc mail peek <id>`, which leaves it as it was, and its thread with
+It prints the total first and a line for each message. A `partial` line names
+each mail store that did not answer, whose messages the list leaves out: tell
+the operator, and read the list again before you say the mailbox is worked
+through. A `next_cursor` line means more messages follow: read the next page
+with `&cursor=<it>` added to the URL, and every page after it. With no total
+line, the read failed: say what it printed and read again. Read a message with
+`gc mail peek <id>`, which leaves it as it was, and its thread with
 `gc mail thread <id>`. Work through the mail by kind, the messages of one
 sender and subject together, and tell the operator what each kind is before
 you act on it.

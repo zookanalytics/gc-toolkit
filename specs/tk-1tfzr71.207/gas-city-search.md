@@ -89,7 +89,11 @@ reads `Provider.All`, "all open messages (read and unread)",
 `internal/mail/mail.go`, line 178). The postmaster's prompt reads that route,
 finding the supervisor with `gc dashboard serve` and the city's name with
 `gc status --json`, and reads each message with `gc mail peek`, which leaves it
-as it was.
+as it was. The route's answer says when it is not the whole mailbox: `partial`
+and `partial_errors` when one of the city's mail stores fails while the others
+answer, and `next_cursor` when more messages follow the page (`mailKeysetBody`
+in `internal/api/huma_handlers_mail.go`, and `MailListBody` in
+`internal/api/huma_types_mail.go`). The prompt prints both with the messages.
 
 ## The count on the board
 
