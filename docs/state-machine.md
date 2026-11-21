@@ -153,9 +153,10 @@ and keeps no other state beside the record. `services/gctk/pr/record`
 declares its keys and values. No machine checks its writers: the refinery
 publishes a PR's record through `gctk pr record`, in its `mr` step and when it
 sends a PR on the record back to the PR's review run (`refinery-requeue.sh`),
-the landing order writes each later step through `gctk pr reconcile`, acting
-from the bead and the read the PR watch saved on it
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
+the landing order writes each later step through `gctk pr reconcile`,
+deciding each from the bead and from its own read of GitHub, made in the act,
+while the read the PR watch saved on the bead only chooses the records a run
+decides ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
 and `gctk pr withdraw` sets the record's marker when it files a withdrawal on a
 record that carries none. The record's `pr_state` and `pr_last_checked_at` are
 the PR watch's, which writes them with GitHub's side of the PR
