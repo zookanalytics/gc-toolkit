@@ -677,6 +677,31 @@ and how many it cleared. It exits 0 when every owned PR was read, every update
 saved, the search read and every clear landed, and 2 otherwise, and Gas City
 labels its run record the same way. `gc order history pr-compare` lists its
 passes.
+
+**The cost, and the PRs it is sized for.** The PR watch and the landing order
+draw on the city login's GraphQL allowance, 5,000 points an hour, beside every
+other reader of GitHub in the city, such as the old intake `pr-facts.sh` until
+it retires and the agents' own `gh` calls. A pass of the cheap question costs 1
+point for each 50 PRs a rig owns, and a rig that owns none asks nothing, so it
+costs 60 points an hour for each rig that owns a PR. A pass of the net costs 1
+or 2 points for each 10 owned PRs, more for a PR whose lists run past a page,
+and 1 point for each page of its label search. The landing order reads GitHub
+only for a record it decides, about 5 points for a PR at the head the refinery
+validated, once its PR moved or its bead changed and at least once an hour
+([The landing order](#the-landing-order)). So a change to a PR costs about 7
+points, its one-PR update and the decision it makes due.
+
+On 2026-11-20 the city's account had 22 open PRs, in 5 of the 6 rigs. Before
+any of them changes, that costs about 500 points an hour: about 300 for the
+cheap question, 80 for the net and at most 110 for the landing order's hourly
+decisions. At 100 open PRs it is about 1,100 points an hour, and up to about
+1,800 when each PR changes about once an hour.
+
+The design is sized for about 100 open PRs across the city. The cost grows
+with the PRs the city owns and with how often they change, and the likely cap
+is where the allowance runs out, somewhere around 300 to 500 open PRs. More
+than 100 open PRs is a known issue, and no code guards it.
+
 ## The landing order
 
 `orders/pr-reconcile.toml` merges each PR on the
