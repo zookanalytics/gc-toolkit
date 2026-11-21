@@ -56,6 +56,10 @@ type Server struct {
 	// board requests drives a single gather rather than one per request.
 	flight singleflight.Group
 
+	// gathers is every gather in flight, the board's and each cache's, which
+	// StopGathers ends (gathers.go).
+	gathers *gathers
+
 	// rigBoard serves the rig board's routes, GET /helm/rigs and
 	// GET /helm/rigs/{rig}; nil leaves them answering 503 (see rigboard.go).
 	rigBoard *rigBoard
@@ -109,7 +113,7 @@ func WithCityPath(p string) Option {
 
 // New builds a Server. ttl<=0 disables caching (every request recomputes).
 func New(src source.Source, ttl time.Duration, opts ...Option) *Server {
-	s := &Server{src: src, ttl: ttl, now: time.Now, gate: newActuationGate()}
+	s := &Server{src: src, ttl: ttl, now: time.Now, gate: newActuationGate(), gathers: newGathers()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -243,14 +247,6 @@ func (s *Server) invalidateBoard() {
 	}
 }
 
-// gatherTimeout bounds one gather. A healthy gather is a few seconds; this is
-// generous slack that still cuts off a supervisor that has begun timing out
-// every call, so a coalesced flight cannot run unbounded. The gather runs on a
-// context detached from the caller's (below) precisely so that one client
-// disconnecting mid-build does not cancel the shared gather the cache and the
-// other coalesced waiters depend on.
-const gatherTimeout = 30 * time.Second
-
 // Board returns the cached board when fresh, otherwise gathers and computes a
 // new one. The gather runs OUTSIDE the cache lock — the lock is taken only to
 // read the cache and to swap the finished board in — so a slow gather never
@@ -267,8 +263,11 @@ func (s *Server) Board(ctx context.Context) (*board.Board, error) {
 		if b, ok := s.cachedFresh(); ok {
 			return b, nil
 		}
-		gctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gatherTimeout)
-		defer cancel()
+		gctx, done, err := s.gathers.start(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
 		return s.gather(gctx)
 	})
 	if err != nil {
