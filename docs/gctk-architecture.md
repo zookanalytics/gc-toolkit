@@ -660,7 +660,9 @@ is one package.
 
 `gctk bead stands` answers where a bead stands and whose move it is, through
 the `standing` package, and the helm board's rig read asks the package the same
-question for each row it draws. The answer is in the board's words.
+question for each row it draws. The answer is in the board's words, and
+[bead-standing.md](bead-standing.md) gives each group and each ask to a person,
+with what the person can do.
 
 - **Its group.** `waiting-on-you` when a person owes the next move, `queued`
   when the city takes it as things stand, `not-moving` when nothing moves it as

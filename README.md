@@ -87,6 +87,7 @@ render's byte and token counts.
 - [docs/architecture.md](docs/architecture.md) — how the workflows compose Gas City's primitives, and the consistency test for new work
 - [docs/warrants.md](docs/warrants.md) — the warrants in force: what the pack keeps because Gas City lacks the primitive, the upstream evidence and when it was verified, and the trigger that retires each
 - [docs/pull-request-states.md](docs/pull-request-states.md) — what a pull request's labels and its bead's merge state mean, whose move it is, and what you can do
+- [docs/bead-standing.md](docs/bead-standing.md) — where a bead stands and whose move it is: what each group and each ask on the helm board, and in an agent's report, means, and what you can do
 - [docs/state-machine.md](docs/state-machine.md) — the anchor state machine: every state, every transition, every writer
 - [docs/component-model.md](docs/component-model.md) — the primitives, and every invariant bound to its doctor check
 - [docs/epics.md](docs/epics.md) — what an epic is, the contract it carries, how it is reviewed and when it closes, and the Delivery it may land through

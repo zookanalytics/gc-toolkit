@@ -249,6 +249,9 @@ board's words, and every bead it waits on advances, and an epic or a Delivery
 advances while every open member does. Anything else is `stuck`, and `stuck_on`
 names the bead that stops it, with the word that says why: the ask, when that
 bead is itself what a person owes, and otherwise the rule that names it.
+`services/gctk/standing` declares each of these words with its meaning: the
+asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
+`stuck` in `advance.go`.
 
 | `why` | The bead that stops it |
 |---|---|
