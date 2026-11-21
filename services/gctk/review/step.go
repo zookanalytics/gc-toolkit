@@ -167,8 +167,7 @@ func (st *Step) MustStop(github func(host string) GitHub) (string, error) {
 // mismatch is why the run's vars do not name the record the bead that owns
 // the PR carries, "" when they do: the run's head is the head the record
 // validated, its target the record's, and its branch var, when it names one,
-// the bead's branch. A shadow run judges a PR whose bead may be on no record,
-// so it needs only the PR, its branch and a head.
+// the bead's branch.
 func (st *Step) mismatch() string {
 	run, rec := st.Run, st.Record
 	switch {
@@ -180,8 +179,6 @@ func (st *Step) mismatch() string {
 		return fmt.Sprintf("neither %s nor the run's branch var names the PR's branch", run.PRBead)
 	case st.PR() == "":
 		return fmt.Sprintf("%s names no PR", run.PRBead)
-	case run.Shadow:
-		return ""
 	case !record.OnRecord(rec.Result):
 		return fmt.Sprintf("%s is not on the pending record: its merge_result reads %q", run.PRBead, rec.Result)
 	case rec.Head != run.Head:
