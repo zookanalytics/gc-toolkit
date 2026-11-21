@@ -635,11 +635,12 @@ have "…and waits for the operator only once none is left" \
 lacks "…and never waits while a turn of the operator's is unfinished" \
     'Your thread holds the framing you posted.** Wait for the operator' "$TMP/continue-restart" \
     "a compaction's summary can quote a ruling the sitting has not carried out"
-# A compaction can come between the sign-off, which closes the conversation,
-# and the message the sitting posts for it. The entry then finds no
-# conversation, so the sitting posts that message before it drains.
-have "the prompt posts its own sign-off's message before a none entry drains" \
-    'When your own sign-off closed the conversation and its message is not posted yet, as a compaction between the two leaves it, record and post that message first. Then `gc runtime drain-ack`, and stop.' "$TMP/prompt-stay"
+# A compaction can come between the sign-off and the steps a sitting takes
+# after it, such as the hand-back, whether the sign-off closed the
+# conversation or handed it back to the operator's queue. The entry then finds
+# no conversation, so the sitting takes those steps before it drains.
+have "the prompt finishes the steps after its own sign-off before a none entry drains, whichever way the sign-off left the conversation" \
+    'When your own sign-off ran and the steps after it have not all landed, as a compaction after the sign-off can leave them, finish those steps first, whether the sign-off closed the conversation or handed it back to the operator'"'"'s queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted. Then `gc runtime drain-ack`, and stop.' "$TMP/prompt-stay"
 lacks "…and never drains on none before that message" \
     '| `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |' "$TMP/prompt-stay" \
     "a compaction between a sign-off and its message leaves the entry no conversation"

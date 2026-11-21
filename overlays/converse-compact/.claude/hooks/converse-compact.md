@@ -24,6 +24,9 @@ sections, the summary carries these four parts.
    converse entry again before anything else, with the exact command this
    session ran it with, and to act on the ENTRY and NEXT lines it prints. The
    entry re-reads from the record where the sitting stands. When a sign-off in
-   this session closed the conversation before its message was posted, say
-   so, and tell the sitting to record and post that message before it drains,
-   because the entry then finds no conversation and prints NEXT=drain.
+   this session ran and a step after it has not landed, say which steps are
+   still owed, whether the sign-off closed the conversation or handed it back
+   to the operator's queue: the send or the close of the subject that some
+   rulings make after the sign-off, and the hand-back, recorded and posted.
+   Tell the sitting to take those steps before it drains, because the entry
+   then finds no conversation and prints NEXT=drain.

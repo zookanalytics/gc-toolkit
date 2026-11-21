@@ -146,8 +146,10 @@ asks "the entry's names for the conversation, the subject and the gates" \
     'Copy the CONV, CONVERSATION, SUBJECT and GATES lines exactly as the converse entry last printed them'
 asks "a last line that sends the sitting through its entry before anything else" \
     'End the summary by telling the sitting to run the converse entry again before anything else'
-asks "the message of a sign-off that closed the conversation before it was posted, posted before the drain" \
-    'When a sign-off in this session closed the conversation before its message was posted, say so, and tell the sitting to record and post that message before it drains'
+asks "each step still owed after a sign-off, whichever way it left the conversation" \
+    'When a sign-off in this session ran and a step after it has not landed, say which steps are still owed, whether the sign-off closed the conversation or handed it back to the operator'"'"'s queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted.'
+asks "…taken before the drain" \
+    'Tell the sitting to take those steps before it drains, because the entry then finds no conversation and prints NEXT=drain.'
 
 # --- (5) the advisory is off for the sittings alone ------------------------
 OFF='context_advisory = { enabled = false }'
