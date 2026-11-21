@@ -2,13 +2,13 @@
 // (docs/gctk-architecture.md). Its evaluator is the one definition of whether a
 // PR is ready to merge at its current revision: one rule over the bead's side,
 // read from the store, and GitHub's side of the PR at one head. [Ready] decides
-// over GitHub's side read live, and the landing order acts on its answer and
-// saves the read it made on the bead at each check. [FromStore] decides over
-// the read saved there, and reads no GitHub. Each answers ready, with the head
-// and the target it judged, or the conditions not met, which prstatus renders
-// as the PR's status. The answer is computed at each read and stored nowhere,
-// so no answer stands as a permission on a commit another PR shares, and what
-// the landing order saves is GitHub's facts, which grant nothing.
+// over GitHub's side read live, and the landing order acts on its answer.
+// [FromStore] decides over the read the one-PR update ([Watcher.Refresh])
+// saved on the bead, and reads no GitHub. Each answers ready, with the head and
+// the target it judged, or the conditions not met, which prstatus renders as
+// the PR's status. The answer is computed at each read and stored nowhere, so
+// no answer stands as a permission on a commit another PR shares, and what the
+// update saves is GitHub's facts, which grant nothing.
 //
 // The bead's side is its pending record and branch, the holds set by hand, its
 // own waits through waits, the open beads whose anchor_bead names it, the

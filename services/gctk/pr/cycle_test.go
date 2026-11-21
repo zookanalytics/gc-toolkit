@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -18,7 +19,7 @@ import (
 // sections 4 and 5), each case one of section 12's for its unit, on the
 // landing order's world: a bead on the pending record whose PR the evaluator
 // reads ready, and the branch's commits older, then head, then later, each
-// descending from the one before.
+// descending from the one before in the clone's history.
 
 const (
 	older    = "0000000000000000000000000000000000000001"
@@ -33,8 +34,8 @@ func newCycle(t *testing.T) *land {
 	d := newLand(t)
 	d.l.Mark = func() (string, error) { return cityMark, nil }
 	d.store.CloseTime = "2026-11-12T09:00:00Z"
-	d.github.Descends[head] = []string{older}
-	d.github.Descends[later] = []string{head, older}
+	d.co.descends[head] = []string{older}
+	d.co.descends[later] = []string{head, older}
 	return d
 }
 
@@ -53,14 +54,21 @@ func (d *land) edit(t *testing.T, change func(*fake.Bead)) {
 	d.store.Put(b)
 }
 
-// withdraw files a withdrawal for h on the bead, and makes the store's blocked
-// listing hold the bead on it, as bd's blocked rule does.
+// withdraw files a withdrawal for h on the bead, created at the PR watch's
+// clock to the second, as bd's listing gives a bead's creation time, and makes
+// the store's blocked listing hold the bead on it, as bd's blocked rule does.
 func (d *land) withdraw(t *testing.T, h string) string {
 	t.Helper()
 	w, err := d.l.Withdraw(bead, h, material)
 	if err != nil || !w.Filed {
 		t.Fatalf("Withdraw: %+v, %v", w, err)
 	}
+	b, ok := d.store.Row(w.ID)
+	if !ok {
+		t.Fatalf("the store holds no %s", w.ID)
+	}
+	b.CreatedAt = d.clock.Format(time.RFC3339)
+	d.store.Put(b)
 	d.store.List(bead, w.ID)
 	return w.ID
 }
@@ -158,9 +166,9 @@ func TestADraftTakesOnlyAnOpenPRTheBeadOwns(t *testing.T) {
 }
 
 // The order readies a draft whose passed result names its validated head and
-// target, with no review run attached, whoever returned it to draft, and does
-// not wait for CI: the next run reads the PR again and merges it once it is
-// ready.
+// target, with no review run attached, whoever returned it to draft, once the
+// act's own read of the PR finds it a draft there, and does not wait for CI:
+// the next run reads the PR again and merges it once it is ready.
 func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Facts.IsDraft = true
@@ -169,38 +177,77 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 	if got := asks(d.github); !slices.Equal(got, []string{"MarkReady PR_7 "}) || d.pr.Facts.IsDraft {
 		t.Fatalf("asked %v, the PR a draft %v", got, d.pr.Facts.IsDraft)
 	}
-	if !ofRead(t, d, head).Draft {
-		t.Fatal("the ready transition saved a read made after it, not the draft the run read")
+	savesNothingOfGitHub(t, d)
+	if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
+		t.Fatalf("the ready transition read GitHub %v, want the act's own read of the PR", got)
 	}
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "check-pending") {
 		t.Fatalf("the PR merged before its checks reported: %s", o.Detail)
 	}
-	if ofRead(t, d, head).Draft {
-		t.Fatal("the check after the ready transition saved the PR as a draft")
-	}
+	savesNothingOfGitHub(t, d)
 	d.pr.Suites = map[string][]gh.CheckSuite{head: {{ID: 1, Runs: []gh.CheckRun{passed("test")}}}}
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// The order readies no draft whose record is not pending at its head: a result
-// that passed at another head, a result at its head that did not pass, a head
-// the refinery has not validated, or a review run still attached to the bead.
-func TestTheOrderReadiesNoDraftWhoseRecordIsNotPendingAtItsPassedHead(t *testing.T) {
+// A head pushed onto a draft after the PR watch read it is not marked ready on
+// the passed result of the head the watch saved: the act's own read of the PR
+// finds the new head, which goes to the refinery with the PR still a draft. A
+// PR the act's own read finds ready already is decided as a ready PR, one it
+// finds closed is the record's exception, and a read that does not answer
+// leaves it to the next run.
+func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *testing.T) {
 	d := newCycle(t)
+	d.pr.Facts.IsDraft = true
+	d.refresh(t)
+	d.pr.Facts.HeadRefOid = later
+	is(t, d.run(t), pr.ActRequeued)
+	if slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
+		t.Fatalf("a head pushed after the watch's read was marked ready: %v", asks(d.github))
+	}
+	if !d.pr.Facts.IsDraft {
+		t.Fatalf("the PR was marked ready at a head no review passed")
+	}
+
+	for _, c := range []struct {
+		name string
+		set  func(*land)
+		want string
+	}{
+		{"ready already", func(e *land) { e.pr.Facts.IsDraft = false }, pr.ActRequested},
+		{"closed", func(e *land) { e.pr.Facts.State = "CLOSED" }, pr.ActExcepted},
+		{"unread", func(e *land) { e.github.Fail["PullRequest"] = errors.New("gh: error connecting to api.github.com") }, pr.ActRetry},
+	} {
+		e := newCycle(t)
+		e.pr.Facts.IsDraft = true
+		e.refresh(t)
+		c.set(e)
+		is(t, e.run(t), c.want)
+		if slices.ContainsFunc(e.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
+			t.Fatalf("a PR its own read found %s was marked ready", c.name)
+		}
+	}
+}
+
+// The order readies no draft whose record is not pending at its head: a result
+// that passed at another head or a result at its head that did not pass, for
+// which it pours a review run instead, a head the refinery has not validated,
+// or a review run still attached to the bead.
+func TestTheOrderReadiesNoDraftWhoseRecordIsNotPendingAtItsPassedHead(t *testing.T) {
+	d := newAdmit(t)
 	d.pr.Facts.IsDraft = true
 	d.edit(t, func(b *fake.Bead) {
 		b.Metadata["review_results"] = `[{"head":"` + other + `","target":"main","passed":true}]`
 	})
-	is(t, d.once(t), pr.ActChecked)
+	is(t, d.once(t), pr.ActPoured)
 
-	g := newCycle(t)
+	g := newAdmit(t)
 	g.pr.Facts.IsDraft = true
 	g.edit(t, func(b *fake.Bead) {
 		b.Metadata["review_results"] = `[{"head":"` + head + `","target":"main","passed":false,"run":"tk-run0"}]`
 	})
-	is(t, g.once(t), pr.ActChecked)
+	is(t, g.once(t), pr.ActPoured)
 
 	e := newCycle(t)
 	e.pr.Facts.IsDraft = true
@@ -219,7 +266,7 @@ func TestTheOrderReadiesNoDraftWhoseRecordIsNotPendingAtItsPassedHead(t *testing
 	})
 	f.store.List(bead, "tk-run")
 	is(t, f.once(t), pr.ActChecked)
-	for _, w := range []*land{d, g, e, f} {
+	for _, w := range []*land{d.land, g.land, e, f} {
 		if slices.ContainsFunc(w.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
 			t.Fatalf("a draft not pending at its passed head was marked ready: %v", asks(w.github))
 		}
@@ -240,7 +287,7 @@ func TestAReadyTransitionStoppedBetweenItsStepsFinishesFromWhereThePRStands(t *t
 	d.pr.Facts.IsDraft = true
 	d.github.Fail["MarkReady"] = errors.New("gh: error connecting to api.github.com")
 	is(t, d.once(t), pr.ActRetry)
-	ofRead(t, d, head)
+	savesNothingOfGitHub(t, d)
 	delete(d.github.Fail, "MarkReady")
 	is(t, d.once(t), pr.ActReadied)
 	e := newCycle(t)
@@ -421,24 +468,63 @@ func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t 
 	}
 }
 
+// A dismissal waits on the act's own read of the PR's review threads, with the
+// definition of feedback applied to each inline comment as that read gives it.
+// A read of them that does not answer dismisses nothing and leaves the
+// withdrawal for the next run, and a comment edited into feedback since the
+// watch's read keeps the withdrawal open until the intake routes it.
+func TestADismissalWaitsOnTheActsOwnReadOfTheReviewThreads(t *testing.T) {
+	d := newCycle(t)
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "a note, not for review",
+		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.rule.notFeedback[300] = true
+	id := d.withdraw(t, head)
+	d.refresh(t)
+	dismissed := func() bool {
+		return slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" })
+	}
+	d.github.Fail["ReviewThreads"] = errors.New("gh: error connecting to api.github.com")
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	if dismissed() || status(t, d, id) != "open" {
+		t.Fatalf("over a read of the threads that did not answer, the withdrawal is %s with asks %v: %s",
+			status(t, d, id), asks(d.github), o.Detail)
+	}
+	delete(d.github.Fail, "ReviewThreads")
+	d.pr.Threads[0].Comments[0].Body = "rename this"
+	delete(d.rule.notFeedback, 300)
+	o = d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "inline comment 300") || dismissed() || status(t, d, id) != "open" {
+		t.Fatalf("over a comment edited into feedback since the watch's read, the withdrawal is %s with asks %v: %s",
+			status(t, d, id), asks(d.github), o.Detail)
+	}
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
+	d.run(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
+		t.Fatalf("once routed, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+	}
+}
+
 // A withdrawal holds the PR until no approval that stands was given on a commit
-// without its head: a dismissal GitHub did not answer and a compare GitHub did
-// not answer each leave the withdrawal open for the next run, and the PR waits
-// on it.
+// without its head: a dismissal GitHub did not answer and a read of the clone's
+// history that did not answer each leave the withdrawal open for the next run,
+// and the PR waits on it.
 func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "reviewer", head)}
 	id := d.withdraw(t, head)
-	d.github.Fail["Compare"] = errors.New("gh: gh: Bad Gateway (HTTP 502)")
+	d.co.containsErr = errors.New("git merge-base: fatal: bad object")
 	o := d.once(t)
-	is(t, o, pr.ActChecked)
+	is(t, o, pr.ActRetry)
 	if !strings.Contains(o.Detail, "wait") || status(t, d, id) != "open" {
-		t.Fatalf("an unanswered compare read %s, the withdrawal %s", o.Detail, status(t, d, id))
+		t.Fatalf("an unanswered read of the history read %s, the withdrawal %s", o.Detail, status(t, d, id))
 	}
-	delete(d.github.Fail, "Compare")
+	d.co.containsErr = nil
 	d.github.Fail["DismissReview"] = errors.New("gh: error connecting to api.github.com")
 	o = d.once(t)
-	is(t, o, pr.ActChecked)
+	is(t, o, pr.ActRetry)
 	if status(t, d, id) != "open" || len(d.gates.list()) != 0 {
 		t.Fatalf("an unanswered dismissal left the withdrawal %s, with gates %v", status(t, d, id), d.gates.list())
 	}
@@ -451,18 +537,120 @@ func TestAWithdrawalHoldsThePRUntilNoApprovalWithoutItsHeadStands(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A compare GitHub refuses, as for a commit it no longer holds, does not show
-// that the approved commit contains the head, so the approval is dismissed and
-// the withdrawal closes, where waiting would hold the PR on every run with no
-// one asked. An approval of the head itself stands, since it needs no compare.
-func TestAnApprovalWhoseCompareGitHubRefusesIsDismissed(t *testing.T) {
+// A withdrawal is carried out on the act's own read of the PR's reviews. An
+// approval given after the PR watch's last read is missing from the saved
+// conversation, whether it was given before the withdrawal was filed or after,
+// and the act dismisses it all the same and closes the withdrawal, so with no
+// approval standing the PR is not merged.
+func TestAWithdrawalDismissesAnApprovalTheSavedReadLacks(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		file func(t *testing.T, d *land) string
+	}{
+		{"an approval given before the filing", func(t *testing.T, d *land) string {
+			d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+			return d.withdraw(t, head)
+		}},
+		{"an approval given after the filing", func(t *testing.T, d *land) string {
+			id := d.withdraw(t, head)
+			d.refresh(t)
+			d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+			return id
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newCycle(t)
+			d.pr.Reviews = nil
+			d.refresh(t)
+			id := c.file(t, d)
+			o := d.run(t)
+			if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) ||
+				!strings.Contains(o.Detail, "closed: dismissed the approval review 100 (operator)") {
+				t.Fatalf("over an approval the saved conversation lacks, the withdrawal is %s with reviews %v: %s",
+					status(t, d, id), states(d.pr), o.Detail)
+			}
+			if got := d.runReads(); len(got) < 4 || got[0] != "PullRequest" ||
+				!slices.Equal(got[len(got)-3:], []string{"Reviews", "ReviewThreads", "Reviews"}) {
+				t.Fatalf("the act read GitHub %v, want its own read of the PR first and the withdrawal's reads of the "+
+					"reviews, the threads and the reviews again last", got)
+			}
+			d.store.Unlist(bead)
+			if o := d.once(t); o.Action == pr.ActRequested {
+				t.Fatalf("the PR was merged with no approval standing: %s", o.Detail)
+			}
+		})
+	}
+}
+
+// A filing moves no sign on GitHub, and the PR watch reads nothing again for
+// it. A withdrawal over a conversation the watch read before its filing closes
+// at the first run when the act's own read of the reviews shows no approval
+// standing on a commit without its head.
+func TestAWithdrawalOverAnEarlierReadClosesOnceTheActsOwnReadShowsNoneStanding(t *testing.T) {
+	d := newCycle(t)
+	d.pr.Reviews = []gh.Review{approved(101, "reviewer", head)}
+	d.refresh(t)
+	id := d.withdraw(t, head)
+	writes := len(d.store.Writes())
+	if _, err := d.watch.Poll(pr.PassOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.store.Writes()) != writes {
+		t.Fatalf("the pass after the filing, with nothing moved, wrote %v", d.store.Writes()[writes:])
+	}
+	d.run(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"approved"}) {
+		t.Fatalf("with no approval standing without its head, the withdrawal is %s with reviews %v",
+			status(t, d, id), states(d.pr))
+	}
+}
+
+// A commit the clone does not hold once the act has fetched the PR's branch, as
+// one a force-push left behind, is not shown to contain the head, so the
+// approval of it is dismissed and the withdrawal closes, where waiting would
+// hold the PR on every run with no one asked. An approval of the head itself
+// stands, since its commit is the head.
+func TestAnApprovalOfACommitTheCloneDoesNotHoldIsDismissed(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "former", rewrite), approved(101, "reviewer", head)}
-	d.github.Fail["Compare"] = errors.New("gh: gh: Not Found (HTTP 404)")
 	id := d.withdraw(t, head)
 	d.once(t)
 	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
-		t.Fatalf("a refused compare left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+		t.Fatalf("a commit the clone does not hold left the withdrawal %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch}) {
+		t.Fatalf("the act fetched %v before it dismissed, not the PR's branch %s", d.co.branches, branch)
+	}
+}
+
+// An approval of a commit the clone has not fetched yet, such as one a person
+// pushed onto the PR's branch, is judged once the act has fetched the branch,
+// and stands when that commit contains the head. A fetch that fails dismisses
+// nothing, and the next run acts again.
+func TestAnApprovalOfAPushTheCloneHasNotFetchedIsJudgedOnceTheBranchIsFetched(t *testing.T) {
+	d := newCycle(t)
+	pushed := "5555555555555555555555555555555555555555"
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "operator", pushed)}
+	id := d.withdraw(t, head)
+	d.co.fetchErr = errors.New("git fetch: could not read from remote repository")
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "did not fetch") || status(t, d, id) != "open" ||
+		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" }) {
+		t.Fatalf("a branch that did not fetch read %s, the withdrawal %s, with asks %v", o.Detail, status(t, d, id), asks(d.github))
+	}
+	d.co.fetchErr = nil
+	d.co.onFetch = func() {
+		d.co.mu.Lock()
+		defer d.co.mu.Unlock()
+		d.co.descends[pushed] = []string{head, older}
+	}
+	d.once(t)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed", "approved"}) {
+		t.Fatalf("once the branch fetched, the withdrawal is %s with reviews %v", status(t, d, id), states(d.pr))
+	}
+	if !slices.Equal(d.co.branches, []string{branch, branch}) {
+		t.Fatalf("the acts fetched %v, not the PR's branch %s once each", d.co.branches, branch)
 	}
 }
 
@@ -524,9 +712,9 @@ func TestAWithdrawalOnAHeadSentBackToTheRefineryKeepsItsRecordMarked(t *testing.
 	id := d.withdraw(t, head)
 	is(t, d.once(t), pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
-	ofRead(t, d, later)
+	savesNothingOfGitHub(t, d)
 	is(t, d.once(t), pr.ActChecked)
-	ofRead(t, d, later)
+	savesNothingOfGitHub(t, d)
 	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
 	is(t, d.once(t), pr.ActSettled)
 	if status(t, d, id) != "closed" || d.row(t).Status != "open" {

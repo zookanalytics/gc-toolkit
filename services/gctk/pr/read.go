@@ -14,11 +14,11 @@ import (
 // The evaluator's two reads and its one rule (specs/tk-1tfzr71.134/design.md,
 // sections 1 and 2). The bead's side is what the store holds about the bead.
 // The GitHub read is GitHub's side of the bead's PR at one head, which observe
-// makes live and the landing order saves on the bead at each check. decide is
-// the rule over the two, and reads nothing. Ready composes the bead's side,
-// observe and decide for the merge, and FromStore composes the bead's side, the
-// saved read and decide for a display, so the two list the same conditions in
-// the same order.
+// makes live, and which the read the one-PR update saves on the bead holds in
+// its parts (saved.go). decide is the rule over the two, and reads nothing.
+// Ready composes the bead's side, observe and decide for the landing order's
+// decision, and FromStore composes the bead's side, the saved read and decide
+// for a display, so the two list the same conditions in the same order.
 
 // GitHubRead is GitHub's side of a PR at one head, reduced to what the rule
 // reads: when it was read, the provenance instant the definition of feedback
@@ -63,28 +63,45 @@ type NewestFeedback struct {
 	Conversation int64 `json:"conversation"`
 }
 
-// githubReadKey is the GitHub read on the bead that owns the PR. Its one writer
-// is the landing order, in the write that records each check.
-var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*GitHubRead](),
-	"GitHub's side of a PR on Gas Town's pending record as the landing order last read it whole, one JSON "+
-		"object on the bead that owns the PR: read_at; since, the provenance instant the definition of "+
-		"feedback was applied with; the PR's url, number, repository, head_branch and base; its head, state, "+
-		"draft and merge_state; checks, the required check runs at that head as {name, status, conclusion}; "+
-		"approvers and requesters, the accounts that can push whose approval or request for changes stands; "+
-		"feedback, the newest feedback id in each id space as {review, inline, conversation}; and awaiting, the "+
-		"review threads waiting on the city's answer. The landing order writes it in the write that records "+
-		"each check of an open PR, and a read that fails partway leaves the last whole one. It holds no "+
-		"answer. The pr evaluator decides over it for a display, as current only while it names the record's "+
-		"repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, "+
-		"pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, "+
-		"GitHub's side of the PR reads as unread.",
+// githubReadKey is the saved read on the bead that owns the PR. Its one writer
+// is the one-PR update (refresh.go).
+var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
+	"GitHub's side of a PR as the one-PR update (gctk pr refresh) last read and saved it, one JSON object on "+
+		"the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and, but "+
+		"for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on "+
+		"GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
+		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
+		"state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at "+
+		"that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and "+
+		"statuses, the last two counts by state. conversation: since, the provenance instant the definition "+
+		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+
+		"request for changes stands; feedback, the newest feedback id in each id space as {review, inline, "+
+		"conversation}; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved "+
+		"threads; review_decision; and approvals, each review that approves and has not been dismissed, "+
+		"whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is "+
+		"feedback, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a "+
+		"post changed, and viewer_reactions, each reaction the account the read runs as left on an inline "+
+		"comment, as the comment's id and the reaction, which the definition of feedback reads as an answer "+
+		"to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only "+
+		"when its read was sent after the saved part's: the whole part when it differs, and its read_at alone "+
+		"when it holds the same, so a read sent before it is never saved after it. A read that fails saves "+
+		"nothing. It holds no answer. The pr evaluator decides over it for a display, the PR's status: and "+
+		"held: labels among them, as current only while it holds the pr, checks and conversation parts, the "+
+		"checks at the PR's head, names the record's repository and number, its head is the head the store "+
+		"holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's "+
+		"pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread. The landing "+
+		"order decides no record from it, since it decides each on its own read of GitHub: a change to it "+
+		"only makes the record due, through the digest the order keeps on the bead (pr_landing_digest). The "+
+		"order's label comparison reads the labels it saved, and labels that differ from the derived ones make "+
+		"a label write due, which reads the PR's state itself.",
 	ledger.Warrant("saved-github-read"))
 
-// FromStore answers what Ready answers for the bead's PR, over the GitHub read
-// the landing order saved on the bead in place of a live one: it reads the
-// bead's side through l and decides. It reads no GitHub and loads no definition
-// of feedback, so it is a display's question. A read of the store that fails,
-// or a saved read that does not decode, returns its error and no answer.
+// FromStore answers what Ready answers for the bead's PR, over the read the
+// one-PR update saved on the bead in place of a live one: it reads the bead's
+// side through l and decides. It reads no GitHub and loads no definition of
+// feedback, so it is a display's question, and the landing order decides
+// through Ready, on its own read. A read of the store that fails, or a saved
+// read that does not decode, returns its error and no answer.
 func FromStore(l *ledger.Ledger, bead string) (Answer, error) {
 	b, r, err := readSide(l.Pass(), bead)
 	if err != nil {
@@ -94,7 +111,8 @@ func FromStore(l *ledger.Ledger, bead string) (Answer, error) {
 	if err != nil {
 		return Answer{}, err
 	}
-	return decide(b, saved), nil
+	read, why := saved.view()
+	return decideOver(b, read, why), nil
 }
 
 // side is the bead's side of a read: what the store holds about the bead. The
@@ -178,14 +196,17 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 	return b, r, nil
 }
 
-// head is the head the store holds for the PR: the one the landing order found
-// when the record reads a changed head, and the one the refinery validated
-// otherwise.
-func (b side) head() string {
-	if b.rec.Result == record.HeadChanged {
-		return b.rec.Observed
+// head is the head the store holds for the PR (storeHead).
+func (b side) head() string { return storeHead(b.rec) }
+
+// storeHead is the head the store holds for a record's PR: the one the landing
+// order found when the record reads a changed head, and the one the refinery
+// validated otherwise.
+func storeHead(rec record.Record) string {
+	if rec.Result == record.HeadChanged {
+		return rec.Observed
 	}
-	return b.rec.Head
+	return rec.Head
 }
 
 // unread says why read is not GitHub's side of the bead's PR at the head the
@@ -295,7 +316,11 @@ func listed(l []string) []string {
 // the store's, then the feedback the receipts do not cover and the review
 // threads waiting on the city's answer. An answer that judged a head carries
 // the review loop's result there, passed or not, when one stands.
-func decide(b side, read *GitHubRead) Answer {
+func decide(b side, read *GitHubRead) Answer { return decideOver(b, read, "") }
+
+// decideOver is decide over a read that why, when it is not empty, says is no
+// read of the PR at one head.
+func decideOver(b side, read *GitHubRead, why string) Answer {
 	ans := Answer{Bead: b.bead, Conditions: []Condition{}}
 	var store []Condition
 	if len(b.missing) > 0 {
@@ -317,7 +342,10 @@ func decide(b side, read *GitHubRead) Answer {
 		ans.Conditions = append(ans.Conditions, store...)
 		return ans
 	}
-	if why := b.unread(read); why != "" {
+	if why == "" {
+		why = b.unread(read)
+	}
+	if why != "" {
 		ans.Conditions = append(ans.Conditions, Condition{Kind: KindGitHubUnread,
 			Detail: fmt.Sprintf("GitHub's side of the PR is not read at the head the store holds, %s: %s", b.head(), why)})
 		ans.Conditions = append(ans.Conditions, store...)

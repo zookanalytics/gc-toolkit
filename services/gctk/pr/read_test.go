@@ -3,9 +3,6 @@ package pr_test
 import (
 	"encoding/json"
 	"maps"
-	"reflect"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -143,42 +140,42 @@ func TestASavedReadThatDoesNotDecodeAnswersNothing(t *testing.T) {
 	}
 }
 
-// The saved read names its fields as the key's declaration says, and keeps no
-// answer, condition or readiness.
-func TestTheSavedReadsFields(t *testing.T) {
-	w := ready()
-	w.pr.Threads = nil
-	_, read := w.live(t)
-	raw, err := json.Marshal(read)
-	if err != nil {
-		t.Fatal(err)
+// A saved read is GitHub's side at one head only while it holds the PR, its
+// checks and its conversation, the checks read at the PR's head.
+func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
+	for name, edit := range map[string]func(*pr.SavedRead){
+		"no PR part":            func(s *pr.SavedRead) { s.PR = nil },
+		"no checks":             func(s *pr.SavedRead) { s.Checks = nil },
+		"no conversation":       func(s *pr.SavedRead) { s.Conversation = nil },
+		"checks at a head gone": func(s *pr.SavedRead) { s.Checks.Head = other },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := ready()
+			_, read := w.live(t)
+			s := saveRead(read)
+			edit(s)
+			raw, err := json.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			md := maps.Clone(w.md)
+			md["pr_github_read"] = string(raw)
+			unread(t, w.fromStore(t, md))
+		})
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for k := range fields {
-		names = append(names, k)
-	}
-	slices.Sort(names)
-	want := []string{"approvers", "awaiting", "base", "checks", "draft", "feedback", "head", "head_branch",
-		"merge_state", "number", "read_at", "repository", "requesters", "since", "state", "url"}
-	if !reflect.DeepEqual(names, want) {
-		t.Fatalf("the read names %v, want %v", names, want)
-	}
-	for _, empty := range []string{"requesters", "awaiting"} {
-		if string(fields[empty]) != "[]" {
-			t.Errorf("%s encodes as %s, want an empty list", empty, fields[empty])
+	t.Run("no labels, which the rule does not read", func(t *testing.T) {
+		w := ready()
+		_, read := w.live(t)
+		s := saveRead(read)
+		s.Labels = nil
+		raw, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if got := string(fields["feedback"]); got != `{"review":0,"inline":0,"conversation":0}` {
-		t.Errorf("feedback encodes as %s", got)
-	}
-	// Only the runs the PR requires are kept, each suite's results in GitHub's order.
-	if got := string(fields["checks"]); !strings.Contains(got, `"name":"test"`) || strings.Contains(got, `"size"`) {
-		t.Errorf("checks encode as %s, want the required runs alone", got)
-	}
+		md := maps.Clone(w.md)
+		md["pr_github_read"] = string(raw)
+		isReady(t, w.fromStore(t, md))
+	})
 }
 
 // isReadyAt fails unless a is ready at h into main.

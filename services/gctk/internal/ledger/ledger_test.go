@@ -1,11 +1,15 @@
 package ledger
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -589,6 +593,35 @@ func TestAViewReadsItsKey(t *testing.T) {
 	v := testText.View()
 	if got, ok, err := v.Get(r); err != nil || !ok || got != "aliased" || v.Name() != "test.ledger.text" {
 		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
+	}
+}
+
+// A ledger Within a context ends each call it makes to the city's store once
+// the context ends, as OpenContext's does: gc on PATH here sleeps. A store that
+// cannot be stopped, such as the fake, answers as it does.
+func TestWithinEndsTheStoresCallsWithItsContext(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_NO_API", "1")
+	l, err := Open(filepath.Join(t.TempDir(), ".beads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := l.Within(ctx).Find(Every()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a stopped read answered %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a stopped read took %s", took.Round(time.Millisecond))
+	}
+	f := New(fake.New())
+	if f.Within(ctx) != f {
+		t.Fatal("a fake store's ledger did not answer as it does")
 	}
 }
 

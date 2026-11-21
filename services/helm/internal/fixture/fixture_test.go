@@ -176,7 +176,8 @@ func TestTheCityPageIsServedAtItsRoute(t *testing.T) {
 }
 
 // TestTheRigBoardIsServedAtItsRoutes reads the rig board's routes as the page
-// reads them: the rig list, and the rig's document with its read time beside it.
+// reads them: the rig list, and the rig's document with its read time and the
+// line saying when GitHub was last asked beside it.
 func TestTheRigBoardIsServedAtItsRoutes(t *testing.T) {
 	h := mustHandler(t, nil)
 
@@ -199,6 +200,9 @@ func TestTheRigBoardIsServedAtItsRoutes(t *testing.T) {
 	}
 	if string(answer.Board) != testRig || answer.ReadAt != list.ReadAt {
 		t.Errorf("GET /helm/rigs/example-rig: board %s read at %q, want the document as given, read at %q", answer.Board, answer.ReadAt, list.ReadAt)
+	}
+	if answer.Asked != (askedLine{State: "asked", At: list.ReadAt}) {
+		t.Errorf("GET /helm/rigs/example-rig: asked %+v, want asked at the read time %q", answer.Asked, list.ReadAt)
 	}
 
 	rec = serve(t, h, http.MethodGet, "/helm/rigs/another-rig")

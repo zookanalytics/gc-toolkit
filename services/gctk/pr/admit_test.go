@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -76,6 +77,28 @@ func newAdmit(t *testing.T) *admitting {
 	p := &pours{store: d.store}
 	d.l.Runs = p
 	return &admitting{land: d, runs: p}
+}
+
+// A review run's pour is the one call an act does not stop, since a cook
+// stopped before it attaches its run leaves a run the order never reads, so an
+// act starts it only while the pour's reserve of its bound is left. An act
+// with less left pours nothing and fails no run, and the next run, whose act
+// has its whole bound, pours it.
+func TestAPourStartsOnlyWhileItsReserveIsLeft(t *testing.T) {
+	d := newAdmit(t)
+	d.refresh(t)
+	out := d.reconcile(t, pr.Options{Stop: 5 * time.Second})
+	if len(out) != 1 {
+		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+	}
+	is(t, out[0], pr.ActLeft)
+	if !strings.Contains(out[0].Detail, "reserves") || d.runs.count() != 0 {
+		t.Fatalf("an act short of the reserve says %q and poured %d runs", out[0].Detail, d.runs.count())
+	}
+	is(t, d.run(t), pr.ActPoured)
+	if n := d.runs.count(); n != 1 {
+		t.Fatalf("the next run poured %d runs, want 1", n)
+	}
 }
 
 // end closes the run, as a run's end closes its root, with the outcome given,
@@ -154,21 +177,23 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 	if got := d.runs.vars[0]; !maps.Equal(got, want) {
 		t.Fatalf("the run was poured with %v, want %v", got, want)
 	}
-	ofRead(t, d.land, head)
+	savesNothingOfGitHub(t, d.land)
 	is(t, d.once(t), pr.ActChecked)
-	ofRead(t, d.land, head)
+	savesNothingOfGitHub(t, d.land)
 	if n := d.runs.count(); n != 1 {
 		t.Fatalf("the attached run did not keep the next run from pouring: %d runs", n)
 	}
 
 	e := newAdmit(t)
+	e.refresh(t)
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := e.l.Reconcile(pr.Options{Count: 10}, func(pr.RunOutcome) {}); err != nil {
-				t.Errorf("Reconcile: %v", err)
+			var said []pr.RunOutcome
+			if err := e.l.Reconcile(pr.Options{}, func(o pr.RunOutcome) { said = append(said, o) }); err != nil {
+				t.Errorf("Reconcile: %v (%+v)", err, said)
 			}
 		}()
 	}
@@ -181,8 +206,7 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 // A run that ended without a result is poured again, and when the second at
 // the same head ends without one too, the order asks a person through a
 // review-run-failed gate naming both runs and how each ended, and pours none.
-// A gate that does not file is filed by the next run, and each of these checks
-// saves the GitHub read it made.
+// A gate that does not file is filed by the next run.
 func TestARunThatEndedWithoutAResultIsPouredAgainAndTheSecondFailureGetsTheGate(t *testing.T) {
 	d := newAdmit(t)
 	is(t, d.once(t), pr.ActPoured)
@@ -194,11 +218,11 @@ func TestARunThatEndedWithoutAResultIsPouredAgainAndTheSecondFailureGetsTheGate(
 	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
 	d.gates.err = errors.New("human-gate: could not read the bead's gates")
 	is(t, d.once(t), pr.ActRetry)
-	ofRead(t, d.land, head)
+	savesNothingOfGitHub(t, d.land)
 	d.gates.err = nil
 	o := d.once(t)
 	is(t, o, pr.ActExcepted)
-	ofRead(t, d.land, head)
+	savesNothingOfGitHub(t, d.land)
 	if !gated(d, "review-run-failed") || d.runs.count() != 2 {
 		t.Fatalf("the second failure filed %v and poured %d runs, want the gate and two runs", d.gates.list(), d.runs.count())
 	}
@@ -492,7 +516,7 @@ func TestADraftWithAnOpenAskThatNothingHoldsIsNotMarkedReady(t *testing.T) {
 	a := d.ask(t, "Answer the reviewer's comment on the flag.")
 	d.runs.err = errors.New("gc formula cook: exit 1: the store did not answer")
 	is(t, d.once(t), pr.ActRetry)
-	ofRead(t, d.land, head)
+	savesNothingOfGitHub(t, d.land)
 	if slices.ContainsFunc(d.github.Asks(), func(x ghfake.Ask) bool { return x.Method == "MarkReady" }) {
 		t.Fatalf("a draft with an open ask that nothing holds was marked ready: %v", asks(d.github))
 	}
@@ -571,13 +595,81 @@ func TestAnAskFiledToWaitOnAnOpenBeadGetsNoRunUntilThatBeadCloses(t *testing.T) 
 }
 
 // A refinery whose address names no binding pours nothing, since the run's
-// steps name the pack's scripts by it.
+// steps name the pack's scripts by it, and neither does a landing with no
+// pourer. The pour the record is owed did not happen, so each run decides it
+// again, and none keeps the digest of a decision that owes no act.
 func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	d := newAdmit(t)
 	d.l.Refinery = refinery
 	o := d.once(t)
-	is(t, o, pr.ActChecked)
+	is(t, o, pr.ActRetry)
 	if d.runs.count() != 0 || !strings.Contains(o.Detail, "rig/refinery") {
 		t.Fatalf("a refinery with no binding poured %d runs (%s)", d.runs.count(), o.Detail)
+	}
+	if ws := d.runWrites(); len(ws) != 0 {
+		t.Fatalf("a pour the run could not make wrote %+v", ws)
+	}
+	is(t, d.run(t), pr.ActRetry)
+
+	e := newAdmit(t)
+	e.l.Runs = nil
+	is(t, e.once(t), pr.ActRetry)
+	is(t, e.run(t), pr.ActRetry)
+}
+
+// A read admission makes that does not answer is a retry, which keeps no
+// digest, so the next run decides the record again though nothing it reads
+// changed: here the read of how the earlier runs at the head ended, then the
+// read of the beads on the branch, each failed once.
+func TestAnAdmissionReadThatDoesNotAnswerIsDecidedAgainByTheNextRun(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run1", "canceled", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run2", "fail", "2026-11-12T09:20:00Z")
+	d.store.OnFind = failOnce(d.land, func(q gcbd.Query) bool { return q.Key == "gc.root_bead_id" })
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "earlier runs ended did not read") {
+		t.Fatalf("the failed read of the runs' ends says %q", o.Detail)
+	}
+	if ws := d.runWrites(); len(ws) != 0 {
+		t.Fatalf("a decision the failed read left unmade wrote %+v", ws)
+	}
+	is(t, d.run(t), pr.ActExcepted)
+	if !gated(d, "review-run-failed") {
+		t.Fatalf("the run after the failed read filed %v, want the review-run-failed gate", d.gates.list())
+	}
+
+	e := newAdmit(t)
+	e.refresh(t)
+	branchReads := 0
+	// The decision's digest reads the beads on the branch first, and admission
+	// reads them again.
+	e.store.OnFind = failOnce(e.land, func(q gcbd.Query) bool {
+		if q.Key == "branch" {
+			branchReads++
+		}
+		return branchReads == 2
+	})
+	o = e.run(t)
+	is(t, o, pr.ActRetry)
+	if !strings.Contains(o.Detail, "the beads on "+branch+" did not read") {
+		t.Fatalf("the failed read of the branch's beads says %q", o.Detail)
+	}
+	if ws := e.runWrites(); len(ws) != 0 {
+		t.Fatalf("a decision the failed read left unmade wrote %+v", ws)
+	}
+	is(t, e.run(t), pr.ActPoured)
+}
+
+// failOnce fails the first find of the store fails picks, and no other.
+func failOnce(d *land, fails func(gcbd.Query) bool) func(gcbd.Query) {
+	failed := false
+	return func(q gcbd.Query) {
+		d.store.FindErr = nil
+		if !failed && fails(q) {
+			failed, d.store.FindErr = true, errors.New("the store did not answer")
+		}
 	}
 }

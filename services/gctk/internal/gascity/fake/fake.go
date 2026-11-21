@@ -6,6 +6,7 @@
 package fake
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sync"
@@ -176,6 +177,10 @@ func (r *Runtime) Script(name string, args ...string) gascity.Result {
 	}
 	return gascity.Result{}
 }
+
+// Within answers with the runtime itself, which records every call in one
+// place: a call the fake answers ends when its answer returns.
+func (r *Runtime) Within(context.Context) gascity.Runtime { return r }
 
 // CityRoot answers Root.
 func (r *Runtime) CityRoot() (string, error) {

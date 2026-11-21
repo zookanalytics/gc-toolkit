@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strconv"
@@ -50,6 +51,30 @@ func mark(v string) int64 {
 // review that approves counts nothing by its message, and neither does feedback
 // the definition leaves out.
 func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) (NewestFeedback, error) {
+	f, err := feedbackOf(rule, self, since, reviews, threads, comments)
+	if err != nil {
+		return NewestFeedback{}, err
+	}
+	return f.newest(), nil
+}
+
+// feedbackIDs are the posts the definition reads as feedback, in each id
+// space: the reviews, of which the intake counts those in counted, the inline
+// comments and the conversation comments.
+type feedbackIDs struct {
+	reviews, inline, conversation []int64
+	counted                       map[int64]bool
+}
+
+// newest is the highest feedback id in each id space.
+func (f feedbackIDs) newest() NewestFeedback {
+	return NewestFeedback{Review: newest(f.reviews, 0, f.counted), Inline: newest(f.inline, 0, nil),
+		Conversation: newest(f.conversation, 0, nil)}
+}
+
+// feedbackOf applies the definition to every post of the PR, once in each id
+// space.
+func feedbackOf(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) (feedbackIDs, error) {
 	var revs []feedback.Review
 	counted := map[int64]bool{}
 	for _, v := range reviews {
@@ -60,7 +85,7 @@ func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, thre
 	}
 	reviewIDs, err := rule.Reviews(self, since, revs)
 	if err != nil {
-		return NewestFeedback{}, err
+		return feedbackIDs{}, err
 	}
 	var inline []feedback.Comment
 	for _, t := range threads {
@@ -70,7 +95,7 @@ func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, thre
 	}
 	commentIDs, err := rule.Comments(self, since, inline)
 	if err != nil {
-		return NewestFeedback{}, err
+		return feedbackIDs{}, err
 	}
 	var convo []feedback.Comment
 	for _, c := range comments {
@@ -78,10 +103,39 @@ func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, thre
 	}
 	issueIDs, err := rule.IssueComments(self, since, convo)
 	if err != nil {
-		return NewestFeedback{}, err
+		return feedbackIDs{}, err
 	}
-	return NewestFeedback{Review: newest(reviewIDs, 0, counted), Inline: newest(commentIDs, 0, nil),
-		Conversation: newest(issueIDs, 0, nil)}, nil
+	return feedbackIDs{reviews: reviewIDs, inline: commentIDs, conversation: issueIDs, counted: counted}, nil
+}
+
+// approvals is each review among reviews that approves and has not been
+// dismissed, whoever gave it, in id order, with the newest feedback comment it
+// carries among threads (newestCarried).
+func approvals(reviews []gh.Review, threads []gh.Thread, inline []int64) []Approval {
+	out := []Approval{}
+	for _, v := range reviews {
+		if v.State != "APPROVED" {
+			continue
+		}
+		out = append(out, Approval{ID: v.ID, Author: v.Author, Commit: v.Commit, Inline: newestCarried(v.ID, threads, inline)})
+	}
+	slices.SortFunc(out, func(a, b Approval) int { return cmp.Compare(a.ID, b.ID) })
+	return out
+}
+
+// newestCarried is the newest of the inline comments review carries among
+// threads that inline, the feedback ids of the inline comments, names, or 0
+// when it carries none.
+func newestCarried(review int64, threads []gh.Thread, inline []int64) int64 {
+	var top int64
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.Review != nil && c.Review.ID == review && c.ID > top && slices.Contains(inline, c.ID) {
+				top = c.ID
+			}
+		}
+	}
+	return top
 }
 
 // unhandled is one condition for each id space whose newest feedback the
@@ -106,38 +160,24 @@ func unhandled(rc receipts, n NewestFeedback) []Condition {
 	return out
 }
 
-// unrouted is the ids of the inline comments that dismissing the reviews named
-// would retire before the intake routes them, in id order: each is carried by
-// one of those reviews, is feedback by the definition, which also leaves out a
-// comment a dismissal already retired, and is newer than the comment watermark
-// and the mark the threads have answered through. It is the rule a dismisser
-// waits by (unrouted_comment_ids in assets/scripts/review-dismissal.sh), the
-// definition applied to the comments it names.
-func unrouted(rule Feedback, self, since string, rc receipts, threads []gh.Thread, reviews []int64) ([]int64, error) {
-	var carried []feedback.Comment
-	for _, t := range threads {
-		for _, c := range t.Comments {
-			if c.Review != nil && slices.Contains(reviews, c.Review.ID) {
-				carried = append(carried, commentOf(c))
-			}
-		}
-	}
-	if len(carried) == 0 {
-		return nil, nil
-	}
-	ids, err := rule.Comments(self, since, carried)
-	if err != nil {
-		return nil, err
-	}
+// unrouted is the newest inline comment of each approval named that a
+// dismissal would retire before the intake routes it, in id order: feedback by
+// the definition, carried by the approval, and newer than the comment
+// watermark and the mark the threads have answered through. It is the rule a
+// dismisser waits by (unrouted_comment_ids in
+// assets/scripts/review-dismissal.sh), over the newest such comment each
+// approval carries on the act's own read of the PR's review threads
+// (readUnrouted).
+func unrouted(rc receipts, targets []Approval) []int64 {
 	floor := max(rc.comment, rc.commentAnswered)
 	var out []int64
-	for _, id := range ids {
-		if id > floor {
-			out = append(out, id)
+	for _, a := range targets {
+		if a.Inline > floor {
+			out = append(out, a.Inline)
 		}
 	}
 	slices.Sort(out)
-	return out, nil
+	return slices.Compact(out)
 }
 
 // newest is the highest id above floor among ids, of those only names when it

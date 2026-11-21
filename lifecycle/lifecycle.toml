@@ -59,8 +59,8 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # blocked_reason is also the pending record's reason: the merge a bead awaits,
 # or the exception that holds it. The record writes it only on a bead whose
-# marker, pr_reconcile_pending, is true. A run of the landing order reads a
-# record whose marker is true while its bead is open, blocked or closed (due()
+# marker, pr_reconcile_pending, is true. A run of the landing order decides a
+# record whose marker is true while its bead is open, blocked or closed (plan()
 # in services/gctk/pr/landing.go, with record.Read), and the check that reads
 # this declaration reads no closed bead. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the

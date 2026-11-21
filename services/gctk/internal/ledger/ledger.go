@@ -62,6 +62,16 @@ func OpenContext(ctx context.Context, db string, ids ...string) (*Ledger, error)
 	return open(gcbd.New().WithContext(ctx), db, ids...)
 }
 
+// Within returns the ledger with every call it makes to the store ended once
+// ctx ends, as OpenContext's are, when the store is the city's client. Any
+// other store, such as a test's fake, answers as it does.
+func (l *Ledger) Within(ctx context.Context) *Ledger {
+	if c, ok := l.store.(*gcbd.Client); ok {
+		return New(c.WithContext(ctx))
+	}
+	return l
+}
+
 func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	if db == "" {
 		routed, err := c.Route(ids...)
