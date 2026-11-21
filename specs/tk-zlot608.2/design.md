@@ -505,10 +505,15 @@ and help, and 2.3k test lines, where the evaluation on tk-zlot608.7 estimated
 0.85k and 1.2k. It updates the page's feedback paragraph to name the memory
 step.
 
-Nothing it changes is in `tools/deletion-plan.tsv`. A fix the judge finds in a
-file the plan lists goes to the retiring bead's notes (section 2), so the intake
-gives that code no new work. That includes the feedback-routing doctor check
-that tk-1tfzr71.21 retires, which the epic's boundaries name.
+One file it changes is in `tools/deletion-plan.tsv`: the deacon's prompt,
+`agents/deacon/prompt.template.md`, which tk-1tfzr71.174 retires. The unit adds
+to it only the include that composes the memory-notes fragment, because option
+A carries the guidance to every Claude role that keeps memory (section 6), and
+the deacon keeps memory until that bead lands. The include goes with the file,
+and the PR's size section names its lines under that bead. A fix the judge
+finds in a file the plan lists goes to the retiring bead's notes (section 2),
+so the intake gives that code no new work. That includes the feedback-routing
+doctor check that tk-1tfzr71.21 retires, which the epic's boundaries name.
 
 ## 10. The unit that builds it
 
