@@ -714,21 +714,25 @@ nothing and exits 2 for the next tick, and a rig whose roster names no refinery
 has no record to read.
 
 A run decides each record on its own read of GitHub, once the record has
-changed. It lists the beads that carry the marker `pr_reconcile_pending`, and
-every live bead, in one pass over the store. It takes each record, and each
-bead on the record with a ruling's disposition on it too, with or without the
-marker, an open or blocked one only while it is assigned to nobody or to the
-refinery, and writes nothing to a bead someone else works. A record is due
-unless a run decided it with no act owed and nothing that decision read of the
-store has changed since: the bead's status, assignee and metadata, the read the
-PR watch saved among them ([The PR watch](#the-pr-watch)), each bead its
-blocks edges name, what holds each ask on it, the evaluator's own waits and the
-work anchored to it, and the other open work on its branch. After a decision
-that owes no act, the run keeps the digest of those on the bead
-(`pr_landing_digest`), and a later run passes over the record, with no read of
-GitHub and no write, until the digest of what it reads differs. The digest
-decides only whether a run decides a record, never what it decides, so a
-digest that is missing or wrong only has the record decided again.
+changed and at least once an hour. It lists the beads that carry the marker
+`pr_reconcile_pending`, and every live bead, in one pass over the store. It
+takes each record, and each bead on the record with a ruling's disposition on
+it too, with or without the marker, an open or blocked one only while it is
+assigned to nobody or to the refinery, and writes nothing to a bead someone
+else works. A record is due unless a run decided it with no act owed less than
+an hour ago and nothing that decision read of the store has changed since: the
+bead's status, assignee and metadata, the read the PR watch saved among them
+([The PR watch](#the-pr-watch)), each bead its blocks edges name, what holds
+each ask on it, the evaluator's own waits and the work anchored to it, and the
+other open work on its branch. After a decision that owes no act, the run keeps
+the digest of those on the bead with the decision's time (`pr_landing_digest`),
+and a later run passes over the record, with no read of GitHub and no write,
+until the digest of what it reads differs or an hour has passed since that
+decision. So a change the digest does not show, such as one on GitHub that the
+PR watch has not saved, delays the record's decision by an hour at most, and
+each decision that owes no act starts the record's hour again. The digest
+decides only whether a run decides a record, never what it decides, so a digest
+that is missing or wrong only has the record decided again.
 
 Each due record's act reads the record again under the record lock and
 decides it there, by the evaluator's rule as `gctk pr status` applies it. Where
@@ -744,7 +748,9 @@ and causes no act.
 So a run reads the store six times whatever its records: the marked records,
 every live bead, in one read the closed beads their blocks edges name, the
 store's blocked set, and the closed beads the waits name. It reads GitHub only
-for the records that are due, and for each the reads its decision needs.
+for the records that are due, and for each the reads its decision needs, about
+5 points for a PR at the head the refinery validated. A record due because its
+hour is up costs those reads, and keeping the hour adds no read of the store.
 Measured on 2026-11-20, a run with nothing to act on and every record's digest
 current took 2.9 to 3.5 seconds on the gc-toolkit rig's store, with 10 records
 and 896 live beads, at a load average of 16 to 18, and read GitHub not at all.
@@ -766,8 +772,8 @@ would leave the branch of a closed bead that no run reads again.
 An act that does not complete keeps no digest: the record stays due, the next
 run decides it again, and the run exits 2. A run saves none of what it reads
 of GitHub, since GitHub's side of a PR reaches its bead only through the PR
-watch, and a record that owes no act gets one write, its digest, when the
-store has changed since a run last kept one.
+watch, and a record that owes no act gets one write, its digest with the
+decision's time, when the store has changed or its hour was up.
 
 | The PR | The run |
 |---|---|
@@ -776,7 +782,7 @@ store has changed since a run last kept one.
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
 | retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the act's read finds the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead reassigned or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
-| the same as when a run decided it with no act owed, with nothing changed in the store since | nothing: the run reads none of it from GitHub and writes nothing |
+| the same as when a run decided it with no act owed less than an hour ago, with nothing changed in the store since | nothing: the run reads none of it from GitHub and writes nothing. Once that hour is up, the next run decides it again on its own read, as it decides a record that changed |
 | an act that did not complete: a read or a request GitHub refused or did not answer, a merge state GitHub had not computed yet (`UNKNOWN`), which moves no sign the PR watch reads once it is computed, a fetch that failed, a merge commit not yet on the target, or an act stopped at its 30 seconds | keeps no digest: the record stays due, the next run decides it again, and the run exits 2, so Gas City's run record holds the failure |
 
 **Withdrawals come first.** While the PR is open, a run first carries out each
