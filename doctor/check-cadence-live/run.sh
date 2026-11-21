@@ -16,7 +16,9 @@
 # `enabled = false`, or an `[orders] skip` entry), so the registration arm reads
 # city.toml and reports a documented disable as a NOTE: a missing registration
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
-# its own error rather than being buried beside an intended disable.
+# its own error rather than being buried beside an intended disable. An order
+# the pack ships with `enabled = false` registers only where city.toml turns it
+# on with `enabled = true`, so elsewhere its missing registration is a NOTE too.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
 # the one this checkout describes: lifecycle.sh and epic.sh exec it and have
 # no other implementation, and orders that fire on schedule can still be
@@ -77,18 +79,20 @@ detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
 
 [ -d "$dir/orders" ] || { echo "OK: no orders/ directory under GC_PACK_DIR ($dir) — this pack ships no cadence"; exit 0; }
 
-# name<TAB>interval_secs<TAB>scope per shipped order ("" interval = none).
+# name<TAB>interval_secs<TAB>scope<TAB>shipped per shipped order ("" interval =
+# none; shipped is the order's own `enabled`, true unless it says false).
 order_rows=""
 for f in "$dir"/orders/*.toml; do
     [ -f "$f" ] || continue
     name=$(basename "$f" .toml)
-    read -r interval scope <<EOF
+    read -r interval scope shipped <<EOF
 $(awk '
     /^\[order\]/ { inb = 1; next }
     /^\[/        { inb = 0 }
     inb && /^interval[[:space:]]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); iv = v }
     inb && /^scope[[:space:]]*=/    { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); sc = v }
-    END { print (iv == "" ? "-" : iv), (sc == "" ? "rig" : sc) }' "$f")
+    inb && /^enabled[[:space:]]*=/  { v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]#].*$/, "", v); en = v }
+    END { print (iv == "" ? "-" : iv), (sc == "" ? "rig" : sc), (en == "false" ? "false" : "true") }' "$f")
 EOF
     # "-" = no interval (condition-triggered). A literal placeholder, never an
     # empty field: TAB is IFS whitespace, and an empty field would collapse.
@@ -100,7 +104,7 @@ EOF
         -) ;;
         *) warnings+=("$name: interval \"$interval\" is unparseable — the liveness arm cannot compute its window; registration checked only") ;;
     esac
-    order_rows="$order_rows$name	$secs	$scope
+    order_rows="$order_rows$name	$secs	$scope	$shipped
 "
 done
 [ -n "$order_rows" ] || { echo "OK: orders/ is empty — this pack ships no cadence"; exit 0; }
@@ -173,17 +177,21 @@ fi
 
 # Orders disabled in city.toml are absent from `gc order list`, so the
 # registration arm would read a deliberate disable as a missing registration.
-# Collect the (name, rig) pairs city.toml disables — an `[[orders.overrides]]`
-# block with `enabled = false` (its `rig`, or `*` when unscoped) or an
-# `[orders] skip` entry (city-wide) — so the arm reports a match as a NOTE, not
-# an error. No readable city config (the doctor runner passes GC_CITY_PATH)
-# leaves the set empty and every missing registration a finding, as before.
+# Collect the (name, rig) pairs city.toml switches: an `[[orders.overrides]]`
+# block with `enabled = false` or `enabled = true` (its `rig`, or `*` when
+# unscoped), each one `off` or `on`, and an `[orders] skip` entry (city-wide),
+# which is `off`. The arm reports a missing registration that an `off` explains
+# as a NOTE, not an error, and an order the pack ships disabled is expected only
+# where an `on` turns it on. No readable city config (the doctor runner passes
+# GC_CITY_PATH) leaves the set empty: every missing registration of an order
+# shipped on is a finding, and an order shipped off is expected nowhere.
 city_root="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
-disabled_specs=""
+switch_specs=""
 if [ -n "$city_root" ] && [ -f "$city_root/city.toml" ]; then
-    disabled_specs=$(awk '
+    switch_specs=$(awk '
         function flush() {
-            if (ovr && name != "" && enabled == "false") print name "\t" (rig == "" ? "*" : rig)
+            if (ovr && name != "" && (enabled == "false" || enabled == "true"))
+                print (enabled == "true" ? "on" : "off") "\t" name "\t" (rig == "" ? "*" : rig)
             ovr = 0; name = ""; rig = ""; enabled = ""
         }
         /^[[:space:]]*\[\[orders\.overrides\]\]/ { flush(); ovr = 1; sec = "ovr";    next }
@@ -193,7 +201,7 @@ if [ -n "$city_root" ] && [ -f "$city_root/city.toml" ]; then
             line = $0
             while (match(line, /"[^"]*"/)) {
                 s = substr(line, RSTART + 1, RLENGTH - 2)
-                if (s != "") print s "\t*"
+                if (s != "") print "off\t" s "\t*"
                 line = substr(line, RSTART + RLENGTH)
             }
             next
@@ -204,14 +212,19 @@ if [ -n "$city_root" ] && [ -f "$city_root/city.toml" ]; then
         END { flush() }
     ' "$city_root/city.toml" 2>/dev/null)
 fi
-# True when city.toml explains a missing registration: the order carries a
-# deliberate disable for this rig, or an unscoped one. rig="" asks the city-wide
-# question, which only an unscoped (`*`) disable answers.
-is_disabled() {
-    [ -n "$disabled_specs" ] || return 1
-    printf '%s\n' "$disabled_specs" | awk -F'\t' -v n="$1" -v r="$2" '
-        $1 == n && ($2 == "*" || $2 == r) { hit = 1 } END { exit hit ? 0 : 1 }'
+# switched <on|off> <order> <rig> is true when city.toml switches the order that
+# way for this rig, or with an unscoped override. rig="" asks the city-wide
+# question, which only an unscoped (`*`) one answers. An `off` explains a
+# missing registration, and an `on` is what an order shipped disabled needs.
+switched() {
+    [ -n "$switch_specs" ] || return 1
+    printf '%s\n' "$switch_specs" | awk -F'\t' -v s="$1" -v n="$2" -v r="$3" '
+        $1 == s && $2 == n && ($3 == "*" || $3 == r) { hit = 1 } END { exit hit ? 0 : 1 }'
 }
+is_disabled() { switched off "$1" "$2"; }
+# True when the pack ships the order disabled and city.toml does not turn it on
+# for this rig, so no registration is expected there.
+off_by_default() { [ "$3" = "false" ] && ! switched on "$1" "$2"; }
 
 # The floor every window below takes: one trip of the dispatch rotation over the
 # registry read above, at the budget city.toml sets.
@@ -220,7 +233,7 @@ dispatch_budget=$(cadence_budget "${city_root:+$city_root/city.toml}")
 FLOOR=$(cadence_floor_of "$clock_regs" "$dispatch_budget")
 notes+=("cadence floor ${FLOOR}s: ${clock_regs:-0} clock-driven registration(s) at ${dispatch_budget} per dispatch pass, ${CADENCE_PASS_SPACING}s per pass, never below ${CADENCE_FLOOR_MIN}s")
 
-while IFS=$'\t' read -r name secs scope; do
+while IFS=$'\t' read -r name secs scope shipped; do
     [ -n "$name" ] || continue
     # Rig-bound registrations by name; a city registration has rig == "" and
     # shows up only in the count.
@@ -240,6 +253,8 @@ while IFS=$'\t' read -r name secs scope; do
             printf '%s\n' "$reg_rigs" | grep -qxF "$rig" && continue
             if is_disabled "$name" "$rig"; then
                 notes+=("$name: deliberately disabled on rig $rig (city.toml enabled=false or skip) — its pass is intentionally not running there")
+            elif off_by_default "$name" "$rig" "$shipped"; then
+                notes+=("$name: ships disabled, and city.toml does not turn it on for rig $rig — its pass is intentionally not running there")
             else
                 errors+=("$name: rig $rig imports this pack but has NO registration for this order — its pass never runs there")
             fi
@@ -249,6 +264,8 @@ while IFS=$'\t' read -r name secs scope; do
             :
         elif is_disabled "$name" ""; then
             notes+=("$name: deliberately disabled (city.toml enabled=false or skip) — its pass is intentionally not running")
+        elif off_by_default "$name" "" "$shipped"; then
+            notes+=("$name: ships disabled, and city.toml does not turn it on — its pass is intentionally not running")
         else
             errors+=("$name: scope=\"$scope\" order has NO live registration anywhere — its pass never runs")
         fi
