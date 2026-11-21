@@ -35,22 +35,25 @@
 // hands back, so a sticky changes_requested never traps the value in working
 // after the set empties.
 //
-// A PR is open on Gas Town's pending record ([pr.OnRecord]), and it stands
-// where the pr domain's evaluator says, in the same vocabulary: [Render],
-// [RenderHeld] and [RenderReasons] read its answer beside the facts [Read]
-// gathers. `gctk pr status`, and through it the labels and engage, and the rig
-// board (services/helm/internal/rigboard) ask the evaluator over the GitHub
-// read the landing order saved on the PR's bead and the store as it stands
+// A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
+// domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
+// [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
+// status`, and through it the labels and engage, and the rig board
+// (services/helm/internal/rigboard) ask the evaluator over the GitHub read the
+// landing order saved on the PR's bead and the store as it stands
 // ([pr.FromStore]), so none of them reads GitHub, and a change in the city
 // shows at its next read. A PR whose saved read is absent, or is not of the PR
 // at the head the store holds, reads working until the landing order's next
 // check, unless something only a person clears holds it, which reads
-// needs-attention. The evaluator reads GitHub's merge state, its draft flag and
-// each required check, so it tells a required check still running from a
-// wedge, which GitHub reports alike as BLOCKED. [Derive], [Held] and [Reasons]
-// read the facts alone: for a bead off the record, such as the one engage asks
-// what holds, and for each merge anchor the walk reaches ([Holding]), which it
-// weighs by its row because the walk reads no GitHub.
+// needs-attention.
+//
+// The evaluator reads GitHub's merge state, its draft flag and each required
+// check, so it tells a required check still running from a wedge, which GitHub
+// reports alike as BLOCKED. [Derive], [Held] and [Reasons] read the facts
+// alone: for a bead off the record, such as the one engage asks what holds or
+// one whose record a writer left half written, and for each merge anchor the
+// walk reaches ([Holding]), which it weighs by its row because the walk reads
+// no GitHub.
 package prstatus
 
 import (
@@ -230,10 +233,11 @@ func Derive(f Facts) State {
 }
 
 // Held returns what holds the PR, in the order gate, blocked, and nothing when
-// the PR is not held: the held: value of each of its [Reasons], once each. A value stands only while its condition does, so the first
-// derivation after the condition clears leaves it out. The merge freeze and the
-// rebase hold are not among them: they read needs-attention in [Derive] with no
-// held value of their own.
+// the PR is not held: the held: value of each of its [Reasons], once each. A
+// value stands only while its condition does, so the first derivation after
+// the condition clears leaves it out. The merge freeze and the rebase hold are
+// not among them: they read needs-attention in [Derive] with no held value of
+// their own.
 func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
 
 // holdsOf is the held: value of each reason, once each, in their order. A

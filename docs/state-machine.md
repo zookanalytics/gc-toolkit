@@ -771,9 +771,8 @@ City work on an unapproved PR comes before the verdict it leads to, and the
 verdict is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
 
-Every open PR is on the pending record, and its status renders the evaluator's
-answer for its anchor, with that precedence (`prstatus.Render`, which
-`gctk pr status` prints). The evaluator decides over the store as it stands and
+A PR on the pending record renders the evaluator's answer for its anchor, with
+that precedence (`prstatus.Render`, which `gctk pr status` prints). The evaluator decides over the store as it stands and
 the GitHub read the landing order saved on the bead, and reads nothing on
 GitHub, so the label and the rig board give one answer. The draft flag is
 GitHub's, read through the evaluator as the city's work in progress. The
@@ -782,11 +781,12 @@ names, and the review threads the saved read finds waiting on the city's answer
 while no work of the city's acts on them. A failure of the city's own review
 machinery reads `needs-attention` with no `held:` value
 ([The machine axis](#the-machine-axis)). A review run's question to a person,
-its gate keyed `review-question-<key>`, is a person's hold, `held: gate`. A bead
-off the record owns no open PR, and `gctk pr status` derives its status from
-the facts the store records alone (`prstatus.Derive`), where a recorded
-posture outside its writer's vocabulary is a state the derivation cannot name
-and reads `needs-attention`.
+its gate keyed `review-question-<key>`, is a person's hold, `held: gate`.
+`gctk pr status` asks the evaluator only for a bead on the record. For any
+other bead, such as one that owns no PR or one whose record a writer left half
+written, it derives the status from the facts the store records alone
+(`prstatus.Derive`), where a recorded posture outside its writer's vocabulary
+is a state the derivation cannot name and reads `needs-attention`.
 
 Beside the one `status:` value, a workflow-owned `held:` label names each thing
 that holds an open PR which the city will not clear on its own. Each value is a

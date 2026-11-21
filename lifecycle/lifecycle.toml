@@ -182,8 +182,7 @@ writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh)"
 # Where the exchange with the operator stands, recorded on the anchor by
 # pr-facts.sh against the [posture] watermarks. A dated key,
 # `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
-# moved on never reads as current, and the board's board.prConversation gates it
-# on the pr.machine head the same way the approval clause gates the posture.
+# moved on never reads as current.
 conversation_key = "pr.conversation"
 # The values pr-facts.sh records, derived from the watermarks and the routing
 # disposition each pass:
@@ -448,12 +447,12 @@ keys = [
 #   because its check_set names an `open-as-draft` check that gates the
 #   draft->ready flip. Nothing writes it: the refinery's publication opens every
 #   PR as a draft and records none (refinery-publish.sh). Its PRESENCE tells
-#   gate-ensure.sh the anchor is still in the open-as-draft stage. Absent means the PR opened ready,
-#   or is a draft someone else owns. Never cleared. An oid.
+#   gate-ensure.sh the anchor is still in the open-as-draft stage. Absent means
+#   the PR opened ready, or is a draft someone else owns. Never cleared. An oid.
 # draft_readied — the head oid a PR was read ready at. Nothing writes it: the
 #   landing order marks a PR ready from GitHub's draft flag. Its PRESENCE tells
-#   gate-ensure.sh the anchor reached the ready-for-review stage. Absent means the arm has not read it ready. Never
-#   cleared. An oid.
+#   gate-ensure.sh the anchor reached the ready-for-review stage. Absent means
+#   the arm has not read it ready. Never cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
