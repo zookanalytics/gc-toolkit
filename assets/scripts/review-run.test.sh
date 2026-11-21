@@ -10,14 +10,13 @@
 # of the run does not answer, and making the run's workspace private to its
 # user; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
-# writing nothing for an output gctk refuses, a shadow round handing gctk its
-# writes; triage's withdrawal; the push returning the PR to draft before it
-# pushes, with a lease on the head the round judged, pushing nothing when the
-# draft does not answer or the branch moved, weighing a failed push by the
-# branch on origin (landed, unmoved and to run again, moved, or not read), and
-# nothing in a shadow run; the
-# post of the head's comment, or the edit of the one its mark finds, nothing
-# when there is nothing to answer, and nothing in a shadow run; a deferred fix
+# writing nothing for an output gctk refuses; triage's withdrawal; the push
+# returning the PR to draft before it pushes, with a lease on the head the
+# round judged, pushing nothing when the draft does not answer or the branch
+# moved, and weighing a failed push by the branch on origin (landed, unmoved
+# and to run again, moved, or not read); the post of the head's comment, or
+# the edit of the one its mark finds, and nothing when there is nothing to
+# answer; a deferred fix
 # filed with its wait on the PR's bead in its create, and armed, found rather
 # than filed again, armed then when the call that filed it did not arm it, and
 # left as it stands when it is armed, closed or routed; a
@@ -122,14 +121,14 @@ export PATH="$BIN:$PATH" GCTK_BIN="$BIN/gctk" REVIEW_WORKSPACE_DIR="$TMP/ws"
 mkdir -p "$REVIEW_WORKSPACE_DIR"
 WS="$TMP/ws/gc-review-tk-run"
 
-# facts <ref> <output> <iteration> [shadow] [<change from> <why>] — the held
-# step's facts, the change the whole PR unless a base and its rule are given.
+# facts <ref> <output> <iteration> [<change from> <why>] — the held step's
+# facts, the change the whole PR unless a base and its rule are given.
 facts() {
-    jq -n --arg ref "$1" --arg out "$2" --argjson n "$3" --argjson shadow "${4:-false}" --arg h "$HEAD1" \
-        --arg from "${5:-}" --arg why "${6:-the whole PR}" \
+    jq -n --arg ref "$1" --arg out "$2" --argjson n "$3" --arg h "$HEAD1" \
+        --arg from "${4:-}" --arg why "${5:-the whole PR}" \
         '{step: "tk-step", ref: $ref, output: $out, iteration: $n, run: "tk-run", pr_bead: "tk-pr",
           pr: "https://github.com/o/r/pull/7", branch: "polecat/tk-pr", target: "main", first_head: $h,
-          head: $h, shadow: $shadow,
+          head: $h,
           change: ({head: $h, why: $why} + (if $from == "" then {} else {from: $from} end))}' > "$STUB_FACTS"
 }
 run() { : > "$LOG"; OUT=$(bash "$SD/review-run.sh" "$@" 2>&1); RC=$?; }
@@ -186,20 +185,12 @@ eq "$RC" 64 "a lane's output names its check"
 mkdir -p "$WS/lane-arch"; echo '{"review":"lane"}' > "$WS/lane-arch/output.json"
 run output --check arch
 eq "$RC" 0 "a lane writes its output from its own part"
-facts review-loop.iteration.1.rule-and-repair repair 1 true
-mkdir -p "$WS/repair"; echo '{"review":"repair"}' > "$WS/repair/output.json"
-run output
-has "$(cat "$LOG")" "--writes $WS/repair/shadow-writes.txt" "a shadow round hands gctk its writes"
 
 # --- withdraw --------------------------------------------------------------------
 facts review-loop.iteration.1.triage triage 1
 run withdraw --reason "it changes what the PR does"
 eq "$RC" 0 "triage withdraws"
 has "$(cat "$LOG")" "gctk pr withdraw tk-pr --head $HEAD1 --reason it changes what the PR does" "at the head it judged"
-facts review-loop.iteration.1.triage triage 1 true
-run withdraw --reason r
-eq "$(called 'pr withdraw')" 0 "a shadow run withdraws nothing"
-has "$OUT" "shadow run: wrote nothing" "and says what it would have done"
 
 # --- push ------------------------------------------------------------------------
 facts review-loop.iteration.1.rule-and-repair repair 1
@@ -262,11 +253,6 @@ run push
 eq "$RC" 2 "a push to an origin that does not answer exits 2, to run again"
 git -C "$TMP/rig" remote set-url origin "$TMP/origin.git"
 git -C "$TMP/origin.git" update-ref refs/heads/polecat/tk-pr "$FIX"
-facts review-loop.iteration.1.rule-and-repair repair 1 true
-: > "$WS/repair/shadow-writes.txt"
-run push
-eq "$(called 'pr draft')" 0 "a shadow run drafts nothing"
-has "$(cat "$WS/repair/shadow-writes.txt")" "push: 1 commit(s) onto polecat/tk-pr" "and keeps the push it made none of"
 
 # --- the repair's read keeps the round's work -------------------------------------
 # A session that restarts reads the round again at the head it judged: the
@@ -305,10 +291,6 @@ run post
 has "$(cat "$LOG")" "pr-post.sh comment --repo github.com/o/r --pr 7 --body-file $WS/repair/comment-1.md" "the head's comment posts"
 STUB_COMMENT_ID=4242 run post
 has "$(cat "$LOG")" "pr-post.sh edit --repo github.com/o/r --comment 4242" "a retry edits the comment its mark finds"
-facts review-loop.iteration.1.rule-and-repair repair 1 true
-run post
-eq "$(called pr-post.sh)" 0 "a shadow run posts nothing"
-has "$OUT" "**Review**" "and prints the comment its output carries"
 
 # --- defer -----------------------------------------------------------------------
 facts review-loop.iteration.1.rule-and-repair repair 1
@@ -381,18 +363,12 @@ run finding --finding tk-f1 --ruling question --reason "Which name?" --gate tk-g
 has "$(cat "$LOG")" "--disposition needs-you --reason Which name? --answer Which name? --visit tk-gate1" "a question rides its gate"
 STUB_RC_FINDING=2 run finding --finding tk-f1 --ruling declined --reason r
 eq "$RC" 2 "a ruling that does not land is run again"
-facts review-loop.iteration.1.rule-and-repair repair 1 true
-run finding --finding tk-f1 --ruling declined --reason r
-eq "$(called finding.sh)" 0 "a shadow run rules nothing on the finding"
 
 # --- deliver ---------------------------------------------------------------------
 facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1
 echo mp4 > "$TMP/cap.mp4"
 run deliver --file "$TMP/cap.mp4"
 has "$(cat "$LOG")" "demo-deliver.sh --file $TMP/cap.mp4 --pr https://github.com/o/r/pull/7" "a demo lane delivers its capture"
-facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1 true
-run deliver --file "$TMP/cap.mp4"
-eq "$(called demo-deliver.sh)" 0 "a shadow run keeps it in the workspace"
 
 # --- the reads make each step's worktree in its part ----------------------------
 facts review-loop.iteration.1.triage triage 1
@@ -408,7 +384,7 @@ has "$(cat "$LOG")" "gctk review guidance triage --at $HEAD1" "…at the head it
 STUB_RC_GUIDANCE=1 run triage
 eq "$RC" 2 "triage's read stops, exit 2, when the rig's guidance does not read"
 hasnt "$OUT" "Write the output to" "and names no output to write"
-facts review-loop.iteration.1.triage triage 1 false "$HEAD1" "the head already passed into its target"
+facts review-loop.iteration.1.triage triage 1 "$HEAD1" "the head already passed into its target"
 run triage
 eq "$RC" 0 "triage reads at a head that already passed"
 has "$OUT" "== The change to judge: none, because the head already passed into its target: pick only the checks an ask open on tk-pr sends back" \
