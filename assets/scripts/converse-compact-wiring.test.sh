@@ -146,6 +146,8 @@ asks "the entry's names for the conversation, the subject and the gates" \
     'Copy the CONV, CONVERSATION, SUBJECT and GATES lines exactly as the converse entry last printed them'
 asks "a last line that sends the sitting through its entry before anything else" \
     'End the summary by telling the sitting to run the converse entry again before anything else'
+asks "the message of a sign-off that closed the conversation before it was posted, posted before the drain" \
+    'When a sign-off in this session closed the conversation before its message was posted, say so, and tell the sitting to record and post that message before it drains'
 
 # --- (5) the advisory is off for the sittings alone ------------------------
 OFF='context_advisory = { enabled = false }'

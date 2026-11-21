@@ -781,15 +781,19 @@ telling the sitting to run the entry again before anything else, as the prompt
 also tells it. The entry's claim then returns the conversation as an existing
 assignment, so the entry reads a hold that stands as `interrupted`, and the
 sitting first takes up each turn of the operator's that it had not finished,
-such as a ruling the summary quotes, before it waits (`converse-continue`). The
-hook always exits 0, because exit 2 would block the compaction. The city's own
-PreCompact hook still runs `gc handoff --auto`, which mails the session a note
-and requests no restart. No sitting gets Gas City's context advisory, which
-tells a session past 60% of its window to plan a handoff and reset itself and
-past 80% to run `gc session reset` on itself. Every `converse-<model>` template
-sets `context_advisory = { enabled = false }`, which Gas City merges over the
-city's setting and its built-in default. No other agent sets it, so each keeps
-the advisory. A Codex sitting has the advisory off and no summary steer.
+such as a ruling the summary quotes, before it waits (`converse-continue`). A
+compaction that comes after the sitting's sign-off closed the conversation and
+before its message was posted leaves the entry no conversation, so the prompt's
+`none` entry and the steer have the sitting record and post that message before
+it drains. The hook always exits 0, because exit 2 would block the compaction.
+The city's own PreCompact hook still runs `gc handoff --auto`, which mails the
+session a note and requests no restart. No sitting gets Gas City's context
+advisory, which tells a session past 60% of its window to plan a handoff and
+reset itself and past 80% to run `gc session reset` on itself. Every
+`converse-<model>` template sets `context_advisory = { enabled = false }`,
+which Gas City merges over the city's setting and its built-in default. No
+other agent sets it, so each keeps the advisory. A Codex sitting has the
+advisory off and no summary steer.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a

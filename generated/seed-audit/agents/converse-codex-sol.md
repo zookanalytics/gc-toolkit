@@ -58,7 +58,7 @@ one call to the next, so at the top of every later call, set `CONV`,
 | `interrupted` | A restart or a compaction came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
 | `waiting` | You are staying for work that is still out, and an attach, a restart, a compaction or a notice brought you back before it closed. | `converse-stay` |
 | `returned` | The work you stayed for has closed. | `converse-stay` |
-| `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |
+| `none` | No conversation is assigned to this session. | When your own sign-off closed the conversation and its message is not posted yet, as a compaction between the two leaves it, record and post that message first. Then `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | Acknowledge the drain, as the cases below say. |
 | `unreadable` | The entry could not read the claim or the record. | Do not drain and do not close anything. Run the entry again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:`, and wait. |
 
