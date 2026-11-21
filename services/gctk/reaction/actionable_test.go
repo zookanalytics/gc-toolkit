@@ -96,7 +96,10 @@ func TestAnExitWritesOnlyToAnOpenSubject(t *testing.T) {
 
 // The actionable exit releases the bead to the pool in the one write it makes,
 // with the route, and says nothing waits on it. It asks nothing about the pool
-// first, so a pool that does not run is routed to as any other is.
+// first, so a pool that does not run is routed to as any other is. A route gc
+// sling refuses is the release's last write, so the headline and the release
+// stand: the exit fails saying so, with gc sling's reason and what to do, and a
+// run again with a pool the city configures lands.
 func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition and a branch",
@@ -123,6 +126,23 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(ACTPOOL) a pool that does not run")
 	w.has("HELM takeaway tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(ACTPOOL) the bead is routed to it all the same")
+
+	w = newWorld(t)
+	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
+	wantCode(t, code, 4, err, "(ACTBADROUTE) a route gc sling refuses")
+	w.has("HELM takeaway tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.nosuch --no-wait", "(ACTBADROUTE) the release carries the route")
+	errHas(t, err, `gc sling: agent "gc-toolkit/gc-toolkit.nosuch" not found in city.toml`, "(ACTBADROUTE) giving gc sling's reason")
+	errHas(t, err, "tk-sub is released and the run beneath it has ended", "(ACTBADROUTE) saying what landed")
+	errHas(t, err, "the headline and the release stand", "(ACTBADROUTE) …in the exit's words")
+	errHas(t, err, "run this exit again with --route naming a pool the city configures", "(ACTBADROUTE) and what to do")
+	if out != "" {
+		t.Errorf("(ACTBADROUTE) the exit reported %q", out)
+	}
+	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(ACTBADROUTE) the exit run again with a pool the city configures")
+	if h := w.lines("HELM takeaway"); len(h) != 2 || !strings.Contains(h[1], "--route gc-toolkit/gc-toolkit.polecat --no-wait") {
+		t.Errorf("(ACTBADROUTE) the takeaways were %q", h)
+	}
 
 	w = newWorld(t)
 	w.helmFails = true

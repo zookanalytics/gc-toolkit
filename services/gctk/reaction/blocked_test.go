@@ -217,7 +217,9 @@ func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 // target's default, after the release writes the wait. An edge takeaway could
 // not write, and an arm that did not land, each fail the exit, and nothing is
 // armed after a release that did not land; a re-run arms. A pool that does not
-// run is armed for as any other is.
+// run is armed for as any other is, and a --then-route the arm refuses leaves
+// the headline, the release and the hold, says what to do, and arms when run
+// again with a pool the city configures.
 func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	w := newWorld(t)
 	code, _, err := w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
@@ -267,6 +269,19 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 	if len(w.rt.Previews()) > 0 || slices.Contains(w.rt.Reads(), "roster") {
 		t.Errorf("(BLKROUTE) the exit asked about the pool: previewed %v, with the reads %v", w.rt.Previews(), w.rt.Reads())
 	}
+
+	w = newWorld(t)
+	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
+		"--then-route", "gc-toolkit/gc-toolkit.nosuchpool", "--run", root)
+	wantCode(t, code, 4, err, "(BLKBADROUTE) a --then-route the arm refuses")
+	w.before("HELM takeaway tk-sub t --by proactive --release --waiting-on tk-blk1", "ARM tk-sub --target gc-toolkit/gc-toolkit.nosuchpool", "(BLKBADROUTE) the release writes the wait before the arm")
+	errHas(t, err, "default formula could not be read (no agent in the city's config answers to gc-toolkit/gc-toolkit.nosuchpool)", "(BLKBADROUTE) giving the arm's reason")
+	errHas(t, err, "The headline, the release and the hold stand", "(BLKBADROUTE) saying what landed")
+	errHas(t, err, "run this exit again with --then-route naming one it configures", "(BLKBADROUTE) and what to do")
+	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
+		"--then-route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(BLKBADROUTE) the exit run again with a pool the city configures")
+	w.has("ARM tk-sub --target gc-toolkit/gc-toolkit.polecat", "(BLKBADROUTE) arms the dispatch there")
 }
 
 // blockerClosed is a world in which bd does not report the subject ready and
