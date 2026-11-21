@@ -109,10 +109,10 @@ record in gctk. So an arm also keeps the bead out of the proactive sweep.
 `gctk reaction sweep` looks for raw input to react to, and it drops a bead that
 has a dispatch path. Otherwise a sweep that ran between a blocker closing and
 the deferred-dispatch order's next pass would sling a first reaction at a bead
-the arm is about to dispatch. `gc-helm.sh react`, which `operator-intake.sh`
-calls, and `patrol-finding.sh` skip the sweep and name a bead to
-`gctk reaction sling` directly, so the sling refuses a bead that has a dispatch
-path too, and a reaction they ask for cannot race the arm either.
+the arm is about to dispatch. `operator-intake.sh` and `patrol-finding.sh` skip
+the sweep and name a bead to `gctk reaction sling` directly, so the sling
+refuses a bead that has a dispatch path too, and a reaction they ask for cannot
+race the arm either.
 
 To see what is owed in a rig's store, and to take an arm back:
 
@@ -149,9 +149,9 @@ as any release of an armed bead does.
 
 Every write that stops an armed bead, or sends it on another way, removes the arm
 first, through `gctk bead disarm`, and goes on only once that exits 0, for the same
-reason. `gc-helm.sh takeaway --release` makes the disarm its first write, before
+reason. `gctk bead takeaway --release` makes the disarm its first write, before
 the release write, the waits, the run's end and any `--route` or `--assign`, so a
-bead it stops stays stopped once nothing holds it. `gc-helm.sh accept` does too,
+bead it stops stays stopped once nothing holds it. `gctk reaction accept` does too,
 because the answer it gives the recommendation's gate could release the bead to its
 arm ahead of Accept's own pour. So do `stand-down.sh` and a sitting's withdrawal of
 the subject's arm and route.

@@ -221,11 +221,6 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
-      # includes unicode/regex.h, which the image installs without headers.
-      - name: Install ICU's headers for helm's cgo
-        run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
-
       - name: Vet and test every package
         run: go vet ./... && go test ./...
 
@@ -248,14 +243,13 @@ jobs:
           cache: false
 
       # macOS ships no flock(1), which the pr package's lock test runs against
-      # the record lock, and helm's cgo needs icu4c's headers. The host
-      # installs both from Homebrew.
-      - name: Install flock and icu4c
+      # the record lock, so the host installs it from Homebrew.
+      - name: Install flock
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
           HOMEBREW_NO_ENV_HINTS: "1"
-        run: brew install flock icu4c
+        run: brew install flock
 
       # A Go test that starts a host tool skips when the tool is missing, so a
       # missing tool fails this step by name instead of a test skipping
@@ -272,11 +266,5 @@ jobs:
           done
           exit "$fail"
 
-      # Homebrew keeps icu4c off the default search path, so the compile takes
-      # its include and lib paths for helm's cgo from icu4c-cgo.sh.
       - name: Vet and test every package
-        run: |
-          . assets/scripts/icu4c-cgo.sh
-          icu4c_cgo_flags go-macos
-          export CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS"
-          go vet ./... && go test ./...
+        run: go vet ./... && go test ./...

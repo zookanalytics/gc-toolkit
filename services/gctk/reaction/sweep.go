@@ -10,6 +10,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -64,7 +65,7 @@ func isCandidate(r *ledger.Record) (bool, error) {
 	if r.Description() == "" || !slices.Contains(sweepTypes, r.IssueType()) || slices.Contains(topologyKinds, raw(kindKey, r)) {
 		return false, nil
 	}
-	for _, k := range []stringKey{stepRefKey, stepIDKey, rootBeadKey, takeawayKey, takeawayByKey} {
+	for _, k := range []stringKey{stepRefKey, stepIDKey, rootBeadKey, takeaway.Text, takeaway.By} {
 		if raw(k, r) != "" {
 			return false, nil
 		}

@@ -1,10 +1,9 @@
 // Package fixture serves the Helm board on fixture data, so a demo capture can
 // show the board a commit builds with no city behind it.
 //
-// It serves the embedded app, a board answer read from a file at the board's own
-// path, one rig's document read from a file at the rig board's routes, the
-// city's document read from a file at the city page's route, and a canned answer
-// for each write verb, and nothing else. It gathers no bead state
+// It serves the embedded app, one rig's document read from a file at the rig
+// board's routes, the city's document read from a file at the city page's
+// route, and a canned answer for each write verb, and nothing else. It gathers no bead state
 // and runs no write tool, so nothing it serves reads or writes a city.
 // cmd/helm-fixture is its command, and that command's tests hold its import graph
 // to this package, the app's package and the standard library.
@@ -63,8 +62,6 @@ type cityAnswer struct {
 
 // Handler returns the fixture's routes.
 //
-//   - /helm answers board, in the place helm-svc answers the board it computes,
-//     as JSON, whatever the method.
 //   - GET /helm/rigs lists the one rig rig's document names, and
 //     GET /helm/rigs/{rig} answers that document for that rig, with the time
 //     the fixture started as its read time, in the places helm-svc answers the
@@ -81,13 +78,7 @@ type cityAnswer struct {
 //
 // Any other segment after /helm/ is a verb, so a verb the service adds later is
 // served here too, refused until it has an answer.
-func Handler(board, rig, city []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
-	if !json.Valid(board) {
-		return nil, fmt.Errorf("the board answer is not JSON")
-	}
-	if trimmed := strings.TrimSpace(string(board)); !strings.HasPrefix(trimmed, "{") {
-		return nil, fmt.Errorf("the board answer is not a JSON object")
-	}
+func Handler(rig, city []byte, answers map[string]Answer, spa http.Handler) (http.Handler, error) {
 	var doc struct {
 		Rig string `json:"rig"`
 	}
@@ -111,10 +102,6 @@ func Handler(board, rig, city []byte, answers map[string]Answer, spa http.Handle
 	}
 	readAt := time.Now().UTC().Format(time.RFC3339)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/helm", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(board)
-	})
 	mux.HandleFunc("GET /helm/rigs", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, rigList{ReadAt: readAt, Rigs: []string{doc.Rig}})
 	})

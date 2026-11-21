@@ -56,6 +56,10 @@ const (
 	EdgeParentChild       = "parent-child"
 )
 
+// EdgeRelatesTo is bd's relates-to link, which holds neither bead. bd keeps one
+// edge type per pair of beads, so it refuses a parent-child edge beside one.
+const EdgeRelatesTo = "relates-to"
+
 // WaitsForError answers a bead that has a waits-for edge of its own. bd judges
 // such an edge by its spawner's status rather than by its gate, so neither its
 // blocked listing nor its close rule answers the bead. The answer stands until

@@ -3,19 +3,18 @@
 # first-reaction recommendation it has judged no longer valid. It removes
 # gc.recommended_formula from the SUBJECT and records why, leaving the subject
 # and the sitting's conversation open. gc.recommended_formula is the key the
-# operator's Accept reads — the board offers Accept only where it is present,
-# and gc-helm.sh accept refuses a bead without it — so removing it withdraws
-# Accept while the subject stays open for Discuss.
+# operator's Accept reads, and gctk reaction accept refuses a bead without it,
+# so removing it withdraws Accept while the subject stays open for Discuss.
 #
-# The board offers Accept on a row a live sitting is discussing too, so the
-# strip is what withdraws it, at once and after the sitting ends: a
-# recommendation the sitting rejected does not stay a one-click action. The
-# human gate that put the recommendation to the operator stays open, and the
-# sitting answers it like any gate the operator rules on.
+# Accept does not wait for a live sitting on the subject to end, so the strip
+# is what withdraws it, at once and after the sitting ends: no later Accept
+# takes a recommendation the sitting rejected. The human gate that put the
+# recommendation to the operator stays open, and the sitting answers it like
+# any gate the operator rules on.
 #
-# Disposing of the subject is a different act: bead-rehome.sh (a no-work subject)
-# and a PR retire close the subject, and a closed bead offers no Accept. Use
-# this only where the subject stays open for Discuss.
+# Disposing of the subject is a different act: bead-rehome.sh (a no-work
+# subject) and a PR retire close the subject. Use this only where the subject
+# stays open for Discuss.
 #
 # gc.recommended_formula has a reader, so a strip the store refuses fails the
 # script: a key that survives is Accept returning, the exact defect this exists
@@ -48,9 +47,8 @@ command -v jq >/dev/null 2>&1 || { echo "converse-invalidate-recommendation: jq 
 command -v gc >/dev/null 2>&1 || { echo "converse-invalidate-recommendation: gc is required" >&2; exit 2; }
 
 # A live recommendation is a NON-EMPTY gc.recommended_formula: every reader —
-# the board's Accept derivation (services/helm/internal/board/derive.go tests
-# `rf != ""`), gc-helm.sh accept, and gctk reaction dispose's stale-clear —
-# treats a present-but-empty key as no recommendation, so this does too. One read
+# gctk reaction accept and gctk reaction dispose's stale-clear — treats a
+# present-but-empty key as no recommendation, so this does too. One read
 # answers both questions the strip needs — is the subject readable, and is there
 # a live value to strip — so a subject that changes between reads cannot record a
 # `was` note that disagrees with the presence decision. It is tagged so an

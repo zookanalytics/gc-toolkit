@@ -188,7 +188,7 @@ gc bd --rig <rig> update "$HANDOFF" --assignee <rig>/<binding>.refinery \
 ## Set an effort's priority or park it
 
 Do both on the effort's epic: its beads follow its priority, and parking it
-(`gc-helm.sh park`) holds those that have not started. A convoy that tracks the
+(`gctk bead park`) holds those that have not started. A convoy that tracks the
 beads only reports their status, so do neither on the convoy.
 
 ## Start a workflow from another branch

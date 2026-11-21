@@ -184,7 +184,7 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   sling reads no hold, and its dry run (`gctk bead start-armed --dry-run`)
   names the label that holds the arm, so `doctor/check-armed-dispatch-owed`
   owes that arm no dispatch;
-- `gc-helm.sh place` refuses a bead that `hold:external` also holds, because a
+- `gctk bead place` refuses a bead that `hold:external` also holds, because a
   placement lifts only `hold:mayor`.
 
 ## Placing a bead
@@ -196,16 +196,16 @@ directly.
 - **Place it under an epic.** Its parent is the epic's open Delivery whose aim
   covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists, and
   otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
-  `gc-helm.sh place <bead> --under <delivery-or-epic>`. A park on the Delivery
+  `gctk bead place <bead> --under <delivery-or-epic>`. A park on the Delivery
   or the epic holds it from then on, through bd's parent-child cascade.
 - **Place it on its own**, with no parent, at its own priority:
-  `gc-helm.sh place <bead> --standalone`.
+  `gctk bead place <bead> --standalone`.
 - **Close it**, when the work is not wanted. Nothing reads the label on a closed
   bead.
 
 ```
-gc-helm.sh place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]
-gc-helm.sh place <bead-id> --standalone [--route <rig>/<pool>] [--on <formula>]
+gctk bead place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]
+gctk bead place <bead-id> --standalone [--route <rig>/<pool>] [--on <formula>]
 ```
 
 A sling reads no hold, and no write of Gas City's both sends a bead and lifts
@@ -247,9 +247,9 @@ lift names the lift by hand, which dispatches nothing, rather than a re-run.
 
 A hold also lifts these ways:
 
-- `gc-helm.sh takeaway --release` with `--route` or `--assign` lifts it in
+- `gctk bead takeaway --release` with `--route` or `--assign` lifts it in
   the release write, ahead of the sling or beside the assignee, and
-  `gc-helm.sh accept` lifts it in the write that sends the bead on, because
+  `gctk reaction accept` lifts it in the write that sends the bead on, because
   sending a held bead on is a placement and Gas City serves no bead a hold
   label holds, assigned or not.
 - `converse-signoff.sh` lifts it from a subject the operator's ruling leaves
@@ -297,8 +297,8 @@ to the operator in its portfolio sync
 ### Parking a bead
 
 ```
-gc-helm.sh park <bead-id> "<text>" [--body "<detail>"]
-gc-helm.sh park <bead-id> --waiting-on <bead-id>
+gctk bead park <bead-id> "<text>" [--body "<detail>"]
+gctk bead park <bead-id> --waiting-on <bead-id>
 ```
 
 The text form files a gate of its own and makes the bead wait on it. The gate is
@@ -417,14 +417,6 @@ neither a route nor an arm. Its remedy, arming the member, leaves the member
 held until the park is released, since an ancestor's wait holds an armed bead
 that has not started.
 
-The helm board reads a park as a hold, not a fault. It reads the blockers of
-each member and of the parents above it on the board, so a member under a park
-that nothing else holds counts as parked for the operator rather than
-stranded, and the parked epic names the gate that holds it. A member that has a
-row of its own reads parked there too and names the gate, so the board asks for
-no disposition of it while the park holds it. The board's `parked` kind is
-something else: a bead the board lists because it carries a takeaway.
-
 The rig board's Needs you lists a need about parked work apart from the rest
 and does not count it. It tells a park as a wait on a gate that is no human
 gate, the gate the text form of `park` files, which its table reads as "Held by
@@ -509,8 +501,8 @@ same beads and compute the same priority for each.
 ### Moving a priority
 
 ```
-gc-helm.sh priority <bead-id> <P0-P4> [--dry-run]
-gc-helm.sh priority <bead-id> --shift <±n> [--dry-run]
+queue-priority.sh move <bead-id> <P0-P4> [--dry-run]
+queue-priority.sh move <bead-id> --shift <±n> [--dry-run]
 ```
 
 A P-value sets the priority of a bead that follows nothing. `--shift` sets the
@@ -581,8 +573,8 @@ is born one level sooner than its anchor. Its priority is:
   and P0 for an anchor at P1 or P0.
 
 A child adopted or re-routed later keeps the shift it carries, because after its
-birth the shift is its own input, which `gc-helm.sh priority --shift` may have
-set.
+birth the shift is its own input, which `queue-priority.sh move --shift` may
+have set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor owns
 an open PR, at `pull_request_pending` or `pull_request_head_changed` on the

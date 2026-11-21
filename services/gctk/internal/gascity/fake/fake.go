@@ -64,9 +64,10 @@ type Runtime struct {
 	reads   []string
 }
 
-// Nudge is one nudge: the session nudged and the message.
+// Nudge is one nudge: the session nudged, the message, and for one sent with
+// NudgeNow the bead it is about.
 type Nudge struct {
-	Session, Message string
+	Session, Message, Bead string
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -140,6 +141,20 @@ func (r *Runtime) Wake(session string) gascity.Result {
 // Nudge records the nudge and answers it.
 func (r *Runtime) Nudge(session, message string) gascity.Result {
 	n := Nudge{Session: session, Message: message}
+	r.mu.Lock()
+	r.nudges = append(r.nudges, n)
+	on := r.OnNudge
+	r.mu.Unlock()
+	if on != nil {
+		return on(n)
+	}
+	return gascity.Result{}
+}
+
+// NudgeNow records the nudge, with the bead it is about, and answers it as
+// Nudge does.
+func (r *Runtime) NudgeNow(session, message, bead string) gascity.Result {
+	n := Nudge{Session: session, Message: message, Bead: bead}
 	r.mu.Lock()
 	r.nudges = append(r.nudges, n)
 	on := r.OnNudge

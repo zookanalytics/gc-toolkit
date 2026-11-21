@@ -18,8 +18,8 @@
 #      ruling acts on the same PR even once that PR has closed. The rework is
 #      recorded there too once it is filed, so a re-run once it has closed files
 #      no second one;
-#   2. writes the subject's headline through gc-helm.sh takeaway, and stops
-#      when takeaway refuses it, then, when the ruling leaves the subject
+#   2. writes the subject's headline through gctk bead takeaway, and stops
+#      when the takeaway refuses it, then, when the ruling leaves the subject
 #      waiting on work, its close brief and the arm of its validating closer,
 #      and lifts a hold:mayor that would keep that arm from sending it;
 #   3. resolves each open gate the conversation replies to with
@@ -30,8 +30,9 @@
 #      person at the command line. The first answer wins, and the sign-off
 #      reports it;
 #   4. takes the subject's recommendation when the ruling takes it (--accept),
-#      through gc-helm.sh accept, the writer the board's Accept runs: under the
-#      subject's acceptance lock it answers the recommendation's gate, which
+#      through gctk reaction accept, the one writer that dispatches a
+#      recommendation: under the subject's acceptance lock it answers the
+#      recommendation's gate, which
 #      step 3 leaves to it, dispatches the recommended formula at the subject
 #      and records the dispatch, or finishes an acceptance an earlier Accept
 #      left unfinished without dispatching it again;
@@ -134,8 +135,9 @@
 # What waits on the subject is the caller's to state: one --waiting-on per bead
 # it ROUTED work into, --no-wait when it settled the subject and nothing is
 # waiting, and NEITHER where the subject is parked for a person. The scripts it
-# runs (converse-rework.sh, gc-helm.sh, pr-sitting-comment.sh) are
-# its siblings in the pack's assets/scripts, found through pack_script.
+# runs (bead-store.sh, rig-map.sh, converse-rework.sh, pr-dispose.sh,
+# pr-sitting-comment.sh) are its siblings in the pack's assets/scripts, found
+# through pack_script.
 #
 # A ruling that leaves the subject waiting on work, a bead in the subject's own
 # store that is no gate, also arms the subject's validating closer
@@ -244,11 +246,11 @@
 #     replies to it, and on a turn that does not sign off --answer names it. A
 #     gate under the key that blocks another bead, such as an epic's member,
 #     asks that bead's recommendation, which --accept does not take. Step 3
-#     leaves the subject's gate to step 4, which runs gc-helm.sh accept, the
+#     leaves the subject's gate to step 4, which runs gctk reaction accept, the
 #     one writer that dispatches a recommendation, so the sitting never slings
 #     it itself. Accept answers each open gate under the key on the subject, or
 #     with none open the newest one, and the ruling must answer each of those.
-#     Under Accept's lock and its token, a dispatch the board's Accept already
+#     Under Accept's lock and its token, a dispatch an earlier Accept already
 #     poured is recorded and not sent again, even when that Accept stopped
 #     before recording it. Refused while another open human gate that the
 #     ruling does not answer holds the subject, since the dispatch waits for
@@ -346,8 +348,8 @@ ANSWER_GATES=()
 UNDONE="NOT SIGNED OFF — do NOT post the sign-off."
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# The one read of a bead's human gates, the read gc-helm.sh accept makes, and
-# the rule of which of them still hold it. Exposes bd_human_gates and
+# The one read of a bead's human gates in shell, and the rule of which of them
+# still hold it. Exposes bd_human_gates and
 # $HUMAN_GATE_JQ, and the die this script reports through.
 # shellcheck source=bd-lib.sh
 . "$HERE/bd-lib.sh" || { echo "converse-signoff: cannot source bd-lib.sh from $HERE" >&2; exit 2; }
@@ -901,7 +903,7 @@ if [ -n "$ACCEPT" ]; then
               | select(((.id // "") | tostring) as $i | ($a | index($i)) == null)
               | "\(.id) (\(.title // "untitled"))" ] | join("; ")')
   [ -z "$OTHERS" ] \
-    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or leave the recommendation's gate owed until it is cleared, when Accept on the board takes the recommendation"
+    || die "$SUBJECT's recommendation is dispatched only once no other human gate holds it, and $OTHERS still holds it, which this ruling does not answer; nothing was written. Answer that gate in the same ruling once the operator rules on it, or sign off without --accept and with --leave on the recommendation's gate ($REC_GATES). The recommendation's gate then stays on the operator's page as a question, and once the other gate is cleared, the sitting that answers the question takes the recommendation with --accept"
 fi
 # A stay's work can be a member of the subject, as an epic's own decomposition
 # is, at any depth. The subject cannot wait on it, since bd refuses a blocks
@@ -1000,7 +1002,7 @@ if [ -n "$CLOSER_WAITS" ]; then
 fi
 [ -z "$CLOSE_BRIEF" ] || [ -n "$CLOSER_RIG" ] \
   || die "--close-brief is the claim $SUBJECT's validating closer checks once the work it waits on lands, and none of --waiting-on${WAIT_IDS:+ ($WAIT_IDS)} is work in $SUBJECT's own store that it waits on, a bead that is no gate and no member of $SUBJECT, so no closer is armed; nothing was written. Drop --close-brief"
-HELM=$(pack_script gc-helm.sh) || stopped "no gc-helm.sh beside $0, so the subject's headline cannot be written; nothing was written"
+[ -x "$GCTK" ] || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so the subject's headline cannot be written; nothing was written"
 
 # pr_status <bead> — what `gctk pr status` says of the PR the bead owns, as one
 # line of words: the status; then `owed` when its conditions name a missing
@@ -1080,17 +1082,17 @@ tell_approval() {
   for line in "${APPROVE_TELL[@]+"${APPROVE_TELL[@]}"}"; do echo "$line"; done
 }
 
-# take_recommendation — step 4: hand the recommendation's gate to gc-helm.sh
-# accept, the writer the board's Accept runs, and read back what it left. Accept
-# exits 0 once it has dispatched the formula, or recorded a dispatch that an
-# earlier Accept poured under its token. Any other exit is read off the gates
-# and the subject. A recommendation already dispatched and withdrawn was taken,
-# and an answer that reached the gate first stands, as in step 3. Anything
-# else stops the sign-off here, before the conversation closes, so a re-run
-# takes the recommendation once Accept can.
+# take_recommendation — step 4: hand the recommendation's gate to gctk reaction
+# accept, the one writer that dispatches a recommendation, and read back what it
+# left. Accept exits 0 once it has dispatched the formula, or recorded a
+# dispatch that an earlier Accept poured under its token. Any other exit is read
+# off the gates and the subject. A recommendation already dispatched and
+# withdrawn was taken, and an answer that reached the gate first stands, as in
+# step 3. Anything else stops the sign-off here, before the conversation closes,
+# so a re-run takes the recommendation once Accept can.
 take_recommendation() {
   local out rc g row st why other="" open=""
-  out=$("$HELM" accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" \
+  out=$(GCTK_SCRIPTS_DIR="$HERE" "$GCTK" reaction accept "$SUBJECT" --conversation "$CONVERSATION" --reason "$RULING" \
     "${ACCEPT_VARS[@]+"${ACCEPT_VARS[@]}"}" 2>&1); rc=$?
   [ -z "$out" ] || printf '%s\n' "$out"
   if [ "$rc" -eq 0 ]; then
@@ -1100,7 +1102,7 @@ take_recommendation() {
   fi
   for g in $REC_GATES; do
     row=$(show_row "$g") \
-      || stopped "gc-helm.sh accept exited $rc, and gate $g could not be read back to tell whether the recommendation was taken; the conversation is not closed"
+      || stopped "gctk reaction accept exited $rc, and gate $g could not be read back to tell whether the recommendation was taken; the conversation is not closed"
     st=$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')
     why=$(printf '%s' "$row" | jq -r '.close_reason // ""')
     if [ "$st" != closed ]; then
@@ -1118,7 +1120,7 @@ take_recommendation() {
     echo "the recommendation was already taken: an Accept dispatched $REC_FORMULA at $SUBJECT and recorded it${ACCEPT_VARS[*]:+. That dispatch keeps the vars it was made with, so the --var given here does not reach it}"
     return 0
   fi
-  stopped "the recommendation was not taken: gc-helm.sh accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
+  stopped "the recommendation was not taken: gctk reaction accept exited $rc, and its output above says why${open:+, and its gate $open is still open}. The conversation is not closed. Repair what Accept names, then re-run, which finishes an acceptance Accept left unfinished without dispatching it twice"
 }
 
 # The work a sitting that stays waits on: each --waiting-on bead that is no
@@ -1285,9 +1287,9 @@ fi
 # flag as its own argument, and nothing when it is empty. Its waits are the
 # call's own, less each member of the subject a stay waits on through the
 # conversation alone, and with none left it says --no-wait, as an epic's
-# sign-off on its own decomposition does. An explicit --no-wait stays, so
+# sign-off on its own decomposition does. An explicit --no-wait stays, so the
 # takeaway still refuses it beside a wait. The resolves, the release and the
-# close below cannot be undone, so they wait on takeaway's exit.
+# close below cannot be undone, so they wait on the takeaway's exit.
 HEADLINE_WAIT=("${WAIT[@]+"${WAIT[@]}"}")
 if [ -n "$MEMBER_WAITS" ]; then
   HEADLINE_WAIT=()
@@ -1297,8 +1299,8 @@ if [ -n "$MEMBER_WAITS" ]; then
   case " ${WAIT[*]} " in *" --no-wait "*) HEADLINE_WAIT+=(--no-wait) ;; esac
   [ "${#HEADLINE_WAIT[@]}" -gt 0 ] || HEADLINE_WAIT=(--no-wait)
 fi
-"$HELM" takeaway "$SUBJECT" "$OUTCOME" --by converse "${HEADLINE_WAIT[@]+"${HEADLINE_WAIT[@]}"}" \
-  || stopped "gc-helm.sh takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
+"$GCTK" bead takeaway "$SUBJECT" "$OUTCOME" --by converse "${HEADLINE_WAIT[@]+"${HEADLINE_WAIT[@]}"}" \
+  || stopped "gctk bead takeaway did not finish on $SUBJECT, and its message above says which write it could not make${APPROVE_CLAUSE:+. It carries \"; $APPROVE_CLAUSE\" after --outcome, which counts toward the cap, so a shorter --outcome makes room}; no gate was resolved and the conversation is not closed"
 # The subject's validating closer, once the headline's edges hold the subject
 # on the work: first the close brief the closer checks, then its arm, then the
 # lift of a hold that would keep the arm from sending it, all in the subject's

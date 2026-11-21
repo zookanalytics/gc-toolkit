@@ -27,14 +27,14 @@ func TestRulingFilesItsGateThenReleases(t *testing.T) {
 	if !strings.Contains(gates[0], "the trade-off is the operator's") || !strings.Contains(gates[0], "Filed by a first reaction on tk-sub (ruling, run "+root+"), which waits on it.") {
 		t.Errorf("(RULRUN) the gate's message was %q", gates[0])
 	}
-	w.has("HELM takeaway tk-sub needs a ruling: which default --by proactive --release --waiting-on tk-gate1", "(RUL) the subject is released, held on the gate")
+	w.has("TAKEAWAY tk-sub needs a ruling: which default --by proactive --release --waiting-on tk-gate1", "(RUL) the subject is released, held on the gate")
 	w.hasnt("--route", "(RUL) not routed")
 	w.hasnt("--no-wait", "(RUL) and never called settled")
 	w.hasnt("CREATE", "(RUL) and files nothing else")
 	if out != "tk-sub disposed as ruling (tk-gate1)" {
 		t.Errorf("(RUL) the exit reported %q", out)
 	}
-	w.before("GATE --subject", "HELM takeaway", "(RULORDER) the gate before the release")
+	w.before("GATE --subject", "TAKEAWAY", "(RULORDER) the gate before the release")
 
 	w = newWorld(t)
 	_, _, err = w.dispose("tk-sub", "--disposition", "ruling", "--reason", "the trade-off is the operator's", "--takeaway", "needs a ruling: which default")
@@ -46,7 +46,7 @@ func TestRulingFilesItsGateThenReleases(t *testing.T) {
 	w.gateFails = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "ruling", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 4, err, "(RULGATE) a gate that did not file")
-	w.hasnt("HELM takeaway", "(RULGATE) the subject is not released onto a gate that does not exist")
+	w.hasnt("TAKEAWAY", "(RULGATE) the subject is not released onto a gate that does not exist")
 	errHas(t, err, "re-run this command", "(RULGATE) the failure names the retry")
 
 	w = newWorld(t)
@@ -131,7 +131,7 @@ func TestRecommendStampsItsFormulaAfterTheGate(t *testing.T) {
 	}
 	w.has("--waiting-on tk-gate1", "(RECO) the gate holds the subject")
 	w.before("GATE --subject", "gc.recommended_formula=mol-x", "(RECO) the recommendation lands once the gate is filed")
-	w.before("GATE --subject", "HELM takeaway", "(RECO) the gate before the release")
+	w.before("GATE --subject", "TAKEAWAY", "(RECO) the gate before the release")
 	if s, _ := w.store.Row("tk-sub"); s.Metadata["gc.recommended_formula"] != "mol-x" {
 		t.Errorf("(RECO) the subject carries %q", s.Metadata["gc.recommended_formula"])
 	}
@@ -197,7 +197,7 @@ func TestTheRecommendationIsTrueWhenItIsRead(t *testing.T) {
 	refuse(w, "gc.recommended_formula=")
 	code, _, err = w.dispose("tk-sub", "--disposition", "recommend", "--reason", "operator authority", "--takeaway", "recommend: execute via mol-x", "--recommended-formula", "mol-x", "--run", root)
 	wantCode(t, code, 4, err, "(RECOGUARD) a recommendation set the store refuses")
-	w.hasnt("HELM takeaway", "(RECOGUARD) the release is withheld")
+	w.hasnt("TAKEAWAY", "(RECOGUARD) the release is withheld")
 	errHas(t, err, "the store refused gc.recommended_formula=mol-x", "(RECOGUARD) naming the key")
 	errHas(t, err, "The gate tk-gate1 is filed", "(RECOGUARD) saying the gate is filed")
 
@@ -206,7 +206,7 @@ func TestTheRecommendationIsTrueWhenItIsRead(t *testing.T) {
 	refuse(w, "--unset-metadata gc.recommended_formula")
 	code, _, err = w.dispose("tk-sub", "--disposition", "ruling", "--reason", "r", "--takeaway", "needs a ruling: which default", "--run", root)
 	wantCode(t, code, 4, err, "(RECOGUARD) a stale clear the store refuses")
-	w.hasnt("HELM", "(RECOGUARD) the act is withheld")
+	w.hasnt("TAKEAWAY", "(RECOGUARD) the act is withheld")
 	w.hasnt("GATE ", "(RECOGUARD) and no gate is filed beside the older recommendation")
 	errHas(t, err, "the store refused the clear of the earlier recommendation", "(RECOGUARD) naming the stale key")
 }

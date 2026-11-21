@@ -110,7 +110,6 @@ orders/boot-health.toml	tk-1tfzr71.174
 orders/liveness-sweep.toml	tk-1tfzr71.174
 orders/witness-nudge.toml	tk-1tfzr71.174
 overlays/cycle-recycle/.claude/hooks/patrol-continue.sh	tk-1tfzr71.174
-services/helm/web/contract_parity_test.go	tk-1tfzr71.25
 tools/lint-learned.d/bd-helper-in-scope.sh	tk-1tfzr71.25
 tools/lint-learned.d/inline-ctrl-scrub.sh	tk-1tfzr71.25
 tools/lint-learned.d/pr-post-bypass.sh	tk-1tfzr71.25

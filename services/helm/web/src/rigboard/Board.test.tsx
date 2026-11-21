@@ -492,18 +492,18 @@ describe('the Needs you page', () => {
   });
 
   it('keeps a kind shown alone a control once a read stops counting it, so every kind can show again', async () => {
-    // The cut routes no need to the operator, so the first read counts its
-    // ruling as routed to you instead, and the next read is the cut's own.
-    const routed: Document = structuredClone(board);
-    const n = routed.needs_you;
+    // The cut assigns no need to the operator, so the first read counts its
+    // ruling as assigned to you instead, and the next read is the cut's own.
+    const assigned: Document = structuredClone(board);
+    const n = assigned.needs_you;
     const need = n.counted.find((x) => x.kind === 'Ruling')!;
-    need.kind = 'Routed to you';
-    n.kinds = [...n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k)), { kind: 'Routed to you', count: 1 }];
-    rigReads = [() => json({ read_at: READ_AT, board: routed }), () => json({ read_at: READ_AT, board })];
+    need.kind = 'Assigned to you';
+    n.kinds = [...n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k)), { kind: 'Assigned to you', count: 1 }];
+    rigReads = [() => json({ read_at: READ_AT, board: assigned }), () => json({ read_at: READ_AT, board })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
-    fireEvent.click(screen.getByRole('button', { name: '1 routed to you' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 assigned to you' }));
     expect(rowIds()).toEqual(needIds([need]));
     // A tab shown again reads the document again.
     act(() => {
@@ -511,11 +511,11 @@ describe('the Needs you page', () => {
     });
     await screen.findByRole('button', { name: '1 ruling' });
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
-    const shown = within(strip).getByRole('button', { name: '0 routed to you' });
+    const shown = within(strip).getByRole('button', { name: '0 assigned to you' });
     expect(shown.getAttribute('aria-pressed')).toBe('true');
     expect(rowIds()).toEqual([]);
     fireEvent.click(shown);
-    expect(within(strip).queryByText(/routed to you/)).toBeNull();
+    expect(within(strip).queryByText(/assigned to you/)).toBeNull();
     expect(rowIds()).toEqual(needIds(board.needs_you.counted));
   });
 

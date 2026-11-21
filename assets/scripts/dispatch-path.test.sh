@@ -126,8 +126,7 @@ asks() { # <reader> <predicate>
         && ok "(READERS) $1 asks $2" \
         || bad "(READERS) $1 asks $2"
 }
-for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh \
-         assets/scripts/gc-helm.sh; do
+for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh; do
     sources "$r"; asks "$r" has_dispatch_path
 done
 for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
@@ -135,10 +134,10 @@ for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck
     sources "$r"
 done
 for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
-         assets/scripts/liveness-recheck.sh assets/scripts/gc-helm.sh doctor/check-po-queue-only/run.sh; do
+         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done
-asks assets/scripts/gc-helm.sh dispatch_hold_spellings
+asks doctor/check-po-queue-only/run.sh dispatch_hold_spellings
 
 echo "# no private copies"
 # A copy is a jq def of the keys or the predicate, or one file that tests both

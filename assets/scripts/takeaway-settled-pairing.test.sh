@@ -11,8 +11,12 @@
 #
 # So every site that writes the marker writes its settled-key in the same
 # statement — empty unless the writer means settled, which only
-# `gc-helm.sh takeaway --no-wait` does. A new writer that stamps a headline and
-# says nothing about the wait fails this suite.
+# `gctk bead takeaway --no-wait` does. A new writer that stamps a headline and
+# says nothing about the wait fails this suite. That verb writes the headline's
+# keys through their declarations in services/gctk/takeaway, which only that
+# package can use, so its own stamp is held by that package's tests
+# (TestNoWaitIsTheSettledMark), and this suite reads the sites that spell the
+# keys themselves.
 #
 # run-tests-scope: tree
 set -uo pipefail
@@ -118,12 +122,6 @@ while IFS=: read -r f n _; do
   bad "$f:$n hardcodes a settled disposition; it is $SETTLED's writer only under --no-wait"
 done < <(git grep -a -n -F -e "$SETTLED=1" -- '*.sh' '*.toml' '*.md' '*.go')
 ok "no site outside the verb stamps a settled disposition of its own"
-
-HELM="$HERE/gc-helm.sh"
-has "$(cat "$HELM")" "--no-wait) no_wait=1" "gc-helm.sh takeaway parses --no-wait"
-has "$(cat "$HELM")" "$SETTLED=\$no_wait" "…and the flag is the only source of the value it stamps"
-CONTRA=$(awk '/-n "\$no_wait" \] && \[ -n "\$waiting_ids" \]/,/^    fi$/' "$HELM")
-has "${CONTRA:-<none>}" "exit 2" "…and a takeaway claiming both refuses before it writes"
 
 # The lifecycle writer owns the stamp behind --takeaway, so --set must not be a
 # second door to one half of it. gctk lifecycle is that writer's only

@@ -43,7 +43,7 @@ func (r *rigReads) read(_ context.Context, rig rigboard.Rig) (rigboard.Document,
 }
 
 func newRigServer(reads *rigReads) *Server {
-	s := New(newFake(), time.Minute, WithRigBoard(rigGC{}, time.Minute))
+	s := New(WithRigBoard(rigGC{}, time.Minute))
 	s.rigBoard.read = reads.read
 	return s
 }
@@ -79,7 +79,7 @@ func TestRigBoardRoutes(t *testing.T) {
 	}
 }
 
-// TestRigBoardCaches holds the document's cache to the board's rule: served
+// TestRigBoardCaches holds the document's cache to its rule: served
 // whole for its time to live, and gathered again once a write route succeeds.
 func TestRigBoardCaches(t *testing.T) {
 	reads := &rigReads{}
@@ -92,7 +92,7 @@ func TestRigBoardCaches(t *testing.T) {
 	if reads.reads != 1 {
 		t.Fatalf("three reads gathered %d times, want once", reads.reads)
 	}
-	s.invalidateBoard()
+	s.invalidate()
 	get(t, s, "/helm/rigs/gc-toolkit")
 	if reads.reads != 2 {
 		t.Fatalf("a read after a write gathered %d times in all, want twice", reads.reads)
@@ -119,7 +119,7 @@ func TestRigBoardSaysAFailedRead(t *testing.T) {
 }
 
 func TestRigBoardOff(t *testing.T) {
-	s := New(newFake(), time.Minute)
+	s := New()
 	if rr := get(t, s, "/helm/rigs/gc-toolkit"); rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("without the rig board = %d, want 503", rr.Code)
 	}
