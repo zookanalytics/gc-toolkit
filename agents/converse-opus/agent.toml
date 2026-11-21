@@ -4,7 +4,8 @@
 # that holds no work, and closes one whose process is gone, releasing the
 # conversation it held, so this template stays until no open sitting runs on
 # it. Its fields are the ones its sittings started on, documented on
-# converse-claude-opus.
+# converse-claude-opus, but for Gas City's context advisory, which is off as on
+# every sitting.
 scope = "rig"
 provider = "claude"
 option_defaults = { model = "claude-opus-5-5" }
@@ -19,6 +20,7 @@ session_live = [
 ]
 nudge = ""
 idle_timeout = "0"
+context_advisory = { enabled = false }
 sleep_after_idle = "10m"
 min_active_sessions = 0
 max_active_sessions = 8
