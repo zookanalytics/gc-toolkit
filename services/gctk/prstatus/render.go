@@ -131,6 +131,21 @@ func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 // [Held] does on the old record.
 func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f)) }
 
+// RenderOwnAttention reports what [OwnAttention] does, for a PR on Gas Town's
+// pending record: whether [Render] still reads needs-attention once each human
+// gate and each bead a person owes that holds the PR is answered, such as for a
+// failed required check, a hold set by hand, a review thread or a merge state
+// only a person moves. The evaluator names a wait of the bead's own on such a
+// bead as a condition, so the condition is answered with the bead.
+func RenderOwnAttention(a pr.Answer, f Facts) bool {
+	answered := slices.Concat(f.Gates, f.Owed)
+	a.Conditions = slices.DeleteFunc(slices.Clone(a.Conditions), func(c pr.Condition) bool {
+		return c.Kind == pr.KindWait && slices.ContainsFunc(answered, func(b Blocker) bool { return b.ID == c.ID })
+	})
+	f.Gates, f.Owed = nil, nil
+	return Render(a, f) == NeedsAttention
+}
+
 // threadsHeld is how many review threads the answer names as waiting on the
 // city's answer, or 0 while something of the city's acts on them: feedback the
 // intake has yet to route, a bead that names the PR's bead as its anchor, or a

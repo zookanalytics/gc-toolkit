@@ -338,6 +338,17 @@ func Blocked(f Facts) bool {
 // held value of their own.
 func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
 
+// OwnAttention reports whether the PR reads needs-attention for a reason of its
+// own: one [Derive] still reads once each human gate and each bead a person owes
+// the next move on that holds it is answered, such as a merge or rebase hold,
+// review threads, the merge pass's verdict or a recorded value outside its
+// writer's vocabulary. A PR whose needs-attention rests on those beads alone has
+// none, and answering them is the person's move on it.
+func OwnAttention(f Facts) bool {
+	f.Gates, f.Owed = nil, nil
+	return Derive(f) == NeedsAttention
+}
+
 // holdsOf is the held: value of each reason, once each, in their order. A
 // reason that is the machine's fault stands for none.
 func holdsOf(reasons []Reason) []Hold {
