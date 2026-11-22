@@ -99,7 +99,7 @@ while the gate is open. Each question on the PR is such a gate, under a
 the person's answer as its `close_reason`:
 
 ```bash
-gc bd gate list <the PR's bead> --all --json
+gc bd gate list <the bead that owns the PR> --all --json
 ```
 
 The run after the answer rules the question's own ask, the one whose post the
