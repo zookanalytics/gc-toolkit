@@ -26,27 +26,14 @@ const RosterWait = 15 * time.Second
 const RigListWait = 120 * time.Second
 
 // Agent is one agent the city's roster names (`gc agent list --json`): the name
-// a route or an assignee matches it by, its own name, the rig directory it
-// serves, empty for a city agent, its scope, whether it is suspended, and the
-// most sessions its pool runs, nil when the roster gives none.
+// an assignee matches it by, its own name, the rig directory it serves, empty
+// for a city agent, its scope, and whether it is suspended.
 type Agent struct {
 	QualifiedName string `json:"qualified_name"`
 	Name          string `json:"name"`
 	Dir           string `json:"dir"`
 	Scope         string `json:"scope"`
 	Suspended     bool   `json:"suspended"`
-	Pool          *struct {
-		Max *int `json:"max"`
-	} `json:"pool"`
-}
-
-// MaxSessions is the most sessions the agent's pool runs, and false when the
-// roster gives none.
-func (a Agent) MaxSessions() (int, bool) {
-	if a.Pool == nil || a.Pool.Max == nil {
-		return 0, false
-	}
-	return *a.Pool.Max, true
 }
 
 // NamedSession is one named session the city's merged config lists

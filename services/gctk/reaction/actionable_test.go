@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,9 +94,11 @@ func TestAnExitWritesOnlyToAnOpenSubject(t *testing.T) {
 }
 
 // The actionable exit releases the bead to the pool in the one write it makes,
-// with the route, and says nothing waits on it. The pool is asked whether it
-// can claim this bead first, and one that cannot refuses the exit, naming the
-// named agent's address before the operator's exits.
+// with the route, and says nothing waits on it. It asks nothing about the pool
+// first, so a pool that does not run is routed to as any other is. A route gc
+// sling refuses is the release's last write, so the headline and the release
+// stand: the exit fails saying so, with gc sling's reason and what to do, and a
+// run again with a pool the city configures lands.
 func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition and a branch",
@@ -110,16 +113,32 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	if want := "tk-sub disposed as actionable (gc-toolkit/gc-toolkit.polecat)"; out != want {
 		t.Errorf("(ACT) the exit reported %q, want %q", out, want)
 	}
-	if r := strings.Join(w.rt.Reads(), ","); !strings.Contains(r, "roster") {
-		t.Errorf("(ACTPOOL) the exit did not ask the roster whether the pool can claim: %s", r)
+	if slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(ACTPOOL) the exit asked about the pool: the reads were %v", w.rt.Reads())
 	}
 
 	w = newWorld(t)
-	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
-	wantCode(t, code, 2, err, "(ACTPOOL) a pool that cannot claim")
-	w.hasnt("TAKEAWAY", "(ACTPOOL) the bead is not released")
-	errHas(t, err, "hand it with --assign", "(ACTPOOL) the refusal names the named agent's address")
-	errHas(t, err, "only when the next move is the operator's", "(ACTPOOL) …keeping the operator's exits for the operator's move")
+	w.rt.Roster[0].Suspended = true
+	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(ACTPOOL) a pool that does not run")
+	w.has("TAKEAWAY tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(ACTPOOL) the bead is routed to it all the same")
+
+	w = newWorld(t)
+	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
+	wantCode(t, code, 4, err, "(ACTBADROUTE) a route gc sling refuses")
+	w.has("TAKEAWAY tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.nosuch --no-wait", "(ACTBADROUTE) the release carries the route")
+	errHas(t, err, `gc sling: agent "gc-toolkit/gc-toolkit.nosuch" not found in city.toml`, "(ACTBADROUTE) giving gc sling's reason")
+	errHas(t, err, "tk-sub is released and the run beneath it has ended", "(ACTBADROUTE) saying what landed")
+	errHas(t, err, "the headline and the release stand", "(ACTBADROUTE) …in the exit's words")
+	errHas(t, err, "run this exit again with --route naming a pool the city configures", "(ACTBADROUTE) and what to do")
+	if out != "" {
+		t.Errorf("(ACTBADROUTE) the exit reported %q", out)
+	}
+	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(ACTBADROUTE) the exit run again with a pool the city configures")
+	if h := w.lines("TAKEAWAY "); len(h) != 2 || !strings.Contains(h[1], "--route gc-toolkit/gc-toolkit.polecat --no-wait") {
+		t.Errorf("(ACTBADROUTE) the takeaways were %q", h)
+	}
 
 	w = newWorld(t)
 	w.takeawayFails = true
