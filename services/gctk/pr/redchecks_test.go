@@ -430,6 +430,14 @@ func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	if red := e.runRed(t); red.Action != "" || len(e.gates.withdrawals()) != 0 {
 		t.Fatalf("a red head made %+v and withdrew %v", red, e.gates.withdrawals())
 	}
+
+	// A withdrawal that does not land is a retry, and the next run withdraws.
+	f := newRed(t)
+	f.gateOn(t, "tk-g1", "pr-fix-unmoved.7")
+	f.gates.withdrawErr = errors.New("human-gate: could not resolve the gate")
+	is(t, f.runRed(t), pr.ActRetry)
+	f.gates.withdrawErr = nil
+	is(t, f.runRed(t), pr.ActWithdrawn)
 }
 
 // A required check's newest result is the one that stands: a failure in a
