@@ -428,9 +428,10 @@ func (u *run) carry(ctx context.Context, s state, f seen) carriedOut {
 // carryOne carries out withdrawal w with the PR's reviews as the act last read
 // them, past the approvals gone, which this act dismissed for an earlier
 // withdrawal and which it adds to. It dismisses each approval that stands on a
-// commit without the head once the act's own read of the PR's review threads
-// shows none of them carrying feedback the intake has not routed, reads the
-// reviews again, and closes w once none stands. It returns its account,
+// commit without the head once the act's own reads of the PR's reviews and
+// review threads show none of them carrying feedback the city has not taken,
+// its own message or an inline comment, reads the reviews again, and closes w
+// once none stands. It returns its account,
 // whether w is still open, whether a step did not complete, and the reviews as
 // it last read them. Its reads and requests go through hub.
 func (u *run) carryOne(ctx context.Context, s state, f seen, hub Hub, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {

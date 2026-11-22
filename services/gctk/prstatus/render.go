@@ -142,8 +142,8 @@ func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f)) }
 
 // threadsHeld is how many review threads the answer names as waiting on the
-// city's answer, or 0 while something of the city's acts on them: feedback the
-// intake has yet to route, a bead that names the PR's bead as its anchor, or a
+// city's answer, or 0 while something of the city's acts on them: a post the
+// city has not taken, a bead that names the PR's bead as its anchor, or a
 // wait of the bead's own that is neither a gate, a bead a person owes nor one
 // that waits on work of its own first ([Facts.Staying]), such as work on the
 // PR's branch. A bead that waits on its work acts on no thread.

@@ -353,7 +353,9 @@ var reactionContent = regexp.MustCompile(`^[A-Z_]+$`)
 // AddReaction adds the reaction content, such as EYES, to the post whose node
 // id is subject, as the account gh acts as. GitHub keeps one reaction of each
 // content for each account, so adding one the account left already leaves it
-// as it is. An error reads as MarkReady's.
+// as it is. An error is a request GitHub refused or one whose answer did not
+// arrive, which may still take effect: a read of the post's reactions says
+// which.
 func (c *Client) AddReaction(subject, content string) error {
 	if subject == "" {
 		return errors.New("github: a reaction names no post")
