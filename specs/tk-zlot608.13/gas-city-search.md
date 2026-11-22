@@ -7,11 +7,12 @@ description: The Gas City primitives searched for each need of starting the feed
 
 This change replaces the distiller's rig-scoped formula order with an exec
 order of city scope, `orders/feedback-distiller.toml`, which runs a new gctk
-verb, `gctk distiller start`, in a new noun, `distiller`, that owns no state.
-It also grows the runtime adapter with a formula sling. It adds no key, no bead
-kind and no state. Each need below names the primitive searched, by symbol at
-`gastownhall/gascity` main dc87c978a3 (2026-11-21). The behavior checks ran on
-the city's gc, 1.4.3, through `services/gctk/distiller`'s `TestCityAcceptance`.
+verb, `gctk distiller start`, in a new noun, `distiller`, that owns nothing
+but the start's lock. It also grows the runtime adapter with a formula sling.
+It adds no key and no bead kind. Each need below names the primitive searched,
+by symbol at `gastownhall/gascity` main dc87c978a3 (2026-11-21). The behavior
+checks ran on the city's gc, 1.4.3, through `services/gctk/distiller`'s
+`TestCityAcceptance`.
 
 ## Register the order once, whatever rigs import the pack
 
@@ -84,6 +85,22 @@ at the pour as a workflow (`gc.kind`) of the distiller's formula
 (`gc.formula_name`), the stamps `lifecycle/lifecycle.toml` lists under
 `[metadata.runtime_owned]`, and slings nothing while one is there. It reads no
 key of its own, so a run poured by any path holds the next start.
+
+**Not covered either: two starts at once.** The dispatcher's gate keeps the
+order's own passes apart, and nothing in Gas City keeps a `gc order run` or a
+start by hand from overlapping a pass or each other. `gc order run` runs an
+exec order with no check for a run in flight: `doOrderRunWithJSON` in
+`cmd/gc/cmd_order.go` finds the order and calls `doOrderRunExecTracked`, which
+records the run's tracking bead and runs the exec. A start by hand passes no
+gate at all. So two starts can each read no root before either pours. Gas
+City's flocks, such as `flockWithBoundedWait` in
+`cmd/gc/beads_scope_ownership.go`, guard its own writes, and no `gc` command
+takes a lock for its caller. So the verb takes a lock of its own without
+waiting: a flock on `distiller-start.lock` in the city's
+`.gc/runtime/packs/gc-toolkit`, where the pack's dispatch locks live, held from
+before its read of the store to the sling's end. A start that finds it held
+starts nothing. The acceptance test holds that lock and runs the order, which
+pours nothing, and a mutant of the verb that takes no lock pours a root there.
 
 ## Find the home rig and its pool
 

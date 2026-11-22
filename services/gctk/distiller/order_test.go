@@ -12,8 +12,9 @@ import (
 
 // The order kills its run at its timeout, so the start's four bounds end inside
 // it: the rig list's and the roster's, which the runtime adapter keeps, the
-// store read's and the sling's. The order runs the verb once for the city on a
-// daily cooldown.
+// store read's and the sling's. The start takes its lock without waiting, so
+// the lock adds none. The order runs the verb once for the city on a daily
+// cooldown.
 func TestTheOrder(t *testing.T) {
 	raw, err := os.ReadFile("../../../orders/feedback-distiller.toml")
 	if err != nil {

@@ -29,15 +29,18 @@ type sling struct {
 
 // city is the runtime and the stores a start reads: an HQ whose checkout holds
 // the city's own pack, the home rig tools, whose checkout holds the gc-toolkit
-// pack, and the rig web, whose checkout holds no pack.toml.
+// pack, and the rig web, whose checkout holds no pack.toml. locks is the
+// directory of the start's lock, and pour, when set, runs inside each sling.
 type city struct {
 	*gcfake.Roster
 	hq, home, web gascity.Rig
 	stores        map[string]*fake.Store
+	locks         string
 	openErr       error
 	opened        []time.Duration
 	slings        []sling
 	answer        gascity.FormulaSling
+	pour          func()
 }
 
 func newCity(t *testing.T) *city {
@@ -49,6 +52,7 @@ func newCity(t *testing.T) *city {
 		web:    gascity.Rig{Name: "web", Path: filepath.Join(base, "rigs", "web"), Prefix: "wb"},
 		answer: gascity.FormulaSling{Root: "tk-run"},
 	}
+	c.locks = filepath.Join(c.hq.Path, ".gc", "runtime", "packs", "gc-toolkit")
 	writePack(t, c.hq.Path, "[pack]\nname = \"city\"\nschema = 2\n")
 	writePack(t, c.home.Path, "[pack]\nname = \"gc-toolkit\"\nschema = 2\n\n[imports.core]\nsource = \"core\"\n")
 	if err := os.MkdirAll(c.web.Path, 0o755); err != nil {
@@ -82,6 +86,9 @@ func writePack(t *testing.T, dir, text string) {
 func (c *city) SlingFormula(ctx context.Context, target, formula string) gascity.FormulaSling {
 	deadline, _ := ctx.Deadline()
 	c.slings = append(c.slings, sling{target: target, formula: formula, left: time.Until(deadline)})
+	if c.pour != nil {
+		c.pour()
+	}
 	return c.answer
 }
 
@@ -99,7 +106,7 @@ func (c *city) open(ctx context.Context, db string) (*ledger.Ledger, error) {
 }
 
 func (c *city) start() Outcome {
-	return (&Starter{City: c, Open: c.open}).Run(context.Background())
+	return (&Starter{City: c, Open: c.open, Locks: c.locks}).Run(context.Background())
 }
 
 // root puts a run's root in rig's store: a bead Gas City stamped with kind and
@@ -158,6 +165,66 @@ func TestAnOpenRunHoldsTheStart(t *testing.T) {
 	c.root(c.web, "tk-elsewhere", Formula, "workflow", "open")
 	if out := c.start(); !out.Slung || len(out.Open) != 0 || len(c.slings) != 1 {
 		t.Fatalf("roots that hold nothing held the start: %+v, slung %+v", out, c.slings)
+	}
+}
+
+// Starts that overlap, the order's and any made by hand, take the start's lock
+// in turn. While one holds it, from before its read of the home rig's store to
+// the sling's end, another reads no store, slings nothing and names the holder.
+// Once the holder ends, the next start takes the lock and reads the store,
+// where the run the holder poured now holds it.
+func TestOverlappingStartsSlingOnce(t *testing.T) {
+	c := newCity(t)
+	slinging, poured := make(chan struct{}, 2), make(chan struct{})
+	c.pour = func() {
+		slinging <- struct{}{}
+		<-poured
+		c.root(c.home, "tk-run", Formula, "workflow", "open")
+	}
+	first := make(chan Outcome, 1)
+	go func() { first <- c.start() }()
+	<-slinging
+	second := make(chan Outcome, 1)
+	go func() { second <- c.start() }()
+	var held Outcome
+	select {
+	case held = <-second:
+	case <-slinging:
+		close(poured)
+		t.Fatal("a second start reached the sling while the first held the start's lock")
+	}
+	close(poured)
+	if out := <-first; !out.Slung || out.Root != "tk-run" {
+		t.Fatalf("the start that held the lock answered %+v", out)
+	}
+	want := fmt.Sprintf("another start holds the start's lock (pid %d since ", os.Getpid())
+	if held.Failure != "" || held.Slung || len(held.Open) != 0 || !strings.Contains(held.Held, want) {
+		t.Fatalf("the start that found the lock held answered %+v", held)
+	}
+	if len(c.slings) != 1 || len(c.opened) != 1 {
+		t.Fatalf("two overlapping starts slung %+v and opened the store %d times, want once each", c.slings, len(c.opened))
+	}
+	if out := c.start(); out.Slung || !slices.Equal(out.Open, []string{"tk-run"}) {
+		t.Fatalf("the start after the holder ended answered %+v", out)
+	}
+}
+
+// A start that cannot take the start's lock, because no directory is named for
+// it or the directory cannot be made, reads no store, slings nothing and fails.
+func TestALockThatCannotBeTakenFailsTheStart(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, dir := range map[string]string{"no directory": "", "a directory under a file": filepath.Join(file, "locks")} {
+		t.Run(name, func(t *testing.T) {
+			c := newCity(t)
+			c.locks = dir
+			out := c.start()
+			if out.Failure == "" || out.Slung || len(c.slings) != 0 || len(c.opened) != 0 {
+				t.Fatalf("a lock that cannot be taken answered %+v, slung %+v, opened %v", out, c.slings, c.opened)
+			}
+		})
 	}
 }
 

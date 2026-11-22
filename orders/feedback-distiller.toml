@@ -16,7 +16,9 @@
 # store, where the home rig's pool does not reliably claim it
 # (specs/tk-zlot608.13/gas-city-search.md). The verb bounds its rig list, its
 # roster, its store read and its sling, and their sum ends inside this
-# timeout, as services/gctk/distiller's test holds.
+# timeout, as services/gctk/distiller's test holds. The lock that keeps a
+# start by hand from overlapping a pass is taken without waiting, so it adds
+# nothing to that sum.
 [order]
 description = "learning: start the city's daily feedback distiller run in the pack's home rig, unless one is still open there"
 trigger = "cooldown"

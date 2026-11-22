@@ -3,9 +3,9 @@
 // distiller start`, finds the pack's home rig, the one rig whose checkout holds
 // the pack, and the polecat pool Gas City's roster names there, and slings a
 // run of the distiller's formula to that pool unless a run of it is open in the
-// rig's store. It owns no state. It reads the rig list, the roster, each rig's
-// pack.toml and the roots Gas City stamps at a pour, and its one write is the
-// sling.
+// rig's store. It owns nothing but the start's lock, which keeps overlapping
+// starts apart. It reads the rig list, the roster, each rig's pack.toml and the
+// roots Gas City stamps at a pour, and its one write is the sling.
 package distiller
 
 import (
@@ -55,10 +55,12 @@ type City interface {
 	SlingFormula(ctx context.Context, target, formula string) gascity.FormulaSling
 }
 
-// Starter starts the city's distiller run.
+// Starter starts the city's distiller run. Locks is the directory the start's
+// lock lives in, the city's .gc/runtime/packs/gc-toolkit (arm.LockDir).
 type Starter struct {
-	City City
-	Open ledger.Opener
+	City  City
+	Open  ledger.Opener
+	Locks string
 }
 
 // Outcome is what a start did: the home rig and its pool as far as it found
@@ -94,15 +96,17 @@ func (o Outcome) Summary() string {
 // whose checkout holds a pack.toml that names Pack. A city with no such rig has
 // nowhere to distill, and the start slings nothing. Gas City dispatches no
 // order of a suspended rig, so a suspended home rig takes no run either. The
-// pool is the one agent named Role the roster places in the home rig. A run is
-// open while the home rig's store holds a live root Gas City stamped as a
-// workflow poured from Formula, and an open run, whichever path poured it,
+// pool is the one agent named Role the roster places in the home rig. From
+// there to the sling's end the start holds the start's lock, and a start that
+// finds another holding it starts nothing, since that start reads and slings. A
+// run is open while the home rig's store holds a live root Gas City stamped as
+// a workflow poured from Formula, and an open run, whichever path poured it,
 // holds the start, so a day whose run is still going starts no second one.
 // Otherwise it slings Formula to the pool, which gc pours in the home rig's
 // store, the store of the rig the pool serves. Two rigs that each hold the
-// pack, a pack.toml that does not read, a pool that is not one, and a read or a
-// sling that does not answer each fail the run with nothing slung. The store's
-// read and the sling end when ctx does.
+// pack, a pack.toml that does not read, a pool that is not one, a lock that
+// cannot be taken, and a read or a sling that does not answer each fail the
+// run with nothing slung. The store's read and the sling end when ctx does.
 func (s *Starter) Run(ctx context.Context) Outcome {
 	rigs, err := s.City.Rigs()
 	if err != nil {
@@ -129,6 +133,16 @@ func (s *Starter) Run(ctx context.Context) Outcome {
 		out.Failure = err.Error()
 		return out
 	}
+	release, holder, err := s.lock()
+	if err != nil {
+		out.Failure = err.Error()
+		return out
+	}
+	if release == nil {
+		out.Held = fmt.Sprintf("another start holds the start's lock (%s), so that start decides whether a run starts in rig %s", holder, home.Name)
+		return out
+	}
+	defer release()
 	if out.Open, err = s.openRuns(ctx, *home); err != nil {
 		out.Failure = "the store of rig " + home.Name + " did not read, so whether a run is open there is not known: " + err.Error()
 		return out

@@ -19,10 +19,12 @@ import (
 //
 //	GCTK_CITY_ACCEPTANCE=1 go test ./distiller -run TestCityAcceptance -v
 
-// Gas City registers the order once for the city. Its first run pours one run
-// of the distiller in the store of the rig whose checkout holds the pack, which
-// that rig's polecat pool claims, and its second run, while that run is open,
-// pours none. The miner's order runs every 48h in each rig.
+// Gas City registers the order once for the city. A run of it while another
+// start holds the start's lock in the city's .gc/runtime/packs/gc-toolkit pours
+// nothing. Its next run pours one run of the distiller in the store of the rig
+// whose checkout holds the pack, which that rig's polecat pool claims, and the
+// run after, while that run is open, pours none. The miner's order runs every
+// 48h in each rig.
 func TestCityAcceptance(t *testing.T) {
 	if os.Getenv("GCTK_CITY_ACCEPTANCE") != "1" {
 		t.Skip("the city acceptance test runs the city's gc on a scratch city; GCTK_CITY_ACCEPTANCE=1 runs it")
@@ -99,6 +101,17 @@ func TestCityAcceptance(t *testing.T) {
 	}
 	if strings.Join(miners, ",") != "tools@48h,web@48h" {
 		t.Errorf("the miner's order is registered as %q, want each rig at 48h", miners)
+	}
+
+	locks := filepath.Join(city, ".gc", "runtime", "packs", "gc-toolkit")
+	release, _, err := (&Starter{Locks: locks}).lock()
+	if err != nil || release == nil {
+		t.Fatalf("the test did not take the start's lock: %v", err)
+	}
+	held := gc(t, city, "order", "run", "feedback-distiller")
+	release()
+	if got := runs(t, city, "tools"); len(got) != 0 || !strings.Contains(held, "another start holds the start's lock") {
+		t.Fatalf("the run while another start held the lock left the runs %v and said %q", got, held)
 	}
 
 	first := gc(t, city, "order", "run", "feedback-distiller")

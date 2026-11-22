@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/distiller"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -30,18 +31,24 @@ gc sling <that pool> mol-feedback-distiller --formula, which pours the run in
 the home rig's store. An open run, whichever path poured it, holds the start,
 so a day whose run is still going starts no second one.
 
+From before its read of the home rig's store to the sling's end, the start holds
+a lock, distiller-start.lock in the city's .gc/runtime/packs/gc-toolkit, which
+it takes without waiting. A start that finds another holding it, the order's or
+one made by hand, starts nothing and exits 0, since that start reads and slings.
+
 A city where no rig's checkout holds the pack has nowhere to distill, and a
 suspended home rig takes no run, as Gas City dispatches no order of a suspended
 rig. Each slings nothing and exits 0. Two rigs that each hold the pack, a
 pack.toml that does not read, a home rig the roster places no polecat in or
-several, and a read or a sling that does not answer each sling nothing and exit
-1.
+several, a lock that cannot be taken, and a read or a sling that does not
+answer each sling nothing and exit 1.
 
 The line on standard output says what the start did, or why it started
 nothing, and a failure goes to standard error.
 
 exit: 0 a run started, or nothing needed to
-      1 a read failed, the home rig or its pool is not one, or the sling failed
+      1 a read failed, the home rig or its pool is not one, the lock could not
+        be taken, or the sling failed
       2 usage
       128+N stopped by signal N`
 
@@ -52,7 +59,13 @@ func newDistillerStartCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long:  distillerStartLong,
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			s := &distiller.Starter{City: gascity.New(), Open: ledger.OpenStore}
+			rt := gascity.New()
+			locks, err := arm.LockDir(rt)
+			if err != nil {
+				fmt.Fprintf(stderr, "gctk distiller start: started nothing: %v\n", err)
+				return exit(1)
+			}
+			s := &distiller.Starter{City: rt, Open: ledger.OpenStore, Locks: locks}
 			ctx, release := stopOnSignal()
 			out := s.Run(ctx)
 			if sig := release(); sig != 0 {
