@@ -366,14 +366,14 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   A stay comes back at the operator's next decision about its work, never
   after it. For work with no PR, the return is due when the work closes. For
   work on a PR, whether it opens one or reworks the PR under discussion, the
-  next decision is the approval. The sitting comes back
-  through its own task: while the work is out, its conversation waits in the
-  store on a gate, and Gas City sleeps the sitting and wakes it with its
-  thread when the return is due. Once the city has finished with the PR and
-  only the operator's part is left, the landing order puts the conversation's
-  hold on the PR's merge and closes that work's gate. A sitting stays for one
-  piece of work at a time. A visit to the sitting and a fresh context for it leave the store
-  alone, so the return outlasts both. On each return the
+  next decision is the approval. The sitting comes back through its own task:
+  its conversation waits while the work is out, and Gas City sleeps the sitting
+  and wakes it with its thread when the return is due. Once the city has
+  finished with the PR and only the operator's part is left, the landing order
+  puts the conversation's hold on the PR's merge and releases the
+  conversation. A sitting stays for one piece of work at a time, and its
+  return outlasts a visit to the sitting and a fresh context for it. On each
+  return the
   sitting checks the work against each item that was agreed, tells the operator
   which items are covered and where the work departs, with its recommendation,
   and waits for the operator, even when every item is covered. The PR does not merge until the operator settles

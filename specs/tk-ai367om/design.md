@@ -768,12 +768,15 @@ the effort's branch brought current with main.
 
 This design's own change states the rule in `docs/architecture.md` at the
 document's altitude: when a stay comes back, that it comes back through its own
-task, which waits in the store on a gate, that the landing order holds the
-PR's merge and resolves the gate once the PR is left with the operator's part,
-and that the return always waits for the operator. Its Debt names the stay that comes back
-only when its work closes, with tk-vrg93t0 as the work that retires it, and the
-words unit narrows that entry to the city's own store. The
-gate's close is a close, so step 9 of "How work moves" keeps `closed` as the one
+task, that the landing order holds the PR's merge and releases the
+conversation once the PR is left with the operator's part, and that the return
+always waits for the operator. How the conversation waits and how the landing
+order releases it, the gate of section 2, stays in this design until the units
+build it, and then in `docs/gctk-architecture.md` and
+`docs/human-engagement.md` (section 14). Its Debt names the stay that comes
+back only when its work closes, with tk-vrg93t0 as the work that retires it,
+and the words unit narrows that entry to the city's own store. The release is
+the gate's close, so step 9 of "How work moves" keeps `closed` as the one
 signal waiting parties key on.
 
 ## 12. What the earlier revisions built, and what this keeps
