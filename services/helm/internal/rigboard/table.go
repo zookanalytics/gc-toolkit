@@ -359,8 +359,9 @@ func joinIDs(refs []Ref) string {
 //   - Pull request: a bead whose pull request reads needs-review or
 //     needs-attention, in those words. One whose needs-attention rests on the
 //     human gates and the beads a person owes that hold it, with no reason of
-//     its own (prstatus.OwnAttention), is no ask while it is listed beneath
-//     another need (beneath): the person's move on it is that need's.
+//     its own (prstatus.OwnAttention, or prstatus.RenderOwnAttention for one on
+//     Gas Town's pending record), is no ask while it is listed beneath another
+//     need (beneath): the person's move on it is that need's.
 //   - Assigned to you: any other open bead prstatus.IsPersonBlocker counts, as
 //     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.

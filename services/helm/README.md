@@ -289,9 +289,10 @@ holds beneath it in the Work queue's order. A pull request that needs
 attention only for the questions and the other beads a person owes that hold
 it is listed beneath each of their needs and reads what it waits on. It is a
 need of its own only for a reason of its own beside them
-(`prstatus.OwnAttention`), such as a failed check, or while no need on the
-board lists it. Each Needs you view leads with how
-many of its needs count, and beneath that how many of each kind count: pull
+(`prstatus.OwnAttention`, or `prstatus.RenderOwnAttention` for one on Gas
+Town's pending record), such as a failed check, or while no need on the board
+lists it. Each Needs you view leads with how many of its needs count, and
+beneath that how many of each kind count: pull
 requests, questions, conversations waiting for you, in conversation and
 rulings, a zero among them, then assigned to you when one counts. A kind's count
 shows that kind alone, and a second click shows every kind again. The needs
