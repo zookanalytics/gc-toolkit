@@ -339,7 +339,7 @@ triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
 each hour and records the run, and the board shows the checks that keep
 failing, when doctor last ran, each monitor order's last good run and how
 many messages wait in the `human` mailbox that Gas City's orders send their
-alerts to, which the postmaster works through with the operator. Patrol owns
+alerts to, which the mayor works through with the operator. Patrol owns
 the warranted Dolt reclaim and suspended-store backup, and the reapers no
 native one covers: scratch and the review workspaces outside
 `.gc/worktrees/`.

@@ -343,14 +343,19 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
     reads only its two fixed hold values, whose names are not roles.
   - **Mechanik**, the operator's standing conversation, owns how the city works
     and every edit to the town repo.
-  - **The postmaster**, one for the city, works through the operator's
-    mailbox, Gas City's `human`, with them: a session of the city the operator
-    opens for a sitting as they open a po
-    ([human-engagement.md](human-engagement.md#a-postmaster-sitting)). It owns
-    each archive it makes there, the replies and nudges that settle a message
-    with the agent that owns its problem, and the fixes it files held for the
-    po. No escalation, default or fallback names it, so the mail still goes to
-    `human`, and it plans, places and starts no new work.
+  - **The mayor**, one for the city, shows the operator what needs them across
+    it and moves each matter they pick to its home: a session of the city the
+    operator opens for a sitting as they open a po
+    ([human-engagement.md](human-engagement.md#a-mayor-sitting)). It reads the
+    operator's mailbox, Gas City's `human`, and each rig's open questions as the
+    board counts them. It owns each archive it makes in a sitting and each
+    handoff it writes there: a conversation for a decision, the rig's po for a
+    priority or new work, an existing writer for work a ruling already
+    authorized, the owner's record for an owned matter, and a conversation
+    about the missing home for a matter no role owns. It owns no matter past
+    its handoff. It implements nothing, places nothing and sets no priority,
+    and the queue `hold:mayor` holds stays the po's. No escalation or fallback
+    of the city's names it, so the mail still goes to `human`.
   - **A converse sitting** holds one bead's conversation, below. The patrols,
     the pools and the refinery keep what they own.
 - **A subject is the bead a human gate or a conversation is about.** Its notes
@@ -428,8 +433,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   per render through gctk's shared readers over the ledger, and from Gas City's
   event log, which holds doctor's runs and each monitor order's last good run.
   It reads no store of its own. Its city page counts the messages waiting in
-  Gas City's `human` mailbox and lists none, since the postmaster works through
-  them with the operator. The write verbs are gctk commands, which skills,
+  Gas City's `human` mailbox and lists none, since the mayor works through them
+  with the operator. The write verbs are gctk commands, which skills,
   prompts and the board's write routes call. Accept clears a first reaction's
   recommendation gate and nothing else, under the bead's acceptance lock. The
   po's backlog refinement works the queue, every bead `hold:mayor` holds in any

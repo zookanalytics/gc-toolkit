@@ -188,8 +188,8 @@ tab shows before its name:
 - **Return to a conversation**, Ctrl+R, lists the open conversations
   (*Returning to a conversation*, below).
 - **People**, Ctrl+P, lists the seats the operator sits with: mechanik and
-  the postmaster, of which the city has one each, and each rig's po, the
-  Product Owner, by its rig's name and prefix. The city's HQ has no po.
+  the mayor, of which the city has one each, and each rig's po, the Product
+  Owner, by its rig's name and prefix. The city's HQ has no po.
 
 A page's key goes straight to that page from any page and any field, and the
 key of the page on screen does nothing. In the question, Ctrl+N and Ctrl+P go
@@ -216,7 +216,7 @@ suspended rig's po reads rig suspended, since Gas City starts no session in a
 suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
 while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
 Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`,
-`gc-helm postmaster` or `gc-helm po --rig <name>`, as the form runs a
+`gc-helm mayor` or `gc-helm po --rig <name>`, as the form runs a
 conversation's attach. So all the command prints stays on the terminal and its
 exit status is the form's.
 Each command attaches to the seat's session, starting it first when it is not
@@ -1608,20 +1608,34 @@ while the city's controller is down, or when the po's last sitting ends
 between the attach's check that it is running and the attach itself, gets the
 po's prompt too, which the attach sends once the session runs.
 
-## A postmaster sitting
+## A mayor sitting
 
-The postmaster works through the operator's mailbox, `human`, with them: Gas
-City's alerts and the escalations agents send there. It is a named session of
-the city, one for the city, which the operator opens for one sitting at a time
-from its row on Engage's People page or with `gc-helm postmaster`, Gas City's
-attach on `<binding>.postmaster`. Its sitting starts and ends as a po's does
-(*A po sitting*, above). Only the operator's attach starts it: no escalation,
-default or fallback names it, so the mail still goes to `human`, and the
-board's city page shows how many messages wait there. What it does in a
-sitting is its prompt's (`agents/postmaster/prompt.template.md`): it archives
-what has ended and says so, settles what an owning agent can, files the fix
-for a sender of junk held for the po, and brings the operator only what needs
-them.
+The mayor shows the operator what needs them across the city and why, and
+moves each matter they pick to its home. It is a named session of the city,
+one for the city, which the operator opens for one sitting at a time from its
+row on Engage's People page or with `gc-helm mayor`, Gas City's attach on
+`<binding>.mayor`. Its sitting starts and ends as a po's does (*A po sitting*,
+above). Only the operator's attach starts it: no escalation or fallback of the
+city's names it, so the mail still goes to `human`, and the board's city page
+shows how many messages wait there. The operator can still open a po, mechanik
+or a conversation directly.
+
+A sitting reads the operator's mailbox, the mayor's own, where Gas City's own
+defaults send some alerts, and each rig's needs as `helm-svc board --json`
+prints them, the needs the board's rig pages count. It names a rig or a mail
+store that did not answer, and the overview leaves that rig out until a read
+covers it. Mail and a need that name one bead, pull request or subject are one
+matter. Each matter the operator picks ends at a handoff the mayor writes: a
+conversation for a decision (*Engage*, above), the rig's po for a priority or
+new work, held for it with `hold:mayor`, the `work` skill's writer for work a
+ruling or placement already authorized, the owner's record and word to the
+owner for a matter an agent owns, and, for a matter no role or workflow owns, a
+conversation about which home it needs, with the matter left open on its
+record. The mayor archives what has ended and says so, files the fix for a
+sender of junk held for the po, and keeps no rule of its own. It implements
+nothing, places nothing and sets no priority, the queue `hold:mayor` holds is
+the po's, and a matter is no longer the mayor's once its handoff is written.
+The method is its prompt's (`agents/mayor/prompt.template.md`).
 
 ## How a pane dies when no sitting is live
 
