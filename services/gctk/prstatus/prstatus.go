@@ -53,12 +53,12 @@
 // domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
 // [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
 // status`, and through it the labels and engage, and the rig board
-// (services/helm/internal/rigboard) ask the evaluator over the GitHub read the
-// landing order saved on the PR's bead and the store as it stands
+// (services/helm/internal/rigboard) ask the evaluator over the read the one-PR
+// update saved on the PR's bead and the store as it stands
 // ([pr.FromStore]), so none of them reads GitHub, and a change in the city
 // shows at its next read. A PR whose saved read is absent, or is not of the PR
-// at the head the store holds, reads working until the landing order's next
-// check, unless something only a person clears holds it, which reads
+// at the head the store holds, reads working until the PR watch's next pass
+// reads it, unless something only a person clears holds it, which reads
 // needs-attention.
 package prstatus
 
@@ -249,8 +249,7 @@ func runsOf(blockers []Blocker) []Run {
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
 // its anchor's in-flight set, whatever its task_kind: bd-lib.sh's anchor
 // statuses (_BD_ANCHOR_STATUSES) less closed. [Read] asks its [Store] for the set
-// over them, and the helm board's beads source reads an anchor's live reviews
-// over them too.
+// over them.
 var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
 
 // Derive returns the state the anchor projects. Precedence:

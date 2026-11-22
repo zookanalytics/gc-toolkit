@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,10 +23,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
 
-// idleSource answers the board's gather with no anchors.
-type idleSource struct{}
+// noAPI stands in for the supervisor's API, which the rig board reads only
+// once a rig's store read has answered, and no store read here answers.
+type noAPI struct{}
 
-func (idleSource) Gather(context.Context) (*source.Result, error) { return &source.Result{}, nil }
+func (noAPI) JSON(context.Context, any, string, url.Values) (bool, error) { return false, nil }
 
 // startServing serves srv through serveUntil on a loopback listener, and
 // returns the board's address, stop, which ends serveUntil's context as a
@@ -172,7 +174,7 @@ func stuckGroups(t *testing.T, groups string, n int) []int {
 func TestAStopEndsEveryStoreReadInFlightBeforeServeReturns(t *testing.T) {
 	logs := captureLog(t)
 	groups := storeStub(t)
-	srv := server.New(idleSource{}, time.Minute, server.WithRigBoard(source.NewGC(""), time.Minute))
+	srv := server.New(server.WithRigBoard(source.NewGC(""), noAPI{}, time.Minute))
 	addr, stop, served := startServing(t, srv)
 
 	answers := make(chan string, 2)
@@ -222,7 +224,7 @@ func (w *slowWrite) Run(context.Context, string, string) (server.ToolResult, err
 	close(w.started)
 	time.Sleep(w.took)
 	close(w.finished)
-	return server.ToolResult{Stdout: "gc-helm: dismiss: dismissed tk-abc12\n"}, nil
+	return server.ToolResult{Stdout: "gc-helm: engage: started gc-42 on tk-abc12\n"}, nil
 }
 
 // A stop gives a request it finds open up to shutdownGrace to finish, here a
@@ -242,10 +244,10 @@ func TestAStopGivesAnOpenWriteTheGraceToFinish(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			logs := captureLog(t)
 			w := &slowWrite{took: c.took, started: make(chan struct{}), finished: make(chan struct{})}
-			srv := server.New(idleSource{}, time.Minute, server.WithActuator(w))
+			srv := server.New(server.WithActuator(w))
 			addr, stop, served := startServing(t, srv)
 
-			req, err := http.NewRequest(http.MethodPost, addr+"/helm/dismiss", strings.NewReader(`{"bead":"tk-abc12"}`))
+			req, err := http.NewRequest(http.MethodPost, addr+"/helm/engage", strings.NewReader(`{"bead":"tk-abc12"}`))
 			if err != nil {
 				t.Fatal(err)
 			}

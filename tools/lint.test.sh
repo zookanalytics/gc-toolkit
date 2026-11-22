@@ -13,19 +13,16 @@
 # unlinted because git quotes its path or because its name reads as an option,
 # the Go lint runs a golangci-lint other than the release .golangci-lint-version
 # names, or runs at all when the pin is missing or names no release, a finding
-# of a linter .golangci.yml enables passes, golangci-lint on macOS is not
-# pointed at the icu4c headers services/helm's cgo needs, or a warrant list that
-# could not run reads as nothing touched, or one that ran fails the lint or
-# goes unprinted.
+# of a linter .golangci.yml enables passes, or a warrant list that could not
+# run reads as nothing touched, or one that ran fails the lint or goes
+# unprinted.
 #
 # Hermetic but for the last section: a throwaway git repo holds stubs of
 # assets/scripts/shellcheck-run.sh, tools/lint-step-text.sh and
 # tools/warrants-touched.sh whose exit codes the test sets, a tracked go.mod and
 # a pin, and lint.sh runs with PATH pointing at a stub bin. So the test decides
 # whether shellcheck and go "ran" and what they returned, and a stub nproc sets
-# how many calls the shell lint makes. The host is stubbed the same way: a stub
-# uname names it and a stub brew answers for icu4c, so the macOS path runs on
-# any platform.
+# how many calls the shell lint makes.
 # The last section runs the real golangci-lint, at the repository's pin on the
 # repository's config, over a module of its own, so it needs the Go toolchain
 # and, before Go has cached the linter's build, the network.
@@ -120,50 +117,26 @@ EOF
 chmod +x "$STUB/nproc"
 
 # The stub go stands in for `go run` of golangci-lint. It logs its argv and the
-# directory it ran in, and records the CGO flags it was handed, one run at a
-# time.
+# directory it ran in.
 make_go() {  # $1 = exit code
   cat > "$STUB/go" <<EOF
 #!/bin/sh
 echo "stub-go ran: \$*" >> "$TMP/go.log"
 pwd >> "$TMP/go-dirs.log"
-printf 'CGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "\${CGO_CPPFLAGS:-}" "\${CGO_LDFLAGS:-}" > "$TMP/go-cgo.log"
 exit $1
 EOF
   chmod +x "$STUB/go"
 }
 
-# The host is a fixture too. lint.sh points golangci-lint's cgo at Homebrew's
-# icu4c only on macOS, so uname and brew are stubs and every run names its host:
-# HOST_OS is what uname prints (Linux when empty), ICU_PREFIX is what
-# `brew --prefix icu4c` prints (nothing when empty), and $TMP/brew.log records
-# every brew call. CGO_CPPFLAGS_IN and CGO_LDFLAGS_IN are the CGO flags the run
-# starts with, so one the caller's shell exports cannot leak into a case.
-cat > "$STUB/uname" <<'EOF'
-#!/bin/sh
-echo "${STUB_HOST_OS:-Linux}"
-EOF
-cat > "$STUB/brew" <<EOF
-#!/bin/sh
-echo "\$*" >> "$TMP/brew.log"
-if [ "\$*" = "--prefix icu4c" ] && [ -n "\${STUB_ICU_PREFIX:-}" ]; then
-  echo "\$STUB_ICU_PREFIX"
-  exit 0
-fi
-exit 1
-EOF
-chmod +x "$STUB/uname" "$STUB/brew"
-HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""; NPROC=""
+NPROC=""
 
 # Invoke bash by absolute path: with PATH=$STUB the command word itself resolves
 # against the stub, where there is no bash. Each run gets a TMPDIR of its own,
 # so a case can see what a run left there.
 BASH_BIN="${BASH:-$(command -v bash)}"
 LINT_TMP="$TMP/lint-tmp"; mkdir -p "$LINT_TMP"
-run_sut() {  # args = files; runs in $REPO with the stubbed PATH and host
-  if ( cd "$REPO" && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
-         STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
-         CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+run_sut() {  # args = files; runs in $REPO with the stubbed PATH
+  if ( cd "$REPO" && PATH="$STUB" STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
          "$BASH_BIN" "$SUT" "$@" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 }
 
@@ -473,9 +446,7 @@ for ((i = 0; i < 1000; i++)); do pads+=("pad-$(printf '%064d' "$i").txt"); done
 ( cd "$REPO" && for p in "${pads[@]}"; do : > "$p"; done )
 git -C "$REPO" add -- "${pads[@]}"
 if out="$( ( cd "$REPO" && trap '' XFSZ && ulimit -f 0 \
-       && PATH="$STUB" STUB_HOST_OS="$HOST_OS" STUB_ICU_PREFIX="$ICU_PREFIX" \
-          STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
-          CGO_CPPFLAGS="$CGO_CPPFLAGS_IN" CGO_LDFLAGS="$CGO_LDFLAGS_IN" \
+       && PATH="$STUB" STUB_NPROC="$NPROC" TMPDIR="$LINT_TMP" \
           "$BASH_BIN" "$SUT" subject.sh ) 2>&1 )"; then rc=0; else rc=$?; fi
 printf '%s\n' "$out" > "$TMP/out"
 [ "$rc" -eq 2 ] && ok "listing not written: structural error (exit 2)" \
@@ -567,72 +538,6 @@ git -C "$REPO" rm -q --cached -- go.mod -m/go.mod "$QDIR/go.mod"
 rm -f -- "$REPO/go.mod" "$REPO/-m/go.mod" "$REPO/$QDIR/go.mod"
 rmdir -- "$REPO/-m" "$REPO/$QDIR"
 
-# --- The icu4c cgo flags golangci-lint is handed. ---------------------------
-# services/helm reaches ICU through Dolt's go-icu-regex, a cgo package, and
-# golangci-lint runs cgo. On macOS Homebrew keeps icu4c off every default search
-# path, so a lint that is not pointed at the keg stops at 'unicode/regex.h' file
-# not found.
-cgo_of() { sed -n "s/^$1=//p" "$TMP/go-cgo.log"; }  # as the stub go saw it
-KEG="$TMP/opt/icu4c"
-mkdir -p "$KEG/include/unicode" "$KEG/lib"
-make_wrapper 0; make_go 0
-
-# --- P: on macOS, golangci-lint's cgo is pointed at the keg. ---------------------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; rm -f "$TMP/brew.log" "$TMP/go-cgo.log"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "icu4c: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "icu4c: expected 0, got $rc"; }
-eq "$(cgo_of CGO_CPPFLAGS)" "-I$KEG/include" "icu4c: golangci-lint's cgo is handed the keg's headers"
-eq "$(cgo_of CGO_LDFLAGS)" "-L$KEG/lib" "icu4c: and its libraries"
-eq "$(cat "$TMP/brew.log" 2>/dev/null)" "--prefix icu4c" "icu4c: brew is asked for icu4c's prefix"
-grep -qF "icu4c at $KEG" "$TMP/out" && ok "icu4c: the output names the icu4c the lint used" \
-  || bad "icu4c: the output does not name $KEG"
-
-# --- Q: CGO flags already set are kept, with the keg's appended. -------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; CGO_CPPFLAGS_IN=-DFROM_ENV; CGO_LDFLAGS_IN=-L/from/env
-run_sut subject.sh
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$KEG/include" "icu4c keep: CGO_CPPFLAGS keeps its value, the keg's headers after it"
-eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$KEG/lib" "icu4c keep: CGO_LDFLAGS keeps its value, the keg's libraries after it"
-CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
-
-# --- R: a prefix with no icu4c installed under it adds nothing, and says so. --
-# brew prints a formula's prefix whether or not it is installed.
-HOST_OS=Darwin; ICU_PREFIX="$TMP/opt/not-installed"; mkdir -p "$ICU_PREFIX"; : > "$TMP/go.log"
-run_sut subject.sh
-eq "$(cgo_of CGO_CPPFLAGS)" "" "icu4c missing: no include path is added for a keg that is not there"
-eq "$(cgo_of CGO_LDFLAGS)" "" "icu4c missing: nor a library path"
-grep -q 'brew install icu4c' "$TMP/err" && ok "icu4c missing: the output names the missing prerequisite" \
-  || bad "icu4c missing: nothing names the missing icu4c"
-grep -q 'stub-go ran' "$TMP/go.log" && ok "icu4c missing: the lint still runs and reports for itself" \
-  || bad "icu4c missing: the lint did not run"
-
-# --- S: off macOS nothing is added, and brew is never asked. ------------------
-# The system libicu is on the default search path there.
-HOST_OS=""; ICU_PREFIX="$KEG"; CGO_CPPFLAGS_IN=-DFROM_ENV; rm -f "$TMP/brew.log"
-run_sut subject.sh
-[ "$rc" -eq 0 ] && ok "icu4c off macOS: exit 0" || bad "icu4c off macOS: expected 0, got $rc"
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "icu4c off macOS: CGO_CPPFLAGS passes through untouched"
-eq "$(cgo_of CGO_LDFLAGS)" "" "icu4c off macOS: and no library path is added"
-[ ! -e "$TMP/brew.log" ] && ok "icu4c off macOS: brew is never asked" || bad "icu4c off macOS: brew was asked"
-CGO_CPPFLAGS_IN=""
-
-# --- T: a run with no Go lint to make never asks brew. ----------------------
-HOST_OS=Darwin; ICU_PREFIX="$KEG"; rm -f "$STUB/go" "$TMP/brew.log"
-run_sut subject.sh
-[ "$rc" -eq 1 ] && ok "icu4c no go: exit 1 (fail-closed)" || bad "icu4c no go: expected 1, got $rc"
-[ ! -e "$TMP/brew.log" ] && ok "icu4c no go: brew is never asked" || bad "icu4c no go: brew was asked"
-make_go 0
-
-# --- U: the icu4c helper missing -> structural error (exit 2). ---------------
-# lint.sh sources it from its own checkout, so a lint.sh with no
-# assets/scripts/icu4c-cgo.sh beside it is a packaging error, not a clean lint.
-HOST_OS=""; ICU_PREFIX=""
-mkdir -p "$TMP/lone/tools"; cp "$SUT" "$TMP/lone/tools/lint.sh"
-if ( cd "$REPO" && PATH="$STUB" "$BASH_BIN" "$TMP/lone/tools/lint.sh" subject.sh ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
-[ "$rc" -eq 2 ] && ok "helper missing: structural error (exit 2)" || bad "helper missing: expected 2, got $rc"
-grep -q 'cannot source assets/scripts/icu4c-cgo.sh' "$TMP/err" \
-  && ok "helper missing: error names the helper" \
-  || bad "helper missing: error is silent about icu4c-cgo.sh"
-
 # --- V: the warrant list prints, and only a list that could not run fails. ---
 make_wrapper 0; make_go 0; make_step_text 0; make_warrants 0
 run_sut subject.sh
@@ -671,7 +576,6 @@ make_warrants 0
 
 # --- W: the step-text lint gets every file, and its verdict is the gate's. ---
 # It picks the formulas out itself, so lint.sh hands it the whole list.
-HOST_OS=""; ICU_PREFIX=""
 make_wrapper 0; make_go 0; make_step_text 0; : > "$TMP/step.log"
 run_sut subject.sh formulas/mol-x.toml
 [ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
@@ -703,14 +607,13 @@ grep -q 'step-text lint missing' "$TMP/err" \
   || bad "step-text lint missing: error is silent about it"
 make_step_text 0
 
-# --- V: invoked by a relative path from a subdirectory, it still finds it. ---
-# lint.sh cds to the repo root, after which a relative invocation path names a
-# different directory; the helper is located before that cd.
+# --- V: invoked by a relative path from a subdirectory, it lints the tree. ---
+# lint.sh finds the repository root through git and cds to it, so a run from a
+# subdirectory by a relative path lints the same tree.
 mkdir -p "$REPO/tools"; cp "$SUT" "$REPO/tools/lint.sh"
-cp "$HERE/../assets/scripts/icu4c-cgo.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 if ( cd "$REPO/services/foo" && PATH="$STUB" "$BASH_BIN" ../../tools/lint.sh ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi
 [ "$rc" -eq 0 ] && ok "relative invocation: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "relative invocation: expected 0, got $rc"; }
-rm -f "$REPO/tools/lint.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
+rm -f "$REPO/tools/lint.sh"
 
 # --- The real linter: a finding of each enabled linter fails the lint. -------
 # lint.sh runs the real golangci-lint, at the repository's pin and on the

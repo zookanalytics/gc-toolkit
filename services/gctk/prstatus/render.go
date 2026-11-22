@@ -11,8 +11,8 @@ import (
 // Render returns where a PR on Gas Town's pending record stands, in the status
 // vocabulary, from the evaluator's answer for its anchor and the facts [Read]
 // gathers about the anchor, whose walk names the human gates and the beads a
-// person owes the next move on. A display asks the evaluator over the GitHub
-// read the landing order saved on the bead ([pr.FromStore]). The precedence is
+// person owes the next move on. A display asks the evaluator over the read the
+// one-PR update saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one

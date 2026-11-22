@@ -295,9 +295,10 @@ done <<< "$order_rows"
 # stamps the revision it was built from, which is the only reading that comes
 # from the binary itself rather than from a record the binary did not write.
 #
-# A mismatch WARNS rather than errors. The build order has minutes of lag by
-# design and the state self-heals on the next tick; what an operator needs is to
-# see it, and the board's PACK row is where a persistent one shows up.
+# A mismatch WARNS rather than errors. The build order rebuilds on the first
+# pass after the checkout moves and tries a failed build again every five
+# minutes, so the state heals on its own; what an operator needs is to see it,
+# which this warning does.
 #
 # A MISSING binary is an error, like an order that never runs: lifecycle.sh and
 # epic.sh have nothing else to exec, so every lifecycle write and every epic the
@@ -345,7 +346,7 @@ else
                 if [ "$mapped" = "$tree_rev" ]; then
                     notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12}, hand-built at commit ${gctk_rev:0:12})")
                 else
-                    warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout's gctk revision is $tree_rev — a gctk-build tick has not caught up, or its last build FAILED and the previous binary is still serving. The board's PACK row says which.")
+                    warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout's gctk revision is $tree_rev — a gctk-build run has not caught up, or its last build FAILED and the previous binary is still serving. The last_build_rc in .gc/services/gctk/build-status.json says which.")
                 fi ;;
         esac
     fi

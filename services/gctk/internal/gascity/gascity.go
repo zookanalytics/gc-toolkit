@@ -16,6 +16,7 @@ package gascity
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Runtime is Gas City as one gctk process reaches it.
@@ -61,18 +63,25 @@ type Runtime interface {
 	// Rigs reads the rigs the city names, its HQ among them. A read that does
 	// not answer is an error.
 	Rigs() ([]Rig, error)
+	// Within returns the runtime with every command it runs stopped once ctx
+	// ends, for an act a caller bounds.
+	Within(ctx context.Context) Runtime
 	// ClaudeSettings is the settings file Gas City starts each Claude session
 	// with, whether or not it is there.
 	ClaudeSettings() (string, error)
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one and no --title when Title is empty. A
+// with no <target> when Target is empty, which pours the formula on the bead
+// and leaves each step to the route the formula gives it, gc's --rig when Rig
+// names one, no --title when Title is empty, and a
+// --var for each of Vars, each a <key>=<value> the formula's pour takes. A
 // sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
 // <bead> --no-formula --no-convoy`): it routes the bead to the target's own
 // name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	Vars                              []string
 	NoFormula                         bool
 }
 
@@ -111,13 +120,14 @@ type SlingResult struct {
 
 // City is the Gas City gctk runs in, reached through `gc` on PATH and the
 // pack's scripts directory GCTK_SCRIPTS_DIR names. Every command it runs starts
-// in dir, the process's own working directory when dir is empty, and acts as
-// actor when one is named.
+// in dir, the process's own working directory when dir is empty, acts as actor
+// when one is named, and stops once ctx ends, when ctx is set.
 type City struct {
 	bin        string
 	scriptsDir string
 	dir        string
 	actor      string
+	ctx        context.Context
 
 	once   sync.Once
 	agents []agent
@@ -151,14 +161,23 @@ func (c *City) In(dir string) *City {
 	if abs, err := filepath.Abs(scripts); scripts != "" && err == nil {
 		scripts = abs
 	}
-	return &City{bin: c.bin, scriptsDir: scripts, dir: dir, actor: c.actor}
+	return &City{bin: c.bin, scriptsDir: scripts, dir: dir, actor: c.actor, ctx: c.ctx}
 }
 
 // As returns the city with every command it runs acting as actor, which
 // BEADS_ACTOR names to it, as bead-rehome.sh reads its actor, which a bead
 // assigned to someone must be for the script to close it.
 func (c *City) As(actor string) *City {
-	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: actor}
+	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: actor, ctx: c.ctx}
+}
+
+// Within returns the city with every command it runs stopped once ctx ends:
+// the command is killed, a child of it that still holds its output keeps the
+// call waiting stopGrace longer at most, and the result's Err wraps the error
+// that ended ctx. A child of the command stays in gctk's process group, so
+// whatever stops that group, such as an order's timeout, still reaches it.
+func (c *City) Within(ctx context.Context) Runtime {
+	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: c.actor, ctx: ctx}
 }
 
 // Sling runs the sling in gctk's own process group, so whatever stops gctk's
@@ -169,13 +188,19 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead)
+	if s.Target != "" {
+		args = append(args, s.Target)
+	}
+	args = append(args, s.Bead)
 	if s.NoFormula {
 		args = append(args, "--no-formula", "--no-convoy")
 	} else {
 		args = append(args, "--on", s.Formula)
 		if s.Title != "" {
 			args = append(args, "--title", s.Title)
+		}
+		for _, v := range s.Vars {
+			args = append(args, "--var", v)
 		}
 	}
 	r := c.run(c.bin, args...)
@@ -413,6 +438,17 @@ func (c *City) Nudge(session, message string) Result {
 	return c.run(c.bin, "session", "nudge", session, message)
 }
 
+// NudgeNow runs the nudge with immediate delivery, about bead: the message
+// reaches a running turn where the session's runtime can steer, and the next
+// idle boundary otherwise, and a nudge about the same bead still queued for the
+// session is replaced rather than stacked. --delivery is gc session nudge's in
+// docs/reference/cli.md, at gastownhall/gascity bfe7a19cc2, and
+// --reference-bead the city's build carries from its fork (zookanalytics/gascity
+// 51055e7d3f). Its standard input reads nothing.
+func (c *City) NudgeNow(session, message, bead string) Result {
+	return c.run(c.bin, "session", "nudge", "--delivery", "immediate", "--reference-bead", bead, session, message)
+}
+
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the
 // pack's caller of gctk sets, as gctk-resolve.sh does for a bridge.
 func (c *City) Script(name string, args ...string) Result {
@@ -469,11 +505,20 @@ func isDir(p string) bool {
 	return err == nil && fi.IsDir()
 }
 
+// stopGrace bounds how long a command that was stopped, or a child of it that
+// holds its output, keeps the call waiting after the kill.
+const stopGrace = 2 * time.Second
+
 // run runs bin with args in the city's directory, the process's own working
 // directory when it names none, as the city's actor when it names one, its
 // standard input reading nothing, and returns its exit code and its output.
+// With the city's ctx set it stops the command once ctx ends.
 func (c *City) run(bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
+	if c.ctx != nil {
+		cmd = exec.CommandContext(c.ctx, bin, args...)
+		cmd.WaitDelay = stopGrace
+	}
 	cmd.Dir = c.dir
 	if c.actor != "" {
 		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
@@ -483,6 +528,8 @@ func (c *City) run(bin string, args ...string) Result {
 	err := cmd.Run()
 	var ee *exec.ExitError
 	switch {
+	case err != nil && c.ctx != nil && c.ctx.Err() != nil:
+		return Result{Code: -1, Output: out.String(), Err: fmt.Errorf("%s was stopped: %w", filepath.Base(bin), c.ctx.Err())}
 	case err == nil:
 		return Result{Code: 0, Output: out.String()}
 	case errors.As(err, &ee):

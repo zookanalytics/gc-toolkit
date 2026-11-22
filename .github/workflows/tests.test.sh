@@ -42,8 +42,7 @@
 # go-macos's tool check names each tool whose absence makes a Go test skip
 # rather than fail: lsof (internal/host in gctk), flock (the pr package's lock
 # test) and bash and jq (the board's tests that answer from the stub store,
-# stubStore in services/helm/internal/rigboard and
-# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source).
+# stubStore in services/helm/internal/rigboard).
 # A runner without one then fails the step by name.
 #
 # Main's ruleset requires the checks named test, test-macos and go. A job's

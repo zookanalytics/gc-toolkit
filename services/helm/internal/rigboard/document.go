@@ -10,12 +10,48 @@ package rigboard
 // TypeScript types are generated from this file (web/src/rigboard/document.gen.ts),
 // and TestPageTypesAreCurrent fails when that file is stale.
 
-// Response is what the rig's route answers: the document, and the time its
-// gather finished beside it. The document depends on the store's answers
-// alone, so two reads of an unchanged store give the same document.
+// Response is what the rig's route answers: the document, the time its gather
+// finished beside it, and when GitHub was last asked about the rig's pull
+// requests as of that time. The document depends on the store's answers alone,
+// so two reads of an unchanged store give the same document.
 type Response struct {
 	ReadAt string   `json:"read_at"`
 	Board  Document `json:"board"`
+	Asked  Asked    `json:"asked"`
+}
+
+// AskedState is where the rig's line saying when GitHub was last asked
+// stands. It is asked when a pass of the rig's pr-poll order that exited 0
+// started within three of the order's intervals before the read, and stale
+// when the newest such pass started longer ago. It is not_asked when no pass in
+// Gas City's run history exited 0, unwatched when the city runs no enabled
+// pr-poll order for the rig, and unread when the order or its run history could
+// not be read.
+type AskedState string
+
+const (
+	AskedStateAsked     AskedState = "asked"
+	AskedStateStale     AskedState = "stale"
+	AskedStateNotAsked  AskedState = "not_asked"
+	AskedStateUnwatched AskedState = "unwatched"
+	AskedStateUnread    AskedState = "unread"
+)
+
+// Asked is when GitHub was last asked about the rig's pull requests: the start
+// of the newest pass of the rig's pr-poll order that exited 0, read from Gas
+// City's run history and judged at the read (ReadAt). A pass that could not
+// ask GitHub about every pull request the rig owns exits non-zero, so a failing
+// pass leaves the line at the last one that did.
+type Asked struct {
+	State AskedState `json:"state"`
+	// At is that pass's start, when the state is asked or stale.
+	At string `json:"at,omitempty"`
+	// Since is, when the state is not_asked, the start of the oldest pass the
+	// history holds, none of whose passes since then exited 0. It is empty
+	// when the history holds no pass.
+	Since string `json:"since,omitempty"`
+	// Error is why the line could not be read, when the state is unread.
+	Error string `json:"error,omitempty"`
 }
 
 // Rigs is what the rig list route answers: the city's rigs by name, each the
@@ -83,8 +119,7 @@ type Row struct {
 	// is the title. A piece of work has none.
 	Line2 string `json:"line2,omitempty"`
 	// Line3 names the beads the table puts on the row's third line: what a
-	// wait further along ends on, or each wait that holds work nobody is
-	// scheduled to do.
+	// wait further along ends on.
 	Line3 []Ref `json:"line3,omitempty"`
 	// Reasons are what holds a pull request a person owes a move on, in the
 	// pack's words (prstatus.Reasons, or prstatus.RenderReasons over the
@@ -230,7 +265,7 @@ type Need struct {
 // Count is the needs that count, and it reaches zero only when nothing that
 // counts needs you. Kinds is how many of them are of each kind: Pull request,
 // Question, Conversation waits for you, In conversation and Ruling, each one
-// zero included, then Routed to you when one counts. Counted lists the needs
+// zero included, then Assigned to you when one counts. Counted lists the needs
 // that count, and NotCounted the needs that do not.
 type NeedsYou struct {
 	Count      int         `json:"count"`
@@ -246,13 +281,13 @@ type KindCount struct {
 }
 
 // WorkQueue is a Work queue view: the work in the order it is expected to land
-// (services/gctk/queue). Queue is the work the city takes as things stand: by
-// bd graph's execution layers, what can go now first, and within a layer in
-// the order the pool claims ready work, priority, then oldest, then id.
-// NotScheduled comes after it, in the same order: work the city takes none of
-// as things stand, since nobody has scheduled it or a hold label holds it, as
-// queue reads its row, and work that waits on such work. Unread is the work a
-// reader could not answer, in priority order and then oldest first.
+// (services/gctk/queue). Queue is that work, apart from the ready work nothing
+// sends anywhere: by bd graph's execution layers, what can go now first, and
+// within a layer in the order the pool claims ready work, priority, then
+// oldest, then id. NotScheduled comes after it, in the same order: the ready
+// work that no hold, route, assignee, arm or live run sends anywhere, as queue
+// answers it. Unread is the work a reader could not answer, in priority order
+// and then oldest first.
 type WorkQueue struct {
 	Queue        []string `json:"queue"`
 	NotScheduled []string `json:"not_scheduled"`

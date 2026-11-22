@@ -133,6 +133,28 @@ func runsWorking(l *ledger.Ledger, bead string, up []*ledger.Record, roots func(
 	return out, nil
 }
 
+// RunHolders is the assignee of each member of the run under root that is not
+// closed, the root's own and each step's that names it, once each, in the order
+// read. A session that holds one of them is working the run. A read that fails
+// returns its *ledger.ReadError.
+func RunHolders(l *ledger.Ledger, root string) ([]string, error) {
+	own, err := l.Find(ledger.ByID(root))
+	if err != nil {
+		return nil, err
+	}
+	steps, err := l.Find(ledger.Matching(rootBeadKey, root))
+	if err != nil {
+		return nil, err
+	}
+	var holders []string
+	for _, r := range append(own, steps...) {
+		if a := r.Assignee(); a != "" && r.Status() != "closed" && !slices.Contains(holders, a) {
+			holders = append(holders, a)
+		}
+	}
+	return holders, nil
+}
+
 // runsOver is the run each root among rows is, once each, in root order, over
 // one read of every convoy those roots name, closed ones included, as
 // run-lib.sh's run_rows judges them.

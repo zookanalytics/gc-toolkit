@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
@@ -65,5 +66,62 @@ func TestListingAnswersTheQueueFromItsRows(t *testing.T) {
 		if q.HasKey != "" || q.Key != "" || q.Every {
 			t.Errorf("the order read the store by a key or whole: %+v", q)
 		}
+	}
+}
+
+// The ready work nothing sends comes from the store's ready set and the live
+// runs the listing read. A bead whose run has ended is unsent, though its row
+// keeps the route its pour stamped and the branch its run cut, and a bead a
+// live run works is sent before that run has passed load-context. A bead held
+// hold:external waits outside the city.
+func TestListingAnswersTheReadyWorkNothingSends(t *testing.T) {
+	s := rig()
+	polecat := "gc-toolkit/gc-toolkit.polecat"
+	run := func(convoy string) map[string]string {
+		return map[string]string{"gc.kind": "workflow", "gc.formula_contract": "graph.v2", "gc.input_convoy_id": convoy}
+	}
+	for _, b := range []fake.Bead{
+		{ID: "tk-ended", Title: "its run ended", Status: "open", IssueType: "task", Priority: 2,
+			Metadata: map[string]string{"gc.execution_routed_to": polecat, "branch": "polecat/tk-ended"}},
+		{ID: "tk-ended-root", Title: "mol-polecat-work", Status: "closed", IssueType: "task", Metadata: run("tk-ended-cv")},
+		{ID: "tk-ended-cv", Title: "convoy", Status: "closed", IssueType: "convoy", Edges: []gcbd.Edge{{Type: "tracks", ID: "tk-ended"}}},
+		{ID: "tk-poured", Title: "just poured", Status: "open", IssueType: "task", Priority: 2,
+			Metadata: map[string]string{"gc.execution_routed_to": polecat}},
+		{ID: "tk-poured-root", Title: "mol-polecat-work", Status: "open", IssueType: "task", Metadata: run("tk-poured-cv")},
+		{ID: "tk-poured-step", Title: "Load context", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"gc.root_bead_id": "tk-poured-root", "gc.step_ref": "mol-polecat-work.load-context"}},
+		{ID: "tk-poured-cv", Title: "convoy", Status: "open", IssueType: "convoy", Edges: []gcbd.Edge{{Type: "tracks", ID: "tk-poured"}}},
+		{ID: "tk-away", Title: "waits on a vendor", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"Hold:External"}},
+	} {
+		s.Put(b)
+	}
+	s.MakeReady("tk-ended", "tk-poured", "tk-away", "tk-ask")
+	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holds, _, err := ls.Holds([]string{"tk-ended", "tk-poured"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if holds["tk-ended"].InFlight == "" || holds["tk-poured"].InFlight != "" {
+		t.Fatalf("waits reads tk-ended in flight %q and tk-poured %q; want the branch to read as in flight and the fresh run not yet",
+			holds["tk-ended"].InFlight, holds["tk-poured"].InFlight)
+	}
+
+	o, err := queue.Order([]string{"tk-ended", "tk-poured", "tk-away", "tk-ask"}, ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []queue.Place{{ID: "tk-ended", Layer: 0}}; !slices.Equal(o.NotScheduled, want) {
+		t.Errorf("not scheduled = %+v, want %+v: the stamps an ended run left send nothing", o.NotScheduled, want)
+	}
+	want := []queue.Place{
+		{ID: "tk-ask", Layer: 0, Scheduled: true},
+		{ID: "tk-away", Layer: 0, Outside: true},
+		{ID: "tk-poured", Layer: 0, Scheduled: true},
+	}
+	if !slices.Equal(o.Queue, want) || len(o.Unread) != 0 {
+		t.Errorf("queue = %+v and unread %v; want %+v and none", o.Queue, o.Unread, want)
 	}
 }

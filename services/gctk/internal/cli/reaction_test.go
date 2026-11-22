@@ -180,7 +180,7 @@ func stubCity(t *testing.T, blocked []byte) (log, store string) {
 	t.Helper()
 	dir := t.TempDir()
 	rig, town := filepath.Join(dir, "rig"), filepath.Join(dir, "town")
-	for _, d := range []string{filepath.Join(rig, ".beads"), filepath.Join(town, ".beads"), filepath.Join(dir, "bin"), filepath.Join(dir, "scripts")} {
+	for _, d := range []string{filepath.Join(rig, ".beads"), filepath.Join(town, ".beads"), filepath.Join(town, ".gc"), filepath.Join(dir, "bin"), filepath.Join(dir, "scripts")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -217,13 +217,19 @@ esac
 `
 	script := "#!/bin/sh\necho \"script $(basename \"$0\") $*\" >> \"$STUB_LOG\"\n"
 	for path, body := range map[string]string{filepath.Join(dir, "bin", "gc"): gc,
-		filepath.Join(dir, "scripts", "gc-helm.sh"): script, filepath.Join(dir, "scripts", "human-gate.sh"): script} {
+		filepath.Join(dir, "scripts", "human-gate.sh"): script, filepath.Join(dir, "scripts", "run-cancel.sh"): script} {
 		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GCTK_SCRIPTS_DIR", filepath.Join(dir, "scripts"))
+	// The city's root is the town the stub's rig list names as its HQ, which
+	// holds the dispatch locks a release's disarm takes, and never the city
+	// this test runs in.
+	for _, v := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
+		t.Setenv(v, "")
+	}
 	t.Setenv("STUB_LOG", log)
 	t.Setenv("STUB_DIR", dir)
 	t.Setenv("STUB_RIG", rig)
@@ -402,8 +408,8 @@ func TestReactionDisposeReadsAFalseAnchorAsNone(t *testing.T) {
 			t.Errorf("an anchor of %s: the dispose exited %d: %s", anchor, code, errb.String())
 			continue
 		}
-		routed := slices.ContainsFunc(calls(t, log, "script gc-helm.sh takeaway"), func(l string) bool {
-			return strings.Contains(l, " --route gc-toolkit/gc-toolkit.polecat --no-wait")
+		routed := slices.ContainsFunc(calls(t, log, "sling "), func(l string) bool {
+			return strings.Contains(l, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy")
 		})
 		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " set-state tk-sub hold=mayor ") })
 		if routed != admitted || held == admitted {

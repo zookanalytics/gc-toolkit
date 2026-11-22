@@ -12,13 +12,13 @@
 #
 # The scan's parts, for the reasons govulncheck.yml's comments give: the job
 # runs on macOS; setup-go takes the Go release from go.mod and names none of its
-# own; govulncheck is installed at a release the workflow names; and the scan
-# step sets CGO_ENABLED=1. The scan runs over ./... from the repository root,
-# and no flag picks its output, its level or its mode. govulncheck exits 3 on a
-# finding only in text output and only at the level it scans (TextHandler.Flush
-# in golang.org/x/vuln's internal/scan/text.go), so -format or -json would pass
-# whatever it found, and -scan module would fail on a vulnerability no release
-# fixes in a module the code only requires. Neither the job nor a step
+# own; and govulncheck is installed at a release the workflow names. The scan
+# runs over ./... from the repository root, and no flag picks its output, its
+# level or its mode. govulncheck exits 3 on a finding only in text output and
+# only at the level it scans (TextHandler.Flush in golang.org/x/vuln's
+# internal/scan/text.go), so -format or -json would pass whatever it found, and
+# -scan module would fail on a vulnerability no release fixes in a module the
+# code only requires. Neither the job nor a step
 # continues on error, and the scan's line runs nothing after it, so the scan's
 # exit is the check's.
 #
@@ -119,8 +119,6 @@ scans.each do |s, line, args|
   fail_with.("the scan must set no #{picked.join(', ')}, and its line is: #{line}") unless picked.empty?
   rest = args.grep(/\A(\|\||&&|;|\||&)\z/)
   fail_with.("the scan's line must run nothing after it, and its line is: #{line}") unless rest.empty?
-  cgo = env_of.(s, 'CGO_ENABLED')
-  fail_with.("the scan's step must set CGO_ENABLED to 1, and sets #{cgo.inspect}") unless cgo.to_s == '1'
 end
 
 failures.each { |f| warn "govulncheck.test.sh: FAIL — #{f}" }

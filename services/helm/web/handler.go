@@ -12,12 +12,13 @@ import (
 
 // NewHandler returns an http.Handler over the embedded bundle: the app shell
 // for the mount root, the hashed assets it references, and 404 for everything
-// else. The server mounts it as the catch-all beneath /healthz and /helm.
+// else. The server mounts it as the catch-all beneath /healthz and the /helm/
+// routes.
 //
 // Unknown paths deliberately 404 rather than falling back to the shell. The
 // app has no client-side routes yet, so an unmatched path is a routing mistake
 // (a stale caller, a typo'd asset), and answering it with a 200 HTML shell
-// would hide that — the same reason the board's own catch-all 404s. A later
+// would hide that — the same reason the server's own catch-all 404s. A later
 // unit that adds client-side routing has to revisit this, and should fall back
 // on HTML navigations only.
 func NewHandler() (http.Handler, error) {

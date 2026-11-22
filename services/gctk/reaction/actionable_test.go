@@ -104,9 +104,9 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	code, out, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition and a branch",
 		"--takeaway", "routed to the polecat pool", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(ACT) an actionable exit")
-	w.has("HELM takeaway tk-sub routed to the polecat pool --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait",
+	w.has("TAKEAWAY tk-sub routed to the polecat pool --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait",
 		"(ACTROUTE) the release hands the bead to the pool and says nothing waits on it, in one call")
-	if n := len(w.lines("HELM ")); n != 1 {
+	if n := len(w.lines("TAKEAWAY ")); n != 1 {
 		t.Errorf("(ACT) the exit made %d takeaways, want 1", n)
 	}
 	w.hasnt("SET-STATE", "(ACT) a member is not held")
@@ -121,12 +121,12 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	w.rt.Roster[0].Suspended = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(ACTPOOL) a pool that does not run")
-	w.has("HELM takeaway tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(ACTPOOL) the bead is routed to it all the same")
+	w.has("TAKEAWAY tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(ACTPOOL) the bead is routed to it all the same")
 
 	w = newWorld(t)
 	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
 	wantCode(t, code, 4, err, "(ACTBADROUTE) a route gc sling refuses")
-	w.has("HELM takeaway tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.nosuch --no-wait", "(ACTBADROUTE) the release carries the route")
+	w.has("TAKEAWAY tk-sub t --by proactive --release --route gc-toolkit/gc-toolkit.nosuch --no-wait", "(ACTBADROUTE) the release carries the route")
 	errHas(t, err, `gc sling: agent "gc-toolkit/gc-toolkit.nosuch" not found in city.toml`, "(ACTBADROUTE) giving gc sling's reason")
 	errHas(t, err, "tk-sub is released and the run beneath it has ended", "(ACTBADROUTE) saying what landed")
 	errHas(t, err, "the headline and the release stand", "(ACTBADROUTE) …in the exit's words")
@@ -136,15 +136,15 @@ func TestActionableReleasesTheBeadToItsPool(t *testing.T) {
 	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 0, err, "(ACTBADROUTE) the exit run again with a pool the city configures")
-	if h := w.lines("HELM takeaway"); len(h) != 2 || !strings.Contains(h[1], "--route gc-toolkit/gc-toolkit.polecat --no-wait") {
+	if h := w.lines("TAKEAWAY "); len(h) != 2 || !strings.Contains(h[1], "--route gc-toolkit/gc-toolkit.polecat --no-wait") {
 		t.Errorf("(ACTBADROUTE) the takeaways were %q", h)
 	}
 
 	w = newWorld(t)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "routed to the polecat pool", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 4, err, "(ACTREFUSED) a release the store refuses")
-	errHas(t, err, "could not update 'tk-sub'", "(ACTREFUSED) the failure carries the takeaway's own words")
+	errHas(t, err, "could not write the headline on tk-sub", "(ACTREFUSED) the failure carries the takeaway's own words")
 	if out != "" {
 		t.Errorf("(ACTREFUSED) the exit reported %q", out)
 	}
@@ -172,8 +172,8 @@ func TestActionableHandsTheMechanikItsRoute(t *testing.T) {
 	if out != "tk-sub disposed as actionable (gc-toolkit.mechanik)" {
 		t.Errorf("(ACTASSIGN) the exit reported %q", out)
 	}
-	w.has("HELM takeaway tk-sub city.toml edit routed to mechanik --by proactive --release --no-wait", "(ACTASSIGN) the release leaves the bead at rest")
-	for _, l := range w.lines("HELM ") {
+	w.has("TAKEAWAY tk-sub city.toml edit routed to mechanik --by proactive --release --no-wait", "(ACTASSIGN) the release leaves the bead at rest")
+	for _, l := range w.lines("TAKEAWAY ") {
 		if strings.Contains(l, "--assign") || strings.Contains(l, "--route") {
 			t.Errorf("(ACTASSIGN) the release wrote an address: %s", l)
 		}
@@ -181,7 +181,7 @@ func TestActionableHandsTheMechanikItsRoute(t *testing.T) {
 	if s := w.lines("SLING "); len(s) != 1 || s[0] != "SLING gc-toolkit.mechanik tk-sub --no-formula --no-convoy --rig gc-toolkit" {
 		t.Errorf("(ACTHANDOFF) the hand-off slung %q", s)
 	}
-	w.before("HELM takeaway", "SLING ", "(ACTHANDOFF) the hand-off follows the release")
+	w.before("TAKEAWAY", "SLING ", "(ACTHANDOFF) the hand-off follows the release")
 	w.hasnt("ARM ", "(ACTHANDOFF) nothing is armed for a named agent")
 	w.has("NUDGE gc-toolkit.mechanik tk-sub is routed to you and ready", "(ACTHANDOFF) the agent is nudged with the bead's id")
 	w.before("SLING ", "NUDGE ", "(ACTHANDOFF) once the bead is routed to it")
@@ -264,7 +264,7 @@ func TestAHandOffThatDoesNotLandFailsTheExit(t *testing.T) {
 	wantCode(t, code, 4, err, "(HANDOFFFAIL) a hand-off gc sling refused")
 	errHas(t, err, "gc sling did not hand it to gc-toolkit.mechanik (exit 1: gc sling: fake refusal)", "(HANDOFFFAIL) with gc sling's reason")
 	errHas(t, err, "a re-run resumes", "(HANDOFFFAIL) saying a re-run resumes")
-	w.has("HELM takeaway tk-sub", "(HANDOFFFAIL) after the release, which stands")
+	w.has("TAKEAWAY tk-sub", "(HANDOFFFAIL) after the release, which stands")
 	w.hasnt("NUDGE", "(HANDOFFFAIL) no agent is nudged about a bead it was not handed")
 
 	w = newWorld(t)
@@ -293,11 +293,11 @@ func TestTheRefineryTakesTheAssigneeAndTheOthersAreRefused(t *testing.T) {
 	code, _, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "the branch is ready for the merge queue",
 		"--takeaway", "branch handed to the refinery", "--assign", "gc-toolkit/gc-toolkit.refinery", "--run", root)
 	wantCode(t, code, 0, err, "(ACTREFINERY) an actionable exit to the refinery")
-	w.has("HELM takeaway tk-sub branch handed to the refinery --by proactive --release --assign gc-toolkit/gc-toolkit.refinery --no-wait",
+	w.has("TAKEAWAY tk-sub branch handed to the refinery --by proactive --release --assign gc-toolkit/gc-toolkit.refinery --no-wait",
 		"(ACTREFINERY) the release writes the refinery as the assignee and says nothing waits")
 	w.hasnt("SLING", "(ACTREFINERY) routing nothing")
 	w.has("NUDGE gc-toolkit/gc-toolkit.refinery tk-sub is assigned to you and ready", "(ACTREFINERY) the refinery is nudged")
-	w.before("HELM takeaway", "NUDGE ", "(ACTREFINERY) once the release has assigned it")
+	w.before("TAKEAWAY", "NUDGE ", "(ACTREFINERY) once the release has assigned it")
 
 	w = newWorld(t)
 	w.nudgeFails = true

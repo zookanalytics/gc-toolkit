@@ -2,6 +2,7 @@ package waits
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -193,5 +194,25 @@ func TestIsRootOrStepReadsARunsOwnBeads(t *testing.T) {
 	}
 	if want := []string{"flow", "graph", "mol", "step"}; !slices.Equal(own, want) {
 		t.Errorf("a run's own beads = %v, want %v", own, want)
+	}
+}
+
+// A run's holders are the assignees of its members that are not closed, the
+// root's own among them, each once, and a closed member's assignee is none.
+func TestRunHoldersAreTheAssigneesOfItsLiveMembers(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "root-1", Status: "in_progress", Assignee: "rig/control", Metadata: map[string]string{"gc.kind": "workflow"}})
+	s.Put(fake.Bead{ID: "st-load", Status: "closed", Assignee: "polecat-done", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-impl", Status: "in_progress", Assignee: "polecat-2", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-rev", Status: "open", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-sub", Status: "blocked", Assignee: "polecat-2", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-other", Status: "in_progress", Assignee: "polecat-9", Metadata: map[string]string{"gc.root_bead_id": "root-2"}})
+	got, err := RunHolders(ledger.New(s), "root-1")
+	if err != nil || !slices.Equal(got, []string{"rig/control", "polecat-2"}) {
+		t.Fatalf("RunHolders = %q, %v; want the root's and the live step's assignees, each once", got, err)
+	}
+	s.FindErr = errors.New("the store did not answer")
+	if _, err := RunHolders(ledger.New(s), "root-1"); err == nil {
+		t.Fatal("a read that fails answered holders")
 	}
 }

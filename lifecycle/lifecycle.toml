@@ -51,7 +51,7 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # gc.takeaway is stamped by every sign-off, the one that settled its subject as
 # much as the one that parked it for a person, and only the writer knows which
-# it was — `gc-helm.sh takeaway --no-wait` says so by stamping
+# it was — `gctk bead takeaway --no-wait` says so by stamping
 # gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
 # Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
 # empty unless it means settled, so a stamp cannot inherit the disposition of
@@ -59,8 +59,8 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # blocked_reason is also the pending record's reason: the merge a bead awaits,
 # or the exception that holds it. The record writes it only on a bead whose
-# marker, pr_reconcile_pending, is true. A run of the landing order reads a
-# record whose marker is true while its bead is open, blocked or closed (due()
+# marker, pr_reconcile_pending, is true. A run of the landing order decides a
+# record whose marker is true while its bead is open, blocked or closed (plan()
 # in services/gctk/pr/landing.go, with record.Read), and the check that reads
 # this declaration reads no closed bead. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the
@@ -267,9 +267,9 @@ since_format = "RFC 3339 UTC"
 # agent clears the route; a pool route left on directly-assigned work reads as
 # demand for work no pool is offered.
 #
-# THE OPERATOR-FACING QUESTION is gc.takeaway. The helm board spends it as the
-# row's NEEDS sentence, so lifecycle.sh refuses a --takeaway that normalizes to
-# nothing, and one longer than the 140 codepoints the cell holds.
+# THE HEADLINE is gc.takeaway, one line read at a glance, so lifecycle.sh
+# refuses a --takeaway that normalizes to nothing, and one longer than 140
+# codepoints.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd
@@ -1131,7 +1131,6 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # attempt record before it.
 keys = [
   "gc.recommended_formula", "gc.recommended_formula_dispatched",
-  "gc.acceptance",
   "gc.proactive",
   "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
   "gc.reacted_by", "gc.proactive_reaction", "gc.reaction_owned",
@@ -1139,34 +1138,25 @@ keys = [
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at",
 ]
-# gc.recommended_formula — the execution mol a recommend exit names, which the
-#   operator can Accept from the subject's row on the board. The reaction domain
-#   owns it (services/gctk/reaction, listed in services/gctk/key-registry.json),
+# gc.recommended_formula — the execution mol a recommend exit names, which
+#   gctk reaction accept dispatches once the operator takes it, as a sitting's
+#   sign-off does with --accept. The reaction domain owns it
+#   (services/gctk/reaction, listed in services/gctk/key-registry.json),
 #   and it stays registered here while shell still clears it. gctk reaction
 #   dispose sets it once a recommend's gate is filed and unsets a stale one
-#   before any exit acts, each write taking its exit. gc-helm.sh
-#   `accept` unsets it in the write that records its dispatch, and
+#   before any exit acts, each write taking its exit. gctk reaction accept
+#   unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
-#   recommendation no longer valid. The board's Accept derivation
-#   (services/helm/internal/board/derive.go), gc-helm.sh `accept` and
-#   converse-invalidate-recommendation.sh all read it as a non-empty value, so
-#   absent and empty both mean no live recommendation, and the subject offers
-#   Discuss only. A formula name that `gc formula show` resolves.
-# gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
-#   written in the update that unsets gc.recommended_formula. `accept` reads it
-#   to resume a run that dispatched but did not finish: it completes the unset
-#   and never slings again. `accept` slings before it writes this key, so absent
-#   means no Accept has recorded a dispatch. Never cleared. A formula name.
-# gc.acceptance — on the human gate under the key first-reaction, the dispatch
-#   input of the acceptance that answers it: a JSON object {token, formula,
-#   vars}, with vars the `<key>=<value>` strings its sling carries. gc-helm.sh
-#   `accept` writes it before the resolve that names the token, and a run that
-#   finishes that acceptance slings the vars recorded under the token, so the
-#   board's Accept, which passes no --var, dispatches what the operator
-#   accepted. A record whose token no answer on the gate
-#   names, left by a run that stopped before its resolve or by an answer Accept
-#   reopened, binds nothing, and the next acceptance overwrites it. Never
-#   cleared.
+#   recommendation no longer valid. gctk reaction accept and
+#   converse-invalidate-recommendation.sh both read it as a non-empty value, so
+#   absent and empty both mean no live recommendation, which no Accept takes.
+#   A formula name that `gc formula show` resolves.
+# gc.recommended_formula_dispatched — the formula gctk reaction accept slung,
+#   written in the update that unsets gc.recommended_formula. The reaction
+#   domain owns it (services/gctk/reaction), and it stays registered here while
+#   converse-signoff.sh reads it in shell, to tell a recommendation an Accept
+#   already took. Accept slings before it writes this key, so absent means no
+#   Accept has recorded a dispatch. Never cleared. A formula name.
 # gc.proactive — RETIRED. `1`, the scan opt-in patrol-finding.sh stamped on
 #   each finding it filed. Nothing writes or reads it: the scan reads every
 #   ready, unassigned bead in its rig that is not an epic, so a finding needs no
@@ -1216,7 +1206,7 @@ keys = [
 keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
-#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs. Each
+#   queue-priority.sh move, its --shift. Each
 #   script that files PR-finishing work (gate-ensure.sh, pr-facts.sh,
 #   rework-child.sh and signoff.sh) also writes it, -1, in
 #   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
@@ -1329,9 +1319,11 @@ keys = [
   "gc.ruling_consequence",
 ]
 # The gc.takeaway family carries its mechanics in the comment above and in
-# [holds] (settled_keys): gc-helm.sh, signoff.sh
-# and lifecycle.sh write the takeaway (gc.takeaway_by records which), and
-# gc.takeaway_settled is `1` when nothing waits and empty for a live wait.
+# [holds] (settled_keys): gctk bead takeaway and lifecycle.sh write the takeaway
+# (gc.takeaway_by records which), and gc.takeaway_settled is `1` when nothing
+# waits and empty for a live wait. The takeaway package
+# (services/gctk/takeaway) declares the family, and it stays registered here
+# while shell still reads it (docs/gctk-architecture.md, Debt).
 # gc.hold_demand — RETIRED. On a converse hold's VISIT, it named the demand the
 #   hold filed. A hold now files a human gate, and its conversation's replies-to
 #   edge names the gate, so nothing writes or reads the key, and
