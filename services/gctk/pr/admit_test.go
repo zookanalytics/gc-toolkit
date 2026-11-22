@@ -597,7 +597,7 @@ func TestAnAskFiledToWaitOnAnOpenBeadGetsNoRunUntilThatBeadCloses(t *testing.T) 
 // A refinery whose address names no binding pours nothing, since the run's
 // steps name the pack's scripts by it, and neither does a landing with no
 // pourer. The pour the record is owed did not happen, so each run decides it
-// again, and none keeps the digest of a decision that owes no act.
+// again.
 func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	d := newAdmit(t)
 	d.l.Refinery = refinery
@@ -617,17 +617,25 @@ func TestARefineryAddressWithNoBindingPoursNothing(t *testing.T) {
 	is(t, e.run(t), pr.ActRetry)
 }
 
-// A read admission makes that does not answer is a retry, which keeps no
-// digest, so the next run decides the record again though nothing it reads
-// changed: here the read of how the earlier runs at the head ended, then the
-// read of the beads on the branch, each failed once.
+// A read admission makes that does not answer is a retry, and the next run
+// decides the record again: here the read of how the earlier runs at the head
+// ended, failed in the run's pass and again under the record lock, then the read
+// of the beads on the branch, which the act makes under the lock, failed once.
 func TestAnAdmissionReadThatDoesNotAnswerIsDecidedAgainByTheNextRun(t *testing.T) {
 	d := newAdmit(t)
 	is(t, d.once(t), pr.ActPoured)
 	d.end(t, "tk-run1", "canceled", "2026-11-12T09:10:00Z")
 	is(t, d.once(t), pr.ActPoured)
 	d.end(t, "tk-run2", "fail", "2026-11-12T09:20:00Z")
-	d.store.OnFind = failOnce(d.land, func(q gcbd.Query) bool { return q.Key == "gc.root_bead_id" })
+	ends := 0
+	d.store.OnFind = func(q gcbd.Query) {
+		d.store.FindErr = nil
+		if q.Key == "gc.root_bead_id" {
+			if ends++; ends <= 2 {
+				d.store.FindErr = errors.New("the store did not answer")
+			}
+		}
+	}
 	o := d.run(t)
 	is(t, o, pr.ActRetry)
 	if !strings.Contains(o.Detail, "earlier runs ended did not read") {
@@ -643,15 +651,9 @@ func TestAnAdmissionReadThatDoesNotAnswerIsDecidedAgainByTheNextRun(t *testing.T
 
 	e := newAdmit(t)
 	e.refresh(t)
-	branchReads := 0
-	// The decision's digest reads the beads on the branch first, and admission
-	// reads them again.
-	e.store.OnFind = failOnce(e.land, func(q gcbd.Query) bool {
-		if q.Key == "branch" {
-			branchReads++
-		}
-		return branchReads == 2
-	})
+	// Admission reads the beads on the branch under the record lock, through the
+	// act's own pass of the store.
+	e.store.OnFind = failOnce(e.land, func(q gcbd.Query) bool { return q.Key == "branch" })
 	o = e.run(t)
 	is(t, o, pr.ActRetry)
 	if !strings.Contains(o.Detail, "the beads on "+branch+" did not read") {

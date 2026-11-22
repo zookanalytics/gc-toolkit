@@ -44,20 +44,6 @@ func mark(v string) int64 {
 	return n
 }
 
-// newestFeedback is the highest feedback id in each id space, by the
-// definition, which reads the text of every post: a review, an inline comment
-// or a conversation comment the intake counts. Of a review the intake counts
-// only a message that comments or requests changes and carries text, so a
-// review that approves counts nothing by its message, and neither does feedback
-// the definition leaves out.
-func newestFeedback(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) (NewestFeedback, error) {
-	f, err := feedbackOf(rule, self, since, reviews, threads, comments)
-	if err != nil {
-		return NewestFeedback{}, err
-	}
-	return f.newest(), nil
-}
-
 // feedbackIDs are the posts the definition reads as feedback, in each id
 // space: the reviews, of which the intake counts those in counted, the inline
 // comments and the conversation comments.

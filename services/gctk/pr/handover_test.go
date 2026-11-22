@@ -122,10 +122,8 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 // the requeue keeps the marker and the bead assigned to nobody, since Gas City
 // retires a run whose input bead an agent outside it is assigned, and wakes no
 // one. The first run that decides the record while the review run lives reads
-// no PR and writes only the digest of what it decided on, and a run after it in
-// which nothing changed decides nothing. The first run after the review run
-// ends wakes the
-// refinery, since the conversation still holds the bead, and hands the head to
+// no PR and writes nothing, and neither does a run after it in which nothing
+// changed. The first run after the review run ends wakes the refinery, since the conversation still holds the bead, and hands the head to
 // it in the write that clears the marker.
 func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	d := newHanding(t)
@@ -144,9 +142,8 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	is(t, o, pr.ActChecked)
 	says(t, o, "waits on review run tk-run1")
 	readsNoGitHub(t, d.land)
-	if w := d.runWrites(); !keptDigest(w) {
-		t.Fatalf("a run that found the head still waiting on its run wrote the bead %+v, want the digest of what it "+
-			"decided on alone", w)
+	if w := d.runWrites(); len(w) != 0 {
+		t.Fatalf("a run that found the head still waiting on its run wrote the bead %+v", w)
 	}
 	is(t, d.run(t), pr.ActChecked)
 	readsNoGitHub(t, d.land)

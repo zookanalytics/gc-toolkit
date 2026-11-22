@@ -2,9 +2,6 @@ package pr
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -23,27 +20,36 @@ import (
 // The landing order and the publication it reads (specs/tk-1tfzr71.66/design.md,
 // sections 4 and 6, and specs/tk-1tfzr71.149/design.md, section 5). The
 // refinery publishes a PR's pending record with Record, and the landing order's
-// runs act on each record with Reconcile. A run decides each record under the
-// record lock, from the store and, wherever the decision depends on GitHub,
-// from its own read of the PR, made in the act that decides it. The store holds
-// what the city did: the head the refinery validated, the merge a run verified,
-// the exceptions a run recorded and the waits on the bead. The read holds what
-// GitHub shows now. The read the one-PR update (refresh.go) saved on the bead is
-// the displays', and a run decides no act from it: a change to it only makes a
-// record due (unchanged), and its labels only choose the PRs whose labels a run
-// writes (labelPlans). On its own read a run
-// requests a merge pinned to the head the evaluator judged, closes a bead once
-// the merge commit is on the target, hands a changed head to the refinery and
-// sees that the refinery hears of it, keeps the exceptions blocked behind a
-// human gate, marks a draft ready and carries out an approval's withdrawal. A
-// bead's assignee says who works it now (Gas City's delivery of work to a
-// session): the refinery while it validates a head, and nobody while the PR
-// waits. A run works a bead assigned to nobody or to the refinery, and leaves
-// one assigned to anyone else to that assignee. A ruling that retires a PR
-// records its disposition on the bead under the record lock and then closes the
-// PR (pr-dispose.sh). A run requests no merge of a PR whose bead carries it,
-// and once the run's own read finds the PR closed the bead goes to the
-// disposition writer, bead-rehome.sh, which closes it onto the successor the
+// runs act on each record with Reconcile. The order is the second of the PR's
+// two loops. The PR watch (refresh.go) keeps the read saved on each PR's bead
+// current, and a run finds and does its work from that saved read and the
+// store alone, so no run reads GitHub to learn whether a record has work. The
+// store holds what the city did: the head the refinery validated, the merge a
+// run verified, the exceptions a run recorded and the waits on the bead. The
+// saved read holds what GitHub showed when the watch last read it. A run
+// decides every record from one pass of the store, and takes the record lock
+// only for a record that owes an act, which it decides again under the lock
+// before it acts.
+//
+// Only the merge checks GitHub before it acts, since a merge is the one act no
+// later run takes back, and GitHub's rules refuse what else could go wrong: a
+// run has the one-PR update re-read the PR in full with the lock free
+// (Reread), decides again on what that read saved, and requests the merge
+// pinned to the head it judged. Every other act reads of GitHub only what it
+// changes. A withdrawal reads the reviews it dismisses and their threads, a
+// send-back and a landing fetch the branch they judge, and a label write leaves
+// the PR's labels to their writer, which reads them itself. A run requests a
+// merge, closes a bead once the merge commit is on the target, hands a changed
+// head to the refinery and sees that the refinery hears of it, keeps the
+// exceptions blocked behind a human gate, marks a draft ready and carries out
+// an approval's withdrawal. A bead's assignee says who works it now (Gas City's
+// delivery of work to a session): the refinery while it validates a head, and
+// nobody while the PR waits. A run works a bead assigned to nobody or to the
+// refinery, and leaves one assigned to anyone else to that assignee. A ruling
+// that retires a PR records its disposition on the bead under the record lock
+// and then closes the PR (pr-dispose.sh). A run requests no merge of a PR whose
+// bead carries it, and once the saved read shows the PR closed the bead goes to
+// the disposition writer, bead-rehome.sh, which closes it onto the successor the
 // ruling named, with the lock free, while the bead still has the status and
 // assignee the run judged and still records that ruling. A run saves none of
 // what GitHub says: the one-PR update is the one writer of GitHub's side on a
@@ -56,11 +62,11 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order and the draft cycle reach it: the reads
-// an act decides on, the PR and, where its decision needs them, its reviews,
-// threads, checks and comments, a merge request or an enqueue pinned to the
-// head the evaluator judged, the PR's moves between draft and ready, and the
-// dismissal of a review.
+// Hub is GitHub as the landing order and the draft cycle reach it: the reads an
+// act makes of what it changes, such as a withdrawal's of the reviews it
+// dismisses, a merge request or an enqueue pinned to the head the evaluator
+// judged, the PR's moves between draft and ready, and the dismissal of a
+// review.
 type Hub interface {
 	GitHub
 	MergePullRequest(id, head string) error
@@ -163,8 +169,11 @@ func (e *HeldClose) Error() string { return e.Why }
 // Landing is what the record's verbs act through. Dir is the store's .beads
 // directory, where the record lock lives, and Refinery the refinery's assignee,
 // the one a hand-over of a changed head assigns, which is also the session Wake
-// wakes. Hub is GitHub on a host, each call stopped when ctx ends. Feedback
-// loads the definition of feedback, once a run first needs it. Mark reads the
+// wakes. Hub is GitHub on a host, each call stopped when ctx ends. Reread is
+// the one-PR update's read of every part of the PR at url (Watcher.Reread),
+// which a run has make before it requests a merge, stopped once ctx ends, and
+// a run requests no merge when it is nil. Feedback loads the definition of
+// feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
 // it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
 // ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
@@ -174,13 +183,14 @@ func (e *HeldClose) Error() string { return e.Why }
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
 // waiting for it takes it. Shuffle orders the acts a run takes, at random when
-// nil. Now is the clock a write's stamp, a run's window and a decision's hour
-// read, the system's when nil.
+// nil. Now is the clock a write's stamp and a run's window read, the system's
+// when nil.
 type Landing struct {
 	Ledger       *ledger.Ledger
 	Dir          string
 	Refinery     string
 	Hub          func(ctx context.Context, host string) Hub
+	Reread       func(ctx context.Context, url string) error
 	Feedback     func() (Feedback, error)
 	Mark         func() (string, error)
 	Checkout     Checkout
@@ -279,18 +289,16 @@ type RunOutcome struct {
 
 // The actions a run reports.
 const (
-	// ActChecked: the record owes no act, and the run wrote nothing on the bead
-	// but the digest of what it decided on (keep), where it keeps one: the PR
-	// stands as the record says, or the disposition writer holds a
-	// retired PR's close for now, and the next run hands it over again. A run
-	// keeps the digest of what a decision that owed no act read (one), and
-	// decides the record again only once that changes or freshCheck has passed,
-	// so a decision a failed read, or a merge state GitHub had not computed,
-	// left unmade is ActRetry, never this.
+	// ActChecked: the record owes no act, and the run wrote nothing on the bead:
+	// the PR stands as the record says, the bead holds no saved read of the PR
+	// current for it yet, which the PR watch's next pass saves, or the
+	// disposition writer holds a retired PR's close for now, and the next run
+	// hands it over again.
 	ActChecked = "checked"
-	// ActRequested: the evaluator found the PR ready on the run's own read of
-	// GitHub, and the run asked GitHub to merge it, or to add it to its base's
-	// merge queue, at the head it judged.
+	// ActRequested: the evaluator found the PR ready on the saved read, the
+	// one-PR update re-read the PR in full, the evaluator found it ready on what
+	// that read saved, and the run asked GitHub to merge it, or to add it to its
+	// base's merge queue, at the head it judged.
 	ActRequested = "requested"
 	// ActReadied: the PR was a draft whose record is pending at its head, a
 	// passed review result names that head and its target, and no review run is
@@ -316,20 +324,20 @@ const (
 	// ActExcepted: an exception, filed as a human gate, keeps the bead blocked.
 	ActExcepted = "excepted"
 	// ActRetry: the record's act did not complete, or the run could not decide
-	// it: a call GitHub refused or did not answer, a merge state GitHub had not
-	// computed, a fetch, a read, a filing or a label write that failed, or an
+	// it: a call GitHub refused or did not answer, a merge's re-read that did
+	// not save, a fetch, a read, a filing or a label write that failed, or an
 	// act stopped at its bound. Nothing records it, the difference stays on the
 	// bead, and the next run acts on it again.
 	ActRetry = "retry"
 	// ActLabeled: the status: and held: labels the one-PR update saved for the
-	// PR differ from the ones the store derives, and on the act's own read of the
-	// PR the run had the labels' writer, which reads the PR's labels itself,
-	// write them: the derived labels on an open PR, and none on one that merged
-	// or closed.
+	// PR differ from the ones the store derives, and the run had the labels'
+	// writer, which reads the PR's labels itself, write them: the derived labels
+	// on a PR the saved read shows open, and none on one it shows merged or
+	// closed.
 	ActLabeled = "labeled"
 	// ActAssigned: the bead is assigned to someone other than the refinery, who
 	// works it now, so the act wrote nothing to it, requested no merge and
-	// poured no review run. A run decides no such bead from its pass (plan), so
+	// poured no review run. A run decides no such bead in its pass (plan), so
 	// this one was assigned after the pass read it, and a later run works it
 	// once the assignee is gone.
 	ActAssigned = "assigned"
@@ -370,26 +378,29 @@ type Options struct {
 
 // Reconcile is one run of the landing order. It reads the store once, through a
 // ledger pass that lists the beads that carry the marker, closed ones too, and
-// every live bead, and takes each record that carries the marker, and each bead
-// on the record that carries a ruling's disposition (disposing), an open or
-// blocked one only while it is assigned to nobody or to the refinery (mayWork),
-// and passes over each that a run decided with no act owed less than an hour
-// ago while nothing that decision read has changed (unchanged). With Labels
-// set, each PR the live beads own whose saved labels differ from the ones the
-// store derives owes a label write too (labelPlans). The records it takes and
-// the PRs whose labels owe a write are taken in a shuffled order, so one whose
-// act is slow or keeps failing holds no other back, and none is started past
-// o.Window. Each record's act reads its record again under the record lock,
-// decides it from that read and from its own read of the PR wherever the
-// decision depends on GitHub, and acts within o.Stop, its writes guarded on the
-// status and assignee it read there. A label write takes no lock and writes
-// nothing on the bead, and stops at o.Stop too. A bead whose PR closed under a
-// ruling's disposition goes to the disposition writer once the lock is released
-// (dispose). A record that lands on the rig's default branch has the branch's
-// seed audit checked once the lock is released, inside the window, and its
-// outcome says what the check found. It reports each outcome to report as it
-// goes, and returns an error when the listing did not answer, or when a record
-// or a PR's labels could not be decided or its act did not complete.
+// every live bead, and decides through that pass each record that carries the
+// marker, and each bead on the record that carries a ruling's disposition
+// (disposing), an open or blocked one only while it is assigned to nobody or to
+// the refinery (mayWork), on the read the PR watch saved on its bead and the
+// store. A record that owes no act is reported as its decision found it, with
+// no write and no read of GitHub. With Labels set, each PR the live beads own
+// whose saved labels differ from the ones the store derives owes a label write
+// too (labelPlans). The records that owe an act and the PRs whose labels owe a
+// write are taken in a shuffled order, so one whose act is slow or keeps
+// failing holds no other back, and none is started past o.Window. Each
+// record's act reads its record again under the record lock, decides it again
+// from that read, and acts within o.Stop, its writes guarded on the status and
+// assignee it read there. A decision that finds the PR ready has the one-PR
+// update re-read it in full once the lock is free, and the act decides again
+// on what that read saved before it requests the merge (reread). A label write
+// takes no lock and writes nothing on the bead, and stops at o.Stop too. A bead
+// whose PR closed under a ruling's disposition goes to the disposition writer
+// once the lock is released (dispose). A record that lands on the rig's default
+// branch has the branch's seed audit checked once the lock is released, inside
+// the window, and its outcome says what the check found. It reports each
+// outcome to report as it goes, and returns an error when the listing did not
+// answer, or when a record or a PR's labels could not be decided or its act did
+// not complete.
 func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	u := &run{Landing: l}
 	start := u.clock()
@@ -442,8 +453,11 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 			continue
 		}
 		ctx, cancel := bounded(o.Stop)
-		u.landed, u.disposal = nil, nil
+		u.landed, u.disposal, u.rereadDue, u.reread = nil, nil, "", ""
 		out := u.one(ctx, id, o.Stop)
+		if u.rereadDue != "" {
+			out = u.rereadAndDecide(ctx, id, u.rereadDue, o.Stop)
+		}
 		cancel()
 		if u.disposal != nil {
 			out = u.dispose(*u.disposal, out)
@@ -462,8 +476,8 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	return nil
 }
 
-// clock is the time the run's window and a decision's hour are read by: Now,
-// or the system's clock when Now is nil.
+// clock is the time the run's window is read by: Now, or the system's clock
+// when Now is nil.
 func (l Landing) clock() time.Time {
 	if l.Now == nil {
 		return time.Now()
@@ -536,20 +550,24 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 // until it fetches a PR's branch, which fetched names, once for each branch.
 // landed is the merge the act just made closed its bead on, for the seed
 // audit's check once the lock is free, disposal the close the act just made
-// owes the disposition writer once the lock is free, and audited names, for
-// each tip of the default branch the run has checked, the bead whose landing
-// checked it.
+// owes the disposition writer once the lock is free, rereadDue the PR the act
+// found ready on the saved read, which the one-PR update re-reads once the lock
+// is free, reread the bead whose PR the act has had re-read, and audited names,
+// for each tip of the default branch the run has checked, the bead whose
+// landing checked it.
 type run struct {
 	Landing
-	feedback Feedback
-	mark     string
-	origin   *string
-	logins   map[string]string
-	contains map[[2]string]bool
-	fetched  map[string]bool
-	landed   *landedMerge
-	disposal *Disposal
-	audited  map[string]string
+	feedback  Feedback
+	mark      string
+	origin    *string
+	logins    map[string]string
+	contains  map[[2]string]bool
+	fetched   map[string]bool
+	landed    *landedMerge
+	disposal  *Disposal
+	rereadDue string
+	reread    string
+	audited   map[string]string
 }
 
 // landedMerge is a PR the run closed its bead on: the bead, the PR's number and
@@ -658,25 +676,6 @@ func (u *run) fetchBranch(ctx context.Context, branch string) error {
 	return nil
 }
 
-// readHub is GitHub as the evaluator reads it on the act's own read: the hub
-// of the record's host, which answers the PR the act read just before it with
-// that read and the login with the run's own, so the evaluator reads neither
-// again. Its other reads go to GitHub.
-type readHub struct {
-	Hub
-	pr    *gh.PullRequest
-	login func() (string, error)
-}
-
-func (h readHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
-	if h.pr != nil && number == h.pr.Number && strings.EqualFold(repo, h.pr.Repository) {
-		return h.pr, nil
-	}
-	return h.Hub.PullRequest(repo, number)
-}
-
-func (h readHub) Login() (string, error) { return h.login() }
-
 // state is one record as a run read it: the bead's row and its record, the
 // provenance instant the definition of feedback is applied from, the beads its
 // blocks edges name, open and closed, the withdrawals filed on it and the review
@@ -711,15 +710,18 @@ type carriedOut struct {
 type act func(ctx context.Context, c carriedOut) RunOutcome
 
 // plan is what a record owes: an act, or none, with the outcome that says why.
-// In a run's list of plans, due says the record owes a decision, which its act
-// makes under the record lock (one), and a PR whose labels owe a write is
-// planned under its URL, with write holding the write.
+// reread says the record reads ready for its merge, which the act decides
+// again once the one-PR update has re-read the PR in full (rereadAndDecide).
+// In a run's list of plans, due says the record owes an act, which its act
+// decides again under the record lock (one), and a PR whose labels owe a write
+// is planned under its URL, with write holding the write.
 type plan struct {
-	id    string
-	out   RunOutcome
-	act   act
-	due   bool
-	write *labelWrite
+	id     string
+	out    RunOutcome
+	act    act
+	reread bool
+	due    bool
+	write  *labelWrite
 }
 
 func none(s state, action, detail string) plan {
@@ -732,16 +734,15 @@ func doing(a act) plan { return plan{act: a} }
 // marker, closed ones too, and then, when there is one or the run keeps the
 // PRs' labels, every live bead, and the live beads that carry a ruling's
 // disposition, through the same pass or, when the pass holds no live bead,
-// through a read of their own. Each marked record that is closed, or open or
-// blocked and assigned to nobody or to the refinery (mayWork), and each bead it
-// reads for its disposition (disposing), owes a decision, which its act makes
-// under the record lock (one), unless a run decided it with no act owed less
-// than freshCheck ago and nothing a decision reads of the store, the read the
-// PR watch saved among it, changed since (unchanged). It leaves out a bead
-// that anyone else is assigned, since a run writes nothing to it. A record
-// that does not read as a record is not one the run can act on. With Labels
-// set, the label writes the owned PRs owe follow (labelPlans). The plans are
-// in id order.
+// through a read of their own. It decides through the pass each marked record
+// that is closed, or open or blocked and assigned to nobody or to the refinery
+// (mayWork), and each bead it reads for its disposition (disposing). A record
+// that owes no act gets its outcome, and one that owes an act, or that the pass
+// could not decide, because its state or a read its decision makes did not
+// answer, is due, for its act to decide again under the record lock (one). It leaves out a bead that anyone else is assigned, since a
+// run writes nothing to it. A record that does not read as a record is not one
+// the run can act on. With Labels set, the label writes the owned PRs owe
+// follow (labelPlans). The plans are in id order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
@@ -795,7 +796,7 @@ func (u *run) plan() ([]plan, error) {
 	// among them, which the pass's read of every live bead does not hold. One
 	// read here holds them for every record the run reads, so a run's reads do
 	// not grow with its records. A read that fails here leaves each record's
-	// state to read its own, and a record whose state does not read is decided.
+	// state to read its own, and a record whose state does not read is due.
 	var named []string
 	for _, r := range due {
 		if s := r.Status(); (s == "open" || s == "blocked") && u.mayWork(r) {
@@ -812,11 +813,16 @@ func (u *run) plan() ([]plan, error) {
 	}
 	var out []plan
 	for _, r := range due {
-		if at, ok := u.unchanged(pass, r); ok {
-			out = append(out, plan{id: r.ID, out: RunOutcome{Bead: r.ID, Action: ActChecked, Detail: "nothing the " +
-				"decision reads of the store, the PR watch's saved read among it, changed since a run decided the " +
-				"record at " + at + ", less than an hour ago, so the run read nothing of GitHub for it"}})
-			continue
+		s, missed := u.state(pass, r)
+		if missed == nil {
+			p := u.decide(s)
+			if p.act == nil && !p.reread && p.out.Action != ActRetry && p.out.Action != ActFailed {
+				if p.out.Bead == "" {
+					p.out.Bead = r.ID
+				}
+				out = append(out, plan{id: r.ID, out: p.out})
+				continue
+			}
 		}
 		out = append(out, plan{id: r.ID, due: true})
 	}
@@ -881,15 +887,13 @@ func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 }
 
 // one acts on one record: under the record lock it reads the record afresh,
-// decides it from that read and from its own read of the PR where the
-// decision depends on GitHub, and makes the act it owes, stopped once ctx,
-// which ends stop after the act starts, ends, its reads and writes of the
-// store and its reads of GitHub among what the stop ends. A lock that does
-// not come free inside the act's bound, or an act the stop ended, is an act
-// that did not complete. A decision that owes no act keeps the digest of what
-// it read of the store, with its time (keep), so a later run decides the
-// record again only once something it reads has changed or freshCheck has
-// passed.
+// decides it from that read and the read the PR watch saved on the bead, and
+// makes the act it owes, stopped once ctx, which ends stop after the act
+// starts, ends, its reads and writes of the store among what the stop ends. A
+// lock that does not come free inside the act's bound, or an act the stop
+// ended, is an act that did not complete. A decision that finds the PR ready
+// for a merge the act has not had re-read names the PR in rereadDue, and the
+// run has it re-read once the lock is free (rereadAndDecide).
 func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome {
 	// Acts run one at a time, so the run's ledger is the act's for its length.
 	unbound := u.Ledger
@@ -913,15 +917,16 @@ func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome
 	}
 	s, missed := u.state(u.Ledger.Pass(), r)
 	p := plan{}
-	var d string
 	if missed != nil {
 		p.out = *missed
 	} else {
-		d = u.digest(s)
-		p = u.decide(ctx, s)
+		p = u.decide(s)
 	}
 	out := p.out
-	if p.act != nil {
+	switch {
+	case p.reread:
+		u.rereadDue = s.rec.URL
+	case p.act != nil:
 		out = p.act(ctx, carriedOut{})
 	}
 	if out.Bead == "" {
@@ -931,129 +936,34 @@ func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome
 		out.Action = ActRetry
 		out.Detail = fmt.Sprintf("the act was stopped at its %s: %s", stop, out.Detail)
 	}
-	if out.Action == ActChecked && d != "" && u.disposal == nil {
-		u.keep(s, d)
-	}
 	return out
 }
 
-// decision is what a decision of a record reads of the store, of which a run
-// keeps the digest once it has decided the record with no act owed
-// (decidedKey): the bead's status, assignee and metadata but the digest, the
-// read the PR watch saved among them, each bead its blocks edges name, each ask
-// on it with what holds it, the evaluator's own waits on the bead and the work
-// anchored to it, and the other open work on its branch. A change to any of
-// them, on GitHub through the saved read or in the store, makes the record due
-// again, and so does freshCheck's passing.
-type decision struct {
-	Status   string            `json:"status"`
-	Assignee string            `json:"assignee"`
-	Metadata map[string]string `json:"metadata"`
-	Blockers []decidedBlocker  `json:"blockers"`
-	Asks     []decidedAsk      `json:"asks"`
-	Waits    []Condition       `json:"waits"`
-	Writers  []string          `json:"writers"`
-}
-
-// decidedBlocker is a bead a blocks edge names, as a decision reads it.
-type decidedBlocker struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Assignee  string `json:"assignee"`
-	Type      string `json:"type"`
-	AwaitType string `json:"await_type"`
-	AwaitID   string `json:"await_id"`
-}
-
-// decidedAsk is an ask on the bead, with what holds it.
-type decidedAsk struct {
-	ID     string   `json:"id"`
-	Status string   `json:"status"`
-	Holds  string   `json:"holds"`
-	Checks []string `json:"checks"`
-}
-
-// digest is the digest of what a decision of the record s reads of the store,
-// through s.reads (decision), empty for a record a run keeps none for: one
-// closed or whose parts did not read, which a run decides each time it takes
-// it, and one assigned to anyone but nobody or the refinery, which a run leaves
-// to its assignee.
-func (u *run) digest(s state) string {
-	if (s.status != "open" && s.status != "blocked") || !u.mayWork(s.row) {
-		return ""
-	}
-	md := s.row.Rendered()
-	delete(md, decidedKey.Name())
-	d := decision{Status: s.status, Assignee: s.assignee, Metadata: md}
-	for _, b := range s.blockers {
-		d.Blockers = append(d.Blockers, decidedBlocker{ID: b.ID, Status: b.Status(), Assignee: b.Assignee(),
-			Type: b.IssueType(), AwaitType: b.AwaitType(), AwaitID: b.AwaitID()})
-	}
-	slices.SortFunc(d.Blockers, func(a, b decidedBlocker) int { return strings.Compare(a.ID, b.ID) })
-	asks, err := review.AsksIn(s.reads, s.row, s.blockers)
-	if err != nil {
-		return ""
-	}
-	for _, a := range asks {
-		d.Asks = append(d.Asks, decidedAsk{ID: a.ID, Status: a.Status, Holds: string(a.Holds), Checks: a.Checks})
-	}
-	side, _, err := readSide(s.reads, s.id)
-	if err != nil {
-		return ""
-	}
-	d.Waits = side.waits
-	if s.branch != "" {
-		if d.Writers, err = u.writers(s); err != nil {
-			return ""
+// rereadAndDecide is the check a merge makes of GitHub before it is requested,
+// the one act a run checks first: with the record lock free, the one-PR update
+// re-reads the PR at url in full and saves what it read, and the act then
+// decides the record again under the lock, on what the update saved, so the
+// merge it requests is pinned to the head that read judged. A re-read that
+// finds the PR not ready leaves the saved read corrected, so the next run finds
+// no merge to check. A re-read that does not save requests nothing, and the
+// next run decides again. It runs within ctx, the act's.
+func (u *run) rereadAndDecide(ctx context.Context, id, url string, stop time.Duration) RunOutcome {
+	u.rereadDue = ""
+	retry := func(why string) RunOutcome {
+		if ctx.Err() != nil {
+			why = fmt.Sprintf("the act was stopped at its %s: %s", stop, why)
 		}
+		return RunOutcome{Bead: id, Action: ActRetry, Detail: "the PR reads ready on the saved read, and " + why +
+			", so no merge is requested; the next run decides again"}
 	}
-	raw, err := json.Marshal(d)
-	if err != nil {
-		return ""
+	if u.Reread == nil {
+		return retry("nothing re-reads it here before its merge")
 	}
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
-// freshCheck is how long a decision that owed no act stands while nothing it
-// read of the store changes. Past it a run decides the record again, on its own
-// read of GitHub, so a change the digest does not show, such as one on GitHub
-// that the PR watch has not saved, waits this long at most.
-const freshCheck = time.Hour
-
-// unchanged reports whether a run decided the record r carries, read through
-// pass, with no act owed less than freshCheck ago, and nothing a decision reads
-// of the store, the read the PR watch saved among it, changed since: its
-// digest is the one that run kept (decidedKey). at is when that run decided
-// it. A kept time that does not read, or reads later than the run's clock,
-// leaves the record due.
-func (u *run) unchanged(pass *ledger.Ledger, r *ledger.Record) (at string, ok bool) {
-	kept, _, err := decidedKey.Get(r)
-	if err != nil || kept.Digest == "" {
-		return "", false
+	if err := u.Reread(ctx, url); err != nil {
+		return retry("the one-PR update's re-read of it did not save: " + err.Error())
 	}
-	when, err := time.Parse(time.RFC3339, kept.At)
-	if err != nil {
-		return "", false
-	}
-	if age := u.clock().Sub(when); age < 0 || age >= freshCheck {
-		return "", false
-	}
-	s, missed := u.state(pass, r)
-	return kept.At, missed == nil && u.digest(s) == kept.Digest
-}
-
-// keep records d, the digest of what the act decided the record s read on, with
-// the time the act read it, once the act owed nothing, guarded on the status
-// and assignee it read. So each decision that owes no act starts the record's
-// freshCheck again. An act that wrote the record, or a write the store did not
-// take, leaves the record's digest other than the store's, so the next run
-// decides it again.
-func (u *run) keep(s state, d string) {
-	w := u.Ledger.Write(s.id)
-	decidedKey.Set(w, decided{Digest: d, At: s.now})
-	w.Guard(s.status, s.assignee)
-	_ = u.Ledger.Commit(w)
+	u.reread = id
+	return u.one(ctx, id, stop)
 }
 
 // bounded is a context that ends stop from now, or one that never ends when
@@ -1065,9 +975,9 @@ func bounded(stop time.Duration) (context.Context, context.CancelFunc) {
 	return context.Background(), func() {}
 }
 
-// decide is what the record s read owes, reading the PR within ctx where the
-// decision depends on GitHub.
-func (u *run) decide(ctx context.Context, s state) plan {
+// decide is what the record s read owes, on the store and the read the PR watch
+// saved on the bead. It reads no GitHub.
+func (u *run) decide(s state) plan {
 	switch {
 	case s.status == "closed":
 		return u.decideClosed(s)
@@ -1077,11 +987,11 @@ func (u *run) decide(ctx context.Context, s state) plan {
 	case s.status != "open" && s.status != "blocked":
 		return none(s, ActSkipped, "the bead's status "+s.status+" is none the record knows")
 	case s.ruled && record.OnRecord(s.rec.Result):
-		return u.decideDisposed(ctx, s)
+		return u.decideDisposed(s)
 	case s.status == "open":
-		return u.decideOpen(ctx, s)
+		return u.decideOpen(s)
 	}
-	return u.decideBlocked(ctx, s)
+	return u.decideBlocked(s)
 }
 
 // commit makes w, guarded on what the run read, and names the outcome: done
@@ -1121,16 +1031,17 @@ func (u *run) decideClosed(s state) plan {
 }
 
 // decideOpen decides an open bead assigned to nobody or to the refinery. A
-// changed head is held from the refinery while a withdrawal is open on the bead, which the run
-// carries out, or while a review run is attached to it, whose end a later run
-// reads, and the marker stays until then. Once neither holds it, the run hands
-// it to the refinery (handOver). A whole record whose second write landed moves
-// to blocked and to nobody, and is decided on. Anything else is a record a dead writer left
-// half written, which goes back to the refinery for its full validation.
-func (u *run) decideOpen(ctx context.Context, s state) plan {
+// changed head is held from the refinery while a withdrawal is open on the
+// bead, which the run carries out, or while a review run is attached to it,
+// whose end a later run reads, and the marker stays until then. Once neither
+// holds it, the run hands it to the refinery (handOver). A whole record whose
+// second write landed moves to blocked and to nobody, and is decided on.
+// Anything else is a record a dead writer left half written, which goes back
+// to the refinery for its full validation.
+func (u *run) decideOpen(s state) plan {
 	switch {
 	case s.rec.Result == record.HeadChanged && withdrawing(s):
-		return u.decideRequeued(ctx, s)
+		return u.decideRequeued(s)
 	case s.rec.Result == record.HeadChanged && len(s.runs) > 0:
 		return none(s, ActChecked, onRuns(s))
 	case s.rec.Result == record.HeadChanged:
@@ -1146,7 +1057,10 @@ func (u *run) decideOpen(ctx context.Context, s state) plan {
 				return done
 			}
 			s.status, s.assignee = "blocked", ""
-			next := u.decideBlocked(ctx, s)
+			next := u.decideBlocked(s)
+			if next.reread {
+				u.rereadDue = s.rec.URL
+			}
 			if next.act == nil {
 				if next.out.Bead == "" {
 					next.out.Bead = s.id
@@ -1169,60 +1083,63 @@ func withdrawing(s state) bool {
 	return slices.ContainsFunc(s.withdrawals, func(w withdrawal) bool { return w.open })
 }
 
-// fresh is the PR as the act's own read of GitHub found it, with the host and
-// the hub it read through, which the decision's later reads and its requests
-// go through too.
-type fresh struct {
+// seen is the PR the record names as the read the PR watch saved on the bead
+// shows it, with the host the record names, which an act's reads and requests
+// go to.
+type seen struct {
 	host string
-	hub  Hub
 	pr   *gh.PullRequest
 }
 
-// readPR makes the act's own read of the PR the record s read names, within
-// ctx. It returns the plan in its place when there is no read to decide on: the
-// PR is outside the rig's own repository or GitHub did not answer, so the next
-// run decides again, or the PR GitHub reports is not the one the record names,
+// seenPR is the PR the record s read names, as the read the PR watch saved on
+// the bead shows it. It returns the plan in its place when there is nothing to
+// decide on: the PR is outside the rig's own repository, which no act may
+// reach, so the next run decides again; the bead holds no saved read of the
+// record's PR, as before the PR watch's first pass over it, so the record waits
+// for the watch's next pass, which saves one (moved); or the saved read shows
+// a PR other than the one the record names, by its URL, head branch or base,
 // which is the record's exception.
-func (u *run) readPR(ctx context.Context, s state) (fresh, *plan) {
+func (u *run) seenPR(s state) (seen, *plan) {
 	r := s.rec
 	host, _, number, _ := record.ParseURL(r.URL)
 	if why := u.originDiffers(host, r.Repo); why != "" {
 		p := none(s, ActRetry, why+"; the next run decides again")
-		return fresh{}, &p
+		return seen{}, &p
 	}
-	hub := u.Hub(ctx, host)
-	pr, err := hub.PullRequest(r.Repo, number)
-	if err != nil {
-		p := none(s, ActRetry, "the run's own read of the PR did not answer, so nothing was decided; the next run "+
-			"decides again: "+err.Error())
-		return fresh{}, &p
+	saved, _, err := githubReadKey.Get(s.row)
+	if err != nil || saved == nil || saved.PR == nil || !strings.EqualFold(saved.PR.Repository, r.Repo) ||
+		saved.PR.Number != number {
+		p := none(s, ActChecked, "the bead holds no saved read of the PR yet, so the record waits for the PR "+
+			"watch's next pass to save one")
+		return seen{}, &p
 	}
+	pr := saved.PR.pullRequest()
 	if ids := identityGaps(pr, r.URL, number, r.Repo, s.branch, r.Target); len(ids) > 0 {
 		p := u.invalid(s, "the PR on GitHub is not the one the record names: "+strings.Join(ids, ", "))
-		return fresh{}, &p
+		return seen{}, &p
 	}
-	return fresh{host: host, hub: hub, pr: pr}, nil
+	return seen{host: host, pr: pr}, nil
 }
 
-// unknownState is the plan for a PR whose state GitHub gives as none the
-// record knows.
+// unknownState is the plan for a PR whose state the saved read gives as none
+// the record knows.
 func unknownState(s state, state string) plan {
-	return none(s, ActRetry, fmt.Sprintf("GitHub gives the PR's state as %q, which is no state the record knows; "+
-		"the next run decides again", state))
+	return none(s, ActRetry, fmt.Sprintf("the saved read gives the PR's state as %q, which is no state the record "+
+		"knows; the next run decides again", state))
 }
 
-// decideRequeued decides, on the act's own read of the PR, a changed head that
-// a withdrawal open on the bead holds from the refinery. It carries the
-// withdrawal out while the PR is open, keeping the marker while a withdrawal is
-// open or a review run is attached, so the bead goes to the refinery once
-// nothing the order owes holds it (handOver). A PR that closed or merged
-// meanwhile is the record's exception, as on a pending record.
-func (u *run) decideRequeued(ctx context.Context, s state) plan {
+// decideRequeued decides, on the saved read, a changed head that a withdrawal
+// open on the bead holds from the refinery. It carries the withdrawal out while
+// the PR is open, keeping the marker while a withdrawal is open or a review run
+// is attached, so the bead goes to the refinery once nothing the order owes
+// holds it (handOver). A PR that closed or merged meanwhile is the record's
+// exception, as on a pending record.
+func (u *run) decideRequeued(s state) plan {
 	r := s.rec
 	if missing := recordGaps(r, s.branch); len(missing) > 0 {
 		return u.invalid(s, "the requeued record is incomplete: it lacks "+strings.Join(missing, ", "))
 	}
-	f, stop := u.readPR(ctx, s)
+	f, stop := u.seenPR(s)
 	if stop != nil {
 		return *stop
 	}
@@ -1255,8 +1172,8 @@ func (u *run) decideRequeued(ctx context.Context, s state) plan {
 
 // decideBlocked decides a blocked bead: the record must be whole and must read
 // pending, or a verified merge whose close did not land. Its PR is decided on
-// the act's own read of GitHub.
-func (u *run) decideBlocked(ctx context.Context, s state) plan {
+// the saved read.
+func (u *run) decideBlocked(s state) plan {
 	r := s.rec
 	if record.Exception(r.Result) {
 		// A run recorded the exception and stopped before its gate filed.
@@ -1285,7 +1202,7 @@ func (u *run) decideBlocked(ctx context.Context, s state) plan {
 	default:
 		return u.invalid(s, fmt.Sprintf("a blocked bead with a pending marker reads merge_result %q, not %s", r.Result, record.Pending))
 	}
-	f, stop := u.readPR(ctx, s)
+	f, stop := u.seenPR(s)
 	if stop != nil {
 		return *stop
 	}
@@ -1301,7 +1218,7 @@ func (u *run) decideBlocked(ctx context.Context, s state) plan {
 		if p.HeadRefOid != r.Head {
 			return u.decideHeadChanged(s, f)
 		}
-		return u.decideAtHead(ctx, s, f)
+		return u.decideAtHead(s, f)
 	case "CLOSED":
 		return u.excepting(s, record.ClosedUnmerged, "Pull request "+r.URL+" closed without merging.",
 			fmt.Sprintf("Pull request %s closed without merging, so %s stays blocked, and what waits on it stays "+
@@ -1314,18 +1231,17 @@ func (u *run) decideBlocked(ctx context.Context, s state) plan {
 }
 
 // decideDisposed decides a bead on the record that carries the disposition a
-// ruling recorded before it closed the PR (pr-dispose.sh), on the act's own
-// read of the PR. The PR will not land, so the run requests no merge, pours no
-// review run, marks nothing ready and carries out no withdrawal, whatever
-// GitHub says of it. One still open waits for its close, one that merged all
-// the same lands as any merge does, and one that has closed is retired
-// (decideRetired).
-func (u *run) decideDisposed(ctx context.Context, s state) plan {
+// ruling recorded before it closed the PR (pr-dispose.sh), on the saved read.
+// The PR will not land, so the run requests no merge, pours no review run,
+// marks nothing ready and carries out no withdrawal, whatever GitHub says of
+// it. One still open waits for its close, one that merged all the same lands as
+// any merge does, and one that has closed is retired (decideRetired).
+func (u *run) decideDisposed(s state) plan {
 	r := s.rec
 	if missing := recordGaps(r, s.branch); len(missing) > 0 {
 		return u.invalid(s, "the record is incomplete: it lacks "+strings.Join(missing, ", "))
 	}
-	f, stop := u.readPR(ctx, s)
+	f, stop := u.seenPR(s)
 	if stop != nil {
 		return *stop
 	}
@@ -1340,7 +1256,7 @@ func (u *run) decideDisposed(ctx context.Context, s state) plan {
 	return unknownState(s, f.pr.State)
 }
 
-// decideRetired decides a PR a ruling retired once the act's own read finds it
+// decideRetired decides a PR a ruling retired once the saved read shows it
 // closed. While a review run is attached to the bead, the bead's close waits
 // for the run to end. Otherwise the act closes the withdrawals and the asks
 // still open on the bead, which nothing carries out or takes once the PR is
@@ -1430,22 +1346,24 @@ func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
 	return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
 }
 
-// decideHeadChanged decides a PR the act's own read finds open at a head other
-// than the one the refinery validated. GitHub's answer can lag a push, and the
-// refinery pushes a head before it records it and validates whatever its
-// preparation fetched, a branch a person rewrote included, so the head GitHub
-// gives need not be on the validated head's history. So the act fetches the
-// PR's branch and reads its tip before it sends anything back. A tip at the
-// head GitHub gives confirms it, and the bead goes back to the refinery at it.
-// A tip that contains the validated head says GitHub's answer lags the branch:
-// nothing is sent back, and the next run decides again. Any other tip is a
-// branch moved off the validated head, which goes back to the refinery at that
-// tip. A fetch or a read that does not answer sends nothing back, so the next
-// run decides again. A bead goes back after its withdrawals (sendBack).
-func (u *run) decideHeadChanged(s state, f fresh) plan {
+// decideHeadChanged decides a PR the saved read shows open at a head other
+// than the one the refinery validated. The saved read can lag a push, since the
+// refinery pushes a head before it records it and the PR watch saves the push
+// at its next pass, and the refinery validates whatever its preparation
+// fetched, a branch a person rewrote included, so the head the saved read gives
+// need not be on the validated head's history. So the act fetches the PR's
+// branch and reads its tip before it sends anything back. A tip at the head the
+// saved read gives confirms it, and the bead goes back to the refinery at it. A
+// tip that contains the validated head says the saved read lags the branch:
+// nothing is sent back, and a later run decides on the head the watch saves.
+// Any other tip is a branch moved off the validated head, which goes back to
+// the refinery at that tip. A fetch or a read that does not answer sends
+// nothing back, so the next run decides again. A bead goes back after its
+// withdrawals (sendBack).
+func (u *run) decideHeadChanged(s state, f seen) plan {
 	r, seen := s.rec, f.pr.HeadRefOid
 	return u.withCarry(s, f, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-		at := fmt.Sprintf("GitHub gives the PR's head as %s, not the validated %s", seen, r.Head)
+		at := fmt.Sprintf("the saved read gives the PR's head as %s, not the validated %s", seen, r.Head)
 		retry := func(why string) RunOutcome {
 			return RunOutcome{Bead: s.id, Action: ActRetry,
 				Detail: withNote(at+", and "+why+", so nothing is sent back; the next run decides again", c.note)}
@@ -1467,7 +1385,9 @@ func (u *run) decideHeadChanged(s state, f fresh) plan {
 		if !landed {
 			return u.sendBack(ctx, s, tip, fmt.Sprintf("origin/%s is at %s, which does not contain the validated head", s.branch, tip), c)
 		}
-		return retry(fmt.Sprintf("origin/%s at %s contains the validated head, so GitHub's answer lags the branch", s.branch, tip))
+		return RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(fmt.Sprintf("%s, and origin/%s at %s "+
+			"contains the validated head, so the saved read lags the branch and nothing is sent back; a later run "+
+			"decides on the head the PR watch saves", at, s.branch, tip), c.note)}
 	}))
 }
 
@@ -1519,18 +1439,19 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
 }
 
-// decideAtHead decides a PR the act's own read finds open at the validated
-// head. A PR already in its base's merge queue owes nothing. A draft the review
-// loop has passed at its head, with no review run attached and no ask a run can
-// take, is marked ready, and the next run decides it again (readyBar).
-// Otherwise the evaluator decides on the act's own read whether the PR is
-// ready, reading the rest of GitHub's side through it (readHub). One it finds
-// not ready is owed a review run when it has no passed result at the head or an
-// ask a run can take is open, which the run pours (admit), and is otherwise
-// decided again by the next run while GitHub has not computed its merge state.
-// One it finds ready is merged, pinned to the head the evaluator judged
-// (merge).
-func (u *run) decideAtHead(ctx context.Context, s state, f fresh) plan {
+// decideAtHead decides a PR the saved read shows open at the validated head. A
+// PR already in its base's merge queue owes nothing. A draft the review loop
+// has passed at its head, with no review run attached and no ask a run can
+// take, is marked ready, and a later run decides it on the read the PR watch
+// saves then (readyBar). Otherwise the evaluator decides on the saved read
+// whether the PR is ready (fromSaved), and a saved read that is not current for
+// the bead waits for the watch's next pass. One it finds not ready is owed a
+// review run when it has no passed result at the head or an ask a run can take
+// is open, which the run pours (admit). One it finds ready is checked against
+// GitHub before its merge: the act has the one-PR update re-read the PR in
+// full, decides again on what that read saved (rereadAndDecide), and merges
+// only on that read, pinned to the head the evaluator judged there (merge).
+func (u *run) decideAtHead(s state, f seen) plan {
 	p := f.pr
 	if p.InMergeQueue {
 		return u.withCarry(s, f, none(s, ActChecked, "the PR is in its base's merge queue, which holds its merge request"))
@@ -1546,31 +1467,25 @@ func (u *run) decideAtHead(ctx context.Context, s state, f fresh) plan {
 		}
 		if readyBar(s, p, results, asks) == "" {
 			return u.withCarry(s, f, doing(func(ctx context.Context, c carriedOut) RunOutcome {
-				if err := f.hub.MarkReady(p.ID); err != nil {
+				if err := u.Hub(ctx, f.host).MarkReady(p.ID); err != nil {
 					return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf("the ready transition at %s "+
 						"was refused or not answered, and the next run decides again: %v", p.HeadRefOid, err), c.note)}
 				}
 				return RunOutcome{Bead: s.id, Action: ActReadied, Detail: withNote(fmt.Sprintf("marked ready at %s, without "+
 					"waiting for CI: a passed result names the head, and no review run is attached and no ask a run can "+
-					"take is open; the next run decides again", p.HeadRefOid), c.note)}
+					"take is open", p.HeadRefOid), c.note)}
 			}))
 		}
 	}
-	rule, err := u.rule()
+	ans, err := fromSaved(s.reads, s.id)
 	if err != nil {
-		return none(s, ActRetry, "the definition of feedback did not load; the next run decides again: "+err.Error())
-	}
-	read := readHub{Hub: f.hub, pr: p, login: func() (string, error) { return u.login(f.host, f.hub) }}
-	ans, _, err := Ready(Sources{Ledger: u.Ledger, GitHub: func(h string) GitHub {
-		if h == f.host {
-			return read
-		}
-		return u.Hub(ctx, h)
-	}, Feedback: rule, Now: u.Now}, s.id)
-	if err != nil {
-		return none(s, ActRetry, "the evaluator's read did not answer; the next run decides again: "+err.Error())
+		return none(s, ActRetry, "the evaluator's read of the store did not answer; the next run decides again: "+err.Error())
 	}
 	if !ans.Ready {
+		if i := slices.IndexFunc(ans.Conditions, func(c Condition) bool { return c.Kind == KindGitHubUnread }); i >= 0 {
+			return u.withCarry(s, f, none(s, ActChecked, ans.Conditions[i].Detail+"; the record waits for the PR "+
+				"watch's next pass, which reads the PR whole"))
+		}
 		if owed, ok := u.admit(s, ans, asks); ok {
 			return u.withCarry(s, f, owed)
 		}
@@ -1578,26 +1493,20 @@ func (u *run) decideAtHead(ctx context.Context, s state, f fresh) plan {
 		for _, c := range ans.Conditions {
 			not = append(not, string(c.Kind))
 		}
-		held := "not ready: " + strings.Join(slices.Compact(not), ", ")
-		// GitHub moves no sign the PR watch reads when it computes a merge
-		// state, so a digest kept on one it had not computed could outlast the
-		// state it was kept on.
-		if slices.ContainsFunc(ans.Conditions, func(c Condition) bool {
-			return c.Kind == KindMergeState && c.Value == "UNKNOWN"
-		}) {
-			return u.withCarry(s, f, none(s, ActRetry, held+"; GitHub has not computed the PR's merge state yet, "+
-				"so the next run decides again"))
-		}
-		return u.withCarry(s, f, none(s, ActChecked, held))
+		return u.withCarry(s, f, none(s, ActChecked, "not ready: "+strings.Join(slices.Compact(not), ", ")))
 	}
-	return u.withCarry(s, f, doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.merge(s, f, ans, c) }))
+	if u.reread != s.id {
+		return plan{reread: true, out: RunOutcome{Bead: s.id, Action: ActChecked,
+			Detail: "ready on the saved read, so the one-PR update re-reads the PR before its merge"}}
+	}
+	return u.withCarry(s, f, doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.merge(ctx, s, f, ans, c) }))
 }
 
-// merge asks GitHub to merge a PR the evaluator found ready on the act's own
-// read, pinned to the head the answer judged, or to add it to its base's merge
-// queue where the base requires one. Whatever GitHub answers, the next run
-// decides the PR again on its own read.
-func (u *run) merge(s state, f fresh, ans Answer, c carriedOut) RunOutcome {
+// merge asks GitHub to merge a PR the evaluator found ready on the read the
+// one-PR update saved once it had re-read the PR in full for this act, pinned to
+// the head the answer judged, or to add it to its base's merge queue where the
+// base requires one. Whatever GitHub answers, the next run decides the PR again.
+func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedOut) RunOutcome {
 	// The merge request is the one act no guard can take back, so the bead is
 	// read once more just before it: a close or an assignment that took no lock
 	// and landed during the act's reads stops it here. One that lands after this
@@ -1615,16 +1524,17 @@ func (u *run) merge(s state, f fresh, ans Answer, c carriedOut) RunOutcome {
 		return RunOutcome{Bead: s.id, Action: ActMoved, Detail: withNote(
 			"the bead moved during the act's reads, so no merge was requested; the next run reads it as it stands", c.note)}
 	}
-	method, ask := "merge", f.hub.MergePullRequest
+	hub := u.Hub(ctx, f.host)
+	method, ask := "merge", hub.MergePullRequest
 	if f.pr.MergeQueueEnabled {
-		method, ask = "enqueue", f.hub.EnqueuePullRequest
+		method, ask = "enqueue", hub.EnqueuePullRequest
 	}
 	if err := ask(f.pr.ID, ans.Head); err != nil {
 		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf("the %s request at %s was refused "+
 			"or not answered; the next run decides again: %v", method, ans.Head, err), c.note)}
 	}
-	return RunOutcome{Bead: s.id, Action: ActRequested,
-		Detail: withNote(fmt.Sprintf("ready: the %s is requested at %s into %s", method, ans.Head, ans.Target), c.note)}
+	return RunOutcome{Bead: s.id, Action: ActRequested, Detail: withNote(fmt.Sprintf("ready on the PR's re-read: the "+
+		"%s is requested at %s into %s", method, ans.Head, ans.Target), c.note)}
 }
 
 // withNote is detail with the run's account of the record's withdrawals after
@@ -1636,7 +1546,7 @@ func withNote(detail, note string) string {
 	return detail + "; " + note
 }
 
-// decideMerged decides a PR the act's own read finds merged. A merge of the
+// decideMerged decides a PR the saved read shows merged. A merge of the
 // validated head is landed: the act fetches the target and closes the bead
 // once the merge commit is on it. A merge of another head is an exception, and
 // a recorded merge GitHub's facts contradict is another.

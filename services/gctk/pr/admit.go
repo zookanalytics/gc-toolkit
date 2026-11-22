@@ -59,7 +59,7 @@ const pourReserve = 10 * time.Second
 // gate that asks a person once two runs at its head ended without a result,
 // or why none is poured. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
-// validated head, on the act's own read of the PR, and asks the asks on the
+// validated head, on the read the PR watch saved, and asks the asks on the
 // bead. A run owed is held off, as checked, only while a run, a gate or
 // another writer holds the branch, and a read that did not answer, or a pour
 // this run cannot make, is a retry (ActRetry).

@@ -12,17 +12,38 @@ import (
 
 // A saved read is GitHub's side of the bead's PR only while it names the PR the
 // record names, at the head the store holds, with the bead's provenance instant
-// (specs/tk-1tfzr71.134/design.md, section 2). Each case saves the read Ready
-// made over a ready world, then moves the store the way its writers move it, and
-// asks FromStore.
+// (specs/tk-1tfzr71.134/design.md, section 2). Each case saves the read the
+// one-PR update makes over a ready world, then moves the store the way its
+// writers move it, and asks FromStore.
 
-// readSaved is the world's metadata carrying the GitHub read Ready makes over
-// the world as it stands.
+// readSaved is the world's metadata carrying the read the one-PR update saves
+// over the world as it stands, which the evaluator answers ready over.
 func (w *world) readSaved(t *testing.T) map[string]string {
 	t.Helper()
-	ans, read := w.live(t)
-	isReady(t, ans)
-	return w.withRead(t, read)
+	isReady(t, w.answer(t))
+	return w.savedMD(t)
+}
+
+// savedMD is the bead's metadata as the one-PR update left it, once answer has
+// had the update read the world's PR.
+func (w *world) savedMD(t *testing.T) map[string]string {
+	t.Helper()
+	row, ok := w.store.Row(bead)
+	if !ok {
+		t.Fatal("the store lost the bead")
+	}
+	return maps.Clone(row.Metadata)
+}
+
+// savedRead is the read the one-PR update saves over the world as it stands.
+func (w *world) savedRead(t *testing.T) *pr.SavedRead {
+	t.Helper()
+	w.answer(t)
+	var s pr.SavedRead
+	if err := json.Unmarshal([]byte(w.savedMD(t)["pr_github_read"]), &s); err != nil {
+		t.Fatalf("the saved read does not decode: %v", err)
+	}
+	return &s
 }
 
 // unread fails unless a is the answer for a side of GitHub's that is unread:
@@ -36,7 +57,7 @@ func unread(t *testing.T, a pr.Answer, store ...pr.Kind) {
 }
 
 func TestASavedReadIsCurrentOnlyAtTheHeadTheStoreHolds(t *testing.T) {
-	t.Run("the read Ready made, as saved, answers as Ready did", func(t *testing.T) {
+	t.Run("the read the one-PR update saved answers ready", func(t *testing.T) {
 		w := ready()
 		isReady(t, w.fromStore(t, w.readSaved(t)))
 	})
@@ -107,8 +128,8 @@ func TestAChangedHeadsReadIsCurrentAtTheObservedHead(t *testing.T) {
 	}
 	t.Run("at the head found", func(t *testing.T) {
 		w := changed()
-		_, read := w.live(t)
-		a := w.fromStore(t, w.withRead(t, read))
+		w.answer(t)
+		a := w.fromStore(t, w.savedMD(t))
 		only(t, a, pr.KindHead)
 		if a.Head != other {
 			t.Fatalf("judged head %q, want the observed head %q", a.Head, other)
@@ -122,8 +143,8 @@ func TestAChangedHeadsReadIsCurrentAtTheObservedHead(t *testing.T) {
 	})
 	t.Run("a publication of the head found makes it current again", func(t *testing.T) {
 		w := changed()
-		_, read := w.live(t)
-		md := w.withRead(t, read)
+		w.answer(t)
+		md := w.savedMD(t)
 		md["merge_result"], md["pr_head_sha"] = "pull_request_pending", other
 		delete(md, "observed_pr_head_sha")
 		isReadyAt(t, w.fromStore(t, md), other)
@@ -151,8 +172,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := ready()
-			_, read := w.live(t)
-			s := saveRead(read)
+			s := w.savedRead(t)
 			edit(s)
 			raw, err := json.Marshal(s)
 			if err != nil {
@@ -165,8 +185,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 	}
 	t.Run("no labels, which the rule does not read", func(t *testing.T) {
 		w := ready()
-		_, read := w.live(t)
-		s := saveRead(read)
+		s := w.savedRead(t)
 		s.Labels = nil
 		raw, err := json.Marshal(s)
 		if err != nil {

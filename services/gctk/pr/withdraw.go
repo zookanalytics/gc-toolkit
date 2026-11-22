@@ -17,13 +17,13 @@ import (
 // triage rules a head of a PR a material change, it files a withdrawal with
 // Withdraw: a bead that blocks the bead that owns the PR and names the head in
 // withdraw_head, so the evaluator holds the PR from the moment it is filed. The
-// landing order carries it out on the act's own reads of the PR. It reads the
-// PR's reviews, waits while an approval it would dismiss carries feedback the
-// intake has not routed, on its read of the PR's review threads, dismisses each
-// approval that stands on a commit that does not contain the head, and closes
-// the withdrawal once its read of the reviews after the dismissals shows none
-// standing past the ones it dismissed. It files a human gate on the bead when
-// GitHub refuses a dismissal.
+// landing order carries it out on the act's own reads of what it dismisses. It
+// reads the PR's reviews, waits while an approval it would dismiss carries
+// feedback the intake has not routed, on its read of the PR's review threads,
+// dismisses each approval that stands on a commit that does not contain the
+// head, and closes the withdrawal once its read of the reviews after the
+// dismissals shows none standing past the ones it dismissed. It files a human
+// gate on the bead when GitHub refuses a dismissal.
 //
 // A withdrawal holds the bead from the refinery as any wait does, so the
 // record stays marked while one is open, and the order reads it on every run
@@ -374,10 +374,10 @@ func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []
 }
 
 // withCarry makes p carry out the record's open withdrawals first, on the act's
-// own reads of the PR f found. When p owes no act, the carry is the record's
+// own reads of the PR f names. When p owes no act, the carry is the record's
 // act, and its account rides p's outcome, a retry when a step of it did not
 // complete.
-func (u *run) withCarry(s state, f fresh, p plan) plan {
+func (u *run) withCarry(s state, f seen, p plan) plan {
 	if !withdrawing(s) {
 		return p
 	}
@@ -398,9 +398,10 @@ func (u *run) withCarry(s state, f fresh, p plan) plan {
 }
 
 // carry carries out each open withdrawal on the record s read, oldest first,
-// on the act's own read of the PR's reviews. It returns its account, whether a
-// withdrawal is still open, and whether a step did not complete.
-func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
+// on the act's own read of the PR's reviews, made through the hub of f's host
+// within ctx. It returns its account, whether a withdrawal is still open, and
+// whether a step did not complete.
+func (u *run) carry(ctx context.Context, s state, f seen) carriedOut {
 	var open []withdrawal
 	for _, w := range s.withdrawals {
 		if w.open {
@@ -410,7 +411,8 @@ func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
 	if len(open) == 0 {
 		return carriedOut{}
 	}
-	reviews, err := f.hub.Reviews(s.rec.Repo, f.pr.Number)
+	hub := u.Hub(ctx, f.host)
+	reviews, err := hub.Reviews(s.rec.Repo, f.pr.Number)
 	if err != nil {
 		return carriedOut{note: fmt.Sprintf("%s waits for the next run: the act's own read of the PR's reviews did not "+
 			"answer: %v", names(open), err), held: true, failed: true}
@@ -421,7 +423,7 @@ func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
 	for _, w := range open {
 		var note string
 		var still, failed bool
-		note, still, failed, reviews = u.carryOne(ctx, s, f, w, reviews, gone)
+		note, still, failed, reviews = u.carryOne(ctx, s, f, hub, w, reviews, gone)
 		said = append(said, note)
 		out.held = out.held || still
 		out.failed = out.failed || failed
@@ -437,8 +439,8 @@ func (u *run) carry(ctx context.Context, s state, f fresh) carriedOut {
 // shows none of them carrying feedback the intake has not routed, reads the
 // reviews again, and closes w once none stands. It returns its account,
 // whether w is still open, whether a step did not complete, and the reviews as
-// it last read them.
-func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {
+// it last read them. Its reads and requests go through hub.
+func (u *run) carryOne(ctx context.Context, s state, f seen, hub Hub, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
 	waits := func(why string, failed bool) (string, bool, bool, []gh.Review) {
 		return at + " waits for a later run: " + why, true, failed, reviews
@@ -462,7 +464,7 @@ func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, revi
 	if len(targets) > 0 {
 		// A dismissal retires the inline comments of the review it dismisses, so
 		// it waits while one of them is feedback the intake has not routed.
-		unread, err := u.readUnrouted(s, f.host, f.hub, p.Number, targets)
+		unread, err := u.readUnrouted(s, f.host, hub, p.Number, targets)
 		if err != nil {
 			return waits("the act's own read of the PR's review threads did not answer, and no approval is dismissed "+
 				"without it: "+err.Error(), true)
@@ -487,7 +489,7 @@ func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, revi
 				unanswered = append(unanswered, a)
 				continue
 			}
-			switch err := f.hub.DismissReview(s.rec.Repo, p.Number, a.ID, message+"\n\n"+mark); {
+			switch err := hub.DismissReview(s.rec.Repo, p.Number, a.ID, message+"\n\n"+mark); {
 			case err == nil:
 				gone[a.ID] = true
 			case gh.Refused(err):
@@ -514,7 +516,7 @@ func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, revi
 		// An approval given since the act's first read is in no target, and a
 		// closed withdrawal dismisses nothing more, so the close waits on a read
 		// of the reviews made after the dismissals.
-		again, err := f.hub.Reviews(s.rec.Repo, p.Number)
+		again, err := hub.Reviews(s.rec.Repo, p.Number)
 		if err != nil {
 			return waits("the act's read of the PR's reviews after its dismissals did not answer, and the withdrawal "+
 				"closes only on it: "+err.Error(), true)
@@ -526,8 +528,7 @@ func (u *run) carryOne(ctx context.Context, s state, f fresh, w withdrawal, revi
 		}
 		if len(left) > 0 {
 			return waits(fmt.Sprintf("the reviews read after the dismissals show %s standing on a commit without the "+
-				"head, which a run dismisses once the PR watch saves the reviews that moved, or the record's hour is up",
-				approvalNames(left)), false)
+				"head, which a later run dismisses", approvalNames(left)), false)
 		}
 	}
 	note := fmt.Sprintf("The landing order carried out this withdrawal (%s): ", u.stamp())

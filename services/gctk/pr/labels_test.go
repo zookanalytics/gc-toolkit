@@ -153,9 +153,8 @@ func newLabeled(t *testing.T, shows []string) *labeled {
 
 // run runs the landing order once and returns its outcomes, failing unless it
 // returns an error exactly when an act did not complete. It fails too if the
-// run wrote the store, or read GitHub other than one read of a PR for each
-// outcome, since a label write writes nothing on the bead and reads only the
-// PR, which its writer reads the labels of itself.
+// run wrote the store or read GitHub, since a label write writes nothing on the
+// bead and reads nothing of the PR, whose labels its writer reads itself.
 func (d *labeled) run(t *testing.T, o pr.Options) []pr.RunOutcome {
 	t.Helper()
 	reads, writes := len(d.github.Reads()), len(d.store.Writes())
@@ -165,7 +164,7 @@ func (d *labeled) run(t *testing.T, o pr.Options) []pr.RunOutcome {
 	if (err != nil) != owed {
 		t.Fatalf("Reconcile returned %v over the outcomes %+v", err, out)
 	}
-	if got := d.github.Reads()[reads:]; len(got) > len(out) || slices.ContainsFunc(got, func(r string) bool { return r != "PullRequest" }) {
+	if got := d.github.Reads()[reads:]; len(got) != 0 {
 		t.Fatalf("the run read GitHub %v over the outcomes %+v", got, out)
 	}
 	if got := d.store.Writes()[writes:]; len(got) != 0 {
@@ -187,7 +186,7 @@ func one(t *testing.T, out []pr.RunOutcome, action string) pr.RunOutcome {
 // The landing order writes the labels the store derives where the ones the PR
 // shows differ: it adds a derived label the PR lacks, and takes off a label of
 // the writer's that the store no longer derives, leaving every other label.
-// It reads the PR's state itself and hands the writer no labels, so the writer
+// It reads nothing of the PR and hands the writer no labels, so the writer
 // reads them itself. Once the PR watch saves what the writer wrote, the next
 // run finds nothing to write.
 func TestTheLandingOrderWritesTheLabelsTheStoreDerives(t *testing.T) {
@@ -262,23 +261,28 @@ func TestTheLandingOrderClearsAPRThatMergedOrClosed(t *testing.T) {
 	}
 }
 
-// The run writes a PR's labels on its own read of the PR: one the saved read
-// gives closed that is open again has the labels the store derives written,
-// not cleared.
-func TestALabelWriteIsDecidedOnTheActsOwnReadOfThePR(t *testing.T) {
+// The run writes a PR's labels on the saved read, with no read of the PR: one
+// the saved read gives closed has the city's labels cleared, though GitHub has
+// it open again, and once the watch saves it open, the next run writes the
+// labels the store derives.
+func TestALabelWriteIsDecidedOnTheSavedRead(t *testing.T) {
 	d := newLabeled(t, []string{"status: merging", "bug"})
 	d.pr.Facts.State = "CLOSED"
 	updated(t, d.poll(t), "pr")
 	d.pr.Facts.State = "OPEN"
 	o := one(t, d.run(t, pr.Options{}), pr.ActLabeled)
-	if !strings.Contains(o.Detail, "is open again") {
+	if !strings.Contains(o.Detail, "is closed") {
 		t.Errorf("the outcome says %q", o.Detail)
 	}
-	if got := d.lw.made(); !slices.Equal(got, []string{"reconcile tk-1 github.com/acme/widgets#7 []"}) {
-		t.Fatalf("the writer was asked %q, want the derived labels written", got)
+	if got := d.lw.made(); !slices.Equal(got, []string{"clear github.com/acme/widgets#7 []"}) {
+		t.Fatalf("the writer was asked %q, want the labels cleared on the saved read", got)
 	}
-	if got := slices.Sorted(slices.Values(d.pr.Labels)); !slices.Equal(got, []string{"bug", "status: merging"}) {
-		t.Fatalf("the PR shows %q", got)
+	if rep := d.poll(t); len(rep.Failed) != 0 {
+		t.Fatalf("the pass failed %v", rep.Failed)
+	}
+	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	if got := d.lw.made(); len(got) != 2 || got[1] != "reconcile tk-1 github.com/acme/widgets#7 []" {
+		t.Fatalf("the writer was asked %q, want the derived labels written once the watch saved the PR open", got)
 	}
 }
 

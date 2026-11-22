@@ -1,14 +1,15 @@
 // Package pr is gctk's pr domain: the pull request a bead owns
 // (docs/gctk-architecture.md). Its evaluator is the one definition of whether a
 // PR is ready to merge at its current revision: one rule over the bead's side,
-// read from the store, and GitHub's side of the PR at one head. [Ready] decides
-// over GitHub's side read live, and the landing order acts on its answer.
-// [FromStore] decides over the read the one-PR update ([Watcher.Refresh])
-// saved on the bead, and reads no GitHub. Each answers ready, with the head and
-// the target it judged, or the conditions not met, which prstatus renders as
-// the PR's status. The answer is computed at each read and stored nowhere, so
-// no answer stands as a permission on a commit another PR shares, and what the
-// update saves is GitHub's facts, which grant nothing.
+// read from the store, and GitHub's side of the PR at one head, as the read the
+// one-PR update ([Watcher.Refresh]) saved on the bead holds it. [FromStore]
+// decides over that read and reads no GitHub: the displays read its answer, and
+// the landing order acts on it, deciding a merge on the read the update saves
+// once it has re-read the PR in full ([Watcher.Reread]). It answers ready, with
+// the head and the target it judged, or the conditions not met, which prstatus
+// renders as the PR's status. The answer is computed at each read and stored
+// nowhere, so no answer stands as a permission on a commit another PR shares,
+// and what the update saves is GitHub's facts, which grant nothing.
 //
 // The bead's side is its pending record and branch, the holds set by hand, its
 // own waits through waits, the open beads whose anchor_bead names it, the
@@ -30,7 +31,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -122,52 +122,20 @@ type Answer struct {
 	ReviewResult *review.Result `json:"review_result,omitempty"`
 }
 
-// GitHub is the reads the evaluator makes of GitHub, which the gh
-// adapter's Client carries out and its fake answers.
+// GitHub is the reads of GitHub an act makes of what it changes, which the gh
+// adapter's Client carries out and its fake answers: the PR a return to draft
+// reads, and the reviews, review threads and login a withdrawal reads before
+// it dismisses an approval.
 type GitHub interface {
 	PullRequest(repo string, number int) (*gh.PullRequest, error)
 	Reviews(repo string, number int) ([]gh.Review, error)
-	CheckSuites(repo, oid string, number int) ([]gh.CheckSuite, error)
 	ReviewThreads(repo string, number int) ([]gh.Thread, error)
-	IssueComments(repo string, number int) ([]gh.IssueComment, error)
 	Login() (string, error)
-}
-
-// Sources are where the evaluator reads live: the store, through the ledger;
-// GitHub, through the reads GitHub returns for the host a PR's URL names; and
-// the pack's definition of feedback, loaded in the rig's checkout. Now stamps
-// the GitHub read, the system's clock when nil.
-type Sources struct {
-	Ledger   *ledger.Ledger
-	GitHub   func(host string) GitHub
-	Feedback Feedback
-	Now      func() time.Time
 }
 
 // OnRecord reports whether a bead whose merge_result is v owns a PR on Gas
 // Town's pending record, the PRs the evaluator answers for.
 func OnRecord(v string) bool { return record.OnRecord(v) }
-
-// Ready answers whether the PR the bead owns is ready to merge at its current
-// revision, over GitHub's side read live, and returns the GitHub read it made.
-// It reads the bead's side, observes GitHub and decides. A read that fails
-// returns its error and no answer. A bead with no complete pending record is
-// not ready, and its answer says what the record lacks without reading GitHub,
-// so it returns no read.
-func Ready(src Sources, bead string) (Answer, *GitHubRead, error) {
-	b, _, err := readSide(src.Ledger.Pass(), bead)
-	if err != nil {
-		return Answer{}, nil, err
-	}
-	if len(b.missing) > 0 {
-		return decide(b, nil), nil, nil
-	}
-	read, err := observe(src.GitHub(b.host), src.Feedback, b.rec.Repo, b.number, b.since, stamp(src.Now))
-	if err != nil {
-		return Answer{}, nil, err
-	}
-	return decide(b, read), read, nil
-}
 
 // recordGaps names what a pending record lacks to name its PR, the one reading
 // of a whole record that the evaluator and the landing order share: a PR URL,

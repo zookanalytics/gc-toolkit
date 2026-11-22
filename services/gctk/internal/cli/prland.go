@@ -349,9 +349,11 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 
 // landing builds the pr domain's Landing over the city's adapters: the store
 // at db, else the one gc routes the first of ids to, the record lock in that
-// store's .beads directory, GitHub through gh, the clone at $GC_RIG_ROOT else
-// the working directory, the pack's definition of feedback, loaded in that
-// clone, and the runtime adapter for human gates, for the city's mark, which
+// store's .beads directory, GitHub through gh, the PR watch's one-PR update over
+// the same store for the re-read a merge makes first, waiting for the record
+// lock no longer than the act has left, the clone at $GC_RIG_ROOT else the
+// working directory, the pack's definition of feedback, loaded in that clone,
+// and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
 // so gc resolves the rig's store there, for the disposition writer, which runs
 // as the refinery, for the refinery's wake, for the labels' writer, and, where
@@ -377,18 +379,28 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if carriesSeedAudit(dir) {
 		audit = seedAudit{rt: rt.In(dir), dir: dir}
 	}
+	rule := func() (pr.Feedback, error) {
+		rule, err := feedbackIn(dir)
+		if err != nil {
+			return nil, err
+		}
+		return rule, nil
+	}
 	return pr.Landing{
 		Ledger:   l,
 		Dir:      db,
 		Refinery: refinery,
 		Hub:      func(ctx context.Context, host string) pr.Hub { return gh.New(host).Within(ctx) },
-		Feedback: func() (pr.Feedback, error) {
-			rule, err := feedbackIn(dir)
-			if err != nil {
-				return nil, err
+		Reread: func(ctx context.Context, url string) error {
+			wait := watchLockWait
+			if end, ok := ctx.Deadline(); ok {
+				wait = min(wait, time.Until(end))
 			}
-			return rule, nil
+			_, err := pr.Watcher{Ledger: l.Within(ctx), Dir: db, Feedback: rule, Wait: wait,
+				GitHub: func(host string) pr.Watch { return gh.New(host).Within(ctx) }}.Reread(url)
+			return err
 		},
+		Feedback:     rule,
 		Mark:         func() (string, error) { return cityMark(rt) },
 		Checkout:     checkout{dir: dir},
 		Gates:        actGates{rt: rt},

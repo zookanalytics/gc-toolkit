@@ -15,11 +15,11 @@ import (
 // the city onto an open PR's branch returns the PR to draft with Draft before it
 // pushes, so the round's first push finds the PR ready and converts it, and a
 // later push finds it a draft and changes nothing. The landing order makes the
-// ready transition, in its run (readyBar), from the draft flag its act reads.
-// Each transition reads the draft flag first and changes it only
-// when it differs, so a retry, a restart or a person's own toggle leaves the
-// cycle to finish from where the PR stands. A return to draft dismisses no
-// approval.
+// ready transition, in its run (readyBar), from the draft flag the read the PR
+// watch saved shows. Each transition changes the draft flag only when it reads
+// it as other than the one it sets, so a retry, a restart or a person's own
+// toggle leaves the cycle to finish from where the PR stands. A return to draft
+// dismisses no approval.
 
 // Drafted is what Draft found and did: the PR it read, and whether it converted
 // the PR to draft, which it does only when the PR was ready.
@@ -104,8 +104,8 @@ func undraftable(p *gh.PullRequest, branch string) string {
 }
 
 // readyBar says why the run does not mark a draft ready, and is empty when it
-// marks it: the act's own read finds the PR a draft open at the head the
-// refinery validated, the record is pending there, a passed result of the
+// marks it: the saved read shows the PR a draft open at the head the refinery
+// validated, the record is pending there, a passed result of the
 // review loop names that head and the PR's target, no review run is attached
 // to the bead and no ask a run can take is open on it, so the order has no run
 // to pour for it. An ask that something holds starts no round until a run can

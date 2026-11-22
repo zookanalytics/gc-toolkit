@@ -14,14 +14,15 @@ import (
 )
 
 // The PRs' status: and held: labels, kept by comparison
-// (specs/tk-1tfzr71.149/design.md, section 9). The landing order compares the
-// labels the one-PR update saved on each owned PR's bead with the ones the
-// store derives, and where they differ, it reads the PR itself and has the
-// labels' one writer write them on that read, reading the PR's labels itself:
-// the derived labels on an open PR, and none on one that merged or closed. The
-// net searches the rig's repository for the city's labels on PRs no live bead
-// owns, and has the writer clear them. Nothing records a write that does not
-// land: the difference stays, and a later run writes it again.
+// (specs/tk-1tfzr71.149/design.md, section 9). A label is a view of the saved
+// read and the store. The landing order compares the labels the one-PR update
+// saved on each owned PR's bead with the ones the store derives, and where they
+// differ, it has the labels' one writer write them, which reads the PR's labels
+// itself: the derived labels on a PR the saved read shows open, and none on one
+// it shows merged or closed. The net searches the rig's repository for the
+// city's labels on PRs no live bead owns, and has the writer clear them.
+// Nothing records a write that does not land, or one a saved read out of date
+// made wrong: the difference stays, and a later run writes it again.
 
 // Labels is the PRs' labels as the store derives them and their one writer
 // keeps them (assets/scripts/pr-status-label.sh). The derivation is prstatus's,
@@ -152,46 +153,35 @@ func shown(labels []string) string {
 	return strings.Join(labels, ", ")
 }
 
-// writeLabels makes the write w owes on the act's own read of the PR, through
-// the labels' writer, which reads the PR's labels itself, all stopped at stop:
-// the labels the store derives on a PR the read finds open, and none on one it
-// finds merged or closed. A read or a write that does not land records
-// nothing, so the next run finds the same difference and writes it again.
+// writeLabels makes the write w owes through the labels' writer, which reads
+// the PR's labels itself, stopped at stop: the labels the store derives on a PR
+// the saved read shows open, and none on one it shows merged or closed. It
+// reads nothing of the PR first. A write that does not land records nothing, so
+// the next run finds the same difference and writes it again.
 func (u *run) writeLabels(w labelWrite, stop time.Duration) RunOutcome {
 	ctx, cancel := context.Background(), context.CancelFunc(func() {})
 	if stop > 0 {
 		ctx, cancel = context.WithTimeout(ctx, stop)
 	}
 	defer cancel()
-	retry := func(why string) RunOutcome {
+	var err error
+	var done string
+	if w.ended != "" {
+		err = u.Labels.Clear(ctx, w.host, w.repo, w.number, nil)
+		done = fmt.Sprintf("%s is %s and showed %s, so the labels' writer took them off",
+			w.url, strings.ToLower(w.ended), shown(w.have))
+	} else {
+		err = u.Labels.Reconcile(ctx, w.bead, w.host, w.repo, w.number, nil)
+		done = fmt.Sprintf("%s showed %s where the store derives %s, so the labels' writer wrote them",
+			w.url, shown(w.have), shown(w.want))
+	}
+	if err != nil {
+		why := err.Error()
 		if ctx.Err() != nil {
 			why = fmt.Sprintf("the act was stopped at its %s: %s", stop, why)
 		}
 		return RunOutcome{Bead: w.bead, Action: ActRetry, Detail: fmt.Sprintf("the labels of %s did not land, and "+
 			"nothing records it, so the next run compares them again: %s", w.url, why)}
-	}
-	p, err := u.Hub(ctx, w.host).PullRequest(w.repo, w.number)
-	if err != nil {
-		return retry("the act's own read of the PR did not answer: " + err.Error())
-	}
-	var done string
-	switch p.State {
-	case "MERGED", "CLOSED":
-		err = u.Labels.Clear(ctx, w.host, w.repo, w.number, nil)
-		done = fmt.Sprintf("%s is %s and showed %s, so the labels' writer took them off",
-			w.url, strings.ToLower(p.State), shown(w.have))
-	case "OPEN":
-		err = u.Labels.Reconcile(ctx, w.bead, w.host, w.repo, w.number, nil)
-		done = fmt.Sprintf("%s showed %s where the store derives %s, so the labels' writer wrote them",
-			w.url, shown(w.have), shown(w.want))
-		if w.ended != "" {
-			done = fmt.Sprintf("%s is open again, so the labels' writer wrote the ones the store derives", w.url)
-		}
-	default:
-		return retry(fmt.Sprintf("GitHub gives the PR's state as %q, which is no state the comparison knows", p.State))
-	}
-	if err != nil {
-		return retry(err.Error())
 	}
 	return RunOutcome{Bead: w.bead, Action: ActLabeled, Detail: done}
 }

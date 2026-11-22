@@ -227,67 +227,6 @@ verbs it has, and the net calls `clear` for a PR no bead owns. They add no verb
 and no key, and retire none of the old path's callers, which their own beads
 retire (design, section 9).
 
-## The landing order's digest of what it last decided a record on (the three uses' rework)
-
-Read on 2026-11-20, for the rework the operator ruled in conversation
-tk-k2ebtki: the landing order decides each act that depends on GitHub on its
-own read, and uses the PR watch's output and the store only to choose which
-records to decide. The need: tell, with no read of GitHub, whether anything a
-record's last decision read has changed since, on GitHub through the read the
-watch saved or in the store, where the decision reads the bead, the beads its
-blocks edges name, what holds each ask on it, the work anchored to it and the
-other open work on its branch. A record whose decision owed no act and whose
-inputs have not changed is not decided again, and one whose act did not
-complete is decided again with nothing recording that it failed.
-
-- **bd's revision.** bd keeps a token per bead, `RowVersion` in
-  `internal/types/types.go` at `gastownhall/beads` tag v1.3.4, the build the
-  city runs (`bd version 1.3.4`). Its own doc says it is equality-only, that
-  its coverage is deliberately partial (claim, close, unclaim and the generic
-  update path, and not label-only or reopen writes), and that it is published
-  only on the detail view, as `revision` (`IssueDetails.Revision`). The
-  listing the ledger reads, `bd list --json`, carries no revision. Not
-  covered: it covers one bead's row, and a decision's inputs span other beads,
-  so a blocker that closes or a gate that clears an ask moves no revision of
-  the PR's bead. The order's own write would move it too.
-- **bd's `updated_at`.** Every write to a bead moves it, the order's own
-  included, and a change to another bead, such as a blocker's close, does not.
-  Not covered, for the same reasons.
-- **Gas City's event cursor.** An event order keeps one cursor over the event
-  log for the whole order, set to the log's head before its command runs, with
-  no filter on the payload (`checkEvent` and `dispatchExec`, above). Not
-  covered: it says that some event came, not which record's inputs changed, and
-  only writers that emit are seen (the section above on what runs each order).
-- **A queue of changed records.** None exists (above). Not covered.
-
-Conclusion: none covers it. The landing order keeps one key on the bead,
-`pr_landing_digest`, which only it writes and reads: the digest of what the
-decision read of the store, the saved read among it, written after a decision
-that owed no act. A run decides a record when the digest of what it reads now
-differs. An act that does not complete writes no digest, so the record stays
-due, and a decision whose act changed the record leaves a digest the next run
-finds different, so that run decides the record again. Nothing clears it,
-since a digest that matches nothing makes the record due.
-
-The second rework, which the operator ruled on 2026-11-20 in conversation
-tk-k2ebtki, has the order decide each record again at least once an hour,
-whatever the digest, so a change the digest does not show waits an hour at
-most, and a decision made for any reason starts the hour again. The need is a
-clock for each record that a run reads with no read of GitHub.
-
-- **Gas City's cooldown.** `checkCooldown` in `internal/orders/triggers.go`,
-  read at `gastownhall/gascity` main e6e47235027b, times an order by its own
-  last run (`lastRunFn(a.ScopedName())`): one clock for the order, and none for
-  a record. Not covered.
-- **bd's `updated_at`.** Every write to the bead moves it (above), the PR
-  watch's saves among them, which decide nothing, so it would start the hour
-  again on a write no decision made. Not covered.
-
-Conclusion: none covers it. The order keeps the decision's time beside the
-digest in the key it already keeps, `pr_landing_digest`, now one JSON object
-of `digest` and `at`, and a run decides a record whose kept time is an hour old
-or older. No key is added.
-
 ## The board's line saying when GitHub was last asked (unit 5)
 
 The need: one value, for each rig, saying when the cheap question last read

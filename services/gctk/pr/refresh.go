@@ -24,9 +24,10 @@ import (
 // gh.FullReadBatch PRs, and runs the update for each PR whose read differs
 // from the read saved on its bead, which catches the changes no sign shows.
 // The update reads only the parts of the PR its caller names and saves them on
-// the bead that owns the PR. It is the one writer of the saved read, and of Gas
-// Town's pr_state and pr_last_checked_at on a bead on the pending record. A
-// pass in which nothing moved or differs writes no bead.
+// the bead that owns the PR. The landing order has it read every part of a PR,
+// Reread, before it requests the PR's merge. It is the one writer of the saved
+// read, and of Gas Town's pr_state and pr_last_checked_at on a bead on the
+// pending record. A pass in which nothing moved or differs writes no bead.
 
 // Watch is GitHub as the PR watch reads it: the cheap question and the net's
 // full read over many PRs, a PR's own facts with or without the checks at its
@@ -216,7 +217,27 @@ func one(owners []owned, url string) (owned, error) {
 // finds the live bead that owns the PR at url, in any spelling of the PR's URL,
 // reads the PR's signs itself, and reads and saves what they say moved. A PR no
 // live bead owns has nothing to save, which it reports with no error.
-func (w Watcher) Refresh(url string) (Refreshed, error) {
+func (w Watcher) Refresh(url string) (Refreshed, error) { return w.refresh(url, false) }
+
+// Reread is the one-PR update over every part of the PR at url, whatever its
+// signs say, as the landing order has it before it requests the PR's merge: it
+// reads the PR's signs, its own facts with the checks at its head, its
+// conversation and its labels, and saves them as Refresh does. Once it returns
+// with no error, the read saved on the bead is this one or a newer one, since
+// the update never saves a part read before the saved one. A PR no live bead
+// owns has nothing to save, which is an error here, since the merge it is read
+// for has no bead to decide on.
+func (w Watcher) Reread(url string) (Refreshed, error) {
+	done, err := w.refresh(url, true)
+	if err == nil && done.Action == ActUnowned {
+		return done, fmt.Errorf("%s: %s", url, done.Detail)
+	}
+	return done, err
+}
+
+// refresh is the one-PR update of the PR at url, over every part when whole is
+// set and over the parts its signs say moved otherwise.
+func (w Watcher) refresh(url string, whole bool) (Refreshed, error) {
 	host, repo, number, ok := record.ParseURL(url)
 	if !ok {
 		return Refreshed{}, fmt.Errorf("%q is not a pull request's URL (https://<host>/<owner>/<repo>/pull/<number>)", url)
@@ -243,7 +264,11 @@ func (w Watcher) Refresh(url string) (Refreshed, error) {
 	if !ok {
 		return Refreshed{URL: url, Bead: o.id}, errors.New("GitHub returned no signs for the PR")
 	}
-	return u.update(o, hub, s, at, moved(o.saved, s, o.stale()))
+	due := every
+	if !whole {
+		due = moved(o.saved, s, o.stale())
+	}
+	return u.update(o, hub, s, at, due)
 }
 
 // update is the one-PR update over the parts due names, with the signs s, which

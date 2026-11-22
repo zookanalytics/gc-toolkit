@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"math/rand/v2"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -126,11 +125,30 @@ func TestTheFirstPassReadsAndSavesEveryPart(t *testing.T) {
 		t.Fatalf("pr_last_checked_at %q is not the update's stamp to the second", at)
 	}
 
-	// The saved read answers as the live read does.
-	md := maps.Clone(b.Metadata)
-	live, _ := d.live(t)
-	if got := d.fromStore(t, md); !reflect.DeepEqual(got, live) {
-		t.Fatalf("over the saved read the rule answers\n%+v\nand live\n%+v", got, live)
+	// The evaluator answers the saved read ready, as it is.
+	isReady(t, d.fromStore(t, maps.Clone(b.Metadata)))
+}
+
+// A re-read reads every part of the PR, whatever its signs say, as the landing
+// order has it before a merge request, and saves the instant of each part that
+// holds what the bead holds. A PR no live bead owns is an error, since there is
+// no bead to decide its merge on.
+func TestAReReadReadsEveryPartWhateverItsSignsSay(t *testing.T) {
+	d := newWatched(t)
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	before := len(d.github.Reads())
+	done, err := d.w.Reread(prURL)
+	if err != nil {
+		t.Fatalf("the re-read: %v", err)
+	}
+	if got := d.github.Reads()[before:]; !slices.Equal(got, []string{"Signs", "PullRequestPart+checks", "Login", "Conversation"}) {
+		t.Fatalf("the re-read read %v, want every part", got)
+	}
+	if done.Action != pr.ActSaved || !strings.Contains(done.Detail, "saved its instant") {
+		t.Fatalf("the re-read of an unmoved PR %s (%s), want its instant saved", done.Action, done.Detail)
+	}
+	if _, err := d.w.Reread("https://github.com/acme/widgets/pull/9"); err == nil {
+		t.Fatal("a re-read of a PR no live bead owns returned no error")
 	}
 }
 

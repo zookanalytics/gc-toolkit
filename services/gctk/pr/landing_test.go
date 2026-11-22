@@ -28,18 +28,19 @@ import (
 // gascity-packs 7f86098c04ea (gastown/tests/test_pr_merge_reconcile.sh), each
 // named for the case it ports, and add the pack's: the merge request, the merge
 // queue, the order of the record's writers under the store's record lock, and
-// the run that decides each record on its own read once it changed or its hour
-// is up (specs/tk-1tfzr71.149/design.md, section 5).
+// the run that decides each record on the read the PR watch saved, which re-reads
+// a PR in full only before its merge (specs/tk-1tfzr71.149/design.md, section
+// 5).
 // Gas Town's cases about its artifact cleanup after the close, its REST lookup
 // without gh, its witness's wake of the refinery and its formula's wiring have
 // no counterpart: the pack runs no artifact cleanup, reads GitHub through gh,
 // runs the order with no agent, and the refinery's formula is unit 4's.
 //
-// A run decides a record on its own read of the PR, once the store, the read
-// the one-PR update saved on the bead among it, changed since a run decided it
-// with no act owed, or once that decision is an hour old. So a case that
-// changes GitHub has the PR watch save it first (once), as its next pass would,
-// and asserts on what the run itself read and wrote.
+// A run decides every record on the read the one-PR update saved on its bead
+// and the store, and reads GitHub first only for a merge, through the update's
+// re-read of the PR in full. So a case that changes GitHub has the PR watch save
+// it first (once), as its next pass would, and asserts on what the run itself
+// read and wrote.
 
 const (
 	refinery = "rig/refinery"
@@ -281,6 +282,10 @@ func newLand(t *testing.T) *land {
 		Dir:      dir,
 		Refinery: refinery,
 		Hub:      func(context.Context, string) pr.Hub { return w.github },
+		Reread: func(_ context.Context, url string) error {
+			_, err := d.watch.Reread(url)
+			return err
+		},
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
 		Checkout: co,
 		Gates:    g,
@@ -379,31 +384,29 @@ func readsNoGitHub(t *testing.T, d *land) {
 	}
 }
 
-// readsThePR fails unless the last run's reads of GitHub were want, the act's
-// own read of the PR alone when want is empty.
-func readsThePR(t *testing.T, d *land, want ...string) {
+// rereadReads are the reads of GitHub the one-PR update's re-read of a PR in
+// full makes, the one check a merge makes of GitHub first.
+var rereadReads = []string{"Signs", "PullRequestPart+checks", "Login", "Conversation"}
+
+// rereads fails unless the last run's reads of GitHub were a merge's re-read
+// alone.
+func rereads(t *testing.T, d *land) {
 	t.Helper()
-	if want == nil {
-		want = []string{"PullRequest"}
-	}
-	if reads := d.runReads(); !slices.Equal(reads, want) {
-		t.Fatalf("the run read GitHub %v, want %v", reads, want)
+	if reads := d.runReads(); !slices.Equal(reads, rereadReads) {
+		t.Fatalf("the run read GitHub %v, want the one-PR update's re-read %v", reads, rereadReads)
 	}
 }
 
-// keptDigest reports whether ws is the one write a decision that owed no act
-// makes: the digest of what it decided on, guarded on what the run read.
-func keptDigest(ws []fake.Write) bool {
-	if len(ws) != 1 {
-		return false
-	}
-	var set []string
-	for _, a := range ws[0].Args {
-		if !strings.HasPrefix(a, "--if-") {
-			set = append(set, a)
+// actWrites is each store write the last run made but the one-PR update's,
+// which saves the read on the bead for a merge's re-read.
+func (d *land) actWrites() []fake.Write {
+	var out []fake.Write
+	for _, w := range d.runWrites() {
+		if !slices.ContainsFunc(w.Args, func(a string) bool { return strings.HasPrefix(a, "pr_github_read=") }) {
+			out = append(out, w)
 		}
 	}
-	return len(set) == 2 && set[0] == "--set-metadata" && strings.HasPrefix(set[1], "pr_landing_digest=")
+	return out
 }
 
 func is(t *testing.T, o pr.RunOutcome, action string) {
@@ -531,87 +534,19 @@ func TestOpenUnchangedPRStaysBlocked(t *testing.T) {
 		t.Fatalf("an unchanged open PR left the bead %s under %q", b.Status, b.Assignee)
 	}
 	meta(t, b, map[string]string{"pr_state": "open", "pr_reconcile_pending": "true"})
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("the run decided without its own read of the PR: %v", reads)
-	}
-	if ws := d.runWrites(); !keptDigest(ws) {
-		t.Fatalf("a record that owes no act was written %+v, want the digest of what the run decided on", ws)
+	readsNoGitHub(t, d)
+	if ws := d.runWrites(); len(ws) != 0 {
+		t.Fatalf("a record that owes no act was written %+v", ws)
 	}
 	if len(d.github.Asks()) != 0 {
 		t.Fatalf("a PR the evaluator holds was asked to merge: %v", asks(d.github))
 	}
 	// Nothing moved on GitHub and nothing changed in the store, so the next run
-	// asks GitHub nothing and writes nothing.
-	o := d.run(t)
-	is(t, o, pr.ActChecked)
-	if !strings.Contains(o.Detail, "nothing the decision reads of the store, the PR watch's saved read among it, changed") {
-		t.Fatalf("an unchanged record says %q", o.Detail)
-	}
+	// decides the same, and asks GitHub nothing and writes nothing.
+	is(t, d.run(t), pr.ActChecked)
 	readsNoGitHub(t, d)
 	if ws := d.runWrites(); len(ws) != 0 {
 		t.Fatalf("a run in which nothing changed wrote %+v", ws)
-	}
-}
-
-// A decision that owed no act stands an hour while nothing it read of the
-// store changes, so a change on GitHub that the PR watch never saves, here an
-// approval, is decided on the run's own read once that hour is up, and not
-// before.
-func TestAChangeTheWatchMissedIsDecidedOnTheRunsOwnReadOnceTheHourIsUp(t *testing.T) {
-	d := newLand(t)
-	c := d.timed()
-	d.pr.Reviews = nil
-	is(t, d.once(t), pr.ActChecked)
-	if ws := d.runWrites(); !keptDigest(ws) {
-		t.Fatalf("a record that owes no act was written %+v, want the digest of what the run decided on", ws)
-	}
-	d.pr.Reviews = []gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z")}
-	c.advance(time.Hour - time.Second)
-	o := d.run(t)
-	is(t, o, pr.ActChecked)
-	if !strings.Contains(o.Detail, "a run decided the record at 2026-11-12T09:00:00Z, less than an hour ago") {
-		t.Fatalf("a record inside its hour says %q", o.Detail)
-	}
-	readsNoGitHub(t, d)
-	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
-		t.Fatalf("a run inside the record's hour wrote %+v and asked %v", ws, asks(d.github))
-	}
-	c.advance(time.Second)
-	is(t, d.run(t), pr.ActRequested)
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("the run decided without its own read of the PR: %v", reads)
-	}
-	if len(d.github.Asks()) != 1 {
-		t.Fatalf("the run once the hour was up asked %v, want one merge request", asks(d.github))
-	}
-}
-
-// A decision made for any other reason starts the record's hour again: the PR
-// watch saves a change half an hour in, a run decides the record on it, and the
-// next run on the record's own read comes an hour after that decision.
-func TestADecisionMadeForAnotherReasonStartsTheHourAgain(t *testing.T) {
-	d := newLand(t)
-	c := d.timed()
-	d.pr.Reviews = nil
-	is(t, d.once(t), pr.ActChecked)
-	c.advance(30 * time.Minute)
-	is(t, d.once(t), pr.ActChecked)
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("a run after the watch saved a change decided without its own read: %v", reads)
-	}
-	if ws := d.runWrites(); !keptDigest(ws) {
-		t.Fatalf("the decision half an hour in was written %+v, want the digest of what it decided on", ws)
-	}
-	c.advance(time.Hour - time.Second)
-	is(t, d.run(t), pr.ActChecked)
-	readsNoGitHub(t, d)
-	c.advance(time.Second)
-	is(t, d.run(t), pr.ActChecked)
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("the run an hour after the last decision decided without its own read: %v", reads)
-	}
-	if ws := d.runWrites(); !keptDigest(ws) {
-		t.Fatalf("the decision once the hour was up was written %+v, want the digest of what it decided on", ws)
 	}
 }
 
@@ -732,43 +667,46 @@ func TestAnOpenChangedHeadIsRequeuedForValidation(t *testing.T) {
 	if !strings.Contains(b.Metadata["rejection_reason"], other) {
 		t.Fatalf("the requeue's reason %q does not name the head found", b.Metadata["rejection_reason"])
 	}
-	readsThePR(t, d)
+	readsNoGitHub(t, d)
 }
 
-// The refinery pushes a head and then records it, and GitHub's answer can lag
-// the push, so the act's own read finds the PR at a head the validated one
-// descends from. The act fetches the PR's branch and finds the validated head
-// on it, so the answer is older than the record: nothing is sent back on it,
-// and once GitHub gives the validated head, the record stands at it.
-func TestAGitHubAnswerBehindTheValidatedHeadSendsNothingBack(t *testing.T) {
+// The refinery pushes a head and then records it, and the PR watch saves the
+// push at its next pass, so the saved read can give the PR at a head the
+// validated one descends from. The act fetches the PR's branch and finds the
+// validated head on it, so the saved read is older than the record: nothing is
+// sent back on it, and once the watch saves the validated head, the record
+// stands at it.
+func TestASavedReadBehindTheValidatedHeadSendsNothingBack(t *testing.T) {
 	d := newLand(t)
+	d.refresh(t)
 	d.co.descends[other] = []string{head}
 	d.co.tip = other
 	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_head_sha"] = other })
 	o := d.run(t)
-	is(t, o, pr.ActRetry)
-	if !strings.Contains(o.Detail, "GitHub's answer lags the branch") {
-		t.Fatalf("an answer behind the branch's tip says %q", o.Detail)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "the saved read lags the branch") {
+		t.Fatalf("a saved read behind the branch's tip says %q", o.Detail)
 	}
 	if !slices.Equal(d.co.branches, []string{branch}) {
 		t.Fatalf("the act fetched %v, want the PR's branch %s", d.co.branches, branch)
 	}
-	readsThePR(t, d)
+	readsNoGitHub(t, d)
 	if ws := d.runWrites(); len(ws) != 0 {
-		t.Fatalf("an answer behind the validated head sent the head back: %+v", ws)
+		t.Fatalf("a saved read behind the validated head sent the head back: %+v", ws)
 	}
 	d.pr.Facts.HeadRefOid = other
-	o = d.run(t)
+	o = d.once(t)
 	if o.Action == pr.ActRequeued || d.row(t).Metadata["merge_result"] != record.Pending {
-		t.Fatalf("once GitHub gave the validated head, the run did %+v", o)
+		t.Fatalf("once the watch saved the validated head, the run did %+v", o)
 	}
 }
 
 // A person rewrites the PR's branch off the head the watch last read, and the
 // refinery's preparation fetches the rewritten head, validates it and records
 // it before the watch reads the PR again. The saved head is on no line of the
-// validated head's history, but the run decides on its own read, which gives
-// the validated head: nothing is sent back, and the act fetches no branch.
+// validated head's history, but the act fetches the branch and finds the
+// validated head at its tip, so the saved read lags the branch: nothing is sent
+// back, and the record stands pending.
 func TestAValidatedRewrittenHeadIsNotSentBackOnTheReadFromBeforeIt(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
@@ -779,14 +717,13 @@ func TestAValidatedRewrittenHeadIsNotSentBackOnTheReadFromBeforeIt(t *testing.T)
 		t.Fatal(err)
 	}
 	o := d.run(t)
-	if o.Action == pr.ActRequeued || d.row(t).Metadata["merge_result"] != record.Pending {
+	is(t, o, pr.ActChecked)
+	if d.row(t).Metadata["merge_result"] != record.Pending {
 		t.Fatalf("a read the watch saved before the validated rewrite sent the head back: %+v", o)
 	}
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("the run decided without its own read of the PR: %v", reads)
-	}
-	if len(d.co.branches) != 0 {
-		t.Fatalf("the act fetched %v for a PR GitHub gives at the validated head", d.co.branches)
+	readsNoGitHub(t, d)
+	if !slices.Equal(d.co.branches, []string{branch}) {
+		t.Fatalf("the act fetched %v, want the PR's branch %s", d.co.branches, branch)
 	}
 }
 
@@ -844,10 +781,10 @@ func TestABranchResetToAnAncestorOfTheValidatedHeadIsRequeued(t *testing.T) {
 	if !strings.Contains(b.Metadata["rejection_reason"], head) {
 		t.Fatalf("the requeue's reason %q does not name the head found", b.Metadata["rejection_reason"])
 	}
-	readsThePR(t, d)
+	readsNoGitHub(t, d)
 }
 
-// While the act's own read gives another head than the validated one, a fetch
+// While the saved read gives another head than the validated one, a fetch
 // of the PR's branch that fails sends nothing back, and neither does a read of
 // its tip, or of whether a tip GitHub does not give contains the validated
 // head, that fails. The next run decides again.
@@ -893,64 +830,32 @@ func TestAClosedUnmergedPRStaysBlockedBehindAGate(t *testing.T) {
 	if b.Status != "blocked" || !slices.Equal(d.gates.list(), []string{bead + " " + record.ClosedUnmerged}) {
 		t.Fatalf("a closed PR left the bead %s with gates %v", b.Status, d.gates.list())
 	}
-	if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
-		t.Fatalf("the exception was recorded on the reads %v, want the act's own read of the PR", got)
-	}
+	readsNoGitHub(t, d)
 }
 
-// An exception holds the work behind a person, so it is decided on the act's
-// own read of the PR, never on the saved read. A PR the watch read closed that a
-// person reopened, whose work the refinery published again before the watch
-// read it, gets no exception and no gate: the run finds it open and ready on its
-// own read and requests its merge, and the record stands pending with its
-// marker.
-func TestARepublishedPRIsNotExceptedOnAClosedReadFromBeforeIt(t *testing.T) {
-	d := newLand(t)
-	d.pr.Facts.State = "CLOSED"
-	d.refresh(t)
-	d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", refinery })
-	d.pr.Facts.State = "OPEN"
-	if err := d.l.Record(bead, publication(head)); err != nil {
-		t.Fatal(err)
-	}
-	is(t, d.run(t), pr.ActRequested)
-	if ws, g := d.runWrites(), d.gates.list(); len(ws) != 0 || len(g) != 0 {
-		t.Fatalf("the run wrote %+v and filed %v", ws, g)
-	}
-	meta(t, d.row(t), map[string]string{"merge_result": record.Pending, "pr_reconcile_pending": "true"})
-}
-
-// A PR the saved read finds on another base than the record's target, which
-// the act's own read finds on the record's target, as after a base the
-// refinery's publication followed and the watch has not read since, is no
-// exception: the act decides it on its own read, and a later read that finds
-// the PR on another base is.
-func TestAPRTheSavedReadFindsRetargetedIsExceptedOnlyOnTheActsOwnRead(t *testing.T) {
+// A PR the saved read finds on another base than the record's target is no
+// longer the PR the record names, which is an exception, decided on that read
+// with no read of GitHub.
+func TestAPRTheSavedReadFindsRetargetedIsAnException(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.BaseRefName = "release"
-	d.refresh(t)
-	d.pr.Facts.BaseRefName = "main"
-	is(t, d.run(t), pr.ActRequested)
-	if ws, g := d.runWrites(), d.gates.list(); len(ws) != 0 || len(g) != 0 {
-		t.Fatalf("the run wrote %+v and filed %v", ws, g)
-	}
-	d.pr.Facts.BaseRefName = "release"
-	is(t, d.run(t), pr.ActExcepted)
+	is(t, d.once(t), pr.ActExcepted)
+	readsNoGitHub(t, d)
 	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid}) {
 		t.Fatalf("gates filed %v", g)
 	}
 }
 
-// A record of a merge whose PR the act's own read finds open is a
-// contradiction, whatever the saved read found, and one whose PR it finds
-// merged as recorded lands.
-func TestAMergedRecordsContradictionIsRecordedOnTheActsOwnRead(t *testing.T) {
+// A record of a merge whose PR the saved read shows open is a contradiction,
+// and one whose PR it shows merged as recorded lands, each with no read of
+// GitHub.
+func TestAMergedRecordsContradictionIsRecordedOnTheSavedRead(t *testing.T) {
 	for _, c := range []struct {
 		name, state, action string
 		gates               []string
 	}{
 		{"the PR still open", "OPEN", pr.ActExcepted, []string{bead + " " + record.EvidenceContradiction}},
-		{"the PR merged since the watch read it", "MERGED", pr.ActLanded, nil},
+		{"the PR merged", "MERGED", pr.ActLanded, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newLand(t)
@@ -959,18 +864,15 @@ func TestAMergedRecordsContradictionIsRecordedOnTheActsOwnRead(t *testing.T) {
 				d.md[k] = v
 			}
 			d.put("blocked", "")
-			d.refresh(t)
 			d.pr.Facts.State = c.state
 			if c.state == "MERGED" {
 				d.pr.Facts.MergeCommit, d.pr.Facts.MergedAt = merged, "2026-11-12T08:30:00Z"
 			}
-			is(t, d.run(t), c.action)
+			is(t, d.once(t), c.action)
 			if g := d.gates.list(); !slices.Equal(g, c.gates) {
 				t.Fatalf("gates filed %v, want %v", g, c.gates)
 			}
-			if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
-				t.Fatalf("the act read %v, want its own read of the PR", got)
-			}
+			readsNoGitHub(t, d)
 		})
 	}
 }
@@ -1036,7 +938,7 @@ func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
 		"pr_merged_at": "2026-11-12T08:30:00Z", "pr_head_sha": head, "branch": branch,
 		"pr_reconcile_pending": "<absent>", "blocked_reason": "<absent>"})
 	savesNothingOfGitHub(t, d)
-	readsThePR(t, d)
+	readsNoGitHub(t, d)
 	if !strings.Contains(b.Notes, "merged to main at "+merged[:8]) {
 		t.Fatalf("the close names no merge: %q", b.Notes)
 	}
@@ -1145,7 +1047,7 @@ func TestAnUnreachableMergeCommitIsActedOnAgainWithoutAClose(t *testing.T) {
 	}
 }
 
-// A landing whose fetch failed, and a merge whose own read of GitHub failed,
+// A landing whose fetch failed, and a merge whose re-read of GitHub failed,
 // each write nothing, and the next run acts on the record again.
 func TestAFailedFetchOrMergeReadWritesNothingAndTheNextRunActs(t *testing.T) {
 	d := newLand(t)
@@ -1161,12 +1063,12 @@ func TestAFailedFetchOrMergeReadWritesNothingAndTheNextRunActs(t *testing.T) {
 
 	d = newLand(t)
 	d.refresh(t)
-	d.github.Fail["PullRequest"] = errors.New("HTTP 502")
+	d.github.Fail["Conversation"] = errors.New("HTTP 502")
 	is(t, d.run(t), pr.ActRetry)
-	if ws := d.runWrites(); len(ws) != 0 {
-		t.Fatalf("a merge whose own read failed wrote %+v", ws)
+	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a merge whose re-read failed wrote %+v and asked %v", ws, asks(d.github))
 	}
-	delete(d.github.Fail, "PullRequest")
+	delete(d.github.Fail, "Conversation")
 	is(t, d.run(t), pr.ActRequested)
 }
 
@@ -1214,25 +1116,30 @@ func TestAPRThatIsNoLongerTheRecordsIsAnException(t *testing.T) {
 	}
 }
 
-// A bead with no read of its PR saved is decided all the same, on the run's own
-// read of the PR, and the run saves none of that read on the bead.
-func TestARecordWithNoSavedReadIsDecidedOnTheRunsOwnRead(t *testing.T) {
+// A bead with no read of its PR saved, as before the PR watch's first pass over
+// it, waits for the watch: the run reads no GitHub and writes nothing, and once
+// the watch has saved a read, the run decides on it.
+func TestARecordWithNoSavedReadWaitsForTheWatch(t *testing.T) {
 	d := newLand(t)
-	is(t, d.run(t), pr.ActRequested)
-	if reads := d.runReads(); len(reads) == 0 || reads[0] != "PullRequest" {
-		t.Fatalf("the run decided without its own read of the PR: %v", reads)
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "waits for the PR watch's next pass") {
+		t.Fatalf("a record with no saved read says %q", o.Detail)
 	}
+	readsNoGitHub(t, d)
+	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
+		t.Fatalf("a record with no saved read wrote %+v and asked %v", ws, asks(d.github))
+	}
+	is(t, d.once(t), pr.ActRequested)
 	if got := asks(d.github); !slices.Equal(got, []string{"MergePullRequest PR_7 " + head}) {
 		t.Fatalf("asked %v, want one merge pinned to %s", got, head)
 	}
-	savesNothingOfGitHub(t, d)
 }
 
 // --- the run's order and bounds ---------------------------------------------
 
-// A run takes the records that owe a decision in the order Shuffle gives them,
-// and reports first each record it passes over, one a run decided with no act
-// owed less than an hour ago while nothing that decision read has changed.
+// A run takes the records that owe an act in the order Shuffle gives them, and
+// reports first each record that owes none.
 func TestARunTakesTheRecordsThatOweAnActInAShuffledOrder(t *testing.T) {
 	d := newLand(t)
 	d.pr.Reviews = nil
@@ -1252,7 +1159,7 @@ func TestARunTakesTheRecordsThatOweAnActInAShuffledOrder(t *testing.T) {
 	}
 	out := d.reconcile(t, pr.Options{})
 	if !slices.Equal(given, []string{"tk-o0", "tk-o1", "tk-o2"}) {
-		t.Fatalf("the shuffle was given %v, want the records that owe a decision", given)
+		t.Fatalf("the shuffle was given %v, want the records that owe an act", given)
 	}
 	var order []string
 	for _, o := range out {
@@ -1309,7 +1216,10 @@ func TestAnActIsStoppedAtItsBoundAndTheNextActStarts(t *testing.T) {
 		d := newLand(t)
 		d.refresh(t)
 		d.also(t, "tk-2", "blocked")
-		d.l.Hub = func(ctx context.Context, _ string) pr.Hub { return stalled{d.github, ctx} }
+		d.l.Reread = func(ctx context.Context, _ string) error {
+			<-ctx.Done()
+			return fmt.Errorf("gh: the call was stopped: %w", ctx.Err())
+		}
 		start := time.Now()
 		out := d.reconcile(t, pr.Options{Window: time.Minute, Stop: 300 * time.Millisecond})
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
@@ -1414,17 +1324,6 @@ func (stalledWake) Wake(ctx context.Context, _, _ string) error {
 	return fmt.Errorf("gc session wake was stopped: %w", ctx.Err())
 }
 
-// stalled is GitHub answering no read of the PR until the act's context ends.
-type stalled struct {
-	*ghfake.GitHub
-	ctx context.Context
-}
-
-func (s stalled) PullRequest(string, int) (*gh.PullRequest, error) {
-	<-s.ctx.Done()
-	return nil, fmt.Errorf("gh: the call was stopped: %w", s.ctx.Err())
-}
-
 // Over runs whose window takes a few of many records' acts, a shuffled order
 // reaches every record within a few runs, with no record waiting behind the
 // same others, here acts that keep failing.
@@ -1476,35 +1375,29 @@ func TestAReadyPRIsMergedWithItsHeadPinned(t *testing.T) {
 	}
 }
 
-// The merge takes the whole read of GitHub in its own act, reading the PR once,
-// and pins its request to the head that read judged. A head pushed after the
-// watch's read is the head the act reads, so it goes back to the refinery.
-func TestTheMergeIsDecidedOnTheRunsOwnReadPinnedToTheHeadItJudged(t *testing.T) {
+// The merge is the one act checked against GitHub first: the one-PR update
+// re-reads the PR in full, and the request is pinned to the head the evaluator
+// judged on what that read saved. A head pushed after the watch's read is the
+// head the re-read saves, so it goes back to the refinery.
+func TestTheMergeIsDecidedOnTheReReadPinnedToTheHeadItJudged(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
 	is(t, d.run(t), pr.ActRequested)
 	if got := asks(d.github); !slices.Equal(got, []string{"MergePullRequest PR_7 " + head}) {
 		t.Fatalf("asked %v, want one merge pinned to %s", got, head)
 	}
-	reads := d.runReads()
-	for _, want := range []string{"PullRequest", "CheckSuites", "Reviews", "ReviewThreads", "IssueComments"} {
-		if !slices.Contains(reads, want) {
-			t.Fatalf("the run's own read %v lacks %s", reads, want)
-		}
-	}
-	if n := len(slices.DeleteFunc(slices.Clone(reads), func(r string) bool { return r != "PullRequest" })); n != 1 {
-		t.Fatalf("the run read the PR %d times, want once: %v", n, reads)
-	}
+	rereads(t, d)
 
-	// A head pushed after the watch's read is the head the run reads, so the
-	// run sends it back and asks no merge.
+	// A head pushed after the watch's read is the head the re-read saves, so
+	// the run sends it back and asks no merge.
 	e := newLand(t)
 	e.refresh(t)
 	e.pr.Facts.HeadRefOid = other
 	is(t, e.run(t), pr.ActRequeued)
 	if len(e.github.Asks()) != 0 {
-		t.Fatalf("asked %v on a head the run found moved", asks(e.github))
+		t.Fatalf("asked %v on a head the re-read found moved", asks(e.github))
 	}
+	meta(t, e.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other})
 }
 
 func TestAPushBetweenTheAnswerAndTheRequestIsRefusedAndRequeued(t *testing.T) {
@@ -1554,7 +1447,7 @@ func TestAMergeQueueTakesThePROrDropsIt(t *testing.T) {
 	}
 	// In the queue, the PR's merge is requested already.
 	is(t, d.once(t), pr.ActChecked)
-	readsThePR(t, d)
+	readsNoGitHub(t, d)
 	if len(d.github.Asks()) != 1 {
 		t.Fatalf("a queued PR was asked again: %v", asks(d.github))
 	}
@@ -1577,13 +1470,13 @@ func TestAPRMergedIntoAnotherBaseIsNotLanded(t *testing.T) {
 	}
 }
 
-// --- each act on the run's own read --------------------------------------------
+// --- the one act checked against GitHub first ---------------------------------
 
-// Every act is decided on the act's own read of the PR: a landing, a
-// send-back, an exception for a closed PR and a draft's ready transition each
-// read the PR once, and a withdrawal reads its reviews, its review threads and
-// its reviews again after the dismissals.
-func TestEachActIsDecidedOnTheRunsOwnRead(t *testing.T) {
+// No act but the merge reads GitHub before it acts: a landing, a send-back, an
+// exception for a closed PR and a draft's ready transition each read nothing of
+// GitHub, and a withdrawal reads what it dismisses: the PR's reviews, its
+// review threads and its reviews again after the dismissals.
+func TestNoActButTheMergeReadsGitHubFirst(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		set    func(*land)
@@ -1591,14 +1484,14 @@ func TestEachActIsDecidedOnTheRunsOwnRead(t *testing.T) {
 		reads  []string
 		asked  []string
 	}{
-		{"a landing", func(d *land) { mergedOnGitHub(d, head) }, pr.ActLanded, []string{"PullRequest"}, nil},
-		{"a send-back", func(d *land) { d.pr.Facts.HeadRefOid = other }, pr.ActRequeued, []string{"PullRequest"}, nil},
-		{"an exception's gate", func(d *land) { d.pr.Facts.State = "CLOSED" }, pr.ActExcepted, []string{"PullRequest"}, nil},
-		{"a draft marked ready", func(d *land) { d.pr.Facts.IsDraft = true }, pr.ActReadied, []string{"PullRequest"}, []string{"MarkReady PR_7 "}},
+		{"a landing", func(d *land) { mergedOnGitHub(d, head) }, pr.ActLanded, nil, nil},
+		{"a send-back", func(d *land) { d.pr.Facts.HeadRefOid = other }, pr.ActRequeued, nil, nil},
+		{"an exception's gate", func(d *land) { d.pr.Facts.State = "CLOSED" }, pr.ActExcepted, nil, nil},
+		{"a draft marked ready", func(d *land) { d.pr.Facts.IsDraft = true }, pr.ActReadied, nil, []string{"MarkReady PR_7 "}},
 		{"a withdrawn approval's dismissal", func(d *land) {
 			d.pr.Reviews = []gh.Review{approved(100, "operator", older), approved(101, "reviewer", head)}
 			d.pr.Facts.HeadRefOid = later
-		}, pr.ActRequeued, []string{"PullRequest", "Reviews", "ReviewThreads", "Reviews"}, []string{"DismissReview 100 "}},
+		}, pr.ActRequeued, []string{"Reviews", "ReviewThreads", "Reviews"}, []string{"DismissReview 100 "}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newCycle(t)
@@ -1619,7 +1512,7 @@ func TestEachActIsDecidedOnTheRunsOwnRead(t *testing.T) {
 
 // The one-PR update is the one writer of GitHub's side on a bead (refresh.go),
 // so no write a run makes carries the saved read, pr_state or
-// pr_last_checked_at.
+// pr_last_checked_at but the update's own, which a merge's re-read makes.
 
 // displayed is what a display derives over the store as the run left it.
 func (d *land) displayed(t *testing.T) pr.Answer {
@@ -1632,10 +1525,10 @@ func (d *land) displayed(t *testing.T) pr.Answer {
 }
 
 // savesNothingOfGitHub fails if a write the last run made carries GitHub's
-// side.
+// side, but the one-PR update's own.
 func savesNothingOfGitHub(t *testing.T, d *land) {
 	t.Helper()
-	for _, w := range d.runWrites() {
+	for _, w := range d.actWrites() {
 		for _, a := range w.Args {
 			for _, k := range []string{"pr_github_read=", "pr_state=", "pr_last_checked_at="} {
 				if strings.Contains(a, k) {
@@ -1646,45 +1539,41 @@ func savesNothingOfGitHub(t *testing.T, d *land) {
 	}
 }
 
-func TestACheckOfAPRNotReadyWritesItsDigestAlone(t *testing.T) {
+func TestACheckOfAPRNotReadyWritesNothing(t *testing.T) {
 	d := newLand(t)
 	d.pr.Reviews = nil
 	is(t, d.once(t), pr.ActChecked)
-	if ws := d.runWrites(); !keptDigest(ws) {
-		t.Fatalf("a check that left the record standing wrote %+v, want the digest of what it decided on", ws)
+	if ws := d.runWrites(); len(ws) != 0 {
+		t.Fatalf("a check that left the record standing wrote %+v", ws)
 	}
-	savesNothingOfGitHub(t, d)
-	// An approval GitHub saves moves the read the watch saves, so the next run
-	// decides the record again on its own read.
+	readsNoGitHub(t, d)
+	// An approval the watch saves moves the saved read, so the next run finds
+	// the PR ready, re-reads it and requests its merge.
 	d.pr.Reviews = []gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z")}
 	is(t, d.once(t), pr.ActRequested)
+	rereads(t, d)
 }
 
-// GitHub moves no sign the PR watch reads when it computes a merge state, so a
-// decision on one it had not computed keeps no digest, and the run after it
-// decides the record again though neither watch pass saved anything: here the
-// watch saved CLEAN, the act's own read found UNKNOWN, and GitHub then computed
-// CLEAN again.
-func TestAMergeStateGitHubHadNotComputedIsDecidedAgainByTheNextRun(t *testing.T) {
+// A merge state GitHub has not computed is none the evaluator merges on, so
+// the run decides the PR not ready and writes nothing. The PR watch reads the
+// PR part again at each pass while the saved state is UNKNOWN, so once GitHub
+// has computed the state, the watch saves it and the next run merges.
+func TestAMergeStateGitHubHadNotComputedWaitsForTheWatch(t *testing.T) {
 	d := newLand(t)
-	d.refresh(t)
 	d.pr.Facts.MergeStateStatus = "UNKNOWN"
-	o := d.run(t)
-	is(t, o, pr.ActRetry)
-	if !strings.Contains(o.Detail, "has not computed the PR's merge state") {
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "not ready: merge-state") {
 		t.Fatalf("the uncomputed merge state says %q", o.Detail)
 	}
+	readsNoGitHub(t, d)
 	if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
 		t.Fatalf("a decision on an uncomputed merge state wrote %+v and asked %v", ws, asks(d.github))
 	}
 	d.pr.Facts.MergeStateStatus = "CLEAN"
-	for name, pass := range map[string]func(pr.PassOptions) (pr.PassReport, error){
-		"Poll": d.watch.Poll, "Compare": d.watch.Compare,
-	} {
-		report, err := pass(pr.PassOptions{})
-		if err != nil || len(report.Updates) != 0 || len(report.Failed) != 0 {
-			t.Fatalf("%s over a merge state computed as the watch saved it: %+v, %v", name, report, err)
-		}
+	report, err := d.watch.Poll(pr.PassOptions{})
+	if err != nil || len(report.Updates) != 1 || report.Updates[0].Action != pr.ActSaved {
+		t.Fatalf("the poll over a merge state GitHub computed since: %+v, %v", report, err)
 	}
 	is(t, d.run(t), pr.ActRequested)
 	if len(d.github.Asks()) != 1 {
@@ -1726,40 +1615,45 @@ func TestARefusedRequestWritesNothing(t *testing.T) {
 	d := newLand(t)
 	d.github.OnMerge = func(string, *ghfake.PR, string) error { return errors.New("github: timeout awaiting response") }
 	is(t, d.once(t), pr.ActRetry)
-	if ws := d.runWrites(); len(ws) != 0 {
+	if ws := d.actWrites(); len(ws) != 0 {
 		t.Fatalf("a refused request wrote %+v", ws)
 	}
 }
 
-// A merge whose own read does not answer writes nothing and requests nothing,
-// and the next run decides again.
-func TestAMergesOwnReadThatFailsWritesNothing(t *testing.T) {
-	for _, f := range []string{"PullRequest", "CheckSuites", "Reviews", "Login", "ReviewThreads", "IssueComments", "the definition"} {
+// A merge whose re-read does not answer writes nothing and requests nothing, and
+// the next run decides again.
+func TestAMergesReReadThatFailsRequestsNothing(t *testing.T) {
+	for _, f := range []string{"Signs", "PullRequestPart+checks", "Login", "Conversation", "the definition"} {
 		t.Run(f, func(t *testing.T) {
 			d := newLand(t)
 			d.refresh(t)
-			if f == "the definition" {
+			switch f {
+			case "the definition":
 				d.rule.err = errors.New("jq: failed")
-			} else {
+			case "Signs":
+				d.github.SignsFail[7] = errors.New("github: HTTP 502")
+			default:
 				d.github.Fail[f] = errors.New("github: HTTP 502")
 			}
 			is(t, d.run(t), pr.ActRetry)
 			if ws := d.runWrites(); len(ws) != 0 || len(d.github.Asks()) != 0 {
-				t.Fatalf("the failed read wrote %+v and asked %v", ws, asks(d.github))
+				t.Fatalf("the failed re-read wrote %+v and asked %v", ws, asks(d.github))
 			}
 			meta(t, d.row(t), map[string]string{"merge_result": record.Pending, "pr_reconcile_pending": "true"})
 		})
 	}
 }
 
-// A writer that takes no lock can leave the record lacking a part between the
-// run's decision and the merge's own read, which then reads no more of GitHub.
-func TestAMergeWhoseRecordLostAPartReadsThePRAlone(t *testing.T) {
+// A writer that takes no lock can leave the record lacking a part while the
+// merge's re-read runs, with the lock free. The act decides the record again
+// under the lock once the re-read has saved, so it finds the record incomplete
+// and requests no merge.
+func TestARecordThatLostAPartDuringTheMergesReReadIsNotMerged(t *testing.T) {
 	d := newLand(t)
 	d.refresh(t)
 	moved := false
 	d.github.OnRead = func(method string, _ *ghfake.PR) {
-		if method != "PullRequest" || moved {
+		if method != "PullRequestPart+checks" || moved {
 			return
 		}
 		moved = true
@@ -1768,22 +1662,22 @@ func TestAMergeWhoseRecordLostAPartReadsThePRAlone(t *testing.T) {
 		delete(b.Metadata, "merged_target")
 		d.store.Put(b)
 	}
-	out := d.run(t)
-	is(t, out, pr.ActChecked)
-	if !strings.HasSuffix(out.Detail, "not ready: record") {
-		t.Fatalf("the merge says %q, want the record's gap alone", out.Detail)
+	is(t, d.run(t), pr.ActExcepted)
+	if len(d.github.Asks()) != 0 {
+		t.Fatalf("a record that lost its target was asked to merge: %v", asks(d.github))
 	}
-	if reads := d.runReads(); !slices.Equal(reads, []string{"PullRequest"}) {
-		t.Fatalf("the run read %v, want the PR's read alone", reads)
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " " + record.Invalid}) {
+		t.Fatalf("gates filed %v", g)
 	}
-	savesNothingOfGitHub(t, d)
 }
 
-// The merge is decided on the act's own read of GitHub alone: a saved read the
-// evaluator finds ready gets no request while GitHub holds the PR, and one that
-// holds the PR gets the request once GitHub finds it ready, while the displays
-// still show what the saved read does.
-func TestTheMergeIsDecidedOnTheRunsOwnReadWhateverTheSavedReadSays(t *testing.T) {
+// The merge is decided on its re-read alone, and every other decision on the
+// saved read: a saved read the evaluator finds ready gets no request while the
+// re-read finds GitHub holding the PR, which the re-read saves, so the displays
+// show it and the next run reads no GitHub; and a saved read that holds the PR
+// gets no request and no read of GitHub, whatever GitHub shows, until the watch
+// saves what moved.
+func TestTheMergeIsDecidedOnTheReReadAndTheRestOnTheSavedRead(t *testing.T) {
 	save := func(t *testing.T, d *land, read pr.GitHubRead) {
 		t.Helper()
 		raw, err := json.Marshal(saveRead(&read))
@@ -1793,7 +1687,7 @@ func TestTheMergeIsDecidedOnTheRunsOwnReadWhateverTheSavedReadSays(t *testing.T)
 		d.md["pr_github_read"] = string(raw)
 		d.put("blocked", "")
 	}
-	readyRead := pr.GitHubRead{ReadAt: "2026-11-12T08:00:00Z", URL: prURL, Number: 7, Repository: repo,
+	readyRead := pr.GitHubRead{ReadAt: "2026-11-12T08:00:00.000Z", URL: prURL, Number: 7, Repository: repo,
 		HeadBranch: branch, Base: "main", Head: head, State: "OPEN", MergeState: "CLEAN",
 		Checks:    []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}},
 		Approvers: []string{"operator"}, Requesters: []string{}, Awaiting: []string{}}
@@ -1804,21 +1698,25 @@ func TestTheMergeIsDecidedOnTheRunsOwnReadWhateverTheSavedReadSays(t *testing.T)
 		d.pr.Reviews = nil
 		is(t, d.run(t), pr.ActChecked)
 		if len(d.github.Asks()) != 0 {
-			t.Fatalf("asked %v on a saved read while GitHub holds the PR", asks(d.github))
+			t.Fatalf("asked %v on a PR the re-read found held", asks(d.github))
 		}
+		rereads(t, d)
 		savesNothingOfGitHub(t, d)
+		only(t, d.displayed(t), pr.KindApproval)
+		is(t, d.run(t), pr.ActChecked)
+		readsNoGitHub(t, d)
 	})
-	t.Run("a saved read that holds the PR, while GitHub finds it ready, gets the request", func(t *testing.T) {
+	t.Run("a saved read that holds the PR, while GitHub finds it ready, gets no request", func(t *testing.T) {
 		d := newLand(t)
 		held := readyRead
 		held.Approvers = []string{}
 		save(t, d, held)
 		only(t, d.displayed(t), pr.KindApproval)
-		is(t, d.run(t), pr.ActRequested)
-		if got := asks(d.github); !slices.Equal(got, []string{"MergePullRequest PR_7 " + head}) {
-			t.Fatalf("asked %v, want one merge pinned to %s", got, head)
+		is(t, d.run(t), pr.ActChecked)
+		readsNoGitHub(t, d)
+		if len(d.github.Asks()) != 0 || len(d.runWrites()) != 0 {
+			t.Fatalf("a saved read that holds the PR asked %v and wrote %+v", asks(d.github), d.runWrites())
 		}
-		only(t, d.displayed(t), pr.KindApproval)
 	})
 }
 
@@ -2001,19 +1899,18 @@ func TestALandingPastTheRunsWindowLeavesTheCheckToALaterOne(t *testing.T) {
 
 // --- the record's writers under the lock --------------------------------------
 
-// pause makes the first read of the PR a merge makes wait until the test lets
-// it go, and reports when the act is there, holding the lock.
+// pause makes the first merge request an act makes wait until the test lets it
+// go, and reports when the act is there, holding the lock. The request then
+// lands with GitHub, which has not merged the PR yet.
 func pause(g *ghfake.GitHub) (there, goOn chan struct{}) {
 	there, goOn = make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	g.OnRead = func(method string, _ *ghfake.PR) {
-		if method != "PullRequest" {
-			return
-		}
+	g.OnMerge = func(string, *ghfake.PR, string) error {
 		once.Do(func() {
 			close(there)
 			<-goOn
 		})
+		return nil
 	}
 	return there, goOn
 }
@@ -2097,9 +1994,9 @@ func TestARecordWriteWaitsWhileAnActHoldsTheLockAndLandsAfterItsLastWrite(t *tes
 
 // A publication at a new head holds the lock across its two writes. An act
 // that starts between them waits for the lock, reads the whole record,
-// blocked and assigned to nobody, at the new head, and decides it on its own
-// read of the PR, so it sends nothing back and merges nothing: the new head has
-// no review result, so the act pours its review run.
+// blocked and assigned to nobody, at the new head, and decides it on the read
+// the watch saved of the pushed head, so it sends nothing back and merges
+// nothing: the new head has no review result, so the act pours its review run.
 func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *testing.T) {
 	d := newLand(t)
 	d.l.Refinery = boundRefinery
@@ -2108,8 +2005,8 @@ func TestAnActWaitsWhileARecordWriteHoldsTheLockThenDecidesOnTheWholeRecord(t *t
 	d.md["merge_result"], d.md["observed_pr_head_sha"] = record.HeadChanged, other
 	delete(d.md, "pr_reconcile_pending")
 	d.put("open", boundRefinery)
-	d.refresh(t)
 	d.pr.Facts.HeadRefOid = other // the refinery validated a new head and pushed it
+	d.refresh(t)
 	d.co.descends[other] = []string{head}
 	d.co.tip = other
 	between, goOn := make(chan struct{}), make(chan struct{})
@@ -2314,20 +2211,20 @@ func TestABeadAssignedToAnotherIsLeftToItsAssignee(t *testing.T) {
 		d.store.OnFind = nil
 		check(t, d)
 	})
-	t.Run("while the merge reads GitHub", func(t *testing.T) {
+	t.Run("while the merge's re-read reads GitHub", func(t *testing.T) {
 		d := newLand(t)
 		d.refresh(t)
 		d.github.OnRead = func(method string, _ *ghfake.PR) {
-			if method == "PullRequest" {
+			if method == "PullRequestPart+checks" {
 				if b, _ := d.store.Row(bead); b.Assignee == "" {
 					d.put("blocked", holder)
 				}
 			}
 		}
 		o := d.run(t)
-		is(t, o, pr.ActChecked)
-		if !strings.Contains(o.Detail, "assigned") || len(d.runWrites()) != 0 || len(d.github.Asks()) != 0 {
-			t.Fatalf("a bead assigned during the merge's read did %q, wrote %+v and asked %v", o.Detail, d.runWrites(), asks(d.github))
+		is(t, o, pr.ActAssigned)
+		if !strings.Contains(o.Detail, holder) || len(d.actWrites()) != 0 || len(d.github.Asks()) != 0 {
+			t.Fatalf("a bead assigned during the merge's re-read did %q, wrote %+v and asked %v", o.Detail, d.actWrites(), asks(d.github))
 		}
 		d.github.OnRead = nil
 		check(t, d)

@@ -167,8 +167,8 @@ func TestADraftTakesOnlyAnOpenPRTheBeadOwns(t *testing.T) {
 
 // The order readies a draft whose passed result names its validated head and
 // target, with no review run attached, whoever returned it to draft, once the
-// act's own read of the PR finds it a draft there, and does not wait for CI:
-// the next run reads the PR again and merges it once it is ready.
+// saved read shows it a draft there, and does not wait for CI: a later run
+// merges it once the PR watch saves it ready.
 func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Facts.IsDraft = true
@@ -178,9 +178,7 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 		t.Fatalf("asked %v, the PR a draft %v", got, d.pr.Facts.IsDraft)
 	}
 	savesNothingOfGitHub(t, d)
-	if got := d.runReads(); !slices.Equal(got, []string{"PullRequest"}) {
-		t.Fatalf("the ready transition read GitHub %v, want the act's own read of the PR", got)
-	}
+	readsNoGitHub(t, d)
 	o := d.once(t)
 	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "check-pending") {
@@ -191,24 +189,19 @@ func TestTheOrderReadiesADraftWhoseResultPassedAtItsValidatedHead(t *testing.T) 
 	is(t, d.once(t), pr.ActRequested)
 }
 
-// A head pushed onto a draft after the PR watch read it is not marked ready on
-// the passed result of the head the watch saved: the act's own read of the PR
-// finds the new head, which goes to the refinery with the PR still a draft. A
-// PR the act's own read finds ready already is decided as a ready PR, one it
-// finds closed is the record's exception, and a read that does not answer
-// leaves it to the next run.
-func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *testing.T) {
+// A draft is marked ready on the saved read, with no read of GitHub, so a head
+// pushed onto it after the PR watch read it does not hold the transition: once
+// the watch saves the new head, the next run sends it to the refinery. A draft
+// the watch saves ready already is decided as a ready PR, and one it saves
+// closed is the record's exception.
+func TestTheOrderReadiesADraftOnTheSavedRead(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Facts.IsDraft = true
 	d.refresh(t)
 	d.pr.Facts.HeadRefOid = later
-	is(t, d.run(t), pr.ActRequeued)
-	if slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
-		t.Fatalf("a head pushed after the watch's read was marked ready: %v", asks(d.github))
-	}
-	if !d.pr.Facts.IsDraft {
-		t.Fatalf("the PR was marked ready at a head no review passed")
-	}
+	is(t, d.run(t), pr.ActReadied)
+	readsNoGitHub(t, d)
+	is(t, d.once(t), pr.ActRequeued)
 
 	for _, c := range []struct {
 		name string
@@ -217,15 +210,13 @@ func TestTheOrderReadiesADraftOnlyOnceItsOwnReadFindsItADraftAtThePassedHead(t *
 	}{
 		{"ready already", func(e *land) { e.pr.Facts.IsDraft = false }, pr.ActRequested},
 		{"closed", func(e *land) { e.pr.Facts.State = "CLOSED" }, pr.ActExcepted},
-		{"unread", func(e *land) { e.github.Fail["PullRequest"] = errors.New("gh: error connecting to api.github.com") }, pr.ActRetry},
 	} {
 		e := newCycle(t)
 		e.pr.Facts.IsDraft = true
-		e.refresh(t)
 		c.set(e)
-		is(t, e.run(t), c.want)
+		is(t, e.once(t), c.want)
 		if slices.ContainsFunc(e.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "MarkReady" }) {
-			t.Fatalf("a PR its own read found %s was marked ready", c.name)
+			t.Fatalf("a PR the watch saved %s was marked ready", c.name)
 		}
 	}
 }
@@ -569,10 +560,9 @@ func TestAWithdrawalDismissesAnApprovalTheSavedReadLacks(t *testing.T) {
 				t.Fatalf("over an approval the saved conversation lacks, the withdrawal is %s with reviews %v: %s",
 					status(t, d, id), states(d.pr), o.Detail)
 			}
-			if got := d.runReads(); len(got) < 4 || got[0] != "PullRequest" ||
-				!slices.Equal(got[len(got)-3:], []string{"Reviews", "ReviewThreads", "Reviews"}) {
-				t.Fatalf("the act read GitHub %v, want its own read of the PR first and the withdrawal's reads of the "+
-					"reviews, the threads and the reviews again last", got)
+			if got := d.runReads(); !slices.Equal(got, []string{"Reviews", "ReviewThreads", "Reviews"}) {
+				t.Fatalf("the act read GitHub %v, want the withdrawal's reads of the reviews, the threads and the "+
+					"reviews again", got)
 			}
 			d.store.Unlist(bead)
 			if o := d.once(t); o.Action == pr.ActRequested {

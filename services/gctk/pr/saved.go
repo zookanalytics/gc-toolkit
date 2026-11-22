@@ -51,6 +51,15 @@ type SavedPR struct {
 	Signs             PRSigns `json:"signs"`
 }
 
+// pullRequest is the PR's own facts in the shape GitHub's read of a PR gives
+// them, which the landing order decides on.
+func (p *SavedPR) pullRequest() *gh.PullRequest {
+	return &gh.PullRequest{ID: p.ID, Number: p.Number, URL: p.URL, State: p.State, IsDraft: p.Draft,
+		HeadRefName: p.HeadBranch, HeadRefOid: p.Head, BaseRefName: p.Base, MergeStateStatus: p.MergeState,
+		Repository: p.Repository, MergedAt: p.MergedAt, MergeCommit: p.MergeCommit, InMergeQueue: p.InMergeQueue,
+		MergeQueueEnabled: p.MergeQueueEnabled}
+}
+
 // PRSigns are the signs kept with the PR's own facts.
 type PRSigns struct {
 	State     string `json:"state"`
