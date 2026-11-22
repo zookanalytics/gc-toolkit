@@ -228,10 +228,9 @@ commands it changes.
   `lifecycle.sh` execs with no shell fallback. So a gctk defect reaches every
   landing in the city.
 - **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
-  machine axis and the postures. prstatus carries them as its `knownMachine`
-  and `knownPosture` switches, and `lifecycle.test.sh` holds both to the TOML.
-  No test holds the machine values `assets/scripts/gate-ensure.sh` records to
-  it, and a recorded value prstatus does not know reads as needs-attention.
+  postures. prstatus carries them as its `knownPosture` switch, and
+  `lifecycle.test.sh` holds it to the TOML. `prstatus.Derive` reads a recorded
+  posture it does not know as needs-attention.
 - **A port reads what its script read.** gctk reads bead fields the way jq
   does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and

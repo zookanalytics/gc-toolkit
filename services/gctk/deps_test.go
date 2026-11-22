@@ -16,10 +16,11 @@ import (
 // compiles, go-toml, which requires none and reads the name and prefix a city's
 // .gc/site.toml binds, and x/sys, whose unix package gctk memory and its Claude
 // Code adapter call. gctk shares the repository's one Go module with the board,
-// whose go.mod also requires the beads store library and its cgo, so this list
-// is what keeps the board's dependencies out of gctk: a build of gctk alone
-// downloads cobra, pflag, go-toml and x/sys and nothing else. A module gctk
-// starts to import is added here in the change that imports it.
+// whose go.mod also requires the board's own modules, such as bubbletea,
+// lipgloss and tygo, so this list is what keeps the board's dependencies out of
+// gctk: a build of gctk alone downloads cobra, pflag, go-toml and x/sys and
+// nothing else. A module gctk starts to import is added here in the change that
+// imports it.
 var gctkModules = []string{
 	"github.com/spf13/cobra",
 	"github.com/spf13/pflag",

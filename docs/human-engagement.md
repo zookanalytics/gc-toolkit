@@ -363,13 +363,14 @@ these steps:
    attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
-`gctk pr status --json` gives (`prstatus.Read` and `prstatus.Reasons`),
+`gctk pr status --json` gives (`prstatus.Read`, and `prstatus.RenderReasons`
+for a PR on the pending record or `prstatus.Reasons` for a bead off it),
 the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
 rework or a review the anchor waits on is offered from the PR, each bead a person
 owes the next move on that the same edges reach, such as a decision or another PR
 waiting on a review that the PR's rework waits for, and the PR's own review
-threads or blocked verdict. The conversation form lists them under the bead's
+threads. The conversation form lists them under the bead's
 conversations. A gate or a bead is a row, and choosing it makes it the subject.
 A gate chosen there keeps the bead it was listed under, which the screen names
 under the subject, and the form looks it up and saves it with `--from` naming

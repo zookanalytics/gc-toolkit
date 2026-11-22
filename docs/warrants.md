@@ -363,9 +363,10 @@ no warrant.
 - **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
   keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
   and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
-  table. Their writer: the "record the pass's own verdict on the anchor"
-  section of `assets/scripts/gate-ensure.sh`, which records `pr.machine`
-  alone. The reader of the causes: package `services/gctk/prstatus`.
+  table. Their writer and their one reader: the "record the pass's own verdict
+  on the anchor" section of `assets/scripts/gate-ensure.sh`, which records
+  `pr.machine` alone and reads the cause beside a `blocked` verdict it finds
+  there.
 - **Stands in for.** A merge-readiness verdict kept on the bead whose pull
   request it is, which tells a block no automated actor will clear from a wait
   the city is acting on, with the block's cause as a value a reader keys on.
@@ -400,9 +401,9 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475,
-  `gastownhall/gascity-packs` main aa55b477d4c2, and `gastownhall/beads` main
-  3a274fbf8f76.
+- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8,
+  `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
+  786241099046.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -519,55 +520,6 @@ no warrant.
   monitor reads them and writes them on the bead that owns the PR, once Gas
   Town's pending record carries them, or once a webhook receiver keeps them
   from GitHub's events. The saved read then moves onto that record.
-
-## Unanswered review threads
-
-- **Covers.** The `pr.unanswered_threads` key, in the
-  `[metadata.pr_round_trip]` table of `lifecycle/lifecycle.toml`, which nothing
-  writes. The definition it counts by: `gc_thread_awaits_answer` in
-  `assets/scripts/pr-post.sh`, which reads a thread's posts through
-  `live_comments` in `assets/scripts/review-dismissal.sh` and sets aside a post
-  carrying the reaction the write-back in `assets/scripts/pr-facts.sh` marks a
-  handled post with (`WB_RESOLVED_REACTION`). Its reader is package
-  `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
-  `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
-  `gctk pr status` in `services/gctk/internal/cli/prstatus.go`.
-- **Stands in for.** A record of a pull request's review threads kept on the
-  bead whose pull request it is, which says whether review feedback still
-  waits on an answer.
-- **Evidence.**
-  - In `gastownhall/gascity`, the `gc` binary's pull request readiness monitor
-    reads each open PR's author, draft flag, merge state, head and check rollup
-    (`pullRequestsQuery` in `internal/githubmonitor/client.go`, and
-    `classifyPullRequest` in `internal/githubmonitor/monitor.go`), and records
-    its class on a repair bead it files. No source under `cmd/`, `internal/` or
-    `examples/`, tests aside, reads a pull request's reviews, review threads or
-    review comments.
-  - A webhook rule hands one verified provider event to an order or a
-    conversation and keeps no state of its own
-    ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
-    the configuration reference).
-  - In `gastownhall/beads`, the example formula `gh-pr-review` tells the agent
-    running it to check for unresolved review threads, and records none
-    (`examples/formulas/gh-pr-review.formula.toml`).
-  - In `gastownhall/gascity-packs`, no pack keeps a record of which of a pull
-    request's review threads wait on an answer. The `pr-review` pack's
-    `mol-pr-iterate` formula checks whether the copilot comments it was slung
-    to address are resolved, and records on its own run only whether that one
-    signal cleared (`evidence.cleared`, in
-    `pr-review/formulas/mol-pr-iterate.formula.toml`). The
-    `compound-engineering` pack's `ce-previous-comments-reviewer` agent reads a
-    PR's review comments for feedback the diff leaves unaddressed and returns
-    findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
-    or answer. Neither keeps a record of the thread.
-  - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 with
-  the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
-  main aa55b477d4c2, and `gastownhall/beads` main 3a274fbf8f76.
-- **Retires when.** Gas City records a pull request's review threads where a
-  reader of the PR's own bead finds them, for example once its readiness
-  monitor reads review threads, or a webhook receiver keeps their state from
-  GitHub's review thread events. The count then moves onto that record.
 
 ## Approval withdrawal
 
