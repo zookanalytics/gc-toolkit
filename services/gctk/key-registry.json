@@ -223,10 +223,11 @@
     "name": "gc.formula_name",
     "type": "string",
     "readers": [
+      "distiller",
       "pr",
       "waits"
     ],
-    "doc": "The run link reports a run's formula as its root's. The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
+    "doc": "A live workflow root of mol-feedback-distiller in the home rig's store is a distiller run that is still going, and gctk distiller start slings no other while one is. The run link reports a run's formula as its root's. The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
   },
   {
     "name": "gc.handback",
@@ -264,6 +265,7 @@
     "name": "gc.kind",
     "type": "string",
     "readers": [
+      "distiller",
       "pr",
       "reaction",
       "review",

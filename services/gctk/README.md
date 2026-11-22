@@ -24,6 +24,7 @@ through `gc bd` and the supervisor's API.
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
 | `lifecycle` | the plain write of a bead's `merge_result` outside the pending record, with the work record a landing writes, in one atomic update whose exit decides. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go` |
 | `memory due`, `memory apply`, `memory settle` | the learning loop's memory intake, which the feedback distiller's steps call: the agent memory notes due for its judge as JSON, oldest first, read from each memory directory Claude Code names for a session in each rig's checkout and the city's root; the judge's decision on each note recorded on its directory's list, a dropped note's text kept before it goes; and each note's wait ended once its fix has landed on the default branch, or with the note due again when it ended with none, with one finding for a place Claude Code names no directory for | `gctk memory --help`, `internal/cli/memory.go`, `memory`, `internal/claudecode` |
+| `distiller start` | the feedback-distiller order's start: the pack's home rig, the one rig whose checkout holds a `pack.toml` naming the gc-toolkit pack, and the polecat pool `gc agent list` places there, and one run of `mol-feedback-distiller` slung to that pool unless a run is open in the rig's store; a city with no home rig, or a suspended one, starts nothing, and a read that fails, a second home rig or a pool that is not one starts nothing and exits 1 | `gctk distiller start --help`, `internal/cli/distiller.go`, `distiller` |
 | `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the landing order saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
@@ -217,6 +218,8 @@ epic/                which closes and shifts of a rig's epics no portfolio sync 
 memory/              the memory intake: each memory directory's list of the notes the
                      distiller's judge kept, the due notes, the judge's decisions, and the
                      waits that end once a fix lands
+distiller/           where the city's one distiller run starts: the home rig, its polecat
+                     pool, and whether a run is open there, read-only but for the sling
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits',
@@ -245,6 +248,7 @@ cd services/gctk && go test ./...          # every gctk package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
+cd services/gctk && GCTK_CITY_ACCEPTANCE=1 go test ./internal/gascity ./distiller -run TestCityAcceptance -v   # the city's gc on a scratch city
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge
 bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs

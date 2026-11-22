@@ -1,8 +1,10 @@
 package gascity
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -326,6 +328,38 @@ esac
 	first := strings.Split(string(raw), "\n")[0]
 	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A formula sling names the target and the formula, asks for the JSON line, and
+// reads the run's root from it: the workflow, else the molecule. A notice on
+// standard error leaves the line readable, a sling that exits non-zero names no
+// root and fails with its last line, and one whose line names neither answers
+// with no root.
+func TestAFormulaSlingReadsTheRunsRoot(t *testing.T) {
+	c, log := stubGC(t, `case "$2" in
+  rig/rig.polecat) echo 'gc sling: warning: projecting execution facts' >&2
+    echo '{"schema_version":"1","success":true,"target":"rig/rig.polecat","method":"formula","formula":"mol-x","workflow_id":"tk-root","routed":true}' ;;
+  rig/rig.wisp) echo '{"schema_version":"1","success":true,"molecule_id":"tk-wisp"}' ;;
+  rig/rig.gone) echo 'gc sling: no agent rig/rig.gone' >&2; exit 1 ;;
+  *) echo '{"schema_version":"1","success":true}' ;;
+esac
+`)
+	got := c.SlingFormula(context.Background(), "rig/rig.polecat", "mol-x")
+	if got.Failure() != "" || got.Root != "tk-root" {
+		t.Fatalf("the sling answered %+v, want root tk-root", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.wisp", "mol-x"); got.Root != "tk-wisp" {
+		t.Fatalf("a sling that names only its molecule answered %+v", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.gone", "mol-x"); got.Failure() != "exit 1: gc sling: no agent rig/rig.gone" || got.Root != "" {
+		t.Fatalf("a refused sling answered %+v, failure %q", got, got.Failure())
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.none", "mol-x"); got.Failure() != "" || got.Root != "" {
+		t.Fatalf("a sling whose line names no root answered %+v", got)
+	}
+	if want := []string{"sling", "rig/rig.polecat", "mol-x", "--formula", "--json"}; !slices.Equal(log()[:5], want) {
+		t.Fatalf("the sling ran %q, want %q", log()[:5], want)
 	}
 }
 

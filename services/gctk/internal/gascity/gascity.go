@@ -16,6 +16,8 @@ package gascity
 import (
 	"bufio"
 	"bytes"
+	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -210,6 +212,40 @@ func (c *City) Cook(k Cook) CookResult {
 	out := CookResult{Result: r}
 	if r.Code == 0 {
 		out.Root = cookedRoot(r.Output)
+	}
+	return out
+}
+
+// FormulaSling is what one formula sling answered: the command's own answer,
+// and the root of the run it poured, read from its JSON line, "" when the sling
+// did not answer with one.
+type FormulaSling struct {
+	Bounded
+	Root string
+}
+
+// SlingFormula runs one `gc sling <target> <formula> --formula --json` under
+// ctx, as runBounded runs a command: the formula poured as a run of its own,
+// with no bead, and its root routed to target. The root is the workflow_id of
+// the JSON line it prints, else its molecule_id (slingJSONResult in
+// cmd/gc/cmd_sling.go at gastownhall/gascity dc87c978a3).
+func (c *City) SlingFormula(ctx context.Context, target, formula string) FormulaSling {
+	b := c.runBounded(ctx, c.bin, "sling", target, formula, "--formula", "--json")
+	out := FormulaSling{Bounded: b}
+	if b.Code != 0 || b.Err != nil {
+		return out
+	}
+	sc := bufio.NewScanner(strings.NewReader(b.Stdout))
+	for sc.Scan() {
+		var line struct {
+			WorkflowID string `json:"workflow_id"`
+			MoleculeID string `json:"molecule_id"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &line) == nil {
+			if root := cmp.Or(line.WorkflowID, line.MoleculeID); root != "" {
+				out.Root = root
+			}
+		}
 	}
 	return out
 }
