@@ -1,21 +1,14 @@
 ---
 name: records
-description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set the headline the board shows for a bead (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
+description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set a bead's one-line headline (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # Records: notes, headlines and observations
 
 Use this skill to record an outcome in a bead's notes, to sum up long notes in
-a current-state block, to set the headline the board shows for a bead, or to
-file an observation of feedback about standing agent behavior.
-
-The headline command calls the gc-toolkit pack's script as
-`"$(gc <binding> scripts-dir)/gc-helm.sh"`, and only that way. The call looks
-up the pack gc loaded inside the command, so it runs no checkout's copy and
-needs nothing an earlier call set. `<binding>` is the name the city imports the
-pack under, which gc puts in front of this skill's name: `gc-toolkit` in
-`gc-toolkit.records`. `gc skill list` prints it in this skill's FROM column.
+a current-state block, to set a bead's one-line headline, or to file an
+observation of feedback about standing agent behavior.
 
 ## Record an outcome on a bead
 
@@ -46,13 +39,16 @@ sitting, a converse session with the operator, writes a document only as a
 change the operator rules it make with them, and otherwise files a bead for
 the document (the work skill).
 
-## Set the headline the board shows
+## Set a bead's headline
 
 Write one sentence that says what the bead needs now, and name what it waits
 on:
 
 ```bash
-"$(gc <binding> scripts-dir)/gc-helm.sh" takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
 ```
 
 Pass `--no-wait` when the bead waits on nothing. When it waits, pass

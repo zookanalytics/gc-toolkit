@@ -33,6 +33,11 @@
 #   (CITY-ENDED)  a bound conversation whose sitting ended before it claimed it
 #                 is found by its own row and reads ended, as conversations
 #                 <subject> reads it
+#   (CITY-STORE)  the sessions are the store's (GC_NO_API=1): a sitting the
+#                 supervisor's cache does not list yet reads starting, and one
+#                 whose session the store no longer lists reads ended
+#   (CITY-BIND-AFTER) the sessions are read after the conversations, so a bind
+#                 that lands after the session read reads queued, not ended
 #   (CITY-UNREAD) a store that does not answer is named, the others listed, and
 #                 the verb exits 4 after the list
 #   (CITY-NOLEDGER) a rig whose ledger is not there is named as unread too, and
@@ -55,8 +60,8 @@
 #                 not answer exits 4; a gate that holds the --from bead only
 #                 through another bead is read as without --from, and one that
 #                 no longer holds it is refused; --from with no reference is
-#                 refused, exit 2; accept, dismiss and handback refuse a gate
-#                 two beads wait on, naming both
+#                 refused, exit 2; dismiss and handback refuse a gate two
+#                 beads wait on, naming both
 #   (ABOUT-SUSPENDED) a subject in a suspended rig reads with rig_suspended
 #                 and no refusal, and the text says it waits until the rig
 #                 resumes
@@ -105,15 +110,22 @@ eq()    { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; 
 has()   { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (unexpected '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
-# The session's own city must not reach a hermetic run.
-unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR GC_HELM_FIXTURE || true
+# The session's own city must not reach a hermetic run, and GC_NO_API is the
+# script's own to set: the stub reads it to tell the store from the cache.
+unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG BEADS_DIR GC_HELM_FIXTURE GC_NO_API || true
 export STATE="$TMP/state" CALLS="$TMP/calls"
 mkdir -p "$TMP/bin" "$STATE" "$TMP/.beads" "$TMP/rig/.beads" "$TMP/rig2/.beads" "$TMP/rig3/.beads" "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 cat > "$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# The stub reads each store's rows from $STATE/<prefix>.json.
+# The stub reads each store's rows from $STATE/<prefix>.json. A read gctk
+# makes, which carries HOLDS_STUB_READ, is the seam's to answer, from the store
+# HOLDS_STORE names.
+if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
+  shift
+  exec "$HOLDS_SEAM" answer "$@"
+fi
 printf '%s\n' "$*" | tr '\n' ' ' >> "$CALLS"; printf '\n' >> "$CALLS"
 # The first call after a new subject's create keeps what open had printed on
 # stdout by then, when the case names the file its stdout goes to.
@@ -125,7 +137,24 @@ db_prefix() { case "${1:-${BEADS_DIR:-}}" in */rig/.beads) echo tk ;; */rig2/.be
 arg_after() { _want="$1"; shift; _prev=""; for a in "$@"; do [ "$_prev" = "$_want" ] && { printf '%s' "$a"; return; }; _prev="$a"; done; }
 case "$1 ${2:-}" in
   "rig list") cat "$STATE/rigs.json" ;;
-  "session list") cat "$STATE/sessions.json" ;;
+  "session list")
+    # A read with GC_NO_API=1 is the store's: $STATE/sessions.json. Any other
+    # read is the supervisor's, which answers from its read cache:
+    # $STATE/sessions.cached.json where a case seeds one, else the store's.
+    if [ "${GC_NO_API:-}" != 1 ] && [ -f "$STATE/sessions.cached.json" ]; then
+      cat "$STATE/sessions.cached.json"
+    else
+      cat "$STATE/sessions.json"
+    fi
+    # $STATE/spawn-on-session-read, where a case seeds one as {conv, session},
+    # is an engage that spawns the session and binds the conversation to its
+    # alias just after this read has answered.
+    if [ -f "$STATE/spawn-on-session-read" ]; then
+      _sp=$(cat "$STATE/spawn-on-session-read"); rm -f "$STATE/spawn-on-session-read"
+      _c=$(printf '%s' "$_sp" | jq -r '.conv'); p="${_c%%-*}"
+      jq --argjson sp "$_sp" '.sessions = [$sp.session] + .sessions' "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"
+      jq --argjson sp "$_sp" 'map(if .id == $sp.conv then .assignee = $sp.session.alias else . end)' "$STATE/$p.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/$p.json"
+    fi ;;
   "agent list") cat "$STATE/agents.json" ;;
   "status --json") echo '{"controller":{"running":true}}' ;;
   "bd list")
@@ -192,7 +221,7 @@ export PATH="$TMP/bin:$PATH" GCTK_BIN="$TMP/bin/gctk"
 # The city: gc-toolkit (tk) carries converse, gascity (gc) is suspended, docs
 # (dx) carries no converse, and the city's own store.
 seed() {
-  : > "$CALLS"; rm -f "$STATE"/*.unread "$STATE"/subj.* "$STATE"/conv.* "$STATE"/answer.*
+  : > "$CALLS"; rm -f "$STATE"/*.unread "$STATE"/subj.* "$STATE"/conv.* "$STATE"/answer.* "$STATE"/sessions.cached.json "$STATE"/spawn-on-session-read
   jq -n --arg r "$TMP/rig" --arg r2 "$TMP/rig2" --arg r3 "$TMP/rig3" --arg h "$TMP" '{rigs:[
     {name:"gc-toolkit", path:$r, prefix:"tk", suspended:false},
     {name:"gascity", path:$r2, prefix:"gc", suspended:true},
@@ -308,6 +337,38 @@ eq "$(field tk-bound .state)" "left" "(CITY-ENDED) …in engage's state left"
 run conversations tk-subj --json
 eq "$(printf '%s' "$OUT" | jq -r '.conversations[] | select(.id == "tk-bound") | .readiness')" "ended" "(CITY-ENDED) …as conversations <subject> reads it"
 
+echo "# the sessions are read from the store, which lists a sitting from its spawn until its session closes"
+# Engage spawned s10 and bound tk-fresh to it, and the supervisor's read cache
+# does not list s10 yet. The store no longer lists s1, tk-ready's sitting,
+# whose session closed, and the cache still lists it.
+seed
+jq '. + [{id:"tk-fresh", issue_type:"task", status:"open", assignee:"gc-toolkit/gc-toolkit.tk-fresh", title:"just started", dependencies:[{type:"tracks", depends_on_id:"tk-subj"}]}]' \
+  "$STATE/tk.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/tk.json"
+cp "$STATE/sessions.json" "$STATE/sessions.cached.json"
+jq '.sessions = [{id:"s10", alias:"gc-toolkit/gc-toolkit.tk-fresh", session_name:"s-s10", state:"start-pending", attached:false, created_at:"2026-11-08T13:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"}]
+                + (.sessions | map(select(.id != "s1")))' "$STATE/sessions.json" > "$STATE/tmp.json" && mv "$STATE/tmp.json" "$STATE/sessions.json"
+run conversations --json
+eq "$RC" 0 "(CITY-STORE) the list exits 0"
+eq "$(field tk-fresh .readiness)" "starting" "(CITY-STORE) a conversation bound to a sitting the cache does not list yet reads starting"
+eq "$(field tk-fresh '[.state, .session.id] | join(" ")')" "live s10" "(CITY-STORE) …held live by that sitting, as the store lists it"
+eq "$(field tk-ready .readiness)" "ended" "(CITY-STORE) one whose sitting's session the store no longer lists reads ended, though the cache still lists it"
+eq "$(grep -c '^session list' "$CALLS")" 1 "(CITY-STORE) …from one read of the sessions"
+run conversations tk-subj --json
+eq "$(printf '%s' "$OUT" | jq -c '[.conversations[] | select(.id == "tk-fresh" or .id == "tk-ready") | [.id, .readiness]] | sort')" \
+  '[["tk-fresh","starting"],["tk-ready","ended"]]' "(CITY-STORE) …as conversations <subject> reads them"
+
+echo "# the sessions are read after the conversations, so a bind that lands between finds its row as it was"
+# Engage spawns s11 and binds tk-queue to it just after the list has read the
+# sessions. The list read tk-queue's row before that, in the queue.
+seed
+jq -n '{conv:"tk-queue", session:{id:"s11", alias:"gc-toolkit/gc-toolkit.tk-queue", session_name:"s-s11", state:"start-pending", attached:false, created_at:"2026-11-08T14:00:00Z", template:"gc-toolkit/gc-toolkit.converse-claude-opus"}}' \
+  > "$STATE/spawn-on-session-read"
+run conversations --json
+eq "$RC" 0 "(CITY-BIND-AFTER) the list exits 0"
+eq "$(field tk-queue .readiness)" "queued" "(CITY-BIND-AFTER) a conversation bound after the session read reads queued, as its row was read, not ended"
+run conversations --json
+eq "$(field tk-queue '[.readiness, .session.id] | join(" ")')" "starting s11" "(CITY-BIND-AFTER) …and the next list finds the bind and its sitting, and reads it starting"
+
 echo "# a store that does not answer is named, and the list still prints"
 seed; : > "$STATE/gc.unread"; run conversations --json
 eq "$RC" 4 "(CITY-UNREAD) an unread store exits 4"
@@ -407,11 +468,9 @@ eq "$(printf '%s' "$OUT" | jq -r '.subject.id')" "tk-held2" "(ABOUT-FROM) …nam
 LIST_ID_FAIL=tk-held2 run conversations tk-gate --json
 eq "$RC" 4 "(ABOUT-FROM) a read of the beads' waits that does not answer exits 4"
 has "$ERR" "gate tk-gate holds 2 beads (tk-held tk-held2), and when each began waiting on it could not be read" "(ABOUT-FROM) …saying which one cannot be told"
-for v in accept dismiss; do
-  run "$v" tk-gate
-  eq "$RC" 4 "(ABOUT-FROM) $v on a gate two beads wait on exits 4"
-  has "$ERR" "gc-helm: $v: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm $v <bead>." "(ABOUT-FROM) …refusing it, naming both beads, since $v would act on a bead nobody named"
-done
+run dismiss tk-gate
+eq "$RC" 4 "(ABOUT-FROM) dismiss on a gate two beads wait on exits 4"
+has "$ERR" "gc-helm: dismiss: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm dismiss <bead>." "(ABOUT-FROM) …refusing it, naming both beads, since dismiss would act on a bead nobody named"
 run handback tk-gate <<< "the hand-back"
 eq "$RC" 4 "(ABOUT-FROM) handback on a gate two beads wait on exits 4"
 has "$ERR" "gc-helm: handback: gate tk-gate is about 2 beads still waiting on it (tk-held tk-held2), and a conversation is about one bead. Name the one you mean: gc-helm handback <bead>. Nothing was recorded." "(ABOUT-FROM) …refusing it, naming both beads"
@@ -501,10 +560,13 @@ has "$ERR" "gc-helm open tk-newsubj --reason" "(NEWSUBJ-PART) …with the re-run
 eq "$(subj_assignee)" "human" "(NEWSUBJ-PART) …and the subject stays assigned to human, so no first reaction takes it up while it owes its conversation"
 # A reaction's own first act, the real check, run on the subject as the store
 # holds it: once with no conversation yet, and once open has handed it over.
+# The check is gctk's, built from this checkout and run over the gc-toolkit
+# store through holds-store.stub.sh.
+GCTK_REACTION="$("$HERE/holds-store.stub.sh" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no reaction can check its subject"; exit 1; }
 reaction_check() {
-  mkdir -p "$TMP/fx"; jq 'map({(.id): del(.id)}) | add' "$STATE/tk.json" > "$TMP/fx/beads.json"
   set +e
-  CHECK_OUT="$(GC_PROACTIVE_FIXTURE="$TMP/fx" GC_RIG=gc-toolkit bash "$HERE/../../tools/gc-proactive.sh" sling tk-newsubj --check --run tk-root 2>&1)"; CHECK_RC=$?
+  CHECK_OUT="$(HOLDS_STORE="$STATE/tk.json" HOLDS_SEAM="$HERE/holds-store.stub.sh" GC_RIG=gc-toolkit GC_NO_API=1 \
+    "$GCTK_REACTION" reaction check tk-newsubj --run tk-root 2>&1)"; CHECK_RC=$?
   set -e
 }
 reaction_check

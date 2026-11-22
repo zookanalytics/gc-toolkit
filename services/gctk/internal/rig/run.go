@@ -110,8 +110,10 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 		return Outcome{Kind: Machine, Reason: fmt.Sprintf("bash did not start: %v", err)}
 	}
 	group := -cmd.Process.Pid
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
+	// The outcome is read from cmd.ProcessState, so Wait's error, which
+	// repeats the exit or reports the output's copy, is not needed.
+	waited := make(chan struct{}, 1)
+	go func() { _ = cmd.Wait(); waited <- struct{}{} }()
 
 	var expired <-chan time.Time
 	if timeout > 0 {
@@ -164,7 +166,7 @@ const groupPoll = 25 * time.Millisecond
 // sends SIGKILL and returns once the command has been waited for, which
 // WaitDelay bounds once the command has exited. It returns the first SIGTERM
 // or SIGINT that reached this process while it waited, if one did.
-func stopGroup(group int, waited <-chan error, stop <-chan os.Signal) os.Signal {
+func stopGroup(group int, waited <-chan struct{}, stop <-chan os.Signal) os.Signal {
 	_ = syscall.Kill(group, syscall.SIGTERM)
 	grace := time.NewTimer(StopGrace)
 	defer grace.Stop()

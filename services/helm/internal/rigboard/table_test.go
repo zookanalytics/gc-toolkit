@@ -32,10 +32,12 @@ func TestTableRows(t *testing.T) {
 	owesReview := prstatus.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
 		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
-	// Where queue placed the bead: in a place the city takes as things stand,
-	// and in one it does not.
+	// Where queue placed the bead: in a place something sends it from, in one
+	// nothing does, and waiting outside the city.
 	taken := &queue.Place{ID: "tk-w", Layer: 1, Scheduled: true}
 	untaken := &queue.Place{ID: "tk-w", Layer: 1}
+	ready := &queue.Place{ID: "tk-w", Layer: 0}
+	outside := &queue.Place{ID: "tk-w", Layer: 0, Outside: true}
 
 	cases := []struct {
 		name   string
@@ -50,8 +52,8 @@ func TestTableRows(t *testing.T) {
 			in:  tableInput{b: bead{ID: "tk-w", Status: "closed", WorkOutcome: "shipped"}, kind: KindWork},
 			out: outClosed, group: GroupClosed, signal: "Closed", note: "shipped"},
 		{name: "an ask reads its words before anything holds it",
-			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}, holds: blockedOn(workWait)},
-			out: outAsk, group: GroupWaitingOnYou, signal: "Routed to you"},
+			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskAssignedToYou, words: "Assigned to you"}, holds: blockedOn(workWait)},
+			out: outAsk, group: GroupWaitingOnYou, signal: "Assigned to you"},
 		{name: "an own human gate waits on your answer",
 			in: tableInput{b: work, kind: KindWork, holds: blockedOn(gateWait),
 				holding: &prstatus.Holds{Gates: []prstatus.Blocker{humanGate}}},
@@ -129,17 +131,32 @@ func TestTableRows(t *testing.T) {
 		{name: "assigned to an agent is queued",
 			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Assignee: "gc-toolkit.mechanik"}, kind: KindWork, holds: clear, place: taken},
 			out: outQueued, group: GroupQueued, signal: "Queued"},
-		{name: "nobody scheduled it, and line 3 names what it waits on",
-			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
-			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled", line3: []string{"tk-other"}},
-		{name: "armed, in a place the city does not take, is not scheduled",
-			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
-				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: untaken},
+		{name: "ready work nothing sends is not scheduled",
+			in:  tableInput{b: work, kind: KindWork, holds: clear, place: ready, notScheduled: true},
 			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "ready work nothing sends is not scheduled, though a run it no longer has left a branch on its row",
+			in:  tableInput{b: work, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, InFlight: "carries branch"}, place: ready, notScheduled: true},
+			out: outNotScheduled, group: GroupNotMoving, signal: "Not scheduled"},
+		{name: "nothing sends it and it waits, so it names each wait",
+			in:  tableInput{b: work, kind: KindWork, holds: blockedOn(workWait), place: untaken},
+			out: outUnsent, group: GroupNotMoving, signal: "Waits on tk-other"},
+		{name: "nothing sends it, and the store does not serve it as ready though it waits on nothing",
+			in:  tableInput{b: work, kind: KindWork, holds: clear, place: untaken},
+			out: outUnsent, group: GroupNotMoving, signal: "Not ready"},
+		{name: "held hold:external, armed or not, waits outside the city",
+			in: tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:external"}}, kind: KindWork,
+				holds: &waits.Holds{Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: outside},
+			out: outOutside, group: GroupNotMoving, signal: "Waits outside the city"},
+		{name: "held for the Product Owner in any spelling, with nothing sending it, waits for the Product Owner",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{" Hold:Mayor "}}, kind: KindWork, holds: &waits.Holds{Status: waits.Clear, InFlight: "carries branch"}, place: ready},
+			out: outForProductOwner, group: GroupNotMoving, signal: "Waits for the Product Owner"},
+		{name: "held for the Product Owner and worked by a live run is queued",
+			in:  tableInput{b: bead{ID: "tk-w", Status: "open", Labels: []string{"hold:mayor"}}, kind: KindWork, holds: clear, place: &queue.Place{ID: "tk-w", Scheduled: true}},
+			out: outQueued, group: GroupQueued, signal: "Queued"},
 		{name: "work that queue placed nowhere is unread",
 			in:  tableInput{b: bead{ID: "tk-w", Status: "open", RoutedTo: "gc-toolkit/gc-toolkit.polecat"}, kind: KindWork, holds: clear},
 			out: outUnread, signal: "unread"},
-		{name: "rows 6 to 8 never apply to an epic",
+		{name: "rows 6 to 9 never apply to an epic",
 			in:  tableInput{b: bead{ID: "tk-e", Status: "open", IssueType: "epic", Assignee: "gc-toolkit.mechanik"}, kind: KindEpic, holds: clear},
 			out: outNone},
 		{name: "a bead waits could not answer is unread",
@@ -158,7 +175,7 @@ func TestTableRows(t *testing.T) {
 			in:  tableInput{b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation, holds: clear},
 			out: outNone, signal: "In conversation"},
 		{name: "a pull request prstatus could not answer is unread before any ask",
-			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskRoutedToYou, words: "Routed to you"}, prUnread: true},
+			in:  tableInput{b: work, kind: KindWork, ask: &askAnswer{kind: AskAssignedToYou, words: "Assigned to you"}, prUnread: true},
 			out: outUnread, signal: "unread"},
 	}
 	for _, c := range cases {
@@ -188,6 +205,7 @@ func TestAsks(t *testing.T) {
 		kind        Kind
 		conv, convA string
 		gateOpen    func(string) bool
+		asking      func(string) bool
 		facts       *prFacts
 		open, all   int
 		stay        bool
@@ -202,6 +220,12 @@ func TestAsks(t *testing.T) {
 		{name: "a gate no person answers is never an ask", b: bead{ID: "tk-p", Status: "open", IssueType: "gate", RoutedTo: "human", PersonBlocker: true}, kind: KindGate},
 		{name: "a decision is a question", b: bead{ID: "tk-d", Status: "open", IssueType: "decision"}, kind: KindDecision,
 			want: &askAnswer{kind: AskQuestion, words: "Question", need: NeedKindQuestion}},
+		{name: "a decision a ruling left waiting on its work is no ask", b: bead{ID: "tk-d", Status: "open", IssueType: "decision"}, kind: KindDecision,
+			stay: true},
+		{name: "a decision a conversation answers reads the conversation", b: bead{ID: "tk-d", Status: "open", IssueType: "decision"}, kind: KindDecision,
+			conv: "tk-c", convA: "human", want: &askAnswer{kind: AskQuestion, words: "Conversation waits for you", need: NeedKindQuestion}},
+		{name: "a decision a sitting talks over is in conversation", b: bead{ID: "tk-d", Status: "open", IssueType: "decision"}, kind: KindDecision,
+			conv: "tk-c", convA: "gc-toolkit/gc-toolkit.tk-c", want: &askAnswer{kind: AskQuestion, words: "In conversation", need: NeedKindInConversation}},
 		{name: "a conversation is its own ask", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindConversation,
 			gateOpen: noGate, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you", need: NeedKindWaitsForYou}},
 		{name: "a conversation a sitting holds is in conversation", b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, kind: KindConversation,
@@ -215,11 +239,20 @@ func TestAsks(t *testing.T) {
 		{name: "a conversation that replies to an open human gate belongs to its ask",
 			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-g", Type: "replies-to"}}},
 			kind: KindConversation, gateOpen: openGate},
+		{name: "a conversation that tracks a decision that is a question belongs to its ask",
+			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-d", Type: "tracks"}}},
+			kind: KindConversation, asking: func(id string) bool { return id == "tk-d" }},
+		{name: "a conversation that tracks a decision waiting on its work is its own ask",
+			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-d", Type: "tracks"}}},
+			kind: KindConversation, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you", need: NeedKindWaitsForYou}},
+		{name: "a conversation that tracks a human gate it does not reply to is its own ask",
+			b:    bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human", Edges: []listing.Edge{{ID: "tk-g", Type: "tracks"}}},
+			kind: KindConversation, gateOpen: openGate, want: &askAnswer{kind: AskConversation, words: "Conversation waits for you", need: NeedKindWaitsForYou}},
 		{name: "a pull request needing review is an ask in prstatus's words", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork,
 			facts: needsReview, want: &askAnswer{kind: AskPullRequest, words: "needs-review", need: NeedKindPullRequest}},
 		{name: "a pull request the city is changing is no ask", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: working},
-		{name: "work routed to a person is routed to you", b: bead{ID: "tk-w", Status: "open", RoutedTo: "human", PersonBlocker: true}, kind: KindWork,
-			want: &askAnswer{kind: AskRoutedToYou, words: "Routed to you", need: NeedKindRoutedToYou}},
+		{name: "work assigned to a person is assigned to you", b: bead{ID: "tk-w", Status: "open", Assignee: "human", PersonBlocker: true}, kind: KindWork,
+			want: &askAnswer{kind: AskAssignedToYou, words: "Assigned to you", need: NeedKindAssignedToYou}},
 		{name: "an epic whose members all closed needs a ruling", b: bead{ID: "tk-e", Status: "open", IssueType: "epic"}, kind: KindEpic,
 			open: 0, all: 3, want: &askAnswer{kind: AskRuling, words: "Needs a ruling", need: NeedKindRuling}},
 		{name: "a landed Delivery waits for its checkpoint", b: bead{ID: "tk-e.1", Status: "open", IssueType: "epic"}, kind: KindDelivery,
@@ -230,11 +263,14 @@ func TestAsks(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gateOpen := c.gateOpen
+			gateOpen, asking := c.gateOpen, c.asking
 			if gateOpen == nil {
 				gateOpen = noGate
 			}
-			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, c.facts, c.open, c.all, c.stay)
+			if asking == nil {
+				asking = noGate
+			}
+			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, asking, c.facts, c.open, c.all, c.stay)
 			if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 				t.Errorf("askOf = %+v, want %+v", got, c.want)
 			}
@@ -244,11 +280,16 @@ func TestAsks(t *testing.T) {
 
 // TestStaying holds a stay to the state the stay's last write leaves: open
 // under its sitting, held by a wait of its own. A claim, the operator's queue
-// or no wait each make it something the operator owes a move.
+// or no wait each make it something the operator owes a move. A decision stays
+// by the same reader, while a wait of its own on work holds it: a ruling that
+// sent work leaves it so, and a wait on a gate alone, an ancestor's wait or no
+// wait leaves it the operator's.
 func TestStaying(t *testing.T) {
 	work := waits.Wait{ID: "tk-w", Type: "blocks", Status: "open", IssueType: "task"}
 	blocked := waits.Holds{ID: "tk-c", Status: waits.Blocked, Waits: []waits.Wait{work}}
 	sitting := "gc-toolkit/gc-toolkit.tk-c"
+	decision := bead{ID: "tk-d", Status: "open", IssueType: "decision"}
+	gate := waits.Wait{ID: "tk-g", Type: "blocks", Status: "open", IssueType: "gate", AwaitType: "human"}
 	cases := []struct {
 		name string
 		b    bead
@@ -256,13 +297,22 @@ func TestStaying(t *testing.T) {
 		want bool
 	}{
 		{name: "open under its sitting and held by its work is a stay",
-			b: bead{ID: "tk-c", Status: "open", Assignee: sitting}, h: blocked, want: true},
+			b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: sitting}, h: blocked, want: true},
 		{name: "claimed by its sitting over an earlier stay's work is a hold",
-			b: bead{ID: "tk-c", Status: "in_progress", Assignee: sitting}, h: blocked},
+			b: bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: sitting}, h: blocked},
 		{name: "in the operator's queue over work still out is theirs to move",
-			b: bead{ID: "tk-c", Status: "open", Assignee: "human"}, h: blocked},
+			b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, h: blocked},
 		{name: "open under its sitting with nothing holding it is back",
-			b: bead{ID: "tk-c", Status: "open", Assignee: sitting}, h: waits.Holds{ID: "tk-c", Status: waits.Clear}},
+			b: bead{ID: "tk-c", Status: "open", IssueType: "task", Assignee: sitting}, h: waits.Holds{ID: "tk-c", Status: waits.Clear}},
+		{name: "a decision a ruling left waiting on its work stays", b: decision,
+			h: waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{work}}, want: true},
+		{name: "a decision that waits on a gate and on work stays", b: decision,
+			h: waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{gate, work}}, want: true},
+		{name: "a decision that waits only on a gate is the operator's", b: decision,
+			h: waits.Holds{ID: "tk-d", Status: waits.Blocked, Waits: []waits.Wait{gate}}},
+		{name: "a decision held only through an epic's wait is the operator's", b: decision,
+			h: waits.Holds{ID: "tk-d", Status: waits.Held, Waits: []waits.Wait{{ID: "tk-w", Type: "blocks", Status: "open", IssueType: "task", Ancestor: "tk-e"}}}},
+		{name: "a decision nothing holds is the operator's", b: decision, h: waits.Holds{ID: "tk-d", Status: waits.Clear}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

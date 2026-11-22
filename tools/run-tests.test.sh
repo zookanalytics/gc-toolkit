@@ -16,15 +16,25 @@
 #
 # Asserted here:
 #   - a file with parts runs once per declared part, each run handed its part
-#     and the declared list, and each with its own timeout, report line, serial
+#     and the declared list, and each with its own guard, report line, serial
 #     re-run and failure dump; only the opening comment block declares parts,
 #     and a malformed declaration is a usage error;
+#   - a run that keeps writing passes however long it runs past the timeout,
+#     while one that writes nothing for the timeout is ended as hung, with every
+#     process in its group, and reported as a TIMEOUT whose log says why;
+#   - a run ends once the runner that started it is gone;
+#   - a run ended as hung in the parallel wave that passes alone is recovered,
+#     so the wave's TIMEOUT does not follow it to its serial re-run;
 #   - a file that fails once then passes is recovered on serial re-run (default);
 #   - a file that fails every time stays failed and the suite exits 1;
 #   - --no-retry and --retry 0 report the raw parallel result;
 #   - --retry N bounds the serial attempts;
 #   - the serial run's log, not the parallel one, is what the failure dump shows;
 #   - --retry rejects a non-integer;
+#   - --seconds FILE empties the file, then gets one line per run of the
+#     parallel wave, quiet or not, naming the run as its report line does with
+#     its whole seconds and its status, and no line for a serial re-run; a FILE
+#     that cannot be written, or a missing one, is a usage error;
 #   - every file commits and tags with signing off, under a git config that
 #     signs both with a signer that always fails, and a git config entry the
 #     caller exported still reaches it;
@@ -41,6 +51,10 @@
 #     those outside both prefixes, while the same file run directly gets them
 #     all; the gc binary GC_BIN names reaches a file as RUN_TESTS_GC_BIN, in
 #     place of one the caller exported, and with no GC_BIN a file gets none;
+#   - a run with files that source the shared harness builds the fake gc once
+#     and hands each file its path as RUN_TESTS_FAKE_GC, in place of one the
+#     caller exported; a run with none builds nothing, and a build that fails
+#     is named and hands on nothing;
 #   - with no -j and no TEST_JOBS the wave runs half the cores, at least one,
 #     counted by nproc, else getconf, else sysctl, and capped at the run count;
 #     TEST_JOBS and -j each override that default;
@@ -247,7 +261,7 @@ echo "PARTMARKER $RUN_TESTS_PART"
 [ "$RUN_TESTS_PART" != two ]
 F
 
-# Part slow outlasts a short timeout; part quick does not.
+# Part slow stays quiet past a short timeout; part quick does not.
 cat > "$FIX/partslow.test.sh" <<'F'
 #!/usr/bin/env bash
 # run-tests-parts: quick slow
@@ -295,12 +309,98 @@ has "$OUT" "PARTMARKER two" "the dump shows that part's log"
 hasnt "$OUT" "PARTMARKER one" "a part that passed is not dumped"
 has "$OUT" "1 passed, 1 failed, 2 total" "the passing part still counts as a pass"
 
-echo "── parts: each part has its own timeout ──"
+echo "── parts: each part has its own guard ──"
 reset_state
 OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 2 --no-retry "$FIX/partslow.test.sh" 2>&1)"; RC=$?
-eq "$RC" 1 "the part that outlasts the timeout fails the suite"
-has "$OUT" "TIMEOUT    $FIX/partslow.test.sh[slow]" "the timeout is the slow part's"
+eq "$RC" 1 "the part that stays quiet past the timeout fails the suite"
+has "$OUT" "TIMEOUT    $FIX/partslow.test.sh[slow]" "the timeout is the quiet part's"
 has "$OUT" "1 passed, 1 failed" "the quick part passes under the same limit"
+
+# The talker writes a line every quarter second for RUNTESTS_TALK seconds, then
+# stays quiet for RUNTESTS_QUIET seconds and passes. It records its own pid,
+# which leads the run's process group, and the pid of a child it leaves running
+# in that group.
+cat > "$FIX/talker.test.sh" <<'F'
+#!/usr/bin/env bash
+echo "$$" > "$RUNTESTS_FIXTURE_STATE/talker.pid"
+sleep 300 &
+echo "$!" > "$RUNTESTS_FIXTURE_STATE/talker.child"
+end=$((EPOCHSECONDS + ${RUNTESTS_TALK:-0})); n=0
+while [ "$EPOCHSECONDS" -lt "$end" ]; do n=$((n + 1)); echo "talk $n"; sleep 0.25; done
+echo "TALKED $n"
+sleep "${RUNTESTS_QUIET:-0}"
+F
+
+# gone <pid>: wait up to fifteen seconds for the process to be gone. No pid, as
+# when the fixture never recorded one, is never gone.
+gone() {
+  [ -n "$1" ] || return 1
+  for _ in $(seq 1 60); do
+    kill -0 "$1" 2>/dev/null || return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+echo "── guard: a run that keeps writing is never ended for its length ──"
+reset_state
+OUT="$(RUNTESTS_TALK=8 RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 1 -t 5 --no-retry "$FIX/talker.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run that writes four lines a second passes, though it runs longer than the timeout"
+has "$OUT" "PASS       $FIX/talker.test.sh" "it is reported as a pass"
+gone "$(cat "$STATE/talker.child" 2>/dev/null)" && ok "the child it left behind is gone" \
+  || bad "the child it left behind is gone" "pid $(cat "$STATE/talker.child" 2>/dev/null) still runs"
+
+echo "── guard: a run that goes quiet is ended as hung, with everything in its group ──"
+reset_state
+started="$SECONDS"
+OUT="$(RUNTESTS_TALK=4 RUNTESTS_QUIET=120 RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 1 -t 3 --no-retry "$FIX/talker.test.sh" 2>&1)"; RC=$?
+took=$((SECONDS - started))
+eq "$RC" 1 "a run that goes quiet fails the suite"
+has "$OUT" "TIMEOUT    $FIX/talker.test.sh" "it is reported as a timeout"
+has "$OUT" "TALKED" "it was not ended while it wrote, though it wrote for longer than the timeout"
+has "$OUT" "run-tests: nothing written for 3s, so the run has hung and is ended" \
+  "its log says why the runner ended it"
+[ "$took" -lt 60 ] && ok "it is ended once quiet for the timeout, not when its quiet ends" \
+  || bad "it is ended once quiet for the timeout, not when its quiet ends" "the runner took ${took}s"
+gone "$(cat "$STATE/talker.child" 2>/dev/null)" && ok "the child it left running is ended with it" \
+  || bad "the child it left running is ended with it" "pid $(cat "$STATE/talker.child" 2>/dev/null) still runs"
+
+echo "── guard: a run ends once its runner is gone ──"
+# The run writes for two minutes, so only its runner's end can end it here. The
+# runner's temp goes under TMP, in case its stop leaves the log directory.
+reset_state
+mkdir -p "$TMP/stopped-tmp"
+TMPDIR="$TMP/stopped-tmp" RUNTESTS_TALK=120 RUNTESTS_FIXTURE_STATE="$STATE" \
+  "$RUNNER_COPY" -j 1 -t 30 --no-retry "$FIX/talker.test.sh" >/dev/null 2>&1 &
+stopped_runner=$!
+for _ in $(seq 1 120); do [ -s "$STATE/talker.child" ] && break; sleep 0.25; done
+run_pid="$(cat "$STATE/talker.pid" 2>/dev/null)"
+kill -TERM "$stopped_runner" 2>/dev/null; wait "$stopped_runner" 2>/dev/null
+if [ -n "$run_pid" ] && gone "$run_pid"; then
+  ok "the run ends within seconds of its runner's stop"
+else
+  bad "the run ends within seconds of its runner's stop" "run pid '${run_pid}' still runs"
+  # The run still stands, so its pid still names its group.
+  [ -z "$run_pid" ] || kill -KILL -- "-$run_pid" 2>/dev/null
+fi
+gone "$(cat "$STATE/talker.child" 2>/dev/null)" && ok "and so does the child it left running" \
+  || bad "and so does the child it left running" "pid $(cat "$STATE/talker.child" 2>/dev/null) still runs"
+
+# Goes quiet on its first run and passes on every later one.
+cat > "$FIX/hangonce.test.sh" <<'F'
+#!/usr/bin/env bash
+c="$RUNTESTS_FIXTURE_STATE/hangonce.count"
+n=$(( $(cat "$c" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$c"
+echo "hangonce run $n"
+[ "$n" -ge 2 ] || sleep 60
+F
+
+echo "── guard: a run ended as hung in the wave that passes alone is recovered ──"
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 1 -t 2 "$FIX/hangonce.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run that passes on its serial re-run passes the suite"
+has "$OUT" "TIMEOUT    $FIX/hangonce.test.sh" "the wave reports its run as a timeout"
+has "$OUT" "recovered serially after 1 attempt" "its re-run is judged on its own, not by the wave's timeout"
 
 echo "── parts: only the opening comment block declares parts ──"
 reset_state
@@ -323,6 +423,26 @@ has "$OUT" "declares a malformed part name 'bad/name'" "…and named"
 run "$FIX/dupparts.test.sh"
 eq "$RC" 2 "a part declared twice is refused"
 has "$OUT" "declares part 'one' twice" "…and named"
+
+echo "── seconds: --seconds keeps one line per run of the parallel wave ──"
+printf '#!/usr/bin/env bash\nsleep 1\n' > "$FIX/nap.test.sh"
+SEC="$TMP/seconds.tsv"
+printf 'stale\n' > "$SEC"
+reset_state
+OUT="$(RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 4 -t 30 -q --seconds "$SEC" \
+  "$FIX/pass.test.sh" "$FIX/afail.test.sh" "$FIX/parts.test.sh" "$FIX/nap.test.sh" 2>&1)"; RC=$?
+eq "$RC" 1 "the run exits as it would without --seconds"
+eq "$(cut -f1,3 "$SEC" | sort | tr '\t\n' '| ')" \
+  "$FIX/afail.test.sh|FAIL[1] $FIX/nap.test.sh|PASS $FIX/parts.test.sh[one]|PASS $FIX/parts.test.sh[three]|PASS $FIX/parts.test.sh[two]|PASS $FIX/pass.test.sh|PASS " \
+  "each run of the wave has one line with its report name and status, under -q too, and the serial re-run adds none"
+eq "$(cut -f2 "$SEC" | grep -cvE '^[0-9]+$')" 0 "…and every line's seconds are a whole number"
+eq "$(awk -F'\t' '$1 ~ /nap/ { print ($2 >= 1) }' "$SEC")" 1 "…which is the run's wall time"
+run --seconds "$TMP/no-such-dir/seconds.tsv" "$FIX/pass.test.sh"
+eq "$RC" 2 "a --seconds file that cannot be written is a usage error"
+has "$OUT" "cannot write the --seconds file '$TMP/no-such-dir/seconds.tsv'" "…named"
+hasnt "$OUT" "1 passed" "…and nothing runs"
+run "$FIX/pass.test.sh" --seconds
+eq "$RC" 2 "--seconds with no file is a usage error"
 
 echo "── 8. --retry rejects a non-integer ──"
 run --retry abc "$FIX/pass.test.sh"
@@ -405,7 +525,7 @@ echo "── floor: every file runs above the test floor ──"
 # CANARY stands in for the directory holding the real gc, bd and gh: each one
 # there records that it was reached. The fixture stubs gc the way a suite does,
 # in a directory at the front of PATH, then removes that directory, as a killed
-# suite's EXIT trap or the scratch reaper does, and calls gc again. Each call
+# suite's EXIT trap does, and calls gc again. Each call
 # runs in a subshell, as a script under test makes most of its calls, so each
 # one searches PATH afresh. A shell that ran gc itself remembers the stub's path
 # and fails on the missing file without searching again.
@@ -490,6 +610,45 @@ names="$(cat "$STATE/names")"
 has "$names" "GC_CITY_PATH" "the same file run directly sees the session's GC_* variables"
 has "$names" "BEADS_DIR" "…and its BEADS_* ones"
 eq "$(grep '^gc-bin=' "$STATE/env")" "gc-bin=/caller/gc" "…and the caller's own RUN_TESTS_GC_BIN"
+
+echo "── fake gc: one build for a run's harness files ──"
+# A go ahead of the real one on PATH records each build and writes a stand-in
+# binary where -o names, or fails when STUB_GO_FAIL is set. The fixture tree
+# gets the fake's package directory, which the runner builds from.
+mkdir -p "$TMP/gobin" "$REPO/services/gctk/internal/gcbd/fakegc"
+cat > "$TMP/gobin/go" <<'F'
+#!/bin/sh
+echo "$*" >> "$RUNTESTS_FIXTURE_STATE/go-calls"
+[ -z "${STUB_GO_FAIL:-}" ] || { echo "stub go: the build failed" >&2; exit 1; }
+out=""; prev=""; for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+printf '#!/bin/sh\n' > "$out" && chmod +x "$out"
+F
+chmod +x "$TMP/gobin/go"
+for n in a b; do
+  cat > "$FIX/harness-$n.test.sh" <<'F'
+#!/usr/bin/env bash
+# A suite on the harness sources assets/scripts/test-harness.sh here.
+S="$RUNTESTS_FIXTURE_STATE"
+if [ -n "${RUN_TESTS_FAKE_GC:-}" ] && [ -x "$RUN_TESTS_FAKE_GC" ]; then echo built >> "$S/fake-gc"; else echo "${RUN_TESTS_FAKE_GC-unset}" >> "$S/fake-gc"; fi
+F
+done
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/harness-a.test.sh" "$FIX/harness-b.test.sh" "$FIX/pass.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run with two harness files passes"
+eq "$(wc -l < "$STATE/go-calls" | tr -d ' ')" "1" "…and builds the fake gc once"
+has "$(cat "$STATE/go-calls")" "build -buildvcs=false -o" "…with go build"
+eq "$(sort "$STATE/fake-gc" | tr '\n' ' ')" "built built " "…and each harness file gets the build, in place of the caller's"
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/env.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run with no harness file passes"
+if [ -e "$STATE/go-calls" ]; then bad "…and builds nothing" "$(cat "$STATE/go-calls")"; else ok "…and builds nothing"; fi
+reset_state
+OUT="$(PATH="$TMP/gobin:$PATH" STUB_GO_FAIL=1 RUN_TESTS_FAKE_GC=/caller/gc RUNTESTS_FIXTURE_STATE="$STATE" "$RUNNER_COPY" -j 2 -t 30 "$FIX/harness-a.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "a run whose build fails still runs its files"
+has "$OUT" "the fake gc did not build" "…and says the build failed"
+has "$OUT" "stub go: the build failed" "…with the compiler's message"
+eq "$(cat "$STATE/fake-gc")" "unset" "…and hands on no fake gc, not even the caller's"
+rm -rf "$REPO/services"
 
 echo "── jobs: the default is half the cores, at least one ──"
 # The runner counts cores with nproc, then getconf, then sysctl. Stubs ahead of

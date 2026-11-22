@@ -79,3 +79,58 @@ func TestReadReadsTheRecordAndItsMarker(t *testing.T) {
 		t.Fatal("the reading face names another key")
 	}
 }
+
+// writes is the update each write makes, as its flags.
+func writes(t *testing.T, act func(*ledger.Write)) []string {
+	t.Helper()
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Assignee: "rig/refinery"})
+	l := ledger.New(s)
+	w := l.Write("b-1")
+	act(w)
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	return s.Writes()[0].Args
+}
+
+func has(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// The bead's assignee says who works it now: the writes that end the
+// refinery's work on it assign it to nobody, the writes that hand it to the
+// refinery assign the refinery, and a requeue that keeps the marker leaves the
+// assignee as it is.
+func TestTheRecordsWritesAssignTheBeadToWhoWorksItNow(t *testing.T) {
+	const refinery = "rig/refinery"
+	p := record.Publication{URL: "https://github.com/acme/widgets/pull/7", Repo: "acme/widgets", Number: 7, Head: head, Target: "main"}
+	for name, c := range map[string]struct {
+		act  func(*ledger.Write)
+		want string
+	}{
+		"publish":         {func(w *ledger.Write) { record.Publish(w, p) }, "--assignee="},
+		"block":           {record.Block, "--assignee="},
+		"settle":          {func(w *ledger.Write) { record.Settle(w, refinery) }, "--assignee=" + refinery},
+		"requeue handing": {func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }, "--assignee=" + refinery},
+		"revalidate":      {func(w *ledger.Write) { record.Revalidate(w, "why", refinery) }, "--assignee=" + refinery},
+	} {
+		if args := writes(t, c.act); !has(args, c.want) {
+			t.Errorf("%s writes %q, want %s", name, args, c.want)
+		}
+	}
+	kept := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "") })
+	for _, a := range kept {
+		if strings.HasPrefix(a, "--assignee") || a == "pr_reconcile_pending" {
+			t.Fatalf("a requeue that keeps the marker writes %q", kept)
+		}
+	}
+	if handed := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }); !has(handed, "pr_reconcile_pending") {
+		t.Fatalf("a requeue that hands the head over keeps the marker: %q", handed)
+	}
+}

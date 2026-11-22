@@ -1,10 +1,13 @@
 package gascity
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The previews below are the text gc sling --dry-run --force printed on the
@@ -230,6 +233,35 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 	}
 }
 
+// A city Within a context stops each command it runs once the context ends,
+// and says so, whether or not the command's child still holds its output. A
+// city with no context lets the same command run to its end.
+func TestWithinStopsACommandWhenItsContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	stub := "#!/bin/sh\nsleep 6 &\nsleep 6\n"
+	if err := os.WriteFile(filepath.Join(dir, "pr-status-label.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	r := (&City{scriptsDir: dir}).In(dir).Within(ctx).Script("pr-status-label.sh", "clear")
+	if took := time.Since(start); took > 200*time.Millisecond+stopGrace+time.Second {
+		t.Fatalf("the stopped script held the call %s", took)
+	}
+	if r.Code != -1 || !errors.Is(r.Err, context.DeadlineExceeded) || !strings.Contains(r.Failure(), "pr-status-label.sh was stopped") {
+		t.Fatalf("a stopped script answered %+v", r)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "quick.sh"), []byte("#!/bin/sh\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quick, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	if r := (&City{scriptsDir: dir}).Within(quick).Script("quick.sh"); r.Code != 0 || strings.TrimSpace(r.Output) != "done" {
+		t.Fatalf("a script that ends inside its bound answered %+v", r)
+	}
+}
+
 // A city In a directory starts every command there, its scripts and gc alike,
 // and a relative scripts directory still names the one it named from the
 // process's working directory. The city it came from runs where the process
@@ -269,9 +301,34 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 	}
 }
 
+// A city As an actor runs every command with BEADS_ACTOR naming that actor,
+// and keeps the directory its commands start in. The city it came from runs
+// as the process does.
+func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "who")
+	stub := "#!/bin/sh\nprintf '%s %s\\n' \"${BEADS_ACTOR:-none}\" \"$(pwd -P)\" >> '" + log + "'\n"
+	if err := os.WriteFile(filepath.Join(base, "bead-rehome.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_ACTOR", "")
+	there := t.TempDir()
+	from := (&City{scriptsDir: base}).In(there)
+	from.As("rig/gc-toolkit.refinery").Script("bead-rehome.sh")
+	from.Script("bead-rehome.sh")
+	resolved, err := filepath.EvalSymlinks(there)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(log)
+	if want := "rig/gc-toolkit.refinery " + resolved + "\nnone " + resolved + "\n"; string(raw) != want {
+		t.Fatalf("the commands ran as %q, want %q", raw, want)
+	}
+}
+
 // A cook passes its vars in their names' order, as --var flags, and reads the
 // root from the summary line it prints with --json (formulaCookJSONResult in
-// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). A cook that exits
+// cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). A cook that exits
 // non-zero names no root, and one whose output names none answers with none.
 func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
 	dir := t.TempDir()
@@ -301,5 +358,60 @@ esac
 	first := strings.Split(string(raw), "\n")[0]
 	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A wake and a nudge name the session, and a nudge passes its message as one
+// argument, whatever spaces and quotes it holds. A command that exits non-zero
+// answers with its exit and its last line.
+func TestAWakeAndANudgeNameTheSessionAndPassTheMessageWhole(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+for a in "$@"; do printf '%s\n' "$a"; done >> "$(dirname "$0")/log"
+echo -- >> "$(dirname "$0")/log"
+[ "$3" = rig/gone.refinery ] && { echo "gc session $2: session not found" >&2; exit 1; }
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: gc}
+	msg := "PR head changed on tk-1: run 'gc prime' to check merge queue and begin processing."
+	if r := c.Wake("rig/gc-toolkit.refinery"); r.Failure() != "" {
+		t.Fatalf("the wake answered %+v", r)
+	}
+	if r := c.Nudge("rig/gc-toolkit.refinery", msg); r.Failure() != "" {
+		t.Fatalf("the nudge answered %+v", r)
+	}
+	if f := c.Nudge("rig/gone.refinery", msg).Failure(); f != "exit 1: gc session nudge: session not found" {
+		t.Fatalf("a nudge gc refused failed with %q", f)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
+	want := "session\nwake\nrig/gc-toolkit.refinery\n--\nsession\nnudge\nrig/gc-toolkit.refinery\n" + msg + "\n--\n" +
+		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
+	if string(raw) != want {
+		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
+	}
+}
+
+// The Claude settings file sits under the city's root.
+func TestTheClaudeSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+[ "$1 $2 $3" = "rig list --json" ] || exit 2
+echo '{"rigs":[{"name":"town","path":"`+dir+`","prefix":"lx","hq":true},{"name":"r","path":"/r","prefix":"tk"}]}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY_PATH", "")
+	t.Setenv("GC_CITY", "")
+	t.Setenv("GC_CITY_ROOT", "")
+	c := &City{bin: gc}
+	if got, err := c.ClaudeSettings(); err != nil || got != filepath.Join(dir, ".gc", "settings.json") {
+		t.Errorf("ClaudeSettings = %q, %v", got, err)
 	}
 }

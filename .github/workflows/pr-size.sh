@@ -2,8 +2,10 @@
 # pr-size.sh — keeps one comment on a gc-toolkit pull request current with the
 # change's size: the section `tools/measure.sh --pr` prints from the merge base
 # to the head, which rule 3 of docs/built-once-target.md asks each pull request
-# to show. pr-size.yml runs it on each push to a pull request and each change of
-# the branch the pull request merges into.
+# to show. Below the size the comment shows the suite's time, the section
+# suite-time.sh reads from the tests run at the head. pr-size.yml runs this on
+# each push to a pull request, each change of the branch it merges into, and
+# each end of one of its tests runs.
 #
 # The tool and the deletion plan it reads are the merge base's, never the
 # head's, so a change cannot edit either to hide what it adds. The tool runs
@@ -16,15 +18,25 @@
 # it as review feedback. It is posted through assets/scripts/pr-post.sh, and
 # only a comment the Actions bot wrote is rewritten. When the merge base has no
 # size to show, or the size cannot be measured, a comment an earlier head left
-# is rewritten to say so, and none is posted where there was none.
+# is rewritten to say so, and none is posted where there was none. A suite time
+# that cannot be read is said in the comment and changes no exit.
 #
-# Usage: pr-size.sh --repo <host/owner/name> --pr <n> --base <commit> --head <commit>
-#   --base is the tip of the branch the pull request merges into. It runs from
-#   inside a checkout that holds --base, and fetches --head from origin when
-#   the checkout lacks it.
+# A run measures the pull request as it stands when the run starts. It reads
+# the head and the branch the pull request merges into from the pull request
+# itself, never from the event that started the run, because pr-size.yml's
+# runs need not start in the order of their events. It writes only while both
+# are still as it read them, since a push or a change of that branch starts a
+# run of its own. pr-size.yml's concurrency group keeps two runs of one pull
+# request from writing at once.
 #
-# Exit: 0 the comment is current, or the merge base has no size to show; 1 the
-# size could not be measured, or the comments could not be read or written;
+# Usage: pr-size.sh --repo <host/owner/name> --pr <n>
+#   It runs from inside a checkout that holds the branch the pull request
+#   merges into as refs/remotes/origin/<branch>, and fetches the head from
+#   origin when the checkout lacks it.
+#
+# Exit: 0 the comment is current, the merge base has no size to show, or the
+# pull request moved while the run measured it; 1 the size could not be
+# measured, or the pull request or its comments could not be read or written;
 # 2 usage.
 set -uo pipefail
 
@@ -32,28 +44,39 @@ PROG=pr-size
 MARK='<!-- gc-toolkit:pr-size -->'
 NO_REVIEW='<!-- gc:no-review -->'
 AUTHOR='github-actions[bot]'
-PR_POST="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/pr-post.sh"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PR_POST="$(cd "$HERE/../.." && pwd)/assets/scripts/pr-post.sh"
 
-usage() { echo "usage: $PROG --repo <host/owner/name> --pr <n> --base <commit> --head <commit>" >&2; exit 2; }
-REPO_Q="" PR="" BASE="" HEAD=""
+usage() { echo "usage: $PROG --repo <host/owner/name> --pr <n>" >&2; exit 2; }
+REPO_Q="" PR=""
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
     --repo) REPO_Q=$2 ;;
     --pr) PR=$2 ;;
-    --base) BASE=$2 ;;
-    --head) HEAD=$2 ;;
     *) usage ;;
   esac
   shift 2
 done
 case "$PR" in ''|*[!0-9]*) usage ;; esac
 case "$REPO_Q" in */*/*) ;; *) usage ;; esac
-[ -n "$BASE" ] && [ -n "$HEAD" ] || usage
 HOST=${REPO_Q%%/*} REPO=${REPO_Q#*/}
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/pr-size.XXXXXX") || exit 1
 trap 'rm -rf "$TMP"' EXIT
+
+# pr_now: the pull request's head and the branch it merges into, with a space
+# between, since a branch name holds no space. It fails when the read fails or
+# lacks either.
+pr_now() {
+  local now
+  now=$(gh api "repos/$REPO/pulls/$PR" --hostname "$HOST" | jq -r '"\(.head.sha // "") \(.base.ref // "")"') || return 1
+  case "$now" in ' '*|*' ') return 1 ;; esac
+  printf '%s' "$now"
+}
+NOW=$(pr_now) || { echo "$PROG: could not read PR#$PR's head and base, so nothing is posted" >&2; exit 1; }
+HEAD=${NOW% *} BRANCH=${NOW#* }
+BASE=refs/remotes/origin/$BRANCH
 
 # A fork's head is on no branch the checkout fetched.
 git cat-file -e "$HEAD^{commit}" 2>/dev/null \
@@ -86,7 +109,20 @@ SHORT=$(git rev-parse --short=12 "$HEAD" 2>/dev/null) || SHORT=${HEAD:0:12}
     [ -z "${GITHUB_RUN_ID:-}" ] \
       || printf '\nThe run that tried: %s/%s/actions/runs/%s\n' "${GITHUB_SERVER_URL:-https://github.com}" "$REPO" "$GITHUB_RUN_ID"
   fi
+  printf '\n## Suite time\n\n'
+  if [ -n "$MB" ] && bash "$HERE/suite-time.sh" section --repo "$REPO_Q" --head "$HEAD" --merge-base "$MB" > "$TMP/time"; then
+    cat "$TMP/time"
+  else
+    printf 'The suite'\''s time at head `%s` could not be read.\n' "$SHORT"
+  fi
 } > "$TMP/body"
+
+# The pull request must still be as this run read it (see above).
+AGAIN=$(pr_now) || { echo "$PROG: could not read PR#$PR's head and base again, so nothing is posted" >&2; exit 1; }
+if [ "$AGAIN" != "$NOW" ]; then
+  echo "$PROG: PR#$PR is now head ${AGAIN:0:12} into ${AGAIN#* }, so nothing is written for head $SHORT into $BRANCH"
+  exit 0
+fi
 
 # The bot's own comment carrying the mark. A person's comment that quotes the
 # mark is never rewritten.

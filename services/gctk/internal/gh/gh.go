@@ -8,51 +8,90 @@
 // A read that GitHub did not answer whole returns an error, never a partial
 // answer: a page that does not decode, a GraphQL error, a connection cut short
 // or an id that is not a number. A decision read off part of a PR's reviews or
-// checks would be a decision about another PR.
+// checks would be a decision about another PR. The cheap question (watch.go)
+// asks about many PRs in one request, and answers each PR whole or with that
+// PR's own error.
 package gh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Runner runs gh with args and returns its stdout. A failure carries gh's own
-// message.
+// message, and returns what gh wrote to stdout beside it, since gh writes a
+// GraphQL answer that carries errors and exits non-zero.
 type Runner func(args ...string) ([]byte, error)
 
 // Client reads GitHub through gh, as the account gh is logged in as on host.
+// A call it makes through the gh on PATH stops when ctx ends.
 type Client struct {
 	host string
 	run  Runner
+	ctx  context.Context
 }
 
 // New returns a client for host, such as github.com, that runs the gh on PATH.
-func New(host string) *Client { return &Client{host: host, run: gh} }
+func New(host string) *Client { return &Client{host: host} }
 
 // NewWithRunner returns a client for host that runs gh through run, so the
 // adapter's own tests serve recorded answers.
 func NewWithRunner(host string, run Runner) *Client { return &Client{host: host, run: run} }
 
-// gh runs the gh on PATH.
-func gh(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+// Within returns a client for c's host whose every call stops when ctx ends:
+// the gh it is running is killed, and the call returns an error that wraps the
+// one that ended ctx. GitHub may still take a request whose call was stopped,
+// as it may one whose answer was lost. A client NewWithRunner made runs its
+// runner as it is.
+func (c *Client) Within(ctx context.Context) *Client {
+	d := *c
+	d.ctx = ctx
+	return &d
+}
+
+// call runs gh with args: through the client's runner when it has one, else
+// the gh on PATH, stopped when the client's context ends.
+func (c *Client) call(args ...string) ([]byte, error) {
+	if c.run != nil {
+		return c.run(args...)
+	}
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return gh(ctx, args...)
+}
+
+// ghStopGrace bounds how long a stopped gh, or a child of it that holds its
+// output, keeps a call waiting after the kill.
+const ghStopGrace = 2 * time.Second
+
+// gh runs the gh on PATH, killed when ctx ends. gh holds no lock that a kill
+// leaves behind.
+func gh(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.WaitDelay = ghStopGrace
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return out, fmt.Errorf("gh: the call was stopped: %w", ctx.Err())
+		}
 		var ee *exec.ExitError
 		if msg := strings.TrimSpace(stderr.String()); errors.As(err, &ee) && msg != "" {
-			return nil, fmt.Errorf("gh: %s", msg)
+			return out, fmt.Errorf("gh: %s", msg)
 		}
-		return nil, fmt.Errorf("gh: %w", err)
+		return out, fmt.Errorf("gh: %w", err)
 	}
 	return out, nil
 }
@@ -83,12 +122,14 @@ type PullRequest struct {
 // Review is one review of a PR. State is APPROVED, CHANGES_REQUESTED,
 // COMMENTED, DISMISSED or PENDING. AuthorCanPush is whether its author can push
 // to the repository (authorCanPushToRepository). Commit is the commit the
-// review was given on, its commit_id, empty when GitHub names none.
+// review was given on, its commit_id, empty when GitHub names none. UpdatedAt
+// is when the review last changed, which an edit of its text moves.
 type Review struct {
 	ID            int64
 	State         string
 	Body          string
 	SubmittedAt   string
+	UpdatedAt     string
 	Author        string
 	AuthorCanPush bool
 	Commit        string
@@ -122,12 +163,14 @@ type Thread struct {
 
 // Comment is one inline comment on a PR. Review is the review that carried it,
 // nil when GitHub names none. ViewerReactions are the reactions the account
-// the read ran as left on it, such as THUMBS_UP.
+// the read ran as left on it, such as THUMBS_UP. UpdatedAt is when it last
+// changed, which an edit of its text moves.
 type Comment struct {
 	ID              int64
 	Author          string
 	Body            string
 	CreatedAt       string
+	UpdatedAt       string
 	Review          *CommentReview
 	ViewerReactions []string
 }
@@ -139,12 +182,14 @@ type CommentReview struct {
 	SubmittedAt string
 }
 
-// IssueComment is one comment on a PR's conversation.
+// IssueComment is one comment on a PR's conversation. UpdatedAt is when it
+// last changed, which an edit of its text moves.
 type IssueComment struct {
 	ID        int64
 	Author    string
 	Body      string
 	CreatedAt string
+	UpdatedAt string
 }
 
 // The queries. Each paginated one pages a single connection, which is what
@@ -157,8 +202,7 @@ const (
 
 	// A merge request pinned to the head the caller judged: GitHub merges, or
 	// adds the PR to its base's merge queue, only while the PR's head is that
-	// commit (expectedHeadOid). The merge squashes, as gctk merge's
-	// `gh pr merge --squash --match-head-commit` does.
+	// commit (expectedHeadOid). The merge squashes.
 	mergeMutation = `mutation($id:ID!,$head:GitObjectID!){
   mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{number}}}`
 
@@ -176,7 +220,7 @@ const (
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviews(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-      nodes{fullDatabaseId state body submittedAt authorCanPushToRepository author{login} commit{oid}}}}}}`
+      nodes{` + reviewFields + `}}}}}`
 
 	// The check runs are read with GitHub's LATEST filter, so a re-run's
 	// result stands in place of the attempt it re-ran, in the suite of both.
@@ -186,9 +230,13 @@ const (
       nodes{databaseId checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
         nodes{name status conclusion isRequired(pullRequestNumber:$number)}}}}}}}}`
 
-	commentFields = `fullDatabaseId author{login} body createdAt
+	reviewFields = `fullDatabaseId state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}`
+
+	commentFields = `fullDatabaseId author{login} body createdAt updatedAt
           pullRequestReview{fullDatabaseId submittedAt state}
           reactionGroups{content viewerHasReacted}`
+
+	issueCommentFields = `fullDatabaseId body createdAt updatedAt author{login}`
 
 	threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
@@ -204,33 +252,14 @@ const (
 	issueCommentsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     comments(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-      nodes{fullDatabaseId body createdAt author{login}}}}}}`
+      nodes{` + issueCommentFields + `}}}}}`
 )
 
 // PullRequest reads PR number in repo, owner/name.
 func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 	var page struct {
 		Repository *struct {
-			PullRequest *struct {
-				ID               string `json:"id"`
-				Number           int    `json:"number"`
-				URL              string `json:"url"`
-				State            string `json:"state"`
-				IsDraft          bool   `json:"isDraft"`
-				HeadRefName      string `json:"headRefName"`
-				HeadRefOid       string `json:"headRefOid"`
-				BaseRefName      string `json:"baseRefName"`
-				MergeStateStatus string `json:"mergeStateStatus"`
-				Repository       struct {
-					NameWithOwner string `json:"nameWithOwner"`
-				} `json:"repository"`
-				MergedAt    *string `json:"mergedAt"`
-				MergeCommit *struct {
-					Oid string `json:"oid"`
-				} `json:"mergeCommit"`
-				IsInMergeQueue      bool `json:"isInMergeQueue"`
-				IsMergeQueueEnabled bool `json:"isMergeQueueEnabled"`
-			} `json:"pullRequest"`
+			PullRequest *prNode `json:"pullRequest"`
 		} `json:"repository"`
 	}
 	vars, err := prVars(repo, number)
@@ -245,20 +274,8 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 	if page.Repository == nil || page.Repository.PullRequest == nil {
 		return nil, fmt.Errorf("github: %s holds no pull request %d", repo, number)
 	}
-	p := page.Repository.PullRequest
-	out := &PullRequest{
-		ID: p.ID, Number: p.Number, URL: p.URL, State: p.State, IsDraft: p.IsDraft,
-		HeadRefName: p.HeadRefName, HeadRefOid: p.HeadRefOid, BaseRefName: p.BaseRefName,
-		MergeStateStatus: p.MergeStateStatus, Repository: p.Repository.NameWithOwner,
-		InMergeQueue: p.IsInMergeQueue, MergeQueueEnabled: p.IsMergeQueueEnabled,
-	}
-	if p.MergedAt != nil {
-		out.MergedAt = *p.MergedAt
-	}
-	if p.MergeCommit != nil {
-		out.MergeCommit = p.MergeCommit.Oid
-	}
-	return out, nil
+	out := page.Repository.PullRequest.pullRequest()
+	return &out, nil
 }
 
 // MergePullRequest asks GitHub to squash-merge the PR whose node id is id, only
@@ -305,42 +322,6 @@ func (c *Client) stage(query, id string) error {
 	return c.graphql(query, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
 }
 
-// The statuses of a compare, how its head stands against its base.
-var compareStatuses = []string{"identical", "ahead", "behind", "diverged"}
-
-// commitID is a full commit id, as GitHub names a commit.
-var commitID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
-
-// Compare reads how commit head stands against commit base in repo, by
-// GitHub's compare of the two (GET repos/<repo>/compare/<base>...<head>):
-// identical, ahead when head descends from base, behind when head is an
-// ancestor of base, or diverged. base and head are full commit ids. An answer
-// that names no status of those is an error, as is one GitHub did not give.
-func (c *Client) Compare(repo, base, head string) (string, error) {
-	if _, err := prVars(repo, 1); err != nil {
-		return "", err
-	}
-	if !commitID.MatchString(base) || !commitID.MatchString(head) {
-		return "", fmt.Errorf("github: a compare of %q with %q names no two full commit ids", head, base)
-	}
-	// One commit a page is enough: the status is the answer, and the commits
-	// between the two are not read.
-	raw, err := c.run("api", "--hostname", c.host, fmt.Sprintf("repos/%s/compare/%s...%s?per_page=1", repo, base, head))
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("github: the compare of %s with %s did not decode: %w", head, base, err)
-	}
-	if !slices.Contains(compareStatuses, out.Status) {
-		return "", fmt.Errorf("github: the compare of %s with %s named the status %q", head, base, out.Status)
-	}
-	return out.Status, nil
-}
-
 // DismissReview dismisses review id of PR number in repo with message, through
 // GitHub's review dismissal (PUT repos/<repo>/pulls/<n>/reviews/<id>/dismissals).
 // An error is a dismissal GitHub refused, or one whose answer did not arrive,
@@ -355,7 +336,7 @@ func (c *Client) DismissReview(repo string, number int, id int64, message string
 	if strings.TrimSpace(message) == "" {
 		return errors.New("github: a dismissal needs a message")
 	}
-	_, err := c.run("api", "--hostname", c.host, "-X", "PUT",
+	_, err := c.call("api", "--hostname", c.host, "-X", "PUT",
 		fmt.Sprintf("repos/%s/pulls/%d/reviews/%d/dismissals", repo, number, id), "-f", "message="+message)
 	return err
 }
@@ -392,17 +373,7 @@ func (c *Client) Reviews(repo string, number int) ([]Review, error) {
 		var page struct {
 			Repository *struct {
 				PullRequest *struct {
-					Reviews *connection[struct {
-						ID            string `json:"fullDatabaseId"`
-						State         string `json:"state"`
-						Body          string `json:"body"`
-						SubmittedAt   string `json:"submittedAt"`
-						AuthorCanPush bool   `json:"authorCanPushToRepository"`
-						Author        *actor `json:"author"`
-						Commit        *struct {
-							Oid string `json:"oid"`
-						} `json:"commit"`
-					}] `json:"reviews"`
+					Reviews *connection[reviewNode] `json:"reviews"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		}
@@ -413,14 +384,9 @@ func (c *Client) Reviews(repo string, number int) ([]Review, error) {
 			return fmt.Errorf("the page holds no reviews of %s#%d", repo, number)
 		}
 		for _, n := range page.Repository.PullRequest.Reviews.Nodes {
-			id, err := databaseID(n.ID)
+			v, err := n.review()
 			if err != nil {
 				return err
-			}
-			v := Review{ID: id, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt,
-				Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush}
-			if n.Commit != nil {
-				v.Commit = n.Commit.Oid
 			}
 			out = append(out, v)
 		}
@@ -488,12 +454,57 @@ func (c *Client) CheckSuites(repo, oid string, number int) ([]CheckSuite, error)
 	return out, err
 }
 
+// reviewNode is a review as the reads ask for it.
+type reviewNode struct {
+	ID            string `json:"fullDatabaseId"`
+	State         string `json:"state"`
+	Body          string `json:"body"`
+	SubmittedAt   string `json:"submittedAt"`
+	UpdatedAt     string `json:"updatedAt"`
+	AuthorCanPush bool   `json:"authorCanPushToRepository"`
+	Author        *actor `json:"author"`
+	Commit        *struct {
+		Oid string `json:"oid"`
+	} `json:"commit"`
+}
+
+func (n reviewNode) review() (Review, error) {
+	id, err := databaseID(n.ID)
+	if err != nil {
+		return Review{}, err
+	}
+	v := Review{ID: id, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt, UpdatedAt: n.UpdatedAt,
+		Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush}
+	if n.Commit != nil {
+		v.Commit = n.Commit.Oid
+	}
+	return v, nil
+}
+
+// issueCommentNode is a conversation comment as the reads ask for it.
+type issueCommentNode struct {
+	ID        string `json:"fullDatabaseId"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+	Author    *actor `json:"author"`
+}
+
+func (n issueCommentNode) comment() (IssueComment, error) {
+	id, err := databaseID(n.ID)
+	if err != nil {
+		return IssueComment{}, err
+	}
+	return IssueComment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt}, nil
+}
+
 // commentNode is an inline comment as the thread reads ask for it.
 type commentNode struct {
 	ID        string `json:"fullDatabaseId"`
 	Author    *actor `json:"author"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 	Review    *struct {
 		ID          string `json:"fullDatabaseId"`
 		SubmittedAt string `json:"submittedAt"`
@@ -510,7 +521,7 @@ func (n commentNode) comment() (Comment, error) {
 	if err != nil {
 		return Comment{}, err
 	}
-	c := Comment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt}
+	c := Comment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt}
 	if n.Review != nil {
 		rid, err := databaseID(n.Review.ID)
 		if err != nil {
@@ -540,16 +551,7 @@ func (c *Client) ReviewThreads(repo string, number int) ([]Thread, error) {
 		var page struct {
 			Repository *struct {
 				PullRequest *struct {
-					ReviewThreads *connection[struct {
-						ID         string `json:"id"`
-						IsResolved bool   `json:"isResolved"`
-						Comments   *struct {
-							PageInfo struct {
-								HasNextPage bool `json:"hasNextPage"`
-							} `json:"pageInfo"`
-							Nodes []commentNode `json:"nodes"`
-						} `json:"comments"`
-					}] `json:"reviewThreads"`
+					ReviewThreads *connection[threadNode] `json:"reviewThreads"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		}
@@ -560,18 +562,11 @@ func (c *Client) ReviewThreads(repo string, number int) ([]Thread, error) {
 			return fmt.Errorf("the page holds no review threads of %s#%d", repo, number)
 		}
 		for _, n := range page.Repository.PullRequest.ReviewThreads.Nodes {
-			if n.Comments == nil {
-				return fmt.Errorf("review thread %s holds no comments", n.ID)
+			t, more, err := n.thread()
+			if err != nil {
+				return err
 			}
-			t := Thread{ID: n.ID, Resolved: n.IsResolved}
-			for _, cn := range n.Comments.Nodes {
-				cm, err := cn.comment()
-				if err != nil {
-					return err
-				}
-				t.Comments = append(t.Comments, cm)
-			}
-			if n.Comments.PageInfo.HasNextPage {
+			if more {
 				long = append(long, len(out))
 			}
 			out = append(out, t)
@@ -631,12 +626,7 @@ func (c *Client) IssueComments(repo string, number int) ([]IssueComment, error) 
 		var page struct {
 			Repository *struct {
 				PullRequest *struct {
-					Comments *connection[struct {
-						ID        string `json:"fullDatabaseId"`
-						Body      string `json:"body"`
-						CreatedAt string `json:"createdAt"`
-						Author    *actor `json:"author"`
-					}] `json:"comments"`
+					Comments *connection[issueCommentNode] `json:"comments"`
 				} `json:"pullRequest"`
 			} `json:"repository"`
 		}
@@ -647,11 +637,11 @@ func (c *Client) IssueComments(repo string, number int) ([]IssueComment, error) 
 			return fmt.Errorf("the page holds no comments of %s#%d", repo, number)
 		}
 		for _, n := range page.Repository.PullRequest.Comments.Nodes {
-			id, err := databaseID(n.ID)
+			cm, err := n.comment()
 			if err != nil {
 				return err
 			}
-			out = append(out, IssueComment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt})
+			out = append(out, cm)
 		}
 		return nil
 	})
@@ -660,7 +650,7 @@ func (c *Client) IssueComments(repo string, number int) ([]IssueComment, error) 
 
 // Login reads the login of the account gh acts as on the host.
 func (c *Client) Login() (string, error) {
-	raw, err := c.run("api", "--hostname", c.host, "user")
+	raw, err := c.call("api", "--hostname", c.host, "user")
 	if err != nil {
 		return "", err
 	}
@@ -699,9 +689,9 @@ func (a *actor) name() string {
 
 // prVars are the variables every PR query takes.
 func prVars(repo string, number int) ([]string, error) {
-	owner, name, ok := strings.Cut(repo, "/")
-	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-		return nil, fmt.Errorf("github: %q names no repository as owner/name", repo)
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
 	}
 	if number < 1 {
 		return nil, fmt.Errorf("github: %d is no pull request number", number)
@@ -728,7 +718,7 @@ func (c *Client) graphql(query string, vars []string, paginate bool, take func(j
 	}
 	args = append(args, "-f", "query="+query)
 	args = append(args, vars...)
-	raw, err := c.run(args...)
+	raw, err := c.call(args...)
 	if err != nil {
 		return err
 	}

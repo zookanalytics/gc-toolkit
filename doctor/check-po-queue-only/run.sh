@@ -34,7 +34,7 @@
 #   - A bead in the queue that something already sends: an arm
 #     (gc.dispatch_when_ready), an assignee, or a live run that works it
 #     (assets/scripts/run-lib.sh). Each is a placement that stopped before its
-#     lift, or a sling made while the bead was held, and `gc-helm.sh place`
+#     lift, or a sling made while the bead was held, and `gctk bead place`
 #     finishes either. An arm for the validating closer (mol-validate-close) is
 #     neither: the bead waits on another bead to land and is checked then, so
 #     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
@@ -137,14 +137,11 @@ scrub() { tr -d '\000-\037'; }
 # A check that overlaps its probes runs each one as a background job, and a job
 # cannot hand its parent a variable, so every read lands in a file under one
 # scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
-# it when the check exits. It holds a file in the tree open on fd 9, because the
-# host's scratch reaper removes any gctk-* tree that no process holds open. It
-# returns non-zero when the tree cannot be made or held, and then nothing can be
-# read.
+# it when the check exits. It returns non-zero when the tree cannot be made, and
+# then nothing can be read.
 reads_init() {
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
     trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
 # read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.
@@ -413,7 +410,7 @@ scan_store() {
         | ((.bead // "") | tostring) as $id
         | select(.live == true and $id != "" and ($q | contains(" " + $id + " ")))
         | select(((.formula // "") | tostring) != "mol-first-reaction")
-        | "queued bead \($id) is worked by live run \((.root // "?") | tostring)\(((.formula // "") | tostring) as $f | if $f == "" then "" else " (" + $f + ")" end): it was slung while held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without a second run"
+        | "queued bead \($id) is worked by live run \((.root // "?") | tostring)\(((.formula // "") | tostring) as $f | if $f == "" then "" else " (" + $f + ")" end): it was slung while held. Finish its placement with gctk bead place \($id) --under <parent> or --standalone, which lifts the hold without a second run"
         | gsub("[[:cntrl:]]"; " ")' 2>/dev/null)"
 }
 
@@ -463,11 +460,11 @@ done <<< "$(jq -r --argjson stores "$STORES_JSON" "$DISPATCH_PATH_JQ"'
          (if ($m["gc.dispatch_when_ready_args"] | arm_args | any(.[]; tostring | test("(^|=)mol-validate-close$"))) then
             "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold by removing each spelling of it the bead carries, \($lift), and keep the arm"
           else
-            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: gctk bead disarm \($id) --reason \"<why>\""
+            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gctk bead place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: gctk bead disarm \($id) --reason \"<why>\""
           end)
        else empty end),
       (if (.assignee | nonblank) then
-         "queued bead \($id) is assigned to \(.assignee | tostring), and Gas City serves a held bead to no assignee. Finish its placement with gc-helm.sh place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or clear the assignee"
+         "queued bead \($id) is assigned to \(.assignee | tostring), and Gas City serves a held bead to no assignee. Finish its placement with gctk bead place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or clear the assignee"
        else empty end)
     | gsub("[[:cntrl:]]"; " ")' "$WORK/queued.json" 2>/dev/null)"
 

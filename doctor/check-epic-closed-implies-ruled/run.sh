@@ -192,8 +192,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     while IFS=$'\037' read -r kind id ruling; do
         [ -n "$kind" ] || continue
         # Recording the ruling on the closed epic clears the finding; no reopen is
-        # needed for that. An epic is not a merge anchor, so lifecycle.sh refuses
-        # to reopen it, and the reopen offered here is bd's own.
+        # needed for that. The reopen offered here is bd's own.
         update="gc bd --db $rig_path/.beads update $id"
         reopen="reopen it (\`gc bd --db $rig_path/.beads reopen $id\`)"
         retired="If it was retired into a successor, record that disposition (\`bead-rehome.sh --origin $id --successor <bead> --kind <kind>\`)."

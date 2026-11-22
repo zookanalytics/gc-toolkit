@@ -36,29 +36,29 @@
 // next move on that its `blocks` edges reach, the pr-facts.sh posture, the merge
 // cadence's machine verdict with its blocked cause and the sentence that names
 // it, the merge cadence's count of review threads waiting on the city's answer,
-// the draft-stage markers pr-open.sh records (opened_as_draft, draft_readied),
+// the draft-stage markers (opened_as_draft, draft_readied),
 // and the anchor's in-flight set — any live bead carrying anchor_bead, the same
 // membership test pr-facts.sh applies in its own arms. The rule reads none of
 // GitHub's state itself. It does not read GitHub's merge state:
 // GitHub reports BLOCKED for a required check still running as it does for a
-// wedge, and the merge pass, which reads the branch's rules, is what tells the
-// two apart. It does not consult GitHub's review posture directly — the working
-// -> needs-review flip rests on that live work, which closes as it
-// hands back, so a sticky changes_requested never traps the value in working
-// after the set empties. Nor does it read GitHub's draft flag: a draft the city
-// opened is known by its markers, and a draft someone else made reads like any
-// other PR.
+// wedge, and the pr domain's evaluator, which reads each required check, is
+// what tells the two apart. It does not consult GitHub's review posture
+// directly — the working -> needs-review flip rests on that live work, which
+// closes as it hands back, so a sticky changes_requested never traps the value
+// in working after the set empties. Nor does it read GitHub's draft flag: a
+// draft the city opened is known by its markers, and a draft someone else made
+// reads like any other PR.
 //
 // A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
 // domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
 // [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
 // status`, and through it the labels and engage, and the rig board
-// (services/helm/internal/rigboard) ask the evaluator over the GitHub read the
-// landing order saved on the PR's bead and the store as it stands
+// (services/helm/internal/rigboard) ask the evaluator over the read the one-PR
+// update saved on the PR's bead and the store as it stands
 // ([pr.FromStore]), so none of them reads GitHub, and a change in the city
 // shows at its next read. A PR whose saved read is absent, or is not of the PR
-// at the head the store holds, reads working until the landing order's next
-// check, unless something only a person clears holds it, which reads
+// at the head the store holds, reads working until the PR watch's next pass
+// reads it, unless something only a person clears holds it, which reads
 // needs-attention.
 package prstatus
 
@@ -106,8 +106,8 @@ const (
 
 // The blocked causes: the value pr.machine_cause carries beside a blocked
 // machine verdict, declared as [machine_axis] causes in lifecycle/lifecycle.toml.
-// gctk merge writes them, and the status: label and the helm board read them
-// here rather than parsing the pr.machine_reason sentence.
+// The status: label and the helm board read them here rather than parsing the
+// pr.machine_reason sentence.
 const (
 	CauseReviewThreads = "review-threads" // a required review thread is unresolved
 	CauseCheckFailed   = "check-failed"   // a required check failed at the head
@@ -157,12 +157,11 @@ type Facts struct {
 	// Gates are the open human gates that hold the anchor, on the anchor itself
 	// or behind a bead it waits on, nearest first, as [Holding] reads them
 	// ([Holds.Gates]). Only a person clears a human gate. While one stands the
-	// merge is refused, whether by the gate on the anchor, through the merge
-	// pass's blocker probe and its finalize gate (assets/scripts/finalize-gate.sh),
-	// or by the open blocker the gate holds, through that same probe. So a gate
-	// reads as a hold, as merge_hold and rebase_hold do, whatever work is in
-	// flight. A conversation is no human gate, so it is never among them: one
-	// that holds the anchor's merge is among Owed.
+	// merge is refused: the landing order's evaluator holds a PR's merge on each
+	// open wait of its bead, the gate on the anchor or the open blocker the gate
+	// holds. So a gate reads as a hold, as merge_hold and rebase_hold do,
+	// whatever work is in flight. A conversation is no human gate, so it is
+	// never among them: one that holds the anchor's merge is among Owed.
 	Gates []Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest
@@ -172,12 +171,13 @@ type Facts struct {
 	// rework of this one waits for. No automated actor will move any of them, so
 	// each holds the PR.
 	Owed []Blocker
-	// Staying are the conversations the PR waits on, on its own blockers or
-	// behind a bead it waits on, whose sittings stay for the work they sent, as
-	// [Holding] reads them ([Holds.Staying]). Each holds the merge until its
-	// sitting comes back to the operator once that work closes, so the PR waits
-	// on that work first and is no person's move yet, approved or not. Once the
-	// work closes, the conversation is among Owed.
+	// Staying are the beads a person would owe that the PR waits on, on its own
+	// blockers or behind a bead it waits on, while each waits on work of its own
+	// first, as [Holding] reads them ([Holds.Staying]): a conversation whose
+	// sitting stays for the work it sent, or a decision a ruling left waiting on
+	// the work it sent. Each holds the merge until that work closes, so the PR
+	// waits on that work first and is no person's move yet, approved or not.
+	// Once the work closes, the bead is among Owed.
 	Staying []Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
@@ -204,13 +204,11 @@ type Facts struct {
 	// review, one the city marked handled with its THUMBS_UP, or one a
 	// dismissal retired, neither asks nor answers.
 	PRUnansweredThreads string
-	// OpenedAsDraft is metadata.opened_as_draft: the head oid pr-open.sh opened
-	// or adopted the PR as a draft at, recorded only on a draft whose ready flip
-	// the refinery owns.
+	// OpenedAsDraft is metadata.opened_as_draft: the head oid the PR was opened
+	// or adopted as a draft at, on a draft whose ready flip the city owes.
 	OpenedAsDraft string
-	// DraftReadied is metadata.draft_readied: the head oid pr-open.sh read that
-	// draft ready at, either the head it flipped it at or the head it found it
-	// already ready at.
+	// DraftReadied is metadata.draft_readied: the head oid that draft was read
+	// ready at.
 	DraftReadied string
 	// InFlightCount is the size of the anchor's in-flight set: every bead
 	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
@@ -251,18 +249,17 @@ func runsOf(blockers []Blocker) []Run {
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
 // its anchor's in-flight set, whatever its task_kind: bd-lib.sh's anchor
 // statuses (_BD_ANCHOR_STATUSES) less closed. [Read] asks its [Store] for the set
-// over them, and the helm board's beads source reads an anchor's live reviews
-// over them too.
+// over them.
 var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
 
 // Derive returns the state the anchor projects. Precedence:
 // needs-attention > merging > working > needs-review. A blocker the city will
 // not clear holds the PR whatever else stands. An approved PR with nothing
 // blocking it is the city's to land, whatever work is in flight on the way. A
-// conversation whose sitting stays for work holds the merge until it comes back
-// to the operator, so the PR is working while one does, approved or not. Live
-// city work on an unapproved PR comes before the review verdict it leads to,
-// and the verdict is what remains when neither stands.
+// bead among [Facts.Staying] holds the merge until the work it waits on closes,
+// so the PR is working while one does, approved or not. Live city work on an
+// unapproved PR comes before the review verdict it leads to, and the verdict is
+// what remains when neither stands.
 func Derive(f Facts) State {
 	posture, _ := splitDated(f.PRPosture)
 	machine, _ := splitDated(f.PRMachine)
@@ -285,8 +282,8 @@ func Derive(f Facts) State {
 		return NeedsAttention
 	}
 
-	// working: a conversation whose sitting stays for work holds the merge, so
-	// the work comes first, then the sitting's return to the operator.
+	// working: a bead that waits on work of its own first holds the merge, so
+	// that work comes first, then the person's move on the bead.
 	if len(f.Staying) > 0 {
 		return Working
 	}
@@ -473,8 +470,8 @@ func knownCause(v string) bool {
 	return false
 }
 
-// knownCount is a thread count as gctk merge records it, digits alone, plus no
-// count recorded yet.
+// knownCount is a thread count as pr.unanswered_threads records it, digits
+// alone, plus no count recorded yet.
 func knownCount(v string) bool {
 	for _, c := range v {
 		if c < '0' || c > '9' {
@@ -484,10 +481,10 @@ func knownCount(v string) bool {
 	return true
 }
 
-// isSet is the truthiness rule pr-facts.sh, pr-open.sh and pr-status-label.sh
-// share, applied to the value as `(v // "") | tostring` renders it: null and
-// false already arrive empty, and the string spellings of an unset flag are
-// treated as unset too, so a hold means the same thing everywhere.
+// isSet is the truthiness rule pr-facts.sh and pr-status-label.sh share,
+// applied to the value as `(v // "") | tostring` renders it: null and false
+// already arrive empty, and the string spellings of an unset flag are treated as
+// unset too, so a hold means the same thing everywhere.
 func isSet(v string) bool {
 	switch v {
 	case "", "false", "False", "FALSE", "0", "null":
@@ -499,8 +496,7 @@ func isSet(v string) bool {
 // inDraftStage is the open-as-draft stage: the city opened the PR as a draft and
 // has not yet read it ready, so it still owes the checks that flip it and the
 // flip itself. The test is presence, not truthiness, because both markers are
-// oids: it is the prefilter pr-open.sh's draft-to-ready arm runs and the stage
-// test gate-ensure.sh dispatches on.
+// oids: it is the stage test gate-ensure.sh dispatches on.
 func inDraftStage(openedAsDraft, draftReadied string) bool {
 	return openedAsDraft != "" && draftReadied == ""
 }

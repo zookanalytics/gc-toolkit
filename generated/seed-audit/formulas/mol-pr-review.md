@@ -13,17 +13,14 @@ merges on, and closes the asks the run answered, so no step records it. The
 design is specs/tk-1tfzr71.108/design.md.
 
 The landing order pours a run attached to the bead that owns the PR, which the
-run then holds, with the record it read as the run's vars. A shadow run
-(shadow=true) writes nothing outside itself: no withdrawal, push, post, gate or
-bead, no result and no ask closed, and its rule-and-repair writes what it would
-have written into its output.
+run then holds, with the record it read as the run's vars.
 
 Hard rules, in force for every step:
 
 - Each step is claimed by its own session, so no shell variable or file outside
   the run's workspace survives from one step to the next. Each step's read,
   `review-run.sh`, prints what the step uses.
-- The run is the one writer of the PR's branch while it holds the bead, and
+- The run is the one worker on the PR's branch while it holds the bead, and
   only rule-and-repair pushes, through `review-run.sh push`.
 - A step writes its output once, through `review-run.sh output`, before it
   closes. A step that cannot go on cancels the run rather than closing.
@@ -39,7 +36,6 @@ Variables:
   {{pr_bead}}: The bead that owns the PR, which the run is attached to and holds. (default=)
   {{repair_target}}: The pool rule-and-repair runs on, and a deferred fix's bead is armed for: <rig>/<binding>polecat. (default=)
   {{review_target}}: The pool triage and the lanes run on: <rig>/<binding>polecat-codex. (default=)
-  {{shadow}}: true for a shadow run, which writes nothing outside itself. (default=false)
   {{target}}: The branch the PR merges into, the target the run's result is for. (default=)
 
 Steps (9):

@@ -75,25 +75,40 @@ type Spec struct {
 	// Out takes its standard output and its standard error, and nil discards
 	// them. Its standard input reads nothing.
 	Out io.Writer
-	// Relay has the process write into a pipe that this process copies into
-	// Out, so the process needs no access to where Out leads, and dies at its
-	// next write once this process is gone. Child.Relayed says when the copy
-	// is done.
+	// Stdout, when set, takes its standard output in place of Out, which then
+	// takes its standard error alone.
+	Stdout io.Writer
+	// Relay has the process write into pipes that this process copies into
+	// Out and Stdout, so the process needs no access to where they lead, and
+	// dies at its next write once this process is gone. Child.Relayed says
+	// when the copy is done. Out or Stdout that is an Ender is told when the
+	// stream copied into it ends.
 	Relay bool
 	// Session starts the process in a session of its own, so it leads a
 	// process group of its own, which outlives this process. Without it the
 	// process joins this process's group.
 	Session bool
-	// Sandbox, when set, runs the process inside the sandbox a demo capture
-	// runs in, from Dir, which it needs.
+	// Sandbox, when set, runs the process from Dir, which it needs, as the
+	// pack's demo capture runs one.
 	Sandbox *Sandbox
 }
 
-// Sandbox is the sandbox the pack's demo capture runs a command in, which
-// demo_engine_sandboxed in Lib composes: the process reads and writes its
-// working directory, reaches no loopback port but Port, signals no process
-// outside the sandbox, and gets none of the variables that point a command at
-// the city.
+// An Ender is a writer that takes the end of the stream written into it: a
+// relay calls End once the whole stream is copied in, whether the process
+// ended or closed that stream and runs on, so the writer can act on text that
+// no line end closed. A copy that stops at an error, such as a write the
+// writer refuses, calls no End, because the stream did not end there.
+type Ender interface {
+	End()
+}
+
+// Sandbox is how the pack's demo capture runs a command, which
+// demo_engine_sandboxed in Lib decides by the rig that holds the process's
+// directory. For a rig whose app reads the city the process runs inside the
+// capture's sandbox, where it reads and writes its working directory, reaches
+// no loopback port but Port and signals no process outside the sandbox. For
+// any other rig it runs as an ordinary process. Either way it gets none of the
+// variables that point a command at the city.
 type Sandbox struct {
 	// Lib is the file that defines it, the pack's demo-engine-lib.sh.
 	Lib string
@@ -101,7 +116,14 @@ type Sandbox struct {
 	Port int
 	// Prog is the name the sandbox's messages start with.
 	Prog string
+	// Record, when set, is the file where demo_engine_sandboxed writes whether
+	// the process runs inside the sandbox, true or false, before the process
+	// starts.
+	Record string
 }
+
+// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed.
+const sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
 
 // Child is a process Start started.
 type Child interface {
@@ -140,7 +162,9 @@ func (local) Notify(c chan<- os.Signal, sig ...os.Signal) { signal.Notify(c, sig
 func (local) Ignore(sig ...os.Signal) { signal.Ignore(sig...) }
 
 // sandboxed sources the file it is given first and runs the rest, the port,
-// the directory and the command, through demo_engine_sandboxed.
+// the directory and the command, through demo_engine_sandboxed, which the
+// command replaces, so no shell of the wrapper holds a stream the relay copies
+// once the command closes it.
 const sandboxed = `. "$1" || exit 126; shift; demo_engine_sandboxed "$@"`
 
 func (local) Start(s Spec) (Child, error) {
@@ -154,6 +178,9 @@ func (local) Start(s Spec) (Child, error) {
 		}
 		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, strconv.Itoa(b.Port), s.Dir}, argv...)
 		env = append(slices.Clone(env), "PROG="+b.Prog)
+		if b.Record != "" {
+			env = append(env, sandboxRecordVar+"="+b.Record)
+		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir
@@ -164,28 +191,74 @@ func (local) Start(s Spec) (Child, error) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	}
 	c := &child{cmd: cmd, relayed: make(chan struct{})}
-	if !s.Relay || s.Out == nil {
-		cmd.Stdout, cmd.Stderr = s.Out, s.Out
+	stdout := s.Out
+	if s.Stdout != nil {
+		stdout = s.Stdout
+	}
+	if !s.Relay || stdout == nil {
+		cmd.Stdout, cmd.Stderr = stdout, s.Out
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
 		close(c.relayed)
 		return c, nil
 	}
-	pr, pw, err := os.Pipe()
+	type relay struct {
+		r, w *os.File
+		to   io.Writer
+	}
+	errOut := s.Out
+	if errOut == nil {
+		errOut = io.Discard
+	}
+	relays := []relay{{to: errOut}}
+	if s.Stdout != nil {
+		relays = append(relays, relay{to: s.Stdout})
+	}
+	closeAll := func() {
+		for _, r := range relays {
+			if r.r != nil {
+				_ = r.r.Close()
+				_ = r.w.Close()
+			}
+		}
+	}
+	for i := range relays {
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			closeAll()
+			return nil, err
+		}
+		relays[i].r, relays[i].w = pr, pw
+	}
+	cmd.Stdout, cmd.Stderr = relays[0].w, relays[0].w
+	if len(relays) > 1 {
+		cmd.Stdout = relays[1].w
+	}
+	err := cmd.Start()
+	for _, r := range relays {
+		_ = r.w.Close()
+	}
 	if err != nil {
+		for _, r := range relays {
+			_ = r.r.Close()
+		}
 		return nil, err
 	}
-	cmd.Stdout, cmd.Stderr = pw, pw
-	err = cmd.Start()
-	pw.Close()
-	if err != nil {
-		pr.Close()
-		return nil, err
+	var wg sync.WaitGroup
+	for _, r := range relays {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := io.Copy(r.to, r.r)
+			_ = r.r.Close()
+			if e, ok := r.to.(Ender); ok && err == nil {
+				e.End()
+			}
+		}()
 	}
 	go func() {
-		_, _ = io.Copy(s.Out, pr)
-		pr.Close()
+		wg.Wait()
 		close(c.relayed)
 	}()
 	return c, nil
@@ -323,7 +396,7 @@ func (local) FreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -332,7 +405,7 @@ func (local) Answers(port int) bool {
 	if err != nil {
 		return false
 	}
-	c.Close()
+	_ = c.Close()
 	return true
 }
 

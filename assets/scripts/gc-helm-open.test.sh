@@ -1538,7 +1538,7 @@ grep -q 'tk-rework' <<< "$ERR" && grep -q 'tk-gone' <<< "$ERR" \
 # (RESOLVE-PR-DEFERRED) a PR whose anchor sits in a NON-OPEN live state (deferred)
 # resolves too. The resolver's status set must be the pack's live-PR set
 # (open,in_progress,blocked,deferred,hooked,pinned), which pr-facts.sh defines
-# as LIVE_STATUSES and gctk merge as mergeLiveStatuses. FAKE_DEFERRED_ROWS is
+# as LIVE_STATUSES. FAKE_DEFERRED_ROWS is
 # visible only to a query carrying `deferred`, so a resolver searching
 # open,in_progress,blocked alone finds nothing here and exits 4.
 FAKE_PR_ROWS='[]'
@@ -1680,14 +1680,12 @@ grep -q 'riga' <<< "$ERR" && ok "(RESOLVE-PR-NO-LEDGER) names the rig whose ledg
   || bad "(RESOLVE-PR-NO-LEDGER) does not name the missing ledger (err: $ERR)"
 unset FAKE_PR_ROWS
 
-# --- (RESOLVE-REACT / RESOLVE-ENGAGE) the resolved subject drives the write ----
-# react and engage resolve the same reference open does, then act on the LIVE
-# bead: react slings it through gc-proactive.sh, engage holds a conversation
-# about it in a new sitting. These cases drive the REAL verbs over a stub that
-# answers the resolve reads and, for engage, the conversation lookup, the spawn
-# and the bind, and assert the id each verb writes is the RESOLVED one (a
-# supersede chain's successor, or the bead a PR number records), never the
-# reference typed.
+# --- (RESOLVE-ENGAGE) the resolved subject drives the write ------------------
+# engage resolves the same reference open does, then holds a conversation about
+# the LIVE bead in a new sitting. These cases drive the REAL verb over a stub
+# that answers the resolve reads, the conversation lookup, the spawn and the
+# bind, and assert the id it writes is the RESOLVED one (a supersede chain's
+# successor, or the bead a PR number records), never the reference typed.
 mkdir -p "$TMP/rebin"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/rebin/gc" <<'REBIN'
 # `bd show` branches on the id so a supersede chain and a live bead read
@@ -1744,31 +1742,15 @@ esac
 exit 0
 REBIN
 chmod +x "$TMP/rebin/gc"
-cat > "$TMP/rebin/gc-proactive.sh" <<'PROACTIVE'
-#!/usr/bin/env bash
-printf 'proactive %s\n' "$*" >> "$FAKE_SLING"
-exit 0
-PROACTIVE
-chmod +x "$TMP/rebin/gc-proactive.sh"
 # A real .beads store for the rig, so the resolver can pin --db for the PR search
-# react/engage run; without it the resolver fails closed before resolving. engage
+# engage runs; without it the resolver fails closed before resolving. engage
 # also refuses up front a rig whose checkout carries no converse template
 # (agents/converse-*), so the fixture carries one; without it engage exits 4
 # before it resolves and binds.
 mkdir -p "$TMP/rebinrig/.beads" "$TMP/rebinrig/agents/converse-claude-opus"
 export REBINRIG="$TMP/rebinrig"
-export FAKE_SLING="$TMP/slung" CONV_STATE="$TMP/conv_state"
+export CONV_STATE="$TMP/conv_state"
 
-# run_react <arg> — drive the REAL cmd_react; the fake gc-proactive.sh records
-# the `sling` argv so the resolved subject is checked against the slung id.
-run_react() {
-    : > "$FAKE_SLING"
-    set +e
-    OUT="$(PATH="$TMP/rebin:$PATH" GC_PROACTIVE_TOOL="$TMP/rebin/gc-proactive.sh" \
-        sh "$SCRIPT" react "$1" --dry-run 2>"$TMP/err")"; RC=$?
-    set -e
-    ERR="$(cat "$TMP/err")"; SLUNG="$(cat "$FAKE_SLING")"
-}
 # run_engage <arg> — drive the REAL cmd_engage through the spawn/bind path,
 # --no-attach so no session is attached; CONV_STATE reset so the pre-bind read
 # sees the conversation waiting in the queue.
@@ -1779,28 +1761,6 @@ run_engage() {
     set -e
     ERR="$(cat "$TMP/err")"; CALLS="$(cat "$FAKE_CALLS")"
 }
-
-# (RESOLVE-REACT-SUPERSEDE) react slings the successor of a settled id.
-export FAKE_PR_ROWS='[]'
-run_react tk-pred
-eq "$RC" "0" "(RESOLVE-REACT-SUPERSEDE) react resolves a settled id and slings"
-grep -q 'sling tk-succ' <<< "$SLUNG" \
-  && ok "(RESOLVE-REACT-SUPERSEDE) gc-proactive.sh is slung the live successor" \
-  || bad "(RESOLVE-REACT-SUPERSEDE) slung the successor (slung: $SLUNG)"
-grep -q 'sling tk-pred' <<< "$SLUNG" \
-  && bad "(RESOLVE-REACT-SUPERSEDE) slung the settled predecessor" \
-  || ok "(RESOLVE-REACT-SUPERSEDE) never slings the predecessor"
-
-# (RESOLVE-REACT-PR) react slings the bead a PR number records, not the number.
-export FAKE_PR_ROWS='[{"id":"tk-prbead","status":"open","metadata":{"pr_number":"615","pr_url":"https://github.com/o/r/pull/615"}}]'
-run_react 615
-eq "$RC" "0" "(RESOLVE-REACT-PR) react resolves a PR number and slings"
-grep -q 'sling tk-prbead' <<< "$SLUNG" \
-  && ok "(RESOLVE-REACT-PR) gc-proactive.sh is slung the bead recording the PR" \
-  || bad "(RESOLVE-REACT-PR) slung the PR anchor (slung: $SLUNG)"
-grep -qE 'sling 615( |$)' <<< "$SLUNG" \
-  && bad "(RESOLVE-REACT-PR) slung the raw PR number" \
-  || ok "(RESOLVE-REACT-PR) never slings the raw PR number"
 
 # (RESOLVE-ENGAGE-SUPERSEDE) engage holds the successor's conversation.
 export FAKE_PR_ROWS='[]' FAKE_CONV_SUBJ=tk-succ
@@ -1826,7 +1786,7 @@ grep -q 'conversation tk-convE for tk-prbead' <<< "$OUT" \
 grep -q 'PR #615 -> tk-prbead' <<< "$ERR" \
   && ok "(RESOLVE-ENGAGE-PR) announces the PR match before spawning" \
   || bad "(RESOLVE-ENGAGE-PR) PR match announced (err: $ERR)"
-unset FAKE_PR_ROWS FAKE_SLING CONV_STATE FAKE_CONV_SUBJ
+unset FAKE_PR_ROWS CONV_STATE FAKE_CONV_SUBJ
 
 # --- (SYNTAX) the shipped script still parses ---------------------------------
 sh -n "$SCRIPT" 2>/dev/null && ok "(SYNTAX) gc-helm.sh parses as POSIX sh" || bad "(SYNTAX) sh -n failed"

@@ -20,14 +20,12 @@ import (
 )
 
 // moduleRoot is services/helm, two levels up from this package: the directory
-// the command runs from, where its default board path resolves.
+// the command runs from, where its default document paths resolve.
 const moduleRoot = "../.."
 
 // TestLinksNothingThatReachesACity holds the command's import graph to the
 // standard library, the app's package and package fixture. A bead source or a
-// write tool anywhere in it could read or write the city a capture runs beside,
-// and the beads library would bring back the cgo build this command exists to
-// avoid.
+// write tool anywhere in it could read or write the city a capture runs beside.
 func TestLinksNothingThatReachesACity(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}", ".").Output()
 	if err != nil {
@@ -48,13 +46,13 @@ func TestLinksNothingThatReachesACity(t *testing.T) {
 func noEnv(string) string { return "" }
 
 func TestRunRefusesWhatItCannotServe(t *testing.T) {
-	board := filepath.Join(moduleRoot, defaultBoard)
 	rig := filepath.Join(moduleRoot, defaultRigBoard)
+	city := filepath.Join(moduleRoot, defaultCity)
 	badAnswers := t.TempDir()
-	if err := os.WriteFile(filepath.Join(badAnswers, "dismiss.json"), []byte("dismissed"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(badAnswers, "engage.json"), []byte("engaged"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	notJSON := filepath.Join(t.TempDir(), "board.json")
+	notJSON := filepath.Join(t.TempDir(), "not.json")
 	if err := os.WriteFile(notJSON, []byte("<html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -65,16 +63,16 @@ func TestRunRefusesWhatItCannotServe(t *testing.T) {
 		want int
 		says string
 	}{
-		{"no address and no PORT", []string{"--board", board}, noEnv, 2, "set PORT"},
-		{"an address off this host", []string{"--board", board, "--addr", "0.0.0.0:0"}, noEnv, 2, "not a loopback address"},
-		{"an address with no port", []string{"--board", board, "--addr", "127.0.0.1"}, noEnv, 2, "not host:port"},
-		{"an argument it does not take", []string{"--board", board, "--addr", "127.0.0.1:0", "extra"}, noEnv, 2, "takes no arguments"},
+		{"no address and no PORT", []string{"--rig-board", rig}, noEnv, 2, "set PORT"},
+		{"an address off this host", []string{"--rig-board", rig, "--addr", "0.0.0.0:0"}, noEnv, 2, "not a loopback address"},
+		{"an address with no port", []string{"--rig-board", rig, "--addr", "127.0.0.1"}, noEnv, 2, "not host:port"},
+		{"an argument it does not take", []string{"--rig-board", rig, "--addr", "127.0.0.1:0", "extra"}, noEnv, 2, "takes no arguments"},
 		{"a flag it does not take", []string{"--port", "1"}, noEnv, 2, "flag provided but not defined"},
-		{"a board it cannot read", []string{"--board", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the board answer"},
-		{"a board that is not JSON", []string{"--board", notJSON, "--rig-board", rig, "--addr", "127.0.0.1:0"}, noEnv, 1, "not JSON"},
-		{"a rig document it cannot read", []string{"--board", board, "--rig-board", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the rig document"},
-		{"a rig document that is not JSON", []string{"--board", board, "--rig-board", notJSON, "--addr", "127.0.0.1:0"}, noEnv, 1, "rig document is not a JSON object"},
-		{"an answer that is not JSON", []string{"--board", board, "--rig-board", rig, "--answers", badAnswers, "--addr", "127.0.0.1:0"}, noEnv, 1, "dismiss.json"},
+		{"a rig document it cannot read", []string{"--rig-board", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the rig document"},
+		{"a rig document that is not JSON", []string{"--rig-board", notJSON, "--city", city, "--addr", "127.0.0.1:0"}, noEnv, 1, "rig document is not a JSON object"},
+		{"a city document it cannot read", []string{"--rig-board", rig, "--city", filepath.Join(t.TempDir(), "missing.json"), "--addr", "127.0.0.1:0"}, noEnv, 1, "read the city document"},
+		{"a city document that is not JSON", []string{"--rig-board", rig, "--city", notJSON, "--addr", "127.0.0.1:0"}, noEnv, 1, "city document is not a JSON object"},
+		{"an answer that is not JSON", []string{"--rig-board", rig, "--city", city, "--answers", badAnswers, "--addr", "127.0.0.1:0"}, noEnv, 1, "engage.json"},
 	}
 	for _, c := range cases {
 		var stderr bytes.Buffer
@@ -102,7 +100,7 @@ func get(t *testing.T, method, url, accept string) (*http.Response, []byte) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -111,15 +109,15 @@ func get(t *testing.T, method, url, accept string) (*http.Response, []byte) {
 }
 
 // TestRunServesUntilItIsStopped starts the fixture on PORT the way a capture's
-// --serve command does, reads the board, the app and a canned answer back, then
-// cancels it as the engine's SIGTERM would.
+// --serve command does, reads the rig board, the app and a canned answer back,
+// then cancels it as the engine's SIGTERM would.
 func TestRunServesUntilItIsStopped(t *testing.T) {
 	answers := t.TempDir()
-	if err := os.WriteFile(filepath.Join(answers, "dismiss.json"), []byte(`{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(answers, "engage.json"), []byte(`{"bead":"tk-abc12","verb":"engage","message":"engaged"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	board := filepath.Join(moduleRoot, defaultBoard)
 	rig := filepath.Join(moduleRoot, defaultRigBoard)
+	city := filepath.Join(moduleRoot, defaultCity)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ready := make(chan string, 1)
@@ -132,7 +130,7 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 		return ""
 	}
 	go func() {
-		done <- run(ctx, []string{"--board", board, "--rig-board", rig, "--answers", answers}, env, &stderr, ready)
+		done <- run(ctx, []string{"--rig-board", rig, "--city", city, "--answers", answers}, env, &stderr, ready)
 	}()
 
 	var base string
@@ -148,14 +146,6 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 		t.Errorf("PORT served on %s, want 127.0.0.1", base)
 	}
 
-	want, err := os.ReadFile(board)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, body := get(t, http.MethodGet, base+"/helm", "")
-	if res.StatusCode != http.StatusOK || !bytes.Equal(body, want) || res.Header.Get("Content-Type") != "application/json" {
-		t.Errorf("GET /helm: %d %s, want the board file as application/json", res.StatusCode, res.Header.Get("Content-Type"))
-	}
 	shell, err := os.ReadFile(filepath.Join(moduleRoot, "web/dist/index.html"))
 	if err != nil {
 		t.Fatal(err)
@@ -163,8 +153,8 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
 		t.Errorf("GET /: %d, want the embedded app shell", res.StatusCode)
 	}
-	if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"message":"dismissed"`) {
-		t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
+	if res, body := get(t, http.MethodPost, base+"/helm/engage", ""); res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"message":"engaged"`) {
+		t.Errorf("POST /helm/engage: %d %s, want the canned answer", res.StatusCode, body)
 	}
 	wantRig, err := os.ReadFile(rig)
 	if err != nil {
@@ -172,6 +162,13 @@ func TestRunServesUntilItIsStopped(t *testing.T) {
 	}
 	if res, body := get(t, http.MethodGet, base+"/helm/rigs/gc-toolkit", ""); res.StatusCode != http.StatusOK || !sameJSON(t, rigBoardOf(t, body), wantRig) {
 		t.Errorf("GET /helm/rigs/gc-toolkit: %d, want the rig document file as its board", res.StatusCode)
+	}
+	wantCity, err := os.ReadFile(city)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, body := get(t, http.MethodGet, base+"/helm/city", ""); res.StatusCode != http.StatusOK || !sameJSON(t, cityOf(t, body), wantCity) {
+		t.Errorf("GET /helm/city: %d, want the city document file as its city", res.StatusCode)
 	}
 
 	cancel()
@@ -224,7 +221,9 @@ func startServe(t *testing.T, cmdline, dir string) string {
 		t.Fatal(err)
 	}
 	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	var stderr lockedBuffer
 	cmd := exec.Command("bash", "-c", cmdline)
@@ -261,7 +260,7 @@ func startServe(t *testing.T, cmdline, dir string) string {
 		default:
 		}
 		if res, err := http.Get(base + "/"); err == nil {
-			res.Body.Close()
+			_ = res.Body.Close()
 			if res.StatusCode == http.StatusOK {
 				return base
 			}
@@ -275,7 +274,7 @@ func startServe(t *testing.T, cmdline, dir string) string {
 // TestTheDeclaredCommandServesTheBoard runs the command gc-toolkit declares as
 // its serve command the way gctk rig serve runs a copy's: from the worktree's
 // root, on a free port it hands over as PORT. It reads back what a capture's
-// browser reads: the app, the board as JSON at its own path, and a verb refused
+// browser reads: the app, the rig board and the city page, and a verb refused
 // for want of an answer. It runs the command again with the --answers a
 // reviewer adds, and a click's answer comes back.
 func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
@@ -290,11 +289,11 @@ func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	board, err := os.ReadFile(filepath.Join(mod, defaultBoard))
+	rig, err := os.ReadFile(filepath.Join(mod, defaultRigBoard))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rig, err := os.ReadFile(filepath.Join(mod, defaultRigBoard))
+	city, err := os.ReadFile(filepath.Join(mod, defaultCity))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,30 +307,26 @@ func TestTheDeclaredCommandServesTheBoard(t *testing.T) {
 		if res, body := get(t, http.MethodGet, base+"/", "text/html"); res.StatusCode != http.StatusOK || !bytes.Equal(body, shell) {
 			t.Errorf("GET /: %d, want the app shell the reviewed commit embeds", res.StatusCode)
 		}
-		res, body := get(t, http.MethodGet, base+"/helm", "")
-		if res.StatusCode != http.StatusOK || !bytes.Equal(body, board) {
-			t.Errorf("GET /helm: %d, want %s byte for byte", res.StatusCode, defaultBoard)
-		}
-		if ct := res.Header.Get("Content-Type"); ct != "application/json" {
-			t.Errorf("GET /helm: Content-Type %q, want application/json", ct)
-		}
 		if res, body := get(t, http.MethodGet, base+"/helm/rigs/gc-toolkit", ""); res.StatusCode != http.StatusOK || !sameJSON(t, rigBoardOf(t, body), rig) {
 			t.Errorf("GET /helm/rigs/gc-toolkit: %d, want %s as its board", res.StatusCode, defaultRigBoard)
 		}
-		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"reason":"unavailable"`) {
-			t.Errorf("POST /helm/dismiss with no answer: %d %s, want 503 unavailable", res.StatusCode, body)
+		if res, body := get(t, http.MethodGet, base+"/helm/city", ""); res.StatusCode != http.StatusOK || !sameJSON(t, cityOf(t, body), city) {
+			t.Errorf("GET /helm/city: %d, want %s as its city", res.StatusCode, defaultCity)
+		}
+		if res, body := get(t, http.MethodPost, base+"/helm/engage", ""); res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"reason":"unavailable"`) {
+			t.Errorf("POST /helm/engage with no answer: %d %s, want 503 unavailable", res.StatusCode, body)
 		}
 	})
 
 	t.Run("with the answers a reviewer adds", func(t *testing.T) {
 		answers := t.TempDir()
-		answer := `{"bead":"tk-abc12","verb":"dismiss","message":"dismissed"}`
-		if err := os.WriteFile(filepath.Join(answers, "dismiss.json"), []byte(answer), 0o644); err != nil {
+		answer := `{"bead":"tk-abc12","verb":"engage","message":"engaged"}`
+		if err := os.WriteFile(filepath.Join(answers, "engage.json"), []byte(answer), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		base := startServe(t, declaredServe+" --answers "+answers, repo)
-		if res, body := get(t, http.MethodPost, base+"/helm/dismiss", ""); res.StatusCode != http.StatusOK || string(body) != answer {
-			t.Errorf("POST /helm/dismiss: %d %s, want the canned answer", res.StatusCode, body)
+		if res, body := get(t, http.MethodPost, base+"/helm/engage", ""); res.StatusCode != http.StatusOK || string(body) != answer {
+			t.Errorf("POST /helm/engage: %d %s, want the canned answer", res.StatusCode, body)
 		}
 	})
 }
@@ -350,6 +345,22 @@ func rigBoardOf(t *testing.T, body []byte) []byte {
 		t.Error("the rig answer carries no read time")
 	}
 	return answer.Board
+}
+
+// cityOf is the city document the city route's answer carries.
+func cityOf(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var answer struct {
+		ReadAt string          `json:"read_at"`
+		City   json.RawMessage `json:"city"`
+	}
+	if err := json.Unmarshal(body, &answer); err != nil {
+		t.Fatalf("the city answer is not JSON: %v", err)
+	}
+	if answer.ReadAt == "" {
+		t.Error("the city answer carries no read time")
+	}
+	return answer.City
 }
 
 // sameJSON reports whether two JSON texts hold the same value.

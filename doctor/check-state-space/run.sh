@@ -1,18 +1,9 @@
 #!/usr/bin/env bash
 # doctor/check-state-space — I2: the anchor state space is closed.
-# Per bead store: every open bead's merge_result value is a state declared in
-# lifecycle/lifecycle.toml (built-in enum when the declaration is absent or
-# unparseable) or a value of Gas Town's pending record; a closed-only state
-# (merged, or the record's mr_merged) on an OPEN bead is an error; and
-# an open bead in a declared detached state is held by nobody and offered to no
-# pool. The merge cadence drives those states, so its assignee and its
-# gc.routed_to must be empty; any value is a second driver racing the cadence.
-# A detached anchor must also stay open: the cadence readers (pr-open, merge,
-# pr-facts, gate-ensure) enumerate --status=open, so one claimed or held into
-# any other live status drops out of every one of them until the claim
-# resolves. The open-scoped scan misses that end-state for the same reason the
-# cadence does, so a second probe reads the non-open live statuses to report
-# it. No open bead carries a metadata key from the deleted healer-bookkeeping
+# Per bead store: every open bead's merge_result value is one the pack writes
+# (KEPT_STATES) or a value of Gas Town's pending record, and a closed-only value
+# (merged, or the record's mr_merged) on an OPEN bead is an error. No open bead
+# carries a metadata key from the deleted healer-bookkeeping
 # registry — those keys have no writer any more, so their presence means a
 # retired repair pass is still writing state. Finally, no live bead carries a
 # key the registry retired together with every reader (RETIRED_KEYS), whose
@@ -23,39 +14,22 @@
 
 set -u
 
-dir="${GC_PACK_DIR:-.}"
-
-# The declared enum. "unanchored" (merge_result absent) has no stored value on
-# the ordinary path, but a literal write of it is a declared state, not a drift.
-BUILTIN_STATES="unanchored pre_open_gate pull_request merged abandoned retargeted blocked refused_false_completion"
-BUILTIN_CLOSED="merged"
-BUILTIN_DETACHED="pre_open_gate pull_request"
-# The values Gas Town's pending record gives merge_result, kept outside the
-# machine lifecycle.toml declares: services/gctk/pr/record spells them, and
-# run.test.sh holds this copy to that file. mr_merged is the record's landed
-# value, which only a closed bead carries. None is detached: the record keeps a
-# bead assigned to the refinery, blocked while its PR waits on the merge.
+# The values the pack writes outside the pending record: merged, the direct
+# landing's record, which only a closed bead carries, and the refinery's parks,
+# blocked and refused_false_completion. "unanchored" (merge_result absent) has
+# no stored value on the ordinary path, but a literal write of it is no drift.
+KEPT_STATES="unanchored merged blocked refused_false_completion"
+KEPT_CLOSED="merged"
+# The values Gas Town's pending record gives merge_result:
+# services/gctk/pr/record spells them, and run.test.sh holds this copy to that
+# file. mr_merged is the record's landed value, which only a closed bead
+# carries.
 RECORD_STATES="pull_request_pending pull_request_head_changed mr_merged pull_request_record_incomplete pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
 RECORD_CLOSED="mr_merged"
-lifecycle="$dir/lifecycle/lifecycle.toml"
-toml_array() { # <file> <key> — quoted strings of the first `<key> = [...]`
-    awk -v k="$2" 'ok { print } $0 ~ ("^[[:space:]]*" k "[[:space:]]*=[[:space:]]*\\[") { ok = 1; print }' "$1" 2>/dev/null \
-        | awk '{ print } /\]/ { exit }' | grep -o '"[^"]*"' | tr -d '"'
-}
-states=""; closed_states=""; detached_states=""
-if [ -f "$lifecycle" ]; then
-    states=$(toml_array "$lifecycle" "states")
-    closed_states=$(toml_array "$lifecycle" "closed_states")
-    detached_states=$(toml_array "$lifecycle" "detached_states")
-fi
-[ -n "$states" ] || states=$(printf '%s\n' $BUILTIN_STATES)
-[ -n "$closed_states" ] || closed_states=$(printf '%s\n' $BUILTIN_CLOSED)
-[ -n "$detached_states" ] || detached_states=$(printf '%s\n' $BUILTIN_DETACHED)
-states=$(printf '%s\n' $states $RECORD_STATES)
-closed_states=$(printf '%s\n' $closed_states $RECORD_CLOSED)
+states=$(printf '%s\n' $KEPT_STATES $RECORD_STATES)
+closed_states=$(printf '%s\n' $KEPT_CLOSED $RECORD_CLOSED)
 states_json=$(printf '%s\n' "$states" | jq -R . | jq -cs 'map(select(. != ""))')
 closed_json=$(printf '%s\n' "$closed_states" | jq -R . | jq -cs 'map(select(. != ""))')
-detached_json=$(printf '%s\n' "$detached_states" | jq -R . | jq -cs 'map(select(. != ""))')
 enum_str=$(printf '%s' "$states_json" | jq -r 'join(", ")')
 
 # Keys deleted from the metadata registry along with their healer writers.
@@ -208,20 +182,15 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     fi
     rows=$(printf '%s' "$raw" | scrub | jq -r \
         --argjson states "$states_json" --argjson closed "$closed_json" \
-        --argjson detached "$detached_json" --arg hre "$HEALER_RE" '
+        --arg hre "$HEALER_RE" '
         def clean: tostring | gsub("[[:cntrl:]]"; " ");
         .[]? | . as $b | ($b.metadata // {}) as $m
         | (($b.id // "?") | clean) as $id
-        | (($b.assignee // "") | clean) as $as
-        | (($m["gc.routed_to"] // "") | clean) as $rt
         | ( (if ($m | has("merge_result")) then
                ((($m.merge_result // "") | tostring)) as $mr
                | (if $mr == "" then []
                   elif ($states | index($mr)) == null then [["badmr", $id, $mr, ""]]
                   elif ($closed | index($mr)) != null then [["openclosed", $id, $mr, ""]]
-                  elif ($detached | index($mr)) != null then
-                    ((if $rt == "" then [] else [["detachedroute", $id, $mr, $rt]] end)
-                     + (if $as == "" then [] else [["detachedassignee", $id, $mr, $as]] end))
                   else [] end)
              else [] end)
             + [ $m | keys[]
@@ -231,41 +200,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     if [ $? -ne 0 ]; then
         warnings+=("$label: open-bead listing from $rig_path/.beads could not be parsed — this store was NOT checked")
         continue
-    fi
-
-    # A detached anchor that has been claimed or held into a non-open live status
-    # is invisible to the open-scoped scan above AND to every cadence reader
-    # (pr-open, merge, pr-facts, gate-ensure), all of which enumerate
-    # --status=open — so it stalls in the pipeline unseen until the claim
-    # resolves. Read the non-open live statuses, narrowed to merge_result-bearing
-    # beads, so this end-state has a reader. A live claim is not overwritten here;
-    # it is surfaced, the same escalate-not-overwrite the cadence itself keeps.
-    craw=$(run_bounded gc bd list --db "$rig_path/.beads" \
-        --status in_progress,blocked,deferred,hooked,pinned \
-        --has-metadata-key merge_result --json --limit 0 2>/dev/null); crc=$?
-    if [ "$crc" -ne 0 ] || [ -z "$craw" ]; then
-        warnings+=("$label: could not list claimed/held anchors in $rig_path/.beads (rc=$crc) — the detached-state claim check did NOT run for this store")
-    else
-        crows=$(printf '%s' "$craw" | scrub | jq -r --argjson detached "$detached_json" '
-            def clean: tostring | gsub("[[:cntrl:]]"; " ");
-            .[]? | . as $b | ($b.metadata // {}) as $m
-            | (($b.id // "?") | clean) as $id
-            | (($b.status // "") | clean) as $st
-            | (($m.merge_result // "") | tostring) as $mr
-            | select(($detached | index($mr)) != null)
-            | [$id, $mr, $st] | join("\u001f")' 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            warnings+=("$label: claimed/held anchor listing from $rig_path/.beads could not be parsed — the detached-state claim check did NOT run for this store")
-        elif [ -n "$crows" ]; then
-            if printf '%s\n' "$crows" > "$ENUM_TMP/crows"; then
-                while IFS=$'\037' read -r id mr st; do
-                    [ -n "$id" ] || continue
-                    errors+=("$label bead $id: merge_result=$mr is a detached state (lifecycle/lifecycle.toml detached_states) but the bead is status=$st, not open — a detached anchor rests open so the merge cadence can drive it, and every cadence reader (pr-open, merge, pr-facts, gate-ensure) enumerates --status=open, so this claimed/held anchor has dropped out of the pipeline unseen until the claim resolves")
-                done < "$ENUM_TMP/crows"
-            else
-                warnings+=("$label: could not stage the detached-state claim enumeration (temp-file write failed — e.g. /tmp under disk pressure) — the detached-state claim check did NOT run for this store")
-            fi
-        fi
     fi
 
     # The retired keys are read from the open listing above and from one listing
@@ -299,13 +233,11 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         warnings+=("$label: could not stage the state-space enumeration (temp-file write failed — e.g. /tmp under disk pressure) — this store was NOT checked")
         continue
     fi
-    while IFS=$'\037' read -r kind id val extra; do
+    while IFS=$'\037' read -r kind id val _; do
         [ -n "$kind" ] || continue
         case "$kind" in
-            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a declared state ($enum_str) — an unknown state has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
+            badmr)      errors+=("$label bead $id: merge_result=\"$val\" is not a value the pack writes ($enum_str) — an unknown value has no handler and every reader defaults differently on it; surface it with human-gate.sh, never invent a reading") ;;
             openclosed) errors+=("$label bead $id: OPEN with merge_result=$val — a closed-only state on an open bead means the close half of the transition was lost or a landed anchor was reopened") ;;
-            detachedroute)    errors+=("$label bead $id: merge_result=$val carries gc.routed_to=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states), driven by the merge cadence and offered to no pool, so any route is demand for work already in the merge queue; the claim it invites moves the anchor out of \`--status=open\`, where merge.sh and pr-facts.sh both stop seeing it") ;;
-            detachedassignee) errors+=("$label bead $id: merge_result=$val carries assignee=\"$extra\" — $val is a detached state (lifecycle/lifecycle.toml detached_states) and rests unheld; a holder here is a second driver racing the cadence on one anchor") ;;
             healer)     errors+=("$label bead $id: carries deleted healer-bookkeeping key \"$val\" — lifecycle/lifecycle.toml removed it with its writer, so something retired is still writing state") ;;
         esac
     done < "$ENUM_TMP/rows"
@@ -327,6 +259,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: every open bead's merge_result is a declared state, every detached-state anchor is open and rests unheld and offered to no pool, no deleted healer key survives, and no live bead carries a retired key"
+echo "OK: every open bead's merge_result is a value the pack writes, no deleted healer key survives, and no live bead carries a retired key"
 detail ${notes[@]+"${notes[@]}"}
 exit 0

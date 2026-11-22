@@ -63,7 +63,7 @@ lane, its `locus` (a file and a symbol or section, never a line number or a
 commit), its `message`, its `severity`, `category` and `failure_scenario` as the
 method grades them, and its `verification`. A decision that is the operator's
 to make goes in `needs_you`, not in a finding. A demo lane delivers its capture
-to the PR, and a shadow run keeps it in the workspace:
+to the PR:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" deliver --file "<the capture>"`
 
 **4. Write the output** to `output.json` in the lane's part of the workspace:

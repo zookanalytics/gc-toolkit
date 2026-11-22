@@ -18,7 +18,7 @@
 # the config does not explain stays an error, and a stopped clock (arm 2) keeps
 # its own error rather than being buried beside an intended disable.
 # A third arm asks whether a gctk binary is DEPLOYED at all, and whether it is
-# the one this checkout describes: lifecycle.sh and merge.sh exec it and have
+# the one this checkout describes: lifecycle.sh and epic.sh exec it and have
 # no other implementation, and orders that fire on schedule can still be
 # running logic several commits old. A fourth asks whether flock(1) resolves,
 # since refinery-reconcile's pass lock needs it.
@@ -117,8 +117,6 @@ probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/nu
     exit 1
 }
 trap 'rm -rf "$probe_dir"' EXIT
-# build-scratch-reap removes a gctk-* temp dir that no process holds open.
-exec 9>"$probe_dir/held"
 # Every retained run of every registration. The read carries no --since: gc
 # applies that bound only after fetching every retained run, so it would not
 # make the read cheaper, and without it the answer covers every order's window.
@@ -297,13 +295,14 @@ done <<< "$order_rows"
 # stamps the revision it was built from, which is the only reading that comes
 # from the binary itself rather than from a record the binary did not write.
 #
-# A mismatch WARNS rather than errors. The build order has minutes of lag by
-# design and the state self-heals on the next tick; what an operator needs is to
-# see it, and the board's PACK row is where a persistent one shows up.
+# A mismatch WARNS rather than errors. The build order rebuilds on the first
+# pass after the checkout moves and tries a failed build again every five
+# minutes, so the state heals on its own; what an operator needs is to see it,
+# which this warning does.
 #
 # A MISSING binary is an error, like an order that never runs: lifecycle.sh and
-# merge.sh have nothing else to exec, so every lifecycle transition and every
-# merge pass is refused until the gctk-build order publishes one.
+# epic.sh have nothing else to exec, so every lifecycle write and every epic the
+# work skill files is refused until the gctk-build order publishes one.
 gctk_bin="${GCTK_BIN:-}"
 if [ -z "$gctk_bin" ]; then
     # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
@@ -312,19 +311,25 @@ if [ -z "$gctk_bin" ]; then
     gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
     [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
 fi
-# The identity is the services/gctk SUBTREE at HEAD, the same value the build
-# order records and stamps: a merge that touches nothing under it neither
-# rebuilds the binary nor changes what this arm expects, so unrelated commits
-# never light this warning. A hand build carries the toolchain's commit stamp
-# instead, and the subtree that commit holds is the comparable identity.
-gctk_mod="$dir/services/gctk"
-tree_rev=$(git -C "$gctk_mod" rev-parse 'HEAD:./' 2>/dev/null || true)
+# The identity is the revision assets/scripts/gc-build.sh records and stamps
+# for gctk: git's hash of the `git ls-tree` listing of its inputs, go.mod,
+# go.sum and services/gctk. A merge that touches none of them neither rebuilds
+# the binary nor changes what this arm expects, so unrelated commits never light
+# this warning. A hand build carries the toolchain's commit stamp instead, and
+# the identity at that commit is the comparable one.
+gctk_identity() { # <commit> — gctk's identity at it, or nothing
+    local listing
+    listing=$(git -C "$dir" ls-tree "$1" -- go.mod go.sum services/gctk 2>/dev/null) || return 0
+    [ -n "$listing" ] || return 0
+    printf '%s\n' "$listing" | git -C "$dir" hash-object --stdin 2>/dev/null
+}
+tree_rev=$(gctk_identity HEAD)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
 elif [ ! -x "$gctk_bin" ]; then
-    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and merge.sh exec it and have no other implementation, so every lifecycle transition and every merge pass is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
+    errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and epic.sh exec it and have no other implementation, so every lifecycle write and every epic the work skill files is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
-    warnings+=("gctk: cannot read this checkout's services/gctk revision (\`git -C $gctk_mod rev-parse HEAD:./\`) — the deployed binary cannot be compared against it")
+    warnings+=("gctk: cannot read this checkout's gctk revision (\`git -C $dir ls-tree HEAD -- go.mod go.sum services/gctk\`) — the deployed binary cannot be compared against it")
 else
     gctk_rev=$(run_bounded "$gctk_bin" version 2>/dev/null | head -1); gctk_rc=${PIPESTATUS[0]}
     if [ -z "$gctk_rev" ] && [ "$gctk_rc" -eq 124 ]; then
@@ -337,11 +342,11 @@ else
             unknown)   warnings+=("gctk: the deployed binary carries no revision stamp (built with -buildvcs=false outside the build order) — it cannot be compared against the tree") ;;
             "$tree_rev") notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12})") ;;
             *)
-                mapped=$(git -C "$gctk_mod" rev-parse "${gctk_rev%-dirty}:./" 2>/dev/null || true)
+                mapped=$(gctk_identity "${gctk_rev%-dirty}")
                 if [ "$mapped" = "$tree_rev" ]; then
                     notes+=("gctk: deployed binary matches this checkout (${tree_rev:0:12}, hand-built at commit ${gctk_rev:0:12})")
                 else
-                    warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout's services/gctk is at $tree_rev — a gctk-build tick has not caught up, or its last build FAILED and the previous binary is still serving. The board's PACK row says which.")
+                    warnings+=("gctk: the cadence is running ${gctk_rev%-dirty} but this checkout's gctk revision is $tree_rev — a gctk-build run has not caught up, or its last build FAILED and the previous binary is still serving. The last_build_rc in .gc/services/gctk/build-status.json says which.")
                 fi ;;
         esac
     fi

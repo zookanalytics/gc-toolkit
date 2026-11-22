@@ -34,11 +34,12 @@
 #
 # `advance` is transitive. A blocker or child is advancing only when the city
 # moves it without a person — it is claimed, routed, assigned, machine work,
-# armed for deferred dispatch, or a merge anchor the cadence will act on — AND
-# every open blocker beneath it advances too. Anything else is stuck, and
-# stuck_on names the bead that stops it and why (the classifier below lists
-# each reason). The walk reads level by level, one batched read per store, and
-# stops descending at the first stuck bead on a branch.
+# armed for deferred dispatch, a merge anchor the cadence will act on, or the
+# bead a live run works — AND every open blocker beneath it advances too.
+# Anything else is stuck, and stuck_on names the bead that stops it and why
+# (the classifier below lists each reason). The walk reads level by level, one
+# batched read per store, and stops descending at the first stuck bead on a
+# branch.
 #
 # What holds the subject is the answer of `gctk bead holds` in the subject's own
 # store, the one rule (docs/gctk-architecture.md, "The bead holds contract"): a
@@ -100,6 +101,8 @@ _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
 # shellcheck source=conversation.sh
 . "$_bd_lib_dir/conversation.sh" || { echo "cannot source conversation.sh beside this script" >&2; exit 1; }
+# shellcheck source=run-lib.sh
+. "${GC_RUN_LIB:-$_bd_lib_dir/run-lib.sh}" || { echo "cannot source run-lib.sh beside this script" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'U'
@@ -211,11 +214,17 @@ bd_rows() {
   local ids; ids=$(IFS=,; printf '%s' "$*")
   bd_json "$db" list --id "$ids" --all --brief --include-gates --include-infra --include-templates --include-ephemeral --limit 0
 }
+# The reader run-lib.sh reads one store's runs through, the store RUNS_DB names.
+# A read of runs names no bead, so gc answers an unpinned one from the caller's
+# own store, not the store a bead's id routes to.
+RUNS_DB=""
+runs_bd() { bounded gc bd --db "$RUNS_DB" "$@"; }
 
 # ── The advance classifier ──────────────────────────────────────────────────
 # jq defs, prepended to every program that classifies, so the frontier and the
 # horizon read one classifier and cannot drift. adv_own is a bead's own state,
-# read off its own row:
+# read off its own row and the runs of its store ($runs, bead id -> live, or
+# unread when its store's runs did not read):
 #
 #   advancing  in progress or hooked: someone holds it.
 #              review, rework, validation or finding: machine work the review
@@ -225,14 +234,13 @@ bd_rows() {
 #              armed for deferred dispatch: the deferred-dispatch order slings
 #                it once nothing holds it.
 #              assigned to an agent, whose queue holds it.
-#              a merge anchor the cadence acts on: its recorded machine axis is
-#                progressing, or settled before a PR exists (the PR-open pass
-#                publishes it), or settled with a PR that needs no further review.
-#              a PR on Gas Town's pending record, where no machine axis is
-#                written: one whose new head the refinery validates
-#                (pull_request_head_changed), or one that waits on its merge
-#                (pull_request_pending) with a recorded posture that needs no
-#                further review.
+#              worked by a live run: run-lib.sh's map of its store names it as
+#                the bead of a run whose root is open. The pour leaves that bead
+#                open, unassigned and unrouted.
+#              a PR on Gas Town's pending record: one whose new head the
+#                refinery validates (pull_request_head_changed), or one that
+#                waits on its merge (pull_request_pending) with a recorded
+#                posture that needs no further review.
 #   stuck      human: a human gate (a gate whose await type is human, which
 #                carries no route), a bead assigned to the reserved `human`, a
 #                decision, a finding that needs the operator, an anchor parked
@@ -244,27 +252,31 @@ bd_rows() {
 #                this classifier does not know, so it fails closed. The blocked
 #                status the pending record gives a PR that waits on its merge is
 #                no such hold, so that PR is read as an anchor.
-#              approval: an open PR settled and waiting on the operator's review
-#                (review required, or changes requested) at its live head, or a
-#                PR on the pending record whose recorded posture says so.
+#              approval: a PR on the pending record whose recorded posture says
+#                it waits on the operator's review (review required, or changes
+#                requested).
 #              merge-hold: an operator merge or rebase hold on an anchor.
-#              merge-blocked: the anchor's machine axis says no automated actor
-#                can move it.
-#              unread: an anchor whose machine axis, or whose PR posture at that
-#                axis's head, is not recorded, or a PR on the pending record
-#                with no posture recorded.
+#              unread: a PR on the pending record with no posture recorded.
 #              capped: an armed dispatch that hit its sling-failure cap.
-#              unrouted: open with no route, arm or assignee, so nothing picks it up.
+#              unknown: open with no route, arm or assignee, read from a store
+#                the walk could not place or whose runs did not read, so whether
+#                a live run works it is not known.
+#              unrouted: open with no route, arm, assignee or live run, so
+#                nothing picks it up.
 #
 # Where two rules apply, a conversation outranks everything, so its sitting's
 # claim reads as the person's it is, in-progress outranks everything else, and a
 # human gate, a decision or a bead assigned to `human` outranks every advancing
 # kind, so a review assigned to a person stays stuck.
-# Whether a claim's or a route's session is still up is a liveness join over the
-# session list, not a fact on the row, so a stranded claim reads advancing here,
-# and a bead a poured molecule is working (its work bead, or an inline step)
-# carries no route of its own and reads unrouted. gc.execution_routed_to is a
-# pour's provenance, not a live route, and is not read.
+# Whether a claim's, a route's or a run's session is still up is a liveness join
+# over the session list, not a fact on the row, so a stranded claim or run reads
+# advancing here. A run is live until its root closes. Its input convoy is no
+# sign of one, as a run that finished or was cancelled leaves the convoy open
+# for as long as its bead is open. The runs name the bead a run works, never
+# its steps, so an inline step, which carries no route of its own, reads
+# unrouted.
+# gc.execution_routed_to is a pour's provenance, not a live route, and is not
+# read.
 ADV="$CONVERSATION_JQ"'
 def adv_truthy: ((. // "") | tostring) as $s
   | ($s == "" or $s == "false" or $s == "False" or $s == "FALSE" or $s == "0" or $s == "null") | not;
@@ -273,32 +285,23 @@ def adv_dated: ((. // "") | tostring | split("@")) as $p
   | if ($p | length) == 3 and $p[0] != "" and $p[1] != "" then {value: $p[0], head: $p[1]} else null end;
 def adv_record($mr): $mr == "pull_request_pending" or $mr == "pull_request_head_changed";
 def adv_anchor($m; $mr):
-  if $mr != "pre_open_gate" and $mr != "pull_request" and (adv_record($mr) | not) then {state: "stuck", why: "human"}
+  if (adv_record($mr) | not) then {state: "stuck", why: "human"}
   elif ($m["merge_hold"] | adv_truthy) or ($m["rebase_hold"] | adv_truthy) then {state: "stuck", why: "merge-hold"}
   elif $mr == "pull_request_head_changed" then {state: "advancing"}
-  elif $mr == "pull_request_pending" then
+  else
     ($m["pr_posture"] | adv_dated) as $po
     | if $po == null then {state: "stuck", why: "unread"}
       elif $po.value == "review_required" or $po.value == "changes_requested" then {state: "stuck", why: "approval"}
       elif $po.value == "approved" or $po.value == "commented" or $po.value == "none" then {state: "advancing"}
       else {state: "stuck", why: "unread"} end
-  else ($m["pr.machine"] | adv_dated) as $ma | ($m["pr_posture"] | adv_dated) as $po
-    | if $ma == null then {state: "stuck", why: "unread"}
-      elif $ma.value == "progressing" then {state: "advancing"}
-      elif $ma.value == "blocked" then {state: "stuck", why: "merge-blocked"}
-      elif $ma.value != "settled" then {state: "stuck", why: "unread"}
-      elif $mr == "pre_open_gate" then {state: "advancing"}
-      elif $po == null or $po.head != $ma.head then {state: "stuck", why: "unread"}
-      elif $po.value == "review_required" or $po.value == "changes_requested" then {state: "stuck", why: "approval"}
-      elif $po.value == "approved" or $po.value == "commented" or $po.value == "none" then {state: "advancing"}
-      else {state: "stuck", why: "unread"} end
   end;
-def adv_own($cap):
+def adv_own($cap; $runs):
   (.metadata // {}) as $m
   | (($m["gc.routed_to"] // "") | tostring) as $r
   | (($m["task_kind"] // "") | tostring) as $tk
   | (($m["merge_result"] // "") | tostring) as $mr
   | ((.assignee // "") | tostring) as $a
+  | ($runs[(.id // "") | tostring] // "") as $run
   | if conversation then {state: "stuck", why: "human"}
     elif .status == "in_progress" or .status == "hooked" then {state: "advancing"}
     elif ($a | adv_human) or .issue_type == "decision"
@@ -312,6 +315,8 @@ def adv_own($cap):
       (if (($m["gc.dispatch_when_ready_fail_count"] // 0) | tostring | tonumber? // 0) >= $cap
        then {state: "stuck", why: "capped"} else {state: "advancing"} end)
     elif $a != "" then {state: "advancing"}
+    elif $run == "live" then {state: "advancing"}
+    elif $run == "unread" then {state: "stuck", why: "unknown"}
     else {state: "stuck", why: "unrouted"} end;
 '
 
@@ -319,7 +324,8 @@ def adv_own($cap):
 # A bead advances only when its own state does and every open blocker beneath it
 # advances too, so an armed bead, or a routed bead behind a stuck one, takes its
 # blockers' verdict. The walk carries one object between reads: rows (id -> the
-# row as read), req (the ids asked for), and the roots the sections name.
+# row as read), req (the ids asked for), runs (adv_own's), and the roots the
+# sections name.
 #   walk_blocks   a row's blocks edges in either read shape: `gc bd show` gives
 #                 {dependency_type, id, status, title}, `gc bd list` gives
 #                 {type, depends_on_id} with no status.
@@ -359,8 +365,8 @@ def walk_pass($rows; $own; $req; $final):
           elif all($bs[]; . != null and .state == "advancing") then $acc + {($id): {state: "advancing"}}
           else $acc end
       end);
-def walk_states($rows; $req; $final; $cap):
-  ($rows | map_values(if .status == "closed" then {state: "closed"} else adv_own($cap) end)) as $own
+def walk_states($rows; $req; $final; $cap; $runs):
+  ($rows | map_values(if .status == "closed" then {state: "closed"} else adv_own($cap; $runs) end)) as $own
   | def settle: walk_pass($rows; $own; $req; $final) as $n | if $n == . then . else ($n | settle) end;
     {} | settle;
 def walk_cycle($rows; $st; $id):
@@ -542,9 +548,62 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
     | (if $f == "" then [] else [.[2].waits[]?.id] | unique end) as $direct
     | {subject: $s.id, relist: [],
        rows: ((if $f == "" then {} else {($s.id): $s} end) + ([$open[] | {key: .id, value: .}] | from_entries)),
-       req: {}, roots: ($direct + [$open[].id]),
+       req: {}, runs: {}, roots: ($direct + [$open[].id]),
        forced: ([$direct[] | {key: ., value: true}] | from_entries)}' 2>/dev/null)
-  [ -n "$WALK" ] || WALK='{"subject":"","relist":[],"rows":{},"req":{},"roots":[],"forced":{}}'
+  [ -n "$WALK" ] || WALK='{"subject":"","relist":[],"rows":{},"req":{},"runs":{},"roots":[],"forced":{}}'
+
+  # The subject and its children were read from the subject's store, and every
+  # other row is read from the store its prefix binds.
+  declare -A DB_OF=()      # prefix -> its store, resolved once per prefix
+  declare -A STORE_OF=()   # walked bead -> the store its row was read from
+  while IFS= read -r id; do
+    [ -n "$id" ] && STORE_OF[$id]="$DB"
+  done < <(printf '%s' "$WALK" | jq -r '.rows | keys[]' 2>/dev/null)
+
+  # A row that reads unrouted may be the bead a live run works, which only the
+  # runs of the store it was read from tell, since another store can hold a
+  # bead of the same id. A store's runs (the map verb of run-lib.sh) are read
+  # once, and only once the store holds such a row whose state reaches a
+  # verdict: any walked bead, and the subject only while a walked bead waits on
+  # it. Each such row, on whatever level it was read, is looked up in its own
+  # store's runs alone: it joins .runs as live when they name it as the bead a
+  # live run works, and as unread when they did not read. A row whose store the
+  # walk could not place, where db_for_prefix gave none, has no store to read
+  # runs from, so it joins as unread.
+  declare -A RUNS_READ=()  # store -> ok | failed
+  declare -A LIVE_IN=()    # store -> the beads its live runs work, a line each, framed by newlines
+  runs_unrouted() {
+    local ids id k got beads live=() unread=() live_json='[]' unread_json='[]' merged
+    ids=$(printf '%s' "$WALK" | jq -r --argjson cap "$ARM_CAP" "$ADV$WALK_JQ"'
+      .subject as $s | .rows as $rows | (.runs // {}) as $runs
+      | any($rows[] | walk_open($rows)[]; . == $s) as $awaited
+      | $rows | to_entries[] | select(.key != $s or $awaited)
+      | select((.value | adv_own($cap; $runs)).why == "unrouted") | .key' 2>/dev/null) || return 0
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      k="${STORE_OF[$id]-}"
+      [ -n "$k" ] || { unread+=("$id"); continue; }
+      if [ -z "${RUNS_READ[$k]+set}" ]; then
+        RUNS_DB="$k"
+        if got=$(run_lib map runs_bd) && [ -n "$got" ] \
+          && beads=$(printf '%s' "$got" | jq -r '.[]? | objects | select(.live == true)
+               | (.bead // "") | tostring | select(. != "")' 2>/dev/null); then
+          RUNS_READ[$k]=ok; LIVE_IN[$k]=$'\n'"$beads"$'\n'
+        else RUNS_READ[$k]=failed; fi
+      fi
+      if [ "${RUNS_READ[$k]}" != ok ]; then unread+=("$id")
+      else case "${LIVE_IN[$k]}" in *$'\n'"$id"$'\n'*) live+=("$id") ;; esac
+      fi
+    done <<< "$ids"
+    [ "${#live[@]}" -gt 0 ] || [ "${#unread[@]}" -gt 0 ] || return 0
+    [ "${#live[@]}" -eq 0 ] || live_json=$(printf '%s\n' "${live[@]}" | jq -R . | jq -sc .)
+    [ "${#unread[@]}" -eq 0 ] || unread_json=$(printf '%s\n' "${unread[@]}" | jq -R . | jq -sc .)
+    merged=$(printf '%s' "$WALK" | jq -c --argjson live "$live_json" --argjson unread "$unread_json" '
+      .runs = ((.runs // {})
+        + ([$live[] | {key: ., value: "live"}] | from_entries)
+        + ([$unread[] | {key: ., value: "unread"}] | from_entries))' 2>/dev/null)
+    [ -n "$merged" ] && WALK="$merged"
+  }
 
   # Level by level: ask for every unread blocker still worth reading, the
   # subject's own first, at one read per store, and fold the rows back in. The
@@ -556,10 +615,10 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
   # leaves the farthest unread. Those lead the next read when closed rows hand
   # budget back, and read stuck with why=budget when the walk stops.
   SPENT=0; LEVEL=0
-  declare -A DB_OF=()   # prefix -> its store, resolved once per prefix
   while [ "$LEVEL" -lt "$WALK_DEPTH" ]; do
+    runs_unrouted
     NEXT=$(printf '%s' "$WALK" | jq -r --argjson cap "$ARM_CAP" "$ADV$WALK_JQ"'
-      walk_states(.rows; .req; false; $cap) as $st | .forced as $f
+      walk_states(.rows; .req; false; $cap; (.runs // {})) as $st | .forced as $f
       | walk_pending(.rows; .req; $st; .roots) as $p
       | (.relist | map("F\t\(.)")) + ($p | map(select($f[.]) | "F\t\(.)")) + ($p | map(select($f[.] | not) | "B\t\(.)"))
       | .[]' 2>/dev/null) || break
@@ -575,6 +634,7 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
     for id in "${ASK[@]}"; do
       p="${id%%-*}"
       [ -n "${DB_OF[$p]+set}" ] || DB_OF[$p]=$(db_for_prefix "$p")
+      [ -n "${STORE_OF[$id]+set}" ] || STORE_OF[$id]="${DB_OF[$p]}"
       PAIRS+="$id"$'\t'"${DB_OF[$p]}"$'\n'
     done
     BATCH='[]'
@@ -618,8 +678,9 @@ if [ -n "$WANT_FRONTIER" ] || [ -n "$WANT_HORIZON" ]; then
     LEVEL=$((LEVEL + 1))
   done
 
+  runs_unrouted
   RES=$(printf '%s' "$WALK" | jq -c --argjson cap "$ARM_CAP" "$ADV$WALK_JQ"'
-    .rows as $rows | .req as $req | walk_states($rows; $req; true; $cap) as $st
+    .rows as $rows | .req as $req | walk_states($rows; $req; true; $cap; (.runs // {})) as $st
     | [.roots[] | {key: ., value: walk_verdict($rows; $req; $st; .)}] | from_entries' 2>/dev/null)
   [ -n "$RES" ] || RES='{}'
   # A root the resolution could not place reads unknown: stuck, fail closed.

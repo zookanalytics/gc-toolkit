@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lint.sh — the rig's one lint entry point: shell static analysis, step text,
-# go vet and gofmt, and the list of the warrants a branch touches.
+# golangci-lint over the Go code, and the list of the warrants a branch touches.
 #
 # Wired as the rig's lint_command, it runs at the polecat's self-review and on
 # every merge. It runs these linters, each at the scope a merge gate can enforce
@@ -8,12 +8,13 @@
 #
 #   SHELL — shellcheck, through assets/scripts/shellcheck-run.sh, the one
 #   fail-closed runner (host shellcheck at warning severity; exit 3 when none is
-#   on PATH). Scoped to the shell files passed on argv, so the refinery feeds it
-#   the merge's changed files — `lint.sh $(git diff --name-only origin/main...HEAD)`
-#   — and the gate judges what a change touches. Whole-tree is deliberately NOT
-#   the gate scope: main carries pre-existing warning-level findings, so a gate
-#   that failed on an untouched file would block every unrelated merge. Scan the
-#   whole tree by hand by passing the files: `lint.sh $(git ls-files '*.sh')`.
+#   on PATH), over every tracked shell file, whatever files lint.sh is given.
+#   Whole-tree for the reason the Go lint is: the tree is shellcheck-clean, so
+#   checking every file on every merge is zero-noise. It also keeps a finding
+#   from waiting in a file no change names until an unrelated merge edits that
+#   file and fails on a line it did not write. The files are split across one
+#   runner call per core, so the run lasts about as long as the call that holds
+#   the slowest files.
 #
 #   STEP TEXT — tools/lint-step-text.sh over the files passed on argv, which
 #   checks the formulas among them for a procedure the change adds to step text
@@ -22,21 +23,25 @@
 #   refinery's `git diff --name-only origin/main...HEAD` names, so step text
 #   that predates the rule passes until its own rewrite.
 #
-#   GO — `go vet ./...` in every Go module (each go.mod tree). Whole-module, not
-#   argv-scoped: vet is a per-package analysis, it is clean across the tree
-#   today, so running it everywhere on every merge is zero-noise and still
-#   catches a regression in a package the diff did not name. Vet runs cgo, so
-#   it needs the C headers a cgo package includes, and services/helm reaches ICU
-#   through one, Dolt's go-icu-regex. Each vet is handed the cgo flags
-#   assets/scripts/icu4c-cgo.sh works out, which on macOS point at Homebrew's
-#   keg-only icu4c, the same flags the helm-svc build uses.
-#
-#   GOFMT — `gofmt -l` over every tracked Go file. Whole-tree for the reason vet
-#   is: the tree is gofmt-clean today, so checking every file on every merge is
-#   zero-noise. It also catches drift in a file no diff named, such as a
-#   toolchain whose gofmt formats differently. gofmt lists a file it would
-#   rewrite and still exits 0, so the listing is the finding. lint.sh only
-#   lists; it never rewrites a file.
+#   GO — golangci-lint, `run ./...` in every Go module (each go.mod tree), on
+#   the root's .golangci.yml: errcheck, govet with go vet's analyzers,
+#   ineffassign, staticcheck and unused, and gofmt's check that each file is
+#   formatted. Whole-module, not argv-scoped: the tree is clean, so running it
+#   everywhere on every merge is zero-noise and still catches a regression in a
+#   package the diff did not name, or a toolchain whose gofmt formats
+#   differently. It checks every file of the packages it type-checks. The Go
+#   files it never sees are the ones Go itself ignores: under testdata, named
+#   with a leading _ or ., or built only for a platform other than the one it
+#   runs on. On the city's host, macOS, it lints the files built only for macOS
+#   and none of those built only for Linux. The lint check on GitHub,
+#   .github/workflows/lint.yml, lints the module for both platforms. It only
+#   reports, and never rewrites a file.
+#   The version is the release .golangci-lint-version names, which the lint
+#   check on GitHub reads too. `go run` builds it from source, and Go caches the
+#   build. Run from the module, the build takes the newest of the local Go, the
+#   module's go line and the linter's own, so the linter is never older than
+#   the standard library it type-checks, which a linter built with an older Go
+#   cannot load.
 #
 #   WARRANTS — tools/warrants-touched.sh prints the docs/warrants.md entries the
 #   branch touches, with their Verified dates, so the author re-verifies them
@@ -45,15 +50,15 @@
 #   re-verification. It reads the branch from git, so it takes no FILE.
 #
 # Fail-closed throughout: a linter that cannot run — no shellcheck, no go, no
-# gofmt — is a finding, never a silent pass, the same contract shellcheck-run.sh
-# enforces.
+# golangci-lint — is a finding, never a silent pass, the same contract the
+# shell-lint runner, shellcheck-run.sh, enforces.
 #
 # Usage: lint.sh [FILE ...]
-#   FILE ...  files to lint; the shell scripts among them — a .sh suffix or a
-#             shell shebang (sh, bash, dash, ksh) — are shellchecked, the
-#             formulas among them have their step text checked, and the rest
-#             drop out. With no shell file or formula given neither is linted,
-#             and go vet, gofmt and the warrant list still run.
+#   FILE ...  the files a change names; the formulas among them have their step
+#             text checked, and the rest drop out. With no formula given step
+#             text is not linted. The shell lint and golangci-lint cover the
+#             tracked tree and the warrant list reads the branch, whatever files
+#             are given.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -61,17 +66,9 @@ set -uo pipefail
 
 PROG=lint
 
-# ── The icu4c cgo flags ──────────────────────────────────────────────────────
-# Sourced from lint.sh's own checkout, before the cd below can change what a
-# relative invocation path names. Its absence is a packaging error, as the
-# shell-lint runner's is below.
-# shellcheck source=../assets/scripts/icu4c-cgo.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/icu4c-cgo.sh" \
-  || { echo "$PROG: cannot source assets/scripts/icu4c-cgo.sh from lint.sh's checkout" >&2; exit 2; }
-
 # ── Repository root ──────────────────────────────────────────────────────────
-# Both linters are repo-relative: shell paths resolve from the root and go vet
-# walks each module under it. A tree we cannot locate is a structural error (2),
+# Both linters are repo-relative: shell paths resolve from the root and
+# golangci-lint walks each module under it. A tree we cannot locate is a structural error (2),
 # never an empty clean pass.
 if ! ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   echo "$PROG: not inside a git repository" >&2
@@ -98,10 +95,43 @@ if [ ! -x "$WARRANTS_TOUCHED" ]; then
   exit 2
 fi
 
+# ── The tracked files ────────────────────────────────────────────────────────
+# lint.sh keeps its files in a directory of its own, which every exit removes:
+# the listing of the tracked files, and the output of each shell-lint call.
+if ! lint_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint.XXXXXX")"; then
+  echo "$PROG: cannot make a directory for the lint's files" >&2
+  exit 2
+fi
+trap 'rm -rf "$lint_tmp"' EXIT
+
+# The shell lint takes its files, and the Go lint its modules, from this one
+# listing. It is written to a file and read back from it, and both steps are
+# checked. A listing that failed, or one that could not be read, would yield an
+# empty list, which reads like a tree with no shell and no module in it and
+# skips those checks. A `<<<` here-string would hide the failed read
+# (docs/review-correctness.md, Loop input). The listing ends each path with a
+# NUL and names it as it is: git's default listing quotes a path that holds a
+# double quote, a backslash or a control character, and no file is found under
+# the quoted name, so the file would drop out of its check unchecked.
+if ! git ls-files -z >"$lint_tmp/listing"; then
+  echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
+  exit 2
+fi
+# Each path is kept as ./<path>. A bare name that begins with a dash would reach
+# a linter as an option: the shell-lint runner reads --help as its help option
+# and exits 0 without linting anything.
+tracked=()
+while IFS= read -r -d '' f; do
+  if [ -n "$f" ]; then tracked+=("./$f"); fi
+done <"$lint_tmp/listing" || {
+  echo "$PROG: cannot read the listing of tracked files" >&2
+  exit 2
+}
+
 fail=0
 summary=()
 
-# ── Shell: shellcheck over the given shell files ─────────────────────────────
+# ── Shell: shellcheck over every tracked shell file ──────────────────────────
 # A file is shell if its path ends in .sh, or its shebang names one of the
 # shells the linter handles (sh, bash, dash, ksh, including the `env <shell>`
 # form). The suffix alone misses the repo's extensionless scripts —
@@ -133,23 +163,64 @@ is_shell_file() {
 }
 
 shell_files=()
-for f in "$@"; do
-  is_shell_file "$f" && shell_files+=("$f")
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  if is_shell_file "$f"; then shell_files+=("$f"); fi
 done
 
+# cores — the host's core count, as tools/run-tests.sh reads it: the first that
+# nproc, getconf or sysctl reports, since stock macOS has no nproc. A count no
+# tool reports leaves one.
+cores() {
+  local n
+  n="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) n=0 ;; esac
+  n=$(( 10#$n ))
+  [ "$n" -ge 1 ] || n=1
+  printf '%s\n' "$n"
+}
+
 if [ "${#shell_files[@]}" -eq 0 ]; then
-  summary+=("shell: no shell files given — skipped")
+  summary+=("shell: no tracked shell files — skipped")
 else
-  if "$SHELLCHECK_RUN" "${shell_files[@]}"; then
-    summary+=("shell: ${#shell_files[@]} file(s) clean")
-  else
-    rc=$?
-    fail=1
+  # The files are dealt in turn across one runner call per core, and the calls
+  # run at once. Each call's output waits in a file until that call has ended,
+  # and only a failing call's is printed, so the findings of one call never
+  # interleave with another's.
+  calls="$(cores)"
+  [ "$calls" -le "${#shell_files[@]}" ] || calls=${#shell_files[@]}
+  pids=()
+  for ((c = 0; c < calls; c++)); do
+    share=()
+    for ((i = c; i < ${#shell_files[@]}; i += calls)); do share+=("${shell_files[i]}"); done
+    "$SHELLCHECK_RUN" "${share[@]}" >"$lint_tmp/$c.out" 2>"$lint_tmp/$c.err" &
+    pids+=("$!")
+  done
+  # The summary names the first failing call's exit. An exit 3 says the runner
+  # found no shellcheck on PATH, which every call shares, so its message prints
+  # once.
+  shell_rc=0; no_runner=0
+  for ((c = 0; c < calls; c++)); do
+    rc=0; wait "${pids[c]}" || rc=$?
+    [ "$rc" -ne 0 ] || continue
     if [ "$rc" -eq 3 ]; then
-      summary+=("shell: FAIL — shellcheck could not run (none on PATH); fail-closed, treated as a finding")
-    else
-      summary+=("shell: FAIL — shellcheck findings (shellcheck-run.sh exit $rc)")
+      if [ "$no_runner" -eq 0 ] && [ -s "$lint_tmp/$c.err" ]; then
+        printf '%s\n' "$(<"$lint_tmp/$c.err")" >&2
+      fi
+      no_runner=1
+      continue
     fi
+    [ ! -s "$lint_tmp/$c.out" ] || printf '%s\n' "$(<"$lint_tmp/$c.out")"
+    [ ! -s "$lint_tmp/$c.err" ] || printf '%s\n' "$(<"$lint_tmp/$c.err")" >&2
+    [ "$shell_rc" -ne 0 ] || shell_rc=$rc
+  done
+  if [ "$no_runner" -eq 1 ]; then
+    fail=1
+    summary+=("shell: FAIL — shellcheck could not run (none on PATH); fail-closed, treated as a finding")
+  elif [ "$shell_rc" -ne 0 ]; then
+    fail=1
+    summary+=("shell: FAIL — shellcheck findings (shellcheck-run.sh exit $shell_rc)")
+  else
+    summary+=("shell: ${#shell_files[@]} file(s) clean")
   fi
 fi
 
@@ -168,77 +239,51 @@ else
   fi
 fi
 
-# ── Go: go vet ./... in every module ─────────────────────────────────────────
-# A go.mod basename test keeps paths like `cargo.mod` out of the module list,
-# which the `*go.mod` pathspec would otherwise match.
+# ── Go: golangci-lint in every module ───────────────────────────────────────
+# A module is the directory of a tracked go.mod, named from the repo root, with
+# `.` for the root itself. Its name can drop the listing's ./ because a command
+# sees it only as part of "$ROOT/<module>", the directory golangci-lint runs in.
 modules=()
-while IFS= read -r gomod; do
-  [ -n "$gomod" ] || continue
-  [ "$(basename "$gomod")" = go.mod ] || continue
-  modules+=("$(dirname "$gomod")")
-done < <(git ls-files '*go.mod')
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  case "$f" in
+    */go.mod) m=${f%/go.mod}; modules+=("${m#./}") ;;
+  esac
+done
+
+# golangci_pin prints the release the first line of .golangci-lint-version
+# names, such as v2.15.0, and fails when the file is missing or names anything
+# else. A name such as latest pins nothing: each run would take whichever
+# release is newest when it starts.
+GOLANGCI_LINT=github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+golangci_pin() {
+  local pin=""
+  { IFS= read -r pin || [ -n "$pin" ]; } 2>/dev/null <"$ROOT/.golangci-lint-version" || return 1
+  [[ "$pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$pin"
+}
 
 if [ "${#modules[@]}" -eq 0 ]; then
   summary+=("go: no go.mod modules found — skipped")
 elif ! command -v go >/dev/null 2>&1; then
-  # Fail-closed, the same contract as the shell half: a vet that could not run is
-  # a finding, not a pass.
+  # Fail-closed, the same contract as the shell half: a Go lint that could not
+  # run is a finding, not a pass.
   fail=1
-  summary+=("go: FAIL — 'go' not on PATH; ${#modules[@]} module(s) unvetted; fail-closed, treated as a finding")
+  summary+=("go: FAIL — 'go' not on PATH; ${#modules[@]} module(s) unlinted; fail-closed, treated as a finding")
+elif ! golangci_version="$(golangci_pin)"; then
+  fail=1
+  summary+=("go: FAIL — .golangci-lint-version is missing or names no golangci-lint release (vX.Y.Z); ${#modules[@]} module(s) unlinted; fail-closed, treated as a finding")
 else
-  # Worked out once, and only when vet is about to run, so a tree with nothing
-  # to vet never asks brew.
-  icu4c_cgo_flags "$PROG"
   for m in "${modules[@]}"; do
-    if ( cd "$ROOT/$m" && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go vet ./... ); then
-      summary+=("go: $m vet clean")
+    if ( cd "$ROOT/$m" && go run "$GOLANGCI_LINT@$golangci_version" run ./... ); then
+      summary+=("go: $m golangci-lint $golangci_version clean")
     else
+      # go run exits 1 whatever the exit of the program it ran, so the report
+      # above is what says whether the run found something or could not run.
       rc=$?
       fail=1
-      summary+=("go: FAIL — $m go vet exit $rc")
+      summary+=("go: FAIL — $m golangci-lint $golangci_version exit $rc; the report above names each finding, or why it could not run")
     fi
   done
-fi
-
-# ── Gofmt: gofmt -l over every tracked Go file ───────────────────────────────
-# The listing is checked before it is read. A git ls-files that failed would
-# yield an empty list, which reads exactly like a tree with no Go in it and
-# skips the check. core.quotePath=false keeps a non-ASCII path unquoted so gofmt
-# can open it; a path git still quotes cannot be opened, and gofmt fails on it
-# loudly rather than the file dropping out unchecked.
-if ! go_listing="$(git -c core.quotePath=false ls-files -- '*.go')"; then
-  echo "$PROG: cannot enumerate tracked Go files under $ROOT" >&2
-  exit 2
-fi
-go_files=()
-while IFS= read -r f; do
-  [ -n "$f" ] && go_files+=("$f")
-done <<<"$go_listing"
-
-if [ "${#go_files[@]}" -eq 0 ]; then
-  summary+=("gofmt: no tracked Go files — skipped")
-elif ! command -v gofmt >/dev/null 2>&1; then
-  fail=1
-  summary+=("gofmt: FAIL — 'gofmt' not on PATH; ${#go_files[@]} Go file(s) unchecked; fail-closed, treated as a finding")
-else
-  # A non-zero exit means gofmt could not read or parse a file. That fails the
-  # check on its own, whatever the listing holds.
-  if unformatted="$(gofmt -l "${go_files[@]}")"; then rc=0; else rc=$?; fi
-  listed=0
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    listed=$((listed + 1))
-    summary+=("gofmt: FAIL — $f is not gofmt-clean; gofmt -d $f shows the rewrite")
-  done <<<"$unformatted"
-  if [ "$rc" -ne 0 ]; then
-    fail=1
-    summary+=("gofmt: FAIL — gofmt exit $rc; a Go file could not be read or parsed")
-  fi
-  if [ "$listed" -gt 0 ]; then
-    fail=1
-  elif [ "$rc" -eq 0 ]; then
-    summary+=("gofmt: ${#go_files[@]} Go file(s) clean")
-  fi
 fi
 
 # ── Warrants: the entries this branch touches ───────────────────────────────

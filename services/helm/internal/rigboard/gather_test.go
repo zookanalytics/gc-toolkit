@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -87,8 +88,8 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 		if !slices.Equal(listed[epic], want) {
 			t.Errorf("%s lists %v, want %v, each once", epic, listed[epic], want)
 		}
-		if c := doc.Rows[epic].Counts; c == nil || *c != (Counts{Needs: 1, NotScheduled: len(want)}) {
-			t.Errorf("%s counts %+v, want its question and %d rows nobody scheduled", epic, c, len(want))
+		if c := doc.Rows[epic].Counts; c == nil || *c != (Counts{Needs: 1, Queue: 1, NotScheduled: len(want) - 1}) {
+			t.Errorf("%s counts %+v, want its question, tk-w queued behind it and %d ready rows nothing sends", epic, c, len(want)-1)
 		}
 	}
 	if got := doc.Rows["tk-w"].Group; got != GroupWaitingOnYou {
@@ -101,7 +102,7 @@ func TestReadPlacesWorkUnderEveryEpicItSitsUnder(t *testing.T) {
 
 // TestReadFoldsNeedsAboutParkedWork reads, through the read itself, the needs
 // a park leaves out of the count. Epic tk-pe waits on park gate tk-park, which
-// carries no await type, as gc-helm.sh park files one, and its only member has
+// carries no await type, as gctk bead park files one, and its only member has
 // closed, so it asks for a ruling. Question tk-q2 waits on the park itself, and
 // question tk-q holds only tk-w, which waits on the park too. Question tk-q3
 // holds only decision tk-d2, which waits on the park too, so both fold, and the
@@ -158,6 +159,85 @@ func TestReadFoldsNeedsAboutParkedWork(t *testing.T) {
 		if (x.ID == "tk-q3" || x.ID == "tk-q4") && len(x.Holds) != 0 {
 			t.Errorf("%s draws %v beneath it, want nothing, since it holds no work", x.ID, x.Holds)
 		}
+	}
+}
+
+// TestReadGathersADecisionsHandBack reads, through the read itself, the
+// hand-backs on the conversations about a decision: one on a conversation
+// whose sitting ended at its hand-off, so it has closed, and an older one on a
+// conversation a sitting holds. The decision's row carries the newer, and its
+// question reads the open conversation's state.
+func TestReadGathersADecisionsHandBack(t *testing.T) {
+	rows := []json.RawMessage{
+		json.RawMessage(`{"id":"tk-d","title":"keep the old flag?","status":"open","priority":1,"issue_type":"decision","created_at":"2026-01-01"}`),
+		json.RawMessage(`{"id":"tk-c1","title":"talk it over","status":"closed","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c1","metadata":{"gc.handback":"tk-d — ruled\nkeep it","gc.handback_at":"2026-01-03T00:00:00Z"},"dependencies":[{"issue_id":"tk-c1","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`),
+		json.RawMessage(`{"id":"tk-c2","title":"talk it over again","status":"in_progress","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c2","metadata":{"gc.handback":"tk-d — still open","gc.handback_at":"2026-01-02T12:00:00Z"},"dependencies":[{"issue_id":"tk-c2","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`),
+	}
+	doc, err := Read(context.Background(), stubStore(t, rows))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	r := doc.Rows["tk-d"]
+	if r.Handback == nil || *r.Handback != (Handback{Conversation: "tk-c1", At: "2026-01-03T00:00:00Z", Text: "tk-d — ruled\nkeep it"}) {
+		t.Errorf("tk-d's hand-back = %+v, want the closed conversation's", r.Handback)
+	}
+	if r.Signal != "In conversation" || r.Conversation != "tk-c2" {
+		t.Errorf("tk-d reads %q with conversation %q, want In conversation with tk-c2", r.Signal, r.Conversation)
+	}
+	if _, listed := doc.Rows["tk-c1"]; listed {
+		t.Error("the closed conversation has a row, want it read for its hand-back alone")
+	}
+}
+
+// TestReadListsHandBacksOnlyWhileADecisionIsOpen holds the read's list of
+// hand-backs, which reads every one the store holds, to the rigs that can show
+// one: only an open decision's Details opens with a hand-back, so a read with
+// no open decision makes no call for them, and a read with one makes one.
+func TestReadListsHandBacksOnlyWhileADecisionIsOpen(t *testing.T) {
+	conversation := json.RawMessage(`{"id":"tk-c1","title":"talk it over","status":"closed","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.tk-c1","metadata":{"gc.handback":"tk-d — ruled\nkeep it","gc.handback_at":"2026-01-03T00:00:00Z"},"dependencies":[{"issue_id":"tk-c1","depends_on_id":"tk-d","type":"tracks"}],"created_at":"2026-01-02"}`)
+	for _, c := range []struct {
+		status string
+		lists  int
+	}{
+		{"closed", 0},
+		{"open", 1},
+	} {
+		t.Run("a decision "+c.status, func(t *testing.T) {
+			decision := json.RawMessage(`{"id":"tk-d","title":"keep the old flag?","status":"` + c.status + `","priority":1,"issue_type":"decision","created_at":"2026-01-01"}`)
+			rig := stubStore(t, []json.RawMessage{decision, conversation})
+			stub, err := exec.LookPath("gc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			calls := filepath.Join(dir, "calls")
+			logged := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GC_CALLS\"\nexec \"$STUB_GC\" \"$@\"\n"
+			if err := os.WriteFile(filepath.Join(dir, "gc"), []byte(logged), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			t.Setenv("GC_CALLS", calls)
+			t.Setenv("STUB_GC", stub)
+			if _, err := Read(context.Background(), rig); err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			raw, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lists := 0
+			for _, line := range strings.Split(string(raw), "\n") {
+				f := strings.Fields(line)
+				for i := 0; i+1 < len(f); i++ {
+					if f[i] == "--has-metadata-key" && f[i+1] == "gc.handback" {
+						lists++
+					}
+				}
+			}
+			if lists != c.lists {
+				t.Errorf("the read listed the store's hand-backs %d times, want %d", lists, c.lists)
+			}
+		})
 	}
 }
 
@@ -231,4 +311,108 @@ func TestAnOpenPullRequestOnEitherRecord(t *testing.T) {
 			t.Errorf("merge_result %q owns no open pull request", v)
 		}
 	}
+}
+
+// TestReadListsTheReadyWorkNothingSends reads a store through the read itself
+// and holds the Not scheduled list to the work queue's answer, item by item.
+// Each member is listed by its title on every read, from the store as it then
+// stands, with nothing carried from an earlier read. A row reads "Not
+// scheduled" exactly when the list holds it, so the two never disagree. A bead
+// counts as worked only while a live run works it: tk-ended keeps the route
+// its pour stamped and the branch its run cut, and tk-poured's run has not yet
+// passed load-context. hold:external waits outside the city, and hold:mayor,
+// in any spelling, waits for the Product Owner on the Unprioritized page.
+// Whether a bead waits comes from the store, through its ready set and waits:
+// tk-behind waits on tk-idle, and tk-c is held through its parent.
+func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
+	stamp := `"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"`
+	run := func(convoy string) string {
+		return `"metadata":{"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.input_convoy_id":"` + convoy + `"}`
+	}
+	tracks := func(convoy, bead string) string {
+		return `"dependencies":[{"issue_id":"` + convoy + `","depends_on_id":"` + bead + `","type":"tracks"}]`
+	}
+	rows := func(idleRoute string) []json.RawMessage {
+		return []json.RawMessage{
+			json.RawMessage(`{"id":"tk-idle","title":"nothing sends it","status":"open","priority":2,"issue_type":"task","metadata":{"gc.routed_to":"` + idleRoute + `"},"created_at":"2026-01-01"}`),
+			json.RawMessage(`{"id":"tk-ended","title":"its run ended","status":"open","priority":2,"issue_type":"task","metadata":{` + stamp + `,"branch":"polecat/tk-ended"},"created_at":"2026-01-02"}`),
+			json.RawMessage(`{"id":"tk-ended-root","title":"mol-polecat-work","status":"closed","priority":2,"issue_type":"task",` + run("tk-ended-cv") + `,"created_at":"2026-01-02"}`),
+			json.RawMessage(`{"id":"tk-ended-cv","title":"convoy","status":"closed","priority":2,"issue_type":"convoy",` + tracks("tk-ended-cv", "tk-ended") + `,"created_at":"2026-01-02"}`),
+			json.RawMessage(`{"id":"tk-poured","title":"just poured","status":"open","priority":2,"issue_type":"task","metadata":{` + stamp + `},"created_at":"2026-01-03"}`),
+			json.RawMessage(`{"id":"tk-poured-root","title":"mol-polecat-work","status":"open","priority":2,"issue_type":"task",` + run("tk-poured-cv") + `,"created_at":"2026-01-03"}`),
+			json.RawMessage(`{"id":"tk-poured-step","title":"Load context","status":"open","priority":2,"issue_type":"task","metadata":{"gc.root_bead_id":"tk-poured-root","gc.step_ref":"mol-polecat-work.load-context"},"created_at":"2026-01-03"}`),
+			json.RawMessage(`{"id":"tk-poured-cv","title":"convoy","status":"open","priority":2,"issue_type":"convoy",` + tracks("tk-poured-cv", "tk-poured") + `,"created_at":"2026-01-03"}`),
+			json.RawMessage(`{"id":"tk-vendor","title":"waits on a vendor","status":"open","priority":2,"issue_type":"task","labels":[" Hold:External "],"created_at":"2026-01-04"}`),
+			json.RawMessage(`{"id":"tk-desk","title":"a new idea","status":"open","priority":2,"issue_type":"task","labels":["HOLD:MAYOR"],"created_at":"2026-01-05"}`),
+			json.RawMessage(`{"id":"tk-behind","title":"behind the idle work","status":"open","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-behind","depends_on_id":"tk-idle","type":"blocks"}],"created_at":"2026-01-06"}`),
+			json.RawMessage(`{"id":"tk-first","title":"first piece","status":"open","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.mechanik","created_at":"2026-01-07"}`),
+			json.RawMessage(`{"id":"tk-p","title":"parent work","status":"open","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.mechanik","dependencies":[{"issue_id":"tk-p","depends_on_id":"tk-first","type":"blocks"}],"created_at":"2026-01-08"}`),
+			json.RawMessage(`{"id":"tk-c","title":"child of held work","status":"open","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-c","depends_on_id":"tk-p","type":"parent-child"}],"created_at":"2026-01-09"}`),
+		}
+	}
+	rig := stubStore(t, rows(""))
+	read := func() Document {
+		t.Helper()
+		doc, err := Read(context.Background(), rig)
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		return doc
+	}
+	oneAnswer := func(doc Document) {
+		t.Helper()
+		for id, r := range doc.Rows {
+			if listed := slices.Contains(doc.WorkQueue.NotScheduled, id); (r.Signal == "Not scheduled") != listed {
+				t.Errorf("%s reads %q, and the Not scheduled list holds it: %v; want one answer", id, r.Signal, listed)
+			}
+		}
+		for _, id := range doc.WorkQueue.NotScheduled {
+			if doc.Rows[id].Title == "" {
+				t.Errorf("%s is listed with no title", id)
+			}
+		}
+	}
+
+	doc := read()
+	if got, want := doc.WorkQueue.NotScheduled, []string{"tk-idle", "tk-ended"}; !slices.Equal(got, want) {
+		t.Errorf("not scheduled = %v, want %v", got, want)
+	}
+	oneAnswer(doc)
+	for id, want := range map[string]string{
+		"tk-ended":  "Not scheduled",
+		"tk-poured": "Queued",
+		"tk-vendor": "Waits outside the city",
+		"tk-desk":   "Waits for the Product Owner",
+		"tk-behind": "Waits on tk-idle",
+		"tk-c":      "Waits on tk-first",
+	} {
+		if got := doc.Rows[id].Signal; got != want {
+			t.Errorf("%s reads %q, want %q", id, got, want)
+		}
+	}
+	for _, id := range []string{"tk-vendor", "tk-behind", "tk-c", "tk-poured"} {
+		if !slices.Contains(doc.WorkQueue.Queue, id) {
+			t.Errorf("%s is not in the queue %v", id, doc.WorkQueue.Queue)
+		}
+	}
+	if u := doc.Unprioritized; len(u) != 1 || !slices.Equal(u[0].IDs, []string{"tk-desk"}) ||
+		slices.Contains(doc.WorkQueue.Queue, "tk-desk") || slices.Contains(doc.WorkQueue.NotScheduled, "tk-desk") {
+		t.Errorf("unprioritized = %+v and work queue = %+v; want tk-desk on the Unprioritized page alone", u, doc.WorkQueue)
+	}
+
+	if again := read(); !slices.Equal(again.WorkQueue.NotScheduled, doc.WorkQueue.NotScheduled) {
+		t.Errorf("a second read lists %v, want the same %v", again.WorkQueue.NotScheduled, doc.WorkQueue.NotScheduled)
+	}
+	routed, err := json.Marshal(rows("gc-toolkit/gc-toolkit.polecat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("HOLDS_STORE"), routed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sent := read()
+	if got, want := sent.WorkQueue.NotScheduled, []string{"tk-ended"}; !slices.Equal(got, want) {
+		t.Errorf("once tk-idle is routed, not scheduled = %v, want %v: the list is the store's answer at each read", got, want)
+	}
+	oneAnswer(sent)
 }

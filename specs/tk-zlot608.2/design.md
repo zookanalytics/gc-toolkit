@@ -13,8 +13,10 @@ is, by the operator's three questions, and groups what the note shows onto the
 same feedback patterns, so a lesson an agent wrote down and a correction an
 agent reported meet in one judgment. A note stays in memory while its pattern is
 open. It leaves once the pattern closes and its fix has landed, or as soon as
-the distiller finds nothing in it worth keeping. No note leaves because of its
-age.
+the distiller finds nothing in it worth keeping. A note the distiller cannot
+substantiate either way stays, and records the days it is used, one dated line a
+day, for a later review to weigh. No note leaves because of its age, and no
+fixed span decides when a note is read again.
 
 The backlog record, [specs/tk-zlot608.1/report.md](../tk-zlot608.1/report.md),
 is the worked example of reading notes by the three questions.
@@ -79,9 +81,9 @@ is this design's proposal.
   from the moment it is written, with only its writer behind it.
 - A report is an observation bead
   ([feedback-learning.md](../../docs/feedback-learning.md)). It holds something
-  to be evaluated: corrective feedback from a review, a rework or the operator,
-  feedback whose reach the writer cannot tell, and a change that needs approval.
-  It steers no agent until the loop decides it.
+  to be evaluated: a correction to how agents work, from a review, a rework or
+  the operator. It steers no agent until the loop decides it. A change that
+  needs approval goes by a route still to be decided (section 6).
 - The state of open work goes on its bead's notes, and what the pack already
   says goes nowhere.
 
@@ -116,22 +118,22 @@ file-and-dispatch run 7,612, 8,910 and 8,775 bytes.
 
 **Where the work lives.**
 
-- The mechanics are one script, `assets/scripts/memory-intake.sh`. It places
-  each memory directory, lists the due notes, records each judged note, removes
-  notes and edits the index and collection notes under the checks in section 4,
-  rewrites the guidance block, and reports a place it cannot resolve.
+- The mechanics are a gctk noun, `gctk memory`, with three verbs: `settle`
+  ends the waits that are done, `due` lists the due notes, and `apply` records
+  each judged note and removes the ones the judge dropped, under the checks in
+  section 4. Each verb asks Claude Code where each place keeps memory (section
+  7), and `settle` reports a place it cannot learn.
 - The judging method is a section of the `learning-distill` skill, which the
   distiller reads from origin/main as it reads the rest of its rubric.
-- The formula gains one step, `read-memory`, run first, which holds only calls to
-  the script. The script makes the home-rig check that load-and-gate opens with,
-  so the step changes nothing on a rig that only imports the pack. It removes
-  the notes whose wait has ended, rewrites the guidance block and lists the due
-  notes for the later steps. load-and-gate's cadence gate
-  counts the due notes, judge-and-cluster judges them beside the pending
-  observations, and file-and-dispatch has the script record each judged note and
-  remove the ones the judge dropped. Each of those steps gains a clause or a
-  call, traded for weight the build moves into the script or the skill, since a
-  step that grows past the bound fails `formula-step-size.test.sh`.
+- The formula gains one step, `read-memory`, run first. It makes the home-rig
+  check that load-and-gate opens with, so it changes nothing on a rig that only
+  imports the pack, and on the home rig it runs `gctk memory settle`.
+  load-and-gate seeds the pending set with `gctk memory due`, so its cadence
+  gate counts the due notes, judge-and-cluster judges them beside the pending
+  observations, and file-and-dispatch applies the judge's decisions with `gctk
+  memory apply`. Each of those steps gains a clause or a call, traded for weight
+  the build moves into the skill, since a step that grows past the bound fails
+  `formula-step-size.test.sh`.
 
 ## 2. How the judge reads a note
 
@@ -165,6 +167,10 @@ how it reads.
   subsumes it. A rule current agents follow untold, or one the pack already
   carries, is dropped, and so is anything else the judge finds nothing worth
   keeping in.
+- **Not substantiated either way**: the judge cannot tell whether the note
+  still serves. It is not dropped on that judgment (section 3). It stays until
+  a date the judge sets, with a line that asks whoever uses it to record the
+  day, one line a day.
 
 **A note on a pattern.** The pattern's evidence names the note by its memory
 directory, its name and the hash the judge read. A note is one occurrence in its
@@ -212,9 +218,12 @@ A note leaves in one of two ways, and never because of its age.
   run that judged them, once the run has carried what each shows to where it
   goes.
 - **When what it waits on is done.** A note on a pattern leaves once the pattern
-  closes and every follow-up of the pattern that closed on a merge has landed. A
+  closes, a follow-up of the pattern has landed and none is still on its way. A
   note that waits on a bead in another rig's store leaves once that bead closes
-  and, if it closed on a merge, has landed.
+  on a merge that has landed. A note whose pattern or bead closed with no fix
+  landed does not leave: it is due at once, as old as the day the wait ended, so
+  it comes before the notes changed since, and the judge weighs it with the
+  close reason, a proposal the operator vetoed among them (below).
 
 A follow-up has landed when its merge is on its repository's default branch.
 Closing is not enough, because a follow-up placed under an integration effort
@@ -223,15 +232,60 @@ closes when it lands on the effort's branch: tk-jvl45ot closed on 2026-10-31 at
 PR, #1379, merged at 22:48Z. So a follow-up merged into an effort's branch has
 landed once the effort's landing bead has merged into the default branch. A
 follow-up that closed with no merge, such as a proposal the operator vetoed,
-ends the wait at its close.
+ends the wait at its close, and a pattern all of whose follow-ups closed so has
+landed no fix.
 
 A note on a held pattern stays through the pattern's deferral, which lasts
 `pattern_defer_days` (90). When the window ends with no recurrence, the
-distiller dismisses the pattern and the note leaves. When the lesson recurs, the
-distiller judges the pattern again on the new evidence, and the note stays while
-the pattern is open. A lesson that comes back after its notes left is new
-evidence on its closed pattern, which the rubric's recurrence bar decides
-whether to reopen.
+distiller dismisses the pattern and the note is due again. A note that works
+prevents the recurrence the hold waits for, so that silence substantiates
+nothing, and the judge weighs the note as one it cannot substantiate. When the
+lesson recurs, the distiller judges the pattern again on the new evidence, and
+the note stays while the pattern is open. A lesson that comes back after its
+notes left is new evidence on its closed pattern, which the rubric's recurrence
+bar decides whether to reopen.
+
+**A note the judge cannot substantiate.** The operator ruled in conversation
+tk-0vo6nph on 2026-11-14, dropping a fixed window for such notes:
+
+> Shape feels good, I'd like to drop the 90 days though, I think we can largely
+> leave time out of it, and have directions include that a note that can't be
+> substantiated either way, can have an update made to have it report it's
+> usage on the note with date. That builds up the data point for that case and
+> then lets the agent on a future pass evaluate it more holistically. Some might
+> be fine to drop when no usage in a week and another might need a year (taking
+> an extreme example). Why dictate any timing requirement
+
+So such a note is not dropped on that judgment. The judge keeps it until a date
+it sets for that note, and `gctk memory apply` adds one line to it, in the pack's own
+words, asking whoever uses it to append a dated line recording the use when the
+note holds none for that day. A use is recorded in the note itself, keeps the
+note, and does not reopen its lesson. When the note comes due, the judge weighs
+it as a whole: the days it was used and what each day's line says it changed,
+what it holds, and what losing it would cost. apply takes the line that
+asks out of the note once the judge decides on it without asking again, by a
+wait or by a date without the ask, and the use lines stay as the note's dated
+record. These two limits, a line a day and a request that ends with the judge's
+answer, come from a later sitting's recommendation, which the operator approved
+("go as recommended", conversation tk-g2f63z7). The sitting found that a note
+used once in each of the rig's sessions, about 176 a day, would outgrow what one
+Read returns within a week. A note the judge can substantiate is kept
+or dropped as above, and a note on a pattern whose fix has landed leaves as
+above.
+
+The sitting recorded two proposals of its own beside the ruling, which the
+operator did not rule on. The build takes one: a use line alone does not make a
+note due early, so the per-run read stays for new notes and the uses are read
+when the note next comes due. It leaves the other, that the list keep each
+note's use count so the most-used notes can later go to the operator as
+candidates for the pack. The uses stay in the note alone, where the judge reads
+them. Where the design as approved had a note leave at the veto, a wait that
+ended with no fix landed makes the note due at once, as the shape the
+evaluation on tk-zlot608.7 proposed has it, which the operator approved as
+option A ("Yes, A", conversation tk-f6pdi0y). The veto settles the rule the
+note states, and the judge, reading the close reason, weighs what else the note
+holds. Removing the note at the veto would also have taken out of memory
+anything else it held.
 
 The operator's two concerns, in that cycle:
 
@@ -240,7 +294,8 @@ The operator's two concerns, in that cycle:
   (skills/learning-distill/SKILL.md, Retirement questions).
 - **Keeping a long-term rule until something permanent replaces it.** A note
   worth keeping stays while its pattern is open, which lasts until the pattern's
-  fix has landed, or until its deferral passes with no recurrence.
+  fix has landed, and a note the judge cannot substantiate stays while its
+  recorded uses build the case for keeping or dropping it.
 
 The cost is that memory shrinks only as fast as the distiller decides and fixes
 land, and until a rule's replacement lands, a rule the judge kept steers agents
@@ -260,6 +315,8 @@ For each memory directory, the run keeps these in the pack's state directory,
   has not passed has, in place of a wait, the date it is next due.
 - **Each removed note's text**, as it was when removed, filed under its name and
   hash. Nothing prunes these.
+- **The names of the removed notes whose pointers did not all come out**, which
+  the next run takes out.
 - **The directory's real path**, so a person can tell which directory a key
   belongs to.
 
@@ -269,9 +326,9 @@ characters would merge directories: with each `/` and `.` as `-`, `/x/a.b`,
 `/x/a-b` and `/x-a/b` share one.
 
 A note is due when the list does not hold it at its current hash, or holds the
-date it is next due and that date has come, so the list is all the next run
-needs of the last. The run keeps no copy of the directory and no findings
-record. The town repository ignores `.gc/`, and no session loads it.
+date it is next due and that date has come, so the list and those names are
+all the next run needs of the last. The run keeps no copy of the directory and
+no findings record. The town repository ignores `.gc/`, and no session loads it.
 
 Other writers and other runs:
 
@@ -279,10 +336,11 @@ Other writers and other runs:
   works. A note is removed only while its hash still matches the hash the judge
   read, and a note changed since is due again.
 - The index, `MEMORY.md`, holds pointers and is never judged. Claude Code loads
-  its first 200 lines or 25 KB into every session. The run takes out each line of
-  the index or a collection note that links a note no longer in the directory.
-  That includes the 313 links in collection notes to notes the backlog removal
-  took out (tk-zlot608.3).
+  its first 200 lines or 25 KB into every session. When the run removes a note,
+  it takes out each pointer to it in the index or a collection note while its
+  name holds no file, so a note a session saves under that name keeps them. A
+  line left with no pointer goes, and a pointer that does not come out goes on
+  the next run.
 - A collection note (`hub-*.md`) is judged entry by entry, as the backlog record
   sorted it. A line that links a whole note stands for that note. An entry with
   text of its own is judged like a note and keyed on the list by its own hash.
@@ -291,17 +349,22 @@ Other writers and other runs:
 - A link inside a whole note's own text stays as written.
 - An edit to the index or a collection note is written only if the file is
   unchanged since the run read it. Otherwise the run reads it again.
-- Two distiller runs can overlap, so the script holds a lock in each
+- Two distiller runs can overlap, so `gctk memory` holds a lock in each
   directory's state directory while it writes the list, removes notes and edits
   the index.
 
 ## 5. Which notes a run reads
 
 A note is due from the first run that finds it, new or changed since the judge
-read it, and a note the judge kept for a moment that has not passed is due again
-from the date the judge set (section 2). The judge's own question, whether a
-note can go away, decides whether a fresh note leaves, so no age decides when a
-note is read.
+read it, and a note the judge kept for a moment that has not passed, or kept
+unsubstantiated, is due again from the date the judge set (sections 2 and 3). A
+use line a note gains does not change it for this purpose, because the hash the
+list keeps reads the note's body alone, without its use lines, and a Claude Code
+save rewrites only front matter
+([claude-code-saves.md](../tk-riu2z5n/claude-code-saves.md)). A change to a
+note's front matter alone does not bring it due either. The judge's own
+question, whether a note can go away, decides whether a fresh note leaves, so no
+age decides when a note is read.
 
 Due notes are pending like reports. They count toward the distiller's cadence
 gate beside the pending observations, and a gated run leaves them due. With
@@ -333,104 +396,78 @@ reads the notes behind them and groups them as it goes.
 
 ## 6. How agents are told what goes in memory
 
-The guidance sits at the top of each memory directory's index, which loads into
-every session that has memory and which an agent edits after writing a note.
-`read-memory` rewrites the block each run from one file in the pack, so its
-words change only through a reviewed PR. It adds nothing to the pack's prompts,
-and it reaches no agent whose memory is off. **Proposed** words, for the unit
-that builds them:
+The guidance is a fragment of the pack's prompts,
+`template-fragments/memory-notes.template.md`, so its words change only through
+a reviewed PR. Every Claude role that keeps memory carries it: the polecat, the
+Claude converse sittings, the witness, the refinery, the deacon, the proactive
+reactor, the demo agent and the keeper compose it, and the mechanik, whose prime
+sits at its session-start cap, reads it from the file with its work-quality
+standards. The converse prompt, which the Codex sittings share, composes it only
+for a Claude provider. The words:
 
 ```markdown
-<!-- memory-intake: rewritten from the gc-toolkit pack each run -->
-A note here holds something that should change the next agent's behavior. The learning loop reads each note, leaves it here while the lesson it shows is being judged or fixed, and removes it once that lesson is settled or the note holds nothing worth keeping.
-Write a lesson so it can be acted on: what you did, what happened, the instruction, command or script that led there, what it cost, and whether it happened before.
-A rule is the operator's only with their words and where they said them. Otherwise it is yours, and the note says so.
-What is to be evaluated goes in a report, an observation bead the gc-toolkit.records skill files: corrective feedback from a review, a rework or the operator, feedback whose reach you cannot tell, and a change that needs approval. The state of open work goes on its bead's notes. Leave out what the pack already says.
-<!-- /memory-intake -->
+## Where what you learn goes
+
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
+
+Leave out what the pack already says.
 ```
 
 What a note carries so the judge can act on it:
 
-- A lesson gives the act, what happened, the instruction, command or script
-  behind it by file and section or command line, the cost, and any earlier time
-  it happened. With these the judge can find the words to fix (question 2), or
-  weigh a problem against its fix (question 3).
-- A ruling gives the operator's words and where they gave them.
+- A note that records something that went wrong gives the instruction, command
+  or script that led there, by file and section or command line, what it cost,
+  and whether it happened before. With these the judge can find the words to
+  fix (question 2), or weigh a problem against its fix (question 3).
+- A rule gives the operator's words and where they gave them, or says it is the
+  writer's own.
 
-The block's cost is that an agent may edit it between runs, and the next run
-restores it. The other place for it is a fragment in every Claude prompt, which
-costs each session about the same text, sits away from the act of writing, and
-reaches the Product Owner, whose memory is off.
+The list names each place by the name agents already have for it: Claude
+Code's memory, the pack's observation and a bead's notes. A change an agent
+thinks would help but should not adopt on its own has no place in it, because
+no step carries such an observation to the operator. Its route is a task of its
+own, tk-zlot608.12.
+
+The operator put the guidance in prompts with option A ("Yes, A",
+conversation tk-f6pdi0y), in place of a block at the top of each index that
+the intake would rewrite each run. A prompt costs each session about the text
+the block would have and sits apart from the act of writing a note, but it needs
+no code and no agent can edit it between runs. The Product Owner, whose memory
+is off, and the Codex agents, which keep none, do not carry it.
 
 ## 7. The memory directories, the Product Owner and agents without memory
 
-**Where a memory directory is.** The run places each directory as Claude Code's
-storage-location rules do
-([gas-city-search.md](gas-city-search.md#find-a-memory-directory)), from the
-inputs Gas City starts each rig's Claude sessions with:
+**Where a memory directory is.** The run asks Claude Code. In each rig's
+checkout and in the city's root, it starts one bounded one-turn `claude -p`
+with the settings file Gas City starts each Claude session with and the hooks
+off, and reads `memory_paths.auto` from the stream's init record
+([the search](../tk-zlot608.8/gas-city-search.md#find-a-memory-directory)). The
+directory is the one a session started there keeps, under the environment, home
+and settings the run has, and the run copies none of Claude Code's location
+rules. A session's start makes its memory directory when nothing is there, so
+the run removes each empty directory its ask made. The run reads each directory
+once, by its real path, under the name of every place whose sessions keep memory
+there, because this host's account homes link their `projects` directories to
+one place.
 
-- Memory is off when the environment sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
-  It is also off when the highest settings level that sets `autoMemoryEnabled`
-  sets it false, unless the environment sets that variable to `0`, which turns
-  memory on.
-- Otherwise the directory is the `autoMemoryDirectory` of the highest settings
-  level that sets one. The levels, highest first, are managed settings, the
-  `--settings` file Gas City gives each Claude session it starts, the
-  checkout's local settings, its shared project settings, and the user settings
-  in the config directory. A value that starts with `~/` is under the session's
-  home.
-- Otherwise the directory is `<config dir>/projects/<project>/memory/`. The
-  config directory is `CLAUDE_CONFIG_DIR`, or `.claude` under the session's home.
-  `<project>` is `CLAUDE_CODE_PROJECT_DIR_NAME` when that is set beside
-  `CLAUDE_CONFIG_DIR` and is 1 to 64 letters, digits, hyphens or underscores.
-  Otherwise it is the checkout's path with each character that is not a letter
-  or a digit as `-`.
-
-The environment, the home and the user settings the run reads are its own
-session's. Gas City starts every rig's Claude sessions as it starts the run, so
-they match unless an agent's provider or its own configuration sets a different
-environment, or a launch command gives each account a home of its own, as this
-host's does. The run compares paths by their real path, because those homes link
-their `projects` directories to one place, so one directory shows under several
-paths.
-
-**Which directories the run reads.** It reads each rig's own directory, the one
-named for its checkout or the one the rig's own local or shared project settings
-place, and the city root's. A directory the city's `--settings` file places is
-one for every rig and the city root, and the run reads it once. A directory
-placed at the user or managed level, or named by `CLAUDE_CODE_PROJECT_DIR_NAME`,
-is one directory for every project those sessions start in, and sessions the
-city does not run can share it, so the run reads none of it and reports it as a
-place it cannot resolve. One placed at the user level, or named by the variable,
-comes under the run once the city's or the rig's own Claude settings set
-`autoMemoryDirectory`: both rank above the user level, and a directory they set
-takes the place of the one the variable names. A directory keyed to a path
-outside the city's rigs and its root belongs to sessions the city does not run,
-and the run reads none of it.
-
-**An absent directory, and a place the run cannot resolve.** A directory is
-absent when memory is off or nothing exists where it is placed, and the run
-changes nothing there. The run cannot resolve a place, and removes nothing
-there, when:
-
-- a settings file at one of the levels does not parse, the deciding
-  `autoMemoryDirectory` is neither an absolute path nor one that starts with
-  `~/`, or the checkout's converted path passes 200 characters, where Claude
-  Code appends a hash the pages do not define;
-- a settings file the repository supplies places the directory while
-  `permissions.blockReadsOutsideWorkingDirectories` is on, so Claude Code
-  neither loads nor writes memory there. That is the rig's shared project
-  settings, or its local settings when git tracks them or `.claude` is a link;
-- the directory is placed at a level the run does not read (above).
-
-The run files one finding for each such place through `patrol-finding.sh`, under
-a key for what it could not resolve, as the feedback miner files its findings. A
-case that stays unresolved updates that finding from run to run, and a run that
-resolves it marks the finding cleared. An input the run cannot read, such as
-another account's user settings or a `~/` value under its home, server-managed
-settings, or workspace trust, which decides whether Claude Code honors a
-project's value, can move a directory where the run does not look. That
-directory's notes then stay unread, as every directory's are today.
+**An absent directory, and a place the run cannot learn.** A directory is
+absent when nothing is where Claude Code places it, and the run changes nothing
+there. The run cannot learn a place, and reads and removes nothing there, when
+the ask does not answer, or its init record names no directory, or names a path
+that is not absolute or not a directory. Claude Code leaves the field out when
+memory is off, and a version that stopped reporting it would leave it out too,
+so the run reports such a place rather than reading it as memory off. No place
+in this city turns memory off. `gctk memory settle` keeps one finding for every
+such place through `patrol-finding.sh`, under the key `memory-intake.places`,
+and marks it cleared once it learns every place.
 
 **The Product Owner.** Its memory stays off. `agents/po/agent.toml` sets
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, because a note would carry one sitting's
@@ -460,22 +497,29 @@ to run, how many wait on an open pattern, and how many the judge dropped.
 
 The learning loop measures 2.4k runtime lines and 1.9k test lines in
 [built-once-target.md](../../docs/built-once-target.md), against a built-once
-estimate of 2.0k and 1.5k that has no memory intake. The unit below adds about
-0.5k runtime lines: the script, about 350, the formula's new step and the
-clauses the other steps gain, the skill's memory section and the guidance file.
-It adds about 0.4k test lines. It updates the page's feedback paragraph to name
-the memory step.
+estimate of 2.0k and 1.5k that has no memory intake. The unit below adds the
+formula's new step and the clauses the other steps gain, the skill's memory
+section and the prompt fragment to that subsystem. Its Go, `gctk memory` and
+the Claude Code adapter, counts in gctk's row: about 2.7k lines with comments
+and help, and 2.3k test lines, where the evaluation on tk-zlot608.7 estimated
+0.85k and 1.2k. It updates the page's feedback paragraph to name the memory
+step.
 
-Nothing it changes is in `tools/deletion-plan.tsv`. A fix the judge finds in a
-file the plan lists goes to the retiring bead's notes (section 2), so the intake
-gives that code no new work. That includes the feedback-routing doctor check
-that tk-1tfzr71.21 retires, which the epic's boundaries name.
+One file it changes is in `tools/deletion-plan.tsv`: the deacon's prompt,
+`agents/deacon/prompt.template.md`, which tk-1tfzr71.174 retires. The unit adds
+to it only the include that composes the memory-notes fragment, because option
+A carries the guidance to every Claude role that keeps memory (section 6), and
+the deacon keeps memory until that bead lands. The include goes with the file,
+and the PR's size section names its lines under that bead. A fix the judge
+finds in a file the plan lists goes to the retiring bead's notes (section 2),
+so the intake gives that code no new work. That includes the feedback-routing
+doctor check that tk-1tfzr71.21 retires, which the epic's boundaries name.
 
 ## 10. The unit that builds it
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| tk-zlot608.5 | `assets/scripts/memory-intake.sh` and its suite: verbs that place each memory directory as Claude Code does, keep each directory's list under the SHA-256 of its real path with that path written beside it, list the due notes oldest first, record each judged note on the list with what it waits on or the date it is next due, remove a note under the hash, index and collection-note checks while keeping its text, end a note's wait once its pattern or bead is done and its fix has landed, rewrite the guidance block, and report a place the run cannot resolve. The suite covers each input that moves a directory or turns memory on or off, a shared directory, an absent directory, each case the run cannot resolve, a note changed since it was judged, and a follow-up that landed on an effort's branch. It also covers directories whose real paths a character conversion merges, such as `/x/a.b`, `/x/a-b` and `/x-a/b`, each holding a note of the same name and text, and a note kept for a moment that has not passed, which is not due before its date and then waits behind the notes due before it. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The guidance file. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and the script, the feedback paragraph in docs/built-once-target.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
+| tk-zlot608.8 | `gctk memory` and its Go tests: `due` lists the due notes oldest first for the pending set, `apply` records each judged note on the list with what it waits on or the date it is next due and removes a dropped note under the hash, index and collection-note checks while keeping its text, and `settle` ends a note's wait once its pattern or bead is done and its fix has landed, an effort's landing followed. Each asks Claude Code where each place keeps memory, through a new adapter with a fake, and keeps each directory's list under the SHA-256 of its real path with that path written beside it. The tests cover a place Claude Code names no directory for, a directory it names that is not there, a directory several places share, directories whose real paths a character conversion merges, a note changed since it was judged or listed, a use recorded through a Claude Code save, a note kept for a moment that has not passed, which waits behind the notes due before it, and a follow-up that landed on an effort's branch. `mol-feedback-distiller`'s `read-memory` step, its `memory_notes_per_run` variable and the clauses the other steps gain, within the step-size bound. The `learning-distill` skill's memory section. The memory-notes prompt fragment in every Claude role that keeps memory. The docs this makes stale: the intake and promotion path in docs/feedback-learning.md, the rows in docs/component-model.md §4 for the distiller and gctk memory, the feedback paragraph in docs/built-once-target.md, gctk's rows and adapters in docs/gctk-architecture.md, and the Debt entry in docs/architecture.md, which it removes. | this design's merge (tk-zlot608.2), and the pattern change it builds on (tk-ltcv43q, PR #1486) |
 
-One unit, because the step with no script, or the script with no step, does
-nothing on its own.
+One unit, because the step with no verbs, or the verbs with no step, do
+nothing on their own.

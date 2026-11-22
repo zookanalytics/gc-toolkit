@@ -37,7 +37,7 @@ The gates the conversation replies to stay open and owed until the sign-off
 answers them. Nothing is written to them now.
 
 **On an open PR, the merge waits for this conversation.** The subject may be an
-open PR's anchor (`merge_result` `pull_request`, `pull_request_pending` or
+open PR's anchor (`merge_result` `pull_request_pending` or
 `pull_request_head_changed`, and not closed), or a bead whose `anchor_bead`
 names one, such as its review or rework. Then the anchor depends on this
 conversation through a `blocks` edge, which bd lets go once the
@@ -102,7 +102,10 @@ The writer records each wait as a `blocks` edge and leaves the subject's route
 and lifecycle state as they are:
 
 ```bash
-"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <what holds the subject>
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <what holds the subject>
 ```
 
 When nothing holds the subject, pass `--no-wait` in place of `--waiting-on`.
@@ -122,6 +125,33 @@ Never edit a recommendation in place, because Accept sends whatever formula
 the subject names. The recommendation's gate is then answered like any gate
 the operator rules on.
 
+**On an open PR, say where each of its open review points lands.** Before you
+recommend a ruling on an open PR, list each point its reviews raised that is
+still open: a review comment of the operator's that the branch has not
+answered, and a finding of the city's review that its round put to a person or
+deferred to a later fix. The PR's conversation holds both, with the city's
+review comment saying how its round ruled each finding. `converse-prep` read
+it when the subject's metadata carries the PR's `pr_number` or `pr_url`.
+Otherwise read it from the anchor with
+`"$CONV/converse-pr-conversation.sh" <the anchor>`. The PR's status names what
+still holds it, such as a question a person owes or a review thread that waits
+on the city's answer:
+
+```bash
+ANCHOR="<the open PR's anchor: the subject, or the bead its anchor_bead names>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr status "$ANCHOR" --json
+```
+
+The recommendation says where each point lands. A point lands on the PR's
+branch, before approval, when the operator's review asked for it, when the PR's
+change caused it, or when the PR's stated purpose covers it. Sharing a file, a
+screen or a record entry with the PR does not make a point the PR's. A
+follow-up carries only a point outside that scope, or one the operator rules
+separable.
+
 Post the framing as a hand-back whose decision leads with your recommendation,
 and record it on the conversation first (the prompt's hand-back). When the
 recommendation sends work, the decision names the formula the work goes on,
@@ -140,10 +170,11 @@ merge:
 Then offer the close-out as the last line, the only thing below the hand-back.
 The close-out is the switch that ends the sitting, put where the operator
 already reads. Offering it is not a request to use it, and it does not stand in
-for the decision above it:
+for the decision above it, so its reason names only the sitting's topic and
+that it closed without a ruling, and every course stays in the decision:
 
 ```
-! <the resolved gc-helm.sh path> dismiss --reason "<this sitting's real reason>"
+! <the resolved gc-helm.sh path> dismiss --reason "<the sitting's topic>: closed without a ruling"
 ```
 
 Write the resolved path, not the variable, because the leading `!` runs the

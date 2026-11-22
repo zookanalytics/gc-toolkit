@@ -1,16 +1,18 @@
 # build-scratch-reap — reclaim the build and test scratch a killed or crashed
 # run left behind, before the per-uid tmpfs quota is exhausted and every agent's
 # Bash output capture fails. scratch-reap owns the Claude Code session scratch;
-# this owns the Go toolchain trees, the gc.test per-run trees, and the templated
-# tool temp that no EXIT trap reclaimed.
+# this owns the scratch named for the pid of the process that made it: the
+# gc.test per-run trees and the build scripts' run.<pid> dirs.
 #
 # City scope: the scratch roots are per-uid, shared by every rig on the host, so
 # one pass serves them all. The script also takes a per-uid lock, so a second
-# dispatcher cannot double the sweep. It removes only entries with no live holder
-# (and, for pid-named trees, a dead pid), so a skipped or cut-short pass costs
-# only the reclaim the next pass takes instead.
+# dispatcher cannot double the sweep. It removes only a tree whose name's pid is
+# gone and which nothing holds, so a skipped or cut-short pass costs only the
+# reclaim the next pass takes instead. It never removes a templated name
+# (go-build*, go-link*, gctk-*), which records no owner: what a killed run
+# leaves under one waits for the host's own temp cleanup.
 [order]
-description = "Reclaim build/test scratch (go-build*, go-link*, gct<pid>, run.<pid>, gctk-*) left by killed or crashed runs, gated on no live holder; one host-level pass under a lock"
+description = "Reclaim build/test scratch named for its owner's pid (gct<pid>-<n>, run.<pid>) once that pid is gone and nothing holds it; templated temp (go-build*, go-link*, gctk-*) is never removed, and a killed run's waits for the host's own temp cleanup; one host-level pass under a lock"
 trigger = "cooldown"
 interval = "1h"
 exec = "$PACK_DIR/assets/scripts/build-scratch-reap.sh"

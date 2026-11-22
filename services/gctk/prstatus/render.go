@@ -11,8 +11,8 @@ import (
 // Render returns where a PR on Gas Town's pending record stands, in the status
 // vocabulary, from the evaluator's answer for its anchor and the facts [Read]
 // gathers about the anchor, whose walk names the human gates and the beads a
-// person owes the next move on. A display asks the evaluator over the GitHub
-// read the landing order saved on the bead ([pr.FromStore]). The precedence is
+// person owes the next move on. A display asks the evaluator over the read the
+// one-PR update saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one
@@ -26,9 +26,9 @@ import (
 //     on its branch, or a review thread that work acts on, or with only the
 //     merge state GitHub has yet to compute (UNKNOWN), which the next read
 //     settles.
-//   - working: the PR waits on the city's work and on an approval, or a
-//     conversation whose sitting stays for work holds it, approved or not, as
-//     Derive reads it ([Facts.Staying]). A PR whose GitHub side is not read at
+//   - working: the PR waits on the city's work and on an approval, or a bead
+//     that waits on work of its own first holds it, approved or not, as Derive
+//     reads it ([Facts.Staying]). A PR whose GitHub side is not read at
 //     the head the store holds ([pr.KindGitHubUnread]) reads working too: the
 //     landing order's next check is the next move, and no approval is known.
 //   - needs-review: only an approval is left, or a request for changes that
@@ -134,9 +134,9 @@ func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f
 // threadsHeld is how many review threads the answer names as waiting on the
 // city's answer, or 0 while something of the city's acts on them: feedback the
 // intake has yet to route, a bead that names the PR's bead as its anchor, or a
-// wait of the bead's own that is neither a gate, a bead a person owes nor a
-// conversation whose sitting stays for work, such as work on the PR's branch.
-// A stay waits for its work to close, and acts on no thread.
+// wait of the bead's own that is neither a gate, a bead a person owes nor one
+// that waits on work of its own first ([Facts.Staying]), such as work on the
+// PR's branch. A bead that waits on its work acts on no thread.
 func threadsHeld(a pr.Answer, f Facts) int {
 	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	person := func(id string) bool {

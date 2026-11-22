@@ -864,10 +864,11 @@ Escalate a refinery handoff that has gone genuinely stuck, and the blind
 monitor when the queue cannot be read at all — but never transient churn.
 The refinery has two drivers. Its session (mol-refinery-patrol `find-work`)
 claims open, branch-bearing work assigned to it with no `merge_result`, prepares
-the branch, and stamps the first `merge_result`; the order-driven
-refinery-reconcile cadence then owns the anchor, and its transitions clear the
-assignee (`--assignee ""`), so a gating anchor is detached from both queues
-(docs/refinery-merge-cadence.md).
+the branch, and stamps the first `merge_result`; an order then owns the anchor:
+on the old path the refinery-reconcile cadence, whose transitions clear the
+assignee (`--assignee ""`), and on the pending record the landing order, whose
+record assigns the bead to nobody while its PR waits, so a gating anchor is
+detached from both queues (docs/refinery-merge-cadence.md).
 
 The beads still assigned to the refinery are its inbound queue: fresh handoffs
 and rebase/rework tasks. Both turn over on their own, a handoff within a poll

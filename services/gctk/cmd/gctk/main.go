@@ -15,9 +15,8 @@
 // do not call gctk yet, and it goes away once they do. A bridge is not a
 // contract gctk keeps: matching a script's flags and output byte for byte is
 // not a goal, and neither are tests that pin usage text.
-// assets/scripts/lifecycle.sh, assets/scripts/merge.sh and
-// assets/scripts/epic.sh are bridges: they only exec this binary, and refuse
-// the call when there is none to run.
+// assets/scripts/lifecycle.sh and assets/scripts/epic.sh are bridges: they
+// only exec this binary, and refuse the call when there is none to run.
 // pr-status-label.sh writes the status: and held: labels in shell and takes
 // their values from `gctk pr status`, the one derivation the labels and the
 // helm board share, so when the binary is absent or stale it leaves the labels
@@ -35,19 +34,19 @@ func main() {
 	os.Exit(cli.Run(os.Args[1:], version(), os.Stdout, os.Stderr))
 }
 
-// sourceRev is the identity `gc-build.sh gctk` stamps at link time: the tree
-// hash of services/gctk at the commit it built from (`git rev-parse HEAD:./`),
-// the identity doctor/check-cadence-live compares against the checkout.
-// -X main.sourceRev=<hash>.
+// sourceRev is the identity `gc-build.sh gctk` stamps at link time: one hash
+// over gctk's inputs at the commit it built from, services/gctk and the root
+// go.mod and go.sum, the identity doctor/check-cadence-live compares against
+// the checkout. -X main.sourceRev=<hash>.
 var sourceRev string
 
 // version reports the revision this binary was built from. It is what
-// doctor/check-cadence-live compares against the checkout: a
-// cadence running a binary built from other sources is the failure mode the
-// build order's ~5m lag makes possible, and the operator has no other way to
-// see it. The build order's stamp wins because it names the module's own
-// sources; the toolchain's VCS stamp (a commit hash) is the fallback for a
-// build made by hand.
+// doctor/check-cadence-live compares against the checkout: a cadence running a
+// binary built from other sources is the failure mode a build not yet run, or
+// one that failed, makes possible, and the operator has no other way to see it.
+// The build order's stamp wins because it names gctk's own inputs; the
+// toolchain's VCS stamp (a commit hash) is the fallback for a build made by
+// hand.
 //
 // A build with neither — `go build` outside a repository, or with
 // -buildvcs=false — reports "unknown" rather than inventing a revision.

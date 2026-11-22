@@ -1,9 +1,11 @@
 package git
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -42,6 +44,42 @@ func TestOriginURLNamesTheClonesOrigin(t *testing.T) {
 	}
 }
 
+// OriginURLs lists what a fetch from origin and a push to it reach once git
+// rewrites the remote's URLs: a pushurl and a pushInsteadOf move only the
+// push, an insteadOf moves both, and every URL the remote carries is listed.
+func TestOriginURLsListWhereAFetchAndAPushGo(t *testing.T) {
+	const (
+		real = "https://github.com/acme/widgets.git"
+		fork = "git@github.com:fork/widgets.git"
+	)
+	for name, c := range map[string]struct {
+		config      [][]string
+		fetch, push []string
+	}{
+		"the remote's url":  {fetch: []string{real}, push: []string{real}},
+		"a pushurl":         {config: [][]string{{"remote.origin.pushurl", fork}}, fetch: []string{real}, push: []string{fork}},
+		"a pushInsteadOf":   {config: [][]string{{"url.git@github.com:fork/.pushInsteadOf", "https://github.com/acme/"}}, fetch: []string{real}, push: []string{fork}},
+		"an insteadOf":      {config: [][]string{{"url.git@github.com:fork/.insteadOf", "https://github.com/acme/"}}, fetch: []string{fork}, push: []string{fork}},
+		"two urls":          {config: [][]string{{"--add", "remote.origin.url", fork}}, fetch: []string{real, fork}, push: []string{real, fork}},
+		"two pushurls kept": {config: [][]string{{"remote.origin.pushurl", real}, {"--add", "remote.origin.pushurl", fork}}, fetch: []string{real}, push: []string{real, fork}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := repo(t)
+			gitIn(t, dir, "remote", "add", "origin", real)
+			for _, kv := range c.config {
+				gitIn(t, dir, append([]string{"config"}, kv...)...)
+			}
+			fetch, push, err := OriginURLs(dir)
+			if err != nil || !slices.Equal(fetch, c.fetch) || !slices.Equal(push, c.push) {
+				t.Fatalf("OriginURLs = %q, %q, %v, want %q, %q", fetch, push, err, c.fetch, c.push)
+			}
+		})
+	}
+	if _, _, err := OriginURLs(repo(t)); err == nil {
+		t.Fatal("a clone with no origin listed its URLs")
+	}
+}
+
 // A commit is reachable from the target only once a fetch has brought the
 // target's tip, and a branch's commit the target does not reach never is.
 func TestReachesReadsTheFetchedTarget(t *testing.T) {
@@ -49,22 +87,22 @@ func TestReachesReadsTheFetchedTarget(t *testing.T) {
 	if ok, err := Reaches(dir, landed, "main"); err != nil || ok {
 		t.Fatalf("before the fetch, the merge commit reached main: %v, %v", ok, err)
 	}
-	if err := FetchBranch(dir, "main"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "main"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := Reaches(dir, landed, "main"); err != nil || !ok {
 		t.Fatalf("after the fetch, the merge commit did not reach main: %v, %v", ok, err)
 	}
-	if err := FetchBranch(dir, "side"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "side"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := Reaches(dir, side, "main"); err != nil || ok {
 		t.Fatalf("a commit main does not reach read as reachable: %v, %v", ok, err)
 	}
-	if err := FetchBranch(dir, "no such branch"); err == nil {
+	if err := FetchBranch(context.Background(), dir, "no such branch"); err == nil {
 		t.Fatal("fetched a name that is no branch")
 	}
-	if err := FetchBranch(dir, "gone"); err == nil {
+	if err := FetchBranch(context.Background(), dir, "gone"); err == nil {
 		t.Fatal("a fetch of a branch origin does not hold succeeded")
 	}
 }
@@ -74,10 +112,10 @@ func TestReachesReadsTheFetchedTarget(t *testing.T) {
 // target origin holds.
 func TestReachesIgnoresWhatRewritesHistory(t *testing.T) {
 	dir, _, side := clone(t)
-	if err := FetchBranch(dir, "side"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "side"); err != nil {
 		t.Fatal(err)
 	}
-	if err := FetchBranch(dir, "main"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "main"); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "branch", "origin/main", side)
@@ -109,7 +147,7 @@ func TestDefaultBranchIsTheBranchOriginsHEADNames(t *testing.T) {
 	if got, err := DefaultBranch(dir); err != nil || got != "main" {
 		t.Fatalf("DefaultBranch = %q, %v, want main", got, err)
 	}
-	if err := FetchBranch(dir, "side"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "side"); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "remote", "set-head", "origin", "side")
@@ -132,7 +170,7 @@ func TestTipIsTheBranchAsTheCloneLastFetchedIt(t *testing.T) {
 		t.Fatalf("before the fetch, Tip = %q, %v, want the clone's %s", got, err, before)
 	}
 	for _, b := range []string{"main", "side"} {
-		if err := FetchBranch(dir, b); err != nil {
+		if err := FetchBranch(context.Background(), dir, b); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -151,7 +189,7 @@ func TestTipIsTheBranchAsTheCloneLastFetchedIt(t *testing.T) {
 
 func TestReachesReadsACommitTheCloneLacksAsUnreached(t *testing.T) {
 	dir, _, _ := clone(t)
-	if err := FetchBranch(dir, "main"); err != nil {
+	if err := FetchBranch(context.Background(), dir, "main"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := Reaches(dir, strings.Repeat("1", 40), "main"); err != nil || ok {

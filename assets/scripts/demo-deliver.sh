@@ -16,7 +16,7 @@
 # exists to prevent.
 #
 # A gh call inside a script is invisible to gh-origin-guard, so this resolves and
-# pins the origin itself — the way pr-open.sh and pr-sitting-comment.sh do — and
+# pins the origin itself — the way pr-sitting-comment.sh does — and
 # refuses a PR that does not live in our own rig origin.
 #
 # Usage:

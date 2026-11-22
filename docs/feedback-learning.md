@@ -1,17 +1,21 @@
 ---
 name: Feedback-Learning Loop
-description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads, how observations become operator-reviewed rule changes, the five carriers adopted rules land in, and the recurrence metric that says whether the loop works.
+description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads and agent memory notes are read beside them, how both become operator-reviewed rule changes, the five carriers adopted rules land in, and the recurrence metric that says whether the loop works.
 ---
 
 # Feedback-Learning Loop
 
 The learning system's purpose is **ceiling-raising**: capturing what the
 operator cares about and responds to, so agents present better options
-and escalations over time. It works through one path. Feedback is
-recorded as observation beads; a distiller judges what the observations
-add up to; every resulting behavior change lands as an operator-reviewed
-PR against this pack. Nothing changes agent behavior until that PR
-merges.
+and escalations over time. It has two intakes and one judge. Feedback to
+be evaluated is recorded as observation beads, and what should change the
+next agent's behavior is written as agent memory notes. A distiller judges
+what both add up to. Every resulting change to the pack lands as an
+operator-reviewed PR against this pack, a fix in code another rig owns is
+filed as that rig's work, and one in a project outside the city is recorded
+as an upstream finding for the operator. A memory note steers the agents
+that read it from the moment it is written, with only its writer behind it,
+and nothing else changes agent behavior until such a change merges.
 
 Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
 the learning system**. They are ordinary pack hygiene — a well-architected
@@ -22,9 +26,9 @@ graduated out of the learning system into tooling.
 ## Scope
 
 **Mandate.** The conventions of the feedback-learning loop — the
-observation contract, the capture channels, the promotion and retirement
-path, the carriers adopted rules land in, and how the loop's own success is
-measured.
+observation contract, the capture channels, the memory intake, the
+promotion and retirement path, the carriers adopted rules land in, and how
+the loop's own success is measured.
 
 **Boundaries.** The design rationale and decision record live in
 `specs/2026-08-learning-system/`. The judgment content of the promotion
@@ -140,30 +144,91 @@ Four producers file the same bead contract:
    provenance `pr:<owner/repo>#<n>:veto`) — the rubric's own misses feed
    the loop it powers.
 
+## The memory intake
+
+Claude Code keeps a directory of memory notes for each project. Its index,
+`MEMORY.md`, loads into every session that has memory, and a session reads a
+note when it needs one. The distiller's first step, read-memory, runs `gctk
+memory settle` in the pack's home rig and changes nothing elsewhere. `gctk
+memory` asks Claude Code where the sessions of each rig and of the city's root
+keep memory, so it copies none of Claude Code's location rules, and it files
+one finding through `patrol-finding.sh` for a place whose memory directory
+Claude Code does not name, where it reads and removes nothing.
+
+A note is due when the distiller has not judged it at its current text, or
+when the date the judge set for it has come. The text is the note's body:
+neither its use lines nor what Claude Code rewrites in its front matter when an
+agent saves it counts as a change, and neither does an edit to its front
+matter alone. Due notes join the pending observations, count toward the
+cadence gate, and are judged oldest first, at most `memory_notes_per_run` a
+run. The judge gives each due note one outcome by the rubric's memory section,
+whose tests are the operator's three questions as
+`specs/tk-zlot608.2/design.md` quotes them. It drops a note that holds nothing
+worth keeping, once what the note shows is carried to where it goes. It sets a
+note on the feedback pattern its lesson joins, or keeps it until a date it
+chooses. A note whose fix is in code another rig or project owns waits instead
+on the bead in that rig's store that carries the fix, or on the upstream
+finding that records the problem. A note it
+cannot substantiate either way stays, and a line in it asks its users to record
+the days they use it, one dated line a day, for the judge's next look. A
+decision that does not ask again takes that line out, and the use lines stay as
+the note's dated record.
+
+A note on a pattern leaves once the pattern closes and a fix it spawned has
+landed on its repository's default branch. When the pattern closes with no fix
+landed, such as a prompt-update the operator vetoed, the note comes due at
+once, as old as the day the pattern closed, and the judge reads why. No note
+leaves because of its age. `gctk memory` keeps, for each directory, the list of
+the notes the judge kept, with each one's hash and what it waits on, and the
+text of each note it removed, in the pack's state directory. It removes a note
+only while the note is unchanged since the judge read it, and takes out the
+lines of the index and of a collection note (`hub-*.md`) that link a note it
+removed. A note it removes, and the text each of its edits replaces, stay as
+files in the memory directory's hidden `.memory-intake` folder, since an agent
+that opened one before can still write to it.
+
+Where what an agent learns goes is guidance every Claude role that keeps
+memory carries in its prompt (`template-fragments/memory-notes.template.md`),
+a list of three places: its memory holds what should change the next agent's
+behavior, an observation holds a correction to how agents work, and a bead's
+notes hold the state of its open work.
+
 ## The promotion path
 
 The distiller (`mol-feedback-distiller`, judging by the
 `learning-distill` rubric skill) dedups pending observations, clusters
-them onto pattern beads, and decides which clusters have earned a rule.
+them and the due memory notes onto pattern beads, and decides which
+clusters have earned a rule.
 A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
 triages, the way a bug is, and nothing routes or assigns it. Every run leaves
 each pattern in one of three states: closed once resolved (its rule adopted,
-every follow-up it spawned closed, or dismissed as not a pattern), waiting on
-its follow-up through a `blocks` edge, or deferred with a date while it gathers
-evidence. A deferred pattern comes back to the distiller when its date passes,
-and a closed one reopens when its feedback recurs. `gc bd ready` lists a
-pattern only while it needs a decision, which the distiller makes on its next
-run.
+every follow-up it spawned closed, its fix recorded as an upstream finding, or
+dismissed as not a pattern), waiting on its follow-up through a `blocks` edge,
+or deferred with a date while it gathers evidence. A deferred pattern comes
+back to the distiller when its date passes, and a closed one reopens when its
+feedback recurs. `gc bd ready` lists a pattern only while it needs a decision,
+which the distiller makes on its next run.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
 work, so the distiller files it held with Gas City's `hold:mayor` label and
 routed to no pool, and it waits for the operator's placement sitting
 ([steering.md](steering.md)). Once the sitting places it under an epic or
 routes it on its own, a polecat builds it and the refinery opens the PR;
-**operator review of that PR is the gate**. An engineering bead from
-Gate 2 below waits for placement the same way. The distiller records and
-proposes — it never edits a prompt, fragment, or skill, and neither does
-any capturing agent.
+**operator review of that PR is the gate**.
+
+A lesson one moment needs, such as the work of one formula step, is not a
+rule for every turn. The distiller makes it a fix in the code that moment
+loads, such as a skill, a formula step, a script or a review's method, and
+files an engineering bead that states the failure, the moment, the file that
+owns the rule and what done looks like, leaving the words to whoever builds
+it. When a file already owns the rule, the fix makes that file reach the
+moment instead of copying the rule. An engineering bead, including one from
+Gate 2 below, waits for placement the same way. A fix in code another rig
+owns is filed as that rig's work, and one in a project outside the city is
+recorded as an upstream finding for the operator, which no pattern waits on.
+The rubric's Fixes in code section says how the distiller chooses where a fix
+goes. The distiller records and proposes — it never edits a prompt, fragment,
+skill or other code, and neither does any capturing agent.
 
 ### Three gates on promotion into a paid carrier
 
@@ -194,9 +259,10 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   verification gap, a race, a missing mechanical check) does not become a
   prompt bullet — a bullet an agent can forget fails silently, since the
   agent who forgets the behavior is the one who skips the bullet. It routes
-  instead to an **engineering work bead** (the promotion-time twin of the
-  retirement pass's *hardenable?* question). Only a concrete behavior keyed
-  to a concrete trigger promotes as prose.
+  instead to an **engineering work bead** for a mechanism at the moment the
+  agent fails (the promotion-time twin of the retirement pass's
+  *hardenable?* question). Only a concrete behavior keyed to a concrete
+  trigger promotes as prose.
 - **Lever fit (Gate 3).** A candidate that clears Gate 2 is a concrete
   behavior keyed to a trigger, but that does not yet make a static entry the
   right *lever* for it. A `convention` bullet or a `work-quality` entry
@@ -287,7 +353,9 @@ reviewer sees the moment it goes wrong.
 Preferred over `convention` whenever the failure is visible in a diff: one
 dimension reaches every agent's version of the mistake through the reviewer,
 where a bullet reaches only the role whose fragment renders it. An amendment
-is one dimension sharpened or added. Its anchor goes in the ledger beside the
+is one dimension sharpened or added, as a rule a reviewer of any repository
+would apply. An amendment replaces text where it can, so the method stays
+concise. Its anchor goes in the ledger beside the
 method, `skills/review-correctness/rubric-ledger.md`, not beside the
 dimension: a reviewer reads the whole method file, where an HTML comment is
 noise.

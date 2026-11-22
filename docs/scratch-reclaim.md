@@ -69,10 +69,11 @@ nothing. The script chmods before it deletes, and the measurement is what
 proves the deletion happened.
 
 Agents are told the rule rather than a set of habits. The `scratch-reclaim`
-prompt fragment states that scratch does not outlive an inactive session, so
-durable work goes in the repo. It carries one habit beyond that, because the
-reaper cannot cover it: a single turn can exhaust the quota between passes, so
-build artifacts and whole-store bead dumps stay out of scratch.
+prompt fragment states that a scratchpad belongs to one session and does not
+outlive it, and it names where a file that must outlive the session goes
+instead. It also tells agents to keep build artifacts and whole-store bead
+dumps out of scratch, because the reaper cannot cover them: a single turn can
+exhaust the quota between passes.
 
 ## Ended sessions
 
@@ -167,8 +168,12 @@ in the total.
 ## What it does not touch
 
 Scope is the harness scratch root. Other `/tmp` tenants are reclaimed
-elsewhere: build and test scratch left by killed or crashed runs is
-`build-scratch-reap.sh`'s, the workspaces of ended reviews are
-`review-workspace.sh`'s, and a horizon on `/tmp` as a whole is the host's
+elsewhere. Build and test scratch that killed or crashed runs left under a name
+recording their pid is `build-scratch-reap.sh`'s. What they left under a
+templated name (`go-build*`, `go-link*`, `gctk-*`) records no owner, so no pass
+of the pack removes it, and it waits for the host's own temp cleanup. On macOS
+that is a reboot, or `dirhelper`'s daily pass, which removes files older than
+three days from the per-user temp directory. The workspaces of ended reviews
+are `review-workspace.sh`'s, and a horizon on `/tmp` as a whole is the host's
 policy, not the pack's. Bead worktrees live under `.gc/worktrees/`, not under
 `/tmp`, and [worktree-reclaim.md](worktree-reclaim.md) says what removes them.

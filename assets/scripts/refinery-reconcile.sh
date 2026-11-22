@@ -3,32 +3,17 @@
 # Driven by orders/refinery-reconcile.toml (cooldown 60s, scope=rig): the
 # controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
 # GC_PACK_STATE_DIR, gh token).
-# Arms, in load-bearing order: pr-facts --posture-only (the posture merge reads
-# must be written in the same pass; a non-zero rc HOLDS merge.sh for the pass),
-# merge (BEADS_ACTOR projected to the refinery so its closes and records are
-# attributed to it), pr-open, pr-facts --route-comments-only (route operator
-# feedback ahead of the slow arms, so a pass killed before the full arm has
-# still picked it up; BEADS_ACTOR projected), pre-open-rebase (the conflict
-# observer for anchors that have no PR yet), gate-ensure, pr-facts (same
-# projection), review-sweep (cleanup over closed anchors; no projection, no
-# merge authority), scaffolding-sweep (retires validation/finding/rework on a
-# disposed anchor; BEADS_ACTOR projected: it closes a finding it carries forward
-# through bead-rehome; no merge authority).
+# Arms, in order: pr-facts --posture-only (BEADS_ACTOR projected to the
+# refinery so its records are attributed to it), pr-facts
+# --route-comments-only (route operator feedback ahead of the slow arms, so a
+# pass killed before the full arm has still picked it up; BEADS_ACTOR
+# projected), gate-ensure, pr-facts (same projection), review-sweep (cleanup
+# over closed anchors; no projection), scaffolding-sweep (retires
+# validation/finding/rework on a disposed anchor; BEADS_ACTOR projected: it
+# closes a finding it carries forward through bead-rehome).
 # The arms that walk a set growing with the queue share the pass budget (see
-# PASS_BUDGET_SECS and PACED_ARMS below): merge, pr-open, pr-feedback,
-# pre-open-rebase, gate-ensure and pr-facts.
-# Landing is the main way an anchor leaves the gating set, and pr-open is what
-# puts an anchor in front of the operator for the approval merge waits on. The
-# arms that iterate that set grow in cost with it, so one placed ahead of these
-# two can spend the pass budget before they run, and a set that stops draining
-# keeps growing, which slows that arm further. So they run first: ahead of
-# merge sits only the arm whose output merge must have from this pass, the
-# posture, and ahead of pr-open sits only merge. Neither needs anything
-# gate-ensure writes in the same pass. Both hold an anchor with no check_set on
-# their own read. Of gate-ensure's review-graph writes, a dispatch goes only to
-# a lane that is already short of green, and closing a must-fix finding whose
-# fix landed can only release a hold, so reading the graph before gate-ensure
-# runs can delay an open or a merge by one pass but never allow one early.
+# PASS_BUDGET_SECS and PACED_ARMS below): pr-feedback, gate-ensure and
+# pr-facts. A PR lands through the landing order, never through this cadence.
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -40,21 +25,13 @@ set -u
 
 PROG="refinery-reconcile"
 
-# Rig identity comes from the order runner; guessing would run one rig's merge
-# writer against another rig's store.
+# Rig identity comes from the order runner; guessing would run one rig's arms
+# against another rig's store.
 RIG="${GC_RIG:-}"
 if [ -z "$RIG" ]; then
   echo "$PROG: GC_RIG is unset — this runs as a scope=\"rig\" order and has no rig to reconcile" >&2
   exit 2
 fi
-RIG_ROOT="${GC_RIG_ROOT:-$PWD}"
-# The lifecycle writer the arms close landings through reads the rig checkout
-# from GC_RIG_ROOT, so a pass run without it hands the arms this root.
-export GC_RIG_ROOT="$RIG_ROOT"
-# The head a dropped-tail finding names: the base its anchors would have landed
-# on, captured once. A checkout that is not a git tree reads "unknown".
-RIG_HEAD="$(git -C "$RIG_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-[ -n "$RIG_HEAD" ] || RIG_HEAD=unknown
 # Siblings resolve from $0: the pack lives under the owning rig, so an importer
 # rig's own root has no assets/scripts at all.
 SCRIPTS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -96,8 +73,8 @@ CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
 # left when the arm starts, and never less than ARM_FLOOR_SECS, so an arm that
 # finishes early leaves its time to the arms behind it, and every arm runs on
 # every pass. The budget sits below the order's timeout, so a pass ends and
-# writes END instead of being killed. Two walks are never paced: the posture
-# record, which merge needs whole, and the PRs merge can land this pass.
+# writes END instead of being killed. The posture record is never paced: it
+# reads every open PR in one batched call.
 PASS_BUDGET_SECS="${REFINERY_RECONCILE_PASS_BUDGET_SECS:-420}"
 case "$PASS_BUDGET_SECS" in ''|*[!0-9]*) PASS_BUDGET_SECS=420 ;; esac
 PASS_BUDGET_SECS=$((10#$PASS_BUDGET_SECS))
@@ -149,22 +126,9 @@ PASS_T0="$(date -u +%s)"
 FAILED=""
 NOTED=""
 
-# Per-pass merge-decision marker: the durable record of whether a pass reached
-# and completed its merge decision. A pass the controller kills at its budget
-# runs no at-exit code, but the phase it wrote here before the kill survives, and
-# the NEXT pass reads it (merge-tail-report.sh below) to see a dropped merge tail
-# — a pass that stopped before deciding its approved-clean candidates and left
-# them unmerged with no reason on the board. Written atomically so a reader never
-# sees a torn line; single-flight means only the live pass writes it.
-MERGE_MARK="$STATE_DIR/merge-decision"
-mark_merge() { # <phase>
-  printf '%s\t%s\t%s\n' "$1" "$TICK" "$RIG_HEAD" > "$MERGE_MARK.tmp" 2>/dev/null \
-    && mv -f "$MERGE_MARK.tmp" "$MERGE_MARK" 2>/dev/null || true
-}
-
-# Two merge.sh writers against one rig's anchors is the failure this cadence
-# must never produce, and the controller's open-tracking gate does not prevent
-# it: the watchdog closes tracking beads at 2m, well inside the order's timeout,
+# Two passes writing one rig's anchors at once is the failure this cadence must
+# never produce, and the controller's open-tracking gate does not prevent it:
+# the watchdog closes tracking beads at 2m, well inside the order's timeout,
 # and an un-gated tracking bead is a second dispatch. bd-lib.sh's pass lock
 # depends on no bead surviving. The driver holds it, and each arm runs through
 # pass_child, from a subshell that holds it until the arm exits, so the lock is
@@ -175,7 +139,7 @@ mark_merge() { # <phase>
 # A holder older than this is not a slow pass, because the order's timeout stops
 # the pass's whole process group well before it: a driver run by hand, or an
 # arm still running after its driver was killed by itself, holds the lock.
-# Merges have stopped, so it is reported, not skipped over.
+# The arms have stopped, so it is reported, not skipped over.
 LOCK_STALL_SECS="${REFINERY_RECONCILE_LOCK_STALL_SECS:-900}"
 case "$LOCK_STALL_SECS" in ''|*[!0-9]*) LOCK_STALL_SECS=900 ;; esac
 LOCK_STALL_SECS=$((10#$LOCK_STALL_SECS))
@@ -191,13 +155,13 @@ case "$lock_rc" in
   2)
     [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s STALLED: pass lock held past %ss (%s)\n' \
       "$TICK" "$RIG" "$LOCK_STALL_SECS" "$LOCK_NOTE" >> "$LOG_SINK"
-    echo "${PROG}[$RIG]: pass lock held past ${LOCK_STALL_SECS}s ($LOCK_NOTE) — the cadence is wedged and nothing is landing"
+    echo "${PROG}[$RIG]: pass lock held past ${LOCK_STALL_SECS}s ($LOCK_NOTE) — the cadence is wedged and no arm is running"
     echo "${PROG}[$RIG]: pass log: $LOG"
     exit 1 ;;
   *)
     # The lock is the whole of single-flight, so an unavailable one leaves nothing
-    # serialising the arms. Running them anyway is the second merge.sh writer this
-    # driver exists to prevent.
+    # serialising the arms. Running them anyway is the second writer this driver
+    # exists to prevent.
     [ -n "$LOG_SINK" ] && printf -- '--- %s rig=%s UNGUARDED: %s; no arm ran\n' \
       "$TICK" "$RIG" "$LOCK_NOTE" >> "$LOG_SINK"
     echo "${PROG}[$RIG]: single-flight UNGUARDED ($LOCK_NOTE) — refusing to run any arm without the pass lock"
@@ -211,41 +175,19 @@ esac
 # header with no END under it is a pass that was killed.
 [ -n "$LOG_SINK" ] && printf '=== %s rig=%s refinery=%s\n' "$TICK" "$RIG" "$AGENT" >> "$LOG_SINK"
 
-# Before this pass overwrites the marker, judge the PRIOR pass by it. We hold the
-# pass lock, so the pass that wrote the marker is already dead: a marker that never
-# reached `decided`/`held` while gating anchors are still open is a dropped merge
-# tail, and this files the board-visible finding naming it. BEADS_ACTOR projected
-# so the finding and the reaction it dispatches are attributed to the refinery,
-# like every other bead-writing arm. The report never fails the pass — it only
-# records — so its rc is discarded.
-if [ -x "$SCRIPTS_DIR/merge-tail-report.sh" ]; then
-  ( export BEADS_ACTOR="$AGENT"
-    pass_child "$SCRIPTS_DIR/merge-tail-report.sh" --marker "$MERGE_MARK" --rig "$RIG" ) \
-    >> "${LOG_SINK:-/dev/null}" 2>&1 || true
-fi
-mark_merge started
-
 # Per-pass bd_list cache (assets/scripts/bd-lib.sh). The arms re-issue the same
-# `gc bd list` many times a pass — the gating anchor, and the
-# pull_request/pre_open enumeration nearly every arm re-reads — and each call is
-# seconds of server wait. GC_RECONCILE_BD_CACHE points bd_list at a directory it
-# serves a repeat from; run_pass clears it before every arm so no arm reads
-# another's rows, and it is removed at END. A killed pass leaves it behind, so
-# setup is rm-then-create. A cache dir that cannot be made leaves the pass
-# uncached (the cache is an optimization, never a correctness input).
+# `gc bd list` many times a pass, and each call is seconds of server wait.
+# GC_RECONCILE_BD_CACHE points bd_list at a directory it serves a repeat from;
+# run_pass clears it before every arm so no arm reads another's rows, and it is
+# removed at END. A killed pass leaves it behind, so setup is rm-then-create. A
+# cache dir that cannot be made leaves the pass uncached (the cache is an
+# optimization, never a correctness input).
 CACHE_DIR="$STATE_DIR/cache"
 rm -rf "$CACHE_DIR" 2>/dev/null || true
 if mkdir -p "$CACHE_DIR" 2>/dev/null; then
   export GC_RECONCILE_BD_CACHE="$CACHE_DIR"
 fi
 
-# >>> posture-gates-merge
-# Extracted and EXECUTED by refinery-reconcile.test.sh against stub arms: a
-# posture arm that could not make every posture current must HOLD merge.sh in
-# the same pass. Keep it executable with only a prologue supplying SCRIPTS_DIR,
-# LOG_SINK, NOTED, FAILED, AGENT, STATE_DIR, PASS_T0, PASS_BUDGET_SECS,
-# ARM_FLOOR_SECS, the mark_merge helper (the merge-decision marker writer) and
-# bd-lib.sh.
 note() { NOTED="${NOTED}$*"$'\n'; }
 log()  { [ -n "$LOG_SINK" ] && printf '%s\n' "$*" >> "$LOG_SINK"; return 0; }
 run_pass() { # <label> <script> [args...]
@@ -279,7 +221,7 @@ run_pass() { # <label> <script> [args...]
 # among it and the arms still on this list, in PACE_ARGS, and takes it off the
 # list. pace_skip takes off an arm this pass will not run, so the arms behind it
 # split its share.
-PACED_ARMS=(merge pr-open pr-feedback pre-open-rebase gate-ensure pr-facts)
+PACED_ARMS=(pr-feedback gate-ensure pr-facts)
 pace_skip() { # <arm>
   local a left=()
   for a in ${PACED_ARMS[@]+"${PACED_ARMS[@]}"}; do
@@ -301,59 +243,14 @@ pace_args() { # <arm>
   return 0
 }
 
-# (1) posture: merge.sh answers "is a human waiting on this?" off the bead and
-# never asks GitHub, so the posture it reads has to be written in THIS pass. It
-# runs immediately before merge, so the window in which a newly arrived comment
-# goes unseen is only as long as these two arms make it. Its rc is the same
-# guarantee read the other way: an arm that could not record a posture leaves
-# merge.sh validating one from an earlier tick, so it holds merge for the pass.
-# It reads every open PR in one batched call and keeps, in pr-posture.seen,
-# what each posture was derived from, so a PR nothing has touched since costs
-# no per-PR read and the arm's cost follows the PRs that moved.
-MERGE_HELD=0
-posture_rc=0
+# (1) posture: record each open PR's posture, which the PR-finishing rank and
+# the board read. It reads every open PR in one batched call and keeps, in
+# pr-posture.seen, what each posture was derived from, so a PR nothing has
+# touched since costs no per-PR read and the arm's cost follows the PRs that
+# moved.
 ( export BEADS_ACTOR="$AGENT"
-  run_pass "(1) pr-posture" pr-facts.sh --posture-only --seen "$STATE_DIR/pr-posture.seen" ) || posture_rc=$?
-if [ "$posture_rc" != 0 ]; then
-  MERGE_HELD=1
-  FAILED="${FAILED}pr-posture rc=$posture_rc; "
-  note "pr-posture rc=$posture_rc — merge.sh HELD this pass"
-fi
-
-# (2) merge: runs the moment its one same-pass interlock, the posture record, is
-# done. It visits every PR that can land this pass first, and its share of the
-# pass budget paces only the rest, so `decided` below means every landable PR
-# was decided.
-# BEADS_ACTOR projected in a subshell so its closes and records are attributed
-# to the refinery in the events log. The anchors it closes are detached in a
-# gating state and carry no assignee (mol-refinery-patrol clears it), and the
-# close is a bd update --status=closed, not the ownership-checked bd close, so
-# the projection is attribution, not permission.
-if [ "$MERGE_HELD" = 1 ]; then
-  log "-- (2) merge: HELD this pass (posture not current)"
-  # A hold is a recorded decision, not a dropped tail.
-  mark_merge held
-  # The held arm spends none of the pass budget, so the paced arms behind it
-  # divide its share among themselves.
-  pace_skip merge
-else
-  # `reached` before merge, `decided` after: a pass killed between them leaves
-  # `reached`, which the next pass reads as a merge arm that never finished.
-  mark_merge reached
-  pace_args merge
-  ( export BEADS_ACTOR="$AGENT"
-    run_pass "(2) merge" merge.sh "${PACE_ARGS[@]}" ) || FAILED="${FAILED}merge rc=$?; "
-  mark_merge decided
-fi
-# <<< posture-gates-merge
-
-# (3) pr-open: pre_open_gate -> pull_request, right after merge. The city
-# approves nothing at open, so a PR opened this pass is never landable on the
-# same tick, and merge reads none of this arm's output, so running after merge
-# costs no landing. Running ahead of every other arm means no slow one can keep
-# a green branch from reaching the operator.
-pace_args pr-open
-run_pass "(3) pr-open" pr-open.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-open rc=$?; "
+  run_pass "(1) pr-posture" pr-facts.sh --posture-only --seen "$STATE_DIR/pr-posture.seen" ) \
+  || FAILED="${FAILED}pr-posture rc=$?; "
 
 # (4) pr-feedback: route operator PR feedback ahead of the slow arms. The full
 # pr-facts arm (arm 7) re-runs the same routing idempotently, but it sits
@@ -362,23 +259,11 @@ run_pass "(3) pr-open" pr-open.sh "${PACE_ARGS[@]}" || FAILED="${FAILED}pr-open 
 # every non-feedback arm); arm 7 still owns the write-back and the
 # external-fact reconciliation.
 # BEADS_ACTOR is projected so the children it dispatches are attributed to the
-# refinery, like the full arm. Its rc is reported and holds nothing: merge has
-# already run, and routing is not the posture interlock.
+# refinery, like the full arm. Its rc is reported and holds nothing.
 pace_args pr-feedback
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(4) pr-feedback" pr-facts.sh --route-comments-only --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
   || FAILED="${FAILED}pr-feedback rc=$?; "
-
-# (5) pre-open-rebase: the conflict observer for the pre_open_gate anchors
-# pr-open left where they were. An anchor pr-open flipped this pass carries a
-# PR, where `mergeable` answers the same question and pr-facts' CONFLICTING arm
-# owns the dispatch; both arms probe the same children on the branch, so
-# whichever sees a conflict first files and the other stands down. Its failure
-# is not a merge hold — an anchor it could not observe is left exactly as this
-# cadence found it.
-pace_args pre-open-rebase
-run_pass "(5) pre-open-rebase" pre-open-rebase.sh \
-  --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" || FAILED="${FAILED}pre-open-rebase rc=$?; "
 
 # (6) gate-ensure: review dispatch. It visits every gating anchor, so it runs
 # under its share of the pass budget: past the deadline it starts no new anchor,
@@ -386,8 +271,7 @@ run_pass "(5) pre-open-rebase" pre-open-rebase.sh \
 # after it. A slow gate-ensure therefore delays review dispatch for the anchors
 # it has not reached, and nothing else. Its rc=3 (an anchor whose check_set stamp did
 # not persist, or an enumeration it could not read) is reported and fails
-# nothing: merge.sh and pr-open.sh each hold an anchor with no check_set on
-# their own read.
+# nothing.
 GATE_UNSAFE_RC=3
 pace_args gate-ensure
 gate_rc=0
@@ -396,7 +280,7 @@ run_pass "(6) gate-ensure" gate-ensure.sh \
   --fix-pool "$FIX_POOL" --validate-pool "$VALIDATE_POOL" "${PACE_ARGS[@]}" \
   ${GATE_REVIEW_FORMULA_ARGS[@]+"${GATE_REVIEW_FORMULA_ARGS[@]}"} || gate_rc=$?
 if [ "$gate_rc" = "$GATE_UNSAFE_RC" ]; then
-  note "gate-ensure UNSAFE (rc=$gate_rc) — an anchor has no check_set; merge.sh and pr-open.sh hold it on their own read"
+  note "gate-ensure UNSAFE (rc=$gate_rc) — an anchor has no check_set, or the gating enumeration did not read"
 elif [ "$gate_rc" != 0 ]; then
   FAILED="${FAILED}gate-ensure rc=$gate_rc; "
 fi
@@ -409,8 +293,8 @@ pace_args pr-facts
   || FAILED="${FAILED}pr-facts rc=$?; "
 
 # (8) review-sweep: close reviews whose anchor and branch are both gone. Late,
-# because it reads only closed anchors — nothing earlier in the pass can see
-# them, and the residue this pass's merges create drains on the same tick.
+# because it reads only closed anchors, so a close an earlier arm made this pass
+# drains on the same tick.
 run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=$?; "
 
 # (9) scaffolding-sweep: retire the machine review scaffolding

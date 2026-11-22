@@ -17,14 +17,15 @@
 #     other work; what holds it, or its runs, not reading exits 1;
 #   - a rework child handed back is taken before its anchor, then the highest
 #     priority, then the oldest;
-#   - a rework child the requeue filed and never sent on, which nothing holds,
-#     neither holds its bead nor works its branch, so the bead is taken and the
-#     child named; one in flight, assigned, armed, labeled with a hold, held,
-#     or filed for a review still does, and so does any other wait on the bead;
 #   - an ask on the bead's PR is neither a wait on it nor a writer of its
 #     branch, so the bead is taken; a rework child or another wait still holds
 #     it;
-#   - a bead the old path's cadence drives is left, and named;
+#   - a conversation on the bead's PR, waiting in the operator's queue, held by
+#     a sitting or stayed in, is neither a wait on it nor a writer of its
+#     branch, so the bead is taken; another wait still holds it, a task that
+#     tracks no bead or whose alias names another bead is no conversation and
+#     holds it, the beads that hold it not reading exits 1, and a bead nothing
+#     holds reads no other bead;
 #   - no work exits 3, and a read that does not answer exits 1.
 set -uo pipefail
 
@@ -152,46 +153,6 @@ jq 'map(select(.id != "urgent"))' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE
 run
 eq "$OUT" "early" "within a priority, the oldest goes first"
 
-echo "# a rework child filed and never sent on is no wait and no writer"
-unsent_kid() { put "$(jq -nc --argjson m "${1:-{\}}" --arg a "${2:-}" --argjson l "${3:-[]}" '{id: "c", title: "Rework", status: "open", assignee: $a, issue_type: "task", notes: "", labels: $l,
-  metadata: ({task_kind: "rework", anchor_bead: "p", branch: "polecat/p"} + $m)}')"; }
-fresh
-work p polecat/p '{"merge_result":"pull_request_head_changed"}'
-unsent_kid
-echo "p c" > "$STUB_HOLDS"
-run
-eq "$RC $OUT" "0 p" "the bead its unsent child holds, on the child's branch, is taken"
-has "$ERR" "p's rework child c was filed and never sent on" "…naming the child its prep sends on"
-fresh
-work p polecat/p '{"merge_result":"pull_request_head_changed"}'
-unsent_kid
-run
-eq "$RC $OUT" "0 p" "…and so is one whose unsent child has no blocks edge"
-for v in '{"gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}|' '{}|rig-a/gc-toolkit.polecat-1' '{"gc.dispatch_when_ready":"rig-a/gc-toolkit.polecat"}|' \
-         '{"source_review_bead":"rv-1"}|' '{}||["hold:mayor"]'; do
-  IFS='|' read -r m a l <<< "$v"
-  fresh
-  work p polecat/p '{"merge_result":"pull_request_head_changed"}'
-  unsent_kid "$m" "$a" "${l:-[]}"
-  echo "p c" > "$STUB_HOLDS"
-  run
-  eq "$RC" 3 "a child that is not unsent still holds its bead ($v)"
-  has "$ERR" "p waits on c" "…and is named ($v)"
-done
-fresh
-work p polecat/p '{"merge_result":"pull_request_head_changed"}'
-unsent_kid
-printf 'p c\nc gate-1\n' > "$STUB_HOLDS"
-run
-eq "$RC" 3 "an unsent child something holds still holds its bead"
-fresh
-work p polecat/p '{"merge_result":"pull_request_head_changed"}'
-unsent_kid
-printf 'p c\np gate-2\n' > "$STUB_HOLDS"
-run
-eq "$RC" 3 "a bead another wait holds is left beside its unsent child"
-has "$ERR" "p waits on gate-2" "…and names that wait"
-
 echo "# an ask on the bead's PR is no wait and no writer"
 ask() { put "$(jq -nc --arg id "$1" --argjson m "${2:-{\}}" '{id: $id, title: "Review ask: x", status: "open", assignee: "", issue_type: "task", notes: "",
   metadata: ({branch: "polecat/p"} + $m)}')"; }
@@ -221,14 +182,52 @@ echo "p k" > "$STUB_HOLDS"
 run
 eq "$RC" 3 "a bead on the branch whose workflow Gas City's sling started is no ask, and still holds the bead"
 
-echo "# a bead the old path's cadence drives is left and named"
+echo "# a conversation on the bead's PR is no wait and no writer"
+# conv <id> <status> <assignee>: a task that tracks p, as a conversation about
+# p's PR does, which p's blocks edge onto it holds the merge of.
+conv() { put "$(jq -nc --arg id "$1" --arg s "$2" --arg a "$3" '{id: $id, title: "Converse about the PR", status: $s, assignee: $a,
+  issue_type: "task", notes: "", metadata: {}, dependencies: [{issue_id: $id, depends_on_id: "p", type: "tracks"}]}')"; }
+for c in "open human" "in_progress rig-a/gc-toolkit.tk-c" "open rig-a/gc-toolkit.c-tk-c"; do
+  fresh
+  work p polecat/p '{"merge_result":"pull_request_head_changed","existing_pr":"https://github.com/zook/rig/pull/52"}'
+  # shellcheck disable=SC2086  # the conversation's status and assignee
+  conv tk-c $c
+  echo "p tk-c" > "$STUB_HOLDS"
+  run
+  eq "$RC $OUT" "0 p" "the bead a conversation holds ($c) is taken"
+done
 fresh
-work cad polecat/c '{"merge_result":"pull_request"}'
-work gate polecat/g '{"merge_result":"pre_open_gate"}'
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-c open human
+put '{"id":"gate-4","title":"a gate","status":"open","assignee":"","issue_type":"gate","notes":"","metadata":{}}'
+printf 'p tk-c\np gate-4\n' > "$STUB_HOLDS"
 run
-eq "$RC" 3 "neither is taken (exit 3)"
-has "$ERR" "cad(pull_request)" "the pull_request bead is named"
-has "$ERR" "gate(pre_open_gate)" "the pre_open_gate bead is named"
+eq "$RC" 3 "a bead another wait holds is left beside its conversation"
+has "$ERR" "p waits on gate-4" "…and names that wait"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+put '{"id":"owed","title":"Do a thing","status":"open","assignee":"human","issue_type":"task","notes":"","metadata":{}}'
+echo "p owed" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "work a person owes, which tracks no bead, is no conversation and still holds the bead"
+has "$ERR" "p waits on owed" "…and names it"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-x open rig-a/gc-toolkit.tk-c
+echo "p tk-x" > "$STUB_HOLDS"
+run
+eq "$RC" 3 "a task assigned to an alias that names another bead is no conversation and still holds the bead"
+fresh
+work p polecat/p '{"merge_result":"pull_request_head_changed"}'
+conv tk-c open human
+echo "p tk-c" > "$STUB_HOLDS"
+STUB_GC_ID_FAIL=1 run
+eq "$RC" 1 "what holds the bead not reading by id exits 1"
+eq "$OUT" "" "…and names no bead"
+fresh
+work a polecat/a
+run
+hasnt "$(logged gc)" "--id" "with nothing holding the bead, no bead is read by id"
 
 echo "# no work, and reads that do not answer"
 fresh

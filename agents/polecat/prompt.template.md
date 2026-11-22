@@ -16,4 +16,6 @@ worktree, pushed branch, refinery handoff), a review bead carries
 
 {{ template "file-feedback-observations" . }}
 
+{{ template "memory-notes" . }}
+
 {{ template "learned-conventions-polecat" . }}

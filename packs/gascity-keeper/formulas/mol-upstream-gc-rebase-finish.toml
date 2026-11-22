@@ -1,0 +1,49 @@
+description = """
+Finish a gascity rebase once the operator has answered the gate that asks them
+to land it. No agent force-pushes the fork's main: `mol-upstream-gc-rebase`
+ends by filing that gate on the rebase bead, assigned to the operator, and
+arming the bead to run this formula once the gate clears.
+
+Its one step runs the landing check, `rebase-landing.sh finish`, which reads
+what the operator's push did and records the outcome on the bead. A bead whose
+push landed closes with Gas City's work record of the landing
+(`gc.work_outcome=shipped`), and the rig checkout follows when that discards
+nothing. A bead whose push has not run is asked about again.
+A bead whose main moved after the rebase goes back to its keeper with
+`aborted_at=race-loss`. The script's header holds the rules."""
+formula = "mol-upstream-gc-rebase-finish"
+version = 1
+
+[requires]
+formula_compiler = ">=2.0.0"
+
+[vars.binding_prefix]
+description = "The binding the city imports gc-toolkit under, with its trailing dot. This sub-pack's formulas run on gc-toolkit's polecats, so gc sling pours them with that binding, and a step drops the dot to call the pack's scripts as gc <binding> scripts-dir prints them."
+default = "gc-toolkit."
+
+[[steps]]
+id = "finish"
+title = "Check the operator's push, then close the rebase bead, ask again, or hand it to the keeper"
+description = """
+Run the landing check on the rebase bead this run's input convoy tracks:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/../../packs/gascity-keeper/assets/scripts/rebase-landing.sh" finish --convoy {{convoy_id}}`.
+
+Exit 0: the outcome is on the bead. It closed as landed, it waits on a new
+landing gate, or it is assigned to its keeper. Close this step with
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-upstream-gc-rebase-finish.finish`,
+then drain:
+```bash
+gc runtime drain-ack
+```
+
+Any other exit: a read, the fetch or a write did not land, and the call names
+which. Tell the witness, with the line it printed, then drain without closing
+this step, so the next worker runs the check again. A re-run converges.
+```bash
+gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: the rebase landing check failed" -m "<the line it printed>"
+```
+
+**Exit criteria:** the rebase bead is closed as landed, waits on a new landing
+gate, or is assigned to its keeper with `aborted_at=race-loss`; this step is
+closed."""
+metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }

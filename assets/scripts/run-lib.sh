@@ -54,9 +54,6 @@
 # sibling from a tree left behind, and refinery-find-work.sh for a bead that
 # waits on the one it would take, to tell a writer from a bead that only waits.
 # gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
-# gc-helm.sh ends the live runs beneath an anchor it releases, its park
-# survey applies run_rows to the listing it reads to find a bead's workflows,
-# and its place takes a live run that works a bead as a dispatch already made.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
@@ -71,21 +68,20 @@
 # whether its work has landed.
 # doctor/check-po-queue-only takes the map of each store that holds a bead in
 # the po's queue, to find a held bead a live run already works.
-# tools/gc-proactive.sh drops the beads the map's live runs work from a scan,
-# and refuses a first reaction to a bead a live run works.
 # blocker-holder.sh takes the runs that work each live blocker of an anchor
 # that no route or claim marks, to tell one a live run works from one nothing
 # does.
 # store-only-exit.sh takes the run whose root its session's claimed step
 # names, to confirm it is live and works the bead over the step's --convoy
 # before that root holds the validating closer it arms until the run ends.
+# bead-context.sh takes the map of each store that holds a bead its walk would
+# otherwise read unrouted, so a bead a live run works reads advancing.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
-# of the rule in another language must agree with, as the Go copies in
-# services/helm/internal/source/facts.go and services/gctk/waits/run.go do in
-# their fixture tests. The suite fails when a reader stops sourcing this file,
-# when a file defines the rule's defs itself, and when a file outside it reads
-# the key a root names its convoy in.
+# of the rule in another language must agree with, as the Go copy in
+# services/gctk/waits/run.go does in its fixture test. The suite fails when a
+# reader stops sourcing this file, when a file defines the rule's defs itself,
+# and when a file outside it reads the key a root names its convoy in.
 #
 # A caller sources it beside itself, through a variable its suite can point at
 # a stub of the verbs:

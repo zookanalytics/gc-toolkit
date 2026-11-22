@@ -142,7 +142,7 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-review" "posture commented, no rework
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "working" "a draft the city opened, not yet readied => working"
 
-# needs-review — once pr-open.sh records draft_readied, the draft is up for review.
+# needs-review — once draft_readied is recorded, the draft is up for review.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_result":"pull_request","opened_as_draft":"abc123","draft_readied":"abc123"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a readied draft with nothing in flight => needs-review"
 
@@ -539,6 +539,21 @@ resetlog
 "$SUT" clear --pr 63 --repo "$REPO" >/dev/null 2>&1
 eq "$?" "2" "clear exits 2 when the PR's labels cannot be read"
 hasnt "$(ghlog)" "pr edit" "…and writes nothing"
+
+# gctk's label adapter reads exit 0 as a write that landed, so a writer that
+# cannot run for want of gh or jq exits 1. The PATH holds only what the script
+# runs before those checks, and then the stub gh.
+NOTOOLS="$TMP/no-tools"; mkdir -p "$NOTOOLS"
+ln -s "$(command -v dirname)" "$NOTOOLS/dirname"
+pv 66 '[{"name":"status: working"}]'
+resetlog
+PATH="$NOTOOLS" "$BASH" "$SUT" clear --pr 66 --repo "$REPO" >/dev/null 2>&1
+eq "$?" "1" "clear exits 1 when gh is missing"
+ln -s "$BIN/gh" "$NOTOOLS/gh"
+PATH="$NOTOOLS" "$BASH" "$SUT" clear --pr 66 --repo "$REPO" >/dev/null 2>&1
+eq "$?" "1" "clear exits 1 when jq is missing"
+hasnt "$(ghlog)" "pr edit" "…and writes nothing"
+eq "$(pv_labels 66)" "status: working" "…leaving the PR's labels as they were"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

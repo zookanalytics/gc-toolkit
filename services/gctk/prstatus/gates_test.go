@@ -37,6 +37,20 @@ func (g *graph) read(ids []string) (map[string][]Blocker, error) {
 	return out, nil
 }
 
+// holdingGates is [Holding]'s gates, root by root, with its bound and its
+// errors, the part of the walk these tests read.
+func holdingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
+	holds, err := Holding(roots, read)
+	if holds == nil {
+		return nil, err
+	}
+	gates := make(map[string][]Blocker, len(holds))
+	for root, h := range holds {
+		gates[root] = h.Gates
+	}
+	return gates, err
+}
+
 func gateIDs(gates []Blocker) []string {
 	out := []string{}
 	for _, g := range gates {
@@ -81,7 +95,7 @@ func TestHoldingGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &graph{edges: tc.edges}
-			got, err := HoldingGates([]string{"a"}, g.read)
+			got, err := holdingGates([]string{"a"}, g.read)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +109,7 @@ func TestHoldingGates(t *testing.T) {
 // The gate comes back with the fields a caller names it by.
 func TestHoldingGatesKeepTheTitle(t *testing.T) {
 	g := &graph{edges: map[string][]Blocker{"a": {task("rw")}, "rw": {gate("g")}}}
-	got, err := HoldingGates([]string{"a"}, g.read)
+	got, err := holdingGates([]string{"a"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +127,7 @@ func TestHoldingGatesOverManyRoots(t *testing.T) {
 		"c":  {task("other")},
 		"rw": {gate("shared")},
 	}}
-	got, err := HoldingGates([]string{"a", "b", "c", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b", "c", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +157,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 	t.Run("a read that fails answers nothing", func(t *testing.T) {
 		boom := errors.New("store down")
 		calls := 0
-		got, err := HoldingGates([]string{"a"}, func(ids []string) (map[string][]Blocker, error) {
+		got, err := holdingGates([]string{"a"}, func(ids []string) (map[string][]Blocker, error) {
 			calls++
 			if calls == 2 {
 				return nil, boom
@@ -160,7 +174,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 		for i := 0; i <= walkDepth; i++ {
 			g.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
-		got, err := HoldingGates([]string{"n0"}, g.read)
+		got, err := holdingGates([]string{"n0"}, g.read)
 		if _, answered := got["n0"]; answered || !errors.Is(err, ErrWalkBound) {
 			t.Errorf("(%v, %v), want no answer for n0 and ErrWalkBound", got, err)
 		}
@@ -175,7 +189,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			g.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
 		g.edges[fmt.Sprintf("n%d", walkDepth-1)] = nil
-		if _, err := HoldingGates([]string{"n0"}, g.read); err != nil {
+		if _, err := holdingGates([]string{"n0"}, g.read); err != nil {
 			t.Errorf("a walk of %d levels: %v", walkDepth, err)
 		}
 	})
@@ -186,7 +200,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			wide = append(wide, task(fmt.Sprintf("t%d", i)))
 		}
 		g := &graph{edges: map[string][]Blocker{"a": wide}}
-		if _, err := HoldingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
+		if _, err := holdingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
 			t.Errorf("err = %v, want ErrWalkBound", err)
 		}
 		if len(g.reads) != 1 {
@@ -241,7 +255,7 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 	for _, batch := range batches {
 		t.Run(strings.Join(batch, "+"), func(t *testing.T) {
 			g := &graph{edges: edges}
-			got, err := HoldingGates(batch, g.read)
+			got, err := holdingGates(batch, g.read)
 			wantNamed := []string{}
 			for _, root := range batch {
 				ids, answered := got[root]
@@ -297,7 +311,7 @@ func boundRoots(err error) []string {
 // that names only such beads reads nothing.
 func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 	g := &graph{edges: map[string][]Blocker{"a": {task("x")}, "x": {task("y")}, "b": {task("y")}, "y": {gate("g")}}}
-	got, err := HoldingGates([]string{"a", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,18 +457,78 @@ func TestHoldingOwed(t *testing.T) {
 	}
 }
 
-// HoldingGates is Holding's gates, root by root, with its bound and its errors.
-func TestHoldingGatesIsHoldingsGates(t *testing.T) {
-	g := &graph{edges: map[string][]Blocker{"a": {task("rw"), decision("d")}, "rw": {gate("g")}, "b": nil}}
-	gates, err := HoldingGates([]string{"a", "b"}, g.read)
-	if err != nil {
-		t.Fatal(err)
+// A bead a person would owe that waits on work of its own first is staying, in
+// neither Gates nor Owed, until that work closes: a conversation its sitting
+// stays in, or a decision a ruling left waiting on the work it sent. A decision
+// whose open waits are only gates is still owed. The walk follows a staying
+// bead's edges, so what holds its work counts on its own.
+func TestHoldingStaying(t *testing.T) {
+	park := Blocker{ID: "park", Title: "parked", Status: "open", IssueType: "gate"}
+	sitting := Blocker{ID: "c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.c"}
+	for _, tc := range []struct {
+		name                           string
+		edges                          map[string][]Blocker
+		wantGates, wantOwed, wantStays []string
+	}{
+		{"a decision that waits on the work its ruling sent",
+			map[string][]Blocker{"a": {decision("d")}, "d": {task("w")}}, []string{}, []string{}, []string{"d"}},
+		{"a decision whose work has closed is owed again",
+			map[string][]Blocker{"a": {decision("d")}, "d": {closed(task("w"))}}, []string{}, []string{"d"}, []string{}},
+		{"a decision that waits only on a human gate is owed beside the gate",
+			map[string][]Blocker{"a": {decision("d")}, "d": {gate("g")}}, []string{"g"}, []string{"d"}, []string{}},
+		{"a decision that waits only on a park is owed",
+			map[string][]Blocker{"a": {decision("d")}, "d": {park}}, []string{}, []string{"d"}, []string{}},
+		{"a decision that waits on a gate and on work stays",
+			map[string][]Blocker{"a": {decision("d")}, "d": {gate("g"), task("w")}}, []string{"g"}, []string{}, []string{"d"}},
+		{"a decision that waits on another decision stays, and the other is owed",
+			map[string][]Blocker{"a": {decision("d1")}, "d1": {decision("d2")}}, []string{}, []string{"d2"}, []string{"d1"}},
+		{"what the work of a staying decision waits on counts on its own",
+			map[string][]Blocker{"a": {decision("d")}, "d": {task("w")}, "w": {gate("g")}}, []string{"g"}, []string{}, []string{"d"}},
+		{"a decision behind a rework stays as one on the bead does",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {decision("d")}, "d": {task("w")}}, []string{}, []string{}, []string{"d"}},
+		{"a conversation its sitting stays in",
+			map[string][]Blocker{"a": {sitting}, "c": {task("w")}}, []string{}, []string{}, []string{"c"}},
+		{"a conversation its sitting holds is owed, whatever its edges",
+			map[string][]Blocker{"a": {withStatus(sitting, "in_progress")}, "c": {task("w")}}, []string{}, []string{"c"}, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &graph{edges: tc.edges}
+			got, err := Holding([]string{"a"}, g.read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := gateIDs(got["a"].Gates); !slices.Equal(ids, tc.wantGates) {
+				t.Errorf("gates of a = %v, want %v", ids, tc.wantGates)
+			}
+			if ids := gateIDs(got["a"].Owed); !slices.Equal(ids, tc.wantOwed) {
+				t.Errorf("owed of a = %v, want %v", ids, tc.wantOwed)
+			}
+			if ids := gateIDs(got["a"].Staying); !slices.Equal(ids, tc.wantStays) {
+				t.Errorf("staying of a = %v, want %v", ids, tc.wantStays)
+			}
+		})
 	}
-	if ids := gateIDs(gates["a"]); !slices.Equal(ids, []string{"g"}) {
-		t.Errorf("gates of a = %v, want only the gate", ids)
-	}
-	if ids, answered := gates["b"]; !answered || len(ids) != 0 {
-		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
+}
+
+// Stays reads a blocker by its own row and its own edges alone: a closed
+// decision stays for nothing, and a task that is no conversation never stays.
+func TestStays(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		b    Blocker
+		own  []Blocker
+		want bool
+	}{
+		{"an open decision with open work", decision("d"), []Blocker{task("w")}, true},
+		{"a decision of any case", Blocker{ID: "d", Status: "open", IssueType: "Decision"}, []Blocker{task("w")}, true},
+		{"a closed decision", closed(decision("d")), []Blocker{task("w")}, false},
+		{"a decision with no edge", decision("d"), nil, false},
+		{"a decision whose gate is of any case", decision("d"), []Blocker{{ID: "g", Status: "open", IssueType: "Gate"}}, false},
+		{"a task that is no conversation", task("t"), []Blocker{task("w")}, false},
+	} {
+		if got := Stays(tc.b, tc.own); got != tc.want {
+			t.Errorf("%s: Stays = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

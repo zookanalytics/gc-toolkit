@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
@@ -31,10 +32,15 @@ type index struct {
 	kinds map[string]Kind
 	// rows is every row's id, open rows first.
 	rows []string
-	// subject and replies are each conversation's, off its own edges.
+	// subject is each open conversation's, off its own edges.
 	subject map[string]string
-	// answeredBy is the open conversation that answers each open human gate.
+	// answeredBy is the open conversation that answers each open human gate,
+	// the first that replies to it, and each open decision, the first that
+	// tracks it.
 	answeredBy map[string]string
+	// handback is each open decision's newest hand-back, recorded on a
+	// conversation that tracks it, open or closed.
+	handback map[string]Handback
 	// children are the rows whose parent-child edge names each bead.
 	children map[string][]string
 	// within is the epics and Deliveries each row sits under nearest
@@ -44,7 +50,8 @@ type index struct {
 
 func newIndex(g *gathered) *index {
 	ix := &index{g: g, beads: map[string]bead{}, kinds: map[string]Kind{}, subject: map[string]string{},
-		answeredBy: map[string]string{}, children: map[string][]string{}, within: map[string][]string{}}
+		answeredBy: map[string]string{}, handback: map[string]Handback{}, children: map[string][]string{},
+		within: map[string][]string{}}
 	for _, list := range [][]bead{g.open, g.closed} {
 		for _, b := range list {
 			if _, dup := ix.beads[b.ID]; dup || !ownRow(b) {
@@ -75,8 +82,36 @@ func newIndex(g *gathered) *index {
 				ix.answeredBy[r] = id
 			}
 		}
+		if ix.openDecision(subj) && ix.answeredBy[subj] == "" {
+			ix.answeredBy[subj] = id
+		}
+	}
+	for _, c := range g.handedBack {
+		if strings.TrimSpace(c.Handback) == "" || !conversation.IsCandidate(issueType(c), c.Assignee, c.ID) {
+			continue
+		}
+		subj, _, ok := conversation.Shape(conversationEdges(c))
+		if !ok || !ix.openDecision(subj) {
+			continue
+		}
+		if cur, held := ix.handback[subj]; held && !newerHandback(c, cur) {
+			continue
+		}
+		ix.handback[subj] = Handback{Conversation: c.ID, At: c.HandbackAt, Text: c.Handback}
 	}
 	return ix
+}
+
+// newerHandback reports whether c's hand-back was recorded after cur: at a
+// later time, or at the same time on a conversation whose id sorts after it, so
+// one store gives one answer. A time that does not read is older than any.
+func newerHandback(c bead, cur Handback) bool {
+	at, _ := time.Parse(time.RFC3339, c.HandbackAt)
+	was, _ := time.Parse(time.RFC3339, cur.At)
+	if !at.Equal(was) {
+		return at.After(was)
+	}
+	return c.ID > cur.Conversation
 }
 
 func conversationEdges(b bead) []conversation.Edge {
@@ -138,6 +173,11 @@ func openWork(live []bead) []string {
 func (ix *index) openHumanGate(id string) bool {
 	b, ok := ix.beads[id]
 	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
+}
+
+func (ix *index) openDecision(id string) bool {
+	b, ok := ix.beads[id]
+	return ok && isOpen(b) && ix.kinds[id] == KindDecision
 }
 
 // containers are the epics and Deliveries a row sits under nearest. Its
@@ -223,6 +263,19 @@ func build(g *gathered) Document {
 		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}, held: map[string][]string{},
 		counts: map[string]bool{}}
 
+	// Whether each conversation and decision waits on work of its own first,
+	// read before any ask, since a conversation's ask reads whether the
+	// decision it tracks stays.
+	stays := map[string]bool{}
+	for _, id := range ix.rows {
+		if k := ix.kinds[id]; k == KindConversation || k == KindDecision {
+			if h, ok := g.holds[id]; ok {
+				stays[id] = staying(ix.beads[id], h)
+			}
+		}
+	}
+	askingDecision := func(id string) bool { return ix.openDecision(id) && !stays[id] }
+
 	// Row 2 first: the table reads whether a row is an ask.
 	for _, id := range ix.rows {
 		// Work held for the Product Owner is no need, whatever it would ask
@@ -254,23 +307,23 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		stay := false
-		if h, ok := g.holds[id]; ok && k == KindConversation {
-			stay = staying(b, h)
-		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, factsOf(g, id), open, members, stay); a != nil {
+		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, askingDecision, factsOf(g, id), open, members, stays[id]); a != nil {
 			bt.asks[id] = a
 		}
 	}
 	places := map[string]queue.Place{}
+	unsent := map[string]bool{}
 	for _, list := range [][]queue.Place{g.order.Queue, g.order.NotScheduled} {
 		for _, p := range list {
 			places[p.ID] = p
 		}
 	}
+	for _, p := range g.order.NotScheduled {
+		unsent[p.ID] = true
+	}
 	for _, id := range ix.rows {
 		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
-			prUnread: g.noFacts[id]}
+			prUnread: g.noFacts[id], notScheduled: unsent[id]}
 		if p, ok := places[id]; ok {
 			in.place = &p
 		}
@@ -359,6 +412,9 @@ func (bt *built) row(id string) Row {
 	if k == KindGate || k == KindDecision {
 		r.Conversation = ix.answeredBy[id]
 	}
+	if h, ok := ix.handback[id]; ok {
+		r.Handback = &h
+	}
 	for _, o := range ix.g.open {
 		if o.Anchor == id {
 			r.Anchored = append(r.Anchored, Ref{ID: o.ID, Title: o.Title})
@@ -408,14 +464,19 @@ func contractOf(b bead) *Contract {
 
 // askID is the ask a bead stands in: a conversation that answers a gate stands
 // in the gate's ask, the first of its replies when it answers more than one,
-// and any other ask stands in its own. It is empty for a bead that is no ask.
+// then one that answers the decision it tracks stands in the decision's ask
+// while the decision is one, and any other ask stands in its own. It is empty
+// for a bead that is no ask.
 func (bt *built) askID(id string) string {
 	if bt.ix.kinds[id] == KindConversation {
-		_, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
+		subject, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
 		for _, g := range replies {
 			if bt.ix.answeredBy[g] == id {
 				return g
 			}
+		}
+		if _, ok := bt.asks[subject]; ok && bt.ix.kinds[subject] == KindDecision && bt.ix.answeredBy[subject] == id {
+			return subject
 		}
 	}
 	if _, ok := bt.asks[id]; ok {
@@ -441,13 +502,13 @@ func (bt *built) forProductOwner(id string) bool {
 
 // place lists the rig's open work in the Work queue's order once, the order
 // services/gctk/queue gave the read, so every view lists work in that one
-// order: the queue, then the work after it. The read asked for the order of
-// every open piece of work, work held for the Product Owner included, so the
-// work behind held work comes after the queue as the city takes it. Held work
-// is then left out of the order, since no view lists it. Work a reader could
-// not answer has no place in it and is listed apart: work whose row reads
-// unread, and work the order places nowhere, whose row can still read as an
-// ask.
+// order: the queue, then the ready work nothing sends anywhere after it. The
+// read asked for the order of every open piece of work, work held for the
+// Product Owner included, so the work behind held work sits behind it in the
+// queue. Held work is then left out of the order, since no view lists it. Work
+// a reader could not answer has no place in it and is listed apart: work whose
+// row reads unread, and work the order places nowhere, whose row can still
+// read as an ask.
 func (bt *built) place() {
 	list := func(places []queue.Place, after bool) {
 		for _, p := range places {
@@ -766,14 +827,14 @@ func (bt *built) view(needs []Need, covers func(string) bool) NeedsYou {
 
 // kindCounts is how many needs of each kind count, in the order a view reads
 // them: the five kinds every view shows, each one zero included, so a glance
-// tells which is empty, then Routed to you when one counts.
+// tells which is empty, then Assigned to you when one counts.
 func kindCounts(by map[NeedKind]int) []KindCount {
 	out := []KindCount{}
 	for _, k := range []NeedKind{NeedKindPullRequest, NeedKindQuestion, NeedKindWaitsForYou, NeedKindInConversation, NeedKindRuling} {
 		out = append(out, KindCount{Kind: k, Count: by[k]})
 	}
-	if n := by[NeedKindRoutedToYou]; n > 0 {
-		out = append(out, KindCount{Kind: NeedKindRoutedToYou, Count: n})
+	if n := by[NeedKindAssignedToYou]; n > 0 {
+		out = append(out, KindCount{Kind: NeedKindAssignedToYou, Count: n})
 	}
 	return out
 }
@@ -866,16 +927,10 @@ func (bt *built) needsYouPage() NeedsYou {
 }
 
 // carriesHoldMayor reports whether a bead carries hold:mayor, the label that
-// puts it on the Product Owner's desk, trimmed and in any case, as Gas City's
-// HasDispatchHold compares a label.
-func carriesHoldMayor(b bead) bool {
-	for _, l := range b.Labels {
-		if strings.EqualFold(strings.TrimSpace(l), "hold:mayor") {
-			return true
-		}
-	}
-	return false
-}
+// puts it on the Product Owner's desk, in every spelling the work queue's order
+// reads it in (queue.ForProductOwner), so a bead that hold keeps out of the
+// ready work nothing sends is on the Unprioritized page.
+func carriesHoldMayor(b bead) bool { return queue.ForProductOwner(b.Labels) }
 
 func (bt *built) unprioritizedPage() []PriorityGroup {
 	by := map[int][]string{}

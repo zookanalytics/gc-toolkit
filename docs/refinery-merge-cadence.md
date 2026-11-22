@@ -1,24 +1,21 @@
 ---
 name: Refinery merge cadence
-description: The exec orders that drive the merge — the merge cadence, with its driver and arms, the posture interlock, the arm budgets, the single-flight guarantee and how to read what a pass did, and the landing order that merges a PR on the pending record. Read it to know what drives merges, and why nothing else may.
+description: The exec orders around a PR's merge — the merge cadence, with its driver and arms, the arm budgets, the single-flight guarantee and how to read what a pass did, the PR watch that saves GitHub's side of each PR the city owns, and the landing order that merges a PR on the pending record. Read it to know what drives merges, and why nothing else may.
 ---
 
 # Refinery merge cadence
 
 The merge side of the anchor lifecycle is driven by orders, never by an agent.
-On a rig still on the old path, one order drives it: `merge.sh` fires only from
-the merge cadence, so the cadence *is* the merge queue's clock. When it stops,
-gated-green CLEAN pull requests sit unlanded and nothing else about the city
-looks wrong, which is why its liveness has its own doctor check
-(`check-cadence-live`). On a rig on the new path, the landing order merges each
-PR on the pending record ([The landing order](#the-landing-order)), and the
-cadence's other arms still read and route what happens on the PR.
+The landing order merges each PR on the pending record
+([The landing order](#the-landing-order)), and the merge cadence's arms read
+and route what happens on the PR. The cadence's liveness has its own doctor
+check (`check-cadence-live`).
 
 ## Scope
 
 **Mandate.** What drives the merge-side writers, what each arm of the merge
-cadence owns, what a run of the landing order does, and the runtime guarantees
-the arrangement depends on.
+cadence owns, what a pass of the PR watch reads and saves, what a run of the
+landing order does, and the runtime guarantees the arrangement depends on.
 
 **Boundaries.** The states the arms and the landing order move an anchor
 through are [state-machine.md](state-machine.md). The refinery *agent*'s steps,
@@ -40,7 +37,7 @@ which runs the arms in order and exits.
 | Working directory | the rig's own root, so `git remote get-url origin` resolves |
 | Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
 | Timeout | `timeout = "600s"`, tunable per rig from city.toml `[[orders.overrides]]` — it bounds how long a wedged pass holds the per-rig lock. It must cover a whole pass at the slow end of host load and stay under the driver's `REFINERY_RECONCILE_LOCK_STALL_SECS`, and it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
-| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) is shared by the arms that walk a set growing with the queue, listed in `PACED_ARMS` in refinery-reconcile.sh: merge (the anchors it paces), pr-open, pr-feedback, pre-open-rebase, gate-ensure and pr-facts. Each paced arm's deadline is an equal share of what the budget has left when it starts, split among it and the listed arms still to run, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20); an arm the pass does not run, such as a merge the posture arm held, leaves the split. Each visits first the anchors it can act on and then resumes its rotation from its cursor in the pass state dir. Set both per rig through the override's `env` |
+| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) is shared by the arms that walk a set growing with the queue, listed in `PACED_ARMS` in refinery-reconcile.sh: pr-feedback, gate-ensure and pr-facts. Each paced arm's deadline is an equal share of what the budget has left when it starts, split among it and the listed arms still to run, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20); an arm the pass does not run leaves the split. Each visits first the anchors it can act on and then resumes its rotation from its cursor in the pass state dir. Set both per rig through the override's `env` |
 
 Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
@@ -48,24 +45,14 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 ## The arms
 
-1. **pr-facts.sh --posture-only** — the posture record.
-   `merge.sh` answers "is a human waiting on this?" off the bead and never asks
-   GitHub, so the value it reads has to be written in the same pass. It runs
-   first, immediately before merge, so the window in which a newly arrived
-   comment goes unseen is only as long as these two arms make it. This arm
-   writes `pr_posture` and `pr_merge_state` at the live head for every open
-   non-draft anchor, then stops: no dispatch, no watermark, and MERGED/CLOSED
-   reconciliation stays with arm 7. A held merge still gets one, because
-   recording a fact is not a dispatch, and the pass that finally merges must not
-   be reading a posture from a previous tick. **A non-zero rc is the
-   interlock.** An anchor this arm could not make current — an unreadable review
-   history, a posture write that did not persist — is one `merge.sh` would
-   validate against a fact from an earlier tick, so the driver holds arm 2 for
-   the pass. An anchor whose standing posture is already `commented@` is exempt:
-   it is holding its own merge, and failing the arm over it would hold every
-   other anchor's too. So is an anchor on the pending record: `merge.sh` reads
-   none, because the landing order asks for its merge on the evaluator's live
-   read, so the arm records its posture but counts no gap there. Where this arm
+Each arm keeps the number the driver logs it under.
+
+- **(1) pr-facts.sh --posture-only** — the posture record, which the
+   PR-finishing rank and the board read. It runs first, and writes `pr_posture`
+   and `pr_merge_state` at the live head for every open non-draft anchor, then
+   stops: no dispatch, no watermark, and MERGED/CLOSED reconciliation stays with
+   arm 7. A held merge still gets one, because recording a fact is not a
+   dispatch. Its rc is reported and fails the order. Where this arm
    changes an anchor's posture value, it also
    re-derives that PR's `status:` and `held:` labels, so an approval moves them
    in the pass that records it
@@ -101,232 +88,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    candidate, which keeps no posture. The next pass derives the posture again,
    and a derivation that reads the same facts and derives the same posture
    confirms the basis. A PR that moved is therefore read whole on two passes.
-2. **merge.sh** — `pull_request → merged`. It runs the moment its one
-   same-pass interlock, the posture record above, is done. Landing is the main
-   way an anchor leaves the gating set, and every arm that walks that set costs
-   time in proportion to it, so none of them sits ahead of merge: one that did
-   could spend the pass budget before merge ran, and a set that stops draining
-   keeps growing, which slows that arm further. merge needs nothing
-   gate-ensure (arm 6) writes in the same pass. It holds an anchor whose
-   `check_set` is empty on its own read, and gate-ensure's review-graph writes
-   (a dispatch onto a lane already short of green, the close of a must-fix
-   finding whose fix landed) can delay a landing by one pass but never allow
-   one early.
-
-   Its own cost grows with the PR set too, so it visits in an order that never
-   defers a landing. One paginated GraphQL read lists every open PR with its
-   draft flag, its head, and each account's latest `APPROVED` or
-   `CHANGES_REQUESTED` review. It asks for no merge state: GitHub computes that
-   per PR on request, and asked for about a hundred PRs at once it times out.
-   Every anchor is visited first, and no budget stops that group, unless
-   something read without a per-PR call already rules its merge out this pass:
-   its PR is a draft; `merge_hold` is set, `pr_posture` reads `commented`, or
-   `check_set` is empty; the approval rule the merge applies finds no approval
-   or a standing `CHANGES_REQUESTED` in those reviews (GitHub's
-   `reviewDecision` is not read, because it stays empty on a base that
-   requires no approving review); or the merge state the posture arm recorded
-   at the PR's live head is one the merge never proceeds on, anything but
-   `CLEAN`, `UNSTABLE`, or `UNKNOWN`. Those anchors are visited in id order
-   starting after the last one a pass finished (`merge.cursor` in the pass
-   state dir), wrapping, until merge's share of the pass budget runs out, so
-   every one is reached within a bounded number of passes, and a visit there
-   refreshes a verdict and lands nothing. An anchor whose PR has left the open
-   list (merged, which owes the record below, or closed) is visited first. When
-   the list cannot be read, every anchor joins the first group and the arm is
-   not paced.
-
-   Per anchor: pinned `gh pr view`, identity gates
-   (same repo, not a fork), re-read the anchor and check it still gates this
-   PR — open, still `pull_request`, same number, url and head branch. Then
-   either the record for a PR already merged, or, for an OPEN non-draft one,
-   record how many of its review threads wait on the city's answer
-   (`pr.unanswered_threads`, which the labels and the board read for
-   `held: review` and the merge does not), then
-   validate holds/posture/checks/children/human-gate/approval/base/CLEAN, check
-   that the merge makes no `generated/seed-audit` render stale, re-read the full
-   authorization set immediately before merging, `gh pr merge --squash
-   --match-head-commit <validated oid>`, then close + record in one lifecycle
-   transition, which `gctk merge` runs in-process. The posture it validates is
-   the value **pr-facts recorded on the anchor**, never a fresh read of GitHub.
-   A human gate that blocks the anchor holds its merge twice. The children probe
-   reads the anchor's `blocks` blockers and holds on an open one, and a human
-   gate among them is a person's hold, so it records no machine state where an
-   unrouted blocker records `blocked`. The finalize gate holds on the same open
-   human gates (`docs/finalize-gate.md`), and it is re-asserted in the terminal
-   re-read, because a gate filed mid-pass does not move the head.
-
-   GitHub computes a PR's mergeability lazily. The first read after the PR's
-   base moves answers `UNKNOWN` and starts the computation, which finishes in a
-   few seconds, and a PR nobody reads stays `UNKNOWN`. Every merge this arm makes
-   moves the base under each later candidate on that base, so their pinned reads
-   answer `UNKNOWN`. The arm reads such a PR again before deciding it. A PR's
-   first re-read goes out immediately, and each later one waits
-   `MERGE_STATE_REREAD_SECS` (default 5). A re-read that answers a computed state
-   decides its PR. One that answers `UNKNOWN` again spends one of the pass's
-   `MERGE_STATE_REREADS` (default 3), and once they are spent every later
-   `UNKNOWN` holds on its pinned read. With the defaults, a computation stalled
-   across the repository costs a pass three reads and ten seconds of waiting,
-   however many candidates it holds. The computed state is judged exactly as a
-   pinned one is, so `BEHIND` and `DIRTY` keep their handling. A re-read may
-   differ from the pinned read only in `mergeStateStatus`, `mergeable` and
-   `reviewDecision`. Any other difference means the PR changed under the gates
-   that passed it, so the merge holds and the log names each field that changed.
-   A re-read that fails holds the merge for the pass, as a failed pinned read
-   does, and records nothing. A state still `UNKNOWN` when the re-reads are spent
-   holds for the pass and records `settled`. The re-read belongs to the CLEAN
-   check, the last in the validation order above, so only a candidate every
-   earlier check cleared pays for it. Every read comes after the latest merge of
-   the pass, because the arm merges only at the end of an anchor's turn.
-
-   Landing and recording are two writes, and a pass killed between them leaves
-   an anchor saying `pull_request` over a PR already on the target branch.
-   This arm records that PR rather than leaving it to pr-facts: the arms are
-   ordered, so a recovery downstream of the merge is reached least often
-   exactly when it is needed. The record stands on the same live anchor
-   identity the merge does, since it writes merged truth about one PR onto a
-   bead that may have moved to another since the enumeration.
-
-   A record that fails is retried on the next pass, which is the whole repair
-   for the common cause and no repair at all for a cause the next pass meets
-   unchanged. `record-failure-cap.sh` is what tells the two apart: it counts
-   consecutive failures in `merge_record_failures` on the anchor and, past
-   `GC_MAX_RECORD_FAILURES` (3), files one human gate on the anchor naming the
-   PR and the by-hand record. The record that lands clears the count. This arm, the
-   merge's own record below it, and pr-facts's out-of-band record all call it,
-   so the same repair attempted by three writers spends one budget rather than
-   three. The count is metadata-only because every refusal it bounds is a
-   refusal of the transition's own write, which a bare `--set-metadata` on the
-   same bead is not subject to.
-
-   The seed-audit check is the one gate here that is a property of the merge
-   rather than of the head. `generated/seed-audit` is rendered from the whole
-   source tree and committed per branch, so a PR carrying a render made at an
-   older base overwrites prompt inputs it never saw, and two PRs that touch no
-   common file still clobber each other. A lane's green derives from its
-   reviews and is bound to no commit, so it stays green while the base moves
-   underneath, the pre-commit hook is branch-local, a rebase replays commits
-   without running it, and `-diff` in `.gitattributes` keeps the clobber out of
-   the PR diff.
-   So the arm fetches the two commits into `refs/gc-toolkit/merge-gate/*`, and
-   `render-seed-audit.sh --check-merge` renders the tree `git merge-tree`
-   writes, with the renderer that tree carries. A file passes when the merge
-   commits it exactly as rendered. A file that fails that test still passes
-   when the merge leaves it as the base commits it and it renders the same on
-   the base as on the merge: the base was already stale there, so the check
-   reports it as the base's own staleness and holds nothing on it. That second
-   test needs a render of the base too, which runs only when some file fails
-   the first, so a check costs one render or two, and needs `gc` on the
-   refinery's host. Any other file, or a probe that cannot answer, holds the
-   merge and files one human gate per PR under `seed-audit-merge-gate.<n>`, naming
-   each file and why it failed. Nothing is routed from here: the way out is to
-   bring the head branch current with its base, render what the branch moves
-   (`render-seed-audit.sh --since origin/<base>`), and push.
-
-   A file the base is already stale in went stale with no merge behind it,
-   since this check holds every merge that would make one stale. What moves
-   such a file is the `gc` binary: the agents and recipes gc's own packs
-   define, and this pack's formulas that extend one of them, render whatever
-   the installed build emits, so a newer build makes them stale on every branch
-   at once. The check names those files
-   (`--base-stale-out`), and the arm hands them to `seed-audit-reaudit.sh`,
-   which slings the one bead that re-renders the default branch and lands the
-   new text in a pull request of its own. While that bead is live, a later
-   merge that finds the same files files nothing more. The merge does not wait
-   on the hand-off, whatever it answers. A branch's own commits add none of
-   that text: the pre-commit hook and the remedy above render `--since` a
-   revision, which keeps each file the change does not move as that revision
-   has it. The exceptions are a file the branch re-rendered itself, as the
-   re-audit does, and a page gc added or removed while the branch moves
-   `INDEX.md`, which lists every page. The re-rendered file is rendered fresh,
-   so when gc moves again before the re-audit merges, the same remedy renews
-   its text, and the held merge clears. The page goes with the index, so the
-   index lists no page the merge leaves out.
-
-   What the artifact commits is chosen to stay out of the queue's way. A line
-   that moves on every edit to one agent's prompt, committed beside the lines
-   of every other agent, collides two PRs that touched two unrelated agents
-   whatever else they do. So `generated/seed-audit/` holds the renders and an
-   `INDEX.md` that moves only when the pack's composition moves, and byte and
-   token counts print on request (`render-seed-audit.sh --sizes`).
-3. **pr-open.sh** — `pre_open_gate → pull_request`. It runs right behind merge
-   and ahead of every other arm, because it is what puts a green branch in
-   front of the operator for the approval merge waits on. merge reads none of
-   its output: every merge needs an external approval at the live head, and
-   the city approves nothing at open (the verdict is replayed only as a
-   comment), so a freshly opened PR is never mergeable on the same tick and
-   running after merge costs no landing. It needs nothing gate-ensure writes
-   in the same pass, for the reasons merge does not. A pass that ends inside
-   this arm still makes progress: an anchor it opened has left its domain, and
-   an open interrupted before its record is adopted by the next pass rather
-   than opened twice. It walks under its share of the pass budget: first the
-   anchors gate-ensure last recorded as `settled` whose rows carry no hold this
-   arm applies (`merge_hold`, `rebase_hold`, an empty `check_set`), because
-   gate-ensure settles a green anchor whatever holds it; then the rest, with at
-   least one of each group visited every pass. The grouping only orders the
-   walk, and each anchor still meets the full gate. Each group rotates on a
-   cursor of its own (`pr-open.cursor.first` and `pr-open.cursor` in the pass
-   state dir), because a first-group anchor this arm still holds, such as one
-   whose PR a human closed at this head, stays in the group, and in a fixed
-   order it would lead every pass while the anchors behind it waited.
-   For each anchor whose every `pre-open` check in `check_set` derives `green`
-   (the one resolver names that set — `none`/`off` and the universal
-   `approval` rule dropped; an empty set is held, never read as ungated):
-   adopt an existing PR for the branch or
-   `gh pr create` — as a draft when `check_set` names an `open-as-draft` check,
-   so a preview can deploy before the change is surfaced, else ready — re-read
-   the created PR by number, refuse a moved head, replay each `pre-open` check's
-   verdict as a comment of its own (never an approval), then one `lifecycle.sh`
-   transition carrying
-   `pr_url`/`pr_number`/`merged_target`. A later pass flips a draft to ready once
-   its `open-as-draft` checks are green. That draft-to-ready walk runs after the
-   pre-open walk, under the same deadline, and rotates on `pr-open.cursor.ready`
-   with at least one draft visited every pass, because a draft the arm holds
-   stays a candidate. Each anchor's head comes from one fetch
-   of origin's branches per pass, with the API answering when that fetch could
-   not and confirming the head before any create, so an anchor parked on a red
-   lane costs no API read for its head. Its gates are resolved once at that
-   head, and the one answer feeds the gate, the draft decision and the body; a
-   resolver that is missing or fails holds the anchor. An adopted draft is the
-   refinery's to flip only when the city opened it as a draft and nobody has
-   re-drafted it since. Any other draft is adopted without that claim and stays
-   with whoever parked it.
-   The body's `## Summary` is the anchor's PR summary, which an actor that has
-   read the diff records through `gctk pr summary`: the polecat at its handoff,
-   or, on a landing bead, its effort's summary task once the effort's work has
-   landed. The anchor's
-   description is dispatch text, demoted to a collapsed section and standing
-   in as the summary only when no summary was written. The region writes that heading
-   itself, so a summary opening with one of its own is de-duplicated. The
-   composed body lives between `gc:pr-summary` markers, so adopting an OPEN PR
-   re-splices it from the anchor's current PR summary — a rework's restamp
-   reaches the published merge surface — while text an operator added outside
-   the markers stays. A body a create wrote before these markers
-   is the same stale-body case: the region is established over its legacy
-   `## Summary`…`## Refinery handoff` prefix, keeping what follows, so the
-   restamp still lands. A body carrying no such managed region — hand-written,
-   or a malformed marker shape — has nothing stale to republish and is adopted
-   as it stands; a MERGED PR is a landed record, flipped untouched. A refresh
-   this arm cannot verify — an unreadable or unparseable body, a missing head,
-   or a scratch failure — holds the anchor at `pre_open_gate` for the next pass
-   rather than flip a managed body that may be stale. This adopt-time re-splice
-   covers only the `pre_open_gate` window, and the anchor never returns to the
-   state this arm scans (no `pull_request → pre_open_gate` lifecycle edge). Once
-   the anchor is `pull_request`, a rework's restamp reaches the PR when the
-   refinery lands the rework's hand-back: it composes the PR's title and body
-   with `gctk pr compose`, the handoff naming the gates the anchor's check set
-   resolves to at the new head, and edits them onto the PR before it pushes
-   that head. A bead that comes back through the refinery with its own PR open,
-   such as one the requeue sent back to the pool, has its PR composed the same
-   way before its push, with the gates of the check set the refinery stamps on
-   it. Gates that do not resolve, a view of the recorded PR that does not
-   answer, or an edit that does not take, push nothing, and the bead stays with
-   the refinery for its next pass. A bead that lands `direct` onto the branch of
-   a PR an anchor holds at `pull_request` has that PR composed the same way once
-   its landing is recorded, at the branch's new tip, since only then does the
-   body's list of the beads on the branch name it. There a view of the PR that
-   does not answer, or an edit that does not take, prints a line, and the
-   landing stands.
-4. **pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
+- **(4) pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
    ahead of the slow arms. Arm 7 runs behind gate-ensure, so a pass the timeout
    kills before arm 7 would leave the operator's review stamped-as-seen by the
    posture yet unrouted while the anchor reads as handled. This arm closes that
@@ -339,8 +101,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    routes. Arm 7 still runs the routing idempotently (a
    landed batch's watermark and `pr_comment_disposition` make the re-run a
    no-op) and still owns the write-back and the terminal-state records. Its rc
-   is reported but holds nothing: merge has already run, routing is not the
-   posture interlock, and the full pass is the backstop. It runs ahead of
+   is reported but holds nothing: the full pass is the backstop. It runs ahead of
    gate-ensure, so a validation pass it opens is in place for gate-ensure to
    dispatch a validator onto. It walks the PRs under its share of the pass
    budget, first the anchors whose recorded posture is `commented` (feedback no
@@ -349,47 +110,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    feedback is routed), then the rest in a rotation. The observability half is
    `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
    says a human is waiting with no disposition past a window.
-5. **pre-open-rebase.sh** — the conflict observer for anchors that have no PR
-   yet. It runs after merge and pr-open, neither of which reads its output, so
-   it observes the anchors pr-open left at `pre_open_gate`. Every other arm reads
-   whether a branch still merges off the PR (`mergeable`, `mergeStateStatus`),
-   and `pr-facts.sh` skips any anchor whose `pr_number` is absent before it reads
-   anything else. That is not a narrow enumeration one could widen: the facts
-   those arms dispatch on are PR facts, so a pre-open anchor has none of them and
-   a widened net routes nothing. This arm asks git instead. One fetch per pass
-   mirrors every branch on origin into `refs/gc-toolkit/pre-open-rebase/heads/*`
-   — one round trip costs the same as 38, and this arm holds the pass lock while
-   it runs — pruned, so a branch deleted on origin does not linger as a ref the
-   probe would believe. It walks the anchors in a rotation under its share of
-   the pass budget, and per anchor requires both sides to resolve there and
-   probes `git merge-tree --write-tree`; a conflict files the same merge-in
-   rework child arm 7 files for a PR anchor, stamped `prepare_mode=merge` (every
-   branch shape is brought current by merge, never rebase), whose hand-off the
-   bring-current guard holds to the same audit. An anchor pr-open
-   flipped this pass carries a PR, where `mergeable` answers the question and
-   arm 7 owns the dispatch. Both arms probe
-   children on `metadata.branch` and write the same `head <oid>` phrasing, so
-   whichever sees a branch first files and the other stands down. The vetoes are
-   arm 7's: `merge_hold`, `rebase_hold` on the anchor or on any bead naming the
-   branch, and an open human gate on the anchor or on its live rework child,
-   whatever the gate asks, since bringing the branch current is one answer a
-   person may still be weighing. So is the supersession guard. Past the vetoes and
-   the dedup, both arms ask `branch-supersession.sh` whether the conflict is drift
-   or a change that landed first and deleted code the branch edits. A change
-   that rewrote that code is drift, and gets the merge-in child.
-   Whether a superseded branch still has work to do is the operator's call, so
-   the arm files a human gate under `rework-base-supersession` on the anchor
-   instead of a child, and dispatches nothing while a gate under that key is open
-   on it. `human-gate.sh` files one gate per key and nothing while it is open, so
-   a later supersession lands on the open gate rather than a second one. The
-   guard holds only behind an open gate, so a conflict it cannot classify or
-   record still gets the merge-in child
-   ([specs/tk-b7c72m/supersession-tells.md](../specs/tk-b7c72m/supersession-tells.md)).
-   A failure here is not a merge hold — an anchor it could not observe is left
-   exactly as the pass found it.
-6. **gate-ensure.sh** — check satisfiability, on the old review path, for an
-   anchor at `pre_open_gate` or `pull_request`; a PR on the pending record has a
-   review run instead ([state-machine.md](state-machine.md#checks)). Every gating
+- **(6) gate-ensure.sh** — check satisfiability, on the old review path, for an
+   anchor at `pre_open_gate` or `pull_request`, which no bead carries; a PR on
+   the pending record has a review run instead ([state-machine.md](state-machine.md#checks)). Every gating
    anchor declares a non-empty `check_set` (the default is stamped when absent;
    the `none` sentinel is respected), and every declared check is *raisable*: the lane
    derives `green`, or a live routed review bead is in flight, else dispatch one
@@ -422,8 +145,8 @@ the cadence — the arms run whether or not any refinery session is awake.
    and the runaway shapes left — a reviewer that dies after claim, a fix unit
    filed with its edge reversed, a landed fix whose finding that release missed
    — stop the PR moving rather than spin the dispatcher.
-   It visits every gating anchor, so its cost grows with the set. It runs after
-   merge and pr-open and under its share of the pass budget. It first visits the
+   It visits every gating anchor, so its cost grows with the set. It runs under
+   its share of the pass budget. It first visits the
    anchors it can act on: one with no `check_set` (it owes the stamp), one with
    no machine verdict (never visited; a `check_set` of `none` or `off` never
    gets one), and one whose mark moved since this arm last visited it. The mark
@@ -441,13 +164,12 @@ the cadence — the arms run whether or not any refinery session is awake.
    and nothing else, and every anchor is reached within a bounded number of
    passes. Its rc=3 (an anchor whose `check_set` stamp did not persist, or an
    enumeration it could not read) is reported without failing the order or
-   holding anything: merge.sh and pr-open.sh each hold an anchor with no
-   `check_set` on their own read.
+   holding anything.
 
-7. **pr-facts.sh** — external facts only, no merge authority: PR merged
+- **(7) pr-facts.sh** — external facts only, no merge authority: PR merged
    out-of-band (record), closed-unmerged (→ `abandoned` + a human gate), base
    changed (→ `retargeted` + a human gate), CONFLICTING (one rework child per head, on an
-   approved PR only, by the approval rule merge.sh lands on; the child's
+   approved PR only, by the approval rule `review-verdict.sh` states; the child's
    handoff runs `bring-current-guard.sh`, which refuses it until the worker's
    audit covers every conflict and, when the round conflicted, reopens triage
    to rule on what it reopens and whether the approval stands, adding triage
@@ -458,14 +180,11 @@ the cadence — the arms run whether or not any refinery session is awake.
    ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
    conflict is a landed change deleting code the branch edits,
    the approved PR gets the operator's supersession decision instead of the
-   child, as for arm 5), `BLOCKED` on an unresolved review thread or a
+   child), `BLOCKED` on an unresolved review thread or a
    missing required approving review (→ no gate. The write-back below resolves
    every thread the city rules on, whether it fixed, declined or deferred the
    point, and a thread whose question only a person can answer waits on a gate
-   of its own, as a `needs-you` finding's does. The merge pass's
-   `review-threads` verdict shows a thread still unresolved on an approved PR,
-   which the board and the PR's labels read as `held: review`
-   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
+   of its own, as a `needs-you` finding's does.
    A missing approving review is the operator's own review queue, the state the
    board's review section already surfaces from the recorded `pr_posture`.
    Neither asks a person anything, so the cadence withdraws any open
@@ -657,10 +376,9 @@ the cadence — the arms run whether or not any refinery session is awake.
    pass: each comment becomes a human finding the run rules. The pass lists such an
    anchor at `pull_request_pending` on a blocked bead and at
    `pull_request_head_changed` on an open one, beside `pull_request` on an open
-   one. No transition of the machine writes a value of the record, so each of
-   its writes on such a bead is one plain metadata write guarded on the status
-   and assignee the pass read.
-8. **review-sweep.sh** — cleanup over closed anchors on the old review path, no
+   one, which no bead carries. Each of its writes on such a bead is one plain
+   metadata write guarded on the status and assignee the pass read.
+- **(8) review-sweep.sh** — cleanup over closed anchors on the old review path, no
    merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
    from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
@@ -673,7 +391,7 @@ the cadence — the arms run whether or not any refinery session is awake.
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
    residue is filed by two dispatchers, arm 6 and arm 7.
-9. **scaffolding-sweep.sh** — cleanup over DISPOSED anchors' old review
+- **(9) scaffolding-sweep.sh** — cleanup over DISPOSED anchors' old review
    scaffolding, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
    the duplicates or supersedes edge `bead-rehome.sh` records onto its successor,
@@ -704,7 +422,7 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 ## Single-flight: the tracking gate and the pass lock
 
-Two `merge.sh` writers against the same anchors is the failure this
+Two passes writing the same anchors at once is the failure this
 arrangement exists to prevent. The controller's open-tracking gate is one half
 of the guarantee and a `flock` in the driver is the other, because the gate can
 be reopened underneath a pass that is still running.
@@ -768,24 +486,22 @@ Two settings must never change, because each would undo the guarantee:
   keep the pass inside the watchdog window, because no budget that covers a real
   pass fits there, so the lock is what carries single-flight.
   `refinery-reconcile.test.sh` asserts the pair mechanically: a timeout above the
-  2m window passes only in a run that also demonstrates one `merge.sh` writer
-  across two overlapping ticks. The suite holds the upper bound the same way,
+  2m window passes only in a run that also demonstrates one pass running its
+  arms across two overlapping ticks. The suite holds the upper bound the same way,
   reading both numbers from the files that set them: a timeout at or above the
   driver's `REFINERY_RECONCILE_LOCK_STALL_SECS` would make a pass that is still
   running read as a wedged one.
 
 Never run a cadence driver out-of-band (by hand, cron, or a daemon). Running
 this script by hand at least serialises against the lock; anything else is a
-second merge writer that neither the gate nor the lock can see.
+second writer that neither the gate nor the lock can see.
 
 ## Reading what a pass did
 
 The controller keeps an exec order's output only on non-zero exit, folding a
 bounded tail into the `order.failed` event. So: an unexpected arm failure makes
 the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 is reported but does not fail the order. Arm 1 is the one that both holds
-the merge arm and fails the order, because a posture that could not be recorded
-is a fault to see rather than a routine gate. Every pass logs to
+rc=3 is reported but does not fail the order. Every pass logs to
 `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
 `REFINERY_RECONCILE_LOG_KEEP` lines (2000 default) and not subject to bead
 retention. Arms append as they run, so the shape of the log is what tells you
@@ -796,12 +512,12 @@ how a pass ended:
 | `=== <ts> rig=<rig> refinery=<agent>` | a pass started |
 | `-- (<n>) <arm> (started <ts>)` | an arm started; its output follows |
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
-| `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with, and merge counts its landing-first PRs apart. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
+| `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
-| `--- <ts> rig=<rig> STALLED: ...` | the lock has been held past the stall bound; merges have stopped |
+| `--- <ts> rig=<rig> STALLED: ...` | the lock has been held past the stall bound; the arms have stopped |
 
 **`gc order history` is store-complete only when the read is unbounded.** Any
 positive `--limit` — including the default 50, and a limit larger than the row
@@ -815,73 +531,309 @@ gc order history refinery-reconcile --since 30m --limit 0
 Prefer `gc doctor` (`check-cadence-live`) over hand-rolled queries: it asserts
 per rig that the order is registered and firing within its interval.
 
-### When a pass drops its merge tail
+## The PR watch
 
-The log shows how a pass ended, but a killed pass leaves no record of the
-approved-clean anchors its merge arm never reached — on the board they look
-identical to a healthy "awaiting review". So each pass also stamps a
-merge-decision marker, `<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/merge-decision`,
-one line `<phase> <tick> <head>`, as it runs:
+`orders/pr-poll.toml` asks GitHub every minute whether each PR the rig's beads
+own moved, and saves GitHub's side of each PR that did on its bead. Its signs
+show what people do on a PR, a push, a comment, a review, a label, a move into
+or out of draft, a close, a reopen or a merge, and every check's result, so the
+saved read takes such a change within a minute. It is
+a rig-scoped cooldown exec order with a 180-second timeout, which runs
+`gctk pr poll --db "$GC_RIG_ROOT/.beads"`. `orders/pr-compare.toml`, the net,
+reads each of those PRs in full every hour and saves each one that differs from
+the read saved on its bead, which catches within the hour the few changes no
+cheap sign shows, and clears the city's labels off the PRs no live bead owns
+(the net, below). The two are the first of the PR's two loops: they keep each
+PR's saved read current, and the landing order, the second, finds and does its
+work from that read and the store, reading GitHub first only for a merge,
+which has the one-PR update re-read the PR in full
+([The landing order](#the-landing-order)).
 
-| Phase | Written | Meaning |
-|---|---|---|
-| `started` | before the arms | the pass began; dying here means it never reached the merge arm |
-| `reached` | just before the merge arm | the merge arm is about to decide its candidates |
-| `held` | when a same-pass interlock holds merge | merge was deliberately not run — a recorded decision, not a drop |
-| `decided` | after the merge arm returns | every PR that could land this pass was decided; the ones its budget left for the next pass could not land this pass, so they are not a drop |
+These two orders and the landing order run at their set intervals, `pr-poll`
+and `pr-reconcile` every minute and `pr-compare` every hour, only while the
+city's order budget lets each clock-driven order start at its own interval.
+Gas City's orders lane starts at most `[orders] max_dispatches_per_tick` of
+them a 30-second pass, 4 by default. The city's clock-driven orders, these
+three among them, need about 12 starts a pass at their set intervals, counted
+from the intervals `gc order list` gave on 2026-11-20, so the city's
+`city.toml` sets the budget to 16 and holds the old refinery pass,
+`refinery-reconcile`, at 5 minutes until the GitHub intake retires it. Under a
+smaller budget each order starts later than its interval.
 
-The controller kills a pass with SIGKILL, so one that overruns its budget runs
-no at-exit code — but the phase it wrote before the kill survives. At each pass's
-start, holding the pass lock so the pass that wrote the marker is already dead,
-`merge-tail-report.sh` reads it: a marker left at `started` or `reached` while
-open anchors still carry `merge_result=pull_request` is a dropped merge tail. It
-files one `patrol-finding` naming those anchors, with the head and timestamp of
-the pass that dropped them, keyed per rig (`reconcile-merge-tail-dropped-<rig>`)
-so a recurrence updates one bead rather than filing another. It names only
-anchors still open, so a tail the next pass lands leaves nothing to report, and
-it keys on the pass failing to finish its merge decision, never on how long an
-anchor has waited — slow-but-legitimate CI never trips it, and a real drop is
-never invisible.
+A PR is owned when a live bead names it as its own and is no other bead's
+child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the
+refinery sent back to the pool names it in `existing_pr`. A bead whose
+`anchor_bead` names another bead, such as a rework child, owns nothing. Every
+owned PR is asked about, but one that more than one live bead owns, which the
+pass reports failed.
+
+**The cheap question.** A pass asks GitHub for each owned PR's signs, with one
+aliased `pullRequest(number:)` field for each PR and at most 50 PRs a request,
+1 point each. The signs are the PR's state and draft flag, its head, its base
+and the base's tip, when GitHub last changed it, its comment, review and
+dismissed-review counts, its labels, every one, and its checks at the head
+counted by state. It reads no comment, check or thread. A PR whose signs did
+not read keeps the signs saved on its bead, the next pass asks again, and the
+pass exits 2.
+
+**The one-PR update.** For each PR whose signs differ from the ones saved on its
+bead, or whose bead holds no read or one not current for it, the pass runs the
+one-PR update, `gctk pr refresh`. It takes those PRs, from every repository it
+asked, in a shuffled order, so one whose update is slow or keeps failing holds
+no other back, and starts none more than 90 seconds in. The update reads only
+what moved:
+
+| What moved | What it reads |
+|---|---|
+| the labels | nothing more, since the signs are the labels |
+| the base's tip, the state or the draft flag | the PR's own facts |
+| when GitHub last changed the PR | the PR's own facts and its conversation |
+| the head, or the checks' rollup, total or counts | the PR's own facts with the required check runs at the head, in one request |
+| the comment, review or dismissed count | the conversation, in one request, and the PR's own facts, whose merge state reviews move |
+| nothing, but the bead holds no read or one not current for it | everything |
+
+The landing order has the update read every part of a PR, whatever its signs
+say, before it requests the PR's merge, and decides the merge on what that read
+saved ([The landing order](#the-landing-order)).
+
+It saves what it read on the bead as `pr_github_read`, in four parts: the PR,
+its checks, its conversation and its labels. Each part keeps the instant its
+read was sent and the signs read with it. Under the store's record lock it
+reads the bead again and writes once, guarded on the status and the assignee
+it read, with each part whose read was sent after the saved part's: the part
+when its facts or signs differ, and its read's instant alone when they are the
+same, so an older read never replaces a newer one, even a newer one that found
+nothing new. A bead on the
+pending record gets `pr_state`, the PR's state lower-cased, and
+`pr_last_checked_at` in the same write. An open PR's merge state that GitHub
+reads as `UNKNOWN`, which it computes after a push or a base move and which
+moves no sign once computed, keeps the PR part due, so each pass reads the part
+again until a read finds the state, whether the PR's own signs or only its
+checks moved. GitHub reads a merged PR's merge state as `UNKNOWN` for good, so
+a PR that is not open is read again only when its signs move. A read that
+fails saves nothing. The update is the one writer of these three keys.
+
+`gctk pr refresh --pr <url>` is the same update run alone for one PR, which
+reads the PR's signs itself first: the call a webhook's rule can make for the PR
+an event names. A PR no live bead owns has nothing to save, and it exits 0.
+
+**The net.** Some changes move no cheap sign: a review thread resolved or
+reopened, an edit to a post that left the PR's `updatedAt` as it was, a check
+the PR comes to require or stops requiring, and a review decision, merge state
+or merge-queue flag that a change of the repository's rules moves.
+`orders/pr-compare.toml` reads each owned PR in full every hour for them.
+It is a rig-scoped cooldown exec order with a 300-second timeout, which runs
+`gctk pr compare --db "$GC_RIG_ROOT/.beads"`.
+
+A pass reads each owned PR with one aliased `pullRequest(number:)` field, at
+most 10 PRs a request: the cheap signs, the merge state, the review decision,
+both merge-queue flags, each review thread's resolution, the time each
+conversation comment, review and inline comment last changed, read through the
+review threads 10 a page, the reactions the city's account left on each inline
+comment, and the check runs at the PR's last commit, each with whether the PR
+requires it. It reads no post's text. A list past its first page is read on
+until it ends: the labels, the conversation comments, the reviews, the threads,
+a thread's comments and the check runs, these last at the commit the first page
+read. A request of up to 9 PRs costs 1 point and one of 10 costs 2.
+
+The net compares what it read with the saved read, and runs the one-PR update
+over each part that differs, and over each part the cheap question's table
+names:
+
+| What differs | What the update reads |
+|---|---|
+| the PR's state, draft flag, head, base, merge state or either merge-queue flag | the PR's own facts |
+| the commit the checks were read at, or a name or a result among the check runs the PR requires there | the PR's own facts with the required check runs at the head, in one request |
+| the review decision, the unresolved threads, the newest post time, the latest time any post changed, or the city's reactions on the inline comments, which answer a thread with no reply | the conversation |
+
+A merge state GitHub reads as `UNKNOWN` differs in nothing, since GitHub reads
+an open PR's so until it has computed one, and a merged PR's for good. So a
+change no cheap sign shows reaches the saved read within one pass of the net,
+within the hour.
+A pass in which nothing differs writes no bead. The net takes its updates in a
+shuffled order and starts none more than 3 minutes in, and a PR whose read
+failed keeps its saved read and fails the pass, as in the cheap question's
+pass.
+
+**The labels on PRs no bead owns.** The landing order keeps the labels of the
+PRs the beads own ([The landing order](#the-landing-order)), and nothing holds
+a PR no live bead owns for it, such as one whose bead closed. So each pass of
+the net searches the rig's own repository, the one its clone's origin names,
+for the PRs that carry a `status:` or `held:` label the labels' writer names:
+`search(type: ISSUE)` over `repo:<owner>/<name> is:pr label:"status:
+working",...`, 100 PRs a page for 1 point. It reads on a page at a time until
+it has found 20 PRs that no live bead owns or the results end, so a page that
+holds only owned PRs hides none behind it, and has the writer,
+`pr-status-label.sh clear`, take the city's labels off each. It takes them in a
+shuffled order, so a PR whose clear is slow or keeps failing holds no other
+back, and starts none past its 3 minutes. The writer reads each PR's labels
+itself first. A clear that does not land fails the pass, and the next pass's
+search finds the PR again. At 20 a pass and a pass an hour, the net clears
+about 20 such PRs an hour in a rig's repository, so the 586 PRs in gc-toolkit's
+that carried the city's labels with no live bead owning them on 2026-11-20 take
+about 30 hours to clear, each removal showing in that PR's timeline.
+The net searches no other repository, since a PR there is owned by the beads
+of that repository's rig.
+
+**Reading what a pass did.** A pass in which nothing moved writes no bead but
+that of an open PR whose merge state GitHub had not yet computed, which it
+reads again, and otherwise costs 1 point for each 50 owned PRs, and Gas City
+still writes its run record. Each update prints a line,
+`<bead> <url> <action>: <detail>`, where the action is `saved`, `unchanged`
+or, for a bead that no longer owns the PR when the update reads it again,
+`unowned`. A PR that failed prints `<url> failed: <why>`, one
+the 90 seconds left prints `<url> left`, and the last line counts what the pass
+asked about. A pass exits 0 when every owned PR was asked and every update
+saved, and 2 otherwise. Gas City labels the pass's run record by that exit,
+`exec` or `exec-failed`, and its run history
+(`GET /v0/city/{city}/orders/history`) lists each record with its labels. The
+board reads there when GitHub was last asked. `gc order history pr-poll` lists
+the passes without their exits. A pass of the net prints the same lines, its
+window being 3 minutes and its last line but one counting the PRs it compared.
+Each PR whose labels it cleared prints `<url> cleared`, and its last line says
+what the search found: the pages it read, the PRs no live bead owns it found,
+and how many it cleared. It exits 0 when every owned PR was read, every update
+saved, the search read and every clear landed, and 2 otherwise, and Gas City
+labels its run record the same way. `gc order history pr-compare` lists its
+passes.
+
+**The cost, and the PRs it is sized for.** The PR watch and the landing order
+draw on the city login's GraphQL allowance, 5,000 points an hour, beside every
+other reader of GitHub in the city, such as the old intake `pr-facts.sh` until
+it retires and the agents' own `gh` calls. A pass of the cheap question costs 1
+point for each 50 PRs a rig owns, and a rig that owns none asks nothing, so it
+costs 60 points an hour for each rig that owns a PR. A pass of the net costs 1
+or 2 points for each 10 owned PRs, more for a PR whose lists run past a page,
+and 1 point for each page of its label search, once an hour. The landing order
+reads GitHub to learn nothing: a run in which no record owes an act asks
+GitHub nothing, and a merge's re-read costs about 5 points
+([The landing order](#the-landing-order)). So a change to a PR costs about 2
+points, the one-PR update that saves it, and each merge about 5 more.
+
+On 2026-11-22 the city's account had 20 open PRs, in all 6 of its rigs. Before
+any of them changes, that costs about 380 points an hour: about 360 for the
+cheap question and about 15 for the net. At 100 open PRs it is about 390 points
+an hour, and about 600 when each PR changes about once an hour.
+
+The design is sized for about 100 open PRs across the city. The cost grows
+with the rigs that own a PR, with the PRs past each 50 a rig owns, and with how
+often they change, and the likely cap is where the allowance runs out: somewhere
+around 1,000 to 1,500 open PRs when each changes about once an hour, less what
+the city's other readers of GitHub take. More than 100 open PRs is a known
+issue, and no code guards it.
 
 ## The landing order
 
-On a rig on the new path, `orders/pr-reconcile.toml` merges each PR on the
+`orders/pr-reconcile.toml` merges each PR on the
 pending record ([state-machine.md](state-machine.md#the-pending-record)). It is
-a rig-scoped cooldown exec order, every 5 minutes with a 300-second timeout,
-run in the rig's checkout, where it fetches the target.
+a rig-scoped cooldown exec order, every minute with a 120-second timeout, run
+in the rig's checkout, where it fetches the target.
 `assets/scripts/pr-reconcile.sh` names the rig's refinery from the roster and
 execs `gctk pr reconcile --refinery <it>`. A roster that does not read runs
 nothing and exits 2 for the next tick, and a rig whose roster names no refinery
-has no record to read. The order acts only on pending records, so on a rig
-still on the old path it finds none.
+has no record to read.
 
-Each run takes up to 20 beads that carry the marker `pr_reconcile_pending`,
-the least recently checked first (`pr_last_checked_at`), and starts none after
-four minutes (its `--count` and `--budget`). It reads each PR from GitHub by its
-number, never from a list of open PRs, because a PR missing from that list can
-have closed without merging.
+A run is the second of the PR's two loops. The PR watch keeps the read saved on
+each PR's bead current ([The PR watch](#the-pr-watch)), and a run finds and does
+its work from that saved read and the store alone, so it reads GitHub to learn
+nothing. It lists the beads that carry the marker `pr_reconcile_pending`, and
+every live bead, in one pass over the store. It takes each record, and each
+bead on the record with a ruling's disposition on it too, with or without the
+marker, an open or blocked one only while it is assigned to nobody or to the
+refinery, and writes nothing to a bead someone else works. It decides every
+record through that pass, by the evaluator's rule as `gctk pr status` applies
+it to the saved read, as the board and the labels derive a PR's status. A
+record that owes no act is reported with no write and no read of GitHub. A
+record that owes an act, or one whose decision the pass could not make, such as
+on a store read that did not answer, is decided again under the record lock,
+from a fresh read of its bead, before the act. A record whose bead holds no
+saved read of its PR, as before the watch's first pass over it, waits for the
+watch's next pass, which reads such a PR whole.
+
+Only the merge checks GitHub before it acts. A merge made in error puts work on
+the target, which no run takes back, and GitHub refuses on its own what else
+could go wrong with it: a merge pinned to a head that moved, one an approval or
+a required check does not cover, and a write by an account without the access.
+A record the evaluator finds ready on the saved read has the one-PR update
+re-read its PR in full, every part whatever its signs say, with the record lock
+free, since the update takes it to save. The act then decides the record again
+under the lock, on what that read saved, and requests the merge pinned to the
+head the evaluator judged there. So a person's comment made seconds before the
+merge holds it,
+which the GitHub intake's design relies on, and a ruling that lands during the
+re-read is read by the decision under the lock. A re-read that finds the PR
+not ready leaves the saved read corrected, so the next run finds no merge to
+check. Every other act reads of GitHub only what it changes: a withdrawal
+reads the reviews it dismisses and their threads (below), a send-back and a
+landing fetch the branch they judge, and a label write leaves the PR's labels
+to their writer, which reads them itself. An exception, a ready transition, a
+review run's pour and a retired PR's close read nothing of GitHub first, so a
+saved read out of date can delay one or start one a minute early. After a ready
+transition or a pour started early, a later run decides the record again on the
+read the watch saves. An exception's gate and a retired PR's close stand once
+made, so a PR the watch saw closed, and a person reopened before the next run,
+still gets its exception, whose gate asks a person what becomes of the work, or,
+when a ruling retired the PR, the close of its bead onto the ruling's successor.
+
+So a run reads the store six times whatever its records: the marked records,
+every live bead, the beads that carry a ruling's disposition, in one read the
+closed beads their blocks edges name, the store's blocked set, and the closed
+beads the waits name. It reads GitHub only for a merge's re-read, about 5
+points, and for what an act changes. Measured on 2026-11-22, read-only on the
+gc-toolkit rig's store, with 10 records, 796 live beads and the saved reads in
+the shape the PR watch saves, a run in which no record owed an act took 2.1 to
+2.3 seconds, read the store six times and read GitHub not at all, and its
+label comparison over the 11 PRs the rig's beads own added a read and about
+0.3 seconds, at a load average of about 3.5. It takes the records that owe an
+act in a shuffled order, so a record whose act is slow or keeps failing holds
+no other back, starts no act more than 45 seconds into the run, and stops each
+act at 30 seconds with whatever GitHub call, re-read, fetch, store read or
+write, human gate's filing or refinery's wake it is making. A fetch it stops
+gets a SIGTERM to git's process group, so git removes the lock files it holds
+in the checkout, and a kill only if it still runs 5 seconds later. The stop
+ends no review run's pour and no disposition writer. `gc formula cook
+--attach` makes the run before it adds the edge that attaches it, and a cook
+stopped between the two leaves a run whose steps the pools take and that the
+order never reads, so the next run would pour a second. An act starts a pour
+only while 10 seconds of its 30 remain, which a pour's few store calls fit
+inside, and otherwise leaves it to the next run. The disposition writer a
+retired PR's bead goes to once the act frees the lock ends the bead's branch on
+the git remote once its close lands, and a stop between the two would leave
+the branch of a closed bead that no run reads again. An act that does not
+complete records nothing: the record stays as it was, the next run decides it
+again, and the run exits 2. A run writes none of GitHub's side itself, since it
+reaches a bead only through the one-PR update, the merge's re-read included,
+and a record that owes no act gets no write.
 
 | The PR | The run |
 |---|---|
-| open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. Otherwise it asks the evaluator whether the PR is ready, and asks GitHub to squash-merge a ready one only while its head is that commit (`mergePullRequest` with `expectedHeadOid`), or adds it to its base's merge queue with that head where the base requires one, and pours a review run for one that is not ready when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). It records the check either way, and the next run reads the PR again |
-| open at another head | sends the bead back to the refinery, open, as `pull_request_head_changed`. The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone |
+| open at the head the refinery validated | marks a draft ready, without waiting for CI, once a review result passed at that head and target, no review run is attached and no ask a run can take is open. Otherwise the evaluator decides on the saved read whether the PR is ready. A ready one is re-read in full by the one-PR update, and on what that read saved GitHub is asked to squash-merge it only while its head is the head the evaluator judged (`mergePullRequest` with `expectedHeadOid`), or to add it to its base's merge queue with that head where the base requires one. One that is not ready gets a review run when no review result passed at that head and target, or an ask nothing holds is open on the bead (below). After a request, a later run decides on the read the watch saves |
+| open at another head | records the bead open, as `pull_request_head_changed`, and hands the head to the refinery in the write that assigns it the bead, once no withdrawal and no review run holds the head. While only conversations and asks hold the bead, it wakes the refinery after that write and clears the marker only once the wake lands (below). The refinery validates the new head and records it pending again. When it will not land the head as it stands, such as on a conflict with the target, it files the reason as an ask and then records the PR pending at the head its prep read (`refinery-requeue.sh`), so the ask holds the merge before the head is pending, a later run pours the review run that answers it, and its find-work leaves the ask alone. The saved read can lag a push, since the refinery pushes a head before it records it and the watch saves the push at its next pass, and the refinery validates whatever its prep fetched, a branch a person rewrote included, so the act fetches the PR's branch before it sends anything back. A tip at the head the saved read gives confirms it, and the bead goes back at it. When the tip contains the validated head, in the history the rig's clone holds, the saved read lags the branch: nothing is sent back, and a later run decides on the head the watch saves. Any other tip goes back as the head the branch holds, and a fetch or a read that fails sends nothing back until the next run. The refinery's prep takes the branch as it fetches it, so a reset head is the one it validates (`refinery-prep.sh`) |
 | merged at the validated head, with the merge commit on the freshly fetched target | records `mr_merged` and closes the bead; when bd refuses that close, for an open child or a live blocker, records the exception `pull_request_merged_close_refused` with the merge's evidence, and files its human gate |
 | closed unmerged, merged at another head, or no longer the PR the record names | records the exception, keeps the bead blocked and files a human gate keyed by its value |
-| a lookup or a fetch that failed, or a merge commit not yet on the target | records why in `pr_reconcile_error`, and the next run reads it again |
+| retired by a ruling, whose bead carries the disposition `pr-dispose.sh` records under the record lock before it closes the PR | requests no merge, pours no review run and marks nothing ready while the PR is open. Once the saved read shows the PR closed and no review run is attached, an act closes the asks and the withdrawals still open on the bead, then, with the record lock free, closes the bead onto the ruling's successor through `bead-rehome.sh`, run as the refinery ([state-machine.md](state-machine.md#disposition)). The script closes it only while it still has the status and assignee the act read under the lock and still records the ruling the act read, so a bead reassigned or ruled again once the lock is free goes to the next run, which reads it again. A close the script holds, such as one the ruling's open conversation holds, waits for the next run, which hands it over again, and fails no run. A retired PR that merged all the same lands as any other |
+| an act that did not complete: a request GitHub refused or did not answer, a merge's re-read that did not save, a fetch that failed, a merge commit not yet on the target, or an act stopped at its 30 seconds | records nothing: the record stays as it was, the next run decides it again, and the run exits 2, so Gas City's run record holds the failure |
 
-**Withdrawals come first.** While the PR is open, a run first carries out each
+**Withdrawals come first.** While the saved read shows the PR open, a run first carries out each
 open withdrawal on the bead, which a review run's triage files when it rules a
-head material (`gctk pr withdraw`). It waits while an approval it would dismiss
-carries an inline comment the intake has not routed. It dismisses each approval
-that stands on a commit that does not contain the withdrawal's head, by
-GitHub's compare of the two, or that GitHub refuses to compare, with the
-withdrawal's reason and the city's mark, then reads the reviews again and closes
-the withdrawal once none stands. When GitHub refuses a dismissal, it files a
-human gate on the bead keyed `approval-withdraw-refused`. A compare or a
-dismissal GitHub does not answer leaves the withdrawal for the next run. A
-withdrawal holds the bead from the refinery until it is carried out, so a record
-the run sends back to the refinery keeps its marker while one is open, and the
-order still reads it.
+head material (`gctk pr withdraw`), on its own read of the PR's reviews. It
+waits while an approval it would dismiss carries an inline comment the intake
+has not routed, on its read of the PR's review threads. It dismisses each
+approval that stands on a commit that does not contain the withdrawal's head in
+the history the rig's clone holds, with the withdrawal's reason and the city's
+mark, reads the reviews again, and closes the withdrawal once none stands past
+the ones it dismissed, so an approval given during the act keeps the withdrawal
+open for a later run. Before it dismisses any, it fetches
+the PR's branch into the clone, so an approved commit someone pushed from
+outside the city is judged by its own history. A commit the clone still does
+not hold, such as one a force-push left behind, contains no head, so its
+approval is dismissed. When GitHub refuses a dismissal, it files a human gate
+on the bead keyed `approval-withdraw-refused`. A dismissal, or a read of the
+review threads or the reviews, that GitHub does not answer, a fetch that fails,
+or a read of the clone's history that does not answer, leaves the withdrawal
+for the next run. A withdrawal holds the bead from the refinery until it is
+carried out, so a changed head stays assigned to nobody and keeps its marker
+while one is open, and the order still reads it.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the
@@ -889,39 +841,135 @@ record's PR bead, head, target and branch, and the pools and the binding the
 refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
 `binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, while a
-conversation holds the bead, unless its sitting stays for the work it sent, or
-while a human gate holds it. A run that ended without a result is poured again.
+while another open bead names the PR's branch, such as a rework child, or while
+a human gate holds it. A conversation on the PR holds its merge and nothing
+else, so runs are poured while one is open, and the evaluator's wait holds the
+merge until it closes. A run that ended without a result is poured again.
 When the last two runs at the validated head both ended without one, counting
 only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
 each ended ([state-machine.md](state-machine.md#checks)).
 
-A merge request binds only the head the evaluator judged, so a push that lands
-first makes GitHub refuse it, and the next run finds the head moved. The order
+**A pour cut short.** The pour is one `gc formula cook --attach`. It writes the
+bead's input convoy, then the review run, and last, in a write of its own, the
+bead's `blocks` edge onto the run's root (`wireFormulaCookGraphV2AttachRoot`,
+gascity `cmd/gc/cmd_formula.go`). A launch that stops between the run's write
+and the edge's leaves a review run that no edge of the bead names. bd writes
+the run in one transaction, so that run is whole, unless a transient failure
+had Gas City write it bead by bead (`Instantiate`, gascity
+`internal/molecule/molecule.go`), where a launch that stops partway leaves part
+of one. A launch stops there when Gas City
+ends the order's run at the order's timeout, which ends the run's process group
+and each group the run started, the cook's among them (`shellExecRunner`,
+gascity `cmd/gc/order_dispatch.go`), when the host goes down, or when the store
+fails the edge's write, on which the cook exits non-zero and leaves the run.
+The next run of the order then finds no run attached and pours a second at
+that head. That costs one more review of the head, because a review run pushes
+only under a lease on the head its round judged, and Gas City's claim retires
+the first once the refinery is assigned the bead. Gas City does not promise one
+run per bead here: each attach onto a bare bead makes an input convoy of its
+own, and "A caller that wants stable grouping or dedupe should create and
+target an explicit convoy" (gascity
+`engdocs/design/convoy-first-formulas-and-drain-v0.md`). Measured on
+2026-11-19, the 49 attaches the order made on 2026-11-17 wrote the edge 6 to 21
+seconds after the run's root was created, about 10 on average, and none of the
+135 review runs poured from 2026-11-17 to 2026-11-19 lacks its edge. The pack
+carries no code for this gap, and nothing in it watches for such a run.
+
+**How the refinery hears of a changed head.** A changed head is the refinery's
+to take once no withdrawal is open on the bead and no review run is attached to
+it. Until then the bead stays assigned to nobody and keeps its marker, so a
+later run carries the withdrawal out or reads the run's end, and no run is ever
+attached to a bead the refinery is assigned, which Gas City's claim would read
+as handed off ([the search](../specs/tk-1tfzr71.209/gas-city-search.md)). The
+run then hands the head over in one write that assigns the bead to the
+refinery and clears the marker. When nothing holds the bead at that point, Gas
+City gives the refinery its turn: an
+open bead assigned to the refinery that the store reads as ready is demand that
+wakes it, and core's `cascade-nudge-on-blocker-close` order nudges it when the
+bead's last blocker closes. A conversation or an ask on the PR holds the bead
+too, and holds only its merge, so the refinery's find-work takes the bead past
+it, but while one is open Gas City gives the refinery no turn for the bead. So
+when only conversations and asks hold the bead, the run hands the head over in
+two writes with the wake between them. It assigns the bead to the refinery,
+wakes the refinery and nudges it, with `gc session wake` and
+`gc session nudge` as a polecat's hand-off does, and only then clears the
+marker, so the find-work the wake starts lists the bead. That is the run that
+requeues the head when no withdrawal or run holds it, and otherwise the first
+run after the review run or the withdrawal ends, since its end changes what the
+record's decision reads of the store. A run that comes to the act more than 45 seconds in does
+not start it, and leaves the wake to a later run. A wake that does not land
+records nothing, as an act that does not complete records nothing: the marker
+stays, and the next run wakes the refinery again. The search for a Gas City
+primitive that covers the wake is
+[specs/tk-1tfzr71.165/gas-city-search.md](../specs/tk-1tfzr71.165/gas-city-search.md).
+
+A merge request binds only the head the evaluator judged on the merge's re-read,
+so a push that lands first makes GitHub refuse it, the record stays as it was,
+and once the watch saves the moved head, a later run sends it back. The order
 turns on no auto-merge, so no permission outlives the decision. A PR that waits
-on the operator's approval or on its checks holds no agent: the wait is the
-order's next run.
+on the operator's approval or on its checks holds no agent: the order carries
+the wait.
 
 **One record at a time.** Gas City starts no run while the last one's tracking
 bead or work is open, but its watchdog closes a tracking bead two minutes after
 it was made whether or not its run still works, so the next tick can start a
-second run beside the first. Each run therefore reads each record under the
+second run beside the first. Each act therefore reads its record under the
 store's record lock, a `flock` on `pr-record.lock` in the store's `.beads`
-directory, from its read of the record to its last write of it, and leaves the
-lock free a moment between two records so a publication waiting for it takes it
-there. Two runs that overlap act on one record one after the other, the second
-from the record as the first left it. The refinery's `gctk pr record` and
-`bead-rehome.sh`'s close take the same lock. The kernel frees the lock of a run
-the timeout stops, and the records it did not reach wait for the next run. No
-webhook fires the order, because an order a webhook fires skips Gas City's
-gates and each event would start a run of its own.
+directory, from its read of the record to its last write of it, waiting no
+longer than its 30 seconds while another writer holds it, and the run leaves
+the lock free a moment between two acts so a publication waiting for it takes
+it there. Two runs that overlap act on one record one after the other, the
+second from the record as the first left it. The refinery's `gctk pr record`,
+a review run's `gctk pr withdraw` and `gctk review passed --record`, the PR
+watch's `gctk pr refresh`, from its read of the bead to its write of the saved
+read, `bead-rehome.sh`'s close and `pr-dispose.sh`'s stamp of a ruling's
+disposition take the same lock. So a ruling's disposition lands before an act
+reads the bead, or waits until the act's last write of it, and a merge the act
+requests comes before the ruling, never after it. The kernel frees the lock of
+a run the timeout stops, and the acts it did not reach wait for the
+next run. No webhook fires the order, because an order a webhook fires skips
+Gas City's gates and each event would start a run of its own.
 
 **What a run acts on.** A run acts only on a bead it reads under the lock as
-carrying the marker and, unless the bead is closed, still assigned to the
-refinery, and each write is guarded on the status and assignee it read. A bead
-that a release took from the refinery has its marker cleared and its PR named
-in a note, and nothing else written.
+carrying the marker, or as an open or blocked bead on the record that carries a
+ruling's disposition, with or without the marker, and each write is guarded on
+the status and assignee it read. A bead's assignee says who works it now:
+nobody while its PR waits, and the refinery while it validates a head the PR
+moved to. A bead assigned to anyone else is that assignee's while they work
+it. A run does not take it, and a run that reads it assigned after taking it
+writes nothing to it, requests no merge and pours no review run. The PR's
+status names who holds it, and a later run works it once the assignee is gone.
+What takes a PR off the record is a write that says so: the refinery's send-back
+to the pool clears the marker in the write that reopens the bead, and a ruling
+retires the PR. A human gate on the bead holds its merge and its next review
+run.
+
+**The labels.** A run keeps each PR's `status:` and `held:` labels equal to
+what the store derives, for every PR the rig's live beads own
+([state-machine.md](state-machine.md#the-status-label-github-projection)). For
+each owned PR whose bead holds the PR watch's read of it, it compares the labels
+of the writer's that the read saved with the ones the store derives, as `gctk
+pr status` derives them over the run's own listing: the PR's status and held
+values while it is open, and none once it merged or closed. Where they differ,
+it has the labels' one writer, `pr-status-label.sh`, write them, reading
+nothing of the PR first, `reconcile` on a PR the saved read shows open and
+`clear` on one it shows merged or closed, handing it no labels, so the writer
+reads the PR's labels itself. A label is a view of the saved read and the
+store, so one a saved read out of date made wrong is put right once the watch
+saves the PR. A label write is an act among the others: it takes its
+place in the shuffled order, starts inside the 45 seconds, stops at 30, takes
+no lock and writes nothing on the bead. A write that does not land records
+nothing, so the next run finds the same difference and writes it again. A PR
+whose bead holds no read of it, or a read of another PR, owes no write until
+the PR watch saves one, and a PR more than one live bead owns owes none. So a
+change on the store's side, such as a gate a person files or clears, reaches
+the labels at the next run, and a label a person changes on GitHub is put back
+once the PR watch saves it. A PR the run lands has its labels cleared in the
+same run when the comparison finds them differing, as it does once the PR
+watch has saved the merge. When the saved read still shows the PR open, with
+the labels the store derives for it, the run lands it and writes no label, and
+once its bead closes, the net clears them ([The PR watch](#the-pr-watch)).
 
 **The seed audit after a landing.** In a rig whose clone carries
 `generated/seed-audit`, a run that closes a bead on a merge into the rig's
@@ -941,19 +989,25 @@ finds the lock held files nothing. The check holds no PR, so until that
 re-render lands, a PR's diff can show render lines it did not change. A check
 that does not run holds nothing either: when the default branch or its tip does
 not read, the render does not complete, the writer dispatches nothing, or the
-run has reached its deadline, the next landing on the branch checks again. The
+run has used its 45 seconds, the next landing on the branch checks again. The
 landing's line says what the check found.
 
-**Reading what a run did.** Each record's outcome prints on a line of its own,
-`<bead> <action>: <detail>`, where `readied` names a draft the run marked ready
-and `poured` a review run it attached. `gc order history pr-reconcile` lists the runs
-with their exits: 0 when every record read was handled, and 2 when the listing
-or the lock did not answer or a record's write failed.
+**Reading what a run did.** Each outcome prints on a line of its own, `<bead>
+<action>: <detail>`, where `readied` names a draft the run marked ready,
+`poured` a review run it attached, `labeled` a PR whose labels it had written,
+`retry` an act that did not complete and `left` an act the run's 45 seconds
+left for the next run, or a review run's pour an act left because less than 10
+of its 30 seconds remained. A run exits 0 when each record and each PR's labels
+it took up were decided and no act it started failed, and 2 when the listing
+did not answer, or a record or a PR's labels could not be decided or its act
+did not complete. Gas City labels the run's record by that exit, `exec` or
+`exec-failed`. `gc order history pr-reconcile` lists the runs and each run's
+record bead without the exit, and `gc bd show <bead>` shows a record's labels.
 
 ## Adjacent order: rig-checkout sync
 
-The live `rigs/*` checkouts are what the runtime executes, and `merge.sh`
-lands PRs via GitHub — so a merged PR is **not live** until
+The live `rigs/*` checkouts are what the runtime executes, and the landing
+order merges PRs on GitHub — so a merged PR is **not live** until
 `orders/reconcile-rig-checkouts.toml` (every 15m, city-scoped) fast-forwards
 each rig checkout:
 `git fetch origin && git merge --ff-only --no-overwrite-ignore origin/<default>`.

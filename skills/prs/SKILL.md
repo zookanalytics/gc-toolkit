@@ -7,8 +7,10 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 # PRs: what happens to an open pull request
 
 An open pull request is tracked by its anchor, the bead whose `merge_result` is
-`pull_request`. The refinery's reconcile reads the PR and its anchor every pass
-and lands the PR once it is approved and nothing holds it. Each option says what
+`pull_request_pending` on Gas Town's pending record, or
+`pull_request_head_changed` while the refinery validates a head it has not. The
+landing order reads the PR and its anchor on each run and merges the PR once it
+is approved and nothing holds it. Each option says what
 the message means, who acts on it, and the one writer that sends it. The
 writer's `--help` carries its flags.
 
@@ -52,26 +54,20 @@ the city resolved is still feedback, which the reconcile reads and routes.
 
 ## Send it back for rework
 
-The message is that the branch must change before it lands. A rework child
-blocks the anchor, which holds the merge, and a polecat resumes the PR's own
-branch, so the PR keeps its history.
-
-Writer: `rework-child.sh`, the one writer of a rework child that a ruling or a
-review verdict sends. A sitting reaches it through its sign-off, by adding
-`--rework` to the `--ruled yes` call (the converse-settle step), or to the
-`--answer` call of a turn that does not sign off (the converse-continue step).
-That also returns every review lane to unreviewed, so the whole branch is
-reviewed again once the rework lands. A review verdict reaches it through the
-reviewer's own sign-off.
-
-A PR on Gas Town's pending record, whose anchor's `merge_result` reads
-`pull_request_pending` or `pull_request_head_changed`, has one writer of its
-branch, its review run, so a send-back there is an ask the run takes, never a
-rework child or a supplement. The sign-off's `--rework` files it, with
-`--check <check>` once for each check the ruling sends back, and nothing returns
-to unreviewed, because the run triages the head its fix pushes. A must-fix point
-on such a PR that no sitting rules, such as one a sitting or the mechanik finds
-on another open PR, is an ask of its own on that PR's bead. It holds that PR's
+The message is that the branch must change before it lands. An open PR has one
+worker on its branch, its review run, and a sitting whose conversation holds the
+PR can edit the branch beside it with the operator, pushing under the lease
+(`converse-edit`). A send-back that the sitting does not make itself is an ask
+the run takes. A sitting files it through its sign-off, by adding `--rework` to
+the `--ruled yes` call (the converse-settle step), or to the `--answer` call of
+a turn that does not sign off (the converse-continue step), with
+`--check <check>` once for each check the ruling sends back, and
+`--rework-waiting-on <bead>` once for each bead the send-back waits for, such
+as the anchor of a PR that must land first, which the ask carries from the
+create that files it. Nothing returns to unreviewed, because the run triages
+the head its fix pushes. A must-fix point on an open PR that no sitting rules,
+such as one a sitting or the mechanik finds on another open PR, is an ask of
+its own on that PR's bead. It holds that PR's
 merge from the moment it is filed, and the first run that can take it rules it
 as it rules a person's comment:
 
@@ -82,48 +78,20 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" review ask <the anchor of the PR> --reason "<what must change, why, and what done looks like>" --source <the bead the point came from>
 ```
 
-Add `--check <check>` for each check the point sends back. Exit 0 prints
-`<ask> filed`, or `<ask> found` for an ask of the same source and reason, open
-or closed. Exit 3 refuses an anchor that owns no PR on the pending record,
-which takes the rework or the supplement here instead, and a check the index
-does not declare. Exit 2 is a read that did not answer, and the next call finds
-an ask that landed.
-
-Scope found while a PR on the old path is open, with no ruling behind it, rides
-a supplement bead instead. A supplement is PR-finishing work, and its create sets up
-everything the PR needs from it before it is sent to the polecat pool:
-
-- `--rig <rig>` names the rig whose store holds the anchor. A pool reads only
-  its own rig's store, and `gc sling` refuses a bead filed in another rig's
-  store.
-- `branch`, `existing_pr` and `target` are the PR's, so the polecat commits
-  onto the PR's branch and the PR gains the commits. `target` is the PR's base:
-  the integration branch for a stage's PR, and the default branch for a landing
-  bead's. The refinery blocks a supplement whose `target` is not the PR's base.
-- `anchor_bead` makes it a child of the anchor, joined to it by
-  `related:<anchor>`, and `blocks:<anchor>` makes the anchor wait on it, so
-  the PR does not merge before the supplement lands.
-
-Both edges ride the create, so the command slings nothing when the create
-names no supplement:
-
-```bash
-SUP=$(gc bd --rig <rig> create "<what the PR still needs>" -t task -d "<what to add, why, and what done looks like>" \
-  --deps related:<anchor>,blocks:<anchor> \
-  --metadata '{"anchor_bead":"<anchor>","branch":"<the PR head branch>","existing_pr":"<the PR url>","target":"<the PR base branch>"}' --json | jq -r '.id // empty') \
-  && [ -n "$SUP" ] \
-  && gc sling <rig>/<pool> "$SUP"
-```
-
-Once the supplement's work lands on the branch, the refinery closes the
-supplement and the anchor keeps gating the PR. Send one supplement at a time
-on a branch. A polecat pushes with a plain `git push`, so a second supplement
-in flight on the same branch is rejected non-fast-forward at its push and stays
-with its polecat.
+Add `--check <check>` for each check the point sends back, and
+`--waiting-on <bead>` for each bead of the anchor's id prefix that must close
+before the run takes the point, such as the anchor of a PR it must land after.
+Exit 0 prints `<ask> filed`, or `<ask> found` for an ask of the same source and
+reason, open or closed. Exit 3 refuses an anchor that owns no PR on the pending
+record, one that does not carry the id prefix its store gives the ask, a check
+the index does not declare, a `--waiting-on` bead of another id prefix or one
+the anchor's store does not hold, and a call that finds an ask of the same
+source and reason that does not wait on every `--waiting-on` bead. Exit 2 is a
+read that did not answer, and the next call finds an ask that landed.
 
 Replace a PR only when its implementation is wrong, never because it is
 incomplete. Missing docs, a test a reviewer asked for or an edge case the diff
-exposed is a supplement.
+exposed is an ask on the PR.
 
 ## Hold its merge
 
@@ -161,23 +129,25 @@ instead (the waits skill), and never file it under the anchor (the work skill).
 
 The message is that the PR will not land because its work moved, is not needed,
 or is wrong. The writer records the disposition on the anchor and closes the
-PR, and the reconcile closes the anchor on its next pass through the
-disposition writer, `bead-rehome.sh`.
+PR, and the landing order then closes the anchor on its next run through the
+disposition writer, `bead-rehome.sh`. The landing order requests no merge of
+the PR once the disposition is recorded, and it closes the asks and the approval
+withdrawals still open on the anchor, which no review run takes once the PR is
+closed.
 
 Writer: `"$(gc <binding> scripts-dir)/pr-dispose.sh" --anchor <anchor> --successor <bead> --kind not-needed --note "<why, one sentence>"`.
-The anchor must be open at `merge_result=pull_request`. Under `not-needed` the
-successor is the evidence that ruled the work out, such as the conversation
-where it was decided. Under `duplicate`, `folded`, `re-homed` and
-`fixed-upstream` it is the bead that carries the work now. Never close the PR
-by hand first: a PR closed with no disposition recorded reads as abandoned, and
-the reconcile files a human gate on the anchor asking whether to rework it or
-close it.
+The anchor must own an open PR: not closed, at `merge_result`
+`pull_request_pending` or `pull_request_head_changed`. Under `not-needed` the successor is the evidence
+that ruled the work out, such as the conversation where it was decided. Under
+`duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead that
+carries the work now. Never close the PR by hand first: a PR closed with no
+disposition recorded reads as abandoned, and the landing order files a human
+gate on the anchor asking whether to rework it or close it.
 
-A supplement still open on the PR keeps its `blocks` edge on the anchor, so the
-anchor's close waits until the supplement closes. Stop and close the supplement
-too (the work skill). An open human gate on the anchor holds its close the same
-way (`docs/finalize-gate.md`), so the reconcile closes the anchor once each
-gate is cleared.
+Every open bead that blocks the anchor holds its close: an open human gate on
+the anchor (`docs/finalize-gate.md`), the sitting's own conversation and a
+review run attached to the anchor, so the closer closes the anchor once each of
+them has closed.
 
 In a sitting, retire a PR only on the operator's ruling, and only through the
 sign-off writer: `--retire <kind>` on its `--ruled yes` call (the

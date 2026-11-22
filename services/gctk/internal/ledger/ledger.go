@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -61,6 +62,16 @@ func OpenContext(ctx context.Context, db string, ids ...string) (*Ledger, error)
 	return open(gcbd.New().WithContext(ctx), db, ids...)
 }
 
+// Within returns the ledger with every call it makes to the store ended once
+// ctx ends, as OpenContext's are, when the store is the city's client. Any
+// other store, such as a test's fake, answers as it does.
+func (l *Ledger) Within(ctx context.Context) *Ledger {
+	if c, ok := l.store.(*gcbd.Client); ok {
+		return New(c.WithContext(ctx))
+	}
+	return l
+}
+
 func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 	if db == "" {
 		routed, err := c.Route(ids...)
@@ -79,17 +90,23 @@ func open(c *gcbd.Client, db string, ids ...string) (*Ledger, error) {
 var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
-// the bead, the status it moves the bead to, the note it appends and the guard
-// it lands under, made in one update.
+// the bead, the status it moves the bead to, the agent it assigns the bead to,
+// the labels it removes, the note it appends and the guard it lands under, made
+// in one update.
 type Write struct {
-	id     string
-	title  string
-	sets   []string // key=value, in the order set
-	unsets []string
-	status string
-	note   string
-	guard  *guard
-	err    error
+	id          string
+	title       string
+	sets        []string // key=value, in the order set
+	unsets      []string
+	labelsOff   []string
+	status      string
+	assignee    *string
+	note        string
+	prio        *int
+	description *string
+	parent      *string
+	guard       *guard
+	err         error
 }
 
 // guard is the status and assignee a write lands under.
@@ -125,9 +142,20 @@ func (w *Write) Title(title string) { w.title = title }
 // the bead.
 func (w *Write) Status(status string) { w.status = status }
 
+// Assignee assigns the bead to assignee in the same write, "" for nobody. Gas
+// City reads an assignee as the delivery of the bead to that session as its
+// work, so an act that hands the bead to an agent assigns it, and an act that
+// ends the agent's work assigns it to nobody.
+func (w *Write) Assignee(assignee string) { w.assignee = &assignee }
+
 // Note appends text to the bead's notes in the same write, so the act and its
 // record land together or not at all. A later Note replaces an earlier one.
 func (w *Write) Note(text string) { w.note = text }
+
+// Priority moves the bead to priority p, 0 the highest, in the same write. The
+// priority is the row's own field, which no key declares, so the act that sets
+// it says what it means.
+func (w *Write) Priority(p int) { w.prio = &p }
 
 // WorkRecord gives the bead the runtime's work record in the same write: its
 // outcome, which reads shipped for work that landed and no-op for none, and,
@@ -149,14 +177,56 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 	}
 }
 
+// RemoveLabel removes label from the bead in the same write, by its exact text,
+// as bd removes one. A label is the row's own field, which no key declares, so
+// the act that removes one says what it means.
+func (w *Write) RemoveLabel(label string) {
+	if !slices.Contains(w.labelsOff, label) {
+		w.labelsOff = append(w.labelsOff, label)
+	}
+}
+
+// Description gives the bead text as its description in the same write. The
+// description is the row's own field, which no key declares, so the act that
+// sets it says what it means.
+func (w *Write) Description(text string) { w.description = &text }
+
+// Parent makes parent the bead's one parent in the same write, through bd's
+// parent-child edge, which bd refuses when parent sits under the bead. The edge
+// is the store's own, which no key declares, so the act that sets it says what
+// it means.
+func (w *Write) Parent(parent string) { w.parent = &parent }
+
+// Unroute removes the bead's route, gc.routed_to, in the same write, so no
+// pool's queue offers it. The key is Gas City's (lifecycle/lifecycle.toml,
+// [metadata.runtime_owned]), which gc sling writes and no domain declares, so
+// the act that takes a route away clears it here.
+func (w *Write) Unroute() { w.unset("gc.routed_to") }
+
+// Release takes the bead back from the pool and the session it was last sent
+// to, in the same write: its route, gc.routed_to, is set empty, and the route a
+// pour stamps, gc.execution_routed_to, and the session pins its last executor
+// left, gc.session_name and gc.session_id, are removed. The keys are Gas City's
+// (lifecycle/lifecycle.toml, [metadata.runtime_owned]), which no domain
+// declares, so the act that releases a bead clears them here. A route left
+// behind offers the bead to its pool again, and a session pin left behind is
+// the owner Gas City's orphan recovery resolves the bead to.
+func (w *Write) Release() {
+	w.set("gc.routed_to", "")
+	for _, pin := range []string{"gc.execution_routed_to", "gc.session_name", "gc.session_id"} {
+		w.unset(pin)
+	}
+}
+
 // Guard makes the write land only while the bead still has status and assignee,
 // "" for unassigned, which bd checks in the write's own transaction. A write
 // whose guard no longer holds writes nothing, and Commit returns an error that
 // is ErrGuard.
 func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status, assignee: assignee} }
 
-// args is the update's arguments: the guard, the status, the title, every set,
-// every removal, then the note.
+// args is the update's arguments: the guard, the status, the assignee, the
+// title, the priority, the description, the parent, every set, every removal,
+// every label removed, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -165,14 +235,29 @@ func (w *Write) args() []string {
 	if w.status != "" {
 		args = append(args, "--status="+w.status)
 	}
+	if w.assignee != nil {
+		args = append(args, "--assignee="+*w.assignee)
+	}
 	if w.title != "" {
 		args = append(args, "--title", w.title)
+	}
+	if w.prio != nil {
+		args = append(args, "--priority", strconv.Itoa(*w.prio))
+	}
+	if w.description != nil {
+		args = append(args, "--description", *w.description)
+	}
+	if w.parent != nil {
+		args = append(args, "--parent", *w.parent)
 	}
 	for _, s := range w.sets {
 		args = append(args, "--set-metadata", s)
 	}
 	for _, u := range w.unsets {
 		args = append(args, "--unset-metadata", u)
+	}
+	for _, l := range w.labelsOff {
+		args = append(args, "--remove-label", l)
 	}
 	if w.note != "" {
 		args = append(args, "--append-notes", w.note)
@@ -181,13 +266,13 @@ func (w *Write) args() []string {
 }
 
 // Filing is the filing of one new bead: its title, its type, its description,
-// every key it carries, the beads it blocks and the bead it was found from,
-// made in one create, so the bead lands with its keys and its edges or not at
-// all.
+// every key it carries, the beads it blocks, the beads it waits on and the bead
+// it was found from, made in one create, so the bead lands with its keys and
+// its edges or not at all.
 type Filing struct {
 	title, typ, description string
 	keys                    map[string]string
-	blocks                  []string
+	blocks, blockedBy       []string
 	from                    string
 	err                     error
 }
@@ -201,8 +286,15 @@ func (l *Ledger) File(title, issueType string) *Filing {
 func (f *Filing) Description(text string) { f.description = text }
 
 // Blocks makes the new bead block each bead named, by a blocks edge from that
-// bead onto it, written in the create itself.
+// bead onto it, written in the create itself. Create refuses the filing when
+// such an edge would hold nothing.
 func (f *Filing) Blocks(ids ...string) { f.blocks = append(f.blocks, ids...) }
+
+// BlockedBy makes the new bead wait on each bead named, by its own blocks edge
+// onto that bead, written in the create itself, so no read finds the new bead
+// without its wait. Create refuses the filing when such an edge would hold
+// nothing.
+func (f *Filing) BlockedBy(ids ...string) { f.blockedBy = append(f.blockedBy, ids...) }
 
 // From records the bead the new one was found from, by the new bead's own
 // discovered-from edge onto it, which is no wait and holds nothing.
@@ -217,8 +309,8 @@ func (f *Filing) fail(err error) {
 }
 
 // args is the create's arguments: the type, the description, the keys as one
-// JSON object, then the beads the new one blocks and the bead it was found
-// from, as one --deps list.
+// JSON object, then the beads the new one blocks, the beads it waits on and the
+// bead it was found from, as one --deps list.
 func (f *Filing) args() ([]string, error) {
 	args := []string{"-t", f.typ}
 	if f.description != "" {
@@ -231,9 +323,12 @@ func (f *Filing) args() ([]string, error) {
 		}
 		args = append(args, "--metadata", string(raw))
 	}
-	deps := make([]string, 0, len(f.blocks)+1)
+	deps := make([]string, 0, len(f.blocks)+len(f.blockedBy)+1)
 	for _, id := range f.blocks {
 		deps = append(deps, "blocks:"+id)
+	}
+	for _, id := range f.blockedBy {
+		deps = append(deps, "blocked-by:"+id)
 	}
 	if f.from != "" {
 		deps = append(deps, "discovered-from:"+f.from)
@@ -245,10 +340,14 @@ func (f *Filing) args() ([]string, error) {
 }
 
 // Create files f as one create and returns the new bead's id. A filing a Set
-// refused, or one with no title or type, files nothing. A create the store
-// failed may still have filed the bead, as gcbd.Store.Create says, so its
-// error says that whether it did is unknown, and the caller finds the bead
-// before it files again.
+// refused, or one with no title or type, files nothing. So does a filing whose
+// wait edge would hold nothing, the edge from a bead it blocks or the edge onto
+// a bead it waits on, and its error is a *NotHeld. For a filing with such
+// edges, Create first reads the prefix the store gives a bead it files, then
+// every bead the edges name in one read, and a read that fails files nothing
+// and returns its error. A create the store failed may still have filed the
+// bead, as gcbd.Store.Create says, so its error says that whether it did is
+// unknown, and the caller finds the bead before it files again.
 func (l *Ledger) Create(f *Filing) (string, error) {
 	if f.err != nil {
 		return "", f.err
@@ -260,11 +359,117 @@ func (l *Ledger) Create(f *Filing) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q did not encode: %w", f.title, err)
 	}
+	var far []string
+	for _, id := range slices.Concat(f.blocks, f.blockedBy) {
+		if !slices.Contains(far, id) {
+			far = append(far, id)
+		}
+	}
+	if len(far) > 0 {
+		prefix, err := l.store.Prefix()
+		if err != nil {
+			return "", fmt.Errorf("ledger: the filing of %q files nothing: %w", f.title, err)
+		}
+		if err := l.holds(prefix, far); err != nil {
+			return "", fmt.Errorf("ledger: the filing of %q files nothing: %w", f.title, err)
+		}
+	}
 	id, err := l.store.Create(f.title, args...)
 	if err != nil {
 		return "", fmt.Errorf("ledger: the filing of %q may not have landed: %w", f.title, err)
 	}
 	return id, nil
+}
+
+// ErrNotHeld is the error of a wait edge the ledger refused, with nothing
+// written, because the edge would hold nothing. A *NotHeld says why.
+var ErrNotHeld = errors.New("the edge would hold nothing")
+
+// NotHeld is a wait edge the ledger refused, with nothing written, because it
+// would hold nothing, and its message names the beads at the edge's far end
+// and why. Either they do not carry the id prefix of the bead at the edge's
+// other end, and bd keeps an edge between beads of two prefixes as one into
+// another store, which holds nothing even when this store holds both
+// (IsExternalDepTarget), or the store does not hold them, and an edge onto a
+// bead its store does not hold holds nothing. It is ErrNotHeld.
+type NotHeld struct {
+	ids     []string
+	prefix  string
+	foreign bool
+}
+
+func (e *NotHeld) Error() string {
+	ids := strings.Join(e.ids, " or ")
+	if e.foreign {
+		return ids + " does not carry the id prefix " + e.prefix + ", and bd keeps an edge between beads of two id " +
+			"prefixes as one into another store, which holds nothing even when this store holds the bead"
+	}
+	return "the store holds no bead " + ids + ", and an edge onto a bead the store does not hold holds nothing"
+}
+
+// Unwrap makes a *NotHeld ErrNotHeld.
+func (e *NotHeld) Unwrap() error { return ErrNotHeld }
+
+// holds is nil when an edge between a bead of id prefix prefix and each bead
+// of ids would hold: each carries prefix, and the store holds it, read in one
+// Find. Otherwise it is the *NotHeld that names the beads that do not, those
+// of another prefix ahead of any read. A read that fails returns its error.
+func (l *Ledger) holds(prefix string, ids []string) error {
+	var foreign []string
+	for _, id := range ids {
+		if prefixOf(id) != prefixOf(prefix+"-") {
+			foreign = append(foreign, id)
+		}
+	}
+	if len(foreign) > 0 {
+		return &NotHeld{ids: foreign, prefix: prefix, foreign: true}
+	}
+	rows, err := l.Find(ByID(ids...).WithClosed())
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for _, id := range ids {
+		if !slices.ContainsFunc(rows, func(r *Record) bool { return r.ID == id }) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return &NotHeld{ids: missing}
+	}
+	return nil
+}
+
+// prefixOf is the prefix by which bd tells whether an edge between two beads
+// stays in one store: the bead id up to its first dash, the dash included, or
+// "" for an id with none (ExtractPrefix). So a store prefix that holds a dash,
+// such as a-b, mints ids that bd reads by its first part, a-.
+func prefixOf(id string) string {
+	if i := strings.Index(id, "-"); i >= 0 {
+		return id[:i+1]
+	}
+	return ""
+}
+
+// AddBlocker makes blocker hold the bead id, by a blocks edge from id onto it,
+// once blocker carries id's prefix and a read finds it in the store. It refuses
+// with a *NotHeld, which is ErrNotHeld, when the edge would hold nothing. A
+// read that fails returns its *ReadError, and an edge write that exits
+// non-zero has failed.
+func (l *Ledger) AddBlocker(id, blocker string) error {
+	if err := l.holds(strings.TrimSuffix(prefixOf(id), "-"), []string{blocker}); err != nil {
+		if errors.Is(err, ErrNotHeld) {
+			return fmt.Errorf("ledger: no edge from %s onto %s: %w", id, blocker, err)
+		}
+		return err
+	}
+	if out, err := l.store.AddEdge(id, blocker, EdgeBlocks); err != nil {
+		if out = strings.TrimSpace(out); out != "" {
+			return fmt.Errorf("ledger: the edge from %s onto %s did not land (%w): %s", id, blocker, err, out)
+		}
+		return fmt.Errorf("ledger: the edge from %s onto %s did not land: %w", id, blocker, err)
+	}
+	return nil
 }
 
 // Commit makes w as one update, whose exit decides whether it landed. A write a
@@ -275,7 +480,8 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets) == 0 && w.status == "" && w.title == "" && w.note == "" {
+	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
+		w.description == nil && w.parent == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
 	if out, err := l.store.Update(w.id, w.args()...); err != nil {
@@ -286,3 +492,60 @@ func (l *Ledger) Commit(w *Write) error {
 	}
 	return nil
 }
+
+// Unrelate removes the relates-to link between id and other, in both
+// directions, as one `gc bd dep unrelate`. The write's exit decides whether it
+// landed.
+func (l *Ledger) Unrelate(id, other string) error {
+	if out, err := l.store.Unrelate(id, other); err != nil {
+		return landed(fmt.Sprintf("the removal of the link between %s and %s", id, other), out, err)
+	}
+	return nil
+}
+
+// ResolveGate closes the gate id with reason as its answer, as one `gc bd gate
+// resolve`. bd closes a gate already closed without changing it and exits 0
+// either way, so a caller that must know whose answer the gate holds reads the
+// gate after this write: that read settles a race between two answers, and
+// does not confirm the write. A write that exits non-zero has failed.
+func (l *Ledger) ResolveGate(id, reason string) error {
+	if out, err := l.store.ResolveGate(id, reason); err != nil {
+		return landed("the answer on "+id, out, err)
+	}
+	return nil
+}
+
+// Reopen opens the closed bead id again with reason, as one `gc bd reopen`,
+// which clears its close and its reason, so what the bead blocked waits on it
+// again. The write's exit decides whether it landed.
+func (l *Ledger) Reopen(id, reason string) error {
+	if out, err := l.store.Reopen(id, reason); err != nil {
+		return landed("the reopen of "+id, out, err)
+	}
+	return nil
+}
+
+// landed is the error of a write named what that did not land, with what the
+// store said.
+func landed(what, out string, err error) error {
+	if out = strings.TrimSpace(out); out != "" {
+		return fmt.Errorf("ledger: %s did not land (%w): %s", what, err, out)
+	}
+	return fmt.Errorf("ledger: %s did not land: %w", what, err)
+}
+
+// SetState sets one state dimension of bead id to value, with reason, as one
+// `gc bd set-state`: bd records the change in an event bead and makes
+// <dimension>:<value> the bead's one label for the dimension. Gas City's hold
+// labels are such states (hold=mayor is the label hold:mayor). The write's exit
+// decides whether it landed, and nothing reads it back.
+func (l *Ledger) SetState(id, dimension, value, reason string) error {
+	if err := l.store.SetState(id, dimension, value, reason); err != nil {
+		return fmt.Errorf("ledger: the state %s=%s on %s did not land: %w", dimension, value, id, err)
+	}
+	return nil
+}
+
+// ReadyIDs is the id of every bead the store reports ready. A read that fails
+// returns its *ReadError.
+func (l *Ledger) ReadyIDs() ([]string, error) { return l.store.ReadyIDs() }

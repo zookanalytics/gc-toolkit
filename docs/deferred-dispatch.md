@@ -100,19 +100,19 @@ that is plainly work and carries neither a route nor `gc.dispatch_when_ready`
 is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
-An arm is a dispatch path, as a route is. Both are defined once, in
-`assets/scripts/dispatch-path.sh`, and each reader that asks whether a bead's
-dispatch is already decided sources that file: the proactive scan and sling,
+An arm is a dispatch path, as a route is. Both are defined once for the
+scripts, in `assets/scripts/dispatch-path.sh`, and each script that asks whether
+a bead's dispatch is already decided sources that file:
 `doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
-`assets/scripts/stand-down.sh`. So an arm also keeps the bead out of the
-proactive scan. `tools/gc-proactive.sh scan` looks for raw input to react to,
-and it drops a bead that has a dispatch path.
-Otherwise a sweep that ran between a blocker closing and the deferred-dispatch
-order's next pass would sling a first reaction at a bead the arm is about to
-dispatch.
-`gc-helm.sh react` and `operator-intake.sh` skip the scan and name a bead to
-`tools/gc-proactive.sh sling` directly, so the sling refuses a bead that has a
-dispatch path too, and a reaction they ask for cannot race the arm either.
+`assets/scripts/stand-down.sh`. The first reaction asks the same of the arm's
+record in gctk. So an arm also keeps the bead out of the proactive sweep.
+`gctk reaction sweep` looks for raw input to react to, and it drops a bead that
+has a dispatch path. Otherwise a sweep that ran between a blocker closing and
+the deferred-dispatch order's next pass would sling a first reaction at a bead
+the arm is about to dispatch. `operator-intake.sh` and `patrol-finding.sh` skip
+the sweep and name a bead to `gctk reaction sling` directly, so the sling
+refuses a bead that has a dispatch path too, and a reaction they ask for cannot
+race the arm either.
 
 To see what is owed in a rig's store, and to take an arm back:
 
@@ -149,9 +149,9 @@ as any release of an armed bead does.
 
 Every write that stops an armed bead, or sends it on another way, removes the arm
 first, through `gctk bead disarm`, and goes on only once that exits 0, for the same
-reason. `gc-helm.sh takeaway --release` makes the disarm its first write, before
+reason. `gctk bead takeaway --release` makes the disarm its first write, before
 the release write, the waits, the run's end and any `--route` or `--assign`, so a
-bead it stops stays stopped once nothing holds it. `gc-helm.sh accept` does too,
+bead it stops stays stopped once nothing holds it. `gctk reaction accept` does too,
 because the answer it gives the recommendation's gate could release the bead to its
 arm ahead of Accept's own pour. So do `stand-down.sh` and a sitting's withdrawal of
 the subject's arm and route.
@@ -200,8 +200,8 @@ is not a `blocks` edge, and hears at its next turn. Nothing nudges on a raw
 `bd update --assignee` either, so a person hands work to a named agent through
 the work skill's send.
 
-`first-reaction-dispose.sh` hands a bead to the mechanik as a route and to the
-refinery or the keeper as the assignee, and refuses the deacon, the witness and
+`gctk reaction dispose` hands a bead to the mechanik as a route and to the
+refinery as the assignee, and refuses the deacon, the witness, the keeper and
 any agent this section does not name before it writes anything. Once the bead
 is handed over, either exit reads whether `bd` reports it ready, and nudges the
 agent when it does. That covers a `--then-assign` bead whose blocker closed

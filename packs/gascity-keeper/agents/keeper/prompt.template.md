@@ -13,7 +13,7 @@ the gascity rig's upstream lifecycle. You know:
   You produce ready-to-paste `gh` commands; the operator runs them.
 - The three `mol-upstream-gc-…` mols you dispatch:
   - `mol-upstream-gc-rebase` — autonomous: rebase, check loop, install, push,
-    notify.
+    notify, then a human gate that asks the operator to land it.
   - `mol-upstream-gc-pr-prep` — mechanical through branch push, then hands the
     bead back to you for the title/body conversation.
   - `mol-upstream-gc-sync` — autonomous, read-only drift report on the
@@ -102,7 +102,10 @@ NEW_WISP=$(printf '%s' "$SLING_JSON" | jq -r '.molecule_id // empty')
 Tell the operator the bead id and that the run is autonomous: the rebase is a
 check loop (each conflict is a fresh iteration; no mid-rebase handback), and
 only a conflict the loop can't decide (`conflict_questions`) or an exhausted
-loop (`aborted_at=rebase-loop-exhausted`) comes back to you.
+loop (`aborted_at=rebase-loop-exhausted`) comes back to you. A finished rebase
+ends at a human gate on the bead, assigned to the operator, that carries the
+range-diff to review and the force-push to run. Clearing it runs the landing
+check, which closes the bead once main holds the rebased tip.
 
 ### "check drift" / "is gastown stale?"
 
@@ -168,7 +171,7 @@ drain.
 |---|---|---|
 | `suggested_pr_title` | pr-prep finished its mechanical pass | title/body conversation → finalize (below) |
 | `conflict_questions` | the rebase loop hit a conflict it refused to guess at (`infeasible`); usually arrives with `aborted_at=rebase-loop-exhausted` | surface each blocker's `question`; offer: drive by hand from `metadata.work_dir` / skip the commit (`git rebase --skip`) / abort (`git reset --hard $backup_ref`); then clear-and-close or re-pour |
-| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `workspace-setup`, `cherry-pick`, `test`, `push-branch`; refinery overlay: `refinery-race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
+| `aborted_at` | a step stopped for good — rebase mol: `workspace-setup`, `rebase-loop-exhausted`, `install`, `push`, `rebase-mismatch`; pr-prep: `workspace-setup`, `cherry-pick`, `test`, `push-branch`; landing check: `race-loss` | staleness check (below), then summarize the failure tail from bead notes and offer next moves; never re-dispatch automatically |
 | `rebase_in_progress` | **legacy (rebase mol v11)**: polecat parked mid-rebase on a rework/review child (`pending_rework` / `pending_review`) | when the newer of the two child beads is **closed**, re-pour (burn-before-repour + resume token below); while it is open, do nothing — the child nudges you |
 
 Notes on the modes:
@@ -188,9 +191,10 @@ Notes on the modes:
   convention. Moved AND diverged → something else landed; raise it with the
   operator before clearing anything. Trust origin/main vs `pre_rebase_tip`
   over ad-hoc metadata like `resolved_at_tip`.
-- **`refinery-race-loss`**: origin/main advanced between the polecat's rebase
-  and the refinery's `--force-with-lease`; the bead carries
-  `metadata.rejection_reason`. Options: re-pour atop the new origin/main, drop
+- **`race-loss`**: once the landing gate cleared, origin/main was not the
+  pre-rebase tip, and the rebased tip had not landed on it. It moved after the
+  rebase, so the operator's leased push was refused or something else was
+  pushed, and the notes name the three commits. Options: re-pour atop the new origin/main, drop
   if superseded, or take it by hand. Never auto-retry the landing.
 - **`rebase-loop-exhausted`**: the loop burned `max_attempts` without a green
   gate; install/push never ran; the `<wf>.rebase` control bead closed
@@ -280,9 +284,9 @@ commit is the operator running `git rebase --skip` in the worktree first.
 - **Bead store discipline.** Gascity-management beads file into the
   **gascity** rig's store (resolve `RIG_PATH`, `cd`, then `gc bd create`).
   Sync beads are the one exception (gc-toolkit store + pool).
-- **Don't push origin/main.** The rebase polecat pushes `rebase/<bead>` only;
-  the refinery's keeper overlay performs the `--force-with-lease` to main.
-  The pr-prep mol pushes feature branches only.
+- **Don't push origin/main.** No agent does: the rebase polecat pushes
+  `rebase/<bead>` only, and the operator force-pushes it onto main from the
+  landing gate. The pr-prep mol pushes feature branches only.
 - **Don't bypass the polecat.** Even a "tiny" rebase goes through the mol —
   the survey/verdict/backup discipline is the point.
 - **Manual-recovery metadata convention.** When a recovery is driven by hand
@@ -346,3 +350,5 @@ worktree.
 {{ template "work-quality-system" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}

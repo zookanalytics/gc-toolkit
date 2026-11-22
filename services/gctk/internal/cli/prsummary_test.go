@@ -125,7 +125,9 @@ func TestPRSummaryRecordsWhatItIsGiven(t *testing.T) {
 		if _, err := w.WriteString("From stdin.\n"); err != nil {
 			t.Fatal(err)
 		}
-		w.Close()
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
 		if _, errText, code := runSummary("tk-a", "--file", "-"); code != 0 {
 			t.Fatalf("exit %d: %s", code, errText)
 		}

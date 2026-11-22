@@ -10,8 +10,9 @@ import (
 // Selection is the beads one Find reads: the beads named, the beads that carry a
 // declared key, the beads whose key holds one value, the beads the store lists
 // under a parent, the beads whose title holds a text, the beads of one issue
-// type, or every bead. It reads live beads alone unless WithClosed widens it. A
-// key's selection matches its current spelling, not its legacy aliases.
+// type, the beads assigned to one assignee, or every bead. It reads live beads
+// alone unless WithClosed widens it, and InStatus and Listed narrow it. A key's
+// selection matches its current spelling, not its legacy aliases.
 type Selection struct {
 	q    gcbd.Query
 	none bool
@@ -56,9 +57,30 @@ func Matching[T any](k Key[T], v T) Selection {
 	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}}
 }
 
+// Assigned selects the beads assigned to who, as the store's listing matches an
+// assignee: exactly.
+func Assigned(who string) Selection {
+	return Selection{q: gcbd.Query{Assignee: who}, none: who == ""}
+}
+
 // WithClosed widens s to closed beads as well as live ones.
 func (s Selection) WithClosed() Selection {
 	s.q.Closed = true
+	return s
+}
+
+// InStatus narrows s to the beads whose status is one of statuses.
+func (s Selection) InStatus(statuses ...string) Selection {
+	s.q.Statuses = slices.Clone(statuses)
+	s.none = s.none || len(statuses) == 0
+	return s
+}
+
+// Listed narrows s to the beads bd's listing shows when asked for nothing more,
+// so the store leaves out the rows it hides unless asked
+// ([Record.ListedByDefault]): wisps, templates, gates and infrastructure beads.
+func (s Selection) Listed() Selection {
+	s.q.Listed = true
 	return s
 }
 
@@ -98,6 +120,31 @@ type ServeRule struct {
 func Ready[T any](l *Ledger, k Key[T], rule ServeRule) ([]*Record, error) {
 	rows, err := l.store.Ready(gcbd.ReadyQuery{HasKey: k.decl.name, Unassigned: rule.Unassigned,
 		ExcludeTypes: slices.Clone(rule.ExcludeTypes), ExcludeLabels: slices.Clone(rule.ExcludeLabels)})
+	if err != nil {
+		return nil, err
+	}
+	return records(rows), nil
+}
+
+// ReadyByPriority reads every bead the store reports ready under rule, by bd's
+// own readiness, highest priority first by bd's priority sort. Each record's
+// edges are the listing's, as Find's are. A read that fails returns its
+// *ReadError.
+func (l *Ledger) ReadyByPriority(rule ServeRule) ([]*Record, error) {
+	rows, err := l.store.Ready(gcbd.ReadyQuery{Every: true, Unassigned: rule.Unassigned, ByPriority: true,
+		ExcludeTypes: slices.Clone(rule.ExcludeTypes), ExcludeLabels: slices.Clone(rule.ExcludeLabels)})
+	if err != nil {
+		return nil, err
+	}
+	return records(rows), nil
+}
+
+// Dependents reads the beads that have an edge of type typ onto id. Each
+// record carries the dependent's own fields, its keys among them, and no
+// edges, since the store's dependents read prints none. A read that fails
+// returns its *ReadError, and so does an id the store does not hold.
+func (l *Ledger) Dependents(id, typ string) ([]*Record, error) {
+	rows, err := l.store.Dependents(id, typ)
 	if err != nil {
 		return nil, err
 	}

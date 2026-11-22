@@ -43,9 +43,9 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request","step","convoy","startup-health-episode"]'
 
 # Standing-record task_kinds: a held-by-design host for escalations, not work
-# anyone claims. The one definition, shared with the liveness
-# sweep and the proactive scan, exposes $STANDING_KINDS_JQ. An unsourceable one
-# warns: without it a standing record would read as marooned work.
+# anyone claims. The one definition, shared with the liveness sweep, exposes
+# $STANDING_KINDS_JQ. An unsourceable one warns: without it a standing record
+# would read as marooned work.
 # shellcheck source=../../assets/scripts/standing-kinds.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
     echo "cannot determine whether the HQ store holds marooned work"
@@ -108,14 +108,11 @@ scrub() { tr -d '\000-\037'; }
 # A check that overlaps its probes runs each one as a background job, and a job
 # cannot hand its parent a variable, so every read lands in a file under one
 # scratch tree. reads_init <check> makes that tree, sets WORK to it, and removes
-# it when the check exits. It holds a file in the tree open on fd 9, because the
-# host's scratch reaper removes any gctk-* tree that no process holds open. It
-# returns non-zero when the tree cannot be made or held, and then nothing can be
-# read.
+# it when the check exits. It returns non-zero when the tree cannot be made, and
+# then nothing can be read.
 reads_init() {
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-$1.XXXXXX" 2>/dev/null) || { WORK=""; return 1; }
     trap '[ -z "$WORK" ] || rm -rf "$WORK"' EXIT
-    { exec 9>"$WORK/.hold"; } 2>/dev/null
 }
 # read_to <file> <probe...> runs one bounded probe with its stdout scrubbed into
 # <file> and its stderr in <file>.err, and returns the probe's own exit status.

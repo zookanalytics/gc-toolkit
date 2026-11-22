@@ -1,15 +1,22 @@
 // Package gascity is gctk's runtime adapter: Gas City as gctk reaches it apart
 // from its store, which internal/gcbd reaches (docs/gctk-architecture.md, "The
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
-// when it names none, names the city's root, and runs the pack's scripts that
-// ask a person. A domain reaches them only through Runtime. City is the city
-// gctk runs in, and gascity/fake records what a domain asked and answers as its
-// test says, so a domain's rules are tested in Go with no Gas City.
+// when it names none, reads the city's roster, its named sessions, its
+// session list, its rigs and whether a formula resolves, wakes and nudges a
+// session, names the city's root and the settings file its Claude sessions
+// start with, runs the pack's scripts that ask a person, runs gc doctor, and
+// reads and records the city's events. A domain reaches them only through
+// Runtime, or through an interface of its own that City meets. City is the
+// city gctk runs in, and gascity/fake records what a domain asked and answers
+// as its test says, so a domain's rules are tested in Go with no Gas City. It
+// also states Gas City's dispatch holds (hold.go), the one rule of them each
+// domain asks.
 package gascity
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Runtime is Gas City as one gctk process reaches it.
@@ -35,17 +43,46 @@ type Runtime interface {
 	// does not read or no agent in the config answers to s.Target. It reads
 	// s.Rig, s.Target and s.Bead.
 	DefaultFormula(s Sling) (string, error)
+	// Wake runs one `gc session wake <session>` and returns what it answered.
+	Wake(session string) Result
+	// Nudge runs one `gc session nudge <session> <message>` and returns what it
+	// answered.
+	Nudge(session, message string) Result
 	// Script runs one of the pack's scripts, by its file name in the pack's
 	// scripts directory, and returns what it answered.
 	Script(name string, args ...string) Result
 	// CityRoot is the city's root directory, the one that holds its .gc.
 	CityRoot() (string, error)
+	// ShowFormula runs one `gc formula show <name>`.
+	ShowFormula(name string) Result
+	// Agents reads the city's roster. A read that does not answer is an error.
+	Agents() ([]Agent, error)
+	// NamedSessions reads the named sessions the city's config lists. A read
+	// that does not answer is an error.
+	NamedSessions() ([]NamedSession, error)
+	// Rigs reads the rigs the city names, its HQ among them. A read that does
+	// not answer is an error.
+	Rigs() ([]Rig, error)
+	// Within returns the runtime with every command it runs stopped once ctx
+	// ends, for an act a caller bounds.
+	Within(ctx context.Context) Runtime
+	// ClaudeSettings is the settings file Gas City starts each Claude session
+	// with, whether or not it is there.
+	ClaudeSettings() (string, error)
 }
 
 // Sling is one `gc sling <target> <bead> --on <formula> --title <title>`,
-// with gc's --rig when Rig names one.
+// with no <target> when Target is empty, which pours the formula on the bead
+// and leaves each step to the route the formula gives it, gc's --rig when Rig
+// names one, no --title when Title is empty, and a
+// --var for each of Vars, each a <key>=<value> the formula's pour takes. A
+// sling with NoFormula set pours nothing and files no convoy (`gc sling <target>
+// <bead> --no-formula --no-convoy`): it routes the bead to the target's own
+// name, which a named session's hook serves.
 type Sling struct {
 	Rig, Target, Bead, Formula, Title string
+	Vars                              []string
+	NoFormula                         bool
 }
 
 // Result is what a command answered: its exit code and its output, standard
@@ -83,15 +120,26 @@ type SlingResult struct {
 
 // City is the Gas City gctk runs in, reached through `gc` on PATH and the
 // pack's scripts directory GCTK_SCRIPTS_DIR names. Every command it runs starts
-// in dir, the process's own working directory when dir is empty.
+// in dir, the process's own working directory when dir is empty, acts as actor
+// when one is named, and stops once ctx ends, when ctx is set.
 type City struct {
 	bin        string
 	scriptsDir string
 	dir        string
+	actor      string
+	ctx        context.Context
 
 	once   sync.Once
 	agents []agent
 	cfgErr error
+
+	namedOnce sync.Once
+	named     []NamedSession
+	namedErr  error
+
+	rigsOnce sync.Once
+	rigs     []Rig
+	rigsErr  error
 }
 
 var _ Runtime = (*City)(nil)
@@ -113,7 +161,23 @@ func (c *City) In(dir string) *City {
 	if abs, err := filepath.Abs(scripts); scripts != "" && err == nil {
 		scripts = abs
 	}
-	return &City{bin: c.bin, scriptsDir: scripts, dir: dir}
+	return &City{bin: c.bin, scriptsDir: scripts, dir: dir, actor: c.actor, ctx: c.ctx}
+}
+
+// As returns the city with every command it runs acting as actor, which
+// BEADS_ACTOR names to it, as bead-rehome.sh reads its actor, which a bead
+// assigned to someone must be for the script to close it.
+func (c *City) As(actor string) *City {
+	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: actor, ctx: c.ctx}
+}
+
+// Within returns the city with every command it runs stopped once ctx ends:
+// the command is killed, a child of it that still holds its output keeps the
+// call waiting stopGrace longer at most, and the result's Err wraps the error
+// that ended ctx. A child of the command stays in gctk's process group, so
+// whatever stops that group, such as an order's timeout, still reaches it.
+func (c *City) Within(ctx context.Context) Runtime {
+	return &City{bin: c.bin, scriptsDir: c.scriptsDir, dir: c.dir, actor: c.actor, ctx: ctx}
 }
 
 // Sling runs the sling in gctk's own process group, so whatever stops gctk's
@@ -124,8 +188,22 @@ func (c *City) Sling(s Sling) SlingResult {
 	if s.Rig != "" {
 		args = append(args, "--rig", s.Rig)
 	}
-	args = append(args, s.Target, s.Bead, "--on", s.Formula, "--title", s.Title)
-	r := run(c.dir, c.bin, args...)
+	if s.Target != "" {
+		args = append(args, s.Target)
+	}
+	args = append(args, s.Bead)
+	if s.NoFormula {
+		args = append(args, "--no-formula", "--no-convoy")
+	} else {
+		args = append(args, "--on", s.Formula)
+		if s.Title != "" {
+			args = append(args, "--title", s.Title)
+		}
+		for _, v := range s.Vars {
+			args = append(args, "--var", v)
+		}
+	}
+	r := c.run(c.bin, args...)
 	out := SlingResult{Result: r}
 	if r.Code == 3 {
 		out.Live = liveWorkflows(r.Output, s.Bead)
@@ -136,14 +214,14 @@ func (c *City) Sling(s Sling) SlingResult {
 // Cook runs the cook in gctk's own process group, its vars in their names'
 // order, and reads the root from the JSON line it prints, the summary whose
 // root_id names the workflow it attached (formulaCookJSONResult in
-// cmd/gc/cmd_formula.go at gastownhall/gascity 13bb101b8f). Its standard input
+// cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). Its standard input
 // reads nothing.
 func (c *City) Cook(k Cook) CookResult {
 	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
 	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
 		args = append(args, "--var", name+"="+k.Vars[name])
 	}
-	r := run(c.dir, c.bin, args...)
+	r := c.run(c.bin, args...)
 	out := CookResult{Result: r}
 	if r.Code == 0 {
 		out.Root = cookedRoot(r.Output)
@@ -264,7 +342,7 @@ func (c *City) dryRunFormula(s Sling) (string, error) {
 		args = append(args, "--rig", s.Rig)
 	}
 	args = append(args, s.Target, s.Bead, "--dry-run", "--force")
-	r := run(c.dir, c.bin, args...)
+	r := c.run(c.bin, args...)
 	if r.Code != 0 {
 		return "", fmt.Errorf("%s names no default formula of its own, and gc sling --dry-run did not say which its pack gives it: %s", s.Target, r.why())
 	}
@@ -315,7 +393,7 @@ func dryRunDefault(preview string) (formula string, ok bool) {
 }
 
 func (c *City) readAgents() ([]agent, error) {
-	r := run(c.dir, c.bin, "config", "show", "--json")
+	r := c.run(c.bin, "config", "show", "--json")
 	if r.Code != 0 {
 		return nil, fmt.Errorf("gc config show did not read the city's config: %s", r.why())
 	}
@@ -342,13 +420,42 @@ func (c *City) readAgents() ([]agent, error) {
 	return out, nil
 }
 
+// Wake runs the wake in gctk's own process group, and Gas City's reconciler
+// starts the session on its next tick when it has a reason to run, such as a
+// configured agent (gc session wake in docs/reference/cli.md, at
+// gastownhall/gascity 192fa2d394). Its standard input reads nothing.
+func (c *City) Wake(session string) Result {
+	return c.run(c.bin, "session", "wake", session)
+}
+
+// Nudge runs the nudge in gctk's own process group, with gc's default
+// delivery, wait-idle: the message arrives as a prompt at the session's next
+// idle boundary, and a session that is asleep, or not yet at a boundary, gets
+// it queued (gc session nudge in docs/reference/cli.md, and gc nudge in
+// cmd/gc/cmd_nudge.go, at gastownhall/gascity 192fa2d394). Its standard input
+// reads nothing.
+func (c *City) Nudge(session, message string) Result {
+	return c.run(c.bin, "session", "nudge", session, message)
+}
+
+// NudgeNow runs the nudge with immediate delivery, about bead: the message
+// reaches a running turn where the session's runtime can steer, and the next
+// idle boundary otherwise, and a nudge about the same bead still queued for the
+// session is replaced rather than stacked. --delivery is gc session nudge's in
+// docs/reference/cli.md, at gastownhall/gascity bfe7a19cc2, and
+// --reference-bead the city's build carries from its fork (zookanalytics/gascity
+// 51055e7d3f). Its standard input reads nothing.
+func (c *City) NudgeNow(session, message, bead string) Result {
+	return c.run(c.bin, "session", "nudge", "--delivery", "immediate", "--reference-bead", bead, session, message)
+}
+
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the
 // pack's caller of gctk sets, as gctk-resolve.sh does for a bridge.
 func (c *City) Script(name string, args ...string) Result {
 	if c.scriptsDir == "" {
 		return Result{Code: -1, Err: errors.New("GCTK_SCRIPTS_DIR names no pack scripts directory, so " + name + " cannot be run")}
 	}
-	return run(c.dir, filepath.Join(c.scriptsDir, name), args...)
+	return c.run(filepath.Join(c.scriptsDir, name), args...)
 }
 
 // CityRoot is GC_CITY_PATH, GC_CITY or GC_CITY_ROOT, the first that names an
@@ -361,7 +468,7 @@ func (c *City) CityRoot() (string, error) {
 			return p, nil
 		}
 	}
-	r := run(c.dir, c.bin, "rig", "list", "--json")
+	r := c.run(c.bin, "rig", "list", "--json")
 	if r.Code != 0 {
 		return "", fmt.Errorf("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list did not read: %s", r.why())
 	}
@@ -382,22 +489,47 @@ func (c *City) CityRoot() (string, error) {
 	return "", errors.New("no city root: GC_CITY_PATH, GC_CITY and GC_CITY_ROOT name none, and gc rig list names no HQ rig holding .gc")
 }
 
+// ClaudeSettings is <city root>/.gc/settings.json, which Gas City projects
+// before each Claude start and passes with --settings (ensureClaudeSettingsArgs
+// and settingsArgs in cmd/gc/cmd_start.go at gastownhall/gascity 5f7cd988a6).
+func (c *City) ClaudeSettings() (string, error) {
+	root, err := c.CityRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".gc", "settings.json"), nil
+}
+
 func isDir(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
 }
 
-// run runs bin with args in dir, the process's own working directory when dir
-// is empty, its standard input reading nothing, and returns its exit code and
-// its output.
-func run(dir, bin string, args ...string) Result {
+// stopGrace bounds how long a command that was stopped, or a child of it that
+// holds its output, keeps the call waiting after the kill.
+const stopGrace = 2 * time.Second
+
+// run runs bin with args in the city's directory, the process's own working
+// directory when it names none, as the city's actor when it names one, its
+// standard input reading nothing, and returns its exit code and its output.
+// With the city's ctx set it stops the command once ctx ends.
+func (c *City) run(bin string, args ...string) Result {
 	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
+	if c.ctx != nil {
+		cmd = exec.CommandContext(c.ctx, bin, args...)
+		cmd.WaitDelay = stopGrace
+	}
+	cmd.Dir = c.dir
+	if c.actor != "" {
+		cmd.Env = append(os.Environ(), "BEADS_ACTOR="+c.actor)
+	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
 	var ee *exec.ExitError
 	switch {
+	case err != nil && c.ctx != nil && c.ctx.Err() != nil:
+		return Result{Code: -1, Output: out.String(), Err: fmt.Errorf("%s was stopped: %w", filepath.Base(bin), c.ctx.Err())}
 	case err == nil:
 		return Result{Code: 0, Output: out.String()}
 	case errors.As(err, &ee):

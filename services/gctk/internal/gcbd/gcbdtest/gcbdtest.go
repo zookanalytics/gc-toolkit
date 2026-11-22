@@ -55,7 +55,7 @@ func New(t testing.TB, prefix string) *Store {
 	// The store's server and bd's proxy outlive the test and shrug off a
 	// SIGTERM, so each process whose command line names the scratch directory
 	// is killed, by its pid from the process table.
-	t.Cleanup(func() { killUnder(dir) })
+	t.Cleanup(func() { KillUnder(dir) })
 	s.Run("init", "--prefix", prefix, "--non-interactive", "--proxied-server")
 	s.env = append(s.env, "BEADS_DIR="+s.DB())
 	return s
@@ -193,15 +193,18 @@ func (s *Store) Enter(t *testing.T, more string) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_") || strings.HasPrefix(name, "GC_") {
 			t.Setenv(name, "")
-			os.Unsetenv(name)
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	t.Setenv("BEADS_DIR", s.DB())
 	t.Chdir(s.Dir)
 }
 
-// killUnder kills each process whose command line names dir.
-func killUnder(dir string) {
+// KillUnder kills each process whose command line names dir, such as a scratch
+// store's server and bd's proxy, which outlive a test and shrug off a SIGTERM.
+func KillUnder(dir string) {
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
 	if err != nil {
 		return

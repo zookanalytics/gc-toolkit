@@ -22,8 +22,9 @@ import (
 // package, from one snapshot of the store (docs/gctk-architecture.md, "The
 // bead holds contract"). `gctk bead arm`, `gctk bead disarm` and `gctk bead
 // start-armed` are the arm's verbs, through the arm package
-// (docs/deferred-dispatch.md). None holds a rule: the domain decides, and the
-// command prints its answer.
+// (docs/deferred-dispatch.md), and `gctk bead takeaway` is the takeaway's,
+// through the takeaway package (beadtakeaway.go). None holds a rule: the
+// domain decides, and the command prints its answer.
 
 const beadHoldsLong = `Prints what holds each bead named, from one read of the store: one JSON
 object per line, in the order named, each bead once.
@@ -62,8 +63,8 @@ the store names it with bd's own --db flag. Without it the command reads the
 store gc routes a read of the first bead to, as gc routes a read that names
 a bead and no store: the store gc resolves from the working directory and the
 environment (gc bd where) when its prefix begins that bead's id, else the
-store whose prefix does (gc rig list), and the resolved store when no store's
-prefix begins it or the stores do not list. Every read names that one store,
+store whose prefix does (gc config show), and the resolved store when no
+store's prefix begins it or the city's config does not read. Every read names that one store,
 so no read that names a bead is routed to another, and a bead named in
 another store is one this store does not hold.
 
@@ -93,9 +94,12 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
-	return group("bead", "what holds a bead, and its arm",
-		"A bead's waits, what holds it, read from the store, and the arm that starts it by itself once nothing does.",
-		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr))
+	return group("bead", "what holds a bead, its arm, its park, its placement and its headline",
+		"A bead's waits, what holds it, read from the store, the arm that starts it by itself once nothing does, "+
+			"the park that holds everything under it that has not started, the placement of a bead held for one, "+
+			"and the headline its handling concluded, written with the release that takes it out of play.",
+		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr),
+		newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr), newBeadTakeawayCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the

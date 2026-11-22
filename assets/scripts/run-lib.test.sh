@@ -237,16 +237,15 @@ assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
 assets/scripts/work-gate.sh
 assets/scripts/gate-ensure.sh
-assets/scripts/gc-helm.sh
 assets/scripts/queue-priority.sh
 assets/scripts/priority-lib.sh
 assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh
-tools/gc-proactive.sh
 assets/scripts/blocker-holder.sh
-assets/scripts/store-only-exit.sh"
+assets/scripts/store-only-exit.sh
+assets/scripts/bead-context.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue
     f="$ROOT/$r"
@@ -278,11 +277,10 @@ for d in agents assets doctor formulas lifecycle orders overlays packs services 
 done
 eq "${COPIES# }" "" "(NO-COPY) no file outside run-lib.sh defines its own run defs"
 # The key a root names its input convoy in is read here alone. lifecycle.toml
-# registers it. The helm board's Go copy reads it, and so does gctk's waits
-# package, which declares it in keys.go and lists it in the key registry
-# generated from its declarations, each copy under its own fixture test. Tests
-# and fixtures carry it as data.
-KEY_ALLOW=" lifecycle/lifecycle.toml services/helm/internal/source/facts.go services/gctk/waits/keys.go services/gctk/key-registry.json "
+# registers it. gctk's waits package reads it, declares it in keys.go and lists
+# it in the key registry generated from its declarations, under its own fixture
+# test. Tests and fixtures carry it as data.
+KEY_ALLOW=" lifecycle/lifecycle.toml services/gctk/waits/keys.go services/gctk/key-registry.json "
 KEY_READS=""
 for d in agents assets commands doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue

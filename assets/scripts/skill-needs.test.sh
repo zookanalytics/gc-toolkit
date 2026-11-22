@@ -29,15 +29,14 @@
 # under a renamed import. It pins that the converse steps and the mechanik give
 # the exact command for each act they name while the skills explain the act
 # once, with one fragment pointing both prompts at the skills. It pins how the
-# prompt's hand-back definition has a framing name its subject, and that the
-# hold skill points at it. It pins that the
+# prompt's hand-back definition has a framing name its subject and state its
+# decision, and that the hold skill points at it and has a ruling on an open
+# PR say where each of the PR's open review points lands. It pins that the
 # dispatch fragment the keeper composes arms through gctk's verb by the gctk-bin
 # block and calls gc-bd-watch.sh the work skill's way, and that the mechanik's
 # prompt calls
 # gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
-# each render reaches the pack's own copies. It pins the prs
-# skill's supplement command: filed in the PR's rig, holding the anchor's merge,
-# and slung only once its create names it. It pins that a formula's own
+# each render reaches the pack's own copies. It pins that a formula's own
 # description, not a doc, says which work
 # the formula fits. It pins that a problem in software the rig does not own goes
 # through the external-issue skill, which alone holds that path's commands and
@@ -212,6 +211,18 @@ for s in $BLOCKS; do
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
     writers=$(grep -oE '"\$\(gc <binding> scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
+    # The gctk-bin block names the city's build of gctk, which is no writer of
+    # the pack's, by the one definition gctk-bin.test.sh holds.
+    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
+        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
+    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
+        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
+    # A skill that names no pack script and no binding calls none of the pack's
+    # writers, so it has none to resolve and no binding to name.
+    if [ "${refs:-0}" -eq 0 ] && ! grep -qE -- '<binding>|\.sh([^A-Za-z0-9_]|$)' "$f"; then
+        ok "$s: names no pack script, so it resolves none and names no binding"
+        continue
+    fi
     [ "${refs:-0}" -gt 0 ] && ok "$s: calls its writers through gc <binding> scripts-dir (calls: $refs)" \
         || bad "$s: calls its writers through gc <binding> scripts-dir" "no $RESOLVE<writer>\" call found"
     tr '\n' ' ' <"$f" >"$TMP/joined-$s"
@@ -221,12 +232,6 @@ for s in $BLOCKS; do
     else
         bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
     fi
-    # The gctk-bin block names the city's build of gctk, which is no writer of
-    # the pack's, by the one definition gctk-bin.test.sh holds.
-    stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
-        | grep -oE '"\$(\{[^}]*\}|[A-Za-z_][A-Za-z_0-9]*)/[A-Za-z0-9._-]+' | sort -u | tr '\n' ' ')
-    [ -z "$stray" ] && ok "$s: every writer an example calls goes through the pack command" \
-        || bad "$s: every writer an example calls goes through the pack command" "stray: $stray"
     missing=""
     for w in $writers; do
         [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
@@ -543,7 +548,7 @@ have "…which gives the call" 'converse-invalidate-recommendation.sh" "<why' "$
 # One writer dispatches a recommendation, under the bead's acceptance lock and a
 # token that finds a dispatch an Accept that stopped part way already poured. A
 # sling of the agent's own pours the formula again once that run has finished.
-have "the work skill takes a recommendation through Accept's writer" 'gc-helm.sh" accept <bead>' "$WORK_SKILL"
+have "the work skill takes a recommendation through Accept's writer" '"$GCTK" reaction accept <bead>' "$WORK_SKILL"
 lacks "…and gives no sling of its own that records the dispatch" 'gc.recommended_formula_dispatched=' "$WORK_SKILL" \
     "a sling and record of its own bypasses Accept's lock and token, and dispatches the recommendation twice"
 have "the settle step takes a subject's recommendation through the sign-off" '--ruled yes --no-wait --accept' "$SETTLE"
@@ -681,10 +686,61 @@ have "a message with detail opens the way the body does" \
     'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
 have "the message keeps pipeline vocabulary out or says what it means" \
     'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
-have "an option says what it does rather than what it avoids" \
-    'saying what it does rather than what it avoids' "$PROMPT_JOINED"
-have "an option that accepts a known defect names what it breaks" \
-    'names what the defect breaks and where' "$PROMPT_JOINED"
+# A decision leads with the course as the changes it makes. An option is
+# another way to reach what the operator wants, leaving things as they are is
+# one only when it has a case the operator has not already weighed, any course
+# that leaves a known problem in place says what it breaks, and each option
+# says what it ships and what it asks of them. The operator profile every
+# sitting renders says what an option's cost is, so the prompt uses its terms
+# and leaves the sentence to the profile.
+have "the decision states the course as what would be built or changed, before any reason for it" \
+    'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
+have "…and that course is the whole decision when the operator asked for the best solution" \
+    'When the operator asked for the best solution, that course is the whole decision.' "$PROMPT_JOINED"
+have "…states a course that changed again whole" \
+    'When the course changes during the sitting, state the new one whole rather than as changes to the last.' "$PROMPT_JOINED"
+have "…and says, among several threads, what it settles and what stays open" \
+    'say whether the decision settles one of them or the whole conversation, and what stays open after it.' "$PROMPT_JOINED"
+have "an option is another way to reach what the operator wants, where the choice turns on their judgment" \
+    'An option is another way to reach what the operator wants, offered when the choice between it and your recommendation turns on their judgment, such as which of two costs to accept.' "$PROMPT_JOINED"
+have "…and with no such choice, the recommendation stands alone" \
+    'The operator can always turn a recommendation down, so when no choice turns on their judgment, offer the recommendation alone.' "$PROMPT_JOINED"
+have "…leaving things as they are is an option only with a case the operator has not already weighed" \
+    'Leaving things as they are is one of these ways only when it has a case the operator has not already weighed, such as a problem too small to be worth the change, or a change that could break something beyond the problem it fixes.' "$PROMPT_JOINED"
+have "…which that option makes" 'That option makes its case.' "$PROMPT_JOINED"
+have "any course that leaves a known problem in place, the recommendation included, says what it breaks and where" \
+    'Any course that leaves a known problem in place, your recommendation included, says what that problem breaks, and where.' "$PROMPT_JOINED"
+have "…and each option asks only a decision and says what it ships and what it asks" \
+    'Each option asks of the operator only a decision, never an agent'"'"'s work such as resolving a conflict or merging by hand, and says in one sentence what it ships and what it asks.' "$PROMPT_JOINED"
+lacks "…in place of a rule on wording an option that accepts a known defect" \
+    'An option that accepts a known defect' "$PROMPT_JOINED" \
+    "leaving things as they are is an option only when it has a case of its own"
+lacks "…in place of an upside and a downside" 'true downside' "$PROMPT_JOINED" \
+    "an option is stated by what it ships and what it asks of the operator"
+lacks "…and leaves the operator profile's sentence on an option's cost to the profile" \
+    "An option's cost is" "$PROMPT_JOINED" \
+    "the operator profile, which every sitting renders, states what an option's cost is"
+# A ruling on an open PR lands what the PR's own review asked for on its branch
+# before approval, so the hold lists the points still open, with the reads that
+# show them, and says where each lands.
+HOLD_JOINED="$TMP/hold-squeezed"
+tr -s '[:space:]' ' ' <"$HOLD" >"$HOLD_JOINED"
+have "the hold has a ruling on an open PR say where each open review point lands" \
+    'On an open PR, say where each of its open review points lands.' "$HOLD_JOINED"
+have "…reads the PR's conversation from its anchor when the subject is not the anchor" \
+    '`"$CONV/converse-pr-conversation.sh" <the anchor>`' "$HOLD_JOINED"
+have "…and reads what still holds the PR" '"$GCTK" pr status "$ANCHOR" --json' "$HOLD"
+have "…lands a point on the PR's branch before approval when its review asked for it, its change caused it or its purpose covers it" \
+    'A point lands on the PR'"'"'s branch, before approval, when the operator'"'"'s review asked for it, when the PR'"'"'s change caused it, or when the PR'"'"'s stated purpose covers it.' "$HOLD_JOINED"
+have "…counts sharing a file, a screen or a record entry as no scope" \
+    'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
+have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
+    'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
+# The close-out ends the sitting and offers no course, so its reason names the
+# sitting's topic and that it closed without a ruling.
+have "the close-out's reason names only the sitting's topic and that it closed without a ruling" \
+    'so its reason names only the sitting'"'"'s topic and that it closed without a ruling, and every course stays in the decision' "$HOLD_JOINED"
+have "…in the line the hold offers" 'dismiss --reason "<the sitting'"'"'s topic>: closed without a ruling"' "$HOLD"
 lacks "the hold skill points at the shape and keeps no copy of its order" 'detail and evidence' \
     "$SKILLS/converse-hold/SKILL.md" "the prompt's definition is the one place a framing's order is stated"
 have "the work skill reads the formulas a rig has now" 'gc formula list --rig <rig>' "$WORK_SKILL"
@@ -720,17 +776,6 @@ have "…but takes a design-convoy recommendation through Accept" \
 have "…and hands any other effort to the mechanik" 'Any other effort goes to the mechanik' "$WORK_JOINED"
 lacks "the work skill claims no scope the recipe's push breaks" 'nothing here changes a repo.' "$WORK_JOINED" \
     "the effort recipe pushes the effort's branch"
-# A supplement goes to the PR's own rig, because a pool reads only its rig's
-# store, and the anchor waits on it, because the merge holds on what blocks the
-# anchor and never on a bead that only names the PR's branch. The hold rides the
-# create, and the sling runs only once the create names the supplement.
-have "the prs skill files a supplement in the PR's rig" 'SUP=$(gc bd --rig <rig> create' "$PRS_SKILL"
-have "…as a child of the anchor" '"anchor_bead":"<anchor>"' "$PRS_SKILL"
-have "…born joined to the anchor and holding its merge" '--deps related:<anchor>,blocks:<anchor>' "$PRS_SKILL"
-have "…and slings only once the create names the supplement" '&& [ -n "$SUP" ]' "$PRS_SKILL"
-have "…then slings it" '&& gc sling <rig>/<pool> "$SUP"' "$PRS_SKILL"
-have "…whose target is the PR's base, the integration branch for a stage's PR" "the integration branch for a stage's PR" "$PRS_SKILL"
-have "…one at a time on a branch" 'Send one supplement at a time' "$PRS_SKILL"
 # fenced_block <file> <marker> — the fenced bash block that holds <marker>, with
 # the fence's own indent taken off each of its lines.
 fenced_block() {
@@ -1176,6 +1221,84 @@ for sh_ in $shells; do
         bad "($sh_) converse-iterate-document: a scaffold the store refuses is not reported as written" "exit $rc"
     fi
 done
+echo "── a sitting answers for the work it sends ──"
+# The work a sitting sends is its own to get right. It reasons through what the
+# operator says, reads their go as trust in the course, puts first in the
+# decision what they would most want to stop, and sends once they have decided.
+tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-order"
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-order"
+tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-order"
+have "the settle skill makes the work a sitting sends its own to get right" \
+    'The work you send is yours to get right.' "$TMP/settle-order"
+have "…takes what the operator says as direction to reason through, point by point" \
+    'What the operator says is direction to reason through: take each point up in the course or say why not.' "$TMP/settle-order"
+have "…holds a remark to be neither an order to the letter nor a decision of theirs" \
+    'A remark is not an order to carry out to the letter, and it is not a decision they made.' "$TMP/settle-order"
+have "…reads their go, given at the big picture, as trust in the course" \
+    'The operator usually engages and reviews at the big picture, unless they call out a specific item, and their go means they trust the course.' "$TMP/settle-order"
+have "…puts first in the decision, each as its concrete result, what they would most want to stop" \
+    'So put first in the hand-back'"'"'s decision, each as its concrete result in a short line, what they would most want to stop: anything the course removes, any change of scope, and anything it asks of another rig.' "$TMP/settle-order"
+have "…and sends the work once they have decided" \
+    'Send the work once they have decided, not while they are still thinking it through.' "$TMP/settle-order"
+have "the continue skill writes a turn's work order the settle skill's way, before anything files it" \
+    'Write the order of work or a rework that a turn'"'"'s ruling sends as `converse-settle` gives it (Send the work), before you or the answer files it.' "$TMP/continue-order"
+have "the prompt makes the work a sitting sends its own to get right, with what the operator would most want to stop first" \
+    'What the operator says is direction to reason through, and their go means they trust the course, so the work you send is yours to get right. They usually engage at the big picture, so put first in the decision what they would most want to stop: anything the course removes, any change of scope and anything it asks of another rig (`converse-settle`).' "$TMP/prompt-order"
+echo "── a sitting writes the order of the work it sends in its own voice ──"
+# The order, a task's description or a rework's brief, is one statement in the
+# sitting's own voice that carries each point the operator raised. A rework's
+# ruling line reaches the rework as the operator's ruling, so it carries their
+# words or names the brief.
+have "the order is written in the sitting's own voice, with each point the operator raised carried into it" \
+    'Write the order in your own voice: what needs doing, why, and what done looks like, with each point the operator raised carried into it.' "$TMP/settle-order"
+have "…quoting their words where they carry the point, and never the sitting's reading as their ruling" \
+    'Quote their words where their words carry the point, and never write your reading as their ruling.' "$TMP/settle-order"
+have "…in a task's description, in this rig's store or another's, and in a rework's brief" \
+    'The order is the description of a task you file, in this rig'"'"'s store or another'"'"'s, or the brief of a rework the sign-off files' "$TMP/settle-order"
+have "a rework's ruling line carries the operator's words or names a brief, never the sitting's reading" \
+    'which the sign-off hands the rework as the operator'"'"'s ruling (`--rework`, below), so the line carries their words or names a brief, never your reading. A line that quotes their words and adds nothing of yours is the whole order.' "$TMP/settle-order"
+have "…and names the brief written on the PR's anchor" \
+    '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
+fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
+fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    rc=$(run_chain "$run" "$CH/order-block")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d x --json' "$CH/log"; then
+        ok "($sh_) converse-settle: the task a sitting files carries its order as its description"
+    else
+        bad "($sh_) converse-settle: the task a sitting files carries its order as its description" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/order-block" >"$CH/literal-order"
+    rc=$(run_chain "$run" "$CH/literal-order")
+    if [ "$rc" -eq 0 ] && grep -qxF -- 'gc bd create x -t task -d "the `echo ran` and $HOME stay as written" --json' "$CH/log" \
+        && grep -qxF -- 'gc sling x/x tk-new --on x' "$CH/log"; then
+        ok "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent"
+    else
+        bad "($sh_) converse-settle: what the task's description quotes stays as written, and the task is sent" "exit $rc, calls: $(tr '\n' ';' <"$CH/log")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block")
+    if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Rework brief \([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\)$' \
+        && [ "$(sed -n 2p "$CH/notes")" = x ]; then
+        ok "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath"
+    else
+        bad "($sh_) converse-settle: a rework's brief lands headed by when it was written, its order beneath" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    sed 's/^x$/"the `echo ran` and $HOME stay as written"/' "$CH/brief-block" >"$CH/literal-brief"
+    rc=$(run_chain "$run" "$CH/literal-brief")
+    if [ "$rc" -eq 0 ] && grep -qxF '"the `echo ran` and $HOME stay as written"' "$CH/notes"; then
+        ok "($sh_) converse-settle: what the brief quotes stays as written"
+    else
+        bad "($sh_) converse-settle: what the brief quotes stays as written" "exit $rc, notes: $(head -c 400 "$CH/notes")"
+    fi
+    rc=$(run_chain "$run" "$CH/brief-block" 1)
+    if [ "$rc" -ne 0 ] && [ ! -s "$CH/notes" ]; then
+        ok "($sh_) converse-settle: a brief the store refuses is not reported as written"
+    else
+        bad "($sh_) converse-settle: a brief the store refuses is not reported as written" "exit $rc"
+    fi
+done
 echo "── a sitting makes a change the operator rules it make through Work's writers ──"
 # A sitting's change is held on its conversation and goes through the writers a
 # polecat's work goes through, under --held-by, so the step table loads the edit
@@ -1187,6 +1310,10 @@ have "the edit skill holds the change on the conversation" 'gc bd dep add "$CHAN
 have "…cuts its tree through Work's setup under --held-by" '"$CONV/work-setup.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and hands it off through Work's hand-off under --held-by" '"$CONV/work-submit.sh" --bead "$CHANGE" --held-by "$CONVERSATION"' "$EDIT"
 have "…and reads the polecat class's standards before the first edit" 'template-fragments/work-quality-polecats.template.md' "$EDIT"
+have "…holds an open PR's branch through its conversation's edge on the PR's bead" 'gc bd dep add "$PR" "$CONVERSATION" --type=blocks' "$EDIT"
+have "…proves it holds the PR before the first edit" '"$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check' "$EDIT"
+have "…pushes it through gctk with the pack's pusher, from the tree" '( cd "$TREE" && GCTK_SCRIPTS_DIR="$CONV" "$GCTK" pr push "$PR" --held-by "$CONVERSATION" )' "$EDIT"
+have "…and answers the PR it edited with --no-rework at the sign-off" '`--no-rework`, since its branch carries what the ruling asked for' "$EDIT"
 have "…shows the operator a copy of a UI change at an address of its own" 'GCTK_SCRIPTS_DIR="$CONV" "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --command "$SERVE"' "$EDIT"
 have "…with the city's publisher" '--publish-command "$(var ui_publish_command)" --address-pattern "$(var ui_address_pattern)"' "$EDIT"
 have "…and stops the copy" '( cd "$TREE" && "$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig serve --stop )' "$EDIT"
@@ -1205,7 +1332,7 @@ STUB
 cat >"$LC/city/.gc/services/gctk/bin/gctk" <<'STUB'
 #!/usr/bin/env bash
 { printf 'in %s\n' "$(pwd -P)"; printf 'scripts %s\n' "$GCTK_SCRIPTS_DIR"; printf '%s\n' "$@"; } >"$LC_LOG"
-printf '%s\n' '{"state":"running","address":"https://host:1/","port":1}'
+printf '%s\n' '{"state":"running","address":"https://host:1/","port":1,"app_url":"http://127.0.0.1:1/"}'
 STUB
 chmod +x "$LC/bin/gc" "$LC/city/.gc/services/gctk/bin/gctk"
 LC_TREE=$(cd "$LC/tree" && pwd -P)
@@ -1236,6 +1363,127 @@ for sh_ in $shells; do
         bad "($sh_) converse-edit: a rig that declares no ui_serve_command gets no copy, and the block says so" "gctk got: $(tr '\n' '|' <"$LC/log" 2>/dev/null); printed: $out"
     fi
 done
+echo "── a sitting runs an open PR's checks in its tree ──"
+# The PR's bead records no tree, so the checks of an open PR's edit run from the
+# tree itself. The block runs as written. gc answers mol-polecat-work's vars for
+# the rig: lint as a command with quotes and a substitution, build declared
+# empty over a formula default, typecheck and setup with nothing declared, the
+# whole suite as the formula's own default, and the affected tests as
+# OC_AFFECTED, undeclared when that is empty. gctk logs where each call runs
+# and what it is given, and fails the check OC_FAIL names.
+OC="$TMP/open-pr-checks"
+mkdir -p "$OC/bin" "$OC/tree"
+cat >"$OC/bin/gc" <<'STUB'
+#!/usr/bin/env bash
+[ "$*" = "formula show mol-polecat-work --rig rig-x --json" ] || { echo "gc: unexpected call: $*" >&2; exit 1; }
+jq -n --arg a "$OC_AFFECTED" '{ok: true, vars: [
+    {name: "setup_command", default: "", rig_default: null},
+    {name: "typecheck_command", default: ""},
+    {name: "lint_command", default: "", rig_default: "tools/lint.sh \"$(git diff --name-only origin/main...HEAD)\""},
+    {name: "build_command", default: "make", rig_default: ""},
+    {name: "affected_tests_command", default: "", rig_default: (if $a == "" then null else $a end)},
+    {name: "test_command", default: "tools/run-tests.sh", rig_default: null}]}'
+STUB
+cat >"$OC/gctk" <<'STUB'
+#!/usr/bin/env bash
+{ printf 'in %s:' "$(pwd -P)"; printf ' [%s]' "$@"; printf '\n'; } >>"$OC_LOG"
+[ "$2" != "$OC_FAIL" ]
+STUB
+chmod +x "$OC/bin/gc" "$OC/gctk"
+OC_TREE=$(cd "$OC/tree" && pwd -P)
+# oc_run <shell> <affected tests command> <the check gctk fails> — one run of
+# the block from no log; returns its exit.
+oc_run() {
+    rm -f "$OC/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV TREE="$OC/tree" GC_RIG=rig-x GCTK_BIN="$OC/gctk" OC_LOG="$OC/log" \
+        OC_AFFECTED="$2" OC_FAIL="$3" PATH="$OC/bin:$PATH" $1 "$OC/block" </dev/null >/dev/null 2>&1)
+}
+# oc_want <test scope> <test command> — the calls gctk gets: lint, then the test.
+oc_want() {
+    printf 'in %s: [rig] [lint] [--command] [%s]\nin %s: [rig] [test] [--scope] [%s] [--command] [%s]' \
+        "$OC_TREE" 'tools/lint.sh "$(git diff --name-only origin/main...HEAD)"' "$OC_TREE" "$1" "$2"
+}
+fenced_block "$EDIT" 'rig test --scope "$SCOPE" --command "$T"' >"$OC/block"
+OC_AFF='tools/run-tests.sh --affected origin/main'
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    oc_run "$run" "$OC_AFF" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree"
+    else
+        bad "($sh_) converse-edit: an open PR's checks run each command the rig declares, as written, from the tree" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "" ""; rc=$?
+    if [ "$rc" -eq 0 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want full tools/run-tests.sh)" ]; then
+        ok "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR"
+    else
+        bad "($sh_) converse-edit: a rig that declares no affected tests runs its whole suite on an open PR" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+    oc_run "$run" "$OC_AFF" lint; rc=$?
+    if [ "$rc" -eq 1 ] && [ "$(cat "$OC/log" 2>/dev/null)" = "$(oc_want affected "$OC_AFF")" ]; then
+        ok "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run"
+    else
+        bad "($sh_) converse-edit: a check that fails fails an open PR's checks, and the checks after it still run" "exit $rc; gctk got: $(tr '\n' '|' <"$OC/log" 2>/dev/null)"
+    fi
+done
+echo "── a sitting removes an open PR's tree only once the branch holds its HEAD ──"
+# The let-go block runs as written against a real origin, from a home clone
+# whose tree is a checkout of the branch's tip with no local branch. A commit
+# the branch does not hold keeps the tree, and once a push puts it on the
+# branch the tree goes. gctk logs the copy's stop.
+LG="$TMP/let-go"
+mkdir -p "$LG/city/.gc/services/gctk/bin"
+cat >"$LG/city/.gc/services/gctk/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LG_LOG"
+STUB
+chmod +x "$LG/city/.gc/services/gctk/bin/gctk"
+fenced_block "$EDIT" 'merge-base --is-ancestor HEAD "origin/$BRANCH"' >"$LG/block"
+lgit() {
+    env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com \
+        GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com git "$@"
+}
+# lg_home <dir> — a home clone of a fresh origin, its tree checked out at the
+# branch's tip with one commit in it that the branch does not hold.
+lg_home() {
+    mkdir -p "$1" \
+        && lgit init -q --bare "$1/origin.git" 2>/dev/null \
+        && lgit clone -q "$1/origin.git" "$1/home" 2>/dev/null \
+        && lgit -C "$1/home" commit -q --allow-empty -m base \
+        && lgit -C "$1/home" push -q origin HEAD:refs/heads/main HEAD:refs/heads/polecat/tk-pr \
+        && lgit -C "$1/home" worktree add -q --detach "$1/home/worktrees/tk-pr" origin/polecat/tk-pr \
+        && lgit -C "$1/home/worktrees/tk-pr" commit -q --allow-empty -m edit
+}
+# lg_run <shell> <dir> — one run of the block from no log; returns its exit.
+lg_run() {
+    rm -f "$LG/log"
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+        TREE="$2/home/worktrees/tk-pr" BRANCH=polecat/tk-pr GC_DIR="$2/home" GC_CITY_PATH="$LG/city" LG_LOG="$LG/log" \
+        $1 "$LG/block" </dev/null >/dev/null 2>&1)
+}
+for sh_ in $shells; do
+    run=$sh_
+    [ "$sh_" = zsh ] && run="zsh -f"
+    d="$LG/$sh_"
+    if ! lg_home "$d"; then
+        bad "($sh_) converse-edit: the let-go's home clone did not set up"
+        continue
+    fi
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -ne 0 ] && [ -d "$d/home/worktrees/tk-pr" ] && [ "$(cat "$LG/log" 2>/dev/null)" = "rig serve --stop" ]; then
+        ok "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped"
+    else
+        bad "($sh_) converse-edit: an open PR's tree that holds a commit the branch does not is kept, with its copy stopped" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone); gctk got: $(tr '\n' '|' <"$LG/log" 2>/dev/null)"
+    fi
+    lgit -C "$d/home/worktrees/tk-pr" push -q origin HEAD:refs/heads/polecat/tk-pr
+    lg_run "$run" "$d"; rc=$?
+    if [ "$rc" -eq 0 ] && [ ! -e "$d/home/worktrees/tk-pr" ]; then
+        ok "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree"
+    else
+        bad "($sh_) converse-edit: once the branch holds the tree's HEAD, letting go removes the tree" "exit $rc; tree $([ -d "$d/home/worktrees/tk-pr" ] && echo kept || echo gone)"
+    fi
+done
 # A capture of a rig's own app takes the same command the copy runs: the
 # demo:capture skill reads it for a rig, and its Demo a PR and the demo check
 # pass it to the capture as --serve.
@@ -1262,7 +1510,9 @@ echo "── a moot or benign close settles a headline that waits on nothing ─
 # built from this checkout, answers what holds the subject from a store of that
 # row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
 # its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
-# RL_DEPS_RC, or when RL_GATES is not a list.
+# RL_DEPS_RC, or when RL_GATES is not a list. gctk writes the headline into
+# that store, and each of its writes that lands is logged beside the block's
+# own calls; HOLDS_FAIL=update refuses them.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
@@ -1277,7 +1527,9 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
     [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
     jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" --argjson more "${RL_MORE:-[]}" \
         '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: (.edge // "blocks")} ]}) ] + $g + $more' >"$RL_DIR/holds.json" || exit 1
-    HOLDS_STORE="$RL_DIR/holds.json" exec "$HOLDS_STUB" answer "$@"
+    HOLDS_STORE="$RL_DIR/holds.json" "$HOLDS_STUB" answer "$@" || exit
+    case " $* " in *" update "*) printf 'gc bd %s\n' "$*" >>"$RL_DIR/log" ;; esac
+    exit 0
 fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
@@ -1287,11 +1539,6 @@ case "$1 ${2:-} ${3:-}" in
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
-STUB
-cat >"$RL/pack/assets/scripts/gc-helm.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'gc-helm %s\n' "$*" >>"$RL_DIR/log"
-[ -z "${RL_TAKEAWAY_FAIL:-}" ] || exit 1
 STUB
 cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -1326,7 +1573,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$NONE_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
             ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
         *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
     esac
@@ -1335,7 +1582,7 @@ for sh_ in $shells; do
         rc=$(run_release "$run" "$WAITING" "$gates" RL_MORE="$more")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
-            *"gc-helm takeaway"*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
+            *"gc.takeaway="*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
             0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject $what still holds keeps its headline, and the conversation closes" ;;
             *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
         esac
@@ -1348,7 +1595,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$CONV_HOLDS")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*"gc-helm takeaway tk-x x: x --by converse --no-wait;"*"gc bd close tk-v --reason x: x;"*)
+        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
             ok "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" ;;
         *) bad "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" "exit $rc, calls: $calls" ;;
     esac
@@ -1356,7 +1603,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$WAITING" "$CONV_AND_GATE")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls:$(cat "$RL/out")" in
-        *"gc-helm takeaway"*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
+        *"gc.takeaway="*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
         0:*"gc bd close tk-v "*"tk-x keeps its headline: tk-g2 still holds it"*)
             ok "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline, named without the conversation" ;;
         *) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
@@ -1364,7 +1611,7 @@ for sh_ in $shells; do
     rc=$(run_release "$run" "$SETTLED" '[]')
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        *"gc-helm takeaway"*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
+        *"gc.takeaway="*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
         0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a settled headline is not written, and the conversation closes" ;;
         *) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
     esac
@@ -1380,7 +1627,7 @@ for sh_ in $shells; do
             ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
-    for stop in "RL_TAKEAWAY_FAIL=1|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
+    for stop in "HOLDS_FAIL=update|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
         "RL_NONE=1|a hold read that does not answer|{\"error\":\"no issue found\"}"; do
         IFS='|' read -r setting what gates <<EOF
 $stop
@@ -1408,7 +1655,7 @@ EOF
         rc=$(run_release "$run" "$row" "$NONE_HOLDS" "$show_rc" "$deps_rc")
         calls=$(tr '\n' ';' <"$RL/log")
         case "$rc:$calls" in
-            0:*|*"bd close"*|*"bd update"*|*"gc-helm takeaway"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
+            0:*|*"bd close"*|*"bd update"*|*"gc.takeaway="*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
             *) ok "($sh_) recheck close: $what closes nothing" ;;
         esac
     done
@@ -1627,7 +1874,7 @@ have "…and a gate on waiting work is the sign-off's, once every write has land
 have "a close stands down waiting work it retires, which disarms it before the answer" \
     '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"' "$EPIC_REVIEW"
 have "…and releases waiting work it re-homes into another store, a release that disarms it first, before its gate is answered" \
-    '`"$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`' "$EPIC_REVIEW"
+    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait' "$EPIC_REVIEW"
 have "…then answers that gate on its own call and runs the writer last" \
     'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \
@@ -1670,8 +1917,8 @@ lacks "…never off bd's parent filter, which also returns a bead moved out from
     "a bead whose parent edge was removed still lists under the parent its id names, so a close would wait on work that has left"
 have "…as an epic under the epic, opening with its aim" \
     'gc bd create "Delivery: <what it lands>" -t epic --parent "$EPIC"' "$EPIC_REVIEW"
-have "the next priority uses the steering move" '"$CONV/gc-helm.sh" priority "$EPIC" <P0-P4>' "$EPIC_REVIEW"
-have "…and so does the park" '"$CONV/gc-helm.sh" park "$EPIC"' "$EPIC_REVIEW"
+have "the next priority uses the steering move" '"$CONV/queue-priority.sh" move "$EPIC" <P0-P4>' "$EPIC_REVIEW"
+have "…and so does the park" '"$GCTK" bead park "$EPIC"' "$EPIC_REVIEW"
 have "an unpark releases the epic by write 3's release step" \
     "A ruling that unparks the epic releases it from its park instead, by write 3's release step with \`\"\$EPIC\"\` as the bead." "$EPIC_REVIEW_JOINED"
 have "…which takes only the epic's edge off a gate another bead waits on" 'gc bd dep remove "$EPIC" <park>' "$EPIC_REVIEW"

@@ -1,18 +1,21 @@
-# helm-build — keep the served helm binary current with services/helm.
+# helm-build — keep the served helm binary current with its sources:
+# services/helm, services/gctk, whose packages it imports, and the root go.mod
+# and go.sum.
 # The service launcher only exec's a prebuilt binary (a build cannot fit the
 # 5s readiness probe), so the build runs here and build-and-restart is ONE
-# step. Staleness is `find -newer`, a recorded binary_rev other than the
-# revision the tick sees (find -newer is blind to an input a commit deleted),
-# or a binary that cannot read the city's bead stores; a tick with nothing to
-# do costs one find, one record read, one count of the commits origin/main is
-# ahead under the helm sources, and one probe, plus an origin fetch at most
-# once per 30 minutes.
-# timeout 900s: a cold build measured 2m29s and must be allowed to finish.
-# No-op in cities that declare no helm service.
+# step. A condition order: each pass runs the check, `gc-build.sh helm --due`,
+# and the order runs only when it answers that a run is owed and due, by the
+# rule at the script's check. The check reads the checkout, and asks one
+# `gc service list` where the service's state root is, the root the deploy
+# publishes to, so the default check_timeout holds it.
+# timeout 900s: a cold build must be allowed to finish, under any load.
+# A city that declares no helm service never gets a binary, so a run stays
+# owed there, every five minutes, and each one records that there is nothing
+# to deploy.
 [order]
-description = "Build the helm binary when services/helm is newer than it, and restart the service onto the result"
-trigger = "cooldown"
-interval = "5m"
+description = "Build the helm binary when it is missing or built from another revision than the checkout's, and restart the service onto it"
+trigger = "condition"
+check = "$PACK_DIR/assets/scripts/gc-build.sh helm --due"
 exec = "$PACK_DIR/assets/scripts/gc-build.sh helm --deploy"
 timeout = "900s"
 scope = "city"

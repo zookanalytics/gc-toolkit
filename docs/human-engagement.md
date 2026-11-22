@@ -170,13 +170,10 @@ disables the renudge order, and the creation notice is a record in an unread
 mailbox rather than the reach. A city whose operator reads mail keeps both, and
 every gate the pack files reaches that operator through them unchanged.
 
-**The board is the reach.** The helm board folds each open human gate onto the
-row of every bead it blocks, shows the gate's title as that row's NEEDS, and
-keeps the row owed, ordered by how long it has been owed, until the gate is
-cleared, its filer withdraws it, or, for the gate that put a recommendation to
-the operator, Accept clears it. A gate none of whose beads has a live row keeps
-a row of its own that states what it asks, so no open gate is off the board.
-Nothing re-mails, and no session claims a gate, so a gate a sitting is
+**The board is the reach.** The helm board draws each open human gate as a
+question, and lists the gate and each bead it holds as waiting on the operator,
+until the gate is cleared, its filer withdraws it, or, for the gate that put a
+recommendation to the operator, Accept clears it. Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
 
 ## The way in
@@ -238,12 +235,12 @@ session carries `human`. A sitting starts only when the operator engages.
 ### A conversation on an open PR holds its merge
 
 A conversation on an open PR holds the PR's merge until it closes. The subject
-counts as an open PR when it is the PR's
-anchor (`merge_result=pull_request`, not closed), or a bead whose
+counts as an open PR when it is the PR's anchor, not closed, or a bead whose
 `anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. The hold is bd's own: the anchor depends on the conversation
-through a `blocks` edge, so bd counts the anchor blocked while the
-conversation is open and lets it go once the conversation closes.
+supplement. An anchor counts only while its `merge_result` is
+`pull_request_pending` or `pull_request_head_changed`. The hold is bd's own: the anchor depends on the
+conversation through a `blocks` edge, so bd counts the anchor blocked while
+the conversation is open and lets it go once the conversation closes.
 
 - **Opening the conversation adds the edge.** `gc-helm.sh open` adds it for a
   conversation it files and for one a second concern joins in the queue, and
@@ -254,14 +251,20 @@ conversation is open and lets it go once the conversation closes.
   since the sitting started. bd takes an edge it already holds as a no-op. A
   read of the anchor that does not answer files nothing, and an edge the store
   refuses is reported with its repair.
-- **While the conversation is open, the PR is held.** The merge pass holds a
-  PR while an open bead blocks its anchor. The PR reads `needs-attention` with
-  `held: blocked`, naming the conversation, by the one definition its labels,
-  the board and engage read
+- **While the conversation is open, the PR is held.** The landing order's
+  evaluator reads the edge as a wait of the bead's own, which holds the merge.
+  The PR reads `needs-attention` with `held: blocked`, naming the
+  conversation, by the one definition its labels, the board and engage read
   ([state-machine.md](state-machine.md#the-status-label-github-projection)): a
   conversation is a bead a person owes the next move on. The edge holds only
   the merge. Reviews, reworks and supplements keep running, because each is a
-  bead the anchor waits on, which the edge does not block.
+  bead the anchor waits on, which the edge does not block. The landing order
+  pours the PR's review runs, and the refinery's find-work takes the PR's bead
+  at a new head, as each would with no conversation, whether the conversation
+  waits in the operator's queue or a sitting holds it. Gas City gives the
+  refinery no turn for a bead the conversation holds, so the landing order
+  wakes and nudges the refinery for the new head
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 - **Every close frees the merge.** The sign-off, a dismiss, the premise
   re-check's moot or benign close and a close by hand each end the hold with
   the close itself, and nothing writes a release. A close that does not land
@@ -315,8 +318,9 @@ these steps:
    the gate, names any closed bead the gate was about, and starts nothing, and
    the operator clears the gate.
 2. **It reads the bead's conversations:** the open tasks that track the bead
-   in the conversation shape, with the session list saying which of their
-   sittings are live.
+   in the conversation shape, and then the sessions, read from Gas City's
+   store as the list of conversations reads them (*Returning to a
+   conversation*, below), saying which of their sittings are live.
 3. **A concern opens a fresh conversation.** A `--reason`, `--template` or
    `--skill`, or the operator's choice of a new conversation when engage asks,
    files a new task whose description is that concern, even when the bead has
@@ -337,13 +341,14 @@ these steps:
    unattached, and the session whose alias the task is bound to is never
    closed. A spawn the runtime refuses because a session holds the alias spawns
    nothing. A task bound to that alias is that session's, since the session's
-   claim runs as its alias, even while the session list does not show the
-   session: a sitting another engage started seconds before can be missing
-   from a list the supervisor answers from its read cache. Engage attaches the
-   operator to that session as to a live sitting, and finds it by its alias
-   until the list names it. A task bound to no such alias is waited on for the
-   bind of the engage that holds the alias, and the session is named as left
-   over only when no bind comes within the bind wait.
+   claim runs as its alias, and engage attaches the operator to that session
+   as to a live sitting, which the store's session list names from its create
+   on. The wait for its start reads the list the supervisor answers from its
+   read cache, which can be missing a sitting another engage started seconds
+   before, and waits on a sitting that list does not show yet. A task bound to
+   no such alias is waited on for the bind of the engage that holds the alias,
+   and the session is named as left over only when no bind comes within the
+   bind wait.
 6. **It binds the task to the session's alias** with
    `gc bd update <task> --if-assignee <holder> --if-status <status> --assignee
    <alias>`, where the holder and the status are the ones engage read, or the
@@ -609,12 +614,13 @@ intake.
 
 **Two paths, and the choice is not a preference.** The preferred path slings a
 first reaction on the subject, a run of `mol-first-reaction` that
-`tools/gc-proactive.sh sling` starts. The reaction triages it and takes one of
+`gctk reaction sling` starts. The reaction triages it and takes one of
 its dispositions. On the two that put the subject to the operator, a ruling or
 a recommend, it files a human gate on the subject under the key
 `first-reaction`, which reaches the operator on the board. A ruling is
 Discuss-only. A recommend also records the formula it recommends as
-`gc.recommended_formula`, so the row offers Accept beside Discuss. When the
+`gc.recommended_formula`, which the sitting the operator starts on the gate
+takes when they rule to ([Accept](#accept)). When the
 reaction judges the action clear and reversible, it routes the subject, holds
 it, or hands it to a validating closer, and puts nothing to the operator. A
 capture that is not a member of an epic is not routed: it waits, held, for the
@@ -622,14 +628,13 @@ po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
 through `gc-helm.sh open`, which is where filing a conversation lives. It runs
-on `--no-react`, and when `tools/gc-proactive.sh deliverable` answers that the
+on `--no-react`, and when `gctk reaction deliverable` answers that the
 proactive pool is not registered, is suspended or is capped at zero slots. It
 also runs when the sling slings nothing: it fails, or it refuses the subject
 because a first reaction already runs on it or an open conversation tracks it,
 a live workflow already drives it, it is already routed or armed, held,
-assigned or not open, an open human gate blocks it, Gas City left a pour of
-`mol-first-reaction` unfinished on it, or it is a standing record or a feedback
-pattern, whose kind takes no first reaction. A react path that could not
+assigned or not open, an open human gate blocks it, or it is a standing record
+or a feedback pattern, whose kind takes no first reaction. A react path that could not
 deliver would leave a run waiting on a pool that cannot take it, and no
 conversation at all, the one outcome this channel exists to prevent. A roster
 the deliverable check cannot read answers yes, because absence of evidence is
@@ -669,9 +674,9 @@ subject and its conversation without starting a sitting, which is how the form
 saves a new topic before it starts one.
 
 No first reaction takes the subject. It is filed assigned to `human`, the
-operator who asked, so in the moment before its conversation exists the scan,
-which reads only unassigned beads, passes it over, and
-`tools/gc-proactive.sh sling` refuses it, as a reaction's first act does. Once
+operator who asked, so in the moment before its conversation exists the sweep,
+which reads only unassigned beads, passes it over, and `gctk reaction sling`
+refuses it, as a reaction's first act does. Once
 the conversation is filed, open hands the subject to it: one write, guarded on
 that assignee, clears it, and from then on the open conversation keeps a first
 reaction off the subject, because the sling refuses a bead an open
@@ -695,7 +700,14 @@ operator's queue, starting while its sitting's session has not started,
 preparing until the sitting records its first hand-back after its session was
 created (`gc.handback_at`, which `gc-helm handback` stamps on each framing),
 ready once it has, and ended when its sitting's session has closed while the
-conversation stays open. Each row says whether a terminal is attached to the
+conversation stays open. The list reads the sessions after the conversations,
+from Gas City's store (`GC_NO_API=1 gc session list --json`) rather than the
+supervisor's read cache, which can be missing a sitting until its
+next re-scan. The store lists a sitting from the create that
+spawned it until its session closes, and engage spawns a sitting
+before it binds the conversation to it, so a conversation whose row
+shows the bind finds its sitting and reads starting from the moment
+the bind lands. Each row says whether a terminal is attached to the
 sitting. `gc-helm attach` opens the conversation form on that list, those no
 terminal is attached to first, by readiness and then newest first, and reads it
 again every ten seconds while it is on screen. What is picked is a
@@ -866,11 +878,11 @@ durable trace in one order every time:
 
 1. what a ruling does to an open PR it reaches, the subject, the PR whose
    merge the conversation holds or a PR that a gate it answers releases: its
-   rework, through `converse-rework.sh`, with
-   the conversation as the rework child's `source_ruling_bead`, so a ruling
-   that changes what the PR's branch must contain becomes work the refinery
-   lands; or its retirement, through `pr-dispose.sh`, which records the
-   disposition and closes the PR;
+   rework, through `converse-rework.sh`, as an ask sourced by the
+   conversation, which holds the PR's merge until the review run that answers
+   it records its result, so a ruling that changes what the PR's branch must
+   contain becomes work on that branch; or its retirement, through
+   `pr-dispose.sh`, which records the disposition and closes the PR;
 2. the subject's headline;
 3. `ruled: <the ruling>` on each open gate the conversation replies to that the
    ruling answers, each read back, with an earlier answer reported;
@@ -895,9 +907,12 @@ the waits skill's way of having a bead checked and closed once other work
 lands. A subject held for placement then has its `hold:mayor` lifted, every
 spelling of it, because the deferred-dispatch pass sends no arm while that
 label holds the subject. Each of these writes lands before any gate is
-answered, and one that does not land stops the sign-off. Once the work closes,
-the deferred-dispatch pass slings the closer, which checks the brief against
-what landed and closes the subject or puts it to the operator. No closer is
+answered, and one that does not land stops the sign-off. While the work is
+out, a decision subject is no question of the operator's: the board's row
+reads it as waiting on that work, in Queued, and a pull request it holds reads
+`working` (`prstatus.Stays`). Once the work closes, the deferred-dispatch pass
+slings the closer, which checks the brief against what landed and closes the
+subject or puts it to the operator. No closer is
 armed for a subject that something else sends on once its wait clears: its own
 arm, a route or an assignee, the recommendation the ruling takes, or the
 refinery's merge or its members, for an anchor or an epic. A subject in the
@@ -1018,18 +1033,18 @@ the ruling left open. So when more than one call stands between a document's
 text and what the operator wants, the sitting settles them with the operator
 item by item, reading the operator's guidance for its intent and pushing back
 where it disagrees. The document then changes in one of two ways. The operator
-can rule that the sitting edit it with them (*A sitting's change*, below), or
-the sitting sends one rework that carries the decisions, which is also how a
-document on an open PR changes, because a sitting edits no open PR's branch.
+can rule that the sitting edit it with them (*A sitting's change*, below), on
+an open PR's branch too, or the sitting sends one rework that carries the
+decisions.
 The big picture between sittings is the subject's notes: the dated rulings and
 the newest `## Current state` block. That block with no open question left is
 the scaffold.
 It names only what changes, by section or once for the whole document, and gives
 each change its direction and substance, with exact words only where the wording
 itself was settled. Its first lines are the rules the worker follows for what the
-block leaves open, the wording included. The ruling's line names the block,
-`converse-rework.sh` files the rework on the ordinary lane and `mol-polecat-work`
-runs it, so the loop needs no formula, key or script of its own. With no PR open,
+block leaves open, the wording included. The ruling's line names the block. On
+an open PR, `converse-rework.sh` files the rework as an ask the PR's review run
+takes, so the loop needs no formula, key or script of its own. With no PR open,
 the work is sent as a sign-off sends any other, and its bead names the block. The
 `gc-toolkit.converse-iterate-document` skill holds the steps and the block's form.
 
@@ -1046,10 +1061,10 @@ no reaction would spend their attention for nothing, and a pool does it as well
 without them. Whatever the ruling, a sitting holds one change in flight per
 conversation and changes only its own rig's repository, the rig its
 conversation is filed in, because the hold below is a `blocks` edge, which holds
-only within one store. It never edits in its home, edits an open PR's branch,
-cuts an integration effort's branch, pushes to a target branch, merges, or
-forces a push. The `gc-toolkit.converse-edit` skill carries a change from the
-ruling to the refinery.
+only within one store. It never edits in its home, cuts an integration
+effort's branch, pushes to a target branch, merges, or forces a push. The
+`gc-toolkit.converse-edit` skill carries a change from the ruling to the
+refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
 target in the create: the rig's default branch, or the integration branch of an
@@ -1101,19 +1116,23 @@ the polecat's submit, with the same branch gate, push and check of origin's ref,
 bring-current guard, anchor summary and title, three hand-off writes, refinery
 wake and removal of the tree. Under `--held-by` both writers take as proof that
 `gc hook current` names the conversation and the bead has its edge onto it, and
-they refuse a bead assigned to anyone, the refinery included, one a run works or
-one routed to a pool. A refusal writes nothing, files no gate, cancels nothing
-and drains nothing, because the operator is in the sitting to hear it. The
-hand-off removes the edge as its last write, once it has assigned the bead to
-the refinery, whose queue leaves an assigned bead that a wait of its own holds,
-so the assignment starts nothing while the edge stands. A hand-off cut short
-before the assignment leaves the bead unassigned and held, and the sitting runs
-it again. Once the refinery holds the bead, every run is refused as the
-refinery's, and the sitting removes its edge if it still stands and wakes the
-refinery. The change is then an anchor, as a polecat's fresh work is: one bound
-for the default branch reaches a PR, and one in an effort lands on the effort's
-branch. The sitting writes the PR's summary, quoting the ruling, to the standard
-in the `gc-toolkit.commit-conventions` skill.
+they refuse a bead assigned to anyone, the refinery included, one whose PR
+waits on the pending record, one a run works or one routed to a pool. A refusal
+writes nothing, files no gate, cancels nothing and drains nothing, because the
+operator is in the sitting to hear it. The hand-off removes the edge as its last
+write, once it has assigned the bead to the refinery, whose queue leaves an
+assigned bead that a wait of its own holds, so the assignment starts nothing
+while the edge stands. A hand-off cut short before the assignment leaves the
+bead unassigned and held, and the sitting runs it again. Once the refinery holds
+the bead, every run is refused as the refinery's, and the sitting removes its
+edge if it still stands and wakes the refinery. Once the refinery has published
+the bead's PR, every run is refused because the PR waits on the pending record.
+The sitting then removes its edge if it still stands, because the edge would
+hold the PR's merge, and a further edit goes to the PR's branch through
+`gctk pr push`. The change is then an anchor, as a polecat's fresh work is: one
+bound for the default branch reaches a PR, and one in an effort lands on the
+effort's branch. The sitting writes the PR's summary, quoting the ruling, to the
+standard in the `gc-toolkit.commit-conventions` skill.
 
 **Its checks** are the PR's checks: the refinery's gate, the review checks, CI
 and the operator's approval, so the sitting runs no self-review loop. Before the
@@ -1149,17 +1168,40 @@ conversation as the evidence, removes the tree and its local branch, and carries
 out what the ruling says of the subject. A tree whose sitting ended first stays
 on its branch, and Gas City's reaper removes it once the change closes.
 
-**An open PR's branch** takes one writer at a time, the PR's rework child, which
-a polecat runs and on which the review machinery keys. So a sitting does not
-edit it, and a ruling that changes an open PR's branch files a rework through the
-sign-off.
+**An open PR's branch** on the pending record is one the sitting can edit
+itself, on the operator's ruling, while its conversation holds the PR's merge,
+and the PR's bead carries the change, so the sitting files no bead. The sitting
+proves that it holds the PR (`gctk pr push --check`): the bead owns a PR on the
+pending record and waits on the conversation through the `blocks` edge every
+conversation on an open PR carries, and the conversation is in progress under
+the sitting. It edits a checkout of the branch's tip in a tree under its home
+that has no local branch, and pushes through `gctk pr push`, which proves the
+holding again, refuses a checkout whose origin reaches any repository but the
+PR's, returns the PR to draft and pushes under the lease. A review run or
+another writer can work the branch at the same time, and the lease keeps
+either push from overwriting the other: when the branch holds a commit the tree
+does not, the push sends nothing, and the sitting merges that commit in and
+pushes again. The push takes no lock. A review run's pass on a head the edit
+replaces counts for nothing, since the evaluator counts only a passed result
+that names the PR's head. The landing order's ready switch reads no
+conversation, so it can mark the PR ready between the push's return to draft
+and its push, which starts the PR's CI before the edit's review. The sitting
+rewrites the PR's summary to cover the edit and answers the PR with
+`--no-rework` at the sign-off. The refinery validates the head the sitting
+left, and the landing order pours a review run there, which repairs what it
+rules must-fix with no send-back to the sitting.
 
 ## Accept
 
 A first reaction's recommend exit puts its recommendation to the operator as a
 human gate under the key `first-reaction` and records the formula as
 `gc.recommended_formula` on the bead. Accept is the operator's answer to that
-gate alone. The board offers it while all three hold:
+gate alone, and `gctk reaction accept` is its one writer. The operator takes a
+recommendation in a sitting: the board shows the gate as a question, Start the
+conversation opens a sitting on it, and when the operator rules to take the
+recommendation, the sitting's sign-off runs Accept (below). An agent carrying
+out the operator's approval runs the same command (the `work` skill). Accept
+takes the recommendation only while all three hold:
 
 1. the bead carries `gc.recommended_formula`;
 2. the recommendation's gate is open and unassigned, or closed with an
@@ -1171,43 +1213,46 @@ gates, and each gate's close does something of its own: a `ruled:` close
 releases a needs-you finding, and any close releases what waits on the gate.
 It waits for the others because a formula sling reads no `blocks` edge, so an
 Accept that slung while another gate stayed open would start the work before
-that gate was cleared. While another gate blocks the bead, the row offers
-Discuss and names the gates that withhold Accept (`accept_withheld`), and a
-sitting answers them. A live sitting does not withhold Accept; Accept warns
-when one tracks the bead or replies to the recommendation's gate, and that
-sitting's sign-off later reports the gate already cleared. A conversation that
-holds an open PR's merge withholds no Accept either: it is no human gate, and
-it holds only the merge, which no dispatch reaches.
+that gate was cleared. While another gate blocks the bead, a sitting that
+rules to take the recommendation answers the other gate in the same ruling, or
+signs off with `--leave` on the recommendation's gate. The board then keeps
+showing that gate as a question, and once the other gate clears, the sitting
+the operator starts on it takes the recommendation. A live sitting does not
+stop Accept; Accept warns when one tracks the bead or replies to the
+recommendation's gate, and that sitting's sign-off later reports the gate
+already cleared. A conversation that holds an open PR's merge does not stop
+Accept either: it is no human gate, and it holds only the merge, which no
+dispatch reaches.
 
-`gc-helm.sh accept` runs under the bead's acceptance lock, a `flock` on one
+`gctk reaction accept` runs under the bead's acceptance lock, a `flock` on one
 file per bead under `<city>/.gc/runtime/packs/gc-toolkit`, from before its live
 read of the three conditions to its last write, and refuses, writing nothing,
 while another Accept holds it. On an open gate it records the acceptance's
 dispatch input on the gate (`gc.acceptance`: its token, the formula and each
 var), resolves the gate with `ruled: accepted <formula> accept:<token>` once
-that write has exited 0, reads its own answer back to tell it from one another
-reached first, reads that no other open human gate blocks the bead, slings the
-formula titled
+that write has exited 0, reads which answer the gate took to tell its own from
+one another reached first, reads that no other open human gate blocks the bead,
+slings the formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
 meantime, or a sling that poured no root, reopens the recommendation's gate. A
 run that stopped after its resolve leaves an unfinished acceptance, which the
-board keeps owed and the next Accept finishes under the same token, slinging
-only when no root carries the token. That sling carries the vars the
-acceptance recorded, whoever finishes it: the board's Accept passes none, and
+next Accept finishes under the same token, slinging only when no root carries
+the token. That sling carries the vars the acceptance recorded, whoever
+finishes it: a run given no var slings them, and
 a run given vars other than the recorded ones dispatches nothing. The lock's
 warrant is in [warrants.md](warrants.md).
 
 A sitting takes a recommendation through the same writer. When the operator
 rules to take it, the sign-off's `--accept` leaves the recommendation's gate
-out of its `ruled:` answers and runs `gc-helm.sh accept` once the ruling's other
-writes have landed. Under the lock, that run finishes an acceptance the
-board's Accept left unfinished instead of sending the formula again, and a
-board Accept that runs after the sitting's finds the recommendation
-dispatched. Gas City's launch lock refuses a second pour only while the first
-root is live, so a sling of the sitting's own would pour the formula again
-once the stopped Accept's root had finished.
+out of its `ruled:` answers and runs `gctk reaction accept` once the ruling's
+other writes have landed. Under the lock, that run finishes an acceptance an
+earlier Accept left unfinished instead of sending the formula again, and an
+Accept that runs after the sitting's finds the recommendation dispatched. Gas
+City's launch lock refuses a second pour only while the first root is live, so
+a sling of the sitting's own would pour the formula again once the stopped
+Accept's root had finished.
 A var the ruling settles for the dispatch, such as a design convoy's
 `design_gated` ([design-convoy.md](design-convoy.md)), rides the sign-off's
 `--var` to Accept's sling. The sign-off refuses `--accept`, writing nothing,
@@ -1221,7 +1266,7 @@ under the key, and each gate Accept would answer there.
 ## How a parked subject comes back
 
 A sitting that reaches a conclusion leaves its subject with a `gc.takeaway`,
-one board-visible headline of what was settled or what is being waited for. A
+a one-line headline of what was settled or what is being waited for. A
 takeaway exempts nothing anywhere in the liveness family —
 `liveness-sweep.sh`, its precheck and `liveness-recheck.sh`. The wait it names
 does, for as long as that wait is live, and every shape the wait takes is a
@@ -1235,16 +1280,15 @@ record of what the sitting concluded. A subject a sitting's ruling leaves
 waiting on work comes back through the validating closer the sign-off arms
 instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
-**Routed work is wider than the board's disposition-due.** The board derives
-"blocker landed — dispose or resume" from the `blocks` edges
-`gc-helm takeaway --waiting-on` writes. Routed work filed as a child of the
-subject cannot carry that edge, because bd refuses a `blocks` edge from a
-parent onto its own descendant
+**Routed work is wider than the subject's `blocks` edges.**
+`gctk bead takeaway --waiting-on` records a routed wait as a `blocks` edge.
+Routed work filed as a child of the subject cannot carry that edge, because bd
+refuses a `blocks` edge from a parent onto its own descendant
 ([gascity/human-engagement.md](gascity/human-engagement.md#a-parent-cannot-be-blocked-by-its-own-descendant)).
 The sweep therefore reads the union of the subject's `blocks` edges and its
 children, and readiness is that at least one recorded wait exists and every one
 of them has closed. Work routed with neither recording, a sibling named only in
-the takeaway's prose, is invisible to both.
+the takeaway's prose, is invisible to the sweep.
 
 **So routed work is filed beside the subject.** A dependency the subject waits
 on sits beside it, under the subject's own parent when one applies, or under
@@ -1253,10 +1297,10 @@ the nearest open bead above that parent once it has closed
 `takeaway --waiting-on <work>` then takes. Work that genuinely
 decomposes an epic subject is the one exception: it is the epic's member, and
 containment carries the wait. Routed work already filed as a child stays where
-it is, and both readers handle it.
+it is, and the sweep reads it there.
 
-**Where prose alone is correct.** `gc-helm.sh takeaway` writes prose with no
-edge at two call sites, and both pass `--no-wait`, which stamps
+**Where prose alone is correct.** `gctk bead takeaway` writes prose with no
+edge where nothing waits, and each such call passes `--no-wait`, which stamps
 `gc.takeaway_settled`: `lifecycle/lifecycle.toml` `[holds]` reads a takeaway
 as a hold unless its writer stamped that key beside it.
 
@@ -1363,17 +1407,18 @@ clock off rests on different ground, that a thread the operator is reading
 must not end without them.
 
 *The size of that trace:* a takeaway is capped at **140 characters**, which
-`gc-helm takeaway` enforces by refusing a longer text rather than trimming it.
+`gctk bead takeaway` enforces by refusing a longer text rather than trimming it.
 Whatever does not fit is detail, and detail belongs in the subject's notes or
 the thread.
 
 *The limit of a written trace:* a takeaway is one string, frozen when it is
 written. That is enough for a reap, because the record survives, and not
 enough for a wait, because nothing in the city re-reads prose. So a routed wait
-is also written as a `blocks` edge, `gc-helm takeaway <subject> "…"
---waiting-on <work-bead>`, and the board re-derives on every render whether the
-blocker has closed, promoting the row to "blocker landed — dispose or resume"
-when it has. A wait whose work has already landed on the subject's own branch
+is also written as a `blocks` edge, `gctk bead takeaway <subject> "…"
+--waiting-on <work-bead>`, which keeps the subject out of `bd ready` until that
+work closes, and the subject then comes back as
+[How a parked subject comes back](#how-a-parked-subject-comes-back) says. A
+wait whose work has already landed on the subject's own branch
 is the one the verb folds: its deliverable is in the subject's head, so the
 subject's own merge lands it, and `takeaway` writes no edge there, because an
 edge would gate that merge on work that merges with it. Landed is proven, not
@@ -1388,8 +1433,8 @@ no question to abandon. An earlier sitting on the same conversation may have
 held and been cut short, leaving its hold's headline on the subject, waiting
 on the gates this close resolves. So the close reads the subject first. A
 headline that still waits, on a subject no open blocker holds any more, is
-replaced with the reading, settled. The conversation closes only once those
-writes have exited 0.
+replaced with the reading in one short sentence, settled. The conversation
+closes only once those writes have exited 0.
 
 *A restart is not an ending.* A wake that reaches a session mid-hold gets its
 conversation back from `gc hook --claim` as an existing assignment. Draining
@@ -1702,16 +1747,13 @@ operator's *own* unsent words.
   expected to land. The Epics tab shows both for each epic and each
   Delivery, and the Needs you and Work queue tabs show them across the rig,
   each object drawn and ordered one way wherever it appears.
-  `helm-svc board --json` prints the board model's rows for agents, and the
-  sidecar's `/helm` answer serves the same model. Both run the one
-  `internal/source` gather and the one `internal/board` derivation, so a
-  change to the gather, the ranking or the anchor kinds reaches the JSON and
-  the `/helm` answer together, and not the page. A new tile field also owes
-  the model's TypeScript mirror, `web/src/contract.ts`, which
-  `services/helm/web/contract_parity_test.go` holds equal to the Go contract.
-  `gc-helm.sh` keeps the write verbs (`open`, `engage`, `react`, `takeaway`,
-  `dismiss`, `accept`, `park`, `priority`) that have no Go equivalent, and
-  helm-svc's POST routes run `open`, `engage`, `accept` and `dismiss`.
+  `helm-svc board --json` prints each rig's document for agents, from the
+  reader behind the page's answer. `gc-helm.sh` keeps the write verbs (`open`,
+  `engage`, `dismiss`) that have no Go equivalent, gctk holds the steering
+  moves (`gctk bead park`, `gctk bead place`, `gctk reaction accept`), and a
+  priority move is `queue-priority.sh move`. helm-svc's POST routes run `open`
+  and `engage`. A bead's headline is `gctk bead takeaway`'s, and the operator's
+  intake slings a first reaction through `gctk reaction sling`.
 
 ## What upstream does not ship (the pack's actual seam)
 

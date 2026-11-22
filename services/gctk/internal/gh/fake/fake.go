@@ -9,6 +9,7 @@ package fake
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -16,24 +17,35 @@ import (
 )
 
 // PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid.
+// each commit, by its oid. ReviewDecision is what the net's read and the read
+// of the conversation give. The rest is what the cheap question reads beside
+// what it counts from the rest: its labels, when GitHub last changed it, its
+// base's tip, and its head's check rollup state and the commit statuses there,
+// counted by state.
 type PR struct {
-	Facts    gh.PullRequest
-	Reviews  []gh.Review
-	Suites   map[string][]gh.CheckSuite
-	Threads  []gh.Thread
-	Comments []gh.IssueComment
+	Facts          gh.PullRequest
+	Reviews        []gh.Review
+	Suites         map[string][]gh.CheckSuite
+	Threads        []gh.Thread
+	Comments       []gh.IssueComment
+	Labels         []string
+	UpdatedAt      string
+	BaseTip        string
+	ReviewDecision string
+	Rollup         string
+	Statuses       map[string]int
 }
 
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
 // fails a read or a request by its method's name, such as "Reviews", with its
-// error. OnRead, when set, runs as a read of a PR starts, so a test can change
-// GitHub or another writer's state while a read is in flight. OnMerge, when
-// set, answers a merge request or an enqueue in place of the default, which
-// refuses a request whose head is not the PR's and otherwise merges the PR, or
-// adds it to the queue. OnDismiss, when set, answers a dismissal in place of
-// the default, which dismisses the review. Descends names, for each commit,
-// the commits it descends from, which a compare reads.
+// error. SignsFail fails the cheap question for the PRs it numbers, each with
+// its error, and FullFail the net's read. LabeledPage sets the size of a page
+// of the search for labeled PRs. OnRead, when set, runs as a read of
+// a PR starts, so a test can change GitHub or another writer's state while a
+// read is in flight. OnMerge, when set, answers a merge request or an enqueue
+// in place of the default, which refuses a request whose head is not the PR's
+// and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
+// answers a dismissal in place of the default, which dismisses the review.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR
@@ -41,11 +53,93 @@ type GitHub struct {
 	OnRead    func(method string, p *PR)
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
-	Descends  map[string][]string
+	SignsFail map[int]error
+	FullFail  map[int]error
+	// LabeledPage is how many PRs a page of the search holds,
+	// gh.LabeledBatch when it is 0.
+	LabeledPage int
+	// Repos is each repository's default branch and the checks at each ref,
+	// by its owner/name.
+	Repos map[string]*Repo
 
-	mu    sync.Mutex
-	reads []string
-	asks  []Ask
+	mu       sync.Mutex
+	reads    []string
+	asks     []Ask
+	signs    [][]int
+	full     [][]int
+	searched []string
+}
+
+// Searched returns the cursor each page of the search for labeled PRs started
+// from, in order, "" for a first page.
+func (g *GitHub) Searched() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.searched)
+}
+
+// Labeled answers a page of the search for the PRs in repo that carry any of
+// the labels named, newest first: LabeledPage of them from the cursor after,
+// which the page before gave as the position it ended at. It records one read,
+// "Labeled", for each page.
+func (g *GitHub) Labeled(repo string, names []string, after string) (gh.LabeledPage, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "Labeled")
+	g.searched = append(g.searched, after)
+	if err := g.Fail["Labeled"]; err != nil {
+		return gh.LabeledPage{}, err
+	}
+	var found []*PR
+	for _, p := range g.PRs {
+		if strings.EqualFold(p.Facts.Repository, repo) && slices.ContainsFunc(p.Labels, func(l string) bool {
+			return slices.Contains(names, l)
+		}) {
+			found = append(found, p)
+		}
+	}
+	slices.SortFunc(found, func(a, b *PR) int { return b.Facts.Number - a.Facts.Number })
+	from := 0
+	if after != "" {
+		n, err := strconv.Atoi(strings.TrimPrefix(after, "cursor:"))
+		if err != nil || !strings.HasPrefix(after, "cursor:") || n < 0 || n > len(found) {
+			return gh.LabeledPage{}, fmt.Errorf("github: %q is no cursor of the search", after)
+		}
+		from = n
+	}
+	size := g.LabeledPage
+	if size <= 0 {
+		size = gh.LabeledBatch
+	}
+	var page gh.LabeledPage
+	end := min(from+size, len(found))
+	for _, p := range found[from:end] {
+		page.PRs = append(page.PRs, gh.LabeledPR{Number: p.Facts.Number, State: p.Facts.State})
+	}
+	if end < len(found) {
+		page.Next = "cursor:" + strconv.Itoa(end)
+	}
+	return page, nil
+}
+
+// SignsAsked returns the PRs each cheap question asked about, in order.
+func (g *GitHub) SignsAsked() [][]int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.signs)
+}
+
+// FullAsked returns the PRs each of the net's reads asked about, in order.
+func (g *GitHub) FullAsked() [][]int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.full)
+}
+
+// Repo is one repository's default branch and the checks at each ref.
+type Repo struct {
+	DefaultBranch string
+	Checks        map[string]*gh.HeadChecks
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -65,7 +159,8 @@ func (g *GitHub) Asks() []Ask {
 
 // New returns a GitHub that reads as self and holds no PR.
 func New(self string) *GitHub {
-	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, Descends: map[string][]string{}}
+	return &GitHub{Self: self, PRs: map[string]*PR{}, Fail: map[string]error{}, SignsFail: map[int]error{},
+		FullFail: map[int]error{}}
 }
 
 // Put adds p under its repository and number.
@@ -142,7 +237,7 @@ func (g *GitHub) ask(method, id, head string, take func(*PR)) error {
 		return g.OnMerge(method, p, head)
 	}
 	if p.Facts.HeadRefOid != head {
-		return fmt.Errorf("github: Head branch was modified. Review and try the merge again.")
+		return fmt.Errorf("github: Head branch was modified. Review and try the merge again")
 	}
 	take(p)
 	return nil
@@ -219,27 +314,6 @@ func (g *GitHub) stage(method, id string, draft bool) error {
 	return nil
 }
 
-// Compare answers how head stands against base by Descends: identical, ahead
-// when head descends from base, behind when base descends from head, and
-// diverged otherwise.
-func (g *GitHub) Compare(repo, base, head string) (string, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.reads = append(g.reads, "Compare")
-	if err := g.Fail["Compare"]; err != nil {
-		return "", err
-	}
-	switch {
-	case base == head:
-		return "identical", nil
-	case slices.Contains(g.Descends[head], base):
-		return "ahead", nil
-	case slices.Contains(g.Descends[base], head):
-		return "behind", nil
-	}
-	return "diverged", nil
-}
-
 // DismissReview records the dismissal and answers it: by OnDismiss when set,
 // else by dismissing the review, which GitHub refuses for a review the PR does
 // not hold and for one that neither approves nor requests changes.
@@ -286,4 +360,209 @@ func (g *GitHub) Login() (string, error) {
 		return "", fmt.Errorf("github: gh named no account it acts as")
 	}
 	return g.Self, nil
+}
+
+// Signs answers the cheap question for each PR numbered in repo from the PR's
+// state: its facts, the comments and the inline comments counted together, the
+// reviews and the dismissed among them, its labels sorted, and the check runs
+// at its head counted by their conclusion, or by their status while one runs.
+// It records one read, "Signs", for the whole question, and a PR it holds no
+// such PR for, or one SignsFail numbers, fails alone.
+func (g *GitHub) Signs(repo string, numbers []int) (map[int]gh.Signs, map[int]error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "Signs")
+	g.signs = append(g.signs, slices.Sorted(slices.Values(numbers)))
+	read, failed := map[int]gh.Signs{}, map[int]error{}
+	for _, n := range numbers {
+		if err := g.Fail["Signs"]; err != nil {
+			failed[n] = err
+			continue
+		}
+		if err := g.SignsFail[n]; err != nil {
+			failed[n] = err
+			continue
+		}
+		p, ok := g.PRs[key(repo, n)]
+		if !ok {
+			failed[n] = fmt.Errorf("github: %s holds no pull request %d", repo, n)
+			continue
+		}
+		read[n] = p.signs()
+	}
+	return read, failed
+}
+
+func (p *PR) signs() gh.Signs {
+	s := gh.Signs{Number: p.Facts.Number, State: p.Facts.State, IsDraft: p.Facts.IsDraft,
+		HeadRefOid: p.Facts.HeadRefOid, BaseRefName: p.Facts.BaseRefName, BaseTip: p.BaseTip,
+		UpdatedAt: p.UpdatedAt, Comments: len(p.Comments), Reviews: len(p.Reviews), Rollup: p.Rollup,
+		CheckRuns: map[string]int{}, Statuses: map[string]int{}}
+	for _, t := range p.Threads {
+		s.Comments += len(t.Comments)
+	}
+	for _, v := range p.Reviews {
+		if v.State == "DISMISSED" {
+			s.Dismissed++
+		}
+	}
+	if len(p.Labels) > 0 {
+		s.Labels = slices.Sorted(slices.Values(p.Labels))
+	}
+	for _, suite := range p.Suites[p.Facts.HeadRefOid] {
+		for _, r := range suite.Runs {
+			state := r.Status
+			if r.Status == "COMPLETED" {
+				state = r.Conclusion
+			}
+			s.CheckRuns[state]++
+			s.Contexts++
+		}
+	}
+	for state, n := range p.Statuses {
+		if n > 0 {
+			s.Statuses[state] = n
+			s.Contexts += n
+		}
+	}
+	return s
+}
+
+// FullRead answers the net's read for each PR numbered in repo from the PR's
+// state: its signs, as Signs answers them, its merge state, review decision and
+// merge-queue flags, the time each review, inline comment and conversation
+// comment last changed, the threads that are not resolved, and every check run
+// in the check suites at its head, listed by name: GitHub's check rollup lists
+// them in an order of its own, not suite by suite. It records one read,
+// "FullRead", for the whole read, and a PR it holds no such PR for, or one
+// FullFail numbers, fails alone.
+func (g *GitHub) FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "FullRead")
+	g.full = append(g.full, slices.Sorted(slices.Values(numbers)))
+	read, failed := map[int]gh.Full{}, map[int]error{}
+	for _, n := range numbers {
+		if err := g.Fail["FullRead"]; err != nil {
+			failed[n] = err
+			continue
+		}
+		if err := g.FullFail[n]; err != nil {
+			failed[n] = err
+			continue
+		}
+		p, ok := g.PRs[key(repo, n)]
+		if !ok {
+			failed[n] = fmt.Errorf("github: %s holds no pull request %d", repo, n)
+			continue
+		}
+		f := gh.Full{Signs: p.signs(), MergeStateStatus: p.Facts.MergeStateStatus, ReviewDecision: p.ReviewDecision,
+			InMergeQueue: p.Facts.InMergeQueue, MergeQueueEnabled: p.Facts.MergeQueueEnabled, Posts: []string{},
+			Unresolved: []string{}, ViewerReactions: []string{}, ChecksAt: p.Facts.HeadRefOid, Checks: []gh.CheckRun{}}
+		for _, v := range p.Reviews {
+			f.Posts = append(f.Posts, v.UpdatedAt)
+		}
+		for _, t := range p.Threads {
+			if !t.Resolved {
+				f.Unresolved = append(f.Unresolved, t.ID)
+			}
+			for _, c := range t.Comments {
+				f.Posts = append(f.Posts, c.UpdatedAt)
+				for _, r := range c.ViewerReactions {
+					f.ViewerReactions = append(f.ViewerReactions, strconv.FormatInt(c.ID, 10)+" "+r)
+				}
+			}
+		}
+		for _, c := range p.Comments {
+			f.Posts = append(f.Posts, c.UpdatedAt)
+		}
+		slices.Sort(f.Unresolved)
+		slices.Sort(f.ViewerReactions)
+		for _, s := range p.Suites[p.Facts.HeadRefOid] {
+			f.Checks = append(f.Checks, s.Runs...)
+		}
+		slices.SortStableFunc(f.Checks, func(a, b gh.CheckRun) int { return strings.Compare(a.Name, b.Name) })
+		read[n] = f
+	}
+	return read, failed
+}
+
+// PullRequestPart returns the PR's facts and, with checks, the check suites at
+// its head. It records "PullRequestPart", or "PullRequestPart+checks".
+func (g *GitHub) PullRequestPart(repo string, number int, checks bool) (*gh.PRPart, error) {
+	read := "PullRequestPart"
+	if checks {
+		read += "+checks"
+	}
+	p, err := g.pr(read, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := &gh.PRPart{PullRequest: p.Facts}
+	if checks {
+		out.ChecksAt = p.Facts.HeadRefOid
+		out.Suites = slices.Clone(p.Suites[p.Facts.HeadRefOid])
+		if out.Suites == nil {
+			out.Suites = []gh.CheckSuite{}
+		}
+	}
+	return out, nil
+}
+
+// Conversation returns the PR's reviews, threads, conversation comments and
+// review decision.
+func (g *GitHub) Conversation(repo string, number int) (*gh.Conversation, error) {
+	p, err := g.pr("Conversation", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return &gh.Conversation{Reviews: slices.Clone(p.Reviews), Threads: slices.Clone(p.Threads),
+		Comments: slices.Clone(p.Comments), ReviewDecision: p.ReviewDecision}, nil
+}
+
+// DefaultBranch answers the repository's default branch, failing as
+// Fail["DefaultBranch"] says, and for a repository Repos does not hold.
+func (g *GitHub) DefaultBranch(repo string) (string, error) {
+	r, err := g.repo("DefaultBranch", repo)
+	if err != nil {
+		return "", err
+	}
+	if r.DefaultBranch == "" {
+		return "", fmt.Errorf("github: %s named no default branch", repo)
+	}
+	return r.DefaultBranch, nil
+}
+
+// HeadChecks answers the checks Repos holds at ref, failing as
+// Fail["HeadChecks"] says, and for a ref it holds none at.
+func (g *GitHub) HeadChecks(repo, ref string) (*gh.HeadChecks, error) {
+	r, err := g.repo("HeadChecks", repo)
+	if err != nil {
+		return nil, err
+	}
+	h, ok := r.Checks[ref]
+	if !ok {
+		return nil, fmt.Errorf("github: no checks at %s in %s", ref, repo)
+	}
+	out := *h
+	out.Runs, out.Statuses = slices.Clone(h.Runs), slices.Clone(h.Statuses)
+	return &out, nil
+}
+
+func (g *GitHub) repo(read, repo string) (*Repo, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, read)
+	if err := g.Fail[read]; err != nil {
+		return nil, err
+	}
+	r, ok := g.Repos[strings.ToLower(repo)]
+	if !ok {
+		return nil, fmt.Errorf("github: no repository %s", repo)
+	}
+	return r, nil
 }
