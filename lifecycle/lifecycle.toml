@@ -59,8 +59,8 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # blocked_reason is also the pending record's reason: the merge a bead awaits,
 # or the exception that holds it. The record writes it only on a bead whose
-# marker, pr_reconcile_pending, is true. A run of the landing order reads a
-# record whose marker is true while its bead is open, blocked or closed (due()
+# marker, pr_reconcile_pending, is true. A run of the landing order decides a
+# record whose marker is true while its bead is open, blocked or closed (plan()
 # in services/gctk/pr/landing.go, with record.Read), and the check that reads
 # this declaration reads no closed bead. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the
@@ -1057,9 +1057,10 @@ keys = [
 # city's answer, `<count>@<head oid>`: unresolved, with no answer of the city's
 # after their newest feedback, where a post not for review, one the city marked
 # handled with its THUMBS_UP, or one a dismissal retired is neither
-# (gc_thread_awaits_answer in pr-post.sh). Nothing writes it or reads it: the
-# landing order saves the threads that wait in the GitHub read it keeps on the
-# bead, which its evaluator reads. It is plain, not dated, and never cleared.
+# (gc_thread_awaits_answer in pr-post.sh). Nothing writes it or reads it: the PR
+# watch saves the threads that wait in the GitHub read it keeps on the bead,
+# which the landing order's evaluator reads. It is plain, not dated, and never
+# cleared.
 keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation", "pr.unanswered_threads"]
 
 [metadata.pr_status_label]

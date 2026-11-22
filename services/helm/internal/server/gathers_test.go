@@ -30,7 +30,7 @@ func (twoRigGC) JSON(_ context.Context, out any, args ...string) error {
 // waiting on a gather it ended answers that the board is stopping, and a
 // gather asked for after it reads nothing.
 func TestStopGathersEndsEveryGatherAndWaitsForIt(t *testing.T) {
-	s := New(WithRigBoard(twoRigGC{}, time.Minute))
+	s := New(WithRigBoard(twoRigGC{}, rigAPI{}, time.Minute))
 	var reads, returned atomic.Int32
 	started := make(chan struct{}, 2)
 	s.rigBoard.read = func(ctx context.Context, rig rigboard.Rig) (rigboard.Document, error) {

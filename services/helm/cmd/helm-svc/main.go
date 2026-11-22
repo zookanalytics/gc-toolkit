@@ -18,7 +18,8 @@
 // app (the mount root, plus its assets) over it. Requests arrive already
 // path-stripped.
 //
-// The rig board reads each rig's store through the gc command
+// The rig board reads each rig's store through the gc command, and when GitHub
+// was last asked about the rig's pull requests through the supervisor's API
 // (internal/rigboard), and the city page reads the supervisor's event log
 // (internal/source).
 package main
@@ -97,7 +98,7 @@ func serve() {
 	srv := server.New(
 		server.WithSPA(spaHandler()),
 		server.WithActuator(selectActuator(cityPath)),
-		server.WithRigBoard(source.NewGC(cityPath), server.RigBoardTTL),
+		server.WithRigBoard(source.NewGC(cityPath), source.NewSupervisorAPI(), server.RigBoardTTL),
 		server.WithCityPage(source.NewEventLog(), server.CityPageTTL),
 	)
 
