@@ -34,30 +34,31 @@ U=$(gc dashboard serve | grep -o 'http://[^ ]*') && C=$(gc status --json | jq -r
     else . end'; done
 ```
 
-Each mailbox prints its total, then each message, newest first.
-Gas City's own defaults mail some alerts to the mayor, so yours is the
-operator's mail too. A `partial` line names each mail store that did not
-answer: tell the operator, and read again before you call the mail worked
-through. A `next_cursor` line means more follow: add `&cursor=<it>` to the URL
-for each page after it. With no total line the read failed: say what it
-printed and read again. `gc mail peek <id>` reads a message and leaves it as it
-was, and `gc mail thread <id>` reads its thread.
+Each mailbox prints its total, then each message, newest first. Gas City's
+defaults mail some alerts to the mayor, so yours is the operator's mail too. A
+`partial` line names each mail store that did not answer: tell the operator,
+and read again before you call the mail worked through. A `next_cursor` line
+means more follow: add `&cursor=<it>` to the URL for the next page. With no
+total line the read failed: say what it printed and read again.
+`gc mail peek <id>` reads a message and leaves it as it was, and
+`gc mail thread <id>` its thread.
 
-The rigs' open questions, each need the board counts in each rig:
+The rigs' open questions, as the board counts them:
 
 ```bash
 "$GC_CITY_PATH/.gc/services/helm/bin/helm-svc" board --json | jq -r '"read_at \(.read_at)",
   (.rigs[] | .rig as $r | if .error then "unread\t\($r)\t\(.error)" else .board as $b
     | ($b.needs_you.counted[] | $b.rows[.id] as $w
       | "\($r)\t\(.kind)\t\(.id)\t\($w.title)\(if $w.conversation then "\tin \($w.conversation)" else "" end)"),
+    ($b.work_queue.unread[] | "unread\t\($r)\t\(.)\t\($b.rows[.].title)"),
     "\($r)\t\($b.needs_you.not_counted | length) more, parked or held for the po" end)'
 ```
 
 A line gives a need's rig, kind, bead and title, and the conversation already
-on it. An `unread` line names a rig whose read failed, and no `read_at` line
-means nothing read. Until a read covers it, the overview leaves that rig out:
-say so. Read deeper where it changes your advice: `gc bd show <id>`, and
-`"$S/bead-context.sh" <id>` for what holds it, with
+on it. An `unread` line names a rig, or a bead in it, whose read failed, and no
+`read_at` line means nothing read. Until a read covers it, the overview leaves
+it unassessed: say so. Read deeper where it changes your advice:
+`gc bd show <id>`, and `"$S/bead-context.sh" <id>` for what holds it, with
 `S="$(gc {{ .BindingName }} scripts-dir)"`.
 
 ## The sitting
@@ -102,9 +103,8 @@ read nothing back.
   above in the rig whose code sends it, unless the operator sends it on, then
   archive that mail.
 
-You keep no rule of your own. Nothing is archived by a standing filter, and no
-kind of message is hidden: each archive is a judgment made in a sitting, about
-mail you read.
+Nothing is archived by a standing filter, and no kind of message is hidden:
+each archive is a judgment made in a sitting, about mail you read.
 
 ## Anything else that reaches you
 

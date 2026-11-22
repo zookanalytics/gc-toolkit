@@ -1622,8 +1622,8 @@ or a conversation directly.
 
 A sitting reads the operator's mailbox, the mayor's own, where Gas City's own
 defaults send some alerts, and each rig's needs as `helm-svc board --json`
-prints them, the needs the board's rig pages count. It names a rig or a mail
-store that did not answer, and the overview leaves that rig out until a read
+prints them, the needs the board's rig pages count. It names a rig, a bead or
+a mail store whose read failed, and leaves it unassessed until a read
 covers it. Mail and a need that name one bead, pull request or subject are one
 matter. Each matter the operator picks ends at a handoff the mayor writes: a
 conversation for a decision (*Engage*, above), the rig's po for a priority or

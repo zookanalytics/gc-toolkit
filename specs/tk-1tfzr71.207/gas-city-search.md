@@ -109,9 +109,12 @@ prints for each rig the document the board's rig page draws, from the same
 reader (`services/helm/cmd/helm-svc/board.go`). Its Needs you view is every
 need in the rig, the needs that count apart from those whose subject is parked
 or held for the po, each with its kind and what it holds, and a rig whose read
-failed carries its error in place of its document. So the overview counts what
-the operator's board counts, adds no store and no second queue, and a rig that
-did not read is named, never left out. The read took 12 seconds over the
+failed carries its error in place of its document. In a rig that read, its Work
+queue view lists apart, as unread, the work a reader could not answer, such as
+a pull request whose facts no read gave (`WorkQueue` in
+`services/helm/internal/rigboard/document.go`). So the overview counts what the
+operator's board counts, adds no store and no second queue, and a rig or a bead
+that did not read is named, never left out. The read took 12 seconds over the
 city's seven rigs on 2026-11-22.
 
 ## Opening the seat
