@@ -297,16 +297,16 @@ func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
 	}
 }
 
-// TestAnOpenPullRequestOnEitherRecord: a bead owns an open pull request at
-// pull_request, and at either value Gas Town's pending record gives one, and at
-// no value that records a landing or an end without one.
-func TestAnOpenPullRequestOnEitherRecord(t *testing.T) {
-	for _, v := range []string{"pull_request", "pull_request_pending", "pull_request_head_changed"} {
+// TestAnOpenPullRequestOnTheRecord: a bead owns an open pull request at either
+// value Gas Town's pending record gives one, and at no value that records a
+// landing or an end without one.
+func TestAnOpenPullRequestOnTheRecord(t *testing.T) {
+	for _, v := range []string{"pull_request_pending", "pull_request_head_changed"} {
 		if !hasOpenPullRequest(bead{MergeResult: v}) {
 			t.Errorf("merge_result %s owns an open pull request", v)
 		}
 	}
-	for _, v := range []string{"", "pre_open_gate", "merged", "mr_merged", "pull_request_closed_unmerged"} {
+	for _, v := range []string{"", "mr_merged", "pull_request_closed_unmerged", "pull_request_reconcile_invalid"} {
 		if hasOpenPullRequest(bead{MergeResult: v}) {
 			t.Errorf("merge_result %q owns no open pull request", v)
 		}

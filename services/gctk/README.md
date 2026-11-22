@@ -24,17 +24,20 @@ through `gc bd` and the supervisor's API.
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
 | `lifecycle` | the plain write of a bead's `merge_result` outside the pending record, with the work record a landing writes, in one atomic update whose exit decides. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go` |
 | `memory due`, `memory apply`, `memory settle` | the learning loop's memory intake, which the feedback distiller's steps call: the agent memory notes due for its judge as JSON, oldest first, read from each memory directory Claude Code names for a session in each rig's checkout and the city's root; the judge's decision on each note recorded on its directory's list, a dropped note's text kept before it goes; and each note's wait ended once its fix has landed on the default branch, or with the note due again when it ended with none, with one finding for a place Claude Code names no directory for | `gctk memory --help`, `internal/cli/memory.go`, `memory`, `internal/claudecode` |
+| `distiller start` | the feedback-distiller order's start: the pack's home rig, the one rig whose checkout holds a `pack.toml` naming the gc-toolkit pack, and the polecat pool `gc agent list` places there, and one run of `mol-feedback-distiller` slung to that pool unless a run is open in the rig's store, under a lock that keeps overlapping starts apart; a city with no home rig, a suspended one, or another start holding the lock starts nothing, and a read that fails, a second home rig, a pool that is not one or a lock that cannot be taken starts nothing and exits 1 | `gctk distiller start --help`, `internal/cli/distiller.go`, `distiller` |
 | `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
-| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the landing order saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
+| `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the one-PR update saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
-| `pr reconcile` | one run of the landing order over the store's pending records, the least recently checked first, each under the store's record lock: the withdrawals filed on a bead carried out, a draft whose review result passed at its validated head marked ready, a ready PR merged with its head pinned, a bead closed once its merge commit is on the target, the bead of a PR a ruling retired closed through `bead-rehome.sh` once the PR has closed, a changed head sent back to the refinery, each exception kept blocked behind a human gate, and the GitHub read each check of an open PR made saved on its bead | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
+| `pr poll` | one pass of the PR watch: the PRs the store's live beads own asked about in one request for each 50 in a repository, reading their cheap signs and no detail, and the one-PR update run for each PR whose signs moved or whose saved merge state GitHub had not computed, taken from every repository in a shuffled order, none started past 90 seconds, so a pass in which nothing moved writes no bead but that of such a PR | `gctk pr poll --help`, `internal/cli/prwatch.go`, `pr` |
+| `pr compare` | one pass of the net, every hour: the PRs the store's live beads own read in full in one request for each 10 in a repository, their signs, merge state, review decision, merge-queue flags, review threads' resolutions, posts' times, the city's reactions on inline comments and required check runs, with each list read on to its end and no post's text, and the one-PR update run over each part of each PR that differs from its saved read, taken in a shuffled order, none started past 3 minutes, so a thread resolved, a thread the city's reaction answered or a post edited with no sign moved reaches the saved read within one pass; then the rig's own repository searched for the city's labels, a page at a time until 20 PRs no live bead owns are found or the results end, and each cleared through the labels' writer in a shuffled order | `gctk pr compare --help`, `internal/cli/prwatch.go`, `pr` |
+| `pr refresh` | the one-PR update, the one writer of GitHub's side on a bead: the parts of the PR its signs say moved, or the net finds differ, or every part for the re-read the landing order has made before a merge, read and saved on the live bead that owns it, in four parts that each keep the instant their read was sent, in one write under the store's record lock guarded on what it read, with pr_state and pr_last_checked_at on a bead on the pending record | `gctk pr refresh --help`, `internal/cli/prwatch.go`, `pr` |
+| `pr reconcile` | one run of the landing order over the store's pending records, the second of the PR's two loops: every record decided through one read of the store, on the read the PR watch saved on its bead and the store alone, with no read of GitHub for a record that owes no act, and each that owes one decided again under the store's record lock, taken in a shuffled order, none started past 45 seconds and each stopped at 30: the withdrawals filed on a bead carried out on the act's own reads of what they dismiss, a draft whose review result passed at its validated head marked ready, a PR ready on the saved read re-read in full by the one-PR update and merged with its head pinned only on what that read saved, a bead closed once its merge commit is on the target, the bead of a PR a ruling retired closed through `bead-rehome.sh` once the saved read shows the PR closed, a changed head sent back to the refinery, and each exception kept blocked behind a human gate, and each owned PR's `status:` and `held:` labels written through their one writer, reading nothing of the PR first, where the ones the bead's read saved differ from what the store derives, with nothing of GitHub's written but by the one-PR update and nothing recorded of an act that did not complete | `gctk pr reconcile --help`, `internal/cli/prland.go`, `pr`, `pr/record`, `listing`, `prstatus` |
 | `pr draft` | the PR a bead owns returned to draft before a writer of the city pushes onto it, read from its draft flag first and converted only when it is ready, so a round's later pushes change nothing | `gctk pr draft --help`, `internal/cli/prcycle.go`, `pr` |
 | `pr withdraw` | the withdrawal of the approvals a material change leaves behind: a bead that blocks the bead that owns the PR and names the head, which the landing order carries out by dismissing each approval given on a commit that does not contain it | `gctk pr withdraw --help`, `internal/cli/prcycle.go`, `pr` |
 | `pr push` | a converse sitting's push of its checkout's commits onto the branch of the PR a bead owns, once it proves that its conversation holds the PR and that the checkout's origin is the PR's repository: the PR returned to draft first, then the checkout's HEAD pushed under the lease through the pack's `branch-push.sh`, beside any review run that works the branch; `--check` proves the holding and changes nothing | `gctk pr push --help`, `internal/cli/prpush.go`, `pr` |
 | `reaction check`, `reaction sling` | whether a bead may take a first reaction: the refusals of a bead whose next move is someone's (its kind, its status, an assignee, a route or an arm, a dispatch hold, an open conversation, a live run, an open human gate), each with its exit code; the check is the reaction's own first act and writes nothing, and the sling then slings a run of `mol-first-reaction` through the rig's proactive pool | `gctk reaction check --help`, `gctk reaction sling --help`, `internal/cli/reaction.go`, `reaction` |
 | `reaction sweep` | the proactive order's pass: one ready read of the rig's store by priority, the raw input among it, less each bead a live run works, slung a first reaction each until the sweep's deadline, one JSON line per candidate; `--dry-run` slings nothing | `gctk reaction sweep --help`, `internal/cli/reaction.go`, `reaction` |
-| `reaction deliverable` | whether the rig's proactive pool can take a first reaction now, by the city's roster | `gctk reaction deliverable --help`, `internal/cli/reaction.go`, `reaction` |
 | `reaction dispose` | one exit of a first reaction on its subject, its writes in their order: a release to a pool or a hand-off to the named agent whose work it is, a hold on what it waits for, a validating closer now or once the beads that end its job land, or a human gate for the operator, with or without an action Accept runs; intake holds what it does not admit for placement | `gctk reaction dispose --help`, `internal/cli/reaction.go`, `reaction` |
 | `reaction accept` | the acceptance of a recommendation a recommend exit left: under the bead's acceptance lock, its first write the arm's removal, the dispatch input recorded on the recommendation's gate, the gate answered and read for which answer it took, the formula slung at the bead once under the acceptance's token, the hold lifted and the dispatch recorded; a run finishes an acceptance an earlier one left | `gctk reaction accept --help`, `internal/cli/reaction.go`, `reaction` |
 | `refinery stuck` | the refinery-queue-detect order's look: each open handoff assigned to a rig's refinery that carries a branch and no merge_result, has gone four hours without a write, and that nothing holds by `bead holds`, recorded as one `gc-toolkit.refinery-queue.stuck` event when it finds one; a rig whose queue does not read is left out and the run exits 1 | `gctk refinery stuck --help`, `internal/cli/refinery.go`, `refinery` |
@@ -71,12 +74,18 @@ build, and a city whose build failed keeps serving the last good binary.
 `assets/scripts/pr-status-label.sh` writes the `status:` and `held:` labels in
 shell and takes their values from `gctk pr status`. It resolves the
 binary the same way, and when there is none, or the binary is too old to carry
-`pr status` or its `--json`, it leaves the labels unchanged. `gc-helm.sh` engage
+`pr status` or its `--json`, it leaves the labels unchanged. `gctk pr reconcile`
+and `gctk pr compare` run it through the runtime adapter. The landing order
+compares each owned PR's saved labels with the same derivation first
+(`listing.PRLabels`, and `prstatus.Labels` for the labels' names), and runs
+`reconcile` or `clear` only where they differ. The net derives nothing: it
+searches for the labels `prstatus.LabelNames` lists and runs `clear` on each PR
+it finds that no live bead owns. `gc-helm.sh` engage
 lists what holds a bead from the reasons in the same verb's `--json` answer, and
 the helm board imports the package behind it, `prstatus`, so the labels, engage
 and the board read one definition of what holds a PR. For a PR on Gas Town's
 pending record, the verb and the rig board ask the pr domain's evaluator over
-the store and the GitHub read the landing order saved on the PR's bead, the
+the store and the GitHub read the one-PR update saved on the PR's bead, the
 board through its listing (`listing.PRAnswers`), so none of them reads GitHub.
 
 The refinery's merge-push step (`refinery-publish.sh`) takes a PR's title and
@@ -194,7 +203,9 @@ internal/gcbd/fakegc/  the compiled fake gc, which answers gc's command line fro
                      files for the shell suites, and its contract test against the city's bd
 internal/daemon/     finding the supervisor API the store adapter's reads go through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
-internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end
+internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end, the
+                     cheap question, the signs of up to 50 PRs in one call, and the net's
+                     full read of up to 10
 internal/gh/fake/    the GitHub adapter's in-memory fake, for the domains' tests
 internal/feedback/   the pack's one definition of feedback, pr-post.sh's feedback-def, run
                      through jq
@@ -207,16 +218,21 @@ arm/                 the arm's verbs and its start: what arm refuses, the dispat
 arm/record/          the arm's keys, which it owns, the arm they decode to, and every write to them
 pr/                  the pr domain: whether the PR a bead owns is ready to merge at its
                      current revision, from the store, GitHub and the definition of
-                     feedback, or from the store and the GitHub read the landing order
-                     saved there; the account of the change its author records, the PR
-                     summary; and what the PR's title and body say: its title, and its
-                     body's managed summary region and branch-beads section, with the
-                     renders they replaced pinned under testdata
+                     feedback, or from the store and the GitHub read the one-PR update
+                     saved there, which the PR watch reads when GitHub shows it moved,
+                     or when the net's full read finds it differs; the account of the
+                     change its author records, the PR summary; and what the PR's
+                     title and body say: its title, and its body's managed summary
+                     region and branch-beads section, with the renders they replaced
+                     pinned under testdata
 epic/                which closes and shifts of a rig's epics no portfolio sync has weighed,
                      from the ruling's keys and each sync's mark, read-only
 memory/              the memory intake: each memory directory's list of the notes the
                      distiller's judge kept, the due notes, the judge's decisions, and the
                      waits that end once a fix lands
+distiller/           where the city's one distiller run starts: the home rig, its polecat
+                     pool, and whether a run is open there, read-only but for the sling
+                     and the start's lock
 prstatus/            the PR status derivation, exported for the helm board
 listing/             one pass's read of a store for the helm board: every live bead, the
                      closed beads under a parent, the keys it decodes, and waits',
@@ -245,6 +261,7 @@ cd services/gctk && go test ./...          # every gctk package
 cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write key-registry.json again
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
+cd services/gctk && GCTK_CITY_ACCEPTANCE=1 go test ./internal/gascity ./distiller -run TestCityAcceptance -v   # the city's gc on a scratch city
 bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
 bash assets/scripts/epic.test.sh           # epic through its bridge
 bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs

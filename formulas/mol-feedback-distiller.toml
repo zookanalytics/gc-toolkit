@@ -45,7 +45,7 @@ Every step closes its own bead through `assets/scripts/claim-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block).
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
-drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
+drains). `DISTILL_RUN` (open | gated | aborted) is session state;
 a worker waking fresh re-runs load-and-gate through its cadence gate to
 rebuild it — never guesses.
 
@@ -58,7 +58,7 @@ formula_compiler = ">=2.0.0"
 
 [vars]
 [vars.binding_prefix]
-description = "Agent identity prefix with trailing dot. Non-empty default on purpose: this formula is poured by a gc order, and order dispatch injects no routing vars."
+description = "Agent identity prefix with trailing dot. gc sling sets it from the binding of the pool the run is slung to, and the default holds for a pour that names no agent."
 required = false
 default = "gc-toolkit."
 
@@ -116,11 +116,7 @@ default = "200"
 id = "read-memory"
 title = "End the agent memory waits that are done, before load-and-gate lists the due notes"
 description = """
-Only the pack's home rig reads memory, as load-and-gate's gate says: when
-`grep -q '^name *= *"gc-toolkit"' "$(git rev-parse --show-toplevel)/pack.toml"`
-exits non-zero, close this step and go on.
-
-On the home rig, end the waits that are done:
+End the agent memory waits that are done:
 
 `GCTK_SCRIPTS_DIR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)" "${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}" memory settle`
 
@@ -134,20 +130,19 @@ with `gc hook --claim --json`):
 
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-feedback-distiller.read-memory --outcome pass`
 
-**Exit criteria:** settle printed its places and what it ended, or this is not
-the home rig. Bead closed on every path; session NOT drained.
+**Exit criteria:** settle printed its places and what it ended. Bead closed on
+every path; session NOT drained.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
 
 [[steps]]
 id = "load-and-gate"
-title = "Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate"
+title = "Prime, read pending observations cross-rig, apply the D7 cadence gate"
 needs = ["read-memory"]
 description = """
-## 1. Prime and home-rig gate
+## 1. Prime
 
 ```bash
-SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 gc prime
 gc bd prime
 REPO="$(git rev-parse --show-toplevel)"
@@ -157,16 +152,7 @@ REPO="$(git rev-parse --show-toplevel)"
 # last-known origin/main.
 git -C "$REPO" fetch origin main --quiet || true
 
-DISTILL_RUN=open   # open | gated | aborted | off-home
-# Prompt updates are edits to the pack repo, authorable only from its home
-# rig; every importing rig fires this order, so anywhere else is a clean
-# no-op, not an error.
-if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
-  DISTILL_RUN=off-home
-  echo "DISTILL_RUN=off-home — not the gc-toolkit pack home rig; nothing to distill here."
-  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome pass
-  exit 0
-fi
+DISTILL_RUN=open   # open | gated | aborted
 ```
 
 ## 2. Cross-rig pending-observation read (D5)
@@ -332,11 +318,6 @@ truth; never restate it in parallel prose.
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
 REPO="${REPO:-$(git rev-parse --show-toplevel)}"
-if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
-  echo "DISTILL_RUN=off-home — nothing to judge here."
-  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.judge-and-cluster --outcome pass
-  exit 0
-fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   # An untrustworthy read: judge nothing AND propose nothing.
   echo "DISTILL_RUN=aborted — judging nothing, proposing nothing."
@@ -508,21 +489,14 @@ The TERMINAL step, the one place this workflow drains.
 
 It MUST finalize on every path: close its own bead, then
 `gc runtime drain-ack`, even with nothing to file. Never leave it `open` or
-`blocked`: the order is single-flight on an open root, so a step blocked here
-stalls the distiller until a person runs
-`gc order sweep-tracking --include-wisps feedback-distiller`.
+`blocked`: the order starts no run while this run's root is open, so a step
+left here stalls the distiller until a person ends the run with
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --root <the run's root> --reason "<why>"`.
 
 ## 0. Carry the run disposition
 
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
-REPO="${REPO:-$(git rev-parse --show-toplevel)}"
-if ! { [ -f "$REPO/pack.toml" ] && grep -q '^name *= *"gc-toolkit"' "$REPO/pack.toml"; }; then
-  echo "DISTILL_RUN=off-home — no bead filed, no observation stamped."
-  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome pass
-  gc runtime drain-ack
-  exit 0
-fi
 if [ "${DISTILL_RUN:-}" = "aborted" ]; then
   echo "DISTILL_RUN=aborted — no bead filed, no observation stamped."
   "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.file-and-dispatch --outcome fail

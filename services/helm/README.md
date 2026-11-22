@@ -136,9 +136,9 @@ The packages, with clean dependency lines `rigboard <- server <- cmd` and
 
 | Package | Responsibility |
 |---|---|
-| `internal/source` | Gas City's own interfaces as the pages read them: the `gc` command, through which the rig board reads each rig's store and the service finds its city, and the supervisor's event log, which the city page reads. |
+| `internal/source` | Gas City's own interfaces as the pages read them: the `gc` command, through which the rig board reads each rig's store and the service finds its city, the supervisor's event log, which the city page reads, and the supervisor's API (`SupervisorAPI`), through which the rig board reads when GitHub was last asked. |
 | `internal/server` | HTTP routes + a server-side TTL cache of each rig's board document and of the city's. |
-| `internal/rigboard` | The rig board's read: one gctk listing of a rig's store, the pack's shared readers asked of its rows, and the one table that names each row's group and signal. See *The rig board*, below. |
+| `internal/rigboard` | The rig board's read: one gctk listing of a rig's store, the pack's shared readers asked of its rows, and the one table that names each row's group and signal, with the line saying when GitHub was last asked, read through the supervisor's API. See *The rig board*, below. |
 | `internal/cityboard` | The city page's read: doctor's newest run from the city's event log, and which of its checks the page shows and counts. See *The city page*, below. |
 | `internal/verbs` | Runs a `gc-helm.sh` write verb for the server's POST routes, under a deadline that kills the run's whole process group. It owns no verb logic. |
 | `internal/form` | The terminal conversation form, `helm-svc form`. See *The conversation form*, above. |
@@ -278,7 +278,10 @@ types. It reads the document again every half minute, whenever the tab is shown
 again, and after a write it sends. A read that fails keeps the last good
 document on screen, with the time it was read and the failure beside it, and a
 failed read with no document before it shows the failure alone, never an empty
-list.
+list. Under the read time, a line says when GitHub was last asked about the
+rig's pull requests, as the read judged it, with the date when that was on
+another day than the read. The line is amber when it is stale or GitHub was not
+asked, and red when it could not be read.
 
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
@@ -385,7 +388,8 @@ each, and the Epics, Needs you, Work queue and Unprioritized pages as lists of
 those rows' ids. Each epic and Delivery on the Epics page carries its own Needs
 you, its own Work queue and its closed work, over the rows it holds nearest, and
 the Needs you and Work queue pages carry the same two views across the rig. Its
-read time sits beside it (`read_at`), not in it.
+read time sits beside it (`read_at`), not in it, and so does the line saying
+when GitHub was last asked about the rig's pull requests (`asked`).
 
 **What it reads.** One read of the rig's store through gctk's listing
 (`services/gctk/listing`), a ledger pass, never the beads library: one
@@ -410,7 +414,7 @@ document never mixes two reads of a bead:
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`, and `Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
 | `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
-| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the GitHub read the landing order saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
+| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows, waits' answers, the store's ready set and the live runs, and which of it is the ready work nothing sends anywhere |
 
@@ -476,6 +480,35 @@ among them, and only then does the request answer its failure, so polls that
 come while the store hangs do not pile up reads on it. A failed read answers
 502 with the failure, never a document, so the page keeps its last good
 document and says the read failed.
+
+**When GitHub was last asked.** The rig's `pr-poll` order asks GitHub, once a
+pass, whether each pull request the rig's beads own moved, and a pass that
+could not ask about every one of them exits non-zero. A pass in which nothing
+moved writes nothing to a pull request's bead, but for one whose merge state
+GitHub had not computed, so the line reads Gas City's
+record of the order's runs, through the supervisor's API
+(`internal/rigboard/asked.go`, read by `source.SupervisorAPI`). It reads the
+order's newest 50 runs,
+`GET /v0/city/{city}/orders/history?scoped_name=pr-poll:rig:<rig>`, then the
+order, `GET /v0/city/{city}/order/pr-poll:rig:<rig>`, for its interval as the
+city's `[[orders.overrides]]` leave it. Gas City labels a run's record `exec`
+when its command exited 0, and `exec-failed` or `exec-env-failed` when it did
+not, and the line is the start of the newest run labeled `exec`. The history's
+`exit_code` is a convergence gate's, which an exec order's run does not record.
+The line's state is one of these:
+
+| State | When |
+|---|---|
+| `asked` | the newest run that exited 0 started within three of the order's intervals before the read, and `at` is its start |
+| `stale` | that run started longer ago |
+| `not_asked` | no run the history holds exited 0, and `since` is the start of the oldest one, absent when it holds none |
+| `unwatched` | the city runs no enabled `pr-poll` order for the rig, as for a rig that runs none of the pack's rig orders |
+| `unread` | the history or the order could not be read, and `error` says why |
+
+The line is judged at the read's time and cached with the document, so it is
+as old as the read beside it, and a read of it that fails leaves the document
+as it is. `specs/tk-1tfzr71.149/gas-city-search.md` records the search behind
+it.
 
 **The page's types are generated.** `web/src/rigboard/document.gen.ts` comes
 from `internal/rigboard/document.go` and `table.go`, through tygo, and nobody
@@ -752,8 +785,9 @@ Discovery env:
 ## The board on fixture data (`helm-fixture`)
 
 `cmd/helm-fixture` serves the app this commit embeds with no city behind it.
-`GET /helm/rigs` and `GET /helm/rigs/{rig}` answer one rig's document,
-`GET /helm/city` answers the city's document, and `POST /helm/<verb>` answers a
+`GET /helm/rigs` and `GET /helm/rigs/{rig}` answer one rig's document, with
+GitHub last asked at the time the fixture started, `GET /helm/city` answers the
+city's document, and `POST /helm/<verb>` answers a
 canned answer, so nothing it serves reads or writes a city. It is gc-toolkit's
 declared `ui_serve_command`, so a demo capture of the board serves it as its
 `--serve` command (`docs/review-demo.md`), and a sitting's live copy of the

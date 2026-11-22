@@ -8,8 +8,7 @@
 // expected to land in. services/gctk/conversation says what a conversation
 // is. Where a pull request on Gas Town's pending record stands is the pr
 // domain's evaluator's answer, which the listing asks over the same rows, with
-// the GitHub read the landing order saved on the PR's bead
-// (listing.PRAnswers), rendered through prstatus as `gctk pr status` renders
+// the read the one-PR update saved on the PR's bead (listing.PRAnswers), rendered through prstatus as `gctk pr status` renders
 // it. One table (table.go) turns those answers into a row's group and signal,
 // and it holds no rule of its own about what holds a bead, whose move it is or
 // whether work is moving.
@@ -340,9 +339,8 @@ func holdingAncestor(h waits.Holds) string {
 }
 
 // hasOpenPullRequest reports whether a bead is a merge anchor whose pull
-// request is open, which is what its merge_result says: pull_request on the old
-// record (lifecycle/lifecycle.toml), or a value [pr.OnRecord] names on Gas
-// Town's pending record.
+// request is open, which is what its merge_result says: a value [pr.OnRecord]
+// names on Gas Town's pending record.
 func hasOpenPullRequest(b bead) bool {
-	return b.MergeResult == "pull_request" || pr.OnRecord(b.MergeResult)
+	return pr.OnRecord(b.MergeResult)
 }

@@ -66,7 +66,7 @@ type Closed struct {
 }
 
 // Hold is what holds the subject: an open human gate, a blocker a person has
-// to clear, or, with no ID, the PR's own review threads or blocked verdict.
+// to clear, or, with no ID, the PR's own review threads.
 type Hold struct {
 	Held  string `json:"held"`
 	ID    string `json:"id"`

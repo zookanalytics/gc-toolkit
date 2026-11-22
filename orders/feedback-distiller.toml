@@ -1,16 +1,28 @@
-# feedback-distiller — turn pending observations and due agent memory notes
-# into reviewed prompt-update proposals. The 24h timer is a HEARTBEAT, not the
-# cadence (D7): the formula's load-and-gate step gates judging on pending
-# volume / urgency / age — do not "fix" a quiet order by shortening this
-# interval; tune the formula's gate vars. A gated fire still runs the
-# retirement pass over adopted rules (that pass is unconditional).
-# Home-rig-gated inside the formula: importers' daily fire is one cheap
-# idempotent no-op session. Rig-scoped, BARE pool (same rationale as
-# feedback-miner).
+# feedback-distiller — once a day, start the city's one run of
+# mol-feedback-distiller in the pack's home rig. `gctk distiller start` finds
+# the rig whose checkout holds the gc-toolkit pack and the polecat pool gc agent
+# list names there, and slings the formula to that pool unless a run of it is
+# still open in the rig's store. A run reads the observations and memory notes
+# of every rig, so one run serves the whole city.
+#
+# The 24h timer is a HEARTBEAT, not the cadence (D7): the formula's
+# load-and-gate step gates judging on pending volume, urgency and age, so a
+# quiet loop is tuned through the formula's gate vars, never by shortening this
+# interval. A gated run still makes the retirement pass over adopted rules,
+# which runs every time.
+#
+# City scope, so the order registers once whatever rigs import the pack, and an
+# exec that slings, because a formula order of city scope pours into the city
+# store, where the home rig's pool does not reliably claim it
+# (specs/tk-zlot608.13/gas-city-search.md). The verb bounds its rig list, its
+# roster, its store read and its sling, and their sum ends inside this
+# timeout, as services/gctk/distiller's test holds. The lock that keeps a
+# start by hand from overlapping a pass is taken without waiting, so it adds
+# nothing to that sum.
 [order]
-description = "learning: distill pending feedback observations and due agent memory notes; file prompt-update / retirement beads (judging gated on volume or urgency; the retirement pass runs every fire)"
-formula = "mol-feedback-distiller"
+description = "learning: start the city's daily feedback distiller run in the pack's home rig, unless one is still open there"
 trigger = "cooldown"
 interval = "24h"
-pool = "gc-toolkit.polecat"
-scope = "rig"
+timeout = "300s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" distiller start"
+scope = "city"

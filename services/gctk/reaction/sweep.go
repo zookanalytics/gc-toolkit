@@ -138,23 +138,22 @@ func (e *SweepError) Error() string { return e.Msg }
 // one ready read is unassigned beads that are not epics, by priority, and the
 // candidate rule keeps the raw input among them (isCandidate). It then drops
 // every bead a live run works, by waits' run link, and a run map that does not
-// read drops nothing, which it says. A slung run waits for a pool slot at no
-// cost, so the sweep has no cap. It has a deadline, since the order's timeout
-// stops a pour in progress: it starts no sling once less of the deadline is
-// left than its slowest sling took, each figure taken in whole seconds as its
-// upper bound, and leaves the rest for the next sweep. A rig whose pool cannot
-// take a reaction is skipped. With dryRun it slings nothing and passes each
-// candidate as one it would sling, whose refusals its sling would read again.
-// It returns the summary, which counts each skip by its cause. A *SweepError
-// is a ready read or a candidate rule that failed, with nothing slung, and any
-// other error a sweep in no rig.
+// read drops nothing, which it says. Each reaction goes to the rig's proactive
+// pool whether or not the pool runs, and a sling gc sling refuses, such as to a
+// pool the city does not configure, fails that candidate alone. A slung run
+// waits for a pool slot at no cost, so the sweep has no cap. It has a deadline,
+// since the order's timeout stops a pour in progress: it starts no sling once
+// less of the deadline is left than its slowest sling took, each figure taken
+// in whole seconds as its upper bound, and leaves the rest for the next sweep.
+// With dryRun it slings nothing and passes each candidate as one it would
+// sling, whose refusals its sling would read again. It returns the summary,
+// which counts each skip by its cause. A *SweepError is a ready read or a
+// candidate rule that failed, with nothing slung, and any other error a sweep
+// in no rig.
 func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept)) (string, error) {
 	start := r.now()
 	if _, err := r.proactiveTarget(); err != nil {
 		return "", err
-	}
-	if ok, why := r.ProactiveDeliverable(); !ok {
-		return "no sweep in this rig: " + why, nil
 	}
 	ready, err := r.Ledger.ReadyByPriority(sweepRule)
 	if err != nil {

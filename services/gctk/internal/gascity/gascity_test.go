@@ -1,10 +1,14 @@
 package gascity
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The previews below are the text gc sling --dry-run --force printed on the
@@ -230,6 +234,35 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 	}
 }
 
+// A city Within a context stops each command it runs once the context ends,
+// and says so, whether or not the command's child still holds its output. A
+// city with no context lets the same command run to its end.
+func TestWithinStopsACommandWhenItsContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	stub := "#!/bin/sh\nsleep 6 &\nsleep 6\n"
+	if err := os.WriteFile(filepath.Join(dir, "pr-status-label.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	r := (&City{scriptsDir: dir}).In(dir).Within(ctx).Script("pr-status-label.sh", "clear")
+	if took := time.Since(start); took > 200*time.Millisecond+stopGrace+time.Second {
+		t.Fatalf("the stopped script held the call %s", took)
+	}
+	if r.Code != -1 || !errors.Is(r.Err, context.DeadlineExceeded) || !strings.Contains(r.Failure(), "pr-status-label.sh was stopped") {
+		t.Fatalf("a stopped script answered %+v", r)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "quick.sh"), []byte("#!/bin/sh\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quick, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	if r := (&City{scriptsDir: dir}).Within(quick).Script("quick.sh"); r.Code != 0 || strings.TrimSpace(r.Output) != "done" {
+		t.Fatalf("a script that ends inside its bound answered %+v", r)
+	}
+}
+
 // A city In a directory starts every command there, its scripts and gc alike,
 // and a relative scripts directory still names the one it named from the
 // process's working directory. The city it came from runs where the process
@@ -326,6 +359,38 @@ esac
 	first := strings.Split(string(raw), "\n")[0]
 	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A formula sling names the target and the formula, asks for the JSON line, and
+// reads the run's root from it: the workflow, else the molecule. A notice on
+// standard error leaves the line readable, a sling that exits non-zero names no
+// root and fails with its last line, and one whose line names neither answers
+// with no root.
+func TestAFormulaSlingReadsTheRunsRoot(t *testing.T) {
+	c, log := stubGC(t, `case "$2" in
+  rig/rig.polecat) echo 'gc sling: warning: projecting execution facts' >&2
+    echo '{"schema_version":"1","success":true,"target":"rig/rig.polecat","method":"formula","formula":"mol-x","workflow_id":"tk-root","routed":true}' ;;
+  rig/rig.wisp) echo '{"schema_version":"1","success":true,"molecule_id":"tk-wisp"}' ;;
+  rig/rig.gone) echo 'gc sling: no agent rig/rig.gone' >&2; exit 1 ;;
+  *) echo '{"schema_version":"1","success":true}' ;;
+esac
+`)
+	got := c.SlingFormula(context.Background(), "rig/rig.polecat", "mol-x")
+	if got.Failure() != "" || got.Root != "tk-root" {
+		t.Fatalf("the sling answered %+v, want root tk-root", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.wisp", "mol-x"); got.Root != "tk-wisp" {
+		t.Fatalf("a sling that names only its molecule answered %+v", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.gone", "mol-x"); got.Failure() != "exit 1: gc sling: no agent rig/rig.gone" || got.Root != "" {
+		t.Fatalf("a refused sling answered %+v, failure %q", got, got.Failure())
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.none", "mol-x"); got.Failure() != "" || got.Root != "" {
+		t.Fatalf("a sling whose line names no root answered %+v", got)
+	}
+	if want := []string{"sling", "rig/rig.polecat", "mol-x", "--formula", "--json"}; !slices.Equal(log()[:5], want) {
+		t.Fatalf("the sling ran %q, want %q", log()[:5], want)
 	}
 }
 

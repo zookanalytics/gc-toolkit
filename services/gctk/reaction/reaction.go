@@ -6,8 +6,7 @@
 // `gctk reaction dispose`, each exit's writes in their order and the rules that
 // decide them: intake's (docs/steering.md), an emergency's confirmation on the
 // default branch, the form each named agent takes its work in, and whether a
-// route or a hand-off reaches someone, which `gctk reaction deliverable` asks of
-// the rig's proactive pool. It also holds `gctk reaction accept`, the
+// hand-off reaches the named agent. It also holds `gctk reaction accept`, the
 // operator's acceptance of the recommendation a recommend exit leaves, under
 // the acceptance lock it runs in (accept.go). It asks waits what holds a bead
 // and which runs work it, the arm to arm one, remove its arm and read whether

@@ -105,12 +105,6 @@ func Stays(b Blocker, own []Blocker) bool {
 // isWork reports whether a blocker is work: an open bead that is no gate.
 func isWork(b Blocker) bool { return b.open() && !strings.EqualFold(b.IssueType, "gate") }
 
-// mergeResultPullRequest is the merge_result of a merge anchor whose pull
-// request is open on the old record. On Gas Town's pending record an open pull
-// request is [record.Pending], or [record.HeadChanged] while the refinery
-// validates a head it has not.
-const mergeResultPullRequest = "pull_request"
-
 // awaitsPerson reports whether a merge anchor the walk reached is a person's to
 // move by its own state: what [Derive] returns over the facts its own row
 // records ([RowFacts]) and its own `blocks` edges (own). Each of those edges
@@ -123,8 +117,13 @@ const mergeResultPullRequest = "pull_request"
 // Its gates and the beads a person owes count for nothing here: the walk reaches
 // each of them and counts it itself, so one move is not counted twice. A
 // person's move is needs-attention, and needs-review once the pull request is
-// open, where the move is a review. A pre-open anchor has no pull request to
-// review yet, and a bead with no merge_result is no merge anchor.
+// open on Gas Town's pending record at the head the refinery validated
+// ([record.Pending]), where the move is a review. The walk reads no GitHub, so
+// that review is a person's move only once pr-facts.sh has recorded a posture,
+// which it does not read while the pull request is a draft, the city's work. A
+// pull request at a head the refinery has not validated ([record.HeadChanged])
+// waits on the refinery, an anchor whose pull request is not open has none to
+// review, and a bead with no merge_result is no merge anchor.
 func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
 	result := b.Metadata["merge_result"]
 	if result == "" {
@@ -140,28 +139,12 @@ func awaitsPerson(b Blocker, own []Blocker, edges map[string][]Blocker) bool {
 			f.InFlightCount++
 		}
 	}
-
-	// The walk reads no GitHub, so a pull request on Gas Town's pending record
-	// is weighed by its row as well, less the old record's facts, which no pass
-	// writes on a bead on this one and which [Render] does not read for the PR
-	// itself: the machine verdict and thread count, and the draft markers. Its
-	// review is a person's move only at the validated head, and only once
-	// pr-facts.sh has recorded a posture, which it does not read while the pull
-	// request is a draft, the city's work.
-	onRecord := record.OnRecord(result)
-	if onRecord {
-		f.PRMachine, f.PRMachineCause, f.PRMachineReason, f.PRUnansweredThreads = "", "", "", ""
-		f.OpenedAsDraft, f.DraftReadied = "", ""
-	}
 	switch Derive(f) {
 	case NeedsAttention:
 		return true
 	case NeedsReview:
-		if onRecord {
-			posture, _ := splitDated(f.PRPosture)
-			return result == record.Pending && posture != ""
-		}
-		return result == mergeResultPullRequest
+		posture, _ := splitDated(f.PRPosture)
+		return result == record.Pending && posture != ""
 	}
 	return false
 }

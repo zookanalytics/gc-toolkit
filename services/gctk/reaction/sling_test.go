@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
 // wantSling fails the test unless a sling or a check came to code, saying
@@ -282,6 +284,57 @@ func TestAReadThatDoesNotAnswerDecidesNothing(t *testing.T) {
 		c.edit(w)
 		code, said := w.sling("tk-sub")
 		w.wantSling(1, c.why, code, said, "(FAILCLOSED) "+name)
+	}
+}
+
+// trackersRead is the world's store, counting each read of the beads that
+// track a bead.
+type trackersRead struct {
+	*fake.Store
+	mu    sync.Mutex
+	reads map[string]int
+}
+
+func (s *trackersRead) Dependents(id, typ string) ([]gcbd.Bead, error) {
+	s.mu.Lock()
+	s.reads[id+" "+typ]++
+	s.mu.Unlock()
+	return s.Store.Dependents(id, typ)
+}
+
+// The check and the sling each read the subject's row once and the beads that
+// track it once, for every question they ask of them, and find the runs that
+// work it among live roots alone. A person's gate holds the subject here, and
+// a finished run's convoy tracks it, so every read the refusals make is made
+// before the gate refuses it.
+func TestARefusalReadsTheSubjectAndWhatTracksItOnce(t *testing.T) {
+	w := newWorld(t)
+	w.put(fake.Bead{ID: "tk-g", Title: "rule on it", Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: "polecat-blocked"})
+	w.put(input("tk-held", func(b *fake.Bead) {
+		b.Edges = []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-g", Title: "rule on it", Status: "open"}}
+	}))
+	w.run("tk-root-built", "mol-polecat-work", "tk-held", "closed")
+	for what, ask := range map[string]func() (int, string){
+		"the check": func() (int, string) { return w.check("tk-held", "tk-root-asking") },
+		"the sling": func() (int, string) { return w.sling("tk-held") },
+	} {
+		counted := &trackersRead{Store: w.store, reads: map[string]int{}}
+		w.r.Ledger = ledger.New(counted)
+		before := len(w.store.Finds())
+		code, said := ask()
+		w.wantSling(Decided, "open human gate tk-g", code, said, "(READ-ONCE) "+what)
+		rows := 0
+		for _, q := range w.store.Finds()[before:] {
+			if slices.Contains(q.IDs, "tk-held") {
+				rows++
+			}
+			if q.Closed && (q.Key == "gc.input_convoy_id" || q.Key == "gc.var.issue") {
+				t.Errorf("(READ-ONCE) %s read closed roots to find the runs (%+v)", what, q)
+			}
+		}
+		if n := counted.reads["tk-held tracks"]; rows != 1 || n != 1 {
+			t.Errorf("(READ-ONCE) %s read the subject's row %d times and what tracks it %d times; want once each", what, rows, n)
+		}
 	}
 }
 

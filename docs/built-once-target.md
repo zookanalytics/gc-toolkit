@@ -127,10 +127,11 @@ finding on a PR stays a record the operator rules on.
 The pack's own refinery lands a branch directly or publishes it as a PR, and
 Gas Town's pending-through-merge record keeps the work's bead open until the
 merge is verified on the target. The pack adds one approval contract for every PR the
-city opens, on any target, in one evaluator of the PR's readiness. The merge
-runs it on a fresh read of GitHub, and every display runs it on the GitHub read
-the landing order saves at each check. The pack also adds a merge request
-pinned to the head the evaluator judged, the PR's managed summary and title,
+city opens, on any target, in one evaluator of the PR's readiness. Every
+display and the landing order run it on the GitHub read the PR watch saves on
+the PR's bead when the PR moves, and the landing order runs it again on the
+one-PR update's re-read of the PR in full before it requests a merge. The pack also adds a merge request pinned to the
+head the evaluator judged, the PR's managed summary and title,
 and the step that takes a GitHub event to the bead that owns it.
 
 The trade: the pack's transition machine, its second copy of the approval
@@ -210,6 +211,24 @@ yet. Each remaining difference names its reason and what ends it:
   nothing escalated. What holds the close is no fact a run can change, so a
   retry alone leaves a landed merge holding its work with no one told. This
   ends when Gas Town's command escalates a close it cannot make.
+- **A cheap question watches every PR, and an update reads one.** A pass asks
+  GitHub whether each PR the city owns moved, in one request for each 50 PRs in
+  a repository, and reads and saves a PR only when one of its signs moved, or
+  when the net, which reads every PR in full every hour at the order budget
+  the city sets, finds it differs
+  from the read saved on its bead. Gas Town's command reads each pending PR by
+  its URL at each find-work and writes the check on the record each time. The
+  city's readers of GitHub share one allowance, and a pass whose cost follows
+  the number of PRs cannot watch them all every few minutes. A pass writes
+  nothing for a PR that did not move or differ, so `pr_last_checked_at` says
+  when the PR was last read and saved, not when it was last asked about, and
+  `pr_state` is the PR's state as that read found it, so a landing's evidence is
+  its merge commit and its time. A read or an act that fails is recorded by no
+  key, where Gas Town writes `pr_reconcile_error`, because the next pass finds
+  the same difference and acts on it. The landing order decides every record
+  on the saved read and the store, and reads GitHub first only for a merge,
+  through the one-PR update's re-read of the PR in full, since a merge made in
+  error puts work on the target, which no run takes back. No end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would
