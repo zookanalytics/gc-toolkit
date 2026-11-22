@@ -112,13 +112,13 @@ PRIORITY_JQ="$RUN_JQ"'
   # Whether the PR of this anchor is approved, which ranks its PR-finishing work
   # at P0: its merge_result says it owns an open PR, a value of the pending
   # record (pull_request_pending, pull_request_head_changed), and either the
-  # conversation the one-PR update saved names an approver, an account whose
-  # approval stands as approval() in services/gctk/pr/rules.go reads the
-  # reviews, while the saved PR is at the head the store holds
-  # (observed_pr_head_sha on a changed head, pr_head_sha otherwise), or the
-  # dated posture pr-facts.sh records on it reads approved before its first @,
-  # at the oid after it, which is the head pr-facts.sh last read for the PR
-  # (pr_head_oid).
+  # conversation the one-PR update saved names an approver and no requester,
+  # the accounts whose approval or request for changes stands as approval() in
+  # services/gctk/pr/rules.go reads the reviews, while the saved PR is at the
+  # head the store holds (observed_pr_head_sha on a changed head, pr_head_sha
+  # otherwise), or the dated posture pr-facts.sh records on it reads approved
+  # before its first @, at the oid after it, which is the head pr-facts.sh last
+  # read for the PR (pr_head_oid).
   def prio_pr_approved:
     prio_str("merge_result") as $mr
     | (prio_str("pr_posture") | split("@")) as $p
@@ -127,6 +127,7 @@ PRIORITY_JQ="$RUN_JQ"'
     | ($mr == "pull_request_pending" or $mr == "pull_request_head_changed")
       and ((($r != null)
             and ((try $r.conversation.approvers catch null) | if type == "array" then length > 0 else false end)
+            and ((try $r.conversation.requesters catch null) | if type == "array" then length == 0 else false end)
             and $head != ""
             and (((try $r.pr.head catch null) // "" | tostring) == $head))
            or (($p[0] // "") == "approved"
