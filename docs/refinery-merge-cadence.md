@@ -791,8 +791,9 @@ not ready leaves the saved read corrected, so the next run finds no merge to
 check. Every other act reads of GitHub only what it changes: a withdrawal
 reads the reviews it dismisses and their threads (below), a send-back and a
 landing fetch the branch they judge, a restart of a head's checks reads the
-PR's returns to draft before it makes one, and a label write leaves the PR's
-labels to their writer, which reads them itself. An exception, a ready transition, a
+PR's returns to draft, and a re-run of its failed jobs the check suites at the
+head, before it makes one, and a label write leaves the PR's labels to their
+writer, which reads them itself. An exception, a ready transition, a
 review run's pour and a retired PR's close read nothing of GitHub first, so a
 saved read out of date can delay one or start one a minute early. After a ready
 transition or a pour started early, a later run decides the record again on the
@@ -921,7 +922,11 @@ created last that holds one for it, a skip aside.
   re-run, once per head and only once that run has finished. The head reads
   re-run once a suite there that holds a required check shows its run at an
   attempt above 1, which GitHub raises in the same suite at a re-run, so no key
-  records it. A failure at a head that reads re-run, a failure outside any
+  records it. The saved read shows a re-run only once the PR watch reads the
+  checks again, so the act reads the check suites at the head from GitHub just
+  before it asks for one, and asks for none while they show the head re-run,
+  whether the city re-ran it in an earlier run or a person did. A failure at a
+  head that reads re-run, a failure outside any
   Actions run and a re-run GitHub refuses each file `pr-fix-noncode.<n>`, only
   on an approved PR. An unapproved PR waits for its review, and a refused
   re-run is asked for again at the next run.

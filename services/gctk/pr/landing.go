@@ -38,8 +38,10 @@ import (
 // (Reread), decides again on what that read saved, and requests the merge
 // pinned to the head it judged. Every other act reads of GitHub only what it
 // changes. A withdrawal reads the reviews it dismisses and their threads, a
-// send-back and a landing fetch the branch they judge, and a label write leaves
-// the PR's labels to their writer, which reads them itself. A run requests a
+// send-back and a landing fetch the branch they judge, a restart of a head's
+// checks reads the PR's returns to draft, and a re-run of its failed jobs the
+// check suites at the head, before it makes one, and a label write leaves the
+// PR's labels to their writer, which reads them itself. A run requests a
 // merge, closes a bead once the merge commit is on the target, hands a changed
 // head to the refinery and sees that the refinery hears of it, keeps the
 // exceptions blocked behind a human gate, marks a draft ready and carries out

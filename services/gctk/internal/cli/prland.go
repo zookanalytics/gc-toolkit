@@ -261,10 +261,11 @@ to hold the bead; a conversation holds only the merge:
   - a check that timed out, was cancelled, failed to start, wants an action or
     went stale: the failed jobs of the GitHub Actions run behind it re-run,
     once per head and once that run has finished, the head reading re-run
-    once a suite there shows its run at an attempt above 1; then, on an
-    approved PR, pr-fix-noncode for a failure at a head that reads re-run, one
-    outside any Actions run, or a re-run GitHub refuses, which an unapproved
-    PR asks for again at the next run
+    once a suite there shows its run at an attempt above 1, in the saved read
+    or in the act's read of the head's suites just before it re-runs; then,
+    on an approved PR, pr-fix-noncode for a failure at a head that reads
+    re-run, one outside any Actions run, or a re-run GitHub refuses, which an
+    unapproved PR asks for again at the next run
   - an approved PR whose review passed, which GitHub reads BLOCKED with no
     required check reported but a skip, behind a check suite queued with no
     check runs for ten minutes: one return to draft and ready transition per

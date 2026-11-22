@@ -392,12 +392,7 @@ func (s redState) noncodeFailure(failing []headCheck) redStep {
 			runs = append(runs, h.suite.Run)
 		}
 	}
-	rerun := false
-	for _, x := range c.Suites {
-		if x.Attempt > 1 && slices.ContainsFunc(c.Runs, func(r RequiredRun) bool { return r.Suite == x.ID }) {
-			rerun = true
-		}
-	}
+	_, rerun := reRunBy(c)
 	cause := fmt.Sprintf("PR #%d (%s) has required check(s) %s failing at head %s for a cause no code change fixes",
 		p.Number, p.URL, checkNames(failing), p.Head)
 	switch {
@@ -416,6 +411,18 @@ func (s redState) noncodeFailure(failing []headCheck) redStep {
 	return redStep{kind: stepRerun, runs: runs, approved: s.approved(), key: keyNoncode,
 		message: cause + ", and GitHub refused the city's re-run of their failed jobs: %v. Re-run them by hand or fix the runner.",
 		why:     fmt.Sprintf("%s failed at head %s for a cause no code change fixes", checkNames(failing), p.Head)}
+}
+
+// reRunBy is the check suite that makes c's head read re-run: one that holds a
+// required check and shows the Actions run behind it at an attempt above 1. ok
+// is false when no suite there does.
+func reRunBy(c *SavedChecks) (x SavedSuite, ok bool) {
+	for _, x := range c.Suites {
+		if x.Attempt > 1 && slices.ContainsFunc(c.Runs, func(r RequiredRun) bool { return r.Suite == x.ID }) {
+			return x, true
+		}
+	}
+	return SavedSuite{}, false
 }
 
 // unreported is the suite at the head that never started, while every
@@ -699,7 +706,22 @@ func (u *run) redLocked(ctx context.Context, t redOf) RunOutcome {
 	case stepGate:
 		return u.redGate(ctx, o, step, said)
 	case stepRerun:
+		// The saved read shows a re-run only once the PR watch reads the checks
+		// again, so the act reads the head's suites first, and a re-run made
+		// since, the city's own in a run before or a person's, is not asked for
+		// again: GitHub refuses a run still going, and a finished one would be
+		// re-run twice at the head.
 		hub := u.Hub(ctx, o.host)
+		head := o.saved.PR.Head
+		suites, err := hub.CheckSuites(o.repo, head, o.number)
+		if err != nil {
+			return said(ActRetry, fmt.Sprintf("did not read the check suites at head %s before their re-run (%s), and "+
+				"the next run decides again: %v", head, step.why, err))
+		}
+		if x, ok := reRunBy(&SavedChecks{Runs: requiredRuns(suites), Suites: savedSuites(suites)}); ok {
+			return said(ActChecked, fmt.Sprintf("owes nothing yet: GitHub shows run %d at attempt %d at head %s, a "+
+				"re-run the PR watch's next read saves: %s", x.Run, x.Attempt, head, step.why))
+		}
 		var ran []string
 		for _, run := range step.runs {
 			err := hub.RerunFailedJobs(o.repo, run)
@@ -741,10 +763,12 @@ func (u *run) redGate(ctx context.Context, o owned, step redStep, said func(stri
 // restart restarts the checks at a head whose suite never started, once per
 // head: it reads when the PR's timeline records it was returned to draft, and
 // a return after the head's earliest suite was created is the act's own, since
-// a writer of the branch returns the PR to draft before it pushes. With
-// none, it returns the PR to draft and marks it ready again, which sends the
-// pull_request event that starts the workflows again. With one, it waits
-// stuckAfter from it for the checks to report, and then files
+// a writer of the branch returns the PR to draft before it pushes. A writer's
+// return whose push never landed reads as the act's own too, and the ready
+// transition that ended its draft started the workflows again, as the act's
+// would. With none, it returns the PR to draft and marks it ready again, which
+// sends the pull_request event that starts the workflows again. With one, it
+// waits stuckAfter from it for the checks to report, and then files
 // pr-check-unreported.
 func (u *run) restart(ctx context.Context, s redState, step redStep, said func(string, string) RunOutcome) RunOutcome {
 	p := s.pr()

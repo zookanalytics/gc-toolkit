@@ -315,7 +315,8 @@ func TestANoncodeFailureIsGatedOnlyOnAnApprovedPR(t *testing.T) {
 		}, false},
 		{"whose re-run GitHub refuses", func(d *redWorld, t *testing.T) {
 			d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-			d.github.Fail["RerunFailedJobs"] = errors.New("gh: This workflow is already running (HTTP 403)")
+			d.github.Fail["RerunFailedJobs"] = errors.New("gh: Unable to retry this workflow run because it was created " +
+				"over a month ago (HTTP 403)")
 		}, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -347,6 +348,48 @@ func TestANoncodeFailureIsGatedOnlyOnAnApprovedPR(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A re-run the saved read does not show yet, the city's own from a run before
+// or a person's, is not asked for again: GitHub refuses a run still going, and
+// that refusal would ask a person about a re-run already under way, and a
+// re-run that already failed again would be re-run a second time at the head.
+// Once the PR watch reads the re-run, the act owes nothing until it finishes.
+func TestAReRunTheSavedReadLacksIsNotAskedForAgain(t *testing.T) {
+	d := newRed(t)
+	d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
+	is(t, d.runRed(t), pr.ActRerun)
+	red, _ := redOutcome(t, d.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActChecked)
+	if got := d.rerunAsks(); len(got) != 1 || len(d.gates.list()) != 0 {
+		t.Fatalf("a run before the PR watch read the re-run asked for the re-runs %v and filed %v, want the one "+
+			"re-run and no gate", got, d.gates.list())
+	}
+	if red := d.runRed(t); red.Action != "" {
+		t.Fatalf("a re-run the saved read shows going made %+v", red)
+	}
+
+	e := newRed(t)
+	e.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
+	e.refresh(t)
+	e.checks(t, "QUEUED", testsRun, 2, gh.CheckRun{Name: "test", Status: "QUEUED", Required: true},
+		check("test-macos", "SUCCESS"))
+	red, _ = redOutcome(t, e.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActChecked)
+	if got := e.rerunAsks(); len(got) != 0 || len(e.gates.list()) != 0 {
+		t.Fatalf("a person's re-run the saved read lacks drew the re-runs %v and the gates %v", got, e.gates.list())
+	}
+
+	f := newRed(t)
+	f.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
+	is(t, f.runRed(t), pr.ActRerun)
+	f.checks(t, "COMPLETED", testsRun, 2, check("test", "TIMED_OUT"), check("test-macos", "SUCCESS"))
+	red, _ = redOutcome(t, f.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActChecked)
+	if got := f.rerunAsks(); len(got) != 1 {
+		t.Fatalf("a re-run that failed again before the PR watch read it was asked for again: %v", got)
+	}
+	is(t, f.runRed(t), pr.ActGated)
 }
 
 // A re-run GitHub did not answer is a retry, which asks no person.

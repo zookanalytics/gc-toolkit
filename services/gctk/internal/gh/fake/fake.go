@@ -51,11 +51,8 @@ type PR struct {
 // and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
 // answers a dismissal in place of the default, which dismisses the review.
 // OnReact, when set, runs as a reaction is asked, and an error it returns
-// fails that reaction, which then leaves nothing on the post. OnRerun, when
-// set, answers a re-run of a workflow run's failed jobs in place of the
-// default, which raises the attempt of the suite the run is behind and queues
-// its check runs that did not pass. Now stamps a return to draft in the PR's
-// timeline, the system's clock when nil.
+// fails that reaction, which then leaves nothing on the post. Now stamps a
+// return to draft in the PR's timeline, the system's clock when nil.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR
@@ -64,7 +61,6 @@ type GitHub struct {
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
 	OnReact   func(subject, content string) error
-	OnRerun   func(p *PR, suite *gh.CheckSuite) error
 	Now       func() time.Time
 	SignsFail map[int]error
 	FullFail  map[int]error
@@ -336,11 +332,12 @@ func (g *GitHub) stage(method, id string, draft bool) error {
 	return nil
 }
 
-// RerunFailedJobs records the re-run, with the run's id, and answers it: by
-// OnRerun when set, else by raising the attempt of the check suite the run is
-// behind and queueing each of its check runs that completed without passing,
-// as a re-run of a run's failed jobs does. A run no PR's suite is behind is an
-// error, as GitHub answers a run it does not hold.
+// RerunFailedJobs records the re-run, with the run's id, and answers it by
+// raising the attempt of the check suite the run is behind and queueing each
+// of its check runs that completed without passing, as a re-run of a run's
+// failed jobs does. A run no PR's suite is behind is an error, as GitHub
+// answers a run it does not hold, and so is one whose suite has not completed,
+// which GitHub refuses as already running.
 func (g *GitHub) RerunFailedJobs(repo string, run int64) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -358,8 +355,8 @@ func (g *GitHub) RerunFailedJobs(repo string, run int64) error {
 				if s.Run != run {
 					continue
 				}
-				if g.OnRerun != nil {
-					return g.OnRerun(p, s)
+				if s.Status != "COMPLETED" {
+					return fmt.Errorf("github: run %d cannot be rerun; This workflow is already running (HTTP 403)", run)
 				}
 				s.Attempt++
 				s.Status = "QUEUED"
