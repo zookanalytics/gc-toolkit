@@ -154,9 +154,9 @@ declares its keys and values. No machine checks its writers: the refinery
 publishes a PR's record through `gctk pr record`, in its `mr` step and when it
 sends a PR on the record back to the PR's review run (`refinery-requeue.sh`),
 the landing order writes each later step through `gctk pr reconcile`,
-deciding each from the bead and from its own read of GitHub, made in the act,
-while the read the PR watch saved on the bead only chooses the records a run
-decides ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
+deciding each from the bead and the read the PR watch saved on it, with a
+merge decided on the one-PR update's re-read of the PR in full
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
 and `gctk pr withdraw` sets the record's marker when it files a withdrawal on a
 record that carries none. The record's `pr_state` and `pr_last_checked_at` are
 the PR watch's, which writes them with GitHub's side of the PR
@@ -387,8 +387,8 @@ gate keyed `approval-withdraw-refused`.
 **The draft.** Each city writer returns the PR to draft before it pushes onto
 the branch (`gctk pr draft`), and the landing order marks a draft ready once a
 run has passed at the head the refinery validated, with no run attached and no
-ask a run can take open, and once its own read of the PR finds the draft at
-that head. A draft holds nothing on its own: a human gate, an open
+ask a run can take open, and once the read the PR watch saved shows the draft
+at that head. A draft holds nothing on its own: a human gate, an open
 ask or `merge_hold` still holds the PR the order readied.
 
 What the *reviewer* did short of a verdict is posture, not a check: see
@@ -1040,10 +1040,10 @@ sequenceDiagram
   R->>L: gctk pr record — pull_request_pending, blocked, assigned to nobody
   W->>G: ask whether the PR moved; read what moved
   W->>L: gctk pr refresh — save GitHub's side of the PR on the bead
-  O->>L: the bead changed since a run last decided it, so the run decides it
-  O->>G: the act's own read of the PR; the evaluator finds it ready
-  O->>G: mergePullRequest, pinned to the head that read judged (expectedHeadOid)
-  O->>G: the next run's own read finds the PR merged, with its merge commit
+  O->>L: the evaluator finds the PR ready on the saved read
+  O->>G: gctk pr refresh's re-read of the PR in full, saved on the bead
+  O->>G: mergePullRequest, pinned to the head the evaluator judged on that read (expectedHeadOid)
+  W->>L: the watch saves the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
 
@@ -1456,7 +1456,7 @@ a record to its last write of it, so a merge an act requests comes before the
 marker, never after it. The landing order reads such an anchor's record
 whatever its own `pr_reconcile_pending`, so a changed head it had handed to the
 refinery is read too, while the anchor is assigned to nobody or to the
-refinery. Once the act's own read finds the PR CLOSED and no review run is
+refinery. Once the saved read shows the PR CLOSED and no review run is
 attached to the anchor, it closes the asks and the approval withdrawals still
 open on the anchor, which nothing takes once the PR is closed, and then, with
 the record lock free, runs `bead-rehome.sh` as the refinery. It names the

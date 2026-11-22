@@ -23,9 +23,9 @@
 # Its callers:
 #   - gctk pr reconcile, the landing order, every minute for each PR the rig's
 #     live beads own: it compares the labels the PR watch saved on the PR's bead
-#     with the derivation, and only where they differ reads the PR's state
-#     itself and calls reconcile on an open PR, or clear on one that merged or
-#     closed, with no --current-labels, so this writer reads the PR's labels.
+#     with the derivation, and only where they differ calls reconcile on a PR
+#     the saved read shows open, or clear on one it shows merged or closed, with
+#     no --current-labels, so this writer reads the PR's labels.
 #   - gctk pr compare, the net, which calls clear on each PR its search finds
 #     carrying a label of these families that no live bead owns.
 #   - pr-facts.sh, which calls reconcile for each open PR its full pass's paced

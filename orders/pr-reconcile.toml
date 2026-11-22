@@ -1,25 +1,25 @@
 # pr-reconcile — the landing order (specs/tk-1tfzr71.66/design.md, section 4,
 # and specs/tk-1tfzr71.149/design.md, sections 5 and 6). The refinery records
 # each PR it publishes as pending on the bead that owns it (gctk pr record), and
-# this order decides each of those records on its own read of the PR, made in
-# the act: a merge pinned to the head that read judged, or added to its base's
-# merge queue with it, an exception, a draft's ready transition, and a
-# withdrawal's dismissals and close. A run decides a record once its PR moved
-# or its bead changed since a run decided it with no act owed, which it tells
-# from the store, the read the one-PR update saves for orders/pr-poll.toml and
-# orders/pr-compare.toml among it, and at least once an hour, so in a run in
-# which nothing changed and no record's hour is up, no record is decided and
-# none reads GitHub. Its bead closes once the merge commit is on the freshly
-# fetched target. A PR open at another head goes
-# back to the refinery, which a run wakes and nudges for it when only a
-# conversation or an ask holds the PR's bead, and the exceptions stay blocked
-# behind a human gate. A PR a ruling retired (pr-dispose.sh) is never merged,
-# and once it has closed its bead closes onto the ruling's successor through
-# bead-rehome.sh. A PR open at its validated head with no passed review result
-# there, or with an ask a run can take, gets its review run poured here
-# (gctk pr reconcile's help says when), and a run that ends without a result is
-# poured again once before a human gate asks you. A PR that waits on your
-# approval or its checks holds no agent: this order carries the wait.
+# this order is the second of the PR's two loops: it finds and does its work
+# from the read the PR watch (orders/pr-poll.toml and orders/pr-compare.toml)
+# saved on each bead and the store alone, and reads GitHub to learn nothing. A
+# run decides every record each minute: a merge pinned to the head the
+# evaluator judged, or added to its base's merge queue with it, an exception, a
+# draft's ready transition, and a withdrawal's dismissals and close. Only the
+# merge checks GitHub first: the run has the one-PR update re-read the PR in
+# full and decides again on what that read saved before it requests the merge.
+# Its bead closes once the merge commit is on the freshly fetched target. A PR
+# open at another head goes back to the refinery, which a run wakes and nudges
+# for it when only a conversation or an ask holds the PR's bead, and the
+# exceptions stay blocked behind a human gate. A PR a ruling retired
+# (pr-dispose.sh) is never merged, and once the saved read shows it closed its
+# bead closes onto the ruling's successor through bead-rehome.sh. A PR open at
+# its validated head with no passed review result there, or with an ask a run
+# can take, gets its review run poured here (gctk pr reconcile's help says
+# when), and a run that ends without a result is poured again once before a
+# human gate asks you. A PR that waits on your approval or its checks holds no
+# agent: this order carries the wait.
 # Once a PR lands on the rig's default branch, a run checks that branch's seed
 # audit, where the rig's clone carries one, and hands the pages stale there to
 # seed-audit-reaudit.sh, which slings the branch's one re-render. No PR waits
@@ -28,10 +28,10 @@
 # beads own, on the pending record or not, equal to what the store derives
 # (specs/tk-1tfzr71.149/design.md, section 9): it compares the labels the
 # one-PR update saved on the PR's bead with the ones gctk pr status derives,
-# none once the PR merged or closed, and where they differ it reads the PR
-# itself and has pr-status-label.sh, which reads the PR's labels itself, write
-# them. A label write is an act like the others, and one that does
-# not land records nothing, so the next run writes it again.
+# none once the saved read shows the PR merged or closed, and where they differ
+# it has pr-status-label.sh, which reads the PR's labels itself, write them,
+# reading nothing of the PR first. A label write is an act like the others, and
+# one that does not land records nothing, so the next run writes it again.
 #
 # Exec, not a formula: a run reads records and writes guarded updates, with no
 # judgment for an LLM. Rig-scoped, each run against its own rig's store, with
@@ -49,13 +49,14 @@
 # webhook fires skips Gas City's gates and each event would start a run of its
 # own.
 #
-# Every minute, because a run reads GitHub only for the records that changed
-# or whose hour is up: it reads the store once and takes no --count. A change
-# on the store's side that no writer announces, such as a gate a person clears,
+# Every minute, because a run that owes no act reads the store once, asks
+# GitHub nothing and writes nothing, and takes no --count. A change on the
+# store's side that no writer announces, such as a gate a person clears,
 # reaches its act at the next run, and a change a cheap sign shows reaches it
 # within about three minutes at the most, the PR watch's minute, this order's
-# minute and each run's start at the next lane pass included. A run takes the
-# records it decides in a shuffled order, starts none more than 45 seconds
+# minute and each run's start at the next lane pass included. A change no sign
+# shows reaches it within the hour, once the net saves it. A run takes the
+# records that owe an act in a shuffled order, starts none more than 45 seconds
 # in, and stops each at 30 seconds with whatever GitHub call, fetch, store read
 # or write, human gate's filing or refinery's wake it is making: a fetch gets a
 # SIGTERM to git's process group, so git removes the lock files it holds in the
@@ -72,7 +73,7 @@
 # below it. A pour or a disposition writer that runs past its act's 30 seconds
 # is ended only by `timeout`. Tune from city.toml [[orders.overrides]].
 [order]
-description = "Landing order: decide each PR the refinery recorded as pending on its own read once it moved or its bead changed and at least once an hour, merge a ready one with its head pinned, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
+description = "Landing order: decide each PR the refinery recorded as pending on the read the PR watch saved and the store, merge a ready one with its head pinned once the one-PR update has re-read it, close its bead once the merge commit is on the target, and keep each owned PR's labels equal to what the store derives"
 trigger = "cooldown"
 interval = "1m"
 timeout = "120s"

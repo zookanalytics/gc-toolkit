@@ -1,7 +1,10 @@
-# pr-compare — the net: read every PR the rig's beads own in full every 10
-# minutes, and read and save each one that differs from the read saved on its
-# bead (specs/tk-1tfzr71.149/design.md, sections 2, 6 and 7). It catches the
-# changes no cheap sign shows, which orders/pr-poll.toml cannot see: a review
+# pr-compare — the net: read every PR the rig's beads own in full every hour,
+# and read and save each one that differs from the read saved on its bead
+# (specs/tk-1tfzr71.149/design.md, sections 2, 6 and 7). It is the background
+# sweep of the PR watch, the first of the PR's two loops, which keeps each saved
+# read current for the landing order (orders/pr-reconcile.toml) to work from. It
+# catches the changes no cheap sign shows, which orders/pr-poll.toml cannot see,
+# within the hour: a review
 # thread resolved or reopened, the city's reaction that answers a thread with
 # no reply, an edit to a post that left the PR's updatedAt as it was, a check
 # the PR comes to require or stops requiring, and a review
@@ -22,8 +25,9 @@
 # section 9): it searches the rig's own repository, the one its checkout's origin
 # names, for the PRs that carry a status: or held: label pr-status-label.sh
 # names, 100 a page, reads on until it has found 20 PRs no live bead owns or
-# the results end, and has pr-status-label.sh clear each. A clear that does
-# not land fails the pass, and the next pass's search finds the PR again.
+# the results end, and has pr-status-label.sh clear each, so it clears about 20
+# such PRs an hour. A clear that does not land fails the pass, and the next
+# pass's search finds the PR again.
 # What it costs: a request of up to 9 PRs costs 1 GitHub point and one of 10
 # costs 2, plus 1 for each page past a list's first, and each update 1 or 2
 # more. A request of 10 PRs took about 2 seconds. Each page of the search
@@ -44,7 +48,7 @@
 [order]
 description = "PR watch's net: read every PR the rig's beads own in full, read and save on its bead each one that differs from its saved read, and clear the city's labels off PRs no live bead owns"
 trigger = "cooldown"
-interval = "10m"
+interval = "1h"
 timeout = "300s"
 exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" pr compare --db \"$GC_RIG_ROOT/.beads\""
 scope = "rig"

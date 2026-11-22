@@ -1,15 +1,19 @@
 # pr-poll — ask GitHub cheaply whether each PR the rig's beads own moved, and
 # read and save each one that did (specs/tk-1tfzr71.149/design.md, sections 1,
-# 4 and 6). A pass lists the PRs the store's live beads own, an anchor's by
-# pr_url beside a merge_result and a bead the refinery sent back by
-# existing_pr, asks GitHub for each one's signs in one request for each 50 PRs
-# in a repository, and runs the one-PR update, `gctk pr refresh`, for each PR
-# whose signs moved. The update reads only the parts that moved and saves them
-# on the bead as pr_github_read, the one writer of that read, with pr_state and
-# pr_last_checked_at on a bead on the pending record. A pass in which nothing
-# moved writes no bead but that of an open PR whose merge state GitHub had not
-# yet computed, which it reads again, and otherwise costs one GitHub point for
-# each 50 owned PRs.
+# 4 and 6). With orders/pr-compare.toml's hourly sweep it is the PR watch, the
+# first of the PR's two loops, which keeps each saved read current for the
+# landing order (orders/pr-reconcile.toml) to work from. It runs every minute,
+# which catches most of what a person does on a PR. A pass lists the PRs the
+# store's live beads own, an anchor's by pr_url beside a merge_result and a bead
+# the refinery sent back by existing_pr, asks GitHub for each one's signs in one
+# request for each 50 PRs in a repository, and runs the one-PR update, `gctk pr
+# refresh`, for each PR whose signs moved, and for each whose bead holds no read
+# of it, or one not current for the bead, which it reads whole. The update reads
+# only the parts that moved and saves them on the bead as pr_github_read, the
+# one writer of that read, with pr_state and pr_last_checked_at on a bead on the
+# pending record. A pass in which nothing moved writes no bead but that of an
+# open PR whose merge state GitHub had not yet computed, which it reads again,
+# and otherwise costs one GitHub point for each 50 owned PRs.
 # Exec, not a formula: reads and guarded writes need no LLM. Rig-scoped: one
 # pass per importing rig against its own store, named by --db, loading the
 # pack's definition of feedback in the rig's checkout. GCTK_SCRIPTS_DIR names

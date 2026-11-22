@@ -17,7 +17,7 @@ func TestThePRWatchOrdersHoldAPass(t *testing.T) {
 		window                time.Duration
 	}{
 		{"pr-poll", "1m", "poll", pollWindow},
-		{"pr-compare", "10m", "compare", compareWindow},
+		{"pr-compare", "1h", "compare", compareWindow},
 	} {
 		t.Run(tc.order, func(t *testing.T) {
 			raw, err := os.ReadFile("../../../../orders/" + tc.order + ".toml")

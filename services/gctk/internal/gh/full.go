@@ -9,7 +9,7 @@ import (
 )
 
 // The net's read (specs/tk-1tfzr71.149/design.md, section 2), which reads every
-// PR the city owns in full every 10 minutes, so a change no cheap sign shows,
+// PR the city owns in full every hour, so a change no cheap sign shows,
 // such as a review thread resolved or an edit to a post, still reaches the
 // PR's saved read. It reads the cheap question's signs and the facts no sign
 // shows, and no post's text.

@@ -352,9 +352,9 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-20, at `gastownhall/gascity-packs` main 44b9db7168f6,
+- **Verified.** 2026-11-22, at `gastownhall/gascity-packs` main 44b9db7168f6,
   `gastownhall/beads` main 786241099046 and `gastownhall/gascity` main
-  e6e47235027b.
+  1042f51083f9.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
@@ -453,20 +453,21 @@ no warrant.
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `services/helm/internal/rigboard/gather.go`, the landing order, which reads
-  it only to choose the records it decides, through the digest of what a
-  decision read of the store that it keeps on the bead (`unchanged`, `digest`
-  and `keep` in `services/gctk/pr/landing.go`, through `Reconcile` for
-  `gctk pr reconcile`, from `orders/pr-reconcile.toml`), and compares each
-  owned PR's saved labels with the ones the store derives (`labelPlans` in
-  `services/gctk/pr/labels.go`), and the PR watch
+  `services/helm/internal/rigboard/gather.go`, the landing order, which finds
+  and does its work from it and the store (`plan`, `seenPR` and
+  `decideAtHead` in `services/gctk/pr/landing.go`, through `Reconcile` for
+  `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
+  what the one-PR update saves once it has re-read the PR in full
+  (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
+  and compares each owned PR's saved labels with the ones the store derives
+  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
   itself, which compares a PR's signs with the ones each part keeps (`moved` in
   `services/gctk/pr/saved.go`) and the net's full read with each part's facts
   (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
-  of reading GitHub, whose change tells the landing order which records to
-  decide on its own read, and against which a pass of the PR watch tells
+  of reading GitHub, from which the landing order finds and does its work, and
+  against which a pass of the PR watch tells
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
   head, the standing approvals, each with the commit it was given on, and
@@ -509,7 +510,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8,
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -583,7 +584,7 @@ no warrant.
   threads shows no feedback on it that the intake has not routed, and closes a
   withdrawal once its read of the reviews after the dismissals shows none
   standing on a commit without the head. Once a ruling has retired the PR and
-  the act's own read finds it closed, `decideRetired` in
+  the read the PR watch saved shows it closed, `decideRetired` in
   `landing.go` closes each withdrawal still open, since no approval it
   withdraws can merge a closed PR. Its reader for the review run:
   `WithdrawalFor` in `withdraw.go`, which the `output` verb of
@@ -621,7 +622,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8, with
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -675,7 +676,7 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b, with
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
   main 44b9db7168f6, and `gastownhall/beads` v1.3.4 (7ef2fd05eb0c), the bd
   the city runs.
