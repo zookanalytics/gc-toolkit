@@ -1,10 +1,9 @@
 // Package verbs runs the city's helm WRITE verbs on behalf of the board.
 //
 // It is a thin exec wrapper and nothing else. `gc-helm.sh` owns what each verb
-// DOES — open files a conversation in the operator's queue, accept clears a
-// recommendation's human gate and slings the bead's recommended formula,
-// engage starts a Discuss sitting on a conversation, dismiss ends the sitting —
-// together with subject resolution, rig resolution and the board cache bust.
+// DOES — open files a conversation in the operator's queue, engage starts a
+// Discuss sitting on a conversation — together with subject resolution and rig
+// resolution.
 // This package exists so the HTTP layer can reach that one copy rather than
 // grow a second, the same reuse discipline assets/scripts/operator-intake.sh
 // follows, for the same reason: a Go reimplementation would be a copy nothing
@@ -32,12 +31,11 @@ import (
 // Generous on purpose. No verb is one command: open enumerates rigs (through
 // rig-map.sh, bounded by GC_RIG_LIST_TIMEOUT), reads the subject, scans the
 // bead's conversations for one waiting in the queue, then creates a task and
-// files its edge; accept reads the bead's gates, resolves one, reads it back
-// and slings; engage spawns a converse session. Each of those is a `gc`/`bd` call against Dolt, and under
-// city load the CLI startup cost alone is seconds. Cutting a slow-but-working
-// run short would report failure for a side effect that then appears anyway —
-// the worst outcome available, because the operator's retry is what splits the
-// conversation (open) or double-dispatches (accept).
+// files its edge; engage spawns a converse session. Each of those is a
+// `gc`/`bd` call against Dolt, and under city load the CLI startup cost alone is
+// seconds. Cutting a slow-but-working run short would report failure for a side
+// effect that then appears anyway — the worst outcome available, because the
+// operator's retry is what splits the conversation.
 const DefaultTimeout = 120 * time.Second
 
 // killGrace bounds how long Wait may block AFTER the deadline has fired and the
@@ -66,8 +64,8 @@ type Actuator struct {
 //     (assets/scripts/gc-helm-svc.sh exports the sibling gc-helm.sh next to
 //     itself), so the normal deployment always resolves, and it is what tests
 //     point at a stub. It mirrors GC_HELM_GC_BIN in internal/source. The name is
-//     historical — it predates accept/engage/dismiss — and names the one script
-//     every write verb shells out to.
+//     historical — it predates engage — and names the one script every write
+//     verb shells out to.
 //  2. `gc-helm.sh` on PATH.
 //
 // Deliberately NOT a third guess at "rigs/<rig>/assets/scripts/gc-helm.sh".
@@ -138,7 +136,7 @@ func (o *Actuator) Script() string { return o.script }
 // Every other semantic is the CLI's, unchanged (tk-hsm4d9).
 func argvFor(verb, bead string) ([]string, bool) {
 	switch verb {
-	case "open", "accept", "dismiss":
+	case "open":
 		return []string{verb, bead}, true
 	case "engage":
 		return []string{verb, bead, "--no-input", "--no-attach"}, true

@@ -41,11 +41,7 @@
 #   build. Run from the module, the build takes the newest of the local Go, the
 #   module's go line and the linter's own, so the linter is never older than
 #   the standard library it type-checks, which a linter built with an older Go
-#   cannot load. golangci-lint runs cgo, so it needs the C headers a cgo package
-#   includes, and services/helm reaches ICU through one, Dolt's go-icu-regex.
-#   Each run is handed the cgo flags assets/scripts/icu4c-cgo.sh works out,
-#   which on macOS point at Homebrew's keg-only icu4c, the same flags the
-#   helm-svc build uses.
+#   cannot load.
 #
 #   WARRANTS — tools/warrants-touched.sh prints the docs/warrants.md entries the
 #   branch touches, with their Verified dates, so the author re-verifies them
@@ -69,14 +65,6 @@
 set -uo pipefail
 
 PROG=lint
-
-# ── The icu4c cgo flags ──────────────────────────────────────────────────────
-# Sourced from lint.sh's own checkout, before the cd below can change what a
-# relative invocation path names. Its absence is a packaging error, as the
-# shell-lint runner's is below.
-# shellcheck source=../assets/scripts/icu4c-cgo.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../assets/scripts/icu4c-cgo.sh" \
-  || { echo "$PROG: cannot source assets/scripts/icu4c-cgo.sh from lint.sh's checkout" >&2; exit 2; }
 
 # ── Repository root ──────────────────────────────────────────────────────────
 # Both linters are repo-relative: shell paths resolve from the root and
@@ -285,12 +273,8 @@ elif ! golangci_version="$(golangci_pin)"; then
   fail=1
   summary+=("go: FAIL — .golangci-lint-version is missing or names no golangci-lint release (vX.Y.Z); ${#modules[@]} module(s) unlinted; fail-closed, treated as a finding")
 else
-  # Worked out once, and only when the lint is about to run, so a tree with
-  # nothing to lint never asks brew.
-  icu4c_cgo_flags "$PROG"
   for m in "${modules[@]}"; do
-    if ( cd "$ROOT/$m" && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" \
-           go run "$GOLANGCI_LINT@$golangci_version" run ./... ); then
+    if ( cd "$ROOT/$m" && go run "$GOLANGCI_LINT@$golangci_version" run ./... ); then
       summary+=("go: $m golangci-lint $golangci_version clean")
     else
       # go run exits 1 whatever the exit of the program it ran, so the report

@@ -68,7 +68,7 @@ func (a rigAPI) JSON(_ context.Context, out any, path string, _ url.Values) (boo
 var rigNow = time.Date(2026, 11, 16, 17, 0, 0, 0, time.UTC)
 
 func newRigServer(reads *rigReads) *Server {
-	s := New(newFake(), time.Minute, WithRigBoard(rigGC{}, rigAPI{passAt: rigNow.Add(-time.Minute)}, time.Minute))
+	s := New(WithRigBoard(rigGC{}, rigAPI{passAt: rigNow.Add(-time.Minute)}, time.Minute))
 	s.now = func() time.Time { return rigNow }
 	s.rigBoard.read = reads.read
 	return s
@@ -109,7 +109,7 @@ func TestRigBoardRoutes(t *testing.T) {
 	}
 }
 
-// TestRigBoardCaches holds the document's cache to the board's rule: served
+// TestRigBoardCaches holds the document's cache to its rule: served
 // whole for its time to live, and gathered again once a write route succeeds.
 func TestRigBoardCaches(t *testing.T) {
 	reads := &rigReads{}
@@ -122,7 +122,7 @@ func TestRigBoardCaches(t *testing.T) {
 	if reads.reads != 1 {
 		t.Fatalf("three reads gathered %d times, want once", reads.reads)
 	}
-	s.invalidateBoard()
+	s.invalidate()
 	get(t, s, "/helm/rigs/gc-toolkit")
 	if reads.reads != 2 {
 		t.Fatalf("a read after a write gathered %d times in all, want twice", reads.reads)
@@ -164,7 +164,7 @@ func TestRigBoardServesTheDocumentWhenTheLineFails(t *testing.T) {
 }
 
 func TestRigBoardOff(t *testing.T) {
-	s := New(newFake(), time.Minute)
+	s := New()
 	if rr := get(t, s, "/helm/rigs/gc-toolkit"); rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("without the rig board = %d, want 503", rr.Code)
 	}

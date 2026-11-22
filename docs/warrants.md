@@ -214,9 +214,9 @@ no warrant.
 
 ## Priority following
 
-- **Covers.** `assets/scripts/queue-priority.sh`,
-  `assets/scripts/priority-lib.sh`, `orders/queue-priority.toml`, the
-  `priority_shift` key, the `priority` verb of `assets/scripts/gc-helm.sh`, and
+- **Covers.** `assets/scripts/queue-priority.sh`, whose `move` is the
+  operator's priority move, `assets/scripts/priority-lib.sh`,
+  `orders/queue-priority.toml`, the `priority_shift` key, and
   [steering.md](steering.md#priority).
 - **Stands in for.** A claim priority derived from the bead a bead follows, such
   as its epic.
@@ -233,11 +233,11 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and `gastownhall/beads`
-  main 786241099046 (`BuildReadyWorkOrder` in
-  `internal/storage/sqlbuild/ready.go` orders the priority policy by the
-  bead's own priority). The bd 1.3.4 (7ef2fd05e) binary was read on
-  2026-11-15.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
+  (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
+  `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
+  bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
+  orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
   or a work query can order by a parent's priority.
 
@@ -279,25 +279,24 @@ no warrant.
 
 ## Accept's lock
 
-- **Covers.** The acceptance lock of `assets/scripts/gc-helm.sh` accept: one
-  `flock` file per bead, `accept-<rig>-<bead>.lock`, under the city's
-  `.gc/runtime/packs/gc-toolkit`, held from Accept's live read to its last
-  write.
+- **Covers.** The acceptance lock of `gctk reaction accept`,
+  `services/gctk/reaction/accept_lock.go`: one `flock` file per bead,
+  `accept-<bead>.lock`, under the city's `.gc/runtime/packs/gc-toolkit`, held
+  from Accept's live read to its last write.
 - **Stands in for.** A launch that pours once per acceptance across a finished
   run: a `gc sling` that refuses a second root under a caller's key whatever
   the first root's status.
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
-  live (`internal/sling/sling_core.go`, the lock at 676 and the check at 702,
-  `checkLegacySourceWorkflowConflict`, which reads the live roots at 2030; the
-  terminal-root skip in `internal/sling/sling_attachment.go` 321;
-  and `TestLiveConvoyTrackedWorkflowRootsSkipsTerminalRoots` in
-  `internal/sling/sling_test.go` 3987-4039). Once that root has closed, the next
+  live (`withGraphV2SourceWorkflowLock` in `internal/sling/sling_core.go`, and
+  `checkLegacySourceWorkflowConflict` there, which reads the live roots; the
+  terminal-root skip of `liveConvoyTrackedWorkflowRoots` in
+  `internal/sling/sling_attachment.go`). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
-  by a key, and `--scope-kind` with `--scope-ref` names a city or rig scope, not
-  a caller's key (`cmd/gc/cmd_sling.go` 148-169).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475.
+  by a key, and `--scope-kind` with `--scope-ref` names a logical workflow
+  scope, not a caller's key (`cmd/gc/cmd_sling.go`).
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -365,17 +364,16 @@ no warrant.
   keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
   and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
   table. Their writer: the "record the pass's own verdict on the anchor"
-  section of `assets/scripts/gate-ensure.sh`, which records `pr.machine` alone. The readers of the causes: package
-  `services/gctk/prstatus`, and the helm board's machine reads in
-  `services/helm/internal/board/derive.go`.
+  section of `assets/scripts/gate-ensure.sh`, which records `pr.machine`
+  alone. The reader of the causes: package `services/gctk/prstatus`.
 - **Stands in for.** A merge-readiness verdict kept on the bead whose pull
   request it is, which tells a block no automated actor will clear from a wait
   the city is acting on, with the block's cause as a value a reader keys on.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
     classifies an open PR from its draft flag, its merge state and its check
-    rollup alone, so every `BLOCKED` PR is `blocked` and actionable, a
-    required check still running included (`classifyPullRequest` in
+    rollup alone, so a `BLOCKED` PR that is no draft and has no failed check
+    is `blocked` and actionable, a required check still running included (`classifyPullRequest` in
     `internal/githubmonitor/monitor.go`). It reads no branch rule, review
     thread or approval, and it records its class on a repair bead it files
     (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
@@ -402,8 +400,9 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/gascity-
-  packs` main aa55b477d4c2, and `gastownhall/beads` main 3a274fbf8f76.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475,
+  `gastownhall/gascity-packs` main aa55b477d4c2, and `gastownhall/beads` main
+  3a274fbf8f76.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
@@ -598,8 +597,7 @@ no warrant.
   handled post with (`WB_RESOLVED_REACTION`). Its reader is package
   `services/gctk/prstatus`: `RowFacts` reads it off the anchor and
   `unansweredFeedback` decides from it. `prstatus.Read` gathers it for
-  `gctk pr status` in `services/gctk/internal/cli/prstatus.go` and for the
-  helm board's beads source in `services/helm/internal/source/beads.go`.
+  `gctk pr status` in `services/gctk/internal/cli/prstatus.go`.
 - **Stands in for.** A record of a pull request's review threads kept on the
   bead whose pull request it is, which says whether review feedback still
   waits on an answer.
@@ -629,9 +627,9 @@ no warrant.
     findings, and its `ce-pr-comment-resolver` agent is handed a thread to fix
     or answer. Neither keeps a record of the thread.
   - The search is [specs/tk-iydyiup/gas-city-search.md](../specs/tk-iydyiup/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 with the `gastown` pack
-  it bundles at 66897e7132c9, `gastownhall/gascity-packs` main aa55b477d4c2,
-  and `gastownhall/beads` main 3a274fbf8f76.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 with
+  the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
+  main aa55b477d4c2, and `gastownhall/beads` main 3a274fbf8f76.
 - **Retires when.** Gas City records a pull request's review threads where a
   reader of the PR's own bead finds them, for example once its readiness
   monitor reads review threads, or a webhook receiver keeps their state from
@@ -839,8 +837,8 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, with #7163, #8832 and
-  PR #8834 open and unmerged.
+- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194, with
+  #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
   arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,

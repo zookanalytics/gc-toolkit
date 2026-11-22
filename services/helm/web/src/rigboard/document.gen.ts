@@ -141,8 +141,7 @@ export interface Row {
   line2?: string;
   /**
    * Line3 names the beads the table puts on the row's third line: what a
-   * wait further along ends on, or each wait that holds work nobody is
-   * scheduled to do.
+   * wait further along ends on.
    */
   line3?: Ref[];
   /**
@@ -314,7 +313,7 @@ export interface Need {
  * Count is the needs that count, and it reaches zero only when nothing that
  * counts needs you. Kinds is how many of them are of each kind: Pull request,
  * Question, Conversation waits for you, In conversation and Ruling, each one
- * zero included, then Routed to you when one counts. Counted lists the needs
+ * zero included, then Assigned to you when one counts. Counted lists the needs
  * that count, and NotCounted the needs that do not.
  */
 export interface NeedsYou {
@@ -332,13 +331,13 @@ export interface KindCount {
 }
 /**
  * WorkQueue is a Work queue view: the work in the order it is expected to land
- * (services/gctk/queue). Queue is the work the city takes as things stand: by
- * bd graph's execution layers, what can go now first, and within a layer in
- * the order the pool claims ready work, priority, then oldest, then id.
- * NotScheduled comes after it, in the same order: work the city takes none of
- * as things stand, since nobody has scheduled it or a hold label holds it, as
- * queue reads its row, and work that waits on such work. Unread is the work a
- * reader could not answer, in priority order and then oldest first.
+ * (services/gctk/queue). Queue is that work, apart from the ready work nothing
+ * sends anywhere: by bd graph's execution layers, what can go now first, and
+ * within a layer in the order the pool claims ready work, priority, then
+ * oldest, then id. NotScheduled comes after it, in the same order: the ready
+ * work that no hold, route, assignee, arm or live run sends anywhere, as queue
+ * answers it. Unread is the work a reader could not answer, in priority order
+ * and then oldest first.
  */
 export interface WorkQueue {
   queue: string[];
@@ -374,9 +373,9 @@ export type Group = typeof GroupWaitingOnYou | typeof GroupQueued | typeof Group
 export const AskQuestion = "Question";
 export const AskConversation = "Conversation";
 export const AskPullRequest = "Pull request";
-export const AskRoutedToYou = "Routed to you";
+export const AskAssignedToYou = "Assigned to you";
 export const AskRuling = "Ruling";
-export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskRoutedToYou | typeof AskRuling;
+export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskAssignedToYou | typeof AskRuling;
 /**
  * NeedKind is the kind of need a row is, the kinds a Needs you view counts and
  * filters its needs by. It is the row's ask, in the ask's own words, except
@@ -389,5 +388,5 @@ export const NeedKindQuestion = "Question";
 export const NeedKindWaitsForYou = "Conversation waits for you";
 export const NeedKindInConversation = "In conversation";
 export const NeedKindRuling = "Ruling";
-export const NeedKindRoutedToYou = "Routed to you";
-export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindRoutedToYou;
+export const NeedKindAssignedToYou = "Assigned to you";
+export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindAssignedToYou;

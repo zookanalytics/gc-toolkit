@@ -13,10 +13,9 @@ import (
 )
 
 // SupervisorAPI is the supervisor's HTTP API for the city this service reads,
-// found as SupervisorSource finds it: the base URL from GC_HELM_SUPERVISOR_URL
-// or supervisor.toml, and the city from GC_HELM_CITY, the GC_SERVICE_URL_PREFIX
-// the supervisor hands its services, or the city path's name. The rig board
-// reads through it when GitHub was last asked (internal/rigboard).
+// found as the event log finds it: the base URL by discoverBaseURL, and the
+// city by discoverCity. The rig board reads through it when GitHub was last
+// asked (internal/rigboard).
 type SupervisorAPI struct {
 	baseURL string
 	city    string
@@ -24,7 +23,7 @@ type SupervisorAPI struct {
 }
 
 // NewSupervisorAPI returns the supervisor's API for this city. Each GET ends
-// after ten seconds, as each of SupervisorSource's does.
+// after ten seconds.
 func NewSupervisorAPI() *SupervisorAPI {
 	return &SupervisorAPI{baseURL: discoverBaseURL(), city: discoverCity(), client: &http.Client{Timeout: 10 * time.Second}}
 }

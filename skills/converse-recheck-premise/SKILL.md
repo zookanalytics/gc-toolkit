@@ -94,7 +94,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
   && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
   && OPEN=$(printf '%s\n' "$HOLDS" | jq -er --arg c "$CONVERSATION" 'if .error == null and (.pending | type) == "array" then [ .pending[].id | select(. != $c) ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
-       "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${HEADLINE}" --by converse --no-wait \
+       "$GCTK" bead takeaway "$SUBJECT" "${KIND}: ${HEADLINE}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
   && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \

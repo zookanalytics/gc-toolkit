@@ -30,8 +30,7 @@ func (twoRigGC) JSON(_ context.Context, out any, args ...string) error {
 // waiting on a gather it ended answers that the board is stopping, and a
 // gather asked for after it reads nothing.
 func TestStopGathersEndsEveryGatherAndWaitsForIt(t *testing.T) {
-	src := newFake()
-	s := New(src, time.Minute, WithRigBoard(twoRigGC{}, rigAPI{}, time.Minute))
+	s := New(WithRigBoard(twoRigGC{}, rigAPI{}, time.Minute))
 	var reads, returned atomic.Int32
 	started := make(chan struct{}, 2)
 	s.rigBoard.read = func(ctx context.Context, rig rigboard.Rig) (rigboard.Document, error) {
@@ -67,9 +66,6 @@ func TestStopGathersEndsEveryGatherAndWaitsForIt(t *testing.T) {
 
 	if rr := get(t, s, "/helm/rigs/one"); rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), ErrStopping.Error()) {
 		t.Errorf("a rig asked for after the stop = %d %s, want a 502 saying the board is stopping", rr.Code, rr.Body.String())
-	}
-	if _, err := s.Board(context.Background()); !errors.Is(err, ErrStopping) || src.calls.Load() != 0 {
-		t.Errorf("the board asked for after the stop = %v after %d gathers, want ErrStopping and none", err, src.calls.Load())
 	}
 	if n := reads.Load(); n != 2 {
 		t.Errorf("the rigs were read %d times, want only the 2 reads the stop ended", n)

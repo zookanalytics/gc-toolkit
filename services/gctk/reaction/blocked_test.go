@@ -25,7 +25,7 @@ func TestBlockedWaitsOnItsBlocker(t *testing.T) {
 		t.Errorf("(BLK) the exit reported %q", out)
 	}
 	w.has("FIND tk-blk1 tk-sub", "(BLKHOLDS) the exit reads what holds the subject and its wait")
-	w.before("FIND tk-blk1 tk-sub", "HELM takeaway", "(BLKHOLDS) before its first write")
+	w.before("FIND tk-blk1 tk-sub", "TAKEAWAY", "(BLKHOLDS) before its first write")
 
 	w = newWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--run", root)
@@ -125,7 +125,7 @@ func TestBlockedFilesItsMissingBlocker(t *testing.T) {
 		t.Fatalf("(BLKNEW) the creates were %+v", creates)
 	}
 	w.has("--waiting-on tk-1", "(BLKNEW) the subject waits on the bead filed")
-	w.before("CREATE tk-1", "HELM takeaway", "(BLKNEW) filed before the release writes the wait")
+	w.before("CREATE tk-1", "TAKEAWAY", "(BLKNEW) filed before the release writes the wait")
 
 	w = newWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", strings.Repeat("x", 501), "--run", root)
@@ -154,16 +154,16 @@ func (s *lossyStore) Create(title string, args ...string) (string, error) {
 // another edge type, is not this blocker.
 func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 	w := newWorld(t)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, _, err := w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", "Migrate the seed schema", "--run", root)
 	wantCode(t, code, 4, err, "(BLKRETRY) an exit whose release fails after the blocker is filed")
-	w.helmFails = false
+	w.takeawayFails = false
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", "Migrate the seed schema", "--run", root)
 	wantCode(t, code, 0, err, "(BLKRETRY) the same exit run again")
 	if n := len(w.store.Creates()); n != 1 {
 		t.Errorf("(BLKRETRY) %d creates across both runs, want 1", n)
 	}
-	if h := w.lines("HELM takeaway"); !strings.Contains(h[len(h)-1], "--waiting-on tk-1") {
+	if h := w.lines("TAKEAWAY"); !strings.Contains(h[len(h)-1], "--waiting-on tk-1") {
 		t.Errorf("(BLKRETRY) the re-run's release was %q", h[len(h)-1])
 	}
 	w.saidHas("already tk-sub's pending wait tk-1", "(BLKRETRY) saying so")
@@ -174,7 +174,7 @@ func TestBlockedReusesTheBlockerAnEarlierRunFiled(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", "Migrate the seed schema", "--run", root)
 	wantCode(t, code, 4, err, "(BLKLOST) a create that named no bead")
 	errHas(t, err, "either both landed or neither did", "(BLKLOST) saying the bead and the wait land together")
-	w.hasnt("HELM takeaway", "(BLKLOST) before the release")
+	w.hasnt("TAKEAWAY", "(BLKLOST) before the release")
 	lossy.lose = false
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--blocker", "Migrate the seed schema", "--run", root)
 	wantCode(t, code, 0, err, "(BLKLOST) the same exit run again")
@@ -224,10 +224,10 @@ func TestBlockedArmsItsDispatchLast(t *testing.T) {
 		t.Errorf("(BLKARM) the arm was %q, want a plain arm on the target's default", a)
 	}
 	w.saidHas("armed the dispatch to gc-toolkit/gc-toolkit.polecat", "(BLKARM) the arm lands")
-	w.before("HELM takeaway", "ARM ", "(BLKARM) after the release writes the wait")
+	w.before("TAKEAWAY", "ARM ", "(BLKARM) after the release writes the wait")
 
 	w = newWorld(t)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, out, err := w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1",
 		"--then-route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
 	wantCode(t, code, 4, err, "(BLKEDGE) a wait edge takeaway could not write")
@@ -286,14 +286,14 @@ func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 		t.Errorf("(BLKASSIGN) the exit reported %q", out)
 	}
 	w.has("--release --waiting-on tk-blk1", "(BLKASSIGN) the wait rides the release")
-	for _, l := range w.lines("HELM ") {
+	for _, l := range w.lines("TAKEAWAY ") {
 		if strings.Contains(l, "--assign") || strings.Contains(l, "--no-wait") {
 			t.Errorf("(BLKASSIGN) the release was %q", l)
 		}
 	}
 	w.hasnt("ARM ", "(BLKASSIGN) nothing is armed for a named agent")
 	w.has("SLING gc-toolkit.mechanik tk-sub --no-formula --no-convoy", "(BLKHANDOFF) the waiting bead is routed to the agent")
-	w.before("HELM takeaway", "SLING ", "(BLKHANDOFF) after the release writes the wait")
+	w.before("TAKEAWAY", "SLING ", "(BLKHANDOFF) after the release writes the wait")
 	w.hasnt("NUDGE", "(BLKHANDOFF) no nudge while the bead waits")
 
 	w = blockerClosed(t)
@@ -324,7 +324,7 @@ func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 	w.rt.Roster = w.rt.Roster[:1]
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit/gc-toolkit.refinery")
 	wantCode(t, code, 2, err, "(BLKASSIGN) a --then-assign agent the roster does not register")
-	w.hasnt("HELM", "(BLKASSIGN) the bead is not released")
+	w.hasnt("TAKEAWAY", "(BLKASSIGN) the bead is not released")
 
 	w = waitingWorld(t)
 	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "the hand-off waits on the unit it brings in",
@@ -339,5 +339,5 @@ func TestBlockedHandsTheBeadToItsAgent(t *testing.T) {
 		"--takeaway", "held: bring-current waits on the unit", "--waiting-on", "tk-blk1", "--then-assign", "gc-toolkit/gc-toolkit.refinery", "--run", root)
 	wantCode(t, code, 0, err, "(BLKREADY) the refinery's blocker closed already")
 	w.has("NUDGE gc-toolkit/gc-toolkit.refinery tk-sub is assigned to you and ready", "(BLKREADY) the refinery is nudged")
-	w.before("HELM takeaway", "NUDGE ", "(BLKREADY) once the release has assigned it")
+	w.before("TAKEAWAY", "NUDGE ", "(BLKREADY) once the release has assigned it")
 }

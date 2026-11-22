@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
 // The behaviour of `gctk lifecycle` against a bead store is covered by
@@ -129,7 +131,7 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"--route beside --keep-route", []string{"b-1", "--to", "blocked", "--keep-route", "--route", "rig/pool"}, "ask for opposite things"},
 		{"empty --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", ""}, "tells the operator nothing"},
 		{"whitespace-only --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", " \t\n "}, "tells the operator nothing"},
-		{"--takeaway over the cap", []string{"b-1", "--to", "blocked", "--takeaway", strings.Repeat("x", takeawayMax+1)}, "the cap is 140"},
+		{"--takeaway over the cap", []string{"b-1", "--to", "blocked", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},
 		// A value-taking flag with no following token is malformed; the refusal is
 		// on arguments alone, ahead of any read. --expect is the one that matters:
 		// the empty string it used to take dropped the compare-and-swap guard.
@@ -213,12 +215,12 @@ func TestTakeawayCapIsMeasuredInCodepoints(t *testing.T) {
 	// The board renders one line of text, so the cap counts what a reader sees.
 	// A byte count would refuse a takeaway well inside the cap the moment it
 	// carried an em dash — which is most of them.
-	wide := strings.Repeat("é", takeawayMax)
+	wide := strings.Repeat("é", lifecycle.TakeawayMax)
 	if got, refusal := normalizeTakeaway(wide); refusal != nil || got != wide {
-		t.Errorf("%d codepoints was refused by a byte-counting cap: %v", takeawayMax, refusal)
+		t.Errorf("%d codepoints was refused by a byte-counting cap: %v", lifecycle.TakeawayMax, refusal)
 	}
 	if _, refusal := normalizeTakeaway(wide + "é"); refusal == nil {
-		t.Errorf("%d codepoints was accepted over the cap", takeawayMax+1)
+		t.Errorf("%d codepoints was accepted over the cap", lifecycle.TakeawayMax+1)
 	} else if !strings.Contains(refusal[0], "141 chars") {
 		t.Errorf("the refusal does not report the measured length: %q", refusal[0])
 	}

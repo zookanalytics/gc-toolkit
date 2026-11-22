@@ -249,8 +249,7 @@ func runsOf(blockers []Blocker) []Run {
 // InFlightStatuses are the statuses at which a bead carrying anchor_bead is in
 // its anchor's in-flight set, whatever its task_kind: bd-lib.sh's anchor
 // statuses (_BD_ANCHOR_STATUSES) less closed. [Read] asks its [Store] for the set
-// over them, and the helm board's beads source reads an anchor's live reviews
-// over them too.
+// over them.
 var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
 
 // Derive returns the state the anchor projects. Precedence:

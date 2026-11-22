@@ -11,9 +11,9 @@
 # THIS SCRIPT DOES NOT BUILD. Building here cannot work: the
 # supervisor allows a proxy_process 5s to answer its health probe
 # (proxyProcessReadyTimeout, gascity internal/workspacesvc/proxy_process.go),
-# while a warm build of helm-svc takes ~12.5s and a cold one 2m29s. The
-# deadline always won, and waitReady's stopProcessGroup() then killed the build
-# along with the start — 2,677 abandoned staging files in three days, and a
+# while a cold build of helm-svc takes longer (5 to 6s at loads of 14 to 20).
+# When the deadline wins, waitReady's stopProcessGroup() kills the build along
+# with the start — 2,677 abandoned staging files in three days, and a
 # restart that could only ever report "did not become ready before timeout".
 #
 # Building now belongs to `assets/scripts/gc-build.sh helm`, driven out of band
@@ -39,15 +39,15 @@ if [ ! -x "$BIN" ]; then
 gc-helm-svc: no binary at $BIN — nothing to exec.
 The build runs out of band and has not produced one yet.
   build now: assets/scripts/gc-build.sh helm
-  automatic: the 'helm-build' order (orders/helm-build.toml) builds and restarts
-             this service whenever services/helm has moved past the binary.
-Deliberately NOT building here: the readiness window is 5s and this build needs
-12.5s warm / 2m29s cold, so a build started here is always killed with the start.
+  automatic: the 'helm-build' order (orders/helm-build.toml) builds a missing
+             or out-of-date binary and restarts this service onto it.
+Deliberately NOT building here: the readiness window is 5s and a cold build
+takes longer, so a build started here is killed with the start.
 MSG
     exit 1
 fi
 
-# The board's write routes (POST /helm/{open,accept,engage,dismiss}) run
+# The board's write routes (POST /helm/{open,engage}) run
 # gc-helm.sh's verbs, and gc-helm.sh sits beside THIS launcher in the pack.
 # Resolving it here rather than in Go is deliberate: this script's own location
 # is the only thing that knows which rig checkout the service was started from,

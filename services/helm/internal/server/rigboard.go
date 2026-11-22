@@ -15,11 +15,10 @@ import (
 // The rig board's routes: GET /helm/rigs lists the city's rigs, and
 // GET /helm/rigs/{rig} answers one rig's document, with the line saying when
 // GitHub was last asked beside it, judged at the read. Each answer is cached
-// whole by the same rule the board's cache keeps: a time to live, one gather of
-// a key at a time, and every key dropped when a write route succeeds, since a
-// write changes what the store answers. The drop also lets the next request
-// gather beside a gather that began before the write, whose answer stays out
-// of the cache.
+// whole for a time to live, with one gather of a key at a time, and every key
+// is dropped when a write route succeeds, since a write changes what the
+// store answers. The drop also lets the next request gather beside a gather
+// that began before the write, whose answer stays out of the cache.
 
 // RigBoardTTL is how long one rig's document is served before the next read
 // gathers again. One read of the gc-toolkit rig, the city's largest store,

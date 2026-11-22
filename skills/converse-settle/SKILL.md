@@ -308,16 +308,20 @@ Take the case that fits the ruling:
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
-  yourself: the sign-off hands that gate to `gc-helm.sh accept`, the writer the
-  board's Accept runs, which dispatches the formula once under the subject's
-  acceptance lock. A var the operator settles rides beside `--accept` as
-  `--var <key>=<value>`. The sign-off refuses `--accept`, writing nothing,
-  while a gate the ruling does not answer still holds the subject. Then either
-  answer that gate in the same ruling once the operator rules on it, or sign
-  off without `--accept` and with `--leave` on the recommendation's gate, and
-  the board offers Accept once the other gate clears. A `first-reaction` gate
-  on an epic's member asks about the member's recommendation, which this case
-  does not take.
+  yourself: the sign-off hands that gate to `gctk reaction accept`, the one
+  writer that dispatches a recommendation, which dispatches the formula once
+  under the subject's acceptance lock. A var the operator settles rides beside
+  `--accept` as `--var <key>=<value>`. The sign-off refuses `--accept`, writing
+  nothing, while a gate the ruling does not answer still holds the subject.
+  Then either answer that gate in the same ruling once the operator rules on
+  it, or sign off without `--accept` and with `--leave <the recommendation's
+  gate>`. That gate then stays on the operator's page as a question, and once
+  the other gate clears, the sitting that answers the question takes the
+  recommendation with `--accept`. Tell the operator that this is their next
+  step: once the other gate clears, Start the conversation on that question
+  and rule there to take the recommendation. A `first-reaction` gate on an
+  epic's member asks about the member's recommendation, which this case does
+  not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
