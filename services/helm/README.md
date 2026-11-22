@@ -310,7 +310,12 @@ pages show the same views across the rig. Every object, from an epic to a gate,
 is drawn with one row structure (`src/rigboard/Line.tsx`), whose look follows
 the operator's Claude Design export, and an object looks the same wherever it
 appears: on every page a need is tinted and tagged with its kind, and its line 3
-says how many beads it holds up and, for a pull request, what holds it. A page
+says how many beads it holds up and, for a pull request, what holds it. A need
+reads the highest priority among it and the beads it holds, so a question in
+front of P1 work reads P1, while the order of a Needs you view stays the work's.
+A row that waits on another need names its pull request by number beside what
+it waits on, and its Details gives where the pull request stands and what holds
+it. A page
 decides only what nests under a row: a need on a Needs you view nests the beads
 it holds there, and nothing else nests. Details opens in place under a row: the
 bead's whole description, formatted, which the page reads from the supervisor

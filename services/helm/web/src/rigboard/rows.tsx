@@ -113,7 +113,7 @@ export function ObjectRow({ id, ctx, depth, kids }: ObjectRowProps) {
         hasKids={childIds.length > 0}
         open={kidsOpen}
         onToggle={() => v.flip(kidsKey, true)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         tag={tagOf(row)}
         title={titleOf(row)}
         quiet={closed}
@@ -128,6 +128,15 @@ export function ObjectRow({ id, ctx, depth, kids }: ObjectRowProps) {
       {kidsOpen && childIds.map((c) => <ObjectRow key={c} id={c} ctx={key} depth={depth + 1} />)}
     </>
   );
+}
+
+/** The priority a row reads: a need's is the highest among it and the beads it
+ *  holds, so a question in front of P1 work reads P1, and any other row's is
+ *  its own. Every row that draws a priority reads it here, so a row reads the
+ *  same on every page. */
+function priorityOf(rows: Record<string, Row>, row: Row): number {
+  if (row.ask === undefined) return row.priority;
+  return Math.min(row.priority, ...row.holds.map((h) => rows[h]?.priority ?? row.priority));
 }
 
 /** A need's tag is its kind, in amber while it waits on you, and any other
@@ -590,7 +599,7 @@ export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number })
         hasKids
         open={open}
         onToggle={() => v.flip(key, false)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         hue={hue.hue}
         title={titleOf(row)}
         signal={{ text: row.signal, note: row.note, ink: signalInk(row) }}
@@ -664,7 +673,7 @@ function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: stri
         hasKids
         open={open}
         onToggle={() => v.flip(key, !done)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         tag={tagOf(row)}
         title={row.title}
         signal={{ text: row.signal, note: row.note, ink: signalInk(row) }}

@@ -430,6 +430,25 @@ describe('the Needs you page', () => {
     }
   });
 
+  it('gives a need the highest priority among it and the beads it holds, the same on every page', async () => {
+    render(<Page />);
+    await loaded();
+    const priorityOf = (line: HTMLElement) => text(line.querySelector('.priority'));
+    tab(/Needs you/);
+    // The cut's question tk-q4dd6mk is P2 and holds P1 work.
+    expect(board.rows['tk-q4dd6mk'].priority).toBe(2);
+    expect(board.rows['tk-q4dd6mk'].holds.map((h) => board.rows[h].priority)).toContain(1);
+    expect(priorityOf(rowOf('tk-q4dd6mk'))).toBe('P1');
+    expect(priorityOf(rowOf('tk-toahupq'))).toBe(`P${board.rows['tk-toahupq'].priority}`);
+    for (const id of board.rows['tk-q4dd6mk'].holds) {
+      expect(priorityOf(rowOf(id))).toBe(`P${board.rows[id].priority}`);
+    }
+    tab(/Epics/);
+    fireEvent.click(within(rowOf('tk-1tfzr71')).getByRole('button', { name: SIMPLIFY }));
+    expect(rowsOf('tk-q4dd6mk').length).toBeGreaterThan(0);
+    for (const line of rowsOf('tk-q4dd6mk')) expect(priorityOf(line)).toBe('P1');
+  });
+
   it('starts the conversation on a question no conversation answers', async () => {
     render(<Page />);
     await loaded();
