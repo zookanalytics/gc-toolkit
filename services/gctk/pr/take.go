@@ -34,11 +34,6 @@ import (
 // its bound for the read once a mark has landed (refreshReserve) leaves the
 // posts it did not reach for the next run.
 
-// takenMark is the reaction the take leaves on a post once its ask is filed:
-// the city's mark that it has the post and owes it an answer, which
-// gc_city_taken in assets/scripts/pr-post.sh reads.
-const takenMark = "EYES"
-
 // refreshReserve is how much of its bound a take keeps, once a mark has landed,
 // for the one-PR update's read of the PR's conversation, the only write that
 // shows the saved read the marks. A take that spent its whole bound on posts

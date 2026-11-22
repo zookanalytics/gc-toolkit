@@ -14,15 +14,13 @@
 # returning the PR to draft before it pushes, with a lease on the head the
 # round judged, pushing nothing when the draft does not answer or the branch
 # moved, and weighing a failed push by the branch on origin (landed, unmoved
-# and to run again, moved, or not read); the post of the head's comment, or
-# the edit of the one its mark finds, and nothing when there is nothing to
-# answer; a deferred fix
-# filed with its wait on the PR's bead in its create, and armed, found rather
-# than filed again, armed then when the call that filed it did not arm it, and
-# left as it stands when it is armed, closed or routed; a
-# question put to a gate; a person's batch, whose human findings the round's
-# read lists and the finding verb rules through finding.sh, a deferral's
-# follow-up taking the PR's target; triage's read at a head that already
+# and to run again, moved, or not read); the round's answers posted through
+# gctk pr answer, in the run's worktree or else the rig's checkout, with its
+# exit passed on; a deferred fix filed with its wait on the PR's bead in its
+# create and the PR's target, and armed, found rather than filed again, armed
+# then when the call that filed it did not arm it, and left as it stands when
+# it is armed, closed or routed; a question put to a gate; triage's read at a
+# head that already
 # passed, its read of the check index naming the scripts directory beside it
 # for any binding, its read of the rig's guidance for triage at the head, and
 # stopping when that does not read; the repair's read again keeping the round's
@@ -46,13 +44,11 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 SD="$TMP/scripts"; mkdir -p "$SD"
 cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$SD/"
 LOG="$TMP/calls.log"; export LOG
-for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh finding.sh; do
+for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh; do
     { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SD/$s" <<'STUB'
 printf '%s %s\n' "${0##*/}" "$*" >> "$LOG"
 case "${0##*/}" in
     human-gate.sh) echo "tk-gate1" ;;
-    pr-post.sh) [ "$1" = comment ] && echo "https://github.com/o/r/pull/7#issuecomment-9" ;;
-    finding.sh) exit "${STUB_RC_FINDING:-0}" ;;
 esac
 exit "${STUB_RC_SIBLING:-0}"
 STUB
@@ -73,7 +69,7 @@ export STUB_RIG="$TMP/rig"
 
 # The stubs on PATH: gc, gctk and gh.
 BIN="$TMP/bin"; mkdir -p "$BIN"
-export STUB_FACTS="$TMP/facts.json" STUB_GCTK_OUT="$TMP/gctk.out"
+export STUB_FACTS="$TMP/facts.json"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
@@ -81,7 +77,7 @@ case "$1 $2" in
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
     "bd show") [ -z "${STUB_RC_BD_SHOW:-}" ] || exit "$STUB_RC_BD_SHOW"
                if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
-               else printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","finding.follow_up":"tk-fu","gc.step_ref":"%s"}}]\n' "$3" "${STUB_STEP_REF:-}"; fi ;;
+               else printf '[{"id":"%s","metadata":{"gc.var.repair_target":"rig/gc-toolkit.polecat","gc.step_ref":"%s"}}]\n' "$3" "${STUB_STEP_REF:-}"; fi ;;
     "bd list") [ -z "${STUB_RC_BD_LIST:-}" ] || exit "$STUB_RC_BD_LIST"
                printf '%s\n' "${STUB_LIST:-[]}" ;;
     "bd create") echo '{"id":"tk-new"}' ;;
@@ -100,7 +96,7 @@ case "$1 $2" in
         cat "$STUB_FACTS" ;;
     "review output") [ -z "${STUB_REFUSE:-}" ] || { echo "gctk review output: $STUB_REFUSE; write it again" >&2; exit 3; }
         echo '{"review":"x","iteration":1}' ;;
-    "review comment") [ -f "$STUB_GCTK_OUT" ] && cat "$STUB_GCTK_OUT" ;;
+    "pr answer") printf 'pr-answer-in %s\n' "$PWD" >> "$LOG"; exit "${STUB_RC_ANSWER:-0}" ;;
     "review guidance") [ -z "${STUB_RC_GUIDANCE:-}" ] || { echo "gctk review guidance: docs/review-$3.md would not read" >&2; exit "$STUB_RC_GUIDANCE"; }
         printf 'the rig guidance for %s, read in %s\n' "$3" "$PWD" ;;
     "pr draft") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-draft"
@@ -113,7 +109,6 @@ exit 0
 STUB
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'STUB'
 printf 'gh %s\n' "$*" >> "$LOG"
-[ "$1" = api ] && printf '%s' "${STUB_COMMENT_ID:-}"
 exit 0
 STUB
 chmod +x "$BIN"/*
@@ -122,12 +117,13 @@ mkdir -p "$REVIEW_WORKSPACE_DIR"
 WS="$TMP/ws/gc-review-tk-run"
 
 # facts <ref> <output> <iteration> [<change from> <why>] — the held step's
-# facts, the change the whole PR unless a base and its rule are given.
+# facts, the change the whole PR unless a base and its rule are given, and the
+# PR's target FACT_TARGET, main unless it is set.
 facts() {
     jq -n --arg ref "$1" --arg out "$2" --argjson n "$3" --arg h "$HEAD1" \
-        --arg from "${4:-}" --arg why "${5:-the whole PR}" \
+        --arg from "${4:-}" --arg why "${5:-the whole PR}" --arg target "${FACT_TARGET:-main}" \
         '{step: "tk-step", ref: $ref, output: $out, iteration: $n, run: "tk-run", pr_bead: "tk-pr",
-          pr: "https://github.com/o/r/pull/7", branch: "polecat/tk-pr", target: "main", first_head: $h,
+          pr: "https://github.com/o/r/pull/7", branch: "polecat/tk-pr", target: $target, first_head: $h,
           head: $h,
           change: ({head: $h, why: $why} + (if $from == "" then {} else {from: $from} end))}' > "$STUB_FACTS"
 }
@@ -282,23 +278,32 @@ git -C "$TMP/rig" worktree remove --force --force "$WT" 2>/dev/null; rm -rf "$WS
 
 # --- post ------------------------------------------------------------------------
 facts review-loop.iteration.1.rule-and-repair repair 1
-rm -f "$STUB_GCTK_OUT"
 run post
-eq "$RC" 0 "an iteration with nothing to answer posts nothing"
-eq "$(called pr-post.sh)" 0 "…no comment"
-printf '%s\n' "<!-- gc:review-run tk-run $HEAD1 -->" "**Review**" > "$STUB_GCTK_OUT"
+eq "$RC" 0 "the round's answers post"
+has "$(cat "$LOG")" "gctk pr answer tk-run --iteration 1" "through gctk, for the run and the round's iteration"
+has "$(cat "$LOG")" "pr-answer-in $TMP/rig" "in the rig's checkout while the run has no worktree"
+eq "$(called pr-post.sh)/$(called 'gh ')" "0/0" "and the script posts and reads nothing of its own"
+mkdir -p "$WS/repair/wt"
 run post
-has "$(cat "$LOG")" "pr-post.sh comment --repo github.com/o/r --pr 7 --body-file $WS/repair/comment-1.md" "the head's comment posts"
-STUB_COMMENT_ID=4242 run post
-has "$(cat "$LOG")" "pr-post.sh edit --repo github.com/o/r --comment 4242" "a retry edits the comment its mark finds"
+has "$(cat "$LOG")" "pr-answer-in $WS/repair/wt" "in the run's worktree once the repair's read made it"
+rm -rf "$WS/repair"
+for rc in 1 2 3; do
+    STUB_RC_ANSWER=$rc run post
+    eq "$RC" "$rc" "gctk's exit $rc is the verb's own"
+done
+facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1
+run post
+eq "$(called 'pr answer')" 0 "a lane posts nothing"
 
 # --- defer -----------------------------------------------------------------------
-facts review-loop.iteration.1.rule-and-repair repair 1
+# The PR's target is an integration branch, so the deferred fix's target is the
+# PR's and not the default branch's.
+FACT_TARGET=integration/tk-epic facts review-loop.iteration.1.rule-and-repair repair 1
 echo "Move the parser into its own package." > "$TMP/defer.md"
 run defer --title "Move the parser" --file "$TMP/defer.md"
 eq "$RC/$OUT" "0/tk-new" "a fix outside the diff is deferred, printing its bead"
 has "$(cat "$LOG")" "gc bd create Move the parser -t task" "to a bead of its own"
-has "$(cat "$LOG")" "--deps blocked-by:tk-pr --metadata {\"target\":\"main\"}" "whose create carries its wait on the PR's bead, with the PR's target"
+has "$(cat "$LOG")" "--deps blocked-by:tk-pr --metadata {\"target\":\"integration/tk-epic\"}" "whose create carries its wait on the PR's bead, with the PR's target"
 eq "$(called 'bd dep')" 0 "and adds no edge of its own onto the PR's bead, the one edge bd keeps between the two"
 has "$(cat "$LOG")" "gctk bead arm tk-new --target rig/gc-toolkit.polecat --on mol-polecat-work" "and armed on the run's repair pool"
 STUB_NO_POOL=1 run defer --title "Move the parser" --file "$TMP/defer.md"
@@ -339,30 +344,6 @@ has "$(cat "$LOG")" "human-gate.sh --subject tk-pr --key review-question-c1-scop
 has "$OUT" "tk-gate1" "and prints the gate"
 run question --key "Bad Key" --message m
 eq "$RC" 64 "a key that is no slug is a usage error"
-
-# --- a person's batch: each comment a human finding, ruled by its grade ----------
-facts review-loop.iteration.1.rule-and-repair repair 1
-STUB_LIST='[{"id":"tk-f1","title":"rename the flag","status":"open","metadata":{"task_kind":"finding","finding.lane":"human","finding.fix_unit":"tk-ask"}},{"id":"tk-f9","title":"a lane finding","status":"open","metadata":{"task_kind":"finding","finding.lane":"correctness"}}]' \
-    run repair
-has "$OUT" "tk-f1 (ask tk-ask, unvalidated): rename the flag" "the round's read lists each human finding the batch's ask carries"
-hasnt "$OUT" "tk-f9" "and no other finding"
-run finding --finding tk-f1 --ruling declined --reason "A nit, P2 at most: the name reads as well as the one suggested, so it is answered and not fixed."
-eq "$RC" 0 "a nit is ruled"
-has "$(cat "$LOG")" "finding.sh set-disposition --finding tk-f1 --anchor tk-pr --disposition declined --reason A nit" "as declined on the finding, answered and not fixed"
-has "$(cat "$LOG")" "--reply A nit, P2 at most" "with its answer as the reply the comment is owed"
-run finding --finding tk-f1 --ruling deferred --reason "The fix reaches the parser, outside this PR's diff."
-eq "$RC/$OUT" "0/tk-fu" "a fix outside the diff is deferred, printing its follow-up"
-has "$(cat "$LOG")" "--disposition deferred --reason The fix reaches the parser" "through finding.sh"
-has "$(cat "$LOG")" "--fix-pool rig/gc-toolkit.polecat" "on the run's repair pool"
-has "$(cat "$LOG")" "gc bd update tk-fu --set-metadata target=main" "and its follow-up takes the PR's target"
-run finding --finding tk-f1 --ruling must-fix --reason "P1: the flag is read before it is set."
-has "$(cat "$LOG")" "--disposition must-fix" "a P1 is must-fix"
-run finding --finding tk-f1 --ruling question --reason "Which name?"
-eq "$RC" 64 "a question names its gate"
-run finding --finding tk-f1 --ruling question --reason "Which name?" --gate tk-gate1
-has "$(cat "$LOG")" "--disposition needs-you --reason Which name? --answer Which name? --visit tk-gate1" "a question rides its gate"
-STUB_RC_FINDING=2 run finding --finding tk-f1 --ruling declined --reason r
-eq "$RC" 2 "a ruling that does not land is run again"
 
 # --- deliver ---------------------------------------------------------------------
 facts mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane lane 1

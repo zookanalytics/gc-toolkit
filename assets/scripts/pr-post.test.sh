@@ -430,13 +430,15 @@ eq "$(awaits "$NDEF" "$(thread false "$(in_review "$OP" CHANGES_REQUESTED)" "$(i
   "a dismissed review of the city's answers nothing"
 
 echo "# feedback-def: a post the city marked handled neither asks nor answers"
-# The write-back in pr-facts.sh puts WB_RESOLVED_REACTION in place of its
-# WB_REACTION on a post it owes nothing more. The cases read both from it, so a
-# write-back that marks with another reaction fails them.
-WB_ROUTED=$(sed -n 's/^WB_REACTION="\([A-Z_]*\)"$/\1/p' "$HERE/pr-facts.sh")
-WB_HANDLED=$(sed -n 's/^WB_RESOLVED_REACTION="\([A-Z_]*\)"$/\1/p' "$HERE/pr-facts.sh")
-if [ -n "$WB_ROUTED" ] && [ -n "$WB_HANDLED" ]; then ok "pr-facts.sh names the reactions its write-back marks a post with"
-else bad "pr-facts.sh names the reactions its write-back marks a post with" "WB_REACTION='$WB_ROUTED' WB_RESOLVED_REACTION='$WB_HANDLED'"; fi
+# gctk's pr domain writes the city's two marks: the taken mark when the landing
+# order takes a post, and the handled mark when a review round's post answers
+# it (services/gctk/pr/marks.go). The cases read both names from there, so a
+# writer that marks with another reaction fails them.
+MARKS_GO="$HERE/../../services/gctk/pr/marks.go"
+WB_ROUTED=$(sed -n 's/^[[:space:]]*takenMark[[:space:]]*=[[:space:]]*"\([A-Z_]*\)"$/\1/p' "$MARKS_GO")
+WB_HANDLED=$(sed -n 's/^[[:space:]]*handledMark[[:space:]]*=[[:space:]]*"\([A-Z_]*\)"$/\1/p' "$MARKS_GO")
+if [ -n "$WB_ROUTED" ] && [ -n "$WB_HANDLED" ]; then ok "gctk's pr domain names the reactions it marks a post with"
+else bad "gctk's pr domain names the reactions it marks a post with" "takenMark='$WB_ROUTED' handledMark='$WB_HANDLED' in $MARKS_GO"; fi
 # reacted <comment-json> <content> <viewer-has-reacted> — the comment carrying
 # one reaction group.
 reacted() { printf '%s' "$1" | jq -c --arg c "$2" --argjson v "$3" '. + {reactionGroups: [{content: $c, viewerHasReacted: $v}]}'; }
@@ -454,8 +456,8 @@ eq "$(awaits "$NDEF" "$(thread false "$(reacted "$OP" "$WB_ROUTED" true)")")" tr
   "the city's reaction that it routed a post is no answer"
 
 echo "# feedback-def: the city's taken mark beside its handled mark"
-# The reaction the write-back marks a post it picked up with is the taken mark,
-# and the one it trades that for is the handled mark.
+# The reaction the take marks a post with is the taken mark, and the one a
+# round's post leaves once it has answered the post is the handled mark.
 mark() { printf '%s' "$2" | jq -r "$NDEF$1"; } # <predicate> <post-json>
 eq "$(mark gc_city_taken "$(reacted "$OP" "$WB_ROUTED" true)")" true \
   "the city's reaction that it picked up a post marks the post taken"

@@ -86,11 +86,12 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 		"The pull request a bead owns: where it stands, what its title and body say, the account of the change "+
 			"they carry, GitHub's side of it saved on the bead, its record from publication to the verified merge, "+
 			"its draft between rounds of the city's work, the withdrawal of approvals a material change leaves "+
-			"behind, and the push of a converse sitting that edits its branch.",
+			"behind, a review round's answers on it, and the push of a converse sitting that edits its branch.",
 		status, newPRComposeCmd(stdout, stderr), newPRSummaryCmd(stdout, stderr),
 		newPRPollCmd(stdout, stderr), newPRCompareCmd(stdout, stderr), newPRRefreshCmd(stdout, stderr),
 		newPRRecordCmd(stdout, stderr), newPRReconcileCmd(stdout, stderr),
-		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRPushCmd(stdout, stderr))
+		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRAnswerCmd(stdout, stderr),
+		newPRPushCmd(stdout, stderr))
 }
 
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read

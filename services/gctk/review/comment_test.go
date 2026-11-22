@@ -70,4 +70,26 @@ func TestTheHeadsComment(t *testing.T) {
 	if got := review.Comment(run, 1, nil); got != "" {
 		t.Errorf("an iteration with nothing to answer renders %q", got)
 	}
+
+	// An ask whose post settles a question, or makes it moot, says so.
+	w = newWorld(t)
+	w.ask("tk-ask", "")
+	w.ask("tk-ask2", "")
+	w.output(triage(1, h1))
+	w.output(repair(1, h1, "",
+		review.Ruling{Ask: "tk-ask", Ruling: review.RulingAnswered, Reason: "it answers the question", Settles: "tk-q1"},
+		review.Ruling{Ask: "tk-ask2", Ruling: review.RulingAnswered, Reason: "the cap is gone", Settles: "tk-q2", Moot: true}))
+	run, err = review.ReadRun(w.ledger(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = review.Comment(run, 1, nil)
+	for _, want := range []string{
+		"Answered: it answers the question. The post settles the question at tk-q1.",
+		"Answered: the cap is gone. The post makes the question at tk-q2 moot.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the comment lacks %q:\n%s", want, got)
+		}
+	}
 }

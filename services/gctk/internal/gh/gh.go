@@ -240,6 +240,10 @@ const (
 	reactMutation = `mutation($id:ID!,$content:ReactionContent!){
   addReaction(input:{subjectId:$id,content:$content}){reaction{content}}}`
 
+	// The resolve of a review thread, which names the thread by its node id.
+	resolveMutation = `mutation($id:ID!){
+  resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
+
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviews(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
@@ -365,6 +369,39 @@ func (c *Client) AddReaction(subject, content string) error {
 	}
 	return c.graphql(reactMutation, []string{"-f", "id=" + subject, "-f", "content=" + content}, false,
 		func(json.RawMessage) error { return nil })
+}
+
+// ResolveThread resolves the review thread whose node id is thread, as the
+// account gh acts as. An error is a request GitHub refused or one whose answer
+// did not arrive, which may still take effect: a read of the thread says which.
+func (c *Client) ResolveThread(thread string) error {
+	if thread == "" {
+		return errors.New("github: a resolve names no review thread")
+	}
+	return c.graphql(resolveMutation, []string{"-f", "id=" + thread}, false, func(json.RawMessage) error { return nil })
+}
+
+// loginShape is the form of an account's login: letters, digits, hyphens and
+// underscores, not opening with a hyphen. A bot's login, such as
+// dependabot[bot], is not one GitHub takes a review request for.
+var loginShape = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
+
+// RequestReview asks the account login to review PR number in repo again,
+// through GitHub's review request (POST
+// repos/<repo>/pulls/<n>/requested_reviewers), which puts the PR back in their
+// queue. An error is a request GitHub refused, such as one for an account that
+// cannot review the repository, or one whose answer did not arrive, which may
+// still take effect; Refused tells the two apart.
+func (c *Client) RequestReview(repo string, number int, login string) error {
+	if _, err := prVars(repo, number); err != nil {
+		return err
+	}
+	if !loginShape.MatchString(login) {
+		return fmt.Errorf("github: %q is no login a review can be requested from", login)
+	}
+	_, err := c.call("api", "--hostname", c.host, "-X", "POST",
+		fmt.Sprintf("repos/%s/pulls/%d/requested_reviewers", repo, number), "-f", "reviewers[]="+login)
+	return err
 }
 
 // DismissReview dismisses review id of PR number in repo with message, through

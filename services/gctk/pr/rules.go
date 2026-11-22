@@ -8,17 +8,24 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 )
 
+// opinionStates are the states of a review that give its account's opinion of
+// the PR: an approval, a request for changes, and a dismissed review, which
+// stands for neither.
+var opinionStates = []string{"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+
 // approval reads the reviews by the approval rule: each account's latest
-// review that approves or requests changes counts, when GitHub says the
-// account can push to the repository, the approval GitHub counts toward a
-// required review. A later review that only comments leaves it standing, and a
-// dismissed review counts for nothing. No account is excluded for being a bot,
-// an app or the city's own. It returns the accounts whose approval stands and
-// those whose request for changes stands, each sorted.
+// review that approves, requests changes or was dismissed is its opinion, which
+// counts when GitHub says the account can push to the repository, the approval
+// GitHub counts toward a required review. A later review that only comments
+// leaves it standing. A dismissed review stands for neither, so the account's
+// earlier approval stays superseded once its request for changes is dismissed,
+// and only an approval given after the dismissal counts. No account is excluded
+// for being a bot, an app or the city's own. It returns the accounts whose
+// approval stands and those whose request for changes stands, each sorted.
 func approval(reviews []gh.Review) (approvers, requesters []string) {
 	latest := map[string]gh.Review{}
 	for _, v := range reviews {
-		if !v.AuthorCanPush || v.Author == "" || (v.State != "APPROVED" && v.State != "CHANGES_REQUESTED") {
+		if !v.AuthorCanPush || v.Author == "" || !slices.Contains(opinionStates, v.State) {
 			continue
 		}
 		cur, seen := latest[v.Author]
@@ -27,9 +34,10 @@ func approval(reviews []gh.Review) (approvers, requesters []string) {
 		}
 	}
 	for login, v := range latest {
-		if v.State == "APPROVED" {
+		switch v.State {
+		case "APPROVED":
 			approvers = append(approvers, login)
-		} else {
+		case "CHANGES_REQUESTED":
 			requesters = append(requesters, login)
 		}
 	}

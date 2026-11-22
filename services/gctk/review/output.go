@@ -259,6 +259,9 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 			return nil, refuse("ask %s is open and nothing holds it, so the round rules it", a.ID)
 		}
 	}
+	if err := checkSettles(l, run.PRBead, rp.Rulings); err != nil {
+		return nil, err
+	}
 	if rp.Pushed != "" && !git.IsObjectID(rp.Pushed) {
 		return nil, refuse("the push %q is not a full object name", rp.Pushed)
 	}
@@ -376,6 +379,87 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 			"comes as an ask of its own, which the round rules must-fix", r.Subject(), was)
 	}
 	return nil
+}
+
+// checkSettles is why the round's rulings do not stand on the questions they
+// settle: moot with no gate, a gate settled by a finding's ruling or by a
+// question's, a gate two rulings settle, one the round also puts a question
+// to, and one that is not an open human gate on the bead that owns the PR
+// under a question's key. A read that fails returns the store's error.
+func checkSettles(l *ledger.Ledger, bead string, rs []Ruling) error {
+	asked := map[string]bool{}
+	for _, r := range rs {
+		if r.Ruling == RulingQuestion {
+			asked[strings.TrimSpace(r.Gate)] = true
+		}
+	}
+	settled := map[string]string{}
+	var owner *ledger.Record
+	for _, r := range rs {
+		gate := strings.TrimSpace(r.Settles)
+		switch {
+		case gate == "" && r.Moot:
+			return refuse("%s is ruled moot and names no gate whose question it makes moot", r.Subject())
+		case gate == "":
+			continue
+		case r.Ask == "":
+			return refuse("%s names the gate %s it settles, and only the ruling of an ask for a person's post settles one",
+				r.Subject(), gate)
+		case r.Ruling == RulingQuestion:
+			return refuse("%s is put to a person and names the gate %s it settles, and a question settles none", r.Subject(), gate)
+		case settled[gate] != "":
+			return refuse("%s and %s both settle the gate %s, which one post answers", settled[gate], r.Subject(), gate)
+		case asked[gate]:
+			return refuse("%s settles the gate %s, which the round puts a question to", r.Subject(), gate)
+		}
+		settled[gate] = r.Subject()
+		if owner == nil {
+			o, err := one(l, bead)
+			if err != nil {
+				return err
+			}
+			owner = o
+		}
+		why, err := openQuestion(l, owner, gate)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return refuse("%s settles %s, which %s", r.Subject(), gate, why)
+		}
+	}
+	return nil
+}
+
+// openQuestion says why gate is not a question a review run put to a person
+// that holds owner, the bead that owns the PR, and is empty when it is: an
+// open human gate under a key QuestionKey opens, with owner's blocks edge onto
+// it. A read that fails returns the store's error.
+func openQuestion(l *ledger.Ledger, owner *ledger.Record, gate string) (string, error) {
+	rows, err := l.Find(ledger.ByID(gate).WithClosed())
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "the store does not hold", nil
+	}
+	g := rows[0]
+	switch {
+	case !strings.EqualFold(g.IssueType(), "gate") || g.AwaitType() != "human":
+		return "is no human gate", nil
+	case !strings.HasPrefix(g.AwaitID(), QuestionKey):
+		return fmt.Sprintf("is keyed %q, which is no question's key (%s<slug>)", g.AwaitID(), QuestionKey), nil
+	case g.Status() == "closed":
+		return "is closed already", nil
+	}
+	edges, err := owner.Edges()
+	if err != nil {
+		return "", &ledger.ReadError{ID: owner.ID, Reason: "its edges did not decode: " + err.Error()}
+	}
+	if !slices.ContainsFunc(edges, func(e ledger.Edge) bool { return e.Type == ledger.EdgeBlocks && e.ID == gate }) {
+		return "does not hold " + owner.ID, nil
+	}
+	return "", nil
 }
 
 // earlierDeclines is each ask an earlier round of the run ruled declined or

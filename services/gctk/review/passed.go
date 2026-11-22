@@ -225,6 +225,12 @@ func (v *Verdict) Explain() string {
 				if r.Gate != "" {
 					fmt.Fprintf(&b, " through %s", r.Gate)
 				}
+				switch {
+				case r.Settles != "" && r.Moot:
+					fmt.Fprintf(&b, ", making the question at %s moot", r.Settles)
+				case r.Settles != "":
+					fmt.Fprintf(&b, ", settling the question at %s", r.Settles)
+				}
 				if r.Reason != "" {
 					fmt.Fprintf(&b, ": %s", oneLine(r.Reason))
 				}

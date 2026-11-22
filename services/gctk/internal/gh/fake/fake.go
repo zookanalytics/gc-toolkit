@@ -21,7 +21,8 @@ import (
 // of the conversation give. The rest is what the cheap question reads beside
 // what it counts from the rest: its labels, when GitHub last changed it, its
 // base's tip, and its head's check rollup state and the commit statuses there,
-// counted by state.
+// counted by state. Requested is each account a review request asked to review
+// it.
 type PR struct {
 	Facts          gh.PullRequest
 	Reviews        []gh.Review
@@ -34,6 +35,7 @@ type PR struct {
 	ReviewDecision string
 	Rollup         string
 	Statuses       map[string]int
+	Requested      []string
 }
 
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
@@ -148,8 +150,9 @@ type Repo struct {
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
 // "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
 // "MarkReady" or "ConvertToDraft" with the PR's node id, "DismissReview" with
-// the review's id and the dismissal's message, or "AddReaction" with the
-// post's node id and the reaction as its message.
+// the review's id and the dismissal's message, "AddReaction" with the post's
+// node id and the reaction as its message, "ResolveThread" with the thread's
+// node id, or "RequestReview" with the login asked.
 type Ask struct {
 	Method, ID, Head, Message string
 }
@@ -401,6 +404,46 @@ func (g *GitHub) AddReaction(subject, content string) error {
 		}
 	}
 	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", subject)
+}
+
+// ResolveThread records the resolve and resolves the review thread whose node
+// id is thread. A node id no thread holds is an error, as GitHub answers one
+// that resolves to nothing.
+func (g *GitHub) ResolveThread(thread string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: "ResolveThread", ID: thread})
+	if err := g.Fail["ResolveThread"]; err != nil {
+		return err
+	}
+	for _, p := range g.PRs {
+		for i, t := range p.Threads {
+			if t.ID == thread {
+				p.Threads[i].Resolved = true
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", thread)
+}
+
+// RequestReview records the request and adds login to the PR's requested
+// reviewers, once, as GitHub keeps one request for each account.
+func (g *GitHub) RequestReview(repo string, number int, login string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: "RequestReview", ID: login})
+	if err := g.Fail["RequestReview"]; err != nil {
+		return err
+	}
+	p, ok := g.PRs[key(repo, number)]
+	if !ok {
+		return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
+	}
+	if !slices.Contains(p.Requested, login) {
+		p.Requested = append(p.Requested, login)
+	}
+	return nil
 }
 
 // Login returns Self.

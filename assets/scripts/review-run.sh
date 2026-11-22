@@ -39,19 +39,14 @@
 #       landed, at the judged head nothing moved (exit 2, run it again), and at
 #       any other commit the branch moved (exit 1)
 #   review-run.sh post                            [rule-and-repair]
-#       post the head's comment (gctk review comment), or edit the one its mark
-#       finds, through pr-post.sh
+#       post the round's answers on the PR (gctk pr answer): the head's comment,
+#       or an edit of the one its mark finds, and each person's post an ask the
+#       round ruled carries, answered where it was made
 #   review-run.sh defer --title <text> --file <path>   [rule-and-repair]
 #       file a fix outside the reviewed diff as a bead of its own, waiting on the
 #       PR's bead and armed to start once it lands, its target the PR's
 #   review-run.sh question --key <slug> --message <text>   [rule-and-repair]
 #       put a question only a person can answer to a human gate on the PR's bead
-#   review-run.sh finding --finding <id> --ruling <ruling> --reason <text> [--gate <gate>]   [rule-and-repair]
-#       rule one human finding, a person's comment that an ask the round took
-#       carries, through finding.sh set-disposition: must-fix and answered as
-#       must-fix, declined with the reason as its reply, deferred with the run's
-#       repair pool, whose follow-up then takes the PR's target, and question as
-#       needs-you on the gate --gate names
 #   review-run.sh deliver --file <capture>        [a lane]
 #       deliver a demo capture to the PR (demo-deliver.sh)
 #
@@ -73,7 +68,7 @@ die() { local rc="$1"; shift; echo "$PROG: $*" >&2; exit "$rc"; }
 
 [ "$#" -ge 1 ] || usage
 VERB="$1"; shift
-CHECK=""; FILE=""; REASON=""; TITLE=""; KEY=""; MESSAGE=""; FINDING=""; RULING=""; GATE=""
+CHECK=""; FILE=""; REASON=""; TITLE=""; KEY=""; MESSAGE=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --check)   [ "$#" -ge 2 ] || usage; CHECK="$2"; shift 2 ;;
@@ -82,9 +77,6 @@ while [ "$#" -gt 0 ]; do
         --title)   [ "$#" -ge 2 ] || usage; TITLE="$2"; shift 2 ;;
         --key)     [ "$#" -ge 2 ] || usage; KEY="$2"; shift 2 ;;
         --message) [ "$#" -ge 2 ] || usage; MESSAGE="$2"; shift 2 ;;
-        --finding) [ "$#" -ge 2 ] || usage; FINDING="$2"; shift 2 ;;
-        --ruling)  [ "$#" -ge 2 ] || usage; RULING="$2"; shift 2 ;;
-        --gate)    [ "$#" -ge 2 ] || usage; GATE="$2"; shift 2 ;;
         -h|--help) usage ;;
         *) echo "$PROG: unknown argument '$1'" >&2; usage ;;
     esac
@@ -261,12 +253,6 @@ cmd_repair() {
     "$gctk" review passed "$ID" --explain || true
     printf '%s\n' "== Each lane's files, its evidence on disk"
     for d in "$WS"/lane-*; do [ -d "$d" ] && printf '%s\n' "$d"; done
-    printf '%s\n' "== A person's comments, each a human finding to rule with review-run.sh finding, by the ask that carries it"
-    gc bd list --metadata-field "anchor_bead=$PR_BEAD" --json --limit 0 2>/dev/null | jq -r '.[]?
-        | select((.metadata.task_kind // "") == "finding" and (.metadata["finding.lane"] // "") == "human")
-        | select((.status // "") != "closed" and (.metadata["finding.fix_unit"] // "") != "")
-        | "\(.id) (ask \(.metadata["finding.fix_unit"]), \(.metadata["finding.disposition"] // "unvalidated")): \(.title // "")"' \
-        || die 2 "the human findings on $PR_BEAD did not read"
     printf '%s\n' "== The run's worktree, at the head: $wt" "== Write the output to: ${wt%/wt}/output.json"
 }
 
@@ -330,26 +316,16 @@ cmd_push() {
     echo "$new"
 }
 
+# The round's answers are gctk's to make (gctk pr answer), from the run's
+# worktree when the repair's read made it, else the rig's checkout, whose
+# origin names the PR's repository. Its exits are this script's own.
 cmd_post() {
     load; owns rule-and-repair
-    local body file mark host repo number id
-    body=$("$gctk" review comment "$RUN" --iteration "$N") || die 2 "the head's comment did not render"
-    if [ -z "$body" ]; then echo "$PROG: nothing to answer at $HEAD, so nothing is posted"; return 0; fi
-    [[ "$PR" =~ ^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)$ ]] || die 3 "$PR is not a PR's URL"
-    host=${BASH_REMATCH[1]}; repo=${BASH_REMATCH[2]}; number=${BASH_REMATCH[3]}
-    mark=$(printf '%s\n' "$body" | head -1)
-    id=$(gh api --hostname "$host" "repos/$repo/issues/$number/comments" --paginate \
-        --jq ".[] | select(.body | contains($(jq -Rn --arg m "$mark" '$m'))) | .id" | head -1) \
-        || die 2 "the PR's comments did not read"
-    file="$WS/repair/comment-$N.md"
-    { mkdir -p "$WS/repair" && printf '%s\n' "$body" > "$file"; } || die 1 "cannot write $file"
-    if [ -n "$id" ]; then
-        "$HERE/pr-post.sh" edit --repo "$host/$repo" --comment "$id" --body-file "$file" >/dev/null \
-            || die 1 "the edit of comment $id did not land"
-        echo "$PROG: edited the comment for $HEAD ($id)"
-    else
-        "$HERE/pr-post.sh" comment --repo "$host/$repo" --pr "$number" --body-file "$file" || die 1 "the comment did not post"
+    local dir="$WS/repair/wt"
+    if [ ! -d "$dir" ]; then
+        dir=$("$HERE/rig-root.sh") && [ -n "$dir" ] || die 2 "cannot resolve the rig's checkout"
     fi
+    (cd "$dir" && "$gctk" pr answer "$RUN" --iteration "$N")
 }
 
 # A deferred fix is a task that waits on the PR's bead. bd keeps one edge
@@ -405,44 +381,6 @@ cmd_question() {
         || die 1 "the gate did not land"
 }
 
-# A person's comment is a human finding until tk-1tfzr71.21 gives it its new
-# form, and its ruling is recorded on it through finding.sh, which pr-facts.sh's
-# write-back answers the comment from once its ask closes.
-cmd_finding() {
-    [ -n "$FINDING" ] && [ -n "$RULING" ] && [ -n "$REASON" ] || usage
-    load; owns rule-and-repair
-    local disp args=()
-    case "$RULING" in
-        must-fix|answered) disp=must-fix ;;
-        declined) disp=declined; args=(--reply "$REASON") ;;
-        deferred) disp=deferred ;;
-        question) [ -n "$GATE" ] || die 64 "a question names the gate it went to: --gate <gate>"
-                  disp=needs-you; args=(--visit "$GATE") ;;
-        *) die 64 "--ruling takes must-fix, declined, deferred, answered or question, got '$RULING'" ;;
-    esac
-    if [ "$disp" = deferred ]; then
-        local pool
-        pool=$(gc bd show "$RUN" --json 2>/dev/null | jq -r '.[0].metadata["gc.var.repair_target"] // empty')
-        [ -n "$pool" ] || die 1 "the run names no repair pool for the follow-up a deferral files"
-        args=(--fix-pool "$pool")
-    fi
-    local rc
-    "$HERE/finding.sh" set-disposition --finding "$FINDING" --anchor "$PR_BEAD" --disposition "$disp" \
-        --reason "$REASON" --answer "$REASON" ${args[@]+"${args[@]}"}; rc=$?
-    case "$rc" in
-        0) ;;
-        1) die 64 "finding.sh refused the ruling of $FINDING, and its message above says why" ;;
-        3) die 3 "an open human gate already carries the question of $FINDING" ;;
-        *) die 2 "the ruling of $FINDING did not land; run it again" ;;
-    esac
-    [ "$disp" = deferred ] || return 0
-    local fu
-    fu=$(gc bd show "$FINDING" --json 2>/dev/null | jq -r '.[0].metadata["finding.follow_up"] // empty')
-    [ -n "$fu" ] || die 2 "$FINDING is deferred and names no follow-up; run it again"
-    gc bd update "$fu" --set-metadata "target=$TARGET" >/dev/null || die 1 "the follow-up $fu did not take the PR's target $TARGET; run it again"
-    echo "$fu"
-}
-
 cmd_deliver() {
     [ -n "$FILE" ] || usage
     load; owns lane
@@ -451,6 +389,6 @@ cmd_deliver() {
 }
 
 case "$VERB" in
-    triage|lane|repair|output|withdraw|push|post|defer|question|finding|deliver) "cmd_$VERB" ;;
+    triage|lane|repair|output|withdraw|push|post|defer|question|deliver) "cmd_$VERB" ;;
     *) usage ;;
 esac

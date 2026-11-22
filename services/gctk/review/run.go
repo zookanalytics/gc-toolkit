@@ -121,7 +121,10 @@ type Repair struct {
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
 // id, or one ask, named by its bead: the ruling, its reason, the commit that
-// fixes a must-fix finding and the gate a question went to.
+// fixes a must-fix finding and the gate a question went to. Settles is the gate
+// of a question a person's post settles, which only the ruling of that post's
+// ask names, and Moot says the post makes the question moot rather than
+// answering it. The round's post closes that gate with the post as its answer.
 type Ruling struct {
 	Check   string `json:"check,omitempty"`
 	Finding string `json:"finding,omitempty"`
@@ -130,6 +133,40 @@ type Ruling struct {
 	Reason  string `json:"reason,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 	Gate    string `json:"gate,omitempty"`
+	Settles string `json:"settles,omitempty"`
+	Moot    bool   `json:"moot,omitempty"`
+}
+
+// QuestionKey opens the key of each human gate a review run puts a question to
+// a person through: review-run.sh question files the gate under
+// review-question-<slug> on the bead that owns the PR.
+const QuestionKey = "review-question-"
+
+// Answer is the ruling's answer as the PR shows it, what the head carries for
+// the point it rules, where pushed is the head the round pushed, "" when it
+// pushed nothing: a must-fix point's commit and the head that carries it, why
+// any other point gets no change, and the gate a question went to.
+func (r Ruling) Answer(pushed string) string {
+	reason := oneLine(r.Reason)
+	switch r.Ruling {
+	case RulingMustFix:
+		if pushed != "" {
+			return fmt.Sprintf("Fixed by `%s`, which `%s` carries: %s", short(r.Commit), short(pushed), reason)
+		}
+		return fmt.Sprintf("Fixed by `%s`: %s", short(r.Commit), reason)
+	case RulingDeclined:
+		return "Declined, and the head carries no change for it: " + reason
+	case RulingDeferred:
+		return "Deferred to work of its own once this PR lands: " + reason
+	case RulingAnswered:
+		return "Answered: " + reason
+	case RulingQuestion:
+		if r.Gate == "" {
+			return "A question for you: " + reason
+		}
+		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
+	}
+	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
 }
 
 // Subject is what the ruling rules, as the account names it.

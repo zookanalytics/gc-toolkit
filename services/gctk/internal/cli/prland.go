@@ -384,7 +384,8 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 // lock no longer than the act has left, the clone at $GC_RIG_ROOT else the
 // working directory, the pack's definition of feedback, loaded in that clone,
 // and the runtime adapter for human gates, for the city's mark, which
-// `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
+// `pr-post.sh mark` prints, for the city's posts, which pr-post.sh makes, for
+// a review run's pour, which runs in the clone,
 // so gc resolves the rig's store there, for the disposition writer, which runs
 // as the refinery, for the refinery's wake, for the labels' writer, and, where
 // the clone carries one, for the seed audit, whose scripts run in the clone.
@@ -431,6 +432,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		},
 		Feedback:     rule,
 		Mark:         func() (string, error) { return cityMark(rt) },
+		Posts:        prPosts{rt: rt},
 		Checkout:     checkout{dir: dir},
 		Gates:        actGates{rt: rt},
 		Runs:         runs{rt: rt.In(dir)},

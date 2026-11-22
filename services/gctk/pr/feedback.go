@@ -94,8 +94,8 @@ func (p Post) reason(number int) string {
 }
 
 // postFragment is the fragment of a post's URL on its PR: a review's, an inline
-// comment's or a conversation comment's.
-var postFragment = regexp.MustCompile(`^(pullrequestreview-|discussion_r|issuecomment-)[0-9]+$`)
+// comment's or a conversation comment's, which names the kind and then the id.
+var postFragment = regexp.MustCompile(`^(pullrequestreview-|discussion_r|issuecomment-)([0-9]+)$`)
 
 // postNamed is the URL of the post on the PR at pr that an ask's reason names,
 // as the take writes one (Post.reason), or "" when it names none.

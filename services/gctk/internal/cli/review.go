@@ -295,12 +295,12 @@ record lock, replacing the entry for the same head and target. It passes only
 when the iteration passed and no gate the run put a question to is open. Each
 ask the round at that head answered, ruled declined, deferred or answered,
 closes with its work record: shipped with the commit of the run's must-fix
-ruling of it, else no-op. At an exhausted loop it asks a person through a
-review-loop-exhausted gate on the bead (human-gate.sh), and it closes each
-person's finding whose ask closed (finding.sh close-answered), both from the
-scripts directory GCTK_SCRIPTS_DIR names. A record that does not land exits 75,
-so Gas City runs the check again without spending an attempt, and the retry
-replaces the same entry.
+ruling of it, else no-op. The round's step has posted each ask's answer on the
+PR before it closed (gctk pr answer), so an ask closes once its answer is
+there. At an exhausted loop it asks a person through a review-loop-exhausted
+gate on the bead (human-gate.sh, from the scripts directory GCTK_SCRIPTS_DIR
+names). A record that does not land exits 75, so Gas City runs the check again
+without spending an attempt, and the retry replaces the same entry.
 
 It reads only the store, which is all a check's PATH reaches. It prints the
 verdict and each reason the iteration did not pass, with --explain the
@@ -356,22 +356,18 @@ func reviewPassed(run, db string, n int, explain, record bool, stdout, stderr io
 	}
 	var rec *recorder
 	if record {
-		rt := gascity.New()
-		rec = &recorder{dir: dir, wait: checkLockWait, gates: gates{rt}, scripts: rt}
+		rec = &recorder{dir: dir, wait: checkLockWait, gates: gates{gascity.New()}}
 	}
 	return passedIn(l, run, n, explain, rec, stdout, stderr)
 }
 
 // recorder is what the loop's check records the run's result through: the
 // store's .beads directory, where the record lock lives, how long it waits for
-// the lock, the filer of the review-loop-exhausted gate and the pack's scripts.
+// the lock, and the filer of the review-loop-exhausted gate.
 type recorder struct {
-	dir     string
-	wait    time.Duration
-	gates   review.Gates
-	scripts interface {
-		Script(name string, args ...string) gascity.Result
-	}
+	dir   string
+	wait  time.Duration
+	gates review.Gates
 }
 
 // passedIn is the check's exit for the run over l, with rec recording the
@@ -408,10 +404,9 @@ func passedIn(l *ledger.Ledger, run string, n int, explain bool, rec *recorder, 
 	return 1
 }
 
-// record writes the result of the run the verdict ends, then closes each
-// person's finding whose ask closed, and says what it did. It returns 0 once
-// every part landed, and passedNoVerdict when one did not, so the check runs
-// again.
+// record writes the result of the run the verdict ends and says what it did.
+// It returns 0 once every part landed, and passedNoVerdict when one did not, so
+// the check runs again.
 func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io.Writer) int {
 	got, err := review.Record(l, r.dir, r.wait, v, r.gates)
 	if err != nil {
@@ -433,13 +428,6 @@ func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io
 	if got.Result != nil && got.Exhausted {
 		fmt.Fprintf(stdout, "%s: the loop exhausted its attempts at %s, so a person is asked through a %s gate\n",
 			got.Bead, got.Result.Head, review.LoopExhaustedKey)
-	}
-	// A person's comment is a human finding until tk-1tfzr71.21 gives it its
-	// new form, and its ask closing above is what lets it close.
-	if f := r.scripts.Script("finding.sh", "close-answered", "--anchor", got.Bead).Failure(); f != "" {
-		fmt.Fprintf(stderr, "gctk review passed: the result is recorded, and the findings whose asks closed did not close, "+
-			"so the check runs again: %s\n", f)
-		return passedNoVerdict
 	}
 	return 0
 }

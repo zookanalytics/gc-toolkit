@@ -381,6 +381,63 @@ func TestAGateOrAnotherWriterKeepsTheRunOffTheBranch(t *testing.T) {
 	}
 }
 
+// filedAt makes the bead id read as filed at the instant given, as bd's listing
+// gives a bead's creation time.
+func filedAt(d *admitting, id, at string) {
+	b, _ := d.store.Row(id)
+	b.CreatedAt = at
+	d.store.Put(b)
+}
+
+// A question a review run put to a person holds no run back from a person's
+// post made after it: while every gate that holds the bead is such a question
+// and an ask a run can take carries a person's post filed after the newest of
+// them, the order pours the run that rules the post. A post filed before the
+// question, an ask that carries no post, a question filed after the post, and
+// any other gate beside the question pour none.
+func TestARunIsPouredBehindAQuestionOnlyForAPostMadeAfterIt(t *testing.T) {
+	const post = "Conversation comment by operator on PR #7: " + prURL + "#issuecomment-5"
+	asked := func(t *testing.T) *admitting {
+		d := newAdmit(t)
+		d.gate(t, "tk-q1", review.QuestionKey+"scope")
+		filedAt(d, "tk-q1", "2026-11-12T03:00:00Z")
+		return d
+	}
+	d := asked(t)
+	filedAt(d, d.ask(t, post), "2026-11-12T04:00:00Z")
+	if o := d.once(t); o.Action != pr.ActPoured || d.runs.count() != 1 {
+		t.Fatalf("a post made after the question poured %d runs: %+v", d.runs.count(), o)
+	}
+	for name, setup := range map[string]func(t *testing.T, d *admitting){
+		"a post filed before the question": func(t *testing.T, d *admitting) {
+			filedAt(d, d.ask(t, post), "2026-11-12T02:00:00Z")
+		},
+		"an ask that carries no person's post": func(t *testing.T, d *admitting) {
+			filedAt(d, d.ask(t, "Run the demo check at the next head."), "2026-11-12T04:00:00Z")
+		},
+		"a question filed after the post": func(t *testing.T, d *admitting) {
+			filedAt(d, d.ask(t, post), "2026-11-12T04:00:00Z")
+			d.gate(t, "tk-q2", review.QuestionKey+"naming")
+			filedAt(d, "tk-q2", "2026-11-12T05:00:00Z")
+		},
+		"another gate beside the question": func(t *testing.T, d *admitting) {
+			filedAt(d, d.ask(t, post), "2026-11-12T04:00:00Z")
+			d.gate(t, "tk-g9", "review-run-failed")
+			filedAt(d, "tk-g9", "2026-11-12T02:00:00Z")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := asked(t)
+			setup(t, d)
+			o := d.once(t)
+			is(t, o, pr.ActChecked)
+			if d.runs.count() != 0 || !strings.Contains(o.Detail, "holds the bead") {
+				t.Fatalf("%s poured %d runs: %s", name, d.runs.count(), o.Detail)
+			}
+		})
+	}
+}
+
 // conversation files conversation tk-conv on the PR, a task that tracks the
 // bead, with status and assignee as given, and the bead's blocks edge onto it,
 // the edge that holds the PR's merge, which the blocked listing holds the bead

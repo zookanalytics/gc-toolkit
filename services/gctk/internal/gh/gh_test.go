@@ -268,6 +268,56 @@ func TestAReactionNamesThePostByItsNodeID(t *testing.T) {
 	}
 }
 
+// A resolve names the review thread by its node id, and a GraphQL error fails
+// it.
+func TestAResolveNamesTheThreadByItsNodeID(t *testing.T) {
+	c, r := client([2]string{"resolveReviewThread(input:{threadId:$id})",
+		`{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}`})
+	if err := c.ResolveThread("PRRT_kw1"); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PRRT_kw1") {
+		t.Fatalf("the request %q does not name the thread", args)
+	}
+	c, r = client()
+	if err := c.ResolveThread(""); err == nil || len(r.calls) != 0 {
+		t.Fatalf("a resolve that names no thread = %v, asking %+v", err, r.calls)
+	}
+	c, _ = client([2]string{"resolveReviewThread", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
+	if err := c.ResolveThread("PRRT_gone"); err == nil {
+		t.Fatal("a refused resolve read as resolved")
+	}
+}
+
+// A review request names the PR and the account by its login, and refuses a
+// login GitHub takes no request for before it asks.
+func TestAReviewRequestNamesThePRAndTheLogin(t *testing.T) {
+	c, r := client([2]string{"/requested_reviewers", `{"number":7}`})
+	if err := c.RequestReview("acme/widgets", 7, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"api", "--hostname", "github.com", "-X", "POST", "repos/acme/widgets/pulls/7/requested_reviewers",
+		"-f", "reviewers[]=operator"}
+	if !reflect.DeepEqual(r.calls[0].args, want) {
+		t.Fatalf("the request asked %q, want %q", r.calls[0].args, want)
+	}
+	c, r = client()
+	for _, err := range []error{
+		c.RequestReview("acme/widgets", 7, ""),
+		c.RequestReview("acme/widgets", 7, "dependabot[bot]"),
+		c.RequestReview("acme/widgets", 7, "-x"),
+		c.RequestReview("widgets", 7, "operator"),
+		c.RequestReview("acme/widgets", 0, "operator"),
+	} {
+		if err == nil {
+			t.Fatal("a review request that names no login, a bot, no repository or no PR ran")
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a refused review request asked GitHub: %+v", r.calls)
+	}
+}
+
 // GitHub refused a request when it answered it with a client error, other than
 // a rate limit. A request whose answer did not arrive, or that GitHub could not
 // serve, is not refused.

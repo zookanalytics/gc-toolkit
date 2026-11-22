@@ -254,10 +254,23 @@ func TestApproval(t *testing.T) {
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
 				{ID: 101, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindApproval, pr.KindChangesRequested}},
-		{"an approval still counts once the same account's later request for changes is dismissed",
+		{"an approval given before the same account's request for changes that was dismissed does not stand",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
 				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+			[]pr.Kind{pr.KindApproval}},
+		{"…and an approval given after the dismissed request counts",
+			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"},
+				approve(102, "operator", "2026-11-12T03:00:00Z")},
 			nil},
+		{"a dismissed request for changes holds nothing",
+			[]gh.Review{approve(100, "maintainer", "2026-11-12T01:00:00Z"),
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+			nil},
+		{"a request for changes stays superseded once the same account's later approval is dismissed",
+			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+			[]pr.Kind{pr.KindApproval}},
 		{"an approval after the same account's request for changes lifts it",
 			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
 				approve(101, "operator", "2026-11-12T02:00:00Z")},
@@ -621,7 +634,7 @@ func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
 		approvalMessage.Body = "ship it, and rename X"
 		empty := gh.Review{ID: 301, State: "COMMENTED", Author: "operator", AuthorCanPush: true, Body: " \n", SubmittedAt: "2026-11-12T03:00:00Z"}
 		dismissed := gh.Review{ID: 305, State: "DISMISSED", Author: "operator", AuthorCanPush: true, Body: "an old request",
-			SubmittedAt: "2026-11-12T03:00:00Z"}
+			SubmittedAt: "2026-11-12T02:30:00Z"}
 		cityOwn := commented(302, "2026-11-12T03:00:00Z")
 		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, dismissed, cityOwn)
 		w.pr.Threads = []gh.Thread{thread("T1", comment(303))}

@@ -92,7 +92,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 					what = fmt.Sprintf("%s (%s)", oneLine(a.Reason), r.Ask)
 				}
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", what, answer(r, true, rp))
+			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(r, true, rp), r))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -203,28 +203,29 @@ func answer(r Ruling, ok bool, rp *Repair) string {
 	if !ok {
 		return "Not ruled."
 	}
-	reason := oneLine(r.Reason)
-	switch r.Ruling {
-	case RulingMustFix:
-		switch {
-		case rp.Pushed != "":
-			return fmt.Sprintf("Fixed by `%s`, which `%s` carries: %s", short(r.Commit), short(rp.Pushed), reason)
-		default:
-			return fmt.Sprintf("Fixed by `%s`: %s", short(r.Commit), reason)
-		}
-	case RulingDeclined:
-		return "Declined, and the head carries no change for it: " + reason
-	case RulingDeferred:
-		return "Deferred to work of its own once this PR lands: " + reason
-	case RulingAnswered:
-		return "Answered: " + reason
-	case RulingQuestion:
-		if r.Gate == "" {
-			return "A question for you: " + reason
-		}
-		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
+	return r.Answer(rp.Pushed)
+}
+
+// settles is an ask's answer with what its ruling says of the question the
+// ask's post settles, the answer as it is when the post settles none.
+func settles(answer string, r Ruling) string {
+	switch {
+	case r.Settles == "":
+		return answer
+	case r.Moot:
+		return fmt.Sprintf("%s The post makes the question at %s moot.", Punctuated(answer), r.Settles)
 	}
-	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
+	return fmt.Sprintf("%s The post settles the question at %s.", Punctuated(answer), r.Settles)
+}
+
+// Punctuated is s with a full stop at its end when it ends with no mark that
+// ends a sentence, so a sentence can follow it.
+func Punctuated(s string) string {
+	s = strings.TrimRight(s, " ")
+	if s == "" || strings.ContainsAny(s[len(s)-1:], ".!?") {
+		return s
+	}
+	return s + "."
 }
 
 // visualLine says what kind of visual a demo verdict rests on: its modality,

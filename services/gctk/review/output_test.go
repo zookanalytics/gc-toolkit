@@ -329,6 +329,84 @@ func TestARepairOutput(t *testing.T) {
 		Commit: fix}), nil), "an earlier round of this run ruled ask tk-ask declined")
 }
 
+// question puts a human gate on the store under key, open or closed, which
+// holds the bead that owns the PR by its blocks edge when holds says so.
+func (w *world) question(id, key, status string, holds bool) {
+	w.store.Put(bead{ID: id, Title: "Is the cap the operator's to set?", Status: status, IssueType: "gate",
+		AwaitType: "human", AwaitID: key})
+	if holds {
+		pr, _ := w.store.Row(prBead)
+		pr.Edges = append(pr.Edges, gcbd.Edge{ID: id, Type: gcbd.EdgeBlocks, Status: status, IssueType: "gate", AwaitType: "human"})
+		w.store.Put(pr)
+	}
+}
+
+// A ruling of an ask names the gate of a question the ask's post settles, an
+// open human gate under a question's key that holds the bead that owns the PR,
+// with moot when the post makes the question moot. Moot with no gate, a
+// finding's ruling or a question's that settles a gate, two rulings that
+// settle one, a gate the round also puts a question to, and a gate that is
+// closed, keyed as no question, missing or not holding the bead are refused.
+func TestARulingThatSettlesAQuestion(t *testing.T) {
+	setup := func() (*world, string) {
+		w := newWorld(t)
+		w.ask("tk-ask", "")
+		w.ask("tk-ask2", "")
+		w.output(triage(1, h1))
+		w.question("tk-q1", review.QuestionKey+"scope", "open", true)
+		return w, w.step(1, "rule-and-repair")
+	}
+	settles := func(ask, gate string, moot bool) review.Ruling {
+		return review.Ruling{Ask: ask, Ruling: review.RulingAnswered, Reason: "it answers the question", Settles: gate, Moot: moot}
+	}
+	other := review.Ruling{Ask: "tk-ask2", Ruling: review.RulingDeclined, Reason: "a nit"}
+	w, st := setup()
+	var got review.Repair
+	if err := w.check(st, repair(1, h1, "", settles("tk-ask", "tk-q1", true), other), &got); err != nil {
+		t.Fatal(err)
+	}
+	if r := got.Rulings[0]; r.Settles != "tk-q1" || !r.Moot {
+		t.Fatalf("the printed output keeps the ruling as %+v", r)
+	}
+	for _, c := range []struct {
+		name  string
+		rs    []review.Ruling
+		setup func(w *world)
+		why   string
+	}{
+		{"moot with no gate", []review.Ruling{{Ask: "tk-ask", Ruling: review.RulingAnswered, Reason: "r", Moot: true}, other},
+			nil, "names no gate"},
+		{"a question that settles a gate", []review.Ruling{{Ask: "tk-ask", Ruling: review.RulingQuestion, Reason: "r",
+			Gate: "tk-q9", Settles: "tk-q1"}, other}, nil, "a question settles none"},
+		{"two rulings that settle one gate", []review.Ruling{settles("tk-ask", "tk-q1", false),
+			settles("tk-ask2", "tk-q1", false)}, nil, "both settle the gate tk-q1"},
+		{"a gate the round puts a question to", []review.Ruling{settles("tk-ask", "tk-q1", false),
+			{Ask: "tk-ask2", Ruling: review.RulingQuestion, Reason: "r", Gate: "tk-q1"}}, nil, "puts a question to"},
+		{"a closed gate", []review.Ruling{settles("tk-ask", "tk-q2", false), other},
+			func(w *world) { w.question("tk-q2", review.QuestionKey+"other", "closed", true) }, "closed already"},
+		{"a gate keyed as no question", []review.Ruling{settles("tk-ask", "tk-q2", false), other},
+			func(w *world) { w.question("tk-q2", "review-run-failed", "open", true) }, "no question's key"},
+		{"a gate the store does not hold", []review.Ruling{settles("tk-ask", "tk-q9", false), other}, nil, "the store does not hold"},
+		{"a gate that does not hold the bead", []review.Ruling{settles("tk-ask", "tk-q2", false), other},
+			func(w *world) { w.question("tk-q2", review.QuestionKey+"other", "open", false) }, "does not hold " + prBead},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w, st := setup()
+			if c.setup != nil {
+				c.setup(w)
+			}
+			mustRefuse(t, w.check(st, repair(1, h1, "", c.rs...), nil), c.why)
+		})
+	}
+	w = newWorld(t)
+	w.output(triage(1, h1, "correctness"))
+	w.output(lane(1, "correctness", h1, review.VerdictApprove, "F1"))
+	w.question("tk-q1", review.QuestionKey+"scope", "open", true)
+	st = w.step(1, "rule-and-repair")
+	mustRefuse(t, w.check(st, repair(1, h1, "", review.Ruling{Check: "correctness", Finding: "F1",
+		Ruling: review.RulingDeclined, Reason: "r", Settles: "tk-q1"}), nil), "only the ruling of an ask")
+}
+
 // A finding is its lane's check, compared without case, and its id as the
 // lane wrote it, in the round's output as in the pass rule: two findings whose
 // ids differ only in case are two, each ruled once, and the round that rules

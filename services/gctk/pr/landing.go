@@ -63,19 +63,37 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order and the draft cycle reach it: the reads an
-// act makes of what it changes, such as a withdrawal's of the reviews it
-// dismisses, a merge request or an enqueue pinned to the head the evaluator
-// judged, the PR's moves between draft and ready, the dismissal of a review,
-// and the reaction the take leaves on a post, named by its node id.
+// Hub is GitHub as the landing order, the draft cycle and a review round's post
+// reach it: the reads an act makes of what it changes, such as a withdrawal's of
+// the reviews it dismisses and a round's post's of the PR's conversation, a
+// merge request or an enqueue pinned to the head the evaluator judged, the PR's
+// moves between draft and ready, the dismissal of a review, the reaction the
+// take or a round's post leaves on a post, named by its node id, the resolve
+// of a review thread, named by its node id, and the request that an account
+// review the PR again.
 type Hub interface {
 	GitHub
+	IssueComments(repo string, number int) ([]gh.IssueComment, error)
 	MergePullRequest(id, head string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
 	DismissReview(repo string, number int, id int64, message string) error
 	AddReaction(subject, content string) error
+	ResolveThread(thread string) error
+	RequestReview(repo string, number int, login string) error
+}
+
+// Poster is the writer of the city's posts on a PR, assets/scripts/pr-post.sh,
+// which carries the city's mark on every body it posts: a comment on the
+// conversation of PR number in repo on host, an edit of the city's
+// conversation comment id there, and a reply in the review thread whose node
+// id is thread. An error is a post that did not land, or whose answer did not
+// arrive, which may still have posted: a read of the PR says which.
+type Poster interface {
+	Comment(host, repo string, number int, body string) error
+	Edit(host, repo string, id int64, body string) error
+	Reply(host, thread, body string) error
 }
 
 // Checkout is the rig's clone, as the record reads it: its origin, the target
@@ -180,7 +198,8 @@ func (e *HeldClose) Error() string { return e.Why }
 // landed, stopped once ctx ends. Feedback loads the definition of
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
-// it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
+// it, and Posts is that writer, through which a review round's post posts its
+// comment and its replies. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
 // ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
 // carries none. Wake gives the refinery a turn for a changed head that only
 // conversations and asks hold. Labels keeps the labels of each PR the store's
@@ -200,6 +219,7 @@ type Landing struct {
 	RefreshConversation func(ctx context.Context, url string) error
 	Feedback            func() (Feedback, error)
 	Mark                func() (string, error)
+	Posts               Poster
 	Checkout            Checkout
 	Gates               Gates
 	Runs                Runs
