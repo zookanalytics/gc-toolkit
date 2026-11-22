@@ -462,11 +462,16 @@ no warrant.
   takes each post the conversation keeps untaken as its own ask (`takePlans`,
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
-  and compares each owned PR's saved labels with the ones the store derives
-  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
-  itself, which compares a PR's signs with the ones each part keeps (`moved` in
-  `services/gctk/pr/saved.go`) and the net's full read with each part's facts
-  (`differs` there).
+  converts the receipts `pr-facts.sh` left on a bead whose saved read shows the
+  PR open, and unsets them once the saved conversation shows no post they reach
+  untaken (`unconvertible` and `unsetReceipts` in
+  `services/gctk/pr/convert.go`, which has the update read the conversation
+  again the same way), and compares each owned PR's saved labels with the ones
+  the store derives (`labelPlans` in `services/gctk/pr/labels.go`), and the PR
+  watch itself, which compares a PR's signs with the ones each part keeps and
+  reads again a conversation part that holds no list of untaken posts (`moved`
+  in `services/gctk/pr/saved.go`), and the net's full read with each part's
+  facts (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, from which the landing order finds and does its work, and

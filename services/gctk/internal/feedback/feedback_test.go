@@ -178,6 +178,38 @@ func TestAwaiting(t *testing.T) {
 	}
 }
 
+// A thread holds only the city's own posts when each of its posts is the
+// city's: under its login and marked, or under its login from before the
+// cutover. An unmarked post under the city's login after the cutover is a
+// person's, as is a post under any other login, and a resolved thread is none
+// that waits to be resolved.
+func TestOwnThreads(t *testing.T) {
+	r := load(t, "")
+	finding := feedback.Comment{Author: self, Body: "a finding\n\n<!-- gc-writeback -->", CreatedAt: "2026-11-12T01:00:00Z",
+		Review: &feedback.Review{State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"}}
+	early := feedback.Comment{Author: self, Body: "an unmarked finding", CreatedAt: "2026-09-01T00:00:00Z",
+		Review: &feedback.Review{State: "COMMENTED", SubmittedAt: "2026-09-01T00:00:00Z"}}
+	late := early
+	late.CreatedAt = "2026-11-12T01:00:00Z"
+	late.Review = &feedback.Review{State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"}
+	person := feedback.Comment{Author: "operator", Body: "why?", CreatedAt: "2026-11-12T02:00:00Z",
+		Review: &feedback.Review{State: "COMMENTED", SubmittedAt: "2026-11-12T02:00:00Z"}}
+	got, err := r.OwnThreads(self, cutover, []feedback.Thread{
+		{ID: "marked", Comments: []feedback.Comment{finding}},
+		{ID: "before-the-cutover", Comments: []feedback.Comment{early, finding}},
+		{ID: "unmarked-after-the-cutover", Comments: []feedback.Comment{late}},
+		{ID: "answered-by-a-person", Comments: []feedback.Comment{finding, person}},
+		{ID: "resolved", Resolved: true, Comments: []feedback.Comment{finding}},
+		{ID: "empty"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"marked", "before-the-cutover"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("the city's own threads %v, want %v", got, want)
+	}
+}
+
 func TestLoadFailsWithNoDefinition(t *testing.T) {
 	if _, err := feedback.Load(t.TempDir(), t.TempDir()); err == nil {
 		t.Fatal("loaded a definition from a directory with no pr-post.sh")

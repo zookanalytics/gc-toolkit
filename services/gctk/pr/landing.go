@@ -65,17 +65,21 @@ import (
 
 // Hub is GitHub as the landing order and the draft cycle reach it: the reads an
 // act makes of what it changes, such as a withdrawal's of the reviews it
-// dismisses, a merge request or an enqueue pinned to the head the evaluator
-// judged, the PR's moves between draft and ready, the dismissal of a review,
-// and the reaction the take leaves on a post, named by its node id.
+// dismisses and the conversion's of the PR's posts and threads, a merge request
+// or an enqueue pinned to the head the evaluator judged, the PR's moves between
+// draft and ready, the dismissal of a review, the reaction the take and the
+// conversion leave on a post, named by its node id, and the conversion's
+// resolution of a review thread, named by its node id.
 type Hub interface {
 	GitHub
+	Conversation(repo string, number int) (*gh.Conversation, error)
 	MergePullRequest(id, head string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
 	DismissReview(repo string, number int, id int64, message string) error
 	AddReaction(subject, content string) error
+	ResolveThread(id string) error
 }
 
 // Checkout is the rig's clone, as the record reads it: its origin, the target
@@ -122,29 +126,34 @@ type Waker interface {
 }
 
 // Dispositions is the writer of a close that is not a landing, bead-rehome.sh,
-// as the landing order reaches it for a bead whose PR a ruling retired. Close
-// closes the bead x names onto the successor its ruling named, under its kind,
-// with its note beside the close, acting as the refinery. The writer takes the
-// store's record lock itself, from its read of the bead to its close, so the
-// order calls it with the lock free, and it closes the bead only while the bead
-// still has the status and assignee the run judged it under and still records
-// the ruling the run read. A close the writer
-// holds for now, because a wait on the bead is still open or the bead moved
-// since the run judged it or since the writer read it, is a *HeldClose. An act
-// does not stop the writer, since it ends the bead's branch on the git remote
-// once the close has landed, and a stop between the two would leave the branch
-// of a closed bead, which no run of the order reads again.
+// as the landing order reaches it for a bead whose PR a ruling retired, and for
+// a human finding the conversion of the old receipts closes onto the ask of its
+// post. Close closes the bead x names onto the successor x's disposition names,
+// under its kind, with its note beside the close, acting as the refinery. The
+// writer takes the store's record lock itself, from its read of the bead to its
+// close, so the order calls it with the lock free, and it closes the bead only
+// while the bead still has the status and assignee the run judged it under and,
+// for a ruling's disposition, still records the ruling the run read. A close
+// the writer holds for now, because a wait on the bead is still open or the
+// bead moved since the run judged it or since the writer read it, is a
+// *HeldClose. An act does not stop the writer, since it ends the bead's branch
+// on the git remote once the close has landed, and a stop between the two
+// would leave the branch of a closed bead, which no run of the order reads
+// again.
 type Dispositions interface {
 	Close(x Disposal) error
 }
 
-// Disposal is the close a run owes a bead whose PR closed under a ruling's
-// disposition, which it hands to the disposition writer once the record lock
-// is free: the bead, the status and assignee the run judged it under with the
-// lock held, the disposition it read there, and the note the close carries.
+// Disposal is a close onto a successor that a run owes, which it hands to the
+// disposition writer once the record lock is free: the bead, the status and
+// assignee the run judged it under with the lock held, the disposition, the
+// note the close carries, and whether the disposition is a ruling's, recorded
+// on the bead before its PR closed, which the writer checks the bead still
+// records.
 type Disposal struct {
 	Bead, Status, Assignee, Note string
 	Disposition                  Disposition
+	Ruled                        bool
 }
 
 // Disposition is the close a ruling recorded on the bead that owns a PR before
@@ -355,6 +364,14 @@ const (
 	// filed before, marked each post with the city's EYES, and had the one-PR
 	// update read the PR's conversation again.
 	ActTaken = "taken"
+	// ActConverted: the bead carried pr-facts.sh's receipts, and the run turned
+	// them into the city's marks on its own read of the PR: it filed the post
+	// of each open human finding as its ask and closed the finding onto it,
+	// marked each other post they reach that carried neither of the city's
+	// marks, resolved each unresolved thread that holds only the city's own
+	// posts, closed the asks the batches went to, had the one-PR update read
+	// the PR's conversation again, and unset the receipts.
+	ActConverted = "converted"
 	// ActBlocked: the publication's second write had landed on a bead still
 	// open, and the run moved it to blocked.
 	ActBlocked = "blocked"
@@ -399,11 +416,12 @@ type Options struct {
 // store. A record that owes no act is reported as its decision found it, with
 // no write and no read of GitHub. With Labels set, each PR the live beads own
 // whose saved labels differ from the ones the store derives owes a label write
-// too (labelPlans), and each PR whose bead's saved read holds a post the city
-// has not taken owes its take (takePlans). The records that owe an act, the
-// PRs whose labels owe a write and the PRs that owe a take are taken in a
-// shuffled order, so one whose act is slow or keeps failing holds no other
-// back, and none is started past o.Window. Each
+// too (labelPlans), each PR whose bead's saved read holds a post the city has
+// not taken owes its take, and each PR whose bead carries pr-facts.sh's
+// receipts owes their conversion in place of a take (takePlans). The records
+// that owe an act, the PRs whose labels owe a write and the PRs that owe a
+// take or a conversion are taken in a shuffled order, so one whose act is slow
+// or keeps failing holds no other back, and none is started past o.Window. Each
 // record's act reads its record again under the record lock, decides it again
 // from that read, and acts within o.Stop, its writes guarded on the status and
 // assignee it read there. A decision that finds the PR ready has the one-PR
@@ -434,12 +452,15 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	var acts []string
 	writes := map[string]labelWrite{}
 	takes := map[string]takeOf{}
+	converts := map[string]convertOf{}
 	for _, p := range plans {
 		switch {
 		case p.write != nil:
 			writes[p.id] = *p.write
 		case p.take != nil:
 			takes[p.id] = *p.take
+		case p.convert != nil:
+			converts[p.id] = *p.convert
 		case !p.due:
 			tally(p.out)
 			continue
@@ -464,6 +485,11 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 						"the run started no act past its %s, so the next run makes %s", o.Window, t.of())})
 					continue
 				}
+				if c, ok := converts[left]; ok {
+					report(RunOutcome{Bead: c.bead, Action: ActLeft, Detail: fmt.Sprintf(
+						"the run started no act past its %s, so the next run makes %s", o.Window, c.of())})
+					continue
+				}
 				report(RunOutcome{Bead: left, Action: ActLeft,
 					Detail: fmt.Sprintf("the run started no act past its %s, so the next run acts on the record", o.Window)})
 			}
@@ -478,6 +504,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 		if t, ok := takes[id]; ok {
 			tally(u.take(t, o.Stop))
+			if l.Yield > 0 && i < len(acts)-1 {
+				time.Sleep(l.Yield)
+			}
+			continue
+		}
+		if c, ok := converts[id]; ok {
+			tally(u.convert(c, o.Stop))
 			if l.Yield > 0 && i < len(acts)-1 {
 				time.Sleep(l.Yield)
 			}
@@ -745,17 +778,20 @@ type act func(ctx context.Context, c carriedOut) RunOutcome
 // again once the one-PR update has re-read the PR in full (rereadAndDecide).
 // In a run's list of plans, due says the record owes an act, which its act
 // decides again under the record lock (one), a PR whose labels owe a write is
-// planned under its URL, with write holding the write, and a PR that owes a
-// take is planned under its bead's id with the word take before it, with take
-// holding the take.
+// planned under its URL, with write holding the write, a PR that owes a take is
+// planned under its bead's id with the word take before it, with take holding
+// the take, and a PR whose bead owes the conversion of its old receipts under
+// its bead's id with the word convert before it, with convert holding the
+// conversion.
 type plan struct {
-	id     string
-	out    RunOutcome
-	act    act
-	reread bool
-	due    bool
-	write  *labelWrite
-	take   *takeOf
+	id      string
+	out     RunOutcome
+	act     act
+	reread  bool
+	due     bool
+	write   *labelWrite
+	take    *takeOf
+	convert *convertOf
 }
 
 func none(s state, action, detail string) plan {
@@ -775,9 +811,9 @@ func doing(a act) plan { return plan{act: a} }
 // could not decide, because its state or a read its decision makes did not
 // answer, is due, for its act to decide again under the record lock (one). It leaves out a bead that anyone else is assigned, since a
 // run writes nothing to it. A record that does not read as a record is not one
-// the run can act on. The takes the owned PRs owe follow (takePlans), and with
-// Labels set, the label writes they owe (labelPlans). The plans are in id
-// order.
+// the run can act on. The takes and the conversions the owned PRs owe follow
+// (takePlans), and with Labels set, the label writes they owe (labelPlans). The
+// plans are in id order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
@@ -1352,7 +1388,7 @@ func (u *run) decideRetired(s state, number int) plan {
 		if len(moot) > 0 {
 			detail += fmt.Sprintf("; %s closed, which nothing takes now", strings.Join(moot, ", "))
 		}
-		u.disposal = &Disposal{Bead: s.id, Status: s.status, Assignee: s.assignee, Disposition: d,
+		u.disposal = &Disposal{Bead: s.id, Status: s.status, Assignee: s.assignee, Disposition: d, Ruled: true,
 			Note: fmt.Sprintf("PR #%d closed under the disposition a ruling recorded before the close", number)}
 		return RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail + "; the bead goes to the disposition writer"}
 	})

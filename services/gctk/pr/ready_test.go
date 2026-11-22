@@ -87,6 +87,20 @@ func (r *rule) Awaiting(_, _ string, ts []feedback.Thread) ([]string, error) {
 	return out, r.err
 }
 
+// OwnThreads names each unresolved thread whose every comment the login the
+// read runs as posted, as gc_city_own reads a post under the city's login that
+// carries the city's mark.
+func (r *rule) OwnThreads(self, _ string, ts []feedback.Thread) ([]string, error) {
+	var out []string
+	for _, t := range ts {
+		if !t.Resolved && len(t.Comments) > 0 &&
+			!slices.ContainsFunc(t.Comments, func(c feedback.Comment) bool { return c.Author != self }) {
+			out = append(out, t.ID)
+		}
+	}
+	return out, r.err
+}
+
 // world is one bead on the pending record and its PR on GitHub.
 type world struct {
 	store    *fake.Store

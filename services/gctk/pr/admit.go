@@ -19,13 +19,16 @@ import (
 // evaluator finds no passed result there or the bead carries an ask a run can
 // take, and only while nothing else writes the branch and no person is asked:
 // no run is attached, no open bead other than an ask names the branch, and no
-// human gate holds it. A conversation on the PR holds its merge and nothing
-// else, so runs are poured while one is open, whether it waits in the
-// operator's queue, a sitting holds it or its sitting stays: the evaluator
-// reads the conversation's blocks edge as a wait of the bead's own, so the PR
-// merges only once the conversation closes. The pour runs under the record
-// lock the run holds for the record, so two runs that overlap pour one review
-// run.
+// human gate holds it. It pours none on a bead that carries pr-facts.sh's
+// receipts, whose conversion files the asks of the old path's open findings and
+// closes the asks its batches went to (convert.go), so a run rules the posts
+// those name once, in the form the conversion leaves them. A conversation on
+// the PR holds its merge and nothing else, so runs are poured while one is
+// open, whether it waits in the operator's queue, a sitting holds it or its
+// sitting stays: the evaluator reads the conversation's blocks edge as a wait
+// of the bead's own, so the PR merges only once the conversation closes. The
+// pour runs under the record lock the run holds for the record, so two runs
+// that overlap pour one review run.
 //
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
@@ -84,6 +87,10 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	}
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
+	}
+	if names := receiptsOn(s.row); len(names) > 0 {
+		return checked("no review run is poured while the bead carries pr-facts.sh's receipts (" +
+			strings.Join(names, ", ") + "), which their conversion turns into the city's marks first: " + why)
 	}
 	if by := heldBy(s); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)

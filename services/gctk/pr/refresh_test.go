@@ -796,6 +796,47 @@ func TestTheConversationKeepsEachPostTheCityHasNotTaken(t *testing.T) {
 	}
 }
 
+// A conversation part that holds no list of the posts the city has not taken,
+// as one saved before the update kept that list, is read again by the next
+// pass, whose signs move nothing, and saved with the list. A part that holds
+// the list, an empty one included, is read again only when its signs move.
+func TestAConversationWithNoListOfUntakenPostsIsReadAgain(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor",
+		Body: "one more thing", CreatedAt: "2026-11-16T08:00:00Z"}}
+	d.poll(t)
+	b := d.row(t, bead)
+	var raw map[string]map[string]any
+	if err := json.Unmarshal([]byte(b.Metadata["pr_github_read"]), &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw["conversation"], "untaken")
+	old, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Metadata["pr_github_read"] = string(old)
+	d.store.Put(b)
+	reads := len(d.github.Reads())
+	updated(t, d.poll(t), "conversation")
+	if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs", "Login", "Conversation"}) {
+		t.Fatalf("the pass over a conversation with no list of untaken posts read %v", got)
+	}
+	if got := d.saved(t, bead).Conversation.Untaken; len(got) != 1 || got[0].ID != 400 {
+		t.Fatalf("the pass saved the untaken posts %+v, want comment 400", got)
+	}
+	d.pr.Comments = nil
+	d.pr.UpdatedAt = "2026-11-16T09:30:00Z"
+	updated(t, d.poll(t), "pr, conversation")
+	if got := d.saved(t, bead).Conversation.Untaken; got == nil || len(got) != 0 {
+		t.Fatalf("the pass saved the untaken posts %#v, want an empty list", got)
+	}
+	reads = len(d.github.Reads())
+	if rep := d.poll(t); len(rep.Updates) != 0 || !slices.Equal(d.readsSince(reads), []string{"Signs"}) {
+		t.Fatalf("the pass over an empty list read %v and updated %+v", d.readsSince(reads), rep.Updates)
+	}
+}
+
 // A conversation the update read for a bead with no provenance instant applied
 // the definition from the instant of its read. When another writer stamps an
 // instant on the bead while that read is out, the conversation is not saved

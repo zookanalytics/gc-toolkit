@@ -240,6 +240,10 @@ const (
 	reactMutation = `mutation($id:ID!,$content:ReactionContent!){
   addReaction(input:{subjectId:$id,content:$content}){reaction{content}}}`
 
+	// A review thread's resolution, which names the thread by its node id.
+	resolveMutation = `mutation($id:ID!){
+  resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
+
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviews(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
@@ -365,6 +369,16 @@ func (c *Client) AddReaction(subject, content string) error {
 	}
 	return c.graphql(reactMutation, []string{"-f", "id=" + subject, "-f", "content=" + content}, false,
 		func(json.RawMessage) error { return nil })
+}
+
+// ResolveThread resolves the review thread whose node id is id, as the account
+// gh acts as. An error is a request GitHub refused or one whose answer did not
+// arrive, which may still take effect: a read of the thread says which.
+func (c *Client) ResolveThread(id string) error {
+	if id == "" {
+		return errors.New("github: a resolution names no review thread")
+	}
+	return c.graphql(resolveMutation, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
 }
 
 // DismissReview dismisses review id of PR number in repo with message, through

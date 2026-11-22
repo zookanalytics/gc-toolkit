@@ -268,6 +268,27 @@ func TestAReactionNamesThePostByItsNodeID(t *testing.T) {
 	}
 }
 
+// A resolution names its review thread by the thread's node id. One that names
+// no thread asks nothing, and a refused one is an error.
+func TestAResolutionNamesTheThreadByItsNodeID(t *testing.T) {
+	c, r := client([2]string{"resolveReviewThread(input:{threadId:$id})",
+		`{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}`})
+	if err := c.ResolveThread("PRRT_kw1"); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PRRT_kw1") {
+		t.Fatalf("the request %q does not name the thread", args)
+	}
+	c, r = client()
+	if err := c.ResolveThread(""); err == nil || len(r.calls) != 0 {
+		t.Fatalf("a resolution that names no thread answered %v and asked %+v", err, r.calls)
+	}
+	c, _ = client([2]string{"resolveReviewThread", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
+	if err := c.ResolveThread("PRRT_gone"); err == nil {
+		t.Fatal("a refused resolution read as made")
+	}
+}
+
 // GitHub refused a request when it answered it with a client error, other than
 // a rate limit. A request whose answer did not arrive, or that GitHub could not
 // serve, is not refused.
