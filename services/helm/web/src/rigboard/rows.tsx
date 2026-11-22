@@ -189,10 +189,14 @@ function pullRequestStatus(pr: PullRequest): string {
   return facts.join(' · ');
 }
 
+/** A row's pull request: its number, then where it stands and what holds it,
+ *  except on a row that waits on another need, whose signal says what it
+ *  waits on and whose Details keeps the rest. */
 function pullRequestBits(row: Row): ReactNode[] {
   const pr = row.pull_request;
   if (pr === undefined) return [];
-  const status = pullRequestStatus(pr);
+  const waitsOnANeed = row.ask === undefined && row.group === 'Waiting on you';
+  const status = waitsOnANeed ? '' : pullRequestStatus(pr);
   return [
     <span key="pr" className="bit bit--mono">
       {status === '' ? `#${pr.number}` : `#${pr.number} · ${status}`}

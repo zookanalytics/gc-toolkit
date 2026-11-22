@@ -828,7 +828,8 @@ describe('copying', () => {
 });
 
 // The row and its Details draw a pull request in markup of their own, and
-// read its state and what holds it in the same words.
+// read its state and what holds it in the same words, except on a row that
+// waits on another need, which names it by its number alone.
 describe('a pull request', () => {
   /** The row whose own bead id reads id, as search lists it. */
   function found(id: string): HTMLElement {
@@ -868,6 +869,19 @@ describe('a pull request', () => {
     await loaded();
     expect(readings('tk-c9dcsbn')).toEqual({ row: '#1464 · working', details: '#1464 working' });
     expect(readings('tk-1hazlo2')).toEqual({ row: '#1256', details: '#1256' });
+  });
+
+  it('reads what it waits on and its number beneath the need that holds it, and the rest in Details', async () => {
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    const shown = rowIds();
+    expect(shown.indexOf('tk-yhquh93.10')).toBe(shown.indexOf('tk-2pvj50q') + 1);
+    const line = rowOf('tk-yhquh93.10');
+    expect(text(line.querySelector('.signal'))).toContain('In conversation');
+    expect(text(line.querySelector('.tag'))).toBe('');
+    expect(line.querySelectorAll('.bit--ref')).toHaveLength(0);
+    expect(readings('tk-yhquh93.10')).toEqual({ row: '#1476', details: '#1476 needs-attention · held: blocked' });
   });
 });
 
