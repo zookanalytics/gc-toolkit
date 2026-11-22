@@ -22,7 +22,7 @@ import (
 // Gas City registers the order once for the city. Its first run pours one run
 // of the distiller in the store of the rig whose checkout holds the pack, which
 // that rig's polecat pool claims, and its second run, while that run is open,
-// pours none.
+// pours none. The miner's order runs every 48h in each rig.
 func TestCityAcceptance(t *testing.T) {
 	if os.Getenv("GCTK_CITY_ACCEPTANCE") != "1" {
 		t.Skip("the city acceptance test runs the city's gc on a scratch city; GCTK_CITY_ACCEPTANCE=1 runs it")
@@ -79,19 +79,26 @@ func TestCityAcceptance(t *testing.T) {
 
 	var listed struct {
 		Orders []struct {
-			Name string `json:"name"`
-			Rig  string `json:"rig"`
+			Name     string `json:"name"`
+			Rig      string `json:"rig"`
+			Interval string `json:"interval"`
 		} `json:"orders"`
 	}
 	decode(t, gc(t, city, "order", "list", "--json"), &listed)
-	var distillers []string
+	var distillers, miners []string
 	for _, o := range listed.Orders {
-		if o.Name == "feedback-distiller" {
+		switch o.Name {
+		case "feedback-distiller":
 			distillers = append(distillers, o.Rig)
+		case "feedback-miner":
+			miners = append(miners, o.Rig+"@"+o.Interval)
 		}
 	}
 	if strings.Join(distillers, ",") != "" || len(distillers) != 1 {
 		t.Errorf("the distiller's order is registered for %q, want once for the city", distillers)
+	}
+	if strings.Join(miners, ",") != "tools@48h,web@48h" {
+		t.Errorf("the miner's order is registered as %q, want each rig at 48h", miners)
 	}
 
 	first := gc(t, city, "order", "run", "feedback-distiller")
