@@ -135,8 +135,9 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 // retires a run whose input bead an agent outside it is assigned, and wakes no
 // one. The first run that decides the record while the review run lives reads
 // no PR and writes nothing, and neither does a run after it in which nothing
-// changed. The first run after the review run ends wakes the refinery, since the conversation still holds the bead, and hands the head to
-// it in the write that clears the marker.
+// changed. The first run after the review run ends wakes the refinery, which
+// can take a bead only the conversation holds, and hands the head to it in
+// the write that clears the marker.
 func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	d := newHanding(t)
 	d.conversation(t, "open", "human", "")

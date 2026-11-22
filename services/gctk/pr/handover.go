@@ -17,11 +17,10 @@ import (
 // The hand-over of a changed head (specs/tk-1tfzr71.165/gas-city-search.md,
 // specs/tk-1tfzr71.209/gas-city-search.md). A changed head goes to the
 // refinery in the write that assigns the bead to it and clears the marker,
-// once no open withdrawal and no attached review run holds the head: the
-// record's requeue when nothing else holds the bead either, or the settle
-// below. A bead a run is attached to stays assigned to nobody, since Gas City
-// retires a workflow at its next claim once its input bead is assigned to an
-// agent outside it (workflowInputMembersSettled). The refinery can take the
+// once no open withdrawal and no attached review run holds the head. A bead a
+// run is attached to stays assigned to nobody, since Gas City retires a
+// workflow at its next claim once its input bead is assigned to an agent
+// outside it (workflowInputMembersSettled). The refinery can take the
 // bead at its next find-work once nothing holds it but merge holds: a
 // conversation on the PR, or an ask on it, each of which holds the PR's merge
 // and not the refinery's take of the head (refinery-find-work.sh). An
