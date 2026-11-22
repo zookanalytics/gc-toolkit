@@ -48,11 +48,11 @@ when one is named, and are not committed:
 - [`dog`](agents/dog.md)
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
+- [`mayor`](agents/mayor.md)
 - [`mechanik`](agents/mechanik.md)
 - [`po`](agents/po.md)
 - [`polecat`](agents/polecat.md)
 - [`polecat-codex`](agents/polecat-codex.md)
-- [`postmaster`](agents/postmaster.md)
 - [`proactive`](agents/proactive.md)
 - [`refinery`](agents/refinery.md)
 - [`witness`](agents/witness.md)
@@ -123,12 +123,12 @@ runs to re-prime after compaction.
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |
+| mayor | `city` | 1 | _none_ |
 | mechanik | `city` | 1 | _none_ |
 | po | `gascity`, `gc-toolkit` | 1 | _none_ |
 | polecat **DIVERGES** | `gc-toolkit` | 2 | _none_ |
 |  | `gascity` | 2 | `rebase-conventions`, `polecat-patterns` |
 | polecat-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
-| postmaster | `city` | 1 | _none_ |
 | proactive | `gascity`, `gc-toolkit` | 1 | _none_ |
 | refinery | `gascity`, `gc-toolkit` | 1 | _none_ |
 | witness | `gascity`, `gc-toolkit` | 1 | _none_ |

@@ -245,7 +245,10 @@ The pack's checks, and what a failure means:
 | `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
-canonical remediation where one exists.
+canonical remediation where one exists. Name the check a fix is for,
+`gc doctor --fix --check <check>`, and never fix `hold-label-routed-to`: its fix
+routes every bead the po's queue holds to the mayor seat, which the route would
+wake ([steering.md](steering.md#the-intake-rule)).
 
 Each check holds one deadline for its whole run and gives every probe only
 the time left before it, so a slow or wedged data plane costs findings

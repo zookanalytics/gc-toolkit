@@ -227,13 +227,13 @@ func TestStartAndAttachUseEngage(t *testing.T) {
 }
 
 // A seat opens through its own verb: a rig's po through po --rig, mechanik
-// through mechanik and the postmaster through postmaster.
+// through mechanik and the mayor through mayor.
 func TestASeatOpensThroughItsVerb(t *testing.T) {
 	s := Script{Path: "/pack/gc-helm.sh"}
 	for _, c := range []struct{ seat, rig, want string }{
 		{"po", "gc-toolkit", "sh /pack/gc-helm.sh po --rig gc-toolkit"},
 		{"mechanik", "", "sh /pack/gc-helm.sh mechanik"},
-		{"postmaster", "", "sh /pack/gc-helm.sh postmaster"},
+		{"mayor", "", "sh /pack/gc-helm.sh mayor"},
 	} {
 		if got := strings.Join(s.SeatCommand(c.seat, c.rig).Args, " "); got != c.want {
 			t.Fatalf("%s = %q, want %q", c.seat, got, c.want)

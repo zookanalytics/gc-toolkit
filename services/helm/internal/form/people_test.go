@@ -14,14 +14,14 @@ import (
 )
 
 // peopleCity is rigCity with the seats `conversations` lists for it: mechanik
-// with a terminal attached, the postmaster asleep, gc-toolkit's po with no
+// with a terminal attached, the mayor asleep, gc-toolkit's po with no
 // session, harbor's asleep, the suspended rig's, and the po of docs, a rig with
 // no converse template.
 func peopleCity() City {
 	c := rigCity()
 	c.Seats = []Seat{
 		{Name: "mechanik", Session: &Session{ID: "s-m", Name: "gc-toolkit__mechanik", State: "active", Attached: true}},
-		{Name: "postmaster", Session: &Session{ID: "s-p", Name: "gc-toolkit__postmaster", State: "asleep"}},
+		{Name: "mayor", Session: &Session{ID: "s-p", Name: "gc-toolkit__mayor", State: "asleep"}},
 		{Name: "po", Rig: "gc-toolkit"},
 		{Name: "po", Rig: "harbor", Session: &Session{ID: "s-h", Name: "harbor--gc-toolkit__po", State: "asleep"}},
 		{Name: "po", Rig: "paused"},
@@ -299,7 +299,7 @@ func cursorShows(m *Model, f field) bool {
 	return reverseVideo.MatchString(m.question.View())
 }
 
-// The People page lists mechanik, the postmaster and each rig's Product Owner
+// The People page lists mechanik, the mayor and each rig's Product Owner
 // by its rig's name and prefix, each with its session's state as Gas City gives
 // it, and says what Enter opens for the seat picked.
 func TestThePeoplePageListsTheSeatsWithTheirState(t *testing.T) {
@@ -314,7 +314,7 @@ func TestThePeoplePageListsTheSeatsWithTheirState(t *testing.T) {
 	v := sgr.ReplaceAllString(m.peopleView(), "")
 	for _, want := range []string{
 		fmt.Sprintf("› %-22s mechanik", "active, attached"),
-		fmt.Sprintf("  %-22s postmaster", "asleep"),
+		fmt.Sprintf("  %-22s mayor", "asleep"),
 		fmt.Sprintf("  %-22s Product Owner  %-10s  tk", "no session", "gc-toolkit"),
 		fmt.Sprintf("  %-22s Product Owner  %-10s  hb", "asleep", "harbor"),
 		fmt.Sprintf("  %-22s Product Owner  %-10s  pz", "rig suspended", "paused"),
@@ -328,8 +328,8 @@ func TestThePeoplePageListsTheSeatsWithTheirState(t *testing.T) {
 		}
 	}
 	m.Update(key(tea.KeyDown))
-	if v := sgr.ReplaceAllString(m.peopleView(), ""); !strings.Contains(v, "Opens  ✓ the postmaster, who works through your mailbox with you: Enter runs gc-helm postmaster") {
-		t.Fatalf("the People page does not say what Enter opens for the postmaster:\n%s", v)
+	if v := sgr.ReplaceAllString(m.peopleView(), ""); !strings.Contains(v, "Opens  ✓ the mayor, who goes through your mail and every rig's questions with you: Enter runs gc-helm mayor") {
+		t.Fatalf("the People page does not say what Enter opens for the mayor:\n%s", v)
 	}
 	m.Update(key(tea.KeyDown))
 	if v := sgr.ReplaceAllString(m.peopleView(), ""); !strings.Contains(v, "Opens  ✓ the Product Owner of rig gc-toolkit: Enter runs gc-helm po --rig gc-toolkit") {
@@ -365,7 +365,7 @@ func TestARosterThatDidNotReadListsNoSeat(t *testing.T) {
 }
 
 // Enter opens the seat picked by its own verb once the form has left the
-// terminal: mechanik by gc-helm mechanik, the postmaster by gc-helm postmaster
+// terminal: mechanik by gc-helm mechanik, the mayor by gc-helm mayor
 // and a rig's Product Owner by gc-helm po --rig, whether or not the rig carries
 // a converse template. Nothing is looked up, saved or started.
 func TestEnterOpensTheSeatPicked(t *testing.T) {
@@ -374,7 +374,7 @@ func TestEnterOpensTheSeatPicked(t *testing.T) {
 		verb  string
 	}{
 		{0, "mechanik"},
-		{1, "postmaster"},
+		{1, "mayor"},
 		{2, "po --rig gc-toolkit"},
 		{3, "po --rig harbor"},
 		{5, "po --rig docs"},

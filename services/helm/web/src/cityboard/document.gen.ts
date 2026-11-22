@@ -143,7 +143,7 @@ export interface Monitor {
 }
 /**
  * Mail is the operator's mailbox, Gas City's `human`, as the page counts it:
- * one number beside the failing checks, with how to open the postmaster, who
+ * one number beside the failing checks, with how to open the mayor, who
  * works through the mailbox with the operator.
  */
 export interface Mail {

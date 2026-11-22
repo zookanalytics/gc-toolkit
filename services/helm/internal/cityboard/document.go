@@ -107,7 +107,7 @@ type Monitor struct {
 }
 
 // Mail is the operator's mailbox, Gas City's `human`, as the page counts it:
-// one number beside the failing checks, with how to open the postmaster, who
+// one number beside the failing checks, with how to open the mayor, who
 // works through the mailbox with the operator.
 type Mail struct {
 	// Counted is whether a count read. A document built without one shows no

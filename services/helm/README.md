@@ -118,10 +118,10 @@ the sitting has started. In a suspended rig attaching is off whatever the
 operator chose, and the form saves the question, starts no sitting and leaves.
 `--from`, which engage passes on too, names the bead a `--subject` gate was
 reached from. The People page lists the `seats` that `gc-helm.sh conversations
---json` gives, mechanik, the postmaster and each rig's po, each with its
+--json` gives, mechanik, the mayor and each rig's po, each with its
 session's state as Gas City's session list gives it, and reads them again
 every ten seconds while it is on screen. Enter leaves the terminal to
-`gc-helm.sh mechanik`, `gc-helm.sh postmaster` or `gc-helm.sh po --rig <rig>`,
+`gc-helm.sh mechanik`, `gc-helm.sh mayor` or `gc-helm.sh po --rig <rig>`,
 each of which hands it to the seat's session, and a seat takes no question. It
 writes nothing itself, so what it files is what the command line files.
 [human-engagement.md](../../docs/human-engagement.md#engage)
@@ -576,9 +576,9 @@ when no check has failed two runs in a row. The words beside the count say so,
 and name how many accepted checks and checks not measured it leaves out. With no
 run in the log, or none that measured the checks, it shows no count and says why.
 Beside that count it shows how many messages wait in the mailbox, with how to
-open the postmaster, who works through it with the operator (`gc-helm
-postmaster`). A count that did not read shows why in place of a number, and a
-count that some store did not answer for says what it may miss.
+open the mayor, who works through it with the operator (`gc-helm mayor`). A
+count that did not read shows why in place of a number, and a count that some
+store did not answer for says what it may miss.
 
 **How it is cached.** Doctor's part of the document is cached for five minutes
 (`server.CityPageTTL`), with one read at a time, since the newest run changes

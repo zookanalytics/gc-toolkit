@@ -103,7 +103,7 @@ name = "po"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
-name = "postmaster"
+name = "mayor"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
@@ -130,10 +130,10 @@ template = "po"
 scope = "rig"
 mode = "on_demand"
 
-# The city's postmaster runs the same way, opened by `gc-helm postmaster`
-# (agents/postmaster/agent.toml).
+# The city's mayor runs the same way, opened by `gc-helm mayor`
+# (agents/mayor/agent.toml).
 [[named_session]]
-template = "postmaster"
+template = "mayor"
 scope = "city"
 mode = "on_demand"
 

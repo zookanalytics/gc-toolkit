@@ -248,21 +248,21 @@ describe('the mailbox count', () => {
     return [...document.querySelectorAll('.lead')].map((l) => text(l));
   }
 
-  it('shows how many messages wait beside the failing checks, with how to open the postmaster', async () => {
+  it('shows how many messages wait beside the failing checks, with how to open the mayor', async () => {
     cityReads = [() => json(withMail({ counted: true, waiting: 130 }))];
     render(<Page />);
     await loaded();
     expect(leads()).toEqual([
       '15checks have failed two runs in a row, not counting 1 accepted.',
-      '130messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster.',
+      '130messages wait in your mailbox, read or not. Open the mayor to work through them: gc-helm mayor.',
     ]);
   });
 
-  it('says it of one message, and names no postmaster when none waits', async () => {
+  it('says it of one message, and names no mayor when none waits', async () => {
     cityReads = [() => json(withMail({ counted: true, waiting: 1 }))];
     render(<Page />);
     await loaded();
-    expect(leads()[1]).toBe('1message waits in your mailbox, read or not. Open the postmaster to work through it: gc-helm postmaster.');
+    expect(leads()[1]).toBe('1message waits in your mailbox, read or not. Open the mayor to work through it: gc-helm mayor.');
     cleanup();
     cityReads = [() => json(withMail({ counted: true, waiting: 0 }))];
     render(<Page />);
@@ -275,7 +275,7 @@ describe('the mailbox count', () => {
     render(<Page />);
     await loaded();
     expect(leads()[1]).toBe(
-      '4messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster. The count may miss some: mail provider docs: store_slow: read timed out.',
+      '4messages wait in your mailbox, read or not. Open the mayor to work through them: gc-helm mayor. The count may miss some: mail provider docs: store_slow: read timed out.',
     );
   });
 
@@ -307,7 +307,7 @@ describe('the mailbox count', () => {
     render(<Page />);
     await loaded();
     expect(screen.getByText(/Doctor has recorded no run/)).toBeTruthy();
-    expect(leads()).toEqual(['2messages wait in your mailbox, read or not. Open the postmaster to work through them: gc-helm postmaster.']);
+    expect(leads()).toEqual(['2messages wait in your mailbox, read or not. Open the mayor to work through them: gc-helm mayor.']);
   });
 });
 

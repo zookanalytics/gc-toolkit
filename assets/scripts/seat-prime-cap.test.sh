@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # seat-prime-cap.test.sh — the prime of each seat the operator opens, the po and
-# the postmaster, arrives whole when a sitting starts.
+# the mayor, arrives whole when a sitting starts.
 #
 # The operator's attach starts the seat, and a session that an attach starts
 # takes its prime as session-start hook context. Claude Code keeps hook context
@@ -18,7 +18,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 # either runs this suite (tools/run-tests.sh).
 SEATS=(
   "po agents/po/prompt.template.md generated/seed-audit/agents/po.md"
-  "postmaster agents/postmaster/prompt.template.md generated/seed-audit/agents/postmaster.md"
+  "mayor agents/mayor/prompt.template.md generated/seed-audit/agents/mayor.md"
 )
 FRAGMENTS=(template-fragments/ask-for-work.template.md template-fragments/operator-profile.template.md template-fragments/where-to-search.template.md)
 CAP=10000

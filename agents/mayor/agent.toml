@@ -1,0 +1,35 @@
+# mayor — goes through the operator's mail and every rig's open questions with
+# them, and moves each matter they pick to its home: a named on-demand session
+# of the city (stanza in pack.toml) the operator opens for a sitting, as they
+# open a rig's po. One for the city, because the `human` mailbox and the rigs
+# it reads are the city's. No escalation or fallback of the city's names it, so
+# Gas City's alerts and agents' escalations still go to `human`, where the
+# mayor reads them. Its name is Gas City's default coordinator's, so the mail
+# Gas City's own defaults send to `mayor` reaches its mailbox, and work routed
+# to it would wake it (docs/steering.md, "The queue the po works").
+scope = "city"
+# Each sitting starts in a new conversation, so no sitting inherits another's
+# context.
+wake_mode = "fresh"
+# The mayor changes no repo, so it works from an agent home of the city,
+# as mechanik and the deacon do.
+work_dir = ".gc/agents/mayor"
+# One sitting at a time.
+max_active_sessions = 1
+# A sitting no client is attached to sleeps once an hour has passed, and one
+# ends at gc runtime drain-ack. Either way the next sitting, which
+# `gc-helm mayor` asks the controller to start, starts a new conversation,
+# because the start is fresh.
+sleep_after_idle = "1h"
+# The mayor takes no slung work. The city's [agent_defaults] gives every
+# agent a default formula, so this explicit empty one sends a plain gc sling to
+# sling_query, which refuses it at the caller. A graph.v2 pour, by --on or a
+# default formula, never runs sling_query.
+default_sling_formula = ""
+sling_query = 'echo "the mayor takes no slung work: send {} to a work pool with gc sling, or hold it for the po with gc bd set-state {} hold=mayor --reason <why>" >&2; exit 1'
+
+[env]
+# A memory file would carry one sitting's context into the next by another
+# route. What a later sitting needs is in the mailbox itself and in the beads
+# a sitting files.
+CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"

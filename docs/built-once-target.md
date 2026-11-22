@@ -360,9 +360,9 @@ and what ends it:
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
-  because the operator ruled at tk-rl8gz4b.29's design that it stays and the
-  city runs no mayor. This ends when an operator ruling gives escalation to a
-  seat.
+  because the operator ruled at tk-rl8gz4b.29's design that it stays, and the
+  city's mayor, a seat the operator opens, takes no escalation. This ends when
+  an operator ruling gives escalation to a seat.
 - **No orphan recovery.** Gas Town's witness salvages a dead owner's worktree
   and reopens its bead. Here Gas City's controller and core's orphan sweep
   release the claim within minutes, which a second writer would race, and the

@@ -189,7 +189,7 @@ function leadText(d: Doctor): string {
 }
 
 /** How many messages wait in the operator's mailbox, read or not, beside the
- *  failing checks, with how to open the postmaster, who works through it with
+ *  failing checks, with how to open the mayor, who works through it with
  *  them. A count that did not read shows why in place of a number, and a
  *  document with no count shows nothing. */
 function MailLead({ mail }: { mail: Mail | undefined }) {
@@ -204,7 +204,7 @@ function MailLead({ mail }: { mail: Mail | undefined }) {
       </span>
       <span className="lead-text">
         {n === 1 ? 'message waits' : 'messages wait'} in your mailbox, read or not.
-        {n > 0 && ` Open the postmaster to work through ${n === 1 ? 'it' : 'them'}: gc-helm postmaster.`}
+        {n > 0 && ` Open the mayor to work through ${n === 1 ? 'it' : 'them'}: gc-helm mayor.`}
         {mail.short !== undefined && mail.short !== '' && ` The count may miss some: ${mail.short}.`}
       </span>
     </div>

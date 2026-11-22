@@ -17,7 +17,7 @@
 
 [[accepted]]
 check = "hold-label-routed-to"
-reason = "It warns on every bead that carries a hold:<value> label and no gc.routed_to naming that value, and the pack holds work for placement with hold:mayor, which names no agent. Gas City's issue 6069 (gastownhall/gascity) reports the check as a bug, because a hold label is no route."
+reason = "It warns on every bead that carries a hold:<value> label and no gc.routed_to naming the agent that value names, and the pack holds work for placement with hold:mayor and no route, for each rig's po. Its fix would route that work to the city's mayor seat, which takes none of it. Gas City's issue 6069 (gastownhall/gascity) reports the check as a bug, because a hold label is no route."
 ruling = "The operator's approval of the design for the patrols' move onto orders, PR #1537."
 
 [[accepted]]
