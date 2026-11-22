@@ -647,12 +647,15 @@ func (a *answering) dismiss() error {
 		if err != nil {
 			return err
 		}
+		if a.l.Mark == nil {
+			a.fail("nothing reads the city's mark here, so %s is not dismissed", v.URL)
+			continue
+		}
 		mark, err := a.l.Mark()
-		if err != nil {
+		if mark = strings.TrimSpace(mark); err != nil || mark == "" {
 			a.fail("the city's mark did not read, so %s is not dismissed: %v", v.URL, err)
 			continue
 		}
-		mark = strings.TrimSpace(mark)
 		if login != a.self {
 			switch err := a.hub.RequestReview(a.repo, a.number, login); {
 			case err == nil:
