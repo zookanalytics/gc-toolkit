@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -64,6 +65,42 @@ func waitIDs(ws []waits.Wait) []string {
 		out = append(out, w.ID)
 	}
 	return out
+}
+
+// ReadFrom answers what holds each bead as Read does, over the rows its caller
+// listed, and lists none of them again, so a caller that read a bead's row for
+// a question of its own reads it once. A bead its caller did not list is
+// listed.
+func TestReadFromListsOnlyTheBeadsItsCallerDidNot(t *testing.T) {
+	s := parked()
+	under(s, bead{ID: "member", Status: "open"})
+	s.Put(bead{ID: "free", Status: "open"})
+	l := ledger.New(s)
+	listed, err := l.Find(ledger.ByID("member").WithClosed())
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("the caller's listing of member: %v, %v", listed, err)
+	}
+	before := len(s.Finds())
+	snap, err := waits.ReadFrom(l, listed, "member", "free")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var named []string
+	for _, q := range s.Finds()[before:] {
+		named = append(named, q.IDs...)
+	}
+	if slices.Contains(named, "member") || !slices.Contains(named, "free") {
+		t.Errorf("ReadFrom listed %v; want free listed and member, which its caller listed, not", named)
+	}
+	for _, id := range []string{"member", "free"} {
+		got, err := snap.Holds(id)
+		if err != nil {
+			t.Fatalf("Holds(%s): %v", id, err)
+		}
+		if want := holdsOf(t, s, id); !reflect.DeepEqual(got, want) {
+			t.Errorf("ReadFrom answers %s with %+v, and Read with %+v", id, got, want)
+		}
+	}
 }
 
 // Each status the bead read answers with.

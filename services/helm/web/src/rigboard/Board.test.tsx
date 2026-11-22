@@ -891,6 +891,10 @@ describe('a pull request', () => {
   });
 
   it('reads what it waits on and its number beneath the need that holds it, and the rest in Details', async () => {
+    const doc = structuredClone(board);
+    const held = doc.rows['tk-yhquh93.10'];
+    held.pull_request = { ...held.pull_request!, state: 'needs-attention', held: ['blocked'] };
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);

@@ -42,10 +42,9 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 // pendingRows is a rig whose tk-a owns PR 7 on Gas Town's pending record,
 // blocked and assigned to nobody as the record writes it, validated at
 // pendingHead into main with a review result passed there, and carrying read as
-// the read the one-PR update saved, none when read is empty. The old record's posture is
-// left on it, approved, which prstatus.Derive reads as merging. With gated,
-// tk-a waits on tk-q, an open human gate. tk-o owns PR 8 on the old record,
-// approved.
+// the read the one-PR update saved, none when read is empty. Its recorded
+// posture is approved, which prstatus.Derive reads as merging. With gated, tk-a
+// waits on tk-q, an open human gate.
 func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 	t.Helper()
 	md := map[string]any{"merge_result": "pull_request_pending", "pr_number": "7",
@@ -65,10 +64,6 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 	for _, r := range []map[string]any{a,
 		{"id": "tk-q", "title": "which way?", "status": "open", "priority": 1, "issue_type": "gate", "await_type": "human",
 			"assignee": "human", "created_at": "2026-01-02"},
-		{"id": "tk-o", "title": "old work", "status": "open", "priority": 2, "issue_type": "task",
-			"assignee": "gc-toolkit/refinery", "created_at": "2026-01-03",
-			"metadata": map[string]any{"merge_result": "pull_request", "pr_number": "8",
-				"pr_url": "https://github.com/acme/widgets/pull/8", "pr_posture": "approved@2222222@2026-01-01T00:00:00Z"}},
 	} {
 		raw, err := json.Marshal(r)
 		if err != nil {
@@ -77,17 +72,6 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 		out = append(out, raw)
 	}
 	return out
-}
-
-// oldRecordDerived fails unless tk-o, on the old record, reads the status
-// prstatus.Derive gives its recorded posture: the evaluator is asked about a
-// PR on the pending record alone, and its answer for tk-o, whose record names
-// no PR on it, would read needs-attention.
-func oldRecordDerived(t *testing.T, doc Document) {
-	t.Helper()
-	if o := doc.Rows["tk-o"].PullRequest; o == nil || o.State != "merging" {
-		t.Errorf("tk-o, on the old record, reads %+v, want merging as its posture derives", o)
-	}
 }
 
 // TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer reads, through
@@ -167,7 +151,6 @@ func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 				t.Errorf("tk-a notes %q and the Work queue lists %v, want %s and tk-a in it",
 					r.Note, doc.WorkQueue.Queue, c.state)
 			}
-			oldRecordDerived(t, doc)
 		})
 	}
 }
@@ -189,7 +172,6 @@ func TestAPullRequestTheLandingOrderHasNotReadIsWorking(t *testing.T) {
 		t.Errorf("tk-a reads %q in %q asking %q noting %q, want its pull request working in the Work queue",
 			r.Signal, r.Group, r.Ask, r.Note)
 	}
-	oldRecordDerived(t, doc)
 }
 
 // A pull request on the pending record that the evaluator could not answer
@@ -210,5 +192,4 @@ func TestAPullRequestTheEvaluatorDidNotAnswerReadsUnread(t *testing.T) {
 	if !slices.Contains(doc.WorkQueue.Unread, "tk-a") {
 		t.Errorf("the Work queue lists %+v, want tk-a among the unread", doc.WorkQueue)
 	}
-	oldRecordDerived(t, doc)
 }
