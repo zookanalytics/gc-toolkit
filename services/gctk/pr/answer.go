@@ -46,9 +46,9 @@ import (
 // dismissal by the review's, so the post run again posts nothing twice. Each
 // write is decided on the post's own read of the PR, which it reads again once
 // a reply lands, so a mark and a resolve stand behind a reply that read shows.
-// A write that does not land leaves what it was for to the post run again
-// (Unanswered), and a request GitHub refuses, which a run again would meet
-// again, is left with why.
+// A write that does not land, or a reply that read does not show, leaves what
+// it was for to the post run again (Unanswered), and a request GitHub refuses,
+// which a run again would meet again, is left with why.
 
 // Answered is what a round's post did: the head's comment, "posted", "edited",
 // "kept" when the PR holds it as it stands, or "" when the round has nothing to
@@ -314,7 +314,17 @@ func (a *answering) answer() error {
 			continue
 		}
 		p, ok := a.locate(d.url)
-		if !ok || (d.words != "" && !a.replied(d, p)) {
+		if !ok {
+			continue
+		}
+		if d.words != "" && !a.replied(d, p) {
+			// The post returns non-zero for a reply it made that its read
+			// does not show, so it runs again and marks the post once the
+			// read finds the reply. Its ask closes once the step does, and
+			// no later round would mark the post.
+			if slices.Contains(a.out.Replied, d.url) {
+				a.fail("the reply to %s (%s) landed, and the PR's read does not show it, so the post is not marked answered", d.url, d.r.Ask)
+			}
 			continue
 		}
 		if p.thread >= 0 {

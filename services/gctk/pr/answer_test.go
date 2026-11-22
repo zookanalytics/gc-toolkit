@@ -25,11 +25,13 @@ import (
 // shows it.
 
 // posts is the writer of the city's posts as a test runs it: each post lands on
-// the PR under the city's login, carrying the city's mark, and fail fails a
-// verb (comment, edit or reply) with its error.
+// the PR under the city's login, carrying the city's mark, fail fails a verb
+// (comment, edit or reply) with its error, and a verb lost answers as posted
+// and puts nothing on the PR.
 type posts struct {
 	pr   *ghfake.PR
 	fail map[string]error
+	lost map[string]bool
 	made []string
 	next int64
 }
@@ -40,7 +42,7 @@ func (p *posts) take(verb string) error {
 }
 
 func (p *posts) Comment(_, _ string, _ int, body string) error {
-	if err := p.take("comment"); err != nil {
+	if err := p.take("comment"); err != nil || p.lost["comment"] {
 		return err
 	}
 	p.next++
@@ -64,7 +66,7 @@ func (p *posts) Edit(_, _ string, id int64, body string) error {
 }
 
 func (p *posts) Reply(_, thread, body string) error {
-	if err := p.take("reply"); err != nil {
+	if err := p.take("reply"); err != nil || p.lost["reply"] {
 		return err
 	}
 	for i := range p.pr.Threads {
@@ -91,7 +93,7 @@ type rounds struct {
 func newRounds(t *testing.T) *rounds {
 	t.Helper()
 	d := newCycle(t)
-	p := &posts{pr: d.pr, fail: map[string]error{}}
+	p := &posts{pr: d.pr, fail: map[string]error{}, lost: map[string]bool{}}
 	d.l.Posts = p
 	d.store.Put(fake.Bead{ID: "tk-run", Title: "mol-pr-review", Status: "open", CreatedAt: "2026-11-12T02:00:00Z",
 		Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review", "gc.var.pr_bead": bead,
@@ -356,6 +358,37 @@ func TestAnAnswerThatDoesNotLandLeavesItsAskOpen(t *testing.T) {
 	d.posted(t)
 	if len(d.cityPosts("<!-- gc:answer "+ask+" -->")) != 1 || !d.reacted("PRRC_260", "THUMBS_UP") || !d.resolved("T1") {
 		t.Fatal("the post run again did not make the reply, the mark and the resolve")
+	}
+}
+
+// A reply the writer answers as posted and the PR's read does not show is not
+// marked: the post returns non-zero, with no mark and no resolve, and the post
+// run again marks the post and resolves its thread once the reply shows.
+func TestAReplyThePRDoesNotShowLeavesThePostUnmarked(t *testing.T) {
+	for _, kind := range []string{pr.PostInline, pr.PostConversation} {
+		t.Run(kind, func(t *testing.T) {
+			d := newRounds(t)
+			url := d.person(kind)
+			verb, node := "reply", "PRRC_260"
+			if kind == pr.PostConversation {
+				verb, node = "comment", "IC_5"
+			}
+			ask := d.ask(t, "A post", url, "2026-11-12T03:00:00Z")
+			d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "A nit."})
+			d.posts.lost[verb] = true
+			_, err := d.post(t)
+			var unanswered *pr.Unanswered
+			if !errors.As(err, &unanswered) || d.reacted(node, "THUMBS_UP") || d.resolved("T1") {
+				t.Fatalf("a reply the PR does not show returned %v, the post marked %v, the thread resolved %v",
+					err, d.reacted(node, "THUMBS_UP"), d.resolved("T1"))
+			}
+			delete(d.posts.lost, verb)
+			d.posted(t)
+			if len(d.cityPosts("<!-- gc:answer "+ask+" -->")) != 1 || !d.reacted(node, "THUMBS_UP") ||
+				(kind == pr.PostInline && !d.resolved("T1")) {
+				t.Fatal("the post run again did not reply once, mark the post and resolve its thread")
+			}
+		})
 	}
 }
 
