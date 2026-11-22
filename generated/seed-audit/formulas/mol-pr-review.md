@@ -3,9 +3,9 @@ Description: A PR's review run for one head: a checked loop that judges one head
 iteration. In each iteration triage first checks that the run still stands,
 then reads the change at the head and picks the checks it needs, a lane of
 mol-pr-review-lane runs each picked check by its own method, and
-rule-and-repair rules every finding and every ask the round can take, answers
-them on the PR in one comment for the head, and makes the round's fixes as one
-push. A push is a new head, which the next iteration triages. The loop's check,
+rule-and-repair rules every finding and every ask the round can take, makes the
+round's fixes as one push, and answers them on the PR: in one comment for the
+head, and at each person's post, where it was made. A push is a new head, which the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
 the iteration that ends the loop, a pass or the last attempt, it writes the
 result for the last head the run judged and its target, which the landing order

@@ -80,23 +80,24 @@ fix is low-risk and net-positive and declined when it is risky or marginal;
 and a nit, a preference that no grade covers, is answered and not fixed. The
 reason names the grade.
 
-A batch of a person's comments reaches the run as one ask, and each comment in
-it is a human finding naming that ask as its fix unit, which the round's read
-lists under the ask. Rule each comment by its grade, as above, and record that
-ruling on its finding as well as in the round's output, so the comment is
-answered on the PR once the ask closes:
-
-```bash
-"$(gc <binding> scripts-dir)/review-run.sh" finding --finding <finding> --ruling <must-fix|declined|deferred|answered|question> --reason "<the answer, naming the grade>"
-```
-
-A question also names its gate, `--gate <gate>`. A deferred comment's follow-up
-bead is filed by this call, waiting on the PR's bead and taking the PR's target,
-so file no second one with `review-run.sh defer`. The call prints the follow-up,
-which the ruling's reason names.
+Each comment is its own ask, whose reason names the post and ends with its URL.
+Read the post at that URL as it stands, and rule it by its grade, as above. The
+round's post answers it where it was made, with the ruling's reason as the
+answer, so write the reason to the person who made the comment.
 
 An ask that carries a ruling the operator made, as a sitting's send-back does,
 is applied as ruled and not graded again.
+
+## A comment made while a question is open
+
+A person may comment while a question the run put to them waits on its gate.
+When the comment settles the question, or makes it moot, name the gate in its
+ask's ruling as `settles`, with `moot` set when the comment makes the question
+moot rather than answering it, and rule the question's own ask by the answer.
+The round's post closes the gate with the comment as its answer and says so in
+its reply. A comment that settles nothing leaves the gate open, and its reply
+says the question still stands. Rule the question's own ask a question again,
+naming the same gate.
 
 ## A question only a person can answer
 

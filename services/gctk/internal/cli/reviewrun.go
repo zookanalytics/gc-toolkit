@@ -169,7 +169,11 @@ fallback, screenshot or video, costlier than the modality delivered), a visual
 on another check's verdict, a ruling of a finding no lane raised or of an ask
 the round cannot take, a finding or an ask left unruled, a must-fix with no
 fixing commit, a commit on a ruling that changes no code, a question with no
-gate, and a fix for an ask an earlier round of the run declined. A correctness
+gate, a fix for an ask an earlier round of the run declined, and a settles,
+the gate of a question an ask's post settles, that is no open question gate
+holding the bead that owns the PR, that a finding's or a question's ruling
+names, that two rulings name, or that the round also puts a question to, and a
+moot with no settles beside it. A correctness
 lane's approve on a change that edits its own review guidance
 (review-checks.toml, docs/review-*.md) is refused until needs_you names the
 edit for the person who approves the merge, and when the paths cannot be

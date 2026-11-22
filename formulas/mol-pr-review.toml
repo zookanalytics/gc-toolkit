@@ -3,9 +3,9 @@ A PR's review run for one head: a checked loop that judges one head per
 iteration. In each iteration triage first checks that the run still stands,
 then reads the change at the head and picks the checks it needs, a lane of
 mol-pr-review-lane runs each picked check by its own method, and
-rule-and-repair rules every finding and every ask the round can take, answers
-them on the PR in one comment for the head, and makes the round's fixes as one
-push. A push is a new head, which the next iteration triages. The loop's check,
+rule-and-repair rules every finding and every ask the round can take, makes the
+round's fixes as one push, and answers them on the PR: in one comment for the
+head, and at each person's post, where it was made. A push is a new head, which the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
 the iteration that ends the loop, a pass or the last attempt, it writes the
 result for the last head the run judged and its target, which the landing order
@@ -189,18 +189,32 @@ not read: run it again.
 `review` reading `repair`, the `head` the round judged, `rulings` with one
 `{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
 `commit` of a must-fix and the `gate` of a question, and `pushed`, the head the
-push printed, when it pushed. Then check and write it:
+push printed, when it pushed. The ruling of an ask whose post settles a question
+a gate on `{{pr_bead}}` asks also names that gate in `settles`, with `moot`
+reading `true` when the post makes the question moot. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
-**6. Answer them on the PR** in the head's one comment:
+**6. Answer them on the PR**: the head's one comment, and each person's post an
+ask the round ruled carries, where it was made:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
+It posts or edits the head's comment. An inline comment gets a reply in its
+thread, which is then resolved, and a review's message or a conversation comment
+a comment that links it where its ruling owes words. Each post gets the city's
+👍 once its words are on the PR, but a question's, whose reply names its gate and
+whose thread stays open. The gate a ruling's `settles` names is closed with the
+post as its answer, and a person's request for changes is dismissed once every
+point it raised is answered, with its author asked to review again. Run again,
+it posts nothing twice. Exit 1: an answer did not land, and exit 2: a read did
+not answer: run it again, and when it still fails, cancel the run, which the
+landing order pours again:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
 **7. Close this step.** The loop's check judges the round, and records the
 run's result when the round ends the loop.
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** every finding and ask ruled, the round's fixes pushed, the
-output written, the comment posted, this step closed.
+output written, the round's answers posted, this step closed.
 """
 metadata = { "gc.run_target" = "{{repair_target}}" }

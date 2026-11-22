@@ -571,7 +571,3 @@ why a reader must know it, and the work that retires it.
   PR is on it, so step 7 is not yet the one review path in the code. The
   retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
   (tk-1tfzr71.21) has landed.
-- **A comment made while a question is open waits behind its gate.** The
-  landing order pours no run while a human gate holds a PR's bead, so until the
-  GitHub intake (tk-1tfzr71.21) lands, such a comment waits until the person
-  answers the question on the board.

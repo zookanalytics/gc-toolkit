@@ -266,9 +266,12 @@ lives. It pours one when the evaluator finds no passed result at the validated
 head and target, or when the bead carries an ask the run can take. It pours none
 while a run is attached, while another open bead other than an ask names the
 branch, or while a human gate holds it
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). A
-conversation on the PR holds its merge and nothing else, so runs are poured
-while one is open.
+([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
+unless every gate that holds it is a question a review run put to a person
+(`review-question-<key>`) and an ask the run can take carries a person's post
+filed after the newest of them: that run rules the post, which can settle the
+question. A conversation on the PR holds its merge and nothing else, so runs
+are poured while one is open.
 
 The run is a checked loop, and each iteration judges one head: the run's first
 head, the one the refinery validated, then each head its own repair pushes.
@@ -501,13 +504,18 @@ artifact, and a lane's green does not compare it to a head.
 ### Operator feedback
 
 Feedback from a person is review the branch has never been answered against.
-On a PR on the pending record, `pr-facts.sh` routes a batch to the PR's review
-run as an ask: each comment becomes a human finding whose `finding.fix_unit`
-names the ask, and no validation pass opens. The run's rule-and-repair rules
-each human finding by the bar its grade sets (`review-run.sh finding`), and the
-loop's check, once it records the run's result, closes each one whose ask has
-closed (`finding.sh close-answered`), which the write-back answers on the PR.
-On the old path, `pr-facts.sh` enters the batch into the finding/validation
+On a PR on the pending record, each post a person makes is an ask of its own,
+which the landing order files and marks 👀, and the PR's review run rules it,
+reading the post at the URL its reason names. The round that rules a post
+answers it where it was made (`review-run.sh post`, through `gctk pr answer`):
+a reply in an inline comment's thread, which it then resolves, a comment that
+links a review's message or a conversation comment where the ruling owes words,
+and the city's 👍 once nothing more is owed, while a question's reply names its
+gate and leaves its thread open. Once every point of a person's request for
+changes is answered, the round's post dismisses that review and asks its author
+to review again. `pr-facts.sh` also routes a batch there as an ask whose
+comments are human findings, until the GitHub intake (tk-1tfzr71.21) retires
+it. On the old path, `pr-facts.sh` enters the batch into the finding/validation
 graph by opening a validation pass on it
 (see "Review cycle", `specs/tk-ztapg/review-cycle-architecture.md`):
 `gate-ensure.sh`'s quiescence holds a fresh whole-diff review off the anchor
@@ -521,7 +529,7 @@ approval or a change request counts whatever its body carries. The city's own
 post is one that `assets/scripts/pr-post.sh` marked, which is every post the
 pack makes —
 `signoff.sh`'s verdicts, a review run's comment
-for each head, the write-back's replies and its ruled-finding comments, the sitting reminder, a demo delivery,
+for each head and its replies to a person's posts, the write-back's replies and its ruled-finding comments, the sitting reminder, a demo delivery,
 `pr-dispose.sh`'s closing comment. An unmarked post under the city's login
 after its PR's provenance cutover, described next, is feedback like a person's,
 whoever posted it. Rework hand-backs post nothing.
