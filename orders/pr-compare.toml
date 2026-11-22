@@ -1,0 +1,54 @@
+# pr-compare — the net: read every PR the rig's beads own in full every hour,
+# and read and save each one that differs from the read saved on its bead
+# (specs/tk-1tfzr71.149/design.md, sections 2, 6 and 7). It is the background
+# sweep of the PR watch, the first of the PR's two loops, which keeps each saved
+# read current for the landing order (orders/pr-reconcile.toml) to work from. It
+# catches the changes no cheap sign shows, which orders/pr-poll.toml cannot see,
+# within the hour: a review
+# thread resolved or reopened, the city's reaction that answers a thread with
+# no reply, an edit to a post that left the PR's updatedAt as it was, a check
+# the PR comes to require or stops requiring, and a review
+# decision, merge state or merge-queue flag that a change of the repository's
+# rules moves.
+# What it reads: for each PR the store's live beads own, the cheap question's
+# signs, its merge state, review decision and merge-queue flags, each review
+# thread's resolution, the time each conversation comment, review and inline
+# comment last changed, the reactions the city's account left on each inline
+# comment, and the check runs at its last commit with whether the PR requires
+# each, in one request for each 10 PRs in a repository, with each
+# list read on past its first page. It reads no post's text. For each part of a
+# PR that differs, or whose signs moved as orders/pr-poll.toml tells them, it
+# runs the one-PR update, `gctk pr refresh`, the one writer of pr_github_read,
+# so a pass in which no part differs or moved writes no bead.
+# It then clears the city's labels off the PRs no live bead owns, such as one
+# whose bead closed, which no bead holds for the landing order to find (design,
+# section 9): it searches the rig's own repository, the one its checkout's origin
+# names, for the PRs that carry a status: or held: label pr-status-label.sh
+# names, 100 a page, reads on until it has found 20 PRs no live bead owns or
+# the results end, and has pr-status-label.sh clear each, so it clears about 20
+# such PRs an hour. A clear that does not land fails the pass, and the next
+# pass's search finds the PR again.
+# What it costs: a request of up to 9 PRs costs 1 GitHub point and one of 10
+# costs 2, plus 1 for each page past a list's first, and each update 1 or 2
+# more. A request of 10 PRs took about 2 seconds. Each page of the search
+# costs 1 point, one for each 100 labeled PRs it lists before its twentieth PR
+# to clear, or before its end.
+# Exec, not a formula: reads and guarded writes need no LLM. Rig-scoped: one
+# pass per importing rig against its own store, named by --db, loading the
+# pack's definition of feedback in the rig's checkout. GCTK_SCRIPTS_DIR names
+# the pack's scripts, where that definition lives.
+# Each update writes under the store's record lock and keeps each part's read
+# instant, so a pass that overlaps one of pr-poll's never replaces a newer read
+# with an older one.
+# `timeout` holds the pass's 3 minutes of starting updates and clears, the last
+# update's 30-second wait for the record lock and its reads, or the last clear;
+# gctk's cli test asserts the window and the lock wait sit below it. A pass that
+# fails to read a PR exits 2, so Gas City records the run failed, and the next
+# pass reads it again. Tune from city.toml [[orders.overrides]].
+[order]
+description = "PR watch's net: read every PR the rig's beads own in full, read and save on its bead each one that differs from its saved read, and clear the city's labels off PRs no live bead owns"
+trigger = "cooldown"
+interval = "1h"
+timeout = "300s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" pr compare --db \"$GC_RIG_ROOT/.beads\""
+scope = "rig"

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,6 +22,12 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/server"
 	"github.com/zookanalytics/gc-toolkit/services/helm/internal/source"
 )
+
+// noAPI stands in for the supervisor's API, which the rig board reads only
+// once a rig's store read has answered, and no store read here answers.
+type noAPI struct{}
+
+func (noAPI) JSON(context.Context, any, string, url.Values) (bool, error) { return false, nil }
 
 // startServing serves srv through serveUntil on a loopback listener, and
 // returns the board's address, stop, which ends serveUntil's context as a
@@ -167,7 +174,7 @@ func stuckGroups(t *testing.T, groups string, n int) []int {
 func TestAStopEndsEveryStoreReadInFlightBeforeServeReturns(t *testing.T) {
 	logs := captureLog(t)
 	groups := storeStub(t)
-	srv := server.New(server.WithRigBoard(source.NewGC(""), time.Minute))
+	srv := server.New(server.WithRigBoard(source.NewGC(""), noAPI{}, time.Minute))
 	addr, stop, served := startServing(t, srv)
 
 	answers := make(chan string, 2)

@@ -1,0 +1,811 @@
+package pr_test
+
+import (
+	"encoding/json"
+	"errors"
+	"maps"
+	"math/rand/v2"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+)
+
+// The PR watch's cases (specs/tk-1tfzr71.149/design.md, sections 1, 3, 4, 6
+// and 7). Each starts from the bead on the pending record that ready() holds,
+// whose PR the evaluator reads ready, with the cheap question's own signs set,
+// and a clock that moves a second at each read of it.
+
+// watched is a world as the PR watch reads it.
+type watched struct {
+	*world
+	w     pr.Watcher
+	clock time.Time
+}
+
+func newWatched(t *testing.T) *watched {
+	t.Helper()
+	w := ready()
+	w.pr.Facts.ID = "PR_7"
+	w.pr.Labels = []string{"status: merging"}
+	w.pr.UpdatedAt = "2026-11-16T09:00:00Z"
+	w.pr.BaseTip = "b000000000000000000000000000000000000000"
+	w.pr.ReviewDecision = "APPROVED"
+	w.pr.Rollup = "SUCCESS"
+	d := &watched{world: w, clock: time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)}
+	d.w = pr.Watcher{
+		Ledger:   ledger.New(w.store),
+		Dir:      t.TempDir(),
+		GitHub:   func(string) pr.Watch { return w.github },
+		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
+		Now:      func() time.Time { d.clock = d.clock.Add(time.Second); return d.clock },
+		Wait:     5 * time.Second,
+		Shuffle:  func([]string) {},
+	}
+	w.put(w.md)
+	return d
+}
+
+// poll runs one pass and fails if the store's listing did not read.
+func (d *watched) poll(t *testing.T) pr.PassReport {
+	t.Helper()
+	rep, err := d.w.Poll(pr.PassOptions{Window: 90 * time.Second})
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	return rep
+}
+
+func (d *watched) row(t *testing.T, id string) fake.Bead {
+	t.Helper()
+	b, ok := d.store.Row(id)
+	if !ok {
+		t.Fatalf("the store lost %s", id)
+	}
+	return b
+}
+
+// saved is the read saved on id, nil when it carries none.
+func (d *watched) saved(t *testing.T, id string) *pr.SavedRead {
+	t.Helper()
+	raw, ok := d.row(t, id).Metadata["pr_github_read"]
+	if !ok {
+		return nil
+	}
+	var s pr.SavedRead
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatalf("the saved read %q does not decode: %v", raw, err)
+	}
+	return &s
+}
+
+// readsSince is GitHub's reads after the first n.
+func (d *watched) readsSince(n int) []string { return d.github.Reads()[n:] }
+
+// updated fails unless the pass saved one PR's parts named, and nothing failed.
+func updated(t *testing.T, rep pr.PassReport, parts string) {
+	t.Helper()
+	if len(rep.Failed) != 0 || len(rep.Updates) != 1 {
+		t.Fatalf("the pass failed %v and updated %+v, want one update", rep.Failed, rep.Updates)
+	}
+	if u := rep.Updates[0]; u.Action != pr.ActSaved || !strings.HasSuffix(u.Detail, "saved "+parts) {
+		t.Fatalf("the update %s (%s), want %q saved", u.Action, u.Detail, parts)
+	}
+}
+
+func TestTheFirstPassReadsAndSavesEveryPart(t *testing.T) {
+	d := newWatched(t)
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	if got := d.github.Reads(); !slices.Equal(got, []string{"Signs", "PullRequestPart+checks", "Login", "Conversation"}) {
+		t.Fatalf("the pass read %v", got)
+	}
+	s := d.saved(t, bead)
+	if s.PR == nil || s.Checks == nil || s.Conversation == nil || s.Labels == nil {
+		t.Fatalf("the pass saved %+v, want every part", s)
+	}
+	if s.PR.Head != head || s.Checks.Head != head || s.PR.Signs.BaseTip != d.pr.BaseTip ||
+		!slices.Equal(s.Labels.Names, []string{"status: merging"}) || s.Conversation.ReviewDecision != "APPROVED" {
+		t.Fatalf("the saved read is not GitHub's side: %+v %+v %+v %+v", *s.PR, *s.Checks, *s.Conversation, *s.Labels)
+	}
+	// A part's signs are read no later than its facts.
+	if s.Labels.ReadAt >= s.PR.ReadAt || s.PR.ReadAt >= s.Conversation.ReadAt {
+		t.Fatalf("the parts were read at %s, %s and %s, want the signs first", s.Labels.ReadAt, s.PR.ReadAt,
+			s.Conversation.ReadAt)
+	}
+	b := d.row(t, bead)
+	meta(t, b, map[string]string{"pr_state": "open"})
+	if at := b.Metadata["pr_last_checked_at"]; !regexp.MustCompile(`^2026-11-16T10:00:[0-9]{2}Z$`).MatchString(at) {
+		t.Fatalf("pr_last_checked_at %q is not the update's stamp to the second", at)
+	}
+
+	// The evaluator answers the saved read ready, as it is.
+	isReady(t, d.fromStore(t, maps.Clone(b.Metadata)))
+}
+
+// A re-read reads every part of the PR, whatever its signs say, as the landing
+// order has it before a merge request, and saves the instant of each part that
+// holds what the bead holds. A PR no live bead owns is an error, since there is
+// no bead to decide its merge on.
+func TestAReReadReadsEveryPartWhateverItsSignsSay(t *testing.T) {
+	d := newWatched(t)
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	before := len(d.github.Reads())
+	done, err := d.w.Reread(prURL)
+	if err != nil {
+		t.Fatalf("the re-read: %v", err)
+	}
+	if got := d.github.Reads()[before:]; !slices.Equal(got, []string{"Signs", "PullRequestPart+checks", "Login", "Conversation"}) {
+		t.Fatalf("the re-read read %v, want every part", got)
+	}
+	if done.Action != pr.ActSaved || !strings.Contains(done.Detail, "saved its instant") {
+		t.Fatalf("the re-read of an unmoved PR %s (%s), want its instant saved", done.Action, done.Detail)
+	}
+	if _, err := d.w.Reread("https://github.com/acme/widgets/pull/9"); err == nil {
+		t.Fatal("a re-read of a PR no live bead owns returned no error")
+	}
+}
+
+func TestAPassInWhichNothingMovedWritesNoBead(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	reads, writes := len(d.github.Reads()), len(d.store.Writes())
+	rep := d.poll(t)
+	if len(rep.Updates) != 0 || len(rep.Failed) != 0 || rep.Asked != 1 || rep.Repositories != 1 {
+		t.Fatalf("an unmoved pass reported %+v", rep)
+	}
+	if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs"}) {
+		t.Fatalf("an unmoved pass read %v, want the cheap question alone", got)
+	}
+	if got := d.store.Writes()[writes:]; len(got) != 0 {
+		t.Fatalf("an unmoved pass wrote %+v", got)
+	}
+}
+
+// A saved read that does not decode as the four parts, such as one whose
+// checks are a list, is read as none: the pass reads every part and saves the
+// four over it.
+func TestASavedReadThatDoesNotDecodeIsReadWholeAndReplaced(t *testing.T) {
+	d := newWatched(t)
+	b, _ := d.store.Row(bead)
+	b.Metadata = maps.Clone(b.Metadata)
+	b.Metadata["pr_github_read"] = `{"read_at":"2026-11-16T09:00:00Z","head":"` + head +
+		`","checks":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}`
+	d.store.Put(b)
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	if s := d.saved(t, bead); s.PR == nil || s.Checks == nil || s.Conversation == nil || s.Labels == nil {
+		t.Fatalf("the pass saved %+v over a read that does not decode, want every part", s)
+	}
+}
+
+// Each sign that moved reads its row of the update's table, and the update
+// saves the parts whose facts or signs differ (section 4).
+func TestEachSignsMoveReadsItsRowOfTheTable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		move  func(*watched)
+		reads []string
+		saved string
+	}{
+		{"a label", func(d *watched) { d.pr.Labels = append(d.pr.Labels, "held: you") },
+			nil, "labels"},
+		{"the base's tip", func(d *watched) { d.pr.BaseTip = "c000000000000000000000000000000000000000" },
+			[]string{"PullRequestPart"}, "pr"},
+		{"when GitHub last changed the PR, as an edit of a post moves it", func(d *watched) {
+			d.pr.UpdatedAt = "2026-11-16T09:05:00Z"
+		}, []string{"PullRequestPart", "Login", "Conversation"}, "pr, conversation"},
+		{"the head", func(d *watched) {
+			d.pr.Facts.HeadRefOid = other
+			d.pr.Suites[other] = d.pr.Suites[head]
+		}, []string{"PullRequestPart+checks"}, "pr, checks"},
+		{"a finished check", func(d *watched) {
+			d.pr.Suites[head] = []gh.CheckSuite{{ID: 1, Runs: []gh.CheckRun{
+				{Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", Required: true}, passed("test-macos")}}}
+		}, []string{"PullRequestPart+checks"}, "checks"},
+		{"a commit status", func(d *watched) { d.pr.Statuses = map[string]int{"PENDING": 1} },
+			[]string{"PullRequestPart+checks"}, "checks"},
+		{"the rollup's state", func(d *watched) { d.pr.Rollup = "PENDING" },
+			[]string{"PullRequestPart+checks"}, "checks"},
+		{"a conversation comment", func(d *watched) {
+			d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 300, Author: "operator", Body: "and this",
+				CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"})
+		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
+		{"an inline comment", func(d *watched) {
+			d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: "T9", Comments: []gh.Comment{{ID: 400,
+				Author: "operator", Body: "rename", CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"}}})
+		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
+		{"a review", func(d *watched) {
+			d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 101, State: "COMMENTED", Body: "a thought",
+				Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-16T09:10:00Z"})
+		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
+		{"a dismissed review", func(d *watched) { d.pr.Reviews[0].State = "DISMISSED" },
+			[]string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
+		{"a merge", func(d *watched) { d.pr.Facts.State = "MERGED" },
+			[]string{"PullRequestPart"}, "pr"},
+		{"the draft flag", func(d *watched) { d.pr.Facts.IsDraft = true },
+			[]string{"PullRequestPart"}, "pr"},
+		{"the bead's provenance instant, which makes the saved read not current", func(d *watched) {
+			b, _ := d.store.Row(bead)
+			b.Metadata = maps.Clone(b.Metadata)
+			b.Metadata["pr_provenance_since"] = "2026-11-16T08:00:00Z"
+			d.store.Put(b)
+		}, []string{"PullRequestPart+checks", "Login", "Conversation"}, "conversation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newWatched(t)
+			d.poll(t)
+			reads, writes := len(d.github.Reads()), len(d.store.Writes())
+			tc.move(d)
+			rep := d.poll(t)
+			updated(t, rep, tc.saved)
+			if got := d.readsSince(reads); !slices.Equal(got, append([]string{"Signs"}, tc.reads...)) {
+				t.Fatalf("the pass read %v, want the signs and %v", got, tc.reads)
+			}
+			ws := d.store.Writes()[writes:]
+			if len(ws) != 1 {
+				t.Fatalf("the pass wrote %d times, want once: %+v", len(ws), ws)
+			}
+			args := strings.Join(ws[0].Args, " ")
+			for _, want := range []string{"--if-status=blocked", "--if-assignee= ", "pr_github_read=",
+				"pr_state=", "pr_last_checked_at="} {
+				if !strings.Contains(args, want) {
+					t.Errorf("the write %q lacks %q", args, want)
+				}
+			}
+			// The next pass finds nothing moved, unless the PR's head is
+			// another than the store holds.
+			if tc.name == "the head" {
+				return
+			}
+			reads = len(d.github.Reads())
+			if rep := d.poll(t); len(rep.Updates) != 0 || !slices.Equal(d.readsSince(reads), []string{"Signs"}) {
+				t.Fatalf("the pass after the update read %v and updated %+v", d.readsSince(reads), rep.Updates)
+			}
+		})
+	}
+}
+
+// A merge or a close is saved as GitHub's state, lower-cased, in pr_state.
+func TestTheUpdateSavesThePRsStateInPRState(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	d.pr.Facts.State = "MERGED"
+	d.poll(t)
+	meta(t, d.row(t, bead), map[string]string{"pr_state": "merged"})
+}
+
+// Two updates of one PR can cross: the one whose read was sent first must not
+// write over the part the later read saved (section 7).
+func TestAnOlderReadNeverReplacesANewerOne(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	d.pr.BaseTip = "c000000000000000000000000000000000000000"
+	crossed := false
+	d.github.OnRead = func(method string, p *ghfake.PR) {
+		if method != "PullRequestPart" || crossed {
+			return
+		}
+		crossed = true
+		// The later update reads the merge state GitHub computed since, and
+		// saves it first.
+		p.Facts.MergeStateStatus = "BLOCKED"
+		if _, err := d.w.Refresh(prURL); err != nil {
+			t.Errorf("the later update: %v", err)
+		}
+		p.Facts.MergeStateStatus = "CLEAN"
+	}
+	rep := d.poll(t)
+	if len(rep.Failed) != 0 || len(rep.Updates) != 1 || rep.Updates[0].Action != pr.ActUnchanged {
+		t.Fatalf("the earlier update reported %+v, failed %v, want it to save nothing", rep.Updates, rep.Failed)
+	}
+	if s := d.saved(t, bead); s.PR.MergeState != "BLOCKED" {
+		t.Fatalf("the saved merge state is %s, want the later read's BLOCKED", s.PR.MergeState)
+	}
+}
+
+// A later read that finds the facts the bead already holds keeps its instant
+// on the part, so an earlier read of other facts, still in flight when the
+// later one was saved, is not saved after it (section 7). Here a new comment
+// makes both updates read the PR part, the later finds the merge state the
+// bead holds, and the earlier read returns another.
+func TestALaterReadOfTheSavedFactsKeepsItsInstant(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	before := d.saved(t, bead).PR
+	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", Body: "looks fine", CreatedAt: "2026-11-16T09:30:00Z",
+		UpdatedAt: "2026-11-16T09:30:00Z"}}
+	crossed := false
+	var later pr.Refreshed
+	d.github.OnRead = func(method string, p *ghfake.PR) {
+		if method != "PullRequestPart" || crossed {
+			return
+		}
+		crossed = true
+		var err error
+		if later, err = d.w.Refresh(prURL); err != nil {
+			t.Errorf("the later update: %v", err)
+		}
+		// The earlier read, sent before the later one, returns a merge state
+		// GitHub had computed then.
+		p.Facts.MergeStateStatus = "BLOCKED"
+	}
+	rep := d.poll(t)
+	if len(rep.Failed) != 0 || len(rep.Updates) != 1 {
+		t.Fatalf("the earlier update reported %+v, failed %v", rep.Updates, rep.Failed)
+	}
+	s := d.saved(t, bead)
+	if s.PR.MergeState != before.MergeState || s.PR.ReadAt <= before.ReadAt {
+		t.Fatalf("the saved PR part is %s read at %s, want the later read's %s at an instant after %s", s.PR.MergeState,
+			s.PR.ReadAt, before.MergeState, before.ReadAt)
+	}
+	if later.Action != pr.ActSaved {
+		t.Fatalf("the later update reported %+v, want it saved", later)
+	}
+}
+
+func TestAFailedReadKeepsTheSavedSignsAndFailsThePass(t *testing.T) {
+	t.Run("the cheap question fails for one PR alone", func(t *testing.T) {
+		d := newWatched(t)
+		eight := &ghfake.PR{Facts: gh.PullRequest{ID: "PR_8", Number: 8, URL: "https://github.com/acme/widgets/pull/8",
+			State: "OPEN", HeadRefName: "polecat/tk-8", HeadRefOid: other, BaseRefName: "main", MergeStateStatus: "CLEAN",
+			Repository: repo}}
+		d.github.Put(eight)
+		md := maps.Clone(d.md)
+		md["pr_url"], md["pr_number"], md["branch"], md["pr_head_sha"] = eight.Facts.URL, "8", "polecat/tk-8", other
+		d.store.Put(fake.Bead{ID: "tk-8", Status: "blocked", Assignee: refinery, Metadata: md})
+		d.github.SignsFail[7] = errors.New("github: the signs of PR 7 failed: something went wrong")
+		rep := d.poll(t)
+		if rep.Failed[prURL] == nil || len(rep.Updates) != 1 || rep.Updates[0].Bead != "tk-8" {
+			t.Fatalf("the pass updated %+v and failed %v, want PR 8 updated and PR 7 failed", rep.Updates, rep.Failed)
+		}
+		if d.saved(t, bead) != nil {
+			t.Fatal("a PR whose signs failed had a read saved")
+		}
+		if asked := d.github.SignsAsked(); len(asked) != 1 || !slices.Equal(asked[0], []int{7, 8}) {
+			t.Fatalf("the cheap question asked %v, want both PRs in one request", asked)
+		}
+	})
+	for name, fail := range map[string]func(*watched){
+		"a part's read":              func(d *watched) { d.github.Fail["Conversation"] = errors.New("github: HTTP 502") },
+		"the login":                  func(d *watched) { d.github.Fail["Login"] = errors.New("github: HTTP 502") },
+		"the definition of feedback": func(d *watched) { d.rule.err = errors.New("jq: failed") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newWatched(t)
+			d.poll(t)
+			before := d.row(t, bead).Metadata["pr_github_read"]
+			writes := len(d.store.Writes())
+			d.pr.UpdatedAt = "2026-11-16T09:05:00Z"
+			fail(d)
+			rep := d.poll(t)
+			if rep.Failed[prURL] == nil || len(rep.Updates) != 0 {
+				t.Fatalf("the pass updated %+v and failed %v, want the PR failed", rep.Updates, rep.Failed)
+			}
+			if got := d.store.Writes()[writes:]; len(got) != 0 || d.row(t, bead).Metadata["pr_github_read"] != before {
+				t.Fatalf("a read that failed saved %+v", got)
+			}
+			// The signs stay as they were, so the next pass reads the PR again.
+			delete(d.github.Fail, "Conversation")
+			delete(d.github.Fail, "Login")
+			d.rule.err = nil
+			updated(t, d.poll(t), "pr, conversation")
+		})
+	}
+}
+
+// GitHub computes an open PR's merge state after a push or a base move, and
+// moves no sign once it has: a read of it as unknown is saved, and each pass
+// reads the PR part again until a read finds the state, whether the PR's own
+// signs moved or only its checks did.
+func TestAnOpenPRsUnknownMergeStateIsReadAgainUntilGitHubComputesIt(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		move  func(d *watched)
+		saved string
+	}{
+		{"the base's tip", func(d *watched) { d.pr.BaseTip = "c000000000000000000000000000000000000000" }, "pr"},
+		{"a finished check", func(d *watched) { d.pr.Rollup = "SUCCESS" }, "pr, checks"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newWatched(t)
+			d.pr.Rollup = "PENDING"
+			d.poll(t)
+			c.move(d)
+			d.pr.Facts.MergeStateStatus = "UNKNOWN"
+			updated(t, d.poll(t), c.saved)
+			if s := d.saved(t, bead); s.PR.MergeState != "UNKNOWN" {
+				t.Fatalf("saved the merge state %s, want UNKNOWN", s.PR.MergeState)
+			}
+			reads := len(d.github.Reads())
+			d.poll(t)
+			if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs", "PullRequestPart"}) {
+				t.Fatalf("a pass while GitHub reads it unknown read %v, want the PR part again", got)
+			}
+			d.pr.Facts.MergeStateStatus = "CLEAN"
+			updated(t, d.poll(t), "pr")
+			if s := d.saved(t, bead); s.PR.MergeState != "CLEAN" {
+				t.Fatalf("the pass once GitHub computed it saved %s", s.PR.MergeState)
+			}
+			reads = len(d.github.Reads())
+			if rep := d.poll(t); len(rep.Updates) != 0 || !slices.Equal(d.readsSince(reads), []string{"Signs"}) {
+				t.Fatalf("the pass after the state was found read %v and updated %+v", d.readsSince(reads), rep.Updates)
+			}
+		})
+	}
+}
+
+// A PR is owned by the live bead that names it as its own and is no other
+// bead's child (section 1).
+func TestThePollAsksAboutEveryPRALiveBeadOwns(t *testing.T) {
+	d := newWatched(t)
+	url := func(n string) string { return "https://github.com/acme/widgets/pull/" + n }
+	for _, b := range []fake.Bead{
+		{ID: "tk-sent", Status: "open", Assignee: refinery, Metadata: map[string]string{
+			"merge_result": "pull_request_record_incomplete", "existing_pr": url("11")}},
+		{ID: "tk-old", Status: "open", Metadata: map[string]string{"merge_result": "pull_request", "pr_url": url("12")}},
+		{ID: "tk-child", Status: "open", Metadata: map[string]string{"pr_url": url("13"), "existing_pr": url("13"),
+			"anchor_bead": "tk-old"}},
+		{ID: "tk-closed", Status: "closed", Metadata: map[string]string{"merge_result": "mr_merged", "pr_url": url("14")}},
+		{ID: "tk-unrecorded", Status: "open", Metadata: map[string]string{"pr_url": url("15")}},
+	} {
+		d.store.Put(b)
+	}
+	rep := d.poll(t)
+	if asked := d.github.SignsAsked(); len(asked) != 1 || !slices.Equal(asked[0], []int{7, 11, 12}) {
+		t.Fatalf("the cheap question asked %v, want the PRs of the anchor, the bead sent back and the old path", asked)
+	}
+	if rep.Asked != 3 {
+		t.Fatalf("the pass asked about %d PRs, want 3", rep.Asked)
+	}
+}
+
+// A bead on the old path owns its PR too, and gets the saved read, with no key
+// of the pending record's.
+func TestTheUpdateWritesNoRecordKeyOffThePendingRecord(t *testing.T) {
+	d := newWatched(t)
+	md := maps.Clone(d.md)
+	md["merge_result"] = "pull_request"
+	d.store.Put(fake.Bead{ID: bead, Title: "the work", Status: "open", Metadata: md})
+	updated(t, d.poll(t), "pr, checks, conversation, labels")
+	meta(t, d.row(t, bead), map[string]string{"pr_state": "<absent>", "pr_last_checked_at": "<absent>"})
+}
+
+func TestAPRTwoLiveBeadsOwnIsSavedOnNeither(t *testing.T) {
+	d := newWatched(t)
+	d.store.Put(fake.Bead{ID: "tk-twin", Status: "blocked", Assignee: refinery, Metadata: maps.Clone(d.md)})
+	rep := d.poll(t)
+	if err := rep.Failed[prURL]; err == nil || !strings.Contains(err.Error(), "tk-1, tk-twin") {
+		t.Fatalf("a PR two beads own failed as %v", err)
+	}
+	if len(d.store.Writes()) != 0 || len(d.github.SignsAsked()) != 0 {
+		t.Fatalf("a PR two beads own was asked %v or saved %+v", d.github.SignsAsked(), d.store.Writes())
+	}
+}
+
+// Each spelling of a PR's URL that GitHub reads as that PR names it: its host or
+// its repository in another case, or its number zero-padded. A refresh by any
+// of them updates the bead that owns the PR, a second bead that names the PR in
+// another spelling owns it too, so the pass saves it on neither, and a bead
+// whose URL is respelled while its update reads still owns the PR it saves.
+func TestEverySpellingOfAPRsURLNamesThePR(t *testing.T) {
+	for _, url := range []string{"https://GitHub.com/acme/widgets/pull/7", "https://github.com/ACME/Widgets/pull/7",
+		"https://github.com/acme/widgets/pull/007"} {
+		t.Run("a refresh by "+url, func(t *testing.T) {
+			d := newWatched(t)
+			got, err := d.w.Refresh(url)
+			if err != nil || got.Action != pr.ActSaved || got.Bead != bead {
+				t.Fatalf("the refresh answered %+v, %v", got, err)
+			}
+			if s := d.saved(t, bead); s == nil || s.PR == nil || s.PR.Number != 7 {
+				t.Fatalf("the refresh saved %+v", s)
+			}
+		})
+		t.Run("a second bead naming "+url, func(t *testing.T) {
+			d := newWatched(t)
+			md := maps.Clone(d.md)
+			md["pr_url"] = url
+			d.store.Put(fake.Bead{ID: "tk-twin", Status: "blocked", Assignee: refinery, Metadata: md})
+			rep := d.poll(t)
+			if err := rep.Failed[prURL]; err == nil || !strings.Contains(err.Error(), "tk-1, tk-twin") {
+				t.Fatalf("a PR two beads own in two spellings failed as %v", err)
+			}
+			if len(d.store.Writes()) != 0 || len(d.github.SignsAsked()) != 0 {
+				t.Fatalf("a PR two beads own was asked %v or saved %+v", d.github.SignsAsked(), d.store.Writes())
+			}
+		})
+		t.Run("the bead respelled to "+url+" while its update reads", func(t *testing.T) {
+			d := newWatched(t)
+			d.github.OnRead = func(string, *ghfake.PR) {
+				b, _ := d.store.Row(bead)
+				b.Metadata = maps.Clone(b.Metadata)
+				b.Metadata["pr_url"] = url
+				d.store.Put(b)
+			}
+			updated(t, d.poll(t), "pr, checks, conversation, labels")
+		})
+	}
+}
+
+// A pass starts no update past its window, and the PRs it leaves keep their
+// signs, so the next pass reads them.
+func TestThePollStartsNoUpdatePastItsWindow(t *testing.T) {
+	d := newWatched(t)
+	eight := *d.pr
+	eight.Facts.Number, eight.Facts.URL, eight.Facts.ID = 8, "https://github.com/acme/widgets/pull/8", "PR_8"
+	d.github.Put(&eight)
+	md := maps.Clone(d.md)
+	md["pr_url"], md["pr_number"] = eight.Facts.URL, "8"
+	d.store.Put(fake.Bead{ID: "tk-8", Status: "blocked", Assignee: refinery, Metadata: md})
+	// Each read of the clock moves it 20 seconds: PR 7's update starts 40
+	// seconds in and reads it three times, so PR 8's would start 120 seconds in.
+	d.w.Now = func() time.Time { d.clock = d.clock.Add(20 * time.Second); return d.clock }
+	rep, err := d.w.Poll(pr.PassOptions{Window: 90 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Updates) != 1 || rep.Updates[0].Bead != bead || !slices.Equal(rep.Late, []string{eight.Facts.URL}) {
+		t.Fatalf("the pass updated %+v and left %v, want PR 7 updated and PR 8 left", rep.Updates, rep.Late)
+	}
+	if d.saved(t, "tk-8") != nil {
+		t.Fatal("a PR the window left was saved")
+	}
+}
+
+// wrenches gives the watched world a second owned PR, number 8 in the
+// repository acme/wrenches, whose name sorts after acme/widgets, with its bead
+// tk-8.
+func wrenches(d *watched) {
+	eight := *d.pr
+	eight.Facts.Number, eight.Facts.ID = 8, "PR_8"
+	eight.Facts.Repository, eight.Facts.URL = "acme/wrenches", "https://github.com/acme/wrenches/pull/8"
+	d.github.Put(&eight)
+	md := maps.Clone(d.md)
+	md["pr_url"], md["pr_number"] = eight.Facts.URL, "8"
+	d.store.Put(fake.Bead{ID: "tk-8", Status: "blocked", Assignee: refinery, Metadata: md})
+}
+
+// A pass takes the PRs whose update is due, from every repository it asked, in
+// the order Shuffle gives them.
+func TestAPassTakesTheDuePRsOfEveryRepositoryInAShuffledOrder(t *testing.T) {
+	d := newWatched(t)
+	wrenches(d)
+	var given []string
+	d.w.Shuffle = func(ids []string) {
+		given = slices.Clone(ids)
+		slices.Reverse(ids)
+	}
+	rep := d.poll(t)
+	if !slices.Equal(given, []string{prURL, "https://github.com/acme/wrenches/pull/8"}) {
+		t.Fatalf("the shuffle was given %v, want the due PRs of both repositories", given)
+	}
+	var order []string
+	for _, u := range rep.Updates {
+		order = append(order, u.Bead)
+	}
+	if !slices.Equal(order, []string{"tk-8", bead}) || len(rep.Failed) != 0 || rep.Repositories != 2 {
+		t.Fatalf("the pass updated %v and failed %v over %d repositories, want the shuffle's order",
+			order, rep.Failed, rep.Repositories)
+	}
+}
+
+// slowSeven is GitHub with a conversation read of PR 7 that fails once elapse
+// has moved the clock past the pass's window.
+type slowSeven struct {
+	pr.Watch
+	elapse func()
+}
+
+func (s slowSeven) Conversation(repo string, n int) (*gh.Conversation, error) {
+	if n == 7 {
+		s.elapse()
+		return nil, errors.New("github: the conversation read of PR 7 failed after a slow page")
+	}
+	return s.Watch.Conversation(repo, n)
+}
+
+// A PR whose update keeps failing after taking a pass's whole window holds no
+// other PR back: over a few passes of the cheap question or the net, the
+// shuffled order reaches the PR behind it, in another repository.
+func TestAPRWhoseUpdateKeepsFailingSlowlyHoldsNoOtherBack(t *testing.T) {
+	for _, net := range []bool{false, true} {
+		name, window := "the cheap question", 90*time.Second
+		if net {
+			name, window = "the net", 3*time.Minute
+		}
+		t.Run(name, func(t *testing.T) {
+			d := newWatched(t)
+			wrenches(d)
+			slow := slowSeven{Watch: d.github, elapse: func() { d.clock = d.clock.Add(window + time.Second) }}
+			d.w.GitHub = func(string) pr.Watch { return slow }
+			src := rand.New(rand.NewPCG(1, 2))
+			d.w.Shuffle = func(ids []string) { src.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] }) }
+			pass := d.w.Poll
+			if net {
+				pass = d.w.Compare
+			}
+			passes := 0
+			for ; passes < 10 && d.saved(t, "tk-8") == nil; passes++ {
+				rep, err := pass(pr.PassOptions{Window: window})
+				if err != nil || rep.Failed[prURL] == nil {
+					t.Fatalf("pass %d reported %+v, %v, want PR 7 failed", passes, rep, err)
+				}
+			}
+			if d.saved(t, "tk-8") == nil {
+				t.Fatalf("PR 8 was not saved in %d passes behind PR 7's slow failing update", passes)
+			}
+		})
+	}
+}
+
+func TestARefreshOfAPRNoLiveBeadOwnsSavesNothing(t *testing.T) {
+	d := newWatched(t)
+	got, err := d.w.Refresh("https://github.com/acme/widgets/pull/99")
+	if err != nil || got.Action != pr.ActUnowned {
+		t.Fatalf("a refresh of an unowned PR answered %+v, %v", got, err)
+	}
+	if len(d.github.Reads()) != 0 || len(d.store.Writes()) != 0 {
+		t.Fatalf("it read %v and wrote %+v", d.github.Reads(), d.store.Writes())
+	}
+	if _, err := d.w.Refresh("not a url"); err == nil {
+		t.Fatal("a refresh of no PR's URL answered")
+	}
+}
+
+// Called alone, as a webhook's rule can call it, the update reads the PR's signs
+// itself, and then what they say moved.
+func TestARefreshAloneReadsThePRsSignsItself(t *testing.T) {
+	d := newWatched(t)
+	got, err := d.w.Refresh(prURL)
+	if err != nil || got.Action != pr.ActSaved || got.Bead != bead {
+		t.Fatalf("the refresh answered %+v, %v", got, err)
+	}
+	if reads := d.github.Reads(); !slices.Equal(reads, []string{"Signs", "PullRequestPart+checks", "Login", "Conversation"}) {
+		t.Fatalf("the refresh read %v", reads)
+	}
+	if asked := d.github.SignsAsked(); len(asked) != 1 || !slices.Equal(asked[0], []int{7}) {
+		t.Fatalf("the refresh asked %v, want its PR alone", asked)
+	}
+	got, err = d.w.Refresh(prURL)
+	if err != nil || got.Action != pr.ActUnchanged {
+		t.Fatalf("a refresh with nothing moved answered %+v, %v", got, err)
+	}
+}
+
+// The write is guarded on the status and assignee the update read under the
+// lock, so a bead that moved since gets nothing.
+func TestAnUpdateWritesNothingOnABeadThatMovedSinceItsRead(t *testing.T) {
+	d := newWatched(t)
+	d.store.BeforeUpdate = func(id string, _ []string) error {
+		b, _ := d.store.Row(id)
+		b.Status = "closed"
+		d.store.Put(b)
+		return nil
+	}
+	rep := d.poll(t)
+	if err := rep.Failed[prURL]; err == nil || !strings.Contains(err.Error(), "moved") {
+		t.Fatalf("an update on a bead that moved failed as %v", err)
+	}
+	if d.saved(t, bead) != nil {
+		t.Fatal("the update wrote over a bead that moved")
+	}
+}
+
+// The saved read names its parts and fields as the key's declaration says.
+func TestTheSavedReadsFields(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	var parts map[string]map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(d.row(t, bead).Metadata["pr_github_read"]), &parts); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"pr": {"base", "draft", "head", "head_branch", "id", "in_merge_queue", "merge_commit", "merge_queue_enabled",
+			"merge_state", "merged_at", "number", "read_at", "repository", "signs", "state", "url"},
+		"checks": {"head", "read_at", "runs", "signs"},
+		"conversation": {"approvals", "approvers", "awaiting", "feedback", "read_at", "requesters", "review_decision",
+			"signs", "since", "unresolved"},
+		"labels": {"names", "read_at"},
+	}
+	signs := map[string][]string{
+		"pr":           {"base", "base_tip", "draft", "head", "state", "updated_at"},
+		"checks":       {"check_runs", "contexts", "head", "rollup", "statuses"},
+		"conversation": {"comments", "dismissed", "newest_post", "reviews", "updated_at"},
+	}
+	if got := slices.Sorted(maps.Keys(parts)); !slices.Equal(got, []string{"checks", "conversation", "labels", "pr"}) {
+		t.Fatalf("the saved read's parts are %v", got)
+	}
+	for part, fields := range want {
+		if got := slices.Sorted(maps.Keys(parts[part])); !slices.Equal(got, fields) {
+			t.Errorf("the %s part names %v, want %v", part, got, fields)
+		}
+		if s, ok := signs[part]; ok {
+			var named map[string]json.RawMessage
+			if err := json.Unmarshal(parts[part]["signs"], &named); err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Sorted(maps.Keys(named)); !slices.Equal(got, s) {
+				t.Errorf("the %s part's signs name %v, want %v", part, got, s)
+			}
+		}
+	}
+	// Only the runs the PR requires are kept.
+	if got := string(parts["checks"]["runs"]); !strings.Contains(got, `"name":"test"`) || strings.Contains(got, `"size"`) {
+		t.Errorf("the checks' runs encode as %s, want the required runs alone", got)
+	}
+	var unresolved []string
+	if err := json.Unmarshal(parts["conversation"]["unresolved"], &unresolved); err != nil || unresolved == nil {
+		t.Errorf("unresolved encodes as %s, want a list", parts["conversation"]["unresolved"])
+	}
+	var approvals []pr.Approval
+	if err := json.Unmarshal(parts["conversation"]["approvals"], &approvals); err != nil || approvals == nil {
+		t.Errorf("approvals encodes as %s, want a list", parts["conversation"]["approvals"])
+	}
+}
+
+// The PR part keeps the PR's node id and, once it merged, its merge commit and
+// when it merged.
+func TestThePRPartKeepsItsNodeIDAndItsMerge(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Facts.ID = "PR_7"
+	d.pr.Facts.State, d.pr.Facts.MergeCommit, d.pr.Facts.MergedAt = "MERGED", strings.Repeat("e", 40), "2026-11-16T09:00:00Z"
+	d.poll(t)
+	p := d.saved(t, bead).PR
+	if p.ID != "PR_7" || p.MergeCommit != strings.Repeat("e", 40) || p.MergedAt != "2026-11-16T09:00:00Z" {
+		t.Fatalf("the PR part keeps id %q, merge commit %q, merged at %q", p.ID, p.MergeCommit, p.MergedAt)
+	}
+}
+
+// The conversation keeps each approval that stands, whoever gave it, with the
+// commit it was given on and the newest inline comment it carries that is
+// feedback, which a withdrawal's dismissal would retire. A dismissed review, a
+// request for changes and a comment are no approval, and an inline comment the
+// definition reads as no feedback is not kept.
+func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
+	d := newWatched(t)
+	review := func(id int64, state, login, commit string) gh.Review {
+		return gh.Review{ID: id, State: state, Author: login, AuthorCanPush: login != "visitor", Commit: commit,
+			SubmittedAt: "2026-11-16T08:00:00Z"}
+	}
+	d.pr.Reviews = []gh.Review{review(102, "APPROVED", "visitor", other), review(100, "APPROVED", "operator", head),
+		review(101, "DISMISSED", "operator", other), review(103, "CHANGES_REQUESTED", "reviewer", head),
+		review(104, "COMMENTED", "reviewer", head)}
+	carriedBy := func(id, review int64) gh.Comment {
+		return gh.Comment{ID: id, Author: "operator", Body: "look", CreatedAt: "2026-11-16T08:00:00Z",
+			Review: &gh.CommentReview{ID: review, State: "APPROVED", SubmittedAt: "2026-11-16T08:00:00Z"}}
+	}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carriedBy(300, 100), carriedBy(302, 100), carriedBy(301, 102)}}}
+	d.rule.notFeedback[302] = true
+	d.poll(t)
+	got := d.saved(t, bead).Conversation.Approvals
+	want := []pr.Approval{{ID: 100, Author: "operator", Commit: head, Inline: 300}, {ID: 102, Author: "visitor", Commit: other, Inline: 301}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("the conversation keeps approvals %+v, want %+v", got, want)
+	}
+}
+
+// The newest post time is the latest time any post changed, an edit's
+// included, and the unresolved threads are kept, sorted.
+func TestTheConversationKeepsItsNewestPostAndUnresolvedThreads(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Threads = []gh.Thread{
+		{ID: "T2", Comments: []gh.Comment{{ID: 400, Author: "operator", Body: "a", CreatedAt: "2026-11-16T08:00:00Z",
+			UpdatedAt: "2026-11-16T09:30:00Z"}}},
+		{ID: "T1", Resolved: true, Comments: []gh.Comment{{ID: 401, Author: "operator", Body: "b",
+			CreatedAt: "2026-11-16T08:00:00Z", UpdatedAt: "2026-11-16T08:00:00Z"}}},
+		{ID: "T0", Comments: []gh.Comment{{ID: 402, Author: "operator", Body: "c", CreatedAt: "2026-11-16T08:00:00Z",
+			UpdatedAt: "2026-11-16T08:00:00Z"}}},
+	}
+	d.pr.Comments = []gh.IssueComment{{ID: 500, Author: "operator", Body: "d", CreatedAt: "2026-11-16T07:00:00Z",
+		UpdatedAt: "2026-11-16T07:00:00Z"}}
+	d.poll(t)
+	c := d.saved(t, bead).Conversation
+	if c.Signs.NewestPost != "2026-11-16T09:30:00Z" || !slices.Equal(c.Unresolved, []string{"T0", "T2"}) {
+		t.Fatalf("kept newest post %q and unresolved %v", c.Signs.NewestPost, c.Unresolved)
+	}
+}
