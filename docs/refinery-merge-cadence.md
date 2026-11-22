@@ -668,7 +668,10 @@ holds only owned PRs hides none behind it, and has the writer,
 shuffled order, so a PR whose clear is slow or keeps failing holds no other
 back, and starts none past its 3 minutes. The writer reads each PR's labels
 itself first. A clear that does not land fails the pass, and the next pass's
-search finds the PR again.
+search finds the PR again. At 20 a pass and a pass an hour, the net clears
+about 20 such PRs an hour in a rig's repository, so the 586 PRs in gc-toolkit's
+that carried the city's labels with no live bead owning them on 2026-11-20 take
+about 30 hours to clear, each removal showing in that PR's timeline.
 The net searches no other repository, since a PR there is owned by the beads
 of that repository's rig.
 
@@ -701,24 +704,23 @@ it retires and the agents' own `gh` calls. A pass of the cheap question costs 1
 point for each 50 PRs a rig owns, and a rig that owns none asks nothing, so it
 costs 60 points an hour for each rig that owns a PR. A pass of the net costs 1
 or 2 points for each 10 owned PRs, more for a PR whose lists run past a page,
-and 1 point for each page of its label search. The landing order reads GitHub
-only for a record it decides, about 5 points for a PR at the head the refinery
-validated, once its PR moved or its bead changed and at least once an hour,
-and for a label write it owes, which reads the PR and its labels
-([The landing order](#the-landing-order)). So a change to a PR costs about 7
-points, its one-PR update and the decision it makes due, beside a label write
-when the change moves the PR's status.
+and 1 point for each page of its label search, once an hour. The landing order
+reads GitHub to learn nothing: a run in which no record owes an act asks
+GitHub nothing, and a merge's re-read costs about 5 points
+([The landing order](#the-landing-order)). So a change to a PR costs about 2
+points, the one-PR update that saves it, and each merge about 5 more.
 
-On 2026-11-20 the city's account had 22 open PRs, in 5 of the 6 rigs. Before
-any of them changes, that costs about 500 points an hour: about 300 for the
-cheap question, 80 for the net and at most 110 for the landing order's hourly
-decisions. At 100 open PRs it is about 1,100 points an hour, and up to about
-1,800 when each PR changes about once an hour.
+On 2026-11-22 the city's account had 20 open PRs, in all 6 of its rigs. Before
+any of them changes, that costs about 380 points an hour: about 360 for the
+cheap question and about 15 for the net. At 100 open PRs it is about 390 points
+an hour, and about 600 when each PR changes about once an hour.
 
 The design is sized for about 100 open PRs across the city. The cost grows
-with the PRs the city owns and with how often they change, and the likely cap
-is where the allowance runs out, somewhere around 300 to 500 open PRs. More
-than 100 open PRs is a known issue, and no code guards it.
+with the rigs that own a PR, with the PRs past each 50 a rig owns, and with how
+often they change, and the likely cap is where the allowance runs out: somewhere
+around 1,000 to 1,500 open PRs when each changes about once an hour, less what
+the city's other readers of GitHub take. More than 100 open PRs is a known
+issue, and no code guards it.
 
 ## The landing order
 
