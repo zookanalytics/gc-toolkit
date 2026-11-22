@@ -368,11 +368,11 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   work on a PR, whether it opens one or reworks the PR under discussion, the
   next decision is the approval. The sitting comes back
   through its own task: while the work is out, its conversation waits in the
-  store on a return gate, and Gas City sleeps the sitting and wakes it with its
-  thread when the return is due. When a round ends at the head the refinery
-  validated, the landing order puts the conversation's hold on the PR's merge
-  and closes that work's return gate. A sitting stays for one piece of work at
-  a time. A visit to the sitting and a fresh context for it leave the store
+  store on a gate, and Gas City sleeps the sitting and wakes it with its
+  thread when the return is due. Once the city has finished with the PR and
+  only the operator's part is left, the landing order puts the conversation's
+  hold on the PR's merge and closes that work's gate. A sitting stays for one
+  piece of work at a time. A visit to the sitting and a fresh context for it leave the store
   alone, so the return outlasts both. On each return the
   sitting checks the work against each item that was agreed, tells the operator
   which items are covered and where the work departs, with its recommendation,
