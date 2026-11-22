@@ -235,8 +235,11 @@ ask, and an edit of a post files nothing new. With the lock free, once a mark
 has landed, the one-PR update reads the PR's conversation again, since a
 reaction moves no sign, so the saved read shows the marks. A take takes its
 place among the acts in the shuffled order, under the same 45 and 30 seconds,
-and its line's action is taken. A take that does not complete leaves its posts
-untaken in the saved read, where they hold the PR's merge, and the run exits 2.
+and its line's action is taken. Once a mark has landed it starts no post with
+less than 10 of its 30 seconds left, which it keeps for that read, and leaves
+the posts it did not reach for the next run, its action then left. A take that
+does not complete leaves its posts untaken in the saved read, where they hold
+the PR's merge, and the run exits 2.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the

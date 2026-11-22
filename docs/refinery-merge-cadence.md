@@ -869,7 +869,10 @@ cheap question reads, so once a mark has landed and the lock is free, the act
 has the one-PR update read the PR's conversation again, and the saved read
 shows the marks before the next run decides. A take is an act like a record's,
 in the shuffled order, under the same 45 and 30 seconds, and its line's action
-is `taken`. One whose filing, mark or read of the conversation did not
+is `taken`. Only that read saves the marks, so once a mark has landed the take
+starts no post with less than 10 of its 30 seconds left, and it leaves the
+posts it did not reach for the next run, which starts from them (`left`). One
+whose filing, mark or read of the conversation did not
 complete leaves its posts untaken in the saved read, where each holds the PR's
 merge, and the run exits 2. The merge's own re-read applies the same condition,
 so a post made seconds before a merge holds it though no saved read held it

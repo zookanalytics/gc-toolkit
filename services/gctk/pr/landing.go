@@ -367,7 +367,9 @@ const (
 	ActSkipped = "skipped"
 	// ActLeft: the run had used its window before it reached the record's act,
 	// or the act had less of its bound left than a review run's pour reserves
-	// (pourReserve), so the next run acts on it.
+	// (pourReserve), so the next run acts on it, or a take had less of its bound
+	// left than the read that saves its marks reserves (refreshReserve), so the
+	// next run takes the posts it left.
 	ActLeft = "left"
 	// ActFailed: a write or a read of the store failed in a way the next run may
 	// not clear.

@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -234,6 +235,50 @@ func TestAPostWhoseMarkFailedIsMarkedAgainWithNoSecondAsk(t *testing.T) {
 	}
 	if n := len(d.asksFiled()); n != 4 {
 		t.Fatalf("the take filed %d asks over two runs, want one for each of the four posts", n)
+	}
+}
+
+// A take keeps the last of its bound for the read of the conversation that
+// saves its marks: once a mark has landed with less than that left, it starts
+// no other post and leaves the rest for the next run, whose saved read holds
+// only the posts it left. So a PR with more posts than one act can take has
+// them taken over runs, each starting where the last one's marks were saved.
+// Here an act's bound is shorter than the reserve, so each run takes one post.
+func TestATakeKeepsTimeForTheReadThatSavesItsMarks(t *testing.T) {
+	d := taking(t)
+	refresh := d.l.RefreshConversation
+	d.l.RefreshConversation = func(ctx context.Context, url string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return refresh(ctx, url)
+	}
+	d.refresh(t)
+	nodes := []string{"PRR_150", "PRR_160", "PRRC_500", "IC_700"}
+	for i, node := range nodes {
+		d.asked = len(d.github.Asks())
+		take, _ := takeOf(t, d.reconcile(t, pr.Options{Stop: 5 * time.Second}))
+		if i < len(nodes)-1 {
+			is(t, take, pr.ActLeft)
+			says(t, take, "for the next run", "the read of the conversation that saves the marks")
+		} else {
+			is(t, take, pr.ActTaken)
+		}
+		if got := d.marked(); !slices.Equal(got, []string{node + " EYES"}) {
+			t.Fatalf("run %d marked %q, want %s alone", i+1, got, node)
+		}
+		var left []string
+		for _, p := range d.savedConversation(t).Untaken {
+			left = append(left, p.Node)
+		}
+		if n := len(d.asksFiled()); n != i+1 || !slices.Equal(left, nodes[i+1:]) {
+			t.Fatalf("after run %d the take has filed %d asks and the saved read holds %q untaken, want %d and %q",
+				i+1, n, left, i+1, nodes[i+1:])
+		}
+	}
+	d.asked = len(d.github.Asks())
+	if take, _ := takeOf(t, d.reconcile(t, pr.Options{Stop: 5 * time.Second})); take.Action != "" || len(d.marked()) != 0 {
+		t.Fatalf("a run once every post was taken took %+v and marked %q", take, d.marked())
 	}
 }
 

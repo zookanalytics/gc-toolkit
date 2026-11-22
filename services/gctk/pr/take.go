@@ -30,12 +30,23 @@ import (
 // with no second ask, and a post edited after its take, whose text no reason
 // holds, is filed once. A take that does not complete leaves its posts untaken
 // in the saved read, where they hold the PR's merge (unhandled), and the run
-// reports it as a retry, so the run exits non-zero.
+// reports it as a retry, so the run exits non-zero. One that keeps the last of
+// its bound for the read once a mark has landed (refreshReserve) leaves the
+// posts it did not reach for the next run.
 
 // takenMark is the reaction the take leaves on a post once its ask is filed:
 // the city's mark that it has the post and owes it an answer, which
 // gc_city_taken in assets/scripts/pr-post.sh reads.
 const takenMark = "EYES"
+
+// refreshReserve is how much of its bound a take keeps, once a mark has landed,
+// for the one-PR update's read of the PR's conversation, the only write that
+// shows the saved read the marks. A take that spent its whole bound on posts
+// would save none of its marks, and each next run, finding every post still
+// untaken, would start again from the first, so a PR with more posts than one
+// act can take would never have them all taken. The read is a few GitHub and
+// store calls, which take seconds.
+const refreshReserve = 10 * time.Second
 
 // takeOf is the take one owned PR owes: the bead that owns it, the PR's URL as
 // the bead names it, and the PR's identity.
@@ -108,7 +119,8 @@ func (u *run) untakenOn(o owned) ([]Post, string) {
 // post once its ask is filed (takeLocked), and once a mark has landed and the
 // lock is free it has the one-PR update read the PR's conversation again
 // (RefreshConversation). A filing, a mark or a read again that does not
-// complete makes it a retry, and the next run takes the posts again.
+// complete makes it a retry, and the next run takes the posts again. Posts it
+// left for that read's reserve make it left, and the next run takes them.
 func (u *run) take(t takeOf, stop time.Duration) RunOutcome {
 	ctx, cancel := bounded(stop)
 	defer cancel()
@@ -137,9 +149,10 @@ func (u *run) take(t takeOf, stop time.Duration) RunOutcome {
 // it reads the bead again, decides from that read which posts are untaken
 // (untakenOn), and for each files the post's ask on the bead (review.FileAsk),
 // then marks the post with takenMark. A post whose ask did not file is not
-// marked, so the mark never stands without its ask. It returns the take's
-// outcome, whose detail opens with the take it is (takeOf.of), and how many
-// marks landed.
+// marked, so the mark never stands without its ask. Once a mark has landed it
+// starts no post with less than refreshReserve of ctx left. It returns the
+// take's outcome, whose detail opens with the take it is (takeOf.of), and how
+// many marks landed.
 func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
@@ -174,11 +187,15 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	noChecks := func(string) (review.Index, error) {
 		return review.Index{}, errors.New("a post's ask sends back no check")
 	}
-	var took, failed []string
+	var took, failed, left []string
 	marked := 0
 	for _, p := range posts {
 		if ctx.Err() != nil {
 			failed = append(failed, p.name()+" was not reached")
+			continue
+		}
+		if end, ok := ctx.Deadline(); ok && marked > 0 && time.Until(end) < refreshReserve {
+			left = append(left, p.name())
 			continue
 		}
 		ask, filed, err := review.FileAsk(u.Ledger, review.AskRequest{Bead: o.id, Reason: p.reason(o.number)}, noChecks)
@@ -200,12 +217,22 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	}
 	out := RunOutcome{Bead: t.bead, Action: ActTaken,
 		Detail: fmt.Sprintf("%s took %s, each marked with the city's %s", t.of(), strings.Join(took, "; "), takenMark)}
+	reserved := ""
+	if len(left) > 0 {
+		reserved = fmt.Sprintf("left %s for the next run, keeping the last %s of the act for the read of the "+
+			"conversation that saves the marks", strings.Join(left, ", "), refreshReserve)
+		out.Action = ActLeft
+		out.Detail += ", and " + reserved
+	}
 	if len(failed) > 0 {
 		out.Action = ActRetry
 		out.Detail = fmt.Sprintf("%s did not complete, and the next run makes it again for what is left: %s", t.of(),
 			strings.Join(failed, "; "))
 		if len(took) > 0 {
 			out.Detail += "; it took " + strings.Join(took, "; ")
+		}
+		if reserved != "" {
+			out.Detail += "; it " + reserved
 		}
 	}
 	return out, marked
