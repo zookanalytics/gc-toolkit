@@ -193,11 +193,10 @@ performer; the full transition table with writers is
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
    head.
-8. **Merge.** The landing order decides each PR on the pending record on the
-   read the PR watch saved on its bead. Before it has GitHub merge one at the
-   head the refinery validated, the one-PR update re-reads the PR in full, and
-   the order merges it only once the evaluator reads it ready on that read. It
-   closes the bead once the merge commit is on the target
+8. **Merge.** Before the landing order has GitHub merge a PR on the pending
+   record at the head the refinery validated, the one-PR update re-reads the
+   PR in full, and the order merges it only once the evaluator reads it ready
+   on that read. It closes the bead once the merge commit is on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
@@ -502,30 +501,20 @@ first. Either way the change is a decision on the record, not a drift.
   `gctk pr status` derive a PR's status by the evaluator's one rule from the
   GitHub read the one-PR update saved on the PR's bead and the store as it is
   at the read. Every reader of GitHub draws on one API allowance.
-- **GitHub's data serves three uses in two loops, and only the merge checks
-  GitHub first.** The PR watch, the first loop, asks GitHub which PRs the city
-  owns have changed, every minute and in a full comparison every hour, and its
-  one-PR update saves each changed PR's read on its bead. That saved read serves
-  the displays and the landing order alike. The landing order, the second loop,
-  finds and does its work from the saved read and the store's record of what
-  the city did, and reads GitHub to learn nothing. Whether an act checks GitHub
-  first follows what being wrong costs, once GitHub's own rules have refused
-  what they refuse, such as a merge an approval or a required check does not
-  cover. A merge is the one act no later run takes back, so the one-PR update
-  re-reads the PR in full before it, and the order decides the merge on what
-  that read saved. Every other act reads of GitHub only what it changes, so a
-  saved read out of date delays an act, or starts one a minute early that a
-  later run corrects. The evaluator's answer is computed at each read and stored
-  nowhere.
+- **GitHub's data serves three uses in two loops: learning what changed, the
+  saved read the city shows and works from, and the merge's check.** The PR
+  watch, the first loop, learns which PRs the city owns changed and keeps each
+  one's GitHub read saved on its bead. The landing order, the second loop,
+  decides each record on that saved read and the store's record of what the
+  city did, and never reads GitHub to learn whether a record has work. The
+  evaluator's answer is computed at each read and stored nowhere.
+- **Only the merge checks GitHub before it acts,** since a merge made in error
+  puts work on the target, which no run takes back. Every other act reads of
+  GitHub only what it changes.
 - **A review, a hold or a change of base that arrives after the merge's re-read
   is not part of the landing order's decision to merge,** even when GitHub
   carries out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
-- **The landing order decides every record at each run,** so a change on
-  GitHub reaches its decision once the PR watch saves it: within about a minute
-  for a change a cheap sign shows, and within the hour for one only the full
-  comparison sees. It keeps the labels of each PR the city owns equal to what
-  the store derives.
 - **An approval stands across a push until triage reads the change as
   material.**
 - **No city push rewrites or overwrites a PR's commits,** so the PR keeps the
