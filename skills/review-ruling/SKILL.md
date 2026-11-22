@@ -88,23 +88,33 @@ answer, so write the reason to the person who made the comment.
 An ask that carries a ruling the operator made, as a sitting's send-back does,
 is applied as ruled and not graded again.
 
-## A comment made while a question is open
-
-A person may comment while a question the run put to them waits on its gate.
-When the comment settles the question, or makes it moot, name the gate in its
-ask's ruling as `settles`, with `moot` set when the comment makes the question
-moot rather than answering it, and rule the question's own ask by the answer.
-The round's post closes the gate with the comment as its answer and says so in
-its reply. A comment that settles nothing leaves the gate open, and its reply
-says the question still stands. Rule the question's own ask a question again,
-naming the same gate.
-
 ## A question only a person can answer
 
 Put it to a human gate on the PR's bead with `review-run.sh question`, rule it
-question, and name the gate. The round goes no further on that point, and the
-run records no passed result while the gate is open. The next run starts from
-the answer.
+question, and name the gate. Its message is what the person reads on the board,
+so name in it the post it asks about, by the URL its ask's reason ends with.
+The round goes no further on that point, and the run records no passed result
+while the gate is open. Each question on the PR is such a gate, under a
+`review-question-<slug>` key, and this lists them, each open, or closed with
+the person's answer as its `close_reason`:
+
+```bash
+gc bd gate list <the PR's bead> --all --json
+```
+
+The run after the answer rules the question's own ask, the one whose post the
+gate's message names, by that answer.
+
+## A comment made while a question is open
+
+A person may comment while a question the run put to them waits on its gate,
+open in that list. When the comment settles the question, or makes it moot,
+name the gate in its ask's ruling as `settles`, with `moot` set when the
+comment makes the question moot rather than answering it, and rule the
+question's own ask by the answer. The round's post closes the gate with the
+comment as its answer and says so in its reply. A comment that settles nothing
+leaves the gate open, and its reply says the question still stands. Rule the
+question's own ask a question again, naming the same gate.
 
 ## A decline stands
 

@@ -292,8 +292,10 @@ head, the one the refinery validated, then each head its own repair pushes.
   findings as its step's output.
 - **Rule-and-repair** rules every finding by its own lane's rule for what blocks
   and every ask the round can take, by the bar the `review-ruling` skill holds.
-  It answers them on the PR in one comment for the head, which carries every
-  lane's verdict at that head, and pushes the round's fixes as one new head.
+  It pushes the round's fixes as one new head, and answers them on the PR: in
+  one comment for the head, which carries every lane's verdict at that head,
+  and at each person's post, where it was made
+  ([Operator feedback](#operator-feedback)).
 
 The loop's check, `gctk review passed --record`, passes an iteration when
 triage wrote the head it judged, every lane it picked wrote its verdict there,

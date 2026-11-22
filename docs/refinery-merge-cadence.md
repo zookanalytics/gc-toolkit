@@ -373,7 +373,7 @@ Each arm keeps the number the driver logs it under.
    park reach that PR. The park files only its human gate. The merge-in, the
    red-check fix and a feedback batch each go to the PR's review run as an ask
    (`gctk review ask`), with no rework child and, for a batch, no validation
-   pass: each comment becomes a human finding the run rules. The pass lists such an
+   pass: each comment becomes a human finding. The pass lists such an
    anchor at `pull_request_pending` on a blocked bead and at
    `pull_request_head_changed` on an open one, beside `pull_request` on an open
    one, which no bead carries. Each of its writes on such a bead is one plain
