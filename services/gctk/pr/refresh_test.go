@@ -229,8 +229,9 @@ func TestEachSignsMoveReadsItsRowOfTheTable(t *testing.T) {
 			[]string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
 		{"a merge", func(d *watched) { d.pr.Facts.State = "MERGED" },
 			[]string{"PullRequestPart"}, "pr"},
-		{"the draft flag", func(d *watched) { d.pr.Facts.IsDraft = true },
-			[]string{"PullRequestPart"}, "pr"},
+		{"the draft flag, whose ready transition starts workflows no sign shows yet", func(d *watched) {
+			d.pr.Facts.IsDraft = true
+		}, []string{"PullRequestPart+checks"}, "pr"},
 		{"the bead's provenance instant, which makes the saved read not current", func(d *watched) {
 			b, _ := d.store.Row(bead)
 			b.Metadata = maps.Clone(b.Metadata)
@@ -708,7 +709,7 @@ func TestTheSavedReadsFields(t *testing.T) {
 	want := map[string][]string{
 		"pr": {"base", "draft", "head", "head_branch", "id", "in_merge_queue", "merge_commit", "merge_queue_enabled",
 			"merge_state", "merged_at", "number", "read_at", "repository", "signs", "state", "url"},
-		"checks": {"head", "read_at", "runs", "signs"},
+		"checks": {"head", "read_at", "runs", "signs", "suites"},
 		"conversation": {"approvals", "approvers", "awaiting", "read_at", "requesters", "review_decision",
 			"signs", "since", "unresolved", "untaken"},
 		"labels": {"names", "read_at"},
@@ -928,5 +929,63 @@ func TestTheConversationKeepsItsNewestPostAndUnresolvedThreads(t *testing.T) {
 	c := d.saved(t, bead).Conversation
 	if c.Signs.NewestPost != "2026-11-16T09:30:00Z" || !slices.Equal(c.Unresolved, []string{"T0", "T2"}) {
 		t.Fatalf("kept newest post %q and unresolved %v", c.Signs.NewestPost, c.Unresolved)
+	}
+}
+
+// The checks part keeps each check suite at the head, with its status, its
+// creation time, how many check runs it holds and the Actions run behind it at
+// its attempt, and each required run's result with the suite that holds it and
+// its log, which the landing order's red-check acts read.
+func TestTheChecksPartKeepsEachSuiteAndTheSuiteOfEachResult(t *testing.T) {
+	d := newWatched(t)
+	d.pr.Suites[head] = []gh.CheckSuite{
+		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", Run: 101, Attempt: 2, Runs: []gh.CheckRun{
+			{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Required: true, URL: "https://ci/101/test"},
+			{Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE"}}},
+		{ID: 2, Status: "QUEUED", CreatedAt: "2026-11-16T08:10:00Z"},
+	}
+	d.poll(t)
+	c := d.saved(t, bead).Checks
+	wantSuites := []pr.SavedSuite{
+		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", Run: 101, Attempt: 2, CheckRuns: 2},
+		{ID: 2, Status: "QUEUED", CreatedAt: "2026-11-16T08:10:00Z"},
+	}
+	if !slices.Equal(c.Suites, wantSuites) {
+		t.Fatalf("the checks part keeps the suites %+v, want %+v", c.Suites, wantSuites)
+	}
+	want := []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Suite: 1, URL: "https://ci/101/test"}}
+	if !slices.Equal(c.Runs, want) {
+		t.Fatalf("the checks part keeps the runs %+v, want %+v", c.Runs, want)
+	}
+}
+
+// A checks part saved before the update read the suites holds none, and the
+// next pass reads the checks again though no sign of theirs moved.
+func TestAChecksPartSavedWithNoSuitesIsReadAgain(t *testing.T) {
+	d := newWatched(t)
+	d.poll(t)
+	b, _ := d.store.Row(bead)
+	b.Metadata = maps.Clone(b.Metadata)
+	var read map[string]map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(b.Metadata["pr_github_read"]), &read); err != nil {
+		t.Fatal(err)
+	}
+	delete(read["checks"], "suites")
+	raw, err := json.Marshal(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Metadata["pr_github_read"] = string(raw)
+	d.store.Put(b)
+	if s := d.saved(t, bead); s.Checks.Suites != nil {
+		t.Fatalf("the fixture kept the suites: %+v", s.Checks)
+	}
+	reads := len(d.github.Reads())
+	d.poll(t)
+	if got := d.readsSince(reads); !slices.Equal(got, []string{"Signs", "PullRequestPart+checks"}) {
+		t.Fatalf("the pass read %v, want the checks read again", got)
+	}
+	if s := d.saved(t, bead); s.Checks.Suites == nil {
+		t.Fatal("the checks read again saved no suites")
 	}
 }

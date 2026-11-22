@@ -317,7 +317,8 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 			MergeState: p.MergeStateStatus, InMergeQueue: p.InMergeQueue, MergeQueueEnabled: p.MergeQueueEnabled,
 			MergeCommit: p.MergeCommit, MergedAt: p.MergedAt, Signs: prSigns(s)}
 		if due.checks {
-			fresh.Checks = &SavedChecks{ReadAt: at, Head: p.ChecksAt, Runs: requiredRuns(p.Suites), Signs: checkSigns(s)}
+			fresh.Checks = &SavedChecks{ReadAt: at, Head: p.ChecksAt, Runs: requiredRuns(p.Suites),
+				Suites: savedSuites(p.Suites), Signs: checkSigns(s)}
 		}
 	}
 	if due.conversation {

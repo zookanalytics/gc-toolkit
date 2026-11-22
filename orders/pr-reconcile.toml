@@ -6,7 +6,11 @@
 # saved on each bead and the store alone, and reads GitHub to learn nothing. A
 # run decides every record each minute: a merge pinned to the head the
 # evaluator judged, or added to its base's merge queue with it, an exception, a
-# draft's ready transition, and a withdrawal's dismissals and close. Only the
+# draft's ready transition, and a withdrawal's dismissals and close. A red
+# required check or a conflict on an owned PR becomes an ask for the PR's review
+# run, a re-run of the failed jobs, a restart of a check that never reports or,
+# where the city cannot go on, a human gate, which the run withdraws once the
+# checks pass (gctk pr reconcile's help says when). Only the
 # merge checks GitHub first: the run has the one-PR update re-read the PR in
 # full and decides again on what that read saved before it requests the merge.
 # Its bead closes once the merge commit is on the freshly fetched target. A PR

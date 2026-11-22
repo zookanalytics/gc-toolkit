@@ -67,7 +67,8 @@ import (
 // act makes of what it changes, such as a withdrawal's of the reviews it
 // dismisses, a merge request or an enqueue pinned to the head the evaluator
 // judged, the PR's moves between draft and ready, the dismissal of a review,
-// and the reaction the take leaves on a post, named by its node id.
+// the reaction the take leaves on a post, named by its node id, and the re-run
+// of a GitHub Actions run's failed jobs, named by the run's id.
 type Hub interface {
 	GitHub
 	MergePullRequest(id, head string) error
@@ -76,6 +77,7 @@ type Hub interface {
 	ConvertToDraft(id string) error
 	DismissReview(repo string, number int, id int64, message string) error
 	AddReaction(subject, content string) error
+	RerunFailedJobs(repo string, run int64) error
 }
 
 // Checkout is the rig's clone, as the record reads it: its origin, the target
@@ -108,9 +110,11 @@ type Audit interface {
 }
 
 // Gates files a human gate on a bead under a key, or finds the one open there,
-// stopped once ctx ends.
+// and withdraws each one open there as moot, saying why, each stopped once ctx
+// ends.
 type Gates interface {
 	File(ctx context.Context, subject, key, message string) error
+	Withdraw(ctx context.Context, subject, key, message string) error
 }
 
 // Waker wakes a session and nudges it with a message, so a session that is
@@ -355,6 +359,25 @@ const (
 	// filed before, marked each post with the city's EYES, and had the one-PR
 	// update read the PR's conversation again.
 	ActTaken = "taken"
+	// ActAsked: a required check failed at the PR's head for a code cause, or
+	// GitHub reads an approved PR conflicting, and the run filed the ask for
+	// the PR's review run, or found the one filed before.
+	ActAsked = "asked"
+	// ActRerun: required checks failed at the PR's head for a cause no code
+	// change fixes, and the run re-ran the failed jobs of each GitHub Actions
+	// run that holds one, once at that head.
+	ActRerun = "rerun"
+	// ActRestarted: no required check reported at the head of an approved PR
+	// whose review passed, behind a check suite that never started, and the run
+	// returned the PR to draft and marked it ready, which starts its workflows
+	// again.
+	ActRestarted = "restarted"
+	// ActGated: a red check is one the city cannot go on with, and the run filed
+	// its human gate on the bead, or found it open.
+	ActGated = "gated"
+	// ActWithdrawn: every required check passes at the PR's head, and the run
+	// withdrew each red-check gate open on the bead as moot.
+	ActWithdrawn = "withdrawn"
 	// ActBlocked: the publication's second write had landed on a bead still
 	// open, and the run moved it to blocked.
 	ActBlocked = "blocked"
@@ -434,12 +457,15 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	var acts []string
 	writes := map[string]labelWrite{}
 	takes := map[string]takeOf{}
+	reds := map[string]redOf{}
 	for _, p := range plans {
 		switch {
 		case p.write != nil:
 			writes[p.id] = *p.write
 		case p.take != nil:
 			takes[p.id] = *p.take
+		case p.red != nil:
+			reds[p.id] = *p.red
 		case !p.due:
 			tally(p.out)
 			continue
@@ -464,6 +490,11 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 						"the run started no act past its %s, so the next run makes %s", o.Window, t.of())})
 					continue
 				}
+				if r, ok := reds[left]; ok {
+					report(RunOutcome{Bead: r.bead, Action: ActLeft, Detail: fmt.Sprintf(
+						"the run started no act past its %s, so the next run decides %s", o.Window, r.of())})
+					continue
+				}
 				report(RunOutcome{Bead: left, Action: ActLeft,
 					Detail: fmt.Sprintf("the run started no act past its %s, so the next run acts on the record", o.Window)})
 			}
@@ -478,6 +509,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 		if t, ok := takes[id]; ok {
 			tally(u.take(t, o.Stop))
+			if l.Yield > 0 && i < len(acts)-1 {
+				time.Sleep(l.Yield)
+			}
+			continue
+		}
+		if r, ok := reds[id]; ok {
+			tally(u.red(r, o.Stop))
 			if l.Yield > 0 && i < len(acts)-1 {
 				time.Sleep(l.Yield)
 			}
@@ -745,9 +783,10 @@ type act func(ctx context.Context, c carriedOut) RunOutcome
 // again once the one-PR update has re-read the PR in full (rereadAndDecide).
 // In a run's list of plans, due says the record owes an act, which its act
 // decides again under the record lock (one), a PR whose labels owe a write is
-// planned under its URL, with write holding the write, and a PR that owes a
-// take is planned under its bead's id with the word take before it, with take
-// holding the take.
+// planned under its URL, with write holding the write, a PR that owes a take
+// is planned under its bead's id with the word take before it, with take
+// holding the take, and a PR whose red checks or conflict owe an act under its
+// bead's id with the word red before it, with red holding the act.
 type plan struct {
 	id     string
 	out    RunOutcome
@@ -756,6 +795,7 @@ type plan struct {
 	due    bool
 	write  *labelWrite
 	take   *takeOf
+	red    *redOf
 }
 
 func none(s state, action, detail string) plan {
@@ -796,7 +836,7 @@ func (u *run) plan() ([]plan, error) {
 	}
 	if !every {
 		if len(ruled) == 0 {
-			return u.takePlans(pass)
+			return u.ownedPlans(pass, nil)
 		}
 		if _, err := pass.Find(ledger.Every()); err != nil {
 			return nil, err
@@ -861,11 +901,10 @@ func (u *run) plan() ([]plan, error) {
 		}
 		out = append(out, plan{id: r.ID, due: true})
 	}
-	takes, err := u.takePlans(pass)
+	out, err = u.ownedPlans(pass, out)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, takes...)
 	if u.Labels != nil {
 		writes, err := u.labelPlans(pass)
 		if err != nil {
@@ -873,6 +912,22 @@ func (u *run) plan() ([]plan, error) {
 		}
 		out = append(out, writes...)
 	}
+	slices.SortFunc(out, func(a, b plan) int { return strings.Compare(a.id, b.id) })
+	return out, nil
+}
+
+// ownedPlans is out with the takes and the red-check and conflict acts the
+// owned PRs owe after it (takePlans, redPlans), read through pass, in id order.
+func (u *run) ownedPlans(pass *ledger.Ledger, out []plan) ([]plan, error) {
+	takes, err := u.takePlans(pass)
+	if err != nil {
+		return nil, err
+	}
+	reds, err := u.redPlans(pass)
+	if err != nil {
+		return nil, err
+	}
+	out = append(append(out, takes...), reds...)
 	slices.SortFunc(out, func(a, b plan) int { return strings.Compare(a.id, b.id) })
 	return out, nil
 }

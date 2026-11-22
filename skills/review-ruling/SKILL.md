@@ -63,6 +63,14 @@ the file holding git's first line, then one paragraph for each file you resolved
 by hand, naming what collided, what you kept or wrote and why, and what a
 reviewer should check.
 
+A conflict goes to a person only when the target deleted code the branch edits,
+or defines a name the branch also adds, because whether the branch still has
+work to do is then the person's call. Abort the merge with `git merge --abort`
+and put it to them as A question only a person can answer says, naming the
+change on the target and the branch's code it meets. A rewrite of code the
+branch edits is no such question: resolve it, and its paragraph of the account
+says what the target changed there and how the branch's edit applies to it.
+
 ## A fix outside the reviewed diff
 
 A fix that reaches outside the diff the operator reviews, such as code the PR

@@ -168,14 +168,33 @@ func (d *land) timed() *clock {
 	return c
 }
 
-// gates records each gate filed, fails a filing when err is set, and while
-// stall is set answers no filing until the act's context ends.
+// gates records each gate filed and each key withdrawn, fails a filing when err
+// is set and a withdrawal when withdrawErr is, and while stall is set answers
+// no filing until the act's context ends.
 type gates struct {
-	mu       sync.Mutex
-	filed    []string
-	messages []string
-	err      error
-	stall    bool
+	mu          sync.Mutex
+	filed       []string
+	messages    []string
+	withdrawn   []string
+	err         error
+	withdrawErr error
+	stall       bool
+}
+
+func (g *gates) Withdraw(_ context.Context, subject, key, message string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.withdrawErr != nil {
+		return g.withdrawErr
+	}
+	g.withdrawn = append(g.withdrawn, subject+" "+key+" "+message)
+	return nil
+}
+
+func (g *gates) withdrawals() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.withdrawn)
 }
 
 func (g *gates) File(ctx context.Context, subject, key, message string) error {

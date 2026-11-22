@@ -586,7 +586,8 @@ what moved:
 | What moved | What it reads |
 |---|---|
 | the labels | nothing more, since the signs are the labels |
-| the base's tip, the state or the draft flag | the PR's own facts |
+| the base's tip or the state | the PR's own facts |
+| the draft flag | the PR's own facts with the required check runs at the head, in one request, since a ready transition starts workflows whose check suites no sign shows until they start a job |
 | when GitHub last changed the PR | the PR's own facts and its conversation |
 | the head, or the checks' rollup, total or counts | the PR's own facts with the required check runs at the head, in one request |
 | the comment, review or dismissed count | the conversation, in one request, and the PR's own facts, whose merge state reviews move |
@@ -628,6 +629,14 @@ it, and the definition is applied from that instant. A conversation read from
 another instant than the one the bead holds when the update writes, as when
 another writer stamped one meanwhile, is not saved, and the next pass reads it
 again.
+
+The checks part keeps each result of a check run the PR requires at the head,
+with the check suite that holds it and its log, and each check suite there:
+its status, when GitHub created it, how many check runs it holds, and the
+GitHub Actions run behind it with that run's attempt, which a re-run of the
+run's failed jobs raises in the same suite. The landing order's red-check acts
+read them ([The landing order](#the-landing-order)). A checks part saved with
+no suites is read again at the next pass.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
@@ -781,8 +790,9 @@ re-read is read by the decision under the lock. A re-read that finds the PR
 not ready leaves the saved read corrected, so the next run finds no merge to
 check. Every other act reads of GitHub only what it changes: a withdrawal
 reads the reviews it dismisses and their threads (below), a send-back and a
-landing fetch the branch they judge, and a label write leaves the PR's labels
-to their writer, which reads them itself. An exception, a ready transition, a
+landing fetch the branch they judge, a restart of a head's checks reads the
+PR's returns to draft before it makes one, and a label write leaves the PR's
+labels to their writer, which reads them itself. An exception, a ready transition, a
 review run's pour and a retired PR's close read nothing of GitHub first, so a
 saved read out of date can delay one or start one a minute early. After a ready
 transition or a pour started early, a later run decides the record again on the
@@ -877,6 +887,62 @@ complete leaves its posts untaken in the saved read, where each holds the PR's
 merge, and the run exits 2. The merge's own re-read applies the same condition,
 so a post made seconds before a merge holds it though no saved read held it
 yet.
+
+**A red check or a conflict.** A red check or a conflict on a PR becomes an ask
+on its bead, which the PR's review run works as its branch's one writer, and a
+human gate only where the city cannot go on. For each PR whose bead owns it on
+the record, is open or blocked and is assigned to nobody or to the refinery,
+while the saved read shows the PR open with its checks read at its head, an act
+under the record lock decides from the saved read and the store. It reads each
+required check by its newest result at the head: the result in the check suite
+created last that holds one for it, a skip aside.
+
+- Once every required check passes at the head, it withdraws each red-check
+  gate open on the bead, `pr-fix-unmoved.<n>`, `pr-fix-capped.<n>`,
+  `pr-fix-noncode.<n>` and `pr-check-unreported.<n>` for PR number `<n>`, as
+  moot (`human-gate.sh --retract`), whatever holds the bead.
+- Every other step waits for the record to be pending at the head the
+  refinery validated, and for nothing to hold the bead: a merge or rebase hold
+  set by hand, or an open human gate. A conversation on the PR holds only its
+  merge, so it holds none of them.
+- A PR GitHub reads `DIRTY`, or `BEHIND`, which holds its merge as `DIRTY`
+  does, gets an ask to merge its target in once it is approved and no open
+  bead other than an ask names its branch, such as a rework child. An
+  unapproved one gets nothing, and its label shows the conflict. Its checks
+  wait for that merge.
+- A required check that failed for a code cause, whose name is not a deploy's,
+  gets one ask for the head, naming the PR, the head, the failing checks with
+  their logs and the branch. An ask closed at the head while the PR is still
+  red there files `pr-fix-unmoved.<n>` in place of a second, and a red head
+  after three earlier heads each drew an ask files `pr-fix-capped.<n>` in
+  place of a fourth. A deploy's failed check files `pr-fix-noncode.<n>`.
+- A required check that timed out, was cancelled, failed to start, wants an
+  action or went stale has the failed jobs of the GitHub Actions run behind it
+  re-run, once per head and only once that run has finished. The head reads
+  re-run once a suite there that holds a required check shows its run at an
+  attempt above 1, which GitHub raises in the same suite at a re-run, so no key
+  records it. A failure at a head that reads re-run, a failure outside any
+  Actions run and a re-run GitHub refuses each file `pr-fix-noncode.<n>`, only
+  on an approved PR. An unapproved PR waits for its review, and a refused
+  re-run is asked for again at the next run.
+- An approved PR whose review passed at the head, which GitHub reads
+  `BLOCKED` with no required check reported there but a skip, behind a check
+  suite that has stayed queued with no check runs for ten minutes since GitHub
+  created it, is returned to draft and marked ready again, which sends the
+  `pull_request` event that starts its workflows again. The act first reads
+  the PR's returns to draft from its timeline, and one made after the head's
+  first suite was created is its own, since a writer of the branch
+  returns the PR to draft before it pushes. So it restarts the checks once per
+  head, waits ten minutes from its own return to draft, and then files
+  `pr-check-unreported.<n>`.
+
+Each gate's message says what the person can do, and that the gate is
+withdrawn once every required check passes at the head. The act takes its
+place in the shuffled order, under the same 45 and 30 seconds, and its line's
+action names its step: `asked`, `rerun`, `restarted`, `gated` or `withdrawn`. A
+step that does not complete, such as a re-run GitHub did not answer or a gate
+that did not file, records nothing, the next run decides it again, and the run
+exits 2.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the

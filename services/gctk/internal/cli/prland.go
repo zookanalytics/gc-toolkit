@@ -241,6 +241,40 @@ the posts it did not reach for the next run, its action then left. A take that
 does not complete leaves its posts untaken in the saved read, where they hold
 the PR's merge, and the run exits 2.
 
+A red check or a conflict on such a PR becomes an ask on its bead, which its
+review run works, or a human gate where the city cannot go on. While the saved
+read shows the PR open with its checks read at its head, an act under the
+record lock reads each required check by its newest result there, a skip
+aside. Once every required check passes, it withdraws each red-check gate open
+on the bead (pr-fix-unmoved, pr-fix-capped, pr-fix-noncode and
+pr-check-unreported, each keyed .<number>) through human-gate.sh --retract,
+whatever holds the bead. Its other steps wait for the record to be pending at
+the head the refinery validated, and for no hold set by hand and no human gate
+to hold the bead; a conversation holds only the merge:
+
+  - an approved PR GitHub reads DIRTY or BEHIND, whose branch no open bead but
+    its asks names: an ask to merge its target in, and nothing for its checks
+  - a required check that failed for a code cause: one ask for the head, then
+    pr-fix-unmoved once an ask at the head closed with the head still red, and
+    pr-fix-capped once three earlier heads each drew an ask
+  - a deploy's failed check: pr-fix-noncode
+  - a check that timed out, was cancelled, failed to start, wants an action or
+    went stale: the failed jobs of the GitHub Actions run behind it re-run,
+    once per head and once that run has finished, the head reading re-run
+    once a suite there shows its run at an attempt above 1; then, on an
+    approved PR, pr-fix-noncode for a failure at a head that reads re-run, one
+    outside any Actions run, or a re-run GitHub refuses, which an unapproved
+    PR asks for again at the next run
+  - an approved PR whose review passed, which GitHub reads BLOCKED with no
+    required check reported but a skip, behind a check suite queued with no
+    check runs for ten minutes: one return to draft and ready transition per
+    head, a return made since the head's first suite being the act's own, as
+    its timeline reads, then pr-check-unreported ten minutes after it
+
+It takes its place among the acts in the shuffled order, under the same 45 and
+30 seconds, and its line's action is asked, rerun, restarted, gated or
+withdrawn. A step that does not complete records nothing, and the run exits 2.
+
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the
 run's 45 seconds, in a clone that carries one (render-seed-audit.sh). The
@@ -251,13 +285,14 @@ at a later landing.
 
 It acts only on a bead it reads under the lock as carrying the marker, as an
 open or blocked bead on the record that carries a ruling's disposition, with
-or without the marker, or, for a take, as an open or blocked bead that owns a
-PR on the record, with each write guarded on the status and assignee it read.
+or without the marker, or, for a take and for a red check or a conflict, as an
+open or blocked bead that owns a PR on the record, with each write guarded on
+the status and assignee it read.
 A bead's assignee says who works it now: nobody while its PR waits, and the
 refinery --refinery names while it validates a head. A bead assigned to anyone
 else is theirs: the run writes nothing to it, requests no merge, pours no
-review run and takes none of its PR's posts, and works it again once the
-assignee is gone.
+review run, takes none of its PR's posts and files nothing for its checks, and
+works it again once the assignee is gone.
 Each outcome prints on a line of its own, as <bead> <action>: <detail>, where
 a label write's action is labeled and a take's is taken.
 
@@ -639,6 +674,17 @@ func (g gates) File(subject, key, message string) error {
 	return nil
 }
 
+// Withdraw resolves each open human gate under key that blocks subject, with
+// the reason moot: message (human-gate.sh --retract). No gate open there is no
+// error.
+func (g gates) Withdraw(subject, key, message string) error {
+	res := g.rt.Script("human-gate.sh", "--retract", "--subject", subject, "--key", key, "--message", message)
+	if f := res.Failure(); f != "" {
+		return fmt.Errorf("withdrawal of the human gate on %s [%s]: %s", subject, key, f)
+	}
+	return nil
+}
+
 // actGates files the landing order's human gates through gates, stopped once
 // the act's context ends. The stop kills human-gate.sh, not a call the script
 // already started (gascity.City.Within), so the create that files the gate
@@ -650,4 +696,11 @@ type actGates struct{ rt gascity.Runtime }
 
 func (g actGates) File(ctx context.Context, subject, key, message string) error {
 	return gates{rt: g.rt.Within(ctx)}.File(subject, key, message)
+}
+
+// Withdraw withdraws the gates under key on subject through gates, stopped once
+// the act's context ends. A stop between two resolves leaves the rest open, for
+// the next run's withdrawal.
+func (g actGates) Withdraw(ctx context.Context, subject, key, message string) error {
+	return gates{rt: g.rt.Within(ctx)}.Withdraw(subject, key, message)
 }

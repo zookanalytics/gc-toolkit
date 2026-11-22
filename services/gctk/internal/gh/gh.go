@@ -141,22 +141,32 @@ type Review struct {
 }
 
 // CheckSuite is one check suite at a commit, with the latest result of each of
-// its check runs.
+// its check runs. Status is the suite's own, QUEUED, IN_PROGRESS, COMPLETED and
+// the like, and CreatedAt when GitHub created it. Run is the database id of the
+// GitHub Actions run behind it and Attempt that run's attempt number, which a
+// re-run of the run raises in the same suite, both 0 for a suite no Actions run
+// is behind, such as another app's.
 type CheckSuite struct {
-	ID   int64
-	Runs []CheckRun
+	ID        int64
+	Status    string
+	CreatedAt string
+	Run       int64
+	Attempt   int
+	Runs      []CheckRun
 }
 
 // CheckRun is one check run's latest result in its suite. Status is
 // QUEUED, IN_PROGRESS, COMPLETED and the like, and Conclusion, set once it
 // completed, is SUCCESS, FAILURE, NEUTRAL, CANCELLED, SKIPPED, TIMED_OUT,
 // ACTION_REQUIRED, STALE or STARTUP_FAILURE. Required is whether the PR the
-// read named requires it to pass before merging (isRequired).
+// read named requires it to pass before merging (isRequired). URL is where its
+// details and log are read (detailsUrl), empty when GitHub names none.
 type CheckRun struct {
 	Name       string
 	Status     string
 	Conclusion string
 	Required   bool
+	URL        string
 }
 
 // Thread is one review thread with all of its comments, oldest first.
@@ -250,8 +260,20 @@ const (
 	checksQuery = `query($owner:String!,$name:String!,$oid:GitObjectID!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){object(oid:$oid){... on Commit{
     checkSuites(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
-      nodes{databaseId checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
-        nodes{name status conclusion isRequired(pullRequestNumber:$number)}}}}}}}}`
+      nodes{` + suiteFields + `}}}}}}`
+
+	// A check suite as the reads ask for it: its own status, when it was
+	// created, the Actions run behind it with that run's attempt, and its check
+	// runs read with GitHub's LATEST filter.
+	suiteFields = `databaseId status createdAt workflowRun{databaseId runAttempt}
+        checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
+          nodes{name status conclusion detailsUrl isRequired(pullRequestNumber:$number)}}`
+
+	// The times the PR was returned to draft, from its timeline.
+	draftedQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
+  repository(owner:$owner,name:$name){pullRequest(number:$number){
+    timelineItems(first:100,after:$endCursor,itemTypes:[CONVERT_TO_DRAFT_EVENT]){pageInfo{hasNextPage endCursor}
+      nodes{... on ConvertToDraftEvent{createdAt}}}}}}`
 
 	reviewFields = `fullDatabaseId id url state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}
           reactionGroups{content viewerHasReacted}`
@@ -454,20 +476,7 @@ func (c *Client) CheckSuites(repo, oid string, number int) ([]CheckSuite, error)
 		var page struct {
 			Repository *struct {
 				Object *struct {
-					CheckSuites *connection[struct {
-						ID        int64 `json:"databaseId"`
-						CheckRuns *struct {
-							PageInfo struct {
-								HasNextPage bool `json:"hasNextPage"`
-							} `json:"pageInfo"`
-							Nodes []struct {
-								Name       string  `json:"name"`
-								Status     string  `json:"status"`
-								Conclusion *string `json:"conclusion"`
-								IsRequired bool    `json:"isRequired"`
-							} `json:"nodes"`
-						} `json:"checkRuns"`
-					}] `json:"checkSuites"`
+					CheckSuites *connection[suiteNode] `json:"checkSuites"`
 				} `json:"object"`
 			} `json:"repository"`
 		}
@@ -478,21 +487,65 @@ func (c *Client) CheckSuites(repo, oid string, number int) ([]CheckSuite, error)
 			return fmt.Errorf("the page holds no check suites at %s in %s", oid, repo)
 		}
 		for _, n := range page.Repository.Object.CheckSuites.Nodes {
-			if n.CheckRuns == nil {
-				return fmt.Errorf("check suite %d at %s holds no check runs", n.ID, oid)
-			}
-			if n.CheckRuns.PageInfo.HasNextPage {
-				return fmt.Errorf("check suite %d at %s has more check runs than one page holds", n.ID, oid)
-			}
-			s := CheckSuite{ID: n.ID}
-			for _, r := range n.CheckRuns.Nodes {
-				run := CheckRun{Name: r.Name, Status: r.Status, Required: r.IsRequired}
-				if r.Conclusion != nil {
-					run.Conclusion = *r.Conclusion
-				}
-				s.Runs = append(s.Runs, run)
+			s, err := n.suite(oid)
+			if err != nil {
+				return err
 			}
 			out = append(out, s)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// RerunFailedJobs asks GitHub to re-run the failed jobs of the GitHub Actions
+// run whose database id is run, in repo (POST
+// repos/<repo>/actions/runs/<run>/rerun-failed-jobs). The re-run keeps the run
+// and its check suite and raises the run's attempt. GitHub re-runs a run only
+// once the whole run has finished. An error is a re-run GitHub refused, or one
+// whose answer did not arrive, which may still take effect; Refused tells the
+// two apart.
+func (c *Client) RerunFailedJobs(repo string, run int64) error {
+	if _, err := prVars(repo, 1); err != nil {
+		return err
+	}
+	if run < 1 {
+		return fmt.Errorf("github: %d is no workflow run's id", run)
+	}
+	_, err := c.call("api", "--hostname", c.host, "-X", "POST",
+		fmt.Sprintf("repos/%s/actions/runs/%d/rerun-failed-jobs", repo, run))
+	return err
+}
+
+// ConvertedToDraft reads when PR number in repo was returned to draft, each
+// time its timeline records, oldest first.
+func (c *Client) ConvertedToDraft(repo string, number int) ([]string, error) {
+	vars, err := prVars(repo, number)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	err = c.graphql(draftedQuery, vars, true, func(data json.RawMessage) error {
+		var page struct {
+			Repository *struct {
+				PullRequest *struct {
+					Items *connection[struct {
+						CreatedAt string `json:"createdAt"`
+					}] `json:"timelineItems"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			return err
+		}
+		if page.Repository == nil || page.Repository.PullRequest == nil || page.Repository.PullRequest.Items == nil {
+			return fmt.Errorf("the page holds no timeline of %s#%d", repo, number)
+		}
+		for _, n := range page.Repository.PullRequest.Items.Nodes {
+			if n.CreatedAt == "" {
+				return fmt.Errorf("a return to draft of %s#%d names no time", repo, number)
+			}
+			out = append(out, n.CreatedAt)
 		}
 		return nil
 	})

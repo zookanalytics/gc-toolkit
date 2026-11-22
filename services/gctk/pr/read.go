@@ -46,11 +46,14 @@ type GitHubRead struct {
 }
 
 // RequiredRun is one result of a check run the PR requires, at the read's head,
-// as a check suite there holds its latest result.
+// as a check suite there holds its latest result: the suite that holds it, by
+// its id, and where its log is read, empty when GitHub names nowhere.
 type RequiredRun struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	Suite      int64  `json:"suite,omitempty"`
+	URL        string `json:"url,omitempty"`
 }
 
 // githubReadKey is the saved read on the bead that owns the PR. Its one writer
@@ -61,9 +64,13 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on "+
 		"GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
 		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
-		"state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at "+
-		"that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and "+
-		"statuses, the last two counts by state. conversation: since, the provenance instant the definition "+
+		"state, draft, head, base, base_tip and updated_at. checks: head; runs, the required check runs at "+
+		"that head as {name, status, conclusion, suite, url}, suite the id of the check suite that holds the "+
+		"result and url its log; and suites, each check suite at that head as {id, status, created_at, run, "+
+		"attempt, check_runs}, run the GitHub Actions run behind it and attempt that run's attempt, both 0 "+
+		"for a suite no Actions run is behind, and check_runs how many check runs it holds; with the signs "+
+		"head, rollup, contexts, check_runs and statuses, the last two counts by state. A checks part that "+
+		"holds no suites is read again. conversation: since, the provenance instant the definition "+
 		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+
 		"request for changes stands; untaken, each post that is feedback and carries neither of the city's "+
 		"marks, its EYES or its THUMBS_UP, as {kind, id, node, author, url, state, path, line, review}: kind "+
@@ -265,15 +272,28 @@ func (b side) unread(read *GitHubRead) string {
 }
 
 // requiredRuns is each result the check suites hold of a check run the PR
-// requires, suite by suite, in the order GitHub lists them.
+// requires, suite by suite, in the order GitHub lists them, each with its
+// suite's id and its log.
 func requiredRuns(suites []gh.CheckSuite) []RequiredRun {
 	out := []RequiredRun{}
 	for _, s := range suites {
 		for _, r := range s.Runs {
 			if r.Required {
-				out = append(out, RequiredRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion})
+				out = append(out, RequiredRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion,
+					Suite: s.ID, URL: r.URL})
 			}
 		}
+	}
+	return out
+}
+
+// savedSuites is each check suite as the checks part keeps it, in the order
+// GitHub lists them, never nil.
+func savedSuites(suites []gh.CheckSuite) []SavedSuite {
+	out := []SavedSuite{}
+	for _, s := range suites {
+		out = append(out, SavedSuite{ID: s.ID, Status: s.Status, CreatedAt: s.CreatedAt, Run: s.Run,
+			Attempt: s.Attempt, CheckRuns: len(s.Runs)})
 	}
 	return out
 }

@@ -462,8 +462,11 @@ no warrant.
   takes each post the conversation keeps untaken as its own ask (`takePlans`,
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
-  and compares each owned PR's saved labels with the ones the store derives
-  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
+  decides each owned PR's red checks and conflict from its checks, its merge
+  state and its approvals (`redPlans`, `redOn` and `decideRed` in
+  `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels
+  with the ones the store derives (`labelPlans` in
+  `services/gctk/pr/labels.go`), and the PR watch
   itself, which compares a PR's signs with the ones each part keeps (`moved` in
   `services/gctk/pr/saved.go`) and the net's full read with each part's facts
   (`differs` there).
@@ -473,7 +476,9 @@ no warrant.
   against which a pass of the PR watch tells
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
-  head, the standing approvals, each with the commit it was given on, and
+  head, each with the check suite that holds its result and its log, each check
+  suite there, with its status, its creation time and the attempt of the GitHub
+  Actions run behind it, the standing approvals, each with the commit it was given on, and
   requests for changes, each post that is feedback the city has not taken,
   with what its ask names it by, the review threads waiting on the city's
   answer and those unresolved, and the PR's labels, in four parts that each
@@ -492,7 +497,9 @@ no warrant.
     [GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
     entry declares a poll interval and a webhook secret, which no code outside
     the configuration package reads. No Go source there, tests aside, reads a
-    pull request's reviews or review threads.
+    pull request's reviews or review threads. The monitor's check rollup gives
+    each check's name, status, conclusion and log, and no check suite, no
+    suite's creation time and no Actions run's attempt.
   - A webhook rule hands one verified provider event to an order or a
     conversation and keeps no state of its own
     ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
@@ -514,7 +521,9 @@ no warrant.
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718, and the search for the
     untaken posts the conversation keeps is
-    [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2).
+    [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
+    and for the check suites the checks keep, its
+    [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
 - **Verified.** 2026-11-22, at `gastownhall/gascity` main 7b8d498424f4,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
