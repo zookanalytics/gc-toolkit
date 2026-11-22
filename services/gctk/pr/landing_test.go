@@ -2410,6 +2410,45 @@ func TestAnActWhoseLockDoesNotComeFreeIsActedOnByTheNextRun(t *testing.T) {
 	is(t, d.run(t), pr.ActRequeued)
 }
 
+// A merge's act takes the lock again after the re-read, with what is left of
+// its bound: a writer that takes the lock during the re-read and holds it
+// leaves the act stopped at its bound, with no merge requested, and the next
+// run acts on the record.
+func TestAMergesSecondLockWaitIsWhatIsLeftOfItsBound(t *testing.T) {
+	d := newLand(t)
+	d.refresh(t)
+	const stop = time.Second
+	held := make(chan func(), 1)
+	d.l.Reread = func(ctx context.Context, url string) error {
+		if _, err := d.watch.Reread(url); err != nil {
+			return err
+		}
+		release, err := record.Lock(d.l.Dir, time.Second)
+		if err != nil {
+			return err
+		}
+		held <- release
+		end, _ := ctx.Deadline()
+		time.Sleep(time.Until(end) - stop/10)
+		return nil
+	}
+	start := time.Now()
+	out := d.reconcile(t, pr.Options{Stop: stop})
+	elapsed := time.Since(start)
+	(<-held)()
+	if len(out) != 1 || out[0].Action != pr.ActRetry || len(d.github.Asks()) != 0 {
+		t.Fatalf("an act whose lock a writer held after the re-read did %+v and asked %v", out, asks(d.github))
+	}
+	if elapsed > stop+stop/2 {
+		t.Fatalf("the act took %s, past its %s bound", elapsed.Round(time.Millisecond), stop)
+	}
+	d.l.Reread = func(_ context.Context, url string) error {
+		_, err := d.watch.Reread(url)
+		return err
+	}
+	is(t, d.run(t), pr.ActRequested)
+}
+
 // A run that an order's time limit stops holds nothing: the kernel frees the
 // lock when the run's process ends.
 func TestARunStoppedAtItsTimeLimitLeavesTheLockFree(t *testing.T) {

@@ -889,19 +889,23 @@ func (u *run) state(l *ledger.Ledger, r *ledger.Record) (state, *RunOutcome) {
 // one acts on one record: under the record lock it reads the record afresh,
 // decides it from that read and the read the PR watch saved on the bead, and
 // makes the act it owes, stopped once ctx, which ends stop after the act
-// starts, ends, its reads and writes of the store among what the stop ends. A
-// lock that does not come free inside the act's bound, or an act the stop
-// ended, is an act that did not complete. A decision that finds the PR ready
-// for a merge the act has not had re-read names the PR in rereadDue, and the
-// run has it re-read once the lock is free (rereadAndDecide).
+// starts, ends, its reads and writes of the store among what the stop ends. It
+// waits for the lock no longer than what is left of ctx, since the lock does
+// not watch ctx, and a merge's act takes it a second time after the re-read. A
+// lock that does not come free inside that wait, or an act the stop ended, is
+// an act that did not complete. A decision that finds the PR ready for a merge
+// the act has not had re-read names the PR in rereadDue, and the run has it
+// re-read once the lock is free (rereadAndDecide).
 func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome {
 	// Acts run one at a time, so the run's ledger is the act's for its length.
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
 	defer func() { u.Ledger = unbound }()
 	wait := u.Wait
-	if stop > 0 && (wait <= 0 || stop < wait) {
-		wait = stop
+	if end, ok := ctx.Deadline(); ok {
+		if left := max(time.Until(end), 0); wait <= 0 || left < wait {
+			wait = left
+		}
 	}
 	release, err := record.Lock(u.Dir, wait)
 	if err != nil {
