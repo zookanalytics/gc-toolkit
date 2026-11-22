@@ -31,9 +31,10 @@ import (
 // only for a record that owes an act, which it decides again under the lock
 // before it acts.
 //
-// Only the merge checks GitHub before it acts, since a merge is the one act no
-// later run takes back, and GitHub's rules refuse what else could go wrong: a
-// run has the one-PR update re-read the PR in full with the lock free
+// Only the merge checks GitHub before it acts, since a merge made in error puts
+// work on the target, which no run takes back, and GitHub's rules refuse what
+// else could go wrong with it: a run has the one-PR update re-read the PR in
+// full with the lock free
 // (Reread), decides again on what that read saved, and requests the merge
 // pinned to the head it judged. Every other act reads of GitHub only what it
 // changes. A withdrawal reads the reviews it dismisses and their threads, a

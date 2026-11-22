@@ -227,8 +227,8 @@ yet. Each remaining difference names its reason and what ends it:
   key, where Gas Town writes `pr_reconcile_error`, because the next pass finds
   the same difference and acts on it. The landing order decides every record
   on the saved read and the store, and reads GitHub first only for a merge,
-  through the one-PR update's re-read of the PR in full, since a merge is the
-  one act no later run takes back. No end is planned.
+  through the one-PR update's re-read of the PR in full, since a merge made in
+  error puts work on the target, which no run takes back. No end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would

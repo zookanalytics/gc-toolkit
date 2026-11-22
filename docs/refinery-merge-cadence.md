@@ -750,15 +750,16 @@ from a fresh read of its bead, before the act. A record whose bead holds no
 saved read of its PR, as before the watch's first pass over it, waits for the
 watch's next pass, which reads such a PR whole.
 
-Only the merge checks GitHub before it acts. It is the one act no later run
-takes back, and GitHub refuses on its own what else could go wrong: a merge
-pinned to a head that moved, one an approval or a required check does not
-cover, and a write by an account without the access. A record the evaluator
-finds ready on the saved read has the one-PR update re-read its PR in full,
-every part whatever its signs say, with the record lock free, since the update
-takes it to save. The act then decides the record again under the lock, on
-what that read saved, and requests the merge pinned to the head the evaluator
-judged there. So a person's comment made seconds before the merge holds it,
+Only the merge checks GitHub before it acts. A merge made in error puts work on
+the target, which no run takes back, and GitHub refuses on its own what else
+could go wrong with it: a merge pinned to a head that moved, one an approval or
+a required check does not cover, and a write by an account without the access.
+A record the evaluator finds ready on the saved read has the one-PR update
+re-read its PR in full, every part whatever its signs say, with the record lock
+free, since the update takes it to save. The act then decides the record again
+under the lock, on what that read saved, and requests the merge pinned to the
+head the evaluator judged there. So a person's comment made seconds before the
+merge holds it,
 which the GitHub intake's design relies on, and a ruling that lands during the
 re-read is read by the decision under the lock. A re-read that finds the PR
 not ready leaves the saved read corrected, so the next run finds no merge to
@@ -767,8 +768,12 @@ reads the reviews it dismisses and their threads (below), a send-back and a
 landing fetch the branch they judge, and a label write leaves the PR's labels
 to their writer, which reads them itself. An exception, a ready transition, a
 review run's pour and a retired PR's close read nothing of GitHub first, so a
-saved read out of date can delay one or start one a minute early, and a later
-run decides on the read the watch saves.
+saved read out of date can delay one or start one a minute early. After a ready
+transition or a pour started early, a later run decides the record again on the
+read the watch saves. An exception's gate and a retired PR's close stand once
+made, so a PR the watch saw closed, and a person reopened before the next run,
+still gets its exception, whose gate asks a person what becomes of the work, or,
+when a ruling retired the PR, the close of its bead onto the ruling's successor.
 
 So a run reads the store six times whatever its records: the marked records,
 every live bead, the beads that carry a ruling's disposition, in one read the
