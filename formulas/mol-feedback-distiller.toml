@@ -491,7 +491,7 @@ It MUST finalize on every path: close its own bead, then
 `gc runtime drain-ack`, even with nothing to file. Never leave it `open` or
 `blocked`: the order starts no run while this run's root is open, so a step
 left here stalls the distiller until a person ends the run with
-`run-cancel.sh --root <the run's root> --reason <why>`.
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/run-cancel.sh" --root <the run's root> --reason "<why>"`.
 
 ## 0. Carry the run disposition
 
