@@ -298,6 +298,53 @@ func TestTheUnsetReadsTheSavedRead(t *testing.T) {
 	}
 }
 
+// The conversion acts only on a bead the order may work, while the saved read
+// shows its PR open: a bead someone else is assigned and a PR that closed are
+// converted nothing, and their receipts stay.
+func TestTheConversionConvertsNothingOnABeadItMayNotWork(t *testing.T) {
+	for name, edit := range map[string]func(*land){
+		"assigned to someone else": func(d *land) { d.put("blocked", "rig/gc-toolkit.polecat-1") },
+		"closed":                   func(d *land) { d.pr.Facts.State = "CLOSED" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := converting(t)
+			edit(d)
+			d.refresh(t)
+			d.asked = len(d.github.Asks())
+			out := d.reconcile(t, pr.Options{})
+			if c, _ := conversionOf(t, out); c.Action != "" || len(d.marked()) != 0 || len(d.resolved()) != 0 ||
+				len(d.asksFiled()) != 0 {
+				t.Fatalf("the run converted %+v, marked %q, resolved %q and filed %q over %+v", c, d.marked(),
+					d.resolved(), d.asksFiled(), out)
+			}
+			if v := d.row(t).Metadata["pr_comment_watermark"]; v != "550" {
+				t.Fatalf("the run left pr_comment_watermark=%q", v)
+			}
+		})
+	}
+}
+
+// The unset is guarded on the status and assignee the act read under the
+// record lock: a bead another writer reached between that read and the write,
+// here assigning it to an agent, keeps its receipts.
+func TestTheUnsetIsGuardedOnTheBeadItRead(t *testing.T) {
+	d := converting(t)
+	d.refresh(t)
+	once := false
+	d.store.BeforeUpdate = func(id string, args []string) error {
+		if id == bead && slices.Contains(args, "pr_review_watermark") && !once {
+			once = true
+			d.edit(t, func(b *fake.Bead) { b.Assignee = "rig/gc-toolkit.polecat-1" })
+		}
+		return nil
+	}
+	c, _ := conversionOf(t, d.reconcile(t, pr.Options{}))
+	is(t, c, pr.ActMoved)
+	if v := d.row(t).Metadata["pr_review_watermark"]; v != "200" {
+		t.Fatalf("an unset the guard refused left pr_review_watermark=%q", v)
+	}
+}
+
 // A bead that carries none of the receipts is not converted: the run makes no
 // conversion and resolves no thread, even one that holds only the city's own
 // posts, and the take files each post the saved read holds untaken.
@@ -426,6 +473,31 @@ func TestTheConversionWaitsForAnAttachedReviewRun(t *testing.T) {
 	root, _ := d.store.Row(run)
 	root.Status = "closed"
 	d.store.Put(root)
+	c, _ = conversionOf(t, d.reconcile(t, pr.Options{}))
+	is(t, c, pr.ActConverted)
+}
+
+// While another open bead works the PR's branch, such as a rework child, the
+// conversion of a bead whose old path's findings are open waits for it, since
+// it may answer them, and reads nothing of GitHub; once that bead has closed it
+// converts them.
+func TestTheConversionWaitsWhileAnotherBeadWorksTheBranch(t *testing.T) {
+	d := converting(t)
+	d.l.Dispositions = &rehome{store: d.store}
+	d.findings(t)
+	kid := fake.Bead{ID: "tk-kid", Title: "Rework the branch", Status: "in_progress", IssueType: "task",
+		Assignee: "rig/gc-toolkit.polecat-1", Metadata: map[string]string{"branch": branch, "task_kind": "rework"}}
+	d.store.Put(kid)
+	d.refresh(t)
+	d.asked, d.reads = len(d.github.Asks()), len(d.github.Reads())
+	c, _ := conversionOf(t, d.reconcile(t, pr.Options{}))
+	is(t, c, pr.ActChecked)
+	says(t, c, "waits while tk-kid works "+branch)
+	if got := d.runReads(); len(got) != 0 || len(d.marked()) != 0 || len(d.asksFiled()) != 0 {
+		t.Fatalf("a conversion waiting on another writer read %v, marked %q and filed %q", got, d.marked(), d.asksFiled())
+	}
+	kid.Status = "closed"
+	d.store.Put(kid)
 	c, _ = conversionOf(t, d.reconcile(t, pr.Options{}))
 	is(t, c, pr.ActConverted)
 }
