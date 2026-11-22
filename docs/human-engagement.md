@@ -363,13 +363,14 @@ these steps:
    attaches the operator.
 
 **Engage offers what holds the bead.** It reads the reasons
-`gctk pr status --json` gives (`prstatus.Read` and `prstatus.Reasons`),
+`gctk pr status --json` gives (`prstatus.Read`, and `prstatus.RenderReasons`
+for a PR on the pending record or `prstatus.Reasons` for a bead off it),
 the one definition the PR's `held:` labels and the board's row read: each open
 human gate reached from the bead through its open `blocks` edges, so a gate on a
 rework or a review the anchor waits on is offered from the PR, each bead a person
 owes the next move on that the same edges reach, such as a decision or another PR
 waiting on a review that the PR's rework waits for, and the PR's own review
-threads or blocked verdict. The conversation form lists them under the bead's
+threads. The conversation form lists them under the bead's
 conversations. A gate or a bead is a row, and choosing it makes it the subject.
 A gate chosen there keeps the bead it was listed under, which the screen names
 under the subject, and the form looks it up and saves it with `--from` naming
@@ -628,17 +629,16 @@ po's backlog refinement with the operator ([steering.md](steering.md)).
 
 The fallback path files a conversation in the operator's queue directly,
 through `gc-helm.sh open`, which is where filing a conversation lives. It runs
-on `--no-react`, and when `gctk reaction deliverable` answers that the
-proactive pool is not registered, is suspended or is capped at zero slots. It
-also runs when the sling slings nothing: it fails, or it refuses the subject
-because a first reaction already runs on it or an open conversation tracks it,
-a live workflow already drives it, it is already routed or armed, held,
-assigned or not open, an open human gate blocks it, or it is a standing record
-or a feedback pattern, whose kind takes no first reaction. A react path that could not
-deliver would leave a run waiting on a pool that cannot take it, and no
-conversation at all, the one outcome this channel exists to prevent. A roster
-the deliverable check cannot read answers yes, because absence of evidence is
-not evidence the pool is gone.
+on `--no-react`, and when the sling slings nothing: it fails, as it does when
+gc sling refuses a route that cannot work, such as to a proactive pool the city
+does not configure, or it refuses the subject because a first reaction already
+runs on it or an open conversation tracks it, a live workflow already drives
+it, it is already routed or armed, held, assigned or not open, an open human
+gate blocks it, or it is a standing record or a feedback pattern, whose kind
+takes no first reaction. The intake asks nothing about the pool before the
+sling: a reaction slung to a proactive pool that is suspended, or capped at no
+sessions, waits there until the pool runs, and no framing reaches the operator
+until then. `--no-react` files the conversation at once.
 
 **The intake stamps `gc.origin=operator` on the subject**, on both paths and
 never over an origin already recorded. It is a fact the reaction weighs, not a

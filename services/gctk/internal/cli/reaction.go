@@ -26,12 +26,11 @@ func newReactionCmd(stdout, stderr io.Writer) *cobra.Command {
 the bead once, writes a card on it, and takes one of five exits, which dispose
 performs (docs/human-engagement.md). sling starts one on a bead nobody has
 decided on, sweep starts one on each such bead in the rig, check is the
-reaction's own first act, deliverable says whether the rig's proactive pool
-can take one now, and accept takes the recommendation a recommend exit leaves.`,
+reaction's own first act, and accept takes the recommendation a recommend exit
+leaves.`,
 		newReactionCheckCmd(stdout, stderr),
 		newReactionSlingCmd(stdout, stderr),
 		newReactionSweepCmd(stdout, stderr),
-		newReactionDeliverableCmd(stdout),
 		newReactionDisposeCmd(stdout, stderr),
 		newReactionAcceptCmd(stdout, stderr))
 }
@@ -172,14 +171,16 @@ with a description that is no workflow root, scope, spec or step, no standing
 record, feedback pattern or review lane, carries no headline, no work marker
 and no parent, has no route or arm, and carries no hold:mayor or hold:external.
 It drops every bead a live run works, and a run map that does not read drops
-nothing, which it says. Each sling applies sling's refusals again.
+nothing, which it says. Each reaction goes to the rig's proactive pool whether
+or not the pool runs, and each sling applies sling's refusals again. A sling gc
+sling refuses, as it refuses a pool the city does not configure, fails that
+candidate alone.
 
 A slung run waits for a pool slot at no cost, so the sweep has no cap. It
 starts no sling once less of its deadline is left than its slowest sling took,
 each figure taken in whole seconds as its upper bound, and the next sweep takes
 the rest. The deadline is GC_PROACTIVE_SWEEP_TIMEOUT, seconds alone or with an
-s, m or h suffix, 300s when unset. A rig whose proactive pool cannot take a
-reaction is skipped.
+s, m or h suffix, 300s when unset.
 
 Each candidate gets one JSON line on stdout: its id, title, priority and
 outcome, which is slung, refused (with the refusal's code and why), failed
@@ -190,7 +191,7 @@ would-sling: its sling reads the refusals again.
 --db names the store, a store's .beads directory. Without it the store is the
 one gc resolves here.
 
-exit: 0 swept, or no sweep in a rig whose pool cannot take a reaction
+exit: 0 swept
       1 nothing slung: the ready read or the candidate rule failed, GC_RIG is
         unset, or the deadline does not read
       2 usage`
@@ -241,40 +242,6 @@ func newReactionSweepCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-const reactionDeliverableLong = `Whether the rig's proactive pool, GC_RIG/gc-toolkit.proactive, can take a
-first reaction now. A slung reaction waits for a slot at no cost, but one routed
-to a pool the city's roster shows absent, suspended or capped at zero waits for
-nobody. No is a positive finding only: a roster that does not read answers yes,
-since it is no evidence that the pool is gone. It prints yes or no, and why, on
-stdout.
-
-exit: 0 yes
-      1 no`
-
-func newReactionDeliverableCmd(stdout io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "deliverable",
-		Short: "whether this rig's proactive pool can take a first reaction now",
-		Long:  reactionDeliverableLong,
-		Args:  cobra.NoArgs,
-		RunE: func(c *cobra.Command, args []string) error {
-			rig := strings.TrimSpace(os.Getenv("GC_RIG"))
-			if rig == "" {
-				fmt.Fprintf(stdout, "no: %v\n", reaction.ErrNoRig)
-				return exit(1)
-			}
-			r := &reaction.Reactions{Runtime: gascity.New(), Rig: rig}
-			ok, why := r.ProactiveDeliverable()
-			if !ok {
-				fmt.Fprintf(stdout, "no: %s\n", why)
-				return exit(1)
-			}
-			fmt.Fprintf(stdout, "yes: %s\n", why)
-			return nil
-		},
-	}
-}
-
 // reactionFor is the reaction over bead's store, --db or else the one gc routes
 // the bead to, in the caller's rig, saying each line to stderr.
 func reactionFor(bead, db string, stderr io.Writer, prog string) (*reaction.Reactions, error) {
@@ -315,8 +282,10 @@ Intake decides whether a pool route or a --then-route arm is written at all:
 only a member of an epic, PR-finishing work (anchor_bead) or an emergency the
 named check confirms on the default branch's head reaches a pool, and any
 other bead is held with hold:mayor for the operator's placement sitting
-(docs/steering.md). A route or a hand-off nothing would claim is refused, and
-so is a hand-off to the po, the deacon, the witness or the keeper.
+(docs/steering.md). A route goes to its pool whether or not the pool runs, and
+a route gc sling refuses, as it refuses a pool the city does not configure,
+stops the exit at that sling. A hand-off nothing would offer the bead to is
+refused, and so is a hand-off to the po, the deacon, the witness or the keeper.
 
 Each exit's writes keep their order, so the write that dispatches, holds or
 gates the subject comes last, and a re-run of the same call after an exit
@@ -329,7 +298,7 @@ before anything is read.
 store is the one gc routes the bead to.
 
 exit: 0 disposed
-      2 usage, or a route or hand-off nothing would claim: nothing written
+      2 usage, or a hand-off nothing would offer the bead to: nothing written
       3 the subject is not open: nothing written
       4 stopped part way: the message says what landed, and a re-run resumes`
 

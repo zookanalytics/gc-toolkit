@@ -350,9 +350,9 @@ func withStatus(b Blocker, s string) Blocker {
 	return b
 }
 
-// awaitingReview is an open pull request the merge pass settled with no approval:
-// its next move is a person's review.
-var awaitingReview = map[string]string{"merge_result": "pull_request", "pr_posture": "review_required@h@t", "pr.machine": "settled@h@t"}
+// awaitingReview is a pull request open on Gas Town's pending record at the head
+// the refinery validated, with no approval: its next move is a person's review.
+var awaitingReview = map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}
 
 func decision(id string) Blocker {
 	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
@@ -380,40 +380,19 @@ func TestHoldingOwed(t *testing.T) {
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {task("b.rw")}}, []string{}, []string{}},
 		{"another pull request the city is landing",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}}, []string{}, []string{}},
-		{"another pull request the merge pass blocked",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr.machine", "blocked@h@t", "pr.machine_cause", "check-failed"))}},
-			[]string{}, []string{"b"}},
 		{"another pull request under a merge hold",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "merge_hold", "true"))}},
 			[]string{}, []string{"b"}},
-		{"another pull request review feedback holds",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "pr.unanswered_threads", "1@h"))}},
+		{"a pull request waiting on a review at the blocked status the pending record gives it",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", awaitingReview), "blocked")}},
 			[]string{}, []string{"b"}},
-		{"another pull request on the pending record waiting on a review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pull request on the pending record whose head the refinery is validating",
+		{"a pull request whose head the refinery is validating",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_head_changed"))}}, []string{}, []string{}},
-		{"a pull request on the pending record in its draft stage, with no posture recorded",
+		{"a pull request in its draft stage, with no posture recorded",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", map[string]string{"merge_result": "pull_request_pending"}), "blocked")}},
 			[]string{}, []string{}},
-		{"a pull request on the pending record carrying the old record's blocked verdict and thread count",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"pr_posture", "approved@h@t", "pr.machine", "blocked@h@t", "pr.machine_cause", "review-threads", "pr.unanswered_threads", "1@h")), "blocked")}},
-			[]string{}, []string{}},
-		{"a pull request on the pending record carrying the old record's draft markers, waiting on a review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"opened_as_draft", "h")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pull request on the pending record under a merge hold",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"pr_posture", "approved@h@t", "merge_hold", "true")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pre-open anchor whose checks are done has no pull request to review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate"))}}, []string{}, []string{}},
-		{"a pre-open anchor the merge pass blocked",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate", "pr.machine", "blocked@h@t", "pr.machine_cause", "rule"))}},
-			[]string{}, []string{"b"}},
+		{"a pull request that closed unmerged has no review to wait on",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_closed_unmerged"))}}, []string{}, []string{}},
 		{"a bead that is no merge anchor is no review to wait on",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("t", with(awaitingReview, "merge_result", ""))}}, []string{}, []string{}},
 		{"a pull request held only by its gate is the gate's to clear",
@@ -427,7 +406,7 @@ func TestHoldingOwed(t *testing.T) {
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b1", awaitingReview)}, "b1": {anchorBlocker("b2", awaitingReview)}},
 			[]string{}, []string{"b2"}},
 		{"a pull request that landed holds nothing",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "merged")))}}, []string{}, []string{}},
+			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "mr_merged")))}}, []string{}, []string{}},
 		{"a closed decision holds nothing", map[string][]Blocker{"a": {closed(decision("d"))}}, []string{}, []string{}},
 		{"a human gate counts once, as a gate",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {gate("g")}},

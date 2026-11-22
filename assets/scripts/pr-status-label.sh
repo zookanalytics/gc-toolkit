@@ -8,13 +8,13 @@
 # not clear on its own (needs-attention). An open PR carries exactly one status
 # value. `held:` names what holds it that the city will not clear on its own: an
 # open human gate on the PR or behind a bead it waits on (gate), review feedback
-# the city has not answered or a review thread the merge waits on (review), or a
-# blocker no automated actor will clear (blocked). Each is a label of its own, so more than
+# the city has not answered (review), or a blocker no automated actor will clear
+# (blocked). Each is a label of its own, so more than
 # one can stand, and a PR nothing holds carries none. Any held value reads
 # needs-attention. Both come off once the PR merges or closes, where GitHub's own
 # Merged or Closed state takes over. They are
-# workflow state, never an approval, and never assert a PR may merge:
-# machine-readiness rides pr.machine and the draft flag. The values themselves —
+# workflow state, never an approval, and never assert a PR may merge: the
+# landing order's evaluator decides that. The values themselves —
 # what each projects from, and their precedence — are decided by one Go package,
 # services/gctk/prstatus, reached through `gctk pr status` and exported so
 # the helm board derives the same per-bead state, so a bead's PR labels and its
@@ -88,7 +88,7 @@ label_desc() { # <label name> — its GitHub description (GitHub caps these at 1
     "${LABEL_PREFIX}needs-review")    printf 'Workflow: settled at the current head; awaiting a human review or re-review.' ;;
     "${LABEL_PREFIX}needs-attention") printf 'Workflow: a blocker stands that the city will not clear on its own; needs a human.' ;;
     "${HELD_PREFIX}gate")             printf 'Workflow: an open human gate holds the PR; a person clears it.' ;;
-    "${HELD_PREFIX}review")           printf 'Workflow: feedback the city has not answered, or a thread the merge waits on; a person resolves it.' ;;
+    "${HELD_PREFIX}review")           printf 'Workflow: review feedback the city has not answered holds the PR; a person resolves it.' ;;
     "${HELD_PREFIX}blocked")          printf 'Workflow: a blocker no automated actor will clear holds the PR; a person clears it.' ;;
     "$HELD_PREFIX"*)                  printf 'Workflow hold label.' ;;
     *)                                printf 'Workflow status label.' ;;
