@@ -264,6 +264,15 @@ func (p *prFacts) reasons() []prstatus.Reason {
 	return prstatus.Reasons(p.facts)
 }
 
+// ownAttention is whether the pull request reads needs-attention for a reason
+// of its own, beside the human gates and the beads a person owes that hold it.
+func (p *prFacts) ownAttention() bool {
+	if p.answer != nil {
+		return prstatus.RenderOwnAttention(*p.answer, p.facts)
+	}
+	return prstatus.OwnAttention(p.facts)
+}
+
 // readClosedMembers reads the closed members of each open epic and Delivery,
 // then the closed members of each closed epic among them, such as a Delivery
 // that landed while its epic stays open, and so on until a round reads no

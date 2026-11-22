@@ -357,16 +357,20 @@ func joinIDs(refs []Ref) string {
 //     which comes back to the operator once that work closes, so until then it
 //     is no person's move.
 //   - Pull request: a bead whose pull request reads needs-review or
-//     needs-attention, in those words.
+//     needs-attention, in those words. One whose needs-attention rests on the
+//     human gates and the beads a person owes that hold it, with no reason of
+//     its own (prstatus.OwnAttention), is no ask while it is listed beneath
+//     another need (beneath): the person's move on it is that need's.
 //   - Assigned to you: any other open bead prstatus.IsPersonBlocker counts, as
 //     the listing answers it for the bead.
 //   - Ruling: an epic with members and none open, or a landed Delivery.
 //
 // A gate that is no human gate is never an ask. openQuestionGate reports
 // whether a bead is an open human gate, and askingDecision whether it is an
-// open decision that does not stay.
+// open decision that does not stay. beneath reports whether the row is listed
+// beneath another need, the ask of a bead its Holding answer names.
 func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQuestionGate, askingDecision func(string) bool,
-	facts *prFacts, membersOpen, members int, stay bool) *askAnswer {
+	facts *prFacts, membersOpen, members int, stay, beneath bool) *askAnswer {
 	if !isOpen(b) {
 		return nil
 	}
@@ -403,7 +407,8 @@ func askOf(b bead, k Kind, answeredBy string, answeredByAssignee string, openQue
 		}
 	}
 	if facts != nil {
-		if st := facts.state(); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
+		switch st := facts.state(); {
+		case st == prstatus.NeedsReview, st == prstatus.NeedsAttention && (!beneath || facts.ownAttention()):
 			return &askAnswer{kind: AskPullRequest, words: string(st), need: NeedKindPullRequest}
 		}
 	}

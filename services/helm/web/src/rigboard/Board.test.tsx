@@ -375,7 +375,7 @@ describe('the Epics page', () => {
     expect(headings()[0]).toBe(`Needs you${entry.needs.count}`);
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
     expect(kindsOf(strip).map((k) => k.text)).toEqual([
-      '1 pull request',
+      '0 pull requests',
       '0 questions',
       '0 conversations waiting for you',
       '1 in conversation',
@@ -404,20 +404,29 @@ describe('the Needs you page', () => {
   });
 
   it('draws a need the same way on every page', async () => {
+    // The cut's one pull request waits on a conversation alone, so it is listed
+    // beneath that conversation's need. This document gives it a reason of its
+    // own as well, as a failed check would, so it is a need on every page.
+    const own: Document = structuredClone(board);
+    own.rows['tk-yhquh93.10'] = { ...own.rows['tk-yhquh93.10'], ask: 'Pull request', signal: 'needs-attention' };
+    const need = { id: 'tk-yhquh93.10', kind: 'Pull request' as const, holds: [] };
+    own.needs_you.counted.push(need);
+    own.epics.find((e) => e.id === 'tk-yhquh93')!.needs.counted.push(need);
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: own })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
-    const need = lookOf('tk-yhquh93.10');
-    expect(need.tag).toBe('Pull request');
-    expect(need.background).not.toBe(lookOf('tk-1tfzr71.39').background);
+    const look = lookOf('tk-yhquh93.10');
+    expect(look.tag).toBe('Pull request');
+    expect(look.background).not.toBe(lookOf('tk-1tfzr71.39').background);
     tab(/Work queue/);
-    expect(lookOf('tk-yhquh93.10')).toEqual(need);
+    expect(lookOf('tk-yhquh93.10')).toEqual(look);
     tab(/Epics/);
     fireEvent.click(within(rowOf('tk-yhquh93')).getByRole('button', { name: /Board UI design/ }));
     const lines = rowsOf('tk-yhquh93.10');
     expect(lines.length).toBeGreaterThan(1);
     for (const line of lines) {
-      expect({ tag: text(line.querySelector('.tag')), background: line.style.background }).toEqual(need);
+      expect({ tag: text(line.querySelector('.tag')), background: line.style.background }).toEqual(look);
     }
   });
 
@@ -536,7 +545,7 @@ describe('the Needs you page', () => {
     tab(/Needs you/);
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
     expect(kindsOf(strip)).toEqual([
-      { text: '1 pull request', control: true },
+      { text: '0 pull requests', control: false },
       { text: '4 questions', control: true },
       { text: '0 conversations waiting for you', control: false },
       { text: '1 in conversation', control: true },

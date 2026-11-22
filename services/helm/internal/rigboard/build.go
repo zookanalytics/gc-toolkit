@@ -276,15 +276,7 @@ func build(g *gathered) Document {
 	}
 	askingDecision := func(id string) bool { return ix.openDecision(id) && !stays[id] }
 
-	// Row 2 first: the table reads whether a row is an ask.
-	for _, id := range ix.rows {
-		// Work held for the Product Owner is no need, whatever it would ask
-		// of a person, such as a review of its pull request: hold:mayor names
-		// the Product Owner as its next actor, and the Unprioritized page
-		// alone lists it.
-		if bt.forProductOwner(id) {
-			continue
-		}
+	askFor := func(id string, beneath bool) *askAnswer {
 		b := ix.beads[id]
 		k := ix.kinds[id]
 		conv := ix.answeredBy[id]
@@ -307,7 +299,36 @@ func build(g *gathered) Document {
 				}
 			}
 		}
-		if a := askOf(b, k, conv, convAssignee, ix.openHumanGate, askingDecision, factsOf(g, id), open, members, stays[id]); a != nil {
+		return askOf(b, k, conv, convAssignee, ix.openHumanGate, askingDecision, factsOf(g, id), open, members, stays[id], beneath)
+	}
+
+	// Row 2 first: the table reads whether a row is an ask.
+	for _, id := range ix.rows {
+		// Work held for the Product Owner is no need, whatever it would ask
+		// of a person, such as a review of its pull request: hold:mayor names
+		// the Product Owner as its next actor, and the Unprioritized page
+		// alone lists it.
+		if bt.forProductOwner(id) {
+			continue
+		}
+		if a := askFor(id, false); a != nil {
+			bt.asks[id] = a
+		}
+	}
+	// A pull request listed beneath another need is asked again as beneath it,
+	// so one held by the beads it waits on alone leaves its ask to theirs. One
+	// pass answers every row in any order: it only takes asks away, and a pull
+	// request beneath another whose ask goes stays beneath that one's holder,
+	// which its own Holding walk reaches through it, so no pull request leaves
+	// Needs you.
+	for _, id := range ix.rows {
+		if a := bt.asks[id]; a == nil || a.kind != AskPullRequest || len(bt.holders(id)) == 0 {
+			continue
+		}
+		switch a := askFor(id, true); {
+		case a == nil:
+			delete(bt.asks, id)
+		case a.kind != AskPullRequest:
 			bt.asks[id] = a
 		}
 	}
@@ -561,21 +582,9 @@ func (bt *built) linkWaits() {
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
-		h, ok := ix.g.holds[id]
-		if !ok {
-			continue
-		}
-		hold, ok := ix.g.holding[rootOf(id, h)]
-		if !ok {
-			continue
-		}
 		k := ix.kinds[id]
 		listed := (k == KindWork || k == KindEpic || k == KindDelivery) && !bt.forProductOwner(id)
-		for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
-			a := bt.askID(x.ID)
-			if a == "" || a == id {
-				continue
-			}
+		for _, a := range bt.holders(id) {
 			if !slices.Contains(bt.held[a], id) {
 				bt.held[a] = append(bt.held[a], id)
 			}
@@ -590,6 +599,28 @@ func (bt *built) linkHolds() {
 		bt.inOrder(r.Holds)
 		bt.rows[id] = r
 	}
+}
+
+// holders is the needs a row is listed beneath: the ask each human gate and
+// each bead a person owes that its Holding answer names stands in (askID),
+// other than the row's own, each once, in Holding's order.
+func (bt *built) holders(id string) []string {
+	ix := bt.ix
+	h, ok := ix.g.holds[id]
+	if !ok {
+		return nil
+	}
+	hold, ok := ix.g.holding[rootOf(id, h)]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
+		if a := bt.askID(x.ID); a != "" && a != id && !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // inOrder sorts ids into the Work queue's order: the work it places by its

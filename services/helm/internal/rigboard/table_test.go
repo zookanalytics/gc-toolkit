@@ -199,6 +199,9 @@ func TestAsks(t *testing.T) {
 	openGate := func(id string) bool { return id == "tk-g" }
 	needsReview := &prFacts{}
 	working := &prFacts{facts: prstatus.Facts{InFlightCount: 1}}
+	gate := prstatus.Blocker{ID: "tk-g", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	gated := &prFacts{facts: prstatus.Facts{Gates: []prstatus.Blocker{gate}}}
+	gatedAndFrozen := &prFacts{facts: prstatus.Facts{Gates: []prstatus.Blocker{gate}, MergeHold: "true"}}
 	cases := []struct {
 		name        string
 		b           bead
@@ -209,6 +212,7 @@ func TestAsks(t *testing.T) {
 		facts       *prFacts
 		open, all   int
 		stay        bool
+		beneath     bool
 		want        *askAnswer
 	}{
 		{name: "a human gate is a question", b: bead{ID: "tk-g", Status: "open", IssueType: "gate", AwaitType: "human"}, kind: KindGate,
@@ -251,6 +255,20 @@ func TestAsks(t *testing.T) {
 		{name: "a pull request needing review is an ask in prstatus's words", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork,
 			facts: needsReview, want: &askAnswer{kind: AskPullRequest, words: "needs-review", need: NeedKindPullRequest}},
 		{name: "a pull request the city is changing is no ask", b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: working},
+		{name: "a pull request a human gate alone holds is an ask while no other need lists it",
+			b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: gated,
+			want: &askAnswer{kind: AskPullRequest, words: "needs-attention", need: NeedKindPullRequest}},
+		{name: "…and none beneath the gate's need, whose answer is the person's move on it",
+			b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: gated, beneath: true},
+		{name: "a pull request held by a gate and a reason of its own is an ask beneath the gate's need too",
+			b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: gatedAndFrozen, beneath: true,
+			want: &askAnswer{kind: AskPullRequest, words: "needs-attention", need: NeedKindPullRequest}},
+		{name: "a pull request needing review is an ask beneath another need",
+			b: bead{ID: "tk-w", Status: "open"}, kind: KindWork, facts: needsReview, beneath: true,
+			want: &askAnswer{kind: AskPullRequest, words: "needs-review", need: NeedKindPullRequest}},
+		{name: "a pull request assigned to a person, beneath the need of the gate that alone holds it, is assigned to you",
+			b: bead{ID: "tk-w", Status: "open", Assignee: "human", PersonBlocker: true}, kind: KindWork, facts: gated, beneath: true,
+			want: &askAnswer{kind: AskAssignedToYou, words: "Assigned to you", need: NeedKindAssignedToYou}},
 		{name: "work assigned to a person is assigned to you", b: bead{ID: "tk-w", Status: "open", Assignee: "human", PersonBlocker: true}, kind: KindWork,
 			want: &askAnswer{kind: AskAssignedToYou, words: "Assigned to you", need: NeedKindAssignedToYou}},
 		{name: "an epic whose members all closed needs a ruling", b: bead{ID: "tk-e", Status: "open", IssueType: "epic"}, kind: KindEpic,
@@ -270,7 +288,7 @@ func TestAsks(t *testing.T) {
 			if asking == nil {
 				asking = noGate
 			}
-			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, asking, c.facts, c.open, c.all, c.stay)
+			got := askOf(c.b, c.kind, c.conv, c.convA, gateOpen, asking, c.facts, c.open, c.all, c.stay, c.beneath)
 			if (got == nil) != (c.want == nil) || (got != nil && *got != *c.want) {
 				t.Errorf("askOf = %+v, want %+v", got, c.want)
 			}

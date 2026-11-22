@@ -674,21 +674,22 @@ func TestAConversationThatStaysAndOneThatHolds(t *testing.T) {
 // TestAPullRequestThatWaitsOnAStay holds a pull request whose merge its
 // conversation holds to the stay that conversation keeps: the conversation
 // waits on the rework it sent, so neither it nor its pull request is the
-// operator's move until that rework closes, and then both are. The pull
-// request's facts and what holds each row come from prstatus over the same
-// beads, as gather reads them.
+// operator's move until that rework closes. Then the conversation is, and the
+// pull request, which nothing else holds, is listed beneath it and reads what
+// it waits on. The pull request's facts and what holds each row come from
+// prstatus over the same beads, as gather reads them.
 func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 	sitting := "gc-toolkit/gc-toolkit.tk-c"
 	for _, c := range []struct {
 		name, rework      string
-		counted           []string
+		counted, cHolds   []string
 		prGroup, cGroup   Group
 		prSignal, cSignal string
 	}{
 		{name: "while the rework is out", rework: "in_progress",
 			prGroup: GroupQueued, prSignal: "Pull request #7", cGroup: GroupQueued, cSignal: "Waits on tk-rw"},
-		{name: "once the rework has closed", rework: "closed", counted: []string{"tk-c", "tk-pr"},
-			prGroup: GroupWaitingOnYou, prSignal: "needs-attention", cGroup: GroupWaitingOnYou, cSignal: "In conversation"},
+		{name: "once the rework has closed", rework: "closed", counted: []string{"tk-c"}, cHolds: []string{"tk-pr"},
+			prGroup: GroupWaitingOnYou, prSignal: "In conversation", cGroup: GroupWaitingOnYou, cSignal: "In conversation"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			prMeta := map[string]string{"merge_result": "pull_request",
@@ -748,6 +749,128 @@ func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 			}
 			if r := doc.Rows["tk-c"]; r.Group != c.cGroup || r.Signal != c.cSignal {
 				t.Errorf("tk-c reads %q in %q, want %q in %q", r.Signal, r.Group, c.cSignal, c.cGroup)
+			}
+			if r := doc.Rows["tk-pr"]; r.Ask != "" || len(r.Reasons) != 0 {
+				t.Errorf("tk-pr asks %q for %+v, want no ask of its own", r.Ask, r.Reasons)
+			}
+			if h := doc.Rows["tk-c"].Holds; !slices.Equal(h, c.cHolds) && (len(h) > 0 || len(c.cHolds) > 0) {
+				t.Errorf("tk-c lists %v beneath it, want %v", h, c.cHolds)
+			}
+		})
+	}
+}
+
+// TestAPullRequestHeldOnlyByWhatItWaitsOn holds a pull request whose
+// needs-attention rests on the beads that hold it to one entry on Needs you:
+// it is listed beneath the need of each, reads what it waits on, and counts
+// nowhere of its own. One that no need lists stays a need, so no pull request
+// leaves Needs you, and one with a reason of its own beside them is a need of
+// its own and listed beneath theirs too. The pull requests' facts are
+// prstatus.Derive's, beside the Holding answers the read would give.
+func TestAPullRequestHeldOnlyByWhatItWaitsOn(t *testing.T) {
+	q := prstatus.Blocker{ID: "tk-q", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	x := prstatus.Blocker{ID: "tk-x", Title: "another rig's question", Status: "open", IssueType: "gate", AwaitType: "human"}
+	b := prstatus.Blocker{ID: "tk-b", Title: "the other change", Status: "blocked", IssueType: "task",
+		Metadata: map[string]string{"merge_result": "pull_request_pending"}}
+	wait := func(bl prstatus.Blocker) waits.Wait {
+		return waits.Wait{ID: bl.ID, Type: "blocks", Title: bl.Title, Status: bl.Status, IssueType: bl.IssueType, AwaitType: bl.AwaitType}
+	}
+	pull := func(id, n, title string) bead {
+		return bead{ID: id, Title: title, Status: "blocked", Priority: 1, IssueType: "task", MergeResult: "pull_request_pending",
+			PRNumber: n, CreatedAt: "2026-01-01"}
+	}
+	type side struct {
+		waitsOn []prstatus.Blocker
+		holding prstatus.Holds
+		facts   prstatus.Facts
+	}
+	for _, c := range []struct {
+		name     string
+		a, b     *side
+		asks     map[string]Ask
+		counted  []string
+		qHolds   []string
+		bHolds   []string
+		aSignal  string
+		aReasons int
+	}{
+		{name: "a pull request a question alone holds is listed beneath it",
+			a:    &side{waitsOn: []prstatus.Blocker{q}, holding: prstatus.Holds{Gates: []prstatus.Blocker{q}}, facts: prstatus.Facts{Gates: []prstatus.Blocker{q}}},
+			asks: map[string]Ask{"tk-q": AskQuestion}, counted: []string{"tk-q"}, qHolds: []string{"tk-a"}, aSignal: "Waits on your answer"},
+		{name: "one whose question no need on the board lists stays a need",
+			a:    &side{waitsOn: []prstatus.Blocker{x}, holding: prstatus.Holds{Gates: []prstatus.Blocker{x}}, facts: prstatus.Facts{Gates: []prstatus.Blocker{x}}},
+			asks: map[string]Ask{"tk-a": AskPullRequest, "tk-q": AskQuestion}, counted: []string{"tk-a", "tk-q"}, aSignal: "needs-attention", aReasons: 1},
+		{name: "one held by a question and by a reason of its own is a need, and listed beneath the question too",
+			a: &side{waitsOn: []prstatus.Blocker{q}, holding: prstatus.Holds{Gates: []prstatus.Blocker{q}},
+				facts: prstatus.Facts{Gates: []prstatus.Blocker{q}, MergeHold: "true"}},
+			asks: map[string]Ask{"tk-a": AskPullRequest, "tk-q": AskQuestion}, counted: []string{"tk-a", "tk-q"}, qHolds: []string{"tk-a"},
+			aSignal: "needs-attention", aReasons: 1},
+		{name: "one held by another pull request's review is listed beneath that pull request",
+			a:    &side{waitsOn: []prstatus.Blocker{b}, holding: prstatus.Holds{Owed: []prstatus.Blocker{b}}, facts: prstatus.Facts{Owed: []prstatus.Blocker{b}}},
+			b:    &side{facts: prstatus.Facts{}},
+			asks: map[string]Ask{"tk-b": AskPullRequest, "tk-q": AskQuestion}, counted: []string{"tk-b", "tk-q"}, bHolds: []string{"tk-a"},
+			aSignal: "Waits on tk-b"},
+		{name: "a chain through another pull request a question holds ends beneath the question, which holds both",
+			a: &side{waitsOn: []prstatus.Blocker{b}, holding: prstatus.Holds{Gates: []prstatus.Blocker{q}, Owed: []prstatus.Blocker{b}},
+				facts: prstatus.Facts{Gates: []prstatus.Blocker{q}, Owed: []prstatus.Blocker{b}}},
+			b:    &side{waitsOn: []prstatus.Blocker{q}, holding: prstatus.Holds{Gates: []prstatus.Blocker{q}}, facts: prstatus.Facts{Gates: []prstatus.Blocker{q}}},
+			asks: map[string]Ask{"tk-q": AskQuestion}, counted: []string{"tk-q"}, qHolds: []string{"tk-a", "tk-b"}, aSignal: "Waits on tk-b"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := &gathered{rig: "gc-toolkit",
+				open: []bead{pull("tk-a", "7", "the change"),
+					{ID: "tk-q", Title: "which way?", Status: "open", Priority: 2, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-02"}},
+				holds:   map[string]waits.Holds{"tk-q": {ID: "tk-q", Status: waits.Clear}},
+				holding: map[string]prstatus.Holds{}, facts: map[string]prstatus.Facts{},
+				unread: map[string]error{}, unwalked: map[string]bool{}, noFacts: map[string]bool{}}
+			for id, sd := range map[string]*side{"tk-a": c.a, "tk-b": c.b} {
+				if sd == nil {
+					continue
+				}
+				if id == "tk-b" {
+					g.open = append(g.open, pull("tk-b", "8", "the other change"))
+				}
+				h := waits.Holds{ID: id, Status: waits.Clear}
+				if len(sd.waitsOn) > 0 {
+					h.Status = waits.Blocked
+					for _, w := range sd.waitsOn {
+						h.Waits = append(h.Waits, wait(w))
+					}
+					g.holding[id] = sd.holding
+				}
+				g.holds[id] = h
+				g.facts[id] = sd.facts
+			}
+			doc := boardOf(t, g)
+			for _, id := range []string{"tk-a", "tk-b", "tk-q"} {
+				if r, ok := doc.Rows[id]; ok && r.Ask != c.asks[id] {
+					t.Errorf("%s asks %q, want %q", id, r.Ask, c.asks[id])
+				}
+			}
+			var counted []string
+			for _, n := range doc.NeedsYou.Counted {
+				counted = append(counted, n.ID)
+			}
+			slices.Sort(counted)
+			if !slices.Equal(counted, c.counted) {
+				t.Errorf("Needs you counts %v, want %v", counted, c.counted)
+			}
+			for id, want := range map[string][]string{"tk-q": c.qHolds, "tk-b": c.bHolds} {
+				got := slices.Sorted(slices.Values(doc.Rows[id].Holds))
+				if !slices.Equal(got, want) && (len(got) > 0 || len(want) > 0) {
+					t.Errorf("%s lists %v beneath it, want %v", id, got, want)
+				}
+			}
+			if !onNeedsYou(doc.NeedsYou, "tk-q") {
+				t.Errorf("Needs you does not list tk-q")
+			}
+			r := doc.Rows["tk-a"]
+			if r.Signal != c.aSignal || r.Group != GroupWaitingOnYou || len(r.Reasons) != c.aReasons {
+				t.Errorf("tk-a reads %q in %q with %d reasons, want %q in %q with %d", r.Signal, r.Group, len(r.Reasons),
+					c.aSignal, GroupWaitingOnYou, c.aReasons)
+			}
+			if r.PullRequest == nil || r.PullRequest.Number != "7" || r.PullRequest.State != "needs-attention" {
+				t.Errorf("tk-a's pull request reads %+v, want #7 at needs-attention, its label's state", r.PullRequest)
 			}
 		})
 	}
@@ -814,20 +937,21 @@ func TestADecisionThatWaitsOnItsWork(t *testing.T) {
 
 // TestAPullRequestThatWaitsOnARuledDecision holds a pull request whose merge a
 // decision holds to the work that decision's ruling sent: while that work is
-// out neither the decision nor the pull request is the operator's move, and
-// once it closes both are. The pull request's facts and what holds each row
-// come from prstatus over the same beads, as gather reads them.
+// out neither the decision nor the pull request is the operator's move. Once it
+// closes the decision is, and the pull request, which nothing else holds, is
+// listed beneath it and waits on its answer. The pull request's facts and what
+// holds each row come from prstatus over the same beads, as gather reads them.
 func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 	for _, c := range []struct {
 		name, work        string
-		counted           []string
+		counted, dHolds   []string
 		prGroup, dGroup   Group
 		prSignal, dSignal string
 	}{
 		{name: "while the work is out", work: "open",
 			prGroup: GroupQueued, prSignal: "Pull request #7", dGroup: GroupQueued, dSignal: "Waits on tk-w"},
-		{name: "once the work has closed", work: "closed", counted: []string{"tk-d", "tk-pr"},
-			prGroup: GroupWaitingOnYou, prSignal: "needs-attention", dGroup: GroupWaitingOnYou, dSignal: "Question"},
+		{name: "once the work has closed", work: "closed", counted: []string{"tk-d"}, dHolds: []string{"tk-pr"},
+			prGroup: GroupWaitingOnYou, prSignal: "Waits on your answer", dGroup: GroupWaitingOnYou, dSignal: "Question"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			prMeta := map[string]string{"merge_result": "pull_request",
@@ -880,6 +1004,12 @@ func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 			}
 			if r := doc.Rows["tk-d"]; r.Group != c.dGroup || r.Signal != c.dSignal {
 				t.Errorf("tk-d reads %q in %q, want %q in %q", r.Signal, r.Group, c.dSignal, c.dGroup)
+			}
+			if r := doc.Rows["tk-pr"]; r.Ask != "" || len(r.Reasons) != 0 {
+				t.Errorf("tk-pr asks %q for %+v, want no ask of its own", r.Ask, r.Reasons)
+			}
+			if h := doc.Rows["tk-d"].Holds; !slices.Equal(h, c.dHolds) && (len(h) > 0 || len(c.dHolds) > 0) {
+				t.Errorf("tk-d lists %v beneath it, want %v", h, c.dHolds)
 			}
 		})
 	}
