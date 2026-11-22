@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -19,11 +18,12 @@ import (
 // withdraw_head, so the evaluator holds the PR from the moment it is filed. The
 // landing order carries it out on the act's own reads of what it dismisses. It
 // reads the PR's reviews, waits while an approval it would dismiss carries
-// feedback the intake has not routed, on its read of the PR's review threads,
-// dismisses each approval that stands on a commit that does not contain the
-// head, and closes the withdrawal once its read of the reviews after the
-// dismissals shows none standing past the ones it dismissed. It files a human
-// gate on the bead when GitHub refuses a dismissal.
+// feedback the city has not taken, its own message or an inline comment, on
+// those reads and its read of the PR's review threads, dismisses each approval
+// that stands on a commit that does not contain the head, and closes the
+// withdrawal once its read of the reviews after the dismissals shows none
+// standing past the ones it dismissed. It files a human gate on the bead when
+// GitHub refuses a dismissal.
 //
 // A withdrawal holds the bead from the refinery as any wait does, so the
 // record stays marked while one is open, and the order reads it on every run
@@ -315,39 +315,40 @@ func (u *run) withoutHead(approvals []Approval, head string, gone map[int64]bool
 	return out, nil
 }
 
-// commentReceipts are the bead's receipts of the inline comments the intake
-// has handled.
-func commentReceipts(r *ledger.Record) (receipts, error) {
-	var rerr error
-	read := func(k ledger.Key[string]) string {
-		v, _, err := k.Get(r)
-		if err != nil && rerr == nil {
-			rerr = err
+// readUnrouted is the posts that dismissing targets would retire before the
+// take files their asks, as unrouted reads them, on the act's own reads of the
+// PR: reviews, the PR's reviews as the act read them, and its review threads,
+// which it reads here, with the definition of feedback the run loaded applied
+// to each post as those reads give it, its marks among what they give. It reads
+// nothing more when no target carries a message and no thread holds a comment
+// a target carries.
+func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []Approval, reviews []gh.Review) ([]Post, error) {
+	target := func(id int64) bool { return slices.ContainsFunc(targets, func(a Approval) bool { return a.ID == id }) }
+	var mine []gh.Review
+	for _, v := range reviews {
+		if target(v.ID) {
+			mine = append(mine, v)
 		}
-		return strings.TrimSpace(v)
 	}
-	rc := receipts{comment: mark(read(commentWatermarkKey)), commentAnswered: mark(read(commentAnsweredKey))}
-	return rc, rerr
-}
-
-// readUnrouted is the inline comments that dismissing targets would retire
-// before the intake routes them, as unrouted reads them, on the act's own read
-// of the PR's review threads, with the definition of feedback the run loaded
-// applied to each comment's text as that read gives it.
-func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []Approval) ([]int64, error) {
 	threads, err := hub.ReviewThreads(s.rec.Repo, number)
 	if err != nil {
 		return nil, err
 	}
-	var carried []feedback.Comment
+	var carried []gh.Thread
 	for _, t := range threads {
-		for _, c := range t.Comments {
-			if c.Review != nil && slices.ContainsFunc(targets, func(a Approval) bool { return a.ID == c.Review.ID }) {
-				carried = append(carried, commentOf(c))
+		c := t
+		c.Comments = nil
+		for _, cm := range t.Comments {
+			if cm.Review != nil && target(cm.Review.ID) {
+				c.Comments = append(c.Comments, cm)
 			}
 		}
+		if len(c.Comments) > 0 {
+			carried = append(carried, c)
+		}
 	}
-	if len(carried) == 0 {
+	messages := slices.ContainsFunc(mine, func(v gh.Review) bool { return strings.TrimSpace(v.Body) != "" })
+	if len(carried) == 0 && !messages {
 		return nil, nil
 	}
 	rule, err := u.rule()
@@ -358,19 +359,11 @@ func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []
 	if err != nil {
 		return nil, err
 	}
-	inline, err := rule.Comments(self, s.since, carried)
+	untaken, err := untakenOf(rule, self, s.since, mine, carried, nil)
 	if err != nil {
 		return nil, err
 	}
-	rc, err := commentReceipts(s.row)
-	if err != nil {
-		return nil, err
-	}
-	now := slices.Clone(targets)
-	for i := range now {
-		now[i].Inline = newestCarried(now[i].ID, threads, inline)
-	}
-	return unrouted(rc, now), nil
+	return unrouted(targets, untaken), nil
 }
 
 // withCarry makes p carry out the record's open withdrawals first, on the act's
@@ -462,17 +455,17 @@ func (u *run) carryOne(ctx context.Context, s state, f seen, hub Hub, w withdraw
 		}
 	}
 	if len(targets) > 0 {
-		// A dismissal retires the inline comments of the review it dismisses, so
-		// it waits while one of them is feedback the intake has not routed.
-		unread, err := u.readUnrouted(s, f.host, hub, p.Number, targets)
+		// A dismissal retires an approval's message and the inline comments the
+		// approval carries, so it waits while one of them is feedback the city
+		// has not taken.
+		unread, err := u.readUnrouted(s, f.host, hub, p.Number, targets, reviews)
 		if err != nil {
 			return waits("the act's own read of the PR's review threads did not answer, and no approval is dismissed "+
 				"without it: "+err.Error(), true)
 		}
 		if len(unread) > 0 {
-			return waits(fmt.Sprintf("the act's own read of the review threads shows inline comment %s, on an approval "+
-				"to dismiss, as feedback the intake has not routed, and a dismissal would retire it unread",
-				joinIDs(unread)), false)
+			return waits(fmt.Sprintf("the act's own reads show %s, on an approval to dismiss, as feedback the city has "+
+				"not taken, and a dismissal would retire it before the take files its ask", postNames(unread)), false)
 		}
 		mark, err := u.cityMark()
 		if err != nil {
@@ -608,11 +601,11 @@ func approvalNames(approvals []Approval) string {
 	return noun + " " + strings.Join(parts, ", ")
 }
 
-// joinIDs lists ids.
-func joinIDs(ids []int64) string {
+// postNames lists posts by their names.
+func postNames(posts []Post) string {
 	var parts []string
-	for _, id := range ids {
-		parts = append(parts, fmt.Sprint(id))
+	for _, p := range posts {
+		parts = append(parts, p.name())
 	}
 	return strings.Join(parts, ", ")
 }

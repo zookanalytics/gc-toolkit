@@ -217,7 +217,21 @@ func one(owners []owned, url string) (owned, error) {
 // finds the live bead that owns the PR at url, in any spelling of the PR's URL,
 // reads the PR's signs itself, and reads and saves what they say moved. A PR no
 // live bead owns has nothing to save, which it reports with no error.
-func (w Watcher) Refresh(url string) (Refreshed, error) { return w.refresh(url, false) }
+func (w Watcher) Refresh(url string) (Refreshed, error) { return w.refresh(url, parts{}) }
+
+// RefreshConversation is the one-PR update over the conversation of the PR at
+// url, whatever its signs say, and over each other part they say moved, as the
+// landing order's take has it once its marks have landed: a reaction moves no
+// sign, so only a read of the conversation shows the saved read the marks. A
+// PR no live bead owns has nothing to save, which is an error here, as for
+// Reread, since the take that asks it filed its asks on the bead that owns it.
+func (w Watcher) RefreshConversation(url string) (Refreshed, error) {
+	done, err := w.refresh(url, parts{conversation: true})
+	if err == nil && done.Action == ActUnowned {
+		return done, fmt.Errorf("%s: %s", url, done.Detail)
+	}
+	return done, err
+}
 
 // Reread is the one-PR update over every part of the PR at url, whatever its
 // signs say, as the landing order has it before it requests the PR's merge: it
@@ -228,16 +242,16 @@ func (w Watcher) Refresh(url string) (Refreshed, error) { return w.refresh(url, 
 // owns has nothing to save, which is an error here, since the merge it is read
 // for has no bead to decide on.
 func (w Watcher) Reread(url string) (Refreshed, error) {
-	done, err := w.refresh(url, true)
+	done, err := w.refresh(url, every)
 	if err == nil && done.Action == ActUnowned {
 		return done, fmt.Errorf("%s: %s", url, done.Detail)
 	}
 	return done, err
 }
 
-// refresh is the one-PR update of the PR at url, over every part when whole is
-// set and over the parts its signs say moved otherwise.
-func (w Watcher) refresh(url string, whole bool) (Refreshed, error) {
+// refresh is the one-PR update of the PR at url, over the parts its signs say
+// moved and each part also names.
+func (w Watcher) refresh(url string, also parts) (Refreshed, error) {
 	host, repo, number, ok := record.ParseURL(url)
 	if !ok {
 		return Refreshed{}, fmt.Errorf("%q is not a pull request's URL (https://<host>/<owner>/<repo>/pull/<number>)", url)
@@ -264,11 +278,7 @@ func (w Watcher) refresh(url string, whole bool) (Refreshed, error) {
 	if !ok {
 		return Refreshed{URL: url, Bead: o.id}, errors.New("GitHub returned no signs for the PR")
 	}
-	due := every
-	if !whole {
-		due = moved(o.saved, s, o.stale())
-	}
-	return u.update(o, hub, s, at, due)
+	return u.update(o, hub, s, at, moved(o.saved, s, o.stale()).plus(also))
 }
 
 // update is the one-PR update over the parts due names, with the signs s, which
@@ -319,12 +329,18 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 		if err != nil {
 			return nil, err
 		}
-		at := instant(u.Now)
+		// A bead with no provenance instant gets the instant of this read, the
+		// city's first of the PR's conversation, which the definition is applied
+		// from and save stamps on the bead with the part.
+		at, since := instant(u.Now), o.since
+		if since == "" {
+			since = stamp(u.Now)
+		}
 		c, err := hub.Conversation(o.repo, o.number)
 		if err != nil {
 			return nil, err
 		}
-		conv, err := savedConversation(rule, self, o.since, c)
+		conv, err := savedConversation(rule, self, since, c)
 		if err != nil {
 			return nil, err
 		}
@@ -346,7 +362,7 @@ func (u *watchRun) read(o owned, hub Watch, s gh.Signs, signsAt string, due part
 // comments, which the definition reads as answers and which move no time, as
 // signs the net compares.
 func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*SavedConversation, error) {
-	f, err := feedbackOf(rule, self, since, c.Reviews, c.Threads, c.Comments)
+	untaken, err := untakenOf(rule, self, since, c.Reviews, c.Threads, c.Comments)
 	if err != nil {
 		return nil, err
 	}
@@ -377,9 +393,8 @@ func savedConversation(rule Feedback, self, since string, c *gh.Conversation) (*
 	}
 	sort.Strings(unresolved)
 	return &SavedConversation{Since: since, Approvers: listed(approvers), Requesters: listed(requesters),
-		Feedback: f.newest(), Awaiting: listed(waiting), Unresolved: listed(unresolved), ReviewDecision: c.ReviewDecision,
-		Approvals: approvals(c.Reviews, c.Threads, f.inline), Signs: ConversationSigns{NewestPost: newest,
-			ViewerReactions: reacted}}, nil
+		Untaken: untaken, Awaiting: listed(waiting), Unresolved: listed(unresolved), ReviewDecision: c.ReviewDecision,
+		Approvals: approvals(c.Reviews), Signs: ConversationSigns{NewestPost: newest, ViewerReactions: reacted}}, nil
 }
 
 // later is the later of two of GitHub's times, a when b does not read as one.
@@ -393,7 +408,12 @@ func later(a, b string) string {
 // save writes the parts of fresh that the bead does not already hold newer,
 // under the record lock, as the bead reads under it: a part's facts and signs
 // when they differ, and its instant when they are the same (merge). A bead that
-// no longer owns the PR gets nothing.
+// no longer owns the PR gets nothing. A conversation read for a bead with no
+// provenance instant applied the definition from the instant of its read, which
+// the write stamps on the bead with the part, while the bead still lacks one.
+// A conversation that applied it from an instant other than the one the bead
+// holds under the lock, as when another writer stamped one meanwhile, is not
+// saved, and the next pass reads it again.
 func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error) {
 	out := Refreshed{URL: o.url, Bead: o.id}
 	release, err := record.Lock(u.Dir, u.Wait)
@@ -418,14 +438,30 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 	if err != nil {
 		saved = nil
 	}
+	since, other := "", ""
+	if c := fresh.Conversation; c != nil {
+		switch {
+		case now.since == "":
+			since = c.Since
+		case c.Since != now.since:
+			other = fmt.Sprintf("; the conversation applied the definition of feedback from %q and the bead's "+
+				"provenance instant is now %q, so it is not saved and the next pass reads it again", c.Since, now.since)
+			kept := *fresh
+			kept.Conversation = nil
+			fresh = &kept
+		}
+	}
 	merged, took, restamped := merge(saved, fresh)
 	if !took.any() && !restamped.any() {
-		out.Action, out.Detail = ActUnchanged, fmt.Sprintf("read %s, which the bead holds newer", due)
+		out.Action, out.Detail = ActUnchanged, fmt.Sprintf("read %s, which the bead holds newer%s", due, other)
 		return out, nil
 	}
 	w := u.Ledger.Write(o.id)
 	w.Guard(now.status, now.assignee)
 	githubReadKey.Set(w, merged)
+	if since != "" && (took.conversation || restamped.conversation) {
+		provenanceKey.Set(w, since)
+	}
 	if record.OnRecord(now.rec.Result) && merged.PR != nil {
 		record.Refreshed(w, strings.ToLower(merged.PR.State), stamp(u.Now))
 	}
@@ -435,9 +471,9 @@ func (u *watchRun) save(o owned, fresh *SavedRead, due parts) (Refreshed, error)
 		}
 		return out, err
 	}
-	out.Action, out.Detail = ActSaved, fmt.Sprintf("read %s, saved %s", due, took)
+	out.Action, out.Detail = ActSaved, fmt.Sprintf("read %s, saved %s%s", due, took, other)
 	if !took.any() {
-		out.Detail = fmt.Sprintf("read %s, which holds what the bead holds, and saved its instant", due)
+		out.Detail = fmt.Sprintf("read %s, which holds what the bead holds, and saved its instant%s", due, other)
 	}
 	return out, nil
 }

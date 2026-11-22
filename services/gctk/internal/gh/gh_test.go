@@ -240,6 +240,34 @@ func TestTheStageOfAPRMovesByItsNodeID(t *testing.T) {
 	}
 }
 
+// A reaction names its post by the post's node id and its content by GitHub's
+// name for it. One that names no post, or a content GitHub has no name of that
+// form for, asks nothing, and a refused one is an error.
+func TestAReactionNamesThePostByItsNodeID(t *testing.T) {
+	c, r := client([2]string{"addReaction(input:{subjectId:$id,content:$content})",
+		`{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}`})
+	if err := c.AddReaction("PRRC_kw1", "EYES"); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PRRC_kw1") ||
+		!strings.Contains(args, "-f content=EYES") {
+		t.Fatalf("the request %q does not name the post and the reaction", args)
+	}
+	c, r = client()
+	for _, err := range []error{c.AddReaction("", "EYES"), c.AddReaction("PRRC_kw1", "eyes"), c.AddReaction("PRRC_kw1", "")} {
+		if err == nil {
+			t.Fatal("a reaction that names no post or no content GitHub names ran")
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a refused reaction asked GitHub: %+v", r.calls)
+	}
+	c, _ = client([2]string{"addReaction", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
+	if err := c.AddReaction("PRRC_gone", "EYES"); err == nil {
+		t.Fatal("a refused reaction read as added")
+	}
+}
+
 // GitHub refused a request when it answered it with a client error, other than
 // a rate limit. A request whose answer did not arrive, or that GitHub could not
 // serve, is not refused.

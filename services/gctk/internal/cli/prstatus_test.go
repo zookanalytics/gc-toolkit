@@ -570,7 +570,7 @@ func inParts(r *pr.GitHubRead) *pr.SavedRead {
 			HeadBranch: r.HeadBranch, Base: r.Base, Head: r.Head, State: r.State, Draft: r.Draft, MergeState: r.MergeState},
 		Checks: &pr.SavedChecks{ReadAt: r.ReadAt, Head: r.Head, Runs: r.Checks},
 		Conversation: &pr.SavedConversation{ReadAt: r.ReadAt, Since: r.Since, Approvers: r.Approvers,
-			Requesters: r.Requesters, Feedback: r.Feedback, Awaiting: r.Awaiting, Unresolved: []string{}},
+			Requesters: r.Requesters, Untaken: r.Untaken, Awaiting: r.Awaiting, Unresolved: []string{}},
 		Labels: &pr.SavedLabels{ReadAt: r.ReadAt, Names: []string{}},
 	}
 }
@@ -822,13 +822,14 @@ func packScripts(t *testing.T) {
 // there, and feedback where nothing declares it.
 func readsDeclared(t *testing.T, f pr.Feedback) bool {
 	t.Helper()
-	ids, err := f.IssueComments("zook-bot", "2026-10-01T00:00:00Z", []feedback.Comment{
+	got, err := f.Untaken("zook-bot", "2026-10-01T00:00:00Z", nil, nil, []feedback.Comment{
 		{ID: 1, Author: "integration", Body: declared + " a status the integration posts", CreatedAt: "2026-11-12T01:00:00Z"},
 		{ID: 2, Author: "operator", Body: "one more thing", CreatedAt: "2026-11-12T01:00:00Z"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	ids := got.Conversation
 	switch {
 	case slices.Equal(ids, []int64{2}):
 		return true

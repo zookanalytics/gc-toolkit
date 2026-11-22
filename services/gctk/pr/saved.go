@@ -91,16 +91,17 @@ type CheckSigns struct {
 
 // SavedConversation is the PR's conversation as the one-PR update read it, with
 // the definition of feedback applied from Since: the accounts whose approval or
-// request for changes stands, the newest feedback in each id space and the
-// review threads waiting on the city's answer, which the rule reads, and the
-// unresolved threads and GitHub's review decision, which the net compares
-// (differs). Approvals is each approval that stands.
+// request for changes stands, the posts that are feedback the city has not
+// taken (untakenOf) and the review threads waiting on the city's answer, which
+// the rule reads and the landing order's take files from, and the unresolved
+// threads and GitHub's review decision, which the net compares (differs).
+// Approvals is each approval that stands.
 type SavedConversation struct {
 	ReadAt         string            `json:"read_at"`
 	Since          string            `json:"since"`
 	Approvers      []string          `json:"approvers"`
 	Requesters     []string          `json:"requesters"`
-	Feedback       NewestFeedback    `json:"feedback"`
+	Untaken        []Post            `json:"untaken"`
 	Awaiting       []string          `json:"awaiting"`
 	Unresolved     []string          `json:"unresolved"`
 	ReviewDecision string            `json:"review_decision"`
@@ -109,14 +110,12 @@ type SavedConversation struct {
 }
 
 // Approval is one review that approves the PR and has not been dismissed,
-// whoever gave it: its id, its author, the commit it was given on, "" when
-// GitHub names none, and Inline, the newest inline comment it carries that is
-// feedback by the definition, 0 for none, which a dismissal would retire.
+// whoever gave it: its id, its author, and the commit it was given on, "" when
+// GitHub names none.
 type Approval struct {
 	ID     int64  `json:"id"`
 	Author string `json:"author"`
 	Commit string `json:"commit"`
-	Inline int64  `json:"inline"`
 }
 
 // ConversationSigns are the signs kept with the conversation: the comment, review
@@ -157,7 +156,7 @@ func (s *SavedRead) view() (*GitHubRead, string) {
 	p, c := s.PR, s.Conversation
 	return &GitHubRead{ReadAt: p.ReadAt, Since: c.Since, URL: p.URL, Number: p.Number, Repository: p.Repository,
 		HeadBranch: p.HeadBranch, Base: p.Base, Head: p.Head, State: p.State, Draft: p.Draft, MergeState: p.MergeState,
-		Checks: s.Checks.Runs, Approvers: c.Approvers, Requesters: c.Requesters, Feedback: c.Feedback,
+		Checks: s.Checks.Runs, Approvers: c.Approvers, Requesters: c.Requesters, Untaken: c.Untaken,
 		Awaiting: c.Awaiting}, ""
 }
 

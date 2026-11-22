@@ -334,28 +334,33 @@ func TestTheRefineryIsWokenOnlyOnceTheBeadIsAssignedToIt(t *testing.T) {
 
 // A withdrawal that held a changed head from the refinery, carried out while a
 // conversation holds the bead, has the refinery woken in the run that carries
-// it out.
+// it out. An inline comment the city has not taken holds the withdrawal open
+// until the take's mark on it lands, and the comment's ask is a merge hold
+// beside the conversation.
 func TestAWithdrawalCarriedOutWhileAConversationHoldsTheBeadWakesTheRefinery(t *testing.T) {
 	d := newHanding(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "rename this",
-		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carried(300, 100)}}}
 	d.conversation(t, "open", "human", "")
 	d.pr.Facts.HeadRefOid = later
 	id := d.withdraw(t, head)
-	d.store.List(bead, id, "tk-conv")
-	is(t, d.once(t), pr.ActRequeued)
+	d.holdOnAsks(id, "tk-conv")
+	d.github.Fail["AddReaction"] = errUnmarked
+	_, o := d.onceTaking(t)
+	is(t, o, pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
 	assignedTo(t, d.land, "")
 	d.wokeNone(t)
 
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
+	delete(d.github.Fail, "AddReaction")
+	ask := d.theAsk(t)
 	// The store's blocked listing leaves the withdrawal out once the run closes
-	// it, so the hand-over after the carry reads the conversation alone.
-	d.store.List(bead, "tk-conv")
-	o := d.once(t)
+	// it, so the hand-over after the carry reads the conversation and the ask.
+	d.holdOnAsks("tk-conv", ask)
+	take, o := d.onceTaking(t)
+	is(t, take, pr.ActTaken)
 	is(t, o, pr.ActSettled)
-	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
+	says(t, o, "only ask "+ask+" and conversation tk-conv hold the bead, so the refinery was woken and nudged")
 	if status(t, d.land, id) != "closed" {
 		t.Fatalf("the withdrawal is %s", status(t, d.land, id))
 	}
@@ -366,24 +371,30 @@ func TestAWithdrawalCarriedOutWhileAConversationHoldsTheBeadWakesTheRefinery(t *
 
 // A withdrawal carried out while a review run is still attached leaves the
 // changed head waiting on that run: the marker stays and no one is woken, and
-// the first run after the review run ends hands the head to the refinery.
+// the first run after the review run ends hands the head to the refinery. An
+// inline comment the city has not taken holds the withdrawal open until the
+// take's mark on it lands.
 func TestAWithdrawalCarriedOutWhileARunIsAttachedWaitsOnTheRun(t *testing.T) {
 	d := newHanding(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "rename this",
-		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carried(300, 100)}}}
 	d.conversation(t, "open", "human", "")
-	is(t, d.once(t), pr.ActPoured)
+	d.github.Fail["AddReaction"] = errUnmarked
+	_, o := d.onceTaking(t)
+	is(t, o, pr.ActPoured)
+	ask := d.theAsk(t)
 	d.pr.Facts.HeadRefOid = later
 	id := d.withdraw(t, head)
-	d.store.List(bead, id, "tk-run1", "tk-conv")
-	is(t, d.once(t), pr.ActRequeued)
+	d.holdOnAsks(id, "tk-run1", "tk-conv", ask)
+	_, o = d.onceTaking(t)
+	is(t, o, pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
 	d.wokeNone(t)
 
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
-	d.store.List(bead, "tk-run1", "tk-conv")
-	o := d.once(t)
+	delete(d.github.Fail, "AddReaction")
+	d.holdOnAsks("tk-run1", "tk-conv", ask)
+	take, o := d.onceTaking(t)
+	is(t, take, pr.ActTaken)
 	is(t, o, pr.ActChecked)
 	says(t, o, "waits on review run tk-run1")
 	if status(t, d.land, id) != "closed" {
@@ -393,10 +404,10 @@ func TestAWithdrawalCarriedOutWhileARunIsAttachedWaitsOnTheRun(t *testing.T) {
 	d.wokeNone(t)
 
 	d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
-	d.store.List(bead, "tk-conv")
+	d.store.List(bead, "tk-conv", ask)
 	o = d.once(t)
 	is(t, o, pr.ActSettled)
-	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
+	says(t, o, "only ask "+ask+" and conversation tk-conv hold the bead, so the refinery was woken and nudged")
 	d.wokeOnce(t, "tk-conv")
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
 }

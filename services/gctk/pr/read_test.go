@@ -162,7 +162,8 @@ func TestASavedReadThatDoesNotDecodeAnswersNothing(t *testing.T) {
 }
 
 // A saved read is GitHub's side at one head only while it holds the PR, its
-// checks and its conversation, the checks read at the PR's head.
+// checks and its conversation, the checks read at the PR's head. Each case
+// keeps the provenance instant the update stamped with the conversation.
 func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 	for name, edit := range map[string]func(*pr.SavedRead){
 		"no PR part":            func(s *pr.SavedRead) { s.PR = nil },
@@ -178,7 +179,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			md := maps.Clone(w.md)
+			md := w.savedMD(t)
 			md["pr_github_read"] = string(raw)
 			unread(t, w.fromStore(t, md))
 		})
@@ -191,7 +192,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		md := maps.Clone(w.md)
+		md := w.savedMD(t)
 		md["pr_github_read"] = string(raw)
 		isReady(t, w.fromStore(t, md))
 	})

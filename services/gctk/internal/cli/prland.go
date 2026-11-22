@@ -145,8 +145,9 @@ again.
 Before any of these, while the saved read shows the PR open, it carries out
 each open withdrawal filed on the bead (gctk pr withdraw), on the act's own
 read of the PR's reviews: it waits while an approval it would dismiss carries
-an inline comment the intake has not routed, on the act's own read of the PR's
-review threads, dismisses each approval that stands on a commit that does not
+feedback the city has not taken, its own message or an inline comment, on the
+act's own reads of the PR's reviews and review threads, since a dismissal
+retires both, dismisses each approval that stands on a commit that does not
 contain the withdrawal's head in the clone's history, with the withdrawal's
 reason and the city's mark, reads the reviews again, and closes the withdrawal
 once none stands past the ones it dismissed, so an approval given during the
@@ -220,6 +221,23 @@ same 45 and 30 seconds, and writes nothing on the bead, so one that does not
 land, or one a saved read out of date made wrong, leaves the difference for a
 later run, which writes it again.
 
+Each post on an owned PR that is feedback the city has not taken, as the
+one-PR update saved it, becomes an ask: the take. For each PR whose bead owns
+it on the record, is open or blocked and is assigned to nobody or to the
+refinery, while the saved read shows the PR open and applied the definition of
+feedback from the bead's provenance instant, an act under the record lock files
+one ask on the bead for each such post (gctk review ask's filing), whose
+one-line reason names the post's kind, its author, the PR, an inline comment's
+file and the line it was made on, and its URL, and marks the post with the
+city's EYES once its ask stands. A filing finds the ask filed before for the
+same reason, so a post whose mark did not land is marked again with no second
+ask, and an edit of a post files nothing new. With the lock free, once a mark
+has landed, the one-PR update reads the PR's conversation again, since a
+reaction moves no sign, so the saved read shows the marks. A take takes its
+place among the acts in the shuffled order, under the same 45 and 30 seconds,
+and its line's action is taken. A take that does not complete leaves its posts
+untaken in the saved read, where they hold the PR's merge, and the run exits 2.
+
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the
 run's 45 seconds, in a clone that carries one (render-seed-audit.sh). The
@@ -228,24 +246,28 @@ slings the branch's one re-render, and the landing's line says what the check
 found. The check holds nothing, and one that does not run is asked for again
 at a later landing.
 
-It acts only on a bead it reads under the lock as carrying the marker, or as
-an open or blocked bead on the record that carries a ruling's disposition,
-with or without the marker, with each write guarded on the status and
-assignee it read. A bead's assignee says who works it now: nobody while its
-PR waits, and the refinery --refinery names while it validates a head. A bead
-assigned to anyone else is theirs: the run writes nothing to it, requests no
-merge and pours no review run, and works it again once the assignee is gone.
+It acts only on a bead it reads under the lock as carrying the marker, as an
+open or blocked bead on the record that carries a ruling's disposition, with
+or without the marker, or, for a take, as an open or blocked bead that owns a
+PR on the record, with each write guarded on the status and assignee it read.
+A bead's assignee says who works it now: nobody while its PR waits, and the
+refinery --refinery names while it validates a head. A bead assigned to anyone
+else is theirs: the run writes nothing to it, requests no merge, pours no
+review run and takes none of its PR's posts, and works it again once the
+assignee is gone.
 Each outcome prints on a line of its own, as <bead> <action>: <detail>, where
-a label write's action is labeled.
+a label write's action is labeled and a take's is taken.
 
-exit: 0 each record and each PR's labels the run took up were decided, and
-        no act it started failed
+exit: 0 each record, each PR's labels and each take the run took up were
+        decided, and no act it started failed
       1 usage
-      2 the listing did not answer, or a record or a PR's labels could not be
-        decided or its act did not complete: a store read or write failed, a
-        call GitHub refused or did not answer, a merge's re-read did not save,
-        a fetch failed, a review run the record is owed did not pour, the
-        labels' writer did not exit 0, or the act was stopped`
+      2 the listing did not answer, or a record, a PR's labels or a take could
+        not be decided or its act did not complete: a store read or write
+        failed, a call GitHub refused or did not answer, a merge's re-read did
+        not save, a fetch failed, a review run the record is owed did not pour,
+        the labels' writer did not exit 0, a post's ask did not file, its mark
+        did not land or the read of the conversation after the marks did not
+        save, or the act was stopped`
 
 func newPRRecordCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, head, target, refinery, db string
@@ -354,7 +376,8 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 // landing builds the pr domain's Landing over the city's adapters: the store
 // at db, else the one gc routes the first of ids to, the record lock in that
 // store's .beads directory, GitHub through gh, the PR watch's one-PR update over
-// the same store for the re-read a merge makes first, waiting for the record
+// the same store for the re-read a merge makes first and for the read of the
+// conversation a take makes once its marks land, each waiting for the record
 // lock no longer than the act has left, the clone at $GC_RIG_ROOT else the
 // working directory, the pack's definition of feedback, loaded in that clone,
 // and the runtime adapter for human gates, for the city's mark, which
@@ -396,12 +419,11 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Refinery: refinery,
 		Hub:      func(ctx context.Context, host string) pr.Hub { return gh.New(host).Within(ctx) },
 		Reread: func(ctx context.Context, url string) error {
-			wait := watchLockWait
-			if end, ok := ctx.Deadline(); ok {
-				wait = min(wait, time.Until(end))
-			}
-			_, err := pr.Watcher{Ledger: l.Within(ctx), Dir: db, Feedback: rule, Wait: wait,
-				GitHub: func(host string) pr.Watch { return gh.New(host).Within(ctx) }}.Reread(url)
+			_, err := watcherWithin(ctx, l, db, rule).Reread(url)
+			return err
+		},
+		RefreshConversation: func(ctx context.Context, url string) error {
+			_, err := watcherWithin(ctx, l, db, rule).RefreshConversation(url)
 			return err
 		},
 		Feedback:     rule,
@@ -415,6 +437,18 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Labels:       prLabels{rt: rt},
 		Wait:         recordLockWait,
 	}, nil
+}
+
+// watcherWithin is the PR watch over the store l opened at db, for an act of the
+// landing order: each GitHub call and store read stops once ctx ends, and its
+// wait for the record lock is no longer than what is left of ctx.
+func watcherWithin(ctx context.Context, l *ledger.Ledger, db string, rule func() (pr.Feedback, error)) pr.Watcher {
+	wait := watchLockWait
+	if end, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(end))
+	}
+	return pr.Watcher{Ledger: l.Within(ctx), Dir: db, Feedback: rule, Wait: wait,
+		GitHub: func(host string) pr.Watch { return gh.New(host).Within(ctx) }}
 }
 
 // wakes wakes a session and then nudges it through the runtime adapter, the two

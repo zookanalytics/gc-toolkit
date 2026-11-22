@@ -66,8 +66,8 @@ import (
 // Hub is GitHub as the landing order and the draft cycle reach it: the reads an
 // act makes of what it changes, such as a withdrawal's of the reviews it
 // dismisses, a merge request or an enqueue pinned to the head the evaluator
-// judged, the PR's moves between draft and ready, and the dismissal of a
-// review.
+// judged, the PR's moves between draft and ready, the dismissal of a review,
+// and the reaction the take leaves on a post, named by its node id.
 type Hub interface {
 	GitHub
 	MergePullRequest(id, head string) error
@@ -75,6 +75,7 @@ type Hub interface {
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
 	DismissReview(repo string, number int, id int64, message string) error
+	AddReaction(subject, content string) error
 }
 
 // Checkout is the rig's clone, as the record reads it: its origin, the target
@@ -173,7 +174,10 @@ func (e *HeldClose) Error() string { return e.Why }
 // wakes. Hub is GitHub on a host, each call stopped when ctx ends. Reread is
 // the one-PR update's read of every part of the PR at url (Watcher.Reread),
 // which a run has make before it requests a merge, stopped once ctx ends, and
-// a run requests no merge when it is nil. Feedback loads the definition of
+// a run requests no merge when it is nil. RefreshConversation is the one-PR
+// update's read of the conversation of the PR at url
+// (Watcher.RefreshConversation), which a take has make once its marks have
+// landed, stopped once ctx ends. Feedback loads the definition of
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
 // it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
@@ -187,24 +191,26 @@ func (e *HeldClose) Error() string { return e.Why }
 // nil. Now is the clock a write's stamp and a run's window read, the system's
 // when nil.
 type Landing struct {
-	Ledger       *ledger.Ledger
-	Dir          string
-	Refinery     string
-	Hub          func(ctx context.Context, host string) Hub
-	Reread       func(ctx context.Context, url string) error
-	Feedback     func() (Feedback, error)
-	Mark         func() (string, error)
-	Checkout     Checkout
-	Gates        Gates
-	Runs         Runs
-	Dispositions Dispositions
-	Audit        Audit
-	Wake         Waker
-	Labels       Labels
-	Now          func() time.Time
-	Wait         time.Duration
-	Yield        time.Duration
-	Shuffle      func([]string)
+	Ledger   *ledger.Ledger
+	Dir      string
+	Refinery string
+	Hub      func(ctx context.Context, host string) Hub
+	Reread   func(ctx context.Context, url string) error
+	// RefreshConversation is described above, with Reread.
+	RefreshConversation func(ctx context.Context, url string) error
+	Feedback            func() (Feedback, error)
+	Mark                func() (string, error)
+	Checkout            Checkout
+	Gates               Gates
+	Runs                Runs
+	Dispositions        Dispositions
+	Audit               Audit
+	Wake                Waker
+	Labels              Labels
+	Now                 func() time.Time
+	Wait                time.Duration
+	Yield               time.Duration
+	Shuffle             func([]string)
 }
 
 // stamp is the time a write records, RFC 3339 UTC to the second, the form whose
@@ -344,6 +350,11 @@ const (
 	ActAssigned = "assigned"
 	// ActSettled: no further run is owed, and the run cleared the marker.
 	ActSettled = "settled"
+	// ActTaken: the read saved on the bead held posts that are feedback the
+	// city has not taken, and the run filed the ask of each, or found the one
+	// filed before, marked each post with the city's EYES, and had the one-PR
+	// update read the PR's conversation again.
+	ActTaken = "taken"
 	// ActBlocked: the publication's second write had landed on a bead still
 	// open, and the run moved it to blocked.
 	ActBlocked = "blocked"
@@ -386,9 +397,11 @@ type Options struct {
 // store. A record that owes no act is reported as its decision found it, with
 // no write and no read of GitHub. With Labels set, each PR the live beads own
 // whose saved labels differ from the ones the store derives owes a label write
-// too (labelPlans). The records that owe an act and the PRs whose labels owe a
-// write are taken in a shuffled order, so one whose act is slow or keeps
-// failing holds no other back, and none is started past o.Window. Each
+// too (labelPlans), and each PR whose bead's saved read holds a post the city
+// has not taken owes its take (takePlans). The records that owe an act, the
+// PRs whose labels owe a write and the PRs that owe a take are taken in a
+// shuffled order, so one whose act is slow or keeps failing holds no other
+// back, and none is started past o.Window. Each
 // record's act reads its record again under the record lock, decides it again
 // from that read, and acts within o.Stop, its writes guarded on the status and
 // assignee it read there. A decision that finds the PR ready has the one-PR
@@ -418,10 +431,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	}
 	var acts []string
 	writes := map[string]labelWrite{}
+	takes := map[string]takeOf{}
 	for _, p := range plans {
 		switch {
 		case p.write != nil:
 			writes[p.id] = *p.write
+		case p.take != nil:
+			takes[p.id] = *p.take
 		case !p.due:
 			tally(p.out)
 			continue
@@ -441,6 +457,11 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 						"the run started no act past its %s, so the next run compares the labels of %s", o.Window, w.url)})
 					continue
 				}
+				if t, ok := takes[left]; ok {
+					report(RunOutcome{Bead: t.bead, Action: ActLeft, Detail: fmt.Sprintf(
+						"the run started no act past its %s, so the next run makes %s", o.Window, t.of())})
+					continue
+				}
 				report(RunOutcome{Bead: left, Action: ActLeft,
 					Detail: fmt.Sprintf("the run started no act past its %s, so the next run acts on the record", o.Window)})
 			}
@@ -448,6 +469,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 		if w, ok := writes[id]; ok {
 			tally(u.writeLabels(w, o.Stop))
+			if l.Yield > 0 && i < len(acts)-1 {
+				time.Sleep(l.Yield)
+			}
+			continue
+		}
+		if t, ok := takes[id]; ok {
+			tally(u.take(t, o.Stop))
 			if l.Yield > 0 && i < len(acts)-1 {
 				time.Sleep(l.Yield)
 			}
@@ -714,8 +742,10 @@ type act func(ctx context.Context, c carriedOut) RunOutcome
 // reread says the record reads ready for its merge, which the act decides
 // again once the one-PR update has re-read the PR in full (rereadAndDecide).
 // In a run's list of plans, due says the record owes an act, which its act
-// decides again under the record lock (one), and a PR whose labels owe a write
-// is planned under its URL, with write holding the write.
+// decides again under the record lock (one), a PR whose labels owe a write is
+// planned under its URL, with write holding the write, and a PR that owes a
+// take is planned under its bead's id with the word take before it, with take
+// holding the take.
 type plan struct {
 	id     string
 	out    RunOutcome
@@ -723,6 +753,7 @@ type plan struct {
 	reread bool
 	due    bool
 	write  *labelWrite
+	take   *takeOf
 }
 
 func none(s state, action, detail string) plan {
@@ -742,8 +773,9 @@ func doing(a act) plan { return plan{act: a} }
 // could not decide, because its state or a read its decision makes did not
 // answer, is due, for its act to decide again under the record lock (one). It leaves out a bead that anyone else is assigned, since a
 // run writes nothing to it. A record that does not read as a record is not one
-// the run can act on. With Labels set, the label writes the owned PRs owe
-// follow (labelPlans). The plans are in id order.
+// the run can act on. The takes the owned PRs owe follow (takePlans), and with
+// Labels set, the label writes they owe (labelPlans). The plans are in id
+// order.
 func (u *run) plan() ([]plan, error) {
 	pass := u.Ledger.Pass()
 	rows, err := pass.Find(record.Marked())
@@ -762,7 +794,7 @@ func (u *run) plan() ([]plan, error) {
 	}
 	if !every {
 		if len(ruled) == 0 {
-			return nil, nil
+			return u.takePlans(pass)
 		}
 		if _, err := pass.Find(ledger.Every()); err != nil {
 			return nil, err
@@ -827,6 +859,11 @@ func (u *run) plan() ([]plan, error) {
 		}
 		out = append(out, plan{id: r.ID, due: true})
 	}
+	takes, err := u.takePlans(pass)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, takes...)
 	if u.Labels != nil {
 		writes, err := u.labelPlans(pass)
 		if err != nil {
@@ -902,13 +939,7 @@ func (u *run) one(ctx context.Context, id string, stop time.Duration) RunOutcome
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
 	defer func() { u.Ledger = unbound }()
-	wait := u.Wait
-	if end, ok := ctx.Deadline(); ok {
-		if left := max(time.Until(end), 0); wait <= 0 || left < wait {
-			wait = left
-		}
-	}
-	release, err := record.Lock(u.Dir, wait)
+	release, err := record.Lock(u.Dir, lockWait(ctx, u.Wait))
 	if err != nil {
 		return RunOutcome{Bead: id, Action: ActRetry, Detail: "the record lock did not come free, so the next run acts: " + err.Error()}
 	}
@@ -969,6 +1000,17 @@ func (u *run) rereadAndDecide(ctx context.Context, id, url string, stop time.Dur
 	}
 	u.reread = id
 	return u.one(ctx, id, stop)
+}
+
+// lockWait is how long an act waits for the record lock: wait, or what is left
+// of ctx when that is less, since the lock does not watch ctx.
+func lockWait(ctx context.Context, wait time.Duration) time.Duration {
+	if end, ok := ctx.Deadline(); ok {
+		if left := max(time.Until(end), 0); wait <= 0 || left < wait {
+			return left
+		}
+	}
+	return wait
 }
 
 // bounded is a context that ends stop from now, or one that never ends when

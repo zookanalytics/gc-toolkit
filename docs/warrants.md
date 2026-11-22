@@ -233,7 +233,7 @@ no warrant.
   its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
   the copy when the source's priority changes. Neither one's documentation
   describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 7b8d498424f4
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
   `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
@@ -459,6 +459,9 @@ no warrant.
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
   what the one-PR update saves once it has re-read the PR in full
   (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
+  takes each post the conversation keeps untaken as its own ask (`takePlans`,
+  `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
+  read the conversation again through `RefreshConversation` in `refresh.go`),
   and compares each owned PR's saved labels with the ones the store derives
   (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
   itself, which compares a PR's signs with the ones each part keeps (`moved` in
@@ -471,10 +474,10 @@ no warrant.
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
   head, the standing approvals, each with the commit it was given on, and
-  requests for changes, the newest feedback in each comment space, the review
-  threads waiting on the city's answer and those unresolved, and the PR's
-  labels, in four parts that each keep the instant their read was sent and the
-  cheap signs read with it.
+  requests for changes, each post that is feedback the city has not taken,
+  with what its ask names it by, the review threads waiting on the city's
+  answer and those unresolved, and the PR's labels, in four parts that each
+  keep the instant their read was sent and the cheap signs read with it.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
     open PR's number, title, URL, author, draft flag, merge state, base and head
@@ -507,10 +510,12 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md),
-    and the search for the parts, their signs and their one writer is
+    the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
-    read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+    read at `gastownhall/gascity` main 9a4b1e718, and the search for the
+    untaken posts the conversation keeps is
+    [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2).
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 7b8d498424f4,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -581,10 +586,12 @@ no warrant.
   `services/gctk/pr/landing.go` calls on each act that decides the record of a
   PR no ruling retired, on the act's own read of the PR's reviews and the
   history the rig's clone holds once the act fetches the PR's branch. It
-  dismisses an approval only once the act's own read of the PR's review
-  threads shows no feedback on it that the intake has not routed, and closes a
-  withdrawal once its read of the reviews after the dismissals shows none
-  standing on a commit without the head. Once a ruling has retired the PR and
+  dismisses an approval only once the act's own reads of the PR's reviews and
+  review threads show neither the approval's message nor an inline comment it
+  carries as feedback the city has not taken (`unrouted` in
+  `services/gctk/pr/feedback.go`), and closes a withdrawal once its read of the
+  reviews after the dismissals shows none standing on a commit without the
+  head. Once a ruling has retired the PR and
   the read the PR watch saved shows it closed, `decideRetired` in
   `landing.go` closes each withdrawal still open, since no approval it
   withdraws can merge a closed PR. Its reader for the review run:
@@ -602,7 +609,7 @@ no warrant.
     `internal/githubmonitor/client.go`). A search of the repository for a
     dismissal finds a session's startup dialogs, mail and a dashboard note,
     and no review.
-  - A dismissal can wait on routing, and GitHub can refuse it or not answer,
+  - A dismissal can wait on the take, and GitHub can refuse it or not answer,
     so the withdrawal must last until a later pass carries it out. Gas City
     keeps no such wait for a write to an outside service: a failed order is not
     retried ("No retry on dispatch failure" in
@@ -623,7 +630,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-22, at `gastownhall/gascity` main 7b8d498424f4, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before

@@ -46,6 +46,8 @@ type PR struct {
 // in place of the default, which refuses a request whose head is not the PR's
 // and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
 // answers a dismissal in place of the default, which dismisses the review.
+// OnReact, when set, runs as a reaction is asked, and an error it returns
+// fails that reaction, which then leaves nothing on the post.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR
@@ -53,6 +55,7 @@ type GitHub struct {
 	OnRead    func(method string, p *PR)
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
+	OnReact   func(subject, content string) error
 	SignsFail map[int]error
 	FullFail  map[int]error
 	// LabeledPage is how many PRs a page of the search holds,
@@ -144,8 +147,9 @@ type Repo struct {
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
 // "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
-// "MarkReady" or "ConvertToDraft" with the PR's node id, or "DismissReview"
-// with the review's id and the dismissal's message.
+// "MarkReady" or "ConvertToDraft" with the PR's node id, "DismissReview" with
+// the review's id and the dismissal's message, or "AddReaction" with the
+// post's node id and the reaction as its message.
 type Ask struct {
 	Method, ID, Head, Message string
 }
@@ -345,6 +349,58 @@ func (g *GitHub) DismissReview(repo string, number int, id int64, message string
 		return nil
 	}
 	return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
+}
+
+// AddReaction records the reaction and answers it: with OnReact's error when it
+// returns one, else by leaving content among the reactions Self left on the
+// review, inline comment or conversation comment whose node id is subject,
+// once, as GitHub keeps one reaction of each content for each account. A node
+// id no post holds is an error, as GitHub answers one that resolves to nothing.
+func (g *GitHub) AddReaction(subject, content string) error {
+	g.mu.Lock()
+	g.asks = append(g.asks, Ask{Method: "AddReaction", ID: subject, Message: content})
+	err := g.Fail["AddReaction"]
+	g.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if g.OnReact != nil {
+		if err := g.OnReact(subject, content); err != nil {
+			return err
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	add := func(have []string) []string {
+		if slices.Contains(have, content) {
+			return have
+		}
+		return append(slices.Clone(have), content)
+	}
+	for _, p := range g.PRs {
+		for i, v := range p.Reviews {
+			if v.NodeID == subject {
+				p.Reviews[i].ViewerReactions = add(v.ViewerReactions)
+				return nil
+			}
+		}
+		for i, t := range p.Threads {
+			for j, c := range t.Comments {
+				if c.NodeID == subject {
+					p.Threads[i].Comments = slices.Clone(t.Comments)
+					p.Threads[i].Comments[j].ViewerReactions = add(c.ViewerReactions)
+					return nil
+				}
+			}
+		}
+		for i, c := range p.Comments {
+			if c.NodeID == subject {
+				p.Comments[i].ViewerReactions = add(c.ViewerReactions)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", subject)
 }
 
 // Login returns Self.

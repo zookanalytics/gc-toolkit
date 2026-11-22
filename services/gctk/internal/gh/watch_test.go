@@ -238,6 +238,60 @@ func TestConversationReadsEveryListInOneRequest(t *testing.T) {
 	}
 }
 
+// Each post the conversation read returns carries its node id, which the
+// take marks it by, its URL, which its ask names, and the reactions the reading
+// account left on it, which say whether the city has taken it. An inline
+// comment carries its file and the line it was made on, and a comment on a file
+// as a whole, whose line GitHub gives as null, carries none.
+func TestConversationReadsEachPostsAddressAndTheCitysMarks(t *testing.T) {
+	eyes := `[{"content":"THUMBS_UP","viewerHasReacted":false},{"content":"EYES","viewerHasReacted":true}]`
+	c, r := client([2]string{"reviewDecision", `{"data":{"repository":{"pullRequest":{"reviewDecision":null,
+		"reviews":{"pageInfo":{"hasNextPage":false},"nodes":[{"fullDatabaseId":"100","id":"PRR_1",
+			"url":"https://github.com/acme/widgets/pull/7#pullrequestreview-100","state":"APPROVED","body":"rename X",
+			"submittedAt":"s","updatedAt":"u","authorCanPushToRepository":true,"author":{"login":"operator"},"commit":null,
+			"reactionGroups":` + eyes + `}]},
+		"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"id":"T1","isResolved":false,"comments":{
+			"pageInfo":{"hasNextPage":false},"nodes":[
+			{"fullDatabaseId":"200","id":"PRRC_1","url":"https://github.com/acme/widgets/pull/7#discussion_r200",
+				"author":{"login":"operator"},"body":"fix","createdAt":"c","updatedAt":"u","path":"a/b.go","originalLine":42,
+				"pullRequestReview":{"fullDatabaseId":"101","submittedAt":"s","state":"COMMENTED"},"reactionGroups":[]},
+			{"fullDatabaseId":"201","id":"PRRC_2","url":"https://github.com/acme/widgets/pull/7#discussion_r201",
+				"author":{"login":"operator"},"body":"whole file","createdAt":"c","updatedAt":"u","path":"a/c.go",
+				"originalLine":null,"pullRequestReview":{"fullDatabaseId":"101","submittedAt":"s","state":"COMMENTED"},
+				"reactionGroups":[]}]}}]},
+		"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"fullDatabaseId":"300","id":"IC_1",
+			"url":"https://github.com/acme/widgets/pull/7#issuecomment-300","body":"hi","createdAt":"c","updatedAt":"u",
+			"author":{"login":"visitor"},"reactionGroups":` + eyes + `}]}}}}}`})
+	conv, err := c.Conversation("acme/widgets", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := gh.Review{ID: 100, NodeID: "PRR_1", URL: "https://github.com/acme/widgets/pull/7#pullrequestreview-100",
+		State: "APPROVED", Body: "rename X", SubmittedAt: "s", UpdatedAt: "u", Author: "operator", AuthorCanPush: true,
+		ViewerReactions: []string{"EYES"}}
+	if !reflect.DeepEqual(conv.Reviews, []gh.Review{review}) {
+		t.Fatalf("reviews %+v, want %+v", conv.Reviews, review)
+	}
+	inline := conv.Threads[0].Comments
+	if inline[0].NodeID != "PRRC_1" || inline[0].URL != "https://github.com/acme/widgets/pull/7#discussion_r200" ||
+		inline[0].Path != "a/b.go" || inline[0].OriginalLine != 42 || inline[0].ViewerReactions != nil {
+		t.Fatalf("inline comment %+v", inline[0])
+	}
+	if inline[1].Path != "a/c.go" || inline[1].OriginalLine != 0 {
+		t.Fatalf("a comment on a file as a whole reads %+v, want its file and no line", inline[1])
+	}
+	comment := gh.IssueComment{ID: 300, NodeID: "IC_1", URL: "https://github.com/acme/widgets/pull/7#issuecomment-300",
+		Author: "visitor", Body: "hi", CreatedAt: "c", UpdatedAt: "u", ViewerReactions: []string{"EYES"}}
+	if !reflect.DeepEqual(conv.Comments, []gh.IssueComment{comment}) {
+		t.Fatalf("comments %+v, want %+v", conv.Comments, comment)
+	}
+	query := strings.Join(r.calls[0].args, " ")
+	if n := strings.Count(query, "reactionGroups{content viewerHasReacted}"); n != 3 || !strings.Contains(query, "path originalLine") {
+		t.Fatalf("the read %q asks the reactions of %d lists, want the reviews, the inline comments and the "+
+			"conversation comments, and an inline comment's file and line", query, n)
+	}
+}
+
 func TestConversationReadsAListPastItsFirstPageOnItsOwn(t *testing.T) {
 	c, r := client(
 		[2]string{"reviews(first:100,after:$endCursor)", `{"data":{"repository":{"pullRequest":{"reviews":{

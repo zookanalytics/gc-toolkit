@@ -527,8 +527,10 @@ after its PR's provenance cutover, described next, is feedback like a person's,
 whoever posted it. Rework hand-backs post nothing.
 
 A PR's posts from before the city marked anything carry no mark. Each anchor
-records the instant `pr-facts.sh` first read its open PR
-(`pr_provenance_since`), and an unmarked post under the city's login from
+records the instant the city first read its open PR (`pr_provenance_since`),
+which `pr-facts.sh` stamps the first time it reads the PR and the one-PR update
+(`gctk pr refresh`) stamps in the write that saves the first conversation it
+reads for a bead that lacks it, and an unmarked post under the city's login from
 before that instant is still the city's own, so the notices already on a PR do
 not turn into feedback all at once. A post counts from the moment it was
 published: an inline comment from its review's submission, not from its draft,
@@ -650,7 +652,7 @@ non-draft anchor and read off the bead by everything downstream. Declared in
 | `pr_comment_answered` | `<id>` | every inline comment above `pr_comment_watermark`, through this id, was answered by its thread at the last read |
 | `pr_review_answered` | `<id>` | every counted review body above `pr_review_watermark`, through this id, was answered by its threads at the last read |
 | `pr_comment_disposition` | `rework:<id>` / `human:<id>` | what the last outstanding batch was routed to: a rework child, or a human gate |
-| `pr_provenance_since` | `<UTC instant>` | when `pr-facts.sh` first read the open PR; an unmarked post under the city's login from before it is the city's own |
+| `pr_provenance_since` | `<UTC instant>` | when the city first read the open PR, by `pr-facts.sh` or by the one-PR update with the first conversation it saved; an unmarked post under the city's login from before it is the city's own |
 | `pr_finishing_settled` | `approved` / `unapproved` / `unsettled` | the rank all of the anchor's PR-finishing work was last settled at, or `unsettled` while a re-rank is owed; absent while no pass has recorded one |
 | `pr_head_oid` | `<oid>` | the PR head `pr-facts.sh` last read, a draft's included |
 

@@ -613,6 +613,22 @@ checks moved. GitHub reads a merged PR's merge state as `UNKNOWN` for good, so
 a PR that is not open is read again only when its signs move. A read that
 fails saves nothing. The update is the one writer of these three keys.
 
+The conversation part keeps each post that is feedback the city has not taken:
+a review whose message is not blank, an approval's included, an inline comment
+no dismissal retired, or a conversation comment, by the definition of feedback
+(`pr-post.sh feedback-def`), that carries neither of the city's marks, its
+`EYES` once the landing order has filed the post's ask and its `THUMBS_UP`
+once the post is owed nothing more. Each such post is kept with what its ask
+names it by and the node id the landing order marks it by
+([The landing order](#the-landing-order)). A mark is the reading account's own
+reaction, so the read takes the marks with the posts. A bead with no
+`pr_provenance_since` gets the instant of the conversation's read, to the
+second, in the write that saves the first conversation the update reads for
+it, and the definition is applied from that instant. A conversation read from
+another instant than the one the bead holds when the update writes, as when
+another writer stamped one meanwhile, is not saved, and the next pass reads it
+again.
+
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
 an event names. A PR no live bead owns has nothing to save, and it exits 0.
@@ -817,8 +833,10 @@ and a record that owes no act gets no write.
 **Withdrawals come first.** While the saved read shows the PR open, a run first carries out each
 open withdrawal on the bead, which a review run's triage files when it rules a
 head material (`gctk pr withdraw`), on its own read of the PR's reviews. It
-waits while an approval it would dismiss carries an inline comment the intake
-has not routed, on its read of the PR's review threads. It dismisses each
+waits while an approval it would dismiss carries feedback the city has not
+taken, its own message or an inline comment, on its reads of the PR's reviews
+and review threads, since a dismissal retires both before the take files their
+asks. It dismisses each
 approval that stands on a commit that does not contain the withdrawal's head in
 the history the rig's clone holds, with the withdrawal's reason and the city's
 mark, reads the reviews again, and closes the withdrawal once none stands past
@@ -834,6 +852,28 @@ or a read of the clone's history that does not answer, leaves the withdrawal
 for the next run. A withdrawal holds the bead from the refinery until it is
 carried out, so a changed head stays assigned to nobody and keeps its marker
 while one is open, and the order still reads it.
+
+**A person's post.** Each post the saved read keeps untaken becomes an ask on
+the bead that owns the PR, which the PR's review run rules. For each PR whose
+bead owns it on the record, is open or blocked and is assigned to nobody or to
+the refinery, while the saved read shows the PR open and applied the definition
+of feedback from the bead's provenance instant, an act under the record lock
+files the post's ask (`gctk review ask`'s filing), then marks the post `EYES`.
+The ask's reason is one line naming the post: its kind, its author, the PR, an
+inline comment's file and the line it was made on, and its URL, where the run
+reads the post as it stands. The reason holds no text of the post, and a filing
+finds the ask filed before for the same reason, open or closed, so a post whose
+mark did not land is marked again with no second ask, and an edit files nothing
+new. A post's mark goes only after its ask stands. A reaction moves no sign the
+cheap question reads, so once a mark has landed and the lock is free, the act
+has the one-PR update read the PR's conversation again, and the saved read
+shows the marks before the next run decides. A take is an act like a record's,
+in the shuffled order, under the same 45 and 30 seconds, and its line's action
+is `taken`. One whose filing, mark or read of the conversation did not
+complete leaves its posts untaken in the saved read, where each holds the PR's
+merge, and the run exits 2. The merge's own re-read applies the same condition,
+so a post made seconds before a merge holds it though no saved read held it
+yet.
 
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the

@@ -2,6 +2,7 @@ package pr_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -36,37 +37,39 @@ const (
 	self   = "zook-bot"
 )
 
-// rule is the definition of feedback as a test sets it.
+// rule is the definition of feedback as a test sets it: every post is feedback
+// unless notFeedback names it, an inline comment a dismissal retired is none,
+// and a post that carries the city's EYES or THUMBS_UP is taken.
 type rule struct {
 	notFeedback map[int64]bool
 	awaits      map[string]bool
 	err         error
 }
 
-func (r *rule) Reviews(_, _ string, reviews []feedback.Review) ([]int64, error) {
-	var out []int64
+// untaken reports whether the post id, carrying reactions, is feedback the
+// city has not taken.
+func (r *rule) untaken(id int64, reactions []string) bool {
+	return !r.notFeedback[id] && !slices.Contains(reactions, "EYES") && !slices.Contains(reactions, "THUMBS_UP")
+}
+
+func (r *rule) Untaken(_, _ string, reviews []feedback.Review, inline, convo []feedback.Comment) (feedback.Untaken, error) {
+	var out feedback.Untaken
 	for _, v := range reviews {
-		if !r.notFeedback[v.ID] {
-			out = append(out, v.ID)
+		if r.untaken(v.ID, v.Reactions) {
+			out.Reviews = append(out.Reviews, v.ID)
+		}
+	}
+	for _, c := range inline {
+		if (c.Review == nil || c.Review.State != "DISMISSED") && r.untaken(c.ID, c.Reactions) {
+			out.Inline = append(out.Inline, c.ID)
+		}
+	}
+	for _, c := range convo {
+		if r.untaken(c.ID, c.Reactions) {
+			out.Conversation = append(out.Conversation, c.ID)
 		}
 	}
 	return out, r.err
-}
-
-func (r *rule) comments(cs []feedback.Comment) ([]int64, error) {
-	var out []int64
-	for _, c := range cs {
-		if !r.notFeedback[c.ID] {
-			out = append(out, c.ID)
-		}
-	}
-	return out, r.err
-}
-
-func (r *rule) Comments(_, _ string, cs []feedback.Comment) ([]int64, error) { return r.comments(cs) }
-
-func (r *rule) IssueComments(_, _ string, cs []feedback.Comment) ([]int64, error) {
-	return r.comments(cs)
 }
 
 // Awaiting names each thread awaits marks, unless the city's THUMBS_UP is on
@@ -151,7 +154,7 @@ func saveRead(read *pr.GitHubRead) *pr.SavedRead {
 			MergeState: read.MergeState},
 		Checks: &pr.SavedChecks{ReadAt: read.ReadAt, Head: read.Head, Runs: read.Checks},
 		Conversation: &pr.SavedConversation{ReadAt: read.ReadAt, Since: read.Since, Approvers: read.Approvers,
-			Requesters: read.Requesters, Feedback: read.Feedback, Awaiting: read.Awaiting, Unresolved: []string{}},
+			Requesters: read.Requesters, Untaken: read.Untaken, Awaiting: read.Awaiting, Unresolved: []string{}},
 		Labels: &pr.SavedLabels{ReadAt: read.ReadAt, Names: []string{}},
 	}
 }
@@ -566,93 +569,97 @@ func TestTheBeadsOwnWaitsAndHolds(t *testing.T) {
 	})
 }
 
-func TestFeedbackReceipts(t *testing.T) {
-	commented := func(id int64, at string) gh.Review {
-		return gh.Review{ID: id, State: "COMMENTED", Author: "operator", AuthorCanPush: true, Body: "rename this", SubmittedAt: at}
+// Each post that is feedback the city has not taken holds the PR, by its URL:
+// a review whose message is not blank, an approval's included, an inline
+// comment and a conversation comment. The city's EYES or THUMBS_UP on a post
+// takes it, whatever its id, so a review submitted late, below the ids of the
+// posts the city has taken, still holds the PR.
+func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
+	commented := func(id int64, at string, reacted ...string) gh.Review {
+		return gh.Review{ID: id, URL: fmt.Sprintf("%s#pullrequestreview-%d", prURL, id), State: "COMMENTED",
+			Author: "operator", AuthorCanPush: true, Body: "rename this", SubmittedAt: at, ViewerReactions: reacted}
 	}
 	thread := func(id string, comments ...gh.Comment) gh.Thread {
 		return gh.Thread{ID: id, Comments: comments}
 	}
-	comment := func(id int64) gh.Comment {
-		return gh.Comment{ID: id, Author: "operator", Body: "and this", CreatedAt: "2026-11-12T02:00:00Z",
+	comment := func(id int64, reacted ...string) gh.Comment {
+		return gh.Comment{ID: id, URL: fmt.Sprintf("%s#discussion_r%d", prURL, id), Author: "operator", Body: "and this",
+			CreatedAt: "2026-11-12T02:00:00Z", ViewerReactions: reacted,
 			Review: &gh.CommentReview{ID: 200, State: "COMMENTED", SubmittedAt: "2026-11-12T02:00:00Z"}}
 	}
-	t.Run("a review newer than the review watermark holds the PR", func(t *testing.T) {
+	t.Run("a review the city has not taken holds the PR", func(t *testing.T) {
 		w := ready()
-		w.md["pr_review_watermark"] = "150"
 		w.pr.Reviews = append(w.pr.Reviews, commented(200, "2026-11-12T02:00:00Z"))
 		a := w.answer(t)
 		only(t, a, pr.KindFeedback)
-		if !strings.Contains(a.Conditions[0].Detail, "review 200") {
-			t.Fatalf("detail %q names no review 200", a.Conditions[0].Detail)
+		if c := a.Conditions[0]; !strings.Contains(c.Detail, "review 200") || c.Value != prURL+"#pullrequestreview-200" {
+			t.Fatalf("the condition %+v names no review 200 by its URL", c)
 		}
 	})
-	t.Run("one the intake has routed holds nothing", func(t *testing.T) {
+	for _, mark := range []string{"EYES", "THUMBS_UP"} {
+		t.Run("one that carries the city's "+mark+" holds nothing", func(t *testing.T) {
+			w := ready()
+			w.pr.Reviews = append(w.pr.Reviews, commented(200, "2026-11-12T02:00:00Z", mark))
+			w.pr.Threads = []gh.Thread{thread("T1", comment(260, mark))}
+			w.pr.Comments = []gh.IssueComment{{ID: 5, Author: "operator", Body: "one more thing", ViewerReactions: []string{mark}}}
+			isReady(t, w.answer(t))
+		})
+	}
+	t.Run("a review submitted late, below the ids the city has taken, holds the PR", func(t *testing.T) {
 		w := ready()
-		w.md["pr_review_watermark"] = "200"
-		w.pr.Reviews = append(w.pr.Reviews, commented(200, "2026-11-12T02:00:00Z"))
-		isReady(t, w.answer(t))
+		w.pr.Reviews = append(w.pr.Reviews, commented(150, "2026-11-12T04:00:00Z"), commented(200, "2026-11-12T02:00:00Z", "EYES"))
+		w.pr.Threads = []gh.Thread{thread("T1", comment(260, "EYES"))}
+		a := w.answer(t)
+		only(t, a, pr.KindFeedback)
+		if !strings.Contains(a.Conditions[0].Detail, "review 150") {
+			t.Fatalf("detail %q names no review 150", a.Conditions[0].Detail)
+		}
 	})
-	t.Run("one the threads have answered through holds nothing", func(t *testing.T) {
+	t.Run("beside posts the definition reads as no feedback, which hold nothing", func(t *testing.T) {
 		w := ready()
-		w.md["pr_review_watermark"] = "150"
-		w.md["pr_review_answered"] = "200"
-		w.pr.Reviews = append(w.pr.Reviews, commented(200, "2026-11-12T02:00:00Z"))
-		isReady(t, w.answer(t))
-	})
-	t.Run("beside feedback the intake's rule leaves out, which holds nothing", func(t *testing.T) {
-		w := ready()
-		w.md["pr_review_watermark"] = "150"
-		w.md["pr_comment_watermark"] = "150"
-		w.md["pr_issue_comment_watermark"] = "150"
 		approvalMessage := approve(300, "operator", "2026-11-12T03:00:00Z")
 		approvalMessage.Body = "ship it, and rename X"
 		empty := gh.Review{ID: 301, State: "COMMENTED", Author: "operator", AuthorCanPush: true, Body: " \n", SubmittedAt: "2026-11-12T03:00:00Z"}
+		dismissed := gh.Review{ID: 305, State: "DISMISSED", Author: "operator", AuthorCanPush: true, Body: "an old request",
+			SubmittedAt: "2026-11-12T03:00:00Z"}
 		cityOwn := commented(302, "2026-11-12T03:00:00Z")
-		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, cityOwn)
+		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, dismissed, cityOwn)
 		w.pr.Threads = []gh.Thread{thread("T1", comment(303))}
 		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", Body: "[vc]: #deployed"}}
+		w.rule.notFeedback[300] = true
 		w.rule.notFeedback[302] = true
 		w.rule.notFeedback[303] = true
 		w.rule.notFeedback[304] = true
 		isReady(t, w.answer(t))
-		// The same posts as feedback hold it in each space but the review
-		// space, whose counted reviews are only those that comment or request
-		// changes and carry text.
+		// The same posts as feedback hold it, each but the review with no
+		// message and the dismissed review's: the intake counts a review's
+		// message when the review comments, requests changes or approves.
 		w = ready()
-		w.md["pr_review_watermark"] = "150"
-		w.md["pr_comment_watermark"] = "150"
-		w.md["pr_issue_comment_watermark"] = "150"
-		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, cityOwn)
+		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, dismissed, cityOwn)
 		w.pr.Threads = []gh.Thread{thread("T1", comment(303))}
 		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", Body: "[vc]: #deployed"}}
 		a := w.answer(t)
-		only(t, a, pr.KindFeedback, pr.KindFeedback, pr.KindFeedback)
-		if !strings.Contains(a.Conditions[0].Detail, "review 302") {
-			t.Fatalf("the review space counts %q, want review 302 alone", a.Conditions[0].Detail)
+		only(t, a, pr.KindFeedback, pr.KindFeedback, pr.KindFeedback, pr.KindFeedback)
+		var named []string
+		for _, c := range a.Conditions {
+			named = append(named, c.Detail)
+		}
+		for i, want := range []string{"review 300", "review 302", "inline comment 303", "conversation comment 304"} {
+			if !strings.Contains(named[i], want) {
+				t.Fatalf("the conditions name %q, want %s at %d", named, want, i)
+			}
 		}
 	})
-	t.Run("an inline comment newer than the comment watermark, and past the answered mark", func(t *testing.T) {
+	t.Run("an inline comment a dismissal retired holds nothing", func(t *testing.T) {
 		w := ready()
-		w.md["pr_comment_watermark"] = "250"
-		w.md["pr_comment_answered"] = "260"
-		w.pr.Threads = []gh.Thread{{ID: "T1", Resolved: true, Comments: []gh.Comment{comment(260), comment(270)}}}
-		a := w.answer(t)
-		only(t, a, pr.KindFeedback)
-		if !strings.Contains(a.Conditions[0].Detail, "inline comment 270") {
-			t.Fatalf("detail %q names no inline comment 270", a.Conditions[0].Detail)
-		}
-	})
-	t.Run("a conversation comment newer than its watermark", func(t *testing.T) {
-		w := ready()
-		w.md["pr_issue_comment_watermark"] = "not a number"
-		w.pr.Comments = []gh.IssueComment{{ID: 5, Author: "operator", Body: "one more thing"}}
-		only(t, w.answer(t), pr.KindFeedback)
+		retired := comment(270)
+		retired.Review = &gh.CommentReview{ID: 201, State: "DISMISSED", SubmittedAt: "2026-11-12T02:00:00Z"}
+		w.pr.Threads = []gh.Thread{{ID: "T1", Resolved: true, Comments: []gh.Comment{comment(260, "EYES"), retired}}}
+		isReady(t, w.answer(t))
 	})
 	t.Run("a review thread waiting on the city's answer holds the PR", func(t *testing.T) {
 		w := ready()
-		w.md["pr_comment_watermark"] = "999"
-		w.pr.Threads = []gh.Thread{thread("T1", comment(303)), thread("T2", comment(304))}
+		w.pr.Threads = []gh.Thread{thread("T1", comment(303, "EYES")), thread("T2", comment(304, "EYES"))}
 		w.rule.awaits["T2"] = true
 		a := w.answer(t)
 		only(t, a, pr.KindThread)

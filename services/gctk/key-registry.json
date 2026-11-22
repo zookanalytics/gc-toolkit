@@ -516,41 +516,17 @@
     "doc": "true on the bead of a session Gas City runs as a pool seat, which its work ladder paces (ladderGoverns in cmd/gc/work_ladder_lane.go at gastownhall/gascity c7eb6d2f43). The seat-progress look judges only such a seat."
   },
   {
-    "name": "pr_comment_answered",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The inline comment id through which the review threads have answered the comments past the comment watermark. A value that is not a whole number reads as 0."
-  },
-  {
-    "name": "pr_comment_watermark",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The highest inline comment id the intake has routed. A value that is not a whole number reads as 0."
-  },
-  {
     "name": "pr_github_read",
     "type": "json",
     "owner": "pr",
     "warrant": "saved-github-read",
-    "doc": "GitHub's side of a PR as the one-PR update (gctk pr refresh) last read and saved it, one JSON object on the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and, but for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and statuses, the last two counts by state. conversation: since, the provenance instant the definition of feedback was applied from; approvers and requesters, the accounts that can push whose approval or request for changes stands; feedback, the newest feedback id in each id space as {review, inline, conversation}; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved threads; review_decision; and approvals, each review that approves and has not been dismissed, whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is feedback, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a post changed, and viewer_reactions, each reaction the account the read runs as left on an inline comment, as the comment's id and the reaction, which the definition of feedback reads as an answer to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only when its read was sent after the saved part's: the whole part when it differs, and its read_at alone when it holds the same, so a read sent before it is never saved after it. A read that fails saves nothing. It holds no answer. The pr evaluator decides over it for a display, the PR's status: and held: labels among them, as current only while it holds the pr, checks and conversation parts, the checks at the PR's head, names the record's repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread. The landing order finds and does its work from it and the store, and reads GitHub first only for a merge: it has the update read every part of the PR again, and decides the merge on what that read saved. The order's label comparison reads the labels it saved, and labels that differ from the derived ones make a label write due, on an open PR or, for one it shows merged or closed, a clear."
+    "doc": "GitHub's side of a PR as the one-PR update (gctk pr refresh) last read and saved it, one JSON object on the bead that owns the PR, in four parts, each with read_at, the instant its read was sent, and, but for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and statuses, the last two counts by state. conversation: since, the provenance instant the definition of feedback was applied from; approvers and requesters, the accounts that can push whose approval or request for changes stands; untaken, each post that is feedback and carries neither of the city's marks, its EYES or its THUMBS_UP, as {kind, id, node, author, url, state, path, line, review}: kind review, inline or conversation, node its node id on GitHub, state a review's, path and line an inline comment's file and the line it was made on, and review the review that carried it; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved threads; review_decision; and approvals, each review that approves and has not been dismissed, whoever gave it, as {id, author, commit}, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a post changed, and viewer_reactions, each reaction the account the read runs as left on an inline comment, as the comment's id and the reaction, which the definition of feedback reads as an answer to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only when its read was sent after the saved part's: the whole part when it differs, and its read_at alone when it holds the same, so a read sent before it is never saved after it. A read that fails saves nothing. It holds no answer. The pr evaluator decides over it for a display, the PR's status: and held: labels among them, as current only while it holds the pr, checks and conversation parts, the checks at the PR's head, names the record's repository and number, its head is the head the store holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread. The landing order finds and does its work from it and the store, and reads GitHub first only for a merge: it has the update read every part of the PR again, and decides the merge on what that read saved. Its take files an ask for each untaken post and marks the post with the city's EYES, then has the update read the PR's conversation again. The order's label comparison reads the labels it saved, and labels that differ from the derived ones make a label write due, on an open PR or, for one it shows merged or closed, a clear."
   },
   {
     "name": "pr_head_sha",
     "type": "string",
     "owner": "pr/record",
     "doc": "The head the refinery validated, the one head the bead's PR may merge at. A requeue keeps it."
-  },
-  {
-    "name": "pr_issue_comment_watermark",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The highest conversation comment id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
     "name": "pr_last_checked_at",
@@ -573,10 +549,8 @@
   {
     "name": "pr_provenance_since",
     "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The instant from which a post under the city's login is feedback unless it carries the city's mark. A value that is not an instant in GitHub's form makes every such post the city's own."
+    "owner": "pr",
+    "doc": "The instant from which a post under the city's login is feedback unless it carries the city's mark, UTC in the form YYYY-MM-DDTHH:MM:SSZ: when the city first read the PR's conversation. The one-PR update (gctk pr refresh) stamps it on the bead that owns the PR, when the bead lacks it, in the write that saves the first conversation it reads there, applying the definition from it. A value that is not an instant in that form makes every such post the city's own."
   },
   {
     "name": "pr_reconcile_pending",
@@ -589,22 +563,6 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The repository of the PR the record names, owner/name, which matches the rig's origin and is compared without case."
-  },
-  {
-    "name": "pr_review_answered",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The review id through which the review threads have answered the reviews past the review watermark. A value that is not a whole number reads as 0."
-  },
-  {
-    "name": "pr_review_watermark",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The highest review id the intake has routed. A value that is not a whole number reads as 0."
   },
   {
     "name": "pr_state",

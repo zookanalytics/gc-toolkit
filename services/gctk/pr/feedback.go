@@ -3,179 +3,227 @@ package pr
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
 // Feedback is the pack's one definition of feedback, which the feedback
-// adapter's Rule applies and its fake answers: which reviews and comments are
-// feedback, which inline comments a dismissal has not retired, and which review
-// threads wait on the city's answer.
+// adapter's Rule applies and its fake answers: which posts are feedback that
+// the city has not taken, among the inline comments a dismissal has not
+// retired, and which review threads wait on the city's answer.
 type Feedback interface {
-	Reviews(self, since string, reviews []feedback.Review) ([]int64, error)
-	Comments(self, since string, comments []feedback.Comment) ([]int64, error)
-	IssueComments(self, since string, comments []feedback.Comment) ([]int64, error)
+	Untaken(self, since string, reviews []feedback.Review, inline, conversation []feedback.Comment) (feedback.Untaken, error)
 	Awaiting(self, since string, threads []feedback.Thread) ([]string, error)
 }
 
 // countedReviewStates are the states of a review whose message the intake
-// counts as feedback, as pr-facts.sh counts it (counted_review_ids).
-var countedReviewStates = []string{"COMMENTED", "CHANGES_REQUESTED"}
+// counts as a post: a comment, a request for changes and an approval. A
+// dismissed review's message counts for nothing.
+var countedReviewStates = []string{"COMMENTED", "CHANGES_REQUESTED", "APPROVED"}
 
-// receipts are the anchor's records of the feedback the intake has handled:
-// the watermark of each id space, and the marks through which the review
-// threads have answered the reviews and the inline comments.
-type receipts struct {
-	review, comment, issueComment   int64
-	reviewAnswered, commentAnswered int64
+// The kinds of a post.
+const (
+	PostReview       = "review"
+	PostInline       = "inline"
+	PostConversation = "conversation"
+)
+
+// Post is one post on a PR that is feedback the city has not taken: it carries
+// neither of the city's marks. Kind is review, inline or conversation, ID its
+// id in that space, Node its node id, which the take marks it by, and URL its
+// address. State is a review's state, Path and Line an inline comment's file
+// and the line it was made on (originalLine), Line 0 for a comment on a file
+// as a whole, and Review the review that carried an inline comment.
+type Post struct {
+	Kind   string `json:"kind"`
+	ID     int64  `json:"id"`
+	Node   string `json:"node"`
+	Author string `json:"author"`
+	URL    string `json:"url"`
+	State  string `json:"state,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Line   int    `json:"line,omitempty"`
+	Review int64  `json:"review,omitempty"`
 }
 
-// mark reads a receipt. A value that is not a whole number reads as 0.
-func mark(v string) int64 {
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 0 {
-		return 0
+// name is the post as a sentence names it.
+func (p Post) name() string {
+	switch p.Kind {
+	case PostReview:
+		return fmt.Sprintf("the message of review %d", p.ID)
+	case PostInline:
+		return fmt.Sprintf("inline comment %d", p.ID)
 	}
-	return n
+	return fmt.Sprintf("conversation comment %d", p.ID)
 }
 
-// feedbackIDs are the posts the definition reads as feedback, in each id
-// space: the reviews, of which the intake counts those in counted, the inline
-// comments and the conversation comments.
-type feedbackIDs struct {
-	reviews, inline, conversation []int64
-	counted                       map[int64]bool
-}
-
-// newest is the highest feedback id in each id space.
-func (f feedbackIDs) newest() NewestFeedback {
-	return NewestFeedback{Review: newest(f.reviews, 0, f.counted), Inline: newest(f.inline, 0, nil),
-		Conversation: newest(f.conversation, 0, nil)}
-}
-
-// feedbackOf applies the definition to every post of the PR, once in each id
-// space.
-func feedbackOf(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) (feedbackIDs, error) {
-	var revs []feedback.Review
-	counted := map[int64]bool{}
-	for _, v := range reviews {
-		revs = append(revs, reviewOf(v))
-		if slices.Contains(countedReviewStates, v.State) && strings.TrimFunc(v.Body, unicode.IsSpace) != "" {
-			counted[v.ID] = true
+// reason is the one line an ask names the post by, on PR number: its kind, its
+// author, the PR, an inline comment's file and the line it was made on, and its
+// URL, where a run reads the post as it stands. It holds nothing an edit of the
+// post changes, so the take finds the ask it filed for the post (review.FileAsk)
+// however often it runs, and postNamed reads the URL back.
+func (p Post) reason(number int) string {
+	who := p.Author
+	if who == "" {
+		who = "an account GitHub no longer names"
+	}
+	what := "Conversation comment"
+	switch p.Kind {
+	case PostReview:
+		what = map[string]string{"APPROVED": "Approval message", "CHANGES_REQUESTED": "Request for changes"}[p.State]
+		if what == "" {
+			what = "Review"
+		}
+	case PostInline:
+		what = "Inline comment"
+	}
+	where := ""
+	if p.Kind == PostInline && p.Path != "" {
+		where = " on " + p.Path
+		if p.Line > 0 {
+			where = fmt.Sprintf(" at %s line %d", p.Path, p.Line)
 		}
 	}
-	reviewIDs, err := rule.Reviews(self, since, revs)
-	if err != nil {
-		return feedbackIDs{}, err
+	return fmt.Sprintf("%s by %s on PR #%d%s: %s", what, who, number, where, p.URL)
+}
+
+// postFragment is the fragment of a post's URL on its PR: a review's, an inline
+// comment's or a conversation comment's.
+var postFragment = regexp.MustCompile(`^(pullrequestreview-|discussion_r|issuecomment-)[0-9]+$`)
+
+// postNamed is the URL of the post on the PR at pr that an ask's reason names,
+// as the take writes one (Post.reason), or "" when it names none.
+func postNamed(reason, pr string) string {
+	i := strings.LastIndex(reason, ": ")
+	if i < 0 {
+		return ""
+	}
+	url := strings.TrimSpace(reason[i+2:])
+	base, frag, ok := strings.Cut(url, "#")
+	if !ok || !postFragment.MatchString(frag) {
+		return ""
+	}
+	h1, r1, n1, ok1 := record.ParseURL(base)
+	h2, r2, n2, ok2 := record.ParseURL(pr)
+	if !ok1 || !ok2 || identity(h1, r1, n1) != identity(h2, r2, n2) {
+		return ""
+	}
+	return url
+}
+
+// untakenOf is each post among a PR's reviews, review threads and conversation
+// comments that is feedback the city has not taken, by the definition rule
+// applies from since as the account self acts as: a review in a state the
+// intake counts whose message is not blank, an inline comment no dismissal
+// retired, and a conversation comment, each carrying neither of the city's
+// marks. It is the one reading of which posts the city has not taken, which the
+// one-PR update saves, the landing order's take files and marks, and a
+// withdrawal waits on. They come in that order of kinds, each kind by id.
+func untakenOf(rule Feedback, self, since string, reviews []gh.Review, threads []gh.Thread, comments []gh.IssueComment) ([]Post, error) {
+	var revs []feedback.Review
+	byReview := map[int64]gh.Review{}
+	for _, v := range reviews {
+		if slices.Contains(countedReviewStates, v.State) && strings.TrimFunc(v.Body, unicode.IsSpace) != "" {
+			revs = append(revs, reviewOf(v))
+			byReview[v.ID] = v
+		}
 	}
 	var inline []feedback.Comment
+	byInline := map[int64]gh.Comment{}
 	for _, t := range threads {
 		for _, c := range t.Comments {
 			inline = append(inline, commentOf(c))
+			byInline[c.ID] = c
 		}
 	}
-	commentIDs, err := rule.Comments(self, since, inline)
-	if err != nil {
-		return feedbackIDs{}, err
-	}
 	var convo []feedback.Comment
+	byConvo := map[int64]gh.IssueComment{}
 	for _, c := range comments {
-		convo = append(convo, feedback.Comment{ID: c.ID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+		convo = append(convo, feedback.Comment{ID: c.ID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt,
+			Reactions: c.ViewerReactions})
+		byConvo[c.ID] = c
 	}
-	issueIDs, err := rule.IssueComments(self, since, convo)
+	got, err := rule.Untaken(self, since, revs, inline, convo)
 	if err != nil {
-		return feedbackIDs{}, err
+		return nil, err
 	}
-	return feedbackIDs{reviews: reviewIDs, inline: commentIDs, conversation: issueIDs, counted: counted}, nil
+	out := []Post{}
+	for _, id := range sorted(got.Reviews) {
+		if v, ok := byReview[id]; ok {
+			out = append(out, Post{Kind: PostReview, ID: id, Node: v.NodeID, Author: v.Author, URL: v.URL, State: v.State})
+		}
+	}
+	for _, id := range sorted(got.Inline) {
+		if c, ok := byInline[id]; ok {
+			p := Post{Kind: PostInline, ID: id, Node: c.NodeID, Author: c.Author, URL: c.URL, Path: c.Path, Line: c.OriginalLine}
+			if c.Review != nil {
+				p.Review = c.Review.ID
+			}
+			out = append(out, p)
+		}
+	}
+	for _, id := range sorted(got.Conversation) {
+		if c, ok := byConvo[id]; ok {
+			out = append(out, Post{Kind: PostConversation, ID: id, Node: c.NodeID, Author: c.Author, URL: c.URL})
+		}
+	}
+	return out, nil
+}
+
+// sorted is ids in order, each once.
+func sorted(ids []int64) []int64 {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // approvals is each review among reviews that approves and has not been
-// dismissed, whoever gave it, in id order, with the newest feedback comment it
-// carries among threads (newestCarried).
-func approvals(reviews []gh.Review, threads []gh.Thread, inline []int64) []Approval {
+// dismissed, whoever gave it, in id order.
+func approvals(reviews []gh.Review) []Approval {
 	out := []Approval{}
 	for _, v := range reviews {
-		if v.State != "APPROVED" {
-			continue
+		if v.State == "APPROVED" {
+			out = append(out, Approval{ID: v.ID, Author: v.Author, Commit: v.Commit})
 		}
-		out = append(out, Approval{ID: v.ID, Author: v.Author, Commit: v.Commit, Inline: newestCarried(v.ID, threads, inline)})
 	}
 	slices.SortFunc(out, func(a, b Approval) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }
 
-// newestCarried is the newest of the inline comments review carries among
-// threads that inline, the feedback ids of the inline comments, names, or 0
-// when it carries none.
-func newestCarried(review int64, threads []gh.Thread, inline []int64) int64 {
-	var top int64
-	for _, t := range threads {
-		for _, c := range t.Comments {
-			if c.Review != nil && c.Review.ID == review && c.ID > top && slices.Contains(inline, c.ID) {
-				top = c.ID
-			}
-		}
-	}
-	return top
-}
-
-// unhandled is one condition for each id space whose newest feedback the
-// receipts do not cover: newer than the space's watermark and, for reviews and
-// inline comments, past the mark the threads have answered through. The
-// receipts are the store's and move when the intake routes feedback, so the
-// compare is made at each read.
-func unhandled(rc receipts, n NewestFeedback) []Condition {
+// unhandled is one condition for each post among untaken, the posts of the PR
+// that are feedback the city has not taken, each of which waits for the take
+// to file its ask and mark it. Once the post is marked, its ask holds the PR as
+// any wait of the bead's own does.
+func unhandled(untaken []Post) []Condition {
 	var out []Condition
-	if id := newest([]int64{n.Review}, max(rc.review, rc.reviewAnswered), nil); id > 0 {
-		out = append(out, Condition{Kind: KindFeedback,
-			Detail: fmt.Sprintf("review %d is feedback past the review watermark that the intake has not handled", id)})
-	}
-	if id := newest([]int64{n.Inline}, max(rc.comment, rc.commentAnswered), nil); id > 0 {
-		out = append(out, Condition{Kind: KindFeedback,
-			Detail: fmt.Sprintf("inline comment %d is feedback past the comment watermark that the intake has not handled", id)})
-	}
-	if id := newest([]int64{n.Conversation}, rc.issueComment, nil); id > 0 {
-		out = append(out, Condition{Kind: KindFeedback,
-			Detail: fmt.Sprintf("conversation comment %d is feedback past the conversation watermark that the intake has not handled", id)})
+	for _, p := range untaken {
+		out = append(out, Condition{Kind: KindFeedback, Value: p.URL,
+			Detail: fmt.Sprintf("%s is feedback the city has not taken", p.name())})
 	}
 	return out
 }
 
-// unrouted is the newest inline comment of each approval named that a
-// dismissal would retire before the intake routes it, in id order: feedback by
-// the definition, carried by the approval, and newer than the comment
-// watermark and the mark the threads have answered through. It is the rule a
-// dismisser waits by (unrouted_comment_ids in
-// assets/scripts/review-dismissal.sh), over the newest such comment each
-// approval carries on the act's own read of the PR's review threads
-// (readUnrouted).
-func unrouted(rc receipts, targets []Approval) []int64 {
-	floor := max(rc.comment, rc.commentAnswered)
-	var out []int64
-	for _, a := range targets {
-		if a.Inline > floor {
-			out = append(out, a.Inline)
+// unrouted is each post among untaken that dismissing targets would retire
+// before the take files its ask: the message of an approval among targets,
+// which a dismissal takes out of the reviews the intake counts, and an inline
+// comment such an approval carries, which a dismissal retires (live_comments).
+// It is the rule a dismisser waits by, over the posts the act's own read of the
+// PR's reviews and review threads found untaken (readUnrouted).
+func unrouted(targets []Approval, untaken []Post) []Post {
+	target := func(id int64) bool { return slices.ContainsFunc(targets, func(a Approval) bool { return a.ID == id }) }
+	var out []Post
+	for _, p := range untaken {
+		if (p.Kind == PostReview && target(p.ID)) || (p.Kind == PostInline && p.Review != 0 && target(p.Review)) {
+			out = append(out, p)
 		}
 	}
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
-// newest is the highest id above floor among ids, of those only names when it
-// is not nil, or 0 when there is none.
-func newest(ids []int64, floor int64, only map[int64]bool) int64 {
-	var top int64
-	for _, id := range ids {
-		if id > floor && id > top && (only == nil || only[id]) {
-			top = id
-		}
-	}
-	return top
+	return out
 }
 
 // awaiting is the ids of the review threads that wait on the city's answer, by
@@ -193,7 +241,8 @@ func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string,
 }
 
 func reviewOf(v gh.Review) feedback.Review {
-	return feedback.Review{ID: v.ID, Author: v.Author, Body: v.Body, State: v.State, SubmittedAt: v.SubmittedAt}
+	return feedback.Review{ID: v.ID, Author: v.Author, Body: v.Body, State: v.State, SubmittedAt: v.SubmittedAt,
+		Reactions: v.ViewerReactions}
 }
 
 func commentOf(c gh.Comment) feedback.Comment {

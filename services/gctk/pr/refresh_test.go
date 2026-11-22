@@ -3,6 +3,7 @@ package pr_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"math/rand/v2"
 	"regexp"
@@ -708,8 +709,8 @@ func TestTheSavedReadsFields(t *testing.T) {
 		"pr": {"base", "draft", "head", "head_branch", "id", "in_merge_queue", "merge_commit", "merge_queue_enabled",
 			"merge_state", "merged_at", "number", "read_at", "repository", "signs", "state", "url"},
 		"checks": {"head", "read_at", "runs", "signs"},
-		"conversation": {"approvals", "approvers", "awaiting", "feedback", "read_at", "requesters", "review_decision",
-			"signs", "since", "unresolved"},
+		"conversation": {"approvals", "approvers", "awaiting", "read_at", "requesters", "review_decision",
+			"signs", "since", "unresolved", "untaken"},
 		"labels": {"names", "read_at"},
 	}
 	signs := map[string][]string{
@@ -746,6 +747,134 @@ func TestTheSavedReadsFields(t *testing.T) {
 	if err := json.Unmarshal(parts["conversation"]["approvals"], &approvals); err != nil || approvals == nil {
 		t.Errorf("approvals encodes as %s, want a list", parts["conversation"]["approvals"])
 	}
+	var untaken []pr.Post
+	if err := json.Unmarshal(parts["conversation"]["untaken"], &untaken); err != nil || untaken == nil {
+		t.Errorf("untaken encodes as %s, want a list", parts["conversation"]["untaken"])
+	}
+}
+
+// The conversation keeps each post that is feedback the city has not taken,
+// with what the ask the take files for it names and the node id the take marks
+// it by: a review in a state the intake counts whose message is not blank, an
+// approval's among them, an inline comment with its file, the line it was made
+// on and the review that carried it, and a conversation comment. A post that
+// carries the city's EYES or THUMBS_UP is taken, and so is none that is no
+// feedback, a review with no message, a dismissed review's message or an inline
+// comment its dismissal retired. The posts come by kind, each kind by id.
+func TestTheConversationKeepsEachPostTheCityHasNotTaken(t *testing.T) {
+	d := newWatched(t)
+	at := "2026-11-16T08:00:00Z"
+	review := func(id int64, state, body string, reacted ...string) gh.Review {
+		return gh.Review{ID: id, NodeID: fmt.Sprintf("PRR_%d", id), URL: fmt.Sprintf("%s#pullrequestreview-%d", prURL, id),
+			State: state, Body: body, Author: "operator", AuthorCanPush: true, SubmittedAt: at, ViewerReactions: reacted}
+	}
+	d.pr.Reviews = []gh.Review{review(105, "APPROVED", "approved, but rename X"), review(101, "COMMENTED", "a thought"),
+		review(102, "APPROVED", ""), review(103, "DISMISSED", "an old request"), review(104, "CHANGES_REQUESTED", "fix", "EYES"),
+		review(106, "COMMENTED", "handled", "THUMBS_UP")}
+	inline := func(id, carrier int64, state, path string, line int) gh.Comment {
+		return gh.Comment{ID: id, NodeID: fmt.Sprintf("PRRC_%d", id), URL: fmt.Sprintf("%s#discussion_r%d", prURL, id),
+			Author: "visitor", Body: "look", CreatedAt: at, Path: path, OriginalLine: line,
+			Review: &gh.CommentReview{ID: carrier, State: state, SubmittedAt: at}}
+	}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{inline(301, 101, "COMMENTED", "a/b.go", 42),
+		inline(300, 101, "COMMENTED", "a/c.go", 0), inline(302, 103, "DISMISSED", "a/b.go", 7)}}}
+	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor",
+		Body: "one more thing", CreatedAt: at}, {ID: 401, NodeID: "IC_401", Author: "visitor", Body: "not for review",
+		CreatedAt: at}}
+	d.rule.notFeedback[401] = true
+	d.poll(t)
+	want := []pr.Post{
+		{Kind: "review", ID: 101, Node: "PRR_101", Author: "operator", URL: prURL + "#pullrequestreview-101", State: "COMMENTED"},
+		{Kind: "review", ID: 105, Node: "PRR_105", Author: "operator", URL: prURL + "#pullrequestreview-105", State: "APPROVED"},
+		{Kind: "inline", ID: 300, Node: "PRRC_300", Author: "visitor", URL: prURL + "#discussion_r300", Path: "a/c.go", Review: 101},
+		{Kind: "inline", ID: 301, Node: "PRRC_301", Author: "visitor", URL: prURL + "#discussion_r301", Path: "a/b.go", Line: 42,
+			Review: 101},
+		{Kind: "conversation", ID: 400, Node: "IC_400", Author: "visitor", URL: prURL + "#issuecomment-400"},
+	}
+	if got := d.saved(t, bead).Conversation.Untaken; !slices.Equal(got, want) {
+		t.Fatalf("the conversation keeps the untaken posts\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// A conversation the update read for a bead with no provenance instant applied
+// the definition from the instant of its read. When another writer stamps an
+// instant on the bead while that read is out, the conversation is not saved
+// over it, and the next pass reads the conversation from the bead's instant.
+func TestAConversationReadFromAnotherProvenanceInstantIsNotSaved(t *testing.T) {
+	d := newWatched(t)
+	const theirs = "2026-11-16T07:00:00Z"
+	d.github.OnRead = func(method string, _ *ghfake.PR) {
+		if method != "Conversation" {
+			return
+		}
+		b, _ := d.store.Row(bead)
+		b.Metadata = maps.Clone(b.Metadata)
+		b.Metadata["pr_provenance_since"] = theirs
+		d.store.Put(b)
+	}
+	rep := d.poll(t)
+	if len(rep.Updates) != 1 || !strings.Contains(rep.Updates[0].Detail, "not saved") {
+		t.Fatalf("the pass reported %+v, want the conversation left unsaved", rep)
+	}
+	if s := d.saved(t, bead); s == nil || s.Conversation != nil || s.PR == nil {
+		t.Fatalf("the update saved %+v, want every part but the conversation", s)
+	}
+	if got := d.row(t, bead).Metadata["pr_provenance_since"]; got != theirs {
+		t.Fatalf("the bead's provenance instant reads %q, want the other writer's %q", got, theirs)
+	}
+	d.github.OnRead = nil
+	d.poll(t)
+	if c := d.saved(t, bead).Conversation; c == nil || c.Since != theirs {
+		t.Fatalf("the next pass saved the conversation %+v, want it read from %q", c, theirs)
+	}
+}
+
+// The update stamps the bead's provenance instant, when the bead lacks one, in
+// the write that saves the first conversation it reads there, as the instant
+// of that read to the second, and applies the definition of feedback from it.
+// A later read keeps the instant, and an update that reads no conversation
+// stamps none.
+func TestTheUpdateStampsTheProvenanceInstantWithTheFirstConversation(t *testing.T) {
+	d := newWatched(t)
+	if since := d.row(t, bead).Metadata["pr_provenance_since"]; since != "" {
+		t.Fatalf("the world's bead starts with the provenance instant %q", since)
+	}
+	reads, writes := len(d.github.Reads()), len(d.store.Writes())
+	d.poll(t)
+	if !slices.Contains(d.readsSince(reads), "Conversation") {
+		t.Fatalf("the first pass read %v, want the conversation among them", d.readsSince(reads))
+	}
+	since := d.row(t, bead).Metadata["pr_provenance_since"]
+	if !regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$`).MatchString(since) {
+		t.Fatalf("the update stamped the provenance instant %q, want an instant to the second", since)
+	}
+	if got := d.saved(t, bead).Conversation.Since; got != since {
+		t.Fatalf("the conversation applied the definition from %q, want the instant stamped, %q", got, since)
+	}
+	stamped := 0
+	for _, w := range d.store.Writes()[writes:] {
+		if slices.ContainsFunc(w.Args, func(a string) bool { return strings.HasPrefix(a, "pr_provenance_since=") }) {
+			stamped++
+			if !slices.ContainsFunc(w.Args, func(a string) bool { return strings.HasPrefix(a, "pr_github_read=") }) {
+				t.Fatalf("the instant was stamped in a write that saved no read: %v", w.Args)
+			}
+		}
+	}
+	if stamped != 1 {
+		t.Fatalf("the instant was stamped in %d writes, want the one that saved the conversation", stamped)
+	}
+	writes = len(d.store.Writes())
+	d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 500, Author: "operator", Body: "a new comment",
+		CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"})
+	d.poll(t)
+	if got := d.row(t, bead).Metadata["pr_provenance_since"]; got != since {
+		t.Fatalf("a later read moved the provenance instant to %q from %q", got, since)
+	}
+	for _, w := range d.store.Writes()[writes:] {
+		if slices.ContainsFunc(w.Args, func(a string) bool { return strings.HasPrefix(a, "pr_provenance_since=") }) {
+			t.Fatalf("a later read stamped the instant again: %v", w.Args)
+		}
+	}
 }
 
 // The PR part keeps the PR's node id and, once it merged, its merge commit and
@@ -762,10 +891,8 @@ func TestThePRPartKeepsItsNodeIDAndItsMerge(t *testing.T) {
 }
 
 // The conversation keeps each approval that stands, whoever gave it, with the
-// commit it was given on and the newest inline comment it carries that is
-// feedback, which a withdrawal's dismissal would retire. A dismissed review, a
-// request for changes and a comment are no approval, and an inline comment the
-// definition reads as no feedback is not kept.
+// commit it was given on. A dismissed review, a request for changes and a
+// comment are no approval.
 func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
 	d := newWatched(t)
 	review := func(id int64, state, login, commit string) gh.Review {
@@ -775,15 +902,9 @@ func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
 	d.pr.Reviews = []gh.Review{review(102, "APPROVED", "visitor", other), review(100, "APPROVED", "operator", head),
 		review(101, "DISMISSED", "operator", other), review(103, "CHANGES_REQUESTED", "reviewer", head),
 		review(104, "COMMENTED", "reviewer", head)}
-	carriedBy := func(id, review int64) gh.Comment {
-		return gh.Comment{ID: id, Author: "operator", Body: "look", CreatedAt: "2026-11-16T08:00:00Z",
-			Review: &gh.CommentReview{ID: review, State: "APPROVED", SubmittedAt: "2026-11-16T08:00:00Z"}}
-	}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carriedBy(300, 100), carriedBy(302, 100), carriedBy(301, 102)}}}
-	d.rule.notFeedback[302] = true
 	d.poll(t)
 	got := d.saved(t, bead).Conversation.Approvals
-	want := []pr.Approval{{ID: 100, Author: "operator", Commit: head, Inline: 300}, {ID: 102, Author: "visitor", Commit: other, Inline: 301}}
+	want := []pr.Approval{{ID: 100, Author: "operator", Commit: head}, {ID: 102, Author: "visitor", Commit: other}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("the conversation keeps approvals %+v, want %+v", got, want)
 	}

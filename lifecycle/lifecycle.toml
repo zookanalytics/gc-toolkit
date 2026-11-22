@@ -130,8 +130,10 @@ issue_comment_watermark_key = "pr_issue_comment_watermark"
 # review (docs/not-for-review.md), whoever wrote it. The city's own post carries
 # the mark pr-post.sh appends, or is an unmarked post under the city's login
 # from before this instant (UTC, YYYY-MM-DDTHH:MM:SSZ), when its posts did not
-# yet carry one. pr-facts.sh stamps it the first time it reads the open PR;
-# absent or malformed, every post under the city's login is the city's own.
+# yet carry one. pr-facts.sh stamps it the first time it reads the open PR, and
+# the one-PR update (gctk pr refresh) in the write that saves the first
+# conversation it reads for a bead that lacks it; absent or malformed, every
+# post under the city's login is the city's own.
 provenance_since_key = "pr_provenance_since"
 # What the outstanding comments were routed to: "rework:<bead-id>" (a fix-pool
 # child, whatever holds the anchor) or "human:<gate-id>" (nowhere to route work:
@@ -1010,7 +1012,8 @@ keys = [
   # own, and nothing clears the key.
   "pr_check_rerun",
   # The provenance cutover, mechanics in [posture] above. Written once per
-  # anchor; signoff.sh reads it for the same test.
+  # anchor, by pr-facts.sh or the one-PR update; signoff.sh reads it for the
+  # same test.
   "pr_provenance_since",
   # How far the review threads have answered past pr_comment_watermark and
   # pr_review_watermark: every inline comment (or counted review body) above the

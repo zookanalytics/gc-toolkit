@@ -249,7 +249,8 @@ func (a *audit) calls() (checks, reaudits []string) {
 // land is one bead on the pending record, blocked and assigned to nobody,
 // whose PR the evaluator reads ready, with the landing order's sources and the
 // PR watch's one-PR update, which saves GitHub's side on the bead. reads and
-// writes mark where the last run's GitHub reads and store writes start.
+// writes mark where the last run's GitHub reads and store writes start, and
+// asked where a case's requests of GitHub start.
 type land struct {
 	*world
 	co     *checkout
@@ -260,6 +261,7 @@ type land struct {
 	tick   int
 	reads  int
 	writes int
+	asked  int
 }
 
 func newLand(t *testing.T) *land {
@@ -284,6 +286,10 @@ func newLand(t *testing.T) *land {
 		Hub:      func(context.Context, string) pr.Hub { return w.github },
 		Reread: func(_ context.Context, url string) error {
 			_, err := d.watch.Reread(url)
+			return err
+		},
+		RefreshConversation: func(_ context.Context, url string) error {
+			_, err := d.watch.RefreshConversation(url)
 			return err
 		},
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },

@@ -10,12 +10,13 @@ import (
 )
 
 // Render puts the evaluator's answer in the status vocabulary, by Derive's
-// precedence: what a person must clear, then an approved PR the city lands
-// unless a conversation stays for work, then the city's work, a side of
-// GitHub's the landing order has yet to read among it, then the approval
-// alone.
+// precedence: what a person must clear, then a person's post the city works,
+// then an approved PR the city lands unless a conversation stays for work,
+// then the city's work, a side of GitHub's the landing order has yet to read
+// among it, then the approval alone.
 func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 	cond := func(k pr.Kind, value string) pr.Condition { return pr.Condition{Kind: k, Value: value} }
+	const post = "https://github.com/acme/widgets/pull/7#issuecomment-700"
 	staying := prstatus.Facts{Staying: []prstatus.Blocker{{ID: "tk-conv", Title: "a conversation that stays for its work"}}}
 	cases := []struct {
 		name  string
@@ -31,8 +32,18 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 			false, []pr.Condition{cond(pr.KindReview, ""), cond(pr.KindInFlight, "")}, prstatus.Facts{}, prstatus.Merging},
 		{"an unapproved PR with the city's work left is working",
 			false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindDraft, "")}, prstatus.Facts{}, prstatus.Working},
-		{"an unapproved PR with feedback the intake has yet to route is working",
-			false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindFeedback, "")}, prstatus.Facts{}, prstatus.Working},
+		{"an unapproved PR with a post the city has not taken is working",
+			false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindFeedback, post)}, prstatus.Facts{}, prstatus.Working},
+		{"an approved PR with a post the city has not taken is working, ahead of merging",
+			false, []pr.Condition{cond(pr.KindFeedback, post)}, prstatus.Facts{}, prstatus.Working},
+		{"an approved PR whose open ask carries a person's post is working, ahead of merging",
+			false, []pr.Condition{{Kind: pr.KindWait, ID: "tk-ask", Value: post}, cond(pr.KindReview, "")}, prstatus.Facts{},
+			prstatus.Working},
+		{"an approved PR waiting on an ask that carries no post is merging",
+			false, []pr.Condition{{Kind: pr.KindWait, ID: "tk-fix"}, cond(pr.KindReview, "")}, prstatus.Facts{}, prstatus.Merging},
+		{"a post the city has not taken beside a human gate needs attention",
+			false, []pr.Condition{cond(pr.KindFeedback, post), {Kind: pr.KindWait, ID: "gate"}},
+			prstatus.Facts{Gates: []prstatus.Blocker{{ID: "gate", Title: "decide"}}}, prstatus.NeedsAttention},
 		{"an unapproved PR whose review thread waits on the city's answer, with nothing acting on it, needs attention",
 			false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindThread, "T1")}, prstatus.Facts{}, prstatus.NeedsAttention},
 		{"a PR waiting only on an approval needs review",
@@ -67,8 +78,8 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 		{"one that a bead anchored to the PR acts on is the city's",
 			false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindThread, "T1"), {Kind: pr.KindInFlight, ID: "tk-k"}},
 			prstatus.Facts{}, prstatus.Working},
-		{"one beside feedback the intake has yet to route is the city's",
-			false, []pr.Condition{cond(pr.KindThread, "T1"), cond(pr.KindFeedback, "")}, prstatus.Facts{}, prstatus.Merging},
+		{"one beside a post the city has not taken is the city's, and the PR is working",
+			false, []pr.Condition{cond(pr.KindThread, "T1"), cond(pr.KindFeedback, post)}, prstatus.Facts{}, prstatus.Working},
 		{"an approved PR a conversation whose sitting stays for work holds is working, as Derive reads it",
 			false, []pr.Condition{{Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.Working},
 		{"an unapproved PR a conversation whose sitting stays for work holds is working",

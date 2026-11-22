@@ -119,20 +119,25 @@ type PullRequest struct {
 	MergeQueueEnabled bool
 }
 
-// Review is one review of a PR. State is APPROVED, CHANGES_REQUESTED,
+// Review is one review of a PR. NodeID is its node id, which a reaction names
+// it by, and URL its address on the PR. State is APPROVED, CHANGES_REQUESTED,
 // COMMENTED, DISMISSED or PENDING. AuthorCanPush is whether its author can push
 // to the repository (authorCanPushToRepository). Commit is the commit the
 // review was given on, its commit_id, empty when GitHub names none. UpdatedAt
 // is when the review last changed, which an edit of its text moves.
+// ViewerReactions are the reactions the account the read ran as left on it.
 type Review struct {
-	ID            int64
-	State         string
-	Body          string
-	SubmittedAt   string
-	UpdatedAt     string
-	Author        string
-	AuthorCanPush bool
-	Commit        string
+	ID              int64
+	NodeID          string
+	URL             string
+	State           string
+	Body            string
+	SubmittedAt     string
+	UpdatedAt       string
+	Author          string
+	AuthorCanPush   bool
+	Commit          string
+	ViewerReactions []string
 }
 
 // CheckSuite is one check suite at a commit, with the latest result of each of
@@ -161,16 +166,24 @@ type Thread struct {
 	Comments []Comment
 }
 
-// Comment is one inline comment on a PR. Review is the review that carried it,
-// nil when GitHub names none. ViewerReactions are the reactions the account
-// the read ran as left on it, such as THUMBS_UP. UpdatedAt is when it last
-// changed, which an edit of its text moves.
+// Comment is one inline comment on a PR. NodeID is its node id, which a
+// reaction names it by, and URL its address on the PR. Path is the file it was
+// made on, and OriginalLine the line of that file it was made on, which a later
+// push does not move, 0 when GitHub names none, as for a comment on a file as a
+// whole. Review is the review that carried it, nil when GitHub names none.
+// ViewerReactions are the reactions the account the read ran as left on it,
+// such as THUMBS_UP. UpdatedAt is when it last changed, which an edit of its
+// text moves.
 type Comment struct {
 	ID              int64
+	NodeID          string
+	URL             string
 	Author          string
 	Body            string
 	CreatedAt       string
 	UpdatedAt       string
+	Path            string
+	OriginalLine    int
 	Review          *CommentReview
 	ViewerReactions []string
 }
@@ -182,14 +195,19 @@ type CommentReview struct {
 	SubmittedAt string
 }
 
-// IssueComment is one comment on a PR's conversation. UpdatedAt is when it
-// last changed, which an edit of its text moves.
+// IssueComment is one comment on a PR's conversation. NodeID is its node id,
+// which a reaction names it by, and URL its address on the PR. UpdatedAt is
+// when it last changed, which an edit of its text moves. ViewerReactions are
+// the reactions the account the read ran as left on it.
 type IssueComment struct {
-	ID        int64
-	Author    string
-	Body      string
-	CreatedAt string
-	UpdatedAt string
+	ID              int64
+	NodeID          string
+	URL             string
+	Author          string
+	Body            string
+	CreatedAt       string
+	UpdatedAt       string
+	ViewerReactions []string
 }
 
 // The queries. Each paginated one pages a single connection, which is what
@@ -217,6 +235,11 @@ const (
 	draftMutation = `mutation($id:ID!){
   convertPullRequestToDraft(input:{pullRequestId:$id}){pullRequest{isDraft}}}`
 
+	// A reaction on a post, which names the post by its node id: a review, an
+	// inline comment or a conversation comment.
+	reactMutation = `mutation($id:ID!,$content:ReactionContent!){
+  addReaction(input:{subjectId:$id,content:$content}){reaction{content}}}`
+
 	reviewsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
     reviews(first:100,after:$endCursor){pageInfo{hasNextPage endCursor}
@@ -230,13 +253,15 @@ const (
       nodes{databaseId checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
         nodes{name status conclusion isRequired(pullRequestNumber:$number)}}}}}}}}`
 
-	reviewFields = `fullDatabaseId state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}`
+	reviewFields = `fullDatabaseId id url state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}
+          reactionGroups{content viewerHasReacted}`
 
-	commentFields = `fullDatabaseId author{login} body createdAt updatedAt
+	commentFields = `fullDatabaseId id url author{login} body createdAt updatedAt path originalLine
           pullRequestReview{fullDatabaseId submittedAt state}
           reactionGroups{content viewerHasReacted}`
 
-	issueCommentFields = `fullDatabaseId body createdAt updatedAt author{login}`
+	issueCommentFields = `fullDatabaseId id url body createdAt updatedAt author{login}
+          reactionGroups{content viewerHasReacted}`
 
 	threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){pullRequest(number:$number){
@@ -320,6 +345,24 @@ func (c *Client) stage(query, id string) error {
 		return errors.New("github: a change of a PR's stage names no pull request")
 	}
 	return c.graphql(query, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
+}
+
+// reactionContent is the form of a reaction's content, such as EYES.
+var reactionContent = regexp.MustCompile(`^[A-Z_]+$`)
+
+// AddReaction adds the reaction content, such as EYES, to the post whose node
+// id is subject, as the account gh acts as. GitHub keeps one reaction of each
+// content for each account, so adding one the account left already leaves it
+// as it is. An error reads as MarkReady's.
+func (c *Client) AddReaction(subject, content string) error {
+	if subject == "" {
+		return errors.New("github: a reaction names no post")
+	}
+	if !reactionContent.MatchString(content) {
+		return fmt.Errorf("github: %q is no reaction's content", content)
+	}
+	return c.graphql(reactMutation, []string{"-f", "id=" + subject, "-f", "content=" + content}, false,
+		func(json.RawMessage) error { return nil })
 }
 
 // DismissReview dismisses review id of PR number in repo with message, through
@@ -454,9 +497,29 @@ func (c *Client) CheckSuites(repo, oid string, number int) ([]CheckSuite, error)
 	return out, err
 }
 
+// reactionGroups are a post's reactions as the reads ask for them: one group
+// for each content, saying whether the account the read runs as left it.
+type reactionGroups []struct {
+	Content          string `json:"content"`
+	ViewerHasReacted bool   `json:"viewerHasReacted"`
+}
+
+// viewer is each reaction the account the read runs as left, in GitHub's order.
+func (g reactionGroups) viewer() []string {
+	var out []string
+	for _, r := range g {
+		if r.ViewerHasReacted {
+			out = append(out, r.Content)
+		}
+	}
+	return out
+}
+
 // reviewNode is a review as the reads ask for it.
 type reviewNode struct {
 	ID            string `json:"fullDatabaseId"`
+	NodeID        string `json:"id"`
+	URL           string `json:"url"`
 	State         string `json:"state"`
 	Body          string `json:"body"`
 	SubmittedAt   string `json:"submittedAt"`
@@ -466,6 +529,7 @@ type reviewNode struct {
 	Commit        *struct {
 		Oid string `json:"oid"`
 	} `json:"commit"`
+	ReactionGroups reactionGroups `json:"reactionGroups"`
 }
 
 func (n reviewNode) review() (Review, error) {
@@ -473,8 +537,9 @@ func (n reviewNode) review() (Review, error) {
 	if err != nil {
 		return Review{}, err
 	}
-	v := Review{ID: id, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt, UpdatedAt: n.UpdatedAt,
-		Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush}
+	v := Review{ID: id, NodeID: n.NodeID, URL: n.URL, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt,
+		UpdatedAt: n.UpdatedAt, Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush,
+		ViewerReactions: n.ReactionGroups.viewer()}
 	if n.Commit != nil {
 		v.Commit = n.Commit.Oid
 	}
@@ -483,11 +548,14 @@ func (n reviewNode) review() (Review, error) {
 
 // issueCommentNode is a conversation comment as the reads ask for it.
 type issueCommentNode struct {
-	ID        string `json:"fullDatabaseId"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
-	Author    *actor `json:"author"`
+	ID             string         `json:"fullDatabaseId"`
+	NodeID         string         `json:"id"`
+	URL            string         `json:"url"`
+	Body           string         `json:"body"`
+	CreatedAt      string         `json:"createdAt"`
+	UpdatedAt      string         `json:"updatedAt"`
+	Author         *actor         `json:"author"`
+	ReactionGroups reactionGroups `json:"reactionGroups"`
 }
 
 func (n issueCommentNode) comment() (IssueComment, error) {
@@ -495,25 +563,27 @@ func (n issueCommentNode) comment() (IssueComment, error) {
 	if err != nil {
 		return IssueComment{}, err
 	}
-	return IssueComment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt}, nil
+	return IssueComment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), Body: n.Body,
+		CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, ViewerReactions: n.ReactionGroups.viewer()}, nil
 }
 
 // commentNode is an inline comment as the thread reads ask for it.
 type commentNode struct {
-	ID        string `json:"fullDatabaseId"`
-	Author    *actor `json:"author"`
-	Body      string `json:"body"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
-	Review    *struct {
+	ID           string `json:"fullDatabaseId"`
+	NodeID       string `json:"id"`
+	URL          string `json:"url"`
+	Author       *actor `json:"author"`
+	Body         string `json:"body"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+	Path         string `json:"path"`
+	OriginalLine *int   `json:"originalLine"`
+	Review       *struct {
 		ID          string `json:"fullDatabaseId"`
 		SubmittedAt string `json:"submittedAt"`
 		State       string `json:"state"`
 	} `json:"pullRequestReview"`
-	ReactionGroups []struct {
-		Content          string `json:"content"`
-		ViewerHasReacted bool   `json:"viewerHasReacted"`
-	} `json:"reactionGroups"`
+	ReactionGroups reactionGroups `json:"reactionGroups"`
 }
 
 func (n commentNode) comment() (Comment, error) {
@@ -521,18 +591,17 @@ func (n commentNode) comment() (Comment, error) {
 	if err != nil {
 		return Comment{}, err
 	}
-	c := Comment{ID: id, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt}
+	c := Comment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt,
+		UpdatedAt: n.UpdatedAt, Path: n.Path, ViewerReactions: n.ReactionGroups.viewer()}
+	if n.OriginalLine != nil {
+		c.OriginalLine = *n.OriginalLine
+	}
 	if n.Review != nil {
 		rid, err := databaseID(n.Review.ID)
 		if err != nil {
 			return Comment{}, err
 		}
 		c.Review = &CommentReview{ID: rid, State: n.Review.State, SubmittedAt: n.Review.SubmittedAt}
-	}
-	for _, g := range n.ReactionGroups {
-		if g.ViewerHasReacted {
-			c.ViewerReactions = append(c.ViewerReactions, g.Content)
-		}
 	}
 	return c, nil
 }

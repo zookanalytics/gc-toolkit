@@ -31,6 +31,10 @@ import (
 //     reads it ([Facts.Staying]). A PR whose GitHub side is not read at
 //     the head the store holds ([pr.KindGitHubUnread]) reads working too: the
 //     landing order's next check is the next move, and no approval is known.
+//     So does a PR that carries a person's post the city works, approved or
+//     not: a post the city has not taken ([pr.KindFeedback]), or a wait on the
+//     open ask the take filed for one, which names the post
+//     ([pr.KindWait] with a Value).
 //   - needs-review: only an approval is left, or a request for changes that
 //     the account that made it has to lift.
 func Render(a pr.Answer, f Facts) State {
@@ -40,7 +44,7 @@ func Render(a pr.Answer, f Facts) State {
 	if len(RenderReasons(a, f)) > 0 {
 		return NeedsAttention
 	}
-	var person, approval, city, unread bool
+	var person, approval, city, unread, post bool
 	mergeState := ""
 	for _, c := range a.Conditions {
 		switch c.Kind {
@@ -52,6 +56,10 @@ func Render(a pr.Answer, f Facts) State {
 			mergeState = c.Value
 		case pr.KindGitHubUnread:
 			unread = true
+		case pr.KindFeedback:
+			city, post = true, true
+		case pr.KindWait:
+			city, post = true, post || c.Value != ""
 		default:
 			city = true
 		}
@@ -63,6 +71,8 @@ func Render(a pr.Answer, f Facts) State {
 		return Working
 	case !approval && !city && mergeState != "" && mergeState != "UNKNOWN":
 		return NeedsAttention
+	case post:
+		return Working
 	case len(f.Staying) > 0:
 		return Working
 	case !approval:
