@@ -2,11 +2,13 @@ package gascity
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The previews below are the text gc sling --dry-run --force printed on the
@@ -229,6 +231,35 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 	}
 	if r := (&City{}).Script("human-gate.sh"); r.Code != -1 || r.Err == nil || !strings.Contains(r.Err.Error(), "GCTK_SCRIPTS_DIR") {
 		t.Fatalf("a city with no scripts directory answered %+v", r)
+	}
+}
+
+// A city Within a context stops each command it runs once the context ends,
+// and says so, whether or not the command's child still holds its output. A
+// city with no context lets the same command run to its end.
+func TestWithinStopsACommandWhenItsContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	stub := "#!/bin/sh\nsleep 6 &\nsleep 6\n"
+	if err := os.WriteFile(filepath.Join(dir, "pr-status-label.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	r := (&City{scriptsDir: dir}).In(dir).Within(ctx).Script("pr-status-label.sh", "clear")
+	if took := time.Since(start); took > 200*time.Millisecond+stopGrace+time.Second {
+		t.Fatalf("the stopped script held the call %s", took)
+	}
+	if r.Code != -1 || !errors.Is(r.Err, context.DeadlineExceeded) || !strings.Contains(r.Failure(), "pr-status-label.sh was stopped") {
+		t.Fatalf("a stopped script answered %+v", r)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "quick.sh"), []byte("#!/bin/sh\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quick, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	if r := (&City{scriptsDir: dir}).Within(quick).Script("quick.sh"); r.Code != 0 || strings.TrimSpace(r.Output) != "done" {
+		t.Fatalf("a script that ends inside its bound answered %+v", r)
 	}
 }
 

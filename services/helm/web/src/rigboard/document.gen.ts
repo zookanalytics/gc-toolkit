@@ -6,13 +6,54 @@
 // source: document.go
 
 /**
- * Response is what the rig's route answers: the document, and the time its
- * gather finished beside it. The document depends on the store's answers
- * alone, so two reads of an unchanged store give the same document.
+ * Response is what the rig's route answers: the document, the time its gather
+ * finished beside it, and when GitHub was last asked about the rig's pull
+ * requests as of that time. The document depends on the store's answers alone,
+ * so two reads of an unchanged store give the same document.
  */
 export interface Response {
   read_at: string;
   board: Document;
+  asked: Asked;
+}
+/**
+ * AskedState is where the rig's line saying when GitHub was last asked
+ * stands. It is asked when a pass of the rig's pr-poll order that exited 0
+ * started within three of the order's intervals before the read, and stale
+ * when the newest such pass started longer ago. It is not_asked when no pass in
+ * Gas City's run history exited 0, unwatched when the city runs no enabled
+ * pr-poll order for the rig, and unread when the order or its run history could
+ * not be read.
+ */
+export const AskedStateAsked = "asked";
+export const AskedStateStale = "stale";
+export const AskedStateNotAsked = "not_asked";
+export const AskedStateUnwatched = "unwatched";
+export const AskedStateUnread = "unread";
+export type AskedState = typeof AskedStateAsked | typeof AskedStateStale | typeof AskedStateNotAsked | typeof AskedStateUnwatched | typeof AskedStateUnread;
+/**
+ * Asked is when GitHub was last asked about the rig's pull requests: the start
+ * of the newest pass of the rig's pr-poll order that exited 0, read from Gas
+ * City's run history and judged at the read (ReadAt). A pass that could not
+ * ask GitHub about every pull request the rig owns exits non-zero, so a failing
+ * pass leaves the line at the last one that did.
+ */
+export interface Asked {
+  state: AskedState;
+  /**
+   * At is that pass's start, when the state is asked or stale.
+   */
+  at?: string;
+  /**
+   * Since is, when the state is not_asked, the start of the oldest pass the
+   * history holds, none of whose passes since then exited 0. It is empty
+   * when the history holds no pass.
+   */
+  since?: string;
+  /**
+   * Error is why the line could not be read, when the state is unread.
+   */
+  error?: string;
 }
 /**
  * Rigs is what the rig list route answers: the city's rigs by name, each the

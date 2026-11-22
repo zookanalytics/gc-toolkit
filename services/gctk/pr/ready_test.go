@@ -2,11 +2,11 @@ package pr_test
 
 import (
 	"encoding/json"
-	"errors"
-	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -22,9 +22,9 @@ import (
 // condition it is about. The store and GitHub are the adapters' fakes, and the
 // definition of feedback is a test double that reads every post as feedback
 // unless a test names it, since the definition itself is pr-post.sh's and the
-// feedback adapter's own tests run it. Every answer is asked twice, of Ready
-// over the fake GitHub and of FromStore over the GitHub read Ready made, saved
-// on the bead, and the two must be one answer.
+// feedback adapter's own tests run it. Every answer is FromStore's, over the
+// read the one-PR update made of the fake GitHub in full and saved on the bead,
+// as the PR watch's pass and a merge's re-read save it.
 
 const (
 	bead   = "tk-1"
@@ -69,10 +69,15 @@ func (r *rule) IssueComments(_, _ string, cs []feedback.Comment) ([]int64, error
 	return r.comments(cs)
 }
 
+// Awaiting names each thread awaits marks, unless the city's THUMBS_UP is on
+// one of its comments, which answers it as gc_thread_awaits_answer reads it.
 func (r *rule) Awaiting(_, _ string, ts []feedback.Thread) ([]string, error) {
 	var out []string
 	for _, t := range ts {
-		if r.awaits[t.ID] {
+		handled := slices.ContainsFunc(t.Comments, func(c feedback.Comment) bool {
+			return slices.Contains(c.Reactions, "THUMBS_UP")
+		})
+		if r.awaits[t.ID] && !handled {
 			out = append(out, t.ID)
 		}
 	}
@@ -137,35 +142,18 @@ func (w *world) put(md map[string]string) {
 	}
 }
 
-// live asks Ready over the world, and returns its answer and the GitHub read
-// it made.
-func (w *world) live(t *testing.T) (pr.Answer, *pr.GitHubRead) {
-	t.Helper()
-	w.put(w.md)
-	ans, read, err := pr.Ready(pr.Sources{
-		Ledger:   ledger.New(w.store),
-		GitHub:   func(string) pr.GitHub { return w.github },
-		Feedback: w.rule,
-	}, bead)
-	if err != nil {
-		t.Fatalf("Ready: %v", err)
+// saveRead is read, GitHub's side of a PR at one head, in the four parts of the
+// saved read, each read at the read's instant with no signs.
+func saveRead(read *pr.GitHubRead) *pr.SavedRead {
+	return &pr.SavedRead{
+		PR: &pr.SavedPR{ReadAt: read.ReadAt, URL: read.URL, Number: read.Number, Repository: read.Repository,
+			HeadBranch: read.HeadBranch, Base: read.Base, Head: read.Head, State: read.State, Draft: read.Draft,
+			MergeState: read.MergeState},
+		Checks: &pr.SavedChecks{ReadAt: read.ReadAt, Head: read.Head, Runs: read.Checks},
+		Conversation: &pr.SavedConversation{ReadAt: read.ReadAt, Since: read.Since, Approvers: read.Approvers,
+			Requesters: read.Requesters, Feedback: read.Feedback, Awaiting: read.Awaiting, Unresolved: []string{}},
+		Labels: &pr.SavedLabels{ReadAt: read.ReadAt, Names: []string{}},
 	}
-	return ans, read
-}
-
-// withRead is the world's metadata with read saved on it, as the landing order
-// saves it, through the key's JSON codec: none for no read.
-func (w *world) withRead(t *testing.T, read *pr.GitHubRead) map[string]string {
-	t.Helper()
-	md := maps.Clone(w.md)
-	if read != nil {
-		raw, err := json.Marshal(read)
-		if err != nil {
-			t.Fatal(err)
-		}
-		md["pr_github_read"] = string(raw)
-	}
-	return md
 }
 
 // fromStore asks FromStore over the world's bead carrying md, and fails if it
@@ -184,15 +172,19 @@ func (w *world) fromStore(t *testing.T, md map[string]string) pr.Answer {
 	return ans
 }
 
-// answer is Ready's answer over the world, which FromStore must give over the
-// GitHub read Ready made, saved on the bead.
+// answer is FromStore's answer over the world once the one-PR update has read
+// its PR in full and saved it on the bead. A bead that owns no PR at the URL,
+// as a record that names another, gets no read saved.
 func (w *world) answer(t *testing.T) pr.Answer {
 	t.Helper()
-	ans, read := w.live(t)
-	if saved := w.fromStore(t, w.withRead(t, read)); !reflect.DeepEqual(saved, ans) {
-		t.Fatalf("over the read it saves the rule answers\n%+v\nand live\n%+v", saved, ans)
+	w.put(w.md)
+	watch := pr.Watcher{Ledger: ledger.New(w.store), Dir: t.TempDir(), GitHub: func(string) pr.Watch { return w.github },
+		Feedback: func() (pr.Feedback, error) { return w.rule, nil }, Wait: 5 * time.Second}
+	if done, err := watch.Reread(prURL); err != nil && done.Action != pr.ActUnowned {
+		t.Fatalf("the one-PR update's read: %v", err)
 	}
-	return ans
+	row, _ := w.store.Row(bead)
+	return w.fromStore(t, row.Metadata)
 }
 
 func kinds(a pr.Answer) []pr.Kind {
@@ -495,15 +487,12 @@ func TestOpenDraftAndTheRecordsIdentity(t *testing.T) {
 	}
 }
 
-func TestAnIncompleteRecordReadsNoGitHub(t *testing.T) {
+func TestAnIncompleteRecordIsNotReady(t *testing.T) {
 	for _, key := range []string{"pr_head_sha", "merged_target", "pr_url", "pr_number", "pr_repo", "branch", "merge_result"} {
 		t.Run(key, func(t *testing.T) {
 			w := ready()
 			delete(w.md, key)
 			only(t, w.answer(t), pr.KindRecord)
-			if reads := w.github.Reads(); len(reads) > 0 {
-				t.Fatalf("read GitHub %v for a record that names no PR whole", reads)
-			}
 		})
 	}
 	t.Run("a URL that names another number", func(t *testing.T) {
@@ -517,9 +506,6 @@ func TestAnIncompleteRecordReadsNoGitHub(t *testing.T) {
 		w := ready()
 		w.md["pr_head_sha"] = "abc1234"
 		only(t, w.answer(t), pr.KindRecord)
-		if reads := w.github.Reads(); len(reads) > 0 {
-			t.Fatalf("read GitHub %v for a record whose head is no commit id", reads)
-		}
 	})
 }
 
@@ -677,45 +663,16 @@ func TestFeedbackReceipts(t *testing.T) {
 }
 
 func TestAReadThatFailsAnswersNothing(t *testing.T) {
-	for _, read := range []string{"PullRequest", "Reviews", "CheckSuites", "ReviewThreads", "IssueComments", "Login"} {
-		t.Run(read, func(t *testing.T) {
-			w := ready()
-			w.github.Fail[read] = errors.New("github: unreachable")
-			w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-			_, gr, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
-				GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead)
-			if err == nil || gr != nil {
-				t.Fatalf("answered on a read that failed, or returned the read %+v", gr)
-			}
-		})
-	}
-	t.Run("the definition of feedback", func(t *testing.T) {
-		w := ready()
-		w.rule.err = errors.New("jq: failed")
-		w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-		if _, gr, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
-			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil || gr != nil {
-			t.Fatalf("answered on a definition that did not run, or returned the read %+v", gr)
-		}
-	})
 	t.Run("review results that do not decode", func(t *testing.T) {
 		w := ready()
 		w.md["review_results"] = "{not json"
 		w.store.Put(fake.Bead{ID: bead, Status: "blocked", Metadata: w.md})
-		if _, _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
-			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil {
-			t.Fatal("answered on review results that did not decode")
-		}
 		if _, err := pr.FromStore(ledger.New(w.store), bead); err == nil {
 			t.Fatal("answered over the store on review results that did not decode")
 		}
 	})
 	t.Run("a bead the store does not hold", func(t *testing.T) {
 		w := ready()
-		if _, _, err := pr.Ready(pr.Sources{Ledger: ledger.New(w.store),
-			GitHub: func(string) pr.GitHub { return w.github }, Feedback: w.rule}, bead); err == nil {
-			t.Fatal("answered for a bead the store does not hold")
-		}
 		if _, err := pr.FromStore(ledger.New(w.store), bead); err == nil {
 			t.Fatal("answered over the store for a bead the store does not hold")
 		}

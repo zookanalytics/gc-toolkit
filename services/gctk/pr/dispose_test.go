@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -111,6 +111,7 @@ func TestARetiredPRStillOpenIsNeverMerged(t *testing.T) {
 	if a := asks(d.github); len(a) != 0 {
 		t.Fatalf("a retired PR was asked of GitHub: %v", a)
 	}
+	readsNoGitHub(t, d)
 	b := d.row(t)
 	if b.Status != "blocked" || len(r.asked()) != 0 {
 		t.Fatalf("an open retired PR left the bead %s and asked the writer %v", b.Status, r.asked())
@@ -139,14 +140,14 @@ func TestARetiredPRThatClosedGoesToTheDispositionWriter(t *testing.T) {
 	if b := d.row(t); b.Status != "closed" {
 		t.Fatalf("the writer's close left the bead %s", b.Status)
 	}
-	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("a later run read a disposed bead: %+v", out)
 	}
 }
 
-// The order records the closed PR under the lock before it hands the close on,
-// and the writer runs once the lock is free: a writer that waited for the lock
-// would never get it.
+// The act decides the closed PR under the lock and hands the close on once the
+// lock is free, writing nothing on the bead itself: a writer that waited for
+// the lock would never get it.
 func TestTheDispositionWriterRunsWithTheRecordLockFree(t *testing.T) {
 	d, _ := retired(t)
 	d.pr.Facts.State = "CLOSED"
@@ -163,7 +164,9 @@ func TestTheDispositionWriterRunsWithTheRecordLockFree(t *testing.T) {
 	if !free {
 		t.Fatal("the writer ran while the run held the record lock")
 	}
-	meta(t, d.row(t), map[string]string{"pr_state": "closed"})
+	if w := d.runWrites(); len(w) != 0 {
+		t.Fatalf("the run wrote on the bead: %+v", w)
+	}
 }
 
 // closeFunc is a disposition writer that runs a function.
@@ -172,15 +175,16 @@ type closeFunc func() error
 func (f closeFunc) Close(pr.Disposal) error { return f() }
 
 // A close the writer holds for now, as the ruling's open conversation holds it,
-// leaves the bead blocked with its marker, and the next run tries it again.
+// leaves the bead blocked with its marker, and the next run tries it again. It
+// is a wait, so it fails no run.
 func TestAHeldDispositionCloseIsTriedAgainByTheNextRun(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	r.held = "held by the open conversation " + conversation
 	o := d.once(t)
-	is(t, o, pr.ActRetry)
+	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, r.held) {
-		t.Fatalf("the retry says %q", o.Detail)
+		t.Fatalf("the held close says %q", o.Detail)
 	}
 	b := d.row(t)
 	if b.Status != "blocked" {
@@ -199,8 +203,9 @@ func TestADispositionWriterThatDidNotAnswerFailsTheRun(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	r.err = errors.New("bead-rehome.sh: exit 3: successor tk-conv does not exist")
+	d.refresh(t)
 	var out []pr.RunOutcome
-	err := d.l.Reconcile(pr.Options{Count: 10}, func(o pr.RunOutcome) { out = append(out, o) })
+	err := d.l.Reconcile(pr.Options{}, func(o pr.RunOutcome) { out = append(out, o) })
 	if err == nil || len(out) != 1 {
 		t.Fatalf("Reconcile: %v, outcomes %+v", err, out)
 	}
@@ -238,35 +243,19 @@ func (g *gap) Close(x pr.Disposal) error {
 	return g.rehome.Close(x)
 }
 
-// An assignment that lands once the run has made its last write of the record,
-// as a claim can, since it takes no record lock, holds the close: the writer is
-// held to what the run judged, not to a read made after the assignment. The
-// assignment lands at the first read of the store after that write, or in the
-// writer when no read comes first, and the next run leaves the bead to its
-// assignee: it writes nothing and closes nothing.
+// An assignment that lands once the act has freed the record lock, as a claim
+// can, since it takes no record lock, holds the close: the writer is held to
+// what the act judged, not to a read made after the assignment. The next run
+// leaves the bead to its assignee: it writes nothing and closes nothing.
 func TestABeadAssignedOnceTheRunFreesTheLockIsLeftToItsAssignee(t *testing.T) {
 	const holder = "rig/gc-toolkit.polecat-1"
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
-	var written, released bool
-	release := func() {
-		if !released {
-			released = true
-			d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", holder })
-		}
-	}
-	d.store.BeforeUpdate = func(_ string, args []string) error {
-		written = written || slices.Contains(args, "pr_state=closed")
-		return nil
-	}
-	d.store.OnFind = func(gcbd.Query) {
-		if written {
-			release()
-		}
-	}
-	d.l.Dispositions = &gap{rehome: r, change: release}
+	d.l.Dispositions = &gap{rehome: r, change: func() {
+		d.edit(t, func(b *fake.Bead) { b.Status, b.Assignee = "open", holder })
+	}}
 	o := d.once(t)
-	is(t, o, pr.ActRetry)
+	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "not blocked under \"\" as the run judged it") {
 		t.Fatalf("the held close says %q", o.Detail)
 	}
@@ -274,7 +263,7 @@ func TestABeadAssignedOnceTheRunFreesTheLockIsLeftToItsAssignee(t *testing.T) {
 		t.Fatalf("the assigned bead is %s under %q", b.Status, b.Assignee)
 	}
 	n := len(d.store.Writes())
-	if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("the next run took the assigned bead: %+v", out)
 	}
 	b := d.row(t)
@@ -296,7 +285,7 @@ func TestARulingRecordedOnceTheRunFreesTheLockIsCarriedOutByTheNextRun(t *testin
 		})
 	}}
 	o := d.once(t)
-	is(t, o, pr.ActRetry)
+	is(t, o, pr.ActChecked)
 	if !strings.Contains(o.Detail, "records the ruling re-homed onto tk-carrier now") {
 		t.Fatalf("the held close says %q", o.Detail)
 	}
@@ -336,7 +325,7 @@ func TestARetiredChangedHeadIsReadWithoutItsMarker(t *testing.T) {
 		delete(b.Metadata, "pr_reconcile_pending")
 		delete(b.Metadata, "gc.pr_close_disposition_kind")
 	})
-	if out := e.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+	if out := e.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("a changed head with no marker and no whole disposition was read: %+v", out)
 	}
 }
@@ -373,7 +362,7 @@ func TestADispositionIsReadOnlyOnABeadOnTheRecordNoOneElseIsAssigned(t *testing.
 				change(b)
 			})
 			d.pr.Facts.State = "CLOSED"
-			if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 || len(r.asked()) != 0 {
+			if out := d.reconcile(t, pr.Options{}); len(out) != 0 || len(r.asked()) != 0 {
 				t.Fatalf("the order read it: %+v, and asked the writer %v", out, r.asked())
 			}
 		})
@@ -382,8 +371,8 @@ func TestADispositionIsReadOnlyOnABeadOnTheRecordNoOneElseIsAssigned(t *testing.
 
 // rulingHub is GitHub while a ruling waits for the record lock, which it takes
 // from its read of the bead to its stamp of the disposition (pr-dispose.sh): at
-// the run's read of the PR and at its merge request, the ruling tries the lock
-// once, and tries records what each try found.
+// the run's merge request, the ruling tries the lock once, and tries records
+// what each try found.
 type rulingHub struct {
 	pr.Hub
 	dir   string
@@ -403,31 +392,28 @@ func (h rulingHub) try(at string) {
 	}
 }
 
-func (h rulingHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
-	h.try("read")
-	return h.Hub.PullRequest(repo, number)
-}
-
 func (h rulingHub) MergePullRequest(id, head string) error {
 	h.try("merge")
 	return h.Hub.MergePullRequest(id, head)
 }
 
-// A run holds the record lock from its read of the bead to its last write, so a
-// ruling that comes while the run reads an open PR the evaluator finds ready
-// waits for the run: the merge is requested before the ruling records that the
-// work will not land, never after it. The ruling records its disposition once
-// the lock is free, and the next run finds the PR merged and lands it as any
-// merge, asking nothing of the disposition writer.
-func TestARulingThatComesWhileARunReadsAnOpenPRWaitsForTheRun(t *testing.T) {
+// An act holds the record lock from its read of the bead under the lock to its
+// last write, so a ruling that comes while the act requests a merge waits for
+// the act: the merge is requested before the ruling records that the work will
+// not land, never after it. The ruling records its disposition once the lock is
+// free, and the next run finds the PR merged and lands it as any merge, asking
+// nothing of the disposition writer.
+func TestARulingThatComesWhileARunMergesWaitsForTheRun(t *testing.T) {
 	d := newCycle(t)
 	r := &rehome{store: d.store}
 	d.l.Dispositions = r
 	var tries []string
 	hub := d.l.Hub
-	d.l.Hub = func(host string) pr.Hub { return rulingHub{Hub: hub(host), dir: d.l.Dir, tries: &tries} }
+	d.l.Hub = func(ctx context.Context, host string) pr.Hub {
+		return rulingHub{Hub: hub(ctx, host), dir: d.l.Dir, tries: &tries}
+	}
 	is(t, d.once(t), pr.ActRequested)
-	if want := []string{"read: held", "merge: held"}; !slices.Equal(tries, want) {
+	if want := []string{"merge: held"}; !slices.Equal(tries, want) {
 		t.Fatalf("the ruling's tries at the lock found %v, want %v", tries, want)
 	}
 	if want := []string{"MergePullRequest PR_7 " + head}; !slices.Equal(asks(d.github), want) {
@@ -445,6 +431,35 @@ func TestARulingThatComesWhileARunReadsAnOpenPRWaitsForTheRun(t *testing.T) {
 	is(t, d.once(t), pr.ActLanded)
 	if len(r.asked()) != 0 {
 		t.Fatalf("a merged PR asked the disposition writer %v", r.asked())
+	}
+}
+
+// The merge's re-read runs with the record lock free, so a ruling that comes
+// during it records its disposition first, and the act, which decides again
+// under the lock, reads it: no merge is requested, and the PR's close finishes
+// the work.
+func TestARulingDuringTheMergesReReadStopsTheMerge(t *testing.T) {
+	d := newCycle(t)
+	d.l.Dispositions = &rehome{store: d.store}
+	d.refresh(t)
+	reread := d.l.Reread
+	d.l.Reread = func(ctx context.Context, url string) error {
+		release, err := record.Lock(d.l.Dir, 0)
+		if err != nil {
+			t.Errorf("the ruling did not get the lock during the re-read: %v", err)
+			return err
+		}
+		d.edit(t, func(b *fake.Bead) {
+			b.Metadata["gc.pr_close_disposition_kind"] = "not-needed"
+			b.Metadata["gc.pr_close_disposition_successor"] = conversation
+		})
+		release()
+		return reread(ctx, url)
+	}
+	o := d.run(t)
+	is(t, o, pr.ActChecked)
+	if !strings.Contains(o.Detail, "no merge is requested") || len(d.github.Asks()) != 0 {
+		t.Fatalf("a ruling during the re-read left %q and asks %v", o.Detail, asks(d.github))
 	}
 }
 
@@ -485,10 +500,16 @@ func TestARetiredPRsCloseWaitsForAnAttachedReviewRun(t *testing.T) {
 // The asks and the withdrawals still open on the bead are closed once the PR
 // has closed, each with a no-op work record and a note saying why, since no
 // run takes an ask and no withdrawal is carried out on a closed PR, and both
-// would hold the bead's close.
+// would hold the bead's close. One that closed before the PR is left as it is.
 func TestARetiredPRsAsksAndWithdrawalsCloseWithIt(t *testing.T) {
 	d, r := retired(t)
 	d.store.WorkRecordGate = true
+	gone := []string{d.withdraw(t, other), (&admitting{land: d}).ask(t, "drop the flag")}
+	for _, id := range gone {
+		b, _ := d.store.Row(id)
+		b.Status = "closed"
+		d.store.Put(b)
+	}
 	w := d.withdraw(t, later)
 	a := (&admitting{land: d}).ask(t, "rename the flag")
 	d.pr.Facts.State = "CLOSED"
@@ -501,6 +522,11 @@ func TestARetiredPRsAsksAndWithdrawalsCloseWithIt(t *testing.T) {
 		}
 		if !strings.Contains(o.Detail, id) {
 			t.Fatalf("the outcome %q does not name %s", o.Detail, id)
+		}
+	}
+	for _, id := range gone {
+		if b, _ := d.store.Row(id); strings.Contains(b.Notes, "PR #7 closed") || strings.Contains(o.Detail, id) {
+			t.Fatalf("%s, closed before the PR, was closed again: notes %q, outcome %q", id, b.Notes, o.Detail)
 		}
 	}
 	if len(r.asked()) != 1 {

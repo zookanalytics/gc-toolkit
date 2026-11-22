@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -29,36 +30,39 @@ import (
 // (workBeadHasAwakeDemand), and core's cascade-nudge-on-blocker-close nudges a
 // dependent's assignee only when no other blocker still holds it (its
 // still_held), both at gastownhall/gascity 192fa2d394. So while a merge hold is
-// open, neither gives the refinery a turn, and the run gives it one: when only
+// open, neither gives the refinery a turn, and the run gives it one: once no
+// open withdrawal and no attached review run holds the changed head, and only
 // merge holds hold the bead, it assigns the bead to the refinery, then wakes
 // and nudges the refinery, and only then clears the marker. The find-work the
 // wake starts lists the beads the refinery is assigned, so the bead is among
 // them by then. A wake that does not land keeps the marker, so the next run
-// wakes the refinery again.
+// wakes the refinery again. A run records no error for a hand-over it could
+// not finish: the marker stays on the bead, and the next run finds the same
+// changed head and hands it over (specs/tk-1tfzr71.149/design.md, section
+// 11).
 
 // handOver hands a changed head that no open withdrawal and no attached review
 // run holds to the refinery, in the write that assigns the bead to it and
 // clears the marker. When only merge holds hold the bead (mergeHolds), the
 // bead is assigned to the refinery and the refinery woken and nudged before
 // the marker clears (wakeAndSettle). A read of what holds the bead that fails
-// keeps the marker and records why, for the next run to hand the head over.
-// action and detail are what the run did with the record before the
-// hand-over, which its outcome reports.
-func (u *run) handOver(s state, action, detail string) RunOutcome {
+// keeps the marker, for the next run to hand the head over. action and detail
+// are what the run did with the record before the hand-over, which its
+// outcome reports. The wake is stopped once ctx, the act's, ends.
+func (u *run) handOver(ctx context.Context, s state, action, detail string) RunOutcome {
 	holds, err := u.mergeHolds(s)
 	if err != nil {
 		return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+err.Error())
 	}
-	return u.wakeAndSettle(s, holds, action, detail)
+	return u.wakeAndSettle(ctx, s, holds, action, detail)
 }
 
 // wakeAndSettle hands the changed head of the bead s read to the refinery
 // (Settle). When the merge holds holds alone hold the bead, it first assigns
 // the bead to the refinery with the marker kept, then wakes and nudges the
 // refinery, so the bead is the refinery's when the wake reaches it. A wake that
-// does not land keeps the marker and records why, so the next run wakes the
-// refinery again.
-func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOutcome {
+// does not land keeps the marker, so the next run wakes the refinery again.
+func (u *run) wakeAndSettle(ctx context.Context, s state, holds []hold, action, detail string) RunOutcome {
 	if len(holds) > 0 {
 		if s.assignee != u.Refinery {
 			w := u.Ledger.Write(s.id)
@@ -73,7 +77,7 @@ func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOut
 			}
 			s.assignee = u.Refinery
 		}
-		if err := u.wakeRefinery(s, holds); err != nil {
+		if err := u.wakeRefinery(ctx, s, holds); err != nil {
 			return u.handOverLater(s, detail, fmt.Sprintf("only %s %s the bead, and the refinery's wake did not land, "+
 				"so the next run wakes it: %v", holdNames(holds), holdVerb(holds), err))
 		}
@@ -93,12 +97,10 @@ func (u *run) wakeAndSettle(s state, holds []hold, action, detail string) RunOut
 	}
 }
 
-// handOverLater keeps the marker of a changed head the run could not hand over,
-// and records why for the next run, which hands it over.
+// handOverLater leaves the marker of a changed head the run could not hand
+// over and writes nothing, so the next run finds the head and hands it over.
 func (u *run) handOverLater(s state, detail, why string) RunOutcome {
-	w := u.Ledger.Write(s.id)
-	record.Retry(w, "", why, s.now)
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: detail + "; " + why})
+	return RunOutcome{Bead: s.id, Action: ActRetry, Detail: detail + "; " + why}
 }
 
 // hold is a merge hold on a PR's bead: a wait that holds the PR's merge and not
@@ -177,12 +179,13 @@ func isConversation(r *ledger.Record) bool {
 }
 
 // wakeRefinery wakes the refinery and nudges it to take the bead s read, whose
-// changed head only the merge holds holds keep from reading ready.
-func (u *run) wakeRefinery(s state, holds []hold) error {
+// changed head only the merge holds holds keep from reading ready, stopped
+// once ctx ends.
+func (u *run) wakeRefinery(ctx context.Context, s state, holds []hold) error {
 	if u.Wake == nil {
 		return errors.New("nothing wakes a session here")
 	}
-	return u.Wake.Wake(u.Refinery, fmt.Sprintf("PR head changed on %s (%s) while %s %s its merge: the new head "+
+	return u.Wake.Wake(ctx, u.Refinery, fmt.Sprintf("PR head changed on %s (%s) while %s %s its merge: the new head "+
 		"is yours to validate. Run 'gc prime' to check merge queue and begin processing.",
 		s.id, firstOf(s.rec.URL, s.rec.ExistingPR, "its PR"), holdNames(holds), holdVerb(holds)))
 }

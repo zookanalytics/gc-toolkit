@@ -77,8 +77,13 @@ flowchart LR
   RUN -->|repair push| BR
   ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
+  ORD -.->|landing order: a PR's re-read in full before its merge| PR
   ORD -->|landing order: ready, merge request| PR
-  ORD -->|landing order: record, GitHub read, then close| LEDGER
+  ORD -->|landing order: record, then close| LEDGER
+  ORD -->|landing order: labels that differ from the store's| PR
+  ORD -.->|PR watch: reads each PR the city owns| PR
+  ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
+  ORD -->|PR watch's net: clears labels no bead owns| PR
   CAD -->|reads + writes| LEDGER
   CAD -->|labels| PR
   BR --> PR
@@ -90,8 +95,9 @@ flowchart LR
 ```
 
 **Legend.** Solid = writes state. Dashed = reads without writing. Each write
-path that matters has one writer. The refinery writes landings, and the landing
-order writes merges and the GitHub read each PR's status is derived from.
+path that matters has one writer. The refinery writes landings, the landing
+order writes merges, and the PR watch's one-PR update writes the GitHub read
+each PR's status is derived from.
 `bead-rehome.sh` writes dispositions, the closes that name a successor. A PR's
 review run writes the PR's review result, for the last head the run judged.
 Everything else reads.
@@ -187,9 +193,10 @@ performer; the full transition table with writers is
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
    head.
-8. **Merge.** The landing order has GitHub merge each PR on the pending record
-   at the head the refinery validated, once the evaluator reads the PR ready,
-   and closes the bead once the merge commit is on the target
+8. **Merge.** Before the landing order has GitHub merge a PR on the pending
+   record at the head the refinery validated, the one-PR update re-reads the
+   PR in full, and the order merges it only once the evaluator reads it ready
+   on that read. It closes the bead once the merge commit is on the target
    ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 9. **Close propagates.** `closed` is the one signal waiting parties key on
    ([lifecycle-composition.md](lifecycle-composition.md)). A landing closes a
@@ -492,14 +499,21 @@ first. Either way the change is a decision on the record, not a drift.
   record.**
 - **No display reads GitHub.** The board, a PR's status label and
   `gctk pr status` derive a PR's status by the evaluator's one rule from the
-  GitHub read the landing order saved at its last check of the PR and the store
-  as it is at the read. Every reader of GitHub draws on one API allowance.
-- **Only the merge acts on a fresh read of GitHub,** and the saved GitHub read
-  grants nothing. The evaluator's answer is computed at each read and stored
-  nowhere.
-- **A review, a hold or a change of base that arrives after the landing
-  order's read is not part of its decision to merge,** even when GitHub carries
-  out the merge request after it.
+  GitHub read the one-PR update saved on the PR's bead and the store as it is
+  at the read. Every reader of GitHub draws on one API allowance.
+- **GitHub's data serves three uses in two loops: learning what changed, the
+  saved read the city shows and works from, and the merge's check.** The PR
+  watch, the first loop, learns which PRs the city owns changed and keeps each
+  one's GitHub read saved on its bead. The landing order, the second loop,
+  decides each record on that saved read and the store's record of what the
+  city did, and never reads GitHub to learn whether a record has work. The
+  evaluator's answer is computed at each read and stored nowhere.
+- **Only the merge checks GitHub before it acts,** since a merge made in error
+  puts work on the target, which no run takes back. Every other act reads of
+  GitHub only what it changes.
+- **A review, a hold or a change of base that arrives after the merge's re-read
+  is not part of the landing order's decision to merge,** even when GitHub
+  carries out the merge request after it.
 - **The landing order is the one path that admits work on a pending record.**
 - **An approval stands across a push until triage reads the change as
   material.**
