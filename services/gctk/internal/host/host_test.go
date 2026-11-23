@@ -291,11 +291,11 @@ func outsideAddress() net.IP {
 }
 
 // sandboxStub stands in for demo-engine-lib.sh. Its demo_engine_sandboxed
-// logs its port, its directory, PROG, its working directory and the record it
-// is named, or unset, then runs the command in the directory, as the real one
-// does inside the sandbox.
+// logs its port, its directory, PROG, its working directory, the record it is
+// named and the directory of its caches, or unset for each, then runs the
+// command in the directory, as the real one does inside the sandbox.
 const sandboxStub = `demo_engine_sandboxed() {
-  printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" "${DEMO_ENGINE_SANDBOX_RECORD-unset}" > "$SANDBOX_LOG"
+  printf '%s|%s|%s|%s|%s|%s\n' "$1" "$2" "$PROG" "$(pwd -P)" "${DEMO_ENGINE_SANDBOX_RECORD-unset}" "${DEMO_ENGINE_CACHE_DIR-unset}" > "$SANDBOX_LOG"
   local dir=$2
   shift 2
   cd "$dir" && exec "$@"
@@ -308,7 +308,7 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		t.Fatal(err)
 	}
 	work, lib, log := filepath.Join(dir, "work"), filepath.Join(dir, "lib.sh"), filepath.Join(dir, "sandbox.log")
-	record := filepath.Join(dir, "sandboxed")
+	record, caches := filepath.Join(dir, "sandboxed"), filepath.Join(dir, "caches")
 	if err := os.Mkdir(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		Env:     []string{"PORT=4242", "SANDBOX_LOG=" + log},
 		Out:     &out,
 		Relay:   true,
-		Sandbox: &Sandbox{Lib: lib, Port: 4242, Prog: "gctk host test", Record: record},
+		Sandbox: &Sandbox{Lib: lib, Port: 4242, Prog: "gctk host test", Record: record, Caches: caches},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -336,16 +336,16 @@ func TestStartInTheSandboxRunsTheCommandThroughTheLibraryFromItsDirectory(t *tes
 		t.Errorf("relayed %q, want %q: the command's output and errors, through the relay", got, want)
 	}
 	b, _ := os.ReadFile(log)
-	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work+"|"+record; got != want {
-		t.Errorf("the sandbox got %q, want %q: the port, the directory, the name its messages start with and the record, from the directory", got, want)
+	if got, want := strings.TrimSpace(string(b)), "4242|"+work+"|gctk host test|"+work+"|"+record+"|"+caches; got != want {
+		t.Errorf("the sandbox got %q, want %q: the port, the directory, the name its messages start with, the record and the caches, from the directory", got, want)
 	}
 	if c, err := h.Start(Spec{Argv: []string{"true"}, Dir: work, Env: []string{"SANDBOX_LOG=" + log}, Sandbox: &Sandbox{Lib: lib, Port: 4242}}); err != nil {
 		t.Fatal(err)
 	} else if code := c.Wait(); code != 0 {
 		t.Errorf("a sandbox with no record: Wait = %d, want 0", code)
 	}
-	if b, _ := os.ReadFile(log); !strings.HasSuffix(strings.TrimSpace(string(b)), "|unset") {
-		t.Errorf("a sandbox with no record got %q, want no record named", strings.TrimSpace(string(b)))
+	if b, _ := os.ReadFile(log); !strings.HasSuffix(strings.TrimSpace(string(b)), "|unset|unset") {
+		t.Errorf("a sandbox with no record and no caches got %q, want neither named", strings.TrimSpace(string(b)))
 	}
 
 	if c, err := h.Start(Spec{Argv: []string{"true"}, Dir: work, Sandbox: &Sandbox{Lib: filepath.Join(dir, "none.sh"), Port: 4242}}); err != nil {

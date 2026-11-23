@@ -875,6 +875,10 @@ func Lead(h host.Host, dir string) int {
 	}
 	// relayed closes once the serve command's output is all in the log.
 	var relayed <-chan struct{}
+	// caches is the directory the serve command keeps npm's and Go's caches in
+	// inside the sandbox, which no tool outside it reads, and which goes once
+	// the copy's group has ended.
+	caches := ""
 	end := func(code int) int {
 		h.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)
 		_ = h.SignalGroup(me, syscall.SIGTERM)
@@ -892,6 +896,9 @@ func Lead(h host.Host, dir string) int {
 		select {
 		case <-relayed:
 		case <-time.After(time.Second):
+		}
+		if caches != "" {
+			removeCaches(caches)
 		}
 		return code
 	}
@@ -914,6 +921,11 @@ func Lead(h host.Host, dir string) int {
 		return end(1)
 	}
 	defer func() { _ = logf.Close() }()
+	if caches, err = os.MkdirTemp("", "gctk-copy-caches-"); err != nil {
+		fmt.Fprintf(logf, "gctk rig serve: the serve command did not start: no directory for its caches: %v\n", err)
+		_ = rec.write("rc", "127")
+		return end(127)
+	}
 	// The serve command writes through a relay the leader copies into the
 	// log, so the sandbox never has to grant a write to the record. A serve
 	// command whose leader is gone dies at its next write. The leader reads its
@@ -926,7 +938,7 @@ func Lead(h host.Host, dir string) int {
 		Stdout: readURL(rec, logf),
 		Relay:  true,
 		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve",
-			Record: rec.path("sandboxed")},
+			Record: rec.path("sandboxed"), Caches: caches},
 	})
 	if err != nil {
 		fmt.Fprintf(logf, "gctk rig serve: the serve command did not start: %v\n", err)
@@ -952,6 +964,19 @@ func Lead(h host.Host, dir string) int {
 			return end(rc)
 		}
 	}
+}
+
+// removeCaches removes the directory of a copy's caches. Go leaves the
+// directories of its module cache read-only, so each directory is made
+// writable first. A symbolic link is removed, never followed.
+func removeCaches(dir string) {
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			_ = os.Chmod(p, 0o700)
+		}
+		return nil
+	})
+	_ = os.RemoveAll(dir)
 }
 
 // others lists the members of the leader's group other than the leader.

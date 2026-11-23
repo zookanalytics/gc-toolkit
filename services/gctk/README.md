@@ -154,7 +154,10 @@ pattern for the operator. Each caller reads the rig's `ui_serve_command`, and
 the city's `ui_publish_command` and `ui_address_pattern`, from the rig's formula
 vars and passes them. A copy is a process group led by a detached gctk,
 `rig serve --lead`, which ends the group when the serve command ends, and Gas
-City's orphan sweep ends it once the session that started it has ended. Starts and
+City's orphan sweep ends it once the session that started it has ended. The
+leader makes a directory under `TMPDIR` where a serve command inside the
+sandbox keeps npm's and Go's caches, and removes it once the group has ended,
+so nothing the copy writes there reaches a tool outside the sandbox. Starts and
 stops of one checkout take turns under a lock beside the copy's record, so two
 starts that find a copy that died run one copy in its place, and two that ask to
 publish a running copy run one publish command. The record and the lock live

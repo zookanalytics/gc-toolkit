@@ -49,9 +49,10 @@ sandbox, on a free port of its own that the command gets as `$PORT`, where
 `helm-fixture` reads it. A sitting's live copy of the board runs the same
 command. A worktree has one copy, so take its captures one after another. A
 capture whose command differs from a copy that still runs there is refused until
-`gctk rig serve --stop`, run in the worktree, ends it. On a cold Go build cache
-the first run compiles Go's HTTP stack, and the copy's start waits up to three
-minutes for it to answer.
+`gctk rig serve --stop`, run in the worktree, ends it. In the sandbox each copy
+keeps Go's caches in a directory of its own that starts empty, so its run first
+compiles Go's HTTP stack, and the copy's start waits up to three minutes for it
+to answer.
 
 Capture the board through `helm-fixture`, never through a running helm
 service. A capture refuses a `--base-url` that any gc-toolkit server answers,

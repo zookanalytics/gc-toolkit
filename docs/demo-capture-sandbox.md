@@ -42,8 +42,8 @@ the sandbox.
 For a rig that keeps the sandbox:
 
 - The capture engine, SprintShow, and every process it starts: the headless
-  browser, a terminal script's shell and its commands, the engine's own file
-  server, and the Appium that drives an iOS app.
+  browser, a terminal script's shell and its commands, and the engine's own
+  file server. Such a capture drives no iOS app, as the next section says.
 - A copy of the rig's app, which `gctk rig serve` runs from a checkout: the
   rig's start command and every process it starts.
 
@@ -75,15 +75,20 @@ A process inside the sandbox:
   user's, which the system's user record names and which holds the home of
   each agent a host keeps inside it. Tools keep their credentials there, such
   as the GitHub CLI's token, an agent's sign-in, SSH keys and the supervisor's
-  service file. A process reads each Node on its `PATH`, Playwright's browsers
-  and Go's own files, and it reads and writes the caches of npm, the engine and
-  Go. Its git reads none of the user's settings. Of the directories and files
-  the capture names, it reaches one in a home folder only when it lies in a rig
-  worktree.
+  service file, and their caches, such as npm's, Go's and the engine's, which
+  the agents' own builds and tools run code from. A process reads each Node on
+  its `PATH`, Playwright's browsers and Go's own files. Its git reads none of
+  the user's settings. Of the directories and files the capture names, it
+  reaches one in a home folder only when it lies in a rig worktree.
+- keeps the caches of npm and Go in a directory of the run's own, which
+  `npm_config_cache`, `GOCACHE` and `GOMODCACHE` name, so nothing a run writes
+  there reaches a build or a tool outside the sandbox. A capture's run makes
+  the directory and removes it once the run ends, and `gctk rig serve` does so
+  for each copy, so each copy builds its app on caches that start empty.
 - cannot connect to a loopback port it was not given, so the supervisor's API,
   the Dolt server and every agent session's own port do not answer it. A run is
-  given its own port, or the three an iOS app run's servers use. A copy is
-  given its own port, and a capture of the copy is given the same one.
+  given its own port. A copy is given its own port, and a capture of the copy
+  is given the same one.
 - cannot connect to a Unix socket except the system's name resolver, so tmux
   and every other program's socket do not answer it.
 - cannot send a signal to a process outside the sandbox.
@@ -96,7 +101,11 @@ an output or a `--cwd` that lies in a home folder outside any rig worktree, a
 server already listening on the port it would open, a `--base-url` on this
 host that neither a copy nor a worktree of a rig whose `app_reads_city` is
 `"false"` serves, and a copy that runs outside the sandbox its rig now keeps.
-The library's header lists every such refusal.
+It also refuses an iOS app. The engine drives one through the Appium it keeps
+in its cache in the home folder, Appium starts only from a directory it can
+write, and the captures of other rigs, which run with no sandbox, start that
+same Appium. So a rig's iOS app is captured from a worktree of a rig whose
+`app_reads_city` is `"false"`. The library's header lists every such refusal.
 
 ## What it lets through
 
@@ -105,9 +114,8 @@ The library's header lists every such refusal.
   uses.
 - **Files outside the city's directories and the home folders.** A process can
   read and write the rest of the disk the session's user can, such as the
-  system's temporary folders.
-- **The tools' caches in the home folders.** A process writes the caches of
-  npm, the engine and Go, which the session's own tools read later.
+  system's temporary folders, which hold each run's own caches, its own and
+  those of the other captures and copies that run in the sandbox at the time.
 - **Keys in its own environment.** The engine, a terminal capture's commands
   and a copy's serve command start with the environment of the session that
   runs the capture, less the variables that point at the city, so they hold

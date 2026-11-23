@@ -62,9 +62,12 @@ type serveFixture struct {
 	firstPort int
 }
 
-// serveTest runs body in a synctest bubble, on a fixture of its own.
+// serveTest runs body in a synctest bubble, on a fixture of its own. A leader
+// makes its copy's caches under TMPDIR, so each test's are in a directory of
+// its own.
 func serveTest(t *testing.T, body func(t *testing.T, f *serveFixture)) {
 	t.Helper()
+	t.Setenv("TMPDIR", t.TempDir())
 	synctest.Test(t, func(t *testing.T) {
 		body(t, newServeFixture(t))
 	})
@@ -433,12 +436,18 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 			t.Fatalf("%d serve commands started, want 1", len(serves))
 		}
 		s := serves[0].Spec
+		caches := s.Sandbox.Caches
 		want := host.Sandbox{Lib: filepath.Join(f.scripts, SandboxLib), Port: r.Port, Prog: "gctk rig serve",
-			Record: filepath.Join(f.rec(f.repo).dir, "sandboxed")}
+			Record: filepath.Join(f.rec(f.repo).dir, "sandboxed"), Caches: caches}
 		if *s.Sandbox != want || s.Dir != f.repo || !slices.Equal(s.Argv, []string{"bash", "-c", "serve"}) ||
 			!slices.Contains(s.Env, "PORT="+strconv.Itoa(r.Port)) || !s.Relay {
 			t.Errorf("the serve command started as %+v in sandbox %+v, want bash -c serve from %s, PORT=%d, relayed, in %+v",
 				s, *s.Sandbox, f.repo, r.Port, want)
+		}
+		// npm and Go keep their caches in a directory the leader made for the
+		// copy under TMPDIR, which stays while the copy runs.
+		if st, err := os.Stat(caches); err != nil || !st.IsDir() || filepath.Dir(caches) != os.TempDir() {
+			t.Errorf("the serve command's caches are in %q, want a directory the leader made in %s: %v", caches, os.TempDir(), err)
 		}
 		if log := readFile(r.Log); !strings.Contains(log, "serving on "+strconv.Itoa(r.Port)) {
 			t.Errorf("the serve command's output is not in the log %s: %q", r.Log, log)
@@ -508,11 +517,40 @@ func TestServeRunsTheCommandInTheSandboxFromTheCheckoutOnAPortOfItsOwn(t *testin
 			t.Errorf("a second checkout's copy does not run beside the first: ports %d and %d", r.Port, other.Port)
 		}
 
+		// Go leaves the directories of its module cache read-only, and a link
+		// in the caches may name anything outside them.
+		outside := filepath.Join(f.dir, "outside")
+		mod := filepath.Join(caches, "go-mod", "example.com", "m@v1.0.0")
+		if err := os.MkdirAll(outside, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		was, err := os.Stat(outside)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(mod, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module example.com/m\n"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(mod, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(caches, "npm-link")); err != nil {
+			t.Fatal(err)
+		}
 		if s := f.copies.Stop(f.repo); s.State != CopyStopped {
 			t.Fatalf("stop = %s (%s), want stopped", s.State, s.Detail)
 		}
 		if !f.me.GroupGone(leader) {
 			t.Errorf("members of the copy's group are left: %v", f.me.Members(leader))
+		}
+		if _, err := os.Stat(caches); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("the stopped copy's caches %s are still there, read-only module directory and all: %v", caches, err)
+		}
+		if st, err := os.Stat(outside); err != nil || st.Mode() != was.Mode() {
+			t.Errorf("a link in the caches reached %s, whose mode was %v: %v, %v", outside, was.Mode(), st, err)
 		}
 		if f.me.Answers(r.Port) {
 			t.Error("the stopped copy's port still answers")

@@ -120,10 +120,17 @@ type Sandbox struct {
 	// the process runs inside the sandbox, true or false, before the process
 	// starts.
 	Record string
+	// Caches, when set, is the directory where a process inside the sandbox
+	// keeps the caches of npm and Go, which its caller makes and removes.
+	Caches string
 }
 
-// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed.
-const sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
+// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed, and
+// sandboxCachesVar names Sandbox.Caches.
+const (
+	sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
+	sandboxCachesVar = "DEMO_ENGINE_CACHE_DIR"
+)
 
 // Child is a process Start started.
 type Child interface {
@@ -180,6 +187,9 @@ func (local) Start(s Spec) (Child, error) {
 		env = append(slices.Clone(env), "PROG="+b.Prog)
 		if b.Record != "" {
 			env = append(env, sandboxRecordVar+"="+b.Record)
+		}
+		if b.Caches != "" {
+			env = append(env, sandboxCachesVar+"="+b.Caches)
 		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)

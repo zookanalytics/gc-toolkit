@@ -200,9 +200,12 @@ A script that declares `**Platform:** iOS` drives an iOS app on a simulator,
 named by its `ios-simulator://<device UDID>/<bundle id>` URL as `--base-url`,
 or brought up by a rig's start command. Its capture provisions the Appium the
 engine drives the app with, and picks three free loopback ports, which the
-engine gets as `--port` for the servers it drives the app through and a capture
-in the sandbox opens. The app itself runs outside any sandbox, where the
-system's simulator service starts it.
+engine gets as `--port` for the servers it drives the app through. The app
+itself runs outside any sandbox, where the system's simulator service starts
+it. A capture that keeps the sandbox refuses an iOS app, because the engine's
+Appium starts only from a cache it can write, and captures with no sandbox run
+that same Appium. Capture an iOS app from a worktree of a rig whose
+`app_reads_city` is `"false"`.
 
 Two capture modes come from one script:
 

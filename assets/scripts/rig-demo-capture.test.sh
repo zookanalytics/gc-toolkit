@@ -295,18 +295,22 @@ out="$(run -- --script "$SCRIPT" --output "$OUT" --serve 'npm run dev' --port 43
 ok "--port with --serve exits 2" "[ '$rc' = 2 ]"
 has "--port names the --serve-dir server's port" "$out" "it says --port is the --serve-dir server's"
 
-echo "# an iOS app: a --serve copy whose command printed the app's URL, or the URL as --base-url, records the app there through three ports"
+# No rig holds a directory here, so every capture keeps the sandbox, which
+# drives no iOS app. demo-engine-lib.test.sh records one through this script
+# from a worktree of a rig whose app_reads_city is "false", with no sandbox.
+echo "# an iOS app: a capture that keeps the sandbox records none, whether a --serve copy's command printed its URL or --base-url names it"
 IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
 THREE="$(printf '50301\n50302\n50303')"
 out="$(run SURFACE=ios COPY_APP="$IOS_APP" FREE_PORT="$THREE" -- --script "$SCRIPT" --output "$OUT" --serve 'node serve.mjs' --cwd "$SITE")"; rc=$?
-ok "an iOS app's copy captures" "[ '$rc' = 0 ]"
+ok "an iOS app's copy exits 1" "[ '$rc' = 1 ]"
+has "--base-url $IOS_APP is an iOS app" "$out" "it says a capture that keeps the sandbox drives no iOS app"
 RL="$(cat "$RUNLOG")"
 has "gctk rig serve --command node serve.mjs (in $SITE)" "$RL" "it starts the copy as it does for any app"
-has "run $SCRIPT --mode walkthrough -o $OUT --base-url $IOS_APP --port 50301,50302,50303" "$RL" "the engine records the app at the URL its command printed, with a port for each of its servers"
+hasnt "run $SCRIPT" "$RL" "the engine records nothing"
 has "gctk rig serve --stop (in $SITE)" "$RL" "and the capture stops the copy its start ran"
 out="$(run SURFACE=ios FREE_PORT="$THREE" -- --script "$SCRIPT" --output "$OUT" --base-url "$IOS_APP")"; rc=$?
-ok "an iOS app named by its URL captures" "[ '$rc' = 0 ]"
-has "--base-url $IOS_APP --port 50301,50302,50303" "$(cat "$RUNLOG")" "with the same three ports"
+ok "an iOS app named by its URL exits 1" "[ '$rc' = 1 ]"
+hasnt "run $SCRIPT" "$(cat "$RUNLOG")" "and the engine records nothing"
 
 # A terminal script drives a shell in the engine's own terminal. The stub reads
 # no line of it, so each case names its surface with SURFACE=terminal.

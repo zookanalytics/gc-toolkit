@@ -443,13 +443,16 @@ out="$(run COPY_APP=- -- page --script "$SCRIPT" --serve 'npm run dev' --cwd "$S
 eq "$rc" 1 "a copy whose report names no app_url exits 1"
 has "gctk rig serve reported no app_url" "$out" "it says the report does not say where the app is"
 hasnt "[screenshot]" "$(calls)" "and nothing is captured"
-echo "# page: an iOS app's copy, whose command printed the app's URL, is captured there through three ports, at the device's own scale"
+# No rig holds a directory here, so every capture keeps the sandbox, which
+# drives no iOS app. demo-engine-lib.test.sh captures one through this script
+# from a worktree of a rig whose app_reads_city is "false", with no sandbox, at
+# the device's own scale.
+echo "# page: an iOS app's copy, whose command printed the app's URL, is not captured by a capture that keeps the sandbox"
 IOS_APP="ios-simulator://265F099F-E558-4E32-82BE-F70A75EC0716/com.example.Board"
 out="$(run COPY_APP="$IOS_APP" FREE_PORT="$(printf '50301\n50302\n50303')" -- page --script "$SCRIPT" --serve 'node serve.mjs' --cwd "$SITE" --output "$OUT")"; rc=$?
-eq "$rc" 0 "an iOS app's copy captures"
-has "[--base-url] [$IOS_APP]" "$(calls)" "the engine captures the app at the URL its command printed"
-has "[--port] [50301,50302,50303]" "$(calls)" "with a port for each of its servers"
-hasnt "[--scale]" "$(calls)" "and the device's own screenshot, with no --scale"
+eq "$rc" 1 "an iOS app's copy exits 1"
+has "--base-url $IOS_APP is an iOS app" "$out" "it says a capture that keeps the sandbox drives no iOS app"
+hasnt "[screenshot]" "$(calls)" "the engine captures nothing"
 has "rig serve --stop" "$(calls)" "and the capture stops the copy its start ran"
 for target in "--serve npm" "--base-url http://localhost:3000"; do
   # shellcheck disable=SC2086 # the target is a flag and its value
