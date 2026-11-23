@@ -19,11 +19,11 @@ name: tests
 # The tests are hermetic: each stubs gc/bd and works in its own temp dir, so a
 # runner needs no gc binary and no running city. They need bash 5, git, jq 1.8
 # or later, timeout(1), flock(1), lsof, a Python with tomllib, a Ruby with
-# Psych, make, the Go toolchain the setup-go step installs, ICU's headers for
-# helm's cgo, and the Node the setup-node step installs. Psych is the YAML
-# parser Ruby ships, and action-pins.test.sh reads the workflows with it. The
-# Linux job installs its jq and ICU's headers and takes the rest from
-# ubuntu-latest; the macOS job installs what its image lacks.
+# Psych, make, the Go toolchain the setup-go step installs, and the Node the
+# setup-node step installs. Psych is the YAML parser Ruby ships, and
+# action-pins.test.sh reads the workflows with it. The Linux job installs its
+# jq and takes the rest from ubuntu-latest; the macOS job installs what its
+# image lacks.
 # Main's ruleset names the checks that gate a merge by job id, and every job
 # here is one of them, so adding, removing or renaming a job, or giving it a
 # name: or a matrix, changes the checks a merge waits on.
@@ -106,11 +106,6 @@ jobs:
       - name: Check the runner resolves jq 1.8 or later
         run: bash .github/workflows/check-jq.sh
 
-      # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
-      # includes unicode/regex.h, which the image installs without headers.
-      - name: Install ICU's headers for helm's cgo
-        run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
-
       # The runner serves this job alone, so the shell suites take every core.
       # run-tests.sh defaults to half of them, which leaves a shared host's
       # agents room, and at that count this job runs about twice as long.
@@ -164,17 +159,17 @@ jobs:
       # accept take their locks with flock(1); macOS ships neither, and the pr
       # package's Go lock test runs flock(1) against the record lock.
       # tmux-intake-prompt.test.sh runs tmux-bindings.sh under /bin/sh against
-      # a real tmux server, and skips that case without tmux. helm's cgo needs
-      # icu4c's headers. The host installs all five from Homebrew.
+      # a real tmux server, and skips that case without tmux. The host
+      # installs each from Homebrew.
       # coreutils links only the GNU names macOS lacks, such as timeout and
       # nproc, and installs the rest under a g prefix, so date, stat, touch
       # and the like stay BSD.
-      - name: Install bash 5, coreutils, flock, tmux and icu4c
+      - name: Install bash 5, coreutils, flock and tmux
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
           HOMEBREW_NO_INSTALL_CLEANUP: "1"
           HOMEBREW_NO_ENV_HINTS: "1"
-        run: brew install bash coreutils flock tmux icu4c
+        run: brew install bash coreutils flock tmux
 
       # This job tests the BSD userland only while the runner resolves the
       # tools the host does. Without a tomllib python3, the suites that read

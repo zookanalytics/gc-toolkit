@@ -34,10 +34,6 @@
 # its live city and the gc that reaches it, so a test that reached for gc, bd
 # or gh there would reach that city, and the floor refuses the call instead.
 #
-# helm's Go code compiles ICU through cgo. On macOS, ICU's headers sit off the
-# default search path, so go takes the flags icu4c_cgo_flags works out
-# (assets/scripts/icu4c-cgo.sh).
-#
 # The web build writes to a directory of its own, which is compared with dist/,
 # so a run changes no tracked file. npm ci rewrites services/helm/web's
 # node_modules, which git ignores.
@@ -106,10 +102,7 @@ hermetic() {
 }
 
 go_tests() {
-  # shellcheck source=../assets/scripts/icu4c-cgo.sh
-  . "$ROOT/assets/scripts/icu4c-cgo.sh"
-  icu4c_cgo_flags "$PROG"
-  cd "$ROOT" && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go test ./...
+  cd "$ROOT" && go test ./...
 }
 
 web_checks() {

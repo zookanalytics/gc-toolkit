@@ -14,8 +14,6 @@
 #   - go and npm run with no GC_* or BEADS_* variable of the caller's and with
 #     the test floor first on PATH, while run-tests.sh gets the caller's
 #     variables, which it hands on and clears itself;
-#   - on macOS go takes icu4c's cgo flags after the caller's own, and elsewhere
-#     the caller's flags as they are;
 #   - a kind that fails fails the run and stops none of the kinds after it, and
 #     the end names it; a web check that fails stops the web checks after it;
 #   - a build that does not match the committed dist/ fails the web checks,
@@ -32,9 +30,9 @@
 #     errors that run nothing.
 #
 # Hermetic: runs a copy of the Makefile and tools/test.sh in a throwaway git
-# repository, with stand-ins for go, npm, brew and tools/run-tests.sh that log
-# each call, and the repository's own test floor and icu4c-cgo.sh. No network,
-# no Go build, no npm install.
+# repository, with stand-ins for go, npm and tools/run-tests.sh that log each
+# call, and the repository's own test floor. No network, no Go build, no npm
+# install.
 
 set -u
 
@@ -55,12 +53,11 @@ trap 'rm -rf "$TMP"' EXIT
 REPO="$TMP/repo"
 STUBS="$TMP/stubs"
 LOG="$TMP/calls"
-mkdir -p "$REPO/tools" "$REPO/assets/scripts" "$REPO/services/helm/web/dist/assets" \
+mkdir -p "$REPO/tools" "$REPO/services/helm/web/dist/assets" \
   "$REPO/services/helm/internal/rigboard/testdata" "$REPO/docs" "$STUBS"
 cp "$SRC/Makefile" "$REPO/Makefile"
 cp "$SRC/tools/test.sh" "$REPO/tools/test.sh"
 cp -R "$SRC/tools/test-floor" "$REPO/tools/"
-cp "$SRC/assets/scripts/icu4c-cgo.sh" "$REPO/assets/scripts/icu4c-cgo.sh"
 printf '<html>board</html>\n' > "$REPO/services/helm/web/dist/index.html"
 printf 'console.log(1)\n' > "$REPO/services/helm/web/dist/assets/index.js"
 printf '{"rows":[]}\n' > "$REPO/services/helm/internal/rigboard/testdata/gc-toolkit.board.json"
@@ -76,7 +73,7 @@ exit "${STUB_SHELL_RC:-0}"
 F
 cat > "$STUBS/go" <<'F'
 #!/usr/bin/env bash
-printf 'go %s | cwd=%s vars=,%s gc=%s cpp=%s ld=%s\n' "$*" "$PWD" "$(env | grep -oE '^(GC_|BEADS_)[A-Za-z0-9_]*' | sort | tr '\n' ,)" "$(command -v gc)" "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" >> "$STUB_LOG"
+printf 'go %s | cwd=%s vars=,%s gc=%s\n' "$*" "$PWD" "$(env | grep -oE '^(GC_|BEADS_)[A-Za-z0-9_]*' | sort | tr '\n' ,)" "$(command -v gc)" >> "$STUB_LOG"
 exit "${STUB_GO_RC:-0}"
 F
 # npm's build writes STUB_BUILD's tree where --outDir names, as a build would.
@@ -91,12 +88,7 @@ if [ "${1:-} ${2:-}" = "run build" ]; then
 fi
 exit 0
 F
-cat > "$STUBS/brew" <<'F'
-#!/usr/bin/env bash
-[ "$*" = "--prefix icu4c" ] && printf '%s\n' "$STUB_ICU"
-F
-chmod +x "$REPO/tools/run-tests.sh" "$STUBS/go" "$STUBS/npm" "$STUBS/brew"
-mkdir -p "$TMP/icu/include" "$TMP/icu/lib"
+chmod +x "$REPO/tools/run-tests.sh" "$STUBS/go" "$STUBS/npm"
 # What the build stand-in writes: the committed dist/ as it is, or with one
 # file changed or one added.
 BUILT_SAME="$TMP/built-same"; BUILT_CHANGED="$TMP/built-changed"; BUILT_EXTRA="$TMP/built-extra"
@@ -116,7 +108,7 @@ gitc branch base
 run() {
   : > "$LOG"
   OUT="$(cd "$REPO" && env GC_CITY_PATH=/live/city GC_BIN=/live/gc BEADS_DIR=/live/.beads \
-    STUB_LOG="$LOG" STUB_ICU="$TMP/icu" STUB_BUILD="${STUB_BUILD:-$BUILT_SAME}" PATH="$STUBS:$PATH" \
+    STUB_LOG="$LOG" STUB_BUILD="${STUB_BUILD:-$BUILT_SAME}" PATH="$STUBS:$PATH" \
     bash tools/test.sh "$@" 2>&1)"; RC=$?
   CALLS="$(cat "$LOG")"
 }
@@ -136,7 +128,7 @@ eq "$(fmake make -n test-affected BASE=base RUN_TESTS_FLAGS='-j 2 --seconds s.ts
   "BASE replaces the base, and RUN_TESTS_FLAGS follows it"
 eq "$(fmake make -n test RUN_TESTS_FLAGS='-j 2')" "tools/test.sh all -j 2" "RUN_TESTS_FLAGS follows all too"
 : > "$LOG"
-OUT="$(fmake STUB_LOG="$LOG" STUB_ICU="$TMP/icu" STUB_BUILD="$BUILT_SAME" PATH="$STUBS:$PATH" make test 2>&1)"; RC=$?
+OUT="$(fmake STUB_LOG="$LOG" STUB_BUILD="$BUILT_SAME" PATH="$STUBS:$PATH" make test 2>&1)"; RC=$?
 eq "$RC" 0 "make test runs to a pass"
 eq "$(awk '{ print $1 }' "$LOG" | uniq | tr '\n' ' ')" "go npm shell " "…through go, npm and the runner"
 
@@ -170,17 +162,6 @@ has "$OUT" "test: go pass" "the end has a pass line for go"
 has "$OUT" "test: web pass" "…for web"
 has "$OUT" "test: shell pass" "…and for shell"
 eq "$(git -C "$REPO" status --porcelain)" "" "the run changes no tracked file and leaves nothing git does not ignore"
-
-echo "── go's cgo flags for ICU ──"
-: > "$LOG"
-OUT="$(cd "$REPO" && env CGO_CPPFLAGS=-DCALLER CGO_LDFLAGS=-Lcaller STUB_LOG="$LOG" STUB_ICU="$TMP/icu" STUB_BUILD="$BUILT_SAME" PATH="$STUBS:$PATH" bash tools/test.sh all 2>&1)"
-line="$(grep '^go ' "$LOG")"
-if [ "$(uname -s)" = Darwin ]; then
-  has "$line" "cpp=-DCALLER -I$TMP/icu/include " "on macOS go gets icu4c's include path after the caller's flags"
-  has "$line" "ld=-Lcaller -L$TMP/icu/lib" "…and its lib path"
-else
-  has "$line" "cpp=-DCALLER ld=-Lcaller" "off macOS go gets the caller's flags as they are"
-fi
 
 echo "── a kind that fails ──"
 STUB_GO_RC=1 run all
