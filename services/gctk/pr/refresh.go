@@ -188,7 +188,8 @@ func ownerOf(r *ledger.Record) (owned, bool) {
 		return owned{}, false
 	}
 	o := owned{id: r.ID, status: r.Status(), assignee: r.Assignee(), url: url, host: host, repo: repo,
-		number: number, rec: rec, branch: strings.TrimSpace(branch), since: strings.TrimSpace(since)}
+		number: number, rec: rec, branch: strings.TrimSpace(branch), since: strings.TrimSpace(since),
+		receipts: receiptsOn(r)}
 	if saved, _, err := githubReadKey.Get(r); err == nil {
 		o.saved = saved
 	}

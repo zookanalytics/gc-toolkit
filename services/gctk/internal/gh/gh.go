@@ -240,7 +240,7 @@ const (
 	reactMutation = `mutation($id:ID!,$content:ReactionContent!){
   addReaction(input:{subjectId:$id,content:$content}){reaction{content}}}`
 
-	// The resolve of a review thread, which names the thread by its node id.
+	// A review thread's resolution, which names the thread by its node id.
 	resolveMutation = `mutation($id:ID!){
   resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
 
@@ -371,14 +371,14 @@ func (c *Client) AddReaction(subject, content string) error {
 		func(json.RawMessage) error { return nil })
 }
 
-// ResolveThread resolves the review thread whose node id is thread, as the
-// account gh acts as. An error is a request GitHub refused or one whose answer
-// did not arrive, which may still take effect: a read of the thread says which.
-func (c *Client) ResolveThread(thread string) error {
-	if thread == "" {
-		return errors.New("github: a resolve names no review thread")
+// ResolveThread resolves the review thread whose node id is id, as the account
+// gh acts as. An error is a request GitHub refused or one whose answer did not
+// arrive, which may still take effect: a read of the thread says which.
+func (c *Client) ResolveThread(id string) error {
+	if id == "" {
+		return errors.New("github: a resolution names no review thread")
 	}
-	return c.graphql(resolveMutation, []string{"-f", "id=" + thread}, false, func(json.RawMessage) error { return nil })
+	return c.graphql(resolveMutation, []string{"-f", "id=" + id}, false, func(json.RawMessage) error { return nil })
 }
 
 // loginShape is the form of an account's login: letters, digits, hyphens and

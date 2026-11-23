@@ -983,7 +983,11 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group.
+# key). pr-facts.sh writes this group. The landing order's conversion of the
+# old receipts (gctk pr reconcile) unsets the three watermarks, the two
+# answered marks, the three batch ledgers and pr_comment_disposition on a bead
+# that owns a PR on the pending record, once the city's marks on the PR's
+# posts stand in their place.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",

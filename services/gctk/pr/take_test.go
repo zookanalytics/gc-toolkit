@@ -24,11 +24,14 @@ import (
 
 // holdOnAsks has the store's blocked listing hold the bead on the beads held
 // names and on each ask a run files on it, as bd's blocked rule holds a bead on
-// each of its open blockers.
+// each of its open blockers, and leaves the bead out of the listing while
+// nothing holds it.
 func (d *land) holdOnAsks(held ...string) {
 	var mu sync.Mutex
 	list := slices.Clone(held)
-	d.store.List(bead, list...)
+	if len(list) > 0 {
+		d.store.List(bead, list...)
+	}
 	d.store.OnWrite = func(kind, id string, _ []string) {
 		if kind != "create" {
 			return

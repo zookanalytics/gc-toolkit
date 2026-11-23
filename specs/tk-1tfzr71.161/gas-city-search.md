@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the GitHub intake on the one-PR update's read
-description: The Gas City, Gas Town, gascity-packs and GitHub primitives searched for the surface tk-1tfzr71.21's design adds, namely the city's taken mark in the definition of feedback, the landing order's act that takes each person's post as an ask from the PR's saved read, the saved read's list of untaken posts, the review run's answers on GitHub with the dismissal of a request for changes, triage's answer, the run poured behind its own question gates, and the red-check and conflict acts with their gates. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
+description: The Gas City, Gas Town, gascity-packs and GitHub primitives searched for the surface tk-1tfzr71.21's design adds, namely the city's taken mark in the definition of feedback, the landing order's act that takes each person's post as an ask from the PR's saved read, the saved read's list of untaken posts, the conversion of the old path's receipts on a moved bead, the review run's answers on GitHub with the dismissal of a request for changes, triage's answer, the run poured behind its own question gates, and the red-check and conflict acts with their gates. It says what each search found at a named upstream commit and why none covers the need. Read it when building or reviewing one of the design's units, or when the arch check asks for the search.
 ---
 
 # Gas City search for the GitHub intake on the one-PR update's read
@@ -114,6 +114,46 @@ conversation part holds, the posts the update read with neither of the city's
 marks, each with what its ask's reason names, in place of the newest feedback
 id in each id space, and re-verifies that warrant against the same upstream
 sources when it touches the key.
+
+## The conversion of the old receipts (unit 3)
+
+Read on 2026-11-22 at `gastownhall/gascity` main 7b8d498424
+(2026-11-22T19:44:55Z) and in `steveyegge/beads` v1.3.4, the bd the city runs
+(`gc bd version` reads 1.3.4, 7ef2fd05e).
+
+The need: on a bead `pr-facts.sh` served, turn its receipts, the watermarks,
+answered marks and batch ledgers in the bead's metadata, into the city's marks
+on the PR's posts, resolve the old path's machine-finding threads, file the post
+of each open human finding as its ask and close the finding onto that ask, and
+unset the receipts, before the landing order takes any post on the bead.
+
+- **Gas City** reads none of the pack's keys and keeps no migration of bead
+  metadata. Its `migrate` commands move a store's backing data
+  (`cmd/gc/cmd_beads_city_migrate_proxied.go` moves a city's store onto the
+  proxied server), and `git grep` for `resolveReviewThread`, `addReaction`,
+  `dismissPullRequestReview` and `requestReviews` over `cmd`, `internal`,
+  `docs` and `engdocs` at 7b8d498424 still finds no file. Not covered.
+- **bd's `supersede`** (`cmd/bd/duplicate.go`) records a successor the way the
+  conversion needs one recorded: a `supersedes` edge from the old bead onto its
+  replacement, then a close. It closes unchecked, guarded on no status or
+  assignee, and records no reason. A finding can be ruled by a review run while
+  the conversion works, so its close must hold to the status and assignee the
+  landing order read under the record lock. The pack's disposition writer,
+  `bead-rehome.sh`, composes the same edge with bd's checked close and those
+  guards, and the landing order already closes a retired PR's bead through it,
+  so the conversion closes each finding through it under `--kind re-homed`,
+  with no ruling to check.
+- **GitHub's `resolveReviewThread`** is the resolution, which no Gas City or
+  gascity-packs code makes ([The answers on GitHub](#the-answers-on-github-unit-4)).
+  The conversion adds it to gctk's GitHub adapter beside `addReaction`, which
+  the take added.
+
+So the conversion is a landing-order act in gctk's pr domain, decided from the
+bead, which files asks through `gctk review ask`'s filing as the take does. The
+pr domain declares the receipts it unsets, which `pr-facts.sh` still writes
+until the effort's retirement unit deletes it. No bead kind, order or state is
+added, and the conversion's removal (tk-1tfzr71.201) deletes it once no open
+bead carries the receipts.
 
 ## The answers on GitHub (unit 4)
 

@@ -268,9 +268,9 @@ func TestAReactionNamesThePostByItsNodeID(t *testing.T) {
 	}
 }
 
-// A resolve names the review thread by its node id, and a GraphQL error fails
-// it.
-func TestAResolveNamesTheThreadByItsNodeID(t *testing.T) {
+// A resolution names its review thread by the thread's node id. One that names
+// no thread asks nothing, and a refused one is an error.
+func TestAResolutionNamesTheThreadByItsNodeID(t *testing.T) {
 	c, r := client([2]string{"resolveReviewThread(input:{threadId:$id})",
 		`{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}`})
 	if err := c.ResolveThread("PRRT_kw1"); err != nil {
@@ -281,11 +281,11 @@ func TestAResolveNamesTheThreadByItsNodeID(t *testing.T) {
 	}
 	c, r = client()
 	if err := c.ResolveThread(""); err == nil || len(r.calls) != 0 {
-		t.Fatalf("a resolve that names no thread = %v, asking %+v", err, r.calls)
+		t.Fatalf("a resolution that names no thread answered %v and asked %+v", err, r.calls)
 	}
 	c, _ = client([2]string{"resolveReviewThread", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
 	if err := c.ResolveThread("PRRT_gone"); err == nil {
-		t.Fatal("a refused resolve read as resolved")
+		t.Fatal("a refused resolution read as made")
 	}
 }
 

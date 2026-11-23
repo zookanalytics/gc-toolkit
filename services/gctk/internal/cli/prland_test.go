@@ -322,7 +322,7 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed",
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed", Ruled: true,
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
 	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
@@ -343,6 +343,22 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	var held *pr.HeldClose
 	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
 		t.Fatalf("exit 3 read as %v", err)
+	}
+	// A finding the conversion closes onto its post's ask records no ruling, so
+	// the script is not asked to check one.
+	t.Setenv("STUB_EXIT", "0")
+	if err := os.Remove(log); err != nil {
+		t.Fatal(err)
+	}
+	f := pr.Disposal{Bead: "tk-f", Status: "open", Assignee: "", Note: "filed as its post's ask",
+		Disposition: pr.Disposition{Kind: "re-homed", Successor: "tk-ask"}}
+	if err := l.Dispositions.Close(f); err != nil {
+		t.Fatal(err)
+	}
+	want = "actor=rig/gc-toolkit.refinery\n--origin\ntk-f\n--successor\ntk-ask\n--kind\nre-homed\n--note\nfiled as its post's ask\n" +
+		"--if-status\nopen\n--if-assignee\n\n"
+	if raw, _ := os.ReadFile(log); string(raw) != want {
+		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
 	}
 }
 

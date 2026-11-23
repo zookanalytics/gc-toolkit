@@ -406,25 +406,26 @@ func (g *GitHub) AddReaction(subject, content string) error {
 	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", subject)
 }
 
-// ResolveThread records the resolve and resolves the review thread whose node
-// id is thread. A node id no thread holds is an error, as GitHub answers one
-// that resolves to nothing.
-func (g *GitHub) ResolveThread(thread string) error {
+// ResolveThread records the resolution and answers it: with Fail's error for
+// it when set, else by marking resolved the review thread whose node id is id.
+// A node id no thread holds is an error, as GitHub answers one that resolves to
+// nothing.
+func (g *GitHub) ResolveThread(id string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.asks = append(g.asks, Ask{Method: "ResolveThread", ID: thread})
+	g.asks = append(g.asks, Ask{Method: "ResolveThread", ID: id})
 	if err := g.Fail["ResolveThread"]; err != nil {
 		return err
 	}
 	for _, p := range g.PRs {
 		for i, t := range p.Threads {
-			if t.ID == thread {
+			if t.ID == id {
 				p.Threads[i].Resolved = true
 				return nil
 			}
 		}
 	}
-	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", thread)
+	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", id)
 }
 
 // RequestReview records the request and adds login to the PR's requested

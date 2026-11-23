@@ -26,10 +26,10 @@ const conversation = "tk-conv"
 
 // rehome is the disposition writer as a test sets it. It records each close it
 // is asked for, holds one while held says why, fails one while err is set,
-// holds one whose bead no longer has the status, the assignee or the ruling the
-// run judged, as bead-rehome.sh's --if-status, --if-assignee and --if-ruled
-// do, and otherwise closes the bead and clears the marker, as bead-rehome.sh's
-// close does.
+// holds one whose bead no longer has the status or the assignee the run
+// judged, or, for a ruling's close, the ruling, as bead-rehome.sh's
+// --if-status, --if-assignee and --if-ruled do, and otherwise closes the bead
+// and clears the marker, as bead-rehome.sh's close does.
 type rehome struct {
 	mu    sync.Mutex
 	store *fake.Store
@@ -63,7 +63,7 @@ func (r *rehome) Close(x pr.Disposal) error {
 	}
 	m := row.Metadata
 	if now := (pr.Disposition{Kind: m["gc.pr_close_disposition_kind"], Successor: m["gc.pr_close_disposition_successor"],
-		Store: m["gc.pr_close_disposition_successor_store"]}); now != d {
+		Store: m["gc.pr_close_disposition_successor_store"]}); x.Ruled && now != d {
 		return &pr.HeldClose{Why: fmt.Sprintf("%s records the ruling %s onto %s now, not the %s onto %s the run read",
 			x.Bead, now.Kind, now.Successor, d.Kind, d.Successor)}
 	}
@@ -221,7 +221,7 @@ func TestTheDispositionWriterIsHandedTheRunsJudgment(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	is(t, d.once(t), pr.ActDisposed)
-	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: "",
+	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: "", Ruled: true,
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: conversation},
 		Note:        "PR #7 closed under the disposition a ruling recorded before the close"}
 	if got := r.disposals(); len(got) != 1 || got[0] != want {

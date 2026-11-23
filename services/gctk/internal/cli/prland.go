@@ -596,14 +596,16 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 	return res.Root, nil
 }
 
-// dispositions closes a bead whose PR a ruling retired through the runtime
-// adapter, which runs the pack's bead-rehome.sh from the scripts directory
+// dispositions closes a bead onto its successor through the runtime adapter,
+// which runs the pack's bead-rehome.sh from the scripts directory
 // GCTK_SCRIPTS_DIR names, as the refinery, since the script closes an assigned
 // bead only as its assignee, and the refinery is the one agent the order
-// works an assigned bead for. It names the run's
-// judgment of the bead, so the script closes it only while the bead still has
-// the status and assignee the run read under the record lock and still records
-// the ruling the run read there. The script's exit 4 (the bead is not as the
+// works an assigned bead for: a bead whose PR a ruling retired, and a human
+// finding the conversion of the old receipts closes onto its post's ask. It
+// names the run's judgment of the bead, so the script closes it only while the
+// bead still has the status and assignee the run read under the record lock
+// and, for a ruling's disposition, still records the ruling the run read there.
+// The script's exit 4 (the bead is not as the
 // run judged it, or a write did not land, as when the bead moved since the
 // script's own read) and exit 5 (the close is held, as by an open wait) are a
 // close held for now. Any other failure, or a script that did not run, is an
@@ -616,7 +618,10 @@ func (d dispositions) Close(x pr.Disposal) error {
 	if r.Store != "" {
 		args = append(args, "--successor-store", r.Store)
 	}
-	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
+	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee)
+	if x.Ruled {
+		args = append(args, "--if-ruled")
+	}
 	res := d.rt.Script("bead-rehome.sh", args...)
 	switch {
 	case res.Err == nil && res.Code == 0:

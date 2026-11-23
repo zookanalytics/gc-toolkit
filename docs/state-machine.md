@@ -693,9 +693,13 @@ exception and comes back keeps the posture its earlier head was read at until
 A comment outranks an approval on purpose: one reviewer's approval does not
 answer another reviewer's question. A read that fails records nothing rather
 than something weaker, so a standing `commented` stays recorded through an
-unreadable pass. The landing order's evaluator does not read the posture: it
-holds a PR's merge on feedback newer than the watermarks, which it reads with
-GitHub's own facts.
+unreadable pass. The landing order's evaluator does not read the posture or the
+watermarks: it holds a PR's merge on each post the city has not taken, which the
+one-PR update saves with GitHub's own facts. On a bead that owns a PR on the
+pending record, the landing order converts the watermarks, the answered marks,
+the batch ledgers and `pr_comment_disposition` into the city's marks on the
+PR's posts and then unsets them, and takes no post on the bead while it carries
+them ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
 
 **The watermarks** separate a comment already routed from a new one. Each is the
 highest id routed in its own id space, and each advances only after the routing

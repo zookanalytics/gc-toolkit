@@ -627,7 +627,9 @@ second, in the write that saves the first conversation the update reads for
 it, and the definition is applied from that instant. A conversation read from
 another instant than the one the bead holds when the update writes, as when
 another writer stamped one meanwhile, is not saved, and the next pass reads it
-again.
+again. A conversation part that holds no list of the posts the city has not
+taken is read again by the next pass whatever its signs say, since the take and
+the evaluator read the list.
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
@@ -855,10 +857,11 @@ while one is open, and the order still reads it.
 
 **A person's post.** Each post the saved read keeps untaken becomes an ask on
 the bead that owns the PR, which the PR's review run rules. For each PR whose
-bead owns it on the record, is open or blocked and is assigned to nobody or to
-the refinery, while the saved read shows the PR open and applied the definition
-of feedback from the bead's provenance instant, an act under the record lock
-files the post's ask (`gctk review ask`'s filing), then marks the post `EYES`.
+bead owns it on the record, is open or blocked, is assigned to nobody or to the
+refinery and carries none of `pr-facts.sh`'s receipts (below), while the saved
+read shows the PR open and applied the definition of feedback from the bead's
+provenance instant, an act under the record lock files the post's ask
+(`gctk review ask`'s filing), then marks the post `EYES`.
 The ask's reason is one line naming the post: its kind, its author, the PR, an
 inline comment's file and the line it was made on, and its URL, where the run
 reads the post as it stands. The reason holds no text of the post, and a filing
@@ -878,17 +881,53 @@ merge, and the run exits 2. The merge's own re-read applies the same condition,
 so a post made seconds before a merge holds it though no saved read held it
 yet.
 
+**The old path's receipts.** A bead open when the GitHub intake lands can carry
+`pr-facts.sh`'s receipts: in each id space the highest id it routed (a
+watermark) and the highest its review threads had answered past that (an
+answered mark), and the batches it routed with the bead each went to (the
+batch ledgers and `pr_comment_disposition`). The run converts them into the
+city's marks, as an act decided from the bead, and takes no post on the bead
+and pours no review run on it while it carries them, so no post the old path
+routed is filed twice. When an open human finding, or an open ask a batch went
+to, is on the bead, the act waits while a review run is attached to it or
+another open bead works its branch, since that run or that writer may rule or
+answer them. Otherwise, under the record lock, the act reads the PR's posts and
+threads itself. It files the post of each open human finding as its ask, under
+the reason the take would give it, and marks the post `EYES` once the ask
+stands. It marks `EYES` on each other post the receipts reach that is feedback
+carrying neither of the city's marks: an inline comment or a conversation
+comment at or below its space's mark, and the message of a comment or a
+request for changes at or below the review space's. `pr-facts.sh` routed no
+approval's message, so no receipt reaches one, and the take files it once the
+receipts are gone. A post `pr-facts.sh` marked when it routed it is taken
+already, and the act leaves it as it is. The act resolves each unresolved
+review thread that holds only the city's own posts, the old path's machine
+findings, closes each open ask a batch went to, and closes each finding whose
+post is no longer on the PR. With the lock free, `bead-rehome.sh`, run as the
+refinery, closes each finding the act filed onto the ask of its post, and the
+one-PR update reads the PR's conversation again, since a mark and a resolution
+move no sign. Last, under the lock again, the act unsets the receipts in one
+write guarded on the status and assignee it read, once no open human finding
+and no open ask a batch went to is left on the bead and the saved read shows no
+post the receipts reach untaken, so the take, which decides from the saved
+read, files only the posts the old path never routed. Its line's action is
+`converted`. A step that does not complete leaves the receipts on the bead, the
+run exits 2, and the next run converts again from where GitHub and the store
+then stand.
+
 **The review run.** A run pours a PR's review run, `mol-pr-review`, with
 `gc formula cook --attach` onto the bead under the record lock. Its vars are the
 record's PR bead, head, target and branch, and the pools and the binding the
 refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
 `binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
-while another open bead names the PR's branch, such as a rework child, or while
-a human gate holds it, unless every gate that holds it is a question a review
-run put to a person (`review-question-<key>`) and an ask the run can take
-carries a person's post filed after the newest of them, whose run can settle
-the question. A conversation on the PR holds its merge and nothing
+while another open bead names the PR's branch, such as a rework child, while the
+bead carries `pr-facts.sh`'s receipts, which their conversion turns into the
+city's marks first (above), or while a human gate holds it, unless every gate
+that holds it is a question a review run put to a person
+(`review-question-<key>`) and an ask the run can take carries a person's post
+filed after the newest of them, whose run can settle the question. A
+conversation on the PR holds its merge and nothing
 else, so runs are poured while one is open, and the evaluator's wait holds the
 merge until it closes. A run that ended without a result is poured again.
 When the last two runs at the validated head both ended without one, counting
