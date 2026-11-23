@@ -242,20 +242,9 @@ it. A rework child handed back lands on its anchor's branch and closes.
 closes only once its merge is verified, never at publication."""
 
 [[steps]]
-id = "patrol-summary"
-title = "Record patrol cycle summary"
-needs = ["merge-push"]
-description = """
-Summarize the cycle for the next session: the bead and branch handled, its
-disposition (landed, published, parked for the cadence, sent back, held behind
-a gate), the checks and their results, the trackers filed or found, and the
-gates filed. If the cycle ended early, say why and what state it left. The
-summary lives in the wisp's closing reason."""
-
-[[steps]]
 id = "next-iteration"
 title = "Pour the next iteration and loop"
-needs = ["patrol-summary"]
+needs = ["merge-push"]
 description = """
 Pour the next wisp before burning this one:
 ```bash

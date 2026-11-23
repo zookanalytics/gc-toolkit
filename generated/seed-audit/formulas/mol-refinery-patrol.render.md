@@ -36,7 +36,7 @@ Variables:
   {{test_command}}: Test command (when run_tests is true). (default=)
   {{typecheck_command}}: Type check command. Empty = skip. (default=)
 
-Steps (10):
+Steps (9):
   ├── mol-refinery-patrol.validate-identity: Validate canonical agent identity
   ├── mol-refinery-patrol.check-inbox: Check mail [needs: mol-refinery-patrol.validate-identity]
   ├── mol-refinery-patrol.find-work: Find the next work bead assigned to you [needs: mol-refinery-patrol.check-inbox]
@@ -44,6 +44,5 @@ Steps (10):
   ├── mol-refinery-patrol.run-tests: Run quality checks and tests [needs: mol-refinery-patrol.rebase]
   ├── mol-refinery-patrol.handle-failures: Handle quality check or test failures [needs: mol-refinery-patrol.run-tests]
   ├── mol-refinery-patrol.merge-push: Land the branch, or publish its PR [needs: mol-refinery-patrol.handle-failures]
-  ├── mol-refinery-patrol.patrol-summary: Record patrol cycle summary [needs: mol-refinery-patrol.merge-push]
-  ├── mol-refinery-patrol.next-iteration: Pour the next iteration and loop [needs: mol-refinery-patrol.patrol-summary]
+  ├── mol-refinery-patrol.next-iteration: Pour the next iteration and loop [needs: mol-refinery-patrol.merge-push]
   └── mol-refinery-patrol.workflow-finalize: Finalize workflow [needs: mol-refinery-patrol.next-iteration]
