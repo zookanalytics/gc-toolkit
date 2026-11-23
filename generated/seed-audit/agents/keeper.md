@@ -455,13 +455,13 @@ worktree.
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
-<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
+<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 updated:2026-11-23 -->
 - Express a wait or a gated hand-off as a graph edge — a blocked-by
   dependency on the prerequisites, plus a deferred-dispatch arm where a
-  successor must auto-sling on the blocker's close — not a passive gc.hold
-  note or a manual sling a later session must run. A gc.hold note still
-  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
-  edge excludes it until the blocker lands, then self-clears.
+  successor must auto-sling on the blocker's close — not a passive note or
+  a manual sling a later session must run. A note still leaves the bead in
+  gc hook and bd ready as live demand; a blocked-by edge excludes it until
+  the blocker lands, then self-clears.
 
 <!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
 - Give as the operator's only what they said: a ruling, approval, practice,
@@ -480,6 +480,14 @@ worktree.
   their lean before you build on it, push back where you disagree, even
   with an earlier ruling, and say where your recommendation departs from
   what they said.
+
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback) adopted:2026-11-23 -->
+- When a design or proposal fixes a time window, an interval, an age limit
+  or another threshold, give the reason for that value and what a wrong
+  value costs, because a constant copied from a neighbouring rule is not a
+  reason. Where no reason holds the value, let the evidence that should
+  trigger the decision, or a judgment made case by case, decide instead,
+  or drop the requirement.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
