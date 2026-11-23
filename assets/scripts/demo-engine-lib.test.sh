@@ -86,7 +86,7 @@
 #               writes in the session's home and reads the user's git settings
 #               does none of that, though the same command outside does, while
 #               it reads a Node on PATH and Playwright's browsers there, writes
-#               npm's cache and runs git; a
+#               npm's cache, which no tool had made yet, and runs git; a
 #               capture's own server answers it on each of a run of free ports,
 #               which opens neither another loopback service nor a Unix socket;
 #               and with the host's lsof, a copy of a rig set to "true" answers
@@ -1212,10 +1212,12 @@ ENGINE
   # The home folders, the session's own and the user's that holds another
   # agent's home, give the command no credential, no listing and no place to
   # write, while the parts of them its tools need stay open: a Node on PATH and
-  # Playwright's browsers read, npm's cache written, and git runs without the
-  # user's settings. Outside the sandbox the same command reaches each.
+  # Playwright's browsers read, npm's cache written though no tool had made it
+  # yet, and git runs without the user's settings. Outside the sandbox the same
+  # command reaches each.
   mkdir -p "$AHOME/.config/gh" "$UHOME/agents/me-2/.claude" "$UHOME/.nodes/v1/bin" "$UHOME/.nodes/v1/lib" \
-    "$AHOME/Library/Caches/ms-playwright" "$AHOME/.npm"
+    "$AHOME/Library/Caches/ms-playwright"
+  rm -rf "$AHOME/.npm"
   printf 'SECRET-SESSION-HOME\n' >"$AHOME/.config/gh/hosts.yml"
   printf 'SECRET-OTHER-AGENT\n' >"$UHOME/agents/me-2/.claude/settings.json"
   printf '[alias]\n\tprobe = !echo USER-GIT-SETTINGS\n' >"$AHOME/.gitconfig"

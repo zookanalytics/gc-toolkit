@@ -1041,8 +1041,9 @@ _demo_engine_sandbox_run() {
 # the run reads, or "rw ", for one it reads and writes. It reads each Node on
 # PATH, with the npm and corepack that Node holds, Playwright's browsers, and
 # Go's root and settings. It writes the caches of npm, the engine and Go, and
-# the engine keeps the Appium that drives an iOS app in its own. A path that
-# does not exist is left out.
+# the engine keeps the Appium that drives an iOS app in its own. A cache that
+# does not exist yet is made first, and any other path that does not exist is
+# left out.
 _demo_engine_tool_places() {
   local d p kind rest="${PATH:-}:"
   {
@@ -1058,7 +1059,12 @@ _demo_engine_tool_places() {
       go env GOROOT GOENV GOMODCACHE GOCACHE 2>/dev/null | awk '{ print (NR <= 2 ? "ro " : "rw ") $0 }'
     fi
   } | while read -r kind p; do
-    case "$p" in /*) p=$(_demo_engine_canon "$p") ;; *) continue ;; esac
+    case "$p" in /*) ;; *) continue ;; esac
+    # A rule can name only a path that exists, and a cache with no rule stays
+    # shut with the home folder that holds it, where a tool's first run inside
+    # the sandbox could not make it.
+    [ "$kind" != rw ] || mkdir -p -- "$p" 2>/dev/null
+    p=$(_demo_engine_canon "$p")
     [ -z "$p" ] || printf '%s %s\n' "$kind" "$p"
   done
 }
