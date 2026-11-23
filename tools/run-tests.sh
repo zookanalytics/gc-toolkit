@@ -532,15 +532,17 @@ gone_reached() {
 
 # go_callers <path> <function> — adds the function to GO_NAMES, and every
 # function of the same script that calls it, and those functions' callers in
-# turn. A call is the name on a line of the body that is not a comment.
+# turn. A call is the name on a line of the body that is not a comment. GO_NAMED
+# holds each function read, by its script's path and its name, since two
+# scripts can each define a function of one name.
 go_callers() {
   local file="$1" f c rows
   local -a todo=("$2")
   rows="$(fn_rows "$file")"
   while [ "${#todo[@]}" -gt 0 ]; do
     f="${todo[0]}"; todo=("${todo[@]:1}")
-    [ -z "${GO_NAMED[$f]:-}" ] || continue
-    GO_NAMED[$f]=1; GO_NAMES+=("$f")
+    [ -z "${GO_NAMED["$file:$f"]:-}" ] || continue
+    GO_NAMED["$file:$f"]=1; GO_NAMES+=("$f")
     while IFS= read -r c; do
       [ -n "$c" ] && todo+=("$c")
     done < <(printf '%s\n' "$rows" | awk -F'\t' -v f="$f" '

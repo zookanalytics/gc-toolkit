@@ -1395,5 +1395,28 @@ else
     "a change that deletes one of the two files lib's directory pattern embeds reaches the suites compiling tool, though go's answer is whole"
 fi
 
+echo "── 21. two libraries whose compiling functions share a name each reach their own suites ──"
+# Programs a and b both import shared. lib/a.sh and lib/b.sh each define build,
+# which compiles its own program, and a wrapper of its own that calls it.
+TREPO="$TMP/go-twins"
+mkdir -p "$TREPO/tools"
+cp "$RUNNER" "$TREPO/tools/run-tests.sh"
+tfix() { mkdir -p "$(dirname "$TREPO/$1")"; cat > "$TREPO/$1"; }
+printf 'module example.invalid/twins\n\ngo 1.21\n' | tfix go.mod
+printf 'package shared\n\nfunc Value() {}\n' | tfix shared/value.go
+for p in a b; do
+  printf 'package main\n\nimport "example.invalid/twins/shared"\n\nfunc main() { shared.Value() }\n' | tfix "$p/main.go"
+  printf 'build() {\n  go build ./%s\n}\nsetup_%s() {\n  build\n}\n' "$p" "$p" | tfix "lib/$p.sh"
+  printf '#!/usr/bin/env bash\n. lib/%s.sh\nsetup_%s\n' "$p" "$p" | tfix "t/$p.test.sh"
+done
+git -C "$TREPO" init -q
+git -C "$TREPO" add -A
+if command -v go >/dev/null 2>&1; then
+  OUT="$(cd "$TREPO" && GOTOOLCHAIN=local GOWORK=off GOFLAGS='' "$TREPO/tools/run-tests.sh" -j 64 --list shared/value.go 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+  eq "$LIST" "t/a.test.sh t/b.test.sh " \
+    "a package both programs import reaches the suite of each library's wrapper, though both libraries name their compiling function build"
+fi
+
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
