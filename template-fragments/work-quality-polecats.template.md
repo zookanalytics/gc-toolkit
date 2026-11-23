@@ -58,4 +58,12 @@
   installed. A comment says what the code beside it cannot say for
   itself, and a fact is stated a second time only where a reader with
   just that name to follow would miss something they need.
+
+<!-- rule:tk-xxb1jh src:pr:#1045:comment:4212283570, pr:#1267:review:5539030669 (operator feedback), bead:tk-riu2z5n adopted:2026-11-23 -->
+- When a test stands in for data another program writes, such as a tool's
+  files, a command's output or a service's answers, build its fixture from
+  that program's real output, recorded or sampled, and make a case that
+  simulates its write change what the real write changes. A fixture built by
+  hand carries only the shape its author knew, so it passes cases the real
+  data fails.
 {{ end }}
