@@ -46,9 +46,10 @@ nudged once. A pass run by hand afterwards, as the order runs it, printed
 
 The city first ran Gas City's default nudge dispatcher, `legacy`. After the
 sleeping probe woke, its queued nudge was still pending and never attempted
-at 02:21:15Z, three minutes after the pass queued it. With `[daemon] nudge_dispatcher = "supervisor"`, which the
-live city sets, the restarted supervisor delivered it and the probe read its
-mail 12 s after the supervisor was ready. By Gas City's code a session's
+at 02:21:15Z, three minutes after the pass queued it. With
+`[daemon] nudge_dispatcher = "supervisor"`, which the live city sets, the
+restarted supervisor delivered it and the probe read its mail 12 s after the
+supervisor was ready. By Gas City's code a session's
 start begins its poller under `legacy` too (`maybeStartNudgePoller` from
 `gc prime --hook`, in `cmd/gc/cmd_prime.go` at gastownhall/gascity
 c377651cb318), so why that one nudge waited was not traced.
