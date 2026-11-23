@@ -167,6 +167,13 @@ it. A here-document's body is data when any part of its delimiter is quoted.
 Otherwise the shell expands the body, and a substitution in it counts as one
 in an argument does.
 
+A command that only assigns literal values, with no `$`, backtick, `<` or `>`
+in its text, does nothing but name them, so it is no command. An assignment
+that expands a parameter, substitutes a command or carries a redirection is a
+command. So the substitution in a formula step's call to a pack script,
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"`, holds one
+command, and the call is one call.
+
 A `cd` that `&&` runs after a call is no procedure, and that `&&` is no control
 flow. It moves the agent's own shell once the call exits 0, which no script can
 do for its caller, and Claude Code carries the shell's directory from one call
