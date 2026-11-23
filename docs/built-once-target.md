@@ -559,8 +559,9 @@ Every change follows these rules.
    ([suite-time.sh](../.github/workflows/suite-time.sh)).
    `tools/measure.sh --pr` computes the size, and gc-toolkit's CI
    ([pr-size.yml](../.github/workflows/pr-size.yml)) posts both on each PR as
-   one comment that it rewrites on each push, each change of the PR's base
-   branch and each end of the PR's tests run.
+   one comment. It rewrites the comment on each push and each change of the
+   PR's base branch, while the PR has no merge conflict, and each time one of
+   the PR's tests runs passes or fails.
 
 ## Keeping it true
 

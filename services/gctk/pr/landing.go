@@ -1042,7 +1042,8 @@ func (u *run) decideClosed(s state) plan {
 // holds it, the run hands it to the refinery (handOver). A whole record whose
 // second write landed moves to blocked and to nobody, and is decided on.
 // Anything else is a record a dead writer left half written, which goes back
-// to the refinery for its full validation.
+// to the refinery for its full validation, handed over as a changed head is
+// (revalidate).
 func (u *run) decideOpen(s state) plan {
 	switch {
 	case s.rec.Result == record.HeadChanged && withdrawing(s):
@@ -1075,11 +1076,8 @@ func (u *run) decideOpen(s state) plan {
 			return next.act(ctx, c)
 		})
 	}
-	return doing(func(context.Context, carriedOut) RunOutcome {
-		w := u.Ledger.Write(s.id)
-		record.Revalidate(w, "Interrupted PR handoff record is incomplete; full refinery validation is required", u.Refinery)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRevalidate,
-			Detail: "the record was half written: the bead goes back to the refinery, and no merge is requested"})
+	return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
+		return u.revalidate(ctx, s)
 	})
 }
 
@@ -1443,7 +1441,7 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	if unread != nil {
 		return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
 	}
-	return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
+	return u.wakeAndSettle(ctx, s, headChanged, holds, ActRequeued, detail)
 }
 
 // decideAtHead decides a PR the saved read shows open at the validated head. A
