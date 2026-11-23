@@ -217,9 +217,10 @@ you, so you stay parked until a human walks past your pane.
 - **Something a person must see:** file a human gate on the bead
   (`human-gate.sh`), whose message says what they must see. They read it when
   they are there; you keep cycling.
-- **Context exhaustion mid-task:** `gc runtime request-restart`. On a named
-  session it prints `Restart skipped for named session` and returns 0 — not
-  a failure; keep cycling in-session.
+- **Context exhaustion mid-task:** `gc runtime request-restart`, then end the
+  turn. It returns at once, and the controller stops this session and starts
+  it fresh, named and pinned sessions included. A non-zero exit requested
+  nothing, so keep cycling in-session.
 - **Recycling is not your decision and not a question.** The cycle-recycle
   `Stop` hook (`overlays/cycle-recycle/`) recycles you with no involvement
   from you; you never run its handoff/reset sequence by hand.
