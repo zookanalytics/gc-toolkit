@@ -65,6 +65,7 @@ var pkgLayer = map[string]struct {
 	"distiller":                {layer: domain},
 	"doctor":                   {layer: domain},
 	"epic":                     {layer: domain},
+	"gate":                     {layer: domain},
 	"listing":                  {layer: domain},
 	"memory":                   {layer: domain},
 	"park":                     {layer: domain},

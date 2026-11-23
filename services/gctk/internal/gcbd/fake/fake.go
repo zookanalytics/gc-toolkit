@@ -127,6 +127,12 @@ type Store struct {
 	// refuse the resolve with the error it returns.
 	BeforeResolve func(id, reason string) error
 
+	// GateErr fails every gate create before it writes. GateEdgeless has a gate
+	// create file its gate and write no edge onto it, then fail, as a create
+	// that stops between bd's two writes does.
+	GateErr      error
+	GateEdgeless bool
+
 	unrelates []Edge
 	resolves  []Close
 	reopens   []Close
@@ -773,6 +779,40 @@ func (s *Store) Create(title string, args ...string) (string, error) {
 	s.rows[id] = b
 	s.creates = append(s.creates, Create{ID: id, Title: title, Args: slices.Clone(args)})
 	s.wrote("create", id, args)
+	return id, nil
+}
+
+// CreateGate files an open gate titled title of await type typ and await id
+// awaitID, and writes the blocks edge of the bead blocks onto it, as
+// `gc bd gate create` does. Its create is among [Store.Creates], with the
+// arguments "gate", --type, --await-id and --blocks.
+func (s *Store) CreateGate(typ, awaitID, blocks, title string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.GateErr != nil {
+		return "", s.GateErr
+	}
+	r, held := s.rows[blocks]
+	if !held {
+		return "", fmt.Errorf("fake store: issue not found: %s", blocks)
+	}
+	n := len(s.creates) + 1
+	id := fmt.Sprintf("%s-%d", s.prefix(), n)
+	for _, taken := s.rows[id]; taken; _, taken = s.rows[id] {
+		n++
+		id = fmt.Sprintf("%s-%d", s.prefix(), n)
+	}
+	s.rows[id] = Bead{ID: id, Title: title, Status: "open", IssueType: "gate", AwaitType: typ, AwaitID: awaitID,
+		Metadata: map[string]string{}}
+	args := []string{"gate", "--type", typ, "--await-id", awaitID, "--blocks", blocks}
+	s.creates = append(s.creates, Create{ID: id, Title: title, Args: args})
+	s.wrote("create", id, args)
+	if s.GateEdgeless {
+		return "", fmt.Errorf("fake store: adding blocking dependency: the create of %s stopped before its edge", id)
+	}
+	r.Edges = append(slices.Clone(r.Edges), gcbd.Edge{Type: gcbd.EdgeBlocks, ID: id, Title: title, Status: "open"})
+	s.rows[blocks] = r
+	s.added = append(s.added, Edge{ID: blocks, Far: id, Type: gcbd.EdgeBlocks})
 	return id, nil
 }
 

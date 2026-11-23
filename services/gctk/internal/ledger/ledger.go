@@ -515,6 +515,19 @@ func (l *Ledger) ResolveGate(id, reason string) error {
 	return nil
 }
 
+// CreateGate files a gate of type typ titled title, whose await id is awaitID
+// and which blocks the bead blocks, as one `gc bd gate create`, and returns the
+// gate's id. bd writes the gate and then the blocked bead's edge onto it, so a
+// create that stops between the two leaves a gate that nothing waits on, and an
+// error may still have filed the gate.
+func (l *Ledger) CreateGate(typ, awaitID, blocks, title string) (string, error) {
+	id, err := l.store.CreateGate(typ, awaitID, blocks, title)
+	if err != nil {
+		return "", fmt.Errorf("ledger: the %s gate on %s for %s did not file: %w", typ, awaitID, blocks, err)
+	}
+	return id, nil
+}
+
 // Reopen opens the closed bead id again with reason, as one `gc bd reopen`,
 // which clears its close and its reason, so what the bead blocked waits on it
 // again. The write's exit decides whether it landed.

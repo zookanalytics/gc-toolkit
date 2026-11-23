@@ -64,6 +64,8 @@ func (p *pass) Reopen(id, reason string) (string, error) { return "", errPassWri
 
 func (p *pass) Create(title string, args ...string) (string, error) { return "", errPassWrite }
 
+func (p *pass) CreateGate(typ, awaitID, blocks, title string) (string, error) { return "", errPassWrite }
+
 func (p *pass) SetState(id, dimension, value, reason string) error { return errPassWrite }
 
 // Ready reads the store's ready set afresh each time it is asked: readiness is

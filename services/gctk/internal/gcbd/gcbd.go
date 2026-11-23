@@ -488,6 +488,28 @@ func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	return path, ok, nil
 }
 
+// InRig reports whether a rig's store holds id: whether the store whose bead
+// prefix begins id, the longest such prefix when several do ([Client.StoreOf]),
+// is a rig's and not the city's own, which the city's config names first
+// ([Client.rigs]). ok is false when no store's prefix begins id. A config that
+// does not read or decode returns a *ReadError.
+func (c *Client) InRig(id string) (rig, ok bool, err error) {
+	rigs, err := c.rigs(id)
+	if err != nil {
+		return false, false, err
+	}
+	best := ""
+	for i, r := range rigs {
+		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
+			continue
+		}
+		if !ok || len(r.Prefix) > len(best) {
+			best, rig, ok = r.Prefix, i > 0, true
+		}
+	}
+	return rig, ok, nil
+}
+
 // RigStore names the store of the rig called name, from the stores the city's
 // config names ([Client.rigs]), the city's among them: the rig's .beads
 // directory, which a read pinned there names with bd's --db. ok is false when
@@ -860,7 +882,21 @@ func (c *Client) Reopen(id, reason string) (string, error) {
 // bd exits 4, with bd's reply passed through, when bd fell back to a store
 // whose writes do not persist (cmd/bd/create.go; cmd/gc/cmd_bd.go).
 func (c *Client) Create(title string, args ...string) (string, error) {
-	full := append([]string{"bd", "create", "--title", title, "--json"}, args...)
+	return c.file("create", "bead", append([]string{"bd", "create", "--title", title, "--json"}, args...))
+}
+
+// CreateGate makes one `gc bd gate create --type <typ> --await-id <awaitID>
+// --blocks <blocks> --title <title> --json`, and returns the id of the gate
+// its reply names. An error says why, and may still have filed the gate, as
+// Create's may.
+func (c *Client) CreateGate(typ, awaitID, blocks, title string) (string, error) {
+	return c.file("gate create", "gate", []string{"bd", "gate", "create", "--type", typ, "--await-id", awaitID,
+		"--blocks", blocks, "--title", title, "--json"})
+}
+
+// file runs full, bd's verb that files one noun, and returns the id its reply
+// names, or an error that says why it names none.
+func (c *Client) file(verb, noun string, full []string) (string, error) {
 	cmd := c.command(full...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -871,13 +907,13 @@ func (c *Client) Create(title string, args ...string) (string, error) {
 	}
 	switch {
 	case err != nil && said != "":
-		return "", fmt.Errorf("bd's create exited %d, so whether it filed the bead is unknown: %s", ExitCode(err), said)
+		return "", fmt.Errorf("bd's %s exited %d, so whether it filed the %s is unknown: %s", verb, ExitCode(err), noun, said)
 	case err != nil:
-		return "", fmt.Errorf("bd's create exited %d, so whether it filed the bead is unknown: %w", ExitCode(err), err)
+		return "", fmt.Errorf("bd's %s exited %d, so whether it filed the %s is unknown: %w", verb, ExitCode(err), noun, err)
 	case id == "" && said != "":
-		return "", fmt.Errorf("bd's create exited 0 and its reply named no bead, so whether it filed one is unknown: %s", said)
+		return "", fmt.Errorf("bd's %s exited 0 and its reply named no %s, so whether it filed one is unknown: %s", verb, noun, said)
 	case id == "":
-		return "", errors.New("bd's create exited 0 and its reply named no bead, so whether it filed one is unknown")
+		return "", fmt.Errorf("bd's %s exited 0 and its reply named no %s, so whether it filed one is unknown", verb, noun)
 	}
 	return id, nil
 }
