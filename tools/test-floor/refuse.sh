@@ -12,11 +12,15 @@
 # live city from the working directory, the real gh reaches GitHub, and the real
 # git acts on the checkout.
 #
-# This directory is that next directory. tools/run-tests.sh puts it at the
-# front of PATH for every file it runs, so a file's own stubs land ahead of it.
-# harness_init in assets/scripts/test-harness.sh puts it, with harness/,
-# directly beneath the stubs it writes. git sits in harness/ because only the
-# harness stubs it; other suites run the real git over repositories they build.
+# This directory is that next directory. A suite puts it at the front of PATH
+# itself, by sourcing tools/test-floor.sh before anything else it runs, so the
+# suite's own stubs land ahead of it whether tools/run-tests.sh runs the suite
+# or a person does. The runner puts it at the front of PATH for every file it
+# runs as well. harness_init in assets/scripts/test-harness.sh puts it, with
+# harness/, directly beneath the stubs it writes. git sits in harness/ because
+# only the harness stubs it; other suites run the real git over repositories
+# they build. tools/test-floor.sh names this directory as ZDOTDIR too, so it
+# holds no zsh startup file.
 name="${0##*/}"
 printf "test-floor: refused '%s %s': no stub answered it, and a test never reaches the real %s\n" \
   "$name" "${*:1:2}" "$name" >&2

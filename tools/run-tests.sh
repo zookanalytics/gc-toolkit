@@ -142,7 +142,8 @@
 # directory goes while a script the file started still runs, a call that would
 # have reached the real gc, and the live city it finds from the working
 # directory, is refused there instead (tools/test-floor/refuse.sh). A file run
-# directly gets the floor only through harness_init
+# directly gets the floor only from its own lines: from tools/test-floor.sh,
+# which a suite sources before anything else it runs, and from harness_init
 # (assets/scripts/test-harness.sh).
 #
 # Every file runs with no GC_* or BEADS_* variable of the caller's. A city's
