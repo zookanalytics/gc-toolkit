@@ -425,11 +425,12 @@ func (a *Arms) sent(id, formula string, roots []string, why string, dryRun bool)
 }
 
 // FailedPour reports whether Gas City stamped root as a pour that failed part
-// way (molecule_failed=true). The start and Accept read a root under their
-// token by it alike: a failed pour is an attempt that failed, which is tried
-// again, and any other root is the pour that landed. A stamp on a bead under
-// the root does not show that the root's own pour failed, since Gas City
-// stamps a fanout it pours into a live run when that pour fails.
+// way (molecule_failed=true). The start reads a root its token titles, or one
+// gc sling's exit 3 names, by it, and Accept a root its token titles: a failed
+// pour is an attempt that failed, which is tried again, and any other root is
+// the pour that landed. A stamp on a bead under the root does not show that
+// the root's own pour failed, since Gas City stamps a fanout it pours into a
+// live run when that pour fails.
 func FailedPour(root *ledger.Record) bool {
 	v, _, _ := moleculeFailedKey.Get(root)
 	return strings.TrimSpace(v) == "true"

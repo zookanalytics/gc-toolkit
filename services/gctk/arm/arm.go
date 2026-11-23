@@ -31,8 +31,8 @@ var (
 		"gctk bead arm refuses a routed bead, which is dispatched already.")
 	moleculeFailedKey = ledger.ReadOnly("molecule_failed", ledger.String,
 		"Gas City's stamp on each bead of a pour that failed part way (markFailed in internal/molecule). "+
-			"The start and Accept read a root under their token that carries true as an attempt that failed, "+
-			"and any other such root as the pour that landed.")
+			"The start reads it on a root its token titles or gc sling's exit 3 names, and Accept on a root its token titles: "+
+			"one that carries true is an attempt that failed, and any other is the pour that landed.")
 )
 
 // Arms is the arm's verbs and its start over one store: the store's ledger,
