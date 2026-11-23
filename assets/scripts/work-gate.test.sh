@@ -316,6 +316,11 @@ has "$(cat "$TMP/out")" 'which it started and has not finished' "a release the s
 eq "$(jq -r '.[0] | .status + " " + .assignee' "$TMP/step.json")" "in_progress $SELF_ALIAS" "a release the store refuses: the step stays this session's"
 eq "$(FAKE_STEP_DOWN=1 FAKE_SHOW_OUT='' run '')" "1|REFUSED;" "a step the store cannot read: not given back, and the drain is refused"
 has "$(cat "$TMP/out")" 'tk-step could not be read, so it is not given back' "a step the store cannot read: says so"
+# Gas City counts only claims under this session's names, so a step another
+# session holds by the drain is left to it, with nothing written to it.
+eq "$(STEP_ROW="$(jq -c '.assignee = "rig/rig.polecat-busy"' <<<"$STEP_ROW")" FAKE_SHOW_OUT='' run '')" "1|DRAIN;" "a step another session holds: left to it, no note on it, and the drain goes ahead"
+no "$(cat "$TMP/out")" 'given back' "a step another session holds: no give-back is reported"
+eq "$(jq -r '.[0] | .status + " " + .assignee' "$TMP/step.json")" "in_progress rig/rig.polecat-busy" "a step another session holds: it stays that session's"
 
 # A read that fails once and answers on the retry is an answer.
 RETRY_ROW="$(row '{"status":"open","assignee":"","metadata":{}}')"

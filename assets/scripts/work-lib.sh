@@ -142,26 +142,28 @@ work_stop_with_gate() {
 # Gas City acknowledges a session's own drain only while the session holds no
 # claim it started and has not finished, and it gives none of those back. So the
 # claim gc hook current names, a step of the run or the work bead a claimant with
-# no poured workflow holds, goes back first while it reads in_progress, through
-# hand-back.sh. It keeps its route, so its pool offers it to the next worker. A
-# claim the call closed or released already, or one no read answers, stays as it
-# is.
+# no poured workflow holds, goes back first while it reads in_progress under one
+# of this session's names, through hand-back.sh. It keeps its route, so its pool
+# offers it to the next worker. A claim the call closed or released already, one
+# another holder has taken, or one no read answers, stays as it is. Gas City reads
+# only the claims under this session's names, so another holder's never stops
+# the drain.
 work_drain() {
-  local held status
+  local held state
   [ -z "${WORK_HELD_BY:-}" ] || return 0
   held=$(gc hook current --id-only </dev/null 2>/dev/null) || held=""
   if [ -n "$held" ]; then
-    status=$(gc bd show "$held" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub \
-      | jq -r --arg id "$held" 'if type == "array" and (.[0].id // "") == $id then (.[0].status // "") else empty end' 2>/dev/null)
-    case "$status" in
-      in_progress)
-        if "$SCRIPT_DIR/hand-back.sh" "$held" >&2; then
-          echo "$PROG: $held goes back to the pool." >&2
-        else
-          echo "$PROG: $held is not given back." >&2
-        fi ;;
-      "") echo "$PROG: $held could not be read, so it is not given back." >&2 ;;
-    esac
+    state=$(gc bd show "$held" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub \
+      | jq -r --arg id "$held" 'if type == "array" and (.[0].id // "") == $id then "\(.[0].status // "")|\(.[0].assignee // "")" else empty end' 2>/dev/null)
+    if [ -z "$state" ]; then
+      echo "$PROG: $held could not be read, so it is not given back." >&2
+    elif [ "${state%%|*}" = in_progress ] && work_is_self "${state#*|}"; then
+      if "$SCRIPT_DIR/hand-back.sh" "$held" >&2; then
+        echo "$PROG: $held goes back to the pool." >&2
+      else
+        echo "$PROG: $held is not given back." >&2
+      fi
+    fi
   fi
   gc runtime drain-ack
 }
