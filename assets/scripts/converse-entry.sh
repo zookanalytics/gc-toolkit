@@ -154,13 +154,15 @@ pending_of() {
 ids_of() { jq -r '[ .[] | (.id // "") | tostring ] | join(" ")'; }
 
 # waits_of <id> — the beads the conversation waits on through its own blocks
-# edges, each as `gc bd dep list` prints its row, with its type, status, await
-# id and close reason, as one line of JSON. Fails when they do not list.
+# edges, as one line of JSON: of each row `gc bd dep list` prints, its id, type,
+# status, await type and id, and when and why it closed. The rest of a row, its
+# description among it, is left out, because stay_entry hands the list to jq as
+# an argument, which the host's ARG_MAX bounds. Fails when they do not list.
 waits_of() {
   local json
   json=$(gc bd dep list "$1" --type blocks --json 2>/dev/null) || return 1
   printf '%s\n' "$json" | grep -av '^gc bd:' | scrub \
-    | jq -ec 'if type == "array" then [ .[] | objects ] else error("not a list") end' 2>/dev/null
+    | jq -ec 'if type == "array" then [ .[] | objects | {id, issue_type, status, await_type, await_id, closed_at, close_reason} ] else error("not a list") end' 2>/dev/null
 }
 
 # The values every later call sets, from a conversation row on stdin.

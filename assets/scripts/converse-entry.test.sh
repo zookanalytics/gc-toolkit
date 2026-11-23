@@ -398,6 +398,16 @@ stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w closed"
 enter >/dev/null
 is "a restart during that return is still the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
 is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+# A row of what the conversation waits on can run past what a host lets a
+# command's arguments hold, through a long description.
+fresh; hook work ready_assignment tk-c; conv tk-c open "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w closed"
+jq -c --rawfile d <(head -c 1100000 /dev/zero | tr '\0' x) '.description = $d' "$FIXDIR/row-tk-gate.json" >"$FIXDIR/tmp" \
+  && mv "$FIXDIR/tmp" "$FIXDIR/row-tk-gate.json"
+enter >/dev/null
+is "a gate whose row runs past the argument limit still brings the stay back" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+is "…with what was agreed" "$(line AGREED=)" "AGREED=keep the API"
 # The stay's call stopped after its line named the gate and before its status
 # write: the conversation is still claimed, and its gate is open.
 fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
