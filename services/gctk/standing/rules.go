@@ -8,6 +8,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -31,7 +32,10 @@ const (
 	GroupQueued Group = "queued"
 	// GroupNotMoving: nothing moves the bead as things stand. A park holds it
 	// ([RuleParked]), its status is one no pool offers ([RuleStatus]), or it
-	// is work nothing sends ([RuleNotScheduled]).
+	// is work nothing sends: ready work ([RuleNotScheduled]), work that waits
+	// outside the city ([RuleOutside]), work held for the Product Owner
+	// ([RuleForProductOwner]), or work the store does not serve as ready
+	// ([RuleNotReady]).
 	GroupNotMoving Group = "not-moving"
 	// GroupClosed: the bead is closed ([RuleClosed]).
 	GroupClosed Group = "closed"
@@ -81,17 +85,31 @@ const (
 	// RuleGate: the bead is a gate that is no human gate, which holds what
 	// waits on it and asks no one. No group: it has no move of its own.
 	RuleGate Rule = "gate"
+	// RuleNotScheduled: the work is ready work that nothing sends anywhere, as
+	// queue's order lists it (queue.Ordered's NotScheduled): the store's ready
+	// set serves it, no dispatch hold holds it, and nothing sends it, whatever
+	// stamps its row carries. Group not-moving.
+	RuleNotScheduled Rule = "not-scheduled"
+	// RuleOutside: the work waits outside the city, as queue's order names it
+	// (queue.Place's Outside): hold:external holds it and no live run works
+	// it. Group not-moving.
+	RuleOutside Rule = "outside"
+	// RuleForProductOwner: nothing sends the work, and it is held for the
+	// Product Owner's placement, as queue reads that hold
+	// (queue.ForProductOwner). Group not-moving.
+	RuleForProductOwner Rule = "for-product-owner"
 	// RuleInFlight: the bead is work in flight, as waits answers it
 	// (docs/steering.md, "In flight"), or work a live run works, from the
 	// run's start. Group queued.
 	RuleInFlight Rule = "in-flight"
-	// RuleScheduled: the city takes the work as things stand, as its place in
+	// RuleScheduled: something sends the work as things stand, as its place in
 	// queue's order says (queue.Place): it is armed, routed to a pool or
 	// assigned to an agent, and no dispatch hold holds it. Group queued.
 	RuleScheduled Rule = "scheduled"
-	// RuleNotScheduled: any other work, which nothing sends as things stand.
-	// Group not-moving.
-	RuleNotScheduled Rule = "not-scheduled"
+	// RuleNotReady: any other work, which nothing sends and the store does not
+	// serve as ready. The answer names each wait that holds it. Group
+	// not-moving.
+	RuleNotReady Rule = "not-ready"
 	// RuleUnread: a reader could not answer the part a rule needs, so the
 	// answer stops at that rule, in no group, and its Why says what it could
 	// not answer.
@@ -119,9 +137,9 @@ const (
 	// AskPullRequest: a bead whose pull request reads needs-review or
 	// needs-attention ([prstatus.NeedsReview], [prstatus.NeedsAttention]).
 	AskPullRequest Ask = "pull-request"
-	// AskRoutedToYou: any other open bead only a person clears
+	// AskAssignedToYou: any other open bead only a person clears
 	// ([person.Clears]), such as one assigned to human.
-	AskRoutedToYou Ask = "routed-to-you"
+	AskAssignedToYou Ask = "assigned-to-you"
 	// AskRuling: an epic with members and none of them open, or a landed
 	// Delivery, which waits for the operator's review of the epic
 	// (docs/epics.md, "Reviewing an epic").
@@ -309,7 +327,7 @@ func (r *Reading) reach(ids []string) []string {
 // gate, a decision and a conversation are each answered by their kind alone,
 // so a gate that is no human gate is never an ask. An epic or a Delivery is
 // tried as a ruling first. Any other bead, and an epic or a Delivery that is
-// no ruling, is tried as a pull request, then as routed to you.
+// no ruling, is tried as a pull request, then as assigned to you.
 func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, members int) Ask {
 	if !isOpen(b) {
 		return ""
@@ -345,7 +363,7 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 	}
 	if person.Clears(person.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
 		Assignee: b.Assignee}) {
-		return AskRoutedToYou
+		return AskAssignedToYou
 	}
 	return ""
 }
@@ -376,9 +394,11 @@ func (r *Reading) questionOf(b Bead, stays map[string]bool) (Ref, bool) {
 //  5. status
 //  6. staying
 //  7. answers, members or gate, by the bead's kind
-//  8. in-flight
-//  9. scheduled
-//  10. not-scheduled
+//  8. not-scheduled, outside or for-product-owner, by the work's place in
+//     queue's order
+//  9. in-flight
+//  10. scheduled
+//  11. not-ready
 //
 // A bead a reader could not answer reads unread at the rule that needs the
 // answer.
@@ -435,20 +455,29 @@ func (r *Reading) table(b Bead, k Kind, ask Ask, stays map[string]bool) Answer {
 		// staying row answered above, so only a gate that is no human gate does.
 		return Answer{Rule: RuleGate}
 	}
+	place, placed := r.places[b.ID]
+	if placed && r.unsent[b.ID] {
+		return Answer{Group: GroupNotMoving, Rule: RuleNotScheduled}
+	}
+	if placed && place.Outside {
+		return Answer{Group: GroupNotMoving, Rule: RuleOutside}
+	}
+	if placed && !place.Scheduled && queue.ForProductOwner(b.Labels) {
+		return Answer{Group: GroupNotMoving, Rule: RuleForProductOwner}
+	}
 	// waits counts a run in flight only once it has passed load-context, which
 	// answers whether an ancestor's wait still holds work that has not
 	// started. A bead a live run works is the city's from the run's start.
 	if h.InFlight != "" || r.worked[b.ID] != "" {
 		return Answer{Group: GroupQueued, Rule: RuleInFlight, Names: refsOf(h.Waits)}
 	}
-	place, ok := r.places[b.ID]
-	if !ok {
+	if !placed {
 		return Answer{Rule: RuleUnread, Why: "queue placed it nowhere"}
 	}
 	if place.Scheduled {
 		return Answer{Group: GroupQueued, Rule: RuleScheduled, Names: refsOf(h.Waits)}
 	}
-	return Answer{Group: GroupNotMoving, Rule: RuleNotScheduled, Names: refsOf(h.Waits)}
+	return Answer{Group: GroupNotMoving, Rule: RuleNotReady, Names: refsOf(h.Waits)}
 }
 
 // holdingAnswer is row 3: what Holding names for the bead, through one of its
@@ -482,7 +511,7 @@ func holdingAnswer(h waits.Holds, hold prstatus.Holds) Answer {
 
 // gateHold is the first wait behind a bead's status, its own or an ancestor's,
 // on a gate that is no human gate, and nil when none is: a park
-// (docs/steering.md, "A park"), whose gate gc-helm.sh park files with no await
+// (docs/steering.md, "A park"), whose gate gctk bead park files with no await
 // type. A gate of a type bd closes by itself, such as a timer, reads as one
 // too.
 func gateHold(h waits.Holds) *waits.Wait {

@@ -831,6 +831,27 @@ func (c *Client) AddEdge(id, target, typ string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), err
 }
 
+// Unrelate runs one `gc bd dep unrelate <id> <other>`, returning its combined
+// output.
+func (c *Client) Unrelate(id, other string) (string, error) {
+	out, err := c.command("bd", "dep", "unrelate", id, other).CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
+// ResolveGate runs one `gc bd gate resolve <id> --reason <reason>`, returning
+// its combined output.
+func (c *Client) ResolveGate(id, reason string) (string, error) {
+	out, err := c.command("bd", "gate", "resolve", id, "--reason", reason).CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
+// Reopen runs one `gc bd reopen <id> --reason <reason>`, returning its
+// combined output.
+func (c *Client) Reopen(id, reason string) (string, error) {
+	out, err := c.command("bd", "reopen", id, "--reason", reason).CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
 // Create makes one `gc bd create --title <title> --json` with args, and
 // returns the id its reply names. A create that exits non-zero, or exits 0
 // with a reply that names no bead, returns an error that says why, and may

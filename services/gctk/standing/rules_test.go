@@ -21,8 +21,10 @@ type facts struct {
 	answer   *pr.Answer
 	prUnread bool
 	place    *queue.Place
-	// worked is true for a bead a live run works.
-	worked bool
+	// notScheduled is true for work queue's order lists as ready work that
+	// nothing sends anywhere, and worked for a bead a live run works.
+	notScheduled bool
+	worked       bool
 }
 
 // readingOf is a read holding one bead and the readers' answers about it.
@@ -31,7 +33,10 @@ func readingOf(b Bead, k Kind, f facts) *Reading {
 		answeredBy: map[string]string{}, holds: map[string]waits.Holds{}, unread: map[string]error{},
 		holding: map[string]prstatus.Holds{}, unwalked: map[string]bool{}, facts: map[string]prstatus.Facts{},
 		prAnswers: map[string]pr.Answer{}, noFacts: map[string]bool{}, places: map[string]queue.Place{},
-		worked: map[string]string{}}
+		unsent: map[string]bool{}, worked: map[string]string{}}
+	if f.notScheduled {
+		r.unsent[b.ID] = true
+	}
 	if f.worked {
 		r.worked[b.ID] = "tk-root"
 	}
@@ -78,12 +83,14 @@ func TestTable(t *testing.T) {
 	// A merge anchor whose pull request waits on a person's review, as
 	// prstatus.Holding names it among the beads a person owes.
 	owesReview := person.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
-		Metadata: map[string]string{"merge_result": "pull_request", "pr_number": "7"}}
+		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_number": "7", "pr_posture": "review_required@h@t"}}
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
-	// Where queue placed the bead: in a place the city takes as things stand,
-	// and in one it does not.
+	// Where queue placed the bead: in a place something sends it from, in one
+	// nothing does, and waiting outside the city.
 	taken := &queue.Place{ID: "tk-w", Layer: 1, Scheduled: true}
 	untaken := &queue.Place{ID: "tk-w", Layer: 1}
+	ready := &queue.Place{ID: "tk-w", Layer: 0}
+	outside := &queue.Place{ID: "tk-w", Layer: 0, Outside: true}
 	sitting := "gc-toolkit/gc-toolkit.tk-c"
 
 	cases := []struct {
@@ -100,7 +107,7 @@ func TestTable(t *testing.T) {
 	}{
 		{name: "closed", b: Bead{ID: "tk-w", Status: "closed"}, kind: KindWork,
 			rule: RuleClosed, group: GroupClosed},
-		{name: "an ask answers before anything holds it", b: work, kind: KindWork, ask: AskRoutedToYou, f: facts{holds: blockedOn(workWait)},
+		{name: "an ask answers before anything holds it", b: work, kind: KindWork, ask: AskAssignedToYou, f: facts{holds: blockedOn(workWait)},
 			rule: RuleAsk, group: GroupWaitingOnYou},
 		{name: "an own human gate is an own wait", b: work, kind: KindWork,
 			f:    facts{holds: blockedOn(gateWait), holding: &prstatus.Holds{Gates: []person.Blocker{humanGate}}},
@@ -146,8 +153,25 @@ func TestTable(t *testing.T) {
 			rule: RuleScheduled, group: GroupQueued},
 		{name: "routed and held behind work names each wait", b: work, kind: KindWork, f: facts{holds: blockedOn(workWait), place: taken},
 			rule: RuleScheduled, group: GroupQueued, names: []string{"tk-other"}},
-		{name: "nobody scheduled it, and it names what it waits on", b: work, kind: KindWork, f: facts{holds: blockedOn(workWait), place: untaken},
-			rule: RuleNotScheduled, group: GroupNotMoving, names: []string{"tk-other"}},
+		{name: "ready work nothing sends is not scheduled", b: work, kind: KindWork, f: facts{holds: clear, place: ready, notScheduled: true},
+			rule: RuleNotScheduled, group: GroupNotMoving},
+		{name: "ready work nothing sends is not scheduled, though a run it no longer has left a branch on its row", b: work, kind: KindWork,
+			f:    facts{holds: &waits.Holds{ID: "tk-w", Status: waits.Clear, InFlight: "carries branch"}, place: ready, notScheduled: true},
+			rule: RuleNotScheduled, group: GroupNotMoving},
+		{name: "nothing sends it and it waits, so it names each wait", b: work, kind: KindWork, f: facts{holds: blockedOn(workWait), place: untaken},
+			rule: RuleNotReady, group: GroupNotMoving, names: []string{"tk-other"}},
+		{name: "nothing sends it, and the store does not serve it as ready though it waits on nothing", b: work, kind: KindWork,
+			f: facts{holds: clear, place: untaken}, rule: RuleNotReady, group: GroupNotMoving},
+		{name: "held hold:external, armed or not, waits outside the city", b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Labels: []string{"hold:external"}}, kind: KindWork,
+			f:    facts{holds: &waits.Holds{ID: "tk-w", Status: waits.Clear, Arm: &waits.Arm{Target: "gc-toolkit/gc-toolkit.polecat"}}, place: outside},
+			rule: RuleOutside, group: GroupNotMoving},
+		{name: "held for the Product Owner in any spelling, with nothing sending it, waits for the Product Owner",
+			b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Labels: []string{" Hold:Mayor "}}, kind: KindWork,
+			f:    facts{holds: &waits.Holds{ID: "tk-w", Status: waits.Clear, InFlight: "carries branch"}, place: ready},
+			rule: RuleForProductOwner, group: GroupNotMoving},
+		{name: "held for the Product Owner and worked by a live run is in flight from the run's start",
+			b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Labels: []string{"hold:mayor"}}, kind: KindWork,
+			f: facts{holds: clear, place: taken, worked: true}, rule: RuleInFlight, group: GroupQueued},
 		{name: "a live run works it from the run's start, before waits counts it in flight", b: work, kind: KindWork,
 			f: facts{holds: clear, place: untaken, worked: true}, rule: RuleInFlight, group: GroupQueued},
 		{name: "work that queue placed nowhere is unread", b: work, kind: KindWork, f: facts{holds: clear},
@@ -164,7 +188,7 @@ func TestTable(t *testing.T) {
 			f: facts{holds: blockedOn(workWait)}, rule: RuleStaying, group: GroupQueued, names: []string{"tk-other"}},
 		{name: "a conversation its sitting holds over an earlier stay's open work answers nothing of its own", b: Bead{ID: "tk-c", Status: "in_progress", IssueType: "task", Assignee: sitting}, kind: KindConversation,
 			f: facts{holds: blockedOn(workWait)}, rule: RuleAnswers},
-		{name: "a pull request prstatus could not answer is unread before any ask", b: work, kind: KindWork, ask: AskRoutedToYou, f: facts{prUnread: true},
+		{name: "a pull request prstatus could not answer is unread before any ask", b: work, kind: KindWork, ask: AskAssignedToYou, f: facts{prUnread: true},
 			rule: RuleUnread},
 	}
 	for _, c := range cases {
@@ -242,10 +266,10 @@ func TestAsks(t *testing.T) {
 			pr: &prstatus.Facts{}, want: AskPullRequest},
 		{name: "a pull request the city is changing is no ask", b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork,
 			pr: &prstatus.Facts{InFlightCount: 1}},
-		{name: "work in your queue is routed to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindWork,
-			want: AskRoutedToYou},
-		{name: "a bead in your queue that is no task is routed to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "bug", Assignee: "human"}, kind: KindWork,
-			want: AskRoutedToYou},
+		{name: "work in your queue is assigned to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindWork,
+			want: AskAssignedToYou},
+		{name: "a bead in your queue that is no task is assigned to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "bug", Assignee: "human"}, kind: KindWork,
+			want: AskAssignedToYou},
 		{name: "work assigned to an agent is no ask", b: Bead{ID: "tk-w", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik"}, kind: KindWork},
 		{name: "an epic whose members all closed needs a ruling", b: Bead{ID: "tk-e", Status: "open", IssueType: "epic"}, kind: KindEpic,
 			open: 0, all: 3, want: AskRuling},

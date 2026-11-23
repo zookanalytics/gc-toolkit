@@ -25,10 +25,9 @@ harness_init
 export STUB_PROACTIVE_LOG="$TMP/pro.log" RIG_LOG="$TMP/rig.log"
 
 # ── gctk's reaction verbs, stubbed ───────────────────────────────────
-# reaction deliverable answers per STUB_DELIVERABLE_RC; reaction sling logs
-# and answers per STUB_SLING_RC. Both land in their own log so a run that never
-# reached the reaction is distinguishable from one whose reaction failed. Every
-# other verb is the build's.
+# reaction sling logs and answers per STUB_SLING_RC, in its own log so a run
+# that never reached the reaction is distinguishable from one whose reaction
+# failed. Every other verb is the build's.
 cat > "$BIN/gctk" <<GCTK
 #!/usr/bin/env bash
 set -u
@@ -36,7 +35,6 @@ if [ "\${1:-}" = reaction ]; then
   shift
   printf '%s\\n' "\$*" >> "\${STUB_PROACTIVE_LOG:?}"
   case "\${1:-}" in
-    deliverable) exit "\${STUB_DELIVERABLE_RC:-0}" ;;
     sling) [ "\${STUB_SLING_RC:-0}" = "0" ] || { echo "sling failed" >&2; exit "\${STUB_SLING_RC}"; }; exit 0 ;;
   esac
   exit 0
@@ -60,7 +58,7 @@ reset() {
   store '[]'; : > "$STUB_DEPS"; : > "$STUB_GC_LOG"; : > "$STUB_PROACTIVE_LOG"; : > "$RIG_LOG"
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE="" STUB_LIST_FAIL="" STUB_LIST_FAIL_ON=""
   export STUB_SHOW_FAIL="" STUB_FAIL_ON="" STUB_HOOK_AT="" STUB_HOOK=""
-  export STUB_DELIVERABLE_RC=0 STUB_SLING_RC=0
+  export STUB_SLING_RC=0
   export GC_RIG="gc-toolkit"
 }
 
@@ -131,9 +129,9 @@ has "$(body new-1)" "state=failed elapsed=612" "(first) the finding text is the 
 has "$OUT" "filed new-1" "(first) reports the bead it filed"
 eq "$(meta new-1 'finding.first_seen')" "$(meta new-1 'finding.last_seen')" "(first) first_seen == last_seen"
 
-# It reaches the reaction, and only after the bead verified.
-has "$(cat "$STUB_PROACTIVE_LOG")" "deliverable" "(first) asks whether the pool can pick a reaction up"
-has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(first) slings the first reaction at the bead"
+# It reaches the reaction, and only after the bead verified, asking nothing of
+# the pool before the sling.
+eq "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(first) slings the first reaction at the bead, its one reaction call"
 hasnt "$(cat "$STUB_GC_LOG")" "visit:" "(first) no visit is filed on this path"
 
 # ── 2. the same finding, again — the case a human gate's dedup cannot hold ─
@@ -206,22 +204,15 @@ has "$OUT" "recurrence of closed new-1" "(after close) reported"
 eq "$(beads)" "2" "(after close) the recurrence-after-close files exactly one new bead"
 eq "$(meta new-2 'finding.occurrences')" "2" "(after close) later ticks land on the new bead"
 
-# ── 7. the pool cannot take a reaction ───────────────────────────────
-reset
-export STUB_DELIVERABLE_RC=1
-OUT=$("$SUT" --key doctor-x --title "x" --message "x fired" 2>&1); RC=$?
-eq "$RC" "0" "(pool down) the filing still succeeds"
-eq "$(beads)" "1" "(pool down) the bead is filed"
-eq "$(meta new-1 'gc.proactive')" "<absent>" "(pool down) no scan opt-in is stamped: the next sweep reads it as a ready bead"
-hasnt "$(cat "$STUB_PROACTIVE_LOG")" "sling" "(pool down) no sling into a pool that cannot claim it"
-has "$OUT" "waits for the next sweep" "(pool down) says how the reaction still happens"
-
+# ── 7. a sling Gas City refuses ──────────────────────────────────────
+# Such as a sling to a pool the city does not configure.
 reset
 export STUB_SLING_RC=1
 OUT=$("$SUT" --key doctor-y --title "y" --message "y fired" 2>&1); RC=$?
 eq "$RC" "0" "(sling fails) a failed reaction does not lose the finding"
 eq "$(beads)" "1" "(sling fails) the bead stands"
-has "$OUT" "sling on new-1 did not start a reaction" "(sling fails) reported"
+eq "$(meta new-1 'gc.proactive')" "<absent>" "(sling fails) no scan opt-in is stamped: the next sweep reads it as a ready bead"
+has "$OUT" "sling on new-1 did not start a reaction; it waits for the next sweep" "(sling fails) reported, saying how the reaction still happens"
 
 # ── 8. --no-react ────────────────────────────────────────────────────
 reset

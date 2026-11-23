@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,18 +12,20 @@ import (
 
 // The close exit hands the subject to a validating closer, rig-pinned, after
 // the close brief and the headline, and never closes it or releases it to a
-// pool as a raw bead; a closer that cannot claim is refused; a brief or a
-// headline that does not land dispatches nothing; a failed sling names gc
-// sling's reason; and a closer already live is the subject's closer.
+// pool as a raw bead; a closer pool that does not run is slung to as any other
+// is; a closer route gc sling refuses leaves the brief and the headline, says
+// what to do, and lands when run again with a pool the city configures; a
+// brief or a headline that does not land dispatches nothing; a failed sling
+// names gc sling's reason; and a closer already live is the subject's closer.
 func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "close", "--reason", "already fixed, nothing to merge", "--takeaway", "close: fixed in #123", "--run", root)
 	wantCode(t, code, 0, err, "(CLOSE) the close exit")
 	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) it slings the closer to the rig's polecat pool, rig-pinned")
-	w.has("HELM takeaway tk-sub close: fixed in #123 --by proactive", "(CLOSE) it sets the board headline")
+	w.has("TAKEAWAY tk-sub close: fixed in #123 --by proactive", "(CLOSE) it sets the headline")
 	w.has("UPDATE tk-sub --append-notes ## Close brief (first reaction, 2026-11-16T12:00:00Z)\nalready fixed, nothing to merge", "(CLOSEBRIEF) the brief is the reason, on the subject's notes")
-	w.before("Close brief", "HELM takeaway", "(CLOSEBRIEF) before the headline")
-	w.before("HELM takeaway", "SLING ", "(CLOSEHEAD) the headline before the closer")
+	w.before("Close brief", "TAKEAWAY", "(CLOSEBRIEF) before the headline")
+	w.before("TAKEAWAY", "SLING ", "(CLOSEHEAD) the headline before the closer")
 	w.hasnt("--release", "(CLOSE) not released to a pool as a raw bead")
 	w.hasnt("held on", "(CLOSEBRIEF) a close that waits on nothing names no hold")
 	w.hasnt("--status", "(CLOSE) the subject is never closed here")
@@ -40,13 +43,25 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	}
 
 	w = newWorld(t)
-	w.rt.Roster = w.rt.Roster[1:]
+	w.rt.Roster[0].Suspended = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
-	wantCode(t, code, 2, err, "(CLOSE) a closer pool that cannot claim")
-	errHas(t, err, "Put it to the operator instead", "(CLOSE) naming the exits that reach a person")
-	if got := w.writes(); len(got) != 0 {
-		t.Errorf("(CLOSE) wrote %q", got)
+	wantCode(t, code, 0, err, "(CLOSE) a closer pool that does not run")
+	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) the closer is slung to it all the same")
+	if slices.Contains(w.rt.Reads(), "roster") {
+		t.Errorf("(CLOSE) the exit asked about the pool: the reads were %v", w.rt.Reads())
 	}
+
+	w = newWorld(t)
+	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.nosuch", "--run", root)
+	wantCode(t, code, 4, err, "(CLOSEBADROUTE) a closer route gc sling refuses")
+	w.before("Close brief", "SLING gc-toolkit/gc-toolkit.nosuch", "(CLOSEBADROUTE) the brief lands before the closer's sling")
+	w.before("TAKEAWAY", "SLING gc-toolkit/gc-toolkit.nosuch", "(CLOSEBADROUTE) and the headline")
+	errHas(t, err, `gc sling: agent "gc-toolkit/gc-toolkit.nosuch" not found in city.toml`, "(CLOSEBADROUTE) giving gc sling's reason")
+	errHas(t, err, "The close brief and the headline stand", "(CLOSEBADROUTE) saying what landed")
+	errHas(t, err, "run this exit again with --route naming a pool the city configures", "(CLOSEBADROUTE) and what to do")
+	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
+	wantCode(t, code, 0, err, "(CLOSEBADROUTE) the exit run again with a pool the city configures")
+	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSEBADROUTE) slings the closer there")
 
 	w = newWorld(t)
 	w.store.BeforeUpdate = func(id string, args []string) error {
@@ -58,13 +73,13 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 4, err, "(CLOSEBRIEF) a brief that does not land")
 	w.hasnt("SLING", "(CLOSEBRIEF) no closer without its brief")
-	w.hasnt("HELM", "(CLOSEBRIEF) and no headline")
+	w.hasnt("TAKEAWAY", "(CLOSEBRIEF) and no headline")
 
 	w = newWorld(t)
-	w.helmFails = true
+	w.takeawayFails = true
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 4, err, "(CLOSEHEAD) a headline that does not land")
-	errHas(t, err, "its board headline did not land", "(CLOSEHEAD) saying so")
+	errHas(t, err, "its headline did not land", "(CLOSEHEAD) saying so")
 	w.hasnt("SLING", "(CLOSEHEAD) no closer under no headline")
 
 	w = newWorld(t)
@@ -100,8 +115,8 @@ func TestCloseWaitsOnTheBeadsThatEndItsJob(t *testing.T) {
 	wantCode(t, code, 0, err, "(CLOSEWAIT) a close that waits")
 	w.has("DEP-ADD tk-sub tk-retire --type blocks", "(CLOSEWAIT) the subject is held on the bead")
 	w.has("--append-notes ## Close brief (first reaction, held on tk-retire, ", "(CLOSEWAIT) the brief names the bead it is held on")
-	w.before("Close brief", "HELM takeaway", "(CLOSEWAIT) the brief, then the headline")
-	w.before("HELM takeaway", "DEP-ADD", "(CLOSEWAIT) before the hold")
+	w.before("Close brief", "TAKEAWAY", "(CLOSEWAIT) the brief, then the headline")
+	w.before("TAKEAWAY", "DEP-ADD", "(CLOSEWAIT) before the hold")
 	if a := w.lines("ARM "); len(a) != 1 || a[0] != "ARM tk-sub --target gc-toolkit/gc-toolkit.polecat --on mol-validate-close" {
 		t.Errorf("(CLOSEWAIT) the arms were %q", a)
 	}

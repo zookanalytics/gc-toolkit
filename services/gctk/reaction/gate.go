@@ -28,7 +28,7 @@ func gateMessage(d *Dispose, title string) string {
 }
 
 // oneLine is text with each run of white space made one space, trimmed, as
-// gc-helm.sh takeaway stores a headline.
+// lifecycle.Headline makes a headline one line.
 func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
 
 // asksThis reports whether a gate titled got asks the question of a gate

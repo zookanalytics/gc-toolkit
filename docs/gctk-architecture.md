@@ -101,18 +101,24 @@ doc defines what holds a bead or whose move it is.
 | `gctk bead arm <bead> --target <rig>/<pool> [--on <formula>] --reason <text>` | agent, hook | start this bead by itself once nothing holds it, on a formula | One intent over gc's lower-level sling and routing calls. Gas City keeps no launch for later ([warrants.md](warrants.md#deferred-dispatch-residual)), so the arm records one: the caller states what starts and on what, and the start performs every later step. It records the formula it pours, the one named or the target's default from the city's config, so the root each start pours carries the arm's token. It refuses an arm that could never fire or would fire wrong: a closed, dispatched or non-open bead, another arm already on it, a target with no formula, and a wait edge into another store, which bd never holds a bead on. |
 | `gctk bead disarm <bead> --reason <text>` | agent, hook | stop an armed bead from starting by itself | The other half of the arm's intent. It takes the bead's dispatch lock, so once it exits 0 no start has the bead in flight and none will send it, which is what lets a stop release the bead's holds after it. |
 | `gctk bead start-armed` | order | start each armed bead that nothing holds any more, exactly once, and retire the arm of a bead that closed or whose work another path delivered | Gas City slings only when asked. Its `cascade-nudge-on-blocker-close` order nudges the assignees of a closed bead's dependents and slings nothing ([warrants.md](warrants.md#deferred-dispatch-residual)). The start selects by `bd ready` with the flags Gas City renders for a pool's routed demand, so it sends what the pool would serve, and holds back the `waits-for` edges and waits into another store that bd cannot judge. It sends each arm once from Gas City's own records: `gc sling`'s exit 3 when a live workflow works the bead, and the token `arm:<bead>@<armed at>` on the root each start pours, which a start searches after an earlier attempt, so a pour whose run has ended is not made again. A root Gas City left unfinished is neither, so the start asks a person about it. Each start runs under the bead's dispatch lock, which `arm` and `disarm` take too, and the retire of a delivered bead covers the run another path poured, which carries no token ([deferred-dispatch.md](deferred-dispatch.md#exactly-once)). |
-| `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the board. |
-| `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and the board's priority verb. |
+| `gctk bead park <bead> ("<text>" [--body <text>] \| --waiting-on <bead>)` | agent | hold everything under a bead that has not started behind one blocker that says why, and leave work in flight running | bd's defer holds the bead itself, and its children only while a date it names is in the future, and releases on that date or a person's undefer, never on a condition, and never one bead alone ([the search](../specs/tk-1tfzr71.226/gas-city-search.md#park-bds-deferred-status-and-its-gates)). A park composes bd's own gate: it files a plain gate titled with why the bead is parked and what releases it, born with its `blocks` edge, so bd holds the whole subtree, and closing the gate releases it. It adds what bd does not: it refuses a bead in flight, whose own edge would hold its merge and its close, finds the gate an earlier park filed under the same title, and says what the park holds and what it leaves running. |
+| `gctk bead place <bead> (--under <parent> [--shift <±n>] \| --standalone) [--route <rig>/<pool>] [--on <formula>]` | agent | place a bead held for placement: its parent or none, its dispatch, then the lift of its `hold:mayor` | `gc sling` reads no hold, so a sling leaves `hold:mayor` on, and no write of Gas City's both dispatches a bead and lifts its hold ([the search](../specs/tk-1tfzr71.226/gas-city-search.md#place-gc-sling-and-the-deferred-dispatch-arm)). The verb makes the native writes in one order, each taking its exit: the route's clear, the parent, the priority, the sling or, while a wait holds the bead, the arm, then the lift with its note in one write, so a dispatch that fails leaves the bead in the queue, and a run again after a stop finishes the placement without a second run. |
+| `gctk bead takeaway <bead> <text> [--waiting-on <bead>]... [--no-wait] [--release]` | agent, hook | record the one line a bead's handling concluded and whether anything still waits on it, and with `--release` stop the bead, or send it on to a pool (`--route`) or a named agent (`--assign`) | No bd field or Gas City key holds a one-line conclusion with its writer, and no primitive takes a bead out of play whole ([the search](../specs/tk-1tfzr71.220/gas-city-search.md)). bd's guarded update, Gas City's run cancel through `run-cancel.sh`, `gc sling --no-formula`, the immediate nudge and the session list each cover one part, and the verb composes them in the order that keeps a stop safe: the arm removed first, then the headline and the release in one update guarded on the status and the assignee it read, the wait edges, the run's end, then the sling. A refused guard is read again to settle which change it met: a bead closed since keeps its disposition and takes the headline alone, and any other change leaves the bead with whoever holds it now, with nothing written. A claim a live session holds is never taken, and its holder is asked to give the bead back. Each wait is a `blocks` edge, and a headline with neither a wait nor `--no-wait` reads as a hold on prose ([component-model.md](component-model.md), I1). |
+| `gctk priority shift <bead> <±n>` | agent | raise or lower a bead against what it follows, and re-rank the queue, in one act | The native surface writes only an absolute priority, which carries no intent term, so the next settle reads it as drift and overwrites it. The stored shift is that term ([steering.md](steering.md#the-rule)). Its callers are sittings and the po. |
+| `gctk priority settle <bead>` | hook | give a bead the priority of what it follows before anything claims or pours it | A pour copies a bead's priority once, so the bead carries its derived priority before the pour. The pack's own writers run it before they make a bead claimable: filing follow-up work, a sling, a release, and a placement. |
 | `gctk priority reconcile` | order | re-settle the queued beads after raw writes no writer saw | The backstop of the shape the pack ships, ported and never replaced: the settle in the pack's writers, a rig-scoped pass every fifteen minutes that reads the queue and never the whole store, one lock per store, and the stored shift ([steering.md](steering.md#the-pass)). |
 | `gctk pr summary <bead>` | agent, hook | record what the change does, for its PR's summary and title, or read the summary recorded | Gas Town's refinery fills a PR's summary from its bead's description, which is written before the work. This summary is written once the work is done, and says what the diff does. The change's subject line rides the same write as the bead's title, since the PR's title is composed from it, and a reader of a PR's text asks the verb for the summary. |
 | `gctk pr compose <bead>` | hook | the PR's conventional-commit title and managed summary region, from the bead that owns it | Gas Town's refinery titles a PR with its bead's title and writes the body once, when it opens the PR. Compose puts the type prefix the repository's title check requires ahead of the title, and keeps a marked region of the body current with the summary while leaving the text people add. |
 | `gctk pr record <bead> --pr <url> --head <sha> --target <branch> --refinery <address>` | hook | record the PR the bead owns as pending until its merge is verified | Gas Town's refinery keeps this record (`gastown/commands/pr-merge-reconcile`), and no gastown release the city can take carries the command. The verb writes Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or another assignment reached first gets no record, where Gas Town's unguarded second write would reopen it as blocked. The second write assigns the bead to nobody, since the refinery's work on it ends there (Gas City's meaning of an assignee, [the search](../specs/tk-1tfzr71.209/gas-city-search.md)). |
-| `gctk pr reconcile --refinery <address>` | order | land the PRs on the pending record: merge a ready one with its head pinned, close its bead once the merge commit is on the target, close through the disposition writer the bead of a PR a ruling retired once the PR has closed, hand a changed head to the refinery in the write that assigns it the bead once no withdrawal and no review run holds the head, and wake the refinery for one that only conversations and asks hold, pour a review run for a PR open at its validated head with no passed result there or an ask a run can take, pour again a run that ended without a result and ask a person once two at one head did, mark a draft ready once the review loop has passed at its validated head, carry out the withdrawals filed on the bead, save on each open PR's bead the GitHub read its check made, and ask for the seed audit's re-render once a landing leaves the default branch's audit stale | Gas Town's refinery reconciles one record per find-work and merges nothing. The landing order (orders/pr-reconcile.toml) runs this with no agent, asks the evaluator whether each PR is ready, pins the merge request to the head it judged, reads a bounded number of records, the least recently checked first, and holds the store's record lock for one record at a time, so two runs that overlap act on one record one after the other. It makes the draft cycle's ready transition, because a review run cannot tell whether the head it passed is the round's last, and it carries out a withdrawal where it reads the record, once the intake has routed the feedback a dismissal would retire. No order trigger fires on a head with no result and Gas City's PR monitor reads no review, so the run pours each review run itself, with `gc formula cook --attach` under the record lock, and reads the runs attached to a bead from its `blocks` edges onto their roots, so it re-offers one that ended without a result with no list of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#pouring-a-run-for-each-head-unit-4)). Gas City gives a session a turn for an open bead only while the store reads it ready, and its cascade nudge gives none while another blocker holds the bead, so the run wakes and nudges the refinery for a changed head that only conversations and asks hold ([the search](../specs/tk-1tfzr71.165/gas-city-search.md)). The run is where the city verifies a merge on its target, and Gas City's events name no merge landing on a branch, so the run checks the default branch's seed audit after a landing there, through the pack's renderer and its one re-audit writer. |
+| `gctk pr reconcile --refinery <address>` | order | land the PRs on the pending record: merge a ready one with its head pinned, close its bead once the merge commit is on the target, close through the disposition writer the bead of a PR a ruling retired once the PR has closed, hand a changed head to the refinery in the write that assigns it the bead once no withdrawal and no review run holds the head, and wake the refinery for one that only conversations and asks hold, pour a review run for a PR open at its validated head with no passed result there or an ask a run can take, pour again a run that ended without a result and ask a person once two at one head did, mark a draft ready once the review loop has passed at its validated head, carry out the withdrawals filed on the bead, ask for the seed audit's re-render once a landing leaves the default branch's audit stale, and keep each owned PR's `status:` and `held:` labels equal to what the store derives | Gas Town's refinery reconciles one record per find-work and merges nothing. The landing order (orders/pr-reconcile.toml) runs this with no agent every minute, at the order budget the city sets ([The PR watch](refinery-merge-cadence.md#the-pr-watch)). Each run reads the store once and decides every record through that read, on the GitHub read the PR watch saved on its bead, as the displays do, so a run in which no record owes an act asks GitHub nothing and writes nothing. It reads GitHub first only for a merge, since a merge made in error puts work on the target, which no run takes back. The one-PR update re-reads the PR in full with the record lock free, and the act decides the record again under the lock on what that read saved. Every other act reads of GitHub only what it changes: a withdrawal's reads of the reviews and review threads, and a fetch of the PR's branch before a changed head goes back, since the saved read can lag a push. A withdrawal dismisses an approval only while none of its inline comments is feedback the intake has not routed, and closes only once its read of the reviews after the dismissals shows no approval standing on a commit without its head. The run pins the merge request to the head the evaluator judged on the re-read. It takes the records it decides and the PRs whose labels owe a write in a shuffled order, starts none past 45 seconds and stops each at 30, and holds the store's record lock for one act at a time, so two runs that overlap act on one record one after the other. An act that does not complete records nothing on the bead, where Gas Town's reconcile writes `pr_reconcile_error`, because the next run finds the same difference and acts on it ([the search](../specs/tk-1tfzr71.149/gas-city-search.md#what-runs-each-order-and-how-the-landing-order-starts-units-1-2-and-3)). It makes the draft cycle's ready transition, because a review run cannot tell whether the head it passed is the round's last, and it carries out a withdrawal where it reads the record, once the intake has routed the feedback a dismissal would retire. No order trigger fires on a head with no result and Gas City's PR monitor reads no review, so the run pours each review run itself, with `gc formula cook --attach` under the record lock, and reads the runs attached to a bead from its `blocks` edges onto their roots, so it re-offers one that ended without a result with no list of its own ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#pouring-a-run-for-each-head-unit-4)). Gas City gives a session a turn for an open bead only while the store reads it ready, and its cascade nudge gives none while another blocker holds the bead, so the run wakes and nudges the refinery for a changed head that only conversations and asks hold ([the search](../specs/tk-1tfzr71.165/gas-city-search.md)). The run is where the city verifies a merge on its target, and Gas City's events name no merge landing on a branch, so the run checks the default branch's seed audit after a landing there, through the pack's renderer and its one re-audit writer. Nothing in Gas City, Gas Town or the github pack writes a PR's `status:` or `held:` label or keeps a retry for a failed write ([the search](../specs/tk-1tfzr71.149/gas-city-search.md#the-label-writes-and-no-record-of-one-that-failed-unit-4)), so each run compares the labels the one-PR update saved on each owned PR's bead with the ones `pr status` derives, and where they differ it has the labels' one writer, which reads the PR's labels itself, write them, reading nothing of the PR first, the comparison being the retry. |
+| `gctk pr poll` | order | ask GitHub cheaply whether each PR the store's live beads own moved, and run the one-PR update for each that did | Gas City's PR monitor lists only open PRs and reads no labels, no counts of comments or reviews, no base tip and no required flag, so it misses a merge and the signs that say a PR moved, and Gas Town's reconcile reads one record's PR a call ([the search](../specs/tk-1tfzr71.149/gas-city-search.md#the-cheap-question-and-the-net-read-github-units-1-and-3)). The pass asks about each owned PR by its number, at most 50 a request with one aliased field each, so a merged PR is read too, and a pass in which nothing moved writes no bead but that of an open PR whose merge state GitHub had not yet computed. orders/pr-poll.toml runs it every minute on each rig, at the order budget the city sets ([The PR watch](refinery-merge-cadence.md#the-pr-watch)). |
+| `gctk pr compare` | order | read each PR the store's live beads own in full, run the one-PR update for each part that differs from the read saved on its bead, and clear the city's labels off the PRs no live bead owns | Gas City's PR monitor lists only open PRs and reads no review decision, no review thread, no post's time and no required flag ([the search](../specs/tk-1tfzr71.149/gas-city-search.md#the-cheap-question-and-the-net-read-github-units-1-and-3)), so nothing Gas City runs sees a thread resolved, the city's reaction that answers a thread, an edit to a post that moved no sign, or a check the PR comes to require. The pass reads each owned PR by its number, at most 10 a request with one aliased field each, so each check run's required flag is read at the PR's own number, reads each list on to its end and no post's text, and writes no bead when no part differs or moved. No bead holds a PR no live bead owns, such as one whose bead closed, for the landing order to find, so the pass searches the rig's own repository for the labels' writer's labels, a page at a time until it has found 20 such PRs or the results end, and has the writer clear them. orders/pr-compare.toml runs it every hour on each rig, at the order budget the city sets ([The PR watch](refinery-merge-cadence.md#the-pr-watch)). |
+| `gctk pr refresh --pr <url>` | order, hook | read the parts of a PR whose signs moved and save them on the bead that owns it | Nothing in Gas City, Gas Town, the github pack or bd keeps a PR's checks, reviews, threads or labels on the bead that owns it ([the search](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1)). The update is that read's one writer, in four parts that each keep the instant their read was sent, written once under the store's record lock and guarded on what it read, so an older read never replaces a newer one. A webhook's rule can call it for the PR an event names, as the cheap question's pass runs it for each PR that moved and the net's for each PR that differs. |
 | `gctk pr draft <bead>` | agent, hook | return the PR a bead owns to draft before a writer of the city pushes onto it | Nothing in Gas City or its packs moves an open PR between draft and ready, and gh does with `gh pr ready --undo` ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-draft-cycle-and-the-withdrawal-unit-2)). The verb reads the draft flag first and converts only a ready PR, so a round's first push returns the PR to draft, a later push changes nothing, and a retry or a person's toggle leaves the cycle to finish from where the PR stands. |
 | `gctk pr withdraw <bead> --head <oid> --reason <text>` | agent | withdraw the approvals a material change leaves behind | Nothing in Gas City dismisses a GitHub review ([the search](../specs/tk-1tfzr71.108/gas-city-search.md#the-draft-cycle-and-the-withdrawal-unit-2)). Triage files the withdrawal as a bead that blocks the bead that owns the PR, so the evaluator holds the PR from the moment it is filed, and the landing order carries it out by each review's commit: it dismisses each approval given on a commit that does not contain the head, keeps every approval of the head or a later one, and asks a person through a gate when GitHub refuses. |
 | `gctk pr push <bead> --held-by <conversation>` | agent | push a sitting's commits onto the branch of an open PR it edits with the operator | Gas City ships no push onto a PR's branch for the session that holds it: Gas Town's refinery pushes a PR's branch only inside its own patrol step, and its crew pushes straight to the default branch ([the search](../specs/tk-e70808f/gas-city-search.md)). The verb carries the sitting's one intent through every step of it. It proves the holding: the bead owns a PR on the pending record and waits on the conversation through the edge that holds the PR's merge, and the conversation is in progress under this session. A review run or another writer may work the branch meanwhile. It refuses a checkout whose origin fetches from or pushes to a repository other than the PR's, as git resolves the origin's URLs. It then returns the PR to draft by `pr draft`'s rule and pushes through the pack's one pusher under the lease, so a push another writer made is never overwritten. |
 | `gctk pr owner <pr>` | agent, order | which bead owns this PR | Nothing in Gas City's PR concept takes a GitHub event on an open PR to the bead that owns it, and the hop is what turns a review comment into work on that bead. |
-| `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention, with each condition not met for a PR on the pending record | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. For a PR on the pending record the status renders the pr domain's evaluator over the store as it stands and the GitHub read the landing order saved on the PR's bead, so the verb reads no GitHub, and the label, the rig board and the merge run one rule, the merge alone on a fresh read. A PR whose GitHub side the landing order has not read at the head the store holds reads working until the order's next check. A pack writer that changes one of its inputs, such as the old path's opening of a PR or a review verdict's record, sets the label in the same act. The order is the backstop: the merge cadence's pass walks the open beads that carry a PR, a PR on the pending record among them, a set bounded by the open PRs, in a rotation that starts no bead past the pass's deadline, and writes a label only where its value changed. |
+| `gctk pr status <bead>` | hook, order | where the PR stands: working, merging, needs-review or needs-attention, with each condition not met for a PR on the pending record | Nothing in Gas City gates a merge on approval or on required checks, so the pack reads both for the status label and the board. For a PR on the pending record the status renders the pr domain's evaluator over the store as it stands and the GitHub read the one-PR update saved on the PR's bead, so the verb reads no GitHub, and the label, the rig board and the landing order run one rule over the same saved read, the landing order once more over the one-PR update's re-read before a merge. A PR whose GitHub side the PR watch has not read at the head the store holds reads working until the watch's next pass. The landing order keeps the labels: each run compares the labels saved on each owned PR's bead with the ones this verb's rule gives, and writes only where they differ, so a change of any input reaches them at its next run. A pack writer that changes one of its inputs, such as a review verdict's record, also sets the label in the same act, and the merge cadence's pass walks the open beads that carry a PR in a rotation that starts no bead past the pass's deadline, writing a label only where its value changed. |
 | `gctk pr post <pr>` | agent, hook | post the city's comment, review or reply on a PR, carrying the city's mark | Every agent's `gh` token is one bot account, so a post's author cannot tell the city's notice from feedback. The mark can, and this one writer owns the mark and the definition of which posts are feedback. |
 | `gctk pr guard` | hook | refuse an agent's `gh` write outside the rig's own origin, or an unmarked post on it | Gas City scopes no agent's writes ([warrants.md](warrants.md#gh-write-containment)). The rule lives in the GitHub adapter, so gctk's own writes meet it, and the tool-use hook every agent carries applies it to the commands an agent types. |
 | `gctk epic create <title>` | agent | file an epic with its contract, each field in its own key | bd's create checks hold no issue type to a metadata key, so nothing native refuses an epic filed with no hypothesis, which [epics.md](epics.md) makes the one hard gate on an epic. The verb refuses such an epic, files the contract in the create itself, and, under an epic, files a Delivery, which carries no contract. |
@@ -129,11 +135,12 @@ doc defines what holds a bead or whose move it is.
 | `gctk memory due [--limit N \| --count]` | hook | the agent memory notes due for the feedback distiller's judge, oldest first | Claude Code keeps memory notes with no lifecycle and documents no command that prints where a session's memory is ([the search](../specs/tk-zlot608.8/gas-city-search.md)). The verb asks Claude Code itself in each rig's checkout and the city's root, reads each directory against its list, which stands on its warrant ([warrants.md](warrants.md#memory-note-waits)), and hashes a note's body alone, so neither a Claude Code save nor a recorded use brings a note due. |
 | `gctk memory apply <decisions>` | hook | record the judge's decision on each memory note it judged | bd's waits hold only an issue, and a note is a file ([warrants.md](warrants.md#memory-note-waits)). The verb records a note's wait or its next date on the list, keeps a dropped note's text before it removes it, acts only on the text the judge read, and takes out the pointers to a note it removed from the index and the collection notes. |
 | `gctk memory settle` | hook | end each memory note's wait that is done | Nothing in Gas City ends a wait that holds a file. The verb reads the beads notes wait on through the ledger, one read per store, then one more for each pattern's follow-ups and each integration branch's landing bead it has not read, removes a note whose fix reached its repository's default branch, by the merge record and `git merge-base --is-ancestor`, an integration branch's landing bead followed, makes due a note whose wait ended with no fix, and keeps one finding through `patrol-finding.sh` for a place Claude Code names no memory directory for. |
+| `gctk distiller start` | order | start the city's one feedback distiller run in the pack's home rig, the rig whose checkout holds the pack, unless one is open there | Gas City registers a pack's order once per importing rig or once for the city, and only the city's config picks the rigs an order runs in, while a formula order of city scope pours into the city's store, where a rig's pool does not reliably claim it ([the search](../specs/tk-zlot608.13/gas-city-search.md)). So the city's order runs the verb, which finds the home rig by the `pack.toml` its checkout holds and the rig's polecat pool by `gc agent list`, and slings the formula with `gc sling`, which pours the run in that rig's store. Each pass reads the rig list, the roster, each rig's `pack.toml` and the home store's live roots of the formula. It slings only while no live root Gas City stamped as a run of the formula is there, so an open run, however it was poured, holds the next. A read that does not answer, a second rig holding the pack and a pool that is not one each sling nothing. The dispatcher keeps the order's own passes apart, and `gc order run` and a start by hand pass no such gate, so the start takes a lock of its own without waiting, `distiller-start.lock` beside the dispatch locks in the city's `.gc/runtime/packs/gc-toolkit`, and holds it from before its read of the store to the sling's end. Of starts that overlap, the one that holds it reads and slings, and each other starts nothing. No other pack writer pours the formula, so every writer of a run takes that lock. |
 | `gctk reaction check <bead> --run <root>` | hook | whether this run may still react to its subject | A subject's state can change between its reaction's sling and the claim of its step. Gas City retires a run whose subject closed or took an assignee before the claim and checks nothing else then, so the check, the reaction's first act, applies the sling's refusals again. |
 | `gctk reaction sling <bead>` | agent, hook | sling a first reaction on a bead nobody has decided on, through the rig's proactive pool | `gc sling` pours on a bead whatever already speaks for it, such as a hold label, a human gate, an assignee or a live run of another formula. The verb refuses a bead whose next move is someone's, and leaves a second live reaction to `gc sling`'s own refusal. |
 | `gctk reaction sweep [--dry-run]` | order, agent | sling a first reaction at each ready bead in the rig that nobody has decided on | Nothing in Gas City starts work on a bead nobody slung, and its work query offers only routed work, so the sweep runs on its order's cadence. Its dry run shows an agent what a sweep would take. |
-| `gctk reaction deliverable` | hook | whether this rig's proactive pool can take a reaction now | A slung reaction waits for a slot at no cost, but one routed to a pool the city's roster shows absent, suspended or capped at zero waits for nobody. A finding's filing and the operator's intake ask before they sling. |
 | `gctk reaction dispose <bead> --disposition <exit>` | agent | take one of a first reaction's exits on its subject: route it, recommend an action, hold it on its wait, hand it to a validating closer, or put it to the operator | One intent over the native writes each exit makes. It applies intake's rule ([steering.md](steering.md)). |
+| `gctk reaction accept <bead> [--var <key>=<value>]...` | agent | take a first reaction's recommendation: answer the gate that asks it and dispatch its formula at the bead, once | `gc sling` refuses a second launch of a formula at a bead only while the first root is live, and no flag of it checks an earlier root by a caller's key ([the search](../specs/tk-1tfzr71.226/gas-city-search.md#accept-gc-slings-launch-lock)). So the acceptance runs under its own lock ([warrants.md](warrants.md#accepts-lock)), titles its root with its token, which a later run searches before it slings, and records the dispatch's input on the gate, so whoever finishes an acceptance an earlier run left slings what was accepted. bd's gate resolve exits 0 on a gate already closed, so the verb reads which answer the gate took, and the first answer stands. |
 | `gctk session title` | agent | give a session a title its record and its terminal show | `gc session rename` writes only the title on Gas City's record. An agent's terminal shows the name the agent's own `/rename` sets, typed into its input box, so the verb renames the session and has Gas City type `/rename <title>` into it through `gc session submit`, for Claude Code and Codex alike. |
 | `gctk seed render` | hook, order | render every agent's prompt and every formula's recipe into the audit under `generated/seed-audit/` | Gas City renders one prompt or recipe on demand and keeps no copy. The audit keeps them all in the tree, so a PR's diff shows what each agent will receive. It writes only the output it owns, which is what lets an order run it. |
 | `gctk seed check` | hook | whether the render is current | The pre-commit hook and a doctor check read it, so a stale audit is caught before it lands. |
@@ -141,12 +148,20 @@ doc defines what holds a bead or whose move it is.
 | `gctk doctor run --accepted <file>` | order | run gc doctor once and record the run as one event: each check that fails and since when, each the run did not measure, each the operator accepted, and each monitor order's last good run | Gas City keeps no doctor result: `gc doctor --json` prints its report and stores nothing, and the supervisor's API serves no doctor route ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)). So the verb records each run with `gc event emit` as one `gc-toolkit.doctor.ran` event, and the event log is the record. It adds what no primitive does. Each failing check carries the time it first failed and its streak, the runs in a row that measured it failing, from the previous run's event, so a reader can show only what two runs found. A run that did not complete, or did not measure a check, adds to no streak and ends none, as its help says. The checks `doctor/accepted.toml` names are marked accepted, which `[doctor]` config cannot express. Each monitor's newest `order.completed` is read from the events, because the city deletes a closed order-tracking bead. It runs `gc doctor` with no `--fix` under a deadline, and writes no bead. |
 | `gctk session progress` | order | find each pool seat that prints but has written nothing for three hours, and record them as one `gc-toolkit.seat-progress.stalled` event | Gas City's work ladder paces only a quiet pool seat, and nothing in Gas City reads a session's own writes ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-session-progress)). The verb judges each busy pool seat by its newest write as the identity its claim is assigned to, in the claim's store and the city's, from no earlier than its last wake, and writes no bead. |
 | `gctk refinery stuck` | order | find each refinery handoff that has sat unprepared past four hours with nothing holding it, and record them as one `gc-toolkit.refinery-queue.stuck` event | Gas Town's check-refinery nudges the refinery and mails a report of the queue, and doctor's `pool-idle-routed-work` reads the routed work a pool leaves, not a refinery's assigned queue ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#gctk-refinery-stuck-and-gctk-mail-finding)). The verb reads each rig's queue at the identity of the refinery `gc agent list` names for that rig, asks `bead holds` what holds each handoff past the bound, and writes no bead. |
+| `gctk deployment report --rig <rig> [--environment <name>]` | order | report a rig's run of failed deployments to an environment as one patrol finding in its store, and clear its situation once a deployment succeeds | Gas City reads no deployment, and bd's `bd github` syncs issues alone ([the search](../specs/tk-vkio7qb/gas-city-search.md)). GitHub keeps each deployment's status, but nothing in the city reads it, so a deployment that fails is seen only by someone who opens the host. The verb reads the environment's newest deployments in one GitHub call, decides from the newest finished one, and files, notes or clears the finding through `patrol-finding.sh`, which dedups it on its key and slings its first reaction. Its text is made from the run alone, so a pass that finds nothing new only counts on the finding. |
 | `gctk version` | hook | the revision this binary was built from | The build stamps one hash over gctk's inputs, services/gctk and the root go.mod and go.sum, so a doctor check can tell whether the deployed binary is the one the checkout builds. |
 | `gctk lifecycle transition <bead> --to <value>` | hook | write a bead's `merge_result` outside the pending record, with the work record a landing writes | Gas City's `bd update` writes the fields. The verb composes into that one update what `lifecycle.sh`'s callers share: the landing's work record (`gc.work_outcome`, `gc.work_commit`, `gc.work_branch`), the route and takeaway checks, and the dated-key rule. It checks no edge between values, and the doctor checks the beads after the write. |
 
 What each noun owns:
 
-- **`bead`:** the arm record on a bead armed to start by itself.
+- **`bead`:** the arm record on a bead armed to start by itself, and a bead's
+  takeaway: the headline its handling concluded, who wrote it and when, and
+  whether anything still waits on it, which the `takeaway` package declares.
+  The takeaway's keys stand on design decision 5 of
+  [the board's design](../specs/tk-1tfzr71.213/design.md) until tk-1tfzr71.216
+  decides whether they retire onto the bead's notes or stay with a warrant.
+  A park and a placement write only native state: a gate with its `blocks`
+  edge, and a parent, a dispatch and a label's lift.
 - **`priority`:** the derivation, which is a bead's shift and the computed bd
   priority of every bead that follows another, its poured workflow's included.
   The field itself is bd's. The derivation is a feature: work takes the
@@ -157,10 +172,13 @@ What each noun owns:
   PR, Gas Town's pending-through-merge record on the bead that owns the PR,
   with the branch the bead's work is on and the store's record lock that each
   writer of the record takes, the withdrawal of the PR's approvals that triage
-  files, and the GitHub read the landing order saves on that bead at each
-  check. The read is GitHub's facts about the PR at one head, over which the
-  evaluator's rule decides without reading GitHub, and it holds no answer. The
-  read stands on its warrant ([warrants.md](warrants.md#saved-github-read)).
+  files, and the GitHub read the one-PR update saves on that bead when the PR
+  moves.
+  The read is GitHub's facts about the PR, in four parts that each keep the
+  instant their read was sent, over which the evaluator's rule decides for the
+  displays and for the landing order without reading GitHub, and it holds no
+  answer. It stands on its warrant
+  ([warrants.md](warrants.md#saved-github-read)).
   The noun starts
   from Gas City's own PR concept. Gas Town's refinery opens a PR
   with a title and a body taken from its bead, Gas City's PR monitor and
@@ -191,11 +209,18 @@ What each noun owns:
   `memory-intake.places`, for the places Claude Code names no memory directory
   for, which it files and clears through the runtime adapter's
   `patrol-finding.sh`.
+- **`distiller`:** the start's lock, `distiller-start.lock` in the city's
+  `.gc/runtime/packs/gc-toolkit`, which each start holds from its read of the
+  home rig's store to its sling. It reads the rig list, the roster, the
+  `pack.toml` each rig's checkout holds, and the stamps Gas City writes on a
+  run's root at the pour, and its one write is a sling.
 - **`reaction`:** the recommendation a first reaction's `recommend` exit leaves
-  for the operator's Accept, in `gc.recommended_formula`. A reaction itself is a
-  Gas City run of `mol-first-reaction`, and each record its exits leave has
-  another owner: the human gate and the hold label are Gas City's, the headline
-  is the takeaway's, and the arm is `bead`'s.
+  for the operator's Accept, in `gc.recommended_formula`, and an acceptance's
+  record: its dispatch input on the recommendation's gate, in `gc.acceptance`,
+  and the dispatch it made, in `gc.recommended_formula_dispatched`. A reaction
+  itself is a Gas City run of `mol-first-reaction`, and each record its exits
+  leave has another owner: the human gate and the hold label are Gas City's,
+  the headline is the takeaway's, and the arm is `bead`'s.
 - **`doctor`:** the record of each doctor run, the `gc-toolkit.doctor.ran` event,
   which `doctor run` alone records, and the shape of its payload. The accepted
   file it reads, `doctor/accepted.toml`, is config in the pack, and a PR the
@@ -206,6 +231,10 @@ What each noun owns:
   terminal.
 - **`refinery`:** the record of each queue look, the
   `gc-toolkit.refinery-queue.stuck` event, and the shape of its payload.
+- **`deployment`:** nothing of its own. It reads each deployment from GitHub
+  again on every pass, and its one bead write is the patrol finding
+  `deployment.<environment>` in the rig's store, which it files, notes and
+  clears through the runtime adapter's `patrol-finding.sh`.
 - **`dolt`:** nothing.
 
 What gets a verb:
@@ -443,7 +472,11 @@ Nothing outside it parses a metadata value or spells a key's name.
   exits 0. A degraded server can roll back a write it reported, and bd guards
   only its coordination writes, such as a claim, against that. The ledger takes
   the cost bd takes for every other write: the rare record lost that way reads
-  as never written.
+  as never written. A read that settles a race is not a read-back. bd's gate
+  resolve exits 0 on a gate already closed and leaves its answer, so an
+  acceptance reads which answer the gate took to tell its own from one that
+  reached the gate first, and a write guarded by `--if-status` cannot stand in,
+  because it writes no answer.
 - **A wait edge is written only onto a bead of its own prefix that its store
   holds.** bd accepts an edge onto an id its store does not hold and reports
   success, and the edge holds nothing. bd also keeps an edge between beads of
@@ -497,7 +530,7 @@ and CI runs those tests on every PR.
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
-| runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the settings file Gas City starts each Claude session with, the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the one that files a patrol finding, `patrol-finding.sh`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, and the disposition writer, `bead-rehome.sh`, run as the actor a close needs | recorded responses |
+| runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the settings file Gas City starts each Claude session with, the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the one that files a patrol finding, `patrol-finding.sh`, the priority writer, `queue-priority.sh`, the subject resolver, `gc-helm.sh resolve`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, the disposition writer, `bead-rehome.sh`, run as the actor a close needs, and the run's end, `run-cancel.sh`, which calls the supervisor's run cancel | recorded responses |
 | claude code | Claude Code | one bounded `claude -p` per ask, run as a city session runs with its hooks off, reading the stream's init record, which then removes each directory the ask made | answers a test sets |
 | host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table, `lsof` for a port's listeners, a dial for whether a loopback port answers, and `demo-engine-lib.sh` for a start as a demo capture runs one, inside its sandbox for a rig whose app reads the city | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals and loopback ports, on the fake clock of a `testing/synctest` bubble |
 
@@ -593,8 +626,12 @@ bubble's clock, and no rule's test needs a tool on the machine.
   listing's declarations, and asks `standing` over those rows where each row's
   bead stands and whose move it is, which `standing` answers from `waits`,
   `prstatus` and `queue`. The page lists work in the order `queue` gives for
-  the open work the page names, the order the work is expected to land in. Its
-  words, ranking, bands and grouping are its own, and so is the fold of a
+  the open work the page names, the order the work is expected to land in.
+  Beside those rows it shows when GitHub was last asked about the rig's pull
+  requests: the start of the newest run of the rig's `pr-poll` order that
+  exited 0, read from Gas City's run history through the supervisor's API,
+  since a pass in which nothing moved writes nothing to a pull request's bead.
+  Its words, ranking, bands and grouping are its own, and so is the fold of a
   conversation into the row of the question it answers. A question that a loop
   or an agent also asks belongs to a domain, not to the board.
 
@@ -639,9 +676,9 @@ The status rests on these answers.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed. A caller that asks what a bead records it waits
   on, what still holds its close, or whether its own work sits on another bead
-  asks this: a takeaway's waits and its route guard, the check that a wait is
-  an edge, and the board's ruled rows. An ancestor's park answers none of
-  them, because the work it holds is still the bead's own.
+  asks this: a takeaway's waits and its route guard, and the check that a wait
+  is an edge. An ancestor's park answers none of them, because the work it
+  holds is still the bead's own.
 - **When did the last wait that applies to it land?** This is the latest close
   among the waits the rule for where its work is applies: its own, and for work
   that has not started each live ancestor's too. A caller that ages the time
@@ -679,7 +716,7 @@ with what the person can do.
      open human gate and tracks no decision that asks. It is a `pull-request`
      when its pull request reads needs-review or needs-attention, a `ruling`
      when it is an epic with members and none of them open, or a landed
-     Delivery, and `routed-to-you` when it is any other open bead only a
+     Delivery, and `assigned-to-you` when it is any other open bead only a
      person clears.
      Work that carries `hold:mayor` asks nothing, because Gas City's hold
      names the Product Owner as its next actor.
@@ -693,12 +730,18 @@ with what the person can do.
      ruling left waiting on the work it sent. It is a person's move again once
      that work closes.
   7. `answers`, `members` or `gate`: it has no move of its own, as above.
-  8. `in-flight`: it is work in flight by steering.md's definition
+  8. `not-scheduled`, `outside` or `for-product-owner`, by the work's place
+     in the order `queue` gives: `not-scheduled` when it is ready work that
+     nothing sends anywhere, `outside` when it waits outside the city, and
+     `for-product-owner` when nothing sends it and it is held for the
+     Product Owner's placement.
+  9. `in-flight`: it is work in flight by steering.md's definition
      ([In flight](steering.md#in-flight)), or work a live run works, and
      where its pull request stands is part of the answer.
-  9. `scheduled`: it is work that is armed, routed or assigned, and no
-     dispatch hold holds it.
-  10. `not-scheduled`: it is any other work.
+  10. `scheduled`: it is work that is armed, routed or assigned, and no
+      dispatch hold holds it.
+  11. `not-ready`: it is any other work, which nothing sends and the store
+      does not serve as ready.
 
   A read that cannot answer the part a rule needs answers `unread` at that
   rule, and says why.
@@ -786,18 +829,6 @@ why a reader must know it, and the work that retires it.
   feedback applies. The move of the city's PR posts into gctk (tk-ssm8qns.8)
   brings the definition into the pr domain, whose post verb owns it, and the
   adapter goes.
-- **The `/helm` board reads the store itself.** Its source
-  (`services/helm/internal/source`) reads each rig's store through the
-  embedded beads library or the supervisor's API and decodes the rows and keys
-  it shows, and only what holds a bead, where a PR stands and
-  the shape of a conversation come from the domains. One render therefore holds two reads of the store, so
-  the board renders a domain's answer, or that the answer is missing, and
-  never derives its own from its rows. Human gates are where it still does.
-  An open gate's own row marks each bead it names as held by a person, and
-  parks one whose blockers carry no record of the gate's wait. A bead's phase
-  counts as its human gates the ones whose rows name it and the ones among its
-  blockers that are not closed. The board member (tk-1tfzr71.24) retires that
-  read or writes the warrant it stands on.
 - **`epic create`, `session title` and `rig`'s checks start processes outside
   an adapter.** `epic create` files the epic with its own `gc bd create`,
   `session title` runs `gc session rename` and `gc session submit`, and the
@@ -810,10 +841,9 @@ why a reader must know it, and the work that retires it.
   tk-ssm8qns.16 puts them behind the ledger and the adapters.
 - **Readers outside the `bead` domain read the arm's keys.** The arm's record
   (`services/gctk/arm/record`) declares the arm's keys and is their one writer,
-  but the scripts, doctor checks, skills and the helm board that read an arm
-  still read its keys themselves, `dispatch-path.sh`'s dispatch path,
-  `check-po-queue-only` and the board's `selfStart` among them, against rules 1
-  and 6. The arm is a residual under its warrant
+  but the scripts, doctor checks and skills that read an arm still read its
+  keys themselves, `dispatch-path.sh`'s dispatch path and `check-po-queue-only`
+  among them, against rules 1 and 6. The arm is a residual under its warrant
   ([warrants.md](warrants.md#deferred-dispatch-residual)): Gas City's fix for a
   launch that waits on its input bead retires the arm, and a migration of its
   readers built now would be rebuilt then. The operator ruled this exception in
@@ -826,10 +856,24 @@ why a reader must know it, and the work that retires it.
   one too.
 - **Shell still reads and clears the recommendation `reaction` owns.**
   `gc.recommended_formula` is declared in `reaction`, whose `recommend` exit is
-  its one setter, but `gc-helm.sh accept` and
-  `converse-invalidate-recommendation.sh` clear it and `converse-signoff.sh`
-  reads it, each spelling the key, against rules 1 and 6, so the key stays
-  registered in `lifecycle/lifecycle.toml`. The board's own read of it is under
-  the board's entry above. tk-ssm8qns.23 moves those reads and clears onto the
-  domain, and the key's entry in `lifecycle/lifecycle.toml` goes with the last
-  of them.
+  its one setter and whose accept clears it, but
+  `converse-invalidate-recommendation.sh` clears it and `converse-signoff.sh`
+  reads it and `gc.recommended_formula_dispatched`, each spelling the keys,
+  against rules 1 and 6, so the keys stay registered in
+  `lifecycle/lifecycle.toml`. tk-ssm8qns.23 moves those reads and clears onto
+  the domain, and the keys' entries in `lifecycle/lifecycle.toml` go with the
+  last of them.
+- **Shell still reads the takeaway's keys.** `gc.takeaway` and the keys beside
+  it are declared in `takeaway`, whose `bead takeaway` writes them, but shell
+  reads them itself, spelling each key, against rules 1 and 6:
+  `bead-context.sh`, the `converse-recheck-premise` skill's close,
+  `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
+  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
+  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
+  and the liveness recheck, which tk-1tfzr71.174 retires. The keys are also
+  written by `gctk lifecycle --takeaway`, for `pr-facts.sh`, which the
+  GitHub-intake member (tk-1tfzr71.21) retires. So the keys stay registered in
+  `lifecycle/lifecycle.toml`. tk-1tfzr71.216
+  decides whether the keys retire onto the bead's notes or stay with a warrant,
+  and that decision moves these reads onto the domain or retires them with the
+  keys.

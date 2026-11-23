@@ -114,23 +114,23 @@ func TestTheRecordsWritesAssignTheBeadToWhoWorksItNow(t *testing.T) {
 		act  func(*ledger.Write)
 		want string
 	}{
-		"publish":         {func(w *ledger.Write) { record.Publish(w, p, "t") }, "--assignee="},
+		"publish":         {func(w *ledger.Write) { record.Publish(w, p) }, "--assignee="},
 		"block":           {record.Block, "--assignee="},
 		"settle":          {func(w *ledger.Write) { record.Settle(w, refinery) }, "--assignee=" + refinery},
-		"requeue handing": {func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "t", refinery) }, "--assignee=" + refinery},
-		"revalidate":      {func(w *ledger.Write) { record.Revalidate(w, "why", "t", refinery) }, "--assignee=" + refinery},
+		"requeue handing": {func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }, "--assignee=" + refinery},
+		"revalidate":      {func(w *ledger.Write) { record.Revalidate(w, "why", refinery) }, "--assignee=" + refinery},
 	} {
 		if args := writes(t, c.act); !has(args, c.want) {
 			t.Errorf("%s writes %q, want %s", name, args, c.want)
 		}
 	}
-	kept := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "t", "") })
+	kept := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "") })
 	for _, a := range kept {
 		if strings.HasPrefix(a, "--assignee") || a == "pr_reconcile_pending" {
 			t.Fatalf("a requeue that keeps the marker writes %q", kept)
 		}
 	}
-	if handed := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "t", refinery) }); !has(handed, "pr_reconcile_pending") {
+	if handed := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }); !has(handed, "pr_reconcile_pending") {
 		t.Fatalf("a requeue that hands the head over keeps the marker: %q", handed)
 	}
 }

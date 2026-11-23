@@ -26,8 +26,8 @@ import (
 // prstatus.Read gathers the facts through gcbdStore and decides nothing here
 // either: the helm board asks the same package through its own store, so the
 // labels, engage and the board read one definition. For a PR on Gas Town's
-// pending record it asks the pr domain's evaluator over the store, the GitHub
-// read the landing order saved on the bead among it (pr.FromStore), as the rig
+// pending record it asks the pr domain's evaluator over the store, the read the
+// one-PR update saved on the bead among it (pr.FromStore), as the rig
 // board asks it through its listing, so they give one answer and none of them
 // reads GitHub. The cli tests pin GC_NO_API, so every read answers from the
 // same `gc bd` stub the shell acceptance drives.
@@ -43,17 +43,17 @@ anchor. With --json it prints one object instead:
 {"status": <that value>, "held": [<gate, review, blocked>], "reasons":
 [{"held", "id", "title"}]}. held is what holds the PR, in the order the held:
 labels take, and reasons is each thing behind it. A reason's id is empty where
-the PR's own review threads or blocked verdict hold it. Both lists are empty
-arrays when nothing holds the PR.
+the PR's own review threads hold it. Both lists are empty arrays when nothing
+holds the PR.
 
 For a bead whose PR is on Gas Town's pending record, the status renders the pr
-domain's evaluator over the store as it stands, the GitHub read the landing
-order saved on the bead among it, so the command reads no GitHub, and each
-condition not met follows the status on a line of its own, as <kind>:
-<detail>. A saved read that is absent, or is not of the PR at the head the
-store holds, names one condition, github-unread, in place of GitHub's, and the
-PR reads working until the landing order's next check, or needs-attention
-while something only a person clears holds it. For such a bead, held and
+domain's evaluator over the store as it stands, the read the one-PR update
+(gctk pr refresh) saved on the bead among it, so the command reads no GitHub,
+and each condition not met follows the status on a line of its own, as
+<kind>: <detail>. A saved read that is absent, or is not of the PR at the head
+the store holds, names one condition, github-unread, in place of GitHub's, and
+the PR reads working until the PR watch's next pass reads it, or
+needs-attention while something only a person clears holds it. For such a bead, held and
 reasons name the gates and the beads a person owes that hold it, and the
 review threads the saved read finds waiting on the city's answer while no
 work of the city's acts on them. Its --json object also carries "ready", the
@@ -85,10 +85,11 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 	status.Flags().BoolVar(&asJSON, "json", false, "print the status with what holds the PR, as one JSON object")
 	return group("pr", "a bead's pull request",
 		"The pull request a bead owns: where it stands, what its title and body say, the account of the change "+
-			"they carry, its record from publication to the verified merge, its draft between rounds of the city's "+
-			"work, the withdrawal of approvals a material change leaves behind, and the push of a converse "+
-			"sitting that edits its branch.",
+			"they carry, GitHub's side of it saved on the bead, its record from publication to the verified merge, "+
+			"its draft between rounds of the city's work, the withdrawal of approvals a material change leaves "+
+			"behind, and the push of a converse sitting that edits its branch.",
 		status, newPRComposeCmd(stdout, stderr), newPRSummaryCmd(stdout, stderr),
+		newPRPollCmd(stdout, stderr), newPRCompareCmd(stdout, stderr), newPRRefreshCmd(stdout, stderr),
 		newPRRecordCmd(stdout, stderr), newPRReconcileCmd(stdout, stderr),
 		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRPushCmd(stdout, stderr))
 }
@@ -250,8 +251,8 @@ func asBlockers(rows []gcbd.Bead) []person.Blocker {
 }
 
 // answerFromStore is the pr domain's evaluator's answer for the PR anchor owns,
-// over the store gc routes the anchor to, read through the ledger, and the
-// GitHub read the landing order saved on the bead (pr.FromStore). It reads no
+// over the store gc routes the anchor to, read through the ledger, and the read
+// the one-PR update saved on the bead (pr.FromStore). It reads no
 // GitHub and loads no definition of feedback. A read of the store that fails
 // returns its error and no answer.
 func answerFromStore(anchor string) (pr.Answer, error) {

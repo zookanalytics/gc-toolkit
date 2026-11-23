@@ -32,11 +32,12 @@ when a person owes the next move, queued when the city takes it as things
 stand, not-moving when nothing moves it as things stand, closed, and "" for a
 bead with no move of its own, such as an epic with open members. rule is the
 rule that placed it, the first that applies of closed, ask, own-wait,
-further-along, parked, status, staying, answers, members, gate, in-flight,
-scheduled and not-scheduled, and unread where a read could not answer the
-part a rule needs, with why saying what it could not. ask is what a person
-owes when the bead is itself the ask: question, conversation, pull-request,
-routed-to-you or ruling, and "" otherwise. names are the beads the rule
+further-along, parked, status, staying, answers, members, gate,
+not-scheduled, outside, for-product-owner, in-flight, scheduled and
+not-ready, and unread where a read could not answer the part a rule needs,
+with why saying what it could not. ask is what a person owes when the bead is
+itself the ask: question, conversation, pull-request, assigned-to-you or
+ruling, and "" otherwise. names are the beads the rule
 names, each {"id", "title"}: the gate or the bead a person owes, the gate
 that parks it, the question a conversation answers, or the beads it waits
 on.

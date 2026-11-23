@@ -17,6 +17,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
 // root is the root of the reaction's run, which --run names.
@@ -25,7 +26,9 @@ const root = "tk-root"
 // world is one reaction's surroundings: a store holding the subject tk-sub,
 // an open member of the epic tk-epic, and its blocker tk-blk1; a city whose
 // roster runs the rig's polecat and proactive pools, the mechanik and the
-// rig's refinery; a GitHub; and one log of every write and act across them,
+// rig's refinery, and which configures those agents alone, so a sling, a
+// takeaway's route or an arm's default to any other target is refused as Gas
+// City refuses it; a GitHub; and one log of every write and act across them,
 // in order, as the shell suite's FAKE_LOG kept it.
 type world struct {
 	t     *testing.T
@@ -38,10 +41,10 @@ type world struct {
 	log  []string
 	said []string
 
-	// Each fails its act when set: the takeaway (gc-helm.sh exits 4), a gate's
-	// filing, a sling, a nudge and an arm.
-	helmFails, gateFails, slingFails, nudgeFails bool
-	armErr                                       error
+	// Each fails its act when set: the takeaway, a gate's filing, a sling, a
+	// nudge and an arm.
+	takeawayFails, gateFails, slingFails, nudgeFails bool
+	armErr                                           error
 	// slingCode is the exit a sling answers, 3 being a live run of the
 	// formula.
 	slingCode int
@@ -66,18 +69,13 @@ func newWorld(t *testing.T) *world {
 		w.sync()
 	}
 	w.store.OnFind = func(q gcbd.Query) { w.add("FIND " + strings.Join(q.IDs, " ")) }
-	two := 2
 	w.rt = &rtfake.Runtime{
 		Resolves: []string{"mol-x", "mol-polecat-work"},
 		Roster: []gascity.Agent{
-			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},
 			{QualifiedName: "gc-toolkit.mechanik", Name: "mechanik", Scope: "city"},
 			{QualifiedName: "gc-toolkit/gc-toolkit.refinery", Name: "refinery", Dir: "gc-toolkit", Scope: "rig"},
-			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig", Pool: &struct {
-				Max *int `json:"max"`
-			}{Max: &two}},
+			{QualifiedName: "gc-toolkit/gc-toolkit.proactive", Name: "proactive", Dir: "gc-toolkit", Scope: "rig"},
 		},
 		Named: []gascity.NamedSession{{Template: "mechanik"}, {Template: "refinery", Dir: "gc-toolkit"}},
 		RigList: []gascity.Rig{
@@ -98,6 +96,8 @@ func newWorld(t *testing.T) *world {
 		}
 		w.add(line)
 		switch {
+		case !w.configured(s.Target):
+			return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: w.unconfigured(s.Target)}}
 		case w.slingFails:
 			return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "gc sling: fake refusal"}}
 		case w.slingCode == 3:
@@ -126,18 +126,34 @@ func newWorld(t *testing.T) *world {
 		Now: func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) },
 		Log: func(line string) { w.mu.Lock(); w.said = append(w.said, line); w.mu.Unlock() },
 	}
+	w.r.Takeaway = w.takeaway
 	w.r.Arm = func(req arm.Request) (string, error) {
 		line := "ARM " + req.ID + " --target " + req.Target
 		if req.Formula != "" {
 			line += " --on " + req.Formula
 		}
 		w.add(line)
-		if w.armErr != nil {
+		switch {
+		case req.Formula == "" && !w.configured(req.Target):
+			return "", fmt.Errorf("%s's default formula could not be read (no agent in the city's config answers to %s), so name one with --on", req.Target, req.Target)
+		case w.armErr != nil:
 			return "", w.armErr
 		}
 		return "armed " + req.ID, nil
 	}
 	return w
+}
+
+// configured is whether the city configures an agent at target, one its roster
+// lists.
+func (w *world) configured(target string) bool {
+	return slices.ContainsFunc(w.rt.Roster, func(a gascity.Agent) bool { return a.QualifiedName == target })
+}
+
+// unconfigured is gc sling's refusal of a target the city configures no agent
+// for, as the city's build prints it.
+func (w *world) unconfigured(target string) string {
+	return `gc sling: agent "` + target + `" not found in city.toml; did you mean "gc-toolkit/gc-toolkit.po"?`
 }
 
 // sync makes the store's blocked answers for the subject what its edges say,
@@ -168,21 +184,45 @@ func (w *world) add(line string) {
 	w.log = append(w.log, line)
 }
 
-// script answers gc-helm.sh and human-gate.sh. gc-helm.sh takeaway's release
-// makes its subject ready as its waits land (released). human-gate.sh files a
-// gate under its key that blocks its subject, its message's first line as its
-// title and the whole message as its description, and prints its id, or finds
-// the open gate under the key and prints that; --retract closes the open gates
-// under the key.
+// takeaway logs the takeaway as its command's flags would read, and a
+// release makes its subject ready as its waits land (released). Its route, its
+// last write, fails as gc sling refuses a target the city does not configure,
+// in the takeaway's own words.
+func (w *world) takeaway(req takeaway.Request) (string, error) {
+	line := "TAKEAWAY " + req.Bead + " " + req.Text + " --by " + req.By
+	if req.Release {
+		line += " --release"
+	}
+	for _, id := range req.WaitingOn {
+		line += " --waiting-on " + id
+	}
+	if req.Route != "" {
+		line += " --route " + req.Route
+	}
+	if req.Assign != "" {
+		line += " --assign " + req.Assign
+	}
+	if req.NoWait {
+		line += " --no-wait"
+	}
+	w.add(line)
+	if w.takeawayFails {
+		return "", errors.New("could not write the headline on tk-sub (the store refused it), so nothing after it was written")
+	}
+	w.released(req)
+	if req.Route != "" && !w.configured(req.Route) {
+		return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not route it to %s (exit 1: %s), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling %s %s --no-formula --no-convoy",
+			req.Bead, req.Route, w.unconfigured(req.Route), req.Route, req.Bead)
+	}
+	return "takeaway set on " + req.Bead, nil
+}
+
+// script answers human-gate.sh, which files a gate under its key that blocks
+// its subject, its message's first line as its title and the whole message as
+// its description, and prints its id, or finds the open gate under the key and
+// prints that; --retract closes the open gates under the key.
 func (w *world) script(c rtfake.Call) gascity.Result {
 	switch c.Name {
-	case "gc-helm.sh":
-		w.add("HELM " + strings.Join(c.Args, " "))
-		if w.helmFails {
-			return gascity.Result{Code: 4, Output: "gc-helm: could not update 'tk-sub': the store refused it"}
-		}
-		w.released(c.Args)
-		return gascity.Result{}
 	case "human-gate.sh":
 		w.add("GATE " + strings.Join(c.Args, " "))
 		subject, key, message, retract := flagValue(c.Args, "--subject"), flagValue(c.Args, "--key"), flagValue(c.Args, "--message"), slices.Contains(c.Args, "--retract")
@@ -216,22 +256,17 @@ func (w *world) script(c rtfake.Call) gascity.Result {
 // release waits on has closed, as bd's ready set reads the subject once those
 // wait edges land. A subject waitingWorld starts unready so reads ready only
 // after its release.
-func (w *world) released(args []string) {
-	if len(args) < 2 || args[0] != "takeaway" || !slices.Contains(args, "--release") {
+func (w *world) released(req takeaway.Request) {
+	if !req.Release {
 		return
 	}
-	waits := 0
-	for i, a := range args {
-		if a != "--waiting-on" || i+1 == len(args) {
-			continue
-		}
-		if b, ok := w.store.Row(args[i+1]); !ok || !strings.EqualFold(b.Status, "closed") {
+	for _, id := range req.WaitingOn {
+		if b, ok := w.store.Row(id); !ok || !strings.EqualFold(b.Status, "closed") {
 			return
 		}
-		waits++
 	}
-	if waits > 0 {
-		w.store.MakeReady(args[1])
+	if len(req.WaitingOn) > 0 {
+		w.store.MakeReady(req.Bead)
 	}
 }
 

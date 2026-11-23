@@ -12,16 +12,16 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// TestAnOpenPullRequestOnEitherRecord: a bead owns an open pull request at
-// pull_request, and at either value Gas Town's pending record gives one, and at
-// no value that records a landing or an end without one.
-func TestAnOpenPullRequestOnEitherRecord(t *testing.T) {
-	for _, v := range []string{"pull_request", "pull_request_pending", "pull_request_head_changed"} {
+// TestAnOpenPullRequestOnTheRecord: a bead owns an open pull request at either
+// value Gas Town's pending record gives one, and at no value that records a
+// landing or an end without one.
+func TestAnOpenPullRequestOnTheRecord(t *testing.T) {
+	for _, v := range []string{"pull_request_pending", "pull_request_head_changed"} {
 		if !hasOpenPullRequest(Bead{MergeResult: v}) {
 			t.Errorf("merge_result %s owns an open pull request", v)
 		}
 	}
-	for _, v := range []string{"", "pre_open_gate", "merged", "mr_merged", "pull_request_closed_unmerged"} {
+	for _, v := range []string{"", "mr_merged", "pull_request_closed_unmerged", "pull_request_reconcile_invalid"} {
 		if hasOpenPullRequest(Bead{MergeResult: v}) {
 			t.Errorf("merge_result %q owns no open pull request", v)
 		}
@@ -45,6 +45,21 @@ func (s store) Rows(ids []string) (map[string]queue.Row, error) {
 	}
 	return out, nil
 }
+
+// Ready is the store's ready set, as bd serves one: each open bead waits reads
+// as clear.
+func (s store) Ready() ([]string, error) {
+	var out []string
+	for _, b := range s.beads {
+		if h, ok := s.holds[b.ID]; ok && h.Status == waits.Clear && b.Status == "open" {
+			out = append(out, b.ID)
+		}
+	}
+	return out, nil
+}
+
+// Worked names no bead: the store holds no live run.
+func (store) Worked([]string) (map[string]bool, error) { return map[string]bool{}, nil }
 
 func (s store) Holds(ids []string) (map[string]waits.Holds, map[string]error, error) {
 	holds, failed := map[string]waits.Holds{}, map[string]error{}

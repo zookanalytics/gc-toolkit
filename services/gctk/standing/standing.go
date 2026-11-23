@@ -124,8 +124,10 @@ type Reading struct {
 	// worked is the root of the live run that works each bead one works.
 	worked map[string]string
 	order  queue.Ordered
-	// places is each piece of work's place in order, by id.
+	// places is each piece of work's place in order, by id, and unsent is
+	// each piece order lists as ready work that nothing sends anywhere.
 	places map[string]queue.Place
+	unsent map[string]bool
 	// through is the bead that speaks for each bead with no standing of its
 	// own that the read met: the anchor of work a merge anchor carries, and the
 	// bead a live run works for the run's root.
@@ -213,10 +215,14 @@ func Read(ids []string, s Store) (*Reading, error) {
 		return nil, fmt.Errorf("place the work: %w", err)
 	}
 	r.places = map[string]queue.Place{}
+	r.unsent = map[string]bool{}
 	for _, list := range [][]queue.Place{r.order.Queue, r.order.NotScheduled} {
 		for _, p := range list {
 			r.places[p.ID] = p
 		}
+	}
+	for _, p := range r.order.NotScheduled {
+		r.unsent[p.ID] = true
 	}
 
 	for len(level) > 0 {
@@ -572,11 +578,10 @@ func rootOf(id string, h waits.Holds) string {
 }
 
 // hasOpenPullRequest reports whether a bead is a merge anchor whose pull
-// request is open, which is what its merge_result says: pull_request on the old
-// record (lifecycle/lifecycle.toml), or a value [pr.OnRecord] names on Gas
-// Town's pending record.
+// request is open, which is what its merge_result says: a value [pr.OnRecord]
+// names on Gas Town's pending record.
 func hasOpenPullRequest(b Bead) bool {
-	return b.MergeResult == "pull_request" || pr.OnRecord(b.MergeResult)
+	return pr.OnRecord(b.MergeResult)
 }
 
 // openWork is every open piece of work among the live beads that stands on its
@@ -615,11 +620,7 @@ func conversationEdges(b Bead) []conversation.Edge {
 	return out
 }
 
-func carriesHoldMayor(b Bead) bool {
-	for _, l := range b.Labels {
-		if strings.EqualFold(strings.TrimSpace(l), "hold:mayor") {
-			return true
-		}
-	}
-	return false
-}
+// carriesHoldMayor reports whether a bead carries hold:mayor, the label that
+// puts it on the Product Owner's desk, in every spelling the work queue's order
+// reads it in (queue.ForProductOwner).
+func carriesHoldMayor(b Bead) bool { return queue.ForProductOwner(b.Labels) }

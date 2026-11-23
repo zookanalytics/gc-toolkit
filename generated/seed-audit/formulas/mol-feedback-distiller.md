@@ -45,7 +45,7 @@ Every step closes its own bead through `assets/scripts/claim-close.sh --step
 <step-id>` (resolved into `$SC` at the top of each shell block).
 No-op arms close their OWN bead and end their shell WITHOUT draining (the
 successors re-derive the gates and no-op cheaply; only the terminal step
-drains). `DISTILL_RUN` (open | gated | aborted | off-home) is session state;
+drains). `DISTILL_RUN` (open | gated | aborted) is session state;
 a worker waking fresh re-runs load-and-gate through its cadence gate to
 rebuild it — never guesses.
 
@@ -53,7 +53,7 @@ Spec: specs/2026-08-learning-system/implementation-design.md §3; rulings D5-D7.
 
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this formula is poured by a gc order, and order dispatch injects no routing vars. (default=gc-toolkit.)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. gc sling sets it from the binding of the pool the run is slung to, and the default holds for a pour that names no agent. (default=gc-toolkit.)
   {{distill_max_age_days}}: Trickle guard (D7): when the oldest pending observation exceeds this age, the run proceeds regardless of count. (default=14)
   {{distill_min_pending}}: Cadence-gate floor (D7): judge when pending observations reach this count. Urgent observations (obs.endorsed=operator or obs.directive=standing) never wait on volume. (default=5)
   {{exemplar_cap}}: Entry budget for the exemplar corpus, template-fragments/learning-exemplars.template.md (carrier: exemplar). Read per review rather than per turn, so the cap is larger per unit of cost and still bounded. (default=8)
@@ -67,7 +67,7 @@ Variables:
 
 Steps (5):
   ├── mol-feedback-distiller.read-memory: End the agent memory waits that are done, before load-and-gate lists the due notes
-  ├── mol-feedback-distiller.load-and-gate: Prime, home-rig gate, read pending observations cross-rig, apply the D7 cadence gate [needs: mol-feedback-distiller.read-memory]
+  ├── mol-feedback-distiller.load-and-gate: Prime, read pending observations cross-rig, apply the D7 cadence gate [needs: mol-feedback-distiller.read-memory]
   ├── mol-feedback-distiller.judge-and-cluster: Judge the pending set with the learning-distill rubric; cluster onto pattern beads; run the retirement pass; leave every pattern decided [needs: mol-feedback-distiller.load-and-gate]
   ├── mol-feedback-distiller.file-and-dispatch: File one prompt-update bead per proposal, stamp consumed observations, gate contested rules, drain [needs: mol-feedback-distiller.judge-and-cluster]
   └── mol-feedback-distiller.workflow-finalize: Finalize workflow [needs: mol-feedback-distiller.file-and-dispatch]

@@ -218,23 +218,19 @@ in `assets/scripts/test-harness.sh`). `lifecycle.test.sh` names none of gctk's
 gctk change, and no suite it selects for a Go change builds the code that
 changed. No suite builds or runs helm-svc. So on a Go diff the review runs
 `go test ./...` from the repository root, and for gctk the suites of the
-commands it changes. On the host helm compiles only with ICU's cgo flags, so
-its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for the lint.
+commands it changes.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
-  `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
-  each binary is rebuilt from the rig checkout soon after a change reaches it.
+  `helm-build` orders run `assets/scripts/gc-build.sh`, which rebuilds each
+  binary from the rig checkout on the first pass after a change reaches it.
   The landing order (`gctk pr reconcile`) merges every PR on the pending
   record, and every direct landing's record is a `gctk lifecycle` write, which
   `lifecycle.sh` execs with no shell fallback. So a gctk defect reaches every
   landing in the city.
 - **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
-  machine axis and the postures. helm carries the machine values as Go
-  constants in `internal/board/derive.go` and prstatus its own switches, and
-  `lifecycle.test.sh` holds both to the TOML. No test holds the machine values
-  `assets/scripts/gate-ensure.sh` records to it, and a recorded value helm does
-  not know renders as `unknown` on the board.
+  postures. prstatus carries them as its `knownPosture` switch, and
+  `lifecycle.test.sh` holds it to the TOML. `prstatus.Derive` reads a recorded
+  posture it does not know as needs-attention.
 - **A port reads what its script read.** gctk reads bead fields the way jq
   does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and
@@ -252,21 +248,6 @@ in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for the lint.
   runner's group stop. A SIGTERM or SIGINT that reaches gctk during the call
   stops the child's group with SIGTERM, and gctk exits 128 plus the signal.
   gctk's other subprocesses stay in its own group.
-- **The board's gather loads the shared store.** helm-svc's gather reads every
-  rig's store on a cache miss. A full-row read pulls the heavy text columns out
-  of the Dolt store the city's agents share, and a round trip per epic or
-  convoy made under the board's lock serializes every board request behind one
-  slow gather. `internal/source/beads_test.go` pins which reads take the lite
-  projection and that edges, conversations and pull requests cost no read per row,
-  and `internal/server/server_test.go` pins that concurrent misses share one
-  gather, run outside the board's lock. So a gather change is read for a new
-  per-row call or a heavy column.
-- **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
-  an input convoy's tracked member, which in the common sling shape is the
-  anchor's own bead, so a roll-up over children alone shows live work as
-  stranded (`TestAnchorOwnWorkflowCounts` in `internal/board`). A derivation
-  change is checked against each shape a key takes: the anchor itself, a
-  child, and a review or rework bead.
 
 ## The helm web app
 
@@ -284,13 +265,6 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `src/rigboard/document.gen.ts` is generated from its Go types by
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
   fails without `-update` when the file is stale. Nobody writes it by hand.
-- **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
-  wire structs of the `/helm` answer by hand, because the board's `/svc/`
-  surface is not in the supervisor's OpenAPI document. No page code reads it.
-  `web/contract_parity_test.go` compares the two in both directions, and
-  `src/contract.fixture.ts` fails `npm run build` when the committed wire
-  sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. Neither check runs in a gate.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and

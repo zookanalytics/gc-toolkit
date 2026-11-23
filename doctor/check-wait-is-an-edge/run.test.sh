@@ -702,19 +702,19 @@ done
 pending blocked true
 OUT=$(PACK="$TMP/pack13" run_check); RC=$?
 eq "$RC" "0" "the same declaration with a pair that parses answers the reason"
-# (NO-DRIFT) The pair's statuses and value are the landing order's: due() in
-# services/gctk/pr/landing.go reads a record at the statuses it lists, closed
+# (NO-DRIFT) The pair's statuses and value are the landing order's: plan() in
+# services/gctk/pr/landing.go decides a record at the statuses it lists, closed
 # aside since this check lists no closed bead, and record.Read in record.go
 # marks a record whose marker, the key keys.go declares as pendingKey, reads the
 # value it compares. The declaration and the built-in list are held to that
 # code.
 PR_GO="$HERE/../../services/gctk/pr"
-due_body=$(awk '/^func \(l Landing\) due\(/ { f = 1 } f && /^}/ { exit } f' "$PR_GO/landing.go")
-due_statuses=$(printf '%s\n' "$due_body" | sed -n 's/^[[:space:]]*case \(".*"\):$/\1/p' \
+plan_body=$(awk '/^func \(u \*run\) plan\(/ { f = 1 } f && /^}/ { exit } f' "$PR_GO/landing.go")
+plan_statuses=$(printf '%s\n' "$plan_body" | sed -n 's/^[[:space:]]*case \(".*"\):$/\1/p' \
   | grep -o '"[a-z_]*"' | tr -d '"' | grep -vx closed | sort | paste -sd, -)
-# due() keeps a record only where record.Read reads it marked, which is what
+# plan() keeps a record only where record.Read reads it marked, which is what
 # makes record.Read's value the pair's.
-{ grep -q 'record\.Read(r)' <<< "$due_body" && grep -q '!rec\.Marked' <<< "$due_body"; } || due_statuses=""
+{ grep -q 'record\.Read(r)' <<< "$plan_body" && grep -q '!rec\.Marked' <<< "$plan_body"; } || plan_statuses=""
 marker_key=$(sed -n 's/^[[:space:]]*pendingKey *= *ledger\.Declare("\([^"]*\)".*/\1/p' "$PR_GO/record/keys.go")
 marked_value=$(sed -n 's/.*Marked: *get(pendingKey) *== *"\([^"]*\)".*/\1/p' "$PR_GO/record/record.go")
 record_pair() { # <entry> — blocked_reason's pair, its statuses sorted
@@ -722,14 +722,14 @@ record_pair() { # <entry> — blocked_reason's pair, its statuses sorted
   case "$rest" in *:*) st="${rest%%:*}"; rest="${rest#*:}" ;; esac
   printf '%s:%s\n' "$(printf '%s' "$st" | tr ',' '\n' | sort | paste -sd, -)" "$rest"
 }
-if [ -n "$due_statuses" ] && [ -n "$marker_key" ] && [ -n "$marked_value" ]; then
-  want="$due_statuses:$marker_key=$marked_value"
+if [ -n "$plan_statuses" ] && [ -n "$marker_key" ] && [ -n "$marked_value" ]; then
+  want="$plan_statuses:$marker_key=$marked_value"
   declared=$(grep -o '"blocked_reason=[^"]*"' "$SHIPPED/lifecycle/lifecycle.toml" | head -1 | tr -d '"')
   builtin=$(sed -n "s/^\(blocked_reason=[^']*\)'\$/\1/p" "$CHECK")
-  eq "$(record_pair "$declared")" "$want" "(NO-DRIFT) the declared pair answers the record at the statuses due() reads and the value record.Read marks"
+  eq "$(record_pair "$declared")" "$want" "(NO-DRIFT) the declared pair answers the record at the statuses plan() decides and the value record.Read marks"
   eq "$(record_pair "$builtin")" "$want" "(NO-DRIFT) the built-in pair is the same"
 else
-  bad "(NO-DRIFT) could not read due()'s statuses ('$due_statuses'), the marker's key ('$marker_key') or record.Read's value ('$marked_value') from $PR_GO"
+  bad "(NO-DRIFT) could not read plan()'s statuses ('$plan_statuses'), the marker's key ('$marker_key') or record.Read's value ('$marked_value') from $PR_GO"
 fi
 reset
 

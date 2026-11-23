@@ -121,17 +121,16 @@ func TestReactionVerbsRefuseUsageBeforeAnyCall(t *testing.T) {
 	log := stubLoggingGC(t, `{"rigs":[]}`)
 	t.Setenv("GC_RIG", "gc-toolkit")
 	for name, args := range map[string][]string{
-		"a check with no run":       {"reaction", "check", "tk-sub"},
-		"a check with a bad run":    {"reaction", "check", "tk-sub", "--run", "tk root"},
-		"a check with no bead":      {"reaction", "check", "--run", "tk-root"},
-		"a check of a blank bead":   {"reaction", "check", " ", "--run", "tk-root"},
-		"a sling with no bead":      {"reaction", "sling"},
-		"a sling of a blank bead":   {"reaction", "sling", ""},
-		"a sling with two beads":    {"reaction", "sling", "tk-sub", "tk-other"},
-		"a sling's unknown flag":    {"reaction", "sling", "tk-sub", "--nudge"},
-		"a sling's dry run":         {"reaction", "sling", "tk-sub", "--dry-run"},
-		"a sweep with a bead":       {"reaction", "sweep", "tk-sub"},
-		"a pool answer with a bead": {"reaction", "deliverable", "tk-sub"},
+		"a check with no run":     {"reaction", "check", "tk-sub"},
+		"a check with a bad run":  {"reaction", "check", "tk-sub", "--run", "tk root"},
+		"a check with no bead":    {"reaction", "check", "--run", "tk-root"},
+		"a check of a blank bead": {"reaction", "check", " ", "--run", "tk-root"},
+		"a sling with no bead":    {"reaction", "sling"},
+		"a sling of a blank bead": {"reaction", "sling", ""},
+		"a sling with two beads":  {"reaction", "sling", "tk-sub", "tk-other"},
+		"a sling's unknown flag":  {"reaction", "sling", "tk-sub", "--nudge"},
+		"a sling's dry run":       {"reaction", "sling", "tk-sub", "--dry-run"},
+		"a sweep with a bead":     {"reaction", "sweep", "tk-sub"},
 	} {
 		var out, errb bytes.Buffer
 		if code := Run(args, "test", &out, &errb); code != 2 {
@@ -147,9 +146,8 @@ func TestReactionVerbsRefuseUsageBeforeAnyCall(t *testing.T) {
 }
 
 // With no GC_RIG there is no proactive pool to name, so a sling and a sweep
-// fail with exit 1, saying so once, and the pool's answer is no, before
-// anything is read. A sweep whose deadline does not read fails before
-// anything is read, too.
+// fail with exit 1, saying so once, before anything is read. A sweep whose
+// deadline does not read fails before anything is read, too.
 func TestReactionVerbsFailClosedWithNoRigOrDeadline(t *testing.T) {
 	log := stubLoggingGC(t, `{"rigs":[]}`)
 	t.Setenv("GC_RIG", "")
@@ -159,14 +157,9 @@ func TestReactionVerbsFailClosedWithNoRigOrDeadline(t *testing.T) {
 			t.Errorf("%v with no GC_RIG exited %d, saying %q", args, code, errb.String())
 		}
 	}
-	var out, errb bytes.Buffer
-	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: cannot rig-qualify the proactive pool") {
-		t.Errorf("deliverable with no GC_RIG exited %d, saying %q", code, out.String())
-	}
 	t.Setenv("GC_RIG", "gc-toolkit")
 	t.Setenv("GC_PROACTIVE_SWEEP_TIMEOUT", "soon")
-	out.Reset()
-	errb.Reset()
+	var out, errb bytes.Buffer
 	if code := Run([]string{"reaction", "sweep"}, "test", &out, &errb); code != 1 || !strings.Contains(errb.String(), "GC_PROACTIVE_SWEEP_TIMEOUT must be a duration") {
 		t.Errorf("a sweep with an unreadable deadline exited %d, saying %q", code, errb.String())
 	}
@@ -187,7 +180,7 @@ func stubCity(t *testing.T, blocked []byte) (log, store string) {
 	t.Helper()
 	dir := t.TempDir()
 	rig, town := filepath.Join(dir, "rig"), filepath.Join(dir, "town")
-	for _, d := range []string{filepath.Join(rig, ".beads"), filepath.Join(town, ".beads"), filepath.Join(dir, "bin"), filepath.Join(dir, "scripts")} {
+	for _, d := range []string{filepath.Join(rig, ".beads"), filepath.Join(town, ".beads"), filepath.Join(town, ".gc"), filepath.Join(dir, "bin"), filepath.Join(dir, "scripts")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -224,13 +217,19 @@ esac
 `
 	script := "#!/bin/sh\necho \"script $(basename \"$0\") $*\" >> \"$STUB_LOG\"\n"
 	for path, body := range map[string]string{filepath.Join(dir, "bin", "gc"): gc,
-		filepath.Join(dir, "scripts", "gc-helm.sh"): script, filepath.Join(dir, "scripts", "human-gate.sh"): script} {
+		filepath.Join(dir, "scripts", "human-gate.sh"): script, filepath.Join(dir, "scripts", "run-cancel.sh"): script} {
 		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GCTK_SCRIPTS_DIR", filepath.Join(dir, "scripts"))
+	// The city's root is the town the stub's rig list names as its HQ, which
+	// holds the dispatch locks a release's disarm takes, and never the city
+	// this test runs in.
+	for _, v := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
+		t.Setenv(v, "")
+	}
 	t.Setenv("STUB_LOG", log)
 	t.Setenv("STUB_DIR", dir)
 	t.Setenv("STUB_RIG", rig)
@@ -330,20 +329,19 @@ func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 	}
 }
 
-// Each command reads the city's rig list at most once, however many questions
-// it asks of it: the dispose for the pool it routes to, and the sling, whose
-// subject is in the store gc resolves here, and the sweep, which the order
-// gives its store, not at all. Each makes one ready read at most.
-func TestReactionVerbsReadTheRigListOnce(t *testing.T) {
+// No command reads the city's rig list, however many questions it asks: the
+// dispose slings its closer with no question about the pool first, the sling's
+// subject is in the store gc resolves here, and the order gives the sweep its
+// store. Each makes one ready read at most.
+func TestReactionVerbsReadNoRigList(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
 	for name, c := range map[string]struct {
 		args  []string
-		rigs  int
 		sling string
 	}{
-		"a sling":   {[]string{"reaction", "sling", "tk-sub"}, 0, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
-		"a sweep":   {[]string{"reaction", "sweep", "--db", store}, 0, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
-		"a dispose": {[]string{"reaction", "dispose", "tk-sub", "--disposition", "close", "--reason", "nothing to do", "--takeaway", "nothing to do"}, 1, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close"},
+		"a sling":   {[]string{"reaction", "sling", "tk-sub"}, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
+		"a sweep":   {[]string{"reaction", "sweep", "--db", store}, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.proactive tk-sub --on mol-first-reaction"},
+		"a dispose": {[]string{"reaction", "dispose", "tk-sub", "--disposition", "close", "--reason", "nothing to do", "--takeaway", "nothing to do"}, "sling --rig gc-toolkit gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close"},
 	} {
 		if err := os.WriteFile(log, nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -353,8 +351,8 @@ func TestReactionVerbsReadTheRigListOnce(t *testing.T) {
 			t.Errorf("%s exited %d: %s", name, code, errb.String())
 			continue
 		}
-		if got := len(calls(t, log, "rig list")); got != c.rigs {
-			t.Errorf("%s read the rig list %d times, want %d: %v", name, got, c.rigs, calls(t, log, ""))
+		if got := calls(t, log, "rig list"); len(got) != 0 {
+			t.Errorf("%s read the rig list %d times: %v", name, len(got), calls(t, log, ""))
 		}
 		if got := len(calls(t, log, "bd --db "+store+" ready")); got > 1 {
 			t.Errorf("%s read the ready set %d times", name, got)
@@ -380,28 +378,6 @@ func TestReactionSlingPassesGcSlingsRefusalThrough(t *testing.T) {
 	errb.Reset()
 	if code := Run([]string{"reaction", "sling", "tk-sub"}, "test", &out, &errb); code != 1 || !strings.Contains(errb.String(), "gc sling refused or failed on tk-sub (exit 1: gc sling: no such target)") {
 		t.Errorf("a sling gc sling failed exited %d: %s", code, errb.String())
-	}
-}
-
-// The pool's answer is the roster's, whatever warning gc prints on stderr beside
-// it: yes for the rig's registered proactive pool, and no for one the roster
-// does not register or shows suspended, each saying why on stdout.
-func TestReactionDeliverableAnswersTheRigsPool(t *testing.T) {
-	stubCity(t, []byte("[]"))
-	var out, errb bytes.Buffer
-	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 0 || !strings.HasPrefix(out.String(), "yes: gc-toolkit/gc-toolkit.proactive is registered") {
-		t.Errorf("a registered pool: exit %d, %q", code, out.String())
-	}
-	t.Setenv("STUB_AGENTS", `{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}`)
-	out.Reset()
-	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: no agent is registered at gc-toolkit/gc-toolkit.proactive") {
-		t.Errorf("an absent pool: exit %d, %q", code, out.String())
-	}
-	t.Setenv("STUB_AGENTS", `{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","suspended":true,"pool":{"max":2}}]}`)
-	t.Setenv("STUB_WARN", "city.toml: [agents] is a deprecated compatibility alias for [agent_defaults]; rewrite the table name to [agent_defaults]")
-	out.Reset()
-	if code := Run([]string{"reaction", "deliverable"}, "test", &out, &errb); code != 1 || !strings.HasPrefix(out.String(), "no: the pool at gc-toolkit/gc-toolkit.proactive is suspended") {
-		t.Errorf("a suspended pool gc warned beside: exit %d, %q", code, out.String())
 	}
 }
 
@@ -432,8 +408,8 @@ func TestReactionDisposeReadsAFalseAnchorAsNone(t *testing.T) {
 			t.Errorf("an anchor of %s: the dispose exited %d: %s", anchor, code, errb.String())
 			continue
 		}
-		routed := slices.ContainsFunc(calls(t, log, "script gc-helm.sh takeaway"), func(l string) bool {
-			return strings.Contains(l, " --route gc-toolkit/gc-toolkit.polecat --no-wait")
+		routed := slices.ContainsFunc(calls(t, log, "sling "), func(l string) bool {
+			return strings.Contains(l, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy")
 		})
 		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " set-state tk-sub hold=mayor ") })
 		if routed != admitted || held == admitted {

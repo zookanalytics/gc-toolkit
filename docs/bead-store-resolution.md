@@ -258,7 +258,7 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 | `question` | is an open human gate, or an open decision that does not wait on work of its own first |
 | `conversation` | is an open conversation its sitting does not stay in, which answers no open human gate and tracks no decision that asks |
 | `pull-request` | carries a pull request that waits on the operator's review or needs the operator's attention |
-| `routed-to-you` | is any other open bead only a person clears, such as a task in the operator's queue |
+| `assigned-to-you` | is any other open bead only a person clears, such as a task in the operator's queue |
 | `ruling` | is an epic with members and none of them open, or a landed Delivery |
 | `own-wait` | is a human gate, or a bead only a person clears, that the stuck bead waits on through a wait of its own |
 | `further-along` | is such a gate or bead further along its waits, an ancestor's included |
@@ -267,7 +267,10 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 | `answers` | is the question a conversation answers, which the question's own reading carries |
 | `members` | is an epic or a Delivery with no members at all |
 | `gate` | is a gate that is no human gate |
-| `not-scheduled` | is work no pool or agent takes as things stand: no arm, route, assignee or live run moves it, or a dispatch hold such as `hold:mayor` holds it |
+| `not-scheduled` | is ready work that nothing sends anywhere: the store serves it as ready, no dispatch hold holds it, and no arm, route, assignee or live run moves it |
+| `outside` | is work that waits outside the city: `hold:external` holds it and no live run works it |
+| `for-product-owner` | is work nothing sends that is held for the Product Owner's placement, `hold:mayor` |
+| `not-ready` | is any other work nothing sends, which the store does not serve as ready |
 | `unread` | could not be read, has no standing of its own and no bead that speaks for it, waits on itself through the beads it waits on, or is a `waits-for` wait the store cannot judge yet |
 
 So a queued bead is stuck on what stops the first of its waits that does not

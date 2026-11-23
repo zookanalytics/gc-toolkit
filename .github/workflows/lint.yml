@@ -63,12 +63,6 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # helm reaches ICU through Dolt's go-icu-regex, a cgo package that
-      # includes unicode/regex.h, which the image installs without headers,
-      # and the lint type-checks it.
-      - name: Install ICU's headers for helm's cgo
-        run: sudo apt-get update -q && sudo apt-get install -y -q libicu-dev
-
       - name: Lint every package with golangci-lint
         run: go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(cat .golangci-lint-version)" run ./...
 

@@ -71,6 +71,17 @@ func (g graph) ClosedBeneath(parents []string) ([]Bead, error) {
 
 func (g graph) LiveRuns() ([]waits.Run, error) { return g.runs, nil }
 
+// Worked names each bead one of the graph's live runs works.
+func (g graph) Worked(ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, r := range g.runs {
+		if r.Live && slices.Contains(ids, r.Bead) {
+			out[r.Bead] = true
+		}
+	}
+	return out, nil
+}
+
 // TestAdvance reads how far the city carries a bead, by the rule that placed
 // it, and where it stands by what it waits on. Each case reads the bead asked
 // about alone, and again with every bead the store holds, and both reads give
@@ -107,9 +118,9 @@ func TestAdvance(t *testing.T) {
 		{name: "work a live run works advances from the run's start",
 			live: []Bead{work("tk-x", "")}, runs: []waits.Run{{Root: "tk-root", Bead: "tk-x", Live: true}},
 			asked: "tk-x", want: advancing, frontier: VerdictReady},
-		{name: "routed work held for the Product Owner is work nobody takes",
+		{name: "routed work held for the Product Owner waits for the Product Owner",
 			live:  []Bead{{ID: "tk-x", Status: "open", IssueType: "task", Assignee: pool, Labels: []string{"hold:mayor"}}},
-			asked: "tk-x", want: stuck("tk-x", "not-scheduled"), frontier: VerdictReady},
+			asked: "tk-x", want: stuck("tk-x", "for-product-owner"), frontier: VerdictReady},
 		{name: "queued work advances behind queued work",
 			live: []Bead{work("tk-x", pool), work("tk-y", pool)}, waitsOn: map[string][]string{"tk-x": {"tk-y"}},
 			asked: "tk-x", want: advancing, frontier: VerdictAdvancing},
@@ -134,7 +145,7 @@ func TestAdvance(t *testing.T) {
 			asked:   "tk-x", want: stuck("tk-g", "further-along"), frontier: VerdictStuck},
 		{name: "work in your queue is stuck on itself, and what it waits on advances apart",
 			live: []Bead{work("tk-x", "human"), work("tk-y", pool)}, waitsOn: map[string][]string{"tk-x": {"tk-y"}},
-			asked: "tk-x", want: stuck("tk-x", "routed-to-you"), frontier: VerdictAdvancing},
+			asked: "tk-x", want: stuck("tk-x", "assigned-to-you"), frontier: VerdictAdvancing},
 		{name: "a parked bead is stuck on the gate that parks it",
 			live: []Bead{work("tk-x", pool), park}, waitsOn: map[string][]string{"tk-x": {"tk-park"}},
 			asked: "tk-x", want: stuck("tk-park", "parked"), frontier: VerdictStuck},

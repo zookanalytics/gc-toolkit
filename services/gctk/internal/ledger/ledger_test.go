@@ -1,11 +1,15 @@
 package ledger
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -577,6 +581,45 @@ func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
 	}
 }
 
+// A release clears Gas City's route and session pins, and a label removal takes
+// the label by its exact text, in the one update that carries the act's other
+// changes.
+func TestAReleaseAndALabelRemovalRideTheOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "in_progress", Assignee: "rig/polecat-1", Labels: []string{"hold:mayor", " Hold:Mayor", "keep"},
+		Metadata: map[string]string{"gc.routed_to": "rig/polecat", "gc.execution_routed_to": "rig/polecat",
+			"gc.session_name": "polecat-1", "gc.session_id": "s-1"}})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("in_progress", "rig/polecat-1")
+	w.Status("open")
+	w.Assignee("")
+	w.Release()
+	w.RemoveLabel("hold:mayor")
+	w.RemoveLabel(" Hold:Mayor")
+	w.RemoveLabel("hold:mayor")
+	testText.Set(w, "released")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=in_progress", "--if-assignee=rig/polecat-1", "--status=open", "--assignee=",
+		"--set-metadata", "gc.routed_to=", "--set-metadata", "test.ledger.text=released",
+		"--unset-metadata", "gc.execution_routed_to", "--unset-metadata", "gc.session_name", "--unset-metadata", "gc.session_id",
+		"--remove-label", "hold:mayor", "--remove-label", " Hold:Mayor"}
+	if got := s.Writes(); len(got) != 1 || !slices.Equal(got[0].Args, want) {
+		t.Fatalf("the writes are %q, want one update %q", got, want)
+	}
+	b, _ := s.Row("b-1")
+	if !slices.Equal(b.Labels, []string{"keep"}) || b.Metadata["gc.routed_to"] != "" || b.Metadata["gc.session_id"] != "" {
+		t.Fatalf("the bead keeps labels %q and metadata %v", b.Labels, b.Metadata)
+	}
+	w = l.Write("b-1")
+	w.RemoveLabel("keep")
+	if err := l.Commit(w); err != nil {
+		t.Fatalf("a write that removes a label alone carries a change: %v", err)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()
@@ -589,6 +632,35 @@ func TestAViewReadsItsKey(t *testing.T) {
 	v := testText.View()
 	if got, ok, err := v.Get(r); err != nil || !ok || got != "aliased" || v.Name() != "test.ledger.text" {
 		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
+	}
+}
+
+// A ledger Within a context ends each call it makes to the city's store once
+// the context ends, as OpenContext's does: gc on PATH here sleeps. A store that
+// cannot be stopped, such as the fake, answers as it does.
+func TestWithinEndsTheStoresCallsWithItsContext(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_NO_API", "1")
+	l, err := Open(filepath.Join(t.TempDir(), ".beads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := l.Within(ctx).Find(Every()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a stopped read answered %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a stopped read took %s", took.Round(time.Millisecond))
+	}
+	f := New(fake.New())
+	if f.Within(ctx) != f {
+		t.Fatal("a fake store's ledger did not answer as it does")
 	}
 }
 

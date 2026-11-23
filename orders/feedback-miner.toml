@@ -1,16 +1,21 @@
-# feedback-miner — daily sweep of THIS rig's merged/closed PR review threads:
-# files one closed observation bead per review post from outside the city, and
-# one per corrective-feedback hit in the city's own posts (obs.source=miner),
-# deduped on (obs.provenance, obs.category).
+# feedback-miner — every two days, a sweep of THIS rig's merged/closed PR
+# review threads: files one closed observation bead per review post from
+# outside the city, and one per corrective-feedback hit in the city's own posts
+# (obs.source=miner), deduped on (obs.provenance, obs.category).
 # Observations, and one finding when a city post lacks its mark — judging is
 # the distiller's. Rig-scoped with a BARE pool so the wisp lands in, and is
 # claimed from, each importing rig's own polecat store; no home-rig gate on
 # purpose (D5) — a rig without gh/GitHub/auth no-ops in the formula's
 # load-context step.
+#
+# Each run costs a polecat session in every rig, so the sweep runs every two
+# days. The formula's window (miner_window_days, 3 days) has to overlap the
+# cadence, since the overlap is what makes a capped or interrupted run
+# resumable: 48h leaves a day of overlap, where 72h would leave none.
 [order]
 description = "learning: mine this rig's merged/closed PR review threads for outside review feedback and corrective feedback; file observation beads"
 formula = "mol-feedback-miner"
 trigger = "cooldown"
-interval = "24h"
+interval = "48h"
 pool = "gc-toolkit.polecat"
 scope = "rig"

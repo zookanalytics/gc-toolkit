@@ -299,15 +299,15 @@ bead tk-stay <<'J'
 J
 edge tk-stay tracks tk-stayheld
 edge tk-stay blocks tk-sent
-# Settled pull requests that wait on the operator's review: a posture of none,
-# and one of commented. tk-prwait waits on both.
+# Pull requests on Gas Town's pending record that wait on the operator's
+# review, each validated at its head with a review result passed there and the
+# GitHub read the PR watch saved: one nobody reviewed, and one whose only review
+# is a comment the intake has handled. tk-prwait waits on both.
 bead tk-pr-none <<'J'
-{"id":"tk-pr-none","title":"a settled PR nobody reviewed","status":"open","issue_type":"task",
- "metadata":{"merge_result":"pull_request","pr_number":"11","pr.machine":"settled@h1@2026-10-01T00:00:00Z","pr_posture":"none@h1@2026-10-01T00:00:00Z"}}
+{"id":"tk-pr-none","title":"a PR nobody reviewed","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request_pending","pr_number":"11","pr_url":"https://github.com/acme/widgets/pull/11","pr_repo":"acme/widgets","pr_head_sha":"1111111111111111111111111111111111111111","merged_target":"main","branch":"polecat/tk-pr-none","review_results":"[{\"head\":\"1111111111111111111111111111111111111111\",\"target\":\"main\",\"passed\":true}]","pr_github_read":"{\"pr\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"url\":\"https://github.com/acme/widgets/pull/11\",\"number\":11,\"repository\":\"acme/widgets\",\"head_branch\":\"polecat/tk-pr-none\",\"base\":\"main\",\"head\":\"1111111111111111111111111111111111111111\",\"state\":\"OPEN\",\"draft\":false,\"merge_state\":\"CLEAN\"},\"checks\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"head\":\"1111111111111111111111111111111111111111\",\"runs\":[{\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]},\"conversation\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"since\":\"\",\"approvers\":[],\"requesters\":[],\"feedback\":{\"review\":0,\"inline\":0,\"conversation\":0},\"awaiting\":[],\"unresolved\":[]},\"labels\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"names\":[]}}"}}
 J
 bead tk-pr-commented <<'J'
-{"id":"tk-pr-commented","title":"a settled PR with comments","status":"open","issue_type":"task",
- "metadata":{"merge_result":"pull_request","pr_number":"12","pr.machine":"settled@h1@2026-10-01T00:00:00Z","pr_posture":"commented@h1@2026-10-01T00:00:00Z"}}
+{"id":"tk-pr-commented","title":"a PR with comments","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request_pending","pr_number":"12","pr_url":"https://github.com/acme/widgets/pull/12","pr_repo":"acme/widgets","pr_head_sha":"1111111111111111111111111111111111111111","merged_target":"main","branch":"polecat/tk-pr-commented","review_results":"[{\"head\":\"1111111111111111111111111111111111111111\",\"target\":\"main\",\"passed\":true}]","pr_github_read":"{\"pr\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"url\":\"https://github.com/acme/widgets/pull/12\",\"number\":12,\"repository\":\"acme/widgets\",\"head_branch\":\"polecat/tk-pr-commented\",\"base\":\"main\",\"head\":\"1111111111111111111111111111111111111111\",\"state\":\"OPEN\",\"draft\":false,\"merge_state\":\"CLEAN\"},\"checks\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"head\":\"1111111111111111111111111111111111111111\",\"runs\":[{\"name\":\"test\",\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]},\"conversation\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"since\":\"\",\"approvers\":[],\"requesters\":[],\"feedback\":{\"review\":501,\"inline\":0,\"conversation\":0},\"awaiting\":[],\"unresolved\":[]},\"labels\":{\"read_at\":\"2026-10-01T00:00:00Z\",\"names\":[]}}","pr_review_watermark":"501"}}
 J
 bead tk-prwait <<'J'
 {"id":"tk-prwait","title":"waits on two reviews","status":"open","issue_type":"task","metadata":{}}
@@ -756,10 +756,10 @@ eq "$(blkr tk-unsent)" "stuck tk-unsent not-scheduled" "  ... and one waiting on
 run tk-stayheld --frontier --json
 eq "$(blkr tk-stay)" "advancing - -" "a conversation its sitting stays in advances while the work it sent does"
 
-# A settled pull request whose posture is none or commented waits on the
-# operator's review.
+# A pull request with no approval, nobody's review or only a comment, waits on
+# the operator's review.
 run tk-prwait --frontier --json
-eq "$(blkr tk-pr-none)" "stuck tk-pr-none pull-request" "a settled PR with no review is stuck on itself, waiting on review"
+eq "$(blkr tk-pr-none)" "stuck tk-pr-none pull-request" "a PR with no review is stuck on itself, waiting on review"
 eq "$(blkr tk-pr-commented)" "stuck tk-pr-commented pull-request" "  ... and so is one with comments and no verdict"
 eq "$(val "$(after "$J" frontier)" verdict)" stuck "  ... so the subject waiting on them is stuck"
 
@@ -789,7 +789,7 @@ eq "$(kid tk-kid-pool)" "advancing - -" "a pool-routed open child advances"
 eq "$(kid tk-kid-prog)" "advancing - -" "an in-progress child advances"
 eq "$(kid tk-kid-hooked)" "advancing - -" "a hooked child is listed and advances: an agent holds it"
 eq "$(kid tk-anchor)" "stuck tk-anchor pull-request" "a pull request nothing reviewed waits on the operator's review"
-eq "$(kid tk-kid-human)" "stuck tk-kid-human routed-to-you" "an open child in the operator's queue is a person's to move"
+eq "$(kid tk-kid-human)" "stuck tk-kid-human assigned-to-you" "an open child in the operator's queue is a person's to move"
 eq "$(kid tk-kid-armed)" "stuck tk-hg own-wait" "an armed child behind a human gate is stuck on the gate"
 eq "$(kid tk-kid-rework)" "stuck tk-kid-rework not-scheduled" "a rework child whose route the pour cleared is work nobody routes"
 eq "$(kid tk-kid-pinned)" "stuck tk-kid-pinned status" "a pinned child is listed and stuck on its status, though it carries a route"
@@ -807,7 +807,7 @@ eq "$(kid tk-r-ended)" "stuck tk-r-ended not-scheduled" "  ... and its sibling w
 run tk-outer --horizon --json
 eq "$(kid tk-inner)" "advancing - -" "a child epic advances while every open member does"
 eq "$(kid tk-delivery)" "stuck tk-delivery-kid not-scheduled" "a Delivery is stuck on what stops its first open member"
-eq "$(kid tk-mayor)" "stuck tk-mayor not-scheduled" "routed work held for the Product Owner is work nobody takes"
+eq "$(kid tk-mayor)" "stuck tk-mayor for-product-owner" "routed work held for the Product Owner waits for the Product Owner"
 
 # --- one call is enough: the opening's subject slice, verdict and snapshot --
 # The done-condition: with both dimensions opted in, ONE invocation yields the

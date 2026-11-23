@@ -3,7 +3,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import golden from '../../../internal/rigboard/testdata/gc-toolkit.board.json';
 import { Page } from './Board';
-import type { Document } from './document.gen';
+import type { Asked, Document } from './document.gen';
 
 // The page runs here on the document the rig read builds from the committed
 // gc-toolkit fixture (internal/rigboard/testdata/gc-toolkit.board.json), so a
@@ -13,6 +13,9 @@ import type { Document } from './document.gen';
 
 const board = golden as unknown as Document;
 const READ_AT = '2026-11-11T16:40:00Z';
+/** The line saying when GitHub was last asked, as a rig read gives it beside
+ *  the document. */
+const ASKED: Asked = { state: 'asked', at: '2026-11-11T16:39:00Z' };
 
 interface Call {
   url: string;
@@ -53,7 +56,7 @@ beforeEach(() => {
       scrolls.push({ el: this, arg });
     },
   });
-  rigReads = [() => json({ read_at: READ_AT, board })];
+  rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board })];
   engageReply = () =>
     json({
       bead: 'tk-q4dd6mk',
@@ -192,7 +195,7 @@ describe('a read that fails', () => {
 
   it('keeps the last good document on screen with its read time and the failure beside it', async () => {
     rigReads = [
-      () => json({ read_at: READ_AT, board }),
+      () => json({ read_at: READ_AT, asked: ASKED, board }),
       () => json({ error: 'the gc-toolkit board could not be read: the store did not answer' }, 502),
     ];
     render(<Page />);
@@ -203,8 +206,75 @@ describe('a read that fails', () => {
     const alert = await screen.findByText(/The latest read failed at/);
     expect(text(alert)).toContain('the store did not answer');
     expect(text(alert)).toContain('This is the board read at');
+    expect(text(askedLine())).toBe(`GitHub last asked at ${new Date(ASKED.at!).toLocaleTimeString()}.`);
     expect(rowIds()).toContain('tk-q4dd6mk');
     expect(text(document.querySelector('.lead-count'))).toBe(String(board.needs_you.count));
+  });
+});
+
+/** The status line saying when GitHub was last asked. */
+function askedLine(): HTMLElement | null {
+  const line = [...document.querySelectorAll('p.status')].find((p) => text(p).includes('GitHub'));
+  return line instanceof HTMLElement ? line : null;
+}
+
+describe('the line saying when GitHub was last asked', () => {
+  /** Draws the rig's board on a read that gives this line, and returns it. */
+  async function drawn(asked: Asked): Promise<HTMLElement | null> {
+    rigReads = [() => json({ read_at: READ_AT, asked, board })];
+    render(<Page />);
+    await loaded();
+    return askedLine();
+  }
+
+  it('says when the newest pass that asked GitHub started, under the read time', async () => {
+    const line = await drawn(ASKED);
+    expect(text(line)).toBe(`GitHub last asked at ${new Date(ASKED.at!).toLocaleTimeString()}.`);
+    expect(line?.className).toBe('status');
+    const status = [...document.querySelectorAll('p.status')].map((p) => text(p));
+    expect(status[0]).toMatch(/^Read at /);
+    expect(status[1]).toBe(text(line));
+  });
+
+  it('marks a pass the read judged stale', async () => {
+    const at = '2026-11-11T16:30:00Z';
+    const line = await drawn({ state: 'stale', at });
+    expect(text(line)).toBe(`GitHub last asked at ${new Date(at).toLocaleTimeString()}, which is stale.`);
+    expect(line?.className).toBe('status status--stale');
+  });
+
+  it('gives the date of a pass that started on another day than the read', async () => {
+    const at = '2026-11-09T16:30:00Z';
+    const line = await drawn({ state: 'stale', at });
+    expect(text(line)).toBe(`GitHub last asked at ${new Date(at).toLocaleString()}, which is stale.`);
+  });
+
+  it('says since when no pass the history holds succeeded', async () => {
+    const since = '2026-11-11T16:10:00Z';
+    const line = await drawn({ state: 'not_asked', since });
+    expect(text(line)).toBe(`GitHub not asked: no pass since ${new Date(since).toLocaleTimeString()} succeeded.`);
+    expect(line?.className).toBe('status status--stale');
+  });
+
+  it('says so when the history holds no pass', async () => {
+    const line = await drawn({ state: 'not_asked' });
+    expect(text(line)).toBe("GitHub not asked: Gas City's run history holds no pass.");
+    expect(line?.className).toBe('status status--stale');
+  });
+
+  it('says a rig no pass watches is not asked about', async () => {
+    const line = await drawn({ state: 'unwatched' });
+    expect(text(line)).toBe("GitHub is not asked about this rig's pull requests.");
+    expect(line?.className).toBe('status');
+  });
+
+  it('says why the line could not be read, and draws the board', async () => {
+    const line = await drawn({ state: 'unread', error: 'read the run history of pr-poll:rig:gc-toolkit: cache not live' });
+    expect(text(line)).toBe(
+      'When GitHub was last asked could not be read: read the run history of pr-poll:rig:gc-toolkit: cache not live.',
+    );
+    expect(line?.className).toBe('status status--failed');
+    expect(rowIds().length).toBeGreaterThan(0);
   });
 });
 
@@ -372,7 +442,7 @@ describe('the Needs you page', () => {
     const answered: Document = structuredClone(board);
     answered.rows['tk-toahupq'].conversation = 'tk-c4nv0';
     answered.rows['tk-toahupq'].signal = 'Conversation waits for you';
-    rigReads = [() => json({ read_at: READ_AT, board: answered })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: answered })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
@@ -390,7 +460,7 @@ describe('the Needs you page', () => {
     const decisions: Document = structuredClone(board);
     decisions.rows['tk-toahupq'] = { ...decisions.rows['tk-toahupq'], kind: 'decision', conversation: 'tk-c4nv0', signal: 'In conversation' };
     decisions.rows['tk-q4dd6mk'] = { ...decisions.rows['tk-q4dd6mk'], kind: 'decision' };
-    rigReads = [() => json({ read_at: READ_AT, board: decisions })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: decisions })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
@@ -492,18 +562,18 @@ describe('the Needs you page', () => {
   });
 
   it('keeps a kind shown alone a control once a read stops counting it, so every kind can show again', async () => {
-    // The cut routes no need to the operator, so the first read counts its
-    // ruling as routed to you instead, and the next read is the cut's own.
-    const routed: Document = structuredClone(board);
-    const n = routed.needs_you;
+    // The cut assigns no need to the operator, so the first read counts its
+    // ruling as assigned to you instead, and the next read is the cut's own.
+    const assigned: Document = structuredClone(board);
+    const n = assigned.needs_you;
     const need = n.counted.find((x) => x.kind === 'Ruling')!;
-    need.kind = 'Routed to you';
-    n.kinds = [...n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k)), { kind: 'Routed to you', count: 1 }];
-    rigReads = [() => json({ read_at: READ_AT, board: routed }), () => json({ read_at: READ_AT, board })];
+    need.kind = 'Assigned to you';
+    n.kinds = [...n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k)), { kind: 'Assigned to you', count: 1 }];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: assigned }), () => json({ read_at: READ_AT, asked: ASKED, board })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
-    fireEvent.click(screen.getByRole('button', { name: '1 routed to you' }));
+    fireEvent.click(screen.getByRole('button', { name: '1 assigned to you' }));
     expect(rowIds()).toEqual(needIds([need]));
     // A tab shown again reads the document again.
     act(() => {
@@ -511,11 +581,11 @@ describe('the Needs you page', () => {
     });
     await screen.findByRole('button', { name: '1 ruling' });
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
-    const shown = within(strip).getByRole('button', { name: '0 routed to you' });
+    const shown = within(strip).getByRole('button', { name: '0 assigned to you' });
     expect(shown.getAttribute('aria-pressed')).toBe('true');
     expect(rowIds()).toEqual([]);
     fireEvent.click(shown);
-    expect(within(strip).queryByText(/routed to you/)).toBeNull();
+    expect(within(strip).queryByText(/assigned to you/)).toBeNull();
     expect(rowIds()).toEqual(needIds(board.needs_you.counted));
   });
 
@@ -530,7 +600,7 @@ describe('the Needs you page', () => {
     );
     n.count = n.counted.length;
     n.kinds = n.kinds.map((k) => (k.kind === 'Ruling' ? { ...k, count: 0 } : k));
-    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
@@ -553,7 +623,7 @@ describe('the Needs you page', () => {
     n.counted = [];
     n.count = 0;
     n.kinds = n.kinds.map((k) => ({ ...k, count: 0 }));
-    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
@@ -775,7 +845,7 @@ describe('a pull request', () => {
     const doc = structuredClone(board);
     const held = doc.rows['tk-1tfzr71.66'];
     held.pull_request = { ...held.pull_request!, state: 'needs-attention', held: ['gate', 'review'] };
-    rigReads = [() => json({ read_at: READ_AT, board: doc })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     expect(readings('tk-1tfzr71.66')).toEqual({
@@ -812,7 +882,7 @@ describe('Details', () => {
       kind: 'decision',
       handback: { conversation: 'tk-c0nv9', at: '2026-11-17T07:35:05Z', text: '**Ruled: no warning lints.**\n\nThe report it sent is still out.' },
     };
-    rigReads = [() => json({ read_at: READ_AT, board: decided })];
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: decided })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);

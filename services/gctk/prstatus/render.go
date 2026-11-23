@@ -15,8 +15,8 @@ import (
 // person owes the next move on. The pending record is the record a PR's bead
 // carries from its publication to its merge, whose values
 // services/gctk/pr/record declares and docs/state-machine.md ("The pending
-// record") defines. A display asks the evaluator over the GitHub
-// read the landing order saved on the bead ([pr.FromStore]). The precedence is
+// record") defines. A display asks the evaluator over the read the one-PR
+// update saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one
@@ -77,15 +77,11 @@ func Render(a pr.Answer, f Facts) State {
 	return NeedsReview
 }
 
-// RenderReasons returns what holds a PR on Gas Town's pending record, in the
-// order [Reasons] gives: each open human gate the walk names, a review run that
-// ended without a result at the PR's head, the review threads the evaluator
-// finds waiting on the city's answer, and each bead a person owes the next move
-// on. The threads hold the PR only while nothing of the city's acts on them,
-// the rule [unansweredFeedback] applies on the old record. The merge pass's
-// blocked verdict and its count of threads are no reason here: that pass reads
-// only the old record, so on a bead on this one they stand as it last wrote
-// them.
+// RenderReasons returns what holds a PR on Gas Town's pending record, in this
+// order: each open human gate the walk names, a review run that ended without a
+// result at the PR's head, the review threads the evaluator finds waiting on
+// the city's answer, and each bead a person owes the next move on. The threads
+// hold the PR only while nothing of the city's acts on them.
 func RenderReasons(a pr.Answer, f Facts) []Reason {
 	var out []Reason
 	for _, g := range f.Gates {
@@ -132,7 +128,7 @@ func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 }
 
 // RenderHeld returns the held: value of each of [RenderReasons], once each, as
-// [Held] does on the old record.
+// [Held] does of [Reasons].
 func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f)) }
 
 // threadsHeld is how many review threads the answer names as waiting on the

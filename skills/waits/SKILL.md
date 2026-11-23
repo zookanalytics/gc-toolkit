@@ -233,7 +233,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 "$GCTK" bead disarm <bead> --reason "<why>"
 ```
-- **A park** (`gc-helm.sh park`) is released by closing its gate,
+- **A park** (`gctk bead park`) is released by closing its gate,
   `gc bd close <gate>`, or for one bead by `gc bd dep remove <bead> <gate>`
   (`docs/steering.md`).
 

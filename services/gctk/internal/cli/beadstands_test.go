@@ -55,7 +55,7 @@ func TestBeadStandsPrintsOneLinePerBead(t *testing.T) {
 		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"gate","stuck_on":{"id":"gate","why":"question"}}]},"group":"waiting-on-you","id":"member","names":[{"id":"gate","title":"park the epic"}],"rule":"further-along","stuck_on":{"id":"gate","why":"further-along"},"why":""}`,
 		`{"advance":"advancing","ask":"","frontier":{"verdict":"advancing","waits":[{"advance":"advancing","id":"blocker","stuck_on":null}]},"group":"queued","id":"own","names":[{"id":"blocker","title":"the work it waits on"}],"rule":"scheduled","stuck_on":null,"why":""}`,
 		`{"advance":"advancing","ask":"","frontier":{"verdict":"ready","waits":[]},"group":"queued","id":"worked","names":[],"rule":"in-flight","stuck_on":null,"why":""}`,
-		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"spawner","stuck_on":{"id":"spawner","why":"unread"}}]},"group":"not-moving","id":"waiter","names":[{"id":"spawner","title":""}],"rule":"not-scheduled","stuck_on":{"id":"waiter","why":"not-scheduled"},"why":""}`,
+		`{"advance":"stuck","ask":"","frontier":{"verdict":"stuck","waits":[{"advance":"stuck","id":"spawner","stuck_on":{"id":"spawner","why":"unread"}}]},"group":"not-moving","id":"waiter","names":[{"id":"spawner","title":""}],"rule":"not-ready","stuck_on":{"id":"waiter","why":"not-ready"},"why":""}`,
 	}
 	for i, w := range want {
 		raw, _ := json.Marshal(lines[i])

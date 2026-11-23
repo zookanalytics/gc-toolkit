@@ -18,7 +18,7 @@ import (
 //   - ask: the ask's words. A question reads "Question", or the words of the
 //     conversation that answers it. A conversation reads whether it waits for
 //     you or a sitting holds it. A pull request reads where it stands, a
-//     ruling what it waits for, and a bead only a person clears "Routed to
+//     ruling what it waits for, and a bead only a person clears "Assigned to
 //     you".
 //   - own-wait: "Waits on your answer" for a human gate or a decision, the
 //     conversation's words for a conversation, and otherwise "Waits on <id>"
@@ -34,8 +34,13 @@ import (
 //     with its assignee.
 //   - scheduled: "Queued" when nothing holds it, and "Waits on <id>" naming
 //     each wait when one does.
-//   - not-scheduled: "Not scheduled", with line 3 naming each wait when one
-//     holds it.
+//   - not-scheduled: "Not scheduled", whatever stamps its row carries, so the
+//     row and the Work queue's list of ready work nothing sends give one
+//     answer.
+//   - outside: "Waits outside the city".
+//   - for-product-owner: "Waits for the Product Owner".
+//   - not-ready: "Waits on <id>" naming each wait, or "Not ready" when it waits
+//     on nothing waits names.
 //   - unread: "unread", in no group.
 
 // Group is the label the board shows for where a row's work stands, one for
@@ -72,11 +77,11 @@ func groupOf(g standing.Group) Group {
 type Ask string
 
 const (
-	AskQuestion     Ask = "Question"
-	AskConversation Ask = "Conversation"
-	AskPullRequest  Ask = "Pull request"
-	AskRoutedToYou  Ask = "Routed to you"
-	AskRuling       Ask = "Ruling"
+	AskQuestion      Ask = "Question"
+	AskConversation  Ask = "Conversation"
+	AskPullRequest   Ask = "Pull request"
+	AskAssignedToYou Ask = "Assigned to you"
+	AskRuling        Ask = "Ruling"
 )
 
 // NeedKind is the kind of need a row is, the kinds a Needs you view counts and
@@ -92,7 +97,7 @@ const (
 	NeedKindWaitsForYou    NeedKind = "Conversation waits for you"
 	NeedKindInConversation NeedKind = "In conversation"
 	NeedKindRuling         NeedKind = "Ruling"
-	NeedKindRoutedToYou    NeedKind = "Routed to you"
+	NeedKindAssignedToYou  NeedKind = "Assigned to you"
 )
 
 // verdict is a row's words for its standing.
@@ -151,8 +156,8 @@ func (bt *built) askWords(id string, a standing.Answer) *askAnswer {
 			st = string(p.State())
 		}
 		return &askAnswer{kind: AskPullRequest, words: st, need: NeedKindPullRequest}
-	case standing.AskRoutedToYou:
-		return &askAnswer{kind: AskRoutedToYou, words: string(AskRoutedToYou), need: NeedKindRoutedToYou}
+	case standing.AskAssignedToYou:
+		return &askAnswer{kind: AskAssignedToYou, words: string(AskAssignedToYou), need: NeedKindAssignedToYou}
 	case standing.AskRuling:
 		if ix.kinds[id] == KindDelivery {
 			return &askAnswer{kind: AskRuling, words: signalLandedDelivery, need: NeedKindRuling}
@@ -224,7 +229,16 @@ func (bt *built) verdictOf(id string, a standing.Answer) verdict {
 			v.signal = "Waits on " + joinIDs(waitRefs)
 		}
 	case standing.RuleNotScheduled:
-		v.signal, v.line3 = "Not scheduled", waitRefs
+		v.signal = "Not scheduled"
+	case standing.RuleOutside:
+		v.signal = "Waits outside the city"
+	case standing.RuleForProductOwner:
+		v.signal = "Waits for the Product Owner"
+	case standing.RuleNotReady:
+		v.signal = "Not ready"
+		if len(waitRefs) > 0 {
+			v.signal = "Waits on " + joinIDs(waitRefs)
+		}
 	}
 	return v
 }

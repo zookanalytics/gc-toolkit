@@ -52,15 +52,6 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # helm's cgo needs icu4c's headers, which the host installs from
-      # Homebrew.
-      - name: Install icu4c
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-          HOMEBREW_NO_ENV_HINTS: "1"
-        run: brew install icu4c
-
       # `go install` with a version builds the scanner outside the module, with
       # the Go setup-go installed, so the scanner adds nothing to go.mod.
       - name: Install govulncheck
@@ -68,19 +59,6 @@ jobs:
           GOVULNCHECK_VERSION: v1.10.0
         run: GOBIN="$RUNNER_TEMP/bin" go install "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION"
 
-      # The board's bead-store reader opens its embedded store only in a cgo
-      # build (beads_cgo.go in github.com/steveyegge/beads), and gc-build.sh
-      # builds the board with cgo. A scan without cgo reads about a third of the
-      # board's packages and passes over what that store calls, so cgo is turned
-      # on by name: a runner with no C compiler fails the scan instead of
-      # scanning a smaller program. Homebrew keeps icu4c off the default search
-      # path, so the include and lib paths come from icu4c-cgo.sh, as they do
-      # for gc-build.sh's helm build.
       - name: Scan for known vulnerabilities in what the code calls
-        env:
-          CGO_ENABLED: "1"
         run: |
-          . assets/scripts/icu4c-cgo.sh
-          icu4c_cgo_flags govulncheck
-          export CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS"
           "$RUNNER_TEMP/bin/govulncheck" -show version ./...

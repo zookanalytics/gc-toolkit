@@ -6,9 +6,14 @@
 // answers it gathers: services/gctk/waits for what holds a bead and whether it
 // is in flight, services/gctk/prstatus for what a person owes on a bead and
 // where a pull request stands, and services/gctk/queue for the order the rig's
-// work is expected to land in. The board keeps its words for those answers
-// (table.go), its pages, its counts and its views, and holds no rule of its
-// own about what holds a bead, whose move it is or whether work is moving.
+// work is expected to land in. services/gctk/conversation says what a
+// conversation is. Where a pull request on Gas Town's pending record stands is
+// the pr domain's evaluator's answer, which the listing asks over the same
+// rows, with the read the one-PR update saved on the PR's bead
+// (listing.PRAnswers), rendered through prstatus as `gctk pr status` renders
+// it. The board keeps its words for those answers (table.go), its pages, its
+// counts and its views, and holds no rule of its own about what holds a bead,
+// whose move it is or whether work is moving.
 //
 // The listing decodes each key the board shows, so the board spells no key,
 // and the document depends on the store's answers alone, so it can be cached

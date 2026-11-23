@@ -122,6 +122,7 @@ type Snapshot struct {
 	missing map[string]error
 	foreign map[string][]Foreign
 	flight  map[string]string
+	loading map[string]string
 }
 
 // ReadStore reads one snapshot of what holds each bead named, as Read does,
@@ -142,15 +143,31 @@ func ReadStore(db string, ids ...string) (*Snapshot, error) {
 // Read reads one snapshot of what holds each bead named. A bead the store does
 // not hold gets its error from Holds, and every other bead is answered. A read
 // that fails fails the snapshot with its *ledger.ReadError.
-func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
+func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) { return ReadFrom(l, nil, ids...) }
+
+// ReadFrom reads one snapshot as Read does, over listed, rows the caller read
+// in the same pass by ledger.ByID(...).WithClosed(), so a bead named among them
+// is not listed again. It lists the beads named that listed does not hold.
+func ReadFrom(l *ledger.Ledger, listed []*ledger.Record, ids ...string) (*Snapshot, error) {
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
-	s := &Snapshot{missing: map[string]error{}, foreign: map[string][]Foreign{}, flight: map[string]string{}}
-	listed, err := l.Find(ledger.ByID(ids...).WithClosed())
+	s := &Snapshot{missing: map[string]error{}, foreign: map[string][]Foreign{}, flight: map[string]string{},
+		loading: map[string]string{}}
+	var unlisted []string
+	for _, id := range ids {
+		if !slices.ContainsFunc(listed, func(r *ledger.Record) bool { return r.ID == id }) {
+			unlisted = append(unlisted, id)
+		}
+	}
+	more, err := l.Find(ledger.ByID(unlisted...).WithClosed())
 	if err != nil {
 		return nil, err
 	}
-	edges := make(map[string][]ledger.Edge, len(listed))
+	listed = append(slices.Clone(listed), more...)
+	edges := make(map[string][]ledger.Edge, len(ids))
 	for _, r := range listed {
+		if !slices.Contains(ids, r.ID) {
+			continue
+		}
 		e, err := r.Edges()
 		if err != nil {
 			return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
@@ -242,7 +259,8 @@ func foreignOf(listed, shown []ledger.Edge, held map[string]bool) []Foreign {
 }
 
 // readFlight decides, for each bead, whether it is in flight. Its own row
-// settles most beads, and only the beads it does not settle need the runs read.
+// settles most beads, and only the beads it does not settle need the runs read,
+// which also name the first live run of each that load-context still holds.
 func (s *Snapshot) readFlight(l *ledger.Ledger, ids []string) error {
 	var unsettled []string
 	for _, id := range ids {
@@ -274,6 +292,8 @@ func (s *Snapshot) readFlight(l *ledger.Ledger, ids []string) error {
 		}
 		if past {
 			s.flight[r.Bead] = "workflow " + r.Root + " past load-context"
+		} else if s.loading[r.Bead] == "" {
+			s.loading[r.Bead] = r.Root
 		}
 	}
 	return nil
@@ -312,6 +332,24 @@ func (s *Snapshot) InFlight(id string) (string, error) {
 		return "", &ledger.ReadError{ID: id, Reason: "the snapshot did not read it"}
 	}
 	return s.flight[id], nil
+}
+
+// AtLoadContext is the root of a live workflow poured for the bead that has
+// not passed load-context, the first in root order, empty when none has or when
+// the bead is in flight. Load-context's gate has not let such a run through,
+// so a wait that holds the bead now is one that gate reads before the work
+// starts.
+func (s *Snapshot) AtLoadContext(id string) (string, error) {
+	if err := s.missing[id]; err != nil {
+		return "", err
+	}
+	if _, ok := s.record(id); !ok {
+		return "", &ledger.ReadError{ID: id, Reason: "the snapshot did not read it"}
+	}
+	if s.flight[id] != "" {
+		return "", nil
+	}
+	return s.loading[id], nil
 }
 
 func (s *Snapshot) record(id string) (*ledger.Record, bool) {

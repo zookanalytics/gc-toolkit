@@ -6,6 +6,7 @@
 package fake
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sync"
@@ -64,9 +65,10 @@ type Runtime struct {
 	reads   []string
 }
 
-// Nudge is one nudge: the session nudged and the message.
+// Nudge is one nudge: the session nudged, the message, and for one sent with
+// NudgeNow the bead it is about.
 type Nudge struct {
-	Session, Message string
+	Session, Message, Bead string
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -150,6 +152,20 @@ func (r *Runtime) Nudge(session, message string) gascity.Result {
 	return gascity.Result{}
 }
 
+// NudgeNow records the nudge, with the bead it is about, and answers it as
+// Nudge does.
+func (r *Runtime) NudgeNow(session, message, bead string) gascity.Result {
+	n := Nudge{Session: session, Message: message, Bead: bead}
+	r.mu.Lock()
+	r.nudges = append(r.nudges, n)
+	on := r.OnNudge
+	r.mu.Unlock()
+	if on != nil {
+		return on(n)
+	}
+	return gascity.Result{}
+}
+
 // Wakes returns each session the domain woke, in order.
 func (r *Runtime) Wakes() []string {
 	r.mu.Lock()
@@ -176,6 +192,10 @@ func (r *Runtime) Script(name string, args ...string) gascity.Result {
 	}
 	return gascity.Result{}
 }
+
+// Within answers with the runtime itself, which records every call in one
+// place: a call the fake answers ends when its answer returns.
+func (r *Runtime) Within(context.Context) gascity.Runtime { return r }
 
 // CityRoot answers Root.
 func (r *Runtime) CityRoot() (string, error) {

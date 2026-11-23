@@ -103,9 +103,10 @@ type RefCheckRun struct {
 	Name, Conclusion, HeadSHA string
 }
 
-// CommitStatus is one commit status: its context and its state.
+// CommitStatus is one commit status: its context, its state, the description
+// its poster gave it and the URL it links to.
 type CommitStatus struct {
-	Context, State string
+	Context, State, Description, TargetURL string
 }
 
 // DefaultBranch reads repo's default branch (GET repos/<repo>). An answer that
@@ -174,8 +175,10 @@ func (c *Client) HeadChecks(repo, ref string) (*HeadChecks, error) {
 		var p struct {
 			SHA      string `json:"sha"`
 			Statuses *[]struct {
-				Context string `json:"context"`
-				State   string `json:"state"`
+				Context     string `json:"context"`
+				State       string `json:"state"`
+				Description string `json:"description"`
+				TargetURL   string `json:"target_url"`
 			} `json:"statuses"`
 		}
 		if err := json.Unmarshal(page, &p); err != nil || p.Statuses == nil {
@@ -185,7 +188,7 @@ func (c *Client) HeadChecks(repo, ref string) (*HeadChecks, error) {
 			out.SHA = p.SHA
 		}
 		for _, s := range *p.Statuses {
-			out.Statuses = append(out.Statuses, CommitStatus{Context: s.Context, State: s.State})
+			out.Statuses = append(out.Statuses, CommitStatus{Context: s.Context, State: s.State, Description: s.Description, TargetURL: s.TargetURL})
 		}
 		return nil
 	})

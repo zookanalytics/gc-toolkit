@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic test for operator-intake.sh — the operator's intake.
-# Runs the REAL script (via `sh`, as shipped) with `gc`,
-# `gc-helm.sh` and gctk's `reaction deliverable` stubbed — no live city, Dolt,
-# network, or sessions.
+# Runs the REAL script (via `sh`, as shipped) with `gc`, `gc-helm.sh` and
+# gctk's `reaction sling` stubbed — no live city, Dolt, network, or sessions.
 #
 # What the cases are guarding, and why each one was worth a test:
 #
@@ -12,15 +11,12 @@
 #               subject to the operator files a human gate, which reaches the
 #               operator on the board, and a conversation beside it would put
 #               the topic to them twice.
-#   (SHED)      the whole reason the fallback exists. Slinging a reaction
-#               is fire-and-forget and returns 0 whether or not anything will
-#               ever claim it, so an unguarded react path leaves the
-#               topic routed, unclaimed, and WITHOUT a conversation — filed-looking
-#               and silently forgotten. The script asks `deliverable` up
-#               front, and a "no" must divert to the direct path. (The
-#               shipped tool now always answers yes — the pool is always on
-#               and its cap only queues work — so the "no" arm is exercised
-#               through the stub; the divert mechanism is the contract.)
+#   (REFUSED)   a sling Gas City refuses, such as to a pool the city does not
+#               configure, slings nothing, so nothing would put the topic to
+#               the operator: the script files the conversation directly, and
+#               its brief says the sling failed. Nothing is asked of the pool
+#               before the sling, since a reaction slung to a pool that does
+#               not run waits there until it does.
 #   (RECOVER)   a react path that fails outright still ends in a conversation rather
 #               than a subject bead nobody is coming to.
 #   (RIG)       the default rig is FIXED (gc-toolkit), never inferred from
@@ -182,9 +178,6 @@ GC
 
 # --- gc-helm.sh stub ----------------------------------------------------------
 # Records the verb and argv; $FAKE_HELM_RC drives the failure cases.
-# $FAKE_HELM_REACT_RC, when set, drives the `react` verb ALONE — so a test can
-# model react returning its already-reacted no-op code (5) while `open` still
-# succeeds, the way the real tools behave for an already-reacted subject.
 cat > "$TMP/bin/gc-helm.sh" <<'HELM'
 #!/usr/bin/env bash
 printf 'helm %s\n' "$*" >> "$FAKE_CALLS"
@@ -195,22 +188,20 @@ if [ "$1" = resolve ]; then
   echo "${FAKE_RESOLVE:-$2}"
   exit "${FAKE_RESOLVE_RC:-0}"
 fi
-if [ "$1" = react ] && [ -n "${FAKE_HELM_REACT_RC:-}" ]; then
-  exit "$FAKE_HELM_REACT_RC"
-fi
 exit "${FAKE_HELM_RC:-0}"
 HELM
 
 # --- gctk stub ----------------------------------------------------------------
-# $FAKE_DELIVERABLE picks the answer of `gctk reaction deliverable`: yes / no.
+# $FAKE_SLING_RC is the exit of `gctk reaction sling`: 0 when it slung, one of
+# its refusal codes (3, 4, 5 or 6) when it slung nothing, and any other code
+# for a failure, such as 1 for a sling gc sling refuses, so a test can model a
+# refusal while `open` still succeeds. Any other call is one the script must
+# not make.
 cat > "$TMP/bin/gctk" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s GC_RIG=%s\n' "$*" "${GC_RIG:-}" >> "$FAKE_CALLS"
-[ "$1 $2" = "reaction deliverable" ] || { echo "gctk stub: unexpected call: $*" >&2; exit 2; }
-case "${FAKE_DELIVERABLE:-yes}" in
-  yes) echo "yes: the proactive pool is always on — its cap only queues a routed reaction"; exit 0 ;;
-  no)  echo "no: this pool cannot run it (stub-stated reason) — a routed reaction would sit unclaimed"; exit 1 ;;
-esac
+[ "$1 $2" = "reaction sling" ] || { echo "gctk stub: unexpected call: $*" >&2; exit 2; }
+exit "${FAKE_SLING_RC:-0}"
 GCTK
 
 chmod +x "$TMP/bin/gc" "$TMP/bin/gc-helm.sh" "$TMP/bin/gctk"
@@ -225,13 +216,19 @@ export GC_HELM_TOOL="$TMP/bin/gc-helm.sh"
 export GCTK_BIN="$TMP/bin/gctk"
 export TMPDIR="$TMP"
 
-# run <deliverable> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
-# RUN_SH names the shell that runs the script; the default is sh, as shipped.
+# run <sling> [args...] -> sets RC/OUT/ERR/CALLS/STATUS_CALLS
+# <sling> is how the first reaction's sling answers: yes slings it, and no is
+# a sling Gas City refuses, which gctk reaction sling reports as exit 1, so the
+# script files the conversation directly. A FAKE_SLING_RC the case sets
+# answers the sling instead. RUN_SH names the shell that runs the script; the
+# default is sh, as shipped.
 run() {
     : > "$FAKE_CALLS"; : > "$FAKE_TITLE"; : > "$FAKE_BODY"; : > "$FAKE_STATUS_CALLS"
-    export FAKE_DELIVERABLE="$1"; shift
+    _sling_rc="${FAKE_SLING_RC:-}"
+    [ "$1" = no ] && [ -z "$_sling_rc" ] && _sling_rc=1
+    shift
     set +e
-    OUT="$("${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
+    OUT="$(FAKE_SLING_RC="$_sling_rc" "${RUN_SH:-sh}" "$SCRIPT" "$@" 2>"$TMP/err")"; RC=$?
     set -e
     ERR="$(cat "$TMP/err")"
     CALLS="$(cat "$FAKE_CALLS")"
@@ -247,7 +244,7 @@ has "$CALLS" "bd create -t task --title why is dolt wedging under load" "(DIRECT
 has "$CALLS" "helm open tk-newsub" "(DIRECT) the conversation is filed through gc-helm.sh open"
 has "$CALLS" "--reason operator-origin topic intake" "(DIRECT) the conversation says what it is actually for"
 has "$CALLS" "--body" "(DIRECT) the claim-time brief is supplied"
-hasnt "$CALLS" "helm react" "(DIRECT) no first reaction is filed"
+hasnt "$CALLS" "gctk reaction sling" "(DIRECT) no first reaction is filed"
 has "$OUT" "conversation filed" "(DIRECT) the summary reports a filed conversation"
 has "$OUT" "tk-newsub" "(DIRECT) the summary names the subject id"
 
@@ -258,107 +255,107 @@ has "$CALLS" "-d why is dolt wedging under load" "(DIRECT) the topic is the subj
 # --- (SINGLE) the react path files NO conversation ----------------------------------
 run yes "how should we shard the refinery queue"
 eq "$RC" "0" "(SINGLE) the react path exits 0"
-has "$CALLS" "helm react tk-newsub" "(SINGLE) a first reaction is filed for the new subject"
-has "$CALLS" "gctk reaction deliverable GC_RIG=gc-toolkit" "(SINGLE) the pool's answer is asked under the subject's rig"
+has "$CALLS" "gctk reaction sling tk-newsub GC_RIG=gc-toolkit" "(SINGLE) a first reaction is slung for the new subject, under its rig"
 hasnt "$CALLS" "helm open" "(SINGLE) no conversation is filed — the reaction files it"
+has "$OUT" "first reaction slung" "(SINGLE) the summary reports the slung reaction"
 has "$OUT" "nothing waits on you yet" "(SINGLE) the operator is told nothing waits on them yet"
 has "$OUT" "--no-react" "(SINGLE) and is told how to get the conversation now"
 
-# --- (SHED) an undeliverable proactive surface diverts to the direct path ----
+# --- (REFUSED) a sling Gas City refuses ends in a conversation ---------------
 run no "what should the deacon do about quota parks"
-eq "$RC" "0" "(SHED) exits 0"
-hasnt "$CALLS" "helm react" "(SHED) nothing is filed for a pool that cannot run it"
-has "$CALLS" "helm open tk-newsub" "(SHED) the conversation is filed directly instead"
-has "$OUT" "conversation filed" "(SHED) the summary reports a filed conversation"
-run no "a topic"
-has "$OUT" "stub-stated reason" "(SHED) the tool's stated reason is relayed verbatim"
+eq "$RC" "0" "(REFUSED) exits 0"
+eq "$(printf '%s\n' "$CALLS" | grep -E '^(gctk|helm (react|open)) ' | cut -d' ' -f1-4 | tr '\n' ' ')" "gctk reaction sling tk-newsub helm open tk-newsub --reason " \
+  "(REFUSED) the reaction's sling is tried, with nothing asked before it, and the conversation is filed directly once it fails"
+has "$CALLS" "no framing card was written (no: slinging the first reaction failed)" "(REFUSED) the conversation's brief says the sling failed"
+has "$ERR" "slinging the first reaction FAILED — falling back" "(REFUSED) the fallback is announced"
+has "$OUT" "conversation filed (no: slinging the first reaction failed)" "(REFUSED) the summary names the cause"
 
-# A gctk that is missing entirely is the same situation: no reaction is
-# coming, so the conversation must be filed rather than waited for.
+# --- (RECOVER) a reaction that fails to file still ends in a conversation -----
+run yes "a topic whose reaction fails to file"
+FAKE_SLING_RC=1 FAKE_HELM_RC=4 run yes "a topic whose reaction fails to file"
+# the sling fails, and helm is stubbed to fail too, so the run ends in the die()
+# — what matters is that it TRIED the direct path after the sling failed.
+has "$CALLS" "gctk reaction sling tk-newsub" "(RECOVER) the sling was attempted"
+has "$CALLS" "helm open tk-newsub" "(RECOVER) a failed sling falls through to filing the conversation"
+has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
+eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
+unset FAKE_SLING_RC FAKE_HELM_RC
+
+# A gctk that is missing entirely fails outright the same way: no reaction is
+# coming, so the conversation is filed rather than waited for.
 : > "$FAKE_CALLS"
 set +e
 OUT="$(GCTK_BIN="$TMP/bin/nonexistent" sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"
-eq "$RC" "0" "(SHED/missing) a missing gctk still exits 0"
-has "$CALLS" "helm open tk-newsub" "(SHED/missing) the conversation is filed directly"
-
-# --- (RECOVER) a reaction that fails to file still ends in a conversation -----
-run yes "a topic whose reaction fails to file"
-FAKE_HELM_RC=4 run yes "a topic whose reaction fails to file"
-# helm is stubbed to fail for BOTH verbs here, so the run ends in the die() —
-# what matters is that it TRIED the direct path after react failed.
-has "$CALLS" "helm react tk-newsub" "(RECOVER) react was attempted"
-has "$CALLS" "helm open tk-newsub" "(RECOVER) a failed react falls through to filing the conversation"
-has "$ERR" "falling back" "(RECOVER) the fallback is announced, not silent"
-eq "$RC" "4" "(RECOVER) a direct path that also fails exits 4"
-unset FAKE_HELM_RC
+eq "$RC" "0" "(RECOVER/missing) a missing gctk still exits 0"
+has "$CALLS" "helm open tk-newsub" "(RECOVER/missing) the conversation is filed directly"
 
 # --- (REACTED) an already-reacting subject files the conversation directly ----
-# react returns its no-op code (5) when a first reaction already runs on the
+# the sling returns its no-op code (3) when a first reaction already runs on the
 # subject or an open conversation tracks it: the sling slung nothing, so no new
 # reaction will put the topic to the operator. operator-intake must NOT trust the skip as
 # a dispatch — it falls through and files the conversation itself, naming the
 # real cause so its ask is accurate rather than reporting a failure to file
 # that did not happen.
-FAKE_HELM_REACT_RC=5 run yes "a topic on an already-reacted subject"
+FAKE_SLING_RC=3 run yes "a topic on an already-reacted subject"
 eq "$RC" "0" "(REACTED) exits 0 — the conversation is filed"
-has "$CALLS" "helm react tk-newsub" "(REACTED) react was attempted"
+has "$CALLS" "gctk reaction sling tk-newsub" "(REACTED) the sling was attempted"
 has "$CALLS" "helm open tk-newsub" "(REACTED) an already-reacted subject falls through to filing the conversation"
 has "$OUT" "conversation filed" "(REACTED) the summary reports a filed conversation"
 has "$ERR" "a first reaction already runs on subject tk-newsub, or an open conversation tracks it" "(REACTED) the reason names the no-op skip"
 hasnt "$ERR" "FAILED" "(REACTED) it is NOT reported as a failure to file"
-unset FAKE_HELM_REACT_RC
+unset FAKE_SLING_RC
 
 # --- (DRIVEN) a subject a live workflow drives files the conversation directly
-# react returns its other no-op code (6) when a live workflow already drives the
+# the sling returns its other no-op code (4) when a live workflow already drives the
 # subject: the guard filed nothing because a reaction never races work in
 # flight, so no reaction will put the topic to the operator either. The
 # conversation's ask the converse session reads must name that cause, not the
 # already-reacting one and not a failure to file.
-FAKE_HELM_REACT_RC=6 run yes "a topic on a subject a polecat is building"
+FAKE_SLING_RC=4 run yes "a topic on a subject a polecat is building"
 eq "$RC" "0" "(DRIVEN) exits 0 — the conversation is filed"
-has "$CALLS" "helm react tk-newsub" "(DRIVEN) react was attempted"
+has "$CALLS" "gctk reaction sling tk-newsub" "(DRIVEN) the sling was attempted"
 has "$CALLS" "helm open tk-newsub" "(DRIVEN) a driven subject falls through to filing the conversation"
 has "$CALLS" "a live workflow already drives the subject" "(DRIVEN) the conversation's ask names the live workflow"
 has "$ERR" "a live workflow already drives subject tk-newsub" "(DRIVEN) the reason names the no-op skip"
 hasnt "$ERR" "a first reaction already runs" "(DRIVEN) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "FAILED" "(DRIVEN) it is NOT reported as a failure to file"
-unset FAKE_HELM_REACT_RC
+unset FAKE_SLING_RC
 
 # --- (ROUTED) a subject already routed or armed files the conversation directly
-# react returns its third no-op code (7) when the subject already has a dispatch
+# the sling returns its third no-op code (5) when the subject already has a dispatch
 # path: the guard filed nothing because a reaction never second-guesses a
 # dispatch already decided, so no reaction will put the topic to the operator.
 # The conversation's ask must name that cause, not another skip and not a
 # failure to file.
-FAKE_HELM_REACT_RC=7 run yes "a topic on a subject already routed to a pool"
+FAKE_SLING_RC=5 run yes "a topic on a subject already routed to a pool"
 eq "$RC" "0" "(ROUTED) exits 0 — the conversation is filed"
-has "$CALLS" "helm react tk-newsub" "(ROUTED) react was attempted"
+has "$CALLS" "gctk reaction sling tk-newsub" "(ROUTED) the sling was attempted"
 has "$CALLS" "helm open tk-newsub" "(ROUTED) a routed subject falls through to filing the conversation"
 has "$CALLS" "the subject is already routed or armed" "(ROUTED) the conversation's ask names the route or arm"
 has "$ERR" "subject tk-newsub is already routed or armed" "(ROUTED) the reason names the no-op skip"
 hasnt "$ERR" "a first reaction already runs" "(ROUTED) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a driven subject"
 hasnt "$ERR" "FAILED" "(ROUTED) it is NOT reported as a failure to file"
-unset FAKE_HELM_REACT_RC
+unset FAKE_SLING_RC
 
 # --- (KIND) a standing record or a feedback pattern files the conversation directly
-# react returns its fourth no-op code (8) when the subject's kind takes no first
+# the sling returns its fourth no-op code (6) when the subject's kind takes no first
 # reaction: a standing record is open by design, and the feedback distiller
 # dispatches a pattern. No reaction will put the topic to the operator, so the
 # conversation is filed directly, its ask naming that cause, not another skip
 # and not a failure to sling.
-FAKE_HELM_REACT_RC=8 run yes "a topic on a standing record"
+FAKE_SLING_RC=6 run yes "a topic on a standing record"
 eq "$RC" "0" "(KIND) exits 0 — the conversation is filed"
-has "$CALLS" "helm react tk-newsub" "(KIND) react was attempted"
+has "$CALLS" "gctk reaction sling tk-newsub" "(KIND) the sling was attempted"
 has "$CALLS" "helm open tk-newsub" "(KIND) a standing record or pattern falls through to filing the conversation"
 has "$CALLS" "the subject is a standing record or a feedback pattern" "(KIND) the conversation's ask names the kind"
 has "$ERR" "subject tk-newsub is a standing record or a feedback pattern" "(KIND) the reason names the no-op skip"
 hasnt "$ERR" "a first reaction already runs" "(KIND) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "already routed or armed" "(KIND) it is NOT reported as a routed subject"
 hasnt "$ERR" "FAILED" "(KIND) it is NOT reported as a failure to sling"
-unset FAKE_HELM_REACT_RC
+unset FAKE_SLING_RC
 
 # --- (RIG) the default rig is fixed; --rig retargets; unknown rigs file nothing
 run no "some cross-cutting topic"
@@ -378,7 +375,7 @@ has "$ERR" "unknown rig" "(RIG) the error names the problem"
 # without editing the script.
 : > "$FAKE_CALLS"
 set +e
-GC_INTAKE_DEFAULT_RIG=gascity FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>&1
+GC_INTAKE_DEFAULT_RIG=gascity sh "$SCRIPT" "a topic" >/dev/null 2>&1
 set -e
 has "$(cat "$FAKE_CALLS")" "--db $TMP/rigs/gascity/.beads" "(RIG) GC_INTAKE_DEFAULT_RIG moves the default"
 
@@ -741,7 +738,7 @@ done
 # --- (FAILCLOSE) nothing half-filed -------------------------------------------
 : > "$FAKE_CALLS"
 set +e
-OUT="$(FAKE_CREATE_FAIL=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
+OUT="$(FAKE_CREATE_FAIL=1 sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
 eq "$RC" "4" "(FAILCLOSE) a subject that cannot be created exits 4"
@@ -757,7 +754,7 @@ has "$ERR" "nothing filed" "(FAILCLOSE) the message says nothing was filed"
 : > "$FAKE_CALLS"
 set +e
 LEDGER_SAID="validation failed: validation failed for issue : title must be 500 characters or less (got 579)"
-OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" FAKE_DELIVERABLE=no \
+OUT="$(FAKE_CREATE_FAIL=1 FAKE_CREATE_ERROR="$LEDGER_SAID" \
        sh "$SCRIPT" "a topic" 2>"$TMP/err")"; RC=$?
 set -e
 CALLS="$(cat "$FAKE_CALLS")"; ERR="$(cat "$TMP/err")"
@@ -771,7 +768,7 @@ hasnt "$CALLS" "helm open" "(WHY) and no conversation is filed on a subject that
 # than nothing — the fallback names the missing id and the exit status.
 : > "$FAKE_CALLS"
 set +e
-FAKE_CREATE_SILENT=1 FAKE_DELIVERABLE=no sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
+FAKE_CREATE_SILENT=1 sh "$SCRIPT" "a topic" >/dev/null 2>"$TMP/err"; RC=$?
 set -e
 ERR="$(cat "$TMP/err")"
 eq "$RC" "4" "(WHY) a silent create failure exits 4"

@@ -4,8 +4,8 @@
 # refusal (exit 1); a write that names no route leaving the route as it is; the
 # refusal of a route that is not rig-qualified, `human` included; the clear of
 # the executor identity with the assignee; --set-dated's compare-and-preserve
-# rule for the @<since> component; the --takeaway writer, capped as gc-helm.sh
-# caps it; --keep-route, the write that records on a bead and writes no route;
+# rule for the @<since> component; the --takeaway writer and its cap;
+# --keep-route, the write that records on a bead and writes no route;
 # a landing's work record and its clear of the live objections; and the
 # refusal when no gctk binary resolves.
 #
@@ -32,27 +32,13 @@ if [ -z "$GCTK_BUILT" ]; then
     exit 1
 fi
 
-# --- lifecycle.toml's vocabularies against their Go copies ------------------------
-# The machine axis, its blocked causes and the postures are declared in
-# lifecycle.toml, and the status: label and the board read them through
-# services/gctk/prstatus, while the board mirrors the machine values as Go
-# constants. A value added on one side only renders as `unknown` on every row
-# carrying it, or puts every PR that carries it at needs-attention.
-echo "# lifecycle.toml's vocabularies against their Go copies"
+# --- lifecycle.toml's postures against their Go copy ------------------------------
+# The postures are declared in lifecycle.toml, and services/gctk/prstatus reads
+# them for the status: label and the board. prstatus.Derive reads a recorded
+# posture outside the vocabulary as a state it cannot name, needs-attention, so
+# the values its knownPosture switch accepts must be the ones declared here.
+echo "# lifecycle.toml's postures against their Go copy"
 TOML="$ROOT/lifecycle/lifecycle.toml"
-TOML_MACHINES=$(sed -n 's/^machines = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
-[ -n "$TOML_MACHINES" ] && ok "machine axis declared in lifecycle.toml" || bad "machines = [...] missing from lifecycle.toml"
-GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
-eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
-TOML_CAUSES=$(sed -n 's/^causes = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
-[ -n "$TOML_CAUSES" ] && ok "blocked causes declared in lifecycle.toml" || bad "causes = [...] missing from lifecycle.toml"
-GO_CAUSES=$(sed -n 's/^[[:space:]]*Cause[A-Z][A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$ROOT/services/gctk/prstatus/prstatus.go" | tr '\n' ' ' | sed 's/ *$//')
-eq "$GO_CAUSES" "$TOML_CAUSES" "blocked cause values match lifecycle.toml"
-# prstatus.Derive reads a recorded posture, machine verdict or cause outside the
-# vocabulary as a state it cannot name, needs-attention, so the values each of
-# its known* switches accepts must be the ones declared here.
 go_known() { # <func>: the values its switch accepts, sorted, "" dropped
   sed -n "/^func $1(/,/^}/p" "$ROOT/services/gctk/prstatus/prstatus.go" \
     | sed -n 's/^[[:space:]]*case \(.*\):$/\1/p' | tr ',' '\n' | tr -d '" \t' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'
@@ -61,9 +47,6 @@ sorted_words() { tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//';
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sorted_words)
 [ -n "$TOML_POSTURES" ] && ok "postures declared in lifecycle.toml" || bad "postures = [...] missing from lifecycle.toml"
 eq "$(go_known knownPosture)" "$TOML_POSTURES" "prstatus knows exactly the postures lifecycle.toml declares"
-eq "$(go_known knownMachine)" "$(printf '%s' "$TOML_MACHINES" | sorted_words)" "prstatus knows exactly the machine values lifecycle.toml declares"
-eq "$(go_known knownCause)" "$(sed -n 's/^[[:space:]]*\(Cause[A-Z][A-Za-z]*\)[[:space:]]*=.*/\1/p' \
-  "$ROOT/services/gctk/prstatus/prstatus.go" | sorted_words)" "prstatus knows every blocked cause it declares"
 
 # --- transition: happy path is ONE update carrying everything -------------------
 echo "# transition happy path"
@@ -434,9 +417,9 @@ eq "$rc" 1 "--route human on a re-record exits 1 too"
 eq "$(meta r-3 merge_result)" "blocked" "the refused transitions wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
-# --- --takeaway writes the board's headline --------------------------------------
-# The helm board spends gc.takeaway as a row's NEEDS sentence. A write that
-# parks a bead needs none, since the gate its caller files says what is asked.
+# --- --takeaway writes the bead's headline ---------------------------------------
+# gc.takeaway is the bead's one-line headline. A write that parks a bead needs
+# none, since the gate its caller files says what is asked.
 # A caller that passes --takeaway gets the headline in the transition's one
 # update, capped, and refused when it says nothing.
 echo "# --takeaway"
@@ -456,9 +439,10 @@ eq "$rc" 1 "--set gc.takeaway is refused (owned by --takeaway)"
 has "$out" "--takeaway" "the refusal names the owning flag"
 
 # Over the cap the verb REJECTS rather than truncating: only the author knows
-# which clause is the headline, and a truncated one loses it silently. The cap
-# is the one gc-helm.sh, the other writer of the cell, carries as TAKEAWAY_MAX.
-eq "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" "140" "gc-helm.sh caps a takeaway at the same 140 codepoints"
+# which clause is the headline, and a truncated one loses it silently.
+# gc-helm.sh truncates the conversation titles it writes at the same cap, and it
+# is sh, which reads no Go, so it carries its own copy as TAKEAWAY_MAX.
+eq "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" "140" "gc-helm.sh caps a conversation's title at the same 140 codepoints"
 store '[{"id":"p-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 LONG=$(printf 'x%.0s' $(seq 141))
 : > "$STUB_GC_LOG"

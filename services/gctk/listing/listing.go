@@ -1,5 +1,6 @@
-// Package listing reads a bead store once for a reader outside gctk, the helm
-// board among them, and answers that reader from the one read. A Listing is a
+// Package listing reads a bead store once for a reader that asks several
+// domains about the same beads, the helm board and the landing order's label
+// writes among them, and answers that reader from the one read. A Listing is a
 // ledger pass (docs/gctk-architecture.md, "The ledger"): it lists every live
 // bead in the store, reads each bead beyond them at most once, and every
 // question asked of it answers from those rows. It gives each bead as a Bead,
@@ -8,8 +9,9 @@
 // prstatus's Store and queue's, so a pull request's facts, what a person owes
 // and the order work lands in come from the same rows the reader lays out. It
 // asks the pr domain's evaluator about a PR on Gas Town's pending record over
-// those rows too, with the GitHub read the landing order saved on the PR's
-// bead ([Listing.PRAnswers]).
+// those rows too, with the read the one-PR update saved on the PR's bead
+// ([Listing.PRAnswers]), and derives the labels each open PR shows from both
+// ([Listing.PRLabels]).
 //
 // The package sits outside internal/ so the helm board, which lies outside
 // services/gctk, can import it, while the ledger stays internal.
@@ -121,6 +123,11 @@ func Read(ctx context.Context, db string, ids ...string) (*Listing, error) {
 	}
 	return read(l)
 }
+
+// Over lists the store l reads through once, as Read does. A caller that
+// holds a pass over the store hands it over, such as a run of the landing
+// order, and the listing answers from the rows that pass kept.
+func Over(l *ledger.Ledger) (*Listing, error) { return read(l) }
 
 // read lists every live bead through a pass over l.
 func read(l *ledger.Ledger) (*Listing, error) {

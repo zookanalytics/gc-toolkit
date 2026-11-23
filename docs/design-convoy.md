@@ -162,13 +162,12 @@ merge is verified on the default branch, as any PR's owning bead does. Work that
 ## Design-gated versus all-in-one
 
 `design_gated` is a var, default `true`. The operator settles it per initiative
-when acting on the recommendation. The board's Accept passes no var, so an
-Accept from the board takes the design-gated default, except when it finishes
-an acceptance a sitting's sign-off left unfinished: that sling carries the var
-the acceptance recorded on the recommendation's gate. For all-in-one, the
-operator takes the recommendation to a sitting (Discuss) instead, and the
-sitting's sign-off takes it with `--accept --var design_gated=false`. The
-sign-off hands the var to Accept's writer, which answers the gate that put the
+when acting on the recommendation, in the sitting whose sign-off takes it with
+`--accept`, and `--accept --var design_gated=false` selects all-in-one. An
+Accept given no var takes the design-gated default, except when it finishes an
+acceptance an earlier run left unfinished: that sling carries the var the
+acceptance recorded on the recommendation's gate. The sign-off hands the var
+to Accept's writer, which answers the gate that put the
 recommendation to the operator, slings the formula with the var under the
 bead's acceptance lock, and records the dispatch (the `work` skill). The var is
 read case-insensitively: `false`, `0`, `no`, or `off` selects all-in-one, and
@@ -195,8 +194,8 @@ implementation.
 
 The recommend-to-Accept-to-sling path carries the pattern with no special
 handling. The recommendation is `gc.recommended_formula = mol-design-convoy` on
-the subject, and the board offers Accept while that key is non-empty. Accept
-(`gc-helm.sh accept`) runs
+the subject, and Accept (`gctk reaction accept`, which a sitting's sign-off
+runs with `--accept`) takes it only while that key is non-empty. Accept runs
 `gc sling --rig <the subject's rig> <subject> --on mol-design-convoy`. The
 `--rig` pin resolves the subject in its own rig's store, whatever directory the
 sling runs from. The sling carries no `issue` var, because graph.v2 reserves

@@ -77,9 +77,7 @@ func TestReadGathersTheFacts(t *testing.T) {
 	s := &store{
 		rows: map[string]Row{"a": row("a", map[string]string{
 			"merge_hold": "true", "rebase_hold": "1",
-			"pr_posture": "approved@oid@t", "pr.machine": "blocked@oid@t",
-			"pr.machine_cause": CauseBlocker, "pr.machine_reason": "held by tk-x",
-			"pr.unanswered_threads": "2@oid", "opened_as_draft": "o", "draft_readied": "r",
+			"pr_posture": "approved@oid@t", "merge_result": "pull_request_pending",
 			"unread": "x",
 		})},
 		anchored: map[string][]Row{"a": {row("rw", nil), row("rv", nil)}},
@@ -92,12 +90,11 @@ func TestReadGathersTheFacts(t *testing.T) {
 	got := facts["a"]
 	want := Facts{
 		MergeHold: "true", RebaseHold: "1",
-		Gates:     []person.Blocker{gate("g")},
-		Owed:      []person.Blocker{decider, other},
-		PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t",
-		PRMachineCause: CauseBlocker, PRMachineReason: "held by tk-x",
-		PRUnansweredThreads: "2@oid", OpenedAsDraft: "o", DraftReadied: "r",
+		Gates:         []person.Blocker{gate("g")},
+		Owed:          []person.Blocker{decider, other},
+		PRPosture:     "approved@oid@t",
 		InFlightCount: 2,
+		MergeResult:   "pull_request_pending",
 	}
 	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
 		t.Errorf("Read gathered\n %+v\nwant\n %+v", got, want)
@@ -216,10 +213,8 @@ func TestReadOfNoAnchors(t *testing.T) {
 	}
 }
 
-// Reasons names each thing behind the held values in their order: the gates
-// nearest first, the thread verdict before the unanswered feedback, then each
-// bead a person owes nearest first before the stuck-blocker verdict. A bead is
-// named by its id, and what is the PR's own by what it says.
+// Reasons names each thing behind the held values in their order, each by its
+// bead: the gates nearest first, then each bead a person owes nearest first.
 func TestReasons(t *testing.T) {
 	approved := Facts{PRPosture: "approved@oid@t"}
 	with := func(f Facts, edit func(*Facts)) Facts { edit(&f); return f }
@@ -234,32 +229,11 @@ func TestReasons(t *testing.T) {
 		{"nothing holds the PR", approved, nil},
 		{"gates nearest first", with(approved, func(f *Facts) { f.Gates = []person.Blocker{gate("near"), gate("far")} }),
 			[]Reason{{HeldGate, "near", "ask near"}, {HeldGate, "far", "ask far"}}},
-		{"the thread verdict says its sentence", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause, f.PRMachineReason = "blocked@oid@t", CauseReviewThreads, "2 unresolved review thread(s) must be resolved before this PR can merge"
-		}), []Reason{{HeldReview, "", "2 unresolved review thread(s) must be resolved before this PR can merge"}}},
-		{"…or what its cause means when it recorded none", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseReviewThreads
-		}), []Reason{{HeldReview, "", "unresolved review threads hold the merge"}}},
-		{"one thread waiting on the city's answer", with(approved, func(f *Facts) { f.PRUnansweredThreads = "1@oid" }),
-			[]Reason{{HeldReview, "", "1 review thread waits on the city's answer"}}},
-		{"several", with(approved, func(f *Facts) { f.PRUnansweredThreads = "3@oid" }),
-			[]Reason{{HeldReview, "", "3 review threads wait on the city's answer"}}},
-		{"the verdict before the feedback", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause, f.PRUnansweredThreads = "blocked@oid@t", CauseReviewThreads, "1@oid"
-		}), []Reason{{HeldReview, "", "unresolved review threads hold the merge"}, {HeldReview, "", "1 review thread waits on the city's answer"}}},
 		{"each bead a person owes, nearest first", with(approved, func(f *Facts) { f.Owed = []person.Blocker{d1, b, d2} }),
 			[]Reason{{HeldBlocked, "d1", "first"}, {HeldBlocked, "b", "pr b"}, {HeldBlocked, "d2", "second"}}},
-		{"the stuck-blocker verdict after them", with(approved, func(f *Facts) {
-			f.Owed = []person.Blocker{d1}
-			f.PRMachine, f.PRMachineCause, f.PRMachineReason = "blocked@oid@t", CauseBlocker, "held by finding tk-x (open), which no automated actor holds or will claim"
-		}), []Reason{{HeldBlocked, "d1", "first"}, {HeldBlocked, "", "held by finding tk-x (open), which no automated actor holds or will claim"}}},
-		{"…saying what its cause means when it recorded none", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseBlocker
-		}), []Reason{{HeldBlocked, "", "a live blocker no automated actor holds"}}},
-		{"every value at once", with(approved, func(f *Facts) {
+		{"the gates before the beads a person owes", with(approved, func(f *Facts) {
 			f.Gates, f.Owed = []person.Blocker{gate("g")}, []person.Blocker{d1}
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseReviewThreads
-		}), []Reason{{HeldGate, "g", "ask g"}, {HeldReview, "", "unresolved review threads hold the merge"}, {HeldBlocked, "d1", "first"}}},
+		}), []Reason{{HeldGate, "g", "ask g"}, {HeldBlocked, "d1", "first"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Reasons(tc.f)

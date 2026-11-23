@@ -102,7 +102,10 @@ The writer records each wait as a `blocks` edge and leaves the subject's route
 and lifecycle state as they are:
 
 ```bash
-"$CONV/gc-helm.sh" takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <what holds the subject>
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead takeaway "$SUBJECT" "holding — $NEED" --by converse --waiting-on <what holds the subject>
 ```
 
 When nothing holds the subject, pass `--no-wait` in place of `--waiting-on`.

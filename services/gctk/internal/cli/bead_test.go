@@ -14,8 +14,10 @@ import (
 // rows named, each leaving out an edge whose far bead the store does not hold,
 // and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field,
 // --parent and --all select, in a listing's shape, every edge kept. `bd blocked`
-// answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
-// listing. `bd where` names /stub/.beads at prefix "st", and `config show`
+// answers $STUB_BLOCKED and `bd sql` $STUB_MARKS, the rows the store marks
+// blocked. `bd ready` answers, in its brief shape, each open row $STUB_MARKS does
+// not mark, of a type ready work keeps (ReadyWorkExcludeTypes in bd's
+// internal/storage/sqlbuild/ready.go). $STUB_BLOCKED_RC fails the listing. `bd where` names /stub/.beads at prefix "st", and `config show`
 // names that store alone, so no store's prefix begins an id here. Each call logs the
 // store it names with bd's --db, "-" for none, to $STUB_DB_LOG.
 const storeStub = `#!/bin/sh
@@ -53,6 +55,12 @@ case "$1 $2" in
       | .id as $self
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;
+"bd ready")
+  printf '%s' "$STUB_STORE" | jq -c --argjson marks "${STUB_MARKS:-[]}" '
+    ($marks | map(.id)) as $m
+    | [ .[] | select(.status == "open" and (.id as $i | $m | index($i) | not)
+          and ((.issue_type // "task") as $t | ["merge-request","gate","molecule","rig","agent","role","message"] | index($t) | not))
+        | {id} ]' ;;
 "bd where") printf '%s\n' '{"path":"/stub/.beads","prefix":"st"}' ;;
 "config show") printf '%s\n' '{"city_path":"/stub","config":{"Workspace":{"Name":"stub","Prefix":"st"},"Rigs":[]}}' ;;
 "bd sql") printf '%s\n' "${STUB_MARKS:-[]}" ;;

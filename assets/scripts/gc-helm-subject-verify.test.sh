@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# gc-helm-subject-verify.test.sh — the four write verbs (open, engage, dismiss,
-# accept) resolve their subject through ONE shared path, verify_subject, which
-# tells a data-plane outage apart from a genuine not-found.
+# gc-helm-subject-verify.test.sh — the write verbs open, engage and dismiss
+# resolve their subject through ONE shared path, verify_subject, which tells a
+# data-plane outage apart from a genuine not-found.
 #
 # The bug this guards: a `gc bd show` that did not ANSWER — an empty read, or an
-# error OTHER than the not-found error — was reported by engage/dismiss/accept as
+# error OTHER than the not-found error — was reported by engage/dismiss as
 # "no bead with that id", so a Dolt outage read to the operator as a typo on a
 # bead that existed. Only `open` classified it correctly. verify_subject is now
 # that one code path, so the classification cannot drift between verbs:
@@ -12,8 +12,8 @@
 #   - a well-formed not-found -> "bead not found"
 #
 # Driven over a stubbed `gc` on PATH — no live city, Dolt, or sessions. The happy
-# path of each verb is proven in its own suite (gc-helm-open, -engage, -dismiss
-# and -accept.test.sh); a failure-mode assertion here is self-validating — it
+# path of each verb is proven in its own suite (gc-helm-open, -engage and
+# -dismiss.test.sh); a failure-mode assertion here is self-validating — it
 # names a message only verify_subject emits, so it FAILS if the verb never reached
 # verify_subject (a precondition refusing first would carry different words).
 set -u
@@ -146,7 +146,6 @@ check_verb() {
 check_verb OPEN    "No conversation filed." open tk-real1
 check_verb ENGAGE  "Nothing spawned."  engage  tk-real1 --no-attach --model codex-sol
 check_verb DISMISS "Nothing was written." dismiss tk-real1
-check_verb ACCEPT  "Nothing dispatched." accept  tk-real1
 
 # --- positive controls: the verb CAN pass verify_subject ----------------------
 # A gate that refused everything would satisfy every assertion above while
@@ -161,11 +160,6 @@ run_verb found dismiss tk-real1
 eq "$RC" 0 "(DISMISS found) a resolvable subject exits 0 (no sitting to end)"
 hasnot "$ERR" "could not verify" "(DISMISS found) verify_subject passed"
 hasnot "$ERR" "bead not found"   "(DISMISS found) verify_subject passed"
-
-run_verb found accept tk-real1
-hasnot "$ERR" "could not verify" "(ACCEPT found) verify_subject passed"
-hasnot "$ERR" "bead not found"   "(ACCEPT found) verify_subject passed"
-eq "$CALLS" "" "(ACCEPT found) a discuss-only subject dispatches nothing"
 
 echo ""
 echo "subject-verify: $PASS passed, $FAIL failed"
