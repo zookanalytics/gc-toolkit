@@ -34,7 +34,9 @@ import (
 //     "app-cr" prints it with a carriage return alone after it, "app-at-eof"
 //     prints it with no line end and closes its standard output, each running
 //     on without listening, "app-on-stderr" prints it on its standard error
-//     only, and any other listens on its sandbox's port until it ends, having
+//     only, "own-group" starts `relay <its sandbox's port>` in a group of its
+//     own, as pnpm run starts what it runs, and runs on without listening
+//     itself, and any other listens on its sandbox's port until it ends, having
 //     first written where its sandbox's Record names whether it runs inside
 //     the sandbox, as demo_engine_sandboxed does: "plain" writes false,
 //     "unrecorded" writes nothing, and any other writes true;
@@ -45,6 +47,8 @@ import (
 //     holds; fails refuses for another reason; ignores-term stays running
 //     through SIGTERM; any other is ok;
 //   - `listen <port>`, a process outside any copy that listens on the port;
+//   - `relay <port>`, which starts `listen <port>` in its own group and runs
+//     on, as the shell pnpm run starts runs the app;
 //   - `stubborn <record>`, a leader that ignores SIGTERM and does nothing else.
 type serveFixture struct {
 	dir     string
@@ -102,6 +106,14 @@ func (f *serveFixture) program(s host.Spec) fake.Program {
 	case len(a) == 2 && a[0] == "listen":
 		port, _ := strconv.Atoi(a[1])
 		return func(p *fake.Process) int { p.Listen(port); <-p.Done(); return 0 }
+	case len(a) == 2 && a[0] == "relay":
+		return func(p *fake.Process) int {
+			if _, err := p.Start(host.Spec{Argv: []string{"listen", a[1]}}); err != nil {
+				return 1
+			}
+			<-p.Done()
+			return 0
+		}
 	case len(a) == 2 && a[0] == "stubborn":
 		return func(p *fake.Process) int {
 			p.Ignore(syscall.SIGTERM)
@@ -148,6 +160,16 @@ func (f *serveFixture) serveProgram(command string) fake.Program {
 	case "app-on-stderr":
 		return func(p *fake.Process) int {
 			fmt.Fprintln(p.Out(), "ios-simulator://"+testUDID+"/com.example.Board")
+			<-p.Done()
+			return 0
+		}
+	case "own-group":
+		return func(p *fake.Process) int {
+			port := strconv.Itoa(p.Spec().Sandbox.Port)
+			if _, err := p.Start(host.Spec{Argv: []string{"relay", port}, Session: true}); err != nil {
+				fmt.Fprintln(p.Out(), err)
+				return 1
+			}
 			<-p.Done()
 			return 0
 		}
@@ -1611,17 +1633,82 @@ func TestServeACopyHoldsItsPortOnlyWhileEachListenerIsItsOwn(t *testing.T) {
 
 		rec := f.rec(f.repo)
 		leader := f.leader(f.repo)
-		if ok, why := rec.owned(r.Port, leader); !ok {
+		if ok, why, _ := rec.owned(r.Port, leader); !ok {
 			t.Errorf("a port the copy's serve command listens on is not owned: %s", why)
 		}
-		if ok, _ := rec.owned(r.Port, f.me.Pid()); ok {
+		if ok, _, _ := rec.owned(r.Port, f.me.Pid()); ok {
 			t.Error("a listener outside the group counts as the group's")
 		}
 		free, _ := f.me.FreePort()
-		if ok, why := rec.owned(free, leader); ok || !strings.Contains(why, "nothing listens") {
-			t.Errorf("a port nothing listens on: owned %v, %q", ok, why)
+		if ok, why, final := rec.owned(free, leader); ok || final || !strings.Contains(why, "nothing listens") {
+			t.Errorf("a port nothing listens on: owned %v, final %v, %q", ok, final, why)
+		}
+		if _, err := f.me.Start(host.Spec{Argv: []string{"listen", strconv.Itoa(r.Port)}}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if ok, _, final := rec.owned(r.Port, leader); ok || final {
+			t.Errorf("another program on the copy's port: owned %v, final %v, want neither, since it may end", ok, final)
 		}
 		f.copies.Stop(f.repo)
+	})
+}
+
+// A copy whose serve command starts its app in a process group of its own, as
+// pnpm run and pnpm exec do, cannot count as up, since the copy's stop does not
+// reach that group. A start stops it at once, whether it ran the copy or found
+// it, rather than waiting out its wait, and a check says why.
+func TestServeStopsACopyWhoseAppListensFromAGroupOfItsOwnAtOnce(t *testing.T) {
+	serveTest(t, func(t *testing.T, f *serveFixture) {
+		o := f.opts("own-group")
+		o.Wait = 10 * time.Minute
+		why := "was started by the copy but runs in process group"
+		start := time.Now()
+		r := f.copies.Serve(f.repo, o)
+		if r.State != CopyFailed || r.Reason != "not-answering" || !strings.Contains(r.Detail, "the copy cannot come up") ||
+			!strings.Contains(r.Detail, why) || !strings.Contains(r.Detail, "pnpm run and pnpm exec") {
+			t.Errorf("a start whose copy's app listens from a group of its own: %s %s (%s)", r.State, r.Reason, r.Detail)
+		}
+		if waited := time.Since(start); waited >= time.Minute {
+			t.Errorf("the start gave up after %s, not at once", waited)
+		}
+		leaders := f.starts("leader")
+		if len(leaders) != 1 || !f.me.GroupGone(leaders[0].Pid) {
+			t.Errorf("the copy's group was not stopped: leaders %v", leaders)
+		}
+		if entries, _ := os.ReadDir(f.copies.root); len(entries) != 0 {
+			t.Errorf("a copy that failed left a record: %v", entries)
+		}
+
+		// A start cut off after its leader ran leaves the copy for a check and
+		// the next start to find.
+		port, _ := f.me.FreePort()
+		rec := f.claim(t, f.repo, map[string]string{"command": "own-group", "port": strconv.Itoa(port)})
+		if reason, detail := rec.startLeader(); reason != "" {
+			t.Fatalf("%s: %s", reason, detail)
+		}
+		if !rec.awaitLeader(15*time.Second) || !waitFor(15*time.Second, func() bool { return f.me.Answers(port) }) {
+			t.Fatal("the copy's app did not listen")
+		}
+		leader := f.leader(f.repo)
+		if c := f.copies.Check(f.repo); c.State != CopyNotAnswering || !strings.Contains(c.Detail, "cannot come up") ||
+			!strings.Contains(c.Detail, why) || !strings.Contains(c.Detail, "a start stops it") {
+			t.Errorf("check = %s (%s), want not-answering, and that a start stops it", c.State, c.Detail)
+		}
+		start = time.Now()
+		r = f.copies.Serve(f.repo, o)
+		if r.State != CopyFailed || r.Reason != "not-answering" || !strings.Contains(r.Detail, why) {
+			t.Errorf("a start that finds it: %s %s (%s)", r.State, r.Reason, r.Detail)
+		}
+		if waited := time.Since(start); waited >= time.Minute {
+			t.Errorf("the start that found it gave up after %s, not at once", waited)
+		}
+		if !f.me.GroupGone(leader) {
+			t.Errorf("the copy it found was not stopped: %v", f.me.Members(leader))
+		}
+		if _, err := os.Stat(rec.dir); err == nil {
+			t.Error("its record is left")
+		}
 	})
 }
 

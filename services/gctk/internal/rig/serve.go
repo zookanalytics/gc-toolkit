@@ -354,39 +354,72 @@ func (r copyRec) publisherAlive() bool {
 }
 
 // ready reports whether the copy is up: its serve command has printed its
-// app's URL, or the copy answers on its port and holds it.
-func (r copyRec) ready() (bool, string) {
+// app's URL, or the copy answers on its port and holds it. It says why when the
+// copy is not up, and final when the copy cannot come up while it runs (owned).
+func (r copyRec) ready() (ok bool, why string, final bool) {
 	if r.read("app_url") != "" {
-		return true, ""
+		return true, "", false
 	}
-	port, ok := r.num("port")
-	pid, okp := r.num("pid")
-	if !ok || !okp {
-		return false, "its record names no port or no leader"
+	port, okPort := r.num("port")
+	pid, okPid := r.num("pid")
+	if !okPort || !okPid {
+		return false, "its record names no port or no leader", false
 	}
 	if !r.h.Answers(port) {
-		return false, fmt.Sprintf("nothing answers on port %d, and the serve command has printed no app's URL", port)
+		return false, fmt.Sprintf("nothing answers on port %d, and the serve command has printed no app's URL", port), false
 	}
 	return r.owned(port, pid)
 }
 
 // owned reports whether the copy whose group pgid names holds the port: at
 // least one process listens there, and each one a connection to loopback
-// reaches is a member of the group. It says why when it does not.
-func (r copyRec) owned(port, pgid int) (bool, string) {
+// reaches is a member of the group. It says why when it does not. A listener
+// the copy started that runs in a process group of its own makes that final:
+// the copy's stop does not reach that group, so the copy cannot count as up
+// while the listener runs. Another program on the port may end, so its
+// listener is not final.
+func (r copyRec) owned(port, pgid int) (ok bool, why string, final bool) {
 	pids, err := r.h.Listeners(port)
 	if err != nil {
-		return false, err.Error()
+		return false, err.Error(), false
 	}
 	if len(pids) == 0 {
-		return false, fmt.Sprintf("nothing listens on port %d", port)
+		return false, fmt.Sprintf("nothing listens on port %d", port), false
+	}
+	for _, pid := range pids {
+		if p, ok := r.h.Proc(pid); ok && p.Group != pgid && r.descends(p.Parent, pgid) {
+			return false, fmt.Sprintf("process %d, which listens on port %d, was started by the copy but runs in process group %d, "+
+				"outside the copy's, where the copy's stop does not reach it; have the serve command run the app's own program, "+
+				"as node_modules/.bin/<program> does, since pnpm run and pnpm exec start their command in a process group of its own",
+				pid, port, p.Group), true
+		}
 	}
 	for _, pid := range pids {
 		if p, ok := r.h.Proc(pid); !ok || p.Group != pgid {
-			return false, fmt.Sprintf("process %d, which listens on port %d, is not one of the copy's", pid, port)
+			return false, fmt.Sprintf("process %d, which listens on port %d, is not one of the copy's", pid, port), false
 		}
 	}
-	return true, ""
+	return true, "", false
+}
+
+// descends reports whether the process pid is a member of the group pgid or
+// descends from one, read up its parents as the process table names them. A
+// process whose parent ended has PID 1 as its parent, so it no longer reads as
+// descending from the group that started it. The walk stops after 64 parents,
+// deeper than any serve command's tree, so a table that changes while it is
+// read cannot keep it going.
+func (r copyRec) descends(pid, pgid int) bool {
+	for hops := 0; pid > 1 && hops < 64; hops++ {
+		p, ok := r.h.Proc(pid)
+		if !ok {
+			return false
+		}
+		if p.Group == pgid {
+			return true
+		}
+		pid = p.Parent
+	}
+	return false
 }
 
 // tail returns the last n lines of a file.
@@ -745,13 +778,13 @@ func (r copyRec) startLeader() (string, string) {
 }
 
 // await waits for the copy to be up, and reports it. A copy whose leader ends
-// first, or that is not up within the wait, is stopped, and its record goes,
-// unless its process group survives the stop.
+// first, that is not up within the wait, or that cannot come up while it runs
+// is stopped, and its record goes, unless its process group survives the stop.
 func (r copyRec) await(checkout string, wait time.Duration) Report {
 	port, _ := r.num("port")
 	deadline := time.Now().Add(wait)
 	for {
-		ok, why := r.ready()
+		ok, why, final := r.ready()
 		if ok && r.alive() {
 			return r.running(checkout)
 		}
@@ -765,12 +798,16 @@ func (r copyRec) await(checkout string, wait time.Duration) Report {
 			_ = os.RemoveAll(r.dir)
 			return rep
 		}
-		if !time.Now().Before(deadline) {
+		if final || !time.Now().Before(deadline) {
+			notUp := fmt.Sprintf("the copy was not up within %s (%s)", wait, why)
+			if final {
+				notUp = fmt.Sprintf("the copy cannot come up (%s)", why)
+			}
 			if !r.stopGroup() {
-				return r.notStopped(checkout, fmt.Sprintf("the copy was not up within %s (%s), so this start stopped it", wait, why))
+				return r.notStopped(checkout, notUp+", so this start stopped it")
 			}
 			rep := Report{State: CopyFailed, Reason: "not-answering", Checkout: checkout,
-				Detail: fmt.Sprintf("the copy was not up within %s (%s), so it was stopped", wait, why),
+				Detail: notUp + ", so it was stopped",
 				Tail:   tail(r.path("serve.log"), 20)}
 			_ = os.RemoveAll(r.dir)
 			return rep
@@ -809,14 +846,17 @@ func (c *Copies) Check(checkout string) Report {
 			Tail:   tail(rec.path("serve.log"), 20)}
 	}
 	if rec.alive() {
-		ok, why := rec.ready()
+		ok, why, final := rec.ready()
 		if ok {
 			return rec.running(checkout)
 		}
 		port, _ := rec.num("port")
+		detail := fmt.Sprintf("the copy runs and is not up (%s); a start waits for it to be, and stops it when it is not", why)
+		if final {
+			detail = fmt.Sprintf("the copy runs and cannot come up (%s); a start stops it", why)
+		}
 		return Report{State: CopyNotAnswering, Checkout: checkout, Port: port, Log: rec.path("serve.log"),
-			Detail: fmt.Sprintf("the copy runs and is not up (%s); a start waits for it to be, and stops it when it is not", why),
-			Tail:   tail(rec.path("serve.log"), 20)}
+			Detail: detail, Tail: tail(rec.path("serve.log"), 20)}
 	}
 	rep := Report{State: CopyDied, Checkout: checkout, Log: rec.path("serve.log"), Tail: tail(rec.path("serve.log"), 20)}
 	if rc, ok := rec.exitCode(); ok {
