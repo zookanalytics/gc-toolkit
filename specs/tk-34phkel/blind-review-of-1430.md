@@ -62,7 +62,9 @@ The section was run in two texts:
   first read, a P1 is raised on each passage that holds one, and the finding's
   check confirms it when each quoted sentence takes the shape the finding
   names. The first shape's "several conditions" became "more than one
-  condition".
+  condition". After the runs, the shape for a coined word or a term used
+  before it is defined became two items, one for each, with the same words and
+  fixes, because its one sentence carried two conditions.
 
 | Run | Page | Reviewed | Turns | Seconds | Tokens |
 |---|---|---|---|---|---|

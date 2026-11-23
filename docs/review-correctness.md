@@ -112,9 +112,10 @@ and this page. No gate reads whether an agent can act on that text.
 - **These shapes fail a first read.** Each comes with its fix:
   - One sentence carries more than one condition, an exception or a second
     actor. The fix gives each its own sentence or list item.
-  - A word is coined where the agent has a word of its own, or a term is used
-    before the text says what it is. The fix uses the agent's word, or says
-    what the term is where it first appears.
+  - A word is coined where the agent has a word of its own. The fix uses the
+    agent's word.
+  - A term is used before the text says what it is. The fix says what the term
+    is where it first appears.
   - A sentence changes nothing the agent does, such as one that explains what
     a message means or why a step exists. The fix cuts it.
 - **Other prose keeps the method's grades.** A clarity problem in a spec, a
