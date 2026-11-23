@@ -861,3 +861,31 @@ no warrant.
   Code's directory, with the judge's decisions on those beads and their links,
   and the list, the kept text and the read of Claude Code's directories
   retire.
+
+## Mail wake
+
+- **Covers.** `orders/mail-notify-on-send.toml`,
+  `orders/mail-notify-on-reply.toml` and `services/gctk/mail`, the pass they
+  run, with the notify ledger and its lock that the pass keeps under the city's
+  `.gc/runtime/packs/gc-toolkit`.
+- **Stands in for.** A session's turn requested for its unread mail whoever
+  sent it, as `--notify` requests one when the sender asks.
+- **Evidence.** In `gastownhall/gascity`, only the sender can request the
+  recipient's turn:
+  - `gc mail send --notify` and `gc mail reply --notify` request it, one
+    message at a time (`newMailSendCmd` and `newMailReplyCmd` in
+    `cmd/gc/cmd_mail.go`).
+  - The API's send and reply, which the dashboard uses, take no notify option
+    (`humaHandleMailSend` and `humaHandleMailReply` in
+    `internal/api/huma_handlers_mail.go`).
+  - `gc mail check --inject` shows unread mail only in a turn something else
+    starts (`cmdMailCheckWithFormat` in `cmd/gc/cmd_mail.go`).
+  - Issue #1966, a design issue that is open, carries the maintainer ruling of
+    2026-06-28 that coordinator sessions "wake on mail with a debounce", and no
+    code implements it.
+  - The search is
+    [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main c377651cb318.
+- **Retires when.** A Gas City release requests a session's turn for its unread
+  mail whoever sent it, as #1966 rules. The two orders and the verb then retire,
+  and each agent they list is woken by Gas City.

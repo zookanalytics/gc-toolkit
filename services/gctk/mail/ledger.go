@@ -17,9 +17,9 @@ import (
 // place, so a reader never sees half of one. LockFile is the lock every pass
 // holds from before it reads the ledger until after it writes it, so the two
 // orders' runs, and a run by hand, never nudge a session twice for one
-// message. The lock is one flock(2), which the kernel releases when its
-// holder ends however it ends, and Go opens the file close-on-exec, so the gc
-// commands a pass runs do not carry it.
+// message. The lock is the kernel's advisory lock on the file, which the
+// kernel releases when its holder ends however it ends, and Go opens the file
+// close-on-exec, so the gc commands a pass runs do not carry it.
 const (
 	LedgerFile = "mail-notify.json"
 	LockFile   = "mail-notify.lock"
