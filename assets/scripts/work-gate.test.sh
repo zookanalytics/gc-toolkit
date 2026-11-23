@@ -28,7 +28,8 @@
 #      each refuses the other, in either order of their reads or at once, the
 #      bead is offered again. The run's gate removes that wait onto the step it
 #      holds and judges the bead without it, and a wait that does not land leaves
-#      the claimant's refusal as it was.
+#      the claimant's refusal as it was. The pool the run executes on stays on the
+#      bead through the hand-off, for the run that builds it.
 #
 # The siblings it calls are stubs that log, except decline.sh and work-lib.sh,
 # which are the real ones, and run-lib.stub.sh answers which runs work a bead.
@@ -462,9 +463,16 @@ done
 AT_GATE="$(gate_step open)"
 
 # The claimant reads first, while the run's gate has not let it through.
-eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
-  "the claimant reads first, the run at its gate: waits on the gate step, notes the arm, ends, drains"
+eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" \
+  "the claimant reads first, the run at its gate: waits on the gate step, puts its pool back, notes the arm, ends, drains"
 eq "$(cat "$TMP/await")" "tk-work --blocked-by s-peer --formula mol-polecat-work" "the claimant reads first: the bead waits on that run's gate step, armed to re-sling on the formula"
+# The wait clears both route keys. The run that builds the bead reads the pool
+# it executes on from gc.execution_routed_to, and store-only-exit.sh arms its
+# validating closer there, so the claimant puts that pool back and leaves
+# gc.routed_to clear, the shape the arm and the store-only exit both take.
+eq "$(head -n 1 "$TMP/update")" "tk-work --set-metadata gc.execution_routed_to=rig/pool" \
+  "the claimant reads first: after the wait, the pool the run executes on goes back on the bead"
+no "$(cat "$TMP/update")" "gc.routed_to=" "the claimant reads first: no pool route goes back, so nothing offers the bead to a pool"
 has "$(cat "$TMP/update")" "Claim handed to a run at its gate; re-sling armed" "the claimant reads first: the note names the hand-off"
 has "$(cat "$TMP/update")" "run r-peer's gate step s-peer has not let that run through" "the claimant reads first: the note names the run and its gate step"
 has "$(cat "$TMP/cancel")" "duplicate dispatch: tk-work in flight in live run r-peer" "the claimant reads first: the reason is a live run's"
@@ -485,7 +493,7 @@ eq "$(FAKE_SESSIONS="$SESS_REAL" run "$(row '{"status":"in_progress","assignee":
 # …and the claimant reads after it, with that run still live: the cancel puts
 # the gate step back to not started and closes it, and closes the root last.
 for st in "$(gate_step open)" "$(gate_step closed canceled)"; do
-  eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$st" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$st" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" \
     "the claimant reads after the run refused it, its gate step $(jq -r '.[0] | .status + " " + (.metadata["gc.outcome"] // "")' <<<"$st"): waits on it"
   eq "$(cat "$TMP/await")" "tk-work --blocked-by s-peer --formula mol-polecat-work" \
     "…its close leaves the bead held by nothing, so the arm re-slings it once that run has ended"
@@ -512,23 +520,36 @@ for round in 1 2 3; do
   rm -rf "$TMP/meet-run" "$TMP/meet-claim"
   meet "$TMP/meet-run" "$SELF_NAME" --convoy cv-1; meet "$TMP/meet-claim" hq-busy --bead tk-work; wait
   eq "$(cat "$TMP/meet-run/rc")$(tr '\n' ';' < "$TMP/meet-run/log")" "1UPDATE;CANCEL;DRAIN;" "a claimant and a run at once, round $round: the run refuses the live claim"
-  eq "$(cat "$TMP/meet-claim/rc")$(tr '\n' ';' < "$TMP/meet-claim/log")" "1AWAIT;UPDATE;CANCEL;DRAIN;" "a claimant and a run at once, round $round: the claimant refuses the run and waits on its gate step"
+  eq "$(cat "$TMP/meet-claim/rc")$(tr '\n' ';' < "$TMP/meet-claim/log")" "1AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" "a claimant and a run at once, round $round: the claimant refuses the run and waits on its gate step"
   eq "$(cat "$TMP/meet-claim/await")" "tk-work --blocked-by s-mine --formula mol-polecat-work" "a claimant and a run at once, round $round: the run's cancel closes that step, and the arm re-slings the bead"
 done
 
 # Of two live runs the claimant hands the bead to the oldest, the one that builds.
 eq "$(FAKE_RUNS="[$PEER,$(run_of r-third cv-2)]" FAKE_ROOTS='[{"id":"r-third","created_at":"2026-11-01T10:00:00Z"},{"id":"r-peer","created_at":"2026-11-01T09:00:00Z"}]' FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" \
-  "1|AWAIT;UPDATE;CANCEL;DRAIN;" "two live runs: the claimant waits on a gate step"
+  "1|AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" "two live runs: the claimant waits on a gate step"
 has "$(cat "$TMP/list")" "--metadata-field gc.root_bead_id=r-peer " "two live runs: the gate step read is the oldest run's"
 
 # The wait does not land: the claimant refuses as it does beside a run past its
 # gate, and the live run is the record.
-eq "$(FAKE_AWAIT_RC=1 FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+eq "$(FAKE_AWAIT_RC=1 FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" \
   "the claimant's wait does not land: it refuses"
+eq "$(head -n 1 "$TMP/update")" "tk-work --set-metadata gc.execution_routed_to=rig/pool" \
+  "the wait does not land: the pool still goes back, since a wait can stop after it clears the route keys"
 has "$(cat "$TMP/update")" "Duplicate dispatch refused; run cancelled" "the wait does not land: the note is the refusal's"
 no "$(cat "$TMP/update")" "re-sling armed" "the wait does not land: no note claims an arm"
 has "$(cat "$TMP/cancel")" "The wait on s-peer did not land, so nothing re-slings it if that gate refuses it" "the wait does not land: the reason says so"
 eq "$(asked)" "" "the wait does not land: nothing asked"
+
+# A bead the sling has not stamped yet has no pool to put back, and the stamp
+# that follows writes its own.
+eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$(row "{\"status\":\"in_progress\",\"assignee\":\"$SELF_ALIAS\",\"metadata\":{}}")" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "a claim on a bead with no execution route: waits on the gate step, notes the arm, ends"
+no "$(cat "$TMP/update")" "gc.execution_routed_to" "a claim on a bead with no execution route: no pool is written"
+# A pool that does not go back leaves the wait and the arm as they landed.
+eq "$(FAKE_UPDATE_RC=1 FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;UPDATE;CANCEL;DRAIN;" \
+  "the pool does not go back: the hand-off still ends the claim, with its arm"
+has "$(cat "$TMP/out")" "gc.execution_routed_to=rig/pool did not go back on tk-work, so the run that builds it finds no pool there" "the pool does not go back: says so"
+has "$(cat "$TMP/cancel")" "it waits on s-peer with a re-sling armed" "the pool does not go back: the reason still records the wait"
 
 # What the claimant reads fails: no fact about the run, so it asks nothing and
 # ends nothing.

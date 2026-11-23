@@ -281,7 +281,18 @@ else
     || work_outage "could not read the gate step of run $OLDEST, which works $WORK_ID"
   if [ -n "$GATE_STEP" ]; then
     AT_GATE="in flight in live run $OTHERS, and run $OLDEST's gate step $GATE_STEP has not let that run through"
-    if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "$GATE_STEP" --formula "$FORMULA"; then
+    "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "$GATE_STEP" --formula "$FORMULA"; WAITED=$?
+    # The wait clears gc.execution_routed_to along with gc.routed_to, though of the
+    # two the arm refuses only gc.routed_to (gctk bead arm). The run that builds the
+    # bead reads the pool it executes on from gc.execution_routed_to, as
+    # store-only-exit.sh does to arm its validating closer, so the pool the sling
+    # stamped goes back. A wait that stops after its clear leaves the bead to that
+    # same run, so the pool goes back whether or not the wait landed.
+    EXEC_ROUTE=$(work_meta gc.execution_routed_to)
+    if [ -n "$EXEC_ROUTE" ] && ! gc bd update "$WORK_ID" --set-metadata gc.execution_routed_to="$EXEC_ROUTE" </dev/null >/dev/null 2>&1; then
+      echo "$PROG: gc.execution_routed_to=$EXEC_ROUTE did not go back on $WORK_ID, so the run that builds it finds no pool there" >&2
+    fi
+    if [ "$WAITED" = 0 ]; then
       note "Claim handed to a run at its gate; re-sling armed" "$AT_GATE. It waits on $GATE_STEP with a re-sling armed: a gate that lets the run through retires the arm with no pour, and one that refuses re-slings $WORK_ID"
       "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "duplicate dispatch: $WORK_ID $AT_GATE; it waits on $GATE_STEP with a re-sling armed"
       exit 1
