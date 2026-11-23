@@ -7,8 +7,11 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-An agent file is named for the agent, or for its binding-qualified name
-(`<binding>.<name>`) where agents from different packs share one name.
+Each file is named for its agent or formula and ends in `.render.md`, and an
+agent's file takes its binding-qualified name (`<binding>.<name>`) where agents
+from different packs share one name. The suffix keeps a render from being read
+as an instruction file an agent provider loads: on a case-insensitive
+filesystem, `claude.md` would open as `CLAUDE.md`.
 
 ## Scope
 
@@ -33,28 +36,28 @@ when one is named, and are not committed:
 
 ## Agent prompts
 
-- [`claude`](agents/claude.md)
-- [`codex`](agents/codex.md)
-- [`control-dispatcher`](agents/control-dispatcher.md)
-- [`converse-claude-fable`](agents/converse-claude-fable.md)
-- [`converse-claude-opus`](agents/converse-claude-opus.md)
-- [`converse-codex`](agents/converse-codex.md)
-- [`converse-codex-astra`](agents/converse-codex-astra.md)
-- [`converse-codex-sol`](agents/converse-codex-sol.md)
-- [`converse-fable`](agents/converse-fable.md)
-- [`converse-opus`](agents/converse-opus.md)
-- [`deacon`](agents/deacon.md)
-- [`demo`](agents/demo.md)
-- [`dog`](agents/dog.md)
-- [`gemini`](agents/gemini.md)
-- [`keeper`](agents/keeper.md)
-- [`mechanik`](agents/mechanik.md)
-- [`po`](agents/po.md)
-- [`polecat`](agents/polecat.md)
-- [`polecat-codex`](agents/polecat-codex.md)
-- [`proactive`](agents/proactive.md)
-- [`refinery`](agents/refinery.md)
-- [`witness`](agents/witness.md)
+- [`claude`](agents/claude.render.md)
+- [`codex`](agents/codex.render.md)
+- [`control-dispatcher`](agents/control-dispatcher.render.md)
+- [`converse-claude-fable`](agents/converse-claude-fable.render.md)
+- [`converse-claude-opus`](agents/converse-claude-opus.render.md)
+- [`converse-codex`](agents/converse-codex.render.md)
+- [`converse-codex-astra`](agents/converse-codex-astra.render.md)
+- [`converse-codex-sol`](agents/converse-codex-sol.render.md)
+- [`converse-fable`](agents/converse-fable.render.md)
+- [`converse-opus`](agents/converse-opus.render.md)
+- [`deacon`](agents/deacon.render.md)
+- [`demo`](agents/demo.render.md)
+- [`dog`](agents/dog.render.md)
+- [`gemini`](agents/gemini.render.md)
+- [`keeper`](agents/keeper.render.md)
+- [`mechanik`](agents/mechanik.render.md)
+- [`po`](agents/po.render.md)
+- [`polecat`](agents/polecat.render.md)
+- [`polecat-codex`](agents/polecat-codex.render.md)
+- [`proactive`](agents/proactive.render.md)
+- [`refinery`](agents/refinery.render.md)
+- [`witness`](agents/witness.render.md)
 
 ## Formula recipes
 
@@ -66,34 +69,34 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 
 | formula | scope |
 |---|---|
-| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.md) | `city` |
-| [`mol-design-convoy`](formulas/mol-design-convoy.md) | `city` |
-| [`mol-do-work`](formulas/mol-do-work.md) | `city` |
-| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.md) | `city` |
-| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.md) | `city` |
-| [`mol-feedback-miner`](formulas/mol-feedback-miner.md) | `city` |
-| [`mol-first-reaction`](formulas/mol-first-reaction.md) | `city` |
-| [`mol-polecat-base`](formulas/mol-polecat-base.md) | `city` |
-| [`mol-polecat-commit`](formulas/mol-polecat-commit.md) | `city` |
-| [`mol-polecat-report`](formulas/mol-polecat-report.md) | `city` |
-| [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` |
-| [`mol-pr-review`](formulas/mol-pr-review.md) | `city` |
-| [`mol-pr-review-lane`](formulas/mol-pr-review-lane.md) | `city` |
-| [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` |
-| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` |
-| [`mol-review`](formulas/mol-review.md) | `city` |
-| [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` |
-| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` |
-| [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` |
-| [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` |
-| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` |
-| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.md) | `gascity` |
-| [`mol-upstream-gc-rebase-finish`](formulas/mol-upstream-gc-rebase-finish.md) | `gascity` |
-| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` |
-| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
-| [`mol-validate`](formulas/mol-validate.md) | `city` |
-| [`mol-validate-close`](formulas/mol-validate-close.md) | `city` |
-| [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` |
+| [`mol-deacon-patrol`](formulas/mol-deacon-patrol.render.md) | `city` |
+| [`mol-design-convoy`](formulas/mol-design-convoy.render.md) | `city` |
+| [`mol-do-work`](formulas/mol-do-work.render.md) | `city` |
+| [`mol-dog-stale-db`](formulas/mol-dog-stale-db.render.md) | `city` |
+| [`mol-feedback-distiller`](formulas/mol-feedback-distiller.render.md) | `city` |
+| [`mol-feedback-miner`](formulas/mol-feedback-miner.render.md) | `city` |
+| [`mol-first-reaction`](formulas/mol-first-reaction.render.md) | `city` |
+| [`mol-polecat-base`](formulas/mol-polecat-base.render.md) | `city` |
+| [`mol-polecat-commit`](formulas/mol-polecat-commit.render.md) | `city` |
+| [`mol-polecat-report`](formulas/mol-polecat-report.render.md) | `city` |
+| [`mol-polecat-work`](formulas/mol-polecat-work.render.md) | `city` |
+| [`mol-pr-review`](formulas/mol-pr-review.render.md) | `city` |
+| [`mol-pr-review-lane`](formulas/mol-pr-review-lane.render.md) | `city` |
+| [`mol-prompt-synth`](formulas/mol-prompt-synth.render.md) | `city` |
+| [`mol-refinery-patrol`](formulas/mol-refinery-patrol.render.md) | `city` |
+| [`mol-review`](formulas/mol-review.render.md) | `city` |
+| [`mol-review-quorum`](formulas/mol-review-quorum.render.md) | `city` |
+| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.render.md) | `city` |
+| [`mol-rig-demo`](formulas/mol-rig-demo.render.md) | `city` |
+| [`mol-scoped-work`](formulas/mol-scoped-work.render.md) | `city` |
+| [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.render.md) | `gascity` |
+| [`mol-upstream-gc-rebase`](formulas/mol-upstream-gc-rebase.render.md) | `gascity` |
+| [`mol-upstream-gc-rebase-finish`](formulas/mol-upstream-gc-rebase-finish.render.md) | `gascity` |
+| [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.render.md) | `gascity` |
+| [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.render.md) | `gascity` |
+| [`mol-validate`](formulas/mol-validate.render.md) | `city` |
+| [`mol-validate-close`](formulas/mol-validate-close.render.md) | `city` |
+| [`mol-witness-patrol`](formulas/mol-witness-patrol.render.md) | `city` |
 
 ## Resolved fragment composition
 
