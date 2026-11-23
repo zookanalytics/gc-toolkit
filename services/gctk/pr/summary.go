@@ -15,10 +15,13 @@ import (
 // dispatch text.
 var summaryKey = ledger.Declare("pr_summary", ledger.String,
 	"The account of what a change does, for its PR, in freeform markdown. `gctk pr summary` is its one "+
-		"writer: the polecat records it on the anchor at submit, and an integration effort's summary task on "+
-		"the effort's landing bead once the effort's work has landed. The PR's managed summary region carries "+
-		"it (`gctk pr compose`), and `gctk pr summary` prints it for a reader of the PR's text. Absent or "+
-		"blank, the dispatch text stands in. Never cleared: the next record replaces it.")
+		"writer: the polecat records it on the anchor at submit, an integration effort's summary task on the "+
+		"effort's landing bead once the effort's work has landed, a converse sitting that edits an open PR's "+
+		"branch with the operator, and a review run's round when it fixes the PR's title or summary or changes "+
+		"what the summary states. The PR's managed summary region carries it (`gctk pr compose`), which the "+
+		"refinery's publish and a review round's push put on the PR, and `gctk pr summary` prints it for a "+
+		"reader of the PR's text. Absent or blank, the dispatch text stands in. Never cleared: the next record "+
+		"replaces it.")
 
 // Account is what a change's author records for its PR: the summary, which
 // says what the finished change does, and the change's subject line, which the

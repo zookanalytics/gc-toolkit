@@ -212,12 +212,16 @@ writes it as its step's output: the head it judged, each check it picks as one
 picked the common case, and whether the change is `material`. At the PR's first
 judged head the rig's first check, `correctness`, is picked whatever the diff,
 and the checks an ask the run can take sends back are picked whatever the
-change. At a head that already passed into the run's target, the read says
-there is no change to judge, because its checks ran and their findings were
-ruled: pick only the checks an ask the run can take sends back, and nothing
-when no ask sends one. The rest of this section is a review bead's verdict, whose
-formula's one `signoff.sh` call carries the verdict and the widening together,
-`approve` with these flags:
+change. So is the check of each finding a round of the run fixed in the PR's
+title or summary, until that check has run since, which the run so far names as
+a ruling must-fix in the PR's summary, or as a reason that the check has not
+run since: no diff shows that fix, and the run does not pass until the check
+has judged the PR's text. At a head that already passed into the run's target,
+the read says there is no change to judge, because its checks ran and their
+findings were ruled: pick only the checks an ask the run can take sends back,
+and nothing when no ask sends one. The rest of this section is a review bead's
+verdict, whose formula's one `signoff.sh` call carries the verdict and the
+widening together, `approve` with these flags:
 
 - **`--add-gates`** takes the checks you add, one or several, comma-separated,
   as in `--add-gates demo,arch`. Adding nothing needs no flag: approve on its

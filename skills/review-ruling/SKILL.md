@@ -9,8 +9,8 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 You rule every finding a lane raised at the head the round judged and every ask
 the round can take, and you make the round's fixes. The step that rules is the
 step that fixes, so a ruling is what you change: a point ruled must-fix gets a
-commit, and a point ruled declined, deferred, answered or put to a person gets
-no change at all. Each point is ruled by the rule its source carries, below,
+commit, or a fix in the PR's title or summary, and a point ruled declined,
+deferred, answered or put to a person gets no change at all. Each point is ruled by the rule its source carries, below,
 and each ruling carries its reason, which the head's comment shows the operator
 as that point's answer.
 
@@ -49,7 +49,9 @@ the purpose its row in the check index states.
 Fix each point you rule must-fix with a commit of its own in the run's
 worktree, whose message names the point, and name that commit in its ruling.
 Two points never share a commit, and no point is answered by a fix made for
-another point or by another lane's fix.
+another point or by another lane's fix. A point fixed in the PR's title or
+summary is the one must-fix whose fix no commit carries, as the next section
+says.
 
 For each must-fix point, find the other sites in the change that share its
 cause, and fix them in the same round. Name them in the ruling's reason, so the
@@ -62,6 +64,35 @@ reads beside `git show --remerge-diff`: commit it with `git commit -F <file>`,
 the file holding git's first line, then one paragraph for each file you resolved
 by hand, naming what collided, what you kept or wrote and why, and what a
 reviewer should check.
+
+## A fix in the PR's title or summary
+
+The PR's title and summary are the account the bead that owns the PR records,
+the one the round's read names beside the PR, and the round's push puts that
+account on the PR. So a point on the title or the summary, a lane's finding or
+an ask, is fixed on that bead: rule it must-fix with `"summary": true` in its
+ruling, in place of a commit, or beside the commit when its fix changes code
+too. The check that raised a finding fixed there runs again at the next
+iteration and judges the PR's text, since no diff shows the fix, and the run
+does not pass until it has.
+
+Record the summary again whenever the round leaves it untrue: a point on it,
+and a round whose commits or questions change what it states, such as a fix's
+cost or what stands before the merge. Read the summary `<pr-bead>` records,
+the bead the round's read names beside the PR, write it again whole, to the
+standard the `<binding>.commit-conventions` skill holds for a PR's summary, in
+the repair's part of the run's workspace beside its output, and record it. Add
+`--title "<the subject line>"` when the PR's title changes:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary <pr-bead>
+"$GCTK" pr summary <pr-bead> --file "<the summary file>"
+```
+
+Then push as the step says, whether or not the round has commits to push.
 
 ## A fix outside the reviewed diff
 
@@ -121,6 +152,7 @@ each head: answered once the head carries its fix, or once its check ran there.
 
 The head's comment is rendered from your rulings, so write each reason as the
 answer the operator reads. A must-fix point's answer is the commit that fixes
-it, which the head the round pushed carries. Any other point's answer says why
-the head carries no change for it. A reason never says a point is fixed that
+it, which the head the round pushed carries, or the fix the PR's title or
+summary carries. Any other point's answer says why the head carries no change
+for it. A reason never says a point is fixed that
 the head does not carry the fix for.
