@@ -66,11 +66,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # that outlives a landed fix is new information.
 LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 
-# The most edges a chain of dispositions is followed through. A real chain
-# is a fold or two long, so a longer one is a fault in the edges, and it is
-# read as naming no bead that carries the failure rather than walked further.
-CHAIN_MAX=20
-
 # `bd create` refuses a title over 500 bytes. The key is never cut; a summary
 # is cut at a word boundary so the whole title stays within this many
 # characters.
@@ -250,17 +245,9 @@ read_stamp() {
 # tracks the key, and FILING_VIA is the closed tracker whose chain of
 # disposition edges reached FILING, or empty when FILING is the key's own live tracker.
 # Non-zero when the store could not be read, which the caller must treat as
-# "unknown", never as "untracked".
-#
-# The chain is read as bead-rehome.sh writes it: each closed bead's duplicates
-# or supersedes edge names the next. A not-needed close carries the note
-# `Disposition <time>: not needed, per <successor> in <store>`, or, when the edge
-# was added after an earlier close, `Disposition recorded <time>: ...`; a close
-# made before the edges carries the same words as its close reason. An edge onto
-# a bead the store does not hold ends the chain the way a fixed tracker does,
-# because no bead carries the failure.
+# "unknown", never as "untracked". bd-lib.sh's bd_carried_by reads the chain.
 tracked_by() {
-  local key="$1" rows tracker id prev="" out step hops=0 seen=" "
+  local key="$1" rows tracker
   FILING=""; FILING_VIA=""
   FILING=$(find_tracker "$key" "$LIVE_STATUSES") || return 1
   [ -z "$FILING" ] || return 0
@@ -270,46 +257,9 @@ tracked_by() {
                      and ((.status // "") | tostring) == "closed") ]
       | sort_by([((.closed_at // "") | tostring), ((.id // "") | tostring)])
       | (last // {}) | .id // empty' 2>/dev/null) || return 1
-  id="$tracker"
-  while [ -n "$id" ]; do
-    case "$seen" in
-      *" $id "*)
-        warn "the chain of disposition edges from $tracker loops back to $id, so it names no bead that carries '$key'"
-        return 0 ;;
-    esac
-    if [ "$hops" -gt "$CHAIN_MAX" ]; then
-      warn "the chain of disposition edges from $tracker runs past $CHAIN_MAX edges without reaching a live bead, so it is read as naming none that carries '$key'"
-      return 0
-    fi
-    seen="$seen$id "
-    # The bead's list row, the one that carries an edge onto a bead in another
-    # rig's store. No row is a store that holds no such bead, and a read that
-    # fails is unknown.
-    out=$(bd_exact_row "$id") || return 1
-    step=$(printf '%s' "$out" | jq -r --arg live "$LIVE_STATUSES" "$DISPOSITION_JQ"'
-        if length > 0 then
-          .[0] as $b
-          | ($b | disposed_to) as $p
-          | if ($live | split(",") | any(. == (($b.status // "") | tostring))) then "live"
-            elif $p == "" then "fixed"
-            elif ((($b.close_reason // "") | tostring) | startswith("not needed, per " + $p + " "))
-              or ((($b.notes // "") | tostring) | contains(": not needed, per " + $p + " in "))
-            then "ruled"
-            else "next " + $p end
-        else "missing" end' 2>/dev/null) || return 1
-    case "$step" in
-      live)
-        FILING="$id"
-        [ "$id" = "$tracker" ] || FILING_VIA="$tracker"
-        return 0 ;;
-      fixed|ruled) return 0 ;;
-      missing)
-        [ -z "$prev" ] || warn "$prev names $id as its successor, but the store holds no such bead, so the chain from $tracker names no bead that carries '$key'"
-        return 0 ;;
-      "next "*) prev="$id"; id="${step#next }"; hops=$((hops + 1)) ;;
-      *) return 1 ;;
-    esac
-  done
+  [ -n "$tracker" ] || return 0
+  FILING=$(bd_carried_by "$tracker") || return 1
+  [ -z "$FILING" ] || [ "$FILING" = "$tracker" ] || FILING_VIA="$tracker"
   return 0
 }
 

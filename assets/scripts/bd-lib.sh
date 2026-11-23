@@ -2,12 +2,13 @@
 # bd-lib.sh — the guarded reads of the bead store, shared by every script that
 # queries it, the read of a bead's human gates every reader of them makes and
 # the order its open gates under one key are read in, the read of the bead a
-# disposed bead names, whether two bead ids name one store, the checked create,
-# metadata repair and unmake that code the deletion plan retires still files
-# through, the birth, settle and route of PR-finishing work, the validation
-# pass's work order, the gating-PR read's field set, the per-rig key an order's
-# state lives under, the pass lock that lets an order run one pass at a time,
-# and warn and die, which a script reports through. Sourced, never executed.
+# disposed bead names and of the live bead that carries its work now, whether
+# two bead ids name one store, the checked create, metadata repair and unmake
+# that code the deletion plan retires still files through, the birth, settle
+# and route of PR-finishing work, the validation pass's work order, the
+# gating-PR read's field set, the per-rig key an order's state lives under, the
+# pass lock that lets an order run one pass at a time, and warn and die, which
+# a script reports through. Sourced, never executed.
 #
 # A caller resolves this file beside itself and sources it:
 #   # shellcheck source=bd-lib.sh
@@ -327,6 +328,69 @@ bd_disposed_to() {
   row=$(bd_exact_row "$@") || return 1
   printf '%s' "$row" | jq -er "$DISPOSITION_JQ"'
     if length == 0 then error("absent") else (.[0] | disposed_to) end' 2>/dev/null || return 1
+}
+
+# Every status a live bead can hold, in one comma list, and the most edges
+# bd_carried_by follows. A real chain is a fold or two long, so a longer one is
+# a fault in the edges, and it is read as naming no bead that carries the work
+# rather than walked further.
+_BD_LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
+_BD_CHAIN_MAX=20
+
+# bd_carried_by <bead> — the live bead that carries <bead>'s work now: <bead>
+# itself while it is live, else the live bead its chain of disposition edges
+# reaches. Prints that bead's id, or nothing when no live bead carries the
+# work, and returns 1 when a read failed, which is never "none". Each read is
+# bd_exact_row, through _bd_call, so a caller pinned to one store reads the
+# chain there.
+#
+# The chain is read as bead-rehome.sh writes it: each closed bead's duplicates
+# or supersedes edge names the next (disposed_to above). It ends with no bead
+# at one that closed naming no successor, because the work ended there, and at
+# a not-needed close, whose edge names the evidence for that ruling rather than
+# a bead that carries the work. A not-needed close carries the note
+# `Disposition <time>: not needed, per <successor> in <store>`, or, when the edge
+# was added after an earlier close, `Disposition recorded <time>: ...`; a close
+# made before the edges carries the same words as its close reason. An edge onto
+# a bead the store does not hold ends the chain the same way, and so does a
+# chain that loops or runs past $_BD_CHAIN_MAX edges, each of which it reports
+# on stderr.
+bd_carried_by() {
+  local start="${1:-}" id="${1:-}" prev="" out step hops=0 seen=" "
+  [ -n "$id" ] || return 1
+  while :; do
+    case "$seen" in
+      *" $id "*)
+        warn "the chain of disposition edges from $start loops back to $id, so it names no live bead that carries $start's work"
+        return 0 ;;
+    esac
+    if [ "$hops" -gt "$_BD_CHAIN_MAX" ]; then
+      warn "the chain of disposition edges from $start runs past $_BD_CHAIN_MAX edges without reaching a live bead, so it is read as naming none that carries $start's work"
+      return 0
+    fi
+    seen="$seen$id "
+    out=$(bd_exact_row "$id") || return 1
+    step=$(printf '%s' "$out" | jq -r --arg live "$_BD_LIVE_STATUSES" "$DISPOSITION_JQ"'
+        if length > 0 then
+          .[0] as $b
+          | ($b | disposed_to) as $p
+          | if ($live | split(",") | any(. == (($b.status // "") | tostring))) then "live"
+            elif $p == "" then "ended"
+            elif ((($b.close_reason // "") | tostring) | startswith("not needed, per " + $p + " "))
+              or ((($b.notes // "") | tostring) | contains(": not needed, per " + $p + " in "))
+            then "ruled"
+            else "next " + $p end
+        else "missing" end' 2>/dev/null) || return 1
+    case "$step" in
+      live) printf '%s\n' "$id"; return 0 ;;
+      ended|ruled) return 0 ;;
+      missing)
+        [ -z "$prev" ] || warn "$prev names $id as its successor, but the store holds no such bead, so the chain from $start names no live bead that carries its work"
+        return 0 ;;
+      "next "*) prev="$id"; id="${step#next }"; hops=$((hops + 1)) ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 # bd_same_store <id> <id> — whether two bead ids name one store, which a writer

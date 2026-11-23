@@ -14,9 +14,9 @@
 # the metadata read it shares with them, bd_gates_open_under_key, the order
 # every writer and reader of one situation's human gates reads them in, and
 # $DISPOSITION_JQ, the one reading of a disposition, are pinned first; they read
-# no store. bd_disposed_to, its store read, follows them. The readers that judge
-# a gate by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying
-# it.
+# no store. bd_disposed_to and bd_carried_by, its store reads, follow them. The
+# readers that judge a gate by $HUMAN_GATE_JQ are checked last, for sourcing it
+# rather than copying it.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -148,6 +148,27 @@ eq "$rc/$out" "1/" "…and for a read that fails, so 'none' and 'unread' stay ap
 : > "$STUB_GC_LOG"
 bd_disposed_to tk-d "$TMP/other/.beads" >/dev/null
 has "$(cat "$STUB_GC_LOG")" "--db $TMP/other/.beads" "…and reads another store when named one"
+
+# --- bd_carried_by: the live bead a chain of dispositions reaches --------------
+# preexisting-failure.test.sh walks the chain's faults through find: an edge
+# onto a bead the store does not hold, a loop, and the hop cap.
+store '[{"id":"tk-live","status":"in_progress","metadata":{}},
+        {"id":"tk-f1","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-f1","depends_on_id":"tk-f2","type":"supersedes"}]},
+        {"id":"tk-f2","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-f2","depends_on_id":"tk-live","type":"duplicates"}]},
+        {"id":"tk-done","status":"closed","metadata":{}},
+        {"id":"tk-moot","status":"closed","close_reason":"not needed, per tk-live in tk","metadata":{},"dependencies":[{"issue_id":"tk-moot","depends_on_id":"tk-live","type":"supersedes"}]}]'
+out=$(bd_carried_by tk-live); rc=$?
+eq "$rc/$out" "0/tk-live" "bd_carried_by answers a live bead with itself"
+out=$(bd_carried_by tk-f1); rc=$?
+eq "$rc/$out" "0/tk-live" "…a closed one with the live bead its chain of edges reaches"
+out=$(bd_carried_by tk-done); rc=$?
+eq "$rc/$out" "0/" "…prints nothing for one that closed naming no successor"
+out=$(bd_carried_by tk-moot); rc=$?
+eq "$rc/$out" "0/" "…or for a not-needed close, whose edge names its evidence"
+out=$(bd_carried_by tk-gone); rc=$?
+eq "$rc/$out" "0/" "…or for a bead the store does not hold"
+out=$(STUB_LIST_FAIL=1 bd_carried_by tk-live); rc=$?
+eq "$rc/$out" "1/" "…and returns 1 for a read that fails, so 'none' and 'unread' stay apart"
 
 # --- bd_same_store: the prefix up to an id's first hyphen names its store ------
 : > "$STUB_GC_LOG"
