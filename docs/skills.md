@@ -62,17 +62,20 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 - **Pack-scope** — discovered from `skills/<name>/` at the pack root,
   available to every importing agent as `gc-toolkit.<name>`. The default.
-- **Agent-scope** — bound to a single agent, surfaced via
-  `gc skill list --agent <rig>/gc-toolkit.<agent>`. On a name collision, the
-  agent-scoped variant wins.
+- **Agent-scope** — discovered from `agents/<agent>/skills/<name>/`, bound to
+  that one agent, surfaced via
+  `gc skill list --agent <rig>/gc-toolkit.<agent>`.
 
 Use agent-scope when a skill only makes sense for one role and would be noise
 in every other agent's list.
 
-> **Open item — confirm the agent-scope path against the loader.** No skill
-> is agent-scoped today. The convention this doc adopts is
-> `agents/<agent>/skills/<name>/SKILL.md`; verify the loader discovers it
-> before relying on it.
+Gas City's loader attaches `agents/<agent>/skills/` to the agent named
+`<agent>` in the pack that defines it (`populateAgentLocalAssetDirs` in Gas
+City's `internal/config/compose.go`). Each directory directly under it that
+holds a `SKILL.md` joins that agent's skills under the directory's name alone,
+with no `gc-toolkit.` prefix. A shared skill with exactly that name gives way
+to it, so an agent-scoped `<name>` sits beside the pack's `gc-toolkit.<name>`
+rather than replacing it.
 
 **Name a pack skill by its catalog name.** A skill or formula that sends an
 agent to another pack skill writes the skill's catalog name,
@@ -98,12 +101,13 @@ gc-toolkit/
 │       └── assets/
 └── agents/
     └── <agent>/
-        └── skills/<name>/      # agent-scope (see Open item above)
+        └── skills/<name>/      # agent-scope
 ```
 
 **Keep pack-scope skills flat in one `skills/` dir.** Do not group into
 subdirectories: the spec requires a skill's `name` to equal its immediate
-parent directory, and recursive discovery by Gas City's loader is unverified.
+parent directory, and Gas City's loader reads only the directories directly
+under `skills/`, so it never finds a skill nested deeper.
 Separate the tiers by **frontmatter, not by directory**.
 
 ## Frontmatter
