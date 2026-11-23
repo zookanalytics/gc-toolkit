@@ -149,6 +149,13 @@ reports it. So the command:
 - is up within ten minutes, as long as a start waits before it stops the copy,
   then runs until it is stopped, and ends within a minute of that, removing
   what it made outside the checkout, such as its simulator device;
+- keeps the app in the process group it starts in, because the copy is up only
+  while every process listening on `$PORT` is in that group, the one its stop
+  ends. `npm run` keeps the group, but `pnpm run` and `pnpm exec` start what
+  they run in a group of its own, and a start stops such a copy at once. So a
+  pnpm rig runs the app's program itself, as
+  `cd web && pnpm install --frozen-lockfile && node_modules/.bin/next dev --port $PORT`
+  does;
 - runs a program the repository keeps, so a run starts the app of the commit
   it runs from, as a rig's test command runs the tests of its commit. The rig
   declares one command for all its branches, so it names an entry point every
