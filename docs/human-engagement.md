@@ -755,9 +755,12 @@ seconds, on the next pass of Gas City's orders lane, and later when that lane
 is busy. The mail-notify-on-send and mail-notify-on-reply orders run
 `gctk mail notify`, which nudges the sitting with "You have mail from
 <sender>" unless a notice a sender's `--notify` queued will tell it first. A
-sitting that sleeps is woken, and the nudge reaches it once it has started. A
-sitting that has finished, or is suspended, keeps its mail waiting.
-`gctk mail notify --help` states the rule.
+sitting that sleeps is woken. Once it has started, the nudge reaches it where
+the city delivers queued nudges through its supervisor,
+`[daemon] nudge_dispatcher = "supervisor"`. Under Gas City's default
+dispatcher the nudge can stay queued after the wake, and the mail then waits
+for the sitting's next turn. A sitting that has finished, or is suspended,
+keeps its mail waiting. `gctk mail notify --help` states the rule.
 
 **Recovery resumes the sitting through its alias.** A sitting whose session
 sleeps, or whose runtime stopped, resumes when the operator attaches:

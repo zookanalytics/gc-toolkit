@@ -12,10 +12,13 @@
 # its mail waiting. Its twin, mail-notify-on-reply, runs the same pass when
 # mail is replied to, since an order's event trigger names one event type.
 #
-# The turn arrives on the orders lane's next pass after the mail, about 30
-# seconds by default ([daemon] patrol_interval), and later when the lane has
-# more due orders than it starts in one pass. Mail sent with --notify starts
-# its turn in seconds, and the pass then finds it read or still queued.
+# A running sitting's turn arrives on the orders lane's next pass after the
+# mail, about 30 seconds by default ([daemon] patrol_interval), and later when
+# the lane has more due orders than it starts in one pass. A sleeping sitting
+# is woken then, and whether the nudge reaches it once it has started depends
+# on the city's nudge dispatcher (docs/human-engagement.md, "Mail starts the
+# sitting's turn"). Mail sent with --notify starts its turn in seconds, and
+# the pass then finds it read or still queued.
 #
 # Exec, not a formula: a pass reads lists and sends nudges, with no judgment
 # for an LLM. City scope, since mail and sessions are the city's: one run per
