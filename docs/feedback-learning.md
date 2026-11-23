@@ -104,7 +104,7 @@ Four producers file the same bead contract:
      standing correction also names the correction's slug in
      `obs.correction`, so the recurrence metric counts its repeats. A post
      is the city's when the city's login posted it with the city's mark
-     (`assets/scripts/pr-post.sh`), which counts under no other login. A
+     (`assets/scripts/pr-post.sh`). The mark counts under no other login. A
      post that is not for review
      ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
      are notices, not review feedback, whoever posted them. On a rig that
