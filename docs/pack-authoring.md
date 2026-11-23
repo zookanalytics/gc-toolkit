@@ -221,16 +221,19 @@ a line of its own and the call takes it as `"${NAME:?…}"`, which stops the
 block on a file that is missing or empty, and on a read left out while its
 field stays. Step text, where a block may gain no command
 (`tools/lint-step-text.sh`), puts the read in an assignment the block already
-makes and takes it the same way. Or it keeps the read in the call's argument
-and gives the call the same file as its stdin, because a shell that cannot open
-a redirection does not run the command. That form fits only a call that does
-not read its stdin.
+makes and takes it the same way. Or the call opens the file in two
+redirections, as its stdin and for appending on descriptor 3, and a shell runs
+no command whose redirection fails. The first fails on a path that does not
+exist or cannot be read, and the second on a directory, which opens for reading
+but not for appending, while a read of it fails. A call whose input is its
+stdin reads the file there. Any other keeps the read in its argument, which
+fits only a call that does not read its stdin.
 
 The suite holds the rule. It runs every block that reads such a file under bash
 and zsh, with the file holding text that would end an argument or a
-here-document. It runs the block again with each of its files missing, and the
-block must exit non-zero and make no call it would not make, word for word,
-with every file in place.
+here-document. It runs the block again with each of its files missing, and
+again with a directory in its place, and each time the block must exit non-zero
+and make no call it would not make, word for word, with every file in place.
 
 ## A landed pack change is confirmed on the deployed checkout
 

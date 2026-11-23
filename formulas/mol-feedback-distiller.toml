@@ -607,12 +607,13 @@ quoted as it stands:
 Contested rule: <rule summary>
 <the adopted rule, quoted, with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>
 ```
-Then file the gate. The call takes the file as its stdin as well, so a path
-that does not open stops it before it files:
+Then file the gate. The call takes the file as its stdin and opens it for
+appending as well, which a directory refuses, so a path that does not lead to
+the file stops it before it files:
 ```bash
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \
-  --message "$(cat "<the file holding the message>")" <"<the file holding the message>" >/dev/null \
+  --message "$(cat "<the file holding the message>")" <"<the file holding the message>" 3>>"<the file holding the message>" >/dev/null \
   || { echo "human-gate.sh filed no gate on $PATTERN — stop, address what it reported, and re-run this block" >&2; exit 1; }
 ```
 

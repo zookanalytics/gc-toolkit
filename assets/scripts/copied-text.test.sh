@@ -30,16 +30,19 @@
 #      argument on a line of its own, its newlines as spaces, then the stdin
 #      they are given. Each file's text must reach a logged command as written,
 #      inside one argument or its stdin, and nothing in it may run. The block
-#      then runs once more with each of its files missing in turn, and must
-#      exit non-zero and make no call it does not make, word for word, with
-#      every file in place, so no call takes a file that did not read.
+#      then runs again with each of its files missing in turn, and again with
+#      a directory in its place, which a shell opens for reading though no
+#      read of it succeeds. Each time it must exit non-zero and make no call it
+#      does not make, word for word, with every file in place, so no call takes
+#      a file that did not read.
 #   3. Controls: the as-written check fails the same text pasted inside double
 #      quotes, the same text in a quoted here-document whose delimiter is one
 #      of its lines, a file's text passed unquoted, which bash splits, and a
 #      block that drops one of the two files it reads. The missing-file check
 #      fails a read inside the call's argument, a read on a line of its own
-#      whose call runs whether or not it read, and two reads in one assignment,
-#      whose status is the last read's. Part 1 reports a copied-text
+#      whose call runs whether or not it read, two reads in one assignment,
+#      whose status is the last read's, and a read inside the call's argument
+#      whose call takes the same file as its stdin and nothing more. Part 1 reports a copied-text
 #      placeholder inside double quotes in a block, in a here-document's body,
 #      and inside double quotes in an inline command, and none for a file read.
 #
@@ -358,24 +361,30 @@ calls() {
         | LC_ALL=C sort -u
 }
 # stops_on_missing <shell> <block> <prefix> <files> — run with each of
-# <prefix>.file1 to <prefix>.file<files> missing in turn, the block exits
-# non-zero and makes no call that the run before it, with every file in place,
-# did not make word for word. That run's log is the one in $TMP/log. On a
-# failure, STOP_WHY says which file was missing and what the block did.
+# <prefix>.file1 to <prefix>.file<files> missing in turn, then with each a
+# directory, the block exits non-zero and makes no call that the run before it,
+# with every file in place, did not make word for word. That run's log is the
+# one in $TMP/log. On a failure, STOP_WHY says which file did not read, how,
+# and what the block did.
 stops_on_missing() {
-    local k=1 rc extra
+    local k how rc extra
     calls "$TMP/log" >"$TMP/calls-whole"
-    while [ "$k" -le "$4" ]; do
-        mv "$3.file$k" "$3.gone"
-        rc=$(run_block "$1" "$2")
-        mv "$3.gone" "$3.file$k"
-        calls "$TMP/log" >"$TMP/calls-gone"
-        extra=$(LC_ALL=C comm -23 "$TMP/calls-gone" "$TMP/calls-whole")
-        if [ "$rc" -eq 0 ] || [ -n "$extra" ]; then
-            STOP_WHY="with file $k missing: exit $rc; calls it makes only then: $(printf '%s' "$extra" | tr '\t\n' ' ;' | head -c 400)"
-            return 1
-        fi
-        k=$((k + 1))
+    for how in missing "a directory"; do
+        k=1
+        while [ "$k" -le "$4" ]; do
+            mv "$3.file$k" "$3.gone"
+            [ "$how" = missing ] || mkdir "$3.file$k"
+            rc=$(run_block "$1" "$2")
+            rm -rf "$3.file$k"
+            mv "$3.gone" "$3.file$k"
+            calls "$TMP/log" >"$TMP/calls-gone"
+            extra=$(LC_ALL=C comm -23 "$TMP/calls-gone" "$TMP/calls-whole")
+            if [ "$rc" -eq 0 ] || [ -n "$extra" ]; then
+                STOP_WHY="with file $k $how: exit $rc; calls it makes only then: $(printf '%s' "$extra" | tr '\t\n' ' ;' | head -c 400)"
+                return 1
+            fi
+            k=$((k + 1))
+        done
     done
 }
 
@@ -504,9 +513,15 @@ control_missing() {
         fi
     done
 }
+cat >"$TMP/control/stdin-only.md" <<'MD'
+```bash
+gc bd update tk-x --append-notes "$(cat "<the file holding their words>")" <"<the file holding their words>"
+```
+MD
 control_missing in-argument 1 "a read inside the call's argument"
 control_missing unjoined 1 "a read on a line of its own, whose call runs whether or not it read,"
 control_missing one-assignment 2 "two reads in one assignment, whose status is the last read's,"
+control_missing stdin-only 1 "a read inside the call's argument whose call takes the same file as its stdin alone,"
 cat >"$TMP/control/placed.md" <<'MD'
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --ruled yes --ruling "<the ruling, one line>" --no-wait
