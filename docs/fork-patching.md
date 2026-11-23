@@ -39,13 +39,13 @@ disappear](#when-this-doc-should-disappear)).
 When you hit a bug in `gascity` that's blocking your city, evaluate which
 of these options applies:
 
-1. **Ignore.** Wait for upstream to resolve, accept the cost in the meantime.
+1. **Fix it in the city's own config.** A bug the city's own configuration
+   fixes, in `city.toml` or a pack the city runs, takes that change as its
+   fix, not as a stopgap, and the fork carries no patch for it. Only
+   upstream's own fix, arriving through a sync, replaces the change.
+2. **Ignore.** Wait for upstream to resolve, accept the cost in the meantime.
    This is the right answer most of the time, especially when others are
    already working the problem.
-2. **Fix it in the city's own config.** A bug that a change to `city.toml`
-   or the pack fixes takes that change as its fix, not as a stopgap, and the
-   fork carries no patch for it. Only upstream's own fix, arriving through a
-   sync, replaces the change.
 3. **Local patch.** Carry the fix in your fork until upstream catches up.
    This doc is about that path, for a bug the city's config cannot fix.
 4. **Engage upstream.** Only worthwhile if you have something *materially
@@ -53,10 +53,10 @@ of these options applies:
    not yet noticed, a framing nobody's used. Engaging when others are
    already iterating on a fix is noise.
 
-Default to ignoring the bug. When it is hot and you can't wait, fix it in
-the city's config if that config can, and carry a local patch only if it
-cannot. Engage upstream only when you have something new, *and* you've
-decided you want the public footprint of an upstream PR.
+Fix the bug in the city's config when the config can fix it. Otherwise
+default to ignoring it, and carry a local patch when it is hot and you can't
+wait. Engage upstream only when you have something new, *and* you've decided
+you want the public footprint of an upstream PR.
 
 A design gap is not a local-patch case. A gc-toolkit feature that needs
 something Gas City cannot express is reshaped to fit what Gas City ships,
