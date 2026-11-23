@@ -83,13 +83,16 @@ further, and GitHub is asked nothing.
 
 Each GitHub read ends after %s. A workflow the report has not started %s
 after it began is reported unread, so a pass ends inside its order's time
-however many workflows the rig marks.
+however many workflows the rig marks. The report takes the workflows in the
+order of their files' names, from a place that moves one workflow on every
+%s, and the order's passes run that far apart, so a workflow one pass
+leaves unread comes first in a later one.
 
 With --dry-run it reads the checkout and GitHub and prints the writer's
 arguments for each workflow, and writes nothing.
 
 It prints one JSON object: the rig, its repository and default branch, and for
-each workflow its file, its state (failing, succeeded or none), the newest
+each workflow, in the order the report took them, its file, its state (failing, succeeded or none), the newest
 decided run, the length of the run of failures, and what the writer recorded,
 the arguments it would be given, or why that workflow's report did not
 complete. The object's failure joins each such reason with any read of the
@@ -97,7 +100,7 @@ rig's own that failed.
 
 exit: 0 every read answered and the writer recorded what it found
       1 a read failed or a finding was not recorded, as failure says
-      2 usage`, actions.Mark, actions.Window, actions.Priority, actions.ReadBound, actions.StartBound)
+      2 usage`, actions.Mark, actions.Window, actions.Priority, actions.ReadBound, actions.StartBound, actions.Turn)
 
 func newActionsReportCmd(stdout, stderr io.Writer) *cobra.Command {
 	var rig string

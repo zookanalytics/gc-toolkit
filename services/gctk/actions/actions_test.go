@@ -15,7 +15,9 @@ import (
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 )
 
-// t0 is the time the first run of a test started.
+// t0 is the time the first run of a test started. Its count of Turns since
+// the Unix epoch is a multiple of 6, so a report that starts at t0 takes two or
+// three workflows from the first.
 var t0 = time.Date(2026, 11, 20, 6, 0, 0, 0, time.UTC)
 
 // run is run number n of the Nightly workflow on main, of the commit whose oid is
@@ -437,6 +439,51 @@ func TestAReportStartsNoWorkflowPastItsBound(t *testing.T) {
 	if len(w.city.Scripts()) != 2 || len(out.Workflows) != 3 || out.Workflows[2].State != "" ||
 		!strings.Contains(out.Failure, "c.yml: not read, since the report had run 1m32s, past the 1m30s in which it starts a workflow") {
 		t.Errorf("the report wrote %+v: %+v", w.city.Scripts(), out)
+	}
+}
+
+// Passes a Turn apart each start one workflow further on, so a workflow the
+// start bound leaves unread in one pass comes first in a later one, and its
+// failure is filed then.
+func TestEachPassStartsOneWorkflowFurtherOn(t *testing.T) {
+	w := newWorld(map[string][]gh.WorkflowRun{
+		"a.yml": {run('a', 1, 1, "success")},
+		"b.yml": {run('b', 2, 2, "success")},
+		"c.yml": {run('c', 3, 3, "failure")},
+	})
+	var now time.Time
+	w.report.Now = func() time.Time { return now }
+	w.city.OnScript = func(c gcfake.Call) gascity.Result {
+		now = now.Add(StartBound/2 + time.Second)
+		key, _ := arg(c.Args, "--key")
+		return gascity.Result{Output: "patrol-finding: filed ra-1 for [" + key + "]\n"}
+	}
+	var took [][]string
+	for pass := range 3 {
+		now = t0.Add(time.Duration(pass) * Turn)
+		out := w.report.Run("rig-a", false)
+		var files []string
+		for _, wf := range out.Workflows {
+			files = append(files, wf.File)
+		}
+		took = append(took, files)
+		if len(files) != 3 || !strings.HasPrefix(out.Failure, files[2]+": not read") {
+			t.Errorf("pass %d took %q and failed with %q, want its third unread", pass+1, files, out.Failure)
+		}
+	}
+	if want := [][]string{{"a.yml", "b.yml", "c.yml"}, {"b.yml", "c.yml", "a.yml"}, {"c.yml", "a.yml", "b.yml"}}; !slices.EqualFunc(took, want, slices.Equal) {
+		t.Errorf("the passes took %q, want %q", took, want)
+	}
+	filed := 0
+	for _, c := range w.city.Scripts() {
+		if key, _ := arg(c.Args, "--key"); key == Key("c.yml") {
+			if _, cleared := arg(c.Args, "--cleared"); !cleared {
+				filed++
+			}
+		}
+	}
+	if filed != 2 {
+		t.Errorf("c.yml's failure was filed %d times, want once in each of the passes that read it: %+v", filed, w.city.Scripts())
 	}
 }
 

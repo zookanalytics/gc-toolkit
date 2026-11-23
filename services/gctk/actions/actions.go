@@ -45,8 +45,15 @@ const (
 	// StartBound is how long after it starts a report still starts a
 	// workflow. One it has not started by then is reported unread, so a
 	// report ends inside the time its order gives it however many workflows
-	// the rig marks.
+	// the rig marks, and a later report starts with it (Turn).
 	StartBound = 90 * time.Second
+	// Turn is how long a report keeps the same first workflow. A report takes
+	// the workflows in the order of their files' names, from the one whose
+	// place among them is the count of Turns since the Unix epoch, modulo how
+	// many there are, around to the one before it. The order's passes run a
+	// Turn apart, so a workflow the start bound leaves unread in one pass comes
+	// first in a later one.
+	Turn = time.Hour
 	// Scope is the finding's scope, named for the verb that files it.
 	Scope = "actions-report"
 	// Type and Priority are the finding's. A failed run on the default branch
@@ -170,9 +177,9 @@ func branchRuns(runs []gh.WorkflowRun, repo, branch string) []gh.WorkflowRun {
 }
 
 // Outcome is what one report read and did: the rig, its repository, its
-// default branch, and each workflow the branch marks. Failure says why the
-// report did not complete, the rig's own reads or each workflow's that did not,
-// and is empty when it did.
+// default branch, and each workflow the branch marks, in the order the report
+// took them (Turn). Failure says why the report did not complete, the rig's
+// own reads or each workflow's that did not, and is empty when it did.
 type Outcome struct {
 	Rig        string     `json:"rig"`
 	Repository string     `json:"repository,omitempty"`
@@ -243,6 +250,10 @@ func (r *Report) Run(rig string, dryRun bool) Outcome {
 		return fail("the workflows on %s in %s's checkout did not read: %v", branch, rig, err)
 	}
 	slices.Sort(files)
+	if n := int64(len(files)); n > 0 {
+		k := int(start.Unix() / int64(Turn/time.Second) % n)
+		files = slices.Concat(files[k:], files[:k])
+	}
 	var unfinished []string
 	for _, f := range files {
 		w := Workflow{File: path.Base(f)}
