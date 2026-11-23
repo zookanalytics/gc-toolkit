@@ -255,10 +255,10 @@ The failure is on the base branch, so it is not yours and every polecat
 starting a baseline right now sees the same thing. Report it ONCE: search
 the ledger first, and add your confirmation to the existing bead instead of
 filing another copy. Do NOT fix pre-existing failures: that's not your
-assignment.
+assignment, unless your work bead is the failure's tracker (3b).
 
-FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing pre-existing
-failures. FORBIDDEN: Filing before searching.
+FORBIDDEN: Pushing to {{base_branch}}. FORBIDDEN: Fixing a pre-existing
+failure your work bead does not track. FORBIDDEN: Filing before searching.
 
 **3a. Derive the failure's key with the script.** Two agents describe one
 defect in two different ways, so free-text prose cannot match; a key the
@@ -284,6 +284,8 @@ It prints the tracker's id, or nothing when none stands.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/preexisting-failure.sh" find "<the key>"
 ```
+When it prints your own work bead, the failure is the work you were sent to
+fix: comment nothing, close this step (step 4), and fix it in implement.
 A lookup that exits non-zero is not an all-clear, and neither is a `key` that
 refused the failure. File nothing, tell `{{escalation_target}}` which of the two
 happened, and get on with your own work:
@@ -323,15 +325,18 @@ worktree to the current tip, and re-run the pre-flight before filing anything.
 
 **3e. Only now file it.** The script titles a P1 bug with the key and
 stamps the key on it in the same write, so the next 3b lookup finds it even
-after a retitle. Put the full failure, with the subtest 3a dropped and the
-package, in the message. When another gate filed the key since your lookup, the
-script files nothing and prints that tracker's id; confirm on it as in 3c.
+after a retitle. It then sends the tracker to the rig's polecat pool to be
+fixed, so nothing holds it for placement. Put the full failure, with the subtest
+3a dropped and the package, in the message. When another gate filed the key
+since your lookup, the script files and sends nothing and prints that tracker's
+id; confirm on it as in 3c. A warning that the sling failed names the sling
+that sends the tracker: run it.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/preexisting-failure.sh" file "<the key>" --summary "<short description>" --message "Observed on {{base_branch}} while starting <the work bead>. <the full failure: the test or check, its subtest or lines, the package, and the raw output>"
 ```
 Then tell `{{escalation_target}}` what it printed:
 ```bash
-gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" -m "Symptom: <the key>. Tracked as: <the tracker, or nothing, the filing failed>. Proceeding with <the work bead>."
+gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} has failing pre-flights" -m "Symptom: <the key>. Tracked as: <the tracker, sent to be fixed, or nothing, the filing failed>. Proceeding with <the work bead>."
 ```
 
 **4. Close this step:**
@@ -443,11 +448,12 @@ stands:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" --bead "<the work bead>" --check "<test, lint, typecheck, setup or build: the red check>" --commit "<git rev-parse HEAD>" --trackers "<the tracker id of each failure in it, space-separated>"
 ```
-Mark only a failure you reproduced on the base; a run with another command or
-scope replaces the record and needs a mark of its own. A check still red after
-your best effort stays red: the exit condition reads it as "not yet", and the
-loop iterates until its last attempt. `git status` must be clean before you
-close the iteration.
+Mark only a failure you reproduced on the base, and never one whose tracker is
+your own work bead: that failure is the work you were sent to fix, so it holds
+the loop until it passes. A run with another command or scope replaces the
+record and needs a mark of its own. A check still red after your best effort
+stays red: the exit condition reads it as "not yet", and the loop iterates until
+its last attempt. `git status` must be clean before you close the iteration.
 
 **5. On the loop's last attempt, a check still red asks a person.** The loop's
 control bead holds the budget in `gc.max_attempts` and one `gc.attempt_log`

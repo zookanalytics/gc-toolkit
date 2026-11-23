@@ -153,6 +153,68 @@ func TestRenderReasons(t *testing.T) {
 	})
 }
 
+// RenderOwnAttention tells a PR on the pending record whose needs-attention
+// rests on the human gates and the beads a person owes that hold it from one
+// that reads needs-attention for a reason of its own as well. A wait of the
+// bead's own on such a bead is answered with it, and a wait on anything else,
+// such as work on the PR's branch, stays.
+func TestRenderOwnAttention(t *testing.T) {
+	const at = "1111111111111111111111111111111111111111"
+	wait := func(id string) pr.Condition { return pr.Condition{Kind: pr.KindWait, ID: id} }
+	cond := func(k pr.Kind, value string) pr.Condition { return pr.Condition{Kind: k, Value: value} }
+	gated := prstatus.Facts{Gates: []person.Blocker{{ID: "tk-gate", Title: "decide the scope"}}}
+	owed := prstatus.Facts{Owed: []person.Blocker{{ID: "tk-conv", Title: "should this land as built?"}}}
+	machine := prstatus.Facts{Gates: []person.Blocker{{ID: "tk-g", Title: "look at the runs", IssueType: "gate",
+		AwaitType: "human", AwaitID: "review-run-failed"}}}
+	ended := prstatus.Facts{Gates: gated.Gates, Runs: []prstatus.Run{
+		{ID: "tk-run1", Status: "closed", Head: at, Target: "main", ClosedAt: "2026-11-12T09:10:00Z"}}}
+	cases := []struct {
+		name string
+		a    pr.Answer
+		f    prstatus.Facts
+		want bool
+	}{
+		{"a human gate the PR waits on is no reason of its own",
+			pr.Answer{Conditions: []pr.Condition{wait("tk-gate")}}, gated, false},
+		{"…nor is a conversation a person owes that holds the merge",
+			pr.Answer{Conditions: []pr.Condition{wait("tk-conv")}}, owed, false},
+		{"…nor a gate the walk finds behind the PR's own wait on work",
+			pr.Answer{Conditions: []pr.Condition{wait("tk-fix")}}, gated, false},
+		{"…nor an unapproved PR's review, which is left once the gate is answered",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindApproval, ""), wait("tk-gate")}}, gated, false},
+		{"…nor a gate a review run's failure filed",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindReview, ""), wait("tk-g")}}, machine, false},
+		{"…nor a side of GitHub's the landing order has yet to read",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindGitHubUnread, ""), wait("tk-gate")}}, gated, false},
+		{"a failed required check beside a gate is its own",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindCheckFailed, "test"), wait("tk-gate")}}, gated, true},
+		{"a hold set by hand beside a bead a person owes is its own",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindHold, ""), wait("tk-conv")}}, owed, true},
+		{"a review thread beside a gate is its own",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindThread, "T1"), wait("tk-gate")}}, gated, true},
+		{"a conflict on an approved PR beside a gate is its own",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindMergeState, "DIRTY"), wait("tk-gate")}}, gated, true},
+		{"a review run that ended with no result beside a gate is its own",
+			pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{cond(pr.KindReview, ""), wait("tk-gate")}}, ended, true},
+		{"a failed required check alone is its own",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindCheckFailed, "test")}}, prstatus.Facts{}, true},
+		{"a PR that waits only on an approval has none",
+			pr.Answer{Conditions: []pr.Condition{cond(pr.KindApproval, "")}}, prstatus.Facts{}, false},
+		{"a ready PR has none", pr.Answer{Ready: true}, prstatus.Facts{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := prstatus.RenderOwnAttention(c.a, c.f)
+			if got != c.want {
+				t.Fatalf("RenderOwnAttention = %v, want %v", got, c.want)
+			}
+			if state := prstatus.Render(c.a, c.f); got && state != prstatus.NeedsAttention {
+				t.Fatalf("RenderOwnAttention holds but Render = %s, want needs-attention", state)
+			}
+		})
+	}
+}
+
 // The review condition renders with the run's state (specs/tk-1tfzr71.108/
 // design.md, section 7): a run attached is the city's work in flight, and a
 // closed run with no result at the head, and the gates a run's failure files,
