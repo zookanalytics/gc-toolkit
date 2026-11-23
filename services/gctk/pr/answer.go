@@ -158,16 +158,18 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 }
 
 // answering is one round's post as it goes: the PR, the account the city's gh
-// token acts as, the round's rulings and the head it pushed, the bead that owns
-// the PR with its asks and the beads it waits on, the post's read of the PR,
-// the posts this post marked handled by node id, the questions on the bead, and
-// each write that did not land.
+// token acts as, the definition of feedback, the round's rulings and the head
+// it pushed, the bead that owns the PR with its asks and the beads it waits on,
+// the post's read of the PR, the posts that read shows as feedback the city has
+// not taken and the posts this post marked handled, each by node id, the
+// questions on the bead, and each write that did not land.
 type answering struct {
 	l          Landing
 	hub        Hub
 	host, repo string
 	number     int
 	self       string
+	rule       Feedback
 	run        *review.Run
 	rulings    []review.Ruling
 	pushed     string
@@ -177,6 +179,7 @@ type answering struct {
 	reviews    []gh.Review
 	threads    []gh.Thread
 	comments   []gh.IssueComment
+	untaken    map[string]bool
 	blockers   []*ledger.Record
 	questions  map[string]*question
 	byAsk      map[string][]review.Ruling
@@ -201,14 +204,20 @@ func (a *answering) leave(format string, args ...any) {
 	a.out.Left = append(a.out.Left, fmt.Sprintf(format, args...))
 }
 
-// read reads the account the city acts as and the PR's reviews, review threads
-// and conversation comments.
+// read reads the account the city acts as, the definition of feedback and the
+// PR's reviews, review threads and conversation comments.
 func (a *answering) read() error {
 	self, err := a.hub.Login()
 	if err != nil {
 		return err
 	}
 	a.self = self
+	if a.l.Feedback == nil {
+		return errors.New("nothing applies the definition of feedback here, so no thread can be resolved")
+	}
+	if a.rule, err = a.l.Feedback(); err != nil {
+		return err
+	}
 	if a.reviews, err = a.hub.Reviews(a.repo, a.number); err != nil {
 		return err
 	}
@@ -216,14 +225,29 @@ func (a *answering) read() error {
 }
 
 // reread reads the PR's review threads and conversation comments again, which
-// a reply changes.
+// a reply changes, and which posts the definition of feedback reads, from the
+// bead's provenance instant, as feedback the city has not taken.
 func (a *answering) reread() error {
 	var err error
 	if a.threads, err = a.hub.ReviewThreads(a.repo, a.number); err != nil {
 		return err
 	}
-	a.comments, err = a.hub.IssueComments(a.repo, a.number)
-	return err
+	if a.comments, err = a.hub.IssueComments(a.repo, a.number); err != nil {
+		return err
+	}
+	since, _, err := provenanceKey.Get(a.owner)
+	if err != nil {
+		return err
+	}
+	posts, err := untakenOf(a.rule, a.self, strings.TrimSpace(since), a.reviews, a.threads, a.comments)
+	if err != nil {
+		return err
+	}
+	a.untaken = map[string]bool{}
+	for _, p := range posts {
+		a.untaken[p.Node] = true
+	}
+	return nil
 }
 
 // comment posts the head's comment, or edits the city's comment its mark
@@ -544,15 +568,18 @@ func (a *answering) handled(node string, reacted []string) bool {
 
 // resolve resolves thread i, which holds the post at url the round answered,
 // once nothing in it is owed: each post in it carries the handled mark, but a
-// post of the city's own that the city never took. A question's post, a post
-// the city took and has not answered, and a person's post it has not taken
-// keep it open.
+// post of the city's own that the city never took. A post the definition of
+// feedback reads as one the city has not taken, whoever's login made it, a
+// question's post and a post the city took and has not answered keep it open.
 func (a *answering) resolve(i int, url string) {
 	t := a.threads[i]
 	if t.Resolved {
 		return
 	}
 	for _, c := range t.Comments {
+		if a.untaken[c.NodeID] {
+			return
+		}
 		own := c.Author == a.self && !slices.Contains(c.ViewerReactions, takenMark)
 		if !own && !a.handled(c.NodeID, c.ViewerReactions) {
 			return

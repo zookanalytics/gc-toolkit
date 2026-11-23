@@ -422,6 +422,34 @@ func TestAThreadStaysOpenWhileAPostInItIsOwed(t *testing.T) {
 	}
 }
 
+// A post the city's own login made without the city's mark is feedback by the
+// definition, so it keeps its thread open until the city takes and answers it,
+// as a person's does. A post of the city's own, which carries the mark, does
+// not.
+func TestAPostUnderTheCitysLoginWithoutItsMarkKeepsTheThreadOpen(t *testing.T) {
+	for _, c := range []struct {
+		name, body string
+		resolved   bool
+	}{
+		{"with no mark", "and one more thing", false},
+		{"with the city's mark", "a note of the city's\n\n" + cityMark, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newRounds(t)
+			url := d.person(pr.PostInline)
+			d.pr.Threads[0].Comments = append(d.pr.Threads[0].Comments, gh.Comment{ID: 263, NodeID: "PRRC_263",
+				URL: prURL + "#discussion_r263", Author: self, Body: c.body})
+			ask := d.ask(t, "Inline comment", url, "2026-11-12T03:00:00Z")
+			d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "A nit."})
+			d.posted(t)
+			if !d.reacted("PRRC_260", "THUMBS_UP") || d.resolved("T1") != c.resolved {
+				t.Fatalf("the ruled post is marked %v and the thread resolved %v, want resolved %v",
+					d.reacted("PRRC_260", "THUMBS_UP"), d.resolved("T1"), c.resolved)
+			}
+		})
+	}
+}
+
 // A person's request for changes is dismissed once its last point is answered
 // on the PR, and not before, with its author asked to review again first and a
 // one-line note that counts what became of the points.

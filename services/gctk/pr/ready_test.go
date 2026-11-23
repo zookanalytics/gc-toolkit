@@ -38,34 +38,38 @@ const (
 )
 
 // rule is the definition of feedback as a test sets it: every post is feedback
-// unless notFeedback names it, an inline comment a dismissal retired is none,
-// and a post that carries the city's EYES or THUMBS_UP is taken.
+// unless notFeedback names it or the login the read runs as made it carrying
+// the city's mark, as gc_city_own reads the city's own post, an inline comment
+// a dismissal retired is none, and a post that carries the city's EYES or
+// THUMBS_UP is taken.
 type rule struct {
 	notFeedback map[int64]bool
 	awaits      map[string]bool
 	err         error
 }
 
-// untaken reports whether the post id, carrying reactions, is feedback the
-// city has not taken.
-func (r *rule) untaken(id int64, reactions []string) bool {
-	return !r.notFeedback[id] && !slices.Contains(reactions, "EYES") && !slices.Contains(reactions, "THUMBS_UP")
+// untaken reports whether the post id, which author made with body and which
+// carries reactions, is feedback the city has not taken, as the login self
+// reads it.
+func (r *rule) untaken(self string, id int64, author, body string, reactions []string) bool {
+	own := author == self && strings.Contains(body, cityMark)
+	return !own && !r.notFeedback[id] && !slices.Contains(reactions, "EYES") && !slices.Contains(reactions, "THUMBS_UP")
 }
 
-func (r *rule) Untaken(_, _ string, reviews []feedback.Review, inline, convo []feedback.Comment) (feedback.Untaken, error) {
+func (r *rule) Untaken(self, _ string, reviews []feedback.Review, inline, convo []feedback.Comment) (feedback.Untaken, error) {
 	var out feedback.Untaken
 	for _, v := range reviews {
-		if r.untaken(v.ID, v.Reactions) {
+		if r.untaken(self, v.ID, v.Author, v.Body, v.Reactions) {
 			out.Reviews = append(out.Reviews, v.ID)
 		}
 	}
 	for _, c := range inline {
-		if (c.Review == nil || c.Review.State != "DISMISSED") && r.untaken(c.ID, c.Reactions) {
+		if (c.Review == nil || c.Review.State != "DISMISSED") && r.untaken(self, c.ID, c.Author, c.Body, c.Reactions) {
 			out.Inline = append(out.Inline, c.ID)
 		}
 	}
 	for _, c := range convo {
-		if r.untaken(c.ID, c.Reactions) {
+		if r.untaken(self, c.ID, c.Author, c.Body, c.Reactions) {
 			out.Conversation = append(out.Conversation, c.ID)
 		}
 	}
