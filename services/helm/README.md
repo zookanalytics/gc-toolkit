@@ -285,9 +285,16 @@ asked, and red when it could not be read.
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
 operator's review, work assigned to them, a ruling), with every bead the need
-holds beneath it in the Work queue's order. Each Needs you view leads with how
-many of its needs count, and beneath that how many of each kind count: pull
-requests, questions, conversations waiting for you, in conversation and
+holds beneath it in the Work queue's order. A pull request that needs
+attention only for the questions and the other beads a person owes that hold
+it is listed beneath each of their needs and reads what it waits on. It is a
+need of its own only for a reason of its own beside them, such as a failed
+check, or while it stands beneath no need on the board. `services/gctk/standing`
+answers both, so `gctk bead stands` reads such a pull request as waiting on the
+same question: its pull-request ask says when a pull request is a need, and
+`Reading.Beneath` names the needs a row is listed beneath. Each Needs you view
+leads with how many of its needs count, and beneath that how many of each kind
+count: pull requests, questions, conversations waiting for you, in conversation and
 rulings, a zero among them, then assigned to you when one counts. A kind's count
 shows that kind alone, and a second click shows every kind again. The needs
 that do not count, those about parked work or work held for the Product Owner,
@@ -305,7 +312,12 @@ pages show the same views across the rig. Every object, from an epic to a gate,
 is drawn with one row structure (`src/rigboard/Line.tsx`), whose look follows
 the operator's Claude Design export, and an object looks the same wherever it
 appears: on every page a need is tinted and tagged with its kind, and its line 3
-says how many beads it holds up and, for a pull request, what holds it. A page
+says how many beads it holds up and, for a pull request, what holds it. A need
+reads the highest priority among it and the beads it holds, so a question in
+front of P1 work reads P1, while the order of a Needs you view stays the work's.
+A row that waits on another need names its pull request by number beside what
+it waits on, and its Details gives where the pull request stands and what holds
+it. A page
 decides only what nests under a row: a need on a Needs you view nests the beads
 it holds there, and nothing else nests. Details opens in place under a row: the
 bead's whole description, formatted, which the page reads from the supervisor
@@ -413,8 +425,8 @@ document never mixes two reads of a bead:
 | `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`) or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
 | `services/gctk/prstatus` (`Holding` over `Listing.Blockers`), and `services/gctk/standing/person` (`Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
-| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
-| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
+| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`, `OwnAttention`) | each open pull request's facts, and where one on the old record stands, what holds it and whether it needs attention for a reason of its own |
+| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`, `RenderOwnAttention`) | where a pull request on Gas Town's pending record stands, what holds it and whether it needs attention for a reason of its own: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows, waits' answers, the store's ready set and the live runs, and which of it is the ready work nothing sends anywhere |
 
