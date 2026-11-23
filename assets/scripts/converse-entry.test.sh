@@ -7,9 +7,12 @@
 # stay that stopped short in each window its writes leave, with its work open
 # and with it closed, a second stay with an earlier stay's text, a hold claimed
 # back over a second stay that stopped short, while the earlier work is out and
-# once it closes, the return of the work, no conversation at all, Gas City
-# stopping the session whatever its conversation's state, and each way the
-# state can fail to read, which is never an answer to drain on.
+# once it closes, the return of the work, a stay on its gate before and after
+# the gate closes, with the gate's work handed on, a stay whose line names its
+# work rather than a gate, a gate the sitting filed before it stayed, open or
+# closed, no conversation at all, Gas City stopping the session whatever its
+# conversation's state, and each way the state can fail to read, which is never
+# an answer to drain on.
 #
 # Hermetic: stubs gc and gctk, reads the repo only; no city, no network.
 
@@ -34,9 +37,11 @@ trap 'rm -rf "$TMPD"' EXIT
 BIN="$TMPD/bin"; FIXDIR="$TMPD/fix"
 mkdir -p "$BIN" "$FIXDIR"
 
-# The gc stub answers the three reads the entry makes from fixtures, logs every
-# call, and refuses anything else, so a write the entry should never make fails
-# the case that reaches it.
+# The gc stub answers the reads the entry makes from fixtures, logs every call,
+# and refuses anything else, so a write the entry should never make fails the
+# case that reaches it. A dep list joins each bead the conversation's row waits
+# on through a blocks edge to that bead's row, as bd does, and a bead with no
+# row of its own answers as open work. deps.down fails it.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf '%s\n' "$*" >>"$FIXDIR/calls"
 case "$*" in
@@ -52,6 +57,17 @@ case "$*" in
   "bd list --assignee "*" --status open,in_progress --json")
     [ -r "$FIXDIR/assigned" ] || { echo "Error: list failed" >&2; exit 1; }
     cat "$FIXDIR/assigned" ;;
+  "bd dep list "*" --type blocks --json")
+    id=$4
+    [ ! -e "$FIXDIR/deps.down" ] || { echo "Error: store unavailable" >&2; exit 1; }
+    [ -r "$FIXDIR/row-$id.json" ] || { echo "Error: no issue found matching $id" >&2; exit 1; }
+    out=""
+    for d in $(jq -r '.dependencies[]? | select(.type == "blocks") | .depends_on_id' "$FIXDIR/row-$id.json"); do
+      if [ -r "$FIXDIR/row-$d.json" ]; then r=$(jq -c '. + {dependency_type: "blocks"}' "$FIXDIR/row-$d.json")
+      else r=$(jq -nc --arg d "$d" '{id: $d, issue_type: "task", status: "open", dependency_type: "blocks"}'); fi
+      out="$out${out:+,}$r"
+    done
+    printf '[%s]\n' "$out" ;;
   *) echo "stub gc: refused: $*" >&2; exit 9 ;;
 esac
 STUB
@@ -96,11 +112,17 @@ handback() {
   jq -c --arg t "$2" '.metadata["gc.handback"] = $t | .metadata["gc.handback_at"] = "2026-11-12T10:00:00Z"' \
     "$FIXDIR/row-$1.json" >"$FIXDIR/tmp" && mv "$FIXDIR/tmp" "$FIXDIR/row-$1.json"
 }
-# holds <id> [<open work>...] — gctk bead holds' answer for the conversation.
+# holds <id> [<open work>|gate:<open gate>...] — gctk bead holds' answer for
+# the conversation; a gate: one is a stay's gate.
 holds() {
-  local id=$1 p=""
+  local id=$1 p="" w
   shift
-  for w in "$@"; do p="$p${p:+,}$(jq -nc --arg w "$w" '{id: $w, type: "blocks", status: "open", issue_type: "task"}')"; done
+  for w in "$@"; do
+    case "$w" in
+      gate:*) p="$p${p:+,}$(jq -nc --arg w "${w#gate:}" '{id: $w, type: "blocks", status: "open", issue_type: "gate", await_type: "gctk:needs-review"}')" ;;
+      *) p="$p${p:+,}$(jq -nc --arg w "$w" '{id: $w, type: "blocks", status: "open", issue_type: "task"}')" ;;
+    esac
+  done
   jq -nc --arg id "$id" --argjson p "[$p]" \
     '{id: $id, status: (if ($p | length) > 0 then "blocked" else "clear" end), waits: $p, pending: $p, last_landed: "", in_flight: "", arm: null, foreign: []}' \
     >"$FIXDIR/holds-$id.json"
@@ -109,6 +131,13 @@ assigned() { jq -sc '.' "$@" >"$FIXDIR/assigned"; }
 # item <id> <status> — the list row of a bead of work, as the entry reads the
 # status of one a stay names with no edge onto it.
 item() { jq -nc --arg id "$1" --arg s "$2" '{id: $id, issue_type: "task", status: $s}' >"$FIXDIR/row-$1.json"; }
+# stay_gate <id> <work> <status> [<closed at> [<reason>]] — the row of a stay's
+# gate on <work>, as a dep list joins it.
+stay_gate() {
+  jq -nc --arg id "$1" --arg w "$2" --arg s "$3" --arg at "${4:-}" --arg why "${5:-}" \
+    '{id: $id, issue_type: "gate", status: $s, await_type: "gctk:needs-review", await_id: $w}
+     + (if $at == "" then {} else {closed_at: $at, close_reason: $why} end)' >"$FIXDIR/row-$1.json"
+}
 # enter — run the script as a sitting would; prints stdout, leaves the status
 # in $FIXDIR/rc and the calls it made in $FIXDIR/calls.
 enter() {
@@ -341,6 +370,104 @@ is "a hold after a stay whose work is still out stands" "$(line ENTRY | cut -d: 
 is "…and goes on with the hold" "$(line NEXT=)" "NEXT=converse-continue"
 has "…printing the last hand-back" "$OUT" "tk-s — the follow-up"
 
+echo "── a stay in a rig's store waits on its gate, which names the work it is for ──"
+# The second staying: line names the stay's gate. The entry reads the stay as
+# waiting while the gate is open and as returned once it has closed, and hands
+# on the gate's await id as the work.
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+is "a stay on its open gate is waiting" "$(line ENTRY | cut -d: -f1)" "ENTRY waiting"
+has "…naming the work and its gate" "$(line ENTRY)" "stays for tk-w, on its gate tk-gate"
+is "…loading the stay's skill" "$(line NEXT=)" "NEXT=converse-stay"
+is "…handing on the gate's work as the work" "$(line WORK=)" "WORK=tk-w"
+is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API"
+is "…exiting 0" "$(rc)" 0
+has "…after reading what the conversation waits on" "$(cat "$FIXDIR/calls")" "bd dep list tk-c --type blocks --json"
+fresh; hook work ready_assignment tk-c; conv tk-c open "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w's PR reads needs-review in its own right at abc1234"
+enter >/dev/null
+is "once its gate has closed, the stay is back" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+has "…saying why the gate closed" "$(line ENTRY)" "(tk-w's PR reads needs-review in its own right at abc1234)"
+has "…and which work is back" "$(line ENTRY)" "so tk-w is back with conversation tk-c"
+is "…loading the stay's skill" "$(line NEXT=)" "NEXT=converse-stay"
+is "…handing on the gate's work" "$(line WORK=)" "WORK=tk-w"
+is "…and what was agreed" "$(line AGREED=)" "AGREED=keep the API"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w closed"
+enter >/dev/null
+is "a restart during that return is still the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+# The stay's call stopped after its line named the gate and before its status
+# write: the conversation is still claimed, and its gate is open.
+fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a stay stopped before its status write, its gate open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
+is "…with the gate's work" "$(line WORK=)" "WORK=tk-w"
+# Work that had closed by the stay needs no gate: the line names the work
+# itself, with no edge onto it, and the entry reads it as back.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-w)" tracks:tk-s; holds tk-c; item tk-w closed
+enter >/dev/null
+is "a stay that named its closed work, with no gate, is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…for that work" "$(line WORK=)" "WORK=tk-w"
+# A stay made before stays waited on a gate names its work, and its
+# conversation waits on that work through an edge, as a stay in the city's own
+# store does. That record reads as it always has: waiting while the work is
+# out, and returned once it has closed.
+fresh; hook drain; conv tk-c open "staying: keep the API (waits on tk-old)" tracks:tk-s blocks:tk-old; holds tk-c tk-old; item tk-old open
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a stay whose line names its work, not a gate, is waiting while that work is out" "$(line ENTRY | cut -d: -f1)" "ENTRY waiting"
+is "…handing on that work" "$(line WORK=)" "WORK=tk-old"
+fresh; hook work ready_assignment tk-c; conv tk-c open "staying: keep the API (waits on tk-old)" tracks:tk-s blocks:tk-old; holds tk-c; item tk-old closed
+enter >/dev/null
+is "…and returned once it has closed" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+is "…handing on that work" "$(line WORK=)" "WORK=tk-old"
+
+echo "── a gate the sitting filed before it stayed ──"
+# The sitting files the stay's gate for work it sent itself, then runs the
+# stay's call. A restart between the two finds a claimed conversation that waits
+# on the open gate, with neither a staying: nor a holding: line.
+fresh; hook drain; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"
+OUT=$(enter)
+is "a claimed conversation on the open gate the sitting filed, with no stay recorded, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming the gate" "$(line ENTRY)" "the gate tk-gate"
+has "…and saying the stay's call has not run" "$(line ENTRY)" "the stay's call has not run"
+is "…which the stay's skill runs" "$(line NEXT=)" "NEXT=converse-stay"
+is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+is "…with nothing agreed on record" "$(line AGREED=)" "AGREED="
+is "…and the conversation's values" "$(line SUBJECT=)" "SUBJECT=tk-s"
+is "…exiting 0" "$(rc)" 0
+# Left open rather than claimed, the same record is no stay the sign-off writes.
+fresh; hook drain; conv tk-c open "" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "an open conversation on that gate, with no stay recorded, does not read" "$(line ENTRY | cut -d: -f1)" "ENTRY unreadable"
+# The gate can close before the stay's call runs, when the work is finished
+# first, and a restart then finds it closed with neither line. Its work is
+# back, and its return is owed.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w's PR reads needs-review in its own right at abc1234"
+enter >/dev/null
+is "a restart after the gate the sitting filed has closed, with no stay recorded, is the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+has "…saying the gate closed before the stay" "$(line ENTRY)" "closed before it stayed"
+has "…and why" "$(line ENTRY)" "(tk-w's PR reads needs-review in its own right at abc1234)"
+is "…which the stay's skill carries out" "$(line NEXT=)" "NEXT=converse-stay"
+is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+is "…with nothing agreed on record" "$(line AGREED=)" "AGREED="
+# One that closed before the last hand-back was the work of a return already
+# made, and a conversation that waits on work rather than a gate is no stay.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; handback tk-c "tk-s — the return"; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-11T10:00:00Z "tk-w closed"
+enter >/dev/null
+is "a restart after such a gate closed before the last hand-back starts from the premise" "$(line NEXT=)" "NEXT=converse-recheck-premise"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-w; holds tk-c; item tk-w closed
+enter >/dev/null
+is "a restart on a conversation whose edge is onto work, not a gate, starts from the premise" "$(line NEXT=)" "NEXT=converse-recheck-premise"
+
 echo "── none: no conversation is this session's ──"
 fresh; hook drain; printf '[]' >"$FIXDIR/assigned"
 enter >/dev/null
@@ -432,11 +559,23 @@ fresh; hook drain; conv tk-c in_progress "" tracks:tk-s blocks:tk-w; holds tk-c 
 unread "a conversation that waits on open work with no staying: line"
 fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: x (waits on tk-w)" tracks:tk-s; holds tk-c
 unread "a bead the stay names with no edge onto it does not read"
+fresh; hook drain; conv tk-c open "staying: x (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"; : >"$FIXDIR/deps.down"
+unread "what a staying conversation waits on does not list"
+fresh; hook drain; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; holds tk-c gate:tk-gate; stay_gate tk-gate tk-w open
+assigned "$FIXDIR/row-tk-c.json"; : >"$FIXDIR/deps.down"
+unread "what a claimed conversation on a gate with no stay recorded waits on does not list"
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z x; : >"$FIXDIR/deps.down"
+unread "what a restarted conversation with no stay recorded waits on does not list"
 
 echo "── it writes nothing beyond the hook's claim, and takes no arguments ──"
 fresh; hook work ready_assignment tk-c; conv tk-c in_progress "staying: x (waits on tk-w)" tracks:tk-s blocks:tk-w; holds tk-c
 enter >/dev/null
-is "a return makes three calls: the claim, the row and holds" "$(tr '\n' '|' <"$FIXDIR/calls")" "hook --claim --json|bd list --id tk-c --all --json|gctk bead holds tk-c|"
+is "a return makes four calls: the claim, the row, holds and what the conversation waits on" "$(tr '\n' '|' <"$FIXDIR/calls")" "hook --claim --json|bd list --id tk-c --all --json|gctk bead holds tk-c|bd dep list tk-c --type blocks --json|"
+fresh; hook work ready_assignment tk-c; conv tk-c in_progress "" tracks:tk-s replies-to:tk-g1; holds tk-c
+enter >/dev/null
+is "a fresh conversation that waits on nothing makes three: the claim, the row and holds" "$(tr '\n' '|' <"$FIXDIR/calls")" "hook --claim --json|bd list --id tk-c --all --json|gctk bead holds tk-c|"
 ( PATH="$BIN:$PATH" bash "$SUT" --conversation tk-c >/dev/null 2>&1 ); is "an argument is a usage error" "$?" 2
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
