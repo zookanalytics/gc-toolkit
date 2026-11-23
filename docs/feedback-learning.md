@@ -60,8 +60,7 @@ routed, never assigned, and never blocks anything.
 | key | values |
 |---|---|
 | `task_kind` | `observation` |
-| `obs.category` | free slug; the distiller owns the vocabulary and merges near-duplicates. Also the finding half of the dedup key, so two observations from one event need different slugs. `outside-review` is reserved for the miner's outside capture, one observation per review post |
-| `obs.correction` | on an `outside-review` observation whose post makes a standing correction: the correction's slug, a category slug reused when one fits. The recurrence metric's M1 counts the post under it |
+| `obs.category` | free slug naming the finding: the finding half of the dedup key, so two observations from one event need different slugs. The distiller groups observations into patterns and records each one's pattern in `obs.distilled`, the grouping the recurrence metric reads. `outside-review` is reserved for the miner's outside capture, one observation per review post |
 | `obs.scope` | `repo:<rig>` \| `agent:<role>` \| `global` — guess narrow |
 | `obs.source` | `self` \| `miner` \| `operator` |
 | `obs.directive` | `standing` \| `diff` — capture-time guess; the distiller re-judges |
@@ -100,10 +99,8 @@ Four producers file the same bead contract:
    `obs.source=miner`, in two captures:
    - **The outside capture.** Every review post from outside the city
      becomes one condensed observation, `obs.category=outside-review`,
-     whether or not it is about standing behavior. A post that makes a
-     standing correction also names the correction's slug in
-     `obs.correction`, so the recurrence metric counts its repeats. A post
-     is the city's when it carries the city's mark
+     whether or not it is about standing behavior. A post is the city's
+     when it carries the city's mark
      (`assets/scripts/pr-post.sh`). A post that is not for review
      ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
      are notices, not review feedback, whoever posted them. On a rig that
@@ -386,39 +383,35 @@ in the same PR, or the promotion does not file.
 ## Measuring the loop
 
 `assets/scripts/learning-recurrence.sh` is the loop's success metric.
-Repeat feedback is the honest one: if the loop works, the same correction
-stops coming back. The report reads observation beads across every store and
-collapses duplicate captures — one correction read by both self-report and
-the miner. Two observations are the same correction when they share a
-provenance key AND an `obs.category`: a provenance key can name a whole
-turn, and a turn carries several distinct corrections. An outside-review
-observation that names a correction counts under that slug as its category.
-It gives two numbers:
+Recurrence after adoption is the honest one: if the loop works, a correction
+the city adopted a rule for stops coming back. Per adopted entry, the report
+counts the events attributed to the entry's pattern bead since its adoption
+date. Attribution runs through `obs.distilled`, which only the distiller
+stamps. An anchor records a date, not a moment, and the distiller stamps
+consumed observations when it files the proposal — before merge. Counting
+therefore starts the day after the anchor date, so a rule cannot recur
+against its own evidence.
 
-- **M1, repeat feedback by category.** The share of events in the window
-  whose `obs.category` was already seen on an earlier event. `obs.category`
-  is stamped at capture, so this half survives the distiller being disabled.
-  The slug is free text minted per capture, so when nearly every event mints
-  its own, the repeat count is pinned to (categorised minus distinct) and the
-  share measures slug reuse rather than recurrence. The report withholds the
-  rate when the key does not discriminate, and reports the spread instead.
-  The outside capture's `outside-review` names where feedback came from, not a
-  correction. M1 counts an outside post that names a correction under its
-  `obs.correction`, and leaves the rest out, counting them on a line of their
-  own.
-- **M2, recurrence after adoption.** Per adopted entry, the observations
-  attributed to its pattern bead since its adoption date. Attribution runs
-  through `obs.distilled`, which only the distiller stamps. An anchor records
-  a date, not a moment, and the distiller stamps consumed observations when
-  it files the proposal — before merge. Counting therefore starts the day
-  after the anchor date, so a rule cannot recur against its own evidence.
+The report reads observation beads across every store and collapses
+duplicate captures of one event. Two observations are one event when they
+share a provenance key and the distiller attributed both to one pattern, such
+as the self-report and the miner's reading of one post, whatever category
+slug each capture minted. A provenance key can name a whole turn, and a
+turn's corrections in different patterns are an event in each. An event
+keeps its earliest capture's time, so a post captured before adoption and
+read again after it is not recurrence.
 
-Both can floor out for reasons that are not improvement, so the report
-states its own limits beside each number: near-unique category slugs stop
-M1's key discriminating so its rate is withheld, an unattributed window
-leaves M2 unmeasured, and an entry with no `rule:<pattern-bead>` anchor
-cannot be scored at all. An unreadable store
-exits non-zero rather than reporting a smaller city as a smaller problem.
+The count is keyed on the pattern, because equality on `obs.category`, a slug
+each capture mints, measures how capturing agents reuse slugs rather than
+whether a correction came back. Repeats of a pattern before adoption are no
+measure either: they are the evidence the distiller weighs before it
+generalizes, so they grow while the loop works.
+
+The count can floor out for reasons that are not improvement, so the report
+states its limits beside it: an unattributed window leaves it unmeasured, and
+an entry with no `rule:<pattern-bead>` anchor cannot be scored at all. An
+unreadable store exits non-zero rather than reporting a smaller city as a
+smaller problem.
 
 The script runs standalone and needs no distiller run. The distiller echoes
 it at the end of every run, and `--inventory` is the shared parser its
