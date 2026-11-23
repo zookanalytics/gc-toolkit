@@ -1362,6 +1362,32 @@ runz "$SKILL"
 has "$OUT" 'SKILL.md:2: a "…" quote opened on this line is still open where the shell fence ends at line 2' \
     "a fence left open to the end of its file is a finding"
 
+# A fence indented in a list item is read without its own indentation, as
+# markdown reads it, so a heredoc's terminator indented with the fence ends the
+# heredoc, and the lines after it are scanned.
+cat > "$SKILL" <<'FIX'
+1. Write the file:
+
+   ```bash
+   cat > out.txt <<EOF
+   hello $USER
+   EOF
+   echo done
+   ```
+
+2. Then:
+
+   ```bash
+   cat > out.txt <<'EOF'
+   hello
+   EOF
+   echo $V:hello
+   ```
+FIX
+runz "$SKILL"
+has "$OUT" "SKILL.md:16: unbraced \$V:h" "the line after a heredoc indented with its fence is scanned"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 1 "and neither heredoc is open where its fence ends"
+
 echo "── zsh-colon-modifier: every real shell fence is scanned to its end ──"
 
 # A canary expansion goes in before the closing line of every shell fence in

@@ -149,13 +149,17 @@ BEGIN { reset_state() }
 /^[[:space:]]*```/ {
     if (inb) { open_at_end(FNR); inb = 0; reset_state() }
     else if (other) other = 0
-    else if (shell_fence($0)) { inb = 1; reset_state() }
+    else if (shell_fence($0)) { inb = 1; reset_state(); match($0, /^ */); ind = RLENGTH }
     else other = 1
     next
 }
 !inb { next }
 {
     line = toml ? toml_text($0) : $0
+    # Markdown drops up to the fence's own indentation, as in a list item, from
+    # each line in it, so a heredoc's terminator indented with the fence ends
+    # the heredoc.
+    match(line, /^ */); line = substr(line, (RLENGTH < ind ? RLENGTH : ind) + 1)
     if (hb) {
         t = line
         if (hbd) sub(/^\t+/, "", t)
