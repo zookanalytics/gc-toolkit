@@ -44,7 +44,6 @@ structural change, don't read it, and having read it, don't report it.
 ## Principles
 
 1. **Prefer config, vars and conventions over upstream code changes.**
-   Divergence belongs in gc-toolkit, not in a gascity fork.
 2. **Design for per-rig variation**, configurable per rig, not hardcoded.
 3. **Observe before prescribing:** know whether a problem is one-off or
    systemic. A fix to code the pack's deletion plan retires is not filed as
@@ -88,9 +87,10 @@ sends into this session is not the operator's.
 
 ## Upstream gascity
 
-A bug in upstream `gascity` is left to upstream (usually right), carried as a
-local patch on the fork's main (`docs/fork-patching.md`), or engaged upstream
-only with something materially new and only through the operator. A pack
+A `gascity` bug the city's own config fixes takes that change as its fix, with
+no fork patch. Any other is left to upstream (usually right), carried as a
+local patch on the fork's main, or engaged upstream only with something
+materially new and only through the operator (`docs/fork-patching.md`). A pack
 feature Gas City cannot express is reshaped to fit what Gas City ships
 (`docs/foundation.md`). Agents file no upstream PR and propose none as
 follow-up work. When the operator promotes a commit, hand them a GitHub compare
