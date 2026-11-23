@@ -29,35 +29,32 @@ import (
 const boundRefinery = "rig/gc-toolkit.refinery"
 
 // pours is the pour of a review run as gc formula cook --attach makes it: the
-// root, which carries its formula, its vars and the meta written on it, and the
-// bead's blocks edge onto it, which the store's blocked listing holds the bead
-// on. err fails the pour. Its rank records the root it settles, runs onRank
-// first when that is set, and answers rankErr.
+// root, which carries its formula and vars, and the bead's blocks edge onto it,
+// which the store's blocked listing holds the bead on. err fails the pour. Its
+// rank records the root it settles, runs onRank first when that is set, and
+// answers rankErr.
 type pours struct {
 	mu      sync.Mutex
 	store   *fake.Store
 	vars    []map[string]string
-	metas   []map[string]string
 	ranked  []string
 	err     error
 	rankErr error
 	onRank  func(ctx context.Context, root string)
 }
 
-func (p *pours) Pour(formula, b string, vars, meta map[string]string) (string, error) {
+func (p *pours) Pour(formula, b string, vars map[string]string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return "", p.err
 	}
 	p.vars = append(p.vars, maps.Clone(vars))
-	p.metas = append(p.metas, maps.Clone(meta))
 	root := fmt.Sprintf("tk-run%d", len(p.vars))
 	md := map[string]string{"gc.kind": "workflow", "gc.formula_name": formula}
 	for k, v := range vars {
 		md["gc.var."+k] = v
 	}
-	maps.Copy(md, meta)
 	p.store.Put(fake.Bead{ID: root, Title: formula, Status: "open", Metadata: md})
 	row, _ := p.store.Row(b)
 	row.Edges = append(row.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: root, Title: formula, Status: "open"})
@@ -230,11 +227,10 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 }
 
 // A review run is PR-finishing work of the bead that owns the PR
-// (docs/steering.md), so its root is poured one level sooner than the bead,
-// and the act settles the run's priority once it has freed the record lock,
-// before its own bound ends, since the pour gave every bead of the run the
-// bead's own priority. A later run, which finds the run attached, settles
-// nothing.
+// (docs/steering.md), which ranks one level sooner than the bead, so the act
+// settles the run's priority once it has freed the record lock, before its own
+// bound ends, since the pour gave every bead of the run the bead's own
+// priority. A later run, which finds the run attached, settles nothing.
 func TestAPouredRunIsSettledAsPRFinishingWorkOnceTheLockIsFree(t *testing.T) {
 	d := newAdmit(t)
 	free, bounded := true, true
@@ -255,12 +251,6 @@ func TestAPouredRunIsSettledAsPRFinishingWorkOnceTheLockIsFree(t *testing.T) {
 		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
 	}
 	is(t, out[0], pr.ActPoured)
-	if got := d.runs.metas[0]; !maps.Equal(got, map[string]string{"priority_shift": "-1"}) {
-		t.Fatalf("the run's root was poured with %v, want priority_shift -1", got)
-	}
-	if root, _ := d.store.Row("tk-run1"); root.Metadata["priority_shift"] != "-1" {
-		t.Fatalf("the run's root carries priority_shift %q, want -1", root.Metadata["priority_shift"])
-	}
 	if got := d.runs.ranks(); !slices.Equal(got, []string{"tk-run1"}) {
 		t.Fatalf("the run settled %v, want the run's root tk-run1", got)
 	}

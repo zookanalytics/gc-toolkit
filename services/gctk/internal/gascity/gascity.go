@@ -95,14 +95,12 @@ type Result struct {
 	Err    error
 }
 
-// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...
-// --meta <k>=<v>...`: the formula poured as a sub-workflow of its own, which the
-// bead gains a blocks edge onto, with each var passed as cook passes only its
-// --var flags, and each of Meta written on the workflow's root once the cook has
-// made it.
+// Cook is one `gc formula cook <formula> --attach <bead> --var <k>=<v>...`: the
+// formula poured as a sub-workflow of its own, which the bead gains a blocks
+// edge onto, with each var passed as cook passes only its --var flags.
 type Cook struct {
 	Formula, Bead string
-	Vars, Meta    map[string]string
+	Vars          map[string]string
 }
 
 // CookResult is a cook's Result, with the root of the workflow it attached,
@@ -214,18 +212,15 @@ func (c *City) Sling(s Sling) SlingResult {
 	return out
 }
 
-// Cook runs the cook in gctk's own process group, its vars and then its meta
-// in their names' order, and reads the root from the JSON line it prints, the
-// summary whose root_id names the workflow it attached (formulaCookJSONResult in
+// Cook runs the cook in gctk's own process group, its vars in their names'
+// order, and reads the root from the JSON line it prints, the summary whose
+// root_id names the workflow it attached (formulaCookJSONResult in
 // cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). Its standard input
 // reads nothing.
 func (c *City) Cook(k Cook) CookResult {
 	args := []string{"formula", "cook", k.Formula, "--attach", k.Bead, "--json"}
 	for _, name := range slices.Sorted(maps.Keys(k.Vars)) {
 		args = append(args, "--var", name+"="+k.Vars[name])
-	}
-	for _, name := range slices.Sorted(maps.Keys(k.Meta)) {
-		args = append(args, "--meta", name+"="+k.Meta[name])
 	}
 	r := c.run(c.bin, args...)
 	out := CookResult{Result: r}

@@ -557,8 +557,8 @@ type runs struct {
 	db string
 }
 
-func (r runs) Pour(formula, bead string, vars, meta map[string]string) (string, error) {
-	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars, Meta: meta})
+func (r runs) Pour(formula, bead string, vars map[string]string) (string, error) {
+	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars})
 	if f := res.Failure(); f != "" {
 		return "", fmt.Errorf("gc formula cook %s --attach %s: %s", formula, bead, f)
 	}

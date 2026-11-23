@@ -233,9 +233,10 @@ no warrant.
   sling pours its workflow at the priority of the bead it is slung on
   (`BeadPriorityOverride` in `internal/sling/sling.go`), a cook attached to a
   bead makes its whole sub-workflow at that bead's priority and takes none of
-  its own (`Attach` in `internal/molecule/molecule.go`, and the flags of
-  `newFormulaCookCmd` in `cmd/gc/cmd_formula.go`), a fragment a running
-  workflow adds takes its root's (`InstantiateFragment` in
+  its own (`newFormulaCookCmd` in `cmd/gc/cmd_formula.go`, whose flags name no
+  priority and whose graph.v2 arm instantiates at the attach bead's priority,
+  as `Attach` in `internal/molecule/molecule.go` does for a v1 formula), a
+  fragment a running workflow adds takes its root's (`InstantiateFragment` in
   `internal/molecule/molecule.go`), and `bd swarm` creates its molecule at its
   epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
   source's priority changes. Neither one's documentation describes a priority

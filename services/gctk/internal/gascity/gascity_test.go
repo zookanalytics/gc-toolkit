@@ -327,11 +327,10 @@ func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
 	}
 }
 
-// A cook passes its vars in their names' order, as --var flags, then its meta
-// in their names' order, as --meta flags, and reads the root from the summary
-// line it prints with --json (formulaCookJSONResult in cmd/gc/cmd_formula.go at
-// gastownhall/gascity 03f6fe825c). A cook that exits non-zero names no root, and
-// one whose output names none answers with none.
+// A cook passes its vars in their names' order, as --var flags, and reads the
+// root from the summary line it prints with --json (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). A cook that exits
+// non-zero names no root, and one whose output names none answers with none.
 func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
 	dir := t.TempDir()
 	gc := filepath.Join(dir, "gc")
@@ -346,8 +345,7 @@ esac
 		t.Fatal(err)
 	}
 	c := &City{bin: gc}
-	got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-1", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"},
-		Meta: map[string]string{"priority_shift": "-1"}})
+	got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-1", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"}})
 	if got.Code != 0 || got.Root != "tk-root" {
 		t.Fatalf("the cook answered %+v, want exit 0 and root tk-root", got)
 	}
@@ -359,7 +357,7 @@ esac
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
 	first := strings.Split(string(raw), "\n")[0]
-	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main --meta priority_shift=-1"; first != want {
+	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
 	}
 }
