@@ -42,6 +42,9 @@ when mail arrives for it, whoever sent the mail.
   coordinator session on its mail. Its maintainer ruling (2026-06-28) is that
   such sessions "wake on mail with a debounce", with implementation still to
   follow, and no Gas City release carries it.
+- An open draft, gastownhall/gascity#6387, wakes a pool that has no session
+  for unread mail to its alias whose sender passed `--notify`. Mail sent
+  without the flag, the API's included, still requests nothing there.
 
 **Gap.** A turn for mail whose sender did not ask for one. Gas City records
 every send and reply as an event, and an exec order on an event is its shape
@@ -101,8 +104,35 @@ for.
 - Core's `nudge-on-route` keeps the pairs it has nudged in a file of its own,
   `$GC_PACK_STATE_DIR/nudge-on-route-state.json`
   (`internal/bootstrap/packs/core/assets/scripts/nudge-on-route.sh`).
+- `gc session nudge --key` is Gas City's own record of a nudge already sent: a
+  rerun under the same key reports the first run's outcome and sends nothing,
+  after delivery too, but only "while the op journal records this command"
+  (`newSessionNudgeCmd` and `sessionNudgeKeyUsage` in `cmd/gc/cmd_session.go`,
+  and `deliverSessionNudgeKeyed` in `cmd/gc/cmd_nudge.go`). With no `[ops]`
+  gate set, the journal records only over a SQLite sessions store. Set to
+  `auto` or `require`, it records over a store that can record ops, which a
+  store bd serves cannot until bd's writes take `--if-revision`, and no
+  released bd's do (`OpsConfig` in `internal/config/ops.go`, and
+  `CheckRecordsByDefault` in `internal/opjournal/default_recording.go`). A city
+  `gc init` makes keeps its sessions in a SQLite store under `.gc/store` by
+  default, and a city made before that keeps them in its work ledger, since an
+  upgrade leaves its storage as it was (`--storage` in `cmd/gc/cmd_init.go`,
+  and "Your city's storage stays as it was" in
+  `docs/getting-started/upgrading.md`). There a keyed nudge runs unrecorded
+  with a warning, and a rerun under the same key nudges again (`newCLIOp` in
+  `cmd/gc/op_record.go`, and `cannotRecord` in
+  `internal/opjournal/legacyop/legacyop.go`).
 
-**Gap.** A record, per message, that outlives a pass, so a pass that runs again
-on the same mail requests no second turn. The verb keeps one as core does, in
-the pack's state directory, `.gc/runtime/packs/gc-toolkit`, holding only
-messages still unread, under a lock both orders' runs take.
+**Gap.** A record, per message, that outlives a pass in a city whose op journal
+does not record its nudges, so a pass that runs again on the same mail requests
+no second turn. The city this pack runs in is one: its `city.toml` has no
+`[storage]`, so bd serves its sessions with its work, and its bd, 1.3.4, takes
+no `--if-revision`, so no `[ops]` setting would record a keyed nudge there. The
+verb keeps the record as core does, in the pack's state directory,
+`.gc/runtime/packs/gc-toolkit`, holding only messages still unread, under a
+lock both orders' runs take. It passes no `--key` beside the ledger, because in
+such a city the key records nothing and adds a warning to every nudge, and in a
+city whose journal records nudges the ledger already holds what the key would.
+Once the city keeps its sessions in a store the journal records, the ledger's
+move onto a keyed nudge is due, as the "Mail wake" warrant in `docs/warrants.md`
+says.
