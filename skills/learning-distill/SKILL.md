@@ -386,14 +386,17 @@ the review pool runs on codex. A Claude session can run under an account
 profile's home, which holds no Codex login. Run codex on the login the review
 pool's sessions use, in the home directory of your user account, without the
 shared background server, and keep the probe's session files out of it. A
-probe must change nothing, so run Claude with no tools and codex in a read-only
-sandbox:
+probe must change nothing, and either provider loads the account's connectors
+and runs the hooks its settings name unless the call turns them off. So run
+Claude with no tools, no MCP servers and no hooks, and codex in a read-only
+sandbox with its apps and hooks off:
 
 ```bash
-claude -p --tools "" -- "<prompt>"
+claude -p --tools "" --strict-mcp-config \
+  --settings '{"disableAllHooks":true}' -- "<prompt>"
 CODEX_HOME="$(perl -e 'print((getpwuid($<))[7])')/.codex" \
   codex --no-daemon exec --ephemeral --skip-git-repo-check -s read-only \
-  "<prompt>" </dev/null
+  --disable apps --disable hooks "<prompt>" </dev/null
 ```
 
 When the carrier reaches a reviewer, also run a change the operator already
