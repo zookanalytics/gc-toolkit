@@ -73,15 +73,21 @@ go as this section ends.
 conversation holds the PR's merge while the conversation is open. Every
 conversation on an open PR carries that edge, and bd takes an edge it holds
 already as a no-op, so add it whatever stands. Then prove that you hold the PR,
-and record the ruling on the bead:
+and record the ruling on the bead. Their words go in the quoted here-document as
+they said them, where a double quote, a backtick or a `$` among them cannot end
+the note or run:
 
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
+WORDS=$(cat <<'WORDS'
+<their words>
+WORDS
+) \
+  && gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
   && "$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check \
-  && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"<their words>\""
+  && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"$WORDS\""
 ```
 
 Exit 3 from the check names each reason it refused, such as a PR that is no
@@ -223,12 +229,16 @@ once the one before it has landed. Add `--parent "$SUBJECT"` to the create when
 the subject is an epic:
 
 ```bash
-CHANGE=$(gc bd create "<what the change does>" -t task --metadata '{"target":"<the target>"}' \
-    -d "Made with the operator in conversation $CONVERSATION, on their ruling of $(date -u +%Y-%m-%d): \"<their words>\"
+WORDS=$(cat <<'WORDS'
+<their words>
+WORDS
+) \
+  && CHANGE=$(gc bd create "<what the change does>" -t task --metadata '{"target":"<the target>"}' \
+    -d "Made with the operator in conversation $CONVERSATION, on their ruling of $(date -u +%Y-%m-%d): \"$WORDS\"
 Scope: <what the change covers>" --json | jq -er '.id') \
   && echo "CHANGE=$CHANGE" \
   && gc bd dep add "$CHANGE" "$CONVERSATION" --type=blocks \
-  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that this sitting make a change with them: \"<their words>\". $CHANGE carries it." \
+  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that this sitting make a change with them: \"$WORDS\". $CHANGE carries it." \
   && echo "filed and held"
 ```
 
@@ -300,8 +310,12 @@ hold, and append this sitting's ruling to the change, which as the subject also
 takes your outcome record:
 
 ```bash
-gc bd dep add "$SUBJECT" "$CONVERSATION" --type=blocks \
-  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): resumed in conversation $CONVERSATION on the operator's ruling: \"<their words>\". <what is left to do>" \
+WORDS=$(cat <<'WORDS'
+<their words>
+WORDS
+) \
+  && gc bd dep add "$SUBJECT" "$CONVERSATION" --type=blocks \
+  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): resumed in conversation $CONVERSATION on the operator's ruling: \"$WORDS\". <what is left to do>" \
   && echo "held and recorded"
 ```
 
@@ -556,9 +570,13 @@ own edge onto the conversation:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" bead disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
+RULING=$(cat <<'RULING'
+<the operator's ruling, one sentence>
+RULING
+) \
+  && "$GCTK" bead disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
   && gc bd update "$CHANGE" --set-metadata gc.work_outcome=no-op \
-  && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "<the operator's ruling, one sentence>"
+  && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "$RULING"
 ```
 
 Then stop the copy of the UI, and remove the tree and its local branch with
@@ -625,10 +643,18 @@ as the one edge you wrote, so the subject carries one close brief and one
 closer's arm. The converse-settle step carries the rest of the call:
 
 ```bash
-"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
-  --outcome "<what this sitting settled or needs next, at most 140 characters>" \
-  --ruled yes --ruling "<the ruling, one line>" \
-  --waiting-on "$CHANGE" --close-brief "<the brief's own text, as you wrote it at filing>"
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+) \
+  && BRIEF=$(cat <<'BRIEF'
+<the brief's own text, as you wrote it at filing>
+BRIEF
+) \
+  && "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
+    --outcome "<what this sitting settled or needs next, at most 140 characters>" \
+    --ruled yes --ruling "$RULING" \
+    --waiting-on "$CHANGE" --close-brief "$BRIEF"
 ```
 
 An epic subject names no wait on its member, because bd refuses that edge, and

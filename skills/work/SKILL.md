@@ -82,12 +82,16 @@ skill), or leave it for the operator to place.
   The tracker writer files one tracker per failure, with no hold, and sends the
   tracker it files to its rig's polecat pool, so the failure goes to be fixed.
   Derive the failure's key, then file it, in a checkout of the rig or with
-  `GC_RIG=<rig>` in front of each call:
+  `GC_RIG=<rig>` in front of each call. The output goes in the quoted
+  here-document as the run printed it, quotes, backticks and `$` included:
 
-  ```bash
-  KEY=$("$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>")
-  "$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "<where it failed: the branch and commit, the check or the command that ran, and its raw output>"
-  ```
+```bash
+KEY=$("$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>")
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "$(cat <<'FAILURE'
+<where it failed: the branch and commit, the check or the command that ran, and its raw output>
+FAILURE
+)"
+```
 
   `key --target <repo-relative path>` keys a failure with no test function,
   such as a suite file, a package or a build target, and
@@ -137,13 +141,23 @@ has no hypothesis to answer, so it is not an epic, and its work is ordinary
 flow (`docs/epics.md`, "Epics are mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
-hypothesis, and files nothing. It prints the new epic's id:
+hypothesis, and files nothing. It prints the new epic's id. A field the
+operator stated goes in its quoted here-document as they said it:
 
 ```bash
 "$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
-  --hypothesis "<for whom, what changes, and the signal that shows it worked>" \
-  --handle "<three to five words>" \
-  --boundaries "<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --hypothesis "$(cat <<'FIELD'
+<for whom, what changes, and the signal that shows it worked>
+FIELD
+)" \
+  --handle "$(cat <<'FIELD'
+<three to five words>
+FIELD
+)" \
+  --boundaries "$(cat <<'FIELD'
+<the axis it is cut on, and the work beside it that it is not, with where that lives>
+FIELD
+)" \
   -d "<what the epic is about>"
 ```
 
@@ -152,7 +166,10 @@ hypothesis, and files nothing. It prints the new epic's id:
 has printed the epic's id, record on the epic whose words each field is:
 
 ```bash
-gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: <each field they stated, and where they stated it, or none>."
+gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: $(cat <<'STATED'
+<each field they stated, and where they stated it, or none>
+STATED
+)."
 ```
 
 Work the epic plainly owns goes on under it meanwhile, and the epic's next
@@ -164,7 +181,10 @@ hypothesis, and `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
 `epic_indicators` go the same way:
 
 ```bash
-gc bd update <epic> --set-metadata epic_hypothesis="<the operator's words>" \
+gc bd update <epic> --set-metadata epic_hypothesis="$(cat <<'WORDS'
+<the operator's words>
+WORDS
+)" \
   --append-notes "Stated by the operator in <where they said it>: the hypothesis."
 ```
 
@@ -172,7 +192,10 @@ A change you would make yourself is a proposal for the epic's next review:
 leave the keys as they are, and record the change with its evidence:
 
 ```bash
-gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): <the change, quoted>. Evidence: <what you read or ran>."
+gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): $(cat <<'CHANGE'
+<the change, quoted>
+CHANGE
+). Evidence: <what you read or ran>."
 ```
 
 When work you must do depends on the operator's answer, file a human gate on
@@ -455,10 +478,16 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   after the sign-off, which answers the gates the ruling settles.
 
 When a person rules that work a human gate holds will not go on, one call does
-all of this in order (the waits skill):
-`"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`.
-In a sitting it runs before the sign-off, with `--successor <conversation>`
-(the converse-settle step).
+all of this in order (the waits skill), with the ruling in its quoted
+here-document. In a sitting it runs before the sign-off, with
+`--successor <conversation>` (the converse-settle step):
+
+```bash
+"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)"
+```
 
 A bead that needs no work only once another bead lands is not closed now. Make
 it wait on that bead, and arm `mol-validate-close` to run when that bead closes

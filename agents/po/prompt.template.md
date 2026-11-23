@@ -108,8 +108,16 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   need, or `not-needed` and the bead the ruling rests on.
 
 A write's exit says whether it landed. Note each ruling on its bead with the
-operator's reason in their words:
-`gc bd --rig {{ .RigName }} update <bead> --append-notes "<ruling: reason>"`.
+operator's reason in their words, in the quoted here-document as they said
+them:
+
+```bash
+gc bd --rig {{ .RigName }} update <bead> --append-notes "$(cat <<'RULING'
+<ruling: reason>
+RULING
+)"
+```
+
 When they turn down a proposal that moves no lever, note their reason the same
 way, so the next sitting reads it first.
 

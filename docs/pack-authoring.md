@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a block takes text it copies as it stands, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -16,10 +16,10 @@ convention rests on one of them, it links there.
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
 agents follow where Gas City leaves the choice to the pack: how a step closes
 and how a run declines, how step text and skills reach a pack script, why each
-shell block in step text makes one call, how a landed pack change is confirmed
-live, the names the pack's artifacts carry, how one text names another's step,
-where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an
-owner or an address.
+shell block in step text makes one call, how a block takes text it copies as it
+stands, how a landed pack change is confirmed live, the names the pack's
+artifacts carry, how one text names another's step, where a rig-scoped agent
+runs, the patrol-wisp cycle, and how a scan resolves an owner or an address.
 
 **Boundaries.** What Gas City itself does when a formula runs or a pack loads
 is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
@@ -192,6 +192,23 @@ and unread mail. A step over the bound keeps its instructions inline and moves
 its reference prose into the doc it points to, or its mechanics into a tested
 script. `assets/scripts/formula-step-size.test.sh` holds the bound, and its
 header says how it renders a step and which formulas no hook delivers.
+
+## Copied text enters a command through a quoted here-document
+
+A block's placeholder takes either words the agent writes for that block or
+text it copies as it stands: a person's words, a ruling or an answer that
+quotes them, a card's or a brief's own text, verbatim feedback, or a run's raw
+output. Copied text can hold a double quote, which ends a double-quoted
+argument, a backtick span or a `$(...)`, which runs as a command, and a `$`,
+which expands. So its placeholder never sits inside double quotes. It sits
+alone in the body of a here-document whose delimiter is quoted, and the command
+takes what the here-document captured. Step text keeps the here-document
+inside the argument, where a substitution that holds a single command weighs
+nothing. A skill may capture the text into a variable first, as when two writes
+take the same words. A block that holds one starts at the left margin, even
+under a list item, because the here-document ends only at a delimiter line
+with nothing before it. `assets/scripts/copied-text.test.sh` holds the rule,
+and runs every block that holds such a here-document under bash and zsh.
 
 ## A landed pack change is confirmed on the deployed checkout
 

@@ -112,11 +112,14 @@ lands, in one plain sentence that names no other rig or its beads.
   (`converse-stay`).
 - **Another rig's pool**: run the create as `gc bd --rig <rig> create`.
 - **An epic the ruling files**: create it with the `work` skill's epic create,
-  then append a note that says whose words each field is:
-
-  ```bash
-  gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
-  ```
+  then append a note that says whose words each field is, with theirs in the
+  quoted here-document as they said them:
+```bash
+gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: $(cat <<'STATED'
+<each field they stated or approved, quoting their words, or none>
+STATED
+)."
+```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
 as the operator's ruling (`--rework`, below), so the line carries their words
@@ -216,7 +219,10 @@ Then take the case that fits the ruling:
   0. Without that line, answer nothing:
 
 ```bash
-WHY="<the ruling, one line>"
+WHY=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
@@ -241,15 +247,21 @@ ROW=$(gc bd show "$SUBJECT" --json) \
 
 That comment lists the ruling and each act recorded on the conversation, so
 keep other rigs and their beads out of both. When the sign-off exits non-zero,
-it stopped short, and you must NOT post the sign-off. A re-run with the same
-`--ruling` is safe, because the writer keys what it recorded to that ruling.
+it stopped short, and you must NOT post the sign-off. The ruling goes in its
+quoted here-document as written, so a double quote, a backtick or a `$` in it
+reaches the writer unchanged. A re-run with the same `--ruling` is safe,
+because the writer keys what it recorded to that ruling.
 The writer refuses, with nothing written, the one re-run it cannot make safe: a
 rework that an earlier attempt may have filed and never recorded (below):
 
 ```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
-     --ruled yes --ruling "<the ruling, one line>" --no-wait
+     --ruled yes --ruling "$RULING" --no-wait
      # --leave <gate>, once for each gate the ruling leaves owed
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work, unless the sign-off arms no closer for the subject (below)
@@ -323,8 +335,14 @@ Take the case that fits the ruling:
   epic's member asks about the member's recommendation, which this case does
   not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
-  subject down first, with the gate's `await_id` as the key:
-  `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
+  subject down first, with the gate's `await_id` as the key and the ruling in
+  the quoted here-document:
+```bash
+"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)" --successor "$CONVERSATION"
+```
   The stand-down removes the arm, ends any run beneath it, answers the gate and
   closes the subject. When it exits non-zero, repair what it printed and run it
   again before you sign off. A gate that also holds another open bead is left
@@ -385,7 +403,10 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
 To retire the subject's PR:
 
 ```bash
-"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)" --no-wait --retire not-needed
 ```
 
 Given none of the three, the sign-off refuses and writes nothing, because a

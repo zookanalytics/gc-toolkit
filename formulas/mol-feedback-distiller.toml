@@ -604,8 +604,11 @@ A contested rule is a human gate on its pattern bead under the key
 ```bash
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \
-  --message "Contested rule: <rule summary>
-<the adopted rule with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>" >/dev/null \
+  --message "$(cat <<'MESSAGE'
+Contested rule: <rule summary>
+<the adopted rule, quoted, with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>
+MESSAGE
+)" >/dev/null \
   || { echo "human-gate.sh filed no gate on $PATTERN — stop, address what it reported, and re-run this block" >&2; exit 1; }
 ```
 

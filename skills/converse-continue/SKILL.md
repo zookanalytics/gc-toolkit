@@ -32,8 +32,12 @@ answer that gate at once, so a later dismiss leaves nothing they ruled on open:
    place:
 
 ```bash
+RULING=$(cat <<'RULING'
+<the operator's ruling, one line>
+RULING
+)
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
-  --ruling "<the operator's ruling, one line>" \
+  --ruling "$RULING" \
   --outcome "<where the subject stands now, at most 140 characters, or 95 when the ruling leaves an open PR standing>"
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (converse-settle)
   # when it takes the subject's recommendation, --answer its gate and add --accept (converse-settle)

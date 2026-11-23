@@ -202,17 +202,29 @@ limits arming too (the work skill).
 - **A bead checked once other work lands** needs nothing: the closer checks it
   once the blocker closes. To keep it as work instead, disarm it (below) and
   remove the edge: `gc bd dep remove <bead> <blocker>`.
-- **A wait a person owed** is released by the answer:
-  `gc bd gate resolve <gate> --reason "ruled: <the answer>"`. The reason opens
-  with `ruled:` when the person decided, approved or acted, `moot:` when the
-  premise no longer holds, and `benign:` when it holds but needs nobody. In a
-  sitting, the sign-off's `--ruled yes` resolves the gates its conversation
-  replies to (the converse-settle step), and its `--answer` resolves the gates
-  a ruling settles on a turn that does not sign off (the converse-continue
-  step).
-- **A wait a person owed, when they rule the work will not go on:**
-  `"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>"`,
-  with the gate's `await_id` as the key. It removes the arm, ends the run beneath
+- **A wait a person owed** is released by the answer, which goes in the quoted
+  here-document as they gave it:
+```bash
+gc bd gate resolve <gate> --reason "ruled: $(cat <<'ANSWER'
+<their answer>
+ANSWER
+)"
+```
+  The reason opens with `ruled:` when the person decided, approved or acted,
+  `moot:` when the premise no longer holds, and `benign:` when it holds but
+  needs nobody. In a sitting, the sign-off's `--ruled yes` resolves the gates
+  its conversation replies to (the converse-settle step), and its `--answer`
+  resolves the gates a ruling settles on a turn that does not sign off (the
+  converse-continue step).
+- **A wait a person owed, when they rule the work will not go on**, takes the
+  stand-down, with the ruling in its quoted here-document:
+```bash
+"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)"
+```
+  The key is the gate's `await_id`. It removes the arm, ends the run beneath
   the bead, answers the gate with the ruling and closes the bead. A gate
   assigned to the person who owes its action (above) needs nothing from you
   first: the stand-down takes it back from them, because the ruling answers

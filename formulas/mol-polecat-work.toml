@@ -290,7 +290,10 @@ A lookup that exits non-zero is not an all-clear, and neither is a `key` that
 refused the failure. File nothing, tell `{{escalation_target}}` which of the two
 happened, and get on with your own work:
 ```bash
-gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" -m "Symptom: <the key or the raw failure>. <why nothing was looked up or filed>. Proceeding with <the work bead>."
+gc mail send {{escalation_target}} -s "NOTICE: {{base_branch}} pre-flight failed, dedupe lookup broken" -m "Symptom: $(cat <<'FAILURE'
+<the key or the raw failure>
+FAILURE
+). <why nothing was looked up or filed>. Proceeding with <the work bead>."
 ```
 
 **3b2. If the exact key matched nothing, widen to the family.** Sibling
@@ -327,12 +330,16 @@ worktree to the current tip, and re-run the pre-flight before filing anything.
 stamps the key on it in the same write, so the next 3b lookup finds it even
 after a retitle. It then sends the tracker to the rig's polecat pool to be
 fixed, so nothing holds it for placement. Put the full failure, with the subtest
-3a dropped and the package, in the message. When another gate filed the key
-since your lookup, the script files and sends nothing and prints that tracker's
-id; confirm on it as in 3c. A warning that the sling failed names the sling
-that sends the tracker: run it.
+3a dropped and the package, in the message's here-document as the run printed
+it, which keeps its quotes, backticks and `$` as written. When another gate
+filed the key since your lookup, the script files and sends nothing and prints
+that tracker's id; confirm on it as in 3c. A warning that the sling failed
+names the sling that sends the tracker: run it.
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/preexisting-failure.sh" file "<the key>" --summary "<short description>" --message "Observed on {{base_branch}} while starting <the work bead>. <the full failure: the test or check, its subtest or lines, the package, and the raw output>"
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/preexisting-failure.sh" file "<the key>" --summary "<short description>" --message "Observed on {{base_branch}} while starting <the work bead>. $(cat <<'FAILURE'
+<the full failure: the test or check, its subtest or lines, the package, and the raw output>
+FAILURE
+)"
 ```
 Then tell `{{escalation_target}}` what it printed:
 ```bash

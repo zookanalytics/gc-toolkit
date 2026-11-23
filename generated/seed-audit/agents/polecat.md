@@ -658,7 +658,8 @@ OBS_META=$(jq -nc \
     "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
     "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
 OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "## Statement
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "$(cat <<'BODY'
+## Statement
 <the generalizable point>
 
 ## Quote
@@ -668,13 +669,16 @@ OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source re
 <draft rule text — explicitly non-binding>
 
 ## Context
-<optional: what the diff was doing>" --json)
+<optional: what the diff was doing>
+BODY
+)" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 ```
 
 The metadata and the closed status ride the create, so the observation is
-filed whole or not at all.
+filed whole or not at all. The quoted here-document keeps the feedback's
+quotes, backticks and `$` as written.
 
 The provenance key's `<owner/repo>` is origin's full slug — derive it with
 `gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`,

@@ -112,13 +112,21 @@ land, or whose conversation has nothing to do with whether it lands, lifts its
 hold with `gc bd dep remove <anchor> <conversation>` and records why on the
 conversation (the converse-hold step). A hold that must outlast the
 conversation is a gate of its own on the anchor, under a key that names what
-it waits for. The gate is cleared with
-`gc bd gate resolve <gate> --reason "ruled: <the answer>"`, and the same call
-with `--retract` withdraws your own gate once the question has gone. A sitting
-clears a gate the operator ruled on only through its sign-off writer (the
-converse-settle and converse-continue steps), which first carries out what the
-ruling does to the PR, its rework or its retirement, so the merge never lands
-in between.
+it waits for. The gate is cleared with the answer, in the quoted here-document
+as it was given:
+
+```bash
+gc bd gate resolve <gate> --reason "ruled: $(cat <<'ANSWER'
+<their answer>
+ANSWER
+)"
+```
+
+The helper's call with `--retract` withdraws your own gate once the question
+has gone. A sitting clears a gate the operator ruled on only through its
+sign-off writer (the converse-settle and converse-continue steps), which first
+carries out what the ruling does to the PR, its rework or its retirement, so
+the merge never lands in between.
 
 Every open bead the anchor waits on, and every open bead filed under it, holds
 its merge, whatever it was for. Never make an anchor wait on a follow-up that
@@ -160,5 +168,8 @@ is the sitting's conversation, and every other kind names the bead that
 carries the work with `--successor <bead>`:
 
 ```bash
-"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "<the ruling, one line>" --no-wait --retire not-needed
+"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)" --no-wait --retire not-needed
 ```

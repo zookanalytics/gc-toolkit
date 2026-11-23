@@ -45,9 +45,13 @@ as an epic or the anchor of a PR, where it refuses the brief and names the
 case. When the call exits non-zero, it stopped short, and you have not stayed:
 
 ```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "staying — <what this conversation waits for, at most 140 characters>" \
-     --ruled yes --ruling "<the ruling, one line>" --waiting-on <the work> \
+     --ruled yes --ruling "$RULING" --waiting-on <the work> \
      --close-brief "<what that work's landing settles here, and what to check once it has>" \
      --stay "<what the operator agreed, which the return compares the work with, one line>"
      # no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR's anchor

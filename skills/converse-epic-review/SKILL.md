@@ -149,15 +149,23 @@ the call finds its own PR. Without `--pr-anchor`, a second call under the same
 words would act on the first PR again and answer the second PR's gate, leaving
 that PR free to merge. A PR the ruling retires:
 ```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
-  --ruling "<the ruling, one line>; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor> \
+  --ruling "$RULING; it retires PR #<number> (<its anchor>)" --pr-anchor <its anchor> \
   --retire <kind> --outcome "<where the epic stands now, at most 140 characters, or 95 when it leaves the subject's PR standing>" --no-wait
   # and --successor <the bead that carries the work now>, unless the kind is not-needed
 ```
 A PR the ruling leaves standing:
 ```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <the gate on its anchor> \
-  --ruling "<the ruling, one line>; PR #<number> (<its anchor>) stands" --no-rework \
+  --ruling "$RULING; PR #<number> (<its anchor>) stands" --no-rework \
   --outcome "<where the epic stands now, at most 95 characters>" --no-wait
 ```
 Until a call exits 0, its part of the ruling is not in place: repair what it
@@ -226,24 +234,39 @@ line naming this block.
 
 **2. Record the contract and the ruling on the epic, then answer the gates the
 closes wait on.** Whatever the ruling, record each contract field it sets in its
-own key: a change the operator took, a field they stated, or a shift's new aim.
-Leave out the line of each field the ruling does not set. A proposal the
-operator did not take stays out of the keys, and the block says what became of
-it. `epic_ruling_at` is when the operator ruled, which is now. On a shift,
-`epic_shifted_at` is that time too, and a continue or a close leaves its line
-out, so the po's next portfolio sync still weighs the shift once a later review
-has continued or closed the epic. `epic_ruling_evidence` names each human gate
-the ruling clears. Those are among the gates the conversation replies to, which
-this lists:
+own key: a change the operator took, a field they stated, or a shift's new aim,
+in its quoted here-document as it was stated or taken. Leave out each field the
+ruling does not set. A proposal the operator did not take stays out of the
+keys, and the block says what became of it. `epic_ruling_at` is when the
+operator ruled, which is now. On a shift, `epic_shifted_at` is that time too,
+and a continue or a close leaves its line out, so the po's next portfolio sync
+still weighs the shift once a later review has continued or closed the epic.
+`epic_ruling_evidence` names each human gate the ruling clears. Those are among
+the gates the conversation replies to, which this lists:
 ```bash
 gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | select(.type == "replies-to") | .depends_on_id] | join(" ")'
 ```
 ```bash
-gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
-  --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
-  --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
-  --set-metadata epic_indicators="<the signals watched while it is in flight>" \
+gc bd update "$EPIC" --set-metadata epic_hypothesis="$(cat <<'FIELD'
+<the sentence: for whom, what changes, and the signal that shows it worked>
+FIELD
+)" \
+  --set-metadata epic_handle="$(cat <<'FIELD'
+<three to five words>
+FIELD
+)" \
+  --set-metadata epic_boundaries="$(cat <<'FIELD'
+<the axis it is cut on, and the work beside it that it is not, with where that lives>
+FIELD
+)" \
+  --set-metadata epic_closure_condition="$(cat <<'FIELD'
+<the checks a person runs to answer the hypothesis>
+FIELD
+)" \
+  --set-metadata epic_indicators="$(cat <<'FIELD'
+<the signals watched while it is in flight>
+FIELD
+)" \
   --set-metadata epic_ruling=<continue|shift|close> \
   --set-metadata epic_ruling_reason="<why; on a close, the outcome>" \
   --set-metadata epic_ruling_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -259,8 +282,12 @@ Then answer, before any close below, each gate on a landed Delivery, through
 the sign-off's writer: the close gate refuses a bead an open human gate holds.
 Each gate on a PR's anchor takes its own call, as the section above gives it:
 ```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
-  --ruling "<the ruling, one line>" \
+  --ruling "$RULING" \
   --outcome "<where the epic stands now, at most 140 characters, or 95 when it leaves the subject's PR standing>" --no-wait
   # --answer <gate> once for each gate on a landed Delivery
   # and, when the subject is a PR's anchor, that PR's answer (the section above)
@@ -299,16 +326,26 @@ below.
 gc bd dep list <park> --direction=up -t blocks --json | jq -r --arg b <bead> '[.[] | select(.id != $b and .status != "closed") | "\(.id) [\(.status)] \(.title)"] | if length == 0 then "nothing else waits on it" else .[] end'
 ```
 A park's own gate, one with no await type, closes when that list says
-`nothing else waits on it`, or when the ruling also releases each bead it lists:
-`gc bd close <gate> --reason "<the ruling, one line>"`. Otherwise take off only
-this bead's edge, and the park holds the rest: `gc bd dep remove <bead> <park>`.
+`nothing else waits on it`, or when the ruling also releases each bead it lists,
+with the ruling in the quoted here-document:
+```bash
+gc bd close <gate> --reason "$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)"
+```
+Otherwise take off only this bead's edge, and the park holds the rest:
+`gc bd dep remove <bead> <park>`.
 A blocker that is not a park's own gate never closes here: a park behind
 another bead releases this one by its edge alone, and a gate awaiting a person
 clears only by an answer.
 
 Then close the bead through the close gate, with the ruling as its reason:
 ```bash
-"$CONV/finalize-gate.sh" check <bead> && gc bd close <bead> --reason "<the ruling, one line>"
+"$CONV/finalize-gate.sh" check <bead> && gc bd close <bead> --reason "$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)"
 ```
 The gate refuses while a human gate holds the bead or a stewarded epic has no
 close ruling, and bd refuses while anything under the bead is open or a blocker
@@ -340,7 +377,10 @@ parent takes `--shift <±n>` in place of the P-value:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" bead park "$EPIC" "<the ruling, and what releases the park>"
+"$GCTK" bead park "$EPIC" "$(cat <<'RULING'
+<the ruling, and what releases the park>
+RULING
+)"
 ```
 A ruling that unparks the epic releases it from its park instead, by write 3's
 release step with `"$EPIC"` as the bead. When another bead still waits on that
@@ -362,8 +402,13 @@ one. Each item goes one of three ways:
   and this bead closes as re-homed onto the new one. With a PR in flight, that
   close is the PR's retirement on its own call, with
   `--retire re-homed --successor <new bead>`, and otherwise it is the
-  disposition writer:
-  `"$CONV/bead-rehome.sh" --origin <bead> --successor <new bead> --kind re-homed --note "<the ruling, one sentence>"`.
+  disposition writer, with the ruling in the quoted here-document:
+```bash
+"$CONV/bead-rehome.sh" --origin <bead> --successor <new bead> --kind re-homed --note "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)"
+```
   The writer refuses a bead a human gate holds, and the gate's answer would
   send that bead on in this store. So release such a bead first, a release
   whose first write removes the bead's arm, then answer its gate on a call of
@@ -374,7 +419,10 @@ one. Each item goes one of three ways:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait
+GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)" --release --no-wait
 ```
 A Delivery never moves whole, because its aim answers this epic's hypothesis,
 so its Stories move one by one.
@@ -387,14 +435,22 @@ so its Stories move one by one.
   skill closes a bead that needs no work: stop a run in flight and disarm an arm
   first, then record the no-op and run the disposition writer, with this
   conversation as the evidence that ruled it out:
-  ```bash
-  gc bd update <bead> --set-metadata gc.work_outcome=no-op \
-    && "$CONV/bead-rehome.sh" --origin <bead> --successor "$CONVERSATION" --kind not-needed --note "<the ruling, one sentence>"
-  ```
+```bash
+gc bd update <bead> --set-metadata gc.work_outcome=no-op \
+  && "$CONV/bead-rehome.sh" --origin <bead> --successor "$CONVERSATION" --kind not-needed --note "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)"
+```
   A bead a human gate holds is stood down instead, with the gate's `await_id`
   as the key. It removes the arm and ends the run before it answers the gate,
   then closes the bead:
-  `"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "<the ruling, one sentence>" --successor "$CONVERSATION"`.
+```bash
+"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'RULING'
+<the ruling, one sentence>
+RULING
+)" --successor "$CONVERSATION"
+```
 
 **6. On close, close each other Delivery, then the epic,** as write 3 closes a
 bead, with the ruling as each close's reason. Release the epic's park first,
@@ -402,13 +458,14 @@ because its edge to the park blocks the close. The close gate passes the epic
 once write 2 has recorded the close ruling with its outcome.
 
 **Last, whatever the ruling, sign off** as the settle step says, once nothing
-important is pending: `--ruled yes --ruling "<the ruling, one line>" --no-wait`,
-with an outcome of at most 140 characters, or 95 when it leaves the subject's
-PR standing. Add `--leave <gate>` for each gate write 2 left owed: the sign-off
-answers every gate the conversation replies to that no `--leave` names, which
-would release the work still waiting on that judgment. When a gate left owed
-holds the subject, leave out `--no-wait` too, because the subject is then parked
-for a person.
+important is pending: `--ruled yes --ruling "$RULING" --no-wait`, the ruling
+captured as that step's call captures it, with an outcome of at most 140
+characters, or 95 when it leaves the subject's PR standing. Add
+`--leave <gate>` for each gate write 2 left owed: the sign-off answers every
+gate the conversation replies to that no `--leave` names, which would release
+the work still waiting on that judgment. When a gate left owed holds the
+subject, leave out `--no-wait` too, because the subject is then parked for a
+person.
 
 A close or shift can change what the epic's rig works on and in what order,
 beyond the epic itself, and the rig's po weighs that with the operator. So on a

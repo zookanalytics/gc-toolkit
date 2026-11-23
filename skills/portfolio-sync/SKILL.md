@@ -91,6 +91,9 @@ sync made of its close or shift, even when nothing moved, because its mark is
 what takes that change off the next sync's list:
 
 ```bash
-gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): <ruling: reason>" \
+gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): $(cat <<'RULING'
+<ruling: reason>
+RULING
+)" \
   --set-metadata epic_weighed_at="<the read's time>"
 ```
