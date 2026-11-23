@@ -69,14 +69,33 @@ skill), or leave it for the operator to place.
   takes only work its aim covers, such as a follow-up that finishes one of its
   Stories.
 - **Send it now only when it is one of these:** a member of an epic, work that
-  finishes an open PR and carries `anchor_bead`, an emergency, or work the
-  operator routed in a sitting (a converse session with the operator), by hand
-  or by Accept. An emergency is a check that fails on the default branch's head,
-  confirmed by reading that check. Other critical work runs now only when the
-  operator routes it. File any other bead with Gas City's `hold:mayor` label in
-  its create and no route or arm: the operator decides where it goes.
-  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
-  in every rig.
+  finishes an open PR and carries `anchor_bead`, a failure on the default
+  branch, or work the operator routed in a sitting (a converse session with the
+  operator), by hand or by Accept. A failure on the default branch is one you
+  saw fail at its head, whether a check there shows it or you ran it there
+  yourself, and its tracker is filed and sent in one call (below). Other
+  critical work runs now only when the operator routes it. File any other bead
+  with Gas City's `hold:mayor` label in its create and no route or arm: the
+  operator decides where it goes. `gc beads list --label hold:mayor` lists each
+  bead filed so that still waits, in every rig.
+- **A failure on the default branch is filed as its tracker, and never held.**
+  The tracker writer files one tracker per failure, with no hold, and sends the
+  tracker it files to its rig's polecat pool, so the failure goes to be fixed.
+  Derive the failure's key, then file it, in a checkout of the rig or with
+  `GC_RIG=<rig>` in front of each call:
+
+  ```bash
+  KEY=$("$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>")
+  "$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "<where it failed: the branch and commit, the check or the command that ran, and its raw output>"
+  ```
+
+  `key --target <repo-relative path>` keys a failure with no test function,
+  such as a suite file, a package or a build target, and
+  `key --lint <linter> <repo-relative path>` keys a lint finding, one key per
+  flagged file. When a bead already tracks the key, `file` files and sends
+  nothing and prints that bead's id: add what you saw to it with
+  `gc bd comment <that id> "<what you saw, and where>"`. A warning that the
+  sling failed names the sling that sends the tracker: run it.
 
 ### File a Delivery
 
