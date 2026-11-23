@@ -12,4 +12,13 @@
   merge, delete, or leave alone. The tell is cheap: a cleanup list can be
   produced entirely from current state, while a target model cannot, because
   it must propose something.
+
+<!-- rule:tk-h7oli7m src:bead:tk-h7oli7m (operator) adopted:2026-11-23 -->
+- When you answer whether a design follows best practice, or recommend one,
+  start from what already does the job: the steps and readers the system
+  runs, then what the platform, the established library or standard
+  practice does for it, read in its own documentation, including what its
+  core offers that the design leaves switched off. A departure, such as a
+  new step, state or term, stays only for a need none of them meets, and
+  the design's own reasons for departing do not show one.
 {{ end }}
