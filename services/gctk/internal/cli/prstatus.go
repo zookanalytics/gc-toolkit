@@ -165,18 +165,23 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 }
 
 // gcbdStore is the [prstatus.Store] gctk reads through. An anchor's row comes
-// from gcbd.Show, which prefers the supervisor API. Its in-flight set comes from
-// one `gc bd list` per anchor, whose metadata filter matches a key against one
-// value. A level of `blocks` edges comes from one `gc bd show` of every bead in
-// it, whose rows carry each edge's far bead whole.
+// from gcbd.ShowCached, which prefers the supervisor API's cache. A row one
+// pass stale decides nothing that matters here: each caller of gctk pr status
+// shows a person where the PR stands, or writes a status label that the
+// landing order's next run compares with the store again, and for a PR on the
+// pending record the evaluator's answer reads the store as it stands. Its
+// in-flight set comes from one `gc bd list` per anchor, whose metadata filter
+// matches a key against one value. A level of `blocks` edges comes from one
+// `gc bd show` of every bead in it, whose rows carry each edge's far bead
+// whole.
 type gcbdStore struct{ client *gcbd.Client }
 
-// Beads returns the row of each id gcbd.Show reads. One it cannot read is left
-// out, which prstatus.Read reports as an anchor that does not resolve.
+// Beads returns the row of each id gcbd.ShowCached reads. One it cannot read is
+// left out, which prstatus.Read reports as an anchor that does not resolve.
 func (s gcbdStore) Beads(ids []string) (map[string]prstatus.Row, error) {
 	out := make(map[string]prstatus.Row, len(ids))
 	for _, id := range ids {
-		if b := s.client.Show(id); b != nil {
+		if b := s.client.ShowCached(id); b != nil {
 			out[id] = prstatus.Row{ID: id, Metadata: metadataOf(b)}
 		}
 	}

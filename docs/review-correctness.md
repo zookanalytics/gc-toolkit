@@ -238,11 +238,13 @@ commands it changes.
   assertion where jq would raise an error fails open, so the unreadable case is
   fixtured. `Scrub`'s match with the shell helper is
   pinned only by `gcbd_test.go`.
-- **Reads through the supervisor API.** `gcbd.Show` reads through the
+- **Reads through the supervisor API.** `gcbd.ShowCached` reads through the
   supervisor API, whose bead payload carries no notes and whose cached answer
-  can lag a write just made, so a read that verifies a write, or one that needs
-  notes, uses `ShowDirect`. A bead that cannot be read comes back nil, and the
-  caller refuses to act rather than read it as empty.
+  can lag a write just made, so only a read that a stale answer cannot mislead
+  takes it, and says why where it does. A read that decides a write or a merge,
+  or needs notes, uses `gcbd.Show`, which forks `gc bd`. A bead that cannot be
+  read comes back nil, and the caller refuses to act rather than read it as
+  empty.
 - **Child process groups.** `Run` in `internal/rig/run.go` runs the rig's
   check commands in a process group of its own, out of reach of the order
   runner's group stop. A SIGTERM or SIGINT that reaches gctk during the call

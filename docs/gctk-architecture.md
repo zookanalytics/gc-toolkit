@@ -526,7 +526,7 @@ and CI runs those tests on every PR.
 
 | Adapter | Outside system | How it reaches it | Its fake |
 |---|---|---|---|
-| store | the bead store | `gc bd` for writes, for reads that must see a fresh write and for the blocked set, the supervisor API for other reads | in-memory rows and edges, with the store's blocked answers set by the test, and the work-record close gate `gc bd` enforces under `GC_WORK_RECORD_ENFORCE` when a test turns it on |
+| store | the bead store | `gc bd` for writes, for reads and for the blocked set, the supervisor API for the cached read a caller names | in-memory rows and edges, with the store's blocked answers set by the test, and the work-record close gate `gc bd` enforces under `GC_WORK_RECORD_ENFORCE` when a test turns it on |
 | git | git | one `git` command per call, in a named directory | a scratch repository |
 | github | GitHub | `gh` and the GitHub API | in-memory PRs a test sets, and recorded answers in the adapter's own tests |
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |

@@ -350,10 +350,10 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	client := gcbd.New()
 	// This read governs the write: --expect's compare-and-swap, the dated-value
 	// resolution, and the idle-skip below all decide from it, and nothing
-	// re-checks the backing store at write time. So it takes the authoritative
-	// path, not the daemon's cache — a stale read would let --expect pass against
-	// an old value.
-	bead := client.ShowDirect(id)
+	// re-checks the backing store at write time. So it takes Show, the
+	// authoritative read, and never the daemon's cache: a stale read would let
+	// --expect pass against an old value.
+	bead := client.Show(id)
 	if bead == nil {
 		fmt.Fprintf(stderr, "%s: %s unreadable — refusing to transition blind\n", prog, id)
 		return 2

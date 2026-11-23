@@ -203,7 +203,7 @@ internal/gcbd/       the store adapter: bead reads and writes through `gc bd` an
 internal/gcbd/fake/  the store adapter's in-memory fake, for the domains' tests
 internal/gcbd/fakegc/  the compiled fake gc, which answers gc's command line from a store in
                      files for the shell suites, and its contract test against the city's bd
-internal/daemon/     finding the supervisor API the store adapter's reads go through
+internal/daemon/     finding the supervisor API the store adapter's cached read goes through
 internal/git/        the git subprocess seam: one git command per call, in a named directory
 internal/gh/         the GitHub adapter: one `gh api` call per read, paged to its end, the
                      cheap question, the signs of up to 50 PRs in one call, and the net's

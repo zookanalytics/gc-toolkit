@@ -1,22 +1,22 @@
 // Package gcbd is gctk's store adapter: the one package that reaches the bead
 // store (docs/gctk-architecture.md, "The adapters"). It uses `gc bd` for writes,
-// for reads that must see a fresh write and for the blocked set, and the
-// supervisor API for other reads. The ledger reaches it through [Store], which
-// gcbd/fake implements in memory for the domains' tests. The commands that
-// predate the ledger, lifecycle and merge among them, still call [Client]
-// directly.
+// for reads and for the blocked set, and the supervisor API for the cached read
+// a caller names. The ledger reaches it through [Store], which gcbd/fake
+// implements in memory for the domains' tests. The commands that predate the
+// ledger, lifecycle and merge among them, still call [Client] directly.
 //
-// A bead READ (Show) goes through the running supervisor's pooled,
-// process-lifetime Dolt connection over HTTP and falls back to forking
-// `gc bd show` only when that daemon is unreachable, so a read on the healthy
-// path neither forks nor opens its own Dolt connection, and the cadence still
-// answers when the daemon is down. The daemon read is cached and carries no
-// notes, so a read that must see the bead as it stands now, appended notes
-// included, takes the authoritative ShowDirect path instead. Writes (Update)
-// and the Show fallback shell out to `gc` exactly as the shell scripts do,
-// which keeps the observability, the stub surface and the permissions surface
-// of those paths identical across the port: the same invocations appear in the
-// same logs, and the same test stubs serve them.
+// A bead READ is named for what it guarantees. Show forks `gc bd show`, so it
+// sees the latest write and carries the bead's notes, and a read that decides
+// a write or a merge takes it. ShowCached goes through the running
+// supervisor's pooled, process-lifetime Dolt connection over HTTP and falls
+// back to forking `gc bd show` only when that daemon is unreachable, so a read
+// on the healthy path neither forks nor opens its own Dolt connection. Its
+// answer can lag a fresh write and carries no notes, so a caller takes the
+// cache by name, only where a read one pass stale decides nothing that
+// matters. Writes (Update) and every forked read shell out to `gc` exactly as
+// the shell scripts do, which keeps the observability, the stub surface and
+// the permissions surface of those paths identical across the port: the same
+// invocations appear in the same logs, and the same test stubs serve them.
 //
 // The accessors mirror the jq expressions the scripts used, including their
 // corners. `(.x // "") | tostring` treats BOTH null and false as absent, so a
@@ -231,10 +231,10 @@ const maxDaemonBody = 1 << 20
 
 // Client reads and writes beads. bin is the `gc` binary resolved through PATH,
 // which is what puts the test stubs in the path of every subprocess call; the
-// write path and the Show fallback fork it. httpc/baseURL/city carry the
-// supervisor-API read path and are all empty when it is off (GC_NO_API, no city
-// in the environment, no discoverable supervisor, or a pinned store), in which
-// case Show reads straight through bin. db is the store a pinned client names
+// write path, Show and ShowCached's fallback fork it. httpc/baseURL/city carry
+// the supervisor-API read path and are all empty when it is off (GC_NO_API, no
+// city in the environment, no discoverable supervisor, or a pinned store), in
+// which case ShowCached reads straight through bin. db is the store a pinned client names
 // on every call ([Client.In]), empty for the store gc resolves. ctx ends every
 // call the client forks ([Client.WithContext]), and is nil for a client whose
 // calls run to their end.
@@ -557,8 +557,8 @@ func (c *Client) stopped() error {
 	return context.Cause(c.ctx)
 }
 
-// New returns a Client whose reads prefer the supervisor API when one is
-// discoverable and enabled, and whose writes and read fallback use the `gc` on
+// New returns a Client whose cached read prefers the supervisor API when one is
+// discoverable and enabled, and whose writes and other reads use the `gc` on
 // PATH. Discovery is config-only and does not touch the network; an unreachable
 // daemon shows up as a failed request at read time, which falls back.
 func New() *Client {
@@ -575,24 +575,31 @@ func New() *Client {
 
 // daemonConfigured reports whether the supervisor-API read path is wired. All
 // three fields move together in New, so any one of them being empty means the
-// path is off and Show goes straight to the subprocess.
+// path is off and ShowCached goes straight to the subprocess.
 func (c *Client) daemonConfigured() bool {
 	return c.httpc != nil && c.baseURL != "" && c.city != ""
 }
 
-// Show reads one bead. A bead that cannot be read — no implementation could
-// answer, the payload did not decode, or the id resolved to nothing — returns
-// nil, and every caller treats that as "refuse to act blind" rather than as an
-// empty bead.
-//
-// The read prefers the supervisor API: a GET against the daemon's pooled Dolt
-// connection, which neither forks nor opens a connection of its own. Only a 200
-// that decodes to a bead is trusted; a non-200 (including a 404 miss), a
-// transport failure, or an undecodable body falls through to `gc bd show`, so
-// the daemon can only make the read faster, never change its answer — the
-// authoritative `gc bd` path decides whether a bead exists. When the daemon
-// read path is off entirely the read goes straight to that path.
-func (c *Client) Show(id string) *Bead {
+// Show reads one bead straight from `gc bd`, never the supervisor API: the
+// authoritative read, which sees the latest write and carries the bead's
+// notes, so a read that decides a write or a merge from the bead's current
+// state takes it. A bead that cannot be read — no implementation could answer,
+// the payload did not decode, or the id resolved to nothing — returns nil, and
+// every caller treats that as "refuse to act blind" rather than as an empty
+// bead.
+func (c *Client) Show(id string) *Bead { return c.showViaExec(id) }
+
+// ShowCached reads one bead through the supervisor API when the daemon read
+// path is on: a GET against the daemon's pooled Dolt connection, which neither
+// forks nor opens a connection of its own. The daemon's cache can lag a fresh
+// write and its bead payload omits notes, so its answer can differ from
+// Show's, and a caller takes it by name, only where a read one pass stale
+// decides nothing that matters. Only a 200 that decodes to a bead is trusted;
+// a non-200 (including a 404 miss), a transport failure, or an undecodable
+// body falls through to `gc bd show`, so whether a bead exists is always
+// `gc bd`'s answer. When the daemon read path is off the read is Show's. A
+// bead that cannot be read returns nil, as Show's does.
+func (c *Client) ShowCached(id string) *Bead {
 	if !c.daemonConfigured() {
 		return c.showViaExec(id)
 	}
@@ -604,15 +611,6 @@ func (c *Client) Show(id string) *Bead {
 	c.logRoute("show "+id, "fallback", reason)
 	return c.showViaExec(id)
 }
-
-// ShowDirect reads one bead straight from `gc bd`, never the supervisor API.
-// Show routes cold reads through the daemon's cached connection, but a read
-// that decides a write or a merge from the bead's current state must observe
-// the latest write and must carry the bead's notes — the daemon's cache can lag
-// a fresh write and its bead payload omits notes entirely — so such a read uses
-// this authoritative path. Same decode and fail-closed contract as Show's
-// fallback arm.
-func (c *Client) ShowDirect(id string) *Bead { return c.showViaExec(id) }
 
 // showViaExec reads one bead by forking `gc bd show --json`.
 //
