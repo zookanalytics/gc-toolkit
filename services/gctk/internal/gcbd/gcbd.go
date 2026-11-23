@@ -234,10 +234,10 @@ const maxDaemonBody = 1 << 20
 // write path, Show and ShowCached's fallback fork it. httpc/baseURL/city carry
 // the supervisor-API read path and are all empty when it is off (GC_NO_API, no
 // city in the environment, no discoverable supervisor, or a pinned store), in
-// which case ShowCached reads straight through bin. db is the store a pinned client names
-// on every call ([Client.In]), empty for the store gc resolves. ctx ends every
-// call the client forks ([Client.WithContext]), and is nil for a client whose
-// calls run to their end.
+// which case ShowCached reads straight through bin. db is the store a pinned
+// client names on every call ([Client.In]), empty for the store gc resolves.
+// ctx ends every call the client forks ([Client.WithContext]), and is nil for
+// a client whose calls run to their end.
 type Client struct {
 	bin     string
 	httpc   *http.Client
