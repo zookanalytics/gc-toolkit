@@ -187,18 +187,14 @@ performer; the full transition table with writers is
    one worker on the PR's branch. A converse sitting the operator rules edit the
    branch with them can push while a run works it. Work that needs the branch
    changed, such as
-   a person's comment or a conflict with the target, is filed as an ask. An
-   ask is a small record of one piece of work on the PR's branch: an open bead
-   that blocks the bead owning the PR and names the PR's branch. No pool
-   claims an ask, so only the PR's review run takes it, and one run rules
-   every ask open on its PR together. A run asks a person a question in one
+   a person's comment or a conflict with the target, is filed as an ask, and
+   only the PR's review run takes it. A run puts a question to a person in one
    place, a human gate on the PR's bead, which the person answers on the board
-   as any gate. The PR points at the gate and asks nothing itself. A person's
-   comment made while the question is open is feedback like any other, and
-   the landing order pours a run for it while the gate still holds the bead.
-   When the comment settles the question, that run resolves the gate, names
-   the comment as its answer, and says so in its reply to the comment. Each
-   city writer returns the PR to draft before it pushes.
+   as any gate. A person's comment made while the question is open is feedback
+   like any other, and the landing order pours a run for it while the gate
+   still holds the bead. When the comment settles the question, that run
+   resolves the gate. Each city writer returns the PR to draft before it
+   pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
