@@ -37,20 +37,25 @@ disappear](#when-this-doc-should-disappear)).
 ## When to local-patch
 
 When you hit a bug in `gascity` that's blocking your city, evaluate which
-of three options applies:
+of these options applies:
 
 1. **Ignore.** Wait for upstream to resolve, accept the cost in the meantime.
    This is the right answer most of the time, especially when others are
    already working the problem.
-2. **Local patch.** Carry the fix in your fork until upstream catches up.
-   This doc is about that path.
-3. **Engage upstream.** Only worthwhile if you have something *materially
+2. **Fix it in the city's own config.** A bug that a change to `city.toml`
+   or the pack fixes takes that change as its fix, not as a stopgap, and the
+   fork carries no patch for it. Only upstream's own fix, arriving through a
+   sync, replaces the change.
+3. **Local patch.** Carry the fix in your fork until upstream catches up.
+   This doc is about that path, for a bug the city's config cannot fix.
+4. **Engage upstream.** Only worthwhile if you have something *materially
    new* to contribute — a missing repro, a regression test, a consequence
    not yet noticed, a framing nobody's used. Engaging when others are
    already iterating on a fix is noise.
 
-Default to option 1. Move to option 2 when the bug is hot and you can't
-wait. Move to option 3 only when you have something new, *and* you've
+Default to ignoring the bug. When it is hot and you can't wait, fix it in
+the city's config if that config can, and carry a local patch only if it
+cannot. Engage upstream only when you have something new, *and* you've
 decided you want the public footprint of an upstream PR.
 
 A design gap is not a local-patch case. A gc-toolkit feature that needs
