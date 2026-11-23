@@ -916,18 +916,18 @@ RESUME_PACK="$TMP/resumepack"; mkdir -p "$RESUME_PACK"
 cp "$HERE/work-setup.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/bd-lib.sh" "$RESUME_PACK/"
 # resume <bead> — work-setup.sh as a run resuming a rejected branch calls it.
 resume() { ( cd "$R" && GC_SESSION_ID=polecat WORK_READ_WAIT=0 "$RESUME_PACK/work-setup.sh" --bead "$1" --base main ) >/dev/null 2>&1; }
-has "$(cat "$HERE/work-setup.sh")" '"stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only' "work-setup.sh reads a conflict or stale-base rejection as merge-only"
+has "$(cat "$HERE/work-setup.sh")" '"Conflicts with "*) RESUME_SCOPE=merge-only' "work-setup.sh reads a conflict rejection as merge-only"
 eq "$(grep -c 'REASON="Conflicts with \$TARGET at' "$HERE/refinery-prep.sh")" "1" "the refinery's prepare re-queue is rejected 'Conflicts with …'"
 
 echo "# the resume records the start and scope before its merge, and the guard reads from there"
 R="$MODIFY_R"; A="$MODIFY_A"; git -C "$R" merge --abort >/dev/null 2>&1; git -C "$R" reset -q --hard "$A"
-store "[$(child MI12 ",\"work_dir\":\"$R\",\"rejection_reason\":\"stale base at head sha-1: PR#1 conflicts with main.\"$(audit_meta "$(entry stale.txt)")"), $(anchorrow AN1)]"
+store "[$(child MI12 ",\"work_dir\":\"$R\",\"rejection_reason\":\"Conflicts with main at sha-1\"$(audit_meta "$(entry stale.txt)")"), $(anchorrow AN1)]"
 resume MI12
 eq "$(meta MI12 bring_current_from)" "$A" "the stamp is the PR head the round started from"
-eq "$(meta MI12 bring_current_scope)" "merge-only" "…a stale-base rejection makes the round merge-only"
+eq "$(meta MI12 bring_current_scope)" "merge-only" "…a conflict rejection makes the round merge-only"
 eq "$(meta MI12 conflict_audit)" "<absent>" "…the last round's audit is cleared"
 eq "$(git -C "$R" diff --name-only --diff-filter=U)" "v.txt" "the merge it ran stopped on the conflict"
-eq "$(meta MI12 rejection_reason)" "stale base at head sha-1: PR#1 conflicts with main." "…and the rejection stays until that merge concludes"
+eq "$(meta MI12 rejection_reason)" "Conflicts with main at sha-1" "…and the rejection stays until that merge concludes"
 resolve v.txt 'x=2\n'
 H=$(git -C "$R" rev-parse HEAD)
 fresh
@@ -943,7 +943,7 @@ store "[$(child MI13 ",\"work_dir\":\"$R\",\"rejection_reason\":\"Review feedbac
 git -C "$R" reset -q --hard "$A"
 resume MI13
 eq "$(meta MI13 bring_current_scope)" "with-work" "a feedback rejection carries work of its own"
-STUB_UPDATE_FAIL="MI14" store "[$(child MI14 ",\"work_dir\":\"$R\",\"rejection_reason\":\"stale base at head sha-1: x\"")]"
+STUB_UPDATE_FAIL="MI14" store "[$(child MI14 ",\"work_dir\":\"$R\",\"rejection_reason\":\"Conflicts with main at sha-1\"")]"
 git -C "$R" merge --abort >/dev/null 2>&1; git -C "$R" reset -q --hard "$A"
 STUB_UPDATE_FAIL="MI14" resume MI14; rc=$?
 eq "$rc" "1" "a stamp the store refuses stops the resume"

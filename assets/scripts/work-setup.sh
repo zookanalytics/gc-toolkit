@@ -343,11 +343,11 @@ REJECTION=$(work_meta rejection_reason)
 if [ -n "$REJECTION" ] && [ -n "$(work_meta branch)" ]; then
   echo "resuming rejected branch by MERGE (git merge --no-edit origin/$BASE); never rebase or force-push"
   RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$BRANCH" || git rev-parse HEAD)
-  # A conflict or stale-base rejection asks for nothing else, so a commit of the
-  # bead's own is then an edit beyond the merge and owes an audit entry; any other
-  # rejection carries work of its own.
+  # A conflict rejection asks for nothing else, so a commit of the bead's own is
+  # then an edit beyond the merge and owes an audit entry; any other rejection
+  # carries work of its own.
   case "$REJECTION" in
-    "stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only ;;
+    "Conflicts with "*) RESUME_SCOPE=merge-only ;;
     *) RESUME_SCOPE=with-work ;;
   esac
   if ! gc bd update "$WORK_ID" --set-metadata "bring_current_from=$RESUME_FROM" --set-metadata "bring_current_scope=$RESUME_SCOPE" \
