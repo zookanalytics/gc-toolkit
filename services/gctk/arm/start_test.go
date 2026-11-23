@@ -17,6 +17,7 @@ import (
 	rtfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
 // run runs one pass and returns each arm's line by its bead.
@@ -681,6 +682,62 @@ func TestStartListing(t *testing.T) {
 	_, err := w.arms.StartArmed(arm.StartOptions{}, func(arm.Line) {})
 	if !errors.Is(err, arm.ErrListing) {
 		t.Errorf("an unreadable listing = %v; want ErrListing", err)
+	}
+}
+
+// typedStore is the world's store with the values named typed as bd stores
+// them: each key named for a bead reads back as the JSON value given, in place
+// of the string the fake holds, so a row can hold a false or a null.
+type typedStore struct {
+	*fake.Store
+	values map[string]map[string]any
+}
+
+func (s typedStore) typed(rows []gcbd.Bead, err error) ([]gcbd.Bead, error) {
+	for i := range rows {
+		for k, v := range s.values[rows[i].ID] {
+			if _, held := rows[i].Metadata[k]; held {
+				rows[i].Metadata[k] = v
+			}
+		}
+	}
+	return rows, err
+}
+
+func (s typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) { return s.typed(s.Store.Find(q)) }
+
+func (s typedStore) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return s.typed(s.Store.Ready(q)) }
+
+// A bead whose dispatch key bd stores as a false or a null carries no arm, as
+// the pack's scripts read the key, so no pass lists it, open or closed: it gets
+// no line and no write, and the arm beside it is sent as any other is.
+func TestStartListsNoArmOnAKeyThatHoldsFalseOrNull(t *testing.T) {
+	w := newWorld(t)
+	w.put(fake.Bead{ID: "armed", Metadata: armedBead("mol-x", nil)})
+	values := map[string]map[string]any{}
+	for _, b := range []struct {
+		id, status string
+		stored     any
+	}{{"false", "open", false}, {"null", "open", nil}, {"closed", "closed", false}} {
+		w.put(fake.Bead{ID: b.id, Status: b.status, Metadata: map[string]string{"gc.dispatch_when_ready": "typed"}})
+		values[b.id] = map[string]any{"gc.dispatch_when_ready": b.stored}
+	}
+	w.store.MakeReady("armed", "false", "null")
+	w.arms.Ledger = ledger.New(typedStore{Store: w.store, values: values})
+	for _, dry := range []bool{true, false} {
+		lines, sum := w.run(dry)
+		if len(lines) != 1 || sum[arm.ActStart] != 1 {
+			t.Errorf("a pass (dry run %v) gave %d lines, summary %v; want the armed bead's start alone", dry, len(lines), sum)
+		}
+		act(t, lines, "armed", arm.ActStart, "", pool+" on mol-x")
+	}
+	for _, wr := range w.store.Writes() {
+		if wr.ID != "armed" {
+			t.Errorf("the pass wrote to %s: %q", wr.ID, wr.Args)
+		}
+	}
+	if s := w.rt.Slings(); len(s) != 1 || s[0].Bead != "armed" {
+		t.Errorf("slung %+v; want the armed bead once", s)
 	}
 }
 

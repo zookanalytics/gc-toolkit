@@ -137,6 +137,13 @@ func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 	return v, false, nil
 }
 
+// held reports whether r holds k, as Get reads it. A value that does not
+// decode is held, so a selection keeps its row and its reader meets the error.
+func (k Key[T]) held(r *Record) bool {
+	_, ok, _ := k.Get(r)
+	return ok
+}
+
 // Act is an act a key's value is set in: a Write on a bead, or the Filing of a
 // new one.
 type Act interface {

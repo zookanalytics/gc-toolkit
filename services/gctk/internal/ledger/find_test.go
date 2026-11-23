@@ -1,9 +1,12 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -90,5 +93,112 @@ func TestFindNarrowsByAssigneeStatusAndListing(t *testing.T) {
 	}
 	if rs, err := l.Find(Every().InStatus()); rs != nil || err != nil || len(s.Finds()) != before {
 		t.Errorf("a selection of no status = %v, %v after %d reads; want nothing read", rs, err, len(s.Finds())-before)
+	}
+}
+
+// typedStore is the fake store with each bead's metadata typed as bd stores
+// it: a row it returns holds the JSON object put gave the bead, decoded as the
+// store adapter decodes a row, in place of the strings the fake holds. The fake
+// selects a bead by a key's presence, and the bead has each key its object
+// has, whatever the value, as bd's row has a key it stores as a null.
+type typedStore struct {
+	*fake.Store
+	meta map[string]map[string]any
+}
+
+func newTypedStore() *typedStore {
+	return &typedStore{Store: fake.New(), meta: map[string]map[string]any{}}
+}
+
+// put adds a bead at status whose metadata is the JSON object given.
+func (s *typedStore) put(t *testing.T, id, status, metadata string) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(metadata))
+	dec.UseNumber()
+	var m map[string]any
+	if err := dec.Decode(&m); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]string{}
+	for k := range m {
+		keys[k] = "typed"
+	}
+	s.Store.Put(fake.Bead{ID: id, Status: status, Metadata: keys})
+	s.meta[id] = m
+}
+
+func (s *typedStore) typed(rows []gcbd.Bead, err error) ([]gcbd.Bead, error) {
+	for i := range rows {
+		if m, ok := s.meta[rows[i].ID]; ok {
+			rows[i].Metadata = maps.Clone(m)
+		}
+	}
+	return rows, err
+}
+
+func (s *typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) { return s.typed(s.Store.Find(q)) }
+
+func (s *typedStore) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return s.typed(s.Store.Ready(q)) }
+
+// A key's selection keeps the beads whose key Get reads as held. bd's row has a
+// key it stores as a JSON null or a false, and the store selects that row by
+// the key's presence, so Find and Ready leave out a row whose String key holds
+// a null or a false, and keep one that holds an empty text or the text "false".
+// A current spelling that holds false gives way to its alias, so a bead whose
+// alias holds a value is kept, and a JSON flag holds false. A pass keeps the
+// same beads, both when it reads the store for them and when it answers from
+// the rows it holds.
+func TestCarryingKeepsTheBeadsWhoseKeyHoldsAValue(t *testing.T) {
+	s := newTypedStore()
+	for _, b := range []struct{ id, status, metadata string }{
+		{"s-value", "open", `{"test.ledger.shell":"x"}`},
+		{"s-empty", "open", `{"test.ledger.shell":""}`},
+		{"s-false-text", "open", `{"test.ledger.shell":"false"}`},
+		{"s-true", "open", `{"test.ledger.shell":true}`},
+		{"s-false", "open", `{"test.ledger.shell":false}`},
+		{"s-null", "open", `{"test.ledger.shell":null}`},
+		{"s-closed", "closed", `{"test.ledger.shell":"x"}`},
+		{"s-closed-false", "closed", `{"test.ledger.shell":false}`},
+		{"t-alias", "open", `{"test.ledger.text":false,"test.ledger.old_text":"older"}`},
+		{"t-false", "open", `{"test.ledger.text":false}`},
+		{"f-false", "open", `{"test.ledger.flag":false}`},
+		{"f-null", "open", `{"test.ledger.flag":null}`},
+	} {
+		s.put(t, b.id, b.status, b.metadata)
+	}
+	s.MakeReady("s-value", "s-empty", "s-false-text", "s-true", "s-false", "s-null")
+	held := []string{"s-empty", "s-false-text", "s-true", "s-value"}
+	l := New(s)
+	sorted := func(rs []*Record) []string { return slices.Sorted(slices.Values(recordIDs(rs))) }
+	for _, c := range []struct {
+		name string
+		sel  Selection
+		want []string
+	}{
+		{"a String key's beads", Carrying(testShell), held},
+		{"a String key's beads, closed ones too", Carrying(testShell).WithClosed(), append([]string{"s-closed"}, held...)},
+		{"the beads of a key with an alias", Carrying(testText), []string{"t-alias"}},
+		{"a JSON flag's beads", Carrying(testFlag), []string{"f-false"}},
+	} {
+		for _, via := range []struct {
+			name string
+			l    *Ledger
+		}{{"the ledger", l}, {"a pass", l.Pass()}} {
+			got, err := via.l.Find(c.sel)
+			if err != nil || !slices.Equal(sorted(got), c.want) {
+				t.Errorf("%s, read through %s = %v, %v; want %v", c.name, via.name, sorted(got), err, c.want)
+			}
+		}
+	}
+	p := l.Pass()
+	if _, err := p.Find(Every()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.Finds())
+	if got, err := p.Find(Carrying(testShell)); err != nil || !slices.Equal(sorted(got), held) || len(s.Finds()) != before {
+		t.Errorf("a pass that holds every live bead answered %v, %v after %d reads; want %v from its rows", sorted(got), err, len(s.Finds())-before, held)
+	}
+	if got, err := Ready(l, testShell, ServeRule{}); err != nil || !slices.Equal(sorted(got), held) {
+		t.Errorf("the ready beads that carry a String key = %v, %v; want %v", sorted(got), err, held)
 	}
 }
