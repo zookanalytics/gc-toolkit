@@ -1,6 +1,6 @@
 ---
 name: Gas City agent types (platform facts)
-description: What Gas City's agent variants do where upstream's docs leave it unsaid or state it wrongly — scope expansion, what makes a named session desired and how a patch reaches it, what keeps a session up and what an assignment gives it, pool slots and session names, kill and close, the control-dispatcher, gc session new, nudge fences, and which fields name a bead's holder — each cited and dated. gc-toolkit's own agent conventions are pack-authoring.md.
+description: What Gas City's agent variants do where upstream's docs leave it unsaid or state it wrongly — scope expansion, what makes a named session desired, when a cap of 1 keeps routed work on it, and how a patch reaches it, what keeps a session up and what an assignment gives it, pool slots and session names, kill and close, the control-dispatcher, gc session new, nudge fences, and which fields name a bead's holder — each cited and dated. gc-toolkit's own agent conventions are pack-authoring.md.
 ---
 
 # Gas City agent types
@@ -134,6 +134,37 @@ nothing assigned to it or routed at it, never spawns — which makes patching an
 *Evidence:* `computeAwakeSetKeyed` (`cmd/gc/compute_awake_set.go`),
 `computeNamedSessionDemandOn` (`cmd/gc/build_desired_state.go`), read at
 upstream `1e05ae624` and the fork on 2026-10-19.
+
+### A cap of 1 puts routed work on the named session
+
+A named session's backing template is a single-instance (canonical-singleton)
+pool when the agent sets `max_active_sessions = 1` itself, in its own config or
+by a patch or override, and sets no `namepool`, `min_active_sessions` or
+`scale_check`. A cap it inherits from its rig or the workspace does not count.
+Its pool then uses the agent's configured identity instead of numbered slot
+identities, and a named session of the template holds that identity until the
+session is closed or drained or its create fails. Routed work on the template
+wakes the named session, through the routed-demand arm above, and the pool
+starts no session of its own while the identity is held.
+
+With no cap of its own, which the config reference resolves from the rig, then
+the workspace, then unlimited, or with a cap above 1, the template is an
+ordinary pool. Routed work then starts numbered pool sessions, `<name>-1` and
+on, beside the named session, and they share its `work_dir` unless the path
+varies with `{{.AgentBase}}`. Config validation checks that a `work_dir` varies
+by instance only when the agent gives an explicit sign of several instances,
+such as a cap above 1, so a missing cap passes it. A named singleton that takes
+routed work needs the cap of 1 to stay one session.
+
+*Evidence:* `EffectiveMaxActiveSessions`, `UsesCanonicalSingletonPoolIdentity`
+and `SupportsInstanceExpansion` (`internal/config/session_capacity.go`);
+`canonicalSingletonAliasHeldTemplates` and its use in
+`computePoolDesiredStatesParkedAt` (`cmd/gc/pool_desired_state.go`), which the
+v2 allocator's plan also calls, and that plan's `name-occupied` refusal
+(`cmd/gc/allocator_plan.go`); `NamedSessionRoutedDemand`
+(`cmd/gc/build_desired_state.go`); `RequiresPoolWorkDirIsolationCheck`
+(`internal/workdir/pool_isolation.go`); read at upstream `97c0c9b3b1` and the
+fork `96179ad1f6` on 2026-11-23.
 
 ### A named-session patch matches only qualified names, and a bad one fails the city
 
