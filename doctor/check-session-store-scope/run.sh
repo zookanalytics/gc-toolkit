@@ -83,7 +83,12 @@ run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || re
 budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-gcmux() { run_bounded tmux ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
+# The city's tmux server is the one GC_TMUX_SOCKET names. With it unset, tmux
+# reads the server $TMUX names, else its default one. -u keeps the tab in the
+# session list under a locale that is not UTF-8, where the client writes it as
+# `_` and every row would name no session. Gas City's own client passes it on
+# every call.
+gcmux() { run_bounded tmux -u ${GC_TMUX_SOCKET:+-L "$GC_TMUX_SOCKET"} "$@"; }
 
 # env_val <key> <env-text> — the value of key, empty when absent or removed: the
 # rest of the first line that starts with <key>=. A value is any bytes, so the

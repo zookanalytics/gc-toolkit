@@ -17,11 +17,27 @@ CITY="$TMP/city"
 mkdir -p "$TMP/bin" "$TMP/sessions" "$TMP/proc" "$CITY"
 
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/tmux" <<'TMUX'
-while [ "${1:-}" = "-L" ]; do shift 2; done
+# Each call appends the server it addressed to tmux.servers: the -L name, else
+# "default" for the server the environment picks.
+server=default; utf8=0
+while :; do
+    case "${1:-}" in
+        -L) server="$2"; shift 2 ;;
+        -u) utf8=1; shift ;;
+        *)  break ;;
+    esac
+done
+printf '%s\n' "$server" >> "$STUB_DIR/tmux.servers"
 case "${1:-}" in
   list-sessions)
       rc="${STUB_LIST_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"
-      cat "$STUB_DIR/sessions.list" 2>/dev/null ;;
+      # A client in a locale that is not UTF-8 writes the format's tab as `_`,
+      # unless -u tells it the terminal takes UTF-8.
+      if [ -n "${STUB_NOT_UTF8:-}" ] && [ "$utf8" -eq 0 ]; then
+          tr '\t' '_' < "$STUB_DIR/sessions.list" 2>/dev/null
+      else
+          cat "$STUB_DIR/sessions.list" 2>/dev/null
+      fi ;;
   show-environment)
       if [ "${2:-}" = "-g" ]; then
           rc="${STUB_GLOBAL_RC:-0}"; [ "$rc" -eq 0 ] || exit "$rc"
@@ -72,7 +88,7 @@ kern_witness() {
     { printf 'GC_AGENT=alpha/city.witness\nGC_ALIAS=alpha/city.witness\nGC_CITY_PATH=%s\n' "$CITY"; cat; } | kern_pane 200
 }
 reset_fixture() {
-    rm -rf "$TMP/sessions" "$TMP/proc" "$TMP/sessions.list" "$TMP/global.env"
+    rm -rf "$TMP/sessions" "$TMP/proc" "$TMP/sessions.list" "$TMP/global.env" "$TMP/tmux.servers"
     mkdir -p "$TMP/sessions" "$TMP/proc"
     : > "$TMP/sessions.list"
 }
@@ -519,6 +535,23 @@ healthy
 printf 'vanished\n' >> "$TMP/sessions.list"
 OUT=$(run); RC=$?
 eq "$RC" "0" "a session listed but gone by the time it is read is skipped"
+
+# --- 11b. a locale that is not UTF-8 does not empty the scan ------------------
+# There a client without -u writes the session list's tab as `_`. Every row then
+# names no session, each read fails as it does for a session that ended mid-scan,
+# and the scan reaches the OK line having judged nothing.
+healthy
+OUT=$(STUB_NOT_UTF8=1 run); RC=$?
+eq "$RC" "0" "the healthy pair still passes under a locale that is not UTF-8"
+has "$OUT" "2 agent session(s)" "both sessions are judged, so the list kept its tab"
+
+# --- 11c. every read goes to the server GC_TMUX_SOCKET names ------------------
+# Gas City runs a city's sessions on a server named for the city, so a run from
+# outside the city's tmux reaches them only through that name.
+healthy
+OUT=$(GC_TMUX_SOCKET=city-sock run); RC=$?
+eq "$RC" "0" "the healthy pair passes on the named server"
+eq "$(sort -u "$TMP/tmux.servers")" "city-sock" "every tmux call addresses the server GC_TMUX_SOCKET names"
 
 # --- 12. fail-CLOSED: an unreadable session list warns, never passes ---------
 healthy
