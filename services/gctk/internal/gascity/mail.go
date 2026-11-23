@@ -30,22 +30,26 @@ type Inbox struct {
 	Unread    []Message
 }
 
-// MailInbox reads `gc mail inbox <session> --json` once. A read that fails, or
-// prints no JSON object carrying a messages list, is an error, never an empty
-// inbox.
+// MailInbox reads `gc mail inbox <session> --json` once. gc prints the
+// messages of a session's inbox that holds no unread mail as null (Inbox.Unread
+// in internal/mail/beadmail/inbox.go at gastownhall/gascity c377651cb318), and
+// that reads as an empty inbox. A read that fails, or prints no JSON object
+// whose messages key holds a list or null, is an error, never an empty inbox.
 func (c *City) MailInbox(ctx context.Context, session string) (Inbox, error) {
 	b := c.runBounded(ctx, c.bin, "mail", "inbox", session, "--json")
 	if f := b.Failure(); f != "" {
 		return Inbox{}, fmt.Errorf("gc mail inbox %s did not read: %s", session, f)
 	}
 	var out struct {
-		Recipients []string   `json:"recipients"`
-		Messages   *[]Message `json:"messages"`
+		Recipients []string        `json:"recipients"`
+		Messages   json.RawMessage `json:"messages"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(b.Stdout)), &out); err != nil || out.Messages == nil {
+	var unread []Message
+	if err := json.Unmarshal([]byte(strings.TrimSpace(b.Stdout)), &out); err != nil || out.Messages == nil ||
+		json.Unmarshal(out.Messages, &unread) != nil {
 		return Inbox{}, fmt.Errorf("gc mail inbox %s printed no message list that reads: %s", session, clipLine(b.Stdout))
 	}
-	return Inbox{Addresses: out.Recipients, Unread: *out.Messages}, nil
+	return Inbox{Addresses: out.Recipients, Unread: unread}, nil
 }
 
 // QueuedNudge is one nudge `gc nudge status` lists for a session: its source,

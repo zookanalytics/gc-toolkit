@@ -32,16 +32,21 @@ func TestMailInboxReadsTheAddressesAndTheUnreadMail(t *testing.T) {
 	}
 }
 
-// An inbox that reads with no messages is empty, and a read that fails or
-// prints no messages list is an error.
+// An inbox that reads with no messages is empty, whether gc prints them as an
+// empty list or, as it does for a session's inbox with no unread mail, as
+// null. A read that fails, or prints no messages key or one that holds no
+// list, is an error.
 func TestMailInboxFailsClosed(t *testing.T) {
-	c, _ := stubGC(t, `printf '%s\n' '{"schema_version":"1","recipients":["hq-1"],"messages":[]}'`)
-	if got, err := c.MailInbox(context.Background(), "hq-1"); err != nil || len(got.Unread) != 0 {
-		t.Errorf("an empty inbox answered %+v, %v", got, err)
+	for _, messages := range []string{"[]", "null"} {
+		c, _ := stubGC(t, `printf '%s\n' '{"schema_version":"1","recipient":"tools/gc-toolkit.tk-1","recipients":["tools/gc-toolkit.tk-1","hq-1"],"messages":`+messages+`}'`)
+		if got, err := c.MailInbox(context.Background(), "hq-1"); err != nil || len(got.Unread) != 0 || len(got.Addresses) != 2 {
+			t.Errorf("an empty inbox printed as %s answered %+v, %v", messages, got, err)
+		}
 	}
 	for _, body := range []string{
 		"echo 'gc mail inbox: no such session' >&2\nexit 1\n",
 		"printf '%s\\n' '{\"schema_version\":\"1\",\"recipients\":[]}'\n",
+		"printf '%s\\n' '{\"schema_version\":\"1\",\"recipients\":[],\"messages\":\"none\"}'\n",
 		"printf 'not json\\n'\n",
 	} {
 		c, _ := stubGC(t, body)
