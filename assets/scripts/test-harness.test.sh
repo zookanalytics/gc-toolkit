@@ -394,8 +394,8 @@ mk_sut_dir "$TMP/sut-dp" "$HERE/gc-helm.sh"
 out="$(bash -c '. "$1/dispatch-path.sh" && printf "%s" "$DISPATCH_PATH_JQ"' _ "$TMP/sut-dp" 2>&1)"; rc=$?
 eq "$rc" "0" "the copied dispatch-path.sh sources from the SUT's private dir"
 [ -n "$out" ] && ok "…and sets the dispatch path's program" || bad "…and sets the dispatch path's program (it set none)"
-# pr-facts.sh sources the priority function's reading of a PR's approval.
-mk_sut_dir "$TMP/sut-pf" "$HERE/pr-facts.sh"
+# queue-priority.sh sources the priority function.
+mk_sut_dir "$TMP/sut-pf" "$HERE/queue-priority.sh"
 [ -f "$TMP/sut-pf/priority-lib.sh" ] && ok "mk_sut_dir copies priority-lib.sh beside the SUT" || bad "mk_sut_dir left priority-lib.sh out"
 # A copy of gate-ensure.sh without git-lib.sh beside it exits before it reads a
 # head.

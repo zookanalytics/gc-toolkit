@@ -3,17 +3,14 @@
 # Driven by orders/refinery-reconcile.toml (cooldown 60s, scope=rig): the
 # controller supplies the loop, cwd = the rig root, and the env (GC_RIG,
 # GC_PACK_STATE_DIR, gh token).
-# Arms, in order: pr-facts --posture-only (BEADS_ACTOR projected to the
-# refinery so its records are attributed to it), pr-facts
-# --route-comments-only (route operator feedback ahead of the slow arms, so a
-# pass killed before the full arm has still picked it up; BEADS_ACTOR
-# projected), gate-ensure, pr-facts (same projection), review-sweep (cleanup
-# over closed anchors; no projection), scaffolding-sweep (retires
-# validation/finding/rework on a disposed anchor; BEADS_ACTOR projected: it
-# closes a finding it carries forward through bead-rehome).
-# The arms that walk a set growing with the queue share the pass budget (see
-# PASS_BUDGET_SECS and PACED_ARMS below): pr-feedback, gate-ensure and
-# pr-facts. A PR lands through the landing order, never through this cadence.
+# Arms, in order: gate-ensure, review-sweep (cleanup over closed anchors; no
+# projection), scaffolding-sweep (retires validation/finding/rework on a
+# disposed anchor; BEADS_ACTOR projected to the refinery: it closes a finding
+# it carries forward through bead-rehome).
+# The arm that walks a set growing with the queue, gate-ensure, runs under the
+# pass budget (see PASS_BUDGET_SECS and PACED_ARMS below). A PR lands through
+# the landing order, never through this cadence, and the landing order takes a
+# person's posts on it.
 # Single-flight is the per-rig flock below, NOT the controller's open-tracking
 # gate: the controller watchdog closes any tracking bead older than 2m, which
 # reopens that gate under a pass still running.
@@ -73,8 +70,7 @@ CHECK_SET_DEFAULT="${REFINERY_RECONCILE_CHECK_SET:-correctness,triage}"
 # left when the arm starts, and never less than ARM_FLOOR_SECS, so an arm that
 # finishes early leaves its time to the arms behind it, and every arm runs on
 # every pass. The budget sits below the order's timeout, so a pass ends and
-# writes END instead of being killed. The posture record is never paced: it
-# reads every open PR in one batched call.
+# writes END instead of being killed.
 PASS_BUDGET_SECS="${REFINERY_RECONCILE_PASS_BUDGET_SECS:-420}"
 case "$PASS_BUDGET_SECS" in ''|*[!0-9]*) PASS_BUDGET_SECS=420 ;; esac
 PASS_BUDGET_SECS=$((10#$PASS_BUDGET_SECS))
@@ -221,7 +217,7 @@ run_pass() { # <label> <script> [args...]
 # among it and the arms still on this list, in PACE_ARGS, and takes it off the
 # list. pace_skip takes off an arm this pass will not run, so the arms behind it
 # split its share.
-PACED_ARMS=(pr-feedback gate-ensure pr-facts)
+PACED_ARMS=(gate-ensure)
 pace_skip() { # <arm>
   local a left=()
   for a in ${PACED_ARMS[@]+"${PACED_ARMS[@]}"}; do
@@ -243,28 +239,6 @@ pace_args() { # <arm>
   return 0
 }
 
-# (1) posture: record each open PR's posture, which the PR-finishing rank and
-# the board read. It reads every open PR in one batched call and keeps, in
-# pr-posture.seen, what each posture was derived from, so a PR nothing has
-# touched since costs no per-PR read and the arm's cost follows the PRs that
-# moved.
-( export BEADS_ACTOR="$AGENT"
-  run_pass "(1) pr-posture" pr-facts.sh --posture-only --seen "$STATE_DIR/pr-posture.seen" ) \
-  || FAILED="${FAILED}pr-posture rc=$?; "
-
-# (4) pr-feedback: route operator PR feedback ahead of the slow arms. The full
-# pr-facts arm (arm 7) re-runs the same routing idempotently, but it sits
-# behind gate-ensure, so this arm is what routes feedback on a pass killed
-# before arm 7. It does only the routing (skipping the write-back sweep and
-# every non-feedback arm); arm 7 still owns the write-back and the
-# external-fact reconciliation.
-# BEADS_ACTOR is projected so the children it dispatches are attributed to the
-# refinery, like the full arm. Its rc is reported and holds nothing.
-pace_args pr-feedback
-( export BEADS_ACTOR="$AGENT"
-  run_pass "(4) pr-feedback" pr-facts.sh --route-comments-only --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
-  || FAILED="${FAILED}pr-feedback rc=$?; "
-
 # (6) gate-ensure: review dispatch. It visits every gating anchor, so it runs
 # under its share of the pass budget: past the deadline it starts no new anchor,
 # and its cursor names the last anchor it finished, so the next pass resumes
@@ -285,13 +259,6 @@ elif [ "$gate_rc" != 0 ]; then
   FAILED="${FAILED}gate-ensure rc=$gate_rc; "
 fi
 
-# (7) pr-facts: same actor projection (it records closes too). Paced like the
-# arms ahead of it, so the arms behind it still get their turn.
-pace_args pr-facts
-( export BEADS_ACTOR="$AGENT"
-  run_pass "(7) pr-facts" pr-facts.sh --fix-pool "$FIX_POOL" "${PACE_ARGS[@]}" ) \
-  || FAILED="${FAILED}pr-facts rc=$?; "
-
 # (8) review-sweep: close reviews whose anchor and branch are both gone. Late,
 # because it reads only closed anchors, so a close an earlier arm made this pass
 # drains on the same tick.
@@ -303,11 +270,11 @@ run_pass "(8) review-sweep" review-sweep.sh || FAILED="${FAILED}review-sweep rc=
 # that will never resolve. Late, beside review-sweep, because it keys on a
 # terminal disposition no earlier arm produces, and a disposal this pass is
 # cleaned on the same tick. No merge authority: it writes scaffolding beads, and
-# a bug bead for a finding it carries forward, never the anchor — bead-rehome
-# (via pr-facts' close arm) closes that, held by finalize-gate while a human
-# gate on it is still open. BEADS_ACTOR projected — the close of a
-# carried-forward finding is delegated to bead-rehome and attributed in the
-# events table.
+# a bug bead for a finding it carries forward, never the anchor, which the
+# landing order closes through bead-rehome once its PR has closed, held by
+# finalize-gate while a human gate on it is still open. BEADS_ACTOR projected:
+# the close of a carried-forward finding is delegated to bead-rehome and
+# attributed in the events table.
 ( export BEADS_ACTOR="$AGENT"
   run_pass "(9) scaffolding-sweep" scaffolding-sweep.sh ) \
   || FAILED="${FAILED}scaffolding-sweep rc=$?; "

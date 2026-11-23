@@ -106,10 +106,9 @@ echo "# every reader sources the one definition"
 reads() { # <file> <what> <pattern>
     grep -qE -- "$3" "$ROOT/$1" && ok "(READERS) $1 $2" || bad "(READERS) $1 $2"
 }
-for r in assets/scripts/pr-facts.sh assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
+for r in assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
     reads "$r" "sources review-dismissal.sh" '^[[:space:]]*\.[[:space:]].*review-dismissal\.sh'
 done
-reads assets/scripts/pr-facts.sh "reads the comment space through live_comments" 'REVIEW_DISMISSAL_DEF.*live_comments\(\$revs\)'
 reads assets/scripts/approval-withdraw.sh "asks unrouted_comment_ids" 'unrouted_comment_ids\('
 for r in assets/scripts/approval-withdraw.sh assets/scripts/bring-current-guard.sh; do
     reads "$r" "names its PR through pr_coords" '^[[:space:]]*(if ! )?pr_coords '

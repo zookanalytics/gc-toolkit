@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/refinery-reconcile.sh — the merge-cadence
 # driver. Covers: GC_RIG required; refinery discovery + pool derivation;
-# the arm ORDER (pr-facts --posture-only, pr-facts --route-comments-only,
-# gate-ensure, pr-facts, review-sweep, scaffolding-sweep) — the feedback arm
-# runs ahead of gate-ensure, so a gate-ensure that never returns leaves the
-# posture and the feedback already recorded; every paced arm handed a cursor in
-# the pass state dir and a deadline that is its share of what
+# the arm ORDER (gate-ensure, review-sweep, scaffolding-sweep); gate-ensure, the
+# paced arm, handed a cursor in the pass state dir and a deadline that is what
 # REFINERY_RECONCILE_PASS_BUDGET_SECS has left, never under
-# REFINERY_RECONCILE_ARM_FLOOR_SECS, while the posture arm gets neither;
+# REFINERY_RECONCILE_ARM_FLOOR_SECS;
 # gate-ensure's rc=3 reported without failing anything; BEADS_ACTOR projections
 # scoped to their arms, and no arm handed GC_AGENT, since nothing in a pass
 # assigns work; a failing arm not skipping the arms after it; the exit-1 failure
@@ -78,65 +75,24 @@ near() { # <offset> <want-secs> <label> — within 15s, for a loaded host
 }
 
 echo "# arms run in order with derived pools and scoped identities"
-for a in gate-ensure.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 T0=$(date -u +%s)
 out=$(drive); rc=$?
 eq "$rc" 0 "a clean pass exits 0"
 order=$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)
-ARM_ORDER="pr-facts.sh,pr-facts.sh,gate-ensure.sh,pr-facts.sh,review-sweep.sh,scaffolding-sweep.sh"
-eq "$order" "$ARM_ORDER" "the arms ran in order (posture, then feedback, ahead of every arm whose cost grows with the gating set)"
+ARM_ORDER="gate-ensure.sh,review-sweep.sh,scaffolding-sweep.sh"
+eq "$order" "$ARM_ORDER" "the arms ran in order"
 scaf_line=$(grep '^scaffolding-sweep' "$ARM_LOG")
 has "$scaf_line" "|myrig/gc-toolkit.refinery|" "scaffolding-sweep ran as BEADS_ACTOR=<refinery>"
 gate_line=$(grep '^gate-ensure' "$ARM_LOG")
 has "$gate_line" "--default correctness,triage --review-pool myrig/gc-toolkit.polecat-codex --fix-pool myrig/gc-toolkit.polecat --validate-pool myrig/gc-toolkit.polecat" "gate-ensure got the default + derived review, fix AND validate pools"
 hasnt "$gate_line" "--review-formula" "gate-ensure gets no --review-formula by default (the two-lane quorum pilot is opt-in)"
-# Every paced arm resumes from its own cursor in the rig's pass state dir, and
-# its deadline is its share of what the default 420s pass budget has left when
-# it starts. The stub arms return at once, so the three shares are 420 over 3,
-# then over 2, then all of it for pr-facts.
-for pair in "pr-facts.sh|--route-comments-only:pr-feedback" gate-ensure:gate-ensure; do
-  pat="${pair%%:*}"; name="${pair#*:}"
-  has "$(grep "^$pat" "$ARM_LOG")" "--cursor $TMP/state/myrig/$name.cursor" "$name resumes from its own cursor in the pass state dir"
-done
-full_facts=$(grep '^pr-facts' "$ARM_LOG" | grep -v -- '--posture-only' | grep -v -- '--route-comments-only')
-has "$full_facts" "--cursor $TMP/state/myrig/pr-facts.cursor" "pr-facts resumes from its own cursor in the pass state dir"
-near "$(offset "$(grep '^pr-facts.sh|--route-comments-only' "$ARM_LOG")")" 140 "pr-feedback's deadline is a third of the 420s pass budget"
-near "$(offset "$gate_line")" 210 "gate-ensure gets half of what is left"
-near "$(offset "$full_facts")" 420 "and pr-facts all that is left"
-# The full pr-facts arm: --fix-pool and no early-arm mode flag (the posture arm
-# carries neither, the feedback arm carries --route-comments-only).
-facts_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--fix-pool' | grep -v -- '--route-comments-only')
-eq "$(printf '%s\n' "$facts_line" | wc -l | tr -d ' ')" 1 "the full pr-facts arm ran exactly once"
-has "$facts_line" "--fix-pool myrig/gc-toolkit.polecat" "pr-facts got the derived fix pool"
-hasnt "$facts_line" "--review-pool" "…and no review pool: it dispatches no reviews"
-has "$facts_line" "|myrig/gc-toolkit.refinery|" "pr-facts ran as BEADS_ACTOR=<refinery>"
-
-# The posture arm reads every open PR in one batched call, so it is never
-# paced, and it runs first.
-posture_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--posture-only')
-eq "$(printf '%s\n' "$posture_line" | wc -l | tr -d ' ')" 1 "the posture arm ran exactly once"
-has "$posture_line" "|myrig/gc-toolkit.refinery|" "the posture arm ran as BEADS_ACTOR=<refinery>"
-hasnt "$posture_line" "--fix-pool" "the posture arm dispatches nothing, so it takes no pools"
-hasnt "$posture_line" "--deadline" "the posture arm is never paced"
-hasnt "$posture_line" "--cursor" "…so it takes no cursor either"
-has "$posture_line" "--seen $TMP/state/myrig/pr-posture.seen" "…but keeps what each posture was read from in the rig's pass state dir"
-at() { grep -n "^$1" "$ARM_LOG" | head -1 | cut -d: -f1; }
-posture_at=$(at 'pr-facts.*--posture-only')
-route_at=$(at 'pr-facts.*--route-comments-only')
-gate_at=$(at 'gate-ensure')
-eq "$posture_at" 1 "the posture is recorded first"
-# The early feedback arm routes operator feedback ahead of gate-ensure and the
-# full pr-facts arm, so a pass killed in either has still picked it up. It
-# carries a fix pool (it dispatches rework children) but the
-# --route-comments-only flag.
-route_line=$(grep '^pr-facts' "$ARM_LOG" | grep -- '--route-comments-only')
-eq "$(printf '%s\n' "$route_line" | wc -l | tr -d ' ')" 1 "the feedback arm ran exactly once"
-has "$route_line" "--fix-pool myrig/gc-toolkit.polecat" "the feedback arm got the derived fix pool"
-has "$route_line" "|myrig/gc-toolkit.refinery|" "the feedback arm ran as BEADS_ACTOR=<refinery>"
-[ -n "$route_at" ] && [ -n "$gate_at" ] && [ "$route_at" -lt "$gate_at" ] \
-  && ok "the feedback arm routes BEFORE gate-ensure (a pass killed there has still picked feedback up)" \
-  || bad "feedback arm did not run before gate-ensure (route=$route_at gate=$gate_at)"
+# The paced arm resumes from its own cursor in the rig's pass state dir, and
+# its deadline is what the default 420s pass budget has left when it starts. It
+# is the one paced arm, so that is all of it.
+has "$gate_line" "--cursor $TMP/state/myrig/gate-ensure.cursor" "gate-ensure resumes from its own cursor in the pass state dir"
+near "$(offset "$gate_line")" 420 "gate-ensure's deadline is the whole 420s pass budget"
 eq "$(cut -d'|' -f4 "$ARM_LOG" | sort -u | tr -d '\n')" "" "no arm is handed GC_AGENT: nothing in a pass assigns work"
 case "$gate_line" in
   *"|myrig/gc-toolkit.refinery|"*) bad "gate-ensure must NOT inherit BEADS_ACTOR (projection is scoped to the closing arms)" ;;
@@ -145,9 +101,9 @@ esac
 
 echo "# each arm is bracketed in pass.log by its start and its elapsed time"
 PASSLOG0="$TMP/state/myrig/pass.log"
-grep -qE '^-- \(1\) pr-posture \(started [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\)$' "$PASSLOG0" \
+grep -qE '^-- \(6\) gate-ensure \(started [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\)$' "$PASSLOG0" \
   && ok "an arm's start line carries its start time" \
-  || bad "no timed start line for the posture arm in pass.log"
+  || bad "no timed start line for gate-ensure in pass.log"
 grep -qE '^-- \(6\) gate-ensure: done in [0-9]+s \(rc=0\)$' "$PASSLOG0" \
   && ok "an arm's done line carries its elapsed seconds and rc" \
   || bad "no elapsed line for gate-ensure in pass.log"
@@ -155,25 +111,23 @@ grep -qE '^END [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z \([0-9]+s\)$' "$PASSLOG0" \
   && ok "the END line carries the pass's elapsed seconds" \
   || bad "the END line carries no pass elapsed time"
 
-echo "# REFINERY_RECONCILE_PASS_BUDGET_SECS scales every share; 0 unpaces; a spent budget leaves each arm the floor"
+echo "# REFINERY_RECONCILE_PASS_BUDGET_SECS sets the deadline; 0 unpaces; a spent budget leaves the arm the floor"
 : > "$ARM_LOG"; T0=$(date -u +%s)
 REFINERY_RECONCILE_PASS_BUDGET_SECS=700 drive > /dev/null
-near "$(offset "$(grep '^pr-facts.sh|--route-comments-only' "$ARM_LOG")")" 233 "a 700s budget gives pr-feedback a third, 233s"
-near "$(offset "$(grep '^pr-facts.sh|--fix-pool' "$ARM_LOG")")" 700 "…and pr-facts what is left, 700s"
+near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 700 "a 700s budget gives gate-ensure 700s"
 : > "$ARM_LOG"
 REFINERY_RECONCILE_PASS_BUDGET_SECS=0 drive > /dev/null
 hasnt "$(cat "$ARM_LOG")" "--deadline" "a 0 budget hands no arm a deadline"
-eq "$(grep -c -- '--cursor ' "$ARM_LOG")" 3 "…and every paced arm still resumes from its cursor"
+eq "$(grep -c -- '--cursor ' "$ARM_LOG")" 1 "…and the paced arm still resumes from its cursor"
 : > "$ARM_LOG"; T0=$(date -u +%s)
 REFINERY_RECONCILE_PASS_BUDGET_SECS=1 drive > /dev/null
-near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 20 "a spent budget still gives a paced arm the 20s floor"
-near "$(offset "$(grep '^pr-facts.sh|--fix-pool' "$ARM_LOG")")" 20 "…the last one included"
+near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 20 "a spent budget still gives the paced arm the 20s floor"
 : > "$ARM_LOG"; T0=$(date -u +%s)
 REFINERY_RECONCILE_PASS_BUDGET_SECS=1 REFINERY_RECONCILE_ARM_FLOOR_SECS=200 drive > /dev/null
 near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 200 "REFINERY_RECONCILE_ARM_FLOOR_SECS sets the floor"
 : > "$ARM_LOG"; T0=$(date -u +%s)
 REFINERY_RECONCILE_PASS_BUDGET_SECS=soon drive > /dev/null
-near "$(offset "$(grep '^pr-facts.sh|--route-comments-only' "$ARM_LOG")")" 140 "an unparseable budget falls back to the 420s default"
+near "$(offset "$(grep '^gate-ensure' "$ARM_LOG")")" 420 "an unparseable budget falls back to the 420s default"
 # The shares split among the arms still on PACED_ARMS, so the arms the runner
 # paces or skips must be exactly that list, in its order: an arm paced but not
 # listed would take a share no split counted, and one listed but never reached
@@ -189,24 +143,8 @@ mkarm gate-ensure.sh 3
 out=$(drive); rc=$?
 eq "$rc" 0 "an unsafe gate-ensure does not fail the order"
 has "$out" "gate-ensure UNSAFE (rc=3)" "the unsafe rc is reported"
-grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "pr-facts still ran (arms are independent)" || bad "pr-facts was skipped"
+grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep still ran (arms are independent)" || bad "review-sweep was skipped"
 mkarm gate-ensure.sh
-
-echo "# a failing posture arm fails the order and skips no arm"
-mkarm gate-ensure.sh
-cat > "$SD/pr-facts.sh" <<'ARM'
-#!/usr/bin/env bash
-printf '%s|%s|%s|%s\n' pr-facts.sh "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
-case "$*" in *--posture-only*) exit 1 ;; esac
-exit 0
-ARM
-chmod +x "$SD/pr-facts.sh"
-: > "$ARM_LOG"
-out=$(drive); rc=$?
-eq "$rc" 1 "an unrecordable posture fails the order"
-has "$out" "pr-posture rc=1" "…naming the arm"
-eq "$(cut -d'|' -f1 "$ARM_LOG" | paste -sd, -)" "$ARM_ORDER" "…and every arm after it still ran"
-mkarm pr-facts.sh
 
 echo "# a failing arm fails the order but does not skip later arms"
 mkarm gate-ensure.sh 1
@@ -214,8 +152,8 @@ mkarm gate-ensure.sh 1
 out=$(drive); rc=$?
 eq "$rc" 1 "a failing arm exits 1"
 has "$out" "gate-ensure rc=1" "…naming the failed arm"
-grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG" && ok "pr-facts still ran after the gate-ensure failure" || bad "pr-facts was skipped"
-grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep still ran" || bad "review-sweep was skipped"
+grep -q '^review-sweep' "$ARM_LOG" && ok "review-sweep still ran after the gate-ensure failure" || bad "review-sweep was skipped"
+grep -q '^scaffolding-sweep' "$ARM_LOG" && ok "scaffolding-sweep still ran" || bad "scaffolding-sweep was skipped"
 mkarm gate-ensure.sh
 
 echo "# no refinery bound = nothing to reconcile"
@@ -242,19 +180,6 @@ while [ ! -f "${GATE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i +
 ARM
   chmod +x "$SD/gate-ensure.sh"
 }
-# A pr-facts whose posture arm blocks until released (its other modes record and
-# return), so a pass can be caught in its first arm.
-mkblocking_posture() {
-  cat > "$SD/pr-facts.sh" <<'ARM'
-#!/usr/bin/env bash
-printf '%s|%s|%s|%s\n' "pr-facts.sh" "$*" "${BEADS_ACTOR:-}" "${GC_AGENT:-}" >> "${ARM_LOG:?}"
-case "$*" in *--posture-only*) : ;; *) exit 0 ;; esac
-: > "${POSTURE_STARTED:?}"
-i=0
-while [ ! -f "${POSTURE_RELEASE:?}" ] && [ "$i" -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done
-ARM
-  chmod +x "$SD/pr-facts.sh"
-}
 await() { # <file> — bounded wait for a sentinel to appear
   local i=0
   while [ ! -f "$1" ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i + 1)); done
@@ -271,37 +196,9 @@ await_lock_free() {
   return 1
 }
 export GATE_STARTED="$TMP/gate-started" GATE_RELEASE="$TMP/gate-release"
-export POSTURE_STARTED="$TMP/posture-started" POSTURE_RELEASE="$TMP/posture-release"
-
-echo "# a gate-ensure that never returns leaves the posture and the feedback already recorded"
-# gate-ensure visits every gating anchor, so its cost grows with the set. Model
-# the worst case, a gate-ensure that does not return within the pass, and prove
-# the posture and feedback arms already ran while the full pr-facts arm behind
-# it has not.
-for a in pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
-mkblocking_gate
-rm -f "$GATE_STARTED" "$GATE_RELEASE"
-: > "$ARM_LOG"
-drive > /dev/null 2>&1 &
-dG=$!
-if await "$GATE_STARTED"; then
-  grep -q -- '--posture-only' "$ARM_LOG" \
-    && ok "the posture arm ran before the blocked gate-ensure" \
-    || bad "the posture arm had NOT run when gate-ensure blocked"
-  grep -q -- '--route-comments-only' "$ARM_LOG" \
-    && ok "the feedback arm ran before the blocked gate-ensure — feedback is still routed" \
-    || bad "the feedback arm had NOT run when gate-ensure blocked"
-  if grep -q '^pr-facts.sh|--fix-pool' "$ARM_LOG"; then bad "the full pr-facts arm ran ahead of gate-ensure (order wrong)"; else ok "the full pr-facts arm sits behind gate-ensure"; fi
-  : > "$GATE_RELEASE"
-  wait "$dG"
-else
-  bad "the pass never reached its gate-ensure arm (fixture wedged)"
-  : > "$GATE_RELEASE"; wait "$dG" 2>/dev/null
-fi
 
 echo "# the per-rig pass lock, not the tracking bead, is the single-flight"
 LOCK_PROVEN=0
-mkarm pr-facts.sh
 mkblocking_gate
 rm -f "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
@@ -313,7 +210,7 @@ if await "$GATE_STARTED"; then
   has "$out" "already in flight" "…and says a pass is in flight"
   : > "$GATE_RELEASE"
   wait "$d1"
-  n=$(grep -c -- '--posture-only' "$ARM_LOG")
+  n=$(grep -c '^gate-ensure.sh' "$ARM_LOG")
   eq "$n" 1 "exactly one pass ran its arms across the two overlapping ticks"
   [ "$n" = 1 ] && LOCK_PROVEN=1
   grep -q 'SKIPPED: pass already in flight' "$PASSLOG" \
@@ -324,70 +221,43 @@ else
   : > "$GATE_RELEASE"; wait "$d1" 2>/dev/null
 fi
 
-echo "# a pass killed in its first arm leaves its partial output behind"
+echo "# a driver killed in its first arm leaves its partial output behind, and the lock held while the arm runs on"
 await_lock_free || bad "the lock test's pass never released the lock"
-mkarm gate-ensure.sh
-mkblocking_posture
-rm -f "$PASSLOG" "$POSTURE_STARTED" "$POSTURE_RELEASE"
+mkblocking_gate
+rm -f "$PASSLOG" "$GATE_STARTED" "$GATE_RELEASE"
 : > "$ARM_LOG"
 # Launch the driver directly, not through the drive() function. Backgrounding a
 # function forks a wrapper subshell, so $! names the wrapper and `kill` below
-# would leave the real driver orphaned — and the POSTURE_RELEASE written right
+# would leave the real driver orphaned — and the GATE_RELEASE written right
 # after the kill would then let that orphan run on to its END line, defeating
 # this very check. A backgrounded simple command makes $! the driver, so the kill
 # lands.
 GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
 d2=$!
-if await "$POSTURE_STARTED"; then
+if await "$GATE_STARTED"; then
   kill -9 "$d2" 2>/dev/null
   wait "$d2" 2>/dev/null
-  # Read the log before releasing the arm: the posture arm runs in a subshell
-  # that outlives the killed driver, and once released it would log its own
-  # done line, which is the very line this case asserts is absent.
-  grep -q '^=== .*rig=myrig' "$PASSLOG" \
-    && ok "the killed pass left its header in pass.log" \
-    || bad "the killed pass left no header — an overrun is invisible again"
-  grep -q '^-- (1) pr-posture (started ' "$PASSLOG" \
-    && ok "…and the start of the arm it died in" \
-    || bad "…but not the arm it died in"
-  grep -q '^-- (1) pr-posture: done' "$PASSLOG" \
-    && bad "the arm the pass died in logged a done line" \
-    || ok "…with no done line, so the arm it died in is legible"
-  grep -q '^END ' "$PASSLOG" \
-    && bad "the killed pass wrote an END line — a kill is indistinguishable from a clean exit" \
-    || ok "no END line, so the kill is legible as an unfinished pass"
-  : > "$POSTURE_RELEASE"
-else
-  bad "the pass to be killed never reached its posture arm (fixture wedged)"
-  : > "$POSTURE_RELEASE"; wait "$d2" 2>/dev/null
-fi
-mkarm pr-facts.sh
-
-echo "# a driver killed in gate-ensure leaves the lock held while the arm runs on"
-await_lock_free || bad "the posture-killed pass's arm never released the lock"
-mkblocking_gate
-rm -f "$PASSLOG" "$GATE_STARTED" "$GATE_RELEASE"
-: > "$ARM_LOG"
-GC_RIG=myrig GC_RIG_ROOT="$TMP" "$SD/refinery-reconcile.sh" > /dev/null 2>&1 &
-d4=$!
-if await "$GATE_STARTED"; then
-  kill -9 "$d4" 2>/dev/null
-  wait "$d4" 2>/dev/null
   # gate-ensure runs straight from the driver, with no projection subshell, so
   # only pass_child's subshell can still hold the lock once the driver is gone.
   ( exec 9>>"$TMP/state/myrig/pass.lock"; flock -n 9 ) 2>/dev/null \
     && bad "killing the driver by itself freed the lock while the gate-ensure arm it started ran on" \
     || ok "the lock stays held while the arm a killed driver started is still running"
-  grep -q '^-- (4) pr-feedback: done in [0-9]*s (rc=0)$' "$PASSLOG" \
-    && ok "…and the feedback arm's done line is in pass.log" \
-    || bad "the feedback arm left no done line before the kill"
+  grep -q '^=== .*rig=myrig' "$PASSLOG" \
+    && ok "the killed pass left its header in pass.log" \
+    || bad "the killed pass left no header — an overrun is invisible again"
   grep -q '^-- (6) gate-ensure (started ' "$PASSLOG" \
-    && ok "…and gate-ensure's start line names the arm the pass died in" \
-    || bad "gate-ensure left no start line"
+    && ok "…and the start of the arm it died in" \
+    || bad "…but not the arm it died in"
+  grep -q '^-- (6) gate-ensure: done' "$PASSLOG" \
+    && bad "the arm the pass died in logged a done line" \
+    || ok "…with no done line, so the arm it died in is legible"
+  grep -q '^END ' "$PASSLOG" \
+    && bad "the killed pass wrote an END line — a kill is indistinguishable from a clean exit" \
+    || ok "no END line, so the kill is legible as an unfinished pass"
   : > "$GATE_RELEASE"
 else
   bad "the pass to be killed never reached its gate-ensure arm (fixture wedged)"
-  : > "$GATE_RELEASE"; wait "$d4" 2>/dev/null
+  : > "$GATE_RELEASE"; wait "$d2" 2>/dev/null
 fi
 
 echo "# a lock held past the stall bound is reported, not skipped over"
@@ -464,7 +334,7 @@ fi
 echo "# every arm runs without the lock's descriptor, under the lock"
 # An arm's store read can bring up a Dolt server that outlives the pass, and one
 # that kept fd 9 would hold the lock against every later pass.
-for a in gate-ensure.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
 export FD9_LOG="$TMP/fd9.log" LOCK_PROBE="$TMP/state/myrig/pass.lock"; : > "$FD9_LOG"
 out=$(drive); rc=$?
 eq "$rc" 0 "the pass completes"
@@ -498,7 +368,7 @@ if [ -n "$dpid" ] && kill -0 "$dpid" 2>/dev/null; then
   : > "$ARM_LOG"
   out=$(drive); rc=$?
   hasnt "$out" "already in flight" "the next pass is not held off by it"
-  grep -q '^pr-facts.sh' "$ARM_LOG" && ok "…and runs its arms" || bad "the next pass ran no arms"
+  grep -q '^gate-ensure.sh' "$ARM_LOG" && ok "…and runs its arms" || bad "the next pass ran no arms"
 else
   bad "the process the fixture's arm starts never ran"
 fi
@@ -510,7 +380,7 @@ echo "# a driver of any version names the same lock for a rig, whatever the rig'
 # A stand-in for that pass holds <state-dir>/<key>/pass.lock as a driver does,
 # under the key written beside each rig name below: a name past 64 bytes, one
 # with bytes the key rewrites, and one the key replaces whole.
-for a in gate-ensure.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
 NAMES="$TMP/state-names"
 LONG="$(printf '%070d' 0 | tr 0 r)"
 names_drive() { # <rig>
@@ -616,7 +486,7 @@ else
 fi
 
 echo "# REFINERY_RECONCILE_REVIEW_FORMULA opts reviews into the two-lane quorum pilot"
-for a in gate-ensure.sh pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
+for a in gate-ensure.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
 : > "$ARM_LOG"
 GC_RIG=myrig GC_RIG_ROOT="$TMP" REFINERY_RECONCILE_REVIEW_FORMULA=mol-review-quorum-signoff "$SD/refinery-reconcile.sh" >/dev/null 2>&1
 gate_pilot=$(grep '^gate-ensure' "$ARM_LOG")
@@ -640,7 +510,7 @@ printf '%s|%s|%s\n' "\$d" "\$([ -d "\$d" ] && echo dir-present || echo dir-absen
 exit 0
 ARM
 chmod +x "$SD/gate-ensure.sh"
-for a in pr-facts.sh review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
+for a in review-sweep.sh scaffolding-sweep.sh; do mkarm "$a"; done
 # Seed a leftover entry from a notional killed pass; the rm-then-create setup must clear it.
 mkdir -p "$CACHE_DIR"; echo '[{"id":"stale"}]' > "$CACHE_DIR/stale.json"
 : > "$CACHE_PROBE"

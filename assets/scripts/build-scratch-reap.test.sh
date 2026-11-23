@@ -71,8 +71,8 @@ hold_open "$ROOT/gct${DEADH}-444/.lock"
 mkdir -p "$ROOT/go-build99887766";          : >"$ROOT/go-build99887766/a.o"
 mkdir -p "$ROOT/go-link-55443322";          : >"$ROOT/go-link-55443322/exe"
 mkdir -p "$ROOT/gctk-liveness.olddir";      : >"$ROOT/gctk-liveness.olddir/f"
-: >"$ROOT/gctk-pr-facts.oldfile"
-for p in go-build99887766 go-link-55443322 gctk-liveness.olddir gctk-pr-facts.oldfile; do aged "$ROOT/$p" 30; done
+: >"$ROOT/gctk-pr-status.oldfile"
+for p in go-build99887766 go-link-55443322 gctk-liveness.olddir gctk-pr-status.oldfile; do aged "$ROOT/$p" 30; done
 
 # --- unparseable / unrecognized / cache: must be kept ---
 mkdir -p "$ROOT/gct12x-777"                 # matches gct<digit>, pid '12x' non-numeric
@@ -117,7 +117,7 @@ gone "$ROOT/run.${DEADS}"         "reaps a dead pid's tree with content"
 kept "$ROOT/go-build99887766"     "keeps a go-build tree a month unwritten and unheld (it records no owner)"
 kept "$ROOT/go-link-55443322"     "keeps a go-link tree a month unwritten and unheld"
 kept "$ROOT/gctk-liveness.olddir" "keeps a gctk-* dir a month unwritten and unheld"
-kept "$ROOT/gctk-pr-facts.oldfile" "keeps a gctk-* file a month unwritten and unheld"
+kept "$ROOT/gctk-pr-status.oldfile" "keeps a gctk-* file a month unwritten and unheld"
 has "$OUT" "skip (records no owner): $RROOT/go-build99887766" "…and says it records no owner"
 
 kept "$ROOT/gct${LIVE1}-333"      "keeps gct<pid> whose pid is alive"

@@ -14,8 +14,8 @@
 # script cannot reconcile with the caller's store is refused, never repaired.
 # Only proof refuses: an unreadable agent set returns the route with a loud
 # UNVERIFIED warning, because a route nobody could check still beats an outage.
-# Callers: rework-child.sh's rework route, refinery-requeue.sh, and
-# branch-supersession.sh's hold.
+# Callers: rework-child.sh's rework route, refinery-requeue.sh,
+# effort-bring-current.sh and seed-audit-reaudit.sh.
 # Exit: 0 route on stdout · 1 nothing routable · 2 usage
 set -uo pipefail
 

@@ -18,7 +18,7 @@
 #   (NO-COPY) no other file in the pack carries a jq definition of the rule
 # A reader with a private copy drifts silently: the merge gate and the arm that
 # brings a branch current would then disagree about which PRs are approved. The
-# behavioral half lives beside each reader (pr-facts.test.sh).
+# behavioral half lives in each reader's own suite.
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -44,8 +44,8 @@ SELF="gc-city-bot"
 verdict() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'review_verdict($self)'; }
 approvals() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'[ standing_approvals($self)[] | .id ]'; }
 # The verdict after a withdrawal dismisses the standing approvals, and then after
-# every CHANGES_REQUESTED is dismissed too, the way pr-facts.sh clears a request
-# once its findings close.
+# every CHANGES_REQUESTED is dismissed too, the way a review round dismisses a
+# request for changes once each point it raised is answered.
 withdrawn() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'
   [ standing_approvals($self)[] | .id ] as $ids
   | map(if (.id as $i | any($ids[]; . == $i)) then .state = "DISMISSED" else . end)
@@ -119,8 +119,7 @@ eq "$(lifted "[$(rv 1 human1 DISMISSED 2026-08-20T00:00:00Z)]" "$LIFT")" '{"veto
    "(PRED) with no approval standing, nothing is named as set aside"
 
 echo "# every reader sources the one definition"
-READERS="assets/scripts/pr-facts.sh
-assets/scripts/bring-current-guard.sh
+READERS="assets/scripts/bring-current-guard.sh
 assets/scripts/approval-withdraw.sh"
 for r in $READERS; do
     f="$ROOT/$r"

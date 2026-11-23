@@ -223,13 +223,13 @@ run key --test "    --- FAIL: TestReconcile/other_case (0.21s)"
 eq "$RC/$OUT" "0/TestReconcile" "a pasted --- FAIL line yields the same function key"
 run key --test test_widget_rebase
 eq "$RC/$OUT" "0/test_widget_rebase" "a pytest function is its own key"
-run key --test assets/scripts/pr-facts.test.sh
+run key --test assets/scripts/pr-post.test.sh
 eq "$RC" "2" "a suite path is refused as a test function"
 has "$ERR" "--target" "the refusal names --target for a suite file"
 run key --test timeout
 eq "$RC" "2" "a word that is no test function is refused"
-run key --target ./assets//scripts/pr-facts.test.sh/
-eq "$RC/$OUT" "0/assets/scripts/pr-facts.test.sh" "a target path is spelled repo-relative: no ./, no //, no trailing /"
+run key --target ./assets//scripts/pr-post.test.sh/
+eq "$RC/$OUT" "0/assets/scripts/pr-post.test.sh" "a target path is spelled repo-relative: no ./, no //, no trailing /"
 run key --target internal/api/genclient:14:2
 eq "$RC/$OUT" "0/internal/api/genclient" "a trailing :line:col is dropped from a target"
 run key --lint ShellCheck ./assets/scripts/gc-helm.sh:120:5

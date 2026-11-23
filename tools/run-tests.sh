@@ -76,10 +76,10 @@
 # one tally summed over the parts (harness_run_parts in the same harness).
 #
 # Each file runs in its own process group with its output captured to a file,
-# never a pipe. A file that leaves a background child behind (pr-facts.test.sh
-# does) therefore cannot wedge the runner on a pipe that never reaches EOF, and
-# the group is killed once the file's own process exits so the child cannot
-# outlive the file that spawned it.
+# never a pipe. A file that leaves a background child behind therefore cannot
+# wedge the runner on a pipe that never reaches EOF, and the group is killed
+# once the file's own process exits so the child cannot outlive the file that
+# spawned it.
 #
 # --seconds FILE keeps each run's time for a reader such as CI. The file is
 # emptied before anything runs, and each run of the parallel wave adds one line
