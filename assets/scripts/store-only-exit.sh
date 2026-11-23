@@ -44,9 +44,9 @@
 # Everything is read and checked before anything is written, the run's root
 # being in the bead's store among it, since bd stores an edge onto another
 # store's bead without finding it and the edge holds nothing. Each write takes
-# its exit. The first one refused exits 1, and the step drains without
-# recording the exit or handing the bead back, so the step stays claimed and
-# the worker that takes it next re-takes the exit. A re-run converges: bd takes
+# its exit. The first one refused exits 1, and the step goes back to the pool
+# with the exit unrecorded and the bead not handed back, so the worker that
+# takes it next re-takes the exit. A re-run converges: bd takes
 # an edge already in place as a no-op, a second arm rewrites the first, and the
 # notes gain a second copy of the brief.
 #

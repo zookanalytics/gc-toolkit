@@ -11,7 +11,9 @@
 #      nothing asked.
 #   3. A PERSON DECIDES: a parked bead files a gate first, and a bead the store
 #      does not have files a finding.
-#   4. THE STORE: a store that does not answer asks nothing and cancels nothing.
+#   4. THE STORE: a store that does not answer asks nothing and cancels nothing,
+#      and gives the step back before the drain, which Gas City refuses while
+#      the session holds a step it started.
 #   5. FAIL CLOSED: a part that does not land stops what follows it.
 #   6. ANOTHER RUN: of the live runs of this formula on the bead the oldest builds
 #      it and the others refuse, with nothing written. A run of another formula is
@@ -24,11 +26,15 @@
 #      pinned blocker of its own holds nothing. A read with no answer asks
 #      nothing and cancels nothing.
 #
-# The siblings it calls are stubs that log, except decline.sh and work-lib.sh,
-# which are the real ones, and run-lib.stub.sh answers which runs work a bead.
-# What holds the bead is the answer of the gctk this checkout builds, over a stub
-# store of the fixture's rows (holds-store.stub.sh). No live city, Dolt or
-# network.
+# The siblings it calls are stubs that log, except decline.sh, work-lib.sh and
+# hand-back.sh, which are the real ones, and run-lib.stub.sh answers which runs
+# work a bead. What holds the bead is the answer of the gctk this checkout
+# builds, over a stub store of the fixture's rows (holds-store.stub.sh). The
+# step this session claimed is a row of its own, which gc hook current names, a
+# landed cancel closes and a hand-back reopens, and the stub's drain-ack is
+# refused while that row reads in_progress under this session, as Gas City
+# refuses a session's own drain-ack while it holds a claim it started and has
+# not finished. No live city, Dolt or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,7 +53,7 @@ unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 
 PACK="$TMP/pack"
 mkdir -p "$TMP/bin" "$PACK"
-cp "$HERE/work-gate.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/bd-lib.sh" "$HERE/run-lib.sh" "$HERE/run-lib.stub.sh" "$PACK/"
+cp "$HERE/work-gate.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/hand-back.sh" "$HERE/bd-lib.sh" "$HERE/run-lib.sh" "$HERE/run-lib.stub.sh" "$PACK/"
 
 stub() { # <name> <TRACE word> <capture file var> <rc var>
   cat > "$PACK/$1" <<STUB
@@ -58,7 +64,17 @@ exit "\${$4:-0}"
 STUB
   chmod +x "$PACK/$1"
 }
-stub run-cancel.sh CANCEL FAKE_CANCEL FAKE_CANCEL_RC
+# A cancel that lands closes every member of the run, the held step among them.
+cat > "$PACK/run-cancel.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'CANCEL\n' >> "$FAKE_LOG"
+printf '%s\n' "$*" >> "${FAKE_CANCEL:-/dev/null}"
+[ "${FAKE_CANCEL_RC:-0}" = 0 ] || exit "$FAKE_CANCEL_RC"
+if [ -n "${FAKE_STEP_FILE:-}" ]; then
+  jq -c '.[0].status = "closed"' "$FAKE_STEP_FILE" > "$FAKE_STEP_FILE.new" && mv "$FAKE_STEP_FILE.new" "$FAKE_STEP_FILE"
+fi
+STUB
+chmod +x "$PACK/run-cancel.sh"
 stub human-gate.sh GATE FAKE_GATE FAKE_GATE_RC
 stub patrol-finding.sh FINDING FAKE_FINDING FAKE_FINDING_RC
 stub await-ruling.sh AWAIT FAKE_AWAIT FAKE_AWAIT_RC
@@ -70,6 +86,40 @@ if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
   shift
   exec "${HOLDS_STUB:?}" answer "$@"
 fi
+# The step this session claimed, FAKE_HELD, is a row of its own in
+# FAKE_STEP_FILE: gc hook current names it, a show reads it, and an update writes
+# it. A guarded update lands only while the step shows the status and assignee
+# its guards name, and otherwise exits 13 with nothing written, as bd's does.
+# FAKE_STEP_DOWN fails its reads and FAKE_RELEASE_RC its writes.
+mine() { [ -n "$1" ] && case "$1" in "${GC_SESSION_NAME:-}"|"${GC_SESSION_ID:-}"|"${GC_ALIAS:-}"|"${GC_AGENT:-}") true ;; *) false ;; esac; }
+held_write() {
+  local s="" a="" set_a=0 w want=() drop=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --append-notes) printf 'NOTE\n' >> "$FAKE_LOG"; return 0 ;;
+      --if-status=*) want+=("status=${1#*=}") ;;
+      --if-assignee=*) want+=("assignee=${1#*=}") ;;
+      --status=*) s="${1#*=}" ;;
+      --assignee=*) a="${1#*=}"; set_a=1 ;;
+      --unset-metadata) drop+=("$2"); shift ;;
+    esac
+    shift
+  done
+  for w in "${want[@]}"; do
+    [ "$(jq -r --arg f "${w%%=*}" '.[0][$f] // ""' "$FAKE_STEP_FILE")" = "${w#*=}" ] || return 13
+  done
+  jq -c --arg s "$s" --arg a "$a" --argjson set_a "$set_a" --args \
+    '.[0] |= ((if $s == "" then . else .status = $s end) | (if $set_a == 1 then .assignee = $a else . end)
+              | .metadata |= del(.[$ARGS.positional[]]))' "${drop[@]}" \
+    < "$FAKE_STEP_FILE" > "$FAKE_STEP_FILE.new" && mv "$FAKE_STEP_FILE.new" "$FAKE_STEP_FILE" || return 1
+  printf 'RELEASE\n' >> "$FAKE_LOG"
+}
+if [ -n "${FAKE_HELD:-}" ] && [ "${1:-}" = bd ] && [ "${3:-}" = "$FAKE_HELD" ]; then
+  case "$2" in
+    show) [ -z "${FAKE_STEP_DOWN:-}" ] || exit 1; cat "$FAKE_STEP_FILE"; exit 0 ;;
+    update) [ -z "${FAKE_RELEASE_RC:-}" ] || exit "$FAKE_RELEASE_RC"; shift 3; held_write "$@"; exit $? ;;
+  esac
+fi
 case "$1 $2" in
   # Gas City's released core pack has no helper this gate could ask for.
   "core scripts-dir") printf 'CORE\n' >> "$FAKE_LOG"; exit 1 ;;
@@ -77,7 +127,17 @@ case "$1 $2" in
     [ -z "${FAKE_CONVOY_DOWN:-}" ] || { echo "convoy: store down" >&2; exit 1; }
     ONE='{"children":[{"id":"tk-work"}]}'
     printf '%s\n' "${FAKE_CONVOY:-$ONE}"; exit 0 ;;
-  "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
+  "hook current") [ -n "${FAKE_HELD:-}" ] || exit 1; printf '%s\n' "$FAKE_HELD"; exit 0 ;;
+  # Gas City refuses a session's own drain-ack while the session holds a claim
+  # it started and has not finished.
+  "runtime drain-ack")
+    if [ -n "${FAKE_HELD:-}" ] && [ "$(jq -r '.[0].status' "$FAKE_STEP_FILE")" = in_progress ] \
+        && mine "$(jq -r '.[0].assignee // ""' "$FAKE_STEP_FILE")"; then
+      printf 'REFUSED\n' >> "$FAKE_LOG"
+      echo "gc runtime drain-ack: this session holds $FAKE_HELD, which it started and has not finished: continue it (an operator acks from outside this session with --operator); nothing acknowledged" >&2
+      exit 1
+    fi
+    printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
   # With --state all, gc lists every session the city ever closed, so a dead
   # owner would read as live: the owner check reads the default listing.
   "session list")
@@ -105,6 +165,10 @@ export GCTK_BIN HOLDS_STUB GC_NO_API=1
 
 SELF_NAME="hq-me-pool"; SELF_ID="sess-me"; SELF_AGENT="rig/rig.polecat"; SELF_ALIAS="me-alias"
 REFINERY="gc-toolkit/gc-toolkit.refinery"
+# The step this session claimed, as `gc hook --claim` leaves it: in_progress under
+# the alias the claim records, pinned to the session, and routed to its pool.
+STEP_ROW="$(jq -nc --arg a "$SELF_ALIAS" --arg id "$SELF_ID" --arg n "$SELF_NAME" '{id: "tk-step", status: "in_progress", assignee: $a,
+  metadata: {"gc.step_ref": "mol-polecat-work.load-context", "gc.root_bead_id": "tk-root", "gc.routed_to": "rig/rig.polecat", "gc.session_id": $id, "gc.session_name": $n}}')"
 SESS_EMPTY='{"sessions":[]}'
 SESS_REAL='{"sessions":[{"session_name":"hq-busy","id":"sess-busy","alias":"rig/rig.polecat-busy"}]}'
 SESS_OTHER='{"sessions":[{"session_name":"hq-other"}]}'
@@ -118,6 +182,7 @@ row() { printf '[%s]' "$(jq -c '. + {id: "tk-work"}' <<<"$1")"; }
 run() {
   : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/gate"; : > "$TMP/finding"; : > "$TMP/run-reads"; : > "$TMP/list"
   printf '%s' "$1" > "$TMP/row.json"
+  printf '[%s]' "$STEP_ROW" > "$TMP/step.json"
   jq -c --argjson more "${FAKE_STORE_ROWS:-[]}" '(if type == "array" then . else [] end) as $r
     | $more + $r + [ $r[].dependencies[]? | {id, status: (.status // "open")} ] | unique_by(.id)' \
     "$TMP/row.json" > "$TMP/holds.json" 2>/dev/null || printf '[]' > "$TMP/holds.json"
@@ -127,7 +192,7 @@ run() {
   [ "$#" -gt 0 ] || set -- --convoy cv-1
   ( cd "$TMP" || exit 97
     GC_SESSION_NAME="$SELF_NAME" GC_SESSION_ID="$SELF_ID" GC_AGENT="$SELF_AGENT" GC_ALIAS="$SELF_ALIAS" \
-    WORK_READ_WAIT=0 FAKE_ROW_FILE="$TMP/row.json" HOLDS_STORE="$TMP/holds.json" \
+    WORK_READ_WAIT=0 FAKE_ROW_FILE="$TMP/row.json" HOLDS_STORE="$TMP/holds.json" FAKE_HELD=tk-step FAKE_STEP_FILE="$TMP/step.json" \
     GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_LOG="$TMP/run-reads" FAKE_LIST="$TMP/list" \
     FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_GATE="$TMP/gate" FAKE_FINDING="$TMP/finding" \
     FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" \
@@ -137,6 +202,8 @@ run() {
 asked() { cat "$TMP/gate" "$TMP/finding"; }
 DONE_NOBODY="1|UPDATE;CANCEL;DRAIN;"
 DONE_PERSON="1|UPDATE;GATE;CANCEL;DRAIN;"
+# A store that does not answer: the step goes back, then the session drains.
+OUTAGE="1|RELEASE;DRAIN;"
 
 # --- 1. Discrimination. ----------------------------------------------------------
 eq "$(run "$(row '{"status":"open","assignee":"","metadata":{}}')")" "0|" "fresh work (open, unassigned): passes"
@@ -230,13 +297,30 @@ has "$(cat "$TMP/gate")" '--subject cv-1 --key polecat-malformed-convoy' "malfor
 has "$(cat "$TMP/cancel")" 'does not have exactly one tracked member' "malformed convoy: the reason says so"
 
 # --- 4. The store. ---------------------------------------------------------------
-eq "$(FAKE_SHOW_OUT='' run '')" "1|DRAIN;" "a store that never answers: asks nothing, cancels nothing, drains"
+eq "$(FAKE_SHOW_OUT='' run '')" "$OUTAGE" "a store that never answers: asks nothing, cancels nothing, gives the step back and drains"
 has "$(cat "$TMP/out")" 'The store did not answer' "no answer: says so"
-eq "$(FAKE_SHOW_OUT='bd: invalid connection' run '')" "1|DRAIN;" "error text on stdout is no answer"
-eq "$(FAKE_SHOW_OUT='' FAKE_SHOW_RC=0 run '')" "1|DRAIN;" "exit 0 with nothing printed is no answer"
-eq "$(FAKE_SHOW_OUT="$(row '{"status":"open","metadata":{}}')" FAKE_SHOW_RC=1 run '')" "1|DRAIN;" "a row beside a failed exit is no answer"
-eq "$(FAKE_SHOW_OUT='[{"id":"tk-other","status":"open","metadata":{}}]' FAKE_SHOW_RC=0 run '')" "1|DRAIN;" "a row for another bead is no answer"
-eq "$(FAKE_CONVOY_DOWN=1 run '')" "1|DRAIN;" "a convoy read the store does not answer: drains and asks nothing"
+has "$(cat "$TMP/out")" 'tk-step goes back to the pool' "no answer: and that the step goes back to the pool"
+eq "$(jq -c '.[0] | [.status, .assignee, .metadata["gc.session_id"], .metadata["gc.session_name"], .metadata["gc.routed_to"]]' "$TMP/step.json")" \
+   '["open","",null,null,"rig/rig.polecat"]' "no answer: the step is open and unassigned, its pins gone and its route kept, so its pool offers it again"
+eq "$(FAKE_SHOW_OUT='bd: invalid connection' run '')" "$OUTAGE" "error text on stdout is no answer"
+eq "$(FAKE_SHOW_OUT='' FAKE_SHOW_RC=0 run '')" "$OUTAGE" "exit 0 with nothing printed is no answer"
+eq "$(FAKE_SHOW_OUT="$(row '{"status":"open","metadata":{}}')" FAKE_SHOW_RC=1 run '')" "$OUTAGE" "a row beside a failed exit is no answer"
+eq "$(FAKE_SHOW_OUT='[{"id":"tk-other","status":"open","metadata":{}}]' FAKE_SHOW_RC=0 run '')" "$OUTAGE" "a row for another bead is no answer"
+eq "$(FAKE_CONVOY_DOWN=1 run '')" "$OUTAGE" "a convoy read the store does not answer: gives the step back, drains and asks nothing"
+
+# Gas City refuses the drain while the session holds the step it started, so a
+# step that does not go back stays with the session, and the output says so.
+eq "$(FAKE_RELEASE_RC=1 FAKE_SHOW_OUT='' run '')" "1|REFUSED;" "a release the store refuses: the drain is refused too"
+has "$(cat "$TMP/out")" 'tk-step is not given back' "a release the store refuses: says so"
+has "$(cat "$TMP/out")" 'which it started and has not finished' "a release the store refuses: and Gas City's refusal follows"
+eq "$(jq -r '.[0] | .status + " " + .assignee' "$TMP/step.json")" "in_progress $SELF_ALIAS" "a release the store refuses: the step stays this session's"
+eq "$(FAKE_STEP_DOWN=1 FAKE_SHOW_OUT='' run '')" "1|REFUSED;" "a step the store cannot read: not given back, and the drain is refused"
+has "$(cat "$TMP/out")" 'tk-step could not be read, so it is not given back' "a step the store cannot read: says so"
+# Gas City counts only claims under this session's names, so a step another
+# session holds by the drain is left to it, with nothing written to it.
+eq "$(STEP_ROW="$(jq -c '.assignee = "rig/rig.polecat-busy"' <<<"$STEP_ROW")" FAKE_SHOW_OUT='' run '')" "1|DRAIN;" "a step another session holds: left to it, no note on it, and the drain goes ahead"
+no "$(cat "$TMP/out")" 'given back' "a step another session holds: no give-back is reported"
+eq "$(jq -r '.[0] | .status + " " + .assignee' "$TMP/step.json")" "in_progress rig/rig.polecat-busy" "a step another session holds: it stays that session's"
 
 # A read that fails once and answers on the retry is an answer.
 RETRY_ROW="$(row '{"status":"open","assignee":"","metadata":{}}')"
@@ -328,9 +412,9 @@ eq "$(FAKE_RUNS="[$(run_of r-old "")]" run "$FREE" --bead tk-work)" "$DONE_NOBOD
 eq "$(FAKE_RUNS='[]' run "$FREE" --bead tk-work)" "0|" "a direct claim with no run on the bead: passes"
 eq "$(FAKE_RUNS="[$(run_of r-peer cv-0 mol-review)]" run "$FREE" --bead tk-work)" "0|" "a direct claim beside another formula's run: passes"
 
-eq "$(RUN_LIB_STUB_FAIL=all run "$FREE")" "1|DRAIN;" "the runs cannot be read: asks nothing, cancels nothing, drains"
+eq "$(RUN_LIB_STUB_FAIL=all run "$FREE")" "$OUTAGE" "the runs cannot be read: asks nothing, cancels nothing, gives the step back and drains"
 has "$(cat "$TMP/out")" "could not read the runs that work tk-work" "the runs cannot be read: says so"
-eq "$(FAKE_LIST_DOWN=1 FAKE_RUNS="[$MINE,$PEER]" run "$FREE")" "1|DRAIN;" "the ages cannot be read: asks nothing, cancels nothing, drains"
+eq "$(FAKE_LIST_DOWN=1 FAKE_RUNS="[$MINE,$PEER]" run "$FREE")" "$OUTAGE" "the ages cannot be read: asks nothing, cancels nothing, gives the step back and drains"
 has "$(cat "$TMP/out")" "could not read the age of the runs that work tk-work" "the ages cannot be read: says so"
 eq "$(FAKE_ROOTS='[{"id":"r-peer","created_at":"2026-11-01T09:00:00Z"}]' FAKE_RUNS="[$MINE,$PEER]" run "$FREE")" "$DONE_NOBODY" "this run's root is not returned: it cannot be the oldest"
 eq "$(FAKE_RUNS="[$MINE,$PEER]" FAKE_ROOTS="$OLDER_PEER" FAKE_CANCEL_RC=1 run "$FREE")" "1|UPDATE;CANCEL;" "an older live run, the cancel fails: no drain"
@@ -405,12 +489,12 @@ eq "$(run "$(row '{"status":"open","assignee":"","metadata":{},"dependencies":[{
 eq "$(cat "$TMP/await")" "" "a pinned blocker of its own: no wait is recorded"
 
 # A read with no answer is no fact about the work.
-eq "$(GCTK_BIN="$TMP/no-gctk" run "$UNDER_PARK")" "1|DRAIN;" "no gctk binary: asks nothing, cancels nothing, drains"
+eq "$(GCTK_BIN="$TMP/no-gctk" run "$UNDER_PARK")" "$OUTAGE" "no gctk binary: asks nothing, cancels nothing, gives the step back and drains"
 has "$(cat "$TMP/out")" "no gctk binary at '$TMP/no-gctk'" "no gctk binary: says so"
 eq "$(cat "$TMP/await")" "" "no gctk binary: no wait is recorded"
-eq "$(HOLDS_FAIL=all FAKE_STORE_ROWS="$PARKED" run "$UNDER_PARK")" "1|DRAIN;" "a holds read that fails: asks nothing, cancels nothing, drains"
+eq "$(HOLDS_FAIL=all FAKE_STORE_ROWS="$PARKED" run "$UNDER_PARK")" "$OUTAGE" "a holds read that fails: asks nothing, cancels nothing, gives the step back and drains"
 has "$(cat "$TMP/out")" "could not read what holds work bead tk-work (gctk bead holds gave no answer for it)" "a holds read that fails: says so"
-eq "$(HOLDS_FAIL=blocked run "$BLOCKED")" "1|DRAIN;" "a failed blocked listing is no answer, never a clear one"
+eq "$(HOLDS_FAIL=blocked run "$BLOCKED")" "$OUTAGE" "a failed blocked listing is no answer, never a clear one"
 eq "$(cat "$TMP/await")" "" "a failed blocked listing: no wait is recorded"
 
 # Each name a claim writes as an assignee finds the session that goes by it.
