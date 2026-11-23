@@ -166,6 +166,11 @@ yet. Each remaining difference names its reason and what ends it:
   keys a failure already on the target by its symptom, where Gas Town searches
   open bugs by title. Two agents title one failure two ways, and the key finds
   the tracker after a retitle. This ends when Gas Town keys its tracker.
+- **A pre-existing failure goes to be fixed when it is filed.**
+  `preexisting-failure.sh` slings each tracker it files to its rig's polecat
+  pool, where Gas Town files the bug unrouted and moves on. Here new work waits
+  for the operator's placement, and a failure on the target is work to fix
+  rather than new work to place. No end is planned.
 - **Human gates in place of mayor mail.** Where a person must act, such as the
   refinery's park or an exception the landing order finds, the pack files a
   human gate on the bead, keyed by the case. Gas Town routes the bead to
