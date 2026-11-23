@@ -76,7 +76,11 @@ The surfaces a change presents itself through, where the operator judges it:
   whole change and let them weigh it.
 - **Human gates and conversations** — a human gate is the wait an agent files on
   the bead that needs a person, and a conversation is where the operator settles
-  it. Each gate names what it needs and what clears it.
+  it. Each gate names what it needs and what clears it. A sitting the operator
+  asks to stay for work its ruling sends comes back before their next decision
+  about that work, never after it. It tells them which of the items they agreed
+  the work covers and where it departs, with its recommendation, and work on a
+  PR does not merge until they have settled it with the sitting.
 - **Demos** — a narrated recording of an operator-watched surface doing the thing.
   One strong way a change shows its value when the operator would want to see it
   run, not the only way.
