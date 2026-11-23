@@ -21,19 +21,21 @@ import (
 
 // `gctk review` is the review domain (docs/gctk-architecture.md, "The
 // surface"): the check index at a commit, a review run's pass rule, its result
-// and the asks it works. Each command builds what it reads over the adapters
-// and prints the domain's answer.
+// and the asks it works, and the images a change commits, shown on its PR.
+// Each command builds what it reads over the adapters and prints the domain's
+// answer, which `review images` also posts.
 
 func newReviewCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("review", "a PR's review: the check index, a review run's pass rule, its result and its asks",
 		"The review of a PR: which checks gate a change at a commit, with the rig's index laid over the pack's, "+
 			"and the rig's guidance for each; whether an iteration of a review run passed, which as the loop's "+
 			"check records the result of a run for the head and the target it judged; the asks a run works on the "+
-			"PR's branch; and, for a run's steps, what a step judges, the check of the output it writes and the "+
-			"head's comment its round posts.",
+			"PR's branch; for a run's steps, what a step judges, the check of the output it writes and the "+
+			"head's comment its round posts; and, for the demo check, each image a change commits shown on its PR.",
 		newReviewChecksCmd(stdout, stderr), newReviewGuidanceCmd(stdout, stderr),
 		newReviewPassedCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
-		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr))
+		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr),
+		newReviewImagesCmd(stdout, stderr))
 }
 
 const reviewChecksLong = `Prints the check index: every check a commit's review can run, with the rig's
