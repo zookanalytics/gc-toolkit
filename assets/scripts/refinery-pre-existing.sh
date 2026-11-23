@@ -13,7 +13,8 @@
 # bead. The lookup reads every live status, and a lookup that does not answer
 # is unknown, never "none": nothing is filed and nothing lands. With no
 # tracker, one is filed with the failure's evidence, read from --log-file or
-# stdin: the check, where it ran, and its raw output.
+# stdin: the check, where it ran, and its raw output. The filing sends it to
+# the rig's polecat pool to be fixed (preexisting-failure.sh).
 #
 # The bead must be assigned to this refinery ($GC_AGENT), and the refinery's
 # tree for it must hold its branch (refinery-lib.sh). The tracker is then
