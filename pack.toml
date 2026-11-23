@@ -1,15 +1,13 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, po, polecat-codex, proactive, demo, the
+# witness, deacon, mechanik, po, polecat-codex, proactive, demo, and the
 # converse-claude-opus, converse-claude-fable, converse-codex-sol and
-# converse-codex-astra sittings, and the converse-opus, converse-fable and
-# converse-codex templates kept for the sittings already open on them). There is
-# no gastown import and there are no cross-pack prompt patches: each agent's
-# prompt.template.md is purpose-written and injects shared doctrine from
-# template-fragments/ directly. The converse sittings share one prompt in
-# agents/_converse/, a directory the loader skips because its name starts
-# with `_`.
+# converse-codex-astra sittings). There is no gastown import and there are no
+# cross-pack prompt patches: each agent's prompt.template.md is purpose-written
+# and injects shared doctrine from template-fragments/ directly. The converse
+# sittings share one prompt in agents/_converse/, a directory the loader skips
+# because its name starts with `_`.
 #
 # "No imports" scopes to PACK imports: this file declares no [imports.*] and
 # no [rigs.imports.*]. Formula inheritance is a separate mechanism and is
@@ -29,7 +27,7 @@
 # overlay's settings.json rather than a second stanza. Every agent must end up
 # with the guard: assets/scripts/gh-origin-guard-wiring.test.sh enumerates
 # agents/ and fails when one is left uncovered. The codex agents
-# (polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex) read
+# (polecat-codex, converse-codex-sol, converse-codex-astra) read
 # no .claude/settings.json and take no overlay; each registers the guard in the
 # Codex home through its pre_start (docs/gh-origin-guard.md, "Codex").
 #
@@ -84,14 +82,6 @@ overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
 name = "converse-claude-opus"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "converse-fable"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "converse-opus"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]

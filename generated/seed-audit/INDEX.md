@@ -41,11 +41,8 @@ when one is named, and are not committed:
 - [`control-dispatcher`](agents/control-dispatcher.render.md)
 - [`converse-claude-fable`](agents/converse-claude-fable.render.md)
 - [`converse-claude-opus`](agents/converse-claude-opus.render.md)
-- [`converse-codex`](agents/converse-codex.render.md)
 - [`converse-codex-astra`](agents/converse-codex-astra.render.md)
 - [`converse-codex-sol`](agents/converse-codex-sol.render.md)
-- [`converse-fable`](agents/converse-fable.render.md)
-- [`converse-opus`](agents/converse-opus.render.md)
 - [`deacon`](agents/deacon.render.md)
 - [`demo`](agents/demo.render.md)
 - [`dog`](agents/dog.render.md)
@@ -115,11 +112,8 @@ runs to re-prime after compaction.
 | control-dispatcher | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-claude-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-claude-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
-| converse-codex | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-codex-astra | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-codex-sol | `gascity`, `gc-toolkit` | 1 | _none_ |
-| converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
-| converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
 | demo | `gascity`, `gc-toolkit` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |

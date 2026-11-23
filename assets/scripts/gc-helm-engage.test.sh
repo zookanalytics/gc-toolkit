@@ -654,12 +654,10 @@ export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
 # independent of the repo's live agents/. A bare `converse` is present to prove
-# it is EXCLUDED from the model list, and so are the templates engage withdraws
-# (converse-opus, converse-fable and converse-codex), to prove it offers none.
+# it is EXCLUDED from the model list.
 mkdir -p "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable" \
          "$TMP/agents/converse-codex-sol" "$TMP/agents/converse-codex-astra" \
-         "$TMP/agents/converse" "$TMP/agents/converse-opus" \
-         "$TMP/agents/converse-fable" "$TMP/agents/converse-codex"
+         "$TMP/agents/converse"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 # The subject rig's checkout. Converse CAPABILITY comes from the resolved roster
@@ -799,14 +797,6 @@ reset; run_engage tk-conv --model codex-astra --no-attach
 has "$CALLED" "session new converse-codex-astra --alias tk-conv" "(MODELFLAG) --model codex-astra spawns converse-codex-astra"
 reset; run_engage tk-conv --model claude-fable --no-attach
 has "$CALLED" "session new converse-claude-fable --alias tk-conv" "(MODELFLAG) --model claude-fable spawns converse-claude-fable"
-
-echo "# a template engage withdraws is still configured, and engage spawns no sitting on it"
-for withdrawn in opus fable codex; do
-  reset; run_engage tk-conv --model "$withdrawn" --no-attach
-  eq "$RC" 2 "(MODEL-WITHDRAWN) --model $withdrawn exits 2 though agents/converse-$withdrawn exists"
-  hasnt "$CALLED" "session new" "(MODEL-WITHDRAWN) …and spawns nothing on converse-$withdrawn"
-  has "$OUT" "must be one of: claude-opus claude-fable codex-astra codex-sol (got '$withdrawn')" "(MODEL-WITHDRAWN) …naming the variants engage offers"
-done
 
 echo "# engage supplies the subject's rig context so a bare template resolves"
 reset
@@ -1803,8 +1793,7 @@ echo
 echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
 # --model validates against the globbed variants (claude-opus, claude-fable,
 # codex-astra and codex-sol from the fixture agents dir, claude-opus first);
-# the bare 'converse' pool template is not an engage variant, and the templates
-# engage withdraws are not offered.
+# the bare 'converse' pool template is not an engage variant.
 run_fresh tk-conv --model converse --no-attach
 eq "$RC" 2 "(IA-MODEL-SET) --model converse (the bare pool template) is not a variant, exit 2"
 hasnt "$CALLED" "session new" "(IA-MODEL-SET) …and nothing spawned"
