@@ -355,6 +355,9 @@ has "$OUT" "cannot carry this ruling" "a shared gate named as the evidence: it s
 fresh; bset tk-w assignee=someone status=in_progress
 refused "a claim" tk-w --key polecat-x --ruling "x"
 has "$OUT" "someone" "a claim: it names the holder"
+fresh; bset tk-w assignee=someone status=hooked
+refused "a hooked claim" tk-w --key polecat-x --ruling "x"
+has "$OUT" "someone" "a hooked claim: it names the holder"
 fresh; edge tk-w supersedes tk-conv
 refused "a disposition already naming other evidence" tk-w --key polecat-x --ruling "x" --successor tk-g
 fresh; bset tk-w metadata.task_kind=review
@@ -472,6 +475,15 @@ eq "$RC" 0 "a bead at an exception whose PR reads closed stands down"
 eq "$(field tk-w status)" closed "…and closes"
 eq "$(field tk-g close_reason)" "ruled: the record is wrong and nobody needs the work" "…with its gate answered"
 eq "$(gh_reads)" 1 "…and a PR both keys name is read once"
+# The landing order's exception keeps the assignee it read, which is the
+# refinery once a requeue or a settle has handed it the bead.
+exception pull_request_reconcile_invalid assignee=tkrig/refinery; gh_says "$PR7" CLOSED
+run tk-w --key pull_request_reconcile_invalid --ruling "drop it"
+eq "$RC" 0 "a bead the refinery holds at an exception stands down"
+eq "$(field tk-w status)" closed "…and closes"
+eq "$(field tk-w assignee)" "" "…assigned to nobody by the release"
+eq "$(field tk-g close_reason)" "ruled: drop it" "…with its gate answered"
+eq "$(grep -E "$WRITES" "$STUB_GC_LOG" | grep -c -F -- '--actor tkrig/refinery')" 0 "…and no write is made as the refinery"
 exception pull_request_merged_unvalidated_head; gh_says "$PR7" MERGED
 run tk-w --key pull_request_merged_unvalidated_head --ruling "x"
 eq "$RC" 0 "a bead at an exception whose PR reads merged stands down"
@@ -506,11 +518,26 @@ hasnt "$OUT" "DRY RUN" "a dry run at an exception whose record names no PR: it r
 exception pull_request_reconcile_invalid; gh_says "$PR7" OPEN
 refused "a dry run at an exception whose PR is open" tk-w --key pull_request_reconcile_invalid --ruling "x" --dry-run
 hasnt "$OUT" "DRY RUN" "a dry run at an exception whose PR is open: it reports no plan"
-fresh; bset tk-w metadata.merge_result=blocked "metadata.existing_pr=$PR7"
-gh_says "$PR7" OPEN
-run tk-w --key polecat-x --ruling "x"
+# park: the work bead as the refinery parks it, open and still assigned to the
+# refinery, so clearing the gate hands it back, at merge_result=blocked behind a
+# gate keyed by the park.
+park() {
+  fresh
+  bset tk-w assignee=tkrig/refinery metadata.merge_result=blocked "metadata.existing_pr=$PR7"
+  bset tk-g await_id=refinery-pr-not-city-opened
+}
+park; gh_says "$PR7" OPEN
+run tk-w --key refinery-pr-not-city-opened --ruling "x"
 eq "$RC" 0 "a refinery park stands down whatever the PR it records reads"
 eq "$(gh_reads)" 0 "…and GitHub is not asked"
+eq "$(field tk-w status)" closed "…and the bead closes"
+eq "$(field tk-w assignee)" "" "…taken from the refinery by the release"
+park
+snap
+run tk-w --key refinery-pr-not-city-opened --ruling "x" --dry-run
+eq "$RC" 0 "a dry run on a bead the refinery parked exits 0"
+has "$OUT" "the release would take it from tkrig/refinery" "…and names the assignee the release takes"
+same && ok "…and writes nothing" || bad "…and writes nothing: the store changed"
 
 # --- a gate that also holds another open bead --------------------------------------
 shared

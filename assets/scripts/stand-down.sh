@@ -16,10 +16,11 @@
 #      it sends the bead and reads the arm again under, so a start that reads
 #      the gate closed reads the arm gone, and it retires an arm it finds on a
 #      closed bead.
-#   2. It ends the run beneath the bead and clears the bead's route and session
-#      pins through gctk bead takeaway --release --no-wait, whose exit says the
-#      release landed, so the bead is left with no route. So nothing is still
-#      building the work and no pool is offered it once it is ready.
+#   2. It ends the run beneath the bead, assigns the bead to nobody and clears
+#      its route and session pins through gctk bead takeaway --release
+#      --no-wait, whose exit says the release landed, so the bead is left with
+#      no route. So nothing is still building the work and no pool is offered
+#      it once it is ready.
 #   3. It answers each gate under the key with the ruling, and reads each back
 #      to tell whose answer reached it first. An answer releases every bead a
 #      gate blocks, so a gate that also holds another open bead takes none: this
@@ -46,6 +47,14 @@
 # check. A gate this bead leaves keeps its assignee, because it goes on asking
 # about another bead. So does a gate in any status but open. The check refuses
 # both.
+#
+# The release takes the bead from its assignee unless a live session holds it
+# as a claim, in progress or hooked, and bd closes an assigned bead only for its
+# assignee. So the check judges the close as the release leaves it: a bead
+# assigned at any other status, such as one the refinery parks or holds at one
+# of the pending record's exceptions, is checked as its assignee, the actor gctk
+# runs bead-rehome.sh as for a bead assigned to someone (gascity.City.As). A
+# claim is checked as it stands.
 #
 # Apart from those take-backs, nothing is written, and the exit is 1, for a bead
 # whose close this cannot carry out:
@@ -152,7 +161,8 @@ refuse() { echo "$PROG: $1 Nothing was written." >&2; exit 1; }
 WORK_JSON=$(bd_json show "$WORK")
 printf '%s' "$WORK_JSON" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
   || refuse "could not read $WORK."
-case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
+WORK_STATUS=$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)
+case "$WORK_STATUS" in
   closed)
     echo "$PROG: $WORK is already closed, so there is nothing to stand down"
     exit 0 ;;
@@ -259,7 +269,16 @@ done <<EOF
 $TAKE_BACK
 EOF
 
-if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null; then
+# The check runs as the assignee the release takes, as the header says.
+CHECK_AS=""
+case "$WORK_STATUS" in
+  in_progress|hooked) ;;
+  *) CHECK_AS=$(printf '%s' "$WORK_JSON" | jq -r '.[0].assignee // ""' 2>/dev/null) ;;
+esac
+CHECK_ENV=(env)
+[ -z "$CHECK_AS" ] || CHECK_ENV+=("BEADS_ACTOR=$CHECK_AS")
+
+if ! "${CHECK_ENV[@]}" "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null; then
   [ -n "$TOOK" ] || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
   echo "$PROG: $WORK cannot close: bead-rehome.sh refused it, as printed above. Nothing was written but the take-back printed above, which stands, because the ruling answers what each gate asked." >&2
   exit 1
@@ -271,7 +290,7 @@ case "$RULING" in
 esac
 
 if [ "$DRY_RUN" = 1 ]; then
-  echo "$PROG: DRY RUN: $WORK would lose its arm and its run, each open gate under $KEY would resolve with \"$ANSWER\"${SHARED:+ apart from any it would leave open ($SHARED_WHY)}, and $WORK would close as not needed, per $SUCCESSOR"
+  echo "$PROG: DRY RUN: $WORK would lose its arm and its run${CHECK_AS:+, the release would take it from $CHECK_AS}, each open gate under $KEY would resolve with \"$ANSWER\"${SHARED:+ apart from any it would leave open ($SHARED_WHY)}, and $WORK would close as not needed, per $SUCCESSOR"
   exit 0
 fi
 
