@@ -55,7 +55,7 @@ Waiting on you, and the board's Needs you view counts it by its kind.
 |---|---|---|---|
 | Question | `question` | A question the city asked you, or a decision that waits on your ruling. A decision your ruling left waiting on the work it sent is not a question again until that work closes. When a conversation answers the question, the row reads that conversation's words. | Answer it. Start the conversation from its row, or rejoin the one that answers it. |
 | Conversation waits for you, or In conversation | `conversation` | An open conversation. It waits in your queue for you to take it up, or a sitting holds it with you. A conversation that answers a question reads on the question's row instead. One whose sitting waits for the work it sent is not an ask until that work closes. | Rejoin the conversation from its row. |
-| Pull request, with its status | `pull-request` | The bead's pull request reads `needs-review`, so it waits for your review, or `needs-attention`, so something only you can clear stops it. | Review it, or clear what stops it, as [pull-request-states.md](pull-request-states.md#the-labels-on-a-pull-request) says. |
+| Pull request, with its status | `pull-request` | The bead's pull request reads `needs-review`, so it waits for your review, or `needs-attention`, so something only you can clear stops it. A pull request that needs your attention only for a question, a conversation or another ask that holds it is not an ask of its own, [below](#where-a-beads-words-meet-its-pull-requests). | Review it, or clear what stops it, as [pull-request-states.md](pull-request-states.md#the-labels-on-a-pull-request) says. |
 | Assigned to you | `assigned-to-you` | Any other bead only you can clear, such as a task in your queue, one assigned to `human`. | Act on it, or open a conversation about it with Discuss, in the row's Details. |
 | Needs a ruling, or landed — waits for its Epic Checkpoint | `ruling` | An epic whose members have all closed, or a Delivery whose Stories have all closed. Each waits for your review of the epic. | Call the epic's review ([epics.md](epics.md#reviewing-an-epic)). Discuss, in the row's Details, opens a conversation about it. |
 
@@ -69,11 +69,19 @@ you and the Product Owner to place it
 A pull request has a status of its own, one of four words, which its
 `status:` label and the board show
 ([pull-request-states.md](pull-request-states.md#the-labels-on-a-pull-request)).
-A bead whose pull request reads `needs-review` or `needs-attention` is itself
-the ask, `pull-request`, so it reads under Waiting on you, and its row shows
-that status. A bead whose pull request reads `working` or `merging` is work in
-flight, so it reads under Queued as "Pull request #n" with that status, unless
-a park holds it.
+A bead whose pull request reads `needs-review`, or `needs-attention` for a
+reason of its own, such as a failed check or a hold, is itself the ask,
+`pull-request`, so it reads under Waiting on you, and its row shows that
+status. One whose pull request reads `needs-attention` only because a
+question, a conversation or another ask holds it is not an ask of its own,
+since the move you owe is that ask's. It reads under Waiting on you as waiting
+on it, and the board lists it beneath that ask with its number, reading
+"Waits on your answer", the conversation's words, or "Waits on" and the bead
+it waits on. `gctk bead stands` answers it the same way, `own-wait` or
+`further-along`, naming what it waits on. Its `status:` label still reads
+`needs-attention`, and its Details on the board shows that status. A bead
+whose pull request reads `working` or `merging` is work in flight, so it reads
+under Queued as "Pull request #n" with that status, unless a park holds it.
 
 ## Where the words are defined
 

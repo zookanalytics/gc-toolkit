@@ -86,6 +86,35 @@ func TestHeld(t *testing.T) {
 	}
 }
 
+// OwnAttention tells a PR whose needs-attention rests on the human gates and
+// the beads a person owes that hold it from one that reads needs-attention for
+// a reason of its own as well, which still stands once those beads are
+// answered.
+func TestOwnAttention(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		f    Facts
+		want bool
+	}{
+		{"an open human gate alone", Facts{Gates: oneGate}, false},
+		{"a bead a person owes alone", Facts{Owed: personOwed}, false},
+		{"a human gate and a bead a person owes together", Facts{Gates: oneGate, Owed: personOwed}, false},
+		{"a human gate beside the merge freeze", Facts{Gates: oneGate, MergeHold: "true"}, true},
+		{"a bead a person owes beside the rebase hold", Facts{Owed: personOwed, RebaseHold: "true"}, true},
+		{"the merge freeze alone", Facts{MergeHold: "true"}, true},
+		{"a PR that waits only on its review", Facts{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OwnAttention(tc.f); got != tc.want {
+				t.Errorf("OwnAttention(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+			if OwnAttention(tc.f) && Derive(tc.f) != NeedsAttention {
+				t.Errorf("OwnAttention(%+v) holds but Derive = %q, want needs-attention", tc.f, Derive(tc.f))
+			}
+		})
+	}
+}
+
 // isSet mirrors the shell is_set: null and false arrive empty through
 // `(v // "") | tostring`, and the string spellings of an unset flag read as
 // unset too. A merge_hold carrying one of those must NOT read as a hold.
