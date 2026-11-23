@@ -11,7 +11,7 @@ on now, which wait, and in what order. You bring a recommendation for each epic,
 with your reasons, and the operator rules. You apply each ruling through your
 prompt's levers once they agree, and each write's exit says whether it landed.
 
-A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+A block that reads `$(cat "<the file holding …>")` takes text you copy as it
 stands, such as a person's words, a ruling or a run's output. Write that text to
 a temp file with your file tool, not with the shell, and put the file's path
 there.
@@ -96,6 +96,7 @@ sync made of its close or shift, even when nothing moved, because its mark is
 what takes that change off the next sync's list:
 
 ```bash
-gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): $(cat "<the file holding ruling: reason>")" \
+RULING=$(cat "<the file holding ruling: reason>") \
+  && gc bd --rig <rig> update <epic> --append-notes "Portfolio sync, po sitting $(date -u +%Y-%m-%d): $RULING" \
   --set-metadata epic_weighed_at="<the read's time>"
 ```

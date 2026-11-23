@@ -205,7 +205,8 @@ limits arming too (the work skill).
 - **A wait a person owed** is released by the answer, written to a temp file
   with your file tool as they gave it:
 ```bash
-gc bd gate resolve <gate> --reason "ruled: $(cat "<the file holding their answer>")"
+ANSWER=$(cat "<the file holding their answer>") \
+  && gc bd gate resolve <gate> --reason "ruled: $ANSWER"
 ```
   The reason opens with `ruled:` when the person decided, approved or acted,
   `moot:` when the premise no longer holds, and `benign:` when it holds but
@@ -216,7 +217,8 @@ gc bd gate resolve <gate> --reason "ruled: $(cat "<the file holding their answer
 - **A wait a person owed, when they rule the work will not go on**, takes the
   stand-down, with the ruling written to a temp file with your file tool:
 ```bash
-"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat "<the file holding the ruling, one sentence>")"
+RULING=$(cat "<the file holding the ruling, one sentence>") \
+  && "$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$RULING"
 ```
   The key is the gate's `await_id`. It removes the arm, ends the run beneath
   the bead, answers the gate with the ruling and closes the bead. A gate

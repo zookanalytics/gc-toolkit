@@ -405,5 +405,6 @@ file with your file tool as it printed it; everything else is a nudge or a bead
 note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: $(cat "<the file holding the raw message the exit or the check printed>"). Need: <what unblocks it>."
+HIT=$(cat "<the file holding the raw message the exit or the check printed>") \
+  && gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: $HIT. Need: <what unblocks it>."
 ```

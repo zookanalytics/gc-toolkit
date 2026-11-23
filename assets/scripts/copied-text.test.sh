@@ -29,11 +29,17 @@
 #      for gc, gctk, git, every pack script and a command named x, and log each
 #      argument on a line of its own, its newlines as spaces, then the stdin
 #      they are given. Each file's text must reach a logged command as written,
-#      inside one argument or its stdin, and nothing in it may run.
-#   3. Controls: that check fails the same text pasted inside double quotes,
-#      the same text in a quoted here-document whose delimiter is one of its
-#      lines, a file's text passed unquoted, which bash splits, and a block
-#      that drops one of the two files it reads. Part 1 reports a copied-text
+#      inside one argument or its stdin, and nothing in it may run. The block
+#      then runs once more with each of its files missing in turn, and must
+#      exit non-zero and make no call it does not make, word for word, with
+#      every file in place, so no call takes a file that did not read.
+#   3. Controls: the as-written check fails the same text pasted inside double
+#      quotes, the same text in a quoted here-document whose delimiter is one
+#      of its lines, a file's text passed unquoted, which bash splits, and a
+#      block that drops one of the two files it reads. The missing-file check
+#      fails a read inside the call's argument, a read on a line of its own
+#      whose call runs whether or not it read, and two reads in one assignment,
+#      whose status is the last read's. Part 1 reports a copied-text
 #      placeholder inside double quotes in a block, in a here-document's body,
 #      and inside double quotes in an inline command, and none for a file read.
 #
@@ -345,6 +351,34 @@ as_written() {
     [ ! -e "$TMP/away/RAN" ]
 }
 
+# calls <log> — each call the log holds on a line of its own: its name, each
+# argument and its stdin, joined by tabs, sorted, each call once.
+calls() {
+    awk '/^== /{ if (c != "") print c; c = $0; next } { c = c "\t" $0 } END { if (c != "") print c }' "$1" \
+        | LC_ALL=C sort -u
+}
+# stops_on_missing <shell> <block> <prefix> <files> — run with each of
+# <prefix>.file1 to <prefix>.file<files> missing in turn, the block exits
+# non-zero and makes no call that the run before it, with every file in place,
+# did not make word for word. That run's log is the one in $TMP/log. On a
+# failure, STOP_WHY says which file was missing and what the block did.
+stops_on_missing() {
+    local k=1 rc extra
+    calls "$TMP/log" >"$TMP/calls-whole"
+    while [ "$k" -le "$4" ]; do
+        mv "$3.file$k" "$3.gone"
+        rc=$(run_block "$1" "$2")
+        mv "$3.gone" "$3.file$k"
+        calls "$TMP/log" >"$TMP/calls-gone"
+        extra=$(LC_ALL=C comm -23 "$TMP/calls-gone" "$TMP/calls-whole")
+        if [ "$rc" -eq 0 ] || [ -n "$extra" ]; then
+            STOP_WHY="with file $k missing: exit $rc; calls it makes only then: $(printf '%s' "$extra" | tr '\t\n' ' ;' | head -c 400)"
+            return 1
+        fi
+        k=$((k + 1))
+    done
+}
+
 shells="bash"
 command -v zsh >/dev/null 2>&1 && shells="bash zsh"
 count=$(grep -c . "$TMP/blocks/index" || true)
@@ -359,6 +393,11 @@ while IFS="$(printf '\t')" read -r n files label; do
             ok "($sh_) $label"
         else
             bad "($sh_) $label" "exit $rc; calls: $(tr '\n' ';' <"$TMP/log" | head -c 600); output: $(tr '\n' ' ' <"$TMP/out" | head -c 300)"
+        fi
+        if stops_on_missing "$run" "$TMP/blocks/$n.sh" "$TMP/blocks/$n" "$files"; then
+            ok "($sh_) $label: a file that does not read stops each call that takes it"
+        else
+            bad "($sh_) $label: a file that does not read stops each call that takes it" "$STOP_WHY"
         fi
     done
 done <"$TMP/blocks/index"
@@ -424,6 +463,50 @@ control() {
 # zsh does not split an unquoted expansion, so only bash shows this one.
 control unquoted 1 bash "a file's text passed unquoted"
 control dropped 2 "$shells" "a block that drops one of the two files it reads"
+cat >"$TMP/control/in-argument.md" <<'MD'
+```bash
+gc bd update tk-x --append-notes "$(cat "<the file holding their words>")"
+```
+MD
+cat >"$TMP/control/unjoined.md" <<'MD'
+```bash
+WORDS=$(cat "<the file holding their words>")
+gc bd update tk-x --append-notes "$WORDS"
+```
+MD
+cat >"$TMP/control/one-assignment.md" <<'MD'
+```bash
+WORDS=$(cat "<the file holding their words>") RULING=$(cat "<the file holding the ruling, one line>") \
+  && gc bd update tk-x --append-notes "$WORDS" --reason "$RULING"
+```
+MD
+# control_missing <name> <files> <what> — the block in <name>.md, extracted as
+# the pack's are, reaches its call as written under each shell, and the
+# missing-file check fails it.
+control_missing() {
+    python3 -I "$TMP/extract.py" "$ROOT" "$TMP/control/$1" "$TMP/control/$1.md"
+    local n files sh_ run
+    IFS="$(printf '\t')" read -r n files _ <"$TMP/control/$1/index"
+    if [ "$files" != "$2" ]; then
+        bad "$3 is extracted with $2 files" "index: $(cat "$TMP/control/$1/index")"
+        return
+    fi
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        run_block "$run" "$TMP/control/$1/$n.sh" >/dev/null
+        if ! as_written "$TMP/control/$1/$n" "$files"; then
+            bad "($sh_) $3 reaches its call as written" "calls: $(tr '\n' ';' <"$TMP/log" | head -c 400)"
+        elif stops_on_missing "$run" "$TMP/control/$1/$n.sh" "$TMP/control/$1/$n" "$files"; then
+            bad "($sh_) $3 fails the missing-file check" "it passed"
+        else
+            ok "($sh_) $3 fails the missing-file check"
+        fi
+    done
+}
+control_missing in-argument 1 "a read inside the call's argument"
+control_missing unjoined 1 "a read on a line of its own, whose call runs whether or not it read,"
+control_missing one-assignment 2 "two reads in one assignment, whose status is the last read's,"
 cat >"$TMP/control/placed.md" <<'MD'
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --ruled yes --ruling "<the ruling, one line>" --no-wait

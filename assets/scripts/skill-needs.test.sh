@@ -532,7 +532,7 @@ have "the settle step gives the arm it names" '"$GCTK" bead arm <follow-up>' "$S
 have "…once the follow-up and the blocker carry one id prefix" '[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ]' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the settle skill gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$SETTLE"
-RETIRE_CALL='--ruled yes --ruling "$(cat "<the file holding the ruling, one line>")" --no-wait --retire not-needed'
+RETIRE_CALL='--ruled yes --ruling "$RULING" --no-wait --retire not-needed'
 have "the settle skill gives the retire call, through the sign-off" "$RETIRE_CALL" "$TMP/settle-squeezed"
 tr -s '[:space:]' ' ' <"$PRS_SKILL" >"$TMP/prs-squeezed"
 have "…as the prs skill does" "$RETIRE_CALL" "$TMP/prs-squeezed"
@@ -1892,9 +1892,9 @@ have "the answers before the closes are the landed Deliveries' gates" \
 have "…and a gate on waiting work is the sign-off's, once every write has landed" \
     'A gate on work that waits for a judgment takes no call here, because its answer sends that work on. The sign-off answers it once every write below has landed' "$EPIC_REVIEW_JOINED"
 have "a close stands down waiting work it retires, which disarms it before the answer" \
-    '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat "<the file holding the ruling, one sentence>")" --successor "$CONVERSATION"' "$EPIC_REVIEW"
+    '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "$RULING" --successor "$CONVERSATION"' "$EPIC_REVIEW"
 have "…and releases waiting work it re-homes into another store, a release that disarms it first, before its gate is answered" \
-    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "$(cat "<the file holding the ruling, one sentence>")" --release --no-wait' "$EPIC_REVIEW"
+    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "$RULING" --release --no-wait' "$EPIC_REVIEW"
 have "…then answers that gate on its own call and runs the writer last" \
     'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \

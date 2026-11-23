@@ -74,7 +74,8 @@ Write the operator's text verbatim to a temp file with your file tool, where a
 double quote, a backtick or a `$` in it cannot end the title or run:
 
 ```bash
-gc session rename "$GC_SESSION_ID" "$(cat "<the file holding the operator's text, verbatim>")"
+TITLE=$(cat "<the file holding the operator's text, verbatim>") \
+  && gc session rename "$GC_SESSION_ID" "$TITLE"
 ```
 
 Don't add quotes, prefixes, or status decoration. Don't truncate —

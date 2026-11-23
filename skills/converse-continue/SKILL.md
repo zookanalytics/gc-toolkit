@@ -8,7 +8,7 @@ description: Converse's continuation of an open conversation, which answers the 
 Each call starts a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT`
 literally, from the entry's output, at the top of every call below.
 
-A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+A block that reads `$(cat "<the file holding …>")` takes text you copy as it
 stands, such as a person's words, a ruling or a run's output. Write that text to
 a temp file with your file tool, not with the shell, and put the file's path
 there.
@@ -37,8 +37,8 @@ answer that gate at once, so a later dismiss leaves nothing they ruled on open:
    place:
 
 ```bash
-RULING=$(cat "<the file holding the operator's ruling, one line>")
-"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
+RULING=$(cat "<the file holding the operator's ruling, one line>") \
+  && "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --answer <gate> \
   --ruling "$RULING" \
   --outcome "<where the subject stands now, at most 140 characters, or 95 when the ruling leaves an open PR standing>"
   # when the ruling reaches an open PR, add --rework, --no-rework or --retire <kind> (converse-settle)

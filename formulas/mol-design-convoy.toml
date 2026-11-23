@@ -226,27 +226,28 @@ and the design questions, as the subject's card states them (load-context), to
 two temp files with your file tool, and name each where the block reads it. The
 create takes each file's text as written, where a double quote, a backtick or a
 `$` pasted inside the description's quotes would cut it short or run as a
-command. The child goes under the subject's epic
-when it has one, so the epic ranks and parks it (docs/steering.md). bd answers a
-refused create with an `{"error": ...}` object, so the id is read type-guarded
-and a refusal reports bd's own reason:
+command, and a file that is missing or empty stops the block before the create.
+The child goes under the subject's epic when it has one, so the epic ranks and
+parks it (docs/steering.md). bd answers a refused create with an
+`{"error": ...}` object, so the id is read type-guarded and a refusal reports
+bd's own reason:
 ```bash
 # >>> file-design-create
 if [ -z "$DESIGN_CHILD" ]; then
-  EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
+  TOPIC=$(cat "<the file holding the design topic from the initiative card>") QUESTIONS=$(cat "<the file holding the design questions from the initiative card>") EPIC=$(printf '%s' "$SUBJECT_JSON" | jq -r '[.[0].dependencies[]? | select(.dependency_type == "parent-child" and .issue_type == "epic") | .id] | .[0] // empty' 2>/dev/null)
   if [ "$DESIGN_GATED" = "true" ]; then
     DESIGN_LANDS="It is a stage: its PR into $BRANCH is the design gate, and the operator's approval of it releases the implementation."
   else
     DESIGN_LANDS="It lands on $BRANCH with no PR of its own (design_gated=false), and the operator first reviews it in the PR that carries $BRANCH to the default branch."
   fi
   DESIGN_ARGS=(--title "design: $INITIATIVE" -t task --metadata "$(jq -nc --arg t "$BRANCH" '{target: $t}')" -d "## Goal
-Design $(cat "<the file holding the design topic from the initiative card>"), per the initiative $SUBJECT. Land the design doc on
+Design ${TOPIC:?the design topic file is missing or empty}, per the initiative $SUBJECT. Land the design doc on
 $BRANCH, the integration branch $SUBJECT carries to the default branch.
 $DESIGN_LANDS Do NOT start implementation: it is a separate bead of this
 effort.
 
 ## What to settle
-$(cat "<the file holding the design questions from the initiative card>")
+${QUESTIONS:?the design questions file is missing or empty}
 
 ## Deliverable
 A design doc committed to $BRANCH. The design defines the implementation

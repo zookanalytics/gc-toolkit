@@ -14,7 +14,7 @@ a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT` literally, from the
 entry's output, at the top of every call below, and `CHANGE` and `TREE`, with
 `PR` and `BRANCH` for an open PR, too once the calls below have printed them.
 
-A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+A block that reads `$(cat "<the file holding …>")` takes text you copy as it
 stands, such as a person's words, a ruling or a run's output. Write that text to
 a temp file with your file tool, not with the shell, and put the file's path
 there.

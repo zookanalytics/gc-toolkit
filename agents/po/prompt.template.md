@@ -111,7 +111,7 @@ A write's exit says whether it landed. Note each ruling on its bead with the
 operator's reason in their words, written to a temp file with your file tool:
 
 ```bash
-gc bd --rig {{ .RigName }} update <bead> --append-notes "$(cat "<the file holding ruling: reason>")"
+RULING=$(cat "<the file holding ruling: reason>") && gc bd --rig {{ .RigName }} update <bead> --append-notes "$RULING"
 ```
 
 When they turn down a proposal that moves no lever, note their reason the same

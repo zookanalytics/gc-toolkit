@@ -452,9 +452,12 @@ wired() { fixture "$WIRED${1:+ | $1}"; subject_json; export SUMMARY_TASK=dz-sum 
 # $GC_LOG. A sentinel after the block records whether execution ran past it:
 # the step's contract is that a failed write stops it, not merely that the
 # block's last command happened to fail.
+# A block reads each file of copied text from $TMP/copied, which holds a line of
+# the card.
+printf 'the card says "design it" and `this` stays as written\n' > "$TMP/copied"
 run_block() {
   local m="$1" sh="$2"
-  { extract_copy "$m" 1; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"
+  { extract_copy "$m" 1 | sed "s#<the file holding [^>]*>#$TMP/copied#g"; printf 'printf "past\\n" > "%s"\n' "$TMP/past.flag"; } > "$TMP/block.sh"
   run_file "$sh"
 }
 # run_file <shell>: runs $TMP/block.sh as run_block does.
@@ -576,6 +579,14 @@ for sh in "${SHELLS[@]}"; do
   run_block file-design-create "$sh"
   says dz-design "with no PR of its own" && ok "[$sh] design create: all-in-one, the brief says it lands with no PR of its own" \
     || bad "[$sh] design create: the all-in-one brief does not say how it lands"
+
+  fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" NEXT_ID=dz-design DESIGN_GATED=true
+  mv "$TMP/copied" "$TMP/copied.away"
+  run_block file-design-create "$sh"
+  mv "$TMP/copied.away" "$TMP/copied"
+  stopped && not_logged "bd create" && [ "$(meta dz-sub gc.design_child)" = "<absent>" ] \
+    && ok "[$sh] design create: a design file that does not read stops the block before the create" \
+    || bad "[$sh] design create: a design file that does not read did not stop the create (rc=$RC)"
 
   fixture '.[2:] = []'; subject_json; export DESIGN_CHILD="" CREATE_FAIL=1
   run_block file-design-create "$sh"

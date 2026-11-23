@@ -28,7 +28,7 @@ when the stay would come back after the merge:
 | New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
 | Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
 
-A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+A block that reads `$(cat "<the file holding …>")` takes text you copy as it
 stands, such as a person's words, a ruling or a run's output. Write that text to
 a temp file with your file tool, not with the shell, and put the file's path
 there.
@@ -120,7 +120,8 @@ lands, in one plain sentence that names no other rig or its beads.
   then append a note that says whose words each field is, with theirs written
   to a temp file with your file tool as they said them:
 ```bash
-gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: $(cat "<the file holding each field they stated or approved, quoting their words, or none>")."
+STATED=$(cat "<the file holding each field they stated or approved, quoting their words, or none>") \
+  && gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: $STATED."
 ```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
@@ -221,11 +222,11 @@ Then take the case that fits the ruling:
   0. Without that line, answer nothing:
 
 ```bash
-WHY=$(cat "<the file holding the ruling, one line>")
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-ROW=$(gc bd show "$SUBJECT" --json) \
+WHY=$(cat "<the file holding the ruling, one line>") \
+  && ROW=$(gc bd show "$SUBJECT" --json) \
   && ROUTE=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata["gc.routed_to"] // "") | tostring else error("unread") end') \
   && "$GCTK" bead disarm "$SUBJECT" --reason "$WHY" \
   && { [ -z "$ROUTE" ] || gc bd update "$SUBJECT" --unset-metadata gc.routed_to; } \
@@ -254,7 +255,7 @@ The writer refuses, with nothing written, the one re-run it cannot make safe: a
 rework that an earlier attempt may have filed and never recorded (below):
 
 ```bash
-RULING=$(cat "<the file holding the ruling, one line>")
+RULING=$(cat "<the file holding the ruling, one line>") || exit 1
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
      --ruled yes --ruling "$RULING" --no-wait
@@ -334,7 +335,8 @@ Take the case that fits the ruling:
   subject down first, with the gate's `await_id` as the key and the ruling
   written to a temp file with your file tool:
 ```bash
-"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat "<the file holding the ruling, one line>")" --successor "$CONVERSATION"
+RULING=$(cat "<the file holding the ruling, one line>") \
+  && "$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$RULING" --successor "$CONVERSATION"
 ```
   The stand-down removes the arm, ends any run beneath it, answers the gate and
   closes the subject. When it exits non-zero, repair what it printed and run it
@@ -396,7 +398,8 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
 To retire the subject's PR:
 
 ```bash
-"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "$(cat "<the file holding the ruling, one line>")" --no-wait --retire not-needed
+RULING=$(cat "<the file holding the ruling, one line>") \
+  && "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "$RULING" --no-wait --retire not-needed
 ```
 
 Given none of the three, the sign-off refuses and writes nothing, because a

@@ -1330,7 +1330,9 @@ eq "$RC/$(field tk-rev status)/$(meta tk-anc gc.routed_to)" "0/closed/rig-a/old-
 awk '/^```bash[ \t]*$/ { inb = 1; buf = ""; hit = 0; next }
      inb && /^```[ \t]*$/ { if (hit) { printf "%s", buf; exit } inb = 0; next }
      inb { buf = buf $0 "\n"; if (index($0, "carries no arm and no pool route\"")) hit = 1 }' \
-    "$HERE/../../skills/converse-settle/SKILL.md" | sed 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
+    "$HERE/../../skills/converse-settle/SKILL.md" \
+    | sed -e "s#<the file holding [^>]*>#$TMP/why#g" -e 's#<[^>]*>#x#g' > "$TMP/withdraw.sh"
+printf 'the operator sent the subject to another pool\n' > "$TMP/why"
 [ -s "$TMP/withdraw.sh" ] && ok "(ANSWER-ROUTE) the settle skill's withdrawal is found" \
     || bad "(ANSWER-ROUTE) the settle skill's withdrawal is found"
 routed_hold

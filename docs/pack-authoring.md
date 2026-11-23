@@ -202,18 +202,35 @@ run's raw output. Copied text can hold a double quote, which ends a
 double-quoted argument, a backtick span or a `$(...)`, which runs as a command,
 a `$`, which expands, and a line that ends a here-document early. So copied
 text never reaches the shell's parser. The agent writes it to a temp file with
-its own file tool, and the block reads the file, as
-`"$(cat "<the file holding …>")"`, whose output the shell takes as it stands.
+its own file tool, and the block reads the file with
+`$(cat "<the file holding …>")`, whose output the shell takes as it stands.
 The placeholder names the file and what it holds, and a placeholder for copied
 text appears in a block no other way. It says what it copies in the words
 `assets/scripts/copied-text.test.sh` reads as copied text, so the suite finds
 one left anywhere else. A skill whose blocks read such files says once, near
-its top, how to write them, and a step or a prompt says it at its block. Step
-text keeps the read inside the argument, where a substitution that holds a
-single command weighs nothing. A skill may read the file into a variable first,
-as when two writes take the same text. The suite holds the rule, and runs every
-block that reads such a file under bash and zsh, with the file holding text
-that would end an argument or a here-document.
+its top, how to write them, and a step or a prompt says it at its block.
+
+A read that fails, because the path is wrong or the file is gone, leaves
+nothing where the text goes, and a call that runs anyway writes its record
+without the text, such as a contract field set to nothing or a gate answered
+with no answer. So no call that takes a file's text runs once its read has
+failed. A block reads each file into a variable and joins the read to the calls
+with `&&`, or ends on a failed read with `|| exit 1` before an `if`. Where an
+agent may leave a field out, as an epic's contract fields, each read stands on
+a line of its own and the call takes it as `"${NAME:?…}"`, which stops the
+block on a file that is missing or empty, and on a read left out while its
+field stays. Step text, where a block may gain no command
+(`tools/lint-step-text.sh`), puts the read in an assignment the block already
+makes and takes it the same way. Or it keeps the read in the call's argument
+and gives the call the same file as its stdin, because a shell that cannot open
+a redirection does not run the command. That form fits only a call that does
+not read its stdin.
+
+The suite holds the rule. It runs every block that reads such a file under bash
+and zsh, with the file holding text that would end an argument or a
+here-document. It runs the block again with each of its files missing, and the
+block must exit non-zero and make no call it would not make, word for word,
+with every file in place.
 
 ## A landed pack change is confirmed on the deployed checkout
 

@@ -46,15 +46,16 @@ OBS_META=$(jq -nc \
   '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
     "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
     "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
-OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "$(cat "<the file holding the description>")" --json)
+OBS_DESC=$(cat "<the file holding the description>") \
+  && OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "$OBS_DESC" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 ```
 
 The metadata and the closed status ride the create, so the observation is
 filed whole or not at all. The file keeps the feedback's quotes, backticks and
-`$` as written.
+`$` as written, and a file that does not read files nothing.
 
 The provenance key's `<owner/repo>` is origin's full slug — derive it with
 `gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`,

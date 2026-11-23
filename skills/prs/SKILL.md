@@ -21,7 +21,7 @@ fresh shell. `<binding>` is the name the city imports the pack under, which gc
 puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.prs`.
 `gc skill list` prints it in this skill's FROM column.
 
-A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+A block that reads `$(cat "<the file holding …>")` takes text you copy as it
 stands, such as a person's words, a ruling or a run's output. Write that text to
 a temp file with your file tool, not with the shell, and put the file's path
 there.
@@ -121,7 +121,8 @@ it waits for. The gate is cleared with the answer, written to a temp file with
 your file tool as it was given:
 
 ```bash
-gc bd gate resolve <gate> --reason "ruled: $(cat "<the file holding their answer>")"
+ANSWER=$(cat "<the file holding their answer>") \
+  && gc bd gate resolve <gate> --reason "ruled: $ANSWER"
 ```
 
 The helper's call with `--retract` withdraws your own gate once the question
@@ -170,5 +171,6 @@ is the sitting's conversation, and every other kind names the bead that
 carries the work with `--successor <bead>`:
 
 ```bash
-"$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "$(cat "<the file holding the ruling, one line>")" --no-wait --retire not-needed
+RULING=$(cat "<the file holding the ruling, one line>") \
+  && "$(gc <binding> scripts-dir)/converse-signoff.sh" --conversation <conversation> --outcome "<headline>" --ruled yes --ruling "$RULING" --no-wait --retire not-needed
 ```
