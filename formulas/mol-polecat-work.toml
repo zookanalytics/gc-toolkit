@@ -448,11 +448,12 @@ stands:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" --bead "<the work bead>" --check "<test, lint, typecheck, setup or build: the red check>" --commit "<git rev-parse HEAD>" --trackers "<the tracker id of each failure in it, space-separated>"
 ```
-Mark only a failure you reproduced on the base; a run with another command or
-scope replaces the record and needs a mark of its own. A check still red after
-your best effort stays red: the exit condition reads it as "not yet", and the
-loop iterates until its last attempt. `git status` must be clean before you
-close the iteration.
+Mark only a failure you reproduced on the base, and never one whose tracker is
+your own work bead: that failure is the work you were sent to fix, so it holds
+the loop until it passes. A run with another command or scope replaces the
+record and needs a mark of its own. A check still red after your best effort
+stays red: the exit condition reads it as "not yet", and the loop iterates until
+its last attempt. `git status` must be clean before you close the iteration.
 
 **5. On the loop's last attempt, a check still red asks a person.** The loop's
 control bead holds the budget in `gc.max_attempts` and one `gc.attempt_log`
