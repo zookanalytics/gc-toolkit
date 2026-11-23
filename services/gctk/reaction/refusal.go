@@ -60,10 +60,12 @@ var (
 			"takes no step.")
 	taskKindKey = ledger.ReadOnly("task_kind", ledger.String,
 		"A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane.")
-	workDirKey = ledger.ReadOnly("work_dir", ledger.String,
+	// The sweep reads these two only through the motion their declarations
+	// give them (ledger.InMotionKeys), so no name holds them.
+	_ = ledger.ReadOnly("work_dir", ledger.String,
 		"The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that "+
 			"carries one, as work in flight.", ledger.InMotion())
-	checkNameKey = ledger.ReadOnly("check_name", ledger.String,
+	_ = ledger.ReadOnly("check_name", ledger.String,
 		"The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as "+
 			"work in flight.", ledger.InMotion())
 )
