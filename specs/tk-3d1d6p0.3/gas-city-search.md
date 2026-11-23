@@ -104,12 +104,13 @@ pack's locks that the answer's releases act under
 ([design.md](design.md), section 3). A pool's claim takes none of those locks,
 and a lock ends with the run that holds it, so before it answers Accept also
 puts the dispatch hold on the bead, and for `retire` the PR's merge hold, which
-the landing order already honors. It lifts each once its act is done or
-another answer stands. It runs each act through steps the pack already has:
-`gc sling` with today's token for `sling`, gctk's disarm and takeaway with
-`bead-rehome.sh` for `stand-down`, and `pr-dispose.sh` whole, after Accept's
-own answer, for `retire`. `proceed` composes the wait the bead already has, a
-`blocks` edge with what it releases, and adds nothing.
+the landing order already honors, unless the bead carries that hold already.
+Once its act is done or another answer stands, it lifts the holds it put on,
+and never a merge hold that someone else set. It runs each act through steps
+the pack already has: `gc sling` with today's token for `sling`, gctk's disarm
+and takeaway with `bead-rehome.sh` for `stand-down`, and `pr-dispose.sh` whole,
+after Accept's own answer, for `retire`. `proceed` composes the wait the bead
+already has, a `blocks` edge with what it releases, and adds nothing.
 
 ## 4. The board's door for the write
 

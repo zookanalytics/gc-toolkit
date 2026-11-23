@@ -148,26 +148,31 @@ starts the work while the hold is on. For `retire` it also sets the bead's
 merge hold, `merge_hold`, to `accept:<token>`, and the landing order requests
 no merge of a PR whose bead carries one (`mergeHoldKey` in
 `services/gctk/pr/ready_keys.go`, a hold condition of the pr evaluator's
-`decideOver`). Accept takes the bead's dispatch lock, and for `retire` the
+`decideOver`). When the bead already carries a merge hold, such as your
+freeze, Accept leaves that hold as it stands and sets none, since it keeps the
+merge off already. Accept takes the bead's dispatch lock, and for `retire` the
 record lock too, before it writes the holds, and holds them across its answer.
 It takes them in that order, after its acceptance lock, and takes no other
 lock while it holds the record lock, as no holder of that lock does. `proceed`
 takes no hold and no lock, since the release is what its yes asks for.
 
-On another answer, Accept lifts its holds and lets the locks go, having
-written nothing else: the dispatch hold unless the bead carried it before
-Accept put it on, as `gc.acceptance` records, and the merge hold that names
-its token. So the work goes as that answer leaves it. On its own answer, it
-removes any arm before it lets the locks go. Then it runs the rest of the act,
-which ends the holds last: the dispatch hold once no arm is left to send the
-bead, and the merge hold once the PR's disposition is stamped.
+Accept lifts only the holds it put on: the dispatch hold when the bead did not
+carry it before, as `gc.acceptance` records, and a merge hold that names its
+token. A hold the bead carried before stays for whoever set it to lift. The one
+exception is the dispatch hold after a `sling` has run, which Accept lifts
+whoever set it, since a sling is a placement. On another answer, Accept lifts
+its holds and lets the locks go, having written nothing else, so the work goes
+as that answer leaves it. On its own answer, it removes any arm before it lets
+the locks go. Then it runs the rest of the act, which lifts its holds last: the
+dispatch hold once no arm is left to send the bead, and the merge hold once the
+PR's disposition is stamped.
 
 | `act` | What a yes does | The rest of the act |
 |---|---|---|
 | `proceed` | The work waiting on the question goes on by the wait it already has: an arm that re-slings it once the gate clears, a merge the gate holds, or the next run that reads the answer. | Nothing. |
 | `sling` | Starts `formula` on the bead, with `vars`. | It slings once under the token and lifts `hold:mayor`, since a sling is a placement. |
 | `stand-down` | The waiting work does not go on, and the bead closes as not needed. | It ends the run and clears the bead's route (`gctk bead takeaway --release`), then closes the bead with the gate as its evidence (`bead-rehome.sh`). The hold stays on until the bead closes, so no pool takes the bead before its route is cleared. |
-| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | It runs `pr-dispose.sh`, which stamps the PR's disposition, under which the landing order requests no merge, and closes the PR. Then it lifts both holds, and the landing order closes the bead under the disposition once it reads the PR closed. |
+| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | It runs `pr-dispose.sh`, which stamps the PR's disposition, under which the landing order requests no merge, and closes the PR. Then it lifts its holds, and the landing order closes the bead under the disposition once it reads the PR closed, whatever merge hold the bead still carries. |
 
 Before it puts its holds on, Accept also makes the checks each act's writer
 makes before its first write, such as `stand-down.sh`'s refusal of an open PR
@@ -202,7 +207,9 @@ way. A run that stopped anywhere after it put its holds on leaves them on, so
 no pool, arm or merge acts on the work before the next run under the same
 token finishes it, whoever runs it, and that holds for every act. A bead held
 that way waits in the po's placement queue, and a PR held that way reads
-needs attention, so a person sees such a run.
+needs attention, so a person sees such a run. Where the bead carried a merge
+hold before, that hold keeps the merge off instead, for as long as whoever set
+it leaves it on.
 
 ## 4. The askers
 
@@ -394,6 +401,6 @@ with a Debt entry that the last unit to land removes.
 | Unit | What it builds | Waits on |
 |---|---|---|
 | 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. Accept puts the dispatch hold on the bead under the bead's dispatch lock, holds the lock across its answer and removes the arm under it, which the arm domain lets a caller do. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
-| 2 | `stand-down` and `retire` in both verbs, in section 3's order and with their writers' checks. For `retire`, the pr domain, which declares `merge_hold`, gains the write that sets Accept's merge hold and lifts it. | unit 1 |
+| 2 | `stand-down` and `retire` in both verbs, in section 3's order and with their writers' checks. For `retire`, the pr domain, which declares `merge_hold`, gains the write that sets Accept's merge hold on a bead that carries none, and lifts only a merge hold that names Accept's token. | unit 1 |
 | 3 | The board's Accept: the course on a row that qualifies, the button, `POST /helm/accept`, the panel's answer, and the Question row of docs/bead-standing.md. | unit 1 |
 | 4 | The askers: the validating closer's step 2b records its course; the waits skill says how any asker records one, which a decliner and a wait on outside work follow; the polecat doctrine's paragraph on declining points there. | units 1 and 2 |
