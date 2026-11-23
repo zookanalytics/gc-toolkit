@@ -388,6 +388,13 @@ main origin/main`, confirm there is genuine ahead/behind divergence (e.g.
 origin/main...HEAD`), and preserve any local `.beads/config.yaml` tuning
 that may not exist on the landed `origin/main`.
 
+**Agent homes follow at their next start.** Each agent home of the rig is a
+worktree that `assets/scripts/worktree-setup.sh` brings to `origin/main` when
+its session starts. A home whose HEAD is a tip `origin/main` had before the
+rebase moves to the rebased tip then, so the cutover moves no home by hand. The
+script's sync rule says what it does with a home that holds a session's commit
+or edit.
+
 **Never run destructive git operations directly in a `gascity` rig that
 has active worktrees.** Polecats and other agents may be working there.
 Use `git worktree add` for isolation, or coordinate via the city's

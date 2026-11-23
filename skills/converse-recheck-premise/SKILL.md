@@ -42,11 +42,16 @@ Two readings end the question with nothing posted:
 - **benign**: the premise holds but needs no person. A non-empty
   `triage.hold` or another open human gate already names the wait, or the
   condition is a known acceptable state. An open PR awaiting the operator's
-  review is the canonical case: it is in their own review queue, and handing
-  it back to them is the mistake this check prevents. A takeaway alone is
-  never a benign wait, because nothing clears it: re-check the ids in its body
-  (`gc bd show`, and `gc bd list --parent "$SUBJECT" --all`), and it is moot
-  only if something is open again.
+  review is the canonical case when the PR is incidental to the ask, whose
+  condition, such as a stall or a missing stamp, comes down to the PR's wait:
+  the PR is in their own review queue, and handing it back to them is the
+  mistake this check prevents. The ask is the PR itself when the operator
+  asked about the PR, or picked the PR or its anchor to talk over, which
+  files an ask that has you prepare and hold for them. The PR's wait is then
+  what they came about, so the premise holds and needs them. A takeaway alone
+  is never a benign wait, because nothing clears it: re-check the ids in its
+  body (`gc bd show`, and `gc bd list --parent "$SUBJECT" --all`), and it is
+  moot only if something is open again.
 
 Either reading names the stamp or the state it rests on. When you cannot name
 one, hold the sitting: uncertain is not benign.
