@@ -63,6 +63,14 @@ the file holding git's first line, then one paragraph for each file you resolved
 by hand, naming what collided, what you kept or wrote and why, and what a
 reviewer should check.
 
+A conflict goes to a person only when the target deleted code the branch edits,
+or defines a name the branch also adds, because whether the branch still has
+work to do is then the person's call. Abort the merge with `git merge --abort`
+and put it to them as A question only a person can answer says, naming the
+change on the target and the branch's code it meets. A rewrite of code the
+branch edits is no such question: resolve it, and its paragraph of the account
+says what the target changed there and how the branch's edit applies to it.
+
 ## A fix outside the reviewed diff
 
 A fix that reaches outside the diff the operator reviews, such as code the PR
@@ -92,9 +100,10 @@ is applied as ruled and not graded again.
 
 Put it to a human gate on the PR's bead with `review-run.sh question`, rule it
 question, and name the gate. Its message is what the person reads on the board,
-so name in it the post it asks about, by the URL its ask's reason ends with.
-The round goes no further on that point, and the run records no passed result
-while the gate is open. Each question on the PR is such a gate, under a
+so name in it what it asks about: a person's post by the URL its ask's reason
+ends with, and an ask that names no post, such as a conflict, by what its reason
+names. The round goes no further on that point, and the run records no passed
+result while the gate is open. Each question on the PR is such a gate, under a
 `review-question-<slug>` key, and this lists them, each open, or closed with
 the person's answer as its `close_reason`:
 
@@ -102,8 +111,8 @@ the person's answer as its `close_reason`:
 gc bd gate list <the bead that owns the PR> --all --json
 ```
 
-The run after the answer rules the question's own ask, the one whose post the
-gate's message names, by that answer.
+The run after the answer rules the question's own ask, the one the gate's
+message names, by that answer.
 
 ## A comment made while a question is open
 

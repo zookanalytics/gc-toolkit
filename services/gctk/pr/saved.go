@@ -71,12 +71,28 @@ type PRSigns struct {
 }
 
 // SavedChecks is the required check runs at Head, each result its check suite
-// holds as the run's latest.
+// holds as the run's latest, and each check suite there. A checks part saved
+// before the update read the suites holds none, nil, which the update reads as
+// stale (moved).
 type SavedChecks struct {
 	ReadAt string        `json:"read_at"`
 	Head   string        `json:"head"`
 	Runs   []RequiredRun `json:"runs"`
+	Suites []SavedSuite  `json:"suites"`
 	Signs  CheckSigns    `json:"signs"`
+}
+
+// SavedSuite is one check suite at the head: its id, its own status, when
+// GitHub created it, the GitHub Actions run behind it with that run's attempt,
+// both 0 when no Actions run is behind it, and how many check runs it holds,
+// required or not.
+type SavedSuite struct {
+	ID        int64  `json:"id"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+	Run       int64  `json:"run"`
+	Attempt   int    `json:"attempt"`
+	CheckRuns int    `json:"check_runs"`
 }
 
 // CheckSigns are the signs kept with the checks: the head, the rollup's state,
@@ -219,14 +235,17 @@ func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.L
 // by the one-PR update's table (specs/tk-1tfzr71.149/design.md, section 4). A
 // part whose own signs differ is stale. A move of the comment, review or
 // dismissed count makes the PR part stale too, since reviews move its merge
-// state, and so does a move of the checks, which are read with it. The PR part
-// of an open PR whose merge state GitHub read as UNKNOWN stays stale until a
-// read finds the state, since GitHub computes it after a push or a base move
-// and moves no sign when it does; a merged or closed PR's reads UNKNOWN for
-// good. A conversation part that holds no list of the posts the city has not
-// taken is stale, since the take and the evaluator read the list. Every part is
-// stale when the saved read lacks a part or stale says it is not current for
-// the bead.
+// state, and so does a move of the checks, which are read with it. A move of
+// the draft flag makes the checks stale, since a ready transition starts the
+// workflows that listen for it, and a suite that never starts a job moves no
+// sign of the checks. So does a checks part that holds no suites, as one saved
+// before the update read them. The PR part of an open PR whose merge state
+// GitHub read as UNKNOWN stays stale until a read finds the state, since GitHub
+// computes it after a push or a base move and moves no sign when it does; a
+// merged or closed PR's reads UNKNOWN for good. A conversation part that holds
+// no list of the posts the city has not taken is stale, since the take and the
+// evaluator read the list. Every part is stale when the saved read lacks a part
+// or stale says it is not current for the bead.
 func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
 		saved.Labels == nil {
@@ -234,7 +253,8 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	}
 	var p parts
 	p.labels = !slices.Equal(saved.Labels.Names, labels(s))
-	p.checks = !saved.Checks.Signs.equal(checkSigns(s))
+	p.checks = !saved.Checks.Signs.equal(checkSigns(s)) || saved.PR.Signs.Draft != s.IsDraft ||
+		saved.Checks.Suites == nil
 	c := saved.Conversation.Signs
 	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
 	p.conversation = counts || c.UpdatedAt != s.UpdatedAt || saved.Conversation.Untaken == nil

@@ -127,13 +127,18 @@ type Answer struct {
 
 // GitHub is the reads of GitHub an act makes of what it changes, which the gh
 // adapter's Client carries out and its fake answers: the PR a return to draft
-// reads, and the reviews, review threads and login a withdrawal reads before
-// it dismisses an approval.
+// reads, the reviews, review threads and login a withdrawal reads before it
+// dismisses an approval, the times a PR was returned to draft, which the
+// restart of a head's checks reads before it returns the PR to draft, and the
+// check suites at a commit, which the re-run of a head's failed jobs reads
+// before it asks for one.
 type GitHub interface {
 	PullRequest(repo string, number int) (*gh.PullRequest, error)
 	Reviews(repo string, number int) ([]gh.Review, error)
 	ReviewThreads(repo string, number int) ([]gh.Thread, error)
 	Login() (string, error)
+	ConvertedToDraft(repo string, number int) ([]string, error)
+	CheckSuites(repo, oid string, number int) ([]gh.CheckSuite, error)
 }
 
 // OnRecord reports whether a bead whose merge_result is v owns a PR on Gas

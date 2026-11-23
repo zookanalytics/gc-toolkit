@@ -171,7 +171,7 @@ reason:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"`
 A question only a person can answer goes to a gate on `{{pr_bead}}`, which the
 call prints for the ruling:
-`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, the post it asks about by its URL, and what each answer means>"`
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, what it asks about (a post by its URL, else what the ask names), and what each answer means>"`
 
 **4. Push the round's fixes.** The call returns the PR to draft first, and
 pushes onto the branch only while it is at the head the round judged:

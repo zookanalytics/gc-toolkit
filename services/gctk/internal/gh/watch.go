@@ -391,12 +391,10 @@ type PRPart struct {
 const prPartFields = `id number url state isDraft headRefName headRefOid baseRefName mergeStateStatus
     repository{nameWithOwner} mergedAt mergeCommit{oid} isInMergeQueue isMergeQueueEnabled`
 
-// The check suites at the PR's last commit, read with GitHub's LATEST filter as
-// CheckSuites reads them.
+// The check suites at the PR's last commit, read as CheckSuites reads them.
 const prChecksFields = `
     commits(last:1){nodes{commit{oid checkSuites(first:100){pageInfo{hasNextPage endCursor}
-      nodes{databaseId checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
-        nodes{name status conclusion isRequired(pullRequestNumber:$number)}}}}}}}`
+      nodes{` + suiteFields + `}}}}}`
 
 // prNode is a PR's own facts as the reads ask for them.
 type prNode struct {
@@ -436,9 +434,15 @@ func (p prNode) pullRequest() PullRequest {
 	return out
 }
 
-// suiteNode is a check suite as the reads ask for it.
+// suiteNode is a check suite as the reads ask for it (suiteFields).
 type suiteNode struct {
-	ID        int64 `json:"databaseId"`
+	ID          int64  `json:"databaseId"`
+	Status      string `json:"status"`
+	CreatedAt   string `json:"createdAt"`
+	WorkflowRun *struct {
+		ID      int64 `json:"databaseId"`
+		Attempt int   `json:"runAttempt"`
+	} `json:"workflowRun"`
 	CheckRuns *struct {
 		PageInfo struct {
 			HasNextPage bool `json:"hasNextPage"`
@@ -447,6 +451,7 @@ type suiteNode struct {
 			Name       string  `json:"name"`
 			Status     string  `json:"status"`
 			Conclusion *string `json:"conclusion"`
+			DetailsURL *string `json:"detailsUrl"`
 			IsRequired bool    `json:"isRequired"`
 		} `json:"nodes"`
 	} `json:"checkRuns"`
@@ -459,11 +464,24 @@ func (n suiteNode) suite(oid string) (CheckSuite, error) {
 	if n.CheckRuns.PageInfo.HasNextPage {
 		return CheckSuite{}, fmt.Errorf("check suite %d at %s has more check runs than one page holds", n.ID, oid)
 	}
-	s := CheckSuite{ID: n.ID}
+	if n.Status == "" || n.CreatedAt == "" {
+		return CheckSuite{}, fmt.Errorf("check suite %d at %s names no status or no creation time", n.ID, oid)
+	}
+	s := CheckSuite{ID: n.ID, Status: n.Status, CreatedAt: n.CreatedAt}
+	if w := n.WorkflowRun; w != nil {
+		if w.ID < 1 || w.Attempt < 1 {
+			return CheckSuite{}, fmt.Errorf("check suite %d at %s names its Actions run as %d at attempt %d",
+				n.ID, oid, w.ID, w.Attempt)
+		}
+		s.Run, s.Attempt = w.ID, w.Attempt
+	}
 	for _, r := range n.CheckRuns.Nodes {
 		run := CheckRun{Name: r.Name, Status: r.Status, Required: r.IsRequired}
 		if r.Conclusion != nil {
 			run.Conclusion = *r.Conclusion
+		}
+		if r.DetailsURL != nil {
+			run.URL = *r.DetailsURL
 		}
 		s.Runs = append(s.Runs, run)
 	}

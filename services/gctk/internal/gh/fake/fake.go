@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 )
@@ -22,7 +23,8 @@ import (
 // what it counts from the rest: its labels, when GitHub last changed it, its
 // base's tip, and its head's check rollup state and the commit statuses there,
 // counted by state. Requested is each account a review request asked to review
-// it.
+// it. Drafted is each time its timeline records it was returned to draft, oldest
+// first, which a return to draft through ConvertToDraft adds to.
 type PR struct {
 	Facts          gh.PullRequest
 	Reviews        []gh.Review
@@ -36,6 +38,7 @@ type PR struct {
 	Rollup         string
 	Statuses       map[string]int
 	Requested      []string
+	Drafted        []string
 }
 
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
@@ -49,7 +52,8 @@ type PR struct {
 // and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
 // answers a dismissal in place of the default, which dismisses the review.
 // OnReact, when set, runs as a reaction is asked, and an error it returns
-// fails that reaction, which then leaves nothing on the post.
+// fails that reaction, which then leaves nothing on the post. Now stamps a
+// return to draft in the PR's timeline, the system's clock when nil.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR
@@ -58,6 +62,7 @@ type GitHub struct {
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
 	OnReact   func(subject, content string) error
+	Now       func() time.Time
 	SignsFail map[int]error
 	FullFail  map[int]error
 	// LabeledPage is how many PRs a page of the search holds,
@@ -152,7 +157,8 @@ type Repo struct {
 // "MarkReady" or "ConvertToDraft" with the PR's node id, "DismissReview" with
 // the review's id and the dismissal's message, "AddReaction" with the post's
 // node id and the reaction as its message, "ResolveThread" with the thread's
-// node id, or "RequestReview" with the login asked.
+// node id, "RequestReview" with the login asked, or "RerunFailedJobs" with the
+// workflow run's id.
 type Ask struct {
 	Method, ID, Head, Message string
 }
@@ -317,8 +323,69 @@ func (g *GitHub) stage(method, id string, draft bool) error {
 	if p == nil {
 		return fmt.Errorf("github: no pull request has the node id %s", id)
 	}
+	if draft && !p.Facts.IsDraft {
+		now := time.Now
+		if g.Now != nil {
+			now = g.Now
+		}
+		p.Drafted = append(p.Drafted, now().UTC().Format(time.RFC3339))
+	}
 	p.Facts.IsDraft = draft
 	return nil
+}
+
+// RerunFailedJobs records the re-run, with the run's id, and answers it by
+// raising the attempt of the check suite the run is behind and queueing each
+// of its check runs that completed without passing, as a re-run of a run's
+// failed jobs does. A run no PR's suite is behind is an error, as GitHub
+// answers a run it does not hold, and so is one whose suite has not completed,
+// which GitHub refuses as already running.
+func (g *GitHub) RerunFailedJobs(repo string, run int64) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: "RerunFailedJobs", ID: strconv.FormatInt(run, 10)})
+	if err := g.Fail["RerunFailedJobs"]; err != nil {
+		return err
+	}
+	for _, p := range g.PRs {
+		if !strings.EqualFold(p.Facts.Repository, repo) {
+			continue
+		}
+		for oid := range p.Suites {
+			for i := range p.Suites[oid] {
+				s := &p.Suites[oid][i]
+				if s.Run != run {
+					continue
+				}
+				if s.Status != "COMPLETED" {
+					return fmt.Errorf("github: run %d cannot be rerun; This workflow is already running (HTTP 403)", run)
+				}
+				s.Attempt++
+				s.Status = "QUEUED"
+				for j := range s.Runs {
+					r := &s.Runs[j]
+					if r.Status == "COMPLETED" && r.Conclusion != "SUCCESS" && r.Conclusion != "NEUTRAL" &&
+						r.Conclusion != "SKIPPED" {
+						r.Status, r.Conclusion = "QUEUED", ""
+					}
+				}
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("github: %s holds no workflow run %d (HTTP 404)", repo, run)
+}
+
+// ConvertedToDraft returns each time the PR's timeline records it was returned
+// to draft. It records the read, "ConvertedToDraft".
+func (g *GitHub) ConvertedToDraft(repo string, number int) ([]string, error) {
+	p, err := g.pr("ConvertedToDraft", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string{}, p.Drafted...), nil
 }
 
 // DismissReview records the dismissal and answers it: by OnDismiss when set,

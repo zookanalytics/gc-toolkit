@@ -344,23 +344,30 @@ func TestRefusedTellsARefusalFromNoAnswer(t *testing.T) {
 
 func TestCheckSuitesReadTheLatestResultOfEachRequiredRun(t *testing.T) {
 	c, r := client([2]string{"checkSuites(first:100", `{"data":{"repository":{"object":{"checkSuites":{
-		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":116886735833,"checkRuns":{
+		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":116886735833,"status":"IN_PROGRESS",
+		"createdAt":"2026-11-16T07:00:00Z","workflowRun":{"databaseId":42114792210,"runAttempt":2},"checkRuns":{
 		"pageInfo":{"hasNextPage":false},"nodes":[
-		{"name":"test","status":"COMPLETED","conclusion":"SKIPPED","isRequired":true},
-		{"name":"go","status":"IN_PROGRESS","conclusion":null,"isRequired":false}]}}]}}}}}`})
+		{"name":"test","status":"COMPLETED","conclusion":"SKIPPED","isRequired":true,
+			"detailsUrl":"https://github.com/acme/widgets/actions/runs/42114792210/job/1"},
+		{"name":"go","status":"IN_PROGRESS","conclusion":null,"detailsUrl":null,"isRequired":false}]}},
+		{"databaseId":7,"status":"COMPLETED","createdAt":"2026-11-16T07:00:01Z","workflowRun":null,"checkRuns":{
+		"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}`})
 	got, err := c.CheckSuites("acme/widgets", "abc", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []gh.CheckSuite{{ID: 116886735833, Runs: []gh.CheckRun{
-		{Name: "test", Status: "COMPLETED", Conclusion: "SKIPPED", Required: true},
-		{Name: "go", Status: "IN_PROGRESS"},
-	}}}
+	want := []gh.CheckSuite{{ID: 116886735833, Status: "IN_PROGRESS", CreatedAt: "2026-11-16T07:00:00Z", Run: 42114792210,
+		Attempt: 2, Runs: []gh.CheckRun{
+			{Name: "test", Status: "COMPLETED", Conclusion: "SKIPPED", Required: true,
+				URL: "https://github.com/acme/widgets/actions/runs/42114792210/job/1"},
+			{Name: "go", Status: "IN_PROGRESS"},
+		}}, {ID: 7, Status: "COMPLETED", CreatedAt: "2026-11-16T07:00:01Z"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 	args := strings.Join(r.calls[0].args, " ")
-	for _, want := range []string{"filterBy:{checkType:LATEST}", "isRequired(pullRequestNumber:$number)", "object(oid:$oid)", "-f oid=abc", "--paginate"} {
+	for _, want := range []string{"filterBy:{checkType:LATEST}", "isRequired(pullRequestNumber:$number)", "object(oid:$oid)",
+		"-f oid=abc", "--paginate", "workflowRun{databaseId runAttempt}", "status createdAt", "detailsUrl"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the read %q does not ask %q", args, want)
 		}
@@ -369,10 +376,76 @@ func TestCheckSuitesReadTheLatestResultOfEachRequiredRun(t *testing.T) {
 
 func TestASuiteWithMoreRunsThanAPageIsAnError(t *testing.T) {
 	c, _ := client([2]string{"checkSuites", `{"data":{"repository":{"object":{"checkSuites":{
-		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":1,"checkRuns":{
-		"pageInfo":{"hasNextPage":true},"nodes":[]}}]}}}}}`})
+		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":1,"status":"COMPLETED",
+		"createdAt":"2026-11-16T07:00:00Z","checkRuns":{"pageInfo":{"hasNextPage":true},"nodes":[]}}]}}}}}`})
 	if _, err := c.CheckSuites("acme/widgets", "abc", 7); err == nil {
 		t.Fatal("read a suite whose check runs were cut short")
+	}
+}
+
+// A suite read with no status or creation time, or with an Actions run that
+// names no attempt, is a read that did not ask for them, which no decision is
+// made on.
+func TestASuiteThatNamesNoStatusTimeOrAttemptIsAnError(t *testing.T) {
+	for name, node := range map[string]string{
+		"no status":        `{"databaseId":1,"createdAt":"2026-11-16T07:00:00Z","checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}}`,
+		"no creation time": `{"databaseId":1,"status":"QUEUED","checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}}`,
+		"no attempt": `{"databaseId":1,"status":"QUEUED","createdAt":"2026-11-16T07:00:00Z","workflowRun":{"databaseId":9},
+			"checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}}`,
+	} {
+		c, _ := client([2]string{"checkSuites", `{"data":{"repository":{"object":{"checkSuites":{
+			"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[` + node + `]}}}}}`})
+		if _, err := c.CheckSuites("acme/widgets", "abc", 7); err == nil {
+			t.Errorf("%s: read a suite as whole", name)
+		}
+	}
+}
+
+// A re-run asks GitHub to re-run one Actions run's failed jobs, named by the
+// run's id, and a refusal reads as one.
+func TestRerunFailedJobsAsksForTheRunsFailedJobs(t *testing.T) {
+	c, r := client([2]string{"rerun-failed-jobs", ""})
+	if err := c.RerunFailedJobs("acme/widgets", 42114792210); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(r.calls[0].args, " "),
+		"api --hostname github.com -X POST repos/acme/widgets/actions/runs/42114792210/rerun-failed-jobs"; got != want {
+		t.Fatalf("the re-run ran %q, want %q", got, want)
+	}
+	refused, _ := client([2]string{"rerun-failed-jobs", "ERR:gh: This workflow is already running (HTTP 403)"})
+	if err := refused.RerunFailedJobs("acme/widgets", 1); !gh.Refused(err) {
+		t.Fatalf("a re-run GitHub refused returned %v, which reads as no refusal", err)
+	}
+	if err := c.RerunFailedJobs("acme/widgets", 0); err == nil || len(r.calls) != 1 {
+		t.Fatalf("a run with no id was asked for: %v", err)
+	}
+}
+
+// The returns to draft are read from the PR's timeline, every page of it.
+func TestConvertedToDraftReadsEveryReturnToDraftOnTheTimeline(t *testing.T) {
+	c, r := client([2]string{"CONVERT_TO_DRAFT_EVENT", `{"data":{"repository":{"pullRequest":{"timelineItems":{
+		"pageInfo":{"hasNextPage":true,"endCursor":"a"},"nodes":[{"createdAt":"2026-11-12T00:10:00Z"}]}}}}}
+		{"data":{"repository":{"pullRequest":{"timelineItems":{
+		"pageInfo":{"hasNextPage":false,"endCursor":"b"},"nodes":[{"createdAt":"2026-11-12T00:20:00Z"}]}}}}}`})
+	got, err := c.ConvertedToDraft("acme/widgets", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"2026-11-12T00:10:00Z", "2026-11-12T00:20:00Z"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("read %v, want %v", got, want)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "--paginate") {
+		t.Errorf("the read %q does not page", args)
+	}
+	none, _ := client([2]string{"CONVERT_TO_DRAFT_EVENT", `{"data":{"repository":{"pullRequest":{"timelineItems":{
+		"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}`})
+	if got, err := none.ConvertedToDraft("acme/widgets", 7); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("a PR never returned to draft read %v, %v", got, err)
+	}
+	timeless, _ := client([2]string{"CONVERT_TO_DRAFT_EVENT", `{"data":{"repository":{"pullRequest":{"timelineItems":{
+		"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{}]}}}}}`})
+	if _, err := timeless.ConvertedToDraft("acme/widgets", 7); err == nil {
+		t.Fatal("read a return to draft that names no time")
 	}
 }
 
