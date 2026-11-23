@@ -30,23 +30,25 @@ presents itself so the operator can decide, is the `pm` check's.
 
 The anchor `<anchor_bead>` for what the change is for, then the diff at
 `<reviewed_oid>`, in `<worktree>`: `git diff origin/<review_base>...HEAD`. The
-draft PR, `<review_pr_url>`, and its preview where the rig's host deploys one.
-The rig's guidance for this check, the reviewed commit's `docs/review-demo.md`,
-which the review formula printed when the commit carries one. It is also the
-rig's demo guide, which the drafter and `mol-rig-demo` read, and the
-`gc-toolkit.demo-capture` skill says what it holds: the rig's visual surfaces,
-how a capture brings its app up, how a script puts it in a known state and
-signs in, and worked examples. A rig names there how a run of its app shows the
-messages it sends. A rig can also name its design and writing standards there,
-and the states to capture for each screen or message.
+draft PR, `<review_pr_url>`, and its deployed preview where the app target under
+`video` records from it. The rig's guidance for this check, the reviewed
+commit's `docs/review-demo.md`, which the review formula printed when the
+commit carries one. It is also the rig's demo guide, which the drafter and
+`mol-rig-demo` read, and the `gc-toolkit.demo-capture` skill says what it
+holds: the rig's visual surfaces, how a capture brings its app up, how a script
+puts it in a known state and signs in, and worked examples. A rig names there
+how a run of its app shows the messages it sends. A rig can also name its
+design and writing standards there, and the states to capture for each screen
+or message.
 
 ### When it runs
 
 The check index places `demo` at the `open-as-draft` phase. Triage adds it before
 the PR exists, the refinery opens the PR as a draft, and this check runs against
 that draft. Where the rig's host deploys previews for pull requests, the draft
-has one. The PR does not leave draft for human review until every pre-open and
-open-as-draft check reads green, this one included.
+has one, so a change whose demo needs the preview has it. The PR does not leave
+draft for human review until every pre-open and open-as-draft check reads
+green, this one included.
 
 ## What it judges
 
@@ -111,17 +113,24 @@ prints, where `<binding>` is the name in front of this skill's: `gc-toolkit` in
 that holds `<worktree>`, so the engine's working files stay out of the reviewed
 tree.
 
-Every capture runs inside a sandbox from which the live city cannot be reached
-(`demo-engine-lib.sh`). The engine, the command a terminal capture types, the
-server a capture starts and the page it loads can read none of the city's
-stores, configuration or API, and get none of the variables that point at it.
-A command or page that reads the city fails there. So a capture shows the
-reviewed commit on fixture data that stands in for live data: a fixture the
-rig's guidance names, or one the reviewed commit's own tests build. A visual
-that only live state could produce is no capture, and the verdict says so, as
-for any visual that cannot be produced here. The sandbox is macOS's
-`sandbox-exec`, and a host without it runs no capture;
-`doctor/check-demo-toolchain` reports whether this one has it.
+A capture of a rig whose app reads the city runs inside a sandbox from which
+the live city cannot be reached (`demo-engine-lib.sh`). The engine, the command
+a terminal capture types, the server a capture starts and the page it loads
+can read none of the city's stores, configuration or API, and get none of the
+variables that point at it. A command or page that reads the city fails there.
+A capture of any other rig runs as an ordinary process, with the reach the
+rig's own tests have, and still without those variables. The rig keeps the
+sandbox when `city.toml` sets its `app_reads_city` to anything but `"false"`,
+which `gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json` shows, as
+`gc-toolkit.demo-capture` ("The rig's start command") says. Either way a
+capture shows the reviewed commit on fixture data that stands in for live data:
+a fixture the rig's guidance names, or one the reviewed commit's own tests
+build. The one exception is a capture of the draft's deployed preview, which
+shows the reviewed commit on the deployment's own data, in the cases the app
+target under `video` names. Any other visual that only live state could produce
+is no capture, and the verdict says so, as for any visual that cannot be
+produced here. The sandbox is macOS's `sandbox-exec`, and a host without it
+runs no capture; `doctor/check-demo-toolchain` reports whether this one has it.
 
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
 --subject <anchor_bead>` resolves the PR from the anchor and attaches the file
@@ -136,26 +145,50 @@ reports whether the `gh` it needs is present.
   The skill `gc-toolkit.gc-demo-script` writes the `demo:capture` script from
   the anchor and the diff. Keep the script and the clip in the review workspace.
 
-  The app target is the draft's preview, `--base-url <url>`, where one deploys.
-  Otherwise serve the reviewed worktree, so the clip shows the reviewed commit,
-  with the command the rig declares as its `ui_serve_command`
-  (`gc-toolkit.demo-capture`, "The rig's start command"). A review runs in the
-  rig's own pool, so read it for the session's rig:
+  The app target is the reviewed worktree served on this host, so the clip
+  shows the reviewed commit, on fixture data a script can set up to show the
+  change, the same in every capture. Serve it with the command the rig declares
+  as its `ui_serve_command` (`gc-toolkit.demo-capture`, "The rig's start
+  command"). A review runs in the rig's own pool, so read it for the session's
+  rig:
 
   ```bash
   SERVE=$(gc formula show mol-rig-demo --rig "${GC_RIG:-}" --json | jq -r '[.vars[]? | select(.name == "ui_serve_command")][0].rig_default // empty')
   ```
 
   Give it as `--serve "$SERVE" --cwd <worktree>`. It runs as a copy that
-  `gctk rig serve` runs from the worktree, inside the capture's sandbox, on a
-  free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
+  `gctk rig serve` runs from the worktree, inside the capture's sandbox when the
+  rig keeps it, on a free port of its own that the command gets as `$PORT`. An empty `SERVE` is a
   rig that declares no command, whose guidance names its app: give
   `--serve-dir <worktree>/<dir>` for a static build, or
   `--serve "<command>" --cwd <worktree>` for a command it names. When the rig's
   guidance serves its app on this host from `<worktree>`, give its
   `--base-url`, unless `city.toml` sets `app_reads_city = "true"` for the rig.
-  The capture refuses any other URL on this host and says why. A terminal
-  script, one that declares `**Terminal:**`, brings up no app: give it
+  The capture refuses any other URL on this host and says why.
+
+  The draft's deployed preview, `--base-url <url>`, is the app target instead
+  for a rig with no way to run its app on this host, and for a change whose
+  claim exists only where it is deployed. Such a change alters the app's build
+  or hosting configuration, or the environment it is deployed with, or rests on
+  a live outside service whose real response is the point of the change. Record
+  from a preview in no other case. It runs on the deployment's own data and
+  live services, so its scenes can change between captures, and each capture
+  can spend money on live calls. Record a preview only from an address that
+  serves `<reviewed_oid>`: one the host gives that commit's deployment alone,
+  as the host's documentation or the rig's guidance says, or one whose app
+  reports that commit. An address the host moves to each new deployment, such
+  as a branch's or a pull request's, can serve a later commit, so with neither
+  there is no preview of `<reviewed_oid>` to record. Where the host records
+  previews as GitHub deployments,
+  `gh api "repos/<owner>/<repo>/deployments?sha=<reviewed_oid>"` lists that
+  commit's deployments, in the repository `<review_pr_url>` names. A
+  deployment's state is its most recent status,
+  `gh api "repos/<owner>/<repo>/deployments/<id>/statuses" --jq 'max_by(.id)'`
+  with its `id`. Record from it only while that status reads `success`, which
+  says the deployment is up at the status's `environment_url`, not which
+  commit that address serves now.
+
+  A terminal script, one that declares `**Terminal:**`, brings up no app: give it
   `--cwd <worktree>`, the root its shell starts in on every demo path. When the
   guide says its commands run in a directory below the root, the script's first
   step changes into it, as the drafter writes it. Exit 0 is a clip in which
@@ -218,9 +251,9 @@ reports whether the `gh` it needs is present.
   capture, and one that pages a long output in a terminal, such as `git log`,
   waits in its pager, so run it with the pager off (`git --no-pager log`). The
   capture is as tall as the session, so bound a long output with the command's
-  own limit. The command runs inside the sandbox, so one that reads or writes
-  the city fails, and the capture shows the failure; run it on fixture data, as
-  the rig's guidance says. `--text <file>` shows output captured earlier, which
+  own limit. Run the command on fixture data, as the rig's guidance says. For a
+  rig that keeps the sandbox it runs inside it, so one that reads or writes the
+  city fails, and the capture shows the failure. `--text <file>` shows output captured earlier, which
   the terminal prints with `cat`. For markdown, write the markdown the reviewed
   commit composes to the file. `--text` and markdown draw a file as it is, and
   the sandbox cannot see how the file was made, so write to it only what the
@@ -379,10 +412,10 @@ or it was already there. Request changes, and name where the demo shows it as
 the evidence.
 
 A capture that cannot run for a reason outside the change is not a finding. The
-capture toolchain may not resolve, the rig may have no app to serve, no preview
-may deploy, the surface may show only what live state produces, or the capture
-tools may be unable to reach a required state. Each of those is the note below,
-and it never blocks.
+capture toolchain may not resolve, the rig may have no app to serve, the
+reviewed commit may have no preview the capture can record, the surface may
+show only what live state produces, or the capture tools may be unable to reach
+a required state. Each of those is the note below, and it never blocks.
 
 ## The verdict
 
@@ -408,12 +441,14 @@ modality it stands in for.
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
 and where the visual was delivered, or what stopped it. A delivered video's
-sentence also says whether the clip is narrated or silent. A delivered
-repo-artifact's sentence also says where the visual came from, as its delivery
-comment does. A delivered screenshot's sentence also says what it was rendered
-from: the reviewed commit, and any fixture that stands in for live data. A
-verdict on a change that adds or alters a message names each message it shows,
-by its subject, and each one it could not show, with what stopped it. Where it
+sentence also says whether the clip is narrated or silent, and what it was
+recorded from: the reviewed commit served on this host, or the draft's preview
+and why. A delivered repo-artifact's sentence also says where the visual came
+from, as its delivery comment does. A delivered screenshot's sentence also says
+what it was rendered from: the reviewed commit and any fixture that stands in
+for live data, or the draft's preview and why. A verdict on a change that adds
+or alters a message names each message it shows, by its subject, and each one
+it could not show, with what stopped it. Where it
 shows an example or two of many messages the change alters in the same way, it
 also names the rest, by subject. If the rig names a standard, the verdict names
 it. The verdict also lists each screen and message you checked against it, in

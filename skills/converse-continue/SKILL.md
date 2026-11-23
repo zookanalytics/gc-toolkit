@@ -15,6 +15,9 @@ Before you answer a turn, read the gates again, as `converse-prep` primes them:
 the read shows a gate filed on the subject while the sitting runs, and a gate
 another answer has cleared.
 
+Write the order of work or a rework that a turn's ruling sends as
+`converse-settle` gives it (Send the work), before you or the answer files it.
+
 When the operator rules on a gate in a turn that does not end the sitting,
 answer that gate at once, so a later dismiss leaves nothing they ruled on open:
 

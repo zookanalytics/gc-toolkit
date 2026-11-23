@@ -2,15 +2,15 @@
 # Hermetic test for assets/scripts/work-submit.sh, mol-polecat-work's
 # submit-and-exit.
 #
-# It runs against a real git repository with a real bare origin, a gc stub over a
-# JSON store that its reads serve and its writes change, and the real work-lib.sh,
-# run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and store-only-exit.sh, with
-# gctk built from this checkout for the summary and a retitle. The guard, the gate,
-# the wait and the cancel are stubs that record their calls, except in the cases
-# that run the real bring-current guard over a reviewed anchor, and
-# run-lib.stub.sh answers which runs work a bead in the cases that need a run.
-# Everything goes into one log, in order, so a case can read what landed before
-# what. No live city, Dolt, network, or PRs.
+# It runs against a real git repository with a real bare origin, the compiled fake
+# gc over the harness's store, which its reads serve and its writes change, and the
+# real work-lib.sh, run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and
+# store-only-exit.sh, with gctk built from this checkout for the summary and a
+# retitle. The guard, the gate, the wait and the cancel are stubs that record their
+# calls, except in the cases that run the real bring-current guard over a reviewed
+# anchor, and run-lib.stub.sh answers which runs work a bead in the cases that need
+# a run. The fake, a wrapper of git and the stubs write one log, in order, so a case
+# can read what landed before what. No live city, Dolt, network, or PRs.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,17 +18,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-work-submit-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
-eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1' want '$2'"; fi; }
-has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3" "'$2' not in '$1'" ;; esac; }
-no()  { case "$1" in *"$2"*) bad "$3" "'$2' unexpectedly in '$1'" ;; *) ok "$3" ;; esac; }
-
-command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }
 REAL_FIND="$(command -v find)" || { echo "find is required for this test" >&2; exit 1; }
-unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 git config --file "$GIT_CONFIG_GLOBAL" user.name "tester"
@@ -36,11 +27,25 @@ git config --file "$GIT_CONFIG_GLOBAL" user.email "tester@example.com"
 git config --file "$GIT_CONFIG_GLOBAL" commit.gpgsign false
 git config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
 git config --file "$GIT_CONFIG_GLOBAL" advice.detachedHead false
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"
+# The summary and a retitle go through `gctk pr summary`, built from this checkout,
+# which runs the fake gc on PATH, so its write lands in the store and the log.
+harness_build_gctk
+harness_init
 
-PACK="$TMP/pack"; BIN="$TMP/bin"; mkdir -p "$PACK" "$BIN"
+PACK="$TMP/pack/assets/scripts"; mkdir -p "$PACK"
 cp "$HERE/work-submit.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/claim-close.sh" "$HERE/bd-lib.sh" \
    "$HERE/hand-back.sh" "$HERE/store-only-exit.sh" "$HERE/run-lib.sh" "$HERE/branch-push.sh" "$PACK/" 2>/dev/null
-export REAL_GIT REAL_FIND LOG="$TMP/log" STORE="$TMP/store.json"
+# work-submit.sh sources the run-lib.sh beside it, as it does in the city. A case
+# that needs a run names run-lib.stub.sh in GC_RUN_LIB itself.
+unset GC_RUN_LIB RUN_LIB_STUB_CMD
+# One log holds the fake's calls, git's and the stand-in scripts', in order. The
+# fake answers gc-toolkit scripts-dir with PACK, and its roster names the refinery.
+export REAL_GIT REAL_FIND LOG="$STUB_GC_LOG" STUB_PACK="$TMP/pack"
+printf '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.refinery"}]}\n' > "$TMP/agents.json"
+printf '{"agents":[{"qualified_name":"gc-toolkit/other.refinery"}]}\n' > "$TMP/other-agents.json"
+export STUB_AGENTS="$TMP/agents.json"
 
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
 # and a branch's delete are logged, whatever directory -C names. LS_REMOTE_DOWN
@@ -73,81 +78,15 @@ cat > "$BIN/find" <<'SH'
 [ -z "${FIND_DOWN:-}" ] || { echo "find: ./locked: Permission denied (stub)" >&2; exit 1; }
 exec "$REAL_FIND" "$@"
 SH
-# gc over the store. A write whose arguments contain UPDATE_FAIL is refused. A list
-# fails while LIST_DOWN is set, and a show while SHOW_DOWN is set. A dependency's
-# removal drops the edge from the row's dependencies, the shape a show prints, and
-# is refused while DEP_REMOVE_FAIL is set.
-cat > "$BIN/gc" <<'SH'
+# The controller's reaper, taking the tree once the hand-off is written: a case
+# runs it as the fake's hook at the refinery's wake (STUB_HOOK_AT, STUB_HOOK), with
+# REAP the tree and REAP_RIG its repository.
+cat > "$BIN/reap" <<'SH'
 #!/usr/bin/env bash
-case "${1:-} ${2:-}" in
-  "gc-toolkit scripts-dir") printf '%s\n' "$PACK"; exit 0 ;;
-  "runtime drain-ack") printf 'drain\n' >> "$LOG"; exit 0 ;;
-  "hook current")
-    [ -n "${HOOK_CURRENT:-}" ] || { echo "no claim" >&2; exit 1; }
-    printf '%s\n' "$HOOK_CURRENT"; exit 0 ;;
-  "convoy status") printf '{"children":[{"id":"tk-w"}]}\n'; exit 0 ;;
-  "agent list")
-    [ -z "${ROSTER_DOWN:-}" ] || exit 1
-    printf '{"agents":[{"qualified_name":"%s"}]}\n' "${ROSTER:-gc-toolkit/gc-toolkit.refinery}"; exit 0 ;;
-  "session wake"|"session nudge")
-    printf '%s %s %s\n' "$1" "$2" "$3" >> "$LOG"
-    # The controller's reaper, taking the tree once the hand-off is written.
-    [ -z "${REAP:-}" ] || "$REAL_GIT" -C "$REAP_RIG" worktree remove --force "$REAP" >/dev/null 2>&1
-    exit 0 ;;
-  "session list") printf '{"sessions":[]}\n'; exit 0 ;;
-esac
-[ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
-verb="${2:-}"; id="${3:-}"
-case "$verb" in
-  show)
-    [ -z "${SHOW_DOWN:-}" ] || exit 1
-    out=$(jq -c --arg id "$id" '[.[] | select(.id == $id)]' "$STORE")
-    if [ "$out" = "[]" ]; then printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; fi
-    printf '%s\n' "$out" ;;
-  list)
-    printf 'list %s\n' "$*" >> "$LOG"
-    [ -z "${LIST_DOWN:-}" ] || exit 1
-    field=""; shift 2
-    while [ $# -gt 0 ]; do case "$1" in --metadata-field) field="$2"; shift 2 ;; *) shift ;; esac; done
-    jq -c --arg b "${field#branch=}" '[.[] | select((.status // "") != "closed") | select((.metadata.branch // "") == $b)]' "$STORE" ;;
-  dep)
-    case "${3:-}" in
-      list) printf '[]\n'; exit 0 ;;
-      remove)
-        printf 'dep-remove %s %s\n' "${4:-}" "${5:-}" >> "$LOG"
-        [ -z "${DEP_REMOVE_FAIL:-}" ] || { echo "bd: refused (stub)" >&2; exit 1; }
-        jq -c --arg id "${4:-}" --arg on "${5:-}" \
-          'map(if .id == $id then .dependencies = [(.dependencies // [])[] | select(.id != $on)] else . end)' \
-          "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE" ;;
-    esac ;;
-  update)
-    all="$*"
-    case " $all " in *"${UPDATE_FAIL:-@@never@@}"*) echo "bd: refused (stub)" >&2; exit 1 ;; esac
-    printf 'update %s\n' "${all#bd update }" >> "$LOG"
-    shift 3
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --set-metadata)   k="${2%%=*}"; v="${2#*=}"; f='.metadata[$k] = $v'; shift 2 ;;
-        --unset-metadata) k="$2"; v=""; f='.metadata |= del(.[$k])'; shift 2 ;;
-        --status=*)       k="status"; v="${1#--status=}"; f='.status = $v'; shift ;;
-        --assignee=*)     k="assignee"; v="${1#--assignee=}"; f='.assignee = $v'; shift ;;
-        --append-notes)   k="notes"; v="$2"; f='.notes = ((.notes // "") + $v)'; shift 2 ;;
-        --title)          k="title"; v="$2"; f='.title = $v'; shift 2 ;;
-        *) shift; continue ;;
-      esac
-      jq -c --arg id "$id" --arg k "$k" --arg v "$v" "map(if .id == \$id then $f else . end)" "$STORE" > "$STORE.new" && mv "$STORE.new" "$STORE"
-    done ;;
-  *) echo "gc stub: unsupported 'bd $verb'" >&2; exit 2 ;;
-esac
+"$REAL_GIT" -C "$REAP_RIG" worktree remove --force "$REAP" >/dev/null 2>&1
 exit 0
 SH
-chmod +x "$BIN/git" "$BIN/find" "$BIN/gc"
-# The summary and a retitle go through `gctk pr summary`, built from this checkout.
-# gctk runs the `gc` on PATH, so its write lands in the stub store and its log.
-command -v go >/dev/null 2>&1 || { echo "go is required for this test: work-submit.sh records the summary through gctk" >&2; exit 1; }
-( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) > "$TMP/gctk-build.log" 2>&1 \
-  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
-export GCTK_BIN="$TMP/gctk"
+chmod +x "$BIN/git" "$BIN/find" "$BIN/reap"
 
 recorder() { # <name> <log word> <rc var>
   cat > "$PACK/$1" <<STUB
@@ -182,13 +121,17 @@ O2="$TMP/other-origin.git"
 SEED2="$TMP/other-seed"; "$REAL_GIT" clone -q "$O2" "$SEED2" 2>/dev/null
 printf 'other\n' > "$SEED2/other.txt"; g "$SEED2" add other.txt; g "$SEED2" commit -qm other; g "$SEED2" push -q origin HEAD:main
 
+# The step this session holds, and the run's input convoy, whose tracks edge onto
+# the work bead is a dep row.
 STEP_ROW='{"id":"st-submit","status":"in_progress","assignee":"sess-me","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1"}}'
+CONVOY_ROW='{"id":"cv-1","title":"input convoy for tk-w","status":"open","issue_type":"convoy"}'
+TRACKS='cv-1|tracks|tk-w'
 
 N=0
 # prepare <branch> <work metadata json> [<extra store rows json array>] — a tree on
-# <branch> with one commit past main, and a store holding the work bead and step.
-# The tree is a linked worktree of the rig's checkout $R, under a session's
-# directory, as workspace-setup makes it.
+# <branch> with one commit past main, and a store holding the work bead, the step
+# and the convoy. The tree is a linked worktree of the rig's checkout $R, under a
+# session's directory, as workspace-setup makes it.
 prepare() {
   N=$((N + 1)); CO="$TMP/origin-$N.git"; R="$TMP/rig-$N"; C="$TMP/home-$N/worktrees/tk-w"
   cp -R "$O" "$CO"
@@ -201,8 +144,10 @@ prepare() {
     printf 'work\n' > "$C/work.txt"; g "$C" add work.txt; g "$C" commit -qm work
   fi
   HEAD_SHA=$(g "$C" rev-parse HEAD)
-  jq -nc --argjson m "$2" --argjson x "${3:-[]}" --argjson s "$STEP_ROW" --arg d "$C" \
-    '[{id: "tk-w", title: "the work", status: "open", assignee: "", metadata: ({work_dir: $d} + $m)}, $s] + $x' > "$STORE"
+  local m="${2#\{}" x="${3:-[]}"
+  m="${m%\}}"; x="${x#\[}"; x="${x%\]}"
+  store "[{\"id\":\"tk-w\",\"title\":\"the work\",\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"work_dir\":$(json_str "$C")${m:+,$m}}},$STEP_ROW,$CONVOY_ROW${x:+,$x}]"
+  printf '%s\n' "$TRACKS" > "$STUB_DEPS"
   : > "$LOG"
 }
 # submit [<VAR=value>...] -- <args...> — the script as the step calls it, from a
@@ -211,13 +156,22 @@ submit() {
   local envs=()
   while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
-  OUT=$(cd "${SUBMIT_DIR:-$TMP}" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
+  OUT=$(cd "${SUBMIT_DIR:-$TMP}" && env WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit STUB_HOOK_CURRENT=st-submit \
     ${envs[@]+"${envs[@]}"} "$PACK/work-submit.sh" "$@" 2>&1); RC=$?
 }
 go() { submit "$@" -- --convoy cv-1 --base main --notes "Implemented: it"; }
-meta() { jq -r --arg i "${2:-tk-w}" --arg k "$1" '.[] | select(.id == $i) | .metadata // {} | if has($k) then .[$k] else "<absent>" end' "$STORE"; }
-field() { jq -r --arg i "${2:-tk-w}" --arg k "$1" '.[] | select(.id == $i) | .[$k] // ""' "$STORE"; }
-words() { awk '{print $1}' "$LOG" | tr '\n' ' '; }
+# meta <key> [<id>] and field <name> [<id>] — what the bead carries, tk-w unless
+# another is named, read through the fake.
+meta() { "$HARNESS_FAKE_GC" --harness-read meta "${2:-tk-w}" "$1"; }
+field() { bfield "${2:-tk-w}" "$1"; }
+# words — the log's events in order, a word each: update, list, dep-remove,
+# session and drain for the fake's updates, lists, edge removals, wakes and nudges
+# and its drain-ack, and the first word of each line git's wrapper and the
+# stand-ins write. The fake's other reads are left out.
+words() {
+  awk '/^bd (update|list) / { print $2 } /^bd dep remove / { print "dep-remove" } /^session (wake|nudge) / { print "session" }
+    /^runtime drain-ack$/ { print "drain" } /^(push|guard|remove|release|gate|await|cancel|storeonly) / { print $1 }' "$LOG" | tr '\n' ' '
+}
 pushed() { grep -c '^push ' "$LOG" | tr -d ' '; }
 ON_ORIGIN() { g "$CO" rev-parse -q --verify "refs/heads/$1" 2>/dev/null; }
 closed_step() { field status st-submit; }
@@ -243,7 +197,7 @@ eq "$(meta work_dir)" "<absent>" "(1) work_dir is cleared"
 has "$(field notes)" "Implemented: it" "(1) the notes are appended"
 
 echo "# the handoff is ordered"
-ORDER=$(grep -nE '^(push|guard|update tk-w|session|update st-submit|remove|release|drain)' "$LOG" | cut -d: -f2 | awk '{print $1, $2}')
+ORDER=$(grep -E '^(push|guard|bd update (tk-w|st-submit)|session (wake|nudge)|remove|release|runtime drain-ack)( |$)' "$LOG" | sed 's/^bd //' | awk '{print $1, $2}')
 line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | sed -n "${2:-1}p" | cut -d: -f1; }
 [ "$(line_of '^update tk-w')" -lt "$(line_of '^push')" ] && ok "(2) the branch is recorded before the push" || bad "(2) the branch is recorded before the push"
 [ "$(line_of '^push')" -lt "$(line_of '^guard')" ] && ok "(2) the push comes before the guard" || bad "(2) the push comes before the guard"
@@ -251,24 +205,24 @@ line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | sed -n "${2:-1}p" | cut -d: 
 [ "$(line_of '^update st-submit')" -lt "$(line_of '^remove')" ] && ok "(2) the step closes before the tree goes" || bad "(2) the step closes before the tree goes"
 [ "$(line_of '^remove')" -lt "$(line_of '^release')" ] && ok "(2) the tree goes before its local branch is deleted" || bad "(2) the tree goes before its local branch is deleted"
 [ "$(line_of '^release')" -lt "$(line_of '^update tk-w' 5)" ] && ok "(2) work_dir is cleared once both are gone" || bad "(2) work_dir is cleared once both are gone"
-[ "$(line_of '^update tk-w' 5)" -lt "$(line_of '^drain')" ] && ok "(2) and before the drain" || bad "(2) and before the drain"
-eq "$(printf '%s\n' "$ORDER" | tail -n 1)" "drain " "(2) the drain is last"
+[ "$(line_of '^update tk-w' 5)" -lt "$(line_of '^runtime drain-ack')" ] && ok "(2) and before the drain" || bad "(2) and before the drain"
+eq "$(printf '%s\n' "$ORDER" | tail -n 1)" "runtime drain-ack" "(2) the drain is last"
 eq "$(grep '^remove ' "$LOG")" "remove $C" "(2) the tree removed is the one work_dir records"
-eq "$(grep '^update tk-w' "$LOG" | sed -n 5p)" "update tk-w --unset-metadata work_dir" "(2) work_dir is cleared in a write of its own"
-eq "$(grep '^update tk-w' "$LOG" | sed -n 1p)" "update tk-w --set-metadata branch=polecat/tk-w" "(2) the branch is recorded in a write of its own"
-HANDOFF=$(grep '^update tk-w' "$LOG" | sed 1d)
+eq "$(grep '^bd update tk-w ' "$LOG" | sed -n 5p)" "bd update tk-w --unset-metadata work_dir" "(2) work_dir is cleared in a write of its own"
+eq "$(grep '^bd update tk-w ' "$LOG" | sed -n 1p)" "bd update tk-w --set-metadata branch=polecat/tk-w" "(2) the branch is recorded in a write of its own"
+HANDOFF=$(grep '^bd update tk-w ' "$LOG" | sed 1d)
 FIRST=$(printf '%s\n' "$HANDOFF" | sed -n 1p); SECOND=$(printf '%s\n' "$HANDOFF" | sed -n 2p); THIRD=$(printf '%s\n' "$HANDOFF" | sed -n 3p)
 has "$FIRST" "--set-metadata target=main" "(2) the first write carries the target"
 has "$FIRST" "--set-metadata gc.routed_to=" "(2) and clears the route"
 has "$FIRST" "--unset-metadata gc.session_id --unset-metadata gc.session_name" "(2) and removes the session pins"
 has "$FIRST" "--append-notes Implemented: it" "(2) and appends the notes"
-no "$FIRST" "--notes " "(2) it never replaces the notes"
-no "$FIRST" "--assignee" "(2) it carries no assignee, which the claim guard refuses"
-no "$FIRST" "--status" "(2) and no status"
-no "$FIRST" "--set-metadata branch=" "(2) nor the branch again"
-eq "$SECOND" "update tk-w --status=open" "(2) the second write is the status alone"
-eq "$THIRD" "update tk-w --assignee=gc-toolkit/gc-toolkit.refinery" "(2) the third write is the assignee alone"
-has "$(grep '^session' "$LOG" | sed -n 1p)" "session wake gc-toolkit/gc-toolkit.refinery" "(2) the refinery is woken"
+hasnt "$FIRST" "--notes " "(2) it never replaces the notes"
+hasnt "$FIRST" "--assignee" "(2) it carries no assignee, which the claim guard refuses"
+hasnt "$FIRST" "--status" "(2) and no status"
+hasnt "$FIRST" "--set-metadata branch=" "(2) nor the branch again"
+eq "$SECOND" "bd update tk-w --status=open" "(2) the second write is the status alone"
+eq "$THIRD" "bd update tk-w --assignee=gc-toolkit/gc-toolkit.refinery" "(2) the third write is the assignee alone"
+has "$(grep -E '^session (wake|nudge) ' "$LOG" | sed -n 1p)" "session wake gc-toolkit/gc-toolkit.refinery" "(2) the refinery is woken"
 eq "$(grep -c 'workflow-finalize' "$LOG" | tr -d ' ')" 0 "(2) workflow-finalize is never touched"
 
 echo "# the tree goes only when nothing in it or under it would go with it"
@@ -282,14 +236,14 @@ eq "$(meta work_dir)" "$C" "(2b) and work_dir still names it"
 has "$OUT" "$C stays, on polecat/tk-w" "(2b) and says so"
 has "$OUT" "git would not remove it" "(2b) with git's reason"
 eq "$(grep -c '^release ' "$LOG" | tr -d ' ')" 0 "(2b) the branch is not deleted"
-eq "$(tail -n 1 "$LOG")" "drain" "(2b) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(2b) and the drain is last"
 prepare polecat/tk-w "$FRESH"
-go "REAP=$C" "REAP_RIG=$R"
+go "STUB_HOOK_AT=session wake" "STUB_HOOK=$BIN/reap" "REAP=$C" "REAP_RIG=$R"
 eq "$RC" 0 "(2c) a tree the reaper took after the handoff: exits 0: $OUT"
 eq "$(grep -c '^remove ' "$LOG" | tr -d ' ')" 0 "(2c) nothing is left to remove"
 eq "$(g "$R" branch --list polecat/tk-w)" "" "(2c) the local branch is still deleted"
 eq "$(meta work_dir)" "<absent>" "(2c) and work_dir cleared"
-no "$OUT" "stays" "(2c) with nothing reported left behind"
+hasnt "$OUT" "stays" "(2c) with nothing reported left behind"
 prepare polecat/tk-w "$FRESH"
 go "GC_DIR=$C"
 eq "$RC" 0 "(2d) a tree that is this session's own directory: exits 0"
@@ -305,7 +259,7 @@ eq "$RC" 0 "(2e) a tree that holds another checkout of its own repository: exits
 eq "$(meta work_dir)" "$C" "(2e) work_dir still names the tree"
 has "$OUT" "holds the checkout at $C/nested," "(2e) and names the checkout that keeps it"
 prepare polecat/tk-w "$FRESH"
-jq -c --arg d "$TMP/elsewhere" 'map(if .id == "tk-w" then .metadata.work_dir = $d else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+bset tk-w "metadata.work_dir=$TMP/elsewhere"
 SUBMIT_DIR="$C" go
 eq "$RC" 0 "(2f) a call run in a tree the bead does not record: exits 0"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(2f) that tree is not removed, and keeps its branch"
@@ -327,7 +281,7 @@ R2="$TMP/other-$N"; "$REAL_GIT" clone -q "$O2" "$R2" 2>/dev/null
 g "$R2" worktree add -q --detach "$C/worktrees/other" origin/main
 printf 'unsaved\n' > "$C/worktrees/other/unsaved.txt"
 eq "$(g "$C" status --porcelain)" "" "(2h) the tree reads clean"
-no "$(g "$R" worktree list --porcelain)" "worktree $C/" "(2h) and its repository lists no worktree under it"
+hasnt "$(g "$R" worktree list --porcelain)" "worktree $C/" "(2h) and its repository lists no worktree under it"
 go
 eq "$RC" 0 "(2h) a tree that holds another repository's linked worktree: exits 0"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2h) the handoff stands"
@@ -368,11 +322,11 @@ CALL=$(sed -e 's/{{binding_prefix}}/gc-toolkit./g' -e 's/{{convoy_id}}/cv-1/g' -
 has "$CALL" 'work-submit.sh" --convoy cv-1 --base main' "(2j) the step's hand-off call extracts"
 case "$CALL" in *'{{'*|*'"<'*) bad "(2j) the call renders whole" "$CALL" ;; *) ok "(2j) the call renders whole" ;; esac
 # harness <call> <shell...> : the call run as WRAP runs it, by default the way
-# Claude Code does, in a shell standing in the tree. The gc stub answers the
-# call's scripts-dir with PACK.
+# Claude Code does, in a shell standing in the tree. The fake answers the call's
+# scripts-dir with PACK.
 harness() {
   local call="$1"; shift
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" PACK="$PACK" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit HOOK_CURRENT=st-submit \
+  OUT=$(cd "$C" && env WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_RIG=gc-toolkit STUB_HOOK_CURRENT=st-submit \
     GC_DIR="$TMP/home-$N" "$@" -c "${WRAP:-eval \"\$1\" && pwd -P}" _ "$call" 2>&1); RC=$?
 }
 SHELLS="bash"; command -v zsh >/dev/null 2>&1 && SHELLS="bash zsh"
@@ -383,7 +337,7 @@ for sh in $SHELLS; do
   eq "$RC" 0 "(2j) $sh: a hand-off that worked returns a call that did not fail: $OUT"
   eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$TMP/home-$N" "(2j) $sh: the shell ends in the session's own directory"
   [ ! -e "$C" ] && ok "(2j) $sh: the tree is removed" || bad "(2j) $sh: the tree is removed"
-  [ "$(grep -n '^remove ' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^drain' "$LOG" | cut -d: -f1)" ] 2>/dev/null \
+  [ "$(grep -n '^remove ' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^runtime drain-ack$' "$LOG" | cut -d: -f1)" ] 2>/dev/null \
     && ok "(2j) $sh: before the session drains" || bad "(2j) $sh: before the session drains"
   eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2j) $sh: the hand-off stands"
   eq "$(meta pr_summary)" "the summary" "(2j) $sh: with the summary the call passed"
@@ -409,7 +363,7 @@ go
 eq "$RC" 0 "(3) a rework child on metadata.branch passes the gate"
 eq "$(meta target)" "integration/x" "(3) a caller-set target is not overwritten"
 eq "$(meta branch)" "polecat/tk-anchor" "(3) metadata.branch stands"
-no "$(grep '^update tk-w' "$LOG" | sed -n 1p)" "--set-metadata branch=" "(3) and is not rewritten"
+hasnt "$(grep '^bd update tk-w ' "$LOG" | sed -n 1p)" "--set-metadata branch=" "(3) and is not rewritten"
 
 echo "# the branch gate fails closed"
 prepare polecat/stray '{"branch":"polecat/tk-w"}'
@@ -463,7 +417,7 @@ eq "$RC" 3 "(6) an uncommitted change exits 3"
 has "$OUT" "UNCOMMITTED WORK" "(6) says so"
 has "$OUT" "loose.txt" "(6) names it"
 eq "$(pushed)" 0 "(6) nothing is pushed"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(6) no drain: the commit is the session's to make"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(6) no drain: the commit is the session's to make"
 eq "$(field assignee)" "" "(6) nothing is handed off"
 
 echo "# auto_push=false halts at branch-ready"
@@ -478,7 +432,7 @@ eq "$(field status)" "open" "(7) the bead rests open"
 eq "$(field assignee)" "" "(7) unassigned"
 eq "$(meta gc.session_id)" "<absent>" "(7) its pins go with the hand-back"
 eq "$(closed_step)" "closed" "(7) this step is closed"
-eq "$(tail -n 1 "$LOG")" "drain" "(7) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(7) and the drain is last"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(7) the branch stays checked out"
 eq "$(meta work_dir)" "$C" "(7) in the tree work_dir names, which holds the unpushed work"
 prepare polecat/tk-w '{"auto_push":false}'
@@ -497,13 +451,13 @@ eq "$(meta gc.session_id)" "<absent>" "(8) with its pins removed"
 eq "$(closed_step)" "closed" "(8) this step is closed"
 eq "$(pushed)" 0 "(8) nothing is pushed"
 [ -d "$C" ] && ok "(8) and its tree is not removed" || bad "(8) and its tree is not removed"
-eq "$(tail -n 1 "$LOG")" "drain" "(8) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(8) and the drain is last"
 prepare polecat/tk-w "$FRESH"
 submit -- --store-only "filed tk-z" --notes "n" --convoy cv-1 --base main --done ""
 eq "$RC" 1 "(8b) a run with a commit ahead of the base: refused"
 eq "$(meta halt_reason)" "<absent>" "(8b) nothing is recorded"
 eq "$(closed_step)" "in_progress" "(8b) the step stays open"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 1 "(8b) the session drains, so the step is offered again"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 1 "(8b) the session drains, so the step is offered again"
 
 mv "$PACK/store-only-exit.sh" "$TMP/store-only-exit.real"
 recorder store-only-exit.sh storeonly STORE_ONLY_RC
@@ -517,7 +471,7 @@ mv "$TMP/store-only-exit.real" "$PACK/store-only-exit.sh"
 
 echo "# withdrawn work ends the run, and landed work closes the step"
 prepare polecat/tk-w "$FRESH"
-jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+bset tk-w status=closed
 go
 eq "$RC" 1 "(9) closed mid-run: stops"
 grep -q '^cancel --step mol-polecat-work.submit-and-exit --reason work bead tk-w was closed while its run was mid-flight' "$LOG" && ok "(9) the run is cancelled" || bad "(9) the run is cancelled"
@@ -525,13 +479,13 @@ eq "$(pushed)" 0 "(9) nothing is pushed"
 eq "$(closed_step)" "in_progress" "(9) the step is the cancel's to close"
 for landed in '"gc.work_outcome":"shipped"' '"merge_result":"merged"'; do
   prepare polecat/tk-w "{$landed}"
-  jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+  bset tk-w status=closed
   go
   eq "$RC" 0 "(10) closed with $landed: exits 0"
   eq "$(closed_step)" "closed" "(10) closed with $landed: this step closes"
   eq "$(grep -c '^cancel' "$LOG" | tr -d ' ')" 0 "(10) closed with $landed: nothing is cancelled"
   eq "$(pushed)" 0 "(10) closed with $landed: nothing is pushed"
-  eq "$(tail -n 1 "$LOG")" "drain" "(10) closed with $landed: and it drains"
+  eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(10) closed with $landed: and it drains"
 done
 
 echo "# push failures hand nothing off"
@@ -542,7 +496,7 @@ has "$OUT" "PUSH FAILED" "(11) says so"
 has "$OUT" "Never force-push" "(11) with the merge instruction"
 eq "$(field assignee)" "" "(11) nothing is handed off"
 eq "$(closed_step)" "in_progress" "(11) the step stays open"
-eq "$(tail -n 1 "$LOG")" "drain" "(11) the session drains"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(11) the session drains"
 prepare polecat/tk-w "$FRESH"
 go "LS_REMOTE_WRONG=$TMP/ls-seen-$N"
 eq "$RC" 1 "(12) a ref on origin that is not HEAD: stops"
@@ -552,11 +506,11 @@ prepare polecat/tk-w "$FRESH"
 go LS_REMOTE_DOWN=1
 eq "$RC" 1 "(12b) a read of origin that does not answer: stops"
 has "$OUT" "ORIGIN UNREAD" "(12b) says origin's read did not answer"
-no "$OUT" "moved under you" "(12b) …never that the branch moved"
+hasnt "$OUT" "moved under you" "(12b) …never that the branch moved"
 eq "$(pushed)" 0 "(12b) nothing is pushed"
 eq "$(field assignee)" "" "(12b) nothing is handed off"
 eq "$(closed_step)" "in_progress" "(12b) the step stays open"
-eq "$(tail -n 1 "$LOG")" "drain" "(12b) the session drains"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(12b) the session drains"
 
 echo "# the bring-current guard holds the handoff"
 prepare polecat/tk-w "$FRESH"
@@ -568,14 +522,14 @@ prepare polecat/tk-w "$FRESH"
 go GUARD_RC=3
 eq "$RC" 3 "(14) an audit owed exits 3"
 has "$OUT" "BRING-CURRENT AUDIT INCOMPLETE" "(14) says so"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(14) no drain: the audit is the session's to finish"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(14) no drain: the audit is the session's to finish"
 eq "$(field assignee)" "" "(14) nothing is handed off"
 eq "$(pushed)" 1 "(14) the push stands"
 prepare polecat/tk-w "$FRESH"
 go GUARD_RC=1
 eq "$RC" 1 "(15) a guard that did not finish: stops"
 has "$OUT" "BRING-CURRENT GUARD DID NOT FINISH" "(15) says so"
-eq "$(tail -n 1 "$LOG")" "drain" "(15) the session drains"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(15) the session drains"
 eq "$(field assignee)" "" "(15) nothing is handed off"
 # The real guard, over a work bead that names neither its branch nor an anchor while
 # a reviewed anchor stands on that branch: the guard finds the anchor only through
@@ -597,7 +551,7 @@ eq "$RC" 3 "(15b) the real guard holds an unaudited merge on a branch the bead d
 has "$OUT" "base.txt: no entry" "(15b) it names the entry the merge owes"
 eq "$(meta branch)" "polecat/tk-w" "(15b) the branch it found the anchor through is recorded"
 eq "$(field assignee)" "" "(15b) nothing is handed off"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(15b) no drain: the audit is the session's to finish"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(15b) no drain: the audit is the session's to finish"
 # The step passes the anchor --anchor-only printed, which here is the reviewed one.
 unaudited_merge
 submit -- --convoy cv-1 --base main --notes "Implemented: it" --anchor tk-a
@@ -611,7 +565,7 @@ mv "$TMP/guard.recorder" "$PACK/bring-current-guard.sh"
 echo "# a refused handoff write stops the chain"
 for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
   prepare polecat/tk-w "$FRESH"
-  go "UPDATE_FAIL=$piece"
+  go "STUB_UPDATE_FAIL_ON=$piece"
   eq "$RC" 1 "(16) $piece refused: stops"
   has "$OUT" "HANDOFF REFUSED" "(16) $piece refused: says so"
   grep -q '^gate --subject tk-w --key polecat-handoff-refused ' "$LOG" && ok "(16) $piece refused: files a gate" || bad "(16) $piece refused: files a gate"
@@ -620,13 +574,13 @@ done
 
 echo "# the refinery's address must name an agent"
 prepare polecat/tk-w "$FRESH"
-go ROSTER=gc-toolkit/other.refinery
+go "STUB_AGENTS=$TMP/other-agents.json"
 eq "$RC" 1 "(17) an address no agent holds: stops"
 has "$OUT" "REFINERY ADDRESS NAMES NO AGENT" "(17) says so"
 has "$OUT" "gc-toolkit/other.refinery" "(17) names the bound refineries"
 eq "$(field assignee)" "" "(17) nothing is handed off"
 prepare polecat/tk-w "$FRESH"
-go ROSTER_DOWN=1
+go "STUB_FAIL_ON=agent list"
 eq "$RC" 0 "(18) a roster that cannot be read: hands off unchecked"
 has "$OUT" "roster unreadable" "(18) says so"
 prepare polecat/tk-w "$FRESH"
@@ -642,10 +596,10 @@ submit -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A b
 eq "$(meta pr_summary)" "the summary" "(20) fresh work: the summary lands on this bead"
 eq "$(field title)" "A better title" "(20) a retitle lands on this bead"
 eq "$(grep -c -- 'pr_summary=' "$LOG" | tr -d ' ')" 1 "(20) the summary is written once"
-eq "$(grep -- 'pr_summary=' "$LOG")" "update tk-w --title A better title --set-metadata pr_summary=the summary" \
+eq "$(grep -- 'pr_summary=' "$LOG")" "bd update tk-w --title A better title --set-metadata pr_summary=the summary" \
   "(20) in one write with the retitle"
-no "$(grep '^update tk-w --set-metadata target=' "$LOG")" "pr_summary" "(20) and not in the handoff write"
-ACCOUNT_AT=$(grep -n -- 'pr_summary=' "$LOG" | cut -d: -f1); HANDOFF_AT=$(grep -n '^update tk-w --set-metadata target=' "$LOG" | cut -d: -f1)
+hasnt "$(grep '^bd update tk-w --set-metadata target=' "$LOG")" "pr_summary" "(20) and not in the handoff write"
+ACCOUNT_AT=$(grep -n -- 'pr_summary=' "$LOG" | cut -d: -f1); HANDOFF_AT=$(grep -n '^bd update tk-w --set-metadata target=' "$LOG" | cut -d: -f1)
 [ -n "$ACCOUNT_AT" ] && [ -n "$HANDOFF_AT" ] && [ "$ACCOUNT_AT" -lt "$HANDOFF_AT" ] \
   && ok "(20) ahead of the handoff" || bad "(20) ahead of the handoff" "account at ${ACCOUNT_AT:-none}, handoff at ${HANDOFF_AT:-none}"
 [ ! -e "$SUM" ] && ok "(20) the summary file is gone once handed off" || bad "(20) the summary file is gone once handed off"
@@ -658,17 +612,17 @@ eq "$(meta pr_summary tk-a)" "the summary" "(21) the summary lands on the anchor
 eq "$(meta pr_summary)" "<absent>" "(21) and not on the child"
 eq "$(field title tk-a)" "A better title" "(21) the retitle lands on the anchor"
 eq "$(field title)" "the work" "(21) and not on the child"
-eq "$(grep -c '^update tk-a' "$LOG" | tr -d ' ')" 1 "(21) in one write"
+eq "$(grep -c '^bd update tk-a ' "$LOG" | tr -d ' ')" 1 "(21) in one write"
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 printf 'the summary\n' > "$SUM"
-submit UPDATE_FAIL=pr_summary= -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
+submit STUB_UPDATE_FAIL_ON=pr_summary= -- --convoy cv-1 --base main --notes n --summary-file "$SUM" --title "A better title"
 eq "$RC" 0 "(22) a summary the anchor refuses costs the PR its body, not the handoff"
 has "$OUT" "the summary and retitle given did not reach tk-a" "(22) and says so"
-has "$OUT" "refused (stub)" "(22) with what refused it"
+has "$OUT" "simulated update refusal" "(22) with what refused it"
 eq "$(field title tk-a)" "the anchor" "(22) the retitle in that write did not land either"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(22) the handoff lands"
 prepare polecat/tk-w "$FRESH"
-submit UPDATE_FAIL=--title -- --convoy cv-1 --base main --notes n --title "A new title"
+submit STUB_UPDATE_FAIL_ON=--title -- --convoy cv-1 --base main --notes n --title "A new title"
 eq "$RC" 0 "(23) a retitle bd refuses cannot roll the handoff back"
 has "$OUT" "the summary and retitle given did not reach tk-w" "(23) and says so"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(23) the handoff lands"
@@ -698,7 +652,7 @@ prepare polecat/b '{"branch":"polecat/b"}' "$TWO"
 submit -- --anchor-only --convoy cv-1
 eq "$RC" 0 "(26) --anchor-only exits 0"
 has "$OUT" "anchor: tk-old" "(26) the oldest other bead that carries a merge_result"
-eq "$(grep -cE '^(update|push|drain)' "$LOG" | tr -d ' ')" 0 "(26) --anchor-only writes nothing"
+eq "$(grep -cE '^(bd update|push|runtime drain-ack)( |$)' "$LOG" | tr -d ' ')" 0 "(26) --anchor-only writes nothing"
 prepare polecat/tk-w "$FRESH"
 submit -- --anchor-only --convoy cv-1
 has "$OUT" "none other on this branch" "(27) fresh work is its own anchor"
@@ -706,51 +660,44 @@ has "$OUT" "title: the work" "(27) and prints its title"
 prepare polecat/tk-w '{"branch":"polecat/tk-w","merge_result":"pull_request"}'
 submit -- --anchor-only --convoy cv-1
 has "$OUT" "none other on this branch" "(27b) a bead carrying its own merge_result is no child of itself"
-prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$(jq -c '.[0].title = "the anchor"' <<<"$ANCHOR_ROW")"
+prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 submit -- --anchor-only --convoy cv-1
 has "$OUT" "title: the anchor" "(28) a child prints the anchor's title"
 
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 : > "$LOG"
 submit -- --convoy cv-1 --base main --notes n --anchor tk-a --title "T"
-eq "$(grep -c '^list ' "$LOG" | tr -d ' ')" 0 "(29) an anchor passed along is not looked up again"
+eq "$(grep -c '^bd list ' "$LOG" | tr -d ' ')" 0 "(29) an anchor passed along is not looked up again"
 eq "$(field title tk-a)" "T" "(29) and receives the write"
 prepare polecat/tk-a '{"branch":"polecat/tk-a"}' "$ANCHOR_ROW"
 submit -- --convoy cv-1 --base main --notes n --anchor "" --title "T"
 eq "$(field title)" "T" "(29b) an empty --anchor names none: the claimed bead is the anchor"
 
-REBUILD='[{"id":"tk-cv","status":"open","issue_type":"convoy","metadata":{"branch":"integration/x"}}]'
-prepare integration/x '{"branch":"integration/x","task_kind":"rework","anchor_bead":"tk-cv"}' "$REBUILD"
-submit -- --anchor-only --convoy cv-1
-has "$OUT" "anchor: tk-cv" "(30) a rebuild child's anchor is the convoy it names"
-prepare integration/x '{"branch":"integration/x","task_kind":"rework","anchor_bead":"tk-cv","source_review_bead":"tk-r"}' "$REBUILD"
-submit -- --anchor-only --convoy cv-1
-has "$OUT" "none other" "(30b) a review's rework never anchors the convoy"
 prepare polecat/tk-a '{"branch":"polecat/tk-a","anchor_bead":"tk-a"}' "$ANCHOR_ROW"
-submit LIST_DOWN=1 -- --anchor-only --convoy cv-1
+submit STUB_LIST_FAIL=1 -- --anchor-only --convoy cv-1
 has "$OUT" "could not list the branch's beads" "(31) a list that fails says so"
 has "$OUT" "anchor: tk-a" "(31) and a rework child's anchor_bead answers"
 prepare polecat/tk-w "$FRESH"
-submit LIST_DOWN=1 -- --anchor-only --convoy cv-1
+submit STUB_LIST_FAIL=1 -- --anchor-only --convoy cv-1
 has "$OUT" "none other" "(32) with no anchor_bead, the summary falls to the claimed bead"
 
 echo "# the store"
 prepare polecat/tk-w "$FRESH"
-go SHOW_DOWN=1
+go STUB_SHOW_FAIL=1
 eq "$RC" 1 "(33) a store that does not answer: stops"
 has "$OUT" "The store did not answer" "(33) says so"
 eq "$(pushed)" 0 "(33) nothing is pushed: an absent target or auto_push is not read off a failed read"
 eq "$(grep -cE '^(gate|cancel) ' "$LOG" | tr -d ' ')" 0 "(33) asks nothing and cancels nothing"
-eq "$(tail -n 1 "$LOG")" "drain" "(33) the step goes back to the pool"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(33) the step goes back to the pool"
 prepare polecat/tk-w "$FRESH"
-printf '[]' > "$STORE"
+store "[$STEP_ROW,$CONVOY_ROW]"
 go
 eq "$RC" 1 "(34) no such bead: stops"
 eq "$(pushed)" 0 "(34) nothing is pushed"
 prepare polecat/tk-w "$FRESH"
 g "$C" push -q origin polecat/tk-w; BEFORE=$(ON_ORIGIN polecat/tk-w)
 printf 'more\n' >> "$C/work.txt"; g "$C" commit -qam more
-go UPDATE_FAIL=branch=polecat/tk-w
+go STUB_UPDATE_FAIL_ON=branch=polecat/tk-w
 eq "$RC" 1 "(34b) a branch the store does not record: stops"
 has "$OUT" "could not record branch=polecat/tk-w on tk-w" "(34b) says so"
 eq "$(pushed)" 0 "(34b) nothing is pushed"
@@ -758,25 +705,24 @@ eq "$(ON_ORIGIN polecat/tk-w)" "$BEFORE" "(34b) origin's ref is unchanged"
 eq "$(grep -c '^guard ' "$LOG" | tr -d ' ')" 0 "(34b) and no guard runs"
 eq "$(meta branch)" "<absent>" "(34b) the store holds no branch"
 eq "$(closed_step)" "in_progress" "(34b) the step stays open"
-eq "$(tail -n 1 "$LOG")" "drain" "(34b) the step goes back to the pool"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(34b) the step goes back to the pool"
 
 echo "# a close that does not land leaves the step for the next run"
 prepare polecat/tk-w "$FRESH"
-go UPDATE_FAIL=gc.outcome=
+go STUB_UPDATE_FAIL_ON=gc.outcome=
 eq "$RC" 1 "(35) the close refused: stops"
 has "$OUT" "this step is not closed" "(35) says so"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(35) the handoff stands"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(35) no drain: it would hand the step back"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(35) no drain: it would hand the step back"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(35) the branch stays, so a re-offered step reads the same shape"
 
 echo "# a claimant with no poured workflow holds the work bead itself"
 # hold <bead> <assignee> : the bead in_progress under <assignee>, with the session
 # pins a claim leaves, as `gc hook --claim` leaves a bead routed with no pour.
 hold() {
-  jq -c --arg id "$1" --arg who "$2" 'map(if .id == $id then .status = "in_progress" | .assignee = $who
-    | .metadata["gc.session_id"] = $who | .metadata["gc.session_name"] = "x" | .metadata["gc.routed_to"] = "pool" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+  bset "$1" status=in_progress "assignee=$2" "metadata.gc.session_id=$2" metadata.gc.session_name=x metadata.gc.routed_to=pool
 }
-direct() { submit HOOK_CURRENT=tk-w -- --bead tk-w --base main --notes "Implemented: it"; }
+direct() { submit STUB_HOOK_CURRENT=tk-w -- --bead tk-w --base main --notes "Implemented: it"; }
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
 direct
 eq "$RC" 0 "(36) a direct claim hands off and exits 0: $OUT"
@@ -785,13 +731,13 @@ eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(3
 eq "$(meta gc.routed_to)" "" "(36) unrouted"
 eq "$(meta gc.session_id)" "<absent>" "(36) with its pins removed"
 eq "$(meta branch)" "polecat/tk-w" "(36) and its branch recorded"
-no "$OUT" "is not closed" "(36) it asks for no close"
+hasnt "$OUT" "is not closed" "(36) it asks for no close"
 eq "$(closed_step)" "in_progress" "(36) no step is written: it closes nothing of any other run"
-eq "$(grep -c '^update st-submit' "$LOG" | tr -d ' ')" 0 "(36) not even a stray stamp"
+eq "$(grep -c '^bd update st-submit ' "$LOG" | tr -d ' ')" 0 "(36) not even a stray stamp"
 [ ! -e "$C" ] && ok "(36) the tree is removed" || bad "(36) the tree is removed"
 eq "$(g "$R" branch --list polecat/tk-w)" "" "(36) and the local branch deleted"
 eq "$(meta work_dir)" "<absent>" "(36) and work_dir cleared"
-eq "$(tail -n 1 "$LOG")" "drain" "(36) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(36) and the drain is last"
 
 prepare polecat/tk-w '{"auto_push":"false"}'; hold tk-w sess-me
 direct
@@ -800,7 +746,7 @@ eq "$(pushed)" 0 "(37) nothing is pushed"
 eq "$(meta halt_reason)" "auto_push_false" "(37) the halt is recorded"
 eq "$(field status) $(field assignee)" "open " "(37) the claim is released"
 eq "$(closed_step)" "in_progress" "(37) no step is written"
-eq "$(tail -n 1 "$LOG")" "drain" "(37) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(37) and the drain is last"
 # A call interrupted after the release leaves a bead with no holder, which is no
 # other session's claim.
 : > "$LOG"
@@ -808,24 +754,24 @@ direct
 eq "$RC" 0 "(37b) the call again, with the claim already released: exits 0: $OUT"
 eq "$(field status) $(field assignee)" "open " "(37b) the bead stays released"
 eq "$(pushed)" 0 "(37b) still nothing is pushed"
-eq "$(tail -n 1 "$LOG")" "drain" "(37b) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(37b) and the drain is last"
 
 prepare DETACHED "$FRESH"; hold tk-w sess-me
-submit HOOK_CURRENT=tk-w -- --store-only "tk-z" --notes "what closes this" --bead tk-w --base main
+submit STUB_HOOK_CURRENT=tk-w -- --store-only "tk-z" --notes "what closes this" --bead tk-w --base main
 eq "$RC" 0 "(38) a direct claim's store-only exit exits 0: $OUT"
 eq "$(meta halt_reason)" "store_only" "(38) the exit is recorded"
 eq "$(field status) $(field assignee)" "open " "(38) the claim is released"
 eq "$(meta gc.routed_to)" "" "(38) unrouted"
 eq "$(closed_step)" "in_progress" "(38) no step is written"
-eq "$(tail -n 1 "$LOG")" "drain" "(38) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(38) and the drain is last"
 
 prepare polecat/tk-w '{"merge_result":"merged"}'; hold tk-w sess-me
-jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+bset tk-w status=closed
 direct
 eq "$RC" 0 "(39) a direct claim already landed exits 0: $OUT"
 eq "$(words)" "drain " "(39) and only drains"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-jq -c 'map(if .id == "tk-w" then .status = "closed" else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
+bset tk-w status=closed
 direct
 eq "$RC" 1 "(39b) a direct claim closed unlanded: stops"
 has "$OUT" "was closed while this session held it" "(39b) says so"
@@ -833,7 +779,7 @@ eq "$(words)" "drain " "(39b) with no run to cancel, it only drains"
 
 # A handoff whose tree could not go leaves it on its branch, and work_dir naming it.
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-submit HOOK_CURRENT=tk-w "GUARD_TOUCH=$C/late.txt" -- --bead tk-w --base main --notes "Implemented: it"
+submit STUB_HOOK_CURRENT=tk-w "GUARD_TOUCH=$C/late.txt" -- --bead tk-w --base main --notes "Implemented: it"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(40) a tree that could not go keeps its branch"
 rm -f "$C/late.txt"
 : > "$LOG"
@@ -843,7 +789,7 @@ eq "$(field status) $(field assignee)" "open gc-toolkit/gc-toolkit.refinery" "(4
 [ ! -e "$C" ] && ok "(40) the tree goes" || bad "(40) the tree goes"
 eq "$(g "$R" branch --list polecat/tk-w)" "" "(40) with its local branch"
 eq "$(meta work_dir)" "<absent>" "(40) and work_dir is cleared"
-eq "$(tail -n 1 "$LOG")" "drain" "(40) and the drain is last"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(40) and the drain is last"
 
 echo "# --bead validates the claim before anything is written"
 prepare polecat/tk-w "$FRESH"
@@ -852,26 +798,27 @@ eq "$RC" 0 "(41) --bead while holding this step: exits 0: $OUT"
 eq "$(closed_step)" "closed" "(41) the step closes, by claim-close.sh's checks"
 eq "$(meta gc.outcome st-submit)" "pass" "(41) with outcome pass"
 prepare polecat/tk-w "$FRESH"
-submit UPDATE_FAIL=gc.outcome= -- --bead tk-w --base main --notes "n"
+submit STUB_UPDATE_FAIL_ON=gc.outcome= -- --bead tk-w --base main --notes "n"
 eq "$RC" 1 "(41b) that close refused: stops, as a step's close does"
 has "$OUT" "this step is not closed" "(41b) says so"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(41b) no drain"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(41b) no drain"
 
 refused() { # <label> : exit 3, with no write of any kind and no drain.
   eq "$RC" 3 "$1: exit 3"
   has "$OUT" "tk-w is NOT handed off" "$1: says so"
   eq "$(pushed)" 0 "$1: nothing is pushed"
-  eq "$(grep -cE '^(update|drain|gate|cancel|guard|session|remove|release) ?' "$LOG" | tr -d ' ')" 0 "$1: nothing is written, removed or drained"
+  eq "$(grep -cE '^(bd update|runtime drain-ack|gate|cancel|guard|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
+    "$1: nothing is written, removed or drained"
 }
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-submit HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
+submit STUB_HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
 refused "(42) the current claim is another plain bead"
-jq -c '. + [{id: "tk-other", status: "in_progress", assignee: "sess-me", metadata: {}}]' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"; : > "$LOG"
-submit HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
+brow tk-other status=in_progress assignee=sess-me 'metadata:={}'; : > "$LOG"
+submit STUB_HOOK_CURRENT=tk-other -- --bead tk-w --base main --notes "n"
 refused "(42b) one this session holds"
 has "$OUT" "not mol-polecat-work.submit-and-exit" "(42b) and claim-close.sh names what it found"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-submit HOOK_CURRENT= -- --bead tk-w --base main --notes "n"
+submit STUB_HOOK_CURRENT= -- --bead tk-w --base main --notes "n"
 refused "(43) no current claim can be read"
 has "$OUT" "gc hook current names no bead" "(43) names that"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
@@ -879,50 +826,51 @@ direct
 refused "(44) the bead is another session's claim"
 has "$OUT" "held by sess-other" "(44) names the holder"
 prepare polecat/tk-w "$FRESH"
-submit HOOK_CURRENT=st-submit -- --bead st-submit --base main --notes "n"
+submit STUB_HOOK_CURRENT=st-submit -- --bead st-submit --base main --notes "n"
 eq "$RC" 3 "(45) --bead names a step, even the one held: exit 3"
 has "$OUT" "st-submit is the step mol-polecat-work.submit-and-exit" "(45) says so"
 eq "$(pushed)" 0 "(45) nothing is pushed"
 eq "$(closed_step)" "in_progress" "(45) and the step stays open"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
-submit HOOK_CURRENT=tk-other -- --anchor-only --bead tk-w
+submit STUB_HOOK_CURRENT=tk-other -- --anchor-only --bead tk-w
 eq "$RC" 0 "(46) --anchor-only writes nothing, so it validates no claim"
 
 echo "# a step's close stays strict over --convoy"
 prepare polecat/tk-w "$FRESH"
-go HOOK_CURRENT=tk-w
+go STUB_HOOK_CURRENT=tk-w
 eq "$RC" 1 "(47) --convoy with a plain current claim: stops, as a step's close does"
 has "$OUT" "this step is not closed" "(47) says so"
-eq "$(grep -c '^drain' "$LOG" | tr -d ' ')" 0 "(47) no drain"
+eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(47) no drain"
 
 echo "# a sitting hands its change off under --held-by"
 # The change a sitting filed: open, unassigned and unrouted, its target main, with
 # a blocks edge onto the conversation tk-conv, which the sitting's hook names.
 SIT_META='{"target":"main"}'
-sit_edge() {
-  jq -c 'map(if .id == "tk-w" then .dependencies = [{id: "tk-conv", dependency_type: "blocks"}] else . end)' "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
-}
-set_row() { # <jq edit of the change's row>
-  jq -c "map(if .id == \"tk-w\" then $1 else . end)" "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE"
-}
+# The conversation's blocks edge onto the change is a dep row, which the hand-off's
+# `gc bd dep remove tk-w tk-conv` takes away. The conversation is a bead of the
+# store, since a show leaves out an edge onto a bead its store does not hold.
+sit_edge() { brow tk-conv "title=should this land?" status=in_progress; printf 'tk-conv|blocks|tk-w\n' >> "$STUB_DEPS"; }
 sit() { # [<VAR=value>...]
-  submit HOOK_CURRENT=tk-conv "$@" -- --bead tk-w --held-by tk-conv --notes "Handed off from the sitting." \
+  submit STUB_HOOK_CURRENT=tk-conv "$@" -- --bead tk-w --held-by tk-conv --notes "Handed off from the sitting." \
     --summary-file "$SUM" --title "feat: the change"
 }
-edge() { jq -r '.[] | select(.id == "tk-w") | [.dependencies[]? | .id] | join(",")' "$STORE"; }
-ended() { grep -cE '^(drain|gate|await|cancel) ?' "$LOG" | tr -d ' '; }
-final_row() { jq -cS '.[] | select(.id == "tk-w") | del(.notes)' "$STORE"; }
+edge() { bedges tk-w blocks; }
+ended() { grep -cE '^(runtime drain-ack|gate|await|cancel)( |$)' "$LOG" | tr -d ' '; }
+# final_row — the change as the store holds it, but for its notes: its status,
+# assignee, title and metadata, and its edges.
+final_row() { printf '%s|' "$(field status)" "$(field assignee)" "$(field title)" "$(field metadata)" "$(edge)"; }
 note_count() { field notes | grep -o 'Handed off from the sitting\.' | wc -l | tr -d ' '; }
 # held_refused <label> : exit 1, with nothing pushed, written, removed or ended,
-# and the store as $TMP/store-before holds it.
+# and the store and its edges as before() copied them.
 held_refused() {
   eq "$RC" 1 "$1: exit 1"
   eq "$(pushed)" 0 "$1: nothing is pushed"
-  eq "$(grep -cE '^(update|dep-remove|drain|gate|await|cancel|guard|session|remove|release) ?' "$LOG" | tr -d ' ')" 0 \
+  eq "$(grep -cE '^(bd update|bd dep remove|runtime drain-ack|gate|await|cancel|guard|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
     "$1: nothing is written, removed or ended"
-  cmp -s "$STORE" "$TMP/store-before" && ok "$1: the store is as it was" || bad "$1: the store is as it was"
+  cmp -s "$STUB_STORE" "$TMP/store-before" && cmp -s "$STUB_DEPS" "$TMP/deps-before" \
+    && ok "$1: the store is as it was" || bad "$1: the store is as it was"
 }
-before() { cp "$STORE" "$TMP/store-before"; : > "$LOG"; }
+before() { cp "$STUB_STORE" "$TMP/store-before"; cp "$STUB_DEPS" "$TMP/deps-before"; : > "$LOG"; }
 
 prepare polecat/tk-w "$SIT_META"; sit_edge
 printf 'the summary\n' > "$SUM"
@@ -934,9 +882,9 @@ eq "$(meta target) $(meta branch)" "main polecat/tk-w" "(50) its target stands a
 eq "$(meta pr_summary) | $(field title)" "the summary | feat: the change" "(50) the change is its own anchor: the summary and the title land on it"
 eq "$(note_count)" 1 "(50) the notes are appended"
 eq "$(edge)" "" "(50) its edge onto the conversation is removed"
-eq "$(sed -n '1,/^session wake/p' "$LOG" | grep -E '^(update|dep-remove) ' | tail -n 1 | awk '{print $1}')" "dep-remove" \
+eq "$(sed -n '1,/^session wake/p' "$LOG" | grep -E '^bd (update|dep remove) ' | tail -n 1 | cut -d' ' -f2,3)" "dep remove" \
   "(50) the removal is the last write before the refinery's wake"
-[ "$(grep -n '^update tk-w --assignee=' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^dep-remove tk-w tk-conv$' "$LOG" | cut -d: -f1)" ] \
+[ "$(grep -n '^bd update tk-w --assignee=' "$LOG" | cut -d: -f1)" -lt "$(grep -n '^bd dep remove tk-w tk-conv$' "$LOG" | cut -d: -f1)" ] \
   && ok "(50) and comes after the assignment" || bad "(50) and comes after the assignment"
 eq "$(closed_step)" "in_progress" "(50) no step is written"
 eq "$(ended)" 0 "(50) nothing gates, cancels or drains"
@@ -948,7 +896,7 @@ echo "# a hand-off cut short before the assignment is finished by the call run a
 for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
   prepare polecat/tk-w "$SIT_META"; sit_edge
   printf 'the summary\n' > "$SUM"
-  sit "UPDATE_FAIL=$piece"
+  sit "STUB_UPDATE_FAIL_ON=$piece"
   eq "$RC" 1 "(51) $piece refused: stops"
   has "$OUT" "this call run again finishes the hand-off" "(51) $piece refused: says the call run again finishes it"
   eq "$(field assignee) $(edge)" " tk-conv" "(51) $piece refused: the change is unassigned, and its edge stands"
@@ -966,7 +914,7 @@ done
 echo "# once the refinery holds the change, every run is refused as the refinery's"
 prepare polecat/tk-w "$SIT_META"; sit_edge
 printf 'the summary\n' > "$SUM"
-sit DEP_REMOVE_FAIL=1
+sit "STUB_FAIL_ON=dep remove"
 eq "$RC" 1 "(52) the removal refused: stops"
 eq "$(field assignee) $(edge)" "gc-toolkit/gc-toolkit.refinery tk-conv" "(52) the change is the refinery's, and its edge stands"
 has "$OUT" "gc bd dep remove tk-w tk-conv" "(52) it names the removal still owed"
@@ -987,7 +935,7 @@ has "$OUT" "assigned to gc-toolkit/gc-toolkit.refinery" "(52b) the refusal names
 has "$OUT" "no blocks edge onto tk-conv" "(52b) beside the edge already gone"
 
 prepare polecat/tk-w "$SIT_META"; sit_edge
-set_row '.assignee = "gc-toolkit/gc-toolkit.refinery"'
+bset tk-w assignee=gc-toolkit/gc-toolkit.refinery
 before
 sit
 held_refused "(52c) a change the refinery took before this conversation's edge was added"
@@ -999,13 +947,13 @@ for case in edge hook no-hook holder run route target; do
   prepare polecat/tk-w "$SIT_META"; sit_edge
   envs=()
   case "$case" in
-    edge)    set_row '.dependencies = []'; want="no blocks edge onto tk-conv" ;;
-    hook)    envs=(HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
-    no-hook) envs=(HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
-    holder)  set_row '.assignee = "sess-other"'; want="assigned to sess-other" ;;
+    edge)    printf '%s\n' "$TRACKS" > "$STUB_DEPS"; want="no blocks edge onto tk-conv" ;;
+    hook)    envs=(STUB_HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
+    no-hook) envs=(STUB_HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
+    holder)  bset tk-w assignee=sess-other; want="assigned to sess-other" ;;
     run)     envs=("GC_RUN_LIB=$HERE/run-lib.stub.sh" "RUN_LIB_STUB_RUNS=$TMP/runs.json"); want="a run works it (root-9)" ;;
-    route)   set_row '.metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat"'; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
-    target)  set_row '.metadata |= del(.target)'; want="records no target" ;;
+    route)   bset tk-w metadata.gc.routed_to=gc-toolkit/gc-toolkit.polecat; want="routed to gc-toolkit/gc-toolkit.polecat" ;;
+    target)  bunset tk-w metadata.target; want="records no target" ;;
   esac
   before
   sit ${envs[@]+"${envs[@]}"}
@@ -1026,7 +974,7 @@ has "$OUT" "PUSH FAILED" "(54) says so"
 eq "$(field assignee) $(edge)" " tk-conv" "(54) the change stays unassigned and held"
 eq "$(ended)" 0 "(54) nothing gates, cancels or drains"
 prepare polecat/tk-w "$SIT_META"; sit_edge
-sit SHOW_DOWN=1
+sit STUB_SHOW_FAIL=1
 eq "$RC" 1 "(54b) a store that does not answer: stops"
 has "$OUT" "The store did not answer" "(54b) says so"
 eq "$(ended)" 0 "(54b) nothing gates, cancels or drains"

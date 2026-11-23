@@ -23,10 +23,11 @@ import (
 // (specs/tk-1tfzr71.66/design.md, section 6).
 const (
 	// Pending: the PR is open at the head the refinery validated, and the bead
-	// waits on its merge, blocked and assigned to the refinery.
+	// waits on its merge, blocked and assigned to nobody.
 	Pending = "pull_request_pending"
 	// HeadChanged: the PR is open at a head the refinery has not validated. The
-	// bead is open and assigned to the refinery, which validates the new head.
+	// bead is open, and the landing order assigns it to the refinery, which
+	// validates the new head, once nothing the order owes holds the head.
 	HeadChanged = "pull_request_head_changed"
 	// Merged: the PR merged the validated head, and the merge commit is on the
 	// target. The bead is closed.
@@ -87,7 +88,6 @@ type Record struct {
 	MergedSHA, MergedAt      string
 	ExistingPR               string
 	BlockedReason, Rejection string
-	Error                    string
 	Marked                   bool
 }
 
@@ -106,7 +106,7 @@ func Read(r *ledger.Record) (Record, error) {
 		Head: get(prHeadKey), Observed: get(observedHeadKey), State: get(prStateKey), CheckedAt: get(checkedAtKey),
 		Target: get(mergedTargetKey), MergedSHA: get(mergedSHAKey), MergedAt: get(mergedAtKey),
 		ExistingPR: get(existingPRKey), BlockedReason: get(blockedReasonKey), Rejection: get(rejectionReasonKey),
-		Error: get(reconcileErrorKey), Marked: get(pendingKey) == "true",
+		Marked: get(pendingKey) == "true",
 	}
 	return rec, err
 }
@@ -114,6 +114,20 @@ func Read(r *ledger.Record) (Record, error) {
 // Marked selects the beads that carry the marker, closed ones among them,
 // whatever value it holds: a reader keeps the ones whose record reads Marked.
 func Marked() ledger.Selection { return ledger.Carrying(pendingKey).WithClosed() }
+
+// NamingPR selects the live beads that name a PR: those that carry pr_url, and
+// those that carry existing_pr. A reader keeps the ones that own the PR they
+// name.
+func NamingPR() []ledger.Selection {
+	return []ledger.Selection{ledger.Carrying(prURLKey), ledger.Carrying(existingPRKey)}
+}
+
+// Refreshed records on a bead on the record what the one-PR update saved of
+// its PR: the PR's state as GitHub gave it, lower-cased, and when it saved it.
+func Refreshed(w *ledger.Write, state, now string) {
+	prStateKey.Set(w, state)
+	checkedAtKey.Set(w, now)
+}
 
 // The writes. Each sets what one act of the record sets, and the verb that
 // makes it adds the guard on what it read.
@@ -135,69 +149,54 @@ type Publication struct {
 }
 
 // Publish is the publication's second write, the whole record in one write: the
-// bead blocked, merge_result pending, the PR's identity, the validated head and
-// the target, with the marker set again in case a recovery cleared it between
-// the two writes, and the evidence of an earlier round cleared.
-func Publish(w *ledger.Write, p Publication, now string) {
+// bead blocked and assigned to nobody, since the refinery's work on it ends
+// here, merge_result pending, the PR's identity, the validated head and the
+// target, with the marker set again in case a recovery cleared it between the
+// two writes, and the evidence of an earlier round cleared.
+func Publish(w *ledger.Write, p Publication) {
 	w.Status("blocked")
+	w.Assignee("")
 	pendingKey.Set(w, "true")
 	mergeResultKey.Set(w, Pending)
 	prURLKey.Set(w, p.URL)
 	prNumberKey.Set(w, strconv.Itoa(p.Number))
 	prHeadKey.Set(w, p.Head)
 	prRepoKey.Set(w, p.Repo)
-	prStateKey.Set(w, "open")
-	checkedAtKey.Set(w, now)
 	mergedTargetKey.Set(w, p.Target)
 	blockedReasonKey.Set(w, "Awaiting verified merge of "+p.URL)
-	for _, k := range []ledger.Key[string]{rejectionReasonKey, reconcileErrorKey, mergedSHAKey, mergedAtKey,
-		existingPRKey, observedHeadKey} {
+	for _, k := range []ledger.Key[string]{rejectionReasonKey, mergedSHAKey, mergedAtKey, existingPRKey,
+		observedHeadKey} {
 		k.Clear(w)
 	}
 }
 
 // Block finishes a publication whose second write landed and whose bead is
-// still open: the bead moves to blocked.
-func Block(w *ledger.Write) { w.Status("blocked") }
-
-// Checked records a read of the PR that leaves the record standing: the PR's
-// state and when it was read, with any earlier error cleared.
-func Checked(w *ledger.Write, state, now string) {
-	prStateKey.Set(w, state)
-	checkedAtKey.Set(w, now)
-	reconcileErrorKey.Clear(w)
+// still open: the bead moves to blocked and to nobody, as Publish leaves it.
+func Block(w *ledger.Write) {
+	w.Status("blocked")
+	w.Assignee("")
 }
 
-// Retry records a read that could not decide, which the next run reads again:
-// when it was read and why it could not decide, and, unless state is empty, the
-// PR's state as the read left it.
-func Retry(w *ledger.Write, state, reason, now string) {
-	if state != "" {
-		prStateKey.Set(w, state)
-	}
-	checkedAtKey.Set(w, now)
-	reconcileErrorKey.Set(w, reason)
-}
-
-// Requeue sends a PR open at a head the refinery has not validated back to the
-// refinery: the bead open, merge_result head changed, the head found, and why,
-// keeping the validated head. The marker goes, as in Gas Town's requeue
-// (requeue_changed_open_head), unless kept: the landing order keeps it while a
-// withdrawal still open on the bead or a review run attached to it holds the
-// head from the refinery, and until it has woken a refinery that nothing else
-// tells of the head, and then clears it (Settle).
-func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
+// Requeue records a PR open at a head the refinery has not validated: the bead
+// open, merge_result head changed, the head found, and why, keeping the
+// validated head. With to naming the refinery, the same write hands the head to
+// it: the bead assigned to the refinery and the marker gone, as in Gas Town's
+// requeue (requeue_changed_open_head), which the landing order writes only
+// while another wait holds the bead and the refinery cannot take it yet. With
+// to empty, the bead stays assigned to nobody and keeps its marker: the landing
+// order keeps it while a withdrawal still open on the bead or a review run
+// attached to it holds the head from the refinery, and, whenever the refinery
+// can take the bead, until it has assigned the bead to the refinery and woken
+// it, and then hands the head over (Settle).
+func Requeue(w *ledger.Write, prURL, observed, reason, to string) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)
 	existingPRKey.Set(w, prURL)
 	observedHeadKey.Set(w, observed)
-	prStateKey.Set(w, "open")
-	checkedAtKey.Set(w, now)
 	rejectionReasonKey.Set(w, reason)
-	for _, k := range []ledger.Key[string]{blockedReasonKey, reconcileErrorKey} {
-		k.Clear(w)
-	}
-	if !keep {
+	blockedReasonKey.Clear(w)
+	if to != "" {
+		w.Assignee(to)
 		pendingKey.Clear(w)
 	}
 }
@@ -207,56 +206,46 @@ func Requeue(w *ledger.Write, prURL, observed, reason, now string, keep bool) {
 // waits for the order to carry it out.
 func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 
-// Waiting records a run that read the record of a changed head, found it still
-// held from the refinery and read no PR: when the run read it, with any earlier
-// error cleared.
-func Waiting(w *ledger.Write, now string) {
-	checkedAtKey.Set(w, now)
-	reconcileErrorKey.Clear(w)
-}
-
-// Settle clears the marker of an open bead whose changed head the landing order
-// has handed to the refinery, the write Gas Town's recovery of an interrupted
-// requeue makes.
-func Settle(w *ledger.Write) {
-	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey, reconcileErrorKey} {
+// Settle hands the changed head of an open bead to the refinery: the bead
+// assigned to it, and the marker cleared, the write Gas Town's recovery of an
+// interrupted requeue makes.
+func Settle(w *ledger.Write, refinery string) {
+	w.Assignee(refinery)
+	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey} {
 		k.Clear(w)
 	}
 }
 
 // Revalidate sends a half-written record back to the refinery for its full
-// validation: merge_result incomplete, why, and the partial evidence and the
-// marker cleared, keeping the PR the refinery may reuse so it opens no second
-// one.
-func Revalidate(w *ledger.Write, reason, now string) {
+// validation: the bead assigned to the refinery, merge_result incomplete, why,
+// and the partial evidence and the marker cleared, keeping the PR the refinery
+// may reuse so it opens no second one.
+func Revalidate(w *ledger.Write, reason, refinery string) {
 	w.Status("open")
+	w.Assignee(refinery)
 	mergeResultKey.Set(w, Incomplete)
-	prStateKey.Set(w, "revalidation_required")
-	checkedAtKey.Set(w, now)
 	rejectionReasonKey.Set(w, reason)
 	for _, k := range []ledger.Key[string]{prURLKey, prNumberKey, prHeadKey, prRepoKey, mergedSHAKey,
-		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey, reconcileErrorKey, pendingKey} {
+		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey, pendingKey} {
 		k.Clear(w)
 	}
 }
 
 // Except records one of the exceptions: the bead blocked, merge_result the
-// exception, the PR's state and why. The marker stays until the verb has filed
-// the human gate keyed by the exception and cleared it (Unmark), so a run that
-// stops between the two leaves the gate for the next run to file.
-func Except(w *ledger.Write, result, state, reason, now string) {
+// exception, and why. The marker stays until the verb has filed the human gate
+// keyed by the exception and cleared it (Unmark), so a run that stops between
+// the two leaves the gate for the next run to file.
+func Except(w *ledger.Write, result, reason string) {
 	w.Status("blocked")
 	mergeResultKey.Set(w, result)
-	prStateKey.Set(w, state)
-	checkedAtKey.Set(w, now)
 	blockedReasonKey.Set(w, reason)
 }
 
 // Refuse records a verified merge whose close bd refused, CloseRefused: the
 // exception, with the merge's evidence beside it, so the person who clears what
 // held the close finds the landing recorded and closes the bead as landed.
-func Refuse(w *ledger.Write, l Landing, reason, now string) {
-	Except(w, CloseRefused, "merged", reason, now)
+func Refuse(w *ledger.Write, l Landing, reason string) {
+	Except(w, CloseRefused, reason)
 	mergedSHAKey.Set(w, l.MergedSHA)
 	mergedTargetKey.Set(w, l.Target)
 	mergedAtKey.Set(w, l.MergedAt)
@@ -271,29 +260,22 @@ type Landing struct {
 // Land records the verified merge and closes the bead in one write, the marker
 // cleared as the close lands, since the pack runs no artifact cleanup after the
 // close. note rides the close as its reason, which bd's update does not set.
-func Land(w *ledger.Write, l Landing, now, note string) {
+func Land(w *ledger.Write, l Landing, note string) {
 	w.Status("closed")
 	mergeResultKey.Set(w, Merged)
 	mergedSHAKey.Set(w, l.MergedSHA)
 	mergedTargetKey.Set(w, l.Target)
-	prStateKey.Set(w, "merged")
 	mergedAtKey.Set(w, l.MergedAt)
-	checkedAtKey.Set(w, now)
-	for _, k := range []ledger.Key[string]{rejectionReasonKey, reconcileErrorKey, blockedReasonKey, pendingKey} {
+	for _, k := range []ledger.Key[string]{rejectionReasonKey, blockedReasonKey, pendingKey} {
 		k.Clear(w)
 	}
 	w.Note(note)
 }
 
 // Unmark clears the marker and nothing else, on a bead whose record needs no
-// further run: one a release took from the refinery, which keeps its state, and
-// one closed on a verified merge. note, when given, names the PR on the bead.
-func Unmark(w *ledger.Write, note string) {
-	pendingKey.Clear(w)
-	if note != "" {
-		w.Note(note)
-	}
-}
+// further run: one whose exception's human gate has filed, and one closed on a
+// verified merge.
+func Unmark(w *ledger.Write) { pendingKey.Clear(w) }
 
 // Valid reports whether p names a PR the record can hold: a URL on a host,
 // whose repository and number it names, a head that is a full object name, and

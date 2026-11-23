@@ -27,6 +27,8 @@
 #   (REASON-NEW) --reason files a fresh conversation even when one waits
 #   (CONVID-REASON) --reason on an explicit conversation id is refused
 #   (LIVE)    a conversation a live sitting holds is attached to, not doubled
+#   (LIVE-STORE) the sessions are read from the store (GC_NO_API=1), so a
+#             sitting the supervisor's read cache does not list yet is live
 #   (PR-HOLD*) a sitting engage starts on a conversation about an open PR holds
 #             the PR's merge first, through the anchor's blocks edge onto the
 #             conversation, one whose sitting ended included; a live sitting it
@@ -292,7 +294,11 @@ case "$1 ${2:-}" in
         [ -f "$_f" ] && _spawned="$_spawned $(cat "$_f")=${_f##*/held.}"
       done
     fi
-    _live=$(awk 'NF == 2 {printf "%s=%s ", $1, $2}' "$ST/live" 2>/dev/null)
+    # $CACHE_MISSES names sittings $STATE/live seeds that a read without
+    # GC_NO_API=1 leaves out, as the supervisor's read cache leaves out a
+    # sitting spawned since its last re-scan. A read with it is the store's.
+    _live=$(awk -v miss=" ${CACHE_MISSES:-} " -v store="${GC_NO_API:-}" \
+      'NF == 2 && (store == "1" || index(miss, " " $1 " ") == 0) {printf "%s=%s ", $1, $2}' "$ST/live" 2>/dev/null)
     _salias="$(cat "$ST/spawned-alias" 2>/dev/null || true)"
     # The sittings $STATE/live seeds read active, unless $LIVE_STATES walks
     # their state, one entry per listing, the last repeating, with the same
@@ -875,13 +881,24 @@ run_engage tk-subj
 has "$CALLED" "session attach gc-50" "(LIVE-ATTACH) the default attaches the operator to the live sitting"
 hasnt "$OUT" "waiting for the reconciler" "(LIVE-ATTACH) …a started one at once, with no wait announced"
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
-SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-subj --no-attach
+SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-subj --no-attach
 eq "$RC" 0 "(PR-HOLD-LIVE) attaching to a live sitting on an open PR exits 0"
 hasnt "$CALLED" "--type blocks" "(PR-HOLD-LIVE) …and adds no edge: the live sitting keeps the hold as it left it"
 unset LIVE_SITTINGS
 
+echo "# a sitting the supervisor's read cache does not list yet is live, as the store lists it"
+# gc-60 was just spawned and tk-conv bound to it. Engage reads the sessions
+# from the store, which lists gc-60, while the cache does not yet.
+export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" CACHE_MISSES=gc-60
+reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv open
+run_engage tk-subj --no-attach
+eq "$RC" 0 "(LIVE-STORE) engaging a conversation whose sitting the cache does not list yet exits 0"
+hasnt "$CALLED" "session new" "(LIVE-STORE) …spawning no second sitting"
+has "$OUT" "the live sitting gc-60 holds conversation tk-conv for tk-subj" "(LIVE-STORE) …naming the sitting the store lists as live"
+unset LIVE_SITTINGS CACHE_MISSES
+
 echo "# a sitting engage starts on an open PR holds the PR's merge first"
-reset; SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+reset; SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-conv --no-attach
 eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" \
     "(PR-HOLD) …holding the PR's merge through the anchor's blocks edge onto the conversation"
@@ -895,14 +912,14 @@ reset; SUBJ_META='{"task_kind":"review","anchor_bead":"tk-other"}' run_engage tk
 hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) a subject whose anchor is no open PR adds no edge"
 reset; run_engage tk-conv --no-attach
 hasnt "$CALLED" "--type blocks" "(PR-HOLD-NOT-PR) …and neither does a subject that is no anchor"
-reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-conv --no-attach
 eq "$RC" 4 "(PR-HOLD-FAIL) a hold that does not land exits 4"
 has "$OUT" "nothing spawned, because the sitting would talk while the PR could merge" "(PR-HOLD-FAIL) …saying why nothing spawned"
 hasnt "$CALLED" "session new" "(PR-HOLD-FAIL) …and starts no sitting"
 # A conversation whose sitting's session has ended, as one whose sitting lifted
 # the hold leaves it, gets the hold back when engage starts its next sitting.
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
-SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-conv --no-attach
+SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-conv --no-attach
 eq "$RC" 0 "(PR-HOLD-ENDED) engaging a conversation whose sitting ended exits 0"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(PR-HOLD-ENDED) …and the new sitting holds the merge again"
 has "$CALLED" "session new converse-claude-opus --alias tk-conv" "(PR-HOLD-ENDED) …starting a sitting of its own"
@@ -1003,11 +1020,10 @@ has "$OUT" "gc session close gc-60" "(CUT-SHORT-STUCK) …and naming the session
 unset LIVE_SITTINGS
 
 echo "# the session a conversation is bound to is not closed as cut short, even when the first listing missed it"
-# The listing engage chose by can miss the sitting that holds the conversation,
-# as one the supervisor answers from its read cache can. Bound to that
-# sitting's alias, the conversation is the sitting's, so the session is no
-# sitting cut short: engage closes nothing, and the spawn its alias refuses
-# hands engage that sitting to attach.
+# Should the listing engage chose by miss the sitting that holds the
+# conversation, the conversation, bound to that sitting's alias, is still the
+# sitting's, so the session is no sitting cut short: engage closes nothing, and
+# the spawn its alias refuses hands engage that sitting to attach.
 export LIVE_SITTINGS="gc-60=gc-toolkit/gc-toolkit.tk-conv" ALIAS_HELD=gc-60
 reset; held tk-conv gc-toolkit/gc-toolkit.tk-conv
 FAKE_CLOCK="$TMP/clock" GC_HELM_ENGAGE_WAIT_TIMEOUT=60 LIVE_STATES="gone active" run_engage tk-subj
@@ -1102,7 +1118,7 @@ reset; REPLY_FAIL=1 run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOREPLY) a reply the store refuses exits 4"
 hasnt "$CALLED" "session new" "(GATE-NOREPLY) …starting no sitting that would not know its gate"
 has "$OUT" "gc bd dep add tk-conv tk-gate --type replies-to" "(GATE-NOREPLY) …and naming the edge to add by hand"
-reset; REPLY_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+reset; REPLY_FAIL=1 SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOREPLY-PR) a reply the store refuses on a conversation about an open PR exits 4"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" "(GATE-NOREPLY-PR) …having held the PR's merge all the same"
 case "$CALLED" in
@@ -1110,7 +1126,7 @@ case "$CALLED" in
   *) bad "(GATE-NOREPLY-PR) the hold should precede the reply (calls: $CALLED)" ;;
 esac
 hasnt "$CALLED" "session new" "(GATE-NOREPLY-PR) …and starting no sitting"
-reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request"}' run_engage tk-gate --no-attach
+reset; HOLD_FAIL=1 SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-gate --no-attach
 eq "$RC" 4 "(GATE-NOHOLD) a hold the store refuses on a conversation pointed at a gate exits 4"
 has "$CALLED" "bd dep bd dep add tk-conv tk-gate --type replies-to" \
     "(GATE-NOHOLD) …having written the reply all the same, which re-engaging the conversation would not write"
@@ -2278,7 +2294,7 @@ if ( cd "$ROOT/services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/g
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"','"$DECISION_EDGE"'],"tk-rework":['"$GATE_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-dec ("keep the old flag?"), which a person has to clear.' "(HOLD-REAL) a decision the anchor waits on is offered beside the gate"
-  OTHER_PR_EDGE='{"id":"tk-other","title":"the PR the rework builds on","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request","pr_posture":"review_required@h@2026-10-27T00:00:00Z","pr.machine":"settled@h@2026-10-27T00:00:00Z"},"dependency_type":"blocks"}'
+  OTHER_PR_EDGE='{"id":"tk-other","title":"the PR the rework builds on","status":"open","issue_type":"task","metadata":{"merge_result":"pull_request_pending","pr_posture":"review_required@h@2026-10-27T00:00:00Z","pr.machine":"settled@h@2026-10-27T00:00:00Z"},"dependency_type":"blocks"}'
   export WALK_EDGES='{"tk-subj":['"$REWORK_EDGE"'],"tk-rework":['"$OTHER_PR_EDGE"']}'
   run_fresh tk-subj --no-attach --no-input
   has "$OUT" 'tk-subj is held by tk-other ("the PR the rework builds on"), which a person has to clear. To engage it: gc-helm engage tk-other' "(HOLD-REAL) another PR waiting on a review, which the rework waits on, is offered"

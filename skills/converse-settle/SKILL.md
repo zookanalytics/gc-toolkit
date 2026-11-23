@@ -61,13 +61,36 @@ sign-off arms the subject's validating closer (Sign off, below). The `work`
 skill says which bead carries the work and how to choose its formula. When the
 sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
-the work carries of the discussion. In the block below, the sling runs only
-once the create has returned the bead's id. The comment then records the
-dispatch as one of the visit's actions, which the comment on the subject's PR
-lists:
+the work carries of the discussion.
+
+The work you send is yours to get right. What the operator says is direction to
+reason through: take each point up in the course or say why not. A remark is
+not an order to carry out to the letter, and it is not a decision they made.
+The operator usually engages and reviews at the big picture, unless they call
+out a specific item, and their go means they trust the course. So put first in
+the hand-back's decision, each as its concrete result in a short line, what
+they would most want to stop: anything the course removes, any change of
+scope, and anything it asks of another rig. Send the work once they have
+decided, not while they are still thinking it through.
+
+Write the order in your own voice: what needs doing, why, and what done looks
+like, with each point the operator raised carried into it. Quote their words
+where their words carry the point, and never write your reading as their
+ruling.
+
+The order is the description of a task you file, in this rig's store or
+another's, or the brief of a rework the sign-off files (below). In the block
+below, the description goes through a quoted heredoc, so what it quotes stays
+as written, and the sling runs only once the create has returned the bead's id.
+The comment then records the dispatch as one of the visit's actions, which the
+comment on the subject's PR lists:
 
 ```bash
-WORK=$(gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json | jq -er '.id') \
+DESC=$(cat <<'BLOCK'
+<what needs doing, why, and what done looks like, with each point the operator raised>
+BLOCK
+) \
+  && WORK=$(gc bd create "<title>" -t task -d "$DESC" --json | jq -er '.id') \
   && gc sling <rig>/<pool> "$WORK" --on <formula> \
   && gc bd comment "$CONVERSATION" "Sent work: <what it will do, in plain words>"
 ```
@@ -94,6 +117,30 @@ lands, in one plain sentence that names no other rig or its beads.
   ```bash
   gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
   ```
+
+**A rework's order is its ruling line**, which the sign-off hands the rework
+as the operator's ruling (`--rework`, below), so the line carries their words
+or names a brief, never your reading. A line that quotes their words and adds
+nothing of yours is the whole order. When the rework needs more than their
+words, write the order in the notes of the PR's anchor, the bead that carries
+its `merge_result`. A scaffold is such an order already, because the operator
+ruled each of its lines (`converse-iterate-document`):
+
+```bash
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  && BRIEF="## Rework brief ($NOW)
+$(cat <<'BLOCK'
+<what needs doing, why, and what done looks like, with each point the operator raised>
+BLOCK
+)" \
+  && gc bd update <anchor> --append-notes "$BRIEF" \
+  && echo "the brief is written, headed ## Rework brief ($NOW)"
+```
+
+No closing line means the store refused the brief: send no rework. Otherwise
+the ruling line names the brief, as `converse-iterate-document`'s line names
+its scaffold:
+`--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the
 `waits` skill). Never send it now, and never leave it for someone to send
@@ -207,6 +254,7 @@ if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      # --waiting-on <bead> [--waiting-on <bead> ...] in place of --no-wait
      # --close-brief "<what that work's landing settles here, and what to check once it has>" beside a --waiting-on on work, unless the sign-off arms no closer for the subject (below)
      # --rework, --no-rework or --retire <kind>: one is required when the ruling reaches an open PR
+     # --rework-waiting-on <bead> beside --rework, once for each bead the rework waits for, such as another PR's anchor (below)
      # --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one
      # --accept when the ruling takes the subject's recommendation (below)
 then
@@ -260,16 +308,20 @@ Take the case that fits the ruling:
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
-  yourself: the sign-off hands that gate to `gc-helm.sh accept`, the writer the
-  board's Accept runs, which dispatches the formula once under the subject's
-  acceptance lock. A var the operator settles rides beside `--accept` as
-  `--var <key>=<value>`. The sign-off refuses `--accept`, writing nothing,
-  while a gate the ruling does not answer still holds the subject. Then either
-  answer that gate in the same ruling once the operator rules on it, or sign
-  off without `--accept` and with `--leave` on the recommendation's gate, and
-  the board offers Accept once the other gate clears. A `first-reaction` gate
-  on an epic's member asks about the member's recommendation, which this case
-  does not take.
+  yourself: the sign-off hands that gate to `gctk reaction accept`, the one
+  writer that dispatches a recommendation, which dispatches the formula once
+  under the subject's acceptance lock. A var the operator settles rides beside
+  `--accept` as `--var <key>=<value>`. The sign-off refuses `--accept`, writing
+  nothing, while a gate the ruling does not answer still holds the subject.
+  Then either answer that gate in the same ruling once the operator rules on
+  it, or sign off without `--accept` and with `--leave <the recommendation's
+  gate>`. That gate then stays on the operator's page as a question, and once
+  the other gate clears, the sitting that answers the question takes the
+  recommendation with `--accept`. Tell the operator that this is their next
+  step: once the other gate clears, Start the conversation on that question
+  and rule there to take the recommendation. A `first-reaction` gate on an
+  epic's member asks about the member's recommendation, which this case does
+  not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
@@ -306,15 +358,24 @@ Take the case that fits the ruling:
   yet, does not stop the ruling: an open PR is retired instead (below). An epic
   ruled close is the `converse-epic-review` skill's to close.
 
-**A ruling that reaches an open PR** (`merge_result` `pull_request`,
-`pull_request_pending` or `pull_request_head_changed`) says what it does to that
+**A ruling that reaches an open PR** (`merge_result` `pull_request_pending` or
+`pull_request_head_changed`) says what it does to that
 PR. A ruling reaches the subject's PR, the PR whose merge this conversation
 holds, and any PR that a gate the ruling answers releases. Pass one of these:
 
 - `--rework` when the PR's branch must change and you do not make the change
   yourself (the `prs` skill), with `--check <check>` once for each check the
-  ruling sends back when the PR is on Gas Town's pending record, whose review
-  run then takes the ruling as an ask;
+  ruling sends back, and the PR's review run takes the ruling as an ask. When
+  the PR goes back only once other work lands, add `--rework-waiting-on <bead>`
+  once for each bead it waits for, such as the anchor of the PR that must land
+  first. The ask carries that wait from the create that files it, so the run
+  takes the ask only once each bead has closed. Give the wait in the sign-off,
+  never as an edge written after it, because the landing order can start the
+  run in between. The sign-off's `--waiting-on` is the subject's wait, which
+  holds no ask. The sign-off stops with nothing filed for a bead of another id
+  prefix than the PR's anchor or one its store does not hold, whose edge would
+  hold nothing. A re-run that names a wait the ruling's ask was filed without
+  stops and names that ask, since a run may already have taken it;
 - `--no-rework` when the PR stands as it is, as it does once you have pushed
   the change the ruling asked for onto its branch yourself (`converse-edit`);
 - `--retire <kind>` when the PR will not land: `not-needed`, with this

@@ -1,10 +1,15 @@
 package ledger
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -20,6 +25,7 @@ var (
 	testText   = Declare("test.ledger.text", String, "a plain value", Alias("test.ledger.old_text"))
 	testRecord = Declare("test.ledger.record", JSON[record](), "a JSON value")
 	testShell  = ReadOnly("test.ledger.shell", String, "a key shell writes")
+	testFlag   = Declare("test.ledger.flag", JSON[bool](), "a JSON flag")
 )
 
 func TestOneActIsOneWrite(t *testing.T) {
@@ -83,6 +89,7 @@ func TestAnActThatTitlesTheBeadTitlesItInTheSameWrite(t *testing.T) {
 // and the edge from each bead it blocks, so it lands whole or not at all.
 func TestAFilingIsOneCreateCarryingItsKeysAndEdges(t *testing.T) {
 	s := fake.New()
+	s.IDPrefix = "b"
 	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
 	l := New(s)
 	f := l.File("withdraw the approvals", "task")
@@ -111,6 +118,7 @@ func TestAFilingIsOneCreateCarryingItsKeysAndEdges(t *testing.T) {
 // in the create's one --deps list after the beads it blocks, and no wait.
 func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	s := fake.New()
+	s.IDPrefix = "b"
 	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
 	s.Put(fake.Bead{ID: "src", Status: "closed"})
 	l := New(s)
@@ -127,6 +135,78 @@ func TestAFilingFoundFromABeadCarriesItsDiscoveredFromEdge(t *testing.T) {
 	row, _ := s.Row(id)
 	if len(row.Edges) != 1 || row.Edges[0].Type != "discovered-from" || row.Edges[0].ID != "src" {
 		t.Fatalf("the new bead's edges are %+v, want only its discovered-from edge onto src", row.Edges)
+	}
+}
+
+// A bead a filing waits on is the new bead's own blocks edge onto it, in the
+// create's one --deps list after the beads it blocks, so the new bead lands
+// with its wait or not at all, and no update follows.
+func TestAFilingThatWaitsOnABeadCarriesTheWaitInItsCreate(t *testing.T) {
+	s := fake.New()
+	s.IDPrefix = "b"
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Status: "open"})
+	s.Put(fake.Bead{ID: "src", Status: "closed"})
+	l := New(s)
+	f := l.File("ask", "task")
+	f.Blocks("b-1")
+	f.BlockedBy("b-2")
+	f.From("src")
+	id, err := l.Create(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"-t", "task", "--deps", "blocks:b-1,blocked-by:b-2,discovered-from:src"}; !slices.Equal(s.Creates()[0].Args, want) {
+		t.Fatalf("the create carried %q, want %q", s.Creates()[0].Args, want)
+	}
+	row, _ := s.Row(id)
+	if !slices.ContainsFunc(row.Edges, func(e gcbd.Edge) bool { return e.Type == gcbd.EdgeBlocks && e.ID == "b-2" }) {
+		t.Fatalf("the new bead's edges are %+v, without its blocks edge onto b-2", row.Edges)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a filing wrote an update: %+v", s.Writes())
+	}
+}
+
+// A filing whose wait edge would hold nothing files nothing, whether it waits
+// on the bead or blocks it, and its error is ErrNotHeld and names that bead
+// alone: a bead the store does not hold, and a bead the store holds that
+// carries another id prefix than the one the store gives the new bead, which bd
+// keeps as an edge into another store.
+func TestAFilingWhoseWaitEdgeWouldHoldNothingFilesNothing(t *testing.T) {
+	for _, c := range []struct {
+		name, far, why string
+		blocks         bool
+	}{
+		{"a wait on a bead the store does not hold", "b-gone", "the store holds no bead b-gone", false},
+		{"a wait on a bead of another prefix that the store holds", "rb-held", "rb-held does not carry the id prefix b,", false},
+		{"a block of a bead of another prefix that the store holds", "rb-held", "rb-held does not carry the id prefix b,", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := fake.New()
+			s.IDPrefix = "b"
+			s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+			s.Put(fake.Bead{ID: "b-2", Status: "open"})
+			s.Put(fake.Bead{ID: "rb-held", Status: "open"})
+			l := New(s)
+			f := l.File("ask", "task")
+			f.Blocks("b-1")
+			f.BlockedBy("b-2")
+			if c.blocks {
+				f.Blocks(c.far)
+			} else {
+				f.BlockedBy(c.far)
+			}
+			_, err := l.Create(f)
+			var refused *NotHeld
+			if !errors.Is(err, ErrNotHeld) || !errors.As(err, &refused) || !strings.Contains(err.Error(), c.why) ||
+				strings.Contains(err.Error(), "b-1") || strings.Contains(err.Error(), "b-2") {
+				t.Fatalf("the filing = %v; want ErrNotHeld naming %s alone, saying %q", err, c.far, c.why)
+			}
+			if len(s.Creates())+len(s.Writes()) != 0 {
+				t.Fatalf("a refused filing wrote: creates %+v, writes %+v", s.Creates(), s.Writes())
+			}
+		})
 	}
 }
 
@@ -178,6 +258,48 @@ func TestAKeyReadsItsAliasAndClearsBoth(t *testing.T) {
 	want := []string{"--unset-metadata", "test.ledger.text", "--unset-metadata", "test.ledger.old_text"}
 	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
 		t.Errorf("clear = %q, want %q", got, want)
+	}
+}
+
+// rowOf is the record of a bead row whose metadata is the JSON object given,
+// each value typed as bd stores it, decoded as the store adapter decodes a row.
+func rowOf(t *testing.T, metadata string) *Record {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(`{"id":"b-1","status":"open","metadata":` + metadata + `}`))
+	dec.UseNumber()
+	var b gcbd.Bead
+	if err := dec.Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	return records([]gcbd.Bead{b})[0]
+}
+
+// A String key reads a row as the pack's scripts read one, `(.metadata[k] //
+// "")`. A stored JSON false holds no value, as a null holds none, so a current
+// spelling that holds false gives way to its alias. A string "false" keeps its
+// text, and true and a number read as their JSON text. A JSON key decodes a
+// stored false, so a JSON flag holds false.
+func TestAStringKeyReadsAStoredFalseAsNoValue(t *testing.T) {
+	for _, c := range []struct {
+		stored, want string
+		held         bool
+	}{
+		{`false`, "", false},
+		{`null`, "", false},
+		{`"false"`, "false", true},
+		{`true`, "true", true},
+		{`0`, "0", true},
+	} {
+		got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":`+c.stored+`}`))
+		if got != c.want || held != c.held || err != nil {
+			t.Errorf("a key holding %s read %q, %v, %v; want %q, %v", c.stored, got, held, err, c.want, c.held)
+		}
+	}
+	if got, held, err := testText.Get(rowOf(t, `{"test.ledger.text":false,"test.ledger.old_text":"older"}`)); got != "older" || !held || err != nil {
+		t.Errorf("a current spelling holding false read %q, %v, %v; want its alias's value", got, held, err)
+	}
+	if got, held, err := testFlag.Get(rowOf(t, `{"test.ledger.flag":false}`)); got || !held || err != nil {
+		t.Errorf("a JSON flag holding false read %v, %v, %v; want false, held", got, held, err)
 	}
 }
 
@@ -422,6 +544,82 @@ func TestAGuardedWriteLandsOnlyOnTheBeadItWasGuardedOn(t *testing.T) {
 	}
 }
 
+// A write that assigns the bead carries the assignee in its one update, after
+// the status, and an assignee of "" assigns the bead to nobody, which bd's
+// guard on an empty assignee then finds.
+func TestAWriteAssignsTheBeadInItsOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Assignee: "rig/refinery"})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("open", "rig/refinery")
+	w.Status("blocked")
+	w.Assignee("")
+	testText.Set(w, "waiting")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=open", "--if-assignee=rig/refinery", "--status=blocked", "--assignee=",
+		"--set-metadata", "test.ledger.text=waiting"}
+	if got := s.Writes()[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("the update is %q, want %q", got, want)
+	}
+	if b, _ := s.Row("b-1"); b.Status != "blocked" || b.Assignee != "" {
+		t.Fatalf("the bead reads %s under %q", b.Status, b.Assignee)
+	}
+	w = l.Write("b-1")
+	w.Guard("blocked", "")
+	w.Assignee("rig/refinery")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Writes()[1].Args; !slices.Equal(got, []string{"--if-status=blocked", "--if-assignee=", "--assignee=rig/refinery"}) {
+		t.Fatalf("an assignment alone is %q", got)
+	}
+	if b, _ := s.Row("b-1"); b.Assignee != "rig/refinery" {
+		t.Fatalf("the bead is assigned to %q", b.Assignee)
+	}
+}
+
+// A release clears Gas City's route and session pins, and a label removal takes
+// the label by its exact text, in the one update that carries the act's other
+// changes.
+func TestAReleaseAndALabelRemovalRideTheOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "in_progress", Assignee: "rig/polecat-1", Labels: []string{"hold:mayor", " Hold:Mayor", "keep"},
+		Metadata: map[string]string{"gc.routed_to": "rig/polecat", "gc.execution_routed_to": "rig/polecat",
+			"gc.session_name": "polecat-1", "gc.session_id": "s-1"}})
+	l := New(s)
+	w := l.Write("b-1")
+	w.Guard("in_progress", "rig/polecat-1")
+	w.Status("open")
+	w.Assignee("")
+	w.Release()
+	w.RemoveLabel("hold:mayor")
+	w.RemoveLabel(" Hold:Mayor")
+	w.RemoveLabel("hold:mayor")
+	testText.Set(w, "released")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--if-status=in_progress", "--if-assignee=rig/polecat-1", "--status=open", "--assignee=",
+		"--set-metadata", "gc.routed_to=", "--set-metadata", "test.ledger.text=released",
+		"--unset-metadata", "gc.execution_routed_to", "--unset-metadata", "gc.session_name", "--unset-metadata", "gc.session_id",
+		"--remove-label", "hold:mayor", "--remove-label", " Hold:Mayor"}
+	if got := s.Writes(); len(got) != 1 || !slices.Equal(got[0].Args, want) {
+		t.Fatalf("the writes are %q, want one update %q", got, want)
+	}
+	b, _ := s.Row("b-1")
+	if !slices.Equal(b.Labels, []string{"keep"}) || b.Metadata["gc.routed_to"] != "" || b.Metadata["gc.session_id"] != "" {
+		t.Fatalf("the bead keeps labels %q and metadata %v", b.Labels, b.Metadata)
+	}
+	w = l.Write("b-1")
+	w.RemoveLabel("keep")
+	if err := l.Commit(w); err != nil {
+		t.Fatalf("a write that removes a label alone carries a change: %v", err)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()
@@ -434,5 +632,83 @@ func TestAViewReadsItsKey(t *testing.T) {
 	v := testText.View()
 	if got, ok, err := v.Get(r); err != nil || !ok || got != "aliased" || v.Name() != "test.ledger.text" {
 		t.Fatalf("the view read %q, %v, %v as %s", got, ok, err, v.Name())
+	}
+}
+
+// A ledger Within a context ends each call it makes to the city's store once
+// the context ends, as OpenContext's does: gc on PATH here sleeps. A store that
+// cannot be stopped, such as the fake, answers as it does.
+func TestWithinEndsTheStoresCallsWithItsContext(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GC_NO_API", "1")
+	l, err := Open(filepath.Join(t.TempDir(), ".beads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := l.Within(ctx).Find(Every()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("a stopped read answered %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a stopped read took %s", took.Round(time.Millisecond))
+	}
+	f := New(fake.New())
+	if f.Within(ctx) != f {
+		t.Fatal("a fake store's ledger did not answer as it does")
+	}
+}
+
+// A blocker is written as the bead's blocks edge onto it, only once it carries
+// the bead's id prefix and a read finds it in the store: a bead the store does
+// not hold gets no edge and an error that is ErrNotHeld, and a read or an edge
+// write that fails writes nothing and fails.
+func TestABlockerIsWrittenOnlyOntoABeadTheStoreHolds(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "b-2", Title: "the run", Status: "open"})
+	l := New(s)
+	if err := l.AddBlocker("b-1", "b-2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Row("b-1")
+	if want := []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "b-2", Title: "the run", Status: "open"}}; !slices.Equal(b.Edges, want) || b.Status != "blocked" {
+		t.Fatalf("the bead stands %s with edges %+v, want blocked with %+v", b.Status, b.Edges, want)
+	}
+	if err := l.AddBlocker("b-1", "b-elsewhere"); !errors.Is(err, ErrNotHeld) || !strings.Contains(err.Error(), "holds no bead b-elsewhere") {
+		t.Errorf("an edge onto a bead the store does not hold = %v, want ErrNotHeld naming it", err)
+	}
+	s.FindErr = errors.New("dolt timeout")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || errors.Is(err, ErrNotHeld) {
+		t.Errorf("an edge whose read failed = %v, want the read's error", err)
+	}
+	s.FindErr, s.EdgeErr = nil, errors.New("database is locked")
+	if err := l.AddBlocker("b-1", "b-2"); err == nil || !strings.Contains(err.Error(), "did not land") {
+		t.Errorf("an edge the store refused = %v", err)
+	}
+	if b, _ := s.Row("b-1"); len(b.Edges) != 1 {
+		t.Errorf("a refused or unread edge was written: %+v", b.Edges)
+	}
+}
+
+// A blocker of another id prefix than the bead's gets no edge, even when the
+// store holds it, because bd keeps an edge between two prefixes as one into
+// another store: the error is ErrNotHeld and names the blocker and the prefix.
+func TestABlockerOfAnotherPrefixIsRefused(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "blocked"})
+	s.Put(fake.Bead{ID: "rb-held", Status: "open"})
+	l := New(s)
+	err := l.AddBlocker("b-1", "rb-held")
+	if !errors.Is(err, ErrNotHeld) || !strings.Contains(err.Error(), "rb-held does not carry the id prefix b,") {
+		t.Fatalf("an edge onto rb-held from b-1 = %v; want ErrNotHeld naming rb-held and the prefix b", err)
+	}
+	if len(s.Writes()) != 0 {
+		t.Fatalf("a refused edge was written: %+v", s.Writes())
 	}
 }

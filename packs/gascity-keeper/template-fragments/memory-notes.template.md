@@ -1,0 +1,1 @@
+../../../template-fragments/memory-notes.template.md

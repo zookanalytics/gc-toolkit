@@ -1,7 +1,9 @@
 package listing
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
@@ -79,7 +81,7 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	story := by["tk-e.2"]
 	if story.MergeResult != "pull_request" || story.PRNumber != "12" || story.PRURL != "https://example.test/pull/12" ||
 		story.RoutedTo != "gc-toolkit/gc-toolkit.polecat" || story.Priority != 2 || !slices.Equal(story.Labels, []string{"hold:mayor"}) ||
-		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run || story.PersonBlocker {
+		!slices.Equal(story.Edges, []Edge{{ID: "tk-e", Type: "parent-child"}, {ID: "tk-q", Type: "blocks"}}) || story.Run {
 		t.Errorf("the story reads %+v", story)
 	}
 	if e := by["tk-e"].Epic; e.Hypothesis != "it works" || e.Handle != "the board" || e.Ruling != "continue" {
@@ -93,10 +95,6 @@ func TestListingDecodesEachLiveBead(t *testing.T) {
 	}
 	if !by["tk-wisp-1"].EphemeralPlane || by["tk-e.2"].EphemeralPlane {
 		t.Errorf("the ephemeral plane reads %v for the wisp and %v for the story", by["tk-wisp-1"].EphemeralPlane, by["tk-e.2"].EphemeralPlane)
-	}
-	if !by["tk-decide"].PersonBlocker || by["tk-ask"].PersonBlocker || by["tk-q"].PersonBlocker {
-		t.Errorf("a person's to clear reads %v for a decision, %v for work routed to human and %v for a human gate",
-			by["tk-decide"].PersonBlocker, by["tk-ask"].PersonBlocker, by["tk-q"].PersonBlocker)
 	}
 	if q := by["tk-q"]; q.AwaitType != "human" || q.Assignee != "human" || q.Description != "which way?\nthe whole question" {
 		t.Errorf("the gate reads %+v", q)
@@ -123,6 +121,49 @@ func TestListingReadsTheClosedBeadsUnderAParent(t *testing.T) {
 	}
 	if closed[1].WorkOutcome != "shipped" || closed[0].Description != "Aim: land one" {
 		t.Errorf("closed = %+v", closed)
+	}
+}
+
+// The beads that record a hand-back are read in one read of the store that
+// reaches closed beads, each with its hand-back and when it was recorded, a
+// live one among them as the listing decoded it. A read that fails is an
+// error, not an empty answer.
+func TestListingReadsTheHandBacks(t *testing.T) {
+	s := rig()
+	tracks := func(id string) gcbd.Edge { return gcbd.Edge{Type: "tracks", ID: id} }
+	s.Put(fake.Bead{ID: "tk-c1", Title: "talk it over", Status: "closed", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c1",
+		Edges:    []gcbd.Edge{tracks("tk-decide")},
+		Metadata: map[string]string{"gc.handback": "tk-decide — ruled\nkeep it", "gc.handback_at": "2026-01-03T00:00:00Z"}})
+	s.Put(fake.Bead{ID: "tk-c2", Title: "talk it over again", Status: "in_progress", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c2",
+		Edges:    []gcbd.Edge{tracks("tk-decide")},
+		Metadata: map[string]string{"gc.handback": "tk-decide — still open", "gc.handback_at": "2026-01-04T00:00:00Z"}})
+	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.Finds())
+	got, err := ls.HandedBack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.SortFunc(got, func(a, b Bead) int { return strings.Compare(a.ID, b.ID) })
+	if !slices.Equal(ids(got), []string{"tk-c1", "tk-c2"}) {
+		t.Fatalf("handed back = %v, want both conversations, the closed one among them", ids(got))
+	}
+	if got[0].Handback != "tk-decide — ruled\nkeep it" || got[0].HandbackAt != "2026-01-03T00:00:00Z" || got[1].HandbackAt != "2026-01-04T00:00:00Z" {
+		t.Errorf("handed back = %+v", got)
+	}
+	if finds := s.Finds()[before:]; len(finds) != 1 || finds[0].HasKey != "gc.handback" || !finds[0].Closed {
+		t.Errorf("finds = %+v, want one read of every bead carrying gc.handback, closed ones included", finds)
+	}
+	for _, b := range ls.Live() {
+		if b.ID == "tk-c2" && b.Handback != "tk-decide — still open" {
+			t.Errorf("the live conversation reads %+v", b)
+		}
+	}
+	s.FindErr = errors.New("the store is down")
+	if _, err := ls.HandedBack(); err == nil {
+		t.Error("a failed read answered with no hand-backs")
 	}
 }
 

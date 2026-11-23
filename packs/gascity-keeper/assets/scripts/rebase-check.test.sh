@@ -3,8 +3,8 @@
 # loop in mol-upstream-gc-rebase.
 #
 # This script decides whether a rebase is finished and safe to install/push, so
-# every wrong PASS force-pushes an unverified history onto the fork's main
-# branch and every wrong FAIL burns an iteration. The cases below pin both
+# every wrong PASS asks the operator to force-push an unverified history onto
+# the fork's main branch and every wrong FAIL burns an iteration. The cases below pin both
 # directions, with particular attention to the two ways a stale stamp could
 # certify the wrong tree:
 #

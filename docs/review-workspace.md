@@ -22,7 +22,7 @@ worktree there at the head the round judged or past it is kept as it stands,
 with its commits and its uncommitted edits, which the repair's read prints, and
 one at any other commit is refused and kept, which stops the run.
 
-On a rig not yet cut over, a review bead reads its pinned commit in a detached
+On the old review path, a review bead reads its pinned commit in a detached
 worktree and runs there any suite its check calls for. It writes its verdict
 body and its finding set beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
 them from there. A quorum lane writes no file: the block that stores its lane
@@ -71,7 +71,8 @@ asked for. The directory is mode 0700. A name that another user or a symlink
 already holds is refused rather than used, because `/tmp` is shared.
 
 `mol-rig-demo` takes a workspace too, named for its demo-request bead, for the
-worktree its app runs from, because a capture's sandbox refuses a rig's own
+worktree its app runs from, which holds what the rig commits at its HEAD, and
+which the sandbox of a rig that keeps it allows where it refuses the rig's own
 checkout (`assets/scripts/demo-engine-lib.sh`). It only adds one, and the hourly
 reap removes it once the mol closes that bead.
 

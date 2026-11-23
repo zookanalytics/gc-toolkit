@@ -12,19 +12,23 @@
 //     oldest, then id (Gas City's beads.SortBeadsReadyOrder, which matches bd
 //     ready's default sort).
 //
-// Work the city does not take as things stand comes after the queue, since it
-// waits until someone routes it or its hold lifts, and so does work that waits
-// on such work, so the queue holds nothing that waits on work the city will
-// not take.
+// The ready work that nothing sends anywhere comes after the queue: each piece
+// the store's ready set serves that no dispatch hold, route, assignee, arm or
+// live run sends anywhere, a placed piece whose run ended with the piece open
+// among them. A piece counts as worked only while a live run works it, by
+// waits' run link, so no stamp a pour or a run left on its row stands for one.
+// Work that waits on other work stays in the queue behind what it waits on,
+// since what holds it says why it does not go, and work held hold:external is
+// named as waiting outside the city.
 //
 // A reader names the work to place and hands over its read of the store
 // ([Store]). [Order] gathers from that read everything a place depends on:
-// each piece's row, what holds it as waits answers it, and the anchor of each
-// bead it waits on. So every reader that names the same work in one read gets
-// the same order.
+// each piece's row, what holds it as waits answers it, the anchor of each bead
+// it waits on, the store's ready set and the runs that work it. So every
+// reader that names the same work in one read gets the same order.
 //
-// The package sits outside internal/ so the helm board, a separate module, can
-// import it.
+// The package sits outside internal/ so the helm board, which lies outside
+// services/gctk, can import it.
 package queue
 
 import (
@@ -32,6 +36,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -68,25 +73,34 @@ type Store interface {
 	// it could answer, and the error for each it could not. A read that fails
 	// returns its error.
 	Holds(ids []string) (map[string]waits.Holds, map[string]error, error)
+	// Ready returns the store's ready set: the id of each bead bd ready serves.
+	// A read that fails returns its error.
+	Ready() ([]string, error)
+	// Worked returns each id a live run works, by waits' run link
+	// (waits.LiveRuns). A read that fails returns its error.
+	Worked(ids []string) (map[string]bool, error)
 }
 
 // Place is where one piece of work sits: its id and its layer. Scheduled is
-// true when the city takes the piece itself as things stand: it is in flight,
-// or no dispatch hold holds it and it is armed to start by itself, routed to a
-// pool or an agent, or assigned to one. A piece the city takes sits after the
-// queue all the same while it waits on work the city does not take.
+// true when something sends the piece anywhere as things stand: a live run
+// works it, or no dispatch hold holds it and it is armed to start by itself,
+// routed to a pool or an agent, or assigned to one. Outside is true when it
+// waits outside the city: hold:external holds it and no live run works it.
 type Place struct {
 	ID        string
 	Layer     int
 	Scheduled bool
+	Outside   bool
 }
 
 // Ordered is the work in the order it is expected to land.
 type Ordered struct {
-	// Queue is the work the city takes as things stand.
+	// Queue is the work in that order, apart from the ready work nothing
+	// sends anywhere.
 	Queue []Place
-	// NotScheduled is the work after the queue: work the city does not take
-	// as things stand, and work that waits on such work at any depth.
+	// NotScheduled is the ready work that nothing sends anywhere, after the
+	// queue: each piece the store's ready set serves that no dispatch hold
+	// holds and nothing sends anywhere ([Place].Scheduled).
 	NotScheduled []Place
 	// Unread is the work named that has no place, because the store holds no
 	// row for it or what holds it could not be answered, in the order named. A
@@ -96,9 +110,10 @@ type Ordered struct {
 
 // Order places the work ids names: the queue first and the work after it,
 // each by layer, then priority, then oldest, then id. Through s it reads each
-// piece's row and what holds it, and the row of each bead the piece waits on,
-// whose anchor says whether that bead's work is the piece's own. Work named
-// twice is placed once. A read that fails returns its error and no order.
+// piece's row and what holds it, the row of each bead the piece waits on,
+// whose anchor says whether that bead's work is the piece's own, the store's
+// ready set, and which pieces a live run works. Work named twice is placed
+// once. A read that fails returns its error and no order.
 func Order(ids []string, s Store) (Ordered, error) {
 	var named []string
 	seen := map[string]bool{}
@@ -146,6 +161,18 @@ func Order(ids []string, s Store) (Ordered, error) {
 			anchor[id] = r.Anchor
 		}
 	}
+	served, err := s.Ready()
+	if err != nil {
+		return Ordered{}, err
+	}
+	ready := map[string]bool{}
+	for _, id := range served {
+		ready[id] = true
+	}
+	worked, err := s.Worked(held)
+	if err != nil {
+		return Ordered{}, err
+	}
 
 	var items []item
 	var unread []string
@@ -158,7 +185,10 @@ func Order(ids []string, s Store) (Ordered, error) {
 		}
 		items = append(items, item{id: id, priority: r.Priority, createdAt: r.CreatedAt, status: r.Status,
 			waits:     waiting(h, func(x string) string { return anchor[x] }),
-			scheduled: scheduled(h, r.RoutedTo, r.Assignee, r.Labels)})
+			ready:     ready[id],
+			held:      gascity.HasDispatchHold(r.Labels),
+			outside:   !worked[id] && gascity.HasHold(r.Labels, gascity.HoldExternal),
+			scheduled: scheduled(h, worked[id], r.RoutedTo, r.Assignee, r.Labels)})
 	}
 	o := order(items)
 	o.Unread = unread
@@ -178,9 +208,17 @@ type item struct {
 	// layer 1 at least, as bd graph places a bead that waits on one with
 	// nothing ahead of it.
 	waits []string
-	// scheduled is true when the city takes it as things stand ([scheduled]).
+	// ready is true when the store's ready set serves it, held when a dispatch
+	// hold holds it, and outside when it waits outside the city ([Place]).
+	ready, held, outside bool
+	// scheduled is true when something sends it anywhere ([scheduled]).
 	scheduled bool
 }
+
+// unsent reports whether an item is ready work that nothing sends anywhere:
+// the store's ready set serves it, no dispatch hold holds it, and nothing
+// sends it ([scheduled]).
+func (it item) unsent() bool { return it.ready && !it.held && !it.scheduled }
 
 // waiting is what a bead waits on now: each wait behind its status, as waits
 // answers it, once and in waits' order, less any bead whose work is the bead's
@@ -197,39 +235,27 @@ func waiting(h waits.Holds, anchorOf func(id string) string) []string {
 	return out
 }
 
-// scheduled reports whether the city takes a piece of work as things stand:
-// it is in flight (waits' answer), or no dispatch hold holds it and it is
+// scheduled reports whether something sends a piece of work anywhere as
+// things stand: a live run works it, or no dispatch hold holds it and it is
 // armed to start by itself, routed to a pool or an agent, or assigned to one.
-// A dispatch hold is one of Gas City's hold labels, hold:mayor and
-// hold:external, read as its HasDispatchHold reads a label, trimmed and in any
-// case. Gas City serves a bead that carries one to no worker, and the
-// deferred-dispatch pass slings no armed bead while one holds it, so its route,
-// arm or assignee waits for the hold to lift. Work in flight is underway, so it
-// counts whatever it carries.
-func scheduled(h waits.Holds, routedTo, assignee string, labels []string) bool {
-	if h.InFlight != "" {
+// A dispatch hold is one of Gas City's hold labels, as the runtime adapter
+// reads one (gascity.HasDispatchHold). Gas City serves a bead that carries one
+// to no worker, and the deferred-dispatch pass slings no armed bead while one
+// holds it, so its route, arm or assignee waits for the hold to lift. A live
+// run is work underway, so it counts whatever the bead carries.
+func scheduled(h waits.Holds, worked bool, routedTo, assignee string, labels []string) bool {
+	if worked {
 		return true
 	}
-	return !hasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
+	return !gascity.HasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
 		strings.TrimSpace(routedTo) != "" || strings.TrimSpace(assignee) != "")
 }
 
-// dispatchHolds are Gas City's hold labels (DispatchHoldLabels in its package
-// beadmeta).
-var dispatchHolds = []string{"hold:mayor", "hold:external"}
-
-// hasDispatchHold reports whether labels carry a dispatch hold, comparing each
-// label as HasDispatchHold does.
-func hasDispatchHold(labels []string) bool {
-	for _, l := range labels {
-		for _, hold := range dispatchHolds {
-			if strings.EqualFold(strings.TrimSpace(l), hold) {
-				return true
-			}
-		}
-	}
-	return false
-}
+// ForProductOwner reports whether labels hold a bead for the Product Owner's
+// placement: hold:mayor, in every spelling Gas City reads as that hold. Such a
+// bead waits in the Product Owner's queue, so a reader that lists that queue
+// reads the label as the order does.
+func ForProductOwner(labels []string) bool { return gascity.HasHold(labels, gascity.HoldMayor) }
 
 // canGo reports whether a status lets a bead go now: open, which bd's ready
 // set admits, or a claim (in_progress, hooked), which is work going already.
@@ -252,12 +278,12 @@ func order(items []item) Ordered {
 	}
 	slices.Sort(ids)
 	layer := layers(byID, ids)
-	after := notScheduled(byID, ids)
 
 	var out Ordered
 	for _, id := range ids {
-		p := Place{ID: id, Layer: layer[id], Scheduled: byID[id].scheduled}
-		if after[id] {
+		it := byID[id]
+		p := Place{ID: id, Layer: layer[id], Scheduled: it.scheduled, Outside: it.outside}
+		if it.unsent() {
 			out.NotScheduled = append(out.NotScheduled, p)
 		} else {
 			out.Queue = append(out.Queue, p)
@@ -331,30 +357,4 @@ func layers(byID map[string]item, ids []string) map[string]int {
 		layer[id] = l
 	}
 	return layer
-}
-
-// notScheduled marks each item that comes after the queue: one the city does
-// not take as things stand ([scheduled]), and one that waits on such an item
-// at any depth.
-func notScheduled(byID map[string]item, ids []string) map[string]bool {
-	after := map[string]bool{}
-	for _, id := range ids {
-		after[id] = !byID[id].scheduled
-	}
-	for changed := true; changed; {
-		changed = false
-		for _, id := range ids {
-			if after[id] {
-				continue
-			}
-			for _, w := range byID[id].waits {
-				if w != id && after[w] {
-					after[id] = true
-					changed = true
-					break
-				}
-			}
-		}
-	}
-	return after
 }

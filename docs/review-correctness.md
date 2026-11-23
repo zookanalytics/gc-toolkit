@@ -28,16 +28,20 @@ state where a rule that binds only gc-toolkit's own repository lives.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
 declares.
 
-- The polecat's self-review runs `lint_command`, which is
-  `tools/lint-learned.sh` and then `tools/lint.sh` over the files the branch
-  changes. It runs the suites `tools/run-tests.sh --affected origin/main`
-  selects, by the rules in that script's header, and stamps the head that
-  passed on its work bead as `self_review_passed_sha`. When the anchor's stamp
-  names the reviewed commit, the method runs no suite.
+- The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
+  the files the branch changes, then `tools/lint.sh`, which checks the step text
+  of the formulas among them and runs shellcheck and golangci-lint over the
+  whole tracked tree. It runs the suites
+  `tools/run-tests.sh --affected origin/main` selects, by the rules in that
+  script's header, through `gctk rig`, which records the result at the commit
+  it ran at. When that record at the reviewed commit is a pass, the method runs
+  no suite.
 - The refinery runs the same `lint_command` at merge, and no tests.
-- CI runs the whole `*.test.sh` suite on Linux and on macOS
-  (`.github/workflows/tests.yml`), and no lint, Go test or web check. Every
-  merge waits on the checks main's ruleset requires.
+- CI runs the whole `*.test.sh` suite and every Go test on Linux and on macOS
+  (`.github/workflows/tests.yml`) and golangci-lint for Linux and for macOS
+  (`.github/workflows/lint.yml`), scans for known vulnerabilities in what the
+  code calls (`.github/workflows/govulncheck.yml`), and runs no web check.
+  Every merge waits on the checks main's ruleset requires.
 
 ## Pack content every rig runs
 
@@ -49,7 +53,7 @@ scripts, orders, doctor checks and hooks, its services,
 directories include `skills/`, `formulas/`, `agents/`, `template-fragments/`,
 `assets/scripts/`, `orders/`, `doctor/`, `overlays/` and `services/`, and a
 file outside them is pack content when pack content runs it, as pack scripts
-run `tools/gc-proactive.sh`. A skill's description and a formula's step prose
+run `tools/gc-bd-universe.sh`. A skill's description and a formula's step prose
 are pack content as much as a script is. `review-checks.toml` is both the
 pack's check index and gc-toolkit's own, so a row changed there changes that
 check for every rig.
@@ -90,8 +94,8 @@ because such a rule can be worded for any repository and name none.
 
 ## Bash and jq scripts
 
-`tools/lint.sh` shellchecks the `.sh` and shell-shebang files a change names,
-at warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted expansion
+`tools/lint.sh` shellchecks every tracked `.sh` and shell-shebang file, at
+warning severity (`assets/scripts/shellcheck-run.sh`). An unquoted expansion
 (SC2086) and a variable set in a pipeline's subshell (SC2030, SC2031) are info
 findings, so the gate never reports them. A `# shellcheck disable=` directive a
 change adds hides its finding from the gate, so read the reason it gives. Each
@@ -202,70 +206,48 @@ each file needing it carries as a copy.
 
 ## The Go services
 
-`tools/lint.sh` runs `go vet ./...` in each module and `gofmt -l` over every
-tracked Go file, at the self-review and at merge. Vet type-checks test files
-and runs none of them, and no gate runs `go test`. CI's whole suite drives gctk
-end to end, because each suite whose scripts reach `lifecycle.sh` or
-`merge.sh` builds gctk from the checkout (`harness_build_gctk` in
-`assets/scripts/test-harness.sh`). `merge.test.sh` and `lifecycle.test.sh`
-name none of gctk's `.go` files, so the affected subset leaves them out of a
+`tools/lint.sh` runs golangci-lint over the repository's one Go module, at the
+self-review and at merge: go vet's analyzers, errcheck, ineffassign,
+staticcheck, unused and gofmt's check, as the root's `.golangci.yml` sets them,
+at the release `.golangci-lint-version` names. It type-checks test files and
+runs none of them, and no gate runs `go test`. CI's
+whole suite drives gctk end to end, because each suite whose scripts reach
+`lifecycle.sh` builds gctk from the checkout (`harness_build_gctk`
+in `assets/scripts/test-harness.sh`). `lifecycle.test.sh` names none of gctk's
+`.go` files, so the affected subset leaves them out of a
 gctk change, and no suite it selects for a Go change builds the code that
 changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` in each module the diff touches, and for gctk the suites of the
-commands it changes. On the host helm compiles only with ICU's cgo flags, so
-its tests run with `CGO_CPPFLAGS` and `CGO_LDFLAGS` set from `icu4c_cgo_flags`
-in `assets/scripts/icu4c-cgo.sh`, as `tools/lint.sh` sets them for vet.
+`go test ./...` from the repository root, and for gctk the suites of the
+commands it changes.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
-  `helm-build` orders run `assets/scripts/gc-build.sh` every five minutes, so
-  each binary is rebuilt from the rig checkout soon after a change reaches it.
-  `gctk merge` lands the pull requests the merge cadence merges, and every
-  merged record is a `gctk lifecycle` transition. The bridges `merge.sh` and
-  `lifecycle.sh` have no shell fallback, so a gctk defect reaches every landing
-  in the city.
+  `helm-build` orders run `assets/scripts/gc-build.sh`, which rebuilds each
+  binary from the rig checkout on the first pass after a change reaches it.
+  The landing order (`gctk pr reconcile`) merges every PR on the pending
+  record, and every direct landing's record is a `gctk lifecycle` write, which
+  `lifecycle.sh` execs with no shell fallback. So a gctk defect reaches every
+  landing in the city.
 - **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
-  anchor states and the machine axis. gctk carries the states as a typed table
-  and helm carries the machine values as Go constants in
-  `internal/board/derive.go`, and `lifecycle.test.sh` holds both to the TOML.
-  No test holds the machine values the writers record to it (`recordMachine`
-  in gctk's `internal/cli/merge.go`, `assets/scripts/gate-ensure.sh`), and a
-  recorded value helm does not know renders as `unknown` on the board.
+  postures. prstatus carries them as its `knownPosture` switch, and
+  `lifecycle.test.sh` holds it to the TOML. `prstatus.Derive` reads a recorded
+  posture it does not know as needs-attention.
 - **A port reads what its script read.** gctk reads bead fields the way jq
   does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and
   `Scrub` strips the control bytes the shell `scrub` strips. A Go type
   assertion where jq would raise an error fails open, so the unreadable case is
-  fixtured: `merge.test.sh` feeds `gctk merge` a required check with a numeric
-  `conclusion` and expects a hold. `Scrub`'s match with the shell helper is
+  fixtured. `Scrub`'s match with the shell helper is
   pinned only by `gcbd_test.go`.
 - **Reads through the supervisor API.** `gcbd.Show` reads through the
   supervisor API, whose bead payload carries no notes and whose cached answer
   can lag a write just made, so a read that verifies a write, or one that needs
   notes, uses `ShowDirect`. A bead that cannot be read comes back nil, and the
   caller refuses to act rather than read it as empty.
-- **Child process groups.** `gitIn` in `internal/cli/lifecycle.go` runs git,
-  and `Run` in `internal/rig/run.go` runs the rig's check commands, each in a
-  process group of its own, out of reach of the order runner's group stop. A
-  SIGTERM or SIGINT that reaches gctk during the call stops the child's group
-  with SIGTERM, and gctk exits 128 plus the signal. A git fetch killed outright
-  leaves a ref lock in the rig checkout that fails every later fetch there, so
-  a stop sends the group SIGTERM before anything harder. gctk's other
-  subprocesses, `gctk merge`'s git calls among them, stay in its own group.
-- **The board's gather loads the shared store.** helm-svc's gather reads every
-  rig's store on a cache miss. A full-row read pulls the heavy text columns out
-  of the Dolt store the city's agents share, and a round trip per epic or
-  convoy made under the board's lock serializes every board request behind one
-  slow gather. `internal/source/beads_test.go` pins which reads take the lite
-  projection and that edges, conversations and pull requests cost no read per row,
-  and `internal/server/server_test.go` pins that concurrent misses share one
-  gather, run outside the board's lock. So a gather change is read for a new
-  per-row call or a heavy column.
-- **A derivation key follows the sling's shapes.** `Facts.Inflight` is keyed by
-  an input convoy's tracked member, which in the common sling shape is the
-  anchor's own bead, so a roll-up over children alone shows live work as
-  stranded (`TestAnchorOwnWorkflowCounts` in `internal/board`). A derivation
-  change is checked against each shape a key takes: the anchor itself, a
-  child, and a review or rework bead.
+- **Child process groups.** `Run` in `internal/rig/run.go` runs the rig's
+  check commands in a process group of its own, out of reach of the order
+  runner's group stop. A SIGTERM or SIGINT that reaches gctk during the call
+  stops the child's group with SIGTERM, and gctk exits 128 plus the signal.
+  gctk's other subprocesses stay in its own group.
 
 ## The helm web app
 
@@ -283,13 +265,6 @@ then checks that `git status --porcelain -- dist` prints nothing.
   `src/rigboard/document.gen.ts` is generated from its Go types by
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which
   fails without `-update` when the file is stale. Nobody writes it by hand.
-- **The contract is a hand-written mirror.** `src/contract.ts` mirrors the Go
-  wire structs of the `/helm` answer by hand, because the board's `/svc/`
-  surface is not in the supervisor's OpenAPI document. No page code reads it.
-  `web/contract_parity_test.go` compares the two in both directions, and
-  `src/contract.fixture.ts` fails `npm run build` when the committed wire
-  sample stops matching the type. `go test ./web -run TestBoardFixture -update`
-  regenerates the sample. Neither check runs in a gate.
 - **Writes carry `X-GC-Request`.** The supervisor proxies helm-svc and refuses
   a mutation without that header, with a 403 that never reaches helm-svc.
   Every write client takes `SVC_WRITE_HEADERS` from `src/svcWrite.ts`, and

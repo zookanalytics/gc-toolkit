@@ -4,22 +4,16 @@
 #
 # THE SPLIT. gc-helm-svc.sh used to build the binary and then exec it. The
 # supervisor allows a proxy_process 5s to answer its health probe
-# (proxyProcessReadyTimeout); a warm build of this module takes ~12.5s and a
-# cold one 2m29s. So the build never finished inside the window, waitReady's
-# stopProcessGroup() killed it along with the start, and the next start began
-# again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
+# (proxyProcessReadyTimeout), and a build of helm-svc that linked Dolt took
+# ~12.5s warm and 2m29s cold. So the build never finished inside the window,
+# waitReady's stopProcessGroup() killed it along with the start, and the next
+# start began again — 2,677 abandoned .helm-svc.build.* staging files in three days, and a
 # restart that could only report "did not become ready before timeout".
 #
 # Building now lives in gc-build.sh (component helm), out of band, driven by the
 # helm-build order. gc-helm-svc.sh execs and nothing else. These tests pin BOTH halves:
 # that the launcher cannot build, and that the builder still does everything the
 # launcher used to do correctly.
-#
-# THE READABILITY GATE. `find -newer` cannot see a binary going
-# stale against its DEPENDENCY: what helm-svc can read is fixed by the beads
-# library it embedded, and the store's schema moves under it on a `bd` upgrade.
-# The gate also asks `helm-svc probe`, spends `ok` only on a passing one, and
-# refuses to rebuild a binary whose library a rebuild would not move.
 #
 # THE SCRATCH BOUNDING (inherited). The build pointed TMPDIR/GOTMPDIR
 # at a shared /var/tmp/gotmp that nothing ever emptied; one post-reboot rebuild
@@ -28,10 +22,10 @@
 # run dirs whose pid is gone and day-old un-owned scratch.
 #
 # These run the REAL scripts — copied into a throwaway rig tree, because they
-# derive the Go module from their own path — with a stub toolchain on GC_GO_BIN,
-# a stub gc on GC_HELM_GC_BIN, stub uname and brew first on PATH, and
-# GC_HELM_GOTMP pointed at scratch under $TMPDIR. No live city, no network, no
-# real /var/tmp/gotmp. Covered:
+# derive the repository root from their own path — with a stub toolchain on
+# GC_GO_BIN, a stub gc on GC_HELM_GC_BIN, and GC_HELM_GOTMP pointed at scratch
+# under $TMPDIR. No live city, no network,
+# no real /var/tmp/gotmp. Covered:
 #
 #   launcher (gc-helm-svc.sh)
 #   (EXEC)        an existing binary is exec'd, with its arguments
@@ -45,26 +39,15 @@
 #   (REBUILD)     rebuilds when a source is newer than the binary
 #   (CURRENT)     up-to-date binary -> no toolchain call, exit 0
 #   (GOMOD)       a go.mod-only change still counts as newer
-#   (DEPMOD)      a change in a local replace-dep (services/gctk) forces a rebuild
-#   (ICU)         on macOS the build's cgo is pointed at Homebrew's keg-only icu4c
-#   (ICUKEEP)     CGO flags already set are kept, with the keg's appended
-#   (NOICU)       a prefix with no icu4c installed under it adds nothing, and says so
-#   (ICUOFF)      off macOS brew is never asked and CGO flags pass through
-#   (ICUTICK)     a tick with nothing to build never asks brew
-#
-#   readability — the second staleness axis
-#   (READABLE)    a current binary that can read the stores reports ok, builds nothing
-#   (SKEW)        sources unchanged + store schema moved -> it REBUILDS
-#   (STUCK)       a rebuild that cannot fix it never writes ok, and exits non-zero
-#   (NOLOOP)      and the next tick does not rebuild the same binary again
-#   (BUMP)        moving the pinned library re-arms the rebuild
-#   (RECOVER)     a store that comes back restores ok and clears the record
-#   (LISTCITY)    the city_path in `gc service list` is enough to probe against
-#   (UNPROBED)    no city to probe against is reported as such, never as ok
-#   (FAILSTATUS)  a failed build still reports failed, not unreadable
+#   (DEPMOD)      a change in services/gctk, which helm-svc imports, forces a rebuild
 #   (FAILKEEP)    a failed build leaves the previous binary untouched, exits 1
 #   (TOOLLESS)    a build owed with no Go toolchain is a failed build, recorded
 #                 as one, and the serving binary is left untouched
+#   (RELEASE)     the build runs the Go release go.mod's go line names, through
+#                 GOTOOLCHAIN, whichever go starts it
+#   (TOOLCHAIN)   a toolchain line in go.mod names the release over the go line
+#   (NORELEASE)   a go.mod that names no release is a failed build, the same
+#                 way, and the toolchain is never started
 #   (ATOMIC)      the binary is published by rename, never built in place
 #   (STAGE)       the failed build's staging file does not survive
 #   (SWEEPSTAGE)  old stranded staging files are reclaimed; fresh ones are not
@@ -92,34 +75,42 @@
 #   (RETRY)       a failed restart is retried on the NEXT run, even though the
 #                 binary is by then current — and stops once it is serving
 #   (HANDBUILT)   a hand-run build's binary is restarted onto by the next tick
-#   (DEADEND)     a build that cannot read the stores is never restarted onto,
-#                 and the record the board reads says so — every other field on
-#                 it reads healthy
-#   (CONDEMNED)   nor is a pending restart carried out onto one, and that
-#                 record says so too
 #
-#   build-status record (what the board's PACK rows read)
+#   build-status record
 #   (STATUS)      a successful build records source_rev == binary_rev, rc 0
 #   (STATUSFAIL)  a FAILED build moves source_rev, keeps the last good
 #                 binary_rev and built_at, and records the non-zero rc — the
 #                 gap between the two revisions IS the signal
-#   (STATUSNOOP)  an up-to-date tick still writes a record; checked_at is the
-#                 only field that can say the build order itself stopped
+#   (STATUSNOOP)  a run with nothing to build still writes a record, with the
+#                 checked_at the check times the next run by
 #   (STATUSDEL)   a deletion-only change rebuilds — `find -newer` is blind to an
 #                 input that no longer exists, and the record must never name a
 #                 revision the binary was not built from
-#   (DEPREV)      a sibling-subtree revision change rebuilds when mtime is blind;
-#                 SOURCE_REV spans every local replace-dep, not just services/helm
+#   (DEPREV)      a services/gctk revision change rebuilds when mtime is blind;
+#                 SOURCE_REV spans every folder helm-svc compiles from, not just
+#                 services/helm
+#   (DEPBUMP)     a committed go.mod and go.sum change, a dependency's version
+#                 moving, rebuilds when mtime is blind
+#   (OTHER)       a commit that touches none of helm-svc's inputs moves no
+#                 revision and rebuilds nothing
 #   (STATUSPEND)  a published-but-not-serving binary is recorded as such
 #   (STATUSTMP)   the record is published by rename, leaving no staging file
-#   (BEHINDMAIN)  a checkout behind origin/main under the helm sources records
-#                 the gap (behind_main) and is NEVER rebuilt for it — report-only
-#   (ONMAIN)      a checkout level with origin/main records no drift
-#   (FETCHFAIL)   a failed origin fetch still advances the fetch cadence marker,
-#                 so an unreachable origin costs one attempt per TTL, not one per
-#                 tick, and the gap is still reported off the last origin ref
-#   (SYMLINK)     a checkout reached through a symlinked path still counts its
-#                 gap and reaches its fetch
+#
+#   the order's check (--due); gc-build.test.sh pins its build cases
+#   (DUESKIP)     a city with no helm service: the run records its pass, so the
+#                 check owes the next run five minutes later, not every pass
+#   (DUEPEND)     a published binary that waits for its restart owes a run,
+#                 timed from the run whose restart failed; once a restart
+#                 succeeds, none is owed
+#   (DUEHAND)     a hand-run build's publish is owed its restart five minutes
+#                 after the build
+#   (DUEROOT)     with the city in its environment and a listing that does not
+#                 name the service, or none that reads, the check reads
+#                 <city>/.gc/services/<name>, and says nothing on stderr
+#   (DUELIST)     the check reads the state root the listing reports, the root
+#                 the deploy publishes to, and not a binary or a record left at
+#                 <city>/.gc/services/<name>
+#   every check case: the check asks gc for nothing but the service listing
 #
 #   static guards
 #   (STATIC)      the toolchain is never re-pointed at the unbounded $GOTMP;
@@ -157,7 +148,7 @@ trap 'rm -rf "$TMP"' EXIT
 #      real service's binary.
 # ---------------------------------------------------------------------------
 unset GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_CITY_RUNTIME_DIR GC_SERVICE_STATE_ROOT
-unset GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_HELM_CITY_PATH GC_HELM_ORIGIN_FETCH_TTL
+unset GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_HELM_CITY_PATH
 unset GC_RIG GC_RIG_ROOT GC_PACK_DIR PACK_DIR GC_HELM_SERVICE_NAME GC_HELM_GC_BIN
 for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT; do
     if [ -n "$(eval "printf '%s' \"\${$_leak:-}\"")" ]; then
@@ -193,30 +184,6 @@ DEAD_PID=$(( $(cat /proc/sys/kernel/pid_max 2>/dev/null || echo 99999) + 7 ))
 # A gc that is not there, so the service listing is unavailable.
 NO_SUCH_GC="$TMP/no-such-gc"
 
-# The host is a fixture too. The builder adds Homebrew's icu4c to cgo only on
-# macOS, so every case runs against a stub uname and a stub brew placed ahead of
-# the real ones on PATH, and sees the same host on any platform. STUB_HOST_OS
-# names the host (Linux when unset), STUB_ICU_PREFIX is what
-# `brew --prefix icu4c` prints (nothing when unset), and STUB_BREW_LOG records
-# every brew call.
-HOST_BIN="$TMP/host-bin"
-mkdir -p "$HOST_BIN"
-cat > "$HOST_BIN/uname" <<'STUB'
-#!/usr/bin/env bash
-echo "${STUB_HOST_OS:-Linux}"
-STUB
-cat > "$HOST_BIN/brew" <<'STUB'
-#!/usr/bin/env bash
-if [ -n "${STUB_BREW_LOG:-}" ]; then printf '%s\n' "$*" >> "$STUB_BREW_LOG"; fi
-if [ "$*" = "--prefix icu4c" ] && [ -n "${STUB_ICU_PREFIX:-}" ]; then
-    printf '%s\n' "$STUB_ICU_PREFIX"
-    exit 0
-fi
-exit 1
-STUB
-chmod +x "$HOST_BIN/uname" "$HOST_BIN/brew"
-export PATH="$HOST_BIN:$PATH"
-
 # Backdate an entry past a sweep threshold. The sweep stats the entry itself, so
 # fill it BEFORE calling this — writing inside afterwards refreshes the
 # directory mtime and un-ages it. GNU and BSD touch both read a UTC ISO-8601
@@ -230,26 +197,20 @@ age_mins() { age_secs "$1" $(( $2 * 60 )); }     # <path> <minutes>
 # --- fixture ------------------------------------------------------------------
 CASE=0
 FAIL_BUILD=""
-fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
+fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG SERVICES
     CASE=$((CASE + 1))
-    # Reset per case so one case's skew cannot leak into the next. CITY empty
-    # means "no city to probe"; HOST_OS empty means the stub uname's Linux.
-    CITY=""; PROBE_FAIL_BUILT=""; PROBE_FAIL_CACHED=""; BEADS_VERSION="v0.0.0-stub"
-    HOST_OS=""; ICU_PREFIX=""; CGO_CPPFLAGS_IN=""; CGO_LDFLAGS_IN=""
     local base="$TMP/case$CASE"
     ROOT="$base/root"; GOTMP="$base/gotmp"; STATE="$base/state"
     STATE_CITY="$base/city"
     RECORD="$base/go-env"; GOBIN="$base/bin/go"
     GCBIN="$base/bin/gc"; GCLOG="$base/gc-calls"; SERVICES="$base/services.json"
-    BREWLOG="$base/brew-calls"
     mkdir -p "$ROOT/assets/scripts" "$ROOT/services/helm/cmd/helm-svc" \
              "$GOTMP" "$STATE" "$base/bin" "$STATE_CITY/.gc/services/helm"
     cp "$SVC" "$ROOT/assets/scripts/gc-helm-svc.sh"
     cp "$BUILD" "$ROOT/assets/scripts/gc-build.sh"
-    # The builder sources its icu4c cgo flags from beside itself.
-    cp "$HERE/icu4c-cgo.sh" "$ROOT/assets/scripts/icu4c-cgo.sh"
     echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/main.go"
-    printf 'module helm\n' > "$ROOT/services/helm/go.mod"
+    printf 'module example.invalid/fixture\n\ngo 1.22.0\n' > "$ROOT/go.mod"
+    printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
     # The REAL `gc service list --json` reports `service_name`, not `name`, and
     # carries `city_path` + a relative `state_root`. An earlier stub here said
     # `name`; the suite passed while the live gate matched nothing, so the order
@@ -258,23 +219,16 @@ fixture() { # -> ROOT GOTMP STATE RECORD GOBIN GCBIN GCLOG BREWLOG SERVICES
     printf '{"city_path":"%s","services":[{"service_name":"helm","state_root":".gc/services/helm"}]}' \
         "$STATE_CITY" > "$SERVICES"
 
-    # Stub toolchain: records the scratch and cgo env it was handed, leaks a
-    # go-link dir into it the way a killed linker does, then fails or writes a
-    # stand-in binary. `go build -o` produces an executable; mktemp staged
-    # $BIN_TMP 0600, so the chmod is what keeps the -x check downstream honest.
+    # Stub toolchain: records the scratch and toolchain env it was handed,
+    # leaks a go-link dir into it the way a killed linker does, then fails or
+    # writes a stand-in binary. `go build -o` produces an executable; mktemp
+    # staged $BIN_TMP 0600, so the chmod is what keeps the -x check downstream
+    # honest.
     cat > "$GOBIN" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-# `go version -m <binary>` is a read, not a build, so it must answer before the
-# build-scratch machinery below: recording it would make every readability check
-# look like a compile.
-if [ "${1:-}" = "version" ] && [ "${2:-}" = "-m" ]; then
-    printf '\tpath\thelm-svc\n\tdep\tgithub.com/steveyegge/beads\t%s\th1:stub=\n' \
-        "${STUB_BEADS_VERSION:-v0.0.0-stub}"
-    exit 0
-fi
-printf 'TMPDIR=%s\nGOTMPDIR=%s\nCGO_CPPFLAGS=%s\nCGO_LDFLAGS=%s\n' "${TMPDIR:-}" "${GOTMPDIR:-}" \
-    "${CGO_CPPFLAGS:-}" "${CGO_LDFLAGS:-}" > "$STUB_RECORD"
+printf 'TMPDIR=%s\nGOTMPDIR=%s\nGOTOOLCHAIN=%s\n' "${TMPDIR:-}" \
+    "${GOTMPDIR:-}" "${GOTOOLCHAIN:-}" > "$STUB_RECORD"
 mkdir -p "$GOTMPDIR/go-link-stub"
 head -c 4096 /dev/zero > "$GOTMPDIR/go-link-stub/obj"
 if [ -n "${STUB_GO_FAIL:-}" ]; then
@@ -290,14 +244,6 @@ done
 printf '%s\n' "$out" >> "$STUB_RECORD.out"
 cat > "$out" <<'BUILT'
 #!/bin/sh
-if [ "$1" = "probe" ]; then
-    if [ -n "${STUB_PROBE_FAIL_BUILT:-}" ]; then
-        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_BUILT" >&2
-        exit 3
-    fi
-    echo "helm-svc probe: bead stores are readable"
-    exit 0
-fi
 echo "helm-svc-stub ran: $*"
 BUILT
 chmod +x "$out"
@@ -328,14 +274,6 @@ cache_binary() { # plant a previously-built binary
     mkdir -p "$STATE/bin"
     cat > "$STATE/bin/helm-svc" <<'CACHED'
 #!/bin/sh
-if [ "$1" = "probe" ]; then
-    if [ -n "${STUB_PROBE_FAIL_CACHED:-}" ]; then
-        echo "helm-svc probe: cannot read the city's bead stores: no rig bead store could be read: rig gc-toolkit: $STUB_PROBE_FAIL_CACHED" >&2
-        exit 3
-    fi
-    echo "helm-svc probe: bead stores are readable"
-    exit 0
-fi
 echo "cached-binary ran: $*"
 CACHED
     chmod +x "$STATE/bin/helm-svc"
@@ -347,27 +285,31 @@ touch_source() { touch "$ROOT/services/helm/cmd/helm-svc/main.go"; }
 # are the whole point of the record, and a fixture with no repo would let every
 # revision assertion pass vacuously against the empty string. Local and never
 # pushed, so the identity here is scaffolding, not provenance. What comes back
-# is the services/helm SUBTREE's tree hash — the identity the builder records,
-# which moves only when something under the module changes.
+# is the identity the builder records: git's hash of the `git ls-tree HEAD`
+# listing of helm-svc's inputs, go.mod, go.sum, services/helm and services/gctk,
+# which moves only when one of them changes.
+identity() { # <dir> -> helm-svc's revision at the dir's HEAD on stdout
+    local listing
+    listing="$(git -C "$1" ls-tree HEAD -- go.mod go.sum services/helm services/gctk 2>/dev/null)" || return 1
+    [ -n "$listing" ] || return 1
+    printf '%s\n' "$listing" | git -C "$1" hash-object --stdin 2>/dev/null
+}
 commit_fixture() { # <dir> -> the new revision on stdout
     git -C "$1" init -q >/dev/null 2>&1 || return 1
     git -C "$1" add -A >/dev/null 2>&1 || return 1
     git -C "$1" -c user.email=fixture@example.invalid -c user.name=fixture \
         -c commit.gpgsign=false commit -q -m "fixture" >/dev/null 2>&1 || return 1
-    git -C "$1/services/helm" rev-parse 'HEAD:./' 2>/dev/null
+    identity "$1"
 }
 
-# Wire a local replace-dependency into the fixture the way services/helm wires
-# the real prstatus core: a sibling services/gctk module reached through a
-# `=> ../gctk` replace in helm's go.mod. The stub toolchain never compiles it;
-# what matters is that the builder resolves the replace and folds the sibling's
-# sources into both its staleness identity and its mtime scan.
+# Give the fixture the services/gctk folder helm-svc compiles from, the way the
+# real board imports gctk's domain packages, prstatus among them. The stub
+# toolchain never compiles it; what matters is that the builder folds the
+# folder's sources into both its staleness identity and its mtime scan.
 add_gctk_dep() {
-    mkdir -p "$ROOT/services/gctk"
-    printf 'module gctk\n\ngo 1.26.5\n'   > "$ROOT/services/gctk/go.mod"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus.go"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/extra.go"
-    printf 'require gctk v0.0.0\n\nreplace gctk => ../gctk\n' >> "$ROOT/services/helm/go.mod"
+    mkdir -p "$ROOT/services/gctk/prstatus"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/prstatus.go"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/extra.go"
 }
 
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
@@ -375,19 +317,21 @@ add_gctk_dep() {
 # cleared case would pass against the wrong value.
 status_field() { jq -r --arg k "$1" 'if has($k) then .[$k] else "" end | tostring' "$STATE/build-status.json" 2>/dev/null; }
 
+# Move the record's checked_at <seconds> into the past, as if its run were that
+# old, which is what the check times the next run by.
+age_record() {
+    local at
+    at="$(jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate')"
+    jq --arg at "$at" '.checked_at = $at' "$STATE/build-status.json" > "$STATE/build-status.json.new" \
+        && mv "$STATE/build-status.json.new" "$STATE/build-status.json"
+}
+
 run_build() { # -> OUT ERR RC
     local err="$TMP/case$CASE/stderr-build"
     set +e
     OUT="$(STUB_RECORD="$RECORD" STUB_GO_FAIL="$FAIL_BUILD" \
            STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" \
            STUB_GC_LIST_FAIL="${LIST_FAIL:-}" STUB_GC_RESTART_FAIL="${RESTART_FAIL:-}" \
-           STUB_PROBE_FAIL_BUILT="${PROBE_FAIL_BUILT:-}" \
-           STUB_PROBE_FAIL_CACHED="${PROBE_FAIL_CACHED:-}" \
-           STUB_BEADS_VERSION="${BEADS_VERSION:-v0.0.0-stub}" \
-           STUB_HOST_OS="${HOST_OS:-}" STUB_ICU_PREFIX="${ICU_PREFIX:-}" \
-           STUB_BREW_LOG="$BREWLOG" \
-           CGO_CPPFLAGS="${CGO_CPPFLAGS_IN:-}" CGO_LDFLAGS="${CGO_LDFLAGS_IN:-}" \
-           GC_HELM_CITY_PATH="${CITY:-}" \
            GC_GO_BIN="$GOBIN" GC_HELM_GOTMP="$GOTMP" GC_HELM_STATE_ROOT="$STATE" \
            GC_HELM_GC_BIN="$GCBIN" \
            bash "$ROOT/assets/scripts/gc-build.sh" helm "$@" 2>"$err")"
@@ -408,8 +352,6 @@ run_svc() { # -> OUT ERR RC
 }
 
 run_dir_of() { sed -n 's/^GOTMPDIR=//p' "$RECORD"; }
-# CGO_CPPFLAGS or CGO_LDFLAGS, as the toolchain saw it.
-cgo_of() { sed -n "s/^$1=//p" "$RECORD"; }
 
 # ==============================================================================
 # LAUNCHER — gc-helm-svc.sh must exec and never build
@@ -507,7 +449,7 @@ has "$OUT" "helm-svc-stub ran:" "(REBUILD) the freshly built binary replaced the
 # --- case: go.mod-only change still counts -------------------------
 fixture
 cache_binary
-touch "$ROOT/services/helm/go.mod"
+touch "$ROOT/go.mod"
 run_build
 eq "$RC" 0 "(GOMOD) exits 0"
 present "$RECORD" "(GOMOD) a go.mod-only change triggers a rebuild"
@@ -524,206 +466,22 @@ has "$OUT" "up to date" "(CURRENT) says so"
 absent "$RECORD" "(CURRENT) the toolchain was never invoked"
 present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch is untouched"
 
-# --- case: a change in a local replace-dep (services/gctk) rebuilds -----------
-# helm-svc embeds services/gctk — the shared prstatus core the PR label writer
-# also derives from — through a `=> ../gctk` replace. A change confined to that
-# sibling touches no file under services/helm, so unless the mtime scan spans the
-# replace-deps the builder reports the binary current while the label path has
-# already moved, and the board and the label diverge again.
+# --- case: a change in services/gctk, which helm-svc imports, rebuilds ---------
+# helm-svc compiles gctk's domain packages, among them the shared prstatus core
+# the PR label writer also derives from. A change confined to services/gctk
+# touches no file under services/helm, so unless the mtime scan spans every
+# folder the binary compiles from, the builder reports the binary current while
+# the label path has already moved, and the board and the label diverge again.
 fixture
 add_gctk_dep
 cache_binary
-touch "$ROOT/services/gctk/prstatus.go"
+touch "$ROOT/services/gctk/prstatus/prstatus.go"
 [ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
     && ok "(DEPMOD) the change is confined to services/gctk — nothing under services/helm is newer" \
     || bad "(DEPMOD) something under services/helm is newer; the case would not isolate the sibling"
 run_build
 eq "$RC" 0 "(DEPMOD) exits 0"
 present "$RECORD" "(DEPMOD) a services/gctk source change forces a helm rebuild"
-
-# --- case: on macOS, cgo is pointed at Homebrew's keg-only icu4c --------------
-# helm-svc links ICU through Dolt's go-icu-regex. Homebrew installs icu4c
-# keg-only, on no default search path, and the order's environment carries no
-# CGO flags, so without this every macOS build stops at 'unicode/regex.h' and no
-# binary is ever published.
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-run_build
-eq "$RC" 0 "(ICU) exits 0"
-eq "$(cgo_of CGO_CPPFLAGS)" "-I$ICU_PREFIX/include" "(ICU) cgo is handed the keg's headers"
-eq "$(cgo_of CGO_LDFLAGS)" "-L$ICU_PREFIX/lib" "(ICU) and its libraries"
-eq "$(cat "$BREWLOG" 2>/dev/null)" "--prefix icu4c" "(ICU) brew is asked for icu4c's prefix, once"
-has "$OUT" "icu4c at $ICU_PREFIX" "(ICU) the log names the icu4c the build used"
-
-# --- case: CGO flags already set are kept -------------------------------------
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-CGO_CPPFLAGS_IN="-DFROM_ENV"
-CGO_LDFLAGS_IN="-L/from/env"
-run_build
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV -I$ICU_PREFIX/include" \
-   "(ICUKEEP) CGO_CPPFLAGS keeps its value, with the keg's headers after it"
-eq "$(cgo_of CGO_LDFLAGS)" "-L/from/env -L$ICU_PREFIX/lib" \
-   "(ICUKEEP) and CGO_LDFLAGS keeps its value, with the keg's libraries after it"
-
-# --- case: brew names a prefix, but icu4c is not installed under it -----------
-# brew prints a formula's prefix whether or not the formula is installed, so the
-# prefix alone proves nothing; an include/ under it is what does.
-fixture
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-run_build
-eq "$(cgo_of CGO_CPPFLAGS)" "" "(NOICU) no include path is added for a keg that is not there"
-eq "$(cgo_of CGO_LDFLAGS)" "" "(NOICU) nor a library path"
-has "$ERR" "brew install icu4c" "(NOICU) the log names the missing prerequisite"
-
-# --- case: off macOS nothing is added, and brew is never asked ----------------
-# The system libicu is on the default search path there, so a Homebrew icu4c on
-# the host must not displace it.
-fixture
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-CGO_CPPFLAGS_IN="-DFROM_ENV"
-run_build
-eq "$RC" 0 "(ICUOFF) exits 0"
-present "$RECORD" "(ICUOFF) setup: the build ran"
-eq "$(cgo_of CGO_CPPFLAGS)" "-DFROM_ENV" "(ICUOFF) CGO_CPPFLAGS passes through untouched"
-eq "$(cgo_of CGO_LDFLAGS)" "" "(ICUOFF) and no library path is added"
-absent "$BREWLOG" "(ICUOFF) brew is never asked"
-
-# --- case: a tick with nothing to build never asks brew -----------------------
-fixture
-cache_binary                                        # newer than main.go -> current
-HOST_OS=Darwin
-ICU_PREFIX="$TMP/case$CASE/opt/icu4c"
-mkdir -p "$ICU_PREFIX/include/unicode" "$ICU_PREFIX/lib"
-run_build
-eq "$RC" 0 "(ICUTICK) exits 0"
-absent "$RECORD" "(ICUTICK) setup: the binary is current, so nothing builds"
-absent "$BREWLOG" "(ICUTICK) and brew is never asked"
-
-# ==============================================================================
-# READABILITY — the second staleness axis
-# ==============================================================================
-SKEW_MSG="schema version mismatch: database is at v66, binary knows up to v65 (1 migration ahead)"
-
-status_kind() { cut -d' ' -f1 "$STATE/build-status" 2>/dev/null || echo "<no build-status>"; }
-build_count() { grep -c '^' "$RECORD.out" 2>/dev/null || echo 0; }
-
-# --- case: a current binary that CAN read reports ok and builds nothing -------
-fixture
-cache_binary
-CITY="$STATE_CITY"
-run_build
-eq "$RC" 0 "(READABLE) exits 0"
-has "$OUT" "up to date" "(READABLE) still the up-to-date path"
-has "$OUT" "can read the city" "(READABLE) and says the readability was checked"
-absent "$RECORD" "(READABLE) a passing probe builds nothing"
-eq "$(status_kind)" "ok" "(READABLE) build-status is ok"
-
-# --- case: sources unchanged, store schema moved -> REBUILD -------------------
-fixture
-cache_binary                                        # newer than main.go -> current
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-eq "$RC" 0 "(SKEW) exits 0 after rebuilding"
-has "$OUT" "cannot read the city's bead stores" "(SKEW) says what the mtime check could not see"
-present "$RECORD" "(SKEW) the toolchain WAS invoked — sources unchanged, store moved"
-eq "$(status_kind)" "ok" "(SKEW) the rebuilt binary reads, so ok is earned"
-absent "$STATE/probe-failed" "(SKEW) and nothing is latched"
-
-# --- case: a rebuild that cannot fix it must not report ok --------------------
-# The pin, not the sources, is what is stale, so the binary that comes out of
-# the build is as blind as the one that went in.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-run_build
-eq "$RC" 1 "(STUCK) exits non-zero — the third green light goes red"
-eq "$(build_count)" "1" "(STUCK) it did try the rebuild"
-eq "$(status_kind)" "unreadable" "(STUCK) build-status CANNOT read ok while the board fails"
-has "$(cat "$STATE/build-status")" "schema version mismatch" "(STUCK) and carries the reason"
-has "$ERR" "CANNOT READ" "(STUCK) reported on stderr too"
-present "$STATE/probe-failed" "(STUCK) what was tried is recorded"
-
-# --- case: the next tick does not rebuild the same binary again ---------------
-# Same case, so the state the previous run left is the input to this one.
-run_build
-eq "$RC" 1 "(NOLOOP) still a failure"
-eq "$(build_count)" "1" "(NOLOOP) no second build — a rebuild loop is not a remedy"
-eq "$(status_kind)" "unreadable" "(NOLOOP) and it still refuses to say ok"
-has "$ERR" "go.mod" "(NOLOOP) it names the remedy it cannot perform itself"
-
-# --- case: a dependency bump re-arms the rebuild ------------------------------
-# The latch is keyed on the LIBRARY that failed, not on "we already tried". The
-# skew is left in place to isolate that one variable.
-BEADS_VERSION="v1.2.2-0.20260825072917-62d211937bd3"
-run_build
-eq "$RC" 1 "(BUMP) the skew is untouched, so it still fails"
-eq "$(build_count)" "2" "(BUMP) but a different library version is worth another build"
-eq "$(status_kind)" "unreadable" "(BUMP) and it says so"
-eq "$(cat "$STATE/probe-failed" 2>/dev/null || true)" "$BEADS_VERSION" \
-   "(BUMP) the latch now names what was tried"
-
-# --- case: recovery without a rebuild ----------------------------------------
-# The store can also come back on its own (the rig migrates back, or the skew
-# was a half-finished upgrade). The up-to-date path must notice.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-eq "$(status_kind)" "ok" "(RECOVER) setup: rebuilt into a readable binary"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-run_build
-eq "$(status_kind)" "unreadable" "(RECOVER) the store moves again and it says so"
-PROBE_FAIL_BUILT=""
-run_build
-eq "$RC" 0 "(RECOVER) exits 0 once it can read again"
-eq "$(status_kind)" "ok" "(RECOVER) ok returns"
-absent "$STATE/probe-failed" "(RECOVER) and the latch is gone"
-
-# --- case: no city to probe against is not a green light ----------------------
-# A run that cannot ask the question must not answer it with `ok`.
-fixture
-cache_binary
-LIST_FAIL=1
-run_build
-LIST_FAIL=""
-eq "$RC" 0 "(UNPROBED) a hand run still exits 0"
-has "$OUT" "unprobed" "(UNPROBED) and says the readability was not checked"
-eq "$(status_kind)" "unprobed" "(UNPROBED) build-status says so rather than ok"
-absent "$RECORD" "(UNPROBED) nothing is built on a question it cannot ask"
-
-# --- case: the city comes from the service listing when the env has none ------
-# A run whose environment names no city, such as a hand run from a shell outside
-# it, still probes against the city the listing reports.
-fixture
-cache_binary
-PROBE_FAIL_CACHED="$SKEW_MSG"
-run_build
-has "$OUT" "cannot read the city's bead stores" \
-    "(LISTCITY) the listing's city_path is enough to probe against"
-present "$RECORD" "(LISTCITY) so the gate still fires with no city in the environment"
-eq "$(status_kind)" "ok" "(LISTCITY) and reports on what it rebuilt"
-
-# --- case: a failed build's status is still the build failure -----------------
-fixture
-cache_binary
-touch_source
-CITY="$STATE_CITY"
-FAIL_BUILD=1
-run_build
-FAIL_BUILD=""
-eq "$RC" 1 "(FAILSTATUS) exits 1"
-eq "$(status_kind)" "failed" "(FAILSTATUS) a build that never produced a binary reports failed, not unreadable"
 
 # --- case: build fails -> previous binary untouched, non-zero -----------------
 fixture
@@ -742,8 +500,8 @@ eq "$(find "$STATE/bin" -maxdepth 1 -name '.helm-svc.build.*' | wc -l | tr -d ' 
 
 # --- case: a build owed with no Go toolchain is a failed build ----------------
 # Nothing can perform the build, so it is recorded the way any failed build is:
-# build-status says failed, the record the board reads carries the non-zero rc,
-# and the binary already serving is left exactly as it was.
+# the record carries the non-zero rc, and the binary already serving is left
+# exactly as it was.
 fixture
 cache_binary
 touch_source
@@ -752,10 +510,44 @@ GOBIN="$TMP/case$CASE/no-go"
 run_build --deploy
 eq "$RC" 1 "(TOOLLESS) a build owed with no Go toolchain fails, under --deploy too"
 has "$ERR" "no Go toolchain" "(TOOLLESS) and says what is missing"
-eq "$(status_kind)" "failed" "(TOOLLESS) build-status reports the failed build"
-eq "$(status_field last_build_rc)" "1" "(TOOLLESS) and so does the record the board reads"
+eq "$(status_field last_build_rc)" "1" "(TOOLLESS) the record reports the failed build"
 eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(TOOLLESS) the serving binary is left exactly as it was"
 hasnt "$(cat "$GCLOG" 2>/dev/null || true)" "service restart" "(TOOLLESS) and nothing is restarted"
+
+# --- case: the build runs the Go release go.mod names --------------------------
+# GOTOOLCHAIN naming a release makes whichever go starts the build run that
+# release. The fixture's go.mod names go 1.22.0 on its go line.
+fixture
+run_build
+eq "$RC" 0 "(RELEASE) the build exits 0"
+eq "$(sed -n 's/^GOTOOLCHAIN=//p' "$RECORD")" "go1.22.0" \
+   "(RELEASE) the toolchain is handed GOTOOLCHAIN naming the release on go.mod's go line"
+has "$OUT" "with go1.22.0" "(RELEASE) and the build says which release it runs"
+
+# --- case: a toolchain line names the release over the go line ------------------
+# CI's setup-go reads go.mod's toolchain line before its go line, so the build
+# takes the same one.
+fixture
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\ntoolchain go1.22.5\n' > "$ROOT/go.mod"
+run_build
+eq "$RC" 0 "(TOOLCHAIN) the build exits 0"
+eq "$(sed -n 's/^GOTOOLCHAIN=//p' "$RECORD")" "go1.22.5" \
+   "(TOOLCHAIN) the toolchain is handed the release on go.mod's toolchain line"
+
+# --- case: a go.mod that names no release is a failed build ---------------------
+# A go line that names a language version, not a release, leaves the build no
+# release to run, so it fails the way a build with no toolchain does.
+fixture
+cache_binary
+touch_source
+SUM_BEFORE="$(cksum < "$STATE/bin/helm-svc")"
+printf 'module example.invalid/fixture\n\ngo 1.22\n' > "$ROOT/go.mod"
+run_build --deploy
+eq "$RC" 1 "(NORELEASE) a build owed with no release named in go.mod fails, under --deploy too"
+has "$ERR" "names no Go release" "(NORELEASE) and says what is missing"
+eq "$(status_field last_build_rc)" "1" "(NORELEASE) the record reports the failed build"
+absent "$RECORD" "(NORELEASE) the toolchain is never started"
+eq "$(cksum < "$STATE/bin/helm-svc")" "$SUM_BEFORE" "(NORELEASE) the serving binary is left exactly as it was"
 
 # --- case: the 2,677 stranded staging files are reclaimed ---------------------
 # One per killed start, laid down by the inline-build era between 08-19 and
@@ -991,61 +783,13 @@ eq "$RC" 0 "(HANDBUILT) the next deploy tick exits 0"
 absent "$RECORD" "(HANDBUILT) with nothing left to build"
 has "$(cat "$GCLOG")" "service restart helm" "(HANDBUILT) and serves what the hand build left"
 
-# --- case: a deploy never restarts onto a binary it just condemned ------------
-# The gate exists to keep an unreadable binary out of service, so reporting one
-# must not be the step that puts it there. The restart stub is set to fail, so a
-# run that reached it could not go on to report the readability failure instead.
-fixture
-cache_binary
-touch_source
-CITY="$STATE_CITY"
-PROBE_FAIL_BUILT="$SKEW_MSG"
-RESTART_FAIL=1
-run_build --deploy
-RESTART_FAIL=""
-eq "$RC" 1 "(DEADEND) exits non-zero"
-eq "$(status_kind)" "unreadable" "(DEADEND) build-status says why"
-present "$RECORD" "(DEADEND) the build did happen"
-has "$ERR" "CANNOT READ" "(DEADEND) and the failure it reports is the unreadable one"
-hasnt "$(cat "$GCLOG")" "service restart" "(DEADEND) the service was not restarted onto it"
-absent "$STATE/restart-pending" "(DEADEND) and no later run is told to finish that restart"
-# The one-line file and the JSON record describe the same binary, and only the
-# JSON one reaches the board. Every other field here reads healthy — the build
-# exited 0, the revisions match, nothing is pending — so probe_status is the
-# only thing standing between a condemned binary and a NORMAL PACK row.
-eq "$(status_field probe_status)" "unreadable" "(DEADEND) the record the board reads says so too"
-has "$(status_field probe_detail)" "schema version mismatch" "(DEADEND) and carries the probe's reason"
-eq "$(status_field last_build_rc)" "0" "(DEADEND) the build itself did succeed — rc cannot carry this"
-eq "$(status_field source_rev)" "$(status_field binary_rev)" "(DEADEND) nor can the revision gap: they match"
-eq "$(status_field restart_pending)" "false" "(DEADEND) nor restart_pending"
-
-# --- case: nor is a restart the last run left pending -------------------------
-# The marker outlives the run that wrote it, and the up-to-date branch is the
-# only one a later run can reach. So the probe has to be asked there first, or
-# the retry serves what the probe would have condemned.
-fixture
-cache_binary
-CITY="$STATE_CITY"
-PROBE_FAIL_CACHED="$SKEW_MSG"
-printf '%s\n' "$BEADS_VERSION" > "$STATE/probe-failed"   # already tried: no rebuild left
-: > "$STATE/restart-pending"
-run_build --deploy
-eq "$RC" 1 "(CONDEMNED) exits non-zero"
-eq "$(status_kind)" "unreadable" "(CONDEMNED) build-status says why"
-absent "$RECORD" "(CONDEMNED) the latch means nothing is rebuilt"
-hasnt "$(cat "$GCLOG")" "service restart" "(CONDEMNED) and the pending restart is not run onto it"
-present "$STATE/restart-pending" "(CONDEMNED) the marker is kept for a binary that can serve"
-eq "$(status_field probe_status)" "unreadable" "(CONDEMNED) the board's record says the binary cannot read"
-has "$(status_field probe_detail)" "schema version mismatch" "(CONDEMNED) and carries the probe's reason"
-
 # ==============================================================================
-# BUILD-STATUS RECORD — the seam the board's PACK rows read
+# BUILD-STATUS RECORD — what the component serves against what the sources say
 # ==============================================================================
 #
 # Nothing in the running system builds this binary, so a helm-svc older than
 # services/helm serves a stale dashboard in silence. This record is the only
-# thing that can say so, and it is read by services/helm itself — which means a
-# record that lies is a board that lies.
+# thing that can say so, so a record that lies hides a stale board.
 
 # --- case: a successful build records what it built ---------------------------
 fixture
@@ -1061,8 +805,6 @@ eq "$(status_field source_rev)" "$REV_A" "(STATUS) source_rev is the revision th
 eq "$(status_field binary_rev)" "$REV_A" "(STATUS) a successful build makes binary_rev match it"
 eq "$(status_field restart_pending)" "true" "(STATUS) a hand build publishes without restarting, and says so"
 [ -n "$(status_field built_at)" ] && ok "(STATUS) built_at is stamped" || bad "(STATUS) built_at is empty"
-eq "$(status_field probe_status)" "ok" "(STATUS) the probe passed, and the record says which binary it passed for"
-eq "$(status_field probe_detail)" "" "(STATUS) with no reason to carry"
 [ -n "$(status_field checked_at)" ] && ok "(STATUS) checked_at is stamped" || bad "(STATUS) checked_at is empty"
 
 # --- case: a failed build keeps the last good binary in the record ------------
@@ -1085,9 +827,10 @@ eq "$(status_field source_rev)" "$REV_B" "(STATUSFAIL) source_rev follows the tr
 eq "$(status_field binary_rev)" "$REV_A" "(STATUSFAIL) binary_rev stays on what is still serving"
 eq "$(status_field built_at)" "$BUILT_AT_A" "(STATUSFAIL) and so does built_at"
 
-# --- case: a tick with nothing to do still reports ----------------------------
-# checked_at is the only field a quiet tick moves, so it is the only thing that
-# can distinguish a healthy no-op from a build order that stopped running.
+# --- case: a run with nothing to build still reports --------------------------
+# checked_at is the only field such a run moves, and it is what the check times
+# the next run by: a run that left something owed, a failed restart, comes back
+# five minutes after its own checked_at.
 fixture
 REV_C="$(commit_fixture "$ROOT" || true)"
 run_build
@@ -1100,15 +843,15 @@ absent "$RECORD" "(STATUSNOOP) and builds nothing"
 eq "$(status_field last_build_rc)" "0" "(STATUSNOOP) it still reports success"
 eq "$(status_field binary_rev)" "$REV_C" "(STATUSNOOP) binary_rev still names the revision the binary was built from"
 [ "$(status_field checked_at)" != "$CHECKED_1" ] \
-    && ok "(STATUSNOOP) checked_at advanced — the build order is demonstrably alive" \
-    || bad "(STATUSNOOP) checked_at did not move; a stopped build order would look healthy"
+    && ok "(STATUSNOOP) checked_at advanced to the run that wrote it" \
+    || bad "(STATUSNOOP) checked_at did not move; the check would time the next run by an older one"
 
 # --- case: a deletion-only change still rebuilds ------------------------------
 # `find -newer` can only test files that still exist. Delete a source and
 # nothing remaining has to be newer than the binary, so the mtime test alone
 # takes the no-op path and records the new revision for a binary built from the
-# old one — the board's PACK row then reads "current" exactly when the cadence
-# is serving the previous binary.
+# old one — the record then reads current exactly when the cadence is serving
+# the previous binary.
 fixture
 echo 'package main' > "$ROOT/services/helm/cmd/helm-svc/doomed.go"
 REV_D="$(commit_fixture "$ROOT" || true)"
@@ -1131,32 +874,76 @@ eq "$RC" 0 "(STATUSDEL) the next tick exits 0"
 present "$RECORD" "(STATUSDEL) the deleted input forces a rebuild"
 eq "$(status_field binary_rev)" "$REV_E" "(STATUSDEL) so binary_rev names a revision the binary was really built from"
 
-# --- case: a sibling-subtree revision change rebuilds when mtime is blind -----
+# --- case: a services/gctk revision change rebuilds when mtime is blind -------
 # The revision identity catches what `find -newer` cannot see — a deletion. It
-# must span the replace-deps too: a file removed from services/gctk leaves
-# nothing newer than the binary, so only a SOURCE_REV that covers the sibling's
-# subtree forces the rebuild. Without it the record names a revision the binary
-# was never built from, exactly the STATUSDEL failure but one module over.
+# must span every folder the binary compiles from: a file removed from
+# services/gctk leaves nothing newer than the binary, so only a SOURCE_REV that
+# covers services/gctk forces the rebuild. Without it the record names a
+# revision the binary was never built from, exactly the STATUSDEL failure but
+# one folder over.
 fixture
 add_gctk_dep
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-GCTK_REV1="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+GCTK_REV1="$(commit_fixture "$ROOT" || true)"
 run_build
 eq "$RC" 0 "(DEPREV) the first build exits 0"
-has "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev spans the replaced sibling's subtree"
+eq "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev is the revision over every folder helm-svc compiles from"
 rm -f "$RECORD"
-git -C "$ROOT" rm -q "services/gctk/extra.go" >/dev/null 2>&1 || true
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-GCTK_REV2="$(git -C "$ROOT/services/gctk" rev-parse 'HEAD:./' 2>/dev/null || true)"
+git -C "$ROOT" rm -q "services/gctk/prstatus/extra.go" >/dev/null 2>&1 || true
+GCTK_REV2="$(commit_fixture "$ROOT" || true)"
 [ -n "$GCTK_REV2" ] && [ "$GCTK_REV2" != "$GCTK_REV1" ] \
-    && ok "(DEPREV) the sibling deletion advanced its subtree" \
-    || bad "(DEPREV) the sibling subtree did not advance; the case cannot reach the blind spot"
-[ -z "$(find "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPREV) the services/gctk deletion advanced the revision" \
+    || bad "(DEPREV) the revision did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
     && ok "(DEPREV) the deletion leaves nothing newer — the mtime test is blind here" \
     || bad "(DEPREV) something is newer than the binary; the case would not reach the revision path"
 run_build
 eq "$RC" 0 "(DEPREV) the next tick exits 0"
-present "$RECORD" "(DEPREV) a sibling-subtree revision change forces a rebuild"
+present "$RECORD" "(DEPREV) a services/gctk revision change forces a rebuild"
+eq "$(status_field binary_rev)" "$GCTK_REV2" "(DEPREV) and binary_rev names the revision it was built from"
+
+# --- case: a dependency's version moving rebuilds when mtime is blind ---------
+# A bump rewrites go.mod and go.sum, which pin every module helm-svc compiles.
+# Their dates are put back behind the binary, so only the revision sees it.
+fixture
+add_gctk_dep
+BUMP_REV1="$(commit_fixture "$ROOT" || true)"
+run_build
+eq "$RC" 0 "(DEPBUMP) the first build exits 0"
+rm -f "$RECORD"
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
+printf 'example.invalid/dep v1.0.1 h1:two=\n' > "$ROOT/go.sum"
+BUMP_REV2="$(commit_fixture "$ROOT" || true)"
+age_mins "$ROOT/go.mod" 60
+age_mins "$ROOT/go.sum" 60
+[ -n "$BUMP_REV2" ] && [ "$BUMP_REV2" != "$BUMP_REV1" ] \
+    && ok "(DEPBUMP) the bump advanced the revision" \
+    || bad "(DEPBUMP) the revision did not advance; the case cannot reach the blind spot"
+[ -z "$(find "$ROOT/go.mod" "$ROOT/go.sum" "$ROOT/services/helm" "$ROOT/services/gctk" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
+    && ok "(DEPBUMP) the bump leaves nothing newer — the mtime test is blind here" \
+    || bad "(DEPBUMP) something is newer than the binary; the case would not reach the revision path"
+run_build
+eq "$RC" 0 "(DEPBUMP) the next tick exits 0"
+present "$RECORD" "(DEPBUMP) a go.mod and go.sum change forces a rebuild"
+eq "$(status_field binary_rev)" "$BUMP_REV2" "(DEPBUMP) and binary_rev names the bumped revision"
+
+# --- case: a commit that touches none of helm-svc's inputs --------------------
+# The revision spans helm-svc's inputs and nothing else, so a merge to main that
+# touches none of them neither rebuilds the binary nor restarts the service.
+fixture
+add_gctk_dep
+mkdir -p "$ROOT/docs"
+echo 'notes' > "$ROOT/docs/notes.md"
+OTHER_REV1="$(commit_fixture "$ROOT" || true)"
+run_build
+eq "$RC" 0 "(OTHER) the first build exits 0"
+rm -f "$RECORD"
+echo 'more notes' >> "$ROOT/docs/notes.md"
+OTHER_REV2="$(commit_fixture "$ROOT" || true)"
+eq "$OTHER_REV2" "$OTHER_REV1" "(OTHER) a commit outside helm-svc's inputs leaves its revision where it was"
+run_build
+eq "$RC" 0 "(OTHER) the next tick exits 0"
+absent "$RECORD" "(OTHER) and builds nothing"
+has "$OUT" "up to date" "(OTHER) the binary is current"
 
 # --- case: published but not serving -----------------------------------------
 fixture
@@ -1173,8 +960,8 @@ eq "$RC" 0 "(STATUSPEND) the retry tick exits 0"
 eq "$(status_field restart_pending)" "false" "(STATUSPEND) and the record clears once it is serving"
 
 # --- case: the record is published atomically ---------------------------------
-# A reader polls this file; catching it half-written would be a board that
-# reports a component it cannot parse.
+# A reader polls this file; catching it half-written would hand that reader a
+# record it cannot parse.
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
 run_build
@@ -1187,120 +974,154 @@ grep -q 'mv -f "$tmp" "$STATUS"' "$BUILD" \
     && ok "(STATUSTMP) the record is published by rename, never written in place" \
     || bad "(STATUSTMP) the record is no longer published by rename"
 
-# --- case: a checkout behind origin/main is REPORTED, never rebuilt for it ----
-# The board read "helm: ok" while the served binary was three PRs behind main:
-# every staleness axis above keys on the LOCAL checkout, so a checkout parked
-# off-main keeps its binary current with THAT branch and reports a clean row.
-# behind_main is the axis that sees the gap against main — and it must NOT feed
-# the rebuild decision, because a checkout may be off-main on purpose and the
-# SOURCE_REV subtree-hash identity is what decides a build.
-fixture
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-# One more helm-source commit, parked on origin/main only; HEAD stays at A, so
-# HEAD is one helm-source commit behind origin/main.
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-# reconcile-rig-checkouts keeps origin fresh; pin the fetch marker so the case
-# reuses it (the common path) and never reaches the network.
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(BEHINDMAIN) the first build exits 0"
-BEHIND1="$(status_field behind_main)"
-[ "${BEHIND1:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(BEHINDMAIN) the record counts the checkout as behind origin/main" \
-    || bad "(BEHINDMAIN) behind_main is '$BEHIND1', want >= 1"
-# Now current with its own sources: being behind main must not force a rebuild.
-rm -f "$RECORD" "$RECORD.out"
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(BEHINDMAIN) the next tick exits 0"
-absent "$RECORD" "(BEHINDMAIN) behind-main alone never rebuilds — the subtree-hash identity still decides"
-has "$OUT" "up to date" "(BEHINDMAIN) the binary is current with its own sources"
-BEHIND2="$(status_field behind_main)"
-[ "${BEHIND2:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(BEHINDMAIN) the drift is still recorded on the no-op tick" \
-    || bad "(BEHINDMAIN) behind_main is '$BEHIND2' on the no-op tick, want >= 1"
+# ==============================================================================
+# THE ORDER'S CHECK (--due) — whether the helm-build order runs this pass
+# ==============================================================================
 
-# --- case: a checkout level with origin/main records no drift -----------------
-fixture
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-date +%s > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(ONMAIN) exits 0"
-eq "$(status_field behind_main)" "0" "(ONMAIN) a checkout level with origin/main records no drift"
+# The check writes nothing and restarts nothing, so the one gc call it may make
+# is the service listing.
+listed_only() { # <label> — every gc call since the case emptied the log listed services
+    if grep -qvx 'service list --json' "$GCLOG"; then
+        bad "$1 (the check called gc: $(tr '\n' ';' < "$GCLOG"))"
+    else
+        ok "$1"
+    fi
+}
 
-# --- case: a FAILED origin fetch still advances the fetch cadence -------------
-# The behind_main fetch is bounded to one attempt per GC_HELM_ORIGIN_FETCH_TTL so
-# a 5-minute build tick does not fetch every time. The marker that bounds it used
-# to advance only after a SUCCESSFUL fetch, so an unreachable or unauthenticated
-# origin left it absent and every later tick re-attempted the fetch — the
-# report-only check spending network on every tick instead of degrading quietly
-# until the TTL expired. The marker must advance on the ATTEMPT.
+# --- case: a city with no helm service is owed a run every five minutes -------
+# The binary never appears in such a city, so a run stays owed. The run's record
+# is what keeps the check from owing one on every pass.
 fixture
-commit_fixture "$ROOT" >/dev/null 2>&1 || true
-# Behind main under the helm sources, so the block runs and reaches the fetch.
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-# The fixture configures no `origin` remote, so the fetch this tick attempts
-# FAILS. Clear the marker so the cadence gate is open and the tick attempts it.
-rm -f "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(FETCHFAIL) a failed origin fetch does not fail the build"
-present "$STATE/origin-fetch-at" \
-    "(FETCHFAIL) a failed fetch still records the attempt, so the cadence advances"
-BEHIND_FF="$(status_field behind_main)"
-[ "${BEHIND_FF:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(FETCHFAIL) the drift is still reported off the last origin ref despite the failed fetch" \
-    || bad "(FETCHFAIL) behind_main is '$BEHIND_FF' after a failed fetch, want >= 1"
-# The next tick within the TTL must SKIP the fetch. Hold the marker fresh but a
-# few seconds in the past: a re-fetch would restamp it to the current second, so
-# an unchanged value proves the tick did not re-attempt before the TTL expired.
-SENTINEL="$(( $(date +%s) - 5 ))"
-printf '%s\n' "$SENTINEL" > "$STATE/origin-fetch-at"
-run_build
-eq "$RC" 0 "(FETCHFAIL) the next tick exits 0"
-eq "$(cat "$STATE/origin-fetch-at" 2>/dev/null)" "$SENTINEL" \
-    "(FETCHFAIL) a fresh marker keeps the next tick from re-fetching before the TTL"
+REV_SKIP="$(commit_fixture "$ROOT" || true)"
+printf '{"city_path":"%s","services":[{"service_name":"something-else","state_root":".gc/services/other"}]}' \
+    "$STATE_CITY" > "$SERVICES"
+run_build --deploy
+eq "$RC" 0 "(DUESKIP) the run exits 0, with nothing to deploy"
+eq "$(status_field source_rev)" "$REV_SKIP" "(DUESKIP) and records the revision it saw"
+absent "$STATE/bin/helm-svc" "(DUESKIP) and publishes nothing"
+: > "$GCLOG"
+run_build --due
+eq "$RC" 1 "(DUESKIP) the next pass owes no run"
+eq "$ERR" "" "(DUESKIP) and says nothing on stderr"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUESKIP) five minutes after the run, the next is due"
+listed_only "(DUESKIP) and the check asked gc for nothing but the service listing"
 
-# --- case: a checkout reached through a symlinked path still counts its gap ----
-# The builder derives its module paths with logical `pwd`, and git answers the
-# repo root with symlinks resolved. Matched as strings, the two spellings
-# disagreed whenever the checkout was reached through a symlink: every helm path
-# dropped out, the block skipped its fetch, and behind_main read 0 for a
-# checkout that was behind. Run the build through a link to the fixture root.
+# --- case: a restart that failed is owed again five minutes later -------------
 fixture
 commit_fixture "$ROOT" >/dev/null 2>&1 || true
-A_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
-printf '// upstream helm change\n' >> "$ROOT/services/helm/cmd/helm-svc/main.go"
-git -C "$ROOT" add -A >/dev/null 2>&1
-git -C "$ROOT" -c user.email=fixture@example.invalid -c user.name=fixture \
-    -c commit.gpgsign=false commit -q -m "upstream helm change" >/dev/null 2>&1
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset --hard "$A_COMMIT" >/dev/null 2>&1
-LINKED="$TMP/case$CASE/linked-root"
-ln -s "$ROOT" "$LINKED"
-rm -f "$STATE/origin-fetch-at"
-REAL_ROOT="$ROOT"; ROOT="$LINKED"
+RESTART_FAIL=1
+run_build --deploy
+RESTART_FAIL=""
+eq "$RC" 1 "(DUEPEND) the run's restart fails"
+present "$STATE/restart-pending" "(DUEPEND) and leaves the marker"
+: > "$GCLOG"
+run_build --due
+eq "$RC" 1 "(DUEPEND) the next pass does not try the restart again"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUEPEND) five minutes after the failed run, the restart is owed"
+has "$OUT" "has not restarted" "(DUEPEND) and the check names the restart as what is owed"
+listed_only "(DUEPEND) the check asked gc for nothing but the service listing"
+run_build --deploy
+eq "$RC" 0 "(DUEPEND) the owed run restarts the service"
+absent "$STATE/restart-pending" "(DUEPEND) and clears the marker"
+age_record 3600
+run_build --due
+eq "$RC" 1 "(DUEPEND) once a restart succeeds, no run is owed, however long ago the last was"
+
+# --- case: a hand-run build is restarted onto five minutes after it -----------
+fixture
+commit_fixture "$ROOT" >/dev/null 2>&1 || true
 run_build
-ROOT="$REAL_ROOT"
-eq "$RC" 0 "(SYMLINK) a build run through a symlinked checkout exits 0"
-BEHIND_SL="$(status_field behind_main)"
-[ "${BEHIND_SL:-0}" -ge 1 ] 2>/dev/null \
-    && ok "(SYMLINK) the checkout is still counted as behind origin/main" \
-    || bad "(SYMLINK) behind_main is '$BEHIND_SL' through a symlinked checkout, want >= 1"
-present "$STATE/origin-fetch-at" \
-    "(SYMLINK) the block reaches its fetch, so the cadence marker is written"
+eq "$RC" 0 "(DUEHAND) a hand-run build exits 0"
+present "$STATE/restart-pending" "(DUEHAND) and leaves its publish for the order to restart onto"
+run_build --due
+eq "$RC" 1 "(DUEHAND) the check does not restart onto it at once"
+age_record 360
+run_build --due
+eq "$RC" 0 "(DUEHAND) five minutes after the build, the restart is owed"
+
+# --- case: a listing that does not name the service ---------------------------
+# The city in the environment, no override, and a listing with no entry for the
+# service, under the sacrificial name: the check reads Gas City's default root
+# for the service, as a deploy would. A listing that does not read lands on the
+# same root. The record there is from a run ten minutes ago, so the run a missing
+# binary owes is due.
+fixture
+REV_ROOT="$(commit_fixture "$ROOT" || true)"
+CITY_STATE="$STATE_CITY/.gc/services/$SAFE_NAME"
+mkdir -p "$CITY_STATE/bin"
+printf '#!/bin/sh\n' > "$CITY_STATE/bin/helm-svc"
+chmod +x "$CITY_STATE/bin/helm-svc"
+RAN_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 600 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_ROOT" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$CITY_STATE/build-status.json"
+due_in_city() { # -> OUT ERR RC
+    local err="$TMP/case$CASE/stderr-due"
+    set +e
+    OUT="$(GC_CITY_PATH="$STATE_CITY" GC_HELM_SERVICE_NAME="$SAFE_NAME" GC_HELM_GC_BIN="$GCBIN" \
+           STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$SERVICES" STUB_GC_LIST_FAIL="${LIST_FAIL:-}" \
+           bash "$ROOT/assets/scripts/gc-build.sh" helm --due 2>"$err")"
+    RC=$?
+    set -e
+    ERR="$(cat "$err")"
+}
+: > "$GCLOG"
+due_in_city
+eq "$RC" 1 "(DUEROOT) a current binary at <city>/.gc/services/<name> owes no run"
+LIST_FAIL=1
+due_in_city
+LIST_FAIL=""
+eq "$RC" 1 "(DUEROOT) nor does it when the listing does not read"
+eq "$ERR" "" "(DUEROOT) and the check says nothing on stderr about the listing"
+rm -f "$CITY_STATE/bin/helm-svc"
+due_in_city
+eq "$RC" 0 "(DUEROOT) and with no binary there, a run is owed"
+listed_only "(DUEROOT) the check asked gc for nothing but the service listing"
+
+# --- case: the check reads the state root the listing reports -----------------
+# A service whose declaration names its own state_root is served from that root,
+# and the deploy publishes there. The check reads the same root: a current
+# binary and record left at <city>/.gc/services/<name> owe nothing to the
+# configured root, which has no binary, and the configured root's record paces
+# the next run.
+fixture
+REV_LIST="$(commit_fixture "$ROOT" || true)"
+printf '{"city_path":"%s","services":[{"service_name":"%s","state_root":"custom-helm"}]}' \
+    "$STATE_CITY" "$SAFE_NAME" > "$SERVICES"
+OLD_STATE="$STATE_CITY/.gc/services/$SAFE_NAME"
+NEW_STATE="$STATE_CITY/custom-helm"
+mkdir -p "$OLD_STATE/bin" "$NEW_STATE"
+printf '#!/bin/sh\n' > "$OLD_STATE/bin/helm-svc"
+chmod +x "$OLD_STATE/bin/helm-svc"
+RAN_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 600 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$OLD_STATE/build-status.json"
+: > "$GCLOG"
+due_in_city
+eq "$RC" 0 "(DUELIST) a configured root with no binary owes a run, whatever the default root holds"
+has "$OUT" "$NEW_STATE/bin/helm-svc" "(DUELIST) and the check names the configured root's binary"
+FRESH_AT="$(jq -nr --argjson t "$(( $(date -u +%s) - 60 ))" '$t | todate')"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$FRESH_AT" \
+    '{component: $n, built_at: "", source_rev: $rev, binary_rev: "",
+      last_build_rc: 1, restart_pending: false, checked_at: $at}' > "$NEW_STATE/build-status.json"
+due_in_city
+eq "$RC" 1 "(DUELIST) a run there a minute ago that saw this revision paces the next"
+has "$OUT" "not yet due" "(DUELIST) which the check says it waits for"
+mkdir -p "$NEW_STATE/bin"
+printf '#!/bin/sh\n' > "$NEW_STATE/bin/helm-svc"
+chmod +x "$NEW_STATE/bin/helm-svc"
+jq -n --arg n "$SAFE_NAME" --arg rev "$REV_LIST" --arg at "$RAN_AT" \
+    '{component: $n, built_at: $at, source_rev: $rev, binary_rev: $rev,
+      last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$NEW_STATE/build-status.json"
+due_in_city
+eq "$RC" 1 "(DUELIST) a current binary at the configured root owes no run"
+eq "$ERR" "" "(DUELIST) and the check says nothing on stderr"
+listed_only "(DUELIST) the check asked gc for nothing but the service listing"
 
 # ==============================================================================
 # STATIC GUARDS
@@ -1332,7 +1153,7 @@ grep -q 'GOTMP_RUN_OWNED" -eq 1' "$BUILD" \
 # build for the cases it exercises; this refuses the whole shape, so a future
 # edit cannot reintroduce a build down some path the cases do not reach.
 if grep -qE '(go build|GC_GO_BIN|GOTMPDIR|newer_than_binary)' "$SVC"; then
-    bad "(STATIC) the launcher has grown a build again — it has 5s, and the build needs 12.5s"
+    bad "(STATIC) the launcher has grown a build again — it has 5s, and a cold build takes longer"
 else
     ok "(STATIC) the launcher contains no build"
 fi

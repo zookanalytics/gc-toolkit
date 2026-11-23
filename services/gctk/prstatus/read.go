@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Row is a bead as [Read] reads it: its id and its metadata, each value as the
@@ -29,7 +31,7 @@ type Store interface {
 	// Blockers returns, for each id, the far bead of each of its `blocks` edges,
 	// open and closed, with its metadata. It is the read [Holding] walks
 	// ([ReadBlockers]).
-	Blockers(ids []string) (map[string][]Blocker, error)
+	Blockers(ids []string) (map[string][]person.Blocker, error)
 }
 
 // ErrUnresolved reports an anchor the store holds no row for. Nothing about it
@@ -39,8 +41,8 @@ var ErrUnresolved = errors.New("the anchor does not resolve")
 // Read gathers the [Facts] the city records about each anchor's PR: the anchor's
 // own row, its in-flight set over [InFlightStatuses], and what holds it that
 // only a person moves, which [Holding] reads through its `blocks` edges: the
-// open human gates, the beads a person owes the next move on, and the
-// conversations that hold it while their sittings stay for work. It is the one
+// open human gates, the beads a person owes the next move on, and the beads
+// that hold it while they wait on work of their own first. It is the one
 // place that decides what is read, so every reader that asks what holds a PR, or
 // where a PR stands, gives Read its own [Store] and decides from the same facts.
 //
@@ -89,8 +91,8 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		return nil, err
 	}
 	// The walk's first level is the anchors' own edges, already read.
-	holds, err := Holding(resolved, func(level []string) (map[string][]Blocker, error) {
-		out := make(map[string][]Blocker, len(level))
+	holds, err := Holding(resolved, func(level []string) (map[string][]person.Blocker, error) {
+		out := make(map[string][]person.Blocker, len(level))
 		var rest []string
 		for _, id := range level {
 			if b, ok := own[id]; ok {
@@ -130,23 +132,15 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 }
 
 // RowFacts are the facts a bead's own row records, read off its metadata: its
-// holds, the posture, the machine verdict with its cause and sentence, the
-// thread count, the draft-stage markers and its landing state. [Read] adds what
-// it gathers beside the row to them: the gates, the beads a person owes, the
-// staying conversations and the in-flight count.
-// [Holding] weighs a merge anchor it reaches by its row's facts, and the helm
-// board reads a row that is no PR, or whose PR has no answer, by them alone.
+// holds, the posture and its landing state. [Read] adds what it gathers beside
+// the row to them: the gates, the beads a person owes, the beads that wait on
+// work of their own first, the in-flight count and the review runs. [Holding]
+// weighs a merge anchor it reaches by its row's facts.
 func RowFacts(md map[string]string) Facts {
 	return Facts{
-		MergeHold:           md["merge_hold"],
-		RebaseHold:          md["rebase_hold"],
-		PRPosture:           md["pr_posture"],
-		PRMachine:           md["pr.machine"],
-		PRMachineCause:      md["pr.machine_cause"],
-		PRMachineReason:     md["pr.machine_reason"],
-		PRUnansweredThreads: md["pr.unanswered_threads"],
-		OpenedAsDraft:       md["opened_as_draft"],
-		DraftReadied:        md["draft_readied"],
-		MergeResult:         md["merge_result"],
+		MergeHold:   md["merge_hold"],
+		RebaseHold:  md["rebase_hold"],
+		PRPosture:   md["pr_posture"],
+		MergeResult: md["merge_result"],
 	}
 }

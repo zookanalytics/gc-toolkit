@@ -62,11 +62,16 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
 
   A list that printed no JSON array did not answer: file nothing, and tell the
   operator their words wait for the store.
-- **Send the request on**, so a normal PR writes the page. While `hold:mayor`
-  holds it, place it, which sends it and lifts the hold:
-  `"$(gc <binding> scripts-dir)/gc-helm.sh" place <bead> --standalone`.
-  Otherwise sling it: `gc sling <rig>/<binding>.polecat <bead>`. A request
-  already routed or in progress is on its way, so send it nothing.
+- **Send the request on**, so a normal PR writes the page. A request already
+  routed or in progress is on its way, so send it nothing. While `hold:mayor`
+  holds it, place it, which sends it and lifts the hold, and otherwise sling it
+  (`gc sling <rig>/<binding>.polecat <bead>`):
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --standalone
+```
 
 When the operator changes goals the rig already keeps, file the change once they
 agree on its words, with
@@ -81,7 +86,7 @@ and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 | close as duplicate | a closed or shipped bead in this bead's store did the same work | that bead, under `duplicate` |
 | fold into another | an open bead carries the same need | that bead, under `folded` |
 | close as not needed | the premise is gone, or the work is not worth doing; say why | the bead the ruling rests on, under `not-needed` |
-| send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes, such as onto the bead that retires the code it lives in | that bead |
+| send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
 | place on its own | a defect that hurts the operator or a rig now and is worth building without an epic; say what it hurts | nothing |
@@ -94,9 +99,8 @@ Check before you propose:
   (`git -C <checkout> log -1 --format=%s <commit>`), and `fixed-upstream` needs
   that bead closed or shipped in this bead's store. A fix whose commit names no
   such bead is an `ask`, with the commit in the reason.
-- **Send where the rig says:** the file still exists on the rig's default branch,
-  and the bead that takes the problem is still open. A file that is gone means
-  close as fixed or as not needed.
+- **Send where the rig says:** the rule is still in the rig's `AGENTS.md` on its
+  default branch, and the bead it names is still open.
 - **Place or park:** read the epic's description and check that the bead serves
   its hypothesis, not only its area. An area that carries no hypothesis is not an
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
@@ -168,12 +172,8 @@ A close runs the `work` skill's disposition writer, `bead-rehome.sh`, with the
 kind and the bead its row names as `--kind` and `--successor`, and the operator's
 reason in `--note`, with the commit for a fix.
 
-A bead sent where the rig says takes the edge the waits skill gives for it, and
-gets no route. It loses its hold: list its labels
-(`gc bd --rig <rig> label list <bead>`), remove each one that spells
-`hold:mayor` in any case, one `--remove-label` each
-(`gc bd --rig <rig> update <bead> --remove-label hold:mayor`), because bd
-removes a label only by its exact text.
+A bead sent where the rig says goes there by the commands the rig's `AGENTS.md`
+gives.
 
 ## 7. Stop when the operator says
 

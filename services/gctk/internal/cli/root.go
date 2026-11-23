@@ -94,10 +94,15 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 	root.SetErr(stderr)
 	root.AddCommand(
 		newBeadCmd(stdout, stderr),
+		newDeploymentCmd(stdout, stderr),
+		newDistillerCmd(stdout, stderr),
+		newDoctorCmd(stdout, stderr),
 		newEpicCmd(stdout, stderr),
 		newLifecycleCmd(stdout, stderr),
-		newMergeCmd(stdout, stderr),
+		newMemoryCmd(stdout, stderr),
 		newPRCmd(stdout, stderr),
+		newReactionCmd(stdout, stderr),
+		newRefineryCmd(stdout, stderr),
 		newReviewCmd(stdout, stderr),
 		newRigCmd(stdout, stderr),
 		newSessionCmd(stdout, stderr),
@@ -135,32 +140,20 @@ the checkout.`,
 	}
 }
 
-// newLifecycleCmd and newMergeCmd keep their own flag parsing and usage text:
-// both retire with the merge member (docs/gctk-architecture.md, "The
-// re-implementation register"), so they join the tree as they are.
+// newLifecycleCmd keeps its own flag parsing and usage text: it is the plain
+// write lifecycle.sh execs, which retires with its last caller
+// (docs/gctk-architecture.md, "The re-implementation register"), so it joins
+// the tree as it is.
 func newLifecycleCmd(stdout, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "lifecycle",
-		Short: "anchor lifecycle transitions (lifecycle/lifecycle.toml)",
-		Long: `The anchor state machine's transitions, over lifecycle/lifecycle.toml. It
-parses its own verbs and flags: gctk lifecycle with no verb prints them.`,
+		Short: "the plain write of a bead's merge_result",
+		Long: `The plain write of a bead's merge_result, with the work record a landing
+writes. It parses its own verbs and flags: gctk lifecycle with no verb prints
+them.`,
 		DisableFlagParsing: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			return exit(Lifecycle(args, stdout, stderr))
-		},
-	}
-}
-
-func newMergeCmd(stdout, stderr io.Writer) *cobra.Command {
-	return &cobra.Command{
-		Use:   "merge",
-		Short: "the merge cadence's arm 2, the single writer of merged truth",
-		Long: `The merge cadence's arm 2, the single writer of merged truth, which
-assets/scripts/merge.sh hands its calls to. It reads its own flags, --deadline
-and --cursor, which pace one pass.`,
-		DisableFlagParsing: true,
-		RunE: func(_ *cobra.Command, args []string) error {
-			return exit(Merge(args, stdout, stderr))
 		},
 	}
 }

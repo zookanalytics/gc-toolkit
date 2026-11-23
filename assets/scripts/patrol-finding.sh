@@ -25,9 +25,10 @@
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml
 # and its assets/scripts/seat-progress.sh, formulas/mol-refinery-patrol.toml,
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
-# reconcile's assets/scripts/merge-tail-report.sh and
-# assets/scripts/pr-facts.sh, the feedback miner's
-# assets/scripts/feedback-miner.sh, the boot-health order's
+# reconcile's assets/scripts/pr-facts.sh, the feedback miner's
+# assets/scripts/feedback-miner.sh, the feedback distiller's memory intake,
+# `gctk memory settle`, the production-deploy-report order's
+# `gctk deployment report`, the boot-health order's
 # assets/scripts/boot-health.sh, and an agent home's setup at pre_start,
 # assets/scripts/worktree-setup.sh.
 # Filing a finding asks no person anything. A finding needing the operator's
@@ -42,9 +43,6 @@
 set -uo pipefail
 
 PROG="patrol-finding"
-HERE="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-PROACTIVE="${GC_PROACTIVE_TOOL:-$HERE/../../tools/gc-proactive.sh}"
-
 # The rig whose store a finding lands in when the caller names none. The
 # deacon is city-scoped, so GC_RIG arrives unset there and an unpinned
 # `gc bd` would read whichever store the cwd walks up to.
@@ -105,8 +103,8 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
   --rig       the rig whose store this lands in (default: $GC_RIG, else
               gc-toolkit). It also rig-qualifies the proactive pool
   --no-react  file the bead and stop. The next
-              `gc-proactive.sh scan --sling` sweep reacts to it, as it does to
-              every ready bead nobody has decided on
+              `gctk reaction sweep` reacts to it, as it does to every
+              ready bead nobody has decided on
   --cleared   the situation has ended. Set situation=cleared, with --message
               as the reason, on the bead a recurrence would land on, or else
               on one held at blocked with nothing left to wait on, and file no
@@ -165,7 +163,7 @@ case "$ABOUT" in
   *-wisp-*) warn "--about $ABOUT is a wisp, which its pass burns; filing on the key alone"; ABOUT="" ;;
 esac
 
-# GC_RIG selects the store `gc bd` reads and writes, and gc-proactive.sh
+# GC_RIG selects the store `gc bd` reads and writes, and gctk reaction
 # rig-qualifies its pool target from it. Both have to name the same rig, so
 # one value sets both.
 if [ -n "$RIG_ARG" ]; then
@@ -318,7 +316,8 @@ siblings() {
 }
 
 # What a bead still waits on is its own pending waits, as `gctk bead holds`
-# answers them in the store GC_RIG selects, from the binary the city builds.
+# answers them in the store GC_RIG selects, and the finding's first reaction is
+# `gctk reaction sling`, each from the binary the city builds.
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
@@ -596,18 +595,15 @@ fi
 # ── Hand it to the first reaction ────────────────────────────────────
 # The reaction is what disposes the finding: routed to a pool, held on an
 # edge, handed to a validating closer, or put to the operator as a human gate.
-# A reaction that cannot be slung is not a failure of the filing: the finding
-# is a ready bead nobody has decided on, which the next
-# `gc-proactive.sh scan --sling` sweep reacts to, just later.
+# It goes to the rig's proactive pool whether or not that pool runs, and waits
+# there until it does. A reaction that cannot be slung, such as one gc sling
+# refuses, is not a failure of the filing: the finding is a ready bead nobody
+# has decided on, which the next `gctk reaction sweep` reacts to, just later.
 [ -n "$NO_REACT" ] && exit 0
-if [ ! -x "$PROACTIVE" ]; then
-  warn "cannot find gc-proactive.sh (looked at $PROACTIVE); $BEAD waits for the next scan sweep"
+if [ ! -x "$GCTK" ]; then
+  warn "cannot find gctk (looked at $GCTK); $BEAD waits for the next sweep"
   exit 0
 fi
-if ! "$PROACTIVE" deliverable >/dev/null 2>&1; then
-  warn "the proactive pool cannot pick a reaction up right now; $BEAD waits for the next scan sweep"
-  exit 0
-fi
-"$PROACTIVE" sling "$BEAD" \
-  || warn "the first-reaction sling on $BEAD did not start a reaction; it waits for the next scan sweep"
+"$GCTK" reaction sling "$BEAD" \
+  || warn "the first-reaction sling on $BEAD did not start a reaction; it waits for the next sweep"
 exit 0

@@ -72,9 +72,13 @@ record:
   needs nobody spends the attention the close saves. The one exception is a
   headline an earlier sitting's hold left waiting on nothing: a headline with
   no `gc.takeaway_settled`, on a subject none of whose own waits is pending.
-  The block replaces that headline with the reading. `gctk bead holds` answers
-  what still holds the subject, and the block leaves this conversation out of
-  that answer, because the conversation's close frees an open PR's merge.
+  The block replaces that headline with `HEADLINE`, the reading in one short
+  sentence of at most 130 characters. The headline reads
+  `<moot|benign>: <your sentence>`, and its writer refuses a headline over 140
+  characters, so the whole reading goes only to the notes and the close
+  reason. `gctk bead holds` answers what still holds the subject, and the
+  block leaves this conversation out of that answer, because the
+  conversation's close frees an open PR's merge.
 
 Each write takes its exit, and the conversation closes only after them:
 
@@ -83,13 +87,14 @@ Each write takes its exit, and the conversation closes only after them:
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
+HEADLINE="<the reading in one short sentence, at most 130 characters>"
 ACTION="<what ended the visit, in one plain sentence>"
 ROW=$(gc bd show "$SUBJECT" --json) \
   && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
   && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
   && OPEN=$(printf '%s\n' "$HOLDS" | jq -er --arg c "$CONVERSATION" 'if .error == null and (.pending | type) == "array" then [ .pending[].id | select(. != $c) ] | join(" ") else error("unread") end') \
   && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
-       "$CONV/gc-helm.sh" takeaway "$SUBJECT" "${KIND}: ${WHY}" --by converse --no-wait \
+       "$GCTK" bead takeaway "$SUBJECT" "${KIND}: ${HEADLINE}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
   && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \

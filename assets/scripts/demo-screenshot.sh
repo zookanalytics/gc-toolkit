@@ -36,14 +36,20 @@
 # the engine serves that page from a directory and captures the surface's
 # element, with a one-step script whose proof is that the surface is drawn.
 #
-# Every kind captures inside the sandbox demo-engine-lib.sh runs the engine in,
-# where the live city cannot be reached. A --serve command's app runs as a copy
-# of the rig's UI that `gctk rig serve` runs inside the same sandbox, and the
-# engine captures the copy at its loopback port. A command, a copy or a page
-# that reads the city's stores or its API fails there, so a capture shows the
-# reviewed commit on fixture data, or shows the failure, and never live state.
-# The one server outside the sandbox a page capture can reach is a rig's app
-# that --base-url names, as below.
+# A --serve command's app runs as a copy of the rig's UI that `gctk rig serve`
+# runs, and the engine captures the copy's app where gctk rig serve reports it.
+# A capture of a rig whose app reads the city runs the engine and the copy
+# inside the sandbox demo-engine-lib.sh defines, where the live city cannot be
+# reached. A command, a copy or a page that reads the city's stores or its API
+# fails there, so such a capture shows the reviewed commit on fixture data, or
+# shows the failure, and never live state. The servers outside the sandbox a
+# page capture can reach are a rig's app that --base-url names, as below, and
+# an iOS app on a simulator, which the system's simulator service runs outside
+# the sandbox, whoever started it. A capture of any other rig runs as an
+# ordinary process. A markdown capture serves the page it draws from a
+# directory no rig holds, so it keeps the sandbox. docs/demo-capture-sandbox.md
+# says which rigs get the sandbox and what a capture of each can reach. An iOS
+# app's PNG is the device's own screenshot.
 # --text and markdown draw a file they are given, as it is, so what they show
 # is what was written to that file.
 #
@@ -74,19 +80,22 @@
 #   --serve-dir  serve a static directory with the engine's own server, on a
 #                free port unless --port names one. A port that a server
 #                already answers on is refused.
-#   --serve      serve the app with this command as a copy that `gctk rig
-#                serve` runs from the checkout --cwd names (default: here),
-#                with no address, on a free port of its own, which the command
-#                gets as $PORT. A checkout has one copy, so captures from one
-#                checkout run one after another, and captures from two each get
-#                a copy of their own. A copy of that checkout that already runs
-#                the command is the one captured, and it keeps running, and one
-#                that runs another command is refused. One this capture starts
-#                ends with it.
+#   --serve      serve the app with this command as a copy that `gctk rig serve`
+#                runs from the checkout --cwd names (default: here), with no
+#                address, on a free port of its own, which the command gets as
+#                $PORT. The copy is up once it answers there, or once the
+#                command prints the URL of the app it brought up, such as an iOS
+#                app on a simulator. A checkout has one copy, so captures from
+#                one checkout run one after another, and captures from two each
+#                get a copy of their own. A copy of that checkout that already
+#                runs the command is the one captured, and it keeps running, and
+#                one that runs another command is refused. One this capture
+#                starts ends with it.
 #   --base-url   drive a deployed preview, a copy that `gctk rig serve` runs,
-#                or an app that a worktree of a rig serves on this host. Any
-#                other server on this host is refused, as is the app of a rig
-#                that city.toml sets to app_reads_city = "true".
+#                an app that a worktree of a rig serves on this host, or an iOS
+#                app on a simulator, as ios-simulator://<device UDID>/<bundle
+#                id>. Any other server on this host is refused, as is the app of
+#                a rig that city.toml sets to app_reads_city = "true".
 #                Exactly one of --serve-dir / --serve / --base-url is required.
 #   --selector   capture this element instead of the viewport.
 #   --full-page  capture the whole scrollable page instead of the viewport.
@@ -143,7 +152,7 @@ case "$KIND" in
   *)  usage_err "unknown kind '$KIND': page, terminal or markdown" ;;
 esac
 
-OUTPUT=""; SCRIPT=""; SERVE_DIR=""; SERVE_CMD=""; BASE_URL=""; PORT=""; CWD=""
+OUTPUT=""; SCRIPT=""; SERVE_DIR=""; SERVE_CMD=""; BASE_URL=""; PORT=""; CWD=""; SCALE=2
 SELECTOR=""; FULL_PAGE=0; COMMAND=""; TEXT=""; TITLE=""; COLS=""
 FILE=""; REPO=""; EXPAND=0
 # Each kind takes only its own flags.
@@ -282,13 +291,14 @@ fi
 # --- what the engine captures --------------------------------------------
 case "$KIND" in
   page)
-    # A --serve command's app runs as a copy, inside the sandbox, and the engine
-    # captures the copy at its loopback port, which the sandbox opens because
-    # gctk rig serve answers that the copy holds it.
+    # A --serve command's app runs as a copy, and the engine captures the copy's
+    # app where gctk rig serve reports it.
     if [ -n "$SERVE_CMD" ]; then
       demo_engine_copy "${CWD:-$(pwd)}" "$SERVE_CMD" || exit 1
       BASE_URL=$DEMO_ENGINE_COPY_URL
     fi
+    # An iOS app's PNG is the device's own screenshot, at the device's scale.
+    [ -z "$BASE_URL" ] || ! demo_engine_ios_app "$BASE_URL" || SCALE=""
     set -- "$SCRIPT"
     if [ -n "$SERVE_DIR" ]; then set -- "$@" --serve-dir "$SERVE_DIR"
     else set -- "$@" --base-url "$BASE_URL"; fi
@@ -363,7 +373,7 @@ esac
 # PNG left by an earlier run must not pass for this one.
 rm -f "$OUTPUT"
 echo "$PROG: capturing $KIND -> $OUTPUT" >&2
-demo_engine_cli screenshot "$@" -o "$OUTPUT" --scale 2 | tee "$TMPD/report"
+demo_engine_cli screenshot "$@" -o "$OUTPUT" ${SCALE:+--scale "$SCALE"} | tee "$TMPD/report"
 RC=${PIPESTATUS[0]}
 # The engine exits 3 when a step fails its proof and the capture shows the
 # state the steps left. A markdown surface's one step proves only that the

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test: the gascity-keeper sub-pack hands a bead back to its owner by
 # an assignment and its notice, or asks a person through a human gate, and
-# never writes a route.
+# never writes a route. The gh command pr-prep hands back names the fork's
+# owner.
 #
 # mol-upstream-gc-sync's three stops are extracted from the formula as Python's
 # tomllib decodes it, rendered as a pour renders them, and run against a stub gc
@@ -11,8 +12,12 @@
 # keeper with --notify, which requests its turn, and drains. No stop writes a
 # route or a headline. mol-upstream-gc-pr-prep's hand-backs are read in its
 # text: no write of gc.routed_to, and every mail to the keeper requests its
-# turn. formula-git-rig.test.sh runs pr-prep's workspace-setup hand-back. No
-# live city, store or network.
+# turn. pr-prep's block that builds the gh commands is extracted and rendered
+# the same way and run in a fork checkout, once for each origin URL shape it
+# parses, under the runner's own sed, which on macOS is BSD sed. The
+# gh_pr_command it stores names the fork's owner in --head.
+# formula-git-rig.test.sh runs pr-prep's workspace-setup hand-back. No live
+# city, store or network.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -82,7 +87,7 @@ KEEPER="gascity/gascity-keeper.keeper"
 render() {
   sed -e 's|{{issue}}|tk-iss|g' -e "s|{{notify_recipient}}|$2|g" -e 's|{{binding_prefix}}|gc-toolkit.|g' \
       -e 's|{{upstream_rig}}|gascity|g' -e 's|{{upstream_ref}}|origin/main|g' -e 's|{{with_diff}}|0|g' \
-      -e "s|{{sync_script}}|$3|g" "$1"
+      -e "s|{{sync_script}}|$3|g" -e 's|{{origin_remote}}|origin|g' -e 's|{{upstream_branch}}|main|g' "$1"
 }
 # stop <label> <step> <text> <owner> <detector> : run that stop's block; sets LOGTEXT.
 stop() {
@@ -153,6 +158,31 @@ MAILS=$(grep -c 'gc mail send "\$REQUESTING_KEEPER"' "$PRPREP_TOML" || true)
 eq "$(grep 'gc mail send "\$REQUESTING_KEEPER"' "$PRPREP_TOML" | grep -cv -- ' --notify ' || true)" 0 \
   "pr-prep: every mail to the keeper requests its turn"
 eq "$(grep -c 'gc session nudge' "$PRPREP_TOML" || true)" 0 "pr-prep: the hand-back notifies by mail, not by a nudge"
+
+echo "── mol-upstream-gc-pr-prep: the gh command names the fork's owner ──"
+# git reads no global or system config here, because get-url applies its
+# insteadOf rewrites, which could hand the block the other URL shape.
+if step_block "$PRPREP_TOML" prepare-pr-handoff 'FORK_OWNER=' > "$TMP/pr-cmd.tmpl"; then
+  render "$TMP/pr-cmd.tmpl" "" "" > "$TMP/pr-cmd.sh"
+  case "$(cat "$TMP/pr-cmd.sh")" in
+    *'{{'*) bad "pr-prep: the gh command block renders with every placeholder filled" ;;
+    *)      ok "pr-prep: the gh command block renders with every placeholder filled" ;;
+  esac
+  while read -r shape url; do
+    d="$TMP/pr-cmd-$shape"; mkdir -p "$d"; : > "$d/gc.log"
+    ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+      git init -q -b upstream-pr/abc1234 "$d/fork" && git -C "$d/fork" remote add origin "$url" &&
+        cd "$d/fork" && env PATH="$BIN:$PATH" LOG="$d/gc.log" bash "$TMP/pr-cmd.sh" ) >"$d/out" 2>&1
+    eq "$(cat "$d/out")" "" "pr-prep/$shape: the block runs without an error"
+    has "$(cat "$d/gc.log")" "gh_pr_command=gh pr create --repo gastownhall/gascity --base main --head zookanalytics:upstream-pr/abc1234 --title " \
+      "pr-prep/$shape: the stored gh_pr_command's --head names the fork's owner"
+  done <<'URLS'
+git@ git@github.com:zookanalytics/gascity.git
+https https://github.com/zookanalytics/gascity.git
+URLS
+else
+  bad "pr-prep: prepare-pr-handoff holds the block that builds the gh commands"
+fi
 
 echo "-----"
 echo "keeper-hand-back: $PASS passed, $FAIL failed"

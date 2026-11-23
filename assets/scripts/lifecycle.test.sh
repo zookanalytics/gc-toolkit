@@ -1,38 +1,25 @@
 #!/usr/bin/env bash
-# Hermetic test for the anchor lifecycle — THE writer of lifecycle transitions.
-# Covers: the state verb; legal/illegal edges; --expect; the ONE atomic
-# `gc bd update` carrying every field; bd refusal (exit 1); a human state
-# entered with no route, since its gate is the park, and detached states
-# clearing the route in the same call; the refusal of a route that is not
-# rig-qualified, `human` included; the writes leaving a state makes
-# (exit_sets), in the transition's own update; the close/terminal pairing
-# guards (--close only into a closed state, closed states must --close); the
-# non-empty merged_sha that --to merged must carry; --set-dated's
-# compare-and-preserve rule for the @<since> component; the reopen repair verb;
-# the --takeaway writer, capped and mirrored from gc-helm.sh; --keep-route, the
-# self-transition that records on an anchor and writes no route; the drift
-# assertion against lifecycle/lifecycle.toml; and the refusal when no gctk
-# binary resolves.
+# Hermetic test for lifecycle.sh, the plain write of a bead's merge_result.
+# Covers: --expect; the ONE atomic `gc bd update` carrying every field; bd
+# refusal (exit 1); a write that names no route leaving the route as it is; the
+# refusal of a route that is not rig-qualified, `human` included; the clear of
+# the executor identity with the assignee; --set-dated's compare-and-preserve
+# rule for the @<since> component; the --takeaway writer and its cap;
+# --keep-route, the write that records on a bead and writes no route;
+# a landing's work record and its clear of the live objections; and the
+# refusal when no gctk binary resolves.
 #
 # ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
 # `gctk lifecycle` (services/gctk) and has no other implementation. The suite
-# builds the port from this checkout and drives every assertion through
-# lifecycle.sh, so it is the port's acceptance bar and also proves the exec
-# wiring. The port's state table, printed by `gctk lifecycle --dump-machine`, is
-# held against lifecycle.toml.
+# builds it from this checkout and drives every assertion through lifecycle.sh,
+# so it is the writer's acceptance bar and also proves the exec wiring.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUT="$HERE/lifecycle.sh"
-TOML="$ROOT/lifecycle/lifecycle.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lifecycle-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-# The real git, for the cases that fetch a landing. It is captured before
-# harness_init, which puts the stub bin and then the test floor at the front of
-# PATH, and the floor refuses git.
-REAL_GIT="$(command -v git)"
-
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"
 harness_build_gctk
@@ -45,67 +32,13 @@ if [ -z "$GCTK_BUILT" ]; then
     exit 1
 fi
 
-# --- lifecycle.toml, read without a TOML parser ----------------------------------
-toml_states() { awk '/^states = \[/{f=1;next} f&&/^\]/{exit} f{gsub(/[ ",]/,"");print}' "$TOML" | tr '\n' ' ' | sed 's/ $//'; }
-toml_detached() { sed -n 's/^detached_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
-toml_closed() { sed -n 's/^closed_states = \[\(.*\)\]/\1/p' "$TOML" | tr -d '", '; }
-toml_exit_sets() { sed -n 's/^exit_sets = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sed 's/^ *//;s/ *$//' | tr -s ' '; }
-toml_edges()  {
-  awk '
-    /^\[\[transition\]\]/ { from=""; to="" }
-    /^from = /  { gsub(/from = |"/,""); from=$0 }
-    /^to = /    { gsub(/to = |"/,""); to=$0; print from ">" to }' "$TOML" | sort
-}
-
-# --- drift: the port's table against lifecycle.toml ------------------------------
-# The port carries the table in a typed package and prints it on demand.
-echo "# drift against lifecycle.toml (gctk lifecycle --dump-machine)"
-DUMP="$("$GCTK_BUILT" lifecycle --dump-machine 2>&1)"
-[ -n "$DUMP" ] && ok "machine dumped" || bad "gctk lifecycle --dump-machine produced nothing"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^states //p')" "$(toml_states)" "states match lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^detached_states //p')" "$(toml_detached)" "detached states match lifecycle.toml"
-# gc-helm.sh's takeaway refuses to send an anchor in one of them to a pool or an
-# agent, and it is sh, which reads no TOML, so it carries its own copy.
-eq "$(sed -n 's/^DETACHED_STATES="\([^"]*\)".*/\1/p' "$HERE/gc-helm.sh" | head -1)" "$(toml_detached)" \
-   "gc-helm.sh's DETACHED_STATES match lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^closed_states //p')" "$(toml_closed)" "closed states match lifecycle.toml"
-[ -n "$(toml_exit_sets)" ] && ok "exit sets declared in lifecycle.toml" || bad "exit_sets = [...] missing from lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^exit_sets //p')" "$(toml_exit_sets)" "exit sets match lifecycle.toml"
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^transition //p' | sort)" "$(toml_edges)" "transition edges match lifecycle.toml"
-# A person's wait is the human gate filed on the bead, never a route, so
-# neither side declares a park route.
-hasnt "$DUMP" "park_route" "the port declares no park route"
-eq "$(grep -c '^park_route' "$TOML" || true)" "0" "lifecycle.toml declares no park route"
-# The cap is not in lifecycle.toml. It is a rendering bound that the board's two
-# takeaway writers share, so the port's copy is held against gc-helm.sh's.
-eq "$(printf '%s\n' "$DUMP" | sed -n 's/^takeaway_max //p')" \
-   "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" \
-   "the takeaway cap matches gc-helm.sh's TAKEAWAY_MAX"
-
-# The machine axis is declared here and spent by the helm board, which mirrors
-# it as Go constants. One meaning, two lists: a value added on one side only
-# renders as `unknown` on every row carrying it, which is the answer that tells
-# the operator to stop looking.
-TOML_MACHINES=$(sed -n 's/^machines = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
-[ -n "$TOML_MACHINES" ] && ok "machine axis declared in lifecycle.toml" || bad "machines = [...] missing from lifecycle.toml"
-GO_MACHINES=$(sed -n 's/^[[:space:]]*Machine[A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$ROOT/services/helm/internal/board/derive.go" | tr '\n' ' ' | sed 's/ *$//')
-eq "$GO_MACHINES" "$TOML_MACHINES" "machine axis values match lifecycle.toml"
-
-# The blocked causes are declared here and mirrored as Go constants in the shared
-# prstatus package, which gctk merge writes them from and the status: label and
-# the board read them through. A cause added on one side only is a value its
-# readers were never told about.
-TOML_CAUSES=$(sed -n 's/^causes = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | tr -s ' ' | sed 's/^ *//;s/ *$//')
-[ -n "$TOML_CAUSES" ] && ok "blocked causes declared in lifecycle.toml" || bad "causes = [...] missing from lifecycle.toml"
-GO_CAUSES=$(sed -n 's/^[[:space:]]*Cause[A-Z][A-Za-z]*[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$ROOT/services/gctk/prstatus/prstatus.go" | tr '\n' ' ' | sed 's/ *$//')
-eq "$GO_CAUSES" "$TOML_CAUSES" "blocked cause values match lifecycle.toml"
-
-# prstatus.Derive reads a recorded posture, machine verdict or cause outside the
-# vocabulary as a state it cannot name, needs-attention, so the values each of
-# its known* switches accepts must be the ones declared here. A value declared
-# here and missing there would put every PR that carries it at needs-attention.
+# --- lifecycle.toml's postures against their Go copy ------------------------------
+# The postures are declared in lifecycle.toml, and services/gctk/prstatus reads
+# them for the status: label and the board. prstatus.Derive reads a recorded
+# posture outside the vocabulary as a state it cannot name, needs-attention, so
+# the values its knownPosture switch accepts must be the ones declared here.
+echo "# lifecycle.toml's postures against their Go copy"
+TOML="$ROOT/lifecycle/lifecycle.toml"
 go_known() { # <func>: the values its switch accepts, sorted, "" dropped
   sed -n "/^func $1(/,/^}/p" "$ROOT/services/gctk/prstatus/prstatus.go" \
     | sed -n 's/^[[:space:]]*case \(.*\):$/\1/p' | tr ',' '\n' | tr -d '" \t' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'
@@ -114,30 +47,12 @@ sorted_words() { tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//';
 TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sorted_words)
 [ -n "$TOML_POSTURES" ] && ok "postures declared in lifecycle.toml" || bad "postures = [...] missing from lifecycle.toml"
 eq "$(go_known knownPosture)" "$TOML_POSTURES" "prstatus knows exactly the postures lifecycle.toml declares"
-eq "$(go_known knownMachine)" "$(printf '%s' "$TOML_MACHINES" | sorted_words)" "prstatus knows exactly the machine values lifecycle.toml declares"
-eq "$(go_known knownCause)" "$(sed -n 's/^[[:space:]]*\(Cause[A-Z][A-Za-z]*\)[[:space:]]*=.*/\1/p' \
-  "$ROOT/services/gctk/prstatus/prstatus.go" | sorted_words)" "prstatus knows every blocked cause it declares"
-
-# --- state verb ----------------------------------------------------------------
-echo "# state"
-store '[{"id":"b-1","status":"open","assignee":"","notes":"","metadata":{}},
-        {"id":"b-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}},
-        {"id":"b-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"weird_value"}}]'
-out="$("$SUT" state b-1)"; rc=$?
-eq "$rc" 0 "state exits 0 on a readable bead"
-eq "$out" "unanchored" "absent merge_result reads as unanchored"
-eq "$("$SUT" state b-2)" "pull_request" "declared value is printed"
-out="$("$SUT" state b-3 2>&1)"; rc=$?
-eq "$rc" 1 "undeclared merge_result exits 1"
-has "$out" "weird_value" "the undeclared value is named"
-out="$("$SUT" state b-nope 2>&1)"; rc=$?
-eq "$rc" 2 "an unreadable bead exits 2"
 
 # --- transition: happy path is ONE update carrying everything -------------------
 echo "# transition happy path"
-store '[{"id":"a-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","rejection_reason":"old"}}]'
+store '[{"id":"a-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked","rejection_reason":"old"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition a-1 --to merged --expect pull_request --close \
+out="$("$SUT" transition a-1 --to merged --expect blocked --close \
   --set merged_sha=abc123 --unset rejection_reason \
   --append-notes "Merged to main at abc123" --json 2>&1)"; rc=$?
 eq "$rc" 0 "legal transition exits 0"
@@ -166,7 +81,7 @@ has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=closed" "the close rides in 
 # the close both happened and happened by the verb that carries no such check.
 hasnt "$(cat "$STUB_GC_LOG")" "bd close" "the close never uses the \`bd close\` verb, whose ownership check refuses a bead assigned to another principal"
 has "$out" '"ok":true' "--json reports the transition"
-has "$out" '"from":"pull_request"' "--json names the from state"
+has "$out" '"from":"blocked"' "--json names the from state"
 
 # --- a closed-state transition sheds every live objection ------------------------
 # A merged (closed) bead carries no live objection: a rejection_reason or a
@@ -174,8 +89,8 @@ has "$out" '"from":"pull_request"' "--json names the from state"
 # this one writer, so a caller that lists NEITHER still lands a clean terminal
 # record — the divergence the per-caller --unset enumeration used to allow.
 echo "# transition closed-state sheds live objections"
-store '[{"id":"obj-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","rejection_reason":"bounced for X","blocked_reason":"merge_hold: do not merge until Y"}}]'
-out="$("$SUT" transition obj-1 --to merged --expect pull_request --close \
+store '[{"id":"obj-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked","rejection_reason":"bounced for X","blocked_reason":"merge_hold: do not merge until Y"}}]'
+out="$("$SUT" transition obj-1 --to merged --expect blocked --close \
   --set merged_sha=def456 2>&1)"; rc=$?
 eq "$rc" 0 "merged-close exits 0 though neither reason is listed"
 eq "$(meta obj-1 merge_result)" "merged" "merge_result written"
@@ -186,51 +101,10 @@ eq "$(bstatus obj-1)" "closed" "--close landed"
 # The clear is scoped to the terminal land: a non-closed transition keeps a
 # pre-existing blocked_reason (the mirror of the rejection_reason control in the
 # unanchored case below).
-store '[{"id":"obj-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","blocked_reason":"merge_hold: still blocked"}}]'
+store '[{"id":"obj-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","blocked_reason":"merge_hold: still blocked"}}]'
 out="$("$SUT" transition obj-2 --to unanchored --route rig/polecat 2>&1)"; rc=$?
 eq "$rc" 0 "non-closed transition exits 0"
 eq "$(meta obj-2 blocked_reason)" "merge_hold: still blocked" "blocked_reason survives a non-closed transition"
-
-# --- leaving a state writes what exit_sets declares for it -----------------------
-# The rank of an anchor's PR-finishing work is approved only while the anchor
-# rests in pull_request, so every transition out of it marks the record of that
-# rank unsettled, whatever the record read and whichever caller moves it. The
-# caller names no such key, so a writer that forgot it would still leave no
-# record a return to pull_request could read as settled.
-echo "# leaving pull_request marks the PR-finishing rank unsettled"
-store '[{"id":"ex-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved","pr_head_oid":"sha-7"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition ex-1 --to retargeted --expect pull_request --assignee "" \
-  --set blocked_reason="PR#7 retargeted" --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
-eq "$rc" 0 "a retarget out of pull_request exits 0"
-eq "$(meta ex-1 pr_finishing_settled)" "unsettled" "…and an approved record reads unsettled"
-eq "$(meta ex-1 pr_head_oid)" "" "…and the PR head pr-facts.sh read is cleared, so a return counts no approval until it is read again"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…written in the transition's one update"
-store '[{"id":"ex-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"unapproved"}},
-        {"id":"ex-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-"$SUT" transition ex-2 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to \
-  --set rejection_reason="base moved; resume by merge" >/dev/null 2>&1
-eq "$(meta ex-2 pr_finishing_settled)" "unsettled" "a repool out of pull_request marks an unapproved record unsettled too"
-"$SUT" transition ex-3 --to abandoned --set blocked_reason="PR#8 closed" --takeaway "PR#8 was closed without merging" >/dev/null 2>&1
-eq "$(meta ex-3 pr_finishing_settled)" "unsettled" "…and an anchor that carried no record leaves with one"
-store '[{"id":"ex-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
-        {"id":"ex-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved","pr_head_oid":"sha-5"}},
-        {"id":"ex-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","pr_finishing_settled":"unapproved","gc.takeaway":"t"}},
-        {"id":"ex-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","pr_finishing_settled":"unapproved"}}]'
-"$SUT" transition ex-4 --to merged --expect pull_request --close --set merged_sha=abc123 >/dev/null 2>&1
-eq "$(meta ex-4 pr_finishing_settled)" "approved" "a landing into the closed merged state writes no exit set"
-"$SUT" transition ex-5 --to pull_request --expect pull_request --set pr_merge_state=CLEAN@sha >/dev/null 2>&1
-eq "$(meta ex-5 pr_finishing_settled)|$(meta ex-5 pr_head_oid)" "approved|sha-5" "a self-edge on pull_request leaves nothing"
-"$SUT" transition ex-6 --to pull_request --expect retargeted >/dev/null 2>&1
-eq "$(meta ex-6 merge_result)|$(meta ex-6 pr_finishing_settled)" "pull_request|unapproved" "a return into pull_request writes none"
-"$SUT" transition ex-7 --to unanchored --route "" >/dev/null 2>&1
-eq "$(meta ex-7 pr_finishing_settled)" "unapproved" "…nor does leaving a state that declares no exit set"
-store '[{"id":"ex-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
-        {"id":"ex-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}}]'
-"$SUT" transition ex-8 --to unanchored --route "" --set pr_finishing_settled=unapproved >/dev/null 2>&1
-eq "$(meta ex-8 pr_finishing_settled)" "unapproved" "a caller that sets the key itself keeps its own value"
-"$SUT" transition ex-9 --to unanchored --route "" --unset pr_finishing_settled >/dev/null 2>&1
-eq "$(meta ex-9 pr_finishing_settled)" "<absent>" "…and so does one that clears it"
 
 # --- --set-dated: the @<since> compare-and-preserve rule ------------------------
 # The operator's queue is ordered by how long a row has been owed, so the instant
@@ -241,8 +115,8 @@ echo "# --set-dated"
 OID="1111111111111111111111111111111111111111"
 OID2="2222222222222222222222222222222222222222"
 
-store '[{"id":"d-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition d-1 --to pull_request --set-dated "pr.machine=blocked@$OID" 2>&1)"; rc=$?
+store '[{"id":"d-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition d-1 --to blocked --set-dated "pr.machine=blocked@$OID" 2>&1)"; rc=$?
 eq "$rc" 0 "a first dated write exits 0"
 got="$(meta d-1 pr.machine)"
 eq "${got%@*}" "blocked@$OID" "the value and oid are written as given"
@@ -253,13 +127,13 @@ esac
 
 # Preserve: the reconcile cadence re-reaches the same verdict at the same head
 # every few minutes, which is the case a naive clock restarts.
-store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-2 --to pull_request --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
+store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-2 --to blocked --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
 eq "$(meta d-2 pr.machine)" "blocked@$OID@2026-08-28T04:05:06Z"   "an unchanged value at an unchanged head keeps its instant"
 
 # Restamp on a changed VALUE: a new verdict is a new turn.
-store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"progressing@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-3 --to pull_request --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
+store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","pr.machine":"progressing@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-3 --to blocked --set-dated "pr.machine=blocked@$OID" >/dev/null 2>&1
 got="$(meta d-3 pr.machine)"
 eq "${got%@*}" "blocked@$OID" "a changed value is written"
 case "$got" in
@@ -269,8 +143,8 @@ esac
 
 # Restamp on a moved HEAD: a verdict is pinned to the head it judged, so the old
 # instant dates a state that no longer holds.
-store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
-"$SUT" transition d-4 --to pull_request --set-dated "pr.machine=blocked@$OID2" >/dev/null 2>&1
+store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","pr.machine":"blocked@'"$OID"'@2026-08-28T04:05:06Z"}}]'
+"$SUT" transition d-4 --to blocked --set-dated "pr.machine=blocked@$OID2" >/dev/null 2>&1
 got="$(meta d-4 pr.machine)"
 eq "${got%@*}" "blocked@$OID2" "a moved head is written"
 case "$got" in
@@ -279,8 +153,8 @@ case "$got" in
 esac
 
 # A value still in the bare <value>@<oid> shape has no instant to keep.
-store '[{"id":"d-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'"}}]'
-"$SUT" transition d-5 --to pull_request --set-dated "pr.machine=settled@$OID" >/dev/null 2>&1
+store '[{"id":"d-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","pr.machine":"settled@'"$OID"'"}}]'
+"$SUT" transition d-5 --to blocked --set-dated "pr.machine=settled@$OID" >/dev/null 2>&1
 got="$(meta d-5 pr.machine)"
 case "$got" in
   "settled@$OID@"?*) ok "an undated legacy value gains an instant" ;;
@@ -289,24 +163,24 @@ esac
 
 # One atomic write, exactly as an ordinary --set: the dated key rides the same
 # update rather than adding a second one.
-store '[{"id":"d-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"d-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-"$SUT" transition d-6 --to pull_request --set-dated "pr.machine=settled@$OID" --set check_set=correctness >/dev/null 2>&1
+"$SUT" transition d-6 --to blocked --set-dated "pr.machine=settled@$OID" --set check_set=correctness >/dev/null 2>&1
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "a dated key rides the ONE atomic update"
 
 # Shape refusals: the writer supplies value and oid, this script supplies the
 # instant, and a malformed argument makes the preserve comparison undecidable.
-store '[{"id":"d-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine=settled" 2>&1)"; rc=$?
+store '[{"id":"d-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition d-7 --to blocked --set-dated "pr.machine=settled" 2>&1)"; rc=$?
 eq "$rc" 1 "--set-dated with no oid is refused"
 has "$out" "<value>@<oid>" "the refusal names the shape"
-out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine=settled@$OID@2026-01-01T00:00:00Z" 2>&1)"; rc=$?
+out="$("$SUT" transition d-7 --to blocked --set-dated "pr.machine=settled@$OID@2026-01-01T00:00:00Z" 2>&1)"; rc=$?
 eq "$rc" 1 "--set-dated carrying its own instant is refused"
-out="$("$SUT" transition d-7 --to pull_request --set-dated "pr.machine" 2>&1)"; rc=$?
+out="$("$SUT" transition d-7 --to blocked --set-dated "pr.machine" 2>&1)"; rc=$?
 eq "$rc" 1 "--set-dated with no '=' is refused"
-out="$("$SUT" transition d-7 --to pull_request --set-dated "merge_result=x@$OID" 2>&1)"; rc=$?
+out="$("$SUT" transition d-7 --to blocked --set-dated "merge_result=x@$OID" 2>&1)"; rc=$?
 eq "$rc" 1 "--set-dated merge_result is refused (owned by --to)"
-out="$("$SUT" transition d-7 --to pull_request --set-dated "gc.routed_to=x@$OID" 2>&1)"; rc=$?
+out="$("$SUT" transition d-7 --to blocked --set-dated "gc.routed_to=x@$OID" 2>&1)"; rc=$?
 eq "$rc" 1 "--set-dated gc.routed_to is refused (owned by --route)"
 eq "$(meta d-7 pr.machine)" "<absent>" "no refusal wrote anything"
 
@@ -315,23 +189,20 @@ eq "$(meta d-7 pr.machine)" "<absent>" "no refusal wrote anything"
 # each re-assertion cost an update, a store subprocess per anchor, on a cadence
 # whose budget is store subprocesses. What must not
 # change with them gone: the exit code, the report, and the stored value.
-# A detached state sheds its assignee, so a bead resting in one carries none;
-# the fixture models that resting shape, because an idle re-assertion is one
-# whose assignee-clear has nothing left to clear.
 echo "# idle transitions"
-store '[{"id":"n-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr.machine":"settled@'"$OID"'@2026-08-28T04:05:06Z","gc.routed_to":"rig/pool"}}]'
+store '[{"id":"n-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","pr.machine":"settled@'"$OID"'@2026-08-28T04:05:06Z","gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition n-1 --to pull_request --expect pull_request \
+out="$("$SUT" transition n-1 --to blocked --expect blocked \
   --route rig/pool --set-dated "pr.machine=settled@$OID" 2>&1)"; rc=$?
 eq "$rc" 0 "a re-assertion of the state already on the bead exits 0"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and issues NO gc bd update"
-has "$out" "n-1 pull_request -> pull_request" "…and still reports the state"
+has "$out" "n-1 blocked -> blocked" "…and still reports the state"
 eq "$(meta n-1 pr.machine)" "settled@$OID@2026-08-28T04:05:06Z" "…leaving the instant it would have preserved"
 eq "$(meta n-1 gc.routed_to)" "rig/pool" "…and the route it carried back"
-out="$("$SUT" transition n-1 --to pull_request --route rig/pool \
+out="$("$SUT" transition n-1 --to blocked --route rig/pool \
   --set-dated "pr.machine=settled@$OID" --json 2>&1)"
 eq "$(printf '%s' "$out" | jq -r '.ok')" "true" "--json still reports ok"
-eq "$(printf '%s' "$out" | jq -r '.from + ">" + .to')" "pull_request>pull_request" "…with the same from/to"
+eq "$(printf '%s' "$out" | jq -r '.from + ">" + .to')" "blocked>blocked" "…with the same from/to"
 
 # Each field the comparison covers, mutated on its own: every one of these must
 # still write. A skip that fires on a real change is the failure this optimization
@@ -343,51 +214,47 @@ writes_when() { # <label> <bead-json> <args...>
   "$SUT" transition "$@" >/dev/null 2>&1
   eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "$label"
 }
-# BASE carries no assignee, the resting shape n-1 models. Every case built on
-# it enters a detached state at status=open, which clears a stale assignee, and
-# that clear writes by itself. With a stale assignee, a case writes no matter
-# what its own field does, so it passes without testing that field. BASE must
-# therefore be idle on its own: re-asserted unchanged, it writes nothing.
+# BASE must be idle on its own: re-asserted unchanged, it writes nothing, so
+# each case below writes only for its own field.
 BASE='"id":"n-2","status":"open","assignee":"","notes":""'
-store "[{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}]"
+store "[{$BASE,\"metadata\":{\"merge_result\":\"blocked\"}}]"
 : > "$STUB_GC_LOG"
-"$SUT" transition n-2 --to pull_request >/dev/null 2>&1
+"$SUT" transition n-2 --to blocked >/dev/null 2>&1
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "BASE re-asserted unchanged writes nothing"
 writes_when "a moved head writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
-  n-2 --to pull_request --set-dated "pr.machine=settled@$OID2"
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
+  n-2 --to blocked --set-dated "pr.machine=settled@$OID2"
 writes_when "a changed verdict writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
-  n-2 --to pull_request --set-dated "pr.machine=blocked@$OID"
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\",\"pr.machine\":\"settled@$OID@2026-08-28T04:05:06Z\"}}" \
+  n-2 --to blocked --set-dated "pr.machine=blocked@$OID"
 writes_when "a changed --set writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"check_set\":\"correctness\"}}" \
-  n-2 --to pull_request --set check_set=correctness,ci
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\",\"check_set\":\"correctness\"}}" \
+  n-2 --to blocked --set check_set=correctness,ci
 writes_when "a --set of an absent key writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
-  n-2 --to pull_request --set check_set=correctness
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\"}}" \
+  n-2 --to blocked --set check_set=correctness
 writes_when "a --unset of a present key writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"rejection_reason\":\"old\"}}" \
-  n-2 --to pull_request --unset rejection_reason
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\",\"rejection_reason\":\"old\"}}" \
+  n-2 --to blocked --unset rejection_reason
 writes_when "a changed --route writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\",\"gc.routed_to\":\"rig/pool\"}}" \
-  n-2 --to pull_request --route rig/other
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\",\"gc.routed_to\":\"rig/pool\"}}" \
+  n-2 --to blocked --route rig/other
 writes_when "a moved state writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pre_open_gate\"}}" \
-  n-2 --to pull_request
+  "{$BASE,\"metadata\":{\"merge_result\":\"refused_false_completion\"}}" \
+  n-2 --to blocked
 # Fields the comparison does NOT cover: each writes unconditionally, because a
 # skip would drop something no comparison against the current bead can see.
 writes_when "--append-notes always writes" \
-  "{$BASE,\"metadata\":{\"merge_result\":\"pull_request\"}}" \
-  n-2 --to pull_request --append-notes "another line"
+  "{$BASE,\"metadata\":{\"merge_result\":\"blocked\"}}" \
+  n-2 --to blocked --append-notes "another line"
 writes_when "--takeaway always writes (it stamps a fresh instant)" \
-  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
-  n-2 --to pull_request --takeaway "same text"
-# An explicit --assignee skips the detached clear, so this bead can carry the
-# assignee the flag names. The value does not change, and only the flag can
-# force the write.
+  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
+  n-2 --to blocked --takeaway "same text"
+# The assignee the flag names does not change, and only the flag can force the
+# write.
 writes_when "--assignee always writes" \
-  '{"id":"n-2","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}' \
-  n-2 --to pull_request --assignee rig/refinery
+  '{"id":"n-2","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked"}}' \
+  n-2 --to blocked --assignee rig/refinery
 store '[{"id":"n-3","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc123"}}]'
 : > "$STUB_GC_LOG"
 "$SUT" transition n-3 --to merged --close --set merged_sha=abc123 >/dev/null 2>&1
@@ -401,53 +268,41 @@ out="$("$SUT" transition n-4 --to unanchored 2>&1)"; rc=$?
 eq "$rc" 0 "an unanchored self-edge exits 0"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and writes nothing"
 
-# Validation is not what is skipped: an idle-looking call whose --expect does not
-# hold is still refused, and so is one whose edge is illegal.
-store '[{"id":"n-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+# --expect is not what is skipped: an idle-looking call whose --expect does not
+# hold is still refused.
+store '[{"id":"n-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition n-5 --to pull_request --expect pre_open_gate 2>&1)"; rc=$?
+out="$("$SUT" transition n-5 --to blocked --expect refused_false_completion 2>&1)"; rc=$?
 eq "$rc" 1 "an --expect mismatch is still refused ahead of the skip"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and wrote nothing"
-store '[{"id":"n-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"merged"}}]'
-out="$("$SUT" transition n-6 --to pull_request 2>&1)"; rc=$?
-eq "$rc" 1 "an illegal edge is still refused"
 
-# --- illegal edge / --expect mismatch / refusal ---------------------------------
+# --- --expect mismatch / refusal -------------------------------------------------
 echo "# refusals"
-store '[{"id":"a-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"merged"}}]'
-out="$("$SUT" transition a-2 --to pull_request 2>&1)"; rc=$?
-eq "$rc" 1 "illegal edge exits 1"
-has "$out" "illegal edge merged -> pull_request" "the illegal edge is named"
-eq "$(meta a-2 merge_result)" "merged" "an illegal edge writes nothing"
-
-store '[{"id":"a-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-out="$("$SUT" transition a-3 --to pull_request --expect pull_request 2>&1)"; rc=$?
+store '[{"id":"a-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion"}}]'
+out="$("$SUT" transition a-3 --to blocked --expect blocked 2>&1)"; rc=$?
 eq "$rc" 1 "--expect mismatch exits 1"
-eq "$(meta a-3 merge_result)" "pre_open_gate" "an --expect mismatch writes nothing"
+eq "$(meta a-3 merge_result)" "refused_false_completion" "an --expect mismatch writes nothing"
 
-out="$(STUB_UPDATE_FAIL="a-3" "$SUT" transition a-3 --to pull_request 2>&1)"; rc=$?
+out="$(STUB_UPDATE_FAIL="a-3" "$SUT" transition a-3 --to blocked 2>&1)"; rc=$?
 eq "$rc" 1 "a bd refusal exits 1"
 has "$out" "refused by bd" "the refusal is named"
 
-out="$("$SUT" transition a-3 --to nowhere 2>&1)"; rc=$?
-eq "$rc" 1 "an undeclared --to state exits 1"
-out="$("$SUT" transition a-3 --to pull_request --set merge_result=x 2>&1)"; rc=$?
+out="$("$SUT" transition a-3 --to blocked --set merge_result=x 2>&1)"; rc=$?
 eq "$rc" 1 "--set merge_result is refused (owned by --to)"
-out="$("$SUT" transition a-3 --to pull_request --set gc.routed_to=x 2>&1)"; rc=$?
+out="$("$SUT" transition a-3 --to blocked --set gc.routed_to=x 2>&1)"; rc=$?
 eq "$rc" 1 "--set gc.routed_to is refused (owned by --route)"
 
-# --- a human state writes no route: its gate is the park ------------------------
-# A transition into a state that parks an anchor for a person writes no route.
-# The human gate its caller files beside it is what holds the bead, so the
-# bead rests unrouted, keeping the route it carries.
-echo "# human states"
-store '[{"id":"a-6","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
+# --- a write that names no route leaves the route as it is ----------------------
+# A write that parks a bead for a person writes no route. The human gate its
+# caller files beside it is what holds the bead, whatever route it carries.
+echo "# a write names no route unless asked"
+store '[{"id":"a-6","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition a-6 --to abandoned --assignee "" \
+out="$("$SUT" transition a-6 --to refused_false_completion --assignee "" \
   --set blocked_reason="PR#7 closed out-of-band" \
   --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
-eq "$rc" 0 "transition to abandoned exits 0"
-eq "$(meta a-6 'gc.routed_to')" "<absent>" "abandoned writes no route"
+eq "$rc" 0 "transition to refused_false_completion exits 0"
+eq "$(meta a-6 'gc.routed_to')" "<absent>" "refused_false_completion writes no route"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.routed_to" "…since the update names no route"
 eq "$(bassignee a-6)" "" "--assignee '' cleared the assignee"
 eq "$(meta a-6 'gc.takeaway')" "PR#7 was closed without merging — rework it or close this bead" \
@@ -462,89 +317,15 @@ eq "$(meta a-6 'gc.takeaway_settled')" "" "the park's headline carries its own d
 
 # The entry keeps whatever route the bead carries: a transition routes no work,
 # and the gate holds the bead whatever its route.
-store '[{"id":"a-6b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/pool"}}]'
-out="$("$SUT" transition a-6b --to retargeted --expect pull_request --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
-eq "$rc" 0 "transition to retargeted exits 0"
+store '[{"id":"a-6b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/pool"}}]'
+out="$("$SUT" transition a-6b --to blocked --expect blocked --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
+eq "$rc" 0 "transition to blocked exits 0"
 eq "$(meta a-6b 'gc.routed_to')" "rig/pool" "…and the bead keeps the route it carries"
 
-store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.takeaway_settled":"1"}}]'
-out="$("$SUT" transition a-8 --to abandoned --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
+store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.takeaway_settled":"1"}}]'
+out="$("$SUT" transition a-8 --to refused_false_completion --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
 eq "$rc" 0 "a takeaway over an inherited settled-key exits 0"
 eq "$(meta a-8 'gc.takeaway_settled')" "" "…and clears it, leaving the park's own disposition on the bead"
-
-# --- detached states clear the route in the same atomic call --------------------
-# A detached anchor rests unrouted so that no pool offers it. Any route turns
-# the resting state back into pool demand.
-echo "# detached states"
-store '[{"id":"d-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"gc.routed_to":"rig/pool"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition d-1 --to pre_open_gate --assignee "" --set check_set=correctness 2>&1)"; rc=$?
-eq "$rc" 0 "transition to pre_open_gate exits 0"
-eq "$(meta d-1 'gc.routed_to')" "" "pre_open_gate clears the route automatically"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update"
-
-store '[{"id":"d-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"rig/pool"}}]'
-out="$("$SUT" transition d-2 --to pull_request --expect pre_open_gate \
-  --set pr_url=https://github.com/z/r/pull/9 --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "pre_open_gate -> pull_request exits 0"
-eq "$(meta d-2 'gc.routed_to')" "" "a route carried into pull_request is cleared, not inherited"
-
-store '[{"id":"d-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-out="$("$SUT" transition d-3 --to pull_request --route rig/human-recovery 2>&1)"; rc=$?
-eq "$rc" 0 "an explicit --route into a detached state exits 0"
-eq "$(meta d-3 'gc.routed_to')" "rig/human-recovery" "an explicit --route wins over the declared clear"
-
-# A `human` route is no exception: a person's wait on an anchor is its human
-# gate, which holds the anchor whatever its route.
-store '[{"id":"d-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","gc.routed_to":"human"}}]'
-out="$("$SUT" transition d-4 --to pull_request --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "an anchor carrying a human route transitions"
-eq "$(meta d-4 'gc.routed_to')" "" "…and the detached state clears that route too"
-
-# --- detached states clear the assignee in the same atomic call ----------------
-# The unheld half of the same property. The refinery's find-work queue is
-# assignee-keyed and flags a merge_result-bearing bead it finds there instead of
-# taking it, so an assignee that survives the gating transition sits in that
-# queue for the life of the anchor.
-echo "# detached states clear the assignee"
-store '[{"id":"h-1","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition h-1 --to pre_open_gate --set check_set=correctness 2>&1)"; rc=$?
-eq "$rc" 0 "entry to pre_open_gate exits 0"
-eq "$(bassignee h-1)" "" "the handoff assignee is cleared without the caller asking"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the clear rides in the SAME update as the state"
-
-store '[{"id":"h-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
-"$SUT" transition h-2 --to pull_request --expect pull_request --route "" >/dev/null 2>&1
-eq "$(bassignee h-2)" "" "a self-edge observation converges a survivor already parked in the state"
-
-store '[{"id":"h-3","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-"$SUT" transition h-3 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
-eq "$(bassignee h-3)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
-
-# bd refuses an assignee edit on a bead another actor holds in_progress and
-# drops the whole atomic update with it, so the arm must not reach for the
-# field there. The proof is the emitted call: no --assignee flag, no guard.
-store '[{"id":"h-4","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition h-4 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
-eq "$rc" 0 "a transition on an in_progress anchor still lands"
-eq "$(bassignee h-4)" "rig/gc-toolkit.polecat-1" "a live claim is left for escalation, not overwritten"
-hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--assignee" "no assignee flag reaches bd, so the anti-steal guard is never armed"
-eq "$(meta h-4 pr_number)" "9" "the rest of the transition landed"
-
-# An already-unheld anchor is the healthy case, and it must issue the bd call it
-# always did: an --assignee flag there buys nothing and arms the guard for free.
-store '[{"id":"h-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
-: > "$STUB_GC_LOG"
-"$SUT" transition h-5 --to pull_request --set pr_number=9 >/dev/null 2>&1
-hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--assignee" "an empty assignee emits no flag"
-
-# A human state is not detached: the gate its caller files names the person,
-# and the assignee is the caller's to decide.
-store '[{"id":"h-6","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pull_request"}}]'
-"$SUT" transition h-6 --to retargeted --route rig/mechanik >/dev/null 2>&1
-eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assignee alone"
 
 # --- unassigning takes the executor identity with it ----------------------------
 # gc.session_id and gc.session_name name the session that claimed the bead, so
@@ -555,7 +336,7 @@ eq "$(bassignee h-6)" "rig/gc-toolkit.refinery" "a human state leaves the assign
 # route, and the runtime's stale orphan-recovery pin. So the clear rides the same
 # atomic update as the unassign.
 echo "# unassigning clears the executor identity"
-store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"hq-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
+store '[{"id":"x-1","status":"open","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"blocked","gc.session_id":"hq-dead","gc.session_name":"rig--rig__polecat-1-pool","gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition x-1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge" 2>&1)"; rc=$?
 eq "$rc" 0 "the rejection repool's shape exits 0"
@@ -567,21 +348,12 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "the identity clear ride
 has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "gc.session_id is unset in that call"
 has "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_name" "gc.session_name is unset in that call"
 
-# The detached auto-clear reaches the same arm: no --assignee is passed, the
-# handoff assignee is cleared without the caller asking, and the pins follow it.
-store '[{"id":"x-2","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"gc.session_id":"hq-dead2","gc.session_name":"rig--rig__polecat-2-pool"}}]'
-out="$("$SUT" transition x-2 --to pre_open_gate --set check_set=codex 2>&1)"; rc=$?
-eq "$rc" 0 "entry to pre_open_gate exits 0"
-eq "$(bassignee x-2)" "" "the detached clear cleared the assignee"
-eq "$(meta x-2 'gc.session_id')" "<absent>" "…and the pins followed: gc.session_id"
-eq "$(meta x-2 'gc.session_name')" "<absent>" "…and gc.session_name"
-
 # The pins are the assignee's: a live claim keeps them. On an in_progress bead
 # the assignee clear is refused (bd's anti-steal guard), so no --assignee reaches
 # bd, the arm never fires, and the identity stays with the session that holds it.
-store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"pull_request","gc.session_id":"hq-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
+store '[{"id":"x-3","status":"in_progress","assignee":"rig/gc-toolkit.polecat-1","notes":"","metadata":{"merge_result":"blocked","gc.session_id":"hq-live","gc.session_name":"rig--rig__polecat-1-pool"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition x-3 --to pull_request --expect pull_request --route "" --set pr_number=9 2>&1)"; rc=$?
+out="$("$SUT" transition x-3 --to blocked --expect blocked --route "" --set pr_number=9 2>&1)"; rc=$?
 eq "$rc" 0 "a transition on an in_progress anchor still lands"
 eq "$(meta x-3 'gc.session_id')" "hq-live" "a live claim keeps gc.session_id"
 eq "$(meta x-3 'gc.session_name')" "rig--rig__polecat-1-pool" "a live claim keeps gc.session_name"
@@ -589,26 +361,24 @@ hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no
 
 # An explicit new assignee wins over the clear, and its identity is not stripped:
 # the field is the assignee's, and this names one.
-store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"pre_open_gate","gc.session_id":"hq-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
+store '[{"id":"x-4","status":"open","assignee":"rig/gc-toolkit.refinery","notes":"","metadata":{"merge_result":"refused_false_completion","gc.session_id":"hq-keep","gc.session_name":"rig--rig__polecat-3-pool"}}]'
 : > "$STUB_GC_LOG"
-"$SUT" transition x-4 --to pull_request --assignee "rig/mechanik" >/dev/null 2>&1
-eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee wins over the declared clear"
+"$SUT" transition x-4 --to blocked --assignee "rig/mechanik" >/dev/null 2>&1
+eq "$(bassignee x-4)" "rig/mechanik" "an explicit --assignee is written as given"
 eq "$(meta x-4 'gc.session_id')" "hq-keep" "a named assignee keeps gc.session_id"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "--unset-metadata gc.session_id" "no identity clear when an assignee is named"
 
-store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-"$SUT" transition a-7 --to retargeted --route rig/mechanik >/dev/null 2>&1
-eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route into a human state is written as given"
+store '[{"id":"a-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+"$SUT" transition a-7 --to blocked --route rig/mechanik >/dev/null 2>&1
+eq "$(meta a-7 'gc.routed_to')" "rig/mechanik" "an explicit --route is written as given"
 
-# --- an empty --route into a human state clears the route ------------------------
-# A human state names no person by route, so the caller's empty --route is the
-# clear it is on any other state, and the bead rests unrouted behind its gate.
-echo "# human states take an empty route"
-store '[{"id":"a-7b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/pool"}}]'
+# --- an empty --route clears the route ---------------------------------------------
+echo "# an empty route clears the route"
+store '[{"id":"a-7b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/pool"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition a-7b --to abandoned --route "" 2>&1)"; rc=$?
-eq "$rc" 0 "an EMPTY --route into a human state exits 0"
-eq "$(meta a-7b merge_result)" "abandoned" "…and enters the state"
+out="$("$SUT" transition a-7b --to refused_false_completion --route "" 2>&1)"; rc=$?
+eq "$rc" 0 "an EMPTY --route exits 0"
+eq "$(meta a-7b merge_result)" "refused_false_completion" "…and enters the state"
 eq "$(meta a-7b 'gc.routed_to')" "" "…with the route cleared"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in the transition's one update"
 
@@ -618,188 +388,139 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in the transition's 
 # nobody. This one writer, shared by every --route caller, refuses it before the
 # write rather than stranding the bead ready-but-unclaimable.
 echo "# a route is rig-qualified"
-store '[{"id":"r-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"r-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition r-1 --to unanchored --route pool 2>&1)"; rc=$?
 eq "$rc" 1 "a bare --route that names no pool exits 1"
 has "$out" "not rig-qualified" "the refusal says the route is unqualified"
 has "$out" "exact string" "…and why a bare name reaches nobody"
-eq "$(meta r-1 merge_result)" "pull_request" "the refused transition wrote nothing"
+eq "$(meta r-1 merge_result)" "blocked" "the refused transition wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
 # A rig-qualified target is exactly what a pool claims, so it passes and is
 # stamped verbatim.
-store '[{"id":"r-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"r-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 out="$("$SUT" transition r-2 --to unanchored --route gc-toolkit/gc-toolkit.polecat 2>&1)"; rc=$?
 eq "$rc" 0 "a <rig>/<agent> route is accepted"
 eq "$(meta r-2 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "…and stamped verbatim"
 
 # `human` is a bare name like any other. A person's wait is the human gate filed
 # on the bead, so no transition parks a bead on a route, whatever the state.
-store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition r-3 --to abandoned --route human --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
-eq "$rc" 1 "--route human into a human state exits 1"
+out="$("$SUT" transition r-3 --to refused_false_completion --route human --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
+eq "$rc" 1 "--route human exits 1"
 has "$out" "not rig-qualified" "…refused as a bare name"
 has "$out" "human gate" "…and the refusal names the gate that parks a bead for a person"
-out="$("$SUT" transition r-3 --to pull_request --expect pull_request --route human --takeaway "parked" 2>&1)"; rc=$?
-eq "$rc" 1 "--route human on a detached self-edge exits 1"
-eq "$(meta r-3 merge_result)" "pull_request" "the refused transitions wrote nothing"
+out="$("$SUT" transition r-3 --to blocked --expect blocked --route human --takeaway "parked" 2>&1)"; rc=$?
+eq "$rc" 1 "--route human on a re-record exits 1 too"
+eq "$(meta r-3 merge_result)" "blocked" "the refused transitions wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
-# gate-ensure.sh and gctk merge pass the anchor's own route back on every
-# verdict they record, so an anchor carrying a `human` route has that record
-# refused too, until a transition with no --route clears the route.
-store '[{"id":"r-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"human"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition r-4 --to pull_request --expect pull_request --route human --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
-eq "$rc" 1 "carrying a human route back exits 1"
-eq "$(meta r-4 'pr.machine')" "<absent>" "…and records nothing"
-out="$("$SUT" transition r-4 --to pull_request --expect pull_request --set-dated "pr.machine=blocked@sha1" 2>&1)"; rc=$?
-eq "$rc" 0 "the same record with no --route lands"
-eq "$(meta r-4 'gc.routed_to')" "" "…clearing the route, as a detached state's entry does"
-
-# --- --takeaway writes the board's headline --------------------------------------
-# The helm board spends gc.takeaway as a row's NEEDS sentence. A transition into
-# a human state needs none, since the gate its caller files says what is asked.
+# --- --takeaway writes the bead's headline ---------------------------------------
+# gc.takeaway is the bead's one-line headline. A write that parks a bead needs
+# none, since the gate its caller files says what is asked.
 # A caller that passes --takeaway gets the headline in the transition's one
 # update, capped, and refused when it says nothing.
 echo "# --takeaway"
-store '[{"id":"p-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"p-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition p-1 --to abandoned --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
-eq "$rc" 0 "a human state entered with no takeaway exits 0"
-eq "$(meta p-1 merge_result)" "abandoned" "…and enters the state"
+out="$("$SUT" transition p-1 --to refused_false_completion --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
+eq "$rc" 0 "a write with no takeaway exits 0"
+eq "$(meta p-1 merge_result)" "refused_false_completion" "…and enters the state"
 eq "$(meta p-1 'gc.takeaway')" "<absent>" "…writing no headline"
 eq "$(meta p-1 'gc.routed_to')" "<absent>" "…and no route"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in one update"
 
 # The takeaway triple is this flag's to write.
-store '[{"id":"p-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition p-6 --to abandoned --set gc.takeaway="via --set" 2>&1)"; rc=$?
+store '[{"id":"p-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition p-6 --to refused_false_completion --set gc.takeaway="via --set" 2>&1)"; rc=$?
 eq "$rc" 1 "--set gc.takeaway is refused (owned by --takeaway)"
 has "$out" "--takeaway" "the refusal names the owning flag"
 
 # Over the cap the verb REJECTS rather than truncating: only the author knows
 # which clause is the headline, and a truncated one loses it silently.
-store '[{"id":"p-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+# gc-helm.sh truncates the conversation titles it writes at the same cap, and it
+# is sh, which reads no Go, so it carries its own copy as TAKEAWAY_MAX.
+eq "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" "140" "gc-helm.sh caps a conversation's title at the same 140 codepoints"
+store '[{"id":"p-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 LONG=$(printf 'x%.0s' $(seq 141))
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition p-7 --to abandoned --takeaway "$LONG" 2>&1)"; rc=$?
+out="$("$SUT" transition p-7 --to refused_false_completion --takeaway "$LONG" 2>&1)"; rc=$?
 eq "$rc" 1 "a takeaway over the cap exits 1"
 has "$out" "141 chars" "the refusal reports the measured length"
 has "$out" "the cap is 140" "…and the cap"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and nothing was written"
 
-store '[{"id":"p-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition p-8 --to abandoned --takeaway "$(printf 'x%.0s' $(seq 140))" 2>&1)"; rc=$?
+store '[{"id":"p-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition p-8 --to refused_false_completion --takeaway "$(printf 'x%.0s' $(seq 140))" 2>&1)"; rc=$?
 eq "$rc" 0 "a takeaway AT the cap is accepted"
 
 # An EMPTY takeaway is not one. Normalization can leave nothing behind, and
 # writing that would overwrite the headline a bead carries with nothing, under
 # a fresh date and author.
-store '[{"id":"p-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"p-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition p-9 --to abandoned --takeaway "" 2>&1)"; rc=$?
+out="$("$SUT" transition p-9 --to refused_false_completion --takeaway "" 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway exits 1"
 has "$out" "tells the operator nothing" "the refusal says what an empty headline would show"
 eq "$(meta p-9 'gc.takeaway')" "<absent>" "no empty takeaway is written"
-eq "$(meta p-9 merge_result)" "pull_request" "the refused transition wrote nothing"
+eq "$(meta p-9 merge_result)" "blocked" "the refused transition wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
 
-store '[{"id":"p-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
+store '[{"id":"p-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition p-10 --to abandoned --takeaway "   " 2>&1)"; rc=$?
+out="$("$SUT" transition p-10 --to refused_false_completion --takeaway "   " 2>&1)"; rc=$?
 eq "$rc" 1 "a whitespace-only --takeaway exits 1"
 has "$out" "tells the operator nothing" "…with the same refusal"
 eq "$(meta p-10 'gc.takeaway')" "<absent>" "…and nothing is written"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches bd"
 
 # The refusal belongs to the flag, whatever the route.
-store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition p-11 --to retargeted --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
+store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition p-11 --to blocked --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
 
 # --- a record on an anchor staying in its state moves no route -------------------
 # pr-facts.sh records the rank an anchor's PR-finishing work settled at with a
-# self-transition, and a detached state's clear would drop a route the write
-# never looked at. So --keep-route writes no route at all, on a self-transition
-# only.
+# self-transition, and that write must move no route. So --keep-route writes no
+# route at all.
 echo "# --keep-route records without routing"
-store '[{"id":"k-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":""}},
-        {"id":"k-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":"","gc.takeaway":"PR#7 was closed without merging"}},
-        {"id":"k-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"retargeted","gc.routed_to":"rig/gc-toolkit.mechanik"}},
-        {"id":"k-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","gc.routed_to":"rig/gc-toolkit.polecat"}}]'
+store '[{"id":"k-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":""}},
+        {"id":"k-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":"","gc.takeaway":"PR#7 was closed without merging"}},
+        {"id":"k-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/gc-toolkit.mechanik"}},
+        {"id":"k-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/gc-toolkit.polecat"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition k-1 --to abandoned --expect abandoned --keep-route --set pr_finishing_settled=unapproved 2>&1)"; rc=$?
-eq "$rc" 0 "a self-transition on a human state with no route and no takeaway records under --keep-route"
+out="$("$SUT" transition k-1 --to refused_false_completion --expect refused_false_completion --keep-route --set pr_finishing_settled=unapproved 2>&1)"; rc=$?
+eq "$rc" 0 "a self-transition with no route and no takeaway records under --keep-route"
 eq "$(meta k-1 pr_finishing_settled)|$(meta k-1 'gc.routed_to')" "unapproved|" "…and the route stays empty"
 hasnt "$(grep '^bd update k-1' "$STUB_GC_LOG")" "gc.routed_to" "…since the write names no route"
-"$SUT" transition k-2 --to abandoned --expect abandoned --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
+"$SUT" transition k-2 --to refused_false_completion --expect refused_false_completion --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
 eq "$(meta k-2 pr_finishing_settled)|$(meta k-2 'gc.routed_to')" "unapproved|" "…and one that carries a takeaway keeps its empty route"
-"$SUT" transition k-3 --to retargeted --expect retargeted --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
-eq "$(meta k-3 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…a route a person gave a human state is kept"
-"$SUT" transition k-4 --to pull_request --expect pull_request --keep-route --set pr_finishing_settled=approved >/dev/null 2>&1
-eq "$(meta k-4 pr_finishing_settled)|$(meta k-4 'gc.routed_to')" "approved|rig/gc-toolkit.polecat" "…and a detached state's clear does not run"
-store '[{"id":"k-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_finishing_settled":"approved"}},
-        {"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"abandoned","gc.routed_to":""}}]'
+"$SUT" transition k-3 --to blocked --expect blocked --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
+eq "$(meta k-3 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…a route a person gave the bead is kept"
+"$SUT" transition k-4 --to blocked --expect blocked --keep-route --set pr_finishing_settled=approved >/dev/null 2>&1
+eq "$(meta k-4 pr_finishing_settled)|$(meta k-4 'gc.routed_to')" "approved|rig/gc-toolkit.polecat" "…and so is a pool's"
+store '[{"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":""}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition k-5 --to retargeted --expect pull_request --keep-route --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
-eq "$rc" 1 "--keep-route on an edge into another state exits 1"
-has "$out" "entering a state takes that state's routing" "…saying why"
-eq "$(meta k-5 merge_result)" "pull_request" "…and writes nothing"
-out="$("$SUT" transition k-6 --to abandoned --expect abandoned --keep-route --route rig/gc-toolkit.mechanik 2>&1)"; rc=$?
+out="$("$SUT" transition k-6 --to refused_false_completion --expect refused_false_completion --keep-route --route rig/gc-toolkit.mechanik 2>&1)"; rc=$?
 eq "$rc" 1 "--keep-route with --route exits 1"
 has "$out" "opposite things" "…saying the two contradict"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and neither refusal reaches bd"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and the refusal does not reach bd"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"
-store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","branch":"polecat/x"}}]'
+store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","branch":"polecat/x"}}]'
 out="$("$SUT" transition a-8 --to unanchored --set rejection_reason="scope wrong" --route rig/polecat 2>&1)"; rc=$?
 eq "$rc" 0 "rejection to unanchored exits 0"
 eq "$(meta a-8 merge_result)" "<absent>" "unanchored unsets merge_result"
 eq "$(meta a-8 rejection_reason)" "scope wrong" "the rejection reason rides along"
-eq "$("$SUT" state a-8)" "unanchored" "state reads back unanchored"
 
 # --- self-edge is an idempotent re-record ----------------------------------------
-store '[{"id":"a-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" transition a-9 --to pull_request --set pr_number=12 2>&1)"; rc=$?
-eq "$rc" 0 "a self-edge (re-record) is legal"
+store '[{"id":"a-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
+out="$("$SUT" transition a-9 --to blocked --set pr_number=12 2>&1)"; rc=$?
+eq "$rc" 0 "a re-record of the value a bead carries lands"
 eq "$(meta a-9 pr_number)" "12" "and carries its fields"
-
-# --- close/terminal pairing: status and merge_result move together ---------------
-echo "# close pairing"
-store '[{"id":"c-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition c-1 --to abandoned --close 2>&1)"; rc=$?
-eq "$rc" 1 "--close on a non-closed --to state exits 1"
-has "$out" "abandoned" "the refused state is named"
-has "$out" "not a closed state" "the rule is named"
-eq "$(meta c-1 merge_result)" "pull_request" "a refused close writes nothing"
-eq "$(bstatus c-1)" "open" "and closes nothing"
-out="$("$SUT" transition c-1 --to merged 2>&1)"; rc=$?
-eq "$rc" 1 "--to merged without --close exits 1 (a terminal transition must close)"
-has "$out" "requires --close" "the missing flag is named"
-eq "$(meta c-1 merge_result)" "pull_request" "a refused terminal transition writes nothing"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refusal attempted a bd update"
-
-# `merged` carries the evidence its own definition names: it means "landed;
-# merged_sha recorded", so a close with no sha is the false landing claim (I5),
-# refused at the write instead of by the doctor after the fact. A bead that never
-# had a PR is no merge anchor, and the refusal names its close: a plain gc bd close.
-store '[{"id":"c-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition c-2 --to merged --close 2>&1)"; rc=$?
-eq "$rc" 1 "--to merged --close without merged_sha exits 1"
-has "$out" "merged_sha" "the missing evidence is named"
-has "$out" "gc bd close c-2" "the non-anchor close is named"
-eq "$(meta c-2 merge_result)" "pull_request" "a refused merged close writes nothing"
-eq "$(bstatus c-2)" "open" "and closes nothing"
-out="$("$SUT" transition c-2 --to merged --close --set merged_sha= 2>&1)"; rc=$?
-eq "$rc" 1 "an explicitly empty merged_sha is no evidence either"
-has "$out" "requires --set merged_sha" "the empty sha is refused by the same rule"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged close attempted a bd update"
 
 # --- merged writes the work record from the landing it records -------------------
 # The runtime's work-record gate reads gc.work_outcome, gc.work_commit and
@@ -808,9 +529,9 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "neither refused merged 
 # and the branch that commit landed on.
 echo "# merged writes the work record"
 SHA_A=0123456789abcdef0123456789abcdef01234567
-store '[{"id":"w-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main","gc.work_branch":"polecat/w-1"}}]'
+store '[{"id":"w-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked","merged_target":"main","gc.work_branch":"polecat/w-1"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition w-1 --to merged --expect pull_request --close --set merged_sha=$SHA_A 2>&1)"; rc=$?
+out="$("$SUT" transition w-1 --to merged --expect blocked --close --set merged_sha=$SHA_A 2>&1)"; rc=$?
 eq "$rc" 0 "a merged close exits 0"
 eq "$(meta w-1 gc.work_outcome)" "shipped" "gc.work_outcome is shipped"
 eq "$(meta w-1 gc.work_commit)" "$SHA_A" "gc.work_commit is the merge commit"
@@ -831,7 +552,7 @@ eq "$(meta w-2 gc.work_branch)" "release" "gc.work_branch follows the merged_tar
 # commit with a branch it is not on. The unverified:PR#<n> sentinel names no
 # commit, so the bead keeps the record it had.
 SHA_P=89abcdef0123456789abcdef0123456789abcdef
-store '[{"id":"w-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main","gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-3"}}]'
+store '[{"id":"w-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","merged_target":"main","gc.work_commit":"'"$SHA_P"'","gc.work_branch":"polecat/w-3"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition w-3 --to merged --close --set 'merged_sha=unverified:PR#7' 2>&1)"; rc=$?
 eq "$rc" 0 "an unverified landing still records"
@@ -853,7 +574,7 @@ eq "$(meta w-6 gc.work_branch)" "polecat/w-6" "the bead keeps its gc.work_branch
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_" "the closing update carries no work-record key"
 
 # A key the caller sets itself is written even when the landing derives none.
-store '[{"id":"w-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+store '[{"id":"w-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","merged_target":"main"}}]'
 out="$("$SUT" transition w-7 --to merged --close --set 'merged_sha=unverified:PR#8' --set gc.work_commit=$SHA_A 2>&1)"; rc=$?
 eq "$rc" 0 "a partial landing whose caller sets gc.work_commit exits 0"
 eq "$(meta w-7 gc.work_commit)" "$SHA_A" "the caller's gc.work_commit is written"
@@ -861,7 +582,7 @@ eq "$(meta w-7 gc.work_outcome)" "<absent>" "no gc.work_outcome is derived besid
 eq "$(meta w-7 gc.work_branch)" "<absent>" "no gc.work_branch is derived beside it"
 
 # A key the caller writes itself is the one written.
-store '[{"id":"w-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
+store '[{"id":"w-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","merged_target":"main"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition w-4 --to merged --close --set merged_sha=$SHA_A --set gc.work_branch=polecat/w-4 2>&1)"; rc=$?
 eq "$rc" 0 "a merged close that sets gc.work_branch itself exits 0"
@@ -869,174 +590,10 @@ eq "$(meta w-4 gc.work_branch)" "polecat/w-4" "the caller's gc.work_branch is th
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.work_branch=main" "no derived gc.work_branch is written beside it"
 
 # Only a landing writes a work record.
-store '[{"id":"w-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate","merged_target":"main"}}]'
-out="$("$SUT" transition w-5 --to pull_request --set pr_url=https://x/pr/5 --set pr_number=5 2>&1)"; rc=$?
+store '[{"id":"w-5","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","merged_target":"main"}}]'
+out="$("$SUT" transition w-5 --to blocked --set pr_url=https://x/pr/5 --set pr_number=5 2>&1)"; rc=$?
 eq "$rc" 0 "a non-landing transition exits 0"
 eq "$(meta w-5 gc.work_outcome)" "<absent>" "a non-landing transition writes no gc.work_outcome"
-
-# --- the landing is visible where the work-record gate looks ----------------------
-# The gate runs inside the closing `gc bd update` and asks the rig's checkout
-# ($GC_RIG_ROOT) whether gc.work_commit is an ancestor of
-# refs/remotes/origin/<gc.work_branch>. A merge GitHub performed is on origin
-# before that checkout has fetched it, so the transition fetches the branch
-# first, and only when the ref does not already hold the commit. These cases run
-# real git against a local origin; the harness's git stub stays for every other
-# section.
-echo "# the landing is fetched before the close"
-export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/gitconfig"
-"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.name tester
-"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" user.email tester@example.com
-"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" commit.gpgsign false
-"$REAL_GIT" config --file "$GIT_CONFIG_GLOBAL" init.defaultBranch main
-"$REAL_GIT" init -q --bare "$TMP/origin.git"
-"$REAL_GIT" clone -q "$TMP/origin.git" "$TMP/rig" 2>/dev/null
-"$REAL_GIT" -C "$TMP/rig" commit -q --allow-empty -m base
-"$REAL_GIT" -C "$TMP/rig" push -q origin HEAD:main
-# A second clone pushes the commit GitHub's squash would put on origin, so the
-# rig checkout has not fetched it.
-"$REAL_GIT" clone -q "$TMP/origin.git" "$TMP/github"
-"$REAL_GIT" -C "$TMP/github" commit -q --allow-empty -m squash
-"$REAL_GIT" -C "$TMP/github" push -q origin HEAD:main
-LANDED="$("$REAL_GIT" -C "$TMP/github" rev-parse HEAD)"
-if "$REAL_GIT" -C "$TMP/rig" merge-base --is-ancestor "$LANDED" refs/remotes/origin/main 2>/dev/null; then
-  bad "fixture: the rig checkout must not hold the landing before the transition"
-else
-  ok "fixture: the rig checkout has not fetched the landing"
-fi
-# The suite's own git, logged into the gc log so the fetch and the update are
-# ordered in one file.
-mkdir -p "$TMP/realgit"
-cat > "$TMP/realgit/git" <<GIT
-#!/usr/bin/env bash
-printf 'git %s\n' "\$*" >> "\$STUB_GC_LOG"
-exec "$REAL_GIT" "\$@"
-GIT
-chmod +x "$TMP/realgit/git"
-land() { # <bead-id> <merged_sha> [extra transition args...]
-  local id="$1" sha="$2"; shift 2
-  PATH="$TMP/realgit:$PATH" GC_RIG_ROOT="$TMP/rig" \
-    "$SUT" transition "$id" --to merged --close --set merged_sha="$sha" "$@" 2>&1
-}
-
-store '[{"id":"f-1","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-: > "$STUB_GC_LOG"
-out="$(land f-1 "$LANDED")"; rc=$?
-eq "$rc" 0 "a merged close whose landing the checkout lacks exits 0"
-eq "$(meta f-1 gc.work_commit)" "$LANDED" "the landing is recorded as gc.work_commit"
-if "$REAL_GIT" -C "$TMP/rig" merge-base --is-ancestor "$LANDED" refs/remotes/origin/main; then
-  ok "the rig checkout's origin/main holds the landing after the transition"
-else
-  bad "the rig checkout's origin/main must hold the landing after the transition"
-fi
-fetch_at=$(grep -n '^git .* fetch ' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-update_at=$(grep -n '^bd update' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-if [ -n "$fetch_at" ] && [ -n "$update_at" ] && [ "$fetch_at" -lt "$update_at" ]; then
-  ok "the fetch runs before the closing update, the write the gate judges"
-else
-  bad "the fetch must run before the closing update (log: $(tr '\n' ';' < "$STUB_GC_LOG"))"
-fi
-hasnt "$out" "WARN" "a landing made visible prints no warning"
-
-store '[{"id":"f-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-: > "$STUB_GC_LOG"
-out="$(land f-2 "$LANDED")"; rc=$?
-eq "$rc" 0 "a merged close whose landing the checkout already holds exits 0"
-eq "$(grep -c '^git .* fetch ' "$STUB_GC_LOG" || true)" "0" "a landing the checkout already holds is not fetched"
-
-# A landing that records no work record leaves nothing to make reachable, so the
-# polecat branch the bead still names is not fetched.
-store '[{"id":"f-5","status":"open","assignee":"","notes":"","metadata":{"gc.work_branch":"polecat/f-5"}}]'
-: > "$STUB_GC_LOG"
-out="$(land f-5 "$LANDED")"; rc=$?
-eq "$rc" 0 "a merged close with no merged_target exits 0"
-eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "the polecat branch the bead still names is not fetched"
-
-# A landing the checkout cannot fetch still records, and the line it prints is
-# the only report of it: the gate's own warning stays in the update's output.
-store '[{"id":"f-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-out="$(land f-3 "$LANDED" --set merged_target=no-such-branch)"; rc=$?
-eq "$rc" 0 "a landing whose branch cannot be fetched still records"
-eq "$(bstatus f-3)" "closed" "the close lands"
-eq "$(meta f-3 gc.work_branch)" "no-such-branch" "the work record names the branch the call gave"
-has "$out" "WARN f-3 records gc.work_commit=$LANDED on gc.work_branch=no-such-branch" "the landing the gate cannot verify is named"
-
-# With no rig checkout named there is nowhere to fetch, and nothing is run. The
-# line it prints is the only report that the landing went unchecked.
-store '[{"id":"f-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-: > "$STUB_GC_LOG"
-out="$(PATH="$TMP/realgit:$PATH" "$SUT" transition f-4 --to merged --close --set merged_sha="$LANDED" 2>&1)"; rc=$?
-eq "$rc" 0 "a merged close with no GC_RIG_ROOT exits 0"
-eq "$(meta f-4 gc.work_commit)" "$LANDED" "the work record is written without a checkout"
-eq "$(grep -c '^git ' "$STUB_GC_LOG" || true)" "0" "no git runs without a checkout to run it in"
-has "$out" "WARN f-4 records gc.work_commit=$LANDED on gc.work_branch=main, but GC_RIG_ROOT names no rig checkout" "the landing nothing checked is named"
-
-# The branch goes into a refspec, so a name git does not accept as a branch is
-# never fetched: a `*` would make the fetch a glob over every matching branch,
-# a `:` would split the refspec, and a leading `-` would read as an option. The
-# record still lands, and the line names the branch.
-for spec in 'f-6|release/*' 'f-7|a:b' 'f-8|-x'; do
-  id="${spec%%|*}"; br="${spec#*|}"
-  store '[{"id":"'"$id"'","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-  : > "$STUB_GC_LOG"
-  out="$(land "$id" "$LANDED" --set "merged_target=$br")"; rc=$?
-  eq "$rc" 0 "a landing on branch '$br' still records"
-  eq "$(meta "$id" gc.work_branch)" "$br" "the work record names '$br', the branch the call gave"
-  eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'$br' is not fetched"
-  has "$out" "WARN $id records gc.work_commit=$LANDED on gc.work_branch=$br, which git does not accept as a branch name" "the refused branch '$br' is named"
-done
-# check-ref-format --branch expands @{-N} to a branch the checkout had before,
-# and the refspec would carry the unexpanded text. Inside a checkout whose
-# @{-1} resolves, the name is still refused.
-"$REAL_GIT" -C "$TMP/rig" checkout -q -b previous
-"$REAL_GIT" -C "$TMP/rig" checkout -q main
-store '[{"id":"f-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request","merged_target":"main"}}]'
-: > "$STUB_GC_LOG"
-out="$(cd "$TMP/rig" && land f-9 "$LANDED" --set 'merged_target=@{-1}')"; rc=$?
-eq "$rc" 0 "a landing on branch '@{-1}' still records"
-eq "$(grep -c '^git .*fetch' "$STUB_GC_LOG" || true)" "0" "'@{-1}' is not fetched, though git expands it in that checkout"
-has "$out" "on gc.work_branch=@{-1}, which git does not accept as a branch name" "the refused '@{-1}' is named"
-
-# --- reopen: the sanctioned repair for a wrongly-closed bead ---------------------
-echo "# reopen"
-store '[{"id":"r-1","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"pull_request","pr_url":"https://x/pr/4"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" reopen r-1 2>&1)"; rc=$?
-eq "$rc" 0 "reopen on closed+pull_request (the violation shape) exits 0"
-eq "$(bstatus r-1)" "open" "the bead is open again"
-eq "$(meta r-1 merge_result)" "pull_request" "merge_result is untouched"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "reopen is ONE gc bd update"
-has "$(grep '^bd update' "$STUB_GC_LOG")" "--status=open" "and it flips status open"
-hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "merge_result" "it never writes merge_result"
-
-store '[{"id":"r-2","status":"closed","assignee":"","notes":"","metadata":{"merge_result":"merged","merged_sha":"abc"}}]'
-out="$("$SUT" reopen r-2 2>&1)"; rc=$?
-eq "$rc" 1 "reopen refuses a legitimately closed (merged) bead"
-has "$out" "legitimate" "the refusal says that close was legitimate"
-eq "$(bstatus r-2)" "closed" "and writes nothing"
-
-store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-out="$("$SUT" reopen r-3 2>&1)"; rc=$?
-eq "$rc" 1 "reopen refuses an open bead"
-has "$out" "nothing to repair" "and says there is nothing to repair"
-
-# A value-taking flag as the LAST token is a truncated command: refuse it. The
-# empty value it would otherwise take drops --expect's compare-and-swap guard,
-# and a parser that shifts past the end never terminates at all.
-store '[{"id":"v-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pull_request"}}]'
-: > "$STUB_GC_LOG"
-for FLAG in --to --expect --set --set-dated --unset --assignee --route --takeaway --append-notes; do
-  out="$(timeout 10 "$SUT" transition v-1 --to pull_request "$FLAG" 2>&1)"; rc=$?
-  eq "$rc" 1 "$FLAG with no value is refused (exit 1, not a hang)"
-  has "$out" "flag $FLAG needs a value" "and names the flag"
-done
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "a refused truncated command writes nothing"
-
-store '[{"id":"r-4","status":"closed","assignee":"","notes":"","metadata":{}}]'
-out="$("$SUT" reopen r-4 2>&1)"; rc=$?
-eq "$rc" 1 "reopen refuses a closed unanchored bead (a legal closed shape)"
-
-out="$("$SUT" reopen r-nope 2>&1)"; rc=$?
-eq "$rc" 2 "reopen on an unreadable bead exits 2"
 
 # --- the exec ------------------------------------------------------------------
 # gctk's usage text names itself, so it is the proof that lifecycle.sh handed
@@ -1083,16 +640,16 @@ has "$out" "gctk lifecycle" "a city whose latest build failed still runs its las
 # is refused with exit 1 — the code every caller reads as a refused transition —
 # and a message that names what is missing. The bead is left exactly as it was.
 echo "# no binary to exec"
-store '[{"id":"z-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"pre_open_gate"}}]'
+store '[{"id":"z-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion"}}]'
 
 : > "$STUB_GC_LOG"
-out=$(GCTK_BIN=none "$SUT" transition z-1 --to pull_request --set pr_number=9 2>&1); rc=$?
+out=$(GCTK_BIN=none "$SUT" transition z-1 --to blocked --set pr_number=9 2>&1); rc=$?
 eq "$rc" 1 "GCTK_BIN=none refuses the transition (exit 1)"
 has "$out" "GCTK_BIN=none names no binary" "…and says why"
-eq "$(meta z-1 merge_result)" "pre_open_gate" "…writing nothing"
+eq "$(meta z-1 merge_result)" "refused_false_completion" "…writing nothing"
 eq "$(grep -c '' "$STUB_GC_LOG" || true)" "0" "…and making no gc call at all"
 
-out=$(GCTK_BIN="$TMP/no-such-gctk" "$SUT" transition z-1 --to pull_request 2>&1); rc=$?
+out=$(GCTK_BIN="$TMP/no-such-gctk" "$SUT" transition z-1 --to blocked 2>&1); rc=$?
 eq "$rc" 1 "a GCTK_BIN that is not an executable refuses the transition"
 has "$out" "$TMP/no-such-gctk is not an executable gctk binary" "…naming the path it was given"
 
@@ -1102,22 +659,22 @@ FRESH="$TMP/fresh-city"
 mkdir -p "$FRESH"
 : > "$STUB_GC_LOG"
 out=$(env -u GCTK_BIN -u GC_CITY -u GC_CITY_ROOT GC_CITY_PATH="$FRESH" \
-  "$SUT" transition z-1 --to pull_request --set pr_number=9 2>&1); rc=$?
+  "$SUT" transition z-1 --to blocked --set pr_number=9 2>&1); rc=$?
 eq "$rc" 1 "a city with no binary yet refuses the transition (exit 1)"
 has "$out" "no gctk binary at $FRESH/.gc/services/gctk/bin/gctk" "…naming where the binary belongs"
 has "$out" "gctk-build order" "…and the order that publishes it"
 has "$out" "$FRESH/.gc/services/gctk/build-status.json" "…and the record of that order's last build"
-eq "$(meta z-1 merge_result)" "pre_open_gate" "…writing nothing"
+eq "$(meta z-1 merge_result)" "refused_false_completion" "…writing nothing"
 eq "$(grep -c '' "$STUB_GC_LOG" || true)" "0" "…and making no gc call at all"
 
 # The control for the city chain: the binary is on disk at $CITY, and nothing
 # names that city.
 : > "$STUB_GC_LOG"
-out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" transition z-1 --to pull_request 2>&1); rc=$?
+out=$(env -u GCTK_BIN -u GC_CITY_PATH -u GC_CITY -u GC_CITY_ROOT "$SUT" transition z-1 --to blocked 2>&1); rc=$?
 eq "$rc" 1 "no city named anywhere refuses the transition"
 has "$out" "no city to find the gctk binary in" "…naming what is missing"
 eq "$(grep -c '^bd ' "$STUB_GC_LOG" || true)" "0" "…and reading or writing no bead"
-eq "$(meta z-1 merge_result)" "pre_open_gate" "…so the bead is untouched"
+eq "$(meta z-1 merge_result)" "refused_false_completion" "…so the bead is untouched"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

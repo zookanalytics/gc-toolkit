@@ -12,11 +12,13 @@ import (
 // storeStub answers the reads `gctk bead holds` makes from one store,
 // $STUB_STORE, a JSON array of rows in a show's shape: `bd show` returns the
 // rows named, each leaving out an edge whose far bead the store does not hold,
-// and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field
-// and --all select, in a listing's shape, every edge kept. `bd blocked`
-// answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
-// listing. `bd where` names /stub/.beads at prefix "st", and `rig list` names
-// that store alone, so no store's prefix begins an id here. Each call logs the
+// and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field,
+// --parent and --all select, in a listing's shape, every edge kept. `bd blocked`
+// answers $STUB_BLOCKED and `bd sql` $STUB_MARKS, the rows the store marks
+// blocked. `bd ready` answers, in its brief shape, each open row $STUB_MARKS does
+// not mark, of a type ready work keeps (ReadyWorkExcludeTypes in bd's
+// internal/storage/sqlbuild/ready.go). $STUB_BLOCKED_RC fails the listing. `bd where` names /stub/.beads at prefix "st", and `config show`
+// names that store alone, so no store's prefix begins an id here. Each call logs the
 // store it names with bd's --db, "-" for none, to $STUB_DB_LOG.
 const storeStub = `#!/bin/sh
 db=-
@@ -33,26 +35,34 @@ case "$1 $2" in
         | .dependencies = [ (.dependencies // [])[] | select(.id as $d | any($all[]; .id == $d)) ] ]' ;;
 "bd list")
   shift 2
-  ids=""; hk=""; mf=""; all=""
+  ids=""; hk=""; mf=""; all=""; parent=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --id) ids="$2"; shift ;;
       --has-metadata-key) hk="$2"; shift ;;
       --metadata-field) mf="$2"; shift ;;
+      --parent) parent="$2"; shift ;;
       --all) all=1 ;;
     esac
     shift
   done
-  printf '%s' "$STUB_STORE" | jq -c --arg ids "$ids" --arg hk "$hk" --arg mf "$mf" --arg all "$all" '
+  printf '%s' "$STUB_STORE" | jq -c --arg ids "$ids" --arg hk "$hk" --arg mf "$mf" --arg all "$all" --arg parent "$parent" '
     [ .[] | select($all == "1" or .status != "closed")
       | select($ids == "" or (.id as $i | any($ids | split(",")[]; . == $i)))
       | select($hk == "" or ((.metadata // {}) | has($hk)))
       | select($mf == "" or (($mf | split("=")) as [$k, $v] | (.metadata // {})[$k] == $v))
+      | select($parent == "" or any((.dependencies // [])[]; .dependency_type == "parent-child" and .id == $parent))
       | .id as $self
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;
+"bd ready")
+  printf '%s' "$STUB_STORE" | jq -c --argjson marks "${STUB_MARKS:-[]}" '
+    ($marks | map(.id)) as $m
+    | [ .[] | select(.status == "open" and (.id as $i | $m | index($i) | not)
+          and ((.issue_type // "task") as $t | ["merge-request","gate","molecule","rig","agent","role","message"] | index($t) | not))
+        | {id} ]' ;;
 "bd where") printf '%s\n' '{"path":"/stub/.beads","prefix":"st"}' ;;
-"rig list") printf '%s\n' '{"rigs":[{"name":"stub","prefix":"st","path":"/stub"}]}' ;;
+"config show") printf '%s\n' '{"city_path":"/stub","config":{"Workspace":{"Name":"stub","Prefix":"st"},"Rigs":[]}}' ;;
 "bd sql") printf '%s\n' "${STUB_MARKS:-[]}" ;;
 *) echo "stub gc: no answer for $*" >&2; exit 2 ;;
 esac

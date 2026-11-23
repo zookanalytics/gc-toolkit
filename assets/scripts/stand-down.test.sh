@@ -6,8 +6,9 @@
 # the gate first makes the bead ready, which is what an arm waits for. So the
 # suite gives the fake store what makes those two true, a `blocks` edge that holds
 # a close and keeps a bead out of the ready listing, and runs the real
-# stand-down.sh, gc-helm.sh, bead-rehome.sh and finalize-gate.sh over it, with
-# the arm's verbs those scripts call run by gctk built from this checkout.
+# stand-down.sh, bead-rehome.sh and finalize-gate.sh over it, with the arm's
+# verbs and the takeaway those scripts call run by gctk built from this
+# checkout.
 #
 # What is exercised here:
 #   * the orders a person would try by hand, as controls: a close first is refused,
@@ -22,15 +23,23 @@
 #     does not end stops the stand-down;
 #   * a stop at each write leaves the bead unsent and names it, and a re-run
 #     converges on the same close and the first answer;
+#   * a gate under the key that a person is assigned is taken back from them before
+#     the check, in a write held to the assignee read, and the stand-down goes on;
+#     the take-back stands when something else then holds the close, a take-back
+#     the store refuses writes nothing, and a dry run names the gate and stops;
 #   * each refusal writes nothing: an open PR, no gate under the key, another open
-#     gate, a gate a person is assigned, another live blocker, an open child, a gate
-#     that also holds another open bead with nothing else as the evidence, a claim,
-#     an unreadable bead, a disposition already naming other evidence, a review bead;
+#     gate, a gate a person is assigned that this bead leaves or that is in
+#     progress, another live blocker, an open child, a gate that also holds another
+#     open bead with nothing else as the evidence, a claim, an unreadable bead, a
+#     disposition already naming other evidence, a review bead;
+#   * a bead at each of the pending record's exceptions stands down only once
+#     its record names its PR and GitHub reads each PR the record names closed or
+#     merged, and the script's copy of those values is held to
+#     services/gctk/pr/record;
 #   * a gate that also holds another open bead, with the evidence named: the arm and
 #     the route go before the edge, passes after every write and mid-pass sling
 #     nothing, a stop at the edge converges on a re-run, and the gate stays open and
 #     asking about the other bead;
-#   * a graduated convoy the refinery parked, which its gate's message sends here;
 #   * an epic that carries a hypothesis, whatever its ruling reads: the close's
 #     disposition is its terminal reason, so the check ahead of the first write lets
 #     it through, what the check refuses is what the close holds on, and every other
@@ -39,9 +48,11 @@
 #     dry run writes nothing, and a closed bead is nothing to do;
 #   * the clause a decline message carries is a command that runs.
 #
-# No live city, Dolt, network, gc or bd: a tmpdir, a `gc` stub over a JSON store, and
-# the scripts themselves. specs/tk-utv2kaq/real-store-proof.sh runs the same shapes
-# on the real bd by hand, because the test floor refuses it here.
+# No live city, Dolt, network, gc, gh or bd: a tmpdir, the shared harness's
+# compiled fake gc over its store, stand-ins for gh, a run's cancel and a
+# branch's end, and the scripts themselves. specs/tk-utv2kaq/real-store-proof.sh
+# runs the same shapes on the real bd by hand, because the test floor refuses it
+# here.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,291 +61,137 @@ SCRIPT="$HERE/stand-down.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-stand-down-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-PASS=0; FAIL=0
-ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
-eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
-has()   { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
-hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
+# The shared harness: the compiled fake gc over one store, which logs every call
+# to $STUB_GC_LOG, and gctk built from this checkout, which runs the
+# stand-down's disarm and the deferred-dispatch order's pass, gctk bead
+# start-armed, over that store.
+# shellcheck source=test-harness.sh
+. "$HERE/test-harness.sh"
+harness_build_gctk
+harness_init
 
-command -v jq >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 1; }
 [ -x "$SCRIPT" ] || { echo "not executable: $SCRIPT" >&2; exit 1; }
-[ -x "$ROOT/tools/test-floor/gc" ] || { echo "no test floor at tools/test-floor; not running" >&2; exit 2; }
 
-unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
-BIN="$TMP/bin"; mkdir -p "$BIN" "$TMP/rig/.beads" "$TMP/state"
+# The fake refuses to close a bead a live blocker holds, as bd does. A pass reads
+# the pool's default formula from the config, for an arm that names none, and the
+# session list names no session.
+export STUB_ENFORCE_BLOCKS=1 STUB_CONFIG="$TMP/config.json" STUB_SESSIONS="$TMP/sessions.json" STUB_RIGS="$TMP/rigs.json"
+printf '%s\n' '{"ok":true,"config":{"Agents":[{"Name":"pool","Dir":"rig","DefaultSlingFormula":"mol-polecat-work"}]}}' > "$STUB_CONFIG"
+printf '%s\n' '{"sessions":[]}' > "$STUB_SESSIONS"
+mkdir -p "$TMP/rig/.beads"
+printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$STUB_RIGS"
+export BEADS_ACTOR=a-person GC_BRANCH_END_TOOL="$BIN/branch-end"
+# The takeaway's release runs run-cancel.sh from GCTK_SCRIPTS_DIR, which here
+# holds the stand-in alone.
+export GCTK_SCRIPTS_DIR="$TMP/scripts"
+export STUB_GH_STATES="$TMP/gh-states" LANDED="$TMP/landed" LAND_LOG="$TMP/land.log" PASS_LOG="$TMP/pass.log" AT_EDGE="$TMP/at-edge"
 
-# --- the gc stub ---------------------------------------------------------------
-# $STUB_STORE is an array of beads, each with a `_deps` array of the edges it
-# carries ({id, dependency_type}). A live `blocks` target refuses a close and keeps
-# the bead out of --ready, as bd does. STUB_FAIL is text: a bd call whose arguments
-# carry it writes nothing and exits 1. STUB_LAND_AT is text and STUB_LAND a command:
-# the first bd call whose arguments carry it runs the command first, a write that
-# lands between two of a script's reads. STUB_PASS_AFTER_WRITES runs the
-# deferred-dispatch order's pass, gctk bead start-armed, after each write the
-# stand-down makes.
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
-set -u
-S="${STUB_STORE:?}"
-case "${1:-}" in
-  rig) printf '%s\n' "$(<"${STUB_RIGS:?}")"; exit 0 ;;
-  session) printf '{"sessions":[]}\n'; exit 0 ;;
-  sling) shift; printf '%s\n' "$*" >> "${STUB_SLING_LOG:?}"; exit 0 ;;
-  bd) shift ;;
-  *) echo "gc stub: unsupported '$*'" >&2; exit 2 ;;
-esac
-# A call the gctk under test makes answers from the same store, through the seam
-# holds-store.stub.sh keeps. STUB_LAND_AT lands its write ahead of such a call
-# as ahead of any, and the command it runs reaches this stub as a script's
-# calls do, not as gctk's. gctk's writes are the stand-down's own, since its
-# disarm runs gctk bead disarm, so each is logged as a script's write is,
-# refused under STUB_FAIL, and followed by a pass under STUB_PASS_AFTER_WRITES.
-if [ -n "${HOLDS_STUB_READ:-}" ]; then
-  if [ -n "${STUB_LAND_AT:-}" ] && [ ! -e "$S.landed" ]; then
-    case " $* " in
-      *"$STUB_LAND_AT"*) : > "$S.landed"; env -u HOLDS_STUB_READ -u STUB_LAND_AT -u STUB_LAND -u STUB_FAIL bash -c "$STUB_LAND" >>"$S.land.log" 2>&1 ;;
-    esac
-  fi
-  w=("$@"); [ "${w[0]:-}" = --db ] && w=("${w[@]:2}")
-  [ "${w[0]:-}" = update ] || HOLDS_STORE="$S" exec "${HOLDS_STUB:?}" answer "$@"
-  printf 'bd %s\n' "${w[*]}" >> "${STUB_GC_LOG:?}"
-  if [ -n "${STUB_FAIL:-}" ]; then
-    case " ${w[*]} " in *"$STUB_FAIL"*) echo "gc stub: refused: ${w[*]}" >&2; exit 1 ;; esac
-  fi
-  HOLDS_STORE="$S" "${HOLDS_STUB:?}" answer "$@" || exit $?
-  if [ -n "${STUB_PASS_AFTER_WRITES:-}" ] && [ -z "${STUB_IN_PASS:-}" ]; then
-    STUB_IN_PASS=1 "${GCTK_BIN:?}" bead start-armed >>"$S.pass.log" 2>&1
-  fi
-  exit 0
-fi
-actor="${BEADS_ACTOR:-}"
-while :; do
-  case "${1:-}" in
-    --db) shift 2 ;;
-    --actor) actor="${2:-}"; shift 2 ;;
-    *) break ;;
-  esac
-done
-printf 'bd %s\n' "$*" >> "${STUB_GC_LOG:?}"
-if [ -n "${STUB_FAIL:-}" ]; then
-  case " $* " in *"$STUB_FAIL"*) echo "gc stub: refused: $*" >&2; exit 1 ;; esac
-fi
-if [ -n "${STUB_LAND_AT:-}" ] && [ ! -e "$S.landed" ]; then
-  case " $* " in
-    *"$STUB_LAND_AT"*) : > "$S.landed"; env -u STUB_LAND_AT -u STUB_LAND -u STUB_FAIL bash -c "$STUB_LAND" >>"$S.land.log" 2>&1 ;;
-  esac
-fi
-apply() { jq -c "$@" "$S" > "$S.n" && mv "$S.n" "$S"; }
-wrote() {
-  [ -n "${STUB_PASS_AFTER_WRITES:-}" ] || return 0
-  [ -n "${STUB_IN_PASS:-}" ] && return 0
-  STUB_IN_PASS=1 "${GCTK_BIN:?}" bead start-armed >>"$S.pass.log" 2>&1
-  return 0
-}
-BLOCKERS='def live_blockers($s): [ (._deps // [])[] | select(.dependency_type == "blocks") | .id as $t
-    | $s[] | select(.id == $t and ((.status // "open") != "closed") and ((.status // "open") != "pinned")) | .id ];'
-verb="${1:-}"; shift || true
-case "$verb" in
-  show)
-    id="${1:-}"
-    out=$(jq -c --arg id "$id" '. as $s | [ .[] | select(.id == $id) | . as $b
-        | .dependencies = [ ($b._deps // [])[] | . as $e | ($s | map(select(.id == $e.id)) | .[0]) as $t | select($t != null)
-            | {id: $e.id, dependency_type: $e.dependency_type, issue_type: ($t.issue_type // "task"), status: ($t.status // "open")} ]
-        | del(._deps) ]' "$S")
-    if [ "$out" = "[]" ]; then
-      echo '{"error":"no issues found matching the provided IDs","schema_version":1}'; exit 1
-    fi
-    printf '%s\n' "$out" ;;
-  list)
-    # STUB_LIST_FAIL_AFTER is text: once a bd call carrying it has run, every list fails.
-    if [ -n "${STUB_LIST_FAIL_AFTER:-}" ] && grep -q -F -- "$STUB_LIST_FAIL_AFTER" "$STUB_GC_LOG"; then
-      echo '{"error":"simulated read failure","schema_version":1}'; exit 1
-    fi
-    key=""; ready=0; all=0; gates=0; ids=""; st=""; parent=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --db) shift ;;
-        --has-metadata-key) shift; key="${1:-}" ;;
-        --id) shift; ids="${1:-}" ;;
-        --ready) ready=1 ;;
-        --all) all=1 ;;
-        --include-gates) gates=1 ;;
-        --parent) shift; parent="${1:-}" ;;
-        --status) shift; st="${1:-}" ;;
-        --status=*) st="${1#--status=}" ;;
-      esac
-      shift || true
-    done
-    jq -c --arg k "$key" --arg ids "$ids" --argjson ready "$ready" --argjson all "$all" --argjson gates "$gates" \
-          --arg st "$st" --arg parent "$parent" "$BLOCKERS"'
-      . as $s
-      | ($ids | if . == "" then [] else split(",") end) as $want
-      | ($st | if . == "" then [] else split(",") end) as $sts
-      | [ .[]
-          | select($k == "" or ((.metadata // {}) | has($k)))
-          | select(($want | length) == 0 or (.id as $i | $want | index($i)))
-          | select(if ($sts | length) > 0 then ((.status // "open") as $x | $sts | index($x)) != null else ($all == 1 or (.status // "open") != "closed") end)
-          | select($gates == 1 or (.issue_type // "") != "gate")
-          | select($parent == "" or (.parent // "") == $parent)
-          | select($ready == 0 or ((.status // "open") == "open" and (live_blockers($s) | length) == 0))
-          | . as $b
-          | .dependencies = [ ($b._deps // [])[] | {issue_id: $b.id, depends_on_id: .id, type: .dependency_type} ]
-          | del(._deps) ]' "$S" ;;
-  update)
-    id="${1:-}"; shift || true
-    prog='.'; if_st="-"; if_who="-"; args=()
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --db) shift ;;
-        --set-metadata) shift; args+=("${1:-}"); prog="$prog | .metadata[(\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[0])] = (\$ARGS.positional[$((${#args[@]} - 1))] | split(\"=\")[1:] | join(\"=\"))" ;;
-        --unset-metadata) shift; args+=("${1:-}"); prog="$prog | (.metadata |= del(.[\$ARGS.positional[$((${#args[@]} - 1))]]))" ;;
-        --append-notes) shift; args+=("${1:-}"); prog="$prog | .notes = ((.notes // \"\") + \"\n\" + \$ARGS.positional[$((${#args[@]} - 1))])" ;;
-        --status=*) args+=("${1#--status=}"); prog="$prog | .status = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
-        --assignee=*) args+=("${1#--assignee=}"); prog="$prog | .assignee = \$ARGS.positional[$((${#args[@]} - 1))]" ;;
-        --if-status=*) if_st="${1#--if-status=}" ;;
-        --if-assignee=*) if_who="${1#--if-assignee=}" ;;
-      esac
-      shift || true
-    done
-    cur=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | [(.status // "open"), (.assignee // "")] | join("\u001f")) // empty' "$S")
-    [ -n "$cur" ] || { echo "bd: no issue found matching $id" >&2; exit 1; }
-    if { [ "$if_st" != "-" ] && [ "${cur%%$'\037'*}" != "$if_st" ]; } || { [ "$if_who" != "-" ] && [ "${cur#*$'\037'}" != "$if_who" ]; }; then
-      echo "Error: precondition failed for $id" >&2; exit 13
-    fi
-    # A move into closed is bd's checked close: a live blocker refuses it.
-    case " ${args[*]:-} " in *" closed "*)
-      blocked=$(jq -r --arg id "$id" "$BLOCKERS"'. as $s | [ .[] | select(.id == $id) | live_blockers($s)[] ] | join(", ")' "$S")
-      if [ -n "$blocked" ]; then
-        echo "Error: cannot close blocked issue: $id is blocked by [$blocked] (use --force to override)" >&2; exit 1
-      fi ;;
-    esac
-    jq -c --arg id "$id" "map(if .id == \$id then ( $prog ) else . end)" "$S" --args -- ${args[@]+"${args[@]}"} > "$S.n" && mv "$S.n" "$S"
-    wrote
-    echo "updated $id" ;;
-  close)
-    id="${1:-}"; shift || true; reason=""
-    while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
-    who=$(jq -r --arg id "$id" '(.[] | select(.id == $id) | .assignee // "") // ""' "$S")
-    if [ -n "$who" ] && [ "$who" != "$actor" ]; then
-      echo "Error: cannot close $id: assignee is \"$who\", actor is \"$actor\"; reclaim or use --force to override" >&2; exit 1
-    fi
-    blocked=$(jq -r --arg id "$id" "$BLOCKERS"'. as $s | [ .[] | select(.id == $id) | live_blockers($s)[] ] | join(", ")' "$S")
-    if [ -n "$blocked" ]; then
-      echo "Error: cannot close blocked issue: $id is blocked by [$blocked] (use --force to override)" >&2; exit 1
-    fi
-    apply --arg id "$id" --arg r "$reason" 'map(if .id == $id then .status = "closed" | .close_reason = $r else . end)'
-    wrote ;;
-  gate)
-    [ "${1:-}" = resolve ] || { echo "gc stub: unsupported gate ${1:-}" >&2; exit 2; }
-    id="${2:-}"; shift 2 || true; reason=""
-    while [ $# -gt 0 ]; do case "$1" in --reason) shift; reason="${1:-}" ;; esac; shift || true; done
-    # bd keeps the first answer and reports success either way.
-    apply --arg id "$id" --arg r "$reason" 'map(if .id == $id and ((.status // "open") != "closed") then .status = "closed" | .close_reason = $r else . end)'
-    wrote
-    echo "Gate resolved: $id" ;;
-  dep)
-    sub="${1:-}"; shift || true
-    case "$sub" in
-      list)
-        id="${1:-}"; shift || true; dir=down; typ=""
-        while [ $# -gt 0 ]; do
-          case "$1" in
-            --db) shift ;;
-            --direction=*) dir="${1#--direction=}" ;;
-            --direction) shift; dir="${1:-}" ;;
-            --type|-t) shift; typ="${1:-}" ;;
-            --type=*) typ="${1#--type=}" ;;
-          esac
-          shift || true
-        done
-        jq -e --arg id "$id" 'any(.[]; .id == $id)' "$S" >/dev/null \
-          || { printf '{"error":"not found: issue %s","schema_version":1}\n' "$id"; exit 1; }
-        if [ "$dir" = up ]; then
-          jq -c --arg id "$id" --arg t "$typ" '[ .[] | . as $b | ($b._deps // [])[] | select(.id == $id and ($t == "" or .dependency_type == $t))
-              | ($b | del(._deps)) + {dependency_type: .dependency_type} ]' "$S"
-        else
-          jq -c --arg id "$id" --arg t "$typ" '. as $s | [ .[] | select(.id == $id) | (._deps // [])[] | select($t == "" or .dependency_type == $t) | . as $e
-              | $s[] | select(.id == $e.id) | del(._deps) + {dependency_type: $e.dependency_type} ]' "$S"
-        fi ;;
-      remove)
-        apply --arg a "${1:-}" --arg b "${2:-}" 'map(if .id == $a then ._deps = ((._deps // []) | map(select(.id != $b))) else . end)'
-        wrote ;;
-      add)
-        a="${1:-}"; b="${2:-}"; shift 2 || true; typ=blocks
-        while [ $# -gt 0 ]; do case "$1" in --type|-t) shift; typ="${1:-}" ;; --type=*) typ="${1#--type=}" ;; esac; shift || true; done
-        apply --arg a "$a" --arg b "$b" --arg t "$typ" 'map(if .id == $a and ([(._deps // [])[] | select(.id == $b)] | length) == 0 then ._deps = ((._deps // []) + [{id: $b, dependency_type: $t}]) else . end)'
-        wrote ;;
-      *) echo "gc stub: unsupported dep $sub" >&2; exit 2 ;;
-    esac ;;
-  *) echo "gc stub: unsupported bd $verb" >&2; exit 2 ;;
-esac
-STUB
-
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/run-cancel" <<'STUB'
+# --- stand-ins for what is not gc -------------------------------------------------
+# run-cancel and branch-end log each call among the fake's, and
+# STUB_RUN_CANCEL_FAILS makes a run's cancel fail. The gh stand-in answers a PR's
+# state from $STUB_GH_STATES, one "<url> <state>" line per PR, fails as gh does
+# for a PR it does not list, and refuses any other call.
+{ _stub_shebang; cat; } > "$BIN/run-cancel" <<'STUB'
 printf 'run-cancel %s\n' "$*" >> "${STUB_GC_LOG:?}"
 [ -z "${STUB_RUN_CANCEL_FAILS:-}" ] || { echo "run-cancel: simulated failure" >&2; exit 1; }
 exit 0
 STUB
-{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/branch-end" <<'STUB'
+{ _stub_shebang; cat; } > "$BIN/branch-end" <<'STUB'
 printf 'branch-end %s\n' "$*" >> "${STUB_GC_LOG:?}"
 exit 0
 STUB
-chmod +x "$BIN/gc" "$BIN/run-cancel" "$BIN/branch-end"
-printf '{"rigs":[{"name":"tkrig","path":"%s","prefix":"tk"}]}\n' "$TMP/rig" > "$TMP/rigs.json"
+{ _stub_shebang; cat; } > "$BIN/gh" <<'STUB'
+printf 'gh %s\n' "$*" >> "${STUB_GC_LOG:?}"
+[ "$*" = "pr view ${3:-} --json state -q .state" ] || { echo "gh stub: unsupported '$*'" >&2; exit 2; }
+st=$(awk -v u="$3" '$1 == u { print $2; exit }' "${STUB_GH_STATES:?}")
+[ -n "$st" ] || { echo "GraphQL: Could not resolve to a PullRequest with the number of ${3##*/}. (repository.pullRequest)" >&2; exit 1; }
+printf '%s\n' "$st"
+STUB
 
-export PATH="$BIN:$ROOT/tools/test-floor:$PATH"
-export STUB_STORE="$TMP/beads.json" STUB_RIGS="$TMP/rigs.json" STUB_GC_LOG="$TMP/gc.log" STUB_SLING_LOG="$TMP/sling.log"
-export BEADS_ACTOR=a-person GC_RUN_CANCEL_TOOL="$BIN/run-cancel" GC_BRANCH_END_TOOL="$BIN/branch-end"
-export GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json"
-# The pass is the deferred-dispatch order's, gctk bead start-armed, and the
-# stand-down's disarm is gctk bead disarm: both run the gctk this checkout
-# builds over the stub store. The config it reads names the pool's default
-# formula, for an arm that names none.
-export HOLDS_STUB="$HERE/holds-store.stub.sh" GC_NO_API=1
-HOLDS_CONFIG=$(jq -nc '{ok: true, config: {Agents: [{Name: "pool", Dir: "rig", DefaultSlingFormula: "mol-polecat-work"}]}}')
-export HOLDS_CONFIG
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so no pass can read what holds the work"; exit 1; }
-export GCTK_BIN
+# --- what a case runs inside the store's calls ------------------------------------
+# land is the hook a case names in STUB_HOOK to land another writer's change once,
+# before the first call that carries STUB_HOOK_AT (the fake's doc.go): it runs
+# $LAND under bash, logging to $LAND_LOG, and leaves $LANDED, so a later call that
+# carries the text lands nothing more. A change it writes goes through the fake's
+# fixture writers, which log nothing. after-write runs the deferred-dispatch
+# order's pass, gctk bead start-armed, logging to $PASS_LOG, and a case names it
+# in STUB_AFTER_WRITE to run that pass after each write the stand-down makes.
+# at-edge writes what tk-w carries when it runs, its arm and its route, to
+# $AT_EDGE.
+{ _stub_shebang; cat; } > "$TMP/land" <<'STUB'
+[ -e "${LANDED:?}" ] && exit 0
+: > "$LANDED"
+bash -c "${LAND:?}" >> "${LAND_LOG:?}" 2>&1
+exit 0
+STUB
+{ _stub_shebang; cat; } > "$TMP/after-write" <<'STUB'
+"${GCTK_BIN:?}" bead start-armed >> "${PASS_LOG:?}" 2>&1
+exit 0
+STUB
+{ _stub_shebang; cat; } > "$TMP/at-edge" <<'STUB'
+a=$(gc --harness-read meta tk-w gc.dispatch_when_ready); [ "$a" != "<absent>" ] || a=""
+r=$(gc --harness-read meta tk-w gc.routed_to); [ "$r" != "<absent>" ] || r=""
+printf '%s|%s\n' "$a" "$r" > "${AT_EDGE:?}"
+STUB
+chmod +x "$BIN/run-cancel" "$BIN/branch-end" "$BIN/gh" "$TMP/land" "$TMP/after-write" "$TMP/at-edge"
+mkdir -p "$GCTK_SCRIPTS_DIR" && ln -s "$BIN/run-cancel" "$GCTK_SCRIPTS_DIR/run-cancel.sh"
 
+# --- fixtures ----------------------------------------------------------------------
+# An edge is a dep row: `edge <id> <type> <on>` is <id>'s edge onto <on>.
+edge() {
+  if [ "$2" = blocks ]; then printf '%s|blocks|%s\n' "$3" "$1" >> "$STUB_DEPS"
+  else printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$STUB_DEPS"; fi
+}
 # A work bead as a declined run leaves it: open, unassigned, unrouted, armed to
 # re-sling, with a `blocks` edge onto an open human gate under polecat-x.
-fresh() {
-  cat > "$STUB_STORE" <<'JSON'
-[{"id":"tk-w","status":"open","assignee":"","issue_type":"task","notes":"","title":"the work",
+FRESH='[{"id":"tk-w","status":"open","assignee":"","issue_type":"task","notes":"","title":"the work",
   "metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]",
               "gc.dispatch_when_ready_armed_at":"2026-11-01T00:00:00Z",
-              "gc.dispatch_when_ready_reason":"waits on the ruling","resling_target":"rig/pool"},
-  "_deps":[{"id":"tk-g","dependency_type":"blocks"}]},
+              "gc.dispatch_when_ready_reason":"waits on the ruling","resling_target":"rig/pool"}},
  {"id":"tk-g","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x",
   "title":"does this go on?","notes":"","metadata":{},"created_at":"2026-11-01T00:00:00Z"},
- {"id":"tk-conv","status":"open","assignee":"human","issue_type":"task","title":"a conversation","notes":"","metadata":{}}]
-JSON
-  rm -f "$STUB_STORE.landed" "$STUB_STORE.land.log" "$STUB_STORE.pass.log"
-  : > "$STUB_GC_LOG"; : > "$STUB_SLING_LOG"
-  printf '[]\n' > "$RUN_LIB_STUB_RUNS"
+ {"id":"tk-conv","status":"open","assignee":"human","issue_type":"task","title":"a conversation","notes":"","metadata":{}}]'
+fresh() {
+  store "$FRESH"
+  : > "$STUB_DEPS"; echo '[]' > "$STUB_COMMENTS"
+  edge tk-w blocks tk-g
+  rm -f "$LANDED"; : > "$LAND_LOG"; : > "$PASS_LOG"
+  : > "$STUB_GC_LOG"; : > "$STUB_GH_STATES"
 }
-patch()  { jq -c "$1" "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"; }
+# bead <id> <title> [<setting>...]: an open, unassigned task.
+bead() { local id="$1" title="$2"; shift 2; brow "$id" status=open assignee= issue_type=task "title=$title" 'metadata:={}' "$@"; }
+# gate <id> <key> <title>: an open human gate under the key, filed after tk-g.
+gate() { brow "$1" status=open assignee= issue_type=gate await_type=human "await_id=$2" "title=$3" 'metadata:={}' created_at=2026-11-01T00:00:01Z; }
 # The same work bead, on a gate that also holds another open bead.
-shared() {
-  fresh
-  patch '. + [{"id":"tk-o","status":"open","assignee":"","issue_type":"task","title":"another bead","metadata":{},"_deps":[{"id":"tk-g","dependency_type":"blocks"}]}]'
-}
-field()  { jq -r --arg id "$1" --arg f "$2" '.[] | select(.id == $id) | .[$f] // ""' "$STUB_STORE"; }
-meta()   { jq -r --arg id "$1" --arg k "$2" '.[] | select(.id == $id) | .metadata[$k] // "<absent>"' "$STUB_STORE"; }
+shared() { fresh; bead tk-o "another bead"; edge tk-o blocks tk-g; }
+field() { local v; v=$(bfield "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "$v"; }
 # The bead a disposed bead names through its supersedes or duplicates edge.
-succ()   { jq -r --arg id "$1" '.[] | select(.id == $id) | [(._deps // [])[] | select(.dependency_type == "supersedes" or .dependency_type == "duplicates") | .id] | .[0] // "<absent>"' "$STUB_STORE"; }
-slings() { wc -l < "$STUB_SLING_LOG" | tr -d ' '; }
+succ() { local s; s=$(bedges "$1" supersedes); [ -n "$s" ] || s=$(bedges "$1" duplicates); printf '%s' "${s:-<absent>}"; }
+# Whether a bead waits on a gate through a blocks edge: 1 or 0.
+on_gate() { case " $(bedges "$1" blocks) " in *" $2 "*) echo 1 ;; *) echo 0 ;; esac; }
+# A sling is a line of the fake's log, which a pass's start makes.
+slings() { grep -c '^sling ' "$STUB_GC_LOG" || true; }
+sling_lines() { grep '^sling ' "$STUB_GC_LOG" || true; }
 run()    { OUT=$("$SCRIPT" "$@" 2>&1); RC=$?; }
 pass()   { PASS_OUT=$("$GCTK_BIN" bead start-armed 2>&1); PASS_RC=$?; }
 line_of() { grep -n -F -- "$1" "$STUB_GC_LOG" | head -1 | cut -d: -f1; }
-writes() { grep -c -E '^bd (update|close|gate resolve|dep remove|dep add)' "$STUB_GC_LOG" || true; }
+# close_of <bead> — the line of the bead's close, a guarded update that moves it
+# to closed, which the release's guarded update before it does not.
+close_of() { grep -n -F -- "update $1 --if-status" "$STUB_GC_LOG" | grep -F -- "--status=closed" | head -1 | cut -d: -f1; }
+# The store's writes among the fake's log lines, gctk's own included, which name
+# their store ahead of the verb.
+WRITES='^bd (--(db|actor) [^ ]+ )*(update|close|gate resolve|dep remove|dep add)'
+writes() { grep -c -E "$WRITES" "$STUB_GC_LOG" || true; }
+# snap and same: the store's rows and edges as a case found them, and whether
+# they still read that way.
+snap() { cp "$STUB_STORE" "$TMP/before.json" && cp "$STUB_DEPS" "$TMP/before.deps"; }
+same() { cmp -s "$TMP/before.json" "$STUB_STORE" && cmp -s "$TMP/before.deps" "$STUB_DEPS"; }
 refused() { # <label> <args...>: exit 1, the store as it was, nothing sent
   local label="$1"; shift
-  local before="$TMP/before.json"
-  cp "$STUB_STORE" "$before"
+  snap
   run "$@"
   eq "$RC" 1 "$label: exit 1"
-  if cmp -s "$before" "$STUB_STORE"; then ok "$label: nothing was written"; else bad "$label: the store changed"; fi
+  if same; then ok "$label: nothing was written"; else bad "$label: the store changed"; fi
   has "$OUT" "Nothing was written." "$label: it says so"
   eq "$(writes)" 0 "$label: no write was tried"
 }
@@ -356,7 +213,7 @@ eq "$(slings)" 1 "control: taking the bead off a shared gate with its arm standi
 
 # --- the stand-down -------------------------------------------------------------
 fresh
-patch 'map(if .id == "tk-w" then .metadata += {"gc.execution_routed_to":"rig/pool","gc.routed_to":"rig/pool","gc.session_id":"s-1","gc.session_name":"n-1"} else . end)'
+bset tk-w metadata.gc.execution_routed_to=rig/pool metadata.gc.routed_to=rig/pool metadata.gc.session_id=s-1 metadata.gc.session_name=n-1
 run tk-w --key polecat-x --ruling "the branch is wrong and nobody needs this"
 eq "$RC" 0 "a stand-down exits 0"
 eq "$(field tk-w status)" closed "the work closes"
@@ -374,7 +231,7 @@ for k in gc.routed_to gc.session_id gc.session_name gc.execution_routed_to; do
 done
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
 ANSWER=$(line_of "gate resolve tk-g")
-CLOSE=$(line_of "update tk-w --if-status")
+CLOSE=$(close_of tk-w)
 if [ -n "$DISARM" ] && [ -n "$ANSWER" ] && [ -n "$CLOSE" ] && [ "$DISARM" -lt "$ANSWER" ] && [ "$ANSWER" -lt "$CLOSE" ]; then
   ok "the arm goes first, then the answer, then the close"
 else
@@ -391,20 +248,27 @@ eq "$(writes)" "$WRITES_BEFORE" "…and writes nothing"
 eq "$(field tk-g close_reason)" "ruled: the branch is wrong and nobody needs this" "…and the first answer stands"
 
 fresh
-STUB_PASS_AFTER_WRITES=1 run tk-w --key polecat-x --ruling "stop"
+STUB_AFTER_WRITE="$TMP/after-write" run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "with a pass after every write, the stand-down still lands"
 eq "$(slings)" 0 "…and none of those passes slings the work"
-[ -s "$STUB_STORE.pass.log" ] && ok "…and the passes did run" || bad "…and the passes did run"
+[ -s "$PASS_LOG" ] && ok "…and the passes did run" || bad "…and the passes did run"
 
 fresh
-STUB_LAND_AT="list --id tk-w" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
+STUB_HOOK_AT="list --id tk-w" STUB_HOOK="$TMP/land" LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs'" pass
 eq "$(field tk-w status)" closed "a stand-down that lands between a pass's listing and its hold read closes the work"
 eq "$(slings)" 0 "…and that pass does not sling it"
 has "$PASS_OUT" '"action":"withdrawn"' "…and says why"
 
 # --- the run beneath the bead ----------------------------------------------------
-fresh
-printf '[{"root":"r-1","bead":"tk-w","live":true,"convoy":"c-1"}]\n' > "$RUN_LIB_STUB_RUNS"
+# live_run: a graph.v2 run over tk-w, its root r-1 in progress over the input
+# convoy c-1, which tracks tk-w, as the harness's runs reader reads one.
+live_run() {
+  brow r-1 status=in_progress issue_type=task title=mol-polecat-work \
+    'metadata:={"gc.kind":"workflow","gc.formula_contract":"graph.v2","gc.formula_name":"mol-polecat-work","gc.input_convoy_id":"c-1"}'
+  brow c-1 status=open issue_type=convoy "title=input convoy for tk-w" 'metadata:={"gc.synthetic":"true"}'
+  edge c-1 tracks tk-w
+}
+fresh; live_run
 run tk-w --key polecat-x --ruling "stop the run"
 eq "$RC" 0 "a bead with a live run stands down"
 CANCEL=$(line_of "run-cancel --root r-1")
@@ -414,17 +278,16 @@ if [ -n "$CANCEL" ] && [ -n "$ANSWER" ] && [ "$CANCEL" -lt "$ANSWER" ]; then
 else
   bad "…and its run ends before the gate is answered (lines ${CANCEL:-none}, ${ANSWER:-none})"
 fi
-fresh
-printf '[{"root":"r-1","bead":"tk-w","live":true,"convoy":"c-1"}]\n' > "$RUN_LIB_STUB_RUNS"
+fresh; live_run
 STUB_RUN_CANCEL_FAILS=1 run tk-w --key polecat-x --ruling "stop the run"
 eq "$RC" 1 "a run that does not end stops the stand-down"
 eq "$(field tk-g status)" open "…with the gate unanswered"
 eq "$(field tk-w status)" open "…and the work open"
 
 # --- a stop at each write, then a re-run ------------------------------------------
-stop_case() { # <label> <text the stub refuses> <gate status after> <arm after> <text the stop names>
+stop_case() { # <label> <text the fake refuses> <gate status after> <arm after> <text the stop names>
   fresh
-  STUB_FAIL="$2" run tk-w --key polecat-x --ruling "stop"
+  STUB_FAIL_ON="$2" run tk-w --key polecat-x --ruling "stop"
   eq "$RC" 1 "stop at $1: exit 1"
   has "$OUT" "Re-run this command" "stop at $1: it names the way on"
   has "$OUT" "$5" "stop at $1: it says what stands"
@@ -459,32 +322,26 @@ eq "$RC" 0 "…a re-run finds it closed"
 has "$OUT" "already closed" "…and says so"
 
 # --- refusals --------------------------------------------------------------------
-fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request" else . end)'
-refused "an open PR" tk-w --key polecat-x --ruling "x"
-has "$OUT" "pr-dispose.sh" "an open PR: it names the writer that retires one"
-fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request_pending" else . end)'
-refused "an open PR on the pending record" tk-w --key polecat-x --ruling "x"
-has "$OUT" "pull_request_closed_unmerged" "an open PR on the pending record: it names the gate the landing order files on the close"
-hasnt "$OUT" "pr-dispose.sh" "…and not the old record's writer, which refuses it"
-fresh; patch 'map(if .id == "tk-w" then .metadata.merge_result = "pull_request_head_changed" else . end)'
-refused "an open PR at a head the refinery has not validated" tk-w --key polecat-x --ruling "x"
-has "$OUT" "refinery-invalid-existing-pr" "an open PR at a head the refinery has not validated: it names the gate the refinery's publication files on the closed PR"
-hasnt "$OUT" "pull_request_closed_unmerged" "…and not the landing order's, which does not read that bead"
-hasnt "$OUT" "pr-dispose.sh" "…nor the old record's writer, which refuses it"
+for mr in pull_request_pending pull_request_head_changed; do
+  fresh; bset tk-w "metadata.merge_result=$mr"
+  refused "an open PR at $mr" tk-w --key polecat-x --ruling "x"
+  has "$OUT" "pr-dispose.sh" "an open PR at $mr: it names the writer that retires one"
+  has "$OUT" "--retire" "…and the sitting's sign-off that runs it"
+done
 fresh
 refused "no gate under the key" tk-w --key another-key --ruling "x"
 has "$OUT" "no human gate under another-key" "no gate under the key: it says so"
-fresh; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"another-question","title":"another question","metadata":{}}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+fresh; gate tk-g2 another-question "another question"; edge tk-w blocks tk-g2
 refused "another open gate" tk-w --key polecat-x --ruling "x"
 has "$OUT" "tk-g2" "another open gate: it names the gate"
-fresh; patch 'map(if .id == "tk-g" then .assignee = "a-person-owes-it" else . end)'
-refused "a gate a person is assigned" tk-w --key polecat-x --ruling "x"
-fresh; patch '. + [{"id":"tk-p","status":"open","assignee":"","issue_type":"task","title":"prerequisite","metadata":{}}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-p","dependency_type":"blocks"}] else . end)'
+shared; bset tk-g assignee=a-person-owes-it
+refused "a gate a person is assigned that this bead leaves" tk-w --key polecat-x --ruling "x" --successor tk-conv
+fresh; bset tk-g assignee=a-person-owes-it status=in_progress
+refused "a gate a person is assigned that is in progress" tk-w --key polecat-x --ruling "x"
+fresh; bead tk-p prerequisite; edge tk-w blocks tk-p
 refused "another live blocker" tk-w --key polecat-x --ruling "x"
 has "$OUT" "tk-p" "another live blocker: it names it"
-fresh; patch '. + [{"id":"tk-c","status":"open","assignee":"","issue_type":"task","title":"child","parent":"tk-w","metadata":{}}]'
+fresh; bead tk-c child parent=tk-w
 refused "an open child" tk-w --key polecat-x --ruling "x"
 has "$OUT" "tk-c" "an open child: it names it"
 shared
@@ -495,37 +352,170 @@ hasnt "$OUT" "dep remove" "a shared gate's refusal: it sends nobody to take the 
 shared
 refused "a shared gate named as the evidence" tk-w --key polecat-x --ruling "x" --successor tk-g
 has "$OUT" "cannot carry this ruling" "a shared gate named as the evidence: it says why"
-fresh; patch 'map(if .id == "tk-w" then .assignee = "someone" | .status = "in_progress" else . end)'
+fresh; bset tk-w assignee=someone status=in_progress
 refused "a claim" tk-w --key polecat-x --ruling "x"
 has "$OUT" "someone" "a claim: it names the holder"
-fresh; patch 'map(if .id == "tk-w" then ._deps += [{"id":"tk-conv","dependency_type":"supersedes"}] else . end)'
+fresh; edge tk-w supersedes tk-conv
 refused "a disposition already naming other evidence" tk-w --key polecat-x --ruling "x" --successor tk-g
-fresh; patch 'map(if .id == "tk-w" then .metadata.task_kind = "review" else . end)'
+fresh; bset tk-w metadata.task_kind=review
 refused "a review bead" tk-w --key polecat-x --ruling "x"
 fresh
 refused "an unreadable bead" tk-absent --key polecat-x --ruling "x"
 has "$OUT" "could not read tk-absent" "an unreadable bead: it says so"
 fresh
-cp "$STUB_STORE" "$TMP/before.json"
-STUB_FAIL="dep list tk-w" run tk-w --key polecat-x --ruling "x" --successor tk-conv
+snap
+STUB_FAIL_ON="dep list tk-w" run tk-w --key polecat-x --ruling "x" --successor tk-conv
 eq "$RC" 1 "gates that do not read: exit 1"
 has "$OUT" "could not read the human gates of tk-w" "gates that do not read: it says so"
-cmp -s "$TMP/before.json" "$STUB_STORE" && ok "gates that do not read: nothing was written" || bad "gates that do not read: the store changed"
+same && ok "gates that do not read: nothing was written" || bad "gates that do not read: the store changed"
 fresh
-cp "$STUB_STORE" "$TMP/before.json"
-STUB_FAIL="--direction=up" run tk-w --key polecat-x --ruling "x"
+snap
+STUB_FAIL_ON="--direction=up" run tk-w --key polecat-x --ruling "x"
 eq "$RC" 1 "what the gate holds does not read: exit 1"
-cmp -s "$TMP/before.json" "$STUB_STORE" && ok "what the gate holds does not read: nothing was written" || bad "what the gate holds does not read: the store changed"
-fresh; patch '. + [{"id":"tk-o","status":"closed","assignee":"","issue_type":"task","title":"landed","metadata":{},"_deps":[{"id":"tk-g","dependency_type":"blocks"}]}]'
+same && ok "what the gate holds does not read: nothing was written" || bad "what the gate holds does not read: the store changed"
+fresh; bead tk-o landed status=closed; edge tk-o blocks tk-g
 run tk-w --key polecat-x --ruling "x"
 eq "$RC" 0 "a gate that holds only a closed bead besides this one is no refusal"
 eq "$(field tk-g close_reason)" "ruled: x" "…and that gate carries the ruling"
 
+# --- a gate a person is assigned ----------------------------------------------------
+# bead-rehome.sh --check holds a gate a person is assigned, and the ruling answers
+# it, so the stand-down takes it back from them before that check.
+assigned() { fresh; bset tk-g assignee=a-person-owes-it; }
+first_write() { grep -n -E "$WRITES" "$STUB_GC_LOG" | head -1 | cut -d: -f1; }
+assigned
+run tk-w --key polecat-x --ruling "the push is not wanted"
+eq "$RC" 0 "a gate a person is assigned: the stand-down exits 0"
+has "$OUT" "took gate tk-g back from a-person-owes-it" "…saying it took the gate back from them"
+TAKE=$(line_of "update tk-g --if-status=open --if-assignee=a-person-owes-it --assignee=")
+[ -n "$TAKE" ] && [ "$TAKE" = "$(first_write)" ] && ok "…in the first write, held to the open gate and the assignee read" \
+  || bad "…in the first write, held to the open gate and the assignee read (take-back line ${TAKE:-none}, first write line $(first_write))"
+eq "$(field tk-g assignee)" "" "…so it no longer names them"
+eq "$(field tk-g close_reason)" "ruled: the push is not wanted" "…and the gate carries the ruling"
+eq "$(field tk-w status)" closed "…and the work closes"
+eq "$(succ tk-w)" tk-g "…its edge naming the gate"
+pass
+eq "$(slings)" 0 "…and the next pass slings nothing"
+
+assigned; bead tk-p prerequisite; edge tk-w blocks tk-p
+run tk-w --key polecat-x --ruling "x"
+eq "$RC" 1 "a gate a person is assigned, with another live blocker: exit 1"
+has "$OUT" "tk-p" "…naming the blocker"
+has "$OUT" "Nothing was written but the take-back printed above" "…and the take-back as the one write"
+eq "$(writes)" 1 "…which is the one write tried"
+eq "$(field tk-g assignee)" "" "…and it stands"
+eq "$(field tk-g status)" open "…with the gate open"
+eq "$(meta tk-w gc.dispatch_when_ready)" rig/pool "…and the arm in place"
+bset tk-p status=closed
+run tk-w --key polecat-x --ruling "x"
+eq "$RC" 0 "…and once the blocker closes, a re-run stands the work down"
+eq "$(field tk-w status)" closed "…closing it"
+
+assigned
+snap
+STUB_FAIL_ON="--if-assignee=a-person-owes-it" run tk-w --key polecat-x --ruling "x"
+eq "$RC" 1 "a take-back the store refuses: exit 1"
+has "$OUT" "gate tk-g was not taken back from a-person-owes-it" "…saying so"
+has "$OUT" "Nothing was written." "…and that nothing was written"
+same && ok "…and nothing was" || bad "…and nothing was"
+
+assigned
+STUB_HOOK_AT="update tk-g" STUB_HOOK="$TMP/land" LAND="gc --harness-write set tk-g assignee=someone-else" \
+  run tk-w --key polecat-x --ruling "x"
+eq "$RC" 1 "a gate assigned to someone else after the read: exit 1"
+eq "$(field tk-g assignee)" someone-else "…and the gate stays theirs"
+eq "$(field tk-w status)" open "…and the work open"
+
+assigned
+snap
+run tk-w --key polecat-x --ruling "x" --dry-run
+eq "$RC" 0 "a dry run with a gate to take back exits 0"
+has "$OUT" "DRY RUN: the ruling answers each gate under polecat-x, so a real run first takes back gate tk-g from a-person-owes-it" "…naming the take-back"
+has "$OUT" "cannot say whether tk-w would close" "…and that it reads no further"
+eq "$(writes)" 0 "…and tries no write"
+same && ok "…and writes nothing" || bad "…and writes nothing"
+
+# --- a bead at an exception of the pending record ---------------------------------
+RECORD_GO="$ROOT/services/gctk/pr/record/record.go"
+EXCEPTIONS=$(for name in $(awk '/^func Exception\(/ { f = 1 } f && /case / { sub(/^[[:space:]]*case /, ""); sub(/:.*/, ""); gsub(/,/, " "); print; exit }' "$RECORD_GO"); do
+    awk -v n="$name" '$1 == n && $2 == "=" { gsub(/"/, "", $3); print $3 }' "$RECORD_GO"
+  done | sort | paste -sd ' ' -)
+COPY=$(sed -n 's/^RECORD_EXCEPTIONS="\(.*\)"$/\1/p' "$SCRIPT" | tr ' ' '\n' | sort | paste -sd ' ' -)
+if [ -n "$EXCEPTIONS" ]; then
+  eq "$COPY" "$EXCEPTIONS" "(NO-DRIFT) the script's exceptions are the values record.Exception names"
+else
+  bad "(NO-DRIFT) no exception read from $RECORD_GO"
+fi
+PR7=https://github.com/o/r/pull/7
+PR8=https://github.com/o/r/pull/8
+# exception <merge_result> [<setting>...]: the work bead at an exception whose
+# gate has filed, blocked at that value behind a gate keyed by it, with its record
+# naming PR7, and the settings after that.
+exception() {
+  local mr="$1"; shift
+  fresh
+  bset tk-w status=blocked "metadata.merge_result=$mr" "metadata.pr_url=$PR7" "$@"
+  bset tk-g "await_id=$mr"
+}
+gh_says()  { printf '%s %s\n' "$1" "$2" >> "$STUB_GH_STATES"; } # <url> <state>
+gh_reads() { grep -c '^gh pr view ' "$STUB_GC_LOG" || true; }
+gh_other() { grep '^gh ' "$STUB_GC_LOG" | grep -vc '^gh pr view ' || true; }
+for v in $EXCEPTIONS; do
+  exception "$v"; gh_says "$PR7" OPEN
+  refused "$v, its PR open" tk-w --key "$v" --ruling "x"
+  has "$OUT" "gh pr close $PR7" "$v, its PR open: it names the close"
+  eq "$(gh_other)" 0 "$v, its PR open: GitHub is only read"
+done
+exception pull_request_reconcile_invalid "metadata.existing_pr=$PR7"; gh_says "$PR7" CLOSED
+run tk-w --key pull_request_reconcile_invalid --ruling "the record is wrong and nobody needs the work"
+eq "$RC" 0 "a bead at an exception whose PR reads closed stands down"
+eq "$(field tk-w status)" closed "…and closes"
+eq "$(field tk-g close_reason)" "ruled: the record is wrong and nobody needs the work" "…with its gate answered"
+eq "$(gh_reads)" 1 "…and a PR both keys name is read once"
+exception pull_request_merged_unvalidated_head; gh_says "$PR7" MERGED
+run tk-w --key pull_request_merged_unvalidated_head --ruling "x"
+eq "$RC" 0 "a bead at an exception whose PR reads merged stands down"
+eq "$(field tk-w status)" closed "…and closes"
+exception pull_request_reconcile_invalid
+refused "an exception whose PR does not read" tk-w --key pull_request_reconcile_invalid --ruling "x"
+has "$OUT" "GitHub did not say whether its PR $PR7 is still open" "an exception whose PR does not read: it says so"
+exception pull_request_legacy_closed_unverified
+bunset tk-w metadata.pr_url; bset tk-w "metadata.existing_pr=$PR8"
+gh_says "$PR8" OPEN
+refused "an exception whose record names its PR only as existing_pr" tk-w --key pull_request_legacy_closed_unverified --ruling "x"
+has "$OUT" "gh pr close $PR8" "an exception whose record names its PR only as existing_pr: it names that PR's close"
+exception pull_request_closed_unmerged "metadata.existing_pr=$PR8"; gh_says "$PR7" CLOSED; gh_says "$PR8" OPEN
+refused "an exception whose record names a second PR, open" tk-w --key pull_request_closed_unmerged --ruling "x"
+has "$OUT" "gh pr close $PR8" "an exception whose record names a second PR, open: it names that one"
+exception pull_request_reconcile_invalid metadata.pr_url=7
+refused "an exception whose pr_url is no PR's URL" tk-w --key pull_request_reconcile_invalid --ruling "x"
+has "$OUT" "pr_url reads '7'" "an exception whose pr_url is no PR's URL: it names the key and its value"
+eq "$(gh_reads)" 0 "an exception whose pr_url is no PR's URL: GitHub is not asked"
+exception pull_request_reconcile_invalid
+bunset tk-w metadata.pr_url
+refused "an exception whose record names no PR" tk-w --key pull_request_reconcile_invalid --ruling "x"
+has "$OUT" "neither pr_url nor existing_pr names its PR" "an exception whose record names no PR: it says so"
+eq "$(gh_reads)" 0 "an exception whose record names no PR: GitHub is not asked"
+exception pull_request_legacy_closed_unverified "metadata.pr_url= " metadata.existing_pr=
+refused "an exception whose PR keys are empty" tk-w --key pull_request_legacy_closed_unverified --ruling "x"
+has "$OUT" "neither pr_url nor existing_pr names its PR" "an exception whose PR keys are empty: it says so"
+exception pull_request_reconcile_invalid
+bunset tk-w metadata.pr_url
+refused "a dry run at an exception whose record names no PR" tk-w --key pull_request_reconcile_invalid --ruling "x" --dry-run
+hasnt "$OUT" "DRY RUN" "a dry run at an exception whose record names no PR: it reports no plan"
+exception pull_request_reconcile_invalid; gh_says "$PR7" OPEN
+refused "a dry run at an exception whose PR is open" tk-w --key pull_request_reconcile_invalid --ruling "x" --dry-run
+hasnt "$OUT" "DRY RUN" "a dry run at an exception whose PR is open: it reports no plan"
+fresh; bset tk-w metadata.merge_result=blocked "metadata.existing_pr=$PR7"
+gh_says "$PR7" OPEN
+run tk-w --key polecat-x --ruling "x"
+eq "$RC" 0 "a refinery park stands down whatever the PR it records reads"
+eq "$(gh_reads)" 0 "…and GitHub is not asked"
+
 # --- a gate that also holds another open bead --------------------------------------
 shared
-patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-AT_EDGE="$TMP/at-edge"
-STUB_LAND_AT="dep remove tk-w" STUB_LAND="jq -r '.[] | select(.id == \"tk-w\") | [.metadata[\"gc.dispatch_when_ready\"] // \"\", .metadata[\"gc.routed_to\"] // \"\"] | join(\"|\")' '$STUB_STORE' > '$AT_EDGE'" \
+bset tk-w metadata.gc.routed_to=rig/pool
+STUB_HOOK_AT="dep remove tk-w" STUB_HOOK="$TMP/land" LAND="$TMP/at-edge" \
   run tk-w --key polecat-x --ruling "only this bead stops" --successor tk-conv
 eq "$RC" 0 "with the evidence named, a shared gate stands this bead down"
 eq "$(field tk-w status)" closed "…and closes it"
@@ -534,14 +524,14 @@ eq "$(cat "$AT_EDGE")" "|" "…with no arm and no route left when the edge goes"
 eq "$(field tk-g status)" open "…and the gate stays open"
 eq "$(field tk-g close_reason)" "" "…unanswered"
 eq "$(line_of "gate resolve")" "" "…with no answer tried"
-eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 0 "…and this bead off it"
-eq "$(jq -r '[.[] | select(.id == "tk-o") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the other bead still on it"
+eq "$(on_gate tk-w tk-g)" 0 "…and this bead off it"
+eq "$(on_gate tk-o tk-g)" 1 "…and the other bead still on it"
 eq "$(field tk-o status)" open "…and the other bead open"
 has "$OUT" "left gate tk-g, which stays open: gate tk-g also holds tk-o" "…and it says what the gate still holds"
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
 RELEASE=$(line_of "gc.takeaway=")
 LEAVE=$(line_of "dep remove tk-w tk-g")
-CLOSE=$(line_of "update tk-w --if-status")
+CLOSE=$(close_of tk-w)
 if [ -n "$DISARM" ] && [ -n "$RELEASE" ] && [ -n "$LEAVE" ] && [ -n "$CLOSE" ] && [ "$DISARM" -lt "$RELEASE" ] && [ "$RELEASE" -lt "$LEAVE" ] && [ "$LEAVE" -lt "$CLOSE" ]; then
   ok "the arm goes first, then the route, then the edge, then the close"
 else
@@ -549,35 +539,35 @@ else
 fi
 pass
 eq "$(slings)" 0 "the next pass slings nothing"
-patch 'map(if .id == "tk-o" then .metadata += {"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":"[]","gc.dispatch_when_ready_armed_at":"2026-11-01T00:00:00Z"} else . end)'
+bset tk-o metadata.gc.dispatch_when_ready=rig/pool 'metadata.gc.dispatch_when_ready_args=[]' metadata.gc.dispatch_when_ready_armed_at=2026-11-01T00:00:00Z
 pass
 eq "$(slings)" 0 "the gate still holds the other bead's arm"
 gc bd gate resolve tk-g --reason "ruled: the other bead goes on" >/dev/null 2>&1
 pass
 eq "$(slings)" 1 "an answer once this bead has closed sends the other bead"
-has "$(cat "$STUB_SLING_LOG")" "tk-o" "…and that sling is the other bead's"
-hasnt "$(cat "$STUB_SLING_LOG")" "tk-w" "…and not this one's"
+has "$(sling_lines)" "tk-o" "…and that sling is the other bead's"
+hasnt "$(sling_lines)" "tk-w" "…and not this one's"
 
 shared
-STUB_PASS_AFTER_WRITES=1 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_AFTER_WRITE="$TMP/after-write" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 0 "with a pass after every write, the shared gate's stand-down still lands"
 eq "$(slings)" 0 "…and none of those passes, the one right after the edge goes included, slings the work"
-[ -s "$STUB_STORE.pass.log" ] && ok "…and the passes did run" || bad "…and the passes did run"
+[ -s "$PASS_LOG" ] && ok "…and the passes did run" || bad "…and the passes did run"
 
 shared
-STUB_LAND_AT="where --json" STUB_LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
+STUB_HOOK_AT="where --json" STUB_HOOK="$TMP/land" LAND="$SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
 eq "$(field tk-w status)" closed "a shared gate's stand-down that lands while a pass runs closes the work"
 eq "$(slings)" 0 "…and that pass does not sling it"
 
 shared
-STUB_LAND_AT="where --json" STUB_LAND="STUB_FAIL='--status=closed' $SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
+STUB_HOOK_AT="where --json" STUB_HOOK="$TMP/land" LAND="STUB_FAIL_ON='--status=closed' $SCRIPT tk-w --key polecat-x --ruling 'stop while the pass runs' --successor tk-conv" pass
 eq "$(field tk-w status)" open "a shared gate's stand-down that has taken the bead off the gate but not closed it while a pass runs leaves it open"
 eq "$(slings)" 0 "…and that pass does not sling it"
 pass
 eq "$(slings)" 0 "…nor does the next, which finds it ready with no arm"
 
 shared
-STUB_FAIL="dep remove tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_FAIL_ON="dep remove tk-w" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "an edge that does not go stops the stand-down"
 has "$OUT" "did not leave gate tk-g" "…and it says so"
 has "$OUT" "Re-run this command" "…and names the way on"
@@ -592,15 +582,15 @@ eq "$(field tk-g status)" open "…and the gate stays open"
 eq "$(slings)" 0 "…and nothing was sent"
 
 shared
-patch 'map(if .id == "tk-w" then .metadata += {"gc.routed_to":"rig/pool"} else . end)'
-STUB_FAIL='gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+bset tk-w metadata.gc.routed_to=rig/pool
+STUB_FAIL_ON='gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a release the store refuses stops the stand-down before the bead leaves a shared gate"
 has "$OUT" "did not end or its route did not clear" "…and says why"
 eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"
-eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.id == "tk-g")] | length' "$STUB_STORE")" 1 "…and the bead still on the gate"
+eq "$(on_gate tk-w tk-g)" 1 "…and the bead still on the gate"
 
 shared
-STUB_FAIL="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_FAIL_ON="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a close refused after the edge went stops"
 has "$OUT" "no gate under polecat-x holds it" "…and it says what stands"
 hasnt "$OUT" "answered" "…and calls no gate answered, since the bead left this one"
@@ -609,9 +599,9 @@ eq "$RC" 0 "the same command, re-run, closes"
 eq "$(succ tk-w)" tk-conv "…naming the evidence it names"
 eq "$(field tk-g status)" open "…and the gate stays open"
 
-shared
-patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x","title":"a twin","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
-  | map(if .id == "tk-o" then ._deps = [{"id":"tk-g2","dependency_type":"blocks"}] elif .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+# A twin gate under the key that holds the other bead alone besides this one.
+fresh; bead tk-o "another bead"; gate tk-g2 polecat-x "a twin"
+edge tk-w blocks tk-g2; edge tk-o blocks tk-g2
 run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "a twin gate that holds only this bead carries the ruling for the one it leaves"
 eq "$(field tk-g close_reason)" "ruled: stop" "…with the ruling as its answer"
@@ -619,23 +609,21 @@ eq "$(succ tk-w)" tk-g "…and its edge naming it"
 eq "$(field tk-g2 status)" open "…and the shared twin stays open"
 eq "$(field tk-w status)" closed "…and the work closes"
 
-shared
-patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x","title":"a twin","metadata":{},"created_at":"2026-11-01T00:00:01Z"},
-            {"id":"tk-o2","status":"open","assignee":"","issue_type":"task","title":"a second bead","metadata":{},"_deps":[{"id":"tk-g2","dependency_type":"blocks"}]}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+shared; gate tk-g2 polecat-x "a twin"; bead tk-o2 "a second bead"
+edge tk-o2 blocks tk-g2; edge tk-w blocks tk-g2
 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 0 "two gates under the key that each hold another bead: the bead leaves both"
 eq "$(field tk-g status)" open "…with the first open"
 eq "$(field tk-g2 status)" open "…and the second open"
-eq "$(jq -r '[.[] | select(.id == "tk-w") | ._deps[] | select(.dependency_type == "blocks")] | length' "$STUB_STORE")" 0 "…and on neither"
+eq "$(bedges tk-w blocks)" "" "…and on neither"
 eq "$(field tk-w status)" closed "…and the work closes"
 
 shared
-cp "$STUB_STORE" "$TMP/before.json"
+snap
 run tk-w --key polecat-x --ruling "x" --successor tk-conv --dry-run
 eq "$RC" 0 "a shared gate's dry run exits 0"
 has "$OUT" "also holds tk-o" "…and names what the gate still holds"
-cmp -s "$TMP/before.json" "$STUB_STORE" && ok "…and writes nothing" || bad "…and writes nothing"
+same && ok "…and writes nothing" || bad "…and writes nothing"
 
 # --- evidence, wording, dry run ---------------------------------------------------
 fresh
@@ -647,29 +635,27 @@ fresh
 refused "a successor that does not exist" tk-w --key polecat-x --ruling "x" --successor tk-nobody
 
 fresh
-STUB_FAIL="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_FAIL_ON="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a close refused under --successor stops"
 eq "$(succ tk-w)" "<absent>" "…recording no successor, since the close did not land"
 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 0 "the same command, re-run, closes"
 eq "$(succ tk-w)" tk-conv "…naming the evidence it names"
 
-fresh; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"polecat-x","title":"a twin","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+fresh; gate tk-g2 polecat-x "a twin"; edge tk-w blocks tk-g2
 run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "twin gates under the key do not stop a stand-down"
 eq "$(field tk-g close_reason)|$(field tk-g2 close_reason)" "ruled: stop|ruled: stop" "…and each carries the ruling"
 eq "$(succ tk-w)" tk-g "…and its edge names the first"
 
-fresh; patch 'map(if .id == "tk-g" then .status = "closed" | .close_reason = "ruled: an earlier answer" else . end)
-  | map(if .id == "tk-w" then .metadata |= del(.["gc.dispatch_when_ready"]) else . end)'
+fresh; bset tk-g status=closed "close_reason=ruled: an earlier answer"; bunset tk-w metadata.gc.dispatch_when_ready
 run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "a gate already answered still names the evidence"
 eq "$(succ tk-w)" tk-g "…in its edge"
 eq "$(field tk-g close_reason)" "ruled: an earlier answer" "…and its answer stands"
 
 fresh
-STUB_LAND_AT="gate resolve" STUB_LAND="jq -c 'map(if .id == \"tk-g\" then .status = \"closed\" | .close_reason = \"ruled: go on\" else . end)' '$STUB_STORE' > '$STUB_STORE.x' && mv '$STUB_STORE.x' '$STUB_STORE'" run tk-w --key polecat-x --ruling "stop"
+STUB_HOOK_AT="gate resolve" STUB_HOOK="$TMP/land" LAND="gc --harness-write set tk-g status=closed 'close_reason=ruled: go on'" run tk-w --key polecat-x --ruling "stop"
 eq "$RC" 0 "another answer that reaches the gate first does not stop the close"
 has "$OUT" "another answer reached gate tk-g first" "…and it is reported"
 eq "$(field tk-g close_reason)" "ruled: go on" "…and stands"
@@ -682,18 +668,19 @@ run tk-w --key polecat-x --ruling "over
 two lines"
 eq "$(field tk-g close_reason)" "ruled: over two lines" "a ruling is one line"
 
-fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
+fresh; bset tk-w 'metadata:={}'
 run tk-w --key polecat-x --ruling "no arm here"
 eq "$RC" 0 "a bead with no arm stands down"
 eq "$(line_of "--unset-metadata gc.dispatch_when_ready ")" "" "…and its disarm writes nothing"
 # The disarm reads no arm first, so an arm written after the stand-down read the
 # bead is removed before the gate's answer could send it. The arm lands ahead of
 # gctk's own read of the bead, the first read that lists templates.
-fresh; patch 'map(if .id == "tk-w" then .metadata = {} else . end)'
-STUB_LAND_AT="--include-templates" STUB_LAND="jq -c 'map(if .id == \"tk-w\" then .metadata = {\"gc.dispatch_when_ready\":\"rig/pool\",\"gc.dispatch_when_ready_args\":\"[]\",\"gc.dispatch_when_ready_armed_at\":\"2026-11-13T00:00:00Z\",\"gc.dispatch_when_ready_reason\":\"armed meanwhile\"} else . end)' '$STUB_STORE' > '$STUB_STORE.x' && mv '$STUB_STORE.x' '$STUB_STORE'" \
+fresh; bset tk-w 'metadata:={}'
+STUB_HOOK_AT="--include-templates" STUB_HOOK="$TMP/land" \
+  LAND="gc --harness-write set tk-w metadata.gc.dispatch_when_ready=rig/pool 'metadata.gc.dispatch_when_ready_args=[]' metadata.gc.dispatch_when_ready_armed_at=2026-11-13T00:00:00Z 'metadata.gc.dispatch_when_ready_reason=armed meanwhile'" \
   run tk-w --key polecat-x --ruling "armed after the read"
 eq "$RC" 0 "a bead armed after the stand-down read it stands down"
-[ -e "$STUB_STORE.landed" ] && ok "…the arm landed in the stand-down's run" || bad "the arm never landed, so the case proves nothing"
+[ -e "$LANDED" ] && ok "…the arm landed in the stand-down's run" || bad "the arm never landed, so the case proves nothing"
 eq "$(meta tk-w gc.dispatch_when_ready)" "<absent>" "…and the arm written meanwhile is gone"
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
 ANSWER=$(line_of "gate resolve tk-g")
@@ -702,36 +689,32 @@ if [ -n "$DISARM" ] && [ -n "$ANSWER" ] && [ "$DISARM" -lt "$ANSWER" ]; then
 else
   bad "the arm written meanwhile is removed before the gate's answer (lines ${DISARM:-none}, ${ANSWER:-none})"
 fi
-fresh; patch 'map(if .id == "tk-w" then .metadata["gc.routed_to"] = "human" else . end)'
+fresh; bset tk-w metadata.gc.routed_to=human
 run tk-w --key polecat-x --ruling "parked for a person"
 eq "$RC" 0 "a subject parked on the person route stands down"
 eq "$(field tk-w status)" closed "…and closes"
 eq "$(meta tk-w gc.routed_to)" "" "…with its person route cleared"
-fresh; patch 'map(if .id == "tk-w" then .issue_type = "convoy" | .metadata = {"merge_result":"blocked","gc.routed_to":"human"} else . end)'
-run tk-w --key polecat-x --ruling "drop the graduation"
-eq "$RC" 0 "a graduated convoy the refinery parked stands down, as its gate's message says"
-eq "$(field tk-w status)" closed "…and closes"
-eq "$(field tk-g close_reason)" "ruled: drop the graduation" "…with the gate answered"
-fresh; patch 'map(if .id == "tk-w" then .metadata.branch = "polecat/tk-w" else . end)'
+fresh; bset tk-w metadata.branch=polecat/tk-w
 run tk-w --key polecat-x --ruling "drop the branch"
 has "$(cat "$STUB_GC_LOG")" "branch-end --rig tkrig --branch polecat/tk-w" "the bead's branch ends with the close"
 
 fresh
-cp "$STUB_STORE" "$TMP/before.json"
+snap
 run tk-w --key polecat-x --ruling "x" --dry-run
 eq "$RC" 0 "a dry run exits 0"
 has "$OUT" "DRY RUN" "…and says so"
 has "$OUT" "tk-g" "…and names the evidence"
-cmp -s "$TMP/before.json" "$STUB_STORE" && ok "…and writes nothing" || bad "…and writes nothing"
+same && ok "…and writes nothing" || bad "…and writes nothing"
 
 # --- an epic that carries a hypothesis ---------------------------------------------
 # The close stamps its disposition before it runs the finalize gate, and the gate
 # takes that as a stewarded epic's terminal reason. The check ahead of the first
 # write has to read the epic the same way, or it refuses what the close would do.
-epic() { # [metadata as a jq object]: the work bead as a stewarded epic
+epic() { # [<key>=<value>...]: the work bead as a stewarded epic, with those metadata keys
+  local s m=()
+  for s in "$@"; do m+=("metadata.$s"); done
   fresh
-  patch 'map(if .id == "tk-w" then .issue_type = "epic" | .metadata.epic_hypothesis = "the hypothesis" else . end)'
-  [ -z "${1:-}" ] || patch "map(if .id == \"tk-w\" then .metadata += $1 else . end)"
+  bset tk-w issue_type=epic "metadata.epic_hypothesis=the hypothesis" ${m[@]+"${m[@]}"}
 }
 epic
 run tk-w --key polecat-x --ruling "the operator ruled this epic out" --successor tk-conv
@@ -749,43 +732,45 @@ run tk-w --key polecat-x --ruling "the operator ruled this epic out"
 eq "$RC" 0 "an epic with no ruling stands down with its gate as the evidence"
 eq "$(succ tk-w)" tk-g "…its edge naming the gate"
 eq "$(field tk-w status)" closed "…and closes"
-for m in '{"epic_ruling":"continue"}' '{"epic_ruling":"shift"}' '{"epic_ruling":"pending"}' '{"epic_ruling":"close"}' '{"epic_ruling":"close","epic_ruling_reason":"held"}'; do
-  epic "$m"
+for m in epic_ruling=continue epic_ruling=shift epic_ruling=pending epic_ruling=close 'epic_ruling=close epic_ruling_reason=held'; do
+  # shellcheck disable=SC2086  # each row is the keys it spells
+  epic $m
   run tk-w --key polecat-x --ruling "ruled out" --successor tk-conv
   eq "$RC" 0 "an epic carrying $m stands down"
   eq "$(field tk-w status)" closed "…and closes"
 done
 epic
-cp "$STUB_STORE" "$TMP/before.json"
+snap
 run tk-w --key polecat-x --ruling "x" --successor tk-conv --dry-run
 eq "$RC" 0 "a dry run on an epic with no ruling exits 0, as the stand-down would"
-cmp -s "$TMP/before.json" "$STUB_STORE" && ok "…and writes nothing" || bad "…and writes nothing"
+same && ok "…and writes nothing" || bad "…and writes nothing"
 epic
-STUB_FAIL="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_FAIL_ON="--status=closed" run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a close refused on an epic stops"
 pass
 eq "$(slings)" 0 "…a pass between the runs slings nothing"
 run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 0 "…and a re-run closes it"
 eq "$(field tk-w status)" closed "…and it reads closed"
+epic; bset tk-g assignee=a-person-it-asks
+run tk-w --key polecat-x --ruling "x" --successor tk-conv
+eq "$RC" 0 "an epic whose gate a person is assigned stands down"
+eq "$(field tk-g assignee)" "" "…taking the gate back"
+eq "$(field tk-w status)" closed "…and closing the epic"
 
 # What else holds a close holds an epic's: each of these refuses, writing nothing.
-epic; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"another-question","title":"another question","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+epic; gate tk-g2 another-question "another question"; edge tk-w blocks tk-g2
 refused "an epic under another open gate" tk-w --key polecat-x --ruling "x" --successor tk-conv
 has "$OUT" "tk-g2" "…naming that gate"
 refused "an epic with another open gate named as the evidence" tk-w --key polecat-x --ruling "x" --successor tk-g2
 has "$OUT" "tk-g2" "…naming that gate"
-epic; patch 'map(if .id == "tk-g" then .assignee = "a-person-it-asks" else . end)'
-refused "an epic whose gate a person is assigned" tk-w --key polecat-x --ruling "x" --successor tk-conv
-epic; patch '. + [{"id":"tk-pre","status":"open","assignee":"","issue_type":"task","title":"a prerequisite","metadata":{}}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-pre","dependency_type":"blocks"}] else . end)'
+epic; bead tk-pre "a prerequisite"; edge tk-w blocks tk-pre
 refused "an epic with another live blocker" tk-w --key polecat-x --ruling "x" --successor tk-conv
 has "$OUT" "tk-pre" "…naming it"
-epic; patch '. + [{"id":"tk-kid","status":"open","assignee":"","issue_type":"task","title":"a unit","parent":"tk-w","metadata":{}}]'
+epic; bead tk-kid "a unit" parent=tk-w
 refused "an epic with an open child" tk-w --key polecat-x --ruling "x" --successor tk-conv
 has "$OUT" "tk-kid" "…naming it"
-epic; patch 'map(if .id == "tk-w" then .status = "in_progress" | .assignee = "a-live-session" else . end)'
+epic; bset tk-w status=in_progress assignee=a-live-session
 refused "an epic someone has claimed" tk-w --key polecat-x --ruling "x" --successor tk-conv
 has "$OUT" "a-live-session" "…naming them"
 
@@ -797,19 +782,18 @@ agree() { # <label>: the store as set up
   "$HERE/bead-rehome.sh" --origin tk-w --successor tk-conv --kind not-needed --except-key polecat-x >/dev/null 2>&1
   eq "$(field tk-w status)" "$want" "$1: the close does what the check said"
 }
-for m in '{}' '{"epic_ruling":"continue"}' '{"epic_ruling":"close"}' '{"epic_ruling":"close","epic_ruling_reason":"held"}'; do
-  epic "$m"
-  agree "an epic carrying $m"
+for m in '' epic_ruling=continue epic_ruling=close 'epic_ruling=close epic_ruling_reason=held'; do
+  # shellcheck disable=SC2086  # each row is the keys it spells
+  epic $m
+  agree "an epic carrying ${m:-no ruling}"
 done
-epic; patch 'map(if .id == "tk-w" then ._deps += [{"id":"tk-conv","dependency_type":"supersedes"}] else . end)'
+epic; edge tk-w supersedes tk-conv
 agree "an epic already naming the evidence"
-epic; patch '. + [{"id":"tk-kid","status":"open","assignee":"","issue_type":"task","title":"a unit","parent":"tk-w","metadata":{}}]'
+epic; bead tk-kid "a unit" parent=tk-w
 agree "an epic with an open child"
-epic; patch '. + [{"id":"tk-pre","status":"open","assignee":"","issue_type":"task","title":"a prerequisite","metadata":{}}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-pre","dependency_type":"blocks"}] else . end)'
+epic; bead tk-pre "a prerequisite"; edge tk-w blocks tk-pre
 agree "an epic with another live blocker"
-epic; patch '. + [{"id":"tk-g2","status":"open","assignee":"","issue_type":"gate","await_type":"human","await_id":"another-question","title":"another question","metadata":{},"created_at":"2026-11-01T00:00:01Z"}]
-  | map(if .id == "tk-w" then ._deps += [{"id":"tk-g2","dependency_type":"blocks"}] else . end)'
+epic; gate tk-g2 another-question "another question"; edge tk-w blocks tk-g2
 agree "an epic under another open gate"
 
 # --- usage -------------------------------------------------------------------------
@@ -830,7 +814,7 @@ if grep -q -e '--set-metadata' "$SCRIPT"; then bad "the script writes a metadata
 # re-sling.
 CLAUSE=$(grep -o -e 'run \$SCRIPT_DIR/stand-down\.sh \$SUBJECT --key \$KEY --ruling '"'"'<why>'"'" "$ROOT/assets/scripts/decline.sh" | head -1)
 [ -n "$CLAUSE" ] && ok "decline.sh carries the clause" || bad "decline.sh carries the clause"
-fresh; patch 'map(if .id == "tk-g" then .await_id = "polecat-branch-divergence" else . end)'
+fresh; bset tk-g await_id=polecat-branch-divergence
 OUT=$(SCRIPT_DIR="$HERE" SUBJECT=tk-w KEY=polecat-branch-divergence bash -c "${CLAUSE#run }" 2>&1); RC=$?
 eq "$RC" 0 "the clause runs as written"
 eq "$(field tk-w status)" closed "…and closes the work"

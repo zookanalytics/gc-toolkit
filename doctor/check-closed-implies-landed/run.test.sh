@@ -70,13 +70,13 @@ has "$ARGS" "--has-metadata-key merge_result" "merge_result is the candidate net
 has "$ARGS" "--limit 0" "the scan is not truncated by a default limit"
 
 # --- 2. closed but not landed (the 2026-08-23 shape) --------------------------
-store "$(bead c-4 '{"merge_result":"pull_request","pr_url":"https://x/pr/4"}')" \
-      "$(bead c-5 '{"merge_result":"pre_open_gate"}')"
+store "$(bead c-4 '{"merge_result":"pull_request_pending","pr_url":"https://x/pr/4"}')" \
+      "$(bead c-5 '{"merge_result":"pull_request_head_changed"}')"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "closed with merge_result=pull_request/pre_open_gate is an ERROR"
-has "$OUT" "c-4" "the pull_request husk is named"
+eq "$RC" "2" "closed with merge_result=pull_request_pending/pull_request_head_changed is an ERROR"
+has "$OUT" "c-4" "the pending husk is named"
 has "$OUT" "https://x/pr/4" "the stranded PR is named"
-has "$OUT" "c-5" "the pre_open_gate husk is named"
+has "$OUT" "c-5" "the head-changed husk is named"
 
 # --- 2b. closed on the pending record -----------------------------------------
 store "$(bead c-r1 '{"merge_result":"pull_request_pending","pr_url":"https://x/pr/11"}')" \
@@ -87,7 +87,7 @@ has "$OUT" "c-r1" "the pending husk is named"
 has "$OUT" "https://x/pr/11" "…with its PR"
 has "$OUT" "c-r2" "the head-changed husk is named"
 has "$OUT" "the landing order records a PR's end only on a bead that is not closed" "…and why nothing lands it"
-has "$OUT" "gc bd update c-r1 --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_state=merged --set-metadata pr_merged_at=<the PR's mergedAt>" \
+has "$OUT" "gc bd update c-r1 --set-metadata merge_result=mr_merged --set-metadata merged_sha=<the full 40-character merge commit id> --set-metadata pr_merged_at=<the PR's mergedAt>" \
     "…and a merged PR's repair writes the whole mr_merged record the landing order settles, the sha in full"
 hasnt "$OUT" "lifecycle.sh" "…with repairs that do not go through the old record's machine"
 store "$(bead c-r3 '{"merge_result":"mr_merged","merged_sha":"abc123"}')" \
@@ -113,25 +113,25 @@ eq "$RC" "0" "an empty merge_result on a closed bead is not a finding here"
 
 # --- 5. carrying merge_result is not being an anchor ----------------------------
 # A rework child of an OPEN anchor: same branch, stamped by the same machinery.
-# merge.sh enumerates the anchor, so the child's stamp strands nothing.
-store "$(beadx a-1 open - '{"merge_result":"pre_open_gate","branch":"polecat/a-1"}')" \
-      "$(beadx k-1 closed a-1 '{"merge_result":"pre_open_gate","branch":"polecat/a-1"}')"
+# The landing order reads the anchor, so the child's stamp strands nothing.
+store "$(beadx a-1 open - '{"merge_result":"pull_request_head_changed","branch":"polecat/a-1"}')" \
+      "$(beadx k-1 closed a-1 '{"merge_result":"pull_request_head_changed","branch":"polecat/a-1"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a rework child sharing its open anchor's branch is not a finding"
 hasnt "$OUT" "k-1" "the child is not named"
 has "$OUT" "1 closed bead(s) carry merge_result but are not anchors" "the exemption is counted, not silent"
 
 # A chain of them: each child is cleared by the parent one hop up.
-store "$(beadx a-1 open - '{"merge_result":"pre_open_gate","branch":"polecat/a-1"}')" \
-      "$(beadx k-1 closed a-1 '{"merge_result":"pre_open_gate","branch":"polecat/a-1"}')" \
-      "$(beadx k-2 closed k-1 '{"merge_result":"pre_open_gate","branch":"polecat/a-1"}')"
+store "$(beadx a-1 open - '{"merge_result":"pull_request_head_changed","branch":"polecat/a-1"}')" \
+      "$(beadx k-1 closed a-1 '{"merge_result":"pull_request_head_changed","branch":"polecat/a-1"}')" \
+      "$(beadx k-2 closed k-1 '{"merge_result":"pull_request_head_changed","branch":"polecat/a-1"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a rework chain clears one hop at a time, not just the first child"
 
 # The anchor's own state is judged on its own: exempting children never
-# silences the bead merge.sh would actually have enumerated.
-store "$(beadx a-2 closed - '{"merge_result":"pull_request","pr_number":"9","pr_url":"https://x/pr/9"}')" \
-      "$(beadx k-3 closed a-2 '{"merge_result":"pull_request","pr_number":"9"}')"
+# silences the bead the landing order would actually have read.
+store "$(beadx a-2 closed - '{"merge_result":"pull_request_pending","pr_number":"9","pr_url":"https://x/pr/9"}')" \
+      "$(beadx k-3 closed a-2 '{"merge_result":"pull_request_pending","pr_number":"9"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a closed unlanded ANCHOR is still an error when its children are exempt"
 has "$OUT" "a-2" "the anchor is named"
@@ -140,59 +140,54 @@ hasnt "$OUT" "bead k-3" "its child is not reported as a second copy of the same 
 # The anchor may have landed since: the child's stale stamp is still not the
 # thing that strands a PR, and its parent needs no state test to prove it.
 store "$(beadx a-3 closed - '{"merge_result":"merged","merged_sha":"deadbee","pr_number":"568"}')" \
-      "$(beadx k-4 closed a-3 '{"merge_result":"pull_request","pr_number":"568"}')"
+      "$(beadx k-4 closed a-3 '{"merge_result":"pull_request_pending","pr_number":"568"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a child of an anchor that has since landed is not a finding"
 
 # The guard: a parent edge alone exempts nothing. A convoy child is an anchor
 # in its own right, and its parent names different work.
-store "$(beadx p-1 open - '{"merge_result":"pre_open_gate","branch":"polecat/p-1"}')" \
-      "$(beadx c-8 closed p-1 '{"merge_result":"pull_request","branch":"polecat/c-8","pr_url":"https://x/pr/8"}')"
+store "$(beadx p-1 open - '{"merge_result":"pull_request_head_changed","branch":"polecat/p-1"}')" \
+      "$(beadx c-8 closed p-1 '{"merge_result":"pull_request_pending","branch":"polecat/c-8","pr_url":"https://x/pr/8"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a child whose parent names DIFFERENT work is judged as the anchor it is"
 has "$OUT" "c-8" "the convoy child is named"
 
 # A parent that carries no merge_result is no anchor either.
 store "$(beadx p-2 open - '{"branch":"polecat/p-2"}')" \
-      "$(beadx c-9 closed p-2 '{"merge_result":"pull_request","branch":"polecat/p-2"}')"
+      "$(beadx c-9 closed p-2 '{"merge_result":"pull_request_pending","branch":"polecat/p-2"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a parent with no merge_result cannot clear its child"
 
 # --- 6. a disposed bead carries its own terminal state ---------------------------
 # A listing row carries every edge the bead has, one onto another rig's bead
 # included, by depends_on_id and type.
-store '{"id":"c-10","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10","depends_on_id":"s-1","type":"supersedes"}]}' \
-      '{"id":"c-10d","status":"closed","parent":null,"metadata":{"merge_result":"pre_open_gate"},"dependencies":[{"issue_id":"c-10d","depends_on_id":"c-1","type":"duplicates"}]}' \
-      '{"id":"c-10x","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10x","depends_on_id":"zz-9","type":"supersedes"}]}'
+store '{"id":"c-10","status":"closed","parent":null,"metadata":{"merge_result":"pull_request_pending"},"dependencies":[{"issue_id":"c-10","depends_on_id":"s-1","type":"supersedes"}]}' \
+      '{"id":"c-10d","status":"closed","parent":null,"metadata":{"merge_result":"pull_request_head_changed"},"dependencies":[{"issue_id":"c-10d","depends_on_id":"c-1","type":"duplicates"}]}' \
+      '{"id":"c-10x","status":"closed","parent":null,"metadata":{"merge_result":"pull_request_pending"},"dependencies":[{"issue_id":"c-10x","depends_on_id":"zz-9","type":"supersedes"}]}'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a supersedes or duplicates edge IS the explicit terminal state the OK line promises"
 hasnt "$OUT" "c-10" "the disposed beads are not named"
 has "$OUT" "3 disposed onto a successor" "the disposals are counted, an edge into another store's bead among them"
 # The retired successor key alone records nothing a reader acts on.
-store "$(bead c-10k '{"merge_result":"pull_request","gc.superseded_by":"s-1"}')" \
-      '{"id":"c-10r","status":"closed","parent":null,"metadata":{"merge_result":"pull_request"},"dependencies":[{"issue_id":"c-10r","depends_on_id":"s-1","type":"related"}]}'
+store "$(bead c-10k '{"merge_result":"pull_request_pending","gc.superseded_by":"s-1"}')" \
+      '{"id":"c-10r","status":"closed","parent":null,"metadata":{"merge_result":"pull_request_pending"},"dependencies":[{"issue_id":"c-10r","depends_on_id":"s-1","type":"related"}]}'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "the retired gc.superseded_by key, and an edge of another type, leave the bead judged"
 has "$OUT" "c-10k" "the bead with only the retired key is named"
 has "$OUT" "c-10r" "the bead with only a related edge is named"
 
 # --- 7. the remedy states the ledger's fact, never the PR's -----------------------
-store "$(bead c-11 '{"merge_result":"pull_request","existing_pr":"https://x/pr/11"}')"
+store "$(bead c-11 '{"merge_result":"pull_request_pending","existing_pr":"https://x/pr/11"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a stranded anchor is an error however it records its PR"
 has "$OUT" "https://x/pr/11" "existing_pr identifies the PR when pr_url is absent"
 
-store "$(bead c-11b '{"merge_result":"pull_request","pr_url":"","existing_pr":"https://x/pr/11"}')"
+store "$(bead c-11b '{"merge_result":"pull_request_pending","pr_url":"","existing_pr":"https://x/pr/11"}')"
 OUT=$(run_check); RC=$?
 has "$OUT" "https://x/pr/11" "a pr_url stamped EMPTY reads the same as an absent one"
-has "$OUT" "--to merged --close --set merged_sha" "a stale stamp after a real landing is recorded, not reopened"
-has "$OUT" "reopen c-11" "an unlanded anchor is still reopenable"
+has "$OUT" "merge_result=mr_merged --set-metadata merged_sha" "a stale stamp after a real landing is recorded, not reopened"
+has "$OUT" "--status=open" "an unlanded anchor can come back to the refinery"
 hasnt "$OUT" "will never merge" "the check is ledger-only; it does not assert what the PR did"
-
-store "$(bead c-12 '{"merge_result":"pre_open_gate"}')"
-OUT=$(run_check); RC=$?
-has "$OUT" "no PR was ever opened" "pre_open_gate has no PR to read"
-hasnt "$OUT" "merged_sha" "and so is offered no record-the-landing repair"
 
 # --- 8. fail-CLOSED ------------------------------------------------------------
 OUT=$(RIGS_RC=1 run_check); RC=$?
@@ -228,7 +223,7 @@ fi
 # A failing `mktemp` command is a NO-OP on the pre-fix `<<<` (bash's here-string
 # temp is internal, never the mktemp command), which is exactly what makes this
 # case fail against the pre-fix script and so proves it discriminates.
-store "$(bead c-dp '{"merge_result":"pull_request","pr_url":"https://x/pr/dp"}')"
+store "$(bead c-dp '{"merge_result":"pull_request_pending","pr_url":"https://x/pr/dp"}')"
 # Mirror: with a working mktemp the fixture yields its finding, so the
 # disk-pressure assertions below are not vacuously satisfied by an empty store.
 OUT=$(run_check); RC=$?

@@ -483,6 +483,19 @@ func (a *Arms) pours(rows []*ledger.Record, token string) (pours, error) {
 	return out, nil
 }
 
+// Unfinished says why Gas City left the pour under root unfinished, as the
+// start reads a pour: root carries molecule_failed=true, or it or a bead poured
+// under it is still fenced by gc.instantiating. It is empty when the pour
+// finished. Accept reads the root its sling poured this way, so the two treat
+// one pour alike while the city's gc can leave one unfinished.
+func Unfinished(l *ledger.Ledger, root *ledger.Record) (string, error) {
+	ps, err := (&Arms{Ledger: l}).pours([]*ledger.Record{root}, "")
+	if err != nil {
+		return "", err
+	}
+	return ps[root.ID].why, nil
+}
+
 // landed is the roots whose pour finished, open or closed, in id order.
 func (ps pours) landed() []string { return ps.select_(func(p pour) bool { return p.finished }) }
 

@@ -289,12 +289,15 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   and your elaboration of a ruling each name their real source, and a
   decision you record before the operator rules on it says it is proposed.
 
-<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator) adopted:2026-10-31 -->
-- A command, flag, key or name that the operator or a reviewer sketches in
-  passing shows what they want, not the shape it must take. Derive the
-  shape from the conventions of the surface it joins, starting with the
-  commands and names already beside it, and say where the result departs
-  from the sketch.
+<!-- rule:tk-4uw3cg3 src:visit:tk-vijqp9x (operator feedback), bead:tk-4uw3cg3 (operator), pr:#1394:comment:4482935072 (operator feedback), bead:tk-v0itc10 (operator), bead:tk-lfi5zph (operator) adopted:2026-10-31 updated:2026-11-17 -->
+- The operator's guidance, and a reviewer's, gives the direction they
+  want, not words or a shape to copy unless they offer it as exact text,
+  and a lean or belief they state is an idea to test, not a premise.
+  Build on the conventions of the surface it joins, starting with the
+  commands and names already beside it, check what would tell against
+  their lean before you build on it, push back where you disagree, even
+  with an earlier ruling, and say where your recommendation departs from
+  what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
@@ -309,13 +312,31 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 
 
 
-## Scratch is reclaimed
+## Where your files go
 
-Your scratchpad is private to this session and removed after a day idle, so
-durable work belongs in the repo (docs/file-structure.md) and a returning
-session may need `mkdir -p` first. Keep build artifacts and whole-store bead
-dumps out of scratch: reference a binary at its build path, and ask for the
-narrow `gc bd list` rather than writing `--all` to a file.
+Your session starts in its agent home, `$GC_DIR`. It holds gc's files and the
+worktrees made in it for your work, and nothing else you write goes there.
+Where the home is a checkout of the rig, an edit there, or a file there that
+git neither tracks nor ignores, fails the home's next start, and each start
+after it, until someone clears it. A path that comes out relative, such as one
+built on an empty variable, lands in the directory its command runs in, so
+begin a command that writes a file, or runs a script that may, with a `cd` into
+one of these places:
+
+- A change, a spec included, goes in the worktree made for it
+  (docs/file-structure.md).
+- Your session's own files, such as a draft, a captured output or a script you
+  write, go in your scratchpad, or in a directory `mktemp -d` makes where you
+  have none. A scratchpad is this session's alone: no later session sees it, it
+  is removed soon after the session ends or once it sits a day untouched, and a
+  returning session may need `mkdir -p` first.
+- A file a later session of the same bead needs, such as a build env file or a
+  harness, goes in `~/.cache/<bead-id>/`, and what a reader of the bead needs,
+  such as a plan, goes in its notes.
+
+Keep build artifacts and whole-store bead dumps out of scratch: reference a
+binary at its build path, and ask for the narrow `gc bd list` rather than
+writing `--all` to a file.
 
 
 
@@ -341,3 +362,19 @@ the tool's time limit ends it. Look up anything else where it lives:
 - a node package: the worktree's own `node_modules`, or its package manager;
 - Claude session transcripts: `~/.claude/projects/`, in the folder named for
   the session's working directory with each `/` and `.` turned into `-`.
+
+
+
+## Where what you learn goes
+
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
+
+Leave out what the pack already says.

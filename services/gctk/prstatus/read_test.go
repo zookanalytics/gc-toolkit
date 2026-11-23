@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // store is a [Store] over fixed answers. Each read is recorded, so a test can
@@ -13,7 +15,7 @@ import (
 type store struct {
 	rows     map[string]Row
 	anchored map[string][]Row
-	edges    map[string][]Blocker
+	edges    map[string][]person.Blocker
 	fail     string
 	calls    []string
 	statuses [][]string
@@ -52,11 +54,11 @@ func (s *store) Anchored(ids []string, statuses []string) (map[string][]Row, err
 	return out, nil
 }
 
-func (s *store) Blockers(ids []string) (map[string][]Blocker, error) {
+func (s *store) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	if err := s.record("blockers", ids); err != nil {
 		return nil, err
 	}
-	out := map[string][]Blocker{}
+	out := map[string][]person.Blocker{}
 	for _, id := range ids {
 		out[id] = s.edges[id]
 	}
@@ -70,18 +72,16 @@ func row(id string, md map[string]string) Row { return Row{ID: id, Metadata: md}
 // reaches: a blocker of its own, and another PR waiting on a review that its
 // rework waits for.
 func TestReadGathersTheFacts(t *testing.T) {
-	person := Blocker{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}
+	decider := person.Blocker{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}
 	other := anchorBlocker("b", awaitingReview)
 	s := &store{
 		rows: map[string]Row{"a": row("a", map[string]string{
 			"merge_hold": "true", "rebase_hold": "1",
-			"pr_posture": "approved@oid@t", "pr.machine": "blocked@oid@t",
-			"pr.machine_cause": CauseBlocker, "pr.machine_reason": "held by tk-x",
-			"pr.unanswered_threads": "2@oid", "opened_as_draft": "o", "draft_readied": "r",
+			"pr_posture": "approved@oid@t", "merge_result": "pull_request_pending",
 			"unread": "x",
 		})},
 		anchored: map[string][]Row{"a": {row("rw", nil), row("rv", nil)}},
-		edges:    map[string][]Blocker{"a": {task("rw"), person}, "rw": {gate("g"), other}},
+		edges:    map[string][]person.Blocker{"a": {task("rw"), decider}, "rw": {gate("g"), other}},
 	}
 	facts, err := Read([]string{"a"}, s)
 	if err != nil {
@@ -90,12 +90,11 @@ func TestReadGathersTheFacts(t *testing.T) {
 	got := facts["a"]
 	want := Facts{
 		MergeHold: "true", RebaseHold: "1",
-		Gates:     []Blocker{gate("g")},
-		Owed:      []Blocker{person, other},
-		PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t",
-		PRMachineCause: CauseBlocker, PRMachineReason: "held by tk-x",
-		PRUnansweredThreads: "2@oid", OpenedAsDraft: "o", DraftReadied: "r",
+		Gates:         []person.Blocker{gate("g")},
+		Owed:          []person.Blocker{decider, other},
+		PRPosture:     "approved@oid@t",
 		InFlightCount: 2,
+		MergeResult:   "pull_request_pending",
 	}
 	if fmt.Sprintf("%+v", got) != fmt.Sprintf("%+v", want) {
 		t.Errorf("Read gathered\n %+v\nwant\n %+v", got, want)
@@ -110,7 +109,7 @@ func TestReadGathersTheFacts(t *testing.T) {
 func TestReadBatchesItsReads(t *testing.T) {
 	s := &store{
 		rows:  map[string]Row{"a": row("a", nil), "b": row("b", nil)},
-		edges: map[string][]Blocker{"a": {task("rw")}, "b": {task("rw"), task("t")}, "rw": {gate("g")}},
+		edges: map[string][]person.Blocker{"a": {task("rw")}, "b": {task("rw"), task("t")}, "rw": {gate("g")}},
 	}
 	facts, err := Read([]string{"a", "b", "a"}, s)
 	if err != nil {
@@ -140,7 +139,7 @@ func TestReadFailsClosed(t *testing.T) {
 	}
 
 	t.Run("a level of the walk", func(t *testing.T) {
-		s := &store{rows: map[string]Row{"a": row("a", nil)}, edges: map[string][]Blocker{"a": {task("rw")}}}
+		s := &store{rows: map[string]Row{"a": row("a", nil)}, edges: map[string][]person.Blocker{"a": {task("rw")}}}
 		calls := 0
 		walk := failAt{Store: s, n: 2, calls: &calls}
 		if facts, err := Read([]string{"a"}, walk); err == nil || facts != nil {
@@ -156,7 +155,7 @@ type failAt struct {
 	calls *int
 }
 
-func (f failAt) Blockers(ids []string) (map[string][]Blocker, error) {
+func (f failAt) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	*f.calls++
 	if *f.calls == f.n {
 		return nil, errors.New("the level did not read")
@@ -189,10 +188,10 @@ func TestReadLeavesOutAnAnchorWithNoRow(t *testing.T) {
 // An anchor whose walk runs past its bound has no answer, because the gates past
 // it are unknown, and the others keep theirs.
 func TestReadLeavesOutAnAnchorPastTheWalksBound(t *testing.T) {
-	s := &store{rows: map[string]Row{"a": row("a", nil), "deep": row("deep", nil)}, edges: map[string][]Blocker{"a": {gate("g")}}}
-	s.edges["deep"] = []Blocker{task("n1")}
+	s := &store{rows: map[string]Row{"a": row("a", nil), "deep": row("deep", nil)}, edges: map[string][]person.Blocker{"a": {gate("g")}}}
+	s.edges["deep"] = []person.Blocker{task("n1")}
 	for i := 1; i <= walkDepth; i++ {
-		s.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
+		s.edges[fmt.Sprintf("n%d", i)] = []person.Blocker{task(fmt.Sprintf("n%d", i+1))}
 	}
 	facts, err := Read([]string{"a", "deep"}, s)
 	if !errors.Is(err, ErrWalkBound) {
@@ -214,42 +213,13 @@ func TestReadOfNoAnchors(t *testing.T) {
 	}
 }
 
-// A person owes a live decision, and never a human gate, which held: gate
-// counts.
-func TestIsPersonBlocker(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		b    Blocker
-		want bool
-	}{
-		{"a decision", Blocker{ID: "d", Status: "open", IssueType: "decision"}, true},
-		{"a decision in any case", Blocker{ID: "d", Status: "open", IssueType: "Decision"}, true},
-		{"a decision in progress", Blocker{ID: "d", Status: "IN_PROGRESS", IssueType: "decision"}, true},
-		{"a decision with no status", Blocker{ID: "d", IssueType: "decision"}, true},
-		{"closed", Blocker{ID: "d", Status: "closed", IssueType: "decision"}, false},
-		{"closed in any case", Blocker{ID: "d", Status: "Closed", IssueType: "decision"}, false},
-		{"a task", Blocker{ID: "d", Status: "open", IssueType: "task"}, false},
-		{"routed to a pool", Blocker{ID: "d", Status: "open", Metadata: map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}, false},
-		{"routed to human", Blocker{ID: "d", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}}, false},
-		{"a human gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human"}, false},
-		{"a timer gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "timer"}, false},
-		{"a merge anchor waiting on a review is no blocker to clear", anchorBlocker("b", awaitingReview), false},
-	} {
-		if got := IsPersonBlocker(tc.b); got != tc.want {
-			t.Errorf("%s: IsPersonBlocker(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)
-		}
-	}
-}
-
-// Reasons names each thing behind the held values in their order: the gates
-// nearest first, the thread verdict before the unanswered feedback, then each
-// bead a person owes nearest first before the stuck-blocker verdict. A bead is
-// named by its id, and what is the PR's own by what it says.
+// Reasons names each thing behind the held values in their order, each by its
+// bead: the gates nearest first, then each bead a person owes nearest first.
 func TestReasons(t *testing.T) {
 	approved := Facts{PRPosture: "approved@oid@t"}
 	with := func(f Facts, edit func(*Facts)) Facts { edit(&f); return f }
-	d1 := Blocker{ID: "d1", Title: "first", Status: "open", IssueType: "decision"}
-	d2 := Blocker{ID: "d2", Title: "second", Status: "open", IssueType: "decision"}
+	d1 := person.Blocker{ID: "d1", Title: "first", Status: "open", IssueType: "decision"}
+	d2 := person.Blocker{ID: "d2", Title: "second", Status: "open", IssueType: "decision"}
 	b := anchorBlocker("b", awaitingReview)
 	for _, tc := range []struct {
 		name string
@@ -257,34 +227,13 @@ func TestReasons(t *testing.T) {
 		want []Reason
 	}{
 		{"nothing holds the PR", approved, nil},
-		{"gates nearest first", with(approved, func(f *Facts) { f.Gates = []Blocker{gate("near"), gate("far")} }),
+		{"gates nearest first", with(approved, func(f *Facts) { f.Gates = []person.Blocker{gate("near"), gate("far")} }),
 			[]Reason{{HeldGate, "near", "ask near"}, {HeldGate, "far", "ask far"}}},
-		{"the thread verdict says its sentence", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause, f.PRMachineReason = "blocked@oid@t", CauseReviewThreads, "2 unresolved review thread(s) must be resolved before this PR can merge"
-		}), []Reason{{HeldReview, "", "2 unresolved review thread(s) must be resolved before this PR can merge"}}},
-		{"…or what its cause means when it recorded none", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseReviewThreads
-		}), []Reason{{HeldReview, "", "unresolved review threads hold the merge"}}},
-		{"one thread waiting on the city's answer", with(approved, func(f *Facts) { f.PRUnansweredThreads = "1@oid" }),
-			[]Reason{{HeldReview, "", "1 review thread waits on the city's answer"}}},
-		{"several", with(approved, func(f *Facts) { f.PRUnansweredThreads = "3@oid" }),
-			[]Reason{{HeldReview, "", "3 review threads wait on the city's answer"}}},
-		{"the verdict before the feedback", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause, f.PRUnansweredThreads = "blocked@oid@t", CauseReviewThreads, "1@oid"
-		}), []Reason{{HeldReview, "", "unresolved review threads hold the merge"}, {HeldReview, "", "1 review thread waits on the city's answer"}}},
-		{"each bead a person owes, nearest first", with(approved, func(f *Facts) { f.Owed = []Blocker{d1, b, d2} }),
+		{"each bead a person owes, nearest first", with(approved, func(f *Facts) { f.Owed = []person.Blocker{d1, b, d2} }),
 			[]Reason{{HeldBlocked, "d1", "first"}, {HeldBlocked, "b", "pr b"}, {HeldBlocked, "d2", "second"}}},
-		{"the stuck-blocker verdict after them", with(approved, func(f *Facts) {
-			f.Owed = []Blocker{d1}
-			f.PRMachine, f.PRMachineCause, f.PRMachineReason = "blocked@oid@t", CauseBlocker, "held by finding tk-x (open), which no automated actor holds or will claim"
-		}), []Reason{{HeldBlocked, "d1", "first"}, {HeldBlocked, "", "held by finding tk-x (open), which no automated actor holds or will claim"}}},
-		{"…saying what its cause means when it recorded none", with(approved, func(f *Facts) {
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseBlocker
-		}), []Reason{{HeldBlocked, "", "a live blocker no automated actor holds"}}},
-		{"every value at once", with(approved, func(f *Facts) {
-			f.Gates, f.Owed = []Blocker{gate("g")}, []Blocker{d1}
-			f.PRMachine, f.PRMachineCause = "blocked@oid@t", CauseReviewThreads
-		}), []Reason{{HeldGate, "g", "ask g"}, {HeldReview, "", "unresolved review threads hold the merge"}, {HeldBlocked, "d1", "first"}}},
+		{"the gates before the beads a person owes", with(approved, func(f *Facts) {
+			f.Gates, f.Owed = []person.Blocker{gate("g")}, []person.Blocker{d1}
+		}), []Reason{{HeldGate, "g", "ask g"}, {HeldBlocked, "d1", "first"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Reasons(tc.f)
@@ -308,15 +257,15 @@ func TestReasons(t *testing.T) {
 // closed, with the head and the target each was poured at, which Render reads
 // the run's state from. A blocker that is no review run's root is no run.
 func TestReadGathersTheReviewRunsAttachedToTheAnchor(t *testing.T) {
-	root := func(id, status, head string) Blocker {
-		return Blocker{ID: id, Status: status, ClosedAt: map[string]string{"closed": "2026-11-12T09:10:00Z"}[status],
+	root := func(id, status, head string) person.Blocker {
+		return person.Blocker{ID: id, Status: status, ClosedAt: map[string]string{"closed": "2026-11-12T09:10:00Z"}[status],
 			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review",
 				"gc.var.head": head, "gc.var.target": "main"}}
 	}
-	other := Blocker{ID: "w", Status: "open", Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-polecat-work"}}
+	other := person.Blocker{ID: "w", Status: "open", Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-polecat-work"}}
 	s := &store{
 		rows:  map[string]Row{"a": row("a", map[string]string{})},
-		edges: map[string][]Blocker{"a": {root("r1", "closed", "h1"), root("r2", "open", "h2"), other}},
+		edges: map[string][]person.Blocker{"a": {root("r1", "closed", "h1"), root("r2", "open", "h2"), other}},
 	}
 	facts, err := Read([]string{"a"}, s)
 	if err != nil {

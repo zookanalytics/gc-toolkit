@@ -30,65 +30,34 @@
 # names the record to write by hand, because a bead an ask blocks is no ready
 # work that brings the refinery back to it.
 #
-# A convoy, which gc sling would take as its run's input convoy rather than its
-# work, keeps what it carries and comes back as a rework child: a task on the
-# same branch, with task_kind=rework, anchor_bead, branch, target,
-# rejection_reason, merge_strategy=mr and the PR as existing_pr. The child is
-# filed whole: its work order, its edge joining it to the bead and its blocks
-# edge onto the bead are all in the create, so no child exists without them. A
-# create whose reply carries no id may still have landed, so the bead's
-# children are read again for it. The child is then settled at its priority,
-# because a pour copies the priority it finds, and slung. The bead stays open
-# and assigned to the refinery, so the child's hand-back records the PR on it.
-#
-# A child that does not settle is not slung. It is armed instead (gctk bead
-# arm), and the deferred-dispatch order pours it on its next pass, with no
-# settle, so the queue-priority pass settles it with its workflow once that is
-# queued (docs/steering.md). The arm sends it rather than the refinery's next
-# patrol, because the bead the child holds is no demand that wakes the
-# refinery: Gas City counts open work assigned to an on-demand session as its
-# demand only once the work is ready.
-#
-# A run that ends after the create and before the sling or the arm, or whose
-# create reply was lost and whose children did not read again, leaves the child
-# unsent (refinery-lib.sh): it holds the bead, and no one works it. The
-# refinery's next patrol, which comes once other work wakes the refinery, sends
-# it on. find-work counts an unsent child as no wait and no writer, so it takes
-# the bead, and the bead's prep runs this requeue again, which finds the child
-# on the branch.
-#
-# One worker per branch: when an open rework child of the bead is already on
-# the branch, running or parked, the reason goes to that child's notes and
-# nothing else is filed, a bead on the record's included, whose child was filed
-# before its PR's branch had a review run to write it. An unsent child among them is sent on as a new child
-# is, once its blocks edge onto the bead is written when it lacks one, as a
-# child filed before the edge rode the create can. When that edge does not
-# land, the run files a human gate keyed refinery-requeue-failed on the child
-# and then arms the child, so the gate holds both the child and the bead, and
-# clearing the gate lets the deferred-dispatch order send the child on.
+# One worker per branch: when an open rework child of such a bead is already on
+# its branch, running or parked, one filed before the PR's branch had a review
+# run to write it, the reason goes to that child's notes and nothing else is
+# filed.
 #
 # Any other bead, a rework child among them, goes back itself. One write,
 # guarded on the assignee and status it read, reopens it unassigned with the
 # rejection_reason and clears its claim route, its last pour's stamp and the
 # session that last held it, so a run of the landing order that read it before
-# writes nothing (bd's guard), and the next run clears a marker a dead
-# publication left, as after a release. The same write clears the merge_result
-# and blocked_reason that a park, or a record the landing order found half
+# writes nothing (bd's guard). The same write clears the marker a dead
+# publication left (pr_reconcile_pending), since the landing order works a
+# marked bead assigned to nobody as a PR that waits, and the merge_result and
+# blocked_reason that a park, or a record the landing order found half
 # written, left on it, because the polecat's work gate refuses an open bead
 # that carries a merge_result as finished work. Its branch, target and
 # existing_pr stay, so the rework reuses the PR it may have. A live workflow
 # left on it is closed (gc workflow delete-source), and it is slung.
 #
-# A sling that fails is armed the same way. An arm that fails files a human
-# gate keyed refinery-requeue-failed, which asks a person to pour the work by
-# hand.
+# A sling that fails is armed instead (gctk bead arm), and the deferred-dispatch
+# order pours the bead on its next pass once nothing holds it. An arm that fails
+# files a human gate keyed refinery-requeue-failed, which asks a person to pour
+# the work by hand.
 #
 # Exit: 0 sent back or armed to go back, sent to the review run as an ask, or
 #         the reason reached the child already on the branch
 #       1 the work did not go back; the output says why. The bead stays with
-#         the refinery: its next patrol retries the requeue, or sends on the
-#         unsent child this run filed, and a refinery-requeue-failed gate the
-#         run filed waits for a person
+#         the refinery: its next patrol retries the requeue, and a
+#         refinery-requeue-failed gate the run filed waits for a person
 #       2 usage
 #       3 the bead left the refinery or changed status before the write, so
 #         nothing was written
@@ -124,21 +93,6 @@ done
 stop() { echo "$PROG: $1; nothing went back to the pool, and $BEAD stays with the refinery" >&2; exit 1; }
 # said <refusal> <writer>: a write's refusal on one line, for a gate's message.
 said() { printf '%s' "${1:-$2 gave no reason}" | tr -s '[:space:]' ' ' | sed 's/ $//'; }
-# ask <child> <why>: an unsent child whose blocks edge could not be written
-# waits for a person, behind a human gate on it, and is armed once the gate has
-# landed. The gate holds the child, so the patrol stops taking the bead, and
-# clearing it lets the deferred-dispatch order send the child on. Without the
-# gate nothing is armed, since the arm alone would send the child without its
-# edge.
-ask() {
-  if "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $BEAD's branch $BRANCH back to the pool as rework child $1 ($REASON), but $2, so no polecat is building it. Fix that, then clear this gate: $1 is armed behind it, and the deferred-dispatch order sends it on. If gctk bead holds $1 shows no arm on it, send it on yourself instead: $HERE/queue-priority.sh settle $1, then gc sling $ROUTE $1 --on $FORMULA, then clear this gate." >/dev/null; then
-    "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" --reason "refinery requeue: $2; it goes once the refinery-requeue-failed gate is cleared" >&2 \
-      || echo "$PROG: the refinery-requeue-failed gate holds $1, but no deferred dispatch was armed behind it, so a person sends it on by hand" >&2
-  else
-    echo "$PROG: no refinery-requeue-failed gate landed on $1 either, and nothing was armed, so the refinery's next patrol tries to send it on again" >&2
-  fi
-  stop "rework child $1 was never sent on, and $2"
-}
 
 HOME_DIR=$(refinery_home) || stop "the refinery's own worktree is unknown"
 refinery_bead "$BEAD" || stop "$BEAD did not read"
@@ -151,128 +105,74 @@ TARGET=$(bead_meta target)
 STATUS=$(bead_field status)
 ROUTE=$("$HERE/pool-route.sh" "$POOL") || stop "the pool $POOL resolves to no route"
 
-# What a send did with the work, for the line that reports it: slung, or armed.
-WENT=""
-# arm <bead> <why> [<by-hand>]: arm the dispatch this run could not make (gctk
-# bead arm), so the deferred-dispatch order's next pass pours mol-polecat-work
-# on <bead> for the pool once nothing holds it. An arm that fails asks a person,
-# behind a refinery-requeue-failed gate on <bead>, to pour it by hand:
-# <by-hand>, else a plain gc sling.
+# arm <bead> <why>: arm the dispatch this run could not make (gctk bead arm), so
+# the deferred-dispatch order's next pass pours mol-polecat-work on <bead> for
+# the pool once nothing holds it. An arm that fails asks a person, behind a
+# refinery-requeue-failed gate on <bead>, to pour it by hand.
 arm() {
-  local hand="${3:-gc sling $ROUTE $1 --on $FORMULA}"
+  local hand="gc sling $ROUTE $1 --on $FORMULA"
   if "$GCTK" bead arm "$1" --target "$ROUTE" --on "$FORMULA" --reason "refinery requeue: $2" >&2; then
     echo "$PROG: $2; armed a deferred dispatch, which the deferred-dispatch order pours on its next pass" >&2
-    WENT="is armed to go to $ROUTE"
     return 0
   fi
   "$HERE/human-gate.sh" --subject "$1" --key refinery-requeue-failed --message "The refinery sent $1 back to the pool ($REASON), but $2 and no deferred dispatch could be armed, so no polecat is building it. Pour it by hand: $hand, then clear this gate." >/dev/null \
     || echo "$PROG: no refinery-requeue-failed gate landed on $1 either; pour it by hand: $hand" >&2
   return 1
 }
-# sling <bead> [<by-hand>]: pour mol-polecat-work on <bead> for the pool. A
-# sling that fails is armed.
+# sling <bead>: pour mol-polecat-work on <bead> for the pool. A sling that fails
+# is armed.
 sling() {
   local rc
   gc sling ${GC_RIG:+--rig "$GC_RIG"} "$ROUTE" "$1" --on "$FORMULA" </dev/null >&2
   rc=$?
-  [ "$rc" != 0 ] || { WENT="went to $ROUTE"; return 0; }
-  arm "$1" "gc sling of $1 exited $rc" "${2:-}"
-}
-# send <child>: settle a rework child at its priority, because a pour copies
-# the priority it finds, then sling it. A child that does not settle is armed
-# rather than slung, and a person who pours it by hand settles it first.
-send() {
-  local err hand="$HERE/queue-priority.sh settle $1, then gc sling $ROUTE $1 --on $FORMULA"
-  if { err=$(pr_finishing_settle "$1" 2>&1 1>&3); } 3>&2; then
-    sling "$1" "$hand"
-    return
-  fi
-  arm "$1" "$1 did not settle at its priority ($(said "$err" queue-priority.sh))" "$hand"
+  [ "$rc" != 0 ] || return 0
+  arm "$1" "gc sling of $1 exited $rc"
 }
 
-KIND=$(bead_field issue_type)
-[ -n "$KIND" ] || KIND=$(bead_field type)
-if [ "$(bead_meta merge_result)" = pull_request_head_changed ] || [ "$KIND" = convoy ]; then
+if [ "$(bead_meta merge_result)" = pull_request_head_changed ]; then
   PR=$(bead_meta existing_pr)
   [ -n "$PR" ] || PR=$(bead_meta pr_url)
-  # kids: the live beads that name the bead as their anchor, in KIDS.
-  kids() {
-    KIDS=$(bd_json list --metadata-field "anchor_bead=$BEAD" --status="$LIVE" --limit=0) \
-      && printf '%s' "$KIDS" | jq -e 'type == "array"' >/dev/null 2>&1
-  }
-  kids || stop "the open beads that name $BEAD as their anchor did not read"
+  KIDS=$(bd_json list --metadata-field "anchor_bead=$BEAD" --status="$LIVE" --limit=0) \
+    && printf '%s' "$KIDS" | jq -e 'type == "array"' >/dev/null 2>&1 \
+    || stop "the open beads that name $BEAD as their anchor did not read"
   CHILD=$(printf '%s' "$KIDS" | jq -r --arg b "$BRANCH" '[ .[] | select((.metadata.task_kind // "") == "rework" and (.metadata.branch // "") == $b) ] | sort_by(.created_at // .id) | .[0].id // empty')
   if [ -n "$CHILD" ]; then
     gc bd update "$CHILD" --append-notes "Refinery, on $BEAD's branch $BRANCH: $REASON. This child is the rework on the branch, so nothing else is filed for it." </dev/null >/dev/null \
       || stop "the reason did not reach $CHILD, the rework child already on $BRANCH"
-    if printf '%s' "$KIDS" | jq -e --arg c "$CHILD" --arg a "$BEAD" --arg b "$BRANCH" "$REFINERY_UNSENT_JQ"'any(.[]; .id == $c and refinery_unsent($a; $b))' >/dev/null 2>&1; then
-      # An unsent child gets its blocks edge onto the bead before it is sent,
-      # since a child filed before the edge rode the create can lack it. An
-      # edge that does not land asks a person. bd refuses a second edge on a
-      # pair, so an add it refuses is read again, and the add's refusal is kept
-      # for the gate.
-      blocks_bead() { bd_json dep list "$BEAD" --direction=down -t blocks | jq -e --arg c "$1" 'type == "array" and any(.[]; .id == $c)' >/dev/null 2>&1; }
-      if ! blocks_bead "$CHILD"; then
-        ERR=$(gc bd dep "$CHILD" --blocks "$BEAD" </dev/null 2>&1 >/dev/null) || blocks_bead "$CHILD" \
-          || ask "$CHILD" "its blocks edge onto $BEAD did not land ($(said "$ERR" bd)), and that edge is what holds $BEAD for its rework"
-      fi
-      send "$CHILD" || exit 1
-      echo "$PROG: $CHILD, the rework child on $BRANCH, was filed and never sent on, so it $WENT"
-    fi
     echo "$PROG: $CHILD is the rework on $BEAD's branch $BRANCH, so the reason went to its notes: $REASON"
     exit 0
   fi
-  if [ "$KIND" != convoy ]; then
-    [ -n "$PR" ] || stop "$BEAD owns an open PR on the record but names none (existing_pr and pr_url are empty)"
-    # The ask goes first and the record second (see the header).
-    LINE="The refinery sent $PREP_READ back:"
-    ON=$(bd_json list --metadata-field "branch=$BRANCH" --status=open --limit=0) \
-      && printf '%s' "$ON" | jq -e 'type == "array"' >/dev/null 2>&1 \
-      || stop "the open beads on $BRANCH did not read, so whether an ask for $PREP_READ already stands is unknown"
-    ASK=$(printf '%s' "$ON" | jq -r --arg b "$BRANCH" --arg l "$LINE" "$REFINERY_ASK_JQ"'[ .[] | select(refinery_ask($b))
-      | select(((.description // "") | split("\n") | .[0]) == $l) ] | sort_by(.created_at // .id) | .[0].id // empty')
-    if [ -n "$ASK" ]; then
-      echo "$PROG: ask $ASK, which an earlier requeue of $PREP_READ filed, is open on $BRANCH, so no second is filed" >&2
-    else
-      ARC=0
-      AOUT=$("$GCTK" review ask "$BEAD" --reason "$LINE
+  [ -n "$PR" ] || stop "$BEAD owns an open PR on the record but names none (existing_pr and pr_url are empty)"
+  # The ask goes first and the record second (see the header).
+  LINE="The refinery sent $PREP_READ back:"
+  ON=$(bd_json list --metadata-field "branch=$BRANCH" --status=open --limit=0) \
+    && printf '%s' "$ON" | jq -e 'type == "array"' >/dev/null 2>&1 \
+    || stop "the open beads on $BRANCH did not read, so whether an ask for $PREP_READ already stands is unknown"
+  ASK=$(printf '%s' "$ON" | jq -r --arg b "$BRANCH" --arg l "$LINE" "$REFINERY_ASK_JQ"'[ .[] | select(refinery_ask($b))
+    | select(((.description // "") | split("\n") | .[0]) == $l) ] | sort_by(.created_at // .id) | .[0].id // empty')
+  if [ -n "$ASK" ]; then
+    echo "$PROG: ask $ASK, which an earlier requeue of $PREP_READ filed, is open on $BRANCH, so no second is filed" >&2
+  else
+    ARC=0
+    AOUT=$("$GCTK" review ask "$BEAD" --reason "$LINE
 $REASON" </dev/null 2>&1) || ARC=$?
-      [ "$ARC" = 0 ] || stop "the ask that sends $BRANCH to $BEAD's review run did not land ($(said "$AOUT" "gctk review ask")), so $PR is not recorded pending at $PREP_READ"
-      ASK=$(printf '%s\n' "$AOUT" | tail -n 1 | cut -d' ' -f1)
-      [ -n "$ASK" ] || stop "gctk review ask named no ask on $BEAD, so $PR is not recorded pending at $PREP_READ"
-    fi
-    RRC=0
-    ROUT=$(GC_RIG_ROOT="$HOME_DIR" "$GCTK" pr record "$BEAD" --pr "$PR" --head "$PREP_READ" --target "$TARGET" \
-      --refinery "$GC_AGENT" </dev/null 2>&1) || RRC=$?
-    case "$RRC" in
-      0) ;;
-      3) echo "$PROG: $BEAD changed after it was read, so it was left as it is, and ask $ASK holds its merge: $(said "$ROUT" "gctk pr record")" >&2
-         exit 3 ;;
-      *) HAND="GC_RIG_ROOT=$(printf '%q' "$HOME_DIR") $GCTK pr record $BEAD --pr $PR --head $PREP_READ --target $TARGET --refinery $GC_AGENT"
-         "$HERE/human-gate.sh" --subject "$BEAD" --key refinery-requeue-failed --message "The refinery filed ask $ASK to send $BEAD's branch $BRANCH back to its review run ($REASON), but recording $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")). The ask holds the merge, no run takes it until the record names that head, and a bead an ask blocks is no ready work that brings the refinery back. Record it by hand: $HAND, then clear this gate." >/dev/null \
-           || echo "$PROG: no refinery-requeue-failed gate landed on $BEAD either; record it by hand: $HAND" >&2
-         stop "ask $ASK holds $BEAD's merge, and the record of $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")), so a refinery-requeue-failed gate asks a person to write it" ;;
-    esac
-    echo "$PROG: $BEAD keeps its PR $PR, recorded pending at $PREP_READ, and the review run the landing order pours takes its ask $ASK: $REASON"
-    exit 0
+    [ "$ARC" = 0 ] || stop "the ask that sends $BRANCH to $BEAD's review run did not land ($(said "$AOUT" "gctk review ask")), so $PR is not recorded pending at $PREP_READ"
+    ASK=$(printf '%s\n' "$AOUT" | tail -n 1 | cut -d' ' -f1)
+    [ -n "$ASK" ] || stop "gctk review ask named no ask on $BEAD, so $PR is not recorded pending at $PREP_READ"
   fi
-  ORDER=$(jq -nc --arg a "$BEAD" --arg b "$BRANCH" --arg t "$TARGET" --arg r "$REASON" --arg p "$PR" \
-    '{task_kind: "rework", anchor_bead: $a, branch: $b, target: $t, rejection_reason: $r, merge_strategy: "mr"}
-     + (if $p == "" then {} else {existing_pr: $p} end)')
-  IDENTITY=$(pr_finishing_birth "$ORDER") || stop "the rework child's work order did not build"
-  SHORT=$(printf '%s' "$REASON" | head -n 1 | cut -c1-80)
-  CHILD=$(bd_create_child "$BEAD" "Rework $BRANCH for $BEAD: $SHORT" -t task --metadata "$IDENTITY" --deps "blocks:$BEAD" --json </dev/null 2>/dev/null \
-    | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
-  if [ -z "$CHILD" ]; then
-    # A create whose reply was lost can still have landed whole, and no rework
-    # child was on the branch before it, so an unsent one there now is its.
-    kids || stop "the rework child's create returned no id, and the beads that name $BEAD as their anchor did not read again. A child it did file is unsent, and the refinery's next patrol sends it on"
-    CHILD=$(printf '%s' "$KIDS" | jq -r --arg a "$BEAD" --arg b "$BRANCH" "$REFINERY_UNSENT_JQ"'[ .[] | select(refinery_unsent($a; $b)) ] | sort_by(.created_at // .id) | .[0].id // empty')
-    [ -n "$CHILD" ] || stop "the rework child's create returned no id, and no unsent rework child of $BEAD is on $BRANCH, so none was filed"
-    echo "$PROG: the rework child's create returned no id; $CHILD is the unsent rework child it filed on $BRANCH" >&2
-  fi
-  send "$CHILD" || exit 1
-  echo "$PROG: $BEAD keeps its PR${PR:+ $PR}, and its rework child $CHILD $WENT: $REASON"
+  RRC=0
+  ROUT=$(GC_RIG_ROOT="$HOME_DIR" "$GCTK" pr record "$BEAD" --pr "$PR" --head "$PREP_READ" --target "$TARGET" \
+    --refinery "$GC_AGENT" </dev/null 2>&1) || RRC=$?
+  case "$RRC" in
+    0) ;;
+    3) echo "$PROG: $BEAD changed after it was read, so it was left as it is, and ask $ASK holds its merge: $(said "$ROUT" "gctk pr record")" >&2
+       exit 3 ;;
+    *) HAND="GC_RIG_ROOT=$(printf '%q' "$HOME_DIR") $GCTK pr record $BEAD --pr $PR --head $PREP_READ --target $TARGET --refinery $GC_AGENT"
+       "$HERE/human-gate.sh" --subject "$BEAD" --key refinery-requeue-failed --message "The refinery filed ask $ASK to send $BEAD's branch $BRANCH back to its review run ($REASON), but recording $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")). The ask holds the merge, no run takes it until the record names that head, and a bead an ask blocks is no ready work that brings the refinery back. Record it by hand: $HAND, then clear this gate." >/dev/null \
+         || echo "$PROG: no refinery-requeue-failed gate landed on $BEAD either; record it by hand: $HAND" >&2
+       stop "ask $ASK holds $BEAD's merge, and the record of $PR as pending at $PREP_READ did not land ($(said "$ROUT" "gctk pr record")), so a refinery-requeue-failed gate asks a person to write it" ;;
+  esac
+  echo "$PROG: $BEAD keeps its PR $PR, recorded pending at $PREP_READ, and the review run the landing order pours takes its ask $ASK: $REASON"
   exit 0
 fi
 
@@ -282,7 +182,7 @@ case "$STATUS" in open|in_progress) ;; *) stop "$BEAD is $STATUS, not open or in
 RC=0
 OUT=$(gc bd update "$BEAD" --if-assignee="$GC_AGENT" --if-status="$STATUS" --status=open --assignee="" \
   --set-metadata "rejection_reason=$REASON" --unset-metadata merge_result --unset-metadata blocked_reason \
-  --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
+  --unset-metadata pr_reconcile_pending --unset-metadata gc.routed_to --unset-metadata gc.execution_routed_to \
   --unset-metadata gc.session_id --unset-metadata gc.session_name </dev/null 2>&1) || RC=$?
 case "$RC" in
   0) ;;

@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Bead is one bead of a scenario's store. WaitsOn names the beads its `blocks`
@@ -118,8 +119,8 @@ func (s *Store) Anchored(ids []string, statuses []string) (map[string][]prstatus
 }
 
 // Blockers returns, for each id, the far bead of each of its `blocks` edges.
-func (s *Store) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
-	out := make(map[string][]prstatus.Blocker, len(ids))
+func (s *Store) Blockers(ids []string) (map[string][]person.Blocker, error) {
+	out := make(map[string][]person.Blocker, len(ids))
 	for _, id := range ids {
 		b, ok := s.beads[id]
 		if !ok {
@@ -136,8 +137,8 @@ func (s *Store) Blockers(ids []string) (map[string][]prstatus.Blocker, error) {
 }
 
 // BlockerOf is a bead as the far end of a `blocks` edge.
-func BlockerOf(b Bead) prstatus.Blocker {
-	return prstatus.Blocker{
+func BlockerOf(b Bead) person.Blocker {
+	return person.Blocker{
 		ID:        b.ID,
 		Title:     b.Title,
 		Status:    b.Status,

@@ -74,6 +74,8 @@ type Process struct {
 	parent  int
 	spec    host.Spec
 	out     io.Writer
+	stdout  io.Writer
+	closed  bool
 	file    *os.File
 	notify  map[os.Signal][]chan<- os.Signal
 	ignored map[os.Signal]bool
@@ -81,6 +83,9 @@ type Process struct {
 	status  int
 	done    chan struct{}
 	relayed chan struct{}
+	// outCut and stdoutCut are set once the writer of a relayed stream, Out's
+	// or Stdout's own, refused a write, where the relay's copy stops.
+	outCut, stdoutCut bool
 }
 
 var (
@@ -143,24 +148,72 @@ func (p *Process) Spec() host.Spec { return p.spec }
 // Done is closed once the process has ended.
 func (p *Process) Done() <-chan struct{} { return p.done }
 
-// Out is where the process's output goes, as Spec's Out names it. A write
-// once the process has ended fails, as a write to a pipe whose reader has
-// gone does.
-func (p *Process) Out() io.Writer { return output{p} }
+// Out is where the process's output goes, as Spec's Out names it: its
+// standard error, and its standard output too unless Spec's Stdout takes it. A
+// write once the process has ended fails, as a write to a pipe whose reader
+// has gone does. With Relay, a write its writer refuses ends the copy of that
+// stream, as it ends a relay's: a later write to the stream fails as one after
+// the process's end does, and a writer that is a host.Ender is not told the
+// stream ended.
+func (p *Process) Out() io.Writer { return output{p: p} }
 
-type output struct{ p *Process }
+// Stdout is where the process's standard output goes: Spec's Stdout, or Out
+// when the spec names none.
+func (p *Process) Stdout() io.Writer { return output{p: p, stdout: true} }
+
+type output struct {
+	p      *Process
+	stdout bool
+}
 
 func (w output) Write(b []byte) (int, error) {
 	m := w.p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	to, cut := w.p.out, &w.p.outCut
+	if w.stdout && w.p.stdout != nil {
+		to, cut = w.p.stdout, &w.p.stdoutCut
+	}
 	switch {
 	case w.p.ended:
 		return 0, syscall.EPIPE
-	case w.p.out == nil:
+	case w.stdout && w.p.closed:
+		return 0, syscall.EBADF
+	case *cut:
+		return 0, syscall.EPIPE
+	case to == nil:
 		return len(b), nil
 	}
-	return w.p.out.Write(b)
+	n, err := to.Write(b)
+	if err != nil && w.p.spec.Relay {
+		*cut = true
+	}
+	return n, err
+}
+
+// CloseStdout closes the process's standard output, as a program that closes
+// its descriptor 1 and runs on does: a later write to Stdout fails. With
+// Relay, Spec's Stdout is told the stream has ended when it is a host.Ender,
+// as the relay tells it. Spec's Stdout unset, the standard output shares Out
+// with the standard error, whose stream goes on.
+func (p *Process) CloseStdout() {
+	m := p.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p.closed || p.ended {
+		return
+	}
+	p.closed = true
+	if p.spec.Relay && p.stdout != nil && !p.stdoutCut {
+		ends(p.stdout)
+	}
+}
+
+// ends tells w its stream has ended, when w is a host.Ender.
+func ends(w io.Writer) {
+	if e, ok := w.(host.Ender); ok {
+		e.End()
+	}
 }
 
 // Listen has the process listen on the loopback port until it ends.
@@ -241,7 +294,7 @@ func (p *Process) Start(s host.Spec) (host.Child, error) {
 	defer m.mu.Unlock()
 	if p.ended {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, fmt.Errorf("process %d has ended: %w", p.pid, syscall.ESRCH)
 	}
@@ -251,7 +304,7 @@ func (p *Process) Start(s host.Spec) (host.Child, error) {
 		group = m.lastPid
 	}
 	q := m.add(m.lastPid, group, p.pid, s)
-	q.out = s.Out
+	q.out, q.stdout = s.Out, s.Stdout
 	if file != nil {
 		q.out, q.file = file, file
 	}
@@ -413,10 +466,16 @@ func (m *Machine) end(q *Process, status int) {
 	q.ended, q.status = true, status
 	close(q.done)
 	if q.spec.Relay {
+		if q.stdout != nil && !q.closed && !q.stdoutCut {
+			ends(q.stdout)
+		}
+		if !q.outCut {
+			ends(q.out)
+		}
 		close(q.relayed)
 	}
 	if q.file != nil {
-		q.file.Close()
+		_ = q.file.Close()
 	}
 	for port, pids := range m.listens {
 		m.listens[port] = slices.DeleteFunc(pids, func(pid int) bool { return pid == q.pid })

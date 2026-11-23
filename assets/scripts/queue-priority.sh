@@ -10,7 +10,9 @@
 #       priority of its own. --print computes the same priority and writes
 #       nothing. It takes no lock, so no writer writes the number it prints.
 #   move <bead> (<P0-P4> | --shift <±n>) [--dry-run] [--db <path>]
-#       the writer `gc-helm.sh priority` runs: set the bead's own input, then
+#       the operator's priority move, which the po and a sitting run on the
+#       operator's ruling and gctk bead place runs for a --shift: set the
+#       bead's own input, then
 #       write every bead that follows it, directly or through others (members,
 #       the PR-finishing work of each anchor among them, and the live workflow
 #       of each).
@@ -50,15 +52,17 @@
 # holder: the lock is held by a writer that has not recorded itself yet, or the
 # record was left by one that was killed, so the pass skips its tick.
 #
-# Callers: gc-helm.sh priority (move), orders/queue-priority.toml (reconcile),
-# and the writers that route, sling or release a bead (settle). Those writers
+# Callers: the po and a sitting, and gctk bead place for a --shift (move);
+# orders/queue-priority.toml (reconcile); and gctk bead place before it
+# dispatches a held bead, and the writers that route, sling or release a bead
+# (settle). Those writers
 # are the creators of PR-finishing work, and each settles a child before it
 # makes the child claimable: rework-child.sh and gate-ensure.sh before they
-# sling it, and pr-facts.sh and pre-open-rebase.sh before they write its route,
-# which carries no priority. pr-facts.sh also settles an anchor's PR-finishing
-# work when the posture it records turns approved or stops being approved, and
-# when the anchor leaves pull_request, and on each later pass until all of that
-# work has settled at the rank the anchor's state and posture give.
+# sling it, and pr-facts.sh before it writes its route, which carries no
+# priority. pr-facts.sh also settles an anchor's PR-finishing work when the
+# posture it records turns approved or stops being approved, and on each later
+# pass until all of that work has settled at the rank the anchor's state and
+# posture give.
 # Exit codes: 0 ok; 1 a read, a write or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.
@@ -140,7 +144,7 @@ Verbs:
              computes the same priority, prints the number and writes nothing.
              It takes no lock, so no writer writes the number it prints: a
              writer settles the bead, then routes or slings it.
-  move       The writer gc-helm.sh priority runs. A P-value sets a bead that
+  move       The operator's priority move. A P-value sets a bead that
              follows nothing; --shift sets the shift of a bead that follows a
              parent or an anchor. It then writes every bead that follows the
              bead, directly or through others, held beads included. It
@@ -452,9 +456,9 @@ MOVE_JQ='
        else ($level - .base) as $n
          | (if $n > 0 then "+\($n)" else "\($n)" end) as $sh
          | (if .approved == true then " While the PR of \(.via) is approved, it runs at P0 whatever its shift." else "" end) as $ap
-         | {refusal: "\($b) follows \(.kind) \(.via), at P\(.base), so its priority is that plus its own shift. P\($level) is --shift \($sh): gc-helm.sh priority \($b) --shift \($sh).\($ap)"} end)
+         | {refusal: "\($b) follows \(.kind) \(.via), at P\(.base), so its priority is that plus its own shift. P\($level) is --shift \($sh): queue-priority.sh move \($b) --shift \($sh).\($ap)"} end)
     elif $shift != null and ($follows | not) then
-      {refusal: "\($b) follows nothing, so it has no shift. Set its priority directly: gc-helm.sh priority \($b) P<0-4>."}
+      {refusal: "\($b) follows nothing, so it has no shift. Set its priority directly: queue-priority.sh move \($b) P<0-4>."}
     else
       ($before | .[$b] = (if $level != null then ($row | .priority = $level)
                           else ($row | .metadata = (((.metadata // {}) | if type == "object" then . else {} end) + {priority_shift: $shift})) end)) as $g

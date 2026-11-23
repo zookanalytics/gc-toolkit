@@ -1,11 +1,13 @@
 package pr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -15,11 +17,13 @@ import (
 // triage rules a head of a PR a material change, it files a withdrawal with
 // Withdraw: a bead that blocks the bead that owns the PR and names the head in
 // withdraw_head, so the evaluator holds the PR from the moment it is filed. The
-// landing order carries it out on each run that reads the record. It waits
-// while an approval it would dismiss carries feedback the intake has not
-// routed, dismisses each approval that stands on a commit that does not contain
-// the head, reads the reviews again and closes the withdrawal once none stands,
-// and files a human gate on the bead when GitHub refuses a dismissal.
+// landing order carries it out on the act's own reads of what it dismisses. It
+// reads the PR's reviews, waits while an approval it would dismiss carries
+// feedback the intake has not routed, on its read of the PR's review threads,
+// dismisses each approval that stands on a commit that does not contain the
+// head, and closes the withdrawal once its read of the reviews after the
+// dismissals shows none standing past the ones it dismissed. It files a human
+// gate on the bead when GitHub refuses a dismissal.
 //
 // A withdrawal holds the bead from the refinery as any wait does, so the
 // record stays marked while one is open, and the order reads it on every run
@@ -182,6 +186,24 @@ type withdrawal struct {
 // too when closed is set: the withdrawals filed on it and the review runs
 // attached to it among them. A bead with no blocks edge reads nothing.
 func (l Landing) blockers(r *ledger.Record, closed bool) ([]*ledger.Record, error) {
+	return blockersIn(l.Ledger, r, closed)
+}
+
+// blockersIn is blockers, read through l.
+func blockersIn(l *ledger.Ledger, r *ledger.Record, closed bool) ([]*ledger.Record, error) {
+	ids, err := blockerIDs(r)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	sel := ledger.ByID(ids...)
+	if closed {
+		sel = sel.WithClosed()
+	}
+	return l.Find(sel)
+}
+
+// blockerIDs is each bead r's blocks edges name, once.
+func blockerIDs(r *ledger.Record) ([]string, error) {
 	edges, err := r.Edges()
 	if err != nil {
 		return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
@@ -192,14 +214,7 @@ func (l Landing) blockers(r *ledger.Record, closed bool) ([]*ledger.Record, erro
 			ids = append(ids, e.ID)
 		}
 	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	sel := ledger.ByID(ids...)
-	if closed {
-		sel = sel.WithClosed()
-	}
-	return l.Ledger.Find(sel)
+	return ids, nil
 }
 
 // withdrawalsIn is each withdrawal among rows, the beads that carry
@@ -257,11 +272,136 @@ func runsIn(rows []*ledger.Record) ([]string, error) {
 	return out, nil
 }
 
-// carry carries out each open withdrawal on the record s read against p, the
-// PR GitHub reports open, oldest first. It returns its account of what it did,
-// for the record's outcome, and whether a withdrawal is still open. A read
-// that does not answer leaves every withdrawal for the next run.
-func (u *run) carry(s state, host string, hub Hub, p *gh.PullRequest) (string, bool) {
+// approvalsIn is each review among reviews that approves the PR and has not
+// been dismissed, whoever gave it.
+func approvalsIn(reviews []gh.Review) []Approval {
+	var out []Approval
+	for _, r := range reviews {
+		if r.State == "APPROVED" {
+			out = append(out, Approval{ID: r.ID, Author: r.Author, Commit: r.Commit})
+		}
+	}
+	return out
+}
+
+// withoutHead is each of approvals, past the ones gone, that stands on a commit
+// that does not contain head. A commit contains the head when it is the head, or
+// descends from it in the clone's history (Checkout.Contains). A commit the
+// clone does not hold once the act has fetched the PR's branch (carryOne), such
+// as one a force-push left behind, is not shown to contain the head, and neither
+// is an approval that names no commit, so each stands without it, which errs
+// toward a dismissal: otherwise a commit no one holds would keep the withdrawal
+// waiting on every run, with no one asked. An approval of the head, or of any
+// later head of the branch, contains it, since every push onto a PR's branch on
+// the record is a fast-forward. A read of the history that does not answer is
+// an error.
+func (u *run) withoutHead(approvals []Approval, head string, gone map[int64]bool) ([]Approval, error) {
+	var out []Approval
+	for _, a := range approvals {
+		if gone[a.ID] {
+			continue
+		}
+		if a.Commit != "" {
+			in, err := u.holds(a.Commit, head)
+			if err != nil {
+				return nil, fmt.Errorf("whether approved commit %s contains the head did not read: %v", short(a.Commit), err)
+			}
+			if in {
+				continue
+			}
+		}
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+// commentReceipts are the bead's receipts of the inline comments the intake
+// has handled.
+func commentReceipts(r *ledger.Record) (receipts, error) {
+	var rerr error
+	read := func(k ledger.Key[string]) string {
+		v, _, err := k.Get(r)
+		if err != nil && rerr == nil {
+			rerr = err
+		}
+		return strings.TrimSpace(v)
+	}
+	rc := receipts{comment: mark(read(commentWatermarkKey)), commentAnswered: mark(read(commentAnsweredKey))}
+	return rc, rerr
+}
+
+// readUnrouted is the inline comments that dismissing targets would retire
+// before the intake routes them, as unrouted reads them, on the act's own read
+// of the PR's review threads, with the definition of feedback the run loaded
+// applied to each comment's text as that read gives it.
+func (u *run) readUnrouted(s state, host string, hub Hub, number int, targets []Approval) ([]int64, error) {
+	threads, err := hub.ReviewThreads(s.rec.Repo, number)
+	if err != nil {
+		return nil, err
+	}
+	var carried []feedback.Comment
+	for _, t := range threads {
+		for _, c := range t.Comments {
+			if c.Review != nil && slices.ContainsFunc(targets, func(a Approval) bool { return a.ID == c.Review.ID }) {
+				carried = append(carried, commentOf(c))
+			}
+		}
+	}
+	if len(carried) == 0 {
+		return nil, nil
+	}
+	rule, err := u.rule()
+	if err != nil {
+		return nil, err
+	}
+	self, err := u.login(host, hub)
+	if err != nil {
+		return nil, err
+	}
+	inline, err := rule.Comments(self, s.since, carried)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := commentReceipts(s.row)
+	if err != nil {
+		return nil, err
+	}
+	now := slices.Clone(targets)
+	for i := range now {
+		now[i].Inline = newestCarried(now[i].ID, threads, inline)
+	}
+	return unrouted(rc, now), nil
+}
+
+// withCarry makes p carry out the record's open withdrawals first, on the act's
+// own reads of the PR f names. When p owes no act, the carry is the record's
+// act, and its account rides p's outcome, a retry when a step of it did not
+// complete.
+func (u *run) withCarry(s state, f seen, p plan) plan {
+	if !withdrawing(s) {
+		return p
+	}
+	if p.act == nil {
+		out := p.out
+		return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
+			c := u.carry(ctx, s, f)
+			o := out
+			o.Detail = withNote(o.Detail, c.note)
+			if c.failed {
+				o.Action = ActRetry
+			}
+			return o
+		})
+	}
+	main := p.act
+	return doing(func(ctx context.Context, _ carriedOut) RunOutcome { return main(ctx, u.carry(ctx, s, f)) })
+}
+
+// carry carries out each open withdrawal on the record s read, oldest first,
+// on the act's own read of the PR's reviews, made through the hub of f's host
+// within ctx. It returns its account, whether a withdrawal is still open, and
+// whether a step did not complete.
+func (u *run) carry(ctx context.Context, s state, f seen) carriedOut {
 	var open []withdrawal
 	for _, w := range s.withdrawals {
 		if w.open {
@@ -269,103 +409,134 @@ func (u *run) carry(s state, host string, hub Hub, p *gh.PullRequest) (string, b
 		}
 	}
 	if len(open) == 0 {
-		return "", false
+		return carriedOut{}
 	}
-	waits := func(why string) (string, bool) {
-		return fmt.Sprintf("%s waits for the next run: %s", names(open), why), true
-	}
-	reviews, err := hub.Reviews(s.rec.Repo, p.Number)
+	hub := u.Hub(ctx, f.host)
+	reviews, err := hub.Reviews(s.rec.Repo, f.pr.Number)
 	if err != nil {
-		return waits("the PR's reviews did not read: " + err.Error())
+		return carriedOut{note: fmt.Sprintf("%s waits for the next run: the act's own read of the PR's reviews did not "+
+			"answer: %v", names(open), err), held: true, failed: true}
 	}
-	c := &compares{hub: hub, repo: s.rec.Repo, seen: map[[2]string]bool{}}
+	gone := map[int64]bool{}
+	var out carriedOut
 	var said []string
-	held := false
 	for _, w := range open {
 		var note string
-		var still bool
-		note, still, reviews = u.carryOne(s, host, hub, p, w, reviews, c)
+		var still, failed bool
+		note, still, failed, reviews = u.carryOne(ctx, s, f, hub, w, reviews, gone)
 		said = append(said, note)
-		held = held || still
+		out.held = out.held || still
+		out.failed = out.failed || failed
 	}
-	return strings.Join(said, "; "), held
+	out.note = strings.Join(said, "; ")
+	return out
 }
 
-// carryOne carries out withdrawal w with the PR's reviews as last read. It
-// returns its account, whether w is still open, and the reviews as it last
-// read them, which a dismissal changes for the next withdrawal.
-func (u *run) carryOne(s state, host string, hub Hub, p *gh.PullRequest, w withdrawal, reviews []gh.Review, c *compares) (string, bool, []gh.Review) {
+// carryOne carries out withdrawal w with the PR's reviews as the act last read
+// them, past the approvals gone, which this act dismissed for an earlier
+// withdrawal and which it adds to. It dismisses each approval that stands on a
+// commit without the head once the act's own read of the PR's review threads
+// shows none of them carrying feedback the intake has not routed, reads the
+// reviews again, and closes w once none stands. It returns its account,
+// whether w is still open, whether a step did not complete, and the reviews as
+// it last read them. Its reads and requests go through hub.
+func (u *run) carryOne(ctx context.Context, s state, f seen, hub Hub, w withdrawal, reviews []gh.Review, gone map[int64]bool) (string, bool, bool, []gh.Review) {
 	at := fmt.Sprintf("withdrawal %s for %s", w.id, short(w.head))
-	waits := func(why string) (string, bool, []gh.Review) {
-		return at + " waits for the next run: " + why, true, reviews
+	waits := func(why string, failed bool) (string, bool, bool, []gh.Review) {
+		return at + " waits for a later run: " + why, true, failed, reviews
 	}
-	targets, err := c.standing(w.head, reviews)
+	p := f.pr
+	targets, err := u.withoutHead(approvalsIn(reviews), w.head, gone)
 	if err != nil {
-		return waits("GitHub did not answer whether an approved commit contains the head: " + err.Error())
+		return waits(err.Error(), true)
+	}
+	if len(targets) > 0 && !u.fetched[s.branch] {
+		// An approved commit the clone has not fetched, such as one a person
+		// pushed onto the PR's branch, can contain the head, so the act fetches
+		// the branch before it dismisses any approval, and judges them again.
+		if err := u.fetchBranch(ctx, s.branch); err != nil {
+			return waits(fmt.Sprintf("origin/%s did not fetch, so no approval is dismissed: %v", s.branch, err), true)
+		}
+		if targets, err = u.withoutHead(approvalsIn(reviews), w.head, gone); err != nil {
+			return waits(err.Error(), true)
+		}
 	}
 	if len(targets) > 0 {
-		// 1. A dismissal retires the inline comments of the review it dismisses,
-		// so it waits while one of them is feedback the intake has not routed.
-		unread, err := u.unrouted(s, host, hub, p, targets)
+		// A dismissal retires the inline comments of the review it dismisses, so
+		// it waits while one of them is feedback the intake has not routed.
+		unread, err := u.readUnrouted(s, f.host, hub, p.Number, targets)
 		if err != nil {
-			return waits("whether an approval to dismiss carries unrouted feedback did not read: " + err.Error())
+			return waits("the act's own read of the PR's review threads did not answer, and no approval is dismissed "+
+				"without it: "+err.Error(), true)
 		}
 		if len(unread) > 0 {
-			return waits(fmt.Sprintf("an approval to dismiss carries inline comment %s, which the intake has not routed, "+
-				"and a dismissal would retire it unread", joinIDs(unread)))
+			return waits(fmt.Sprintf("the act's own read of the review threads shows inline comment %s, on an approval "+
+				"to dismiss, as feedback the intake has not routed, and a dismissal would retire it unread",
+				joinIDs(unread)), false)
 		}
-		// 2. Dismiss each approval that stands on a commit without the head.
 		mark, err := u.cityMark()
 		if err != nil {
-			return waits("the city's mark did not read, and no dismissal goes without it: " + err.Error())
+			return waits("the city's mark did not read, and no dismissal goes without it: "+err.Error(), true)
 		}
 		message := w.reason
 		if message == "" {
 			message = fmt.Sprintf("Triage ruled head %s a material change, so this approval does not cover the code that will land.", short(w.head))
 		}
-		refused := map[int64]string{}
-		for _, v := range targets {
-			if err := hub.DismissReview(s.rec.Repo, p.Number, v.ID, message+"\n\n"+mark); err != nil && gh.Refused(err) {
-				refused[v.ID] = err.Error()
+		var refused, unanswered []Approval
+		var why string
+		for _, a := range targets {
+			if ctx.Err() != nil {
+				unanswered = append(unanswered, a)
+				continue
 			}
-		}
-		// 3. Read the reviews again: the withdrawal closes only once no approval
-		// stands on a commit without its head.
-		again, err := hub.Reviews(s.rec.Repo, p.Number)
-		if err != nil {
-			return waits("the reviews did not read again after the dismissals: " + err.Error())
-		}
-		reviews = again
-		left, err := c.standing(w.head, again)
-		if err != nil {
-			return waits("GitHub did not answer whether an approved commit contains the head: " + err.Error())
-		}
-		if len(left) > 0 {
-			var stuck []gh.Review
-			for _, v := range left {
-				if _, ok := refused[v.ID]; ok {
-					stuck = append(stuck, v)
+			switch err := hub.DismissReview(s.rec.Repo, p.Number, a.ID, message+"\n\n"+mark); {
+			case err == nil:
+				gone[a.ID] = true
+			case gh.Refused(err):
+				refused = append(refused, a)
+				if why == "" {
+					why = err.Error()
 				}
+			default:
+				unanswered = append(unanswered, a)
 			}
-			if len(stuck) == 0 {
-				return waits(fmt.Sprintf("%s still stands, and its dismissal was not answered", reviewNames(left)))
-			}
-			// 4. GitHub refused: a person dismisses them, or rules otherwise.
-			why := refused[stuck[0].ID]
-			if err := u.Gates.File(s.id, withdrawRefusedKey, refusedWithdrawal(s, p, w, stuck, why)); err != nil {
+		}
+		if len(refused) > 0 {
+			// GitHub refused: a person dismisses them, or rules otherwise.
+			if err := u.Gates.File(ctx, s.id, withdrawRefusedKey, refusedWithdrawal(s, p, w, refused, why)); err != nil {
 				return waits(fmt.Sprintf("GitHub refused to dismiss %s, and the gate %s did not file; the next run files it: %v",
-					reviewNames(stuck), withdrawRefusedKey, err))
+					approvalNames(refused), withdrawRefusedKey, err), true)
 			}
 			return fmt.Sprintf("%s is held: GitHub refused to dismiss %s, and the gate %s asks a person", at,
-				reviewNames(stuck), withdrawRefusedKey), true, reviews
+				approvalNames(refused), withdrawRefusedKey), true, false, reviews
+		}
+		if len(unanswered) > 0 {
+			return waits(fmt.Sprintf("the dismissal of %s was not answered", approvalNames(unanswered)), true)
+		}
+		// An approval given since the act's first read is in no target, and a
+		// closed withdrawal dismisses nothing more, so the close waits on a read
+		// of the reviews made after the dismissals.
+		again, err := hub.Reviews(s.rec.Repo, p.Number)
+		if err != nil {
+			return waits("the act's read of the PR's reviews after its dismissals did not answer, and the withdrawal "+
+				"closes only on it: "+err.Error(), true)
+		}
+		reviews = again
+		left, err := u.withoutHead(approvalsIn(again), w.head, gone)
+		if err != nil {
+			return waits(err.Error(), true)
+		}
+		if len(left) > 0 {
+			return waits(fmt.Sprintf("the reviews read after the dismissals show %s standing on a commit without the "+
+				"head, which a later run dismisses", approvalNames(left)), false)
 		}
 	}
 	note := fmt.Sprintf("The landing order carried out this withdrawal (%s): ", u.stamp())
 	if len(targets) == 0 {
 		note += fmt.Sprintf("no approval of PR #%d stood on a commit without %s.", p.Number, short(w.head))
 	} else {
-		note += fmt.Sprintf("it dismissed %s of PR #%d, and no approval stands on a commit without %s.",
-			reviewNames(targets), p.Number, short(w.head))
+		note += fmt.Sprintf("it dismissed %s of PR #%d, and no other approval stood on a commit without %s.",
+			approvalNames(targets), p.Number, short(w.head))
 	}
 	// A withdrawal is a plain task, whose close the runtime's work-record gate
 	// reads. Carrying it out ships no commit, so its record is no-op.
@@ -375,111 +546,19 @@ func (u *run) carryOne(s state, host string, hub Hub, p *gh.PullRequest, w withd
 	cw.WorkRecord("no-op", "", "")
 	cw.Note(note)
 	if err := u.Ledger.Commit(cw); err != nil {
-		return waits("the withdrawal's close did not land: " + err.Error())
+		return waits("the withdrawal's close did not land: "+err.Error(), true)
 	}
 	if len(targets) == 0 {
-		return at + " closed: no approval stood on a commit without its head", false, reviews
+		return at + " closed: no approval stood on a commit without its head", false, false, reviews
 	}
-	return fmt.Sprintf("%s closed: dismissed %s", at, reviewNames(targets)), false, reviews
-}
-
-// compares answers whether an approved commit contains a head, through
-// GitHub's compare of the two, each pair asked once in a run.
-type compares struct {
-	hub  Hub
-	repo string
-	seen map[[2]string]bool
-}
-
-// contains reports whether commit contains head: it is head, or it descends
-// from it, which GitHub's compare of head with commit reads as identical or
-// ahead. A compare GitHub refuses, as it does for a commit it no longer holds,
-// does not show that commit contains head, so it reads as not containing it.
-// A compare GitHub did not answer is an error.
-func (c *compares) contains(head, commit string) (bool, error) {
-	if commit == head {
-		return true, nil
-	}
-	k := [2]string{head, commit}
-	if v, ok := c.seen[k]; ok {
-		return v, nil
-	}
-	status, err := c.hub.Compare(c.repo, head, commit)
-	if err != nil && !gh.Refused(err) {
-		return false, err
-	}
-	v := err == nil && (status == "identical" || status == "ahead")
-	c.seen[k] = v
-	return v, nil
-}
-
-// standing is each approval among reviews that stands on a commit that does
-// not contain head. A review that has not been dismissed and approves stands,
-// whoever gave it. A review that names no commit, or whose commit GitHub
-// refuses to compare, is not shown to contain the head, so it stands among
-// them, which errs toward a dismissal: otherwise a commit GitHub no longer
-// holds would keep the withdrawal waiting on every run, with no one asked. An
-// approval of the head, or of any later head of the branch, contains it, since
-// every push onto a PR's branch on the record is a fast-forward.
-func (c *compares) standing(head string, reviews []gh.Review) ([]gh.Review, error) {
-	var out []gh.Review
-	for _, v := range reviews {
-		if v.State != "APPROVED" {
-			continue
-		}
-		if v.Commit != "" {
-			in, err := c.contains(head, v.Commit)
-			if err != nil {
-				return nil, err
-			}
-			if in {
-				continue
-			}
-		}
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-// unrouted is the ids of the inline comments that dismissing targets would
-// retire before the intake routes them, read against the bead's receipts.
-func (u *run) unrouted(s state, host string, hub Hub, p *gh.PullRequest, targets []gh.Review) ([]int64, error) {
-	rule, err := u.rule()
-	if err != nil {
-		return nil, err
-	}
-	self, err := u.login(host, hub)
-	if err != nil {
-		return nil, err
-	}
-	threads, err := hub.ReviewThreads(s.rec.Repo, p.Number)
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	for _, v := range targets {
-		ids = append(ids, v.ID)
-	}
-	var rerr error
-	read := func(k ledger.Key[string]) string {
-		v, _, err := k.Get(s.row)
-		if err != nil && rerr == nil {
-			rerr = err
-		}
-		return strings.TrimSpace(v)
-	}
-	since := read(provenanceKey)
-	rc := receipts{comment: mark(read(commentWatermarkKey)), commentAnswered: mark(read(commentAnsweredKey))}
-	if rerr != nil {
-		return nil, rerr
-	}
-	return unrouted(rule, self, since, rc, threads, ids)
+	return fmt.Sprintf("%s closed: dismissed %s", at, approvalNames(targets)), false, false, reviews
 }
 
 // refusedWithdrawal is the message of the gate a refused dismissal files: what
 // GitHub refused, why triage withdrew the approvals, and how a person settles
 // it.
-func refusedWithdrawal(s state, p *gh.PullRequest, w withdrawal, stuck []gh.Review, why string) string {
+func refusedWithdrawal(s state, p *gh.PullRequest, w withdrawal, stuck []Approval, why string) string {
+
 	reason := w.reason
 	if reason == "" {
 		reason = fmt.Sprintf("triage ruled head %s a material change", short(w.head))
@@ -487,7 +566,7 @@ func refusedWithdrawal(s state, p *gh.PullRequest, w withdrawal, stuck []gh.Revi
 	return fmt.Sprintf("GitHub refused to dismiss %s on PR #%d (%s), given on a commit that does not contain head %s: "+
 		"%s. Triage withdrew them because %s %s stays held, and what waits on it stays held, until no such approval "+
 		"stands. Dismiss them on GitHub, then clear this gate. To keep them, close the withdrawal instead "+
-		"(gc bd close %s), then clear this gate.", reviewNames(stuck), p.Number, p.URL, w.head,
+		"(gc bd close %s), then clear this gate.", approvalNames(stuck), p.Number, p.URL, w.head,
 		strings.Join(strings.Fields(why), " "), sentence(reason), s.id, w.id)
 }
 
@@ -512,10 +591,10 @@ func names(ws []withdrawal) string {
 	return "withdrawals " + strings.Join(ids, ", ")
 }
 
-// reviewNames names reviews by their ids and authors.
-func reviewNames(reviews []gh.Review) string {
+// approvalNames names approvals by their review ids and authors.
+func approvalNames(approvals []Approval) string {
 	var parts []string
-	for _, v := range reviews {
+	for _, v := range approvals {
 		who := v.Author
 		if who == "" {
 			who = "an account GitHub no longer names"

@@ -27,7 +27,7 @@ closed.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
-separate bead, and pr-open.sh, pr-facts.sh and merge.sh all read the anchor.
+separate bead, and the refinery and pr-facts.sh read the anchor.
 work-submit.sh resolves it once, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior
@@ -556,17 +556,18 @@ the difference between a bead someone can dispose of and one that just sits:
 
 **3. Compose the PR summary.** Load the skill
 `{{binding_prefix}}commit-conventions` and write the summary to the standard it
-gives, in a file outside the worktree, which the hand-off below reads. Fix each
-mention of another rig this lists. An empty or absent file writes no summary and
-leaves one already on the anchor standing, so leave the file empty only when that
-one meets the standard.
+gives, in a file outside the worktree and outside your home, such as the one
+`mktemp "${TMPDIR:-/tmp}/summary.XXXXXX"` prints, which the hand-off below reads.
+Fix each mention of another rig this lists. An empty or absent file writes no
+summary and leaves one already on the anchor standing, so leave the file empty
+only when that one meets the standard.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-mentions.sh" --file "<the summary file>"
 ```
 
-**4. Name the branch on the anchor's title.** `pr-open.sh`, `pr-facts.sh` and
-`merge.sh` read the anchor, the open bead that carries a `merge_result` for this
-branch, which on fresh work is this bead. The PR's title is composed from its
+**4. Name the branch on the anchor's title.** The refinery and `pr-facts.sh`
+read the anchor, the open bead that carries a `merge_result` for this branch,
+which on fresh work is this bead. The PR's title is composed from its
 title: the PR is opened with it, the refinery's merge-push step brings an open
 PR's title back to it at each round it lands on the branch, and the squash merge
 takes its commit subject from it. Like the

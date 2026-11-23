@@ -56,6 +56,10 @@ const (
 	EdgeParentChild       = "parent-child"
 )
 
+// EdgeRelatesTo is bd's relates-to link, which holds neither bead. bd keeps one
+// edge type per pair of beads, so it refuses a parent-child edge beside one.
+const EdgeRelatesTo = "relates-to"
+
 // WaitsForError answers a bead that has a waits-for edge of its own. bd judges
 // such an edge by its spawner's status rather than by its gate, so neither its
 // blocked listing nor its close rule answers the bead. The answer stands until
@@ -273,6 +277,31 @@ func (c *Client) Rows(ids []string) ([]Bead, error) {
 	for _, id := range ids {
 		if !read[id] {
 			return nil, &ReadError{ID: id, Reason: "gc bd show returned no row for it, which is its reply both for a bead the store does not hold and for one whose lookup failed"}
+		}
+	}
+	return rows, nil
+}
+
+// Dependents reads the beads that have an edge of type typ onto id, in one
+// `gc bd dep list <id> --direction=up --type <typ> --json`, under Blocked's
+// strict contract. Each row is the dependent's own fields, its metadata among
+// them, with the edge's type in DependencyType, and carries none of its own
+// edges. bd refuses an id it cannot resolve, so an id the store does not hold
+// fails the read with a *ReadError.
+func (c *Client) Dependents(id, typ string) ([]Bead, error) {
+	raw, err := c.strictArray("bd", "dep", "list", id, "--direction=up", "--type", typ, "--json")
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var rows []Bead
+	if err := dec.Decode(&rows); err != nil {
+		return nil, &ReadError{ID: id, Reason: "gc bd dep list's rows did not decode: " + err.Error()}
+	}
+	for i := range rows {
+		if rows[i].ID == "" {
+			return nil, &ReadError{ID: id, Reason: "gc bd dep list returned a row with no id"}
 		}
 	}
 	return rows, nil

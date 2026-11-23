@@ -1,8 +1,7 @@
 # shellcheck shell=bash
 # refinery-lib.sh — what the refinery patrol's scripts share. Sourced by
-# sibling path. It sources bd-lib.sh beside it for the store reads and
-# dispatch-path.sh for what dispatches a bead, and otherwise defines functions
-# and sets only its constants.
+# sibling path. It sources bd-lib.sh beside it for the store reads, and
+# otherwise defines functions and sets only its constants.
 #
 # The refinery prepares one bead's branch at a time, in a tree of its own: a
 # git worktree at <refinery home>/worktrees/<bead>, where the home is the
@@ -22,38 +21,8 @@
 _refinery_lib_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_refinery_lib_dir/bd-lib.sh}" || return 1
-# shellcheck source=dispatch-path.sh
-. "$_refinery_lib_dir/dispatch-path.sh" || return 1
 
 REFINERY_READ_NS="refs/worktree/refinery"
-
-# A rework child the requeue filed and never sent on. refinery-requeue.sh files
-# a bead's rework child whole, with its blocks edge onto the bead in the create,
-# then settles and slings it, and arms it when the settle or the sling fails. A
-# run that ends between the create and the sling or the arm, or that cannot
-# read back the child a create with a lost reply filed, leaves the child open
-# on the bead's branch, with no assignee, no pour and no dispatch path or
-# dispatch hold (dispatch-path.sh), so no one works it. find-work counts such a
-# child, once nothing holds it, as neither a wait on the bead nor a writer of
-# its branch, and the bead's prep runs the requeue again, which sends the child
-# on.
-# A child carrying a review's or a ruling's source key was filed by
-# rework-child.sh, and a re-run of its filer adopts it and sends it on, so it
-# is never one of these.
-#   jq "$REFINERY_UNSENT_JQ"' map(select(refinery_unsent($bead; $branch))) '
-# shellcheck disable=SC2034  # read by the scripts that source this file
-REFINERY_UNSENT_JQ="$DISPATCH_PATH_JQ"'
-  def refinery_unsent($anchor; $branch):
-    (.metadata // {}) as $m
-    | ((.status // "") | tostring) == "open"
-      and (($m.task_kind // "") | tostring) == "rework"
-      and (($m.anchor_bead // "") | tostring) == $anchor
-      and (($m.branch // "") | tostring) == $branch
-      and ((.assignee // "") | tostring) == ""
-      and ([ "gc.execution_routed_to", "source_review_bead", "source_ruling_bead" ]
-           | all(. as $k | (($m[$k] // "") | tostring) == ""))
-      and ((has_dispatch_path or has_dispatch_hold) | not);
-'
 
 # An ask on a bead's PR (`gctk review ask`): an open task that names the bead's
 # branch, with no assignee, no route and no task_kind. The route is either of
@@ -224,71 +193,28 @@ refinery_gate_dir() {
 # refinery_owner <bead> <branch> — the bead whose PR the work on <branch>
 # lands on, in OWNER, with its row in OWNER_ROW. BEAD_ROW must be <bead>'s row.
 # It is the bead <bead> names as its anchor_bead when that bead is open on
-# <branch>. A rework that names a bead and carries no review's or ruling's
-# source key can be a convoy's rebuild child, which carries its convoy's PR and
-# so lands on no other bead. When the bead it names is not open on <branch>,
-# that bead is read by its id in every status, and when it is a convoy, or the
-# store holds no bead by that id, the call returns 3, with OWNER empty and the
-# message of the human gate the caller parks <bead> behind in OWNER_REFUSED.
-# A convoy open on <branch> that carries no merge_result and is assigned to
-# nobody returns 3 the same way, since neither the merge cadence nor the
-# refinery would take its PR on: the requeue keeps a convoy it rebuilds with
-# the refinery, and the gate names the assignment that goes on.
-# The gate is keyed refinery-rebuild-convoy-not-open, and the caller files it
-# before it pushes, publishes or records anything. A named bead of any other
-# kind leaves the rest of this rule. Else it is <bead> itself when <bead>
-# carries a merge_result or records a PR (existing_pr, pr_url or pr_number),
-# since any recorded state, a park included, still owns its PR. Else it is the
-# oldest other open bead on <branch> that carries a merge_result and names no
-# other bead as its anchor_bead, since such a bead, a rework child among them,
-# lands on that anchor's PR and never owns one, though a park stamps a
-# merge_result on it too. Else it is <bead> itself. Non-zero, with a line on
-# stderr, when the open beads on <branch>, or the bead a rework names, do not
-# read.
-# shellcheck disable=SC2034  # OWNER_ROW and OWNER_REFUSED are read by the scripts that source this
+# <branch>. Else it is <bead> itself when <bead> carries a merge_result or
+# records a PR (existing_pr, pr_url or pr_number), since any recorded state, a
+# park included, still owns its PR. Else it is the oldest other open bead on
+# <branch> that carries a merge_result and names no other bead as its
+# anchor_bead, since such a bead, a rework child among them, lands on that
+# anchor's PR and never owns one, though a park stamps a merge_result on it
+# too. Else it is <bead> itself. Non-zero, with a line on stderr, when the open
+# beads on <branch> do not read: a listing that fails, or that is no JSON array
+# once bd_json has scrubbed its control bytes. Read as empty, such a listing
+# would make a rework child that carries its anchor's PR keys the owner of that
+# PR, a second bead recording it.
+# shellcheck disable=SC2034  # OWNER_ROW is read by the scripts that source this
 refinery_owner() {
-  local on named key rows found go_on
+  local on named key
   on=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --metadata-field "branch=$2" \
     --status=open,in_progress,blocked,deferred,hooked,pinned --limit=0) || on=""
   printf '%s' "$on" | jq -e 'type == "array"' >/dev/null 2>&1 \
     || { echo "the open beads on $2 did not list, so the bead whose PR they land on cannot be told" >&2; return 1; }
   named=$(bead_meta anchor_bead)
-  OWNER=""; OWNER_REFUSED=""
+  OWNER=""
   [ -z "$named" ] || [ "$named" = "$1" ] \
     || OWNER=$(printf '%s' "$on" | jq -r --arg n "$named" '[ .[] | select(.id == $n) ] | .[0].id // empty')
-  if [ -n "$named" ] && [ "$named" != "$1" ] && [ "$(bead_meta task_kind)" = rework ] \
-     && [ -z "$(bead_meta source_review_bead)" ] && [ -z "$(bead_meta source_ruling_bead)" ]; then
-    if [ -n "$OWNER" ]; then
-      found=$(printf '%s' "$on" | jq -r --arg n "$named" --arg b "$2" '[ .[] | select(.id == $n) ][0] as $r
-        | if (($r.issue_type // $r.type // "") | tostring) == "convoy" and (($r.metadata.merge_result // "") | tostring) == ""
-             and (($r.assignee // "") | tostring) == ""
-          then "\($n) is open on \($b) with no merge_result and assigned to nobody, so neither the merge cadence nor the refinery would take that PR on"
-          else "kept" end' 2>/dev/null)
-      go_on="put $named back in a merge queue by assigning it to the refinery (gc bd update $named --assignee=$GC_AGENT)"
-    else
-      rows=$(bd_json list ${GC_RIG:+--rig="$GC_RIG"} --id "$named" --all --limit=0) || rows=""
-      found=$(printf '%s' "$rows" | jq -r --arg n "$named" --arg branch "$2" 'if type != "array" then empty
-        else ([ .[] | objects | select(.id == $n) ][0]) as $r
-          | if $r == null then "the store holds no bead \($n)"
-            elif (($r.issue_type // $r.type // "") | tostring) != "convoy" then "kept"
-            elif (($r.status // "") | tostring) == "closed" then "\($n) is closed"
-            else (($r.metadata.branch // "") | tostring) as $b
-              | "\($n) is \(($r.status // "") | tostring) " + (if $b == "" then "with no branch" else "on \($b)" end)
-            end
-            | if . == "kept" then . else . + ", so no bead on \($branch) can carry that PR" end
-        end' 2>/dev/null)
-      go_on="make $named open with branch $2"
-    fi
-    case "$found" in
-      "") OWNER=""
-          echo "$named, which $1 names as its anchor_bead, did not read, so whether $1 rebuilds a convoy cannot be told" >&2
-          return 1 ;;
-      kept) ;;
-      *) OWNER=""
-         OWNER_REFUSED="$1, the rebuild of $named, lands on $named's PR, but $found, and the refinery pushed, published and recorded nothing for $1. To go on with the graduation, $go_on, then clear this gate: clearing it hands $1 back to the refinery, whose next pass lands it on $named. To abandon the graduation, run $_refinery_lib_dir/stand-down.sh $1 --key refinery-rebuild-convoy-not-open --ruling '<why>'."
-         return 3 ;;
-    esac
-  fi
   if [ -z "$OWNER" ]; then
     for key in merge_result existing_pr pr_url pr_number; do
       [ -z "$(bead_meta "$key")" ] || { OWNER="$1"; break; }

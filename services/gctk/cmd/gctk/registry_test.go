@@ -23,7 +23,7 @@ import (
 
 var update = flag.Bool("update", false, "rewrite key-registry.json from the declarations")
 
-// registryPath is the generated registry, at the top of the module.
+// registryPath is the generated registry, at the top of services/gctk.
 const registryPath = "../../key-registry.json"
 
 // key-registry.json is generated from every declaration the binary's packages
@@ -49,7 +49,7 @@ func TestKeyRegistryIsCurrent(t *testing.T) {
 	}
 }
 
-// Every package in the module that declares a key is one the registry reads,
+// Every gctk package that declares a key is one the registry reads,
 // so a declaration in a package nothing above imports cannot be left out.
 func TestKeyRegistryReadsEveryDeclaringPackage(t *testing.T) {
 	listed := map[string]bool{}

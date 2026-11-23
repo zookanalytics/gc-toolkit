@@ -340,10 +340,8 @@ eq "$RES" "c1 $ROUTE adopted" "an adopted child already on the pair by another t
 
 echo "# --- PR-finishing work: born with the shift, no parent, slung at its priority ---"
 # Both anchors sit under a P2 epic, each posture in the shape pr-facts.sh stores
-# it. anc-ap's PR is approved, so its rework is slung at P0. anc-cm's carries an
-# unanswered comment, so its rework runs one level sooner than the epic, at P1.
-# A rank that compared the whole stored posture with approved would sling
-# anc-ap's rework at P1, and one that read no shift would sling anc-cm's at P2.
+# it. anc-cm's carries an unanswered comment, so its rework runs one level sooner
+# than the epic, at P1. A rank that read no shift would sling it at P2.
 EPIC='{"id":"ep-2","status":"open","assignee":"","notes":"","issue_type":"epic","priority":2,"metadata":{}}'
 OID=0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901
 anchor_under() { # <id> <posture>: a PR anchor under ep-2, its own stored priority stale, the posture read at the PR's head
@@ -371,7 +369,6 @@ RES=$("$SUT" --anchor anc-ap --branch polecat/anc-ap --target main --title "Rewo
 eq "$RES" "fix-2 $ROUTE filed" "an operator ruling's rework of an approved PR is filed"
 eq "$(meta fix-2 priority_shift)" "-1" "…born carrying the shift"
 eq "$(parents fix-2)" "" "…with no parent"
-eq "$(poured fix-2)" "0" "…and slung at P0, since its PR is approved"
 # An adopted child keeps the shift it carries: after its birth the shift is the
 # child's own input. anc-1 carries no priority, so it reads at bd's default P2.
 reset '{"id":"c1","status":"open","assignee":"","notes":"","metadata":{"task_kind":"rework","anchor_bead":"anc-1","source_ruling_bead":"vis-1","priority_shift":2}}'

@@ -9,16 +9,17 @@
 # choice); filing the conversation lives ONCE in gc-helm.sh open, which this
 # calls. Two paths: PREFERRED slings a first reaction (a framing card; a
 # reaction that puts the topic to the operator files a human gate, which reaches
-# the operator on the board); FALLBACK files a conversation in the operator's
-# queue directly — taken on --no-react, whenever `gc-proactive.sh deliverable`
-# answers no (divert-on-no is the contract — a reaction routed into a downed
-# pool waits invisibly; today's tool always says yes), and when a first
+# the operator on the board) to the subject's rig's proactive pool, whether or
+# not that pool runs, and a reaction slung to a pool that does not run waits
+# there until it does; FALLBACK files a conversation in the operator's queue
+# directly — taken on --no-react, when the sling fails, as it does for a route
+# gc sling refuses, and when a first
 # reaction already runs on the subject or an open conversation tracks it
-# (gc-helm react exit 5), a live workflow already drives it (exit 6), it is
-# already routed or armed, held, assigned, not open, or waits on a person's
-# answer (exit 7), or it is a standing record or a feedback pattern, whose kind
-# takes no first reaction (exit 8), so react is a no-op that slings nothing:
-# nothing would put the topic to the operator, so this does.
+# (gctk reaction sling exit 3), a live workflow already drives it (exit 4), it
+# is already routed or armed, held, assigned, not open, or waits on a person's
+# answer (exit 5), or it is a standing record or a feedback pattern, whose kind
+# takes no first reaction (exit 6), so the sling is a no-op that slings
+# nothing: nothing would put the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
 # read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
 set -u
@@ -34,7 +35,11 @@ scrub() { tr -d '\000-\037'; }
 PROG="operator-intake"
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 HELM="${GC_HELM_TOOL:-$SCRIPT_DIR/gc-helm.sh}"
-PROACTIVE_TOOL="${GC_PROACTIVE_TOOL:-$SCRIPT_DIR/../../tools/gc-proactive.sh}"
+# `gctk reaction sling` slings the first reaction, from the binary the city
+# builds.
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 # The one definition of whether a rig carries converse, shared with gc-helm.sh's
 # engage so this intake and that spawn read the capability the same way. Exposes
 # rig_carries_converse / converse_roster.
@@ -80,9 +85,10 @@ sitting on demand.
 
 Without --no-react the topic is handed to a proactive first reaction, which
 writes a framing card and, when it puts the topic back to you, files a human
-gate that reaches you on the board — but ONLY when that pool can actually run.
-When it cannot (auto-spawn disabled, or the city is at the session cap) this
-falls back to filing the conversation directly and says so.
+gate that reaches you on the board. The reaction goes to the rig's proactive
+pool whether or not that pool runs, and waits there until it does. When the
+sling fails, as it does for a pool the city does not configure, this files the
+conversation directly and says so.
 EOF
 }
 
@@ -227,9 +233,8 @@ require_reaction_agent() {
 # A rig with no agents running gets no note, by design. It is idle, the
 # reconciler launches its triage like anywhere else, and a rig row's running
 # cannot tell an idle rig from one whose pool is dead (city-liveness.sh). A
-# reaction pool that cannot run at all, because it is unregistered, suspended
-# or capped at zero slots, is `gc-proactive.sh deliverable`'s no: the path
-# choice below diverts on it to a direct conversation and prints the reason.
+# reaction pool that is suspended, or capped at no sessions, gets no note
+# either: the reaction is slung to it and waits there until the pool runs.
 note_if_report_waits() {
     if [ "$(rig_suspended "$1")" = "true" ]; then
         note "$PROG: rig '$1' is suspended — the report is recorded now and triaged when you resume it (gc rig resume $1)."
@@ -376,28 +381,17 @@ if [ -z "$ORIGIN_NOW" ]; then
         || note "$PROG: could not stamp gc.origin=operator on $SUBJECT — the conversation is unaffected; stamp it by hand"
 fi
 
-# ── Path selection: can a slung first reaction actually be picked up? ─
-# Delegated to gc-proactive.sh deliverable so this caller cannot drift from
-# the clamps (the tool + agents/proactive/agent.toml).
-REACT=""; REACT_WHY=""
-if [ -n "$NO_REACT" ]; then
-    REACT_WHY="--no-react: filing the conversation directly"
-elif [ ! -x "$PROACTIVE_TOOL" ]; then
-    REACT_WHY="no: cannot find gc-proactive.sh (looked at $PROACTIVE_TOOL)"
-else
-    # Ask under the SUBJECT's rig (the pool and its clamps are rig-scoped;
-    # helm-svc has no GC_RIG of its own). Set for this ONE command,
-    # not exported: later gc calls resolve their own scope.
-    REACT_WHY="$(GC_RIG="${RIG_NAME:-}" "$PROACTIVE_TOOL" deliverable 2>/dev/null)" && REACT=1
-    [ -n "$REACT_WHY" ] || REACT_WHY="no: gc-proactive.sh deliverable gave no answer"
-fi
-
 # ── Open the conversation ────────────────────────────────────────────
-if [ -n "$REACT" ]; then
+# gc sling refuses a route that cannot work, such as to a pool the city does
+# not configure, and gctk reaction sling passes that refusal on as its exit 1.
+REACT_WHY="--no-react: filing the conversation directly"
+if [ -z "$NO_REACT" ]; then
     # The reaction owns putting the topic to the operator from here; a
     # conversation filed now would put it twice.
-    if "$HELM" react "$SUBJECT" --reason "operator-origin intake: $ARG"; then
-        printf '%s: subject %s — first reaction slung (%s).\n' "$PROG" "$SUBJECT" "$REACT_WHY"
+    # The sling rig-qualifies the proactive pool from GC_RIG, the subject's
+    # rig, set for this one command.
+    if GC_RIG="${RIG_NAME:-}" "$GCTK" reaction sling "$SUBJECT"; then
+        printf '%s: subject %s — first reaction slung.\n' "$PROG" "$SUBJECT"
         printf '       The reaction writes a framing card, and when it puts the topic to you it files a human gate for you; nothing waits on you yet.\n'
         printf '       Want the conversation now instead? Re-run with --no-react.\n'
         exit 0
@@ -406,25 +400,25 @@ if [ -n "$REACT" ]; then
     fi
     # No reaction was dispatched, so nothing downstream will put the topic to
     # the operator — fall through and file the conversation directly; a
-    # conversation beats a bead nobody is coming to. gc-helm react exit 5 is
+    # conversation beats a bead nobody is coming to. The sling's exit 3 is
     # the already-reacting no-op (a first reaction happens once at a time, and
-    # an open conversation already puts the subject to the operator), exit 6
-    # the live-workflow no-op (a reaction never races work in flight), exit 7
+    # an open conversation already puts the subject to the operator), exit 4
+    # the live-workflow no-op (a reaction never races work in flight), exit 5
     # the decided no-op (the subject is already routed or armed, held,
-    # assigned, not open, or waits on a person's answer), and exit 8 the kind
+    # assigned, not open, or waits on a person's answer), and exit 6 the kind
     # no-op (a standing record or a feedback pattern takes no first reaction),
     # each distinct from a real failure to sling: name the actual cause so the
     # ask the converse session reads is accurate.
-    if [ "$REACT_RC" -eq 5 ]; then
+    if [ "$REACT_RC" -eq 3 ]; then
         note "$PROG: a first reaction already runs on subject $SUBJECT, or an open conversation tracks it — no new reaction was slung; filing the conversation directly"
         REACT_WHY="no: a first reaction already runs on the subject or a conversation tracks it (a first reaction happens once at a time)"
-    elif [ "$REACT_RC" -eq 6 ]; then
+    elif [ "$REACT_RC" -eq 4 ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
-    elif [ "$REACT_RC" -eq 7 ]; then
+    elif [ "$REACT_RC" -eq 5 ]; then
         note "$PROG: subject $SUBJECT is already routed or armed, held, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: the subject is already routed or armed, held, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
-    elif [ "$REACT_RC" -eq 8 ]; then
+    elif [ "$REACT_RC" -eq 6 ]; then
         note "$PROG: subject $SUBJECT is a standing record or a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
         REACT_WHY="no: the subject is a standing record or a feedback pattern, whose kind takes no first reaction"
     else

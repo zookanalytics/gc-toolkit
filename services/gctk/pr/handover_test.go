@@ -1,12 +1,12 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
@@ -14,11 +14,12 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
-// The hand-over of a changed head (handover.go). Gas City gives the refinery a
-// turn for a bead only once nothing holds it, so while only merge holds, the
-// conversations and asks on a PR, hold its bead, the landing order wakes and
-// nudges the refinery for the bead's changed head, once no withdrawal and no
-// review run holds that head.
+// The hand-over of a changed head (handover.go). An assignment gives a running
+// refinery no turn, so whenever the refinery can take a bead's changed head,
+// because nothing holds the bead or only merge holds do, the conversations and
+// asks on its PR, the landing order wakes and nudges the refinery for it, once
+// no withdrawal and no review run holds that head. While another wait holds
+// the bead, the refinery cannot take it yet, and the order wakes no one.
 
 // waking records each wake the order asks for, as "<session>: <message>", and
 // err fails each.
@@ -28,7 +29,7 @@ type waking struct {
 	err error
 }
 
-func (w *waking) Wake(session, message string) error {
+func (w *waking) Wake(_ context.Context, session, message string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.got = append(w.got, session+": "+message)
@@ -72,6 +73,25 @@ func (d *handing) wokeOnce(t *testing.T, holder string) {
 	}
 }
 
+// wokeOnceFree fails unless the order has woken the refinery once for the
+// bead, with a message that names no merge hold, since nothing holds the bead.
+func (d *handing) wokeOnceFree(t *testing.T) {
+	t.Helper()
+	got := d.wakes.woken()
+	if len(got) != 1 || !strings.HasPrefix(got[0], boundRefinery+": ") || !strings.Contains(got[0], bead) ||
+		strings.Contains(got[0], " while ") {
+		t.Fatalf("the refinery was woken %d times, want once for %s with no merge hold named: %q", len(got), bead, got)
+	}
+}
+
+// assignedTo fails unless the bead is assigned to want, "" for nobody.
+func assignedTo(t *testing.T, d *land, want string) {
+	t.Helper()
+	if b := d.row(t); b.Assignee != want {
+		t.Fatalf("the bead is assigned to %q, want %q", b.Assignee, want)
+	}
+}
+
 func (d *handing) wokeNone(t *testing.T) {
 	t.Helper()
 	if got := d.wakes.woken(); len(got) > 0 {
@@ -102,7 +122,7 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 			}
 			meta(t, b, map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other,
 				"pr_reconcile_pending": "<absent>"})
-			if out := d.reconcile(t, pr.Options{Count: 10}); len(out) != 0 {
+			if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 				t.Fatalf("the hand-over left the record for another run: %+v", out)
 			}
 			d.wokeOnce(t, "tk-conv")
@@ -111,10 +131,13 @@ func TestARequeueOnlyAConversationHoldsWakesTheRefinery(t *testing.T) {
 }
 
 // A head a review run's repair pushed waits on that run while it is attached:
-// the requeue keeps the marker and wakes no one, and each run that reads the
-// record while the review run lives stamps the read, clears an earlier run's
-// error and reads no PR. The first run after the review run ends wakes the
-// refinery, since the conversation still holds the bead, and clears the marker.
+// the requeue keeps the marker and the bead assigned to nobody, since Gas City
+// retires a run whose input bead an agent outside it is assigned, and wakes no
+// one. The first run that decides the record while the review run lives reads
+// no PR and writes nothing, and neither does a run after it in which nothing
+// changed. The first run after the review run ends wakes the refinery, which
+// can take a bead only the conversation holds, and hands the head to it in
+// the write that clears the marker.
 func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	d := newHanding(t)
 	d.conversation(t, "open", "human", "")
@@ -125,19 +148,23 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	is(t, o, pr.ActRequeued)
 	says(t, o, "waits on review run tk-run1")
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+	assignedTo(t, d.land, "")
 	d.wokeNone(t)
 
-	d.l.Now = func() time.Time { return time.Date(2026, 11, 12, 9, 10, 0, 0, time.UTC) }
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_reconcile_error"] = "an earlier run's read did not decide" })
-	reads := len(d.github.Reads())
-	o = d.once(t)
+	o = d.run(t)
 	is(t, o, pr.ActChecked)
 	says(t, o, "waits on review run tk-run1")
-	if more := d.github.Reads()[reads:]; len(more) > 0 {
-		t.Fatalf("a read of a head that waits on its run read GitHub: %v", more)
+	readsNoGitHub(t, d.land)
+	if w := d.runWrites(); len(w) != 0 {
+		t.Fatalf("a run that found the head still waiting on its run wrote the bead %+v", w)
 	}
-	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true", "pr_last_checked_at": "2026-11-12T09:10:00Z",
-		"pr_reconcile_error": "<absent>"})
+	is(t, d.run(t), pr.ActChecked)
+	readsNoGitHub(t, d.land)
+	if w := d.runWrites(); len(w) > 0 {
+		t.Fatalf("a run in which nothing changed wrote the bead: %+v", w)
+	}
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true"})
+	assignedTo(t, d.land, "")
 	d.wokeNone(t)
 
 	d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
@@ -147,19 +174,37 @@ func TestAReviewRunsEndHandsAHeadAConversationHoldsToTheRefinery(t *testing.T) {
 	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged", "the marker is cleared")
 	d.wokeOnce(t, "tk-conv")
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
+	assignedTo(t, d.land, boundRefinery)
 }
 
-// With no conversation, the order wakes no one, since Gas City gives the
-// refinery its turn for a bead nothing holds. A requeue with no run attached
-// clears the marker in its own write, and a head a review run pushed waits on
-// that run, with the marker cleared by the first run after it ends.
-func TestAChangedHeadNoConversationHoldsWakesNoOne(t *testing.T) {
+// A changed head that nothing holds is the refinery's to take, and an
+// assignment alone gives a running refinery no turn, so the order wakes and
+// nudges the refinery for it, as it does for one only merge holds hold. A
+// requeue with no run attached keeps the marker in its own write, assigns the
+// bead to the refinery, wakes it, and only then clears the marker, and a head a
+// review run pushed waits on that run, with the bead assigned to nobody until
+// the first run after it ends hands the head over and wakes the refinery.
+func TestAChangedHeadNothingHoldsWakesTheRefinery(t *testing.T) {
 	t.Run("no run attached", func(t *testing.T) {
 		d := newHanding(t)
 		d.pr.Facts.HeadRefOid = other
-		is(t, d.once(t), pr.ActRequeued)
-		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
-		d.wokeNone(t)
+		o := d.once(t)
+		is(t, o, pr.ActRequeued)
+		says(t, o, "nothing holds the bead, so the refinery was woken and nudged", "the marker is cleared")
+		ws := d.runWrites()
+		if len(ws) != 3 || slices.ContainsFunc(ws[0].Args, func(a string) bool { return strings.HasPrefix(a, "--assignee=") }) ||
+			!slices.Contains(ws[1].Args, "--assignee="+boundRefinery) || !slices.Contains(ws[2].Args, "pr_reconcile_pending") {
+			t.Fatalf("the requeue wrote %+v, want the requeue with the marker kept, the refinery's assignment, "+
+				"then the settle that clears the marker", ws)
+		}
+		d.wokeOnceFree(t)
+		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other,
+			"pr_reconcile_pending": "<absent>"})
+		assignedTo(t, d.land, boundRefinery)
+		if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
+			t.Fatalf("the hand-over left the record for another run: %+v", out)
+		}
+		d.wokeOnceFree(t)
 	})
 	t.Run("a run attached", func(t *testing.T) {
 		d := newHanding(t)
@@ -167,12 +212,16 @@ func TestAChangedHeadNoConversationHoldsWakesNoOne(t *testing.T) {
 		d.pr.Facts.HeadRefOid = other
 		is(t, d.once(t), pr.ActRequeued)
 		meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true"})
+		assignedTo(t, d.land, "")
+		d.wokeNone(t)
 		d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
 		o := d.once(t)
 		is(t, o, pr.ActSettled)
-		says(t, o, "the marker is cleared")
+		says(t, o, "nothing holds the bead, so the refinery was woken and nudged",
+			"the bead is assigned to the refinery and the marker is cleared")
+		d.wokeOnceFree(t)
 		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
-		d.wokeNone(t)
+		assignedTo(t, d.land, boundRefinery)
 	})
 }
 
@@ -191,6 +240,7 @@ func TestWhatElseHoldsTheBeadDecidesTheWake(t *testing.T) {
 		d.pr.Facts.HeadRefOid = other
 		is(t, d.once(t), pr.ActRequeued)
 		meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
+		assignedTo(t, d.land, boundRefinery)
 		d.wokeNone(t)
 	})
 	t.Run("an ask", func(t *testing.T) {
@@ -230,26 +280,110 @@ func TestWhatElseHoldsTheBeadDecidesTheWake(t *testing.T) {
 	})
 }
 
-// A wake that does not land keeps the marker and says why on the record, and
-// the next run wakes the refinery again and clears both.
+// A wake that does not land keeps the marker and records nothing else, as an act
+// that does not complete records nothing, on a bead already assigned to the
+// refinery, and the next run wakes the refinery again and clears the marker,
+// whether a conversation holds the bead or nothing does.
 func TestAWakeThatDoesNotLandIsMadeAgainByTheNextRun(t *testing.T) {
-	d := newHanding(t)
-	d.conversation(t, "open", "human", "")
-	d.wakes.fail(errors.New("gc session nudge rig/gc-toolkit.refinery: exit 1: the session is closed"))
-	d.pr.Facts.HeadRefOid = other
-	o := d.once(t)
-	is(t, o, pr.ActRetry)
-	says(t, o, "the refinery's wake did not land", "the session is closed")
-	b := d.row(t)
-	meta(t, b, map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
-	if !strings.Contains(b.Metadata["pr_reconcile_error"], "the refinery's wake did not land") {
-		t.Fatalf("the record does not say the wake did not land: %q", b.Metadata["pr_reconcile_error"])
+	for _, c := range []struct {
+		name, held string
+		hold       func(t *testing.T, d *handing)
+	}{
+		{"a conversation holds the bead", "only conversation tk-conv holds the bead", func(t *testing.T, d *handing) {
+			d.conversation(t, "open", "human", "")
+		}},
+		{"nothing holds the bead", "nothing holds the bead", func(*testing.T, *handing) {}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newHanding(t)
+			c.hold(t, d)
+			d.wakes.fail(errors.New("gc session nudge rig/gc-toolkit.refinery: exit 1: the session is closed"))
+			d.pr.Facts.HeadRefOid = other
+			o := d.once(t)
+			is(t, o, pr.ActRetry)
+			says(t, o, c.held+", and the refinery's wake did not land", "the session is closed")
+			meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+			assignedTo(t, d.land, boundRefinery)
+			d.wakes.fail(nil)
+			is(t, d.run(t), pr.ActSettled)
+			meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+			assignedTo(t, d.land, boundRefinery)
+			if got := d.wakes.woken(); len(got) != 2 {
+				t.Fatalf("the refinery was asked to wake %d times, want the failed wake and one more: %q", len(got), got)
+			}
+		})
 	}
-	d.wakes.fail(nil)
-	is(t, d.once(t), pr.ActSettled)
-	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>", "pr_reconcile_error": "<absent>"})
-	if got := d.wakes.woken(); len(got) != 2 {
-		t.Fatalf("the refinery was asked to wake %d times, want the failed wake and one more: %q", len(got), got)
+}
+
+// seeing is a refinery that takes its turn the moment it is woken, before the
+// run's next write: it keeps the bead's row as the store holds it then.
+type seeing struct {
+	d    *handing
+	rows []fake.Bead
+}
+
+func (s *seeing) Wake(context.Context, string, string) error {
+	b, _ := s.d.store.Row(bead)
+	s.rows = append(s.rows, b)
+	return nil
+}
+
+// The refinery is woken only once the bead is assigned to it, so a refinery
+// that takes its turn the moment the wake reaches it, before the run's last
+// write, lists the bead at its find-work. The marker is still set then, so a
+// run that stops before its last write leaves the next run to wake the
+// refinery again. Both runs that wake it do so, the one that requeues the head
+// and the first one after a review run ends, whether a conversation holds the
+// bead or nothing does.
+func TestTheRefineryIsWokenOnlyOnceTheBeadIsAssignedToIt(t *testing.T) {
+	for _, held := range []struct {
+		name  string
+		waits []string
+	}{
+		{"a conversation holds the bead", []string{"tk-conv"}},
+		{"nothing holds the bead", nil},
+	} {
+		for _, c := range []struct {
+			name   string
+			action string
+			before func(t *testing.T, d *handing)
+		}{
+			{"in the run that requeues the head", pr.ActRequeued, func(_ *testing.T, d *handing) {
+				d.pr.Facts.HeadRefOid = other
+			}},
+			{"in the first run after a review run ends", pr.ActSettled, func(t *testing.T, d *handing) {
+				is(t, d.once(t), pr.ActPoured)
+				d.store.List(bead, append([]string{"tk-run1"}, held.waits...)...)
+				d.pr.Facts.HeadRefOid = other
+				is(t, d.once(t), pr.ActRequeued)
+				d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
+				if len(held.waits) == 0 {
+					d.store.Unlist(bead)
+				} else {
+					d.store.List(bead, held.waits...)
+				}
+			}},
+		} {
+			t.Run(held.name+", "+c.name, func(t *testing.T) {
+				d := newHanding(t)
+				if len(held.waits) > 0 {
+					d.conversation(t, "open", "human", "")
+				}
+				woken := &seeing{d: d}
+				d.l.Wake = woken
+				c.before(t, d)
+				is(t, d.once(t), c.action)
+				if len(woken.rows) != 1 {
+					t.Fatalf("the refinery was woken %d times, want once", len(woken.rows))
+				}
+				if b := woken.rows[0]; b.Status != "open" || b.Assignee != boundRefinery || b.Metadata["pr_reconcile_pending"] != "true" {
+					t.Fatalf("the wake reached the refinery with the bead %s under %q and marker %q, want open under %s and marked",
+						b.Status, b.Assignee, b.Metadata["pr_reconcile_pending"], boundRefinery)
+				}
+				meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "<absent>"})
+				assignedTo(t, d.land, boundRefinery)
+			})
+		}
 	}
 }
 
@@ -267,6 +401,7 @@ func TestAWithdrawalCarriedOutWhileAConversationHoldsTheBeadWakesTheRefinery(t *
 	d.store.List(bead, id, "tk-conv")
 	is(t, d.once(t), pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+	assignedTo(t, d.land, "")
 	d.wokeNone(t)
 
 	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
@@ -279,6 +414,72 @@ func TestAWithdrawalCarriedOutWhileAConversationHoldsTheBeadWakesTheRefinery(t *
 	if status(t, d.land, id) != "closed" {
 		t.Fatalf("the withdrawal is %s", status(t, d.land, id))
 	}
+	d.wokeOnce(t, "tk-conv")
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+	assignedTo(t, d.land, boundRefinery)
+}
+
+// A withdrawal carried out while a review run is still attached leaves the
+// changed head waiting on that run: the marker stays and no one is woken, and
+// the first run after the review run ends hands the head to the refinery.
+func TestAWithdrawalCarriedOutWhileARunIsAttachedWaitsOnTheRun(t *testing.T) {
+	d := newHanding(t)
+	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "rename this",
+		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.conversation(t, "open", "human", "")
+	is(t, d.once(t), pr.ActPoured)
+	d.pr.Facts.HeadRefOid = later
+	id := d.withdraw(t, head)
+	d.store.List(bead, id, "tk-run1", "tk-conv")
+	is(t, d.once(t), pr.ActRequeued)
+	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
+	d.wokeNone(t)
+
+	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
+	d.store.List(bead, "tk-run1", "tk-conv")
+	o := d.once(t)
+	is(t, o, pr.ActChecked)
+	says(t, o, "waits on review run tk-run1")
+	if status(t, d.land, id) != "closed" {
+		t.Fatalf("the withdrawal is %s", status(t, d.land, id))
+	}
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "true"})
+	d.wokeNone(t)
+
+	d.end(t, "tk-run1", "pass", "2026-11-12T09:30:00Z")
+	d.store.List(bead, "tk-conv")
+	o = d.once(t)
+	is(t, o, pr.ActSettled)
+	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
+	d.wokeOnce(t, "tk-conv")
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+}
+
+// A requeue whose read of what holds the bead fails keeps the marker and
+// records nothing else, as an act that does not complete records nothing, and
+// the next run reads the bead's holds again, wakes the refinery for the
+// conversation and clears the marker.
+func TestARequeueThatCannotReadWhatHoldsTheBeadLeavesTheWakeToTheNextRun(t *testing.T) {
+	d := newHanding(t)
+	d.conversation(t, "open", "human", "")
+	d.pr.Facts.HeadRefOid = other
+	d.refresh(t)
+	d.store.BlockedErr = errors.New("bd's blocked listing did not answer")
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	says(t, o, "what holds the bead did not read", "bd's blocked listing did not answer")
+	if w := d.runWrites(); len(w) != 1 {
+		t.Fatalf("the run wrote %d times, want the requeue alone: %+v", len(w), w)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other,
+		"pr_reconcile_pending": "true"})
+	d.wokeNone(t)
+
+	d.store.BlockedErr = nil
+	o = d.run(t)
+	is(t, o, pr.ActSettled)
+	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
 	d.wokeOnce(t, "tk-conv")
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
 }

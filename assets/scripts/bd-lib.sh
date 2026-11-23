@@ -249,7 +249,7 @@ bd_human_gates() {
 # block, as jq defs in the in-variable convention standing-kinds.sh describes,
 # so every reader prepends the same text. A human gate holds in every status but
 # closed, pinned included, because only its resolve clears the question it asks;
-# gctk merge and pr status read a gate the same way. The defs:
+# gctk's pr status reads a gate the same way. The defs:
 #   human_gate             on one row: issue_type gate and await_type human
 #   open_human_gate($k)    on one row: a human gate that still holds, and when $k
 #                          is not "", one under that situation key
@@ -415,8 +415,9 @@ bd_gates_open_under_key() {
 # filed some other way without the edge still reads while it is live, and
 # tools/anchor-edges-backfill.sh --check reports it.
 #
-# `related` holds nothing: it gates neither bd ready nor a close, and merge.sh's
-# blocker probe reads the `blocks` edges down from the anchor, never these.
+# `related` holds nothing: it gates neither bd ready nor a close, and the
+# evaluator reads the anchor's waits through gctk's waits, which takes only the
+# edge types the store's blocked rule reads as a wait, never these.
 ANCHOR_EDGE_TYPE=related
 ANCHOR_JOINED_KEY=anchor_edges.joined
 _BD_ANCHOR_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
@@ -887,14 +888,10 @@ pr_finishing_birth() {
 }
 
 # The longest a settle of PR-finishing work waits for the store's priority lock
-# when a script of the merge cadence or the refinery patrol runs it:
-# gate-ensure.sh, pr-facts.sh, pre-open-rebase.sh and refinery-requeue.sh. The
-# cadence and the patrol each run their arms one after another, so a longer wait
-# holds every arm after it. A bead whose settle times out in the cadence is
-# settled by a later pass. A rework child whose settle times out in
-# refinery-requeue.sh is armed instead of slung: the deferred-dispatch order
-# pours it, and the queue-priority pass settles it with its workflow.
-# queue-priority.sh's own default wait is longer, and
+# when a script of the merge cadence runs it: gate-ensure.sh and pr-facts.sh.
+# The cadence runs its arms one after another, so a longer wait holds every arm
+# after it. A bead whose settle times out in the cadence is settled by a later
+# pass. queue-priority.sh's own default wait is longer, and
 # rework-child.sh, which runs in a review or converse session rather than in the
 # cadence, keeps it.
 PR_FINISHING_LOCK_WAIT_SECS=30
@@ -912,8 +909,8 @@ pr_finishing_settle() {
 }
 
 # route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
-# priority, for the creators whose child runs with no poured formula
-# (pr-facts.sh, pre-open-rebase.sh). The route makes the child claimable, so the
+# priority, for the creator whose child runs with no poured formula
+# (pr-facts.sh). The route makes the child claimable, so the
 # child is settled first (pr_finishing_settle). Then `gc sling <pool> <child>
 # --no-formula --no-convoy` routes it, with no priority in the write, no formula
 # poured and no convoy filed. No pool can claim the child before the route
@@ -946,13 +943,7 @@ validation_work_order() {
      + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
-# The gating-PR read. The pr-facts arm (pr-facts.sh) and the merge arm
-# (`gctk merge`, prFields in services/gctk/internal/cli/merge.go) both read each
-# gating PR and decide on its merge state, so they read it with one field set
-# and the two arms see the same facts. merge.test.sh holds the merge arm's reads
-# to this set.
-
-# The pinned read's field set. pr-facts.sh asks for it plus labels.
+# The gating-PR read's field set. pr-facts.sh asks for it plus labels.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
 
