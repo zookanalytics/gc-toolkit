@@ -53,8 +53,9 @@ const (
 )
 
 // Monitors are the orders whose job is to notice a problem, whose last good
-// run a run records: the doctor order itself, the pack's two looks,
-// seat-progress-detect and refinery-queue-detect, core's spawn-storm-detect,
+// run a run records: the doctor order itself, the pack's looks,
+// seat-progress-detect and refinery-queue-detect, its report of a rig's failing
+// deployments, production-deploy-report, core's spawn-storm-detect,
 // orphan-sweep and reaper, and the dolt pack's mol-dog-doctor, mol-dog-backup
 // and dolt-health. A good run is the newest order.completed Gas City recorded
 // for the order, which it records when an exec order's run exits 0 and when a
@@ -62,7 +63,7 @@ const (
 // gastownhall/gascity c7eb6d2f43). Whether a monitor is late or failing is Gas
 // City's verdict, in its order-firing-current and order-outcome-healthy checks,
 // which reach a run as checks.
-var Monitors = []string{"doctor-run", "seat-progress-detect", "refinery-queue-detect",
+var Monitors = []string{"doctor-run", "seat-progress-detect", "refinery-queue-detect", "production-deploy-report",
 	"spawn-storm-detect", "orphan-sweep", "reaper", "mol-dog-doctor", "mol-dog-backup", "dolt-health"}
 
 // Record is a run's event payload.

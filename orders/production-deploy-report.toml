@@ -1,0 +1,51 @@
+# production-deploy-report — once an hour, read a rig's newest deployments to
+# its production environment from GitHub, where the host that deploys the
+# rig's repository records each one with its status, and keep one patrol
+# finding in the rig's own store while they fail. The finding is a task naming
+# the failed deployment's commit, its pull request, its link and what its
+# statuses say, with the run's length and the success before it. A later
+# failure notes its commit on that finding, a success clears the finding's
+# situation, and patrol-finding.sh slings the finding's first reaction, which
+# routes it or puts it to you. GitHub carries no build log, so the failing
+# step's error stays on the deploy host, behind the finding's links. The city
+# needs no credential for the host, only the GitHub login the gh CLI already
+# uses. `gctk deployment report --help` states the rule.
+#
+# Shipped disabled. The rigs it watches are the ones the city's config turns
+# it on for, a rig whose repository deploys the environment from its default
+# branch, one entry each in city.toml:
+#
+#   [[orders.overrides]]
+#   name = "production-deploy-report"
+#   rig = "<rig>"
+#   enabled = true
+#
+# A rig whose host names the environment otherwise, such as one Vercel
+# project of several in one repository, sets it in the same entry:
+#
+#   env = { GCTK_DEPLOYMENT_ENVIRONMENT = "<environment>" }
+#
+# Gas City filters out a disabled order before it dispatches any, so the rigs
+# the config leaves off take no place in the orders lane.
+#
+# Exec, not a formula: a run reads GitHub and records one finding, with no
+# judgment for an LLM. Rig-scoped, so each run reports its own rig into its own
+# store. The read is one GraphQL call, about four seconds, bounded at 30, and
+# the finding's write and its reaction's sling fit well inside the timeout. A
+# cooldown counts from a run's start, so the interval stays above the timeout,
+# and an hour is the background tier: a failure is in the rig's queue within
+# about an hour of the deployment failing. Tune from city.toml
+# [[orders.overrides]].
+[order]
+description = "Report a rig's failing production deployments, read from GitHub, as one patrol finding in its store, and clear it once a deployment succeeds"
+trigger = "cooldown"
+interval = "1h"
+timeout = "300s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" deployment report --rig \"$GC_RIG\" --environment \"$GCTK_DEPLOYMENT_ENVIRONMENT\""
+scope = "rig"
+enabled = false
+
+[order.env]
+# The deployment environment the run reads, as the deploy host names it on
+# GitHub.
+GCTK_DEPLOYMENT_ENVIRONMENT = "Production"

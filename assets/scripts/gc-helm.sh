@@ -99,7 +99,7 @@ Engaging a bead or a PR names everything that holds it, by the definition the
 PR's held: labels and the board's row read (gctk pr status): each open
 human gate reached through its open blocks edges, each bead a person owes the
 next move on that the same edges reach, such as another PR waiting on a review,
-and the PR's own review threads or blocked verdict, and how to engage each.
+and the PR's own review threads, and how to engage each.
 --model picks the converse variant by the name its template carries after
 converse- (claude-opus, the work tier, is the default), and refuses a name
 engage does not offer, listing the ones it does. --no-attach spawns without
@@ -2107,9 +2107,9 @@ helm_gctk() {
 # definition the PR's held: labels and the board's row read, so what engage
 # offers cannot differ from what they say. <held> is the held: value the row
 # stands for. <id> is the bead to engage, an open human gate or a bead a person
-# owes the next move on, and is empty where the PR's own review threads or blocked
-# verdict hold it. Returns 1 when gctk is not there or did not answer, which says
-# nothing about what holds the bead.
+# owes the next move on, and is empty where the PR's own review threads hold it.
+# Returns 1 when gctk is not there or did not answer, which says nothing about
+# what holds the bead.
 holding_rows() {
     _hr_bin=$(helm_gctk) || return 1
     _hr_json=$("$_hr_bin" pr status "$1" --json 2>/dev/null) || return 1

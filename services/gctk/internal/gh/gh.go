@@ -850,14 +850,24 @@ func (a *actor) name() string {
 
 // prVars are the variables every PR query takes.
 func prVars(repo string, number int) ([]string, error) {
-	owner, name, err := splitRepo(repo)
+	vars, err := repoVars(repo)
 	if err != nil {
 		return nil, err
 	}
 	if number < 1 {
 		return nil, fmt.Errorf("github: %d is no pull request number", number)
 	}
-	return []string{"-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + strconv.Itoa(number)}, nil
+	return append(vars, "-F", "number="+strconv.Itoa(number)), nil
+}
+
+// repoVars are the variables every repository query takes, read from repo,
+// owner/name.
+func repoVars(repo string) ([]string, error) {
+	owner, name, err := splitRepo(repo)
+	if err != nil {
+		return nil, err
+	}
+	return []string{"-f", "owner=" + owner, "-f", "name=" + name}, nil
 }
 
 // databaseID reads a fullDatabaseId, which GitHub gives as a string.

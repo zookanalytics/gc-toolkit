@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -213,8 +213,8 @@ func (e *HeldClose) Error() string { return e.Why }
 // it, and Posts is that writer, through which a review round's post posts its
 // comment and its replies. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
 // ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
-// carries none. Wake gives the refinery a turn for a changed head that only
-// conversations and asks hold. Labels keeps the labels of each PR the store's
+// carries none. Wake gives the refinery its turn for each changed head the run
+// hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
@@ -1554,10 +1554,10 @@ func (u *run) decideHeadChanged(s state, f seen) plan {
 // place of the one the refinery validated, once the act has carried out the
 // record's withdrawals as c says, and hands the head to the refinery.
 // The bead keeps its marker, assigned to nobody, while a withdrawal is still
-// open or a review run is attached, and until the hand-over has assigned the
-// bead to a refinery that nothing else tells of the head and woken it
-// (handOver). shown, when set, says for the outcome what showed that the head
-// is not the validated one.
+// open or a review run is attached, and, whenever the refinery can take the
+// bead, until the hand-over has assigned the bead to the refinery and woken it
+// (wakeAndSettle). shown, when set, says for the outcome what showed that the
+// head is not the validated one.
 func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carriedOut) RunOutcome {
 	r := s.rec
 	reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
@@ -1572,15 +1572,17 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	// The requeue keeps the marker, and the bead assigned to nobody, while a
 	// withdrawal or an attached run holds the changed head, and for the
 	// hand-over that assigns the bead to the refinery and wakes it once the
-	// requeue lands, or that reads what holds the bead again when this read
-	// fails. Otherwise its own write hands the head to the refinery.
+	// requeue lands, whenever the refinery can take the bead, or that reads what
+	// holds the bead again when this read fails. Otherwise another wait holds
+	// the bead, and the requeue's own write hands the head to the refinery.
 	watched := c.held || len(s.runs) > 0
 	var holds []hold
+	var takeable bool
 	var unread error
 	if !watched {
-		holds, unread = u.mergeHolds(s)
+		holds, takeable, unread = u.mergeHolds(s)
 	}
-	keep := watched || unread != nil || len(holds) > 0
+	keep := watched || unread != nil || takeable
 	to, done := u.Refinery, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail + "; the bead is assigned to the refinery"}
 	if keep {
 		to, done.Detail = "", detail
@@ -1940,7 +1942,7 @@ func (l Landing) sameOrigin(host, repo string) error {
 // outsideOrigin says why a PR on host in repo is not in the repository the
 // origin URL raw names, and is empty when it is.
 func outsideOrigin(raw, host, repo string) string {
-	oh, orepo, ok := originRepo(raw)
+	oh, orepo, ok := git.RemoteRepository(raw)
 	if !ok {
 		return fmt.Sprintf("the rig's origin %s names no repository on a host", raw)
 	}
@@ -1948,24 +1950,6 @@ func outsideOrigin(raw, host, repo string) string {
 		return fmt.Sprintf("the PR's repository %s/%s is not the rig's origin %s/%s", host, repo, oh, orepo)
 	}
 	return ""
-}
-
-// originForms are the forms a clone's origin URL takes: https, with or without
-// credentials, scp-like ssh, and ssh.
-var originForms = []*regexp.Regexp{
-	regexp.MustCompile(`^https://(?:[^@/]+@)?([^/]+)/([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^[^@/]+@([^:/]+):([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^ssh://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/([^/]+/[^/]+?)(?:\.git)?/?$`),
-}
-
-// originRepo reads an origin URL into its host and its repository, owner/name.
-func originRepo(u string) (host, repo string, ok bool) {
-	for _, f := range originForms {
-		if m := f.FindStringSubmatch(strings.TrimSpace(u)); m != nil {
-			return m[1], m[2], true
-		}
-	}
-	return "", "", false
 }
 
 // mergeEvidence reports whether a recorded merge is whole: its commit and its

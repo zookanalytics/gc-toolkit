@@ -42,8 +42,8 @@ anchor. With --json it prints one object instead:
 {"status": <that value>, "held": [<gate, review, blocked>], "reasons":
 [{"held", "id", "title"}]}. held is what holds the PR, in the order the held:
 labels take, and reasons is each thing behind it. A reason's id is empty where
-the PR's own review threads or blocked verdict hold it. Both lists are empty
-arrays when nothing holds the PR.
+the PR's own review threads hold it. Both lists are empty arrays when nothing
+holds the PR.
 
 For a bead whose PR is on Gas Town's pending record, the status renders the pr
 domain's evaluator over the store as it stands, the read the one-PR update

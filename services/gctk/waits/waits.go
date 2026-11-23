@@ -139,16 +139,31 @@ func ReadStore(db string, ids ...string) (*Snapshot, error) {
 // Read reads one snapshot of what holds each bead named. A bead the store does
 // not hold gets its error from Holds, and every other bead is answered. A read
 // that fails fails the snapshot with its *ledger.ReadError.
-func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) {
+func Read(l *ledger.Ledger, ids ...string) (*Snapshot, error) { return ReadFrom(l, nil, ids...) }
+
+// ReadFrom reads one snapshot as Read does, over listed, rows the caller read
+// in the same pass by ledger.ByID(...).WithClosed(), so a bead named among them
+// is not listed again. It lists the beads named that listed does not hold.
+func ReadFrom(l *ledger.Ledger, listed []*ledger.Record, ids ...string) (*Snapshot, error) {
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	s := &Snapshot{missing: map[string]error{}, foreign: map[string][]Foreign{}, flight: map[string]string{},
 		loading: map[string]string{}}
-	listed, err := l.Find(ledger.ByID(ids...).WithClosed())
+	var unlisted []string
+	for _, id := range ids {
+		if !slices.ContainsFunc(listed, func(r *ledger.Record) bool { return r.ID == id }) {
+			unlisted = append(unlisted, id)
+		}
+	}
+	more, err := l.Find(ledger.ByID(unlisted...).WithClosed())
 	if err != nil {
 		return nil, err
 	}
-	edges := make(map[string][]ledger.Edge, len(listed))
+	listed = append(slices.Clone(listed), more...)
+	edges := make(map[string][]ledger.Edge, len(ids))
 	for _, r := range listed {
+		if !slices.Contains(ids, r.ID) {
+			continue
+		}
 		e, err := r.Edges()
 		if err != nil {
 			return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}

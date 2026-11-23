@@ -86,10 +86,6 @@ func TestRenderTheEvaluatorsAnswer(t *testing.T) {
 			false, []pr.Condition{cond(pr.KindApproval, ""), {Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.Working},
 		{"a review thread beside a stay, with nothing of the city's acting on it, needs attention",
 			false, []pr.Condition{cond(pr.KindThread, "T1"), {Kind: pr.KindWait, ID: "tk-conv"}}, staying, prstatus.NeedsAttention},
-		{"the merge pass's verdict and thread count, left from the old record, hold nothing",
-			false, []pr.Condition{cond(pr.KindCheckPending, "test")},
-			prstatus.Facts{PRPosture: "approved@oid@t", PRMachine: "blocked@oid@t", PRMachineCause: prstatus.CauseBlocker,
-				PRUnansweredThreads: "2@oid"}, prstatus.Merging},
 		{"a PR whose GitHub side is unread is working, since no approval is known",
 			false, []pr.Condition{cond(pr.KindGitHubUnread, "")}, prstatus.Facts{}, prstatus.Working},
 		{"an unread PR beside the city's work is working",
@@ -159,15 +155,10 @@ func TestRenderReasons(t *testing.T) {
 			t.Fatalf("RenderReasons = %+v, want %+v", got, want)
 		}
 	})
-	t.Run("the merge pass's records hold nothing, and neither does a thread the city's work acts on", func(t *testing.T) {
-		stale := prstatus.Facts{PRPosture: "review_required@oid@t", PRMachine: "blocked@oid@t",
-			PRMachineCause: prstatus.CauseReviewThreads, PRUnansweredThreads: "1@oid"}
+	t.Run("a thread the city's work acts on holds nothing", func(t *testing.T) {
 		acted := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindThread, Value: "T1"}, {Kind: pr.KindWait, ID: "tk-fix"}}}
-		if got := prstatus.RenderReasons(acted, stale); len(got) != 0 {
+		if got := prstatus.RenderReasons(acted, prstatus.Facts{PRPosture: "review_required@oid@t"}); len(got) != 0 {
 			t.Fatalf("RenderReasons = %+v, want none", got)
-		}
-		if got := prstatus.Reasons(stale); len(got) == 0 {
-			t.Fatal("the old record's reasons read nothing from the same facts, so this case shows nothing")
 		}
 	})
 }

@@ -149,11 +149,10 @@ Four producers file the same bead contract:
 Claude Code keeps a directory of memory notes for each project. Its index,
 `MEMORY.md`, loads into every session that has memory, and a session reads a
 note when it needs one. The distiller's first step, read-memory, runs `gctk
-memory settle` in the pack's home rig and changes nothing elsewhere. `gctk
-memory` asks Claude Code where the sessions of each rig and of the city's root
-keep memory, so it copies none of Claude Code's location rules, and it files
-one finding through `patrol-finding.sh` for a place whose memory directory
-Claude Code does not name, where it reads and removes nothing.
+memory settle`. `gctk memory` asks Claude Code where the sessions of each rig
+and of the city's root keep memory, so it copies none of Claude Code's location
+rules, and it files one finding through `patrol-finding.sh` for a place whose
+memory directory Claude Code does not name, where it reads and removes nothing.
 
 A note is due when the distiller has not judged it at its current text, or
 when the date the judge set for it has come. The text is the note's body:
@@ -199,6 +198,11 @@ The distiller (`mol-feedback-distiller`, judging by the
 `learning-distill` rubric skill) dedups pending observations, clusters
 them and the due memory notes onto pattern beads, and decides which
 clusters have earned a rule.
+One run a day serves the whole city. The `feedback-distiller` order starts it
+through `gctk distiller start` in the pack's home rig, the rig whose checkout
+holds the pack, because the changes a run proposes are edits to the pack. The
+order starts no run while one is still open there. The run reads the
+observations and memory notes of every rig.
 A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
 triages, the way a bug is, and nothing routes or assigns it. Every run leaves
 each pattern in one of three states: closed once resolved (its rule adopted,

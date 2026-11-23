@@ -157,11 +157,10 @@ machine_key = "pr.machine"
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
 #   blocked           the merge cannot proceed without a person, and no review
-#                     verdict is what it waits on. Distinct from settled — which
-#                     waits on a review or the merge pass — so the board and the
-#                     status: label show it as needs-attention rather than
-#                     awaiting-review. The cause rides pr.machine_cause, one of
-#                     causes below, and pr.machine_reason says it in a sentence.
+#                     verdict is what it waits on. Distinct from settled, which
+#                     waits on a review or the merge pass. The cause rides
+#                     pr.machine_cause, one of causes below, and
+#                     pr.machine_reason says it in a sentence.
 machines = ["progressing", "settled", "blocked"]
 # Why a blocked verdict cannot merge, the value pr.machine_cause carries beside
 # it:
@@ -185,8 +184,7 @@ writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh)"
 # Where the exchange with the operator stands, recorded on the anchor by
 # pr-facts.sh against the [posture] watermarks. A dated key,
 # `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
-# moved on never reads as current, and the board's board.prConversation gates it
-# on the pr.machine head the same way the approval clause gates the posture.
+# moved on never reads as current.
 conversation_key = "pr.conversation"
 # The values pr-facts.sh records, derived from the watermarks and the routing
 # disposition each pass:
@@ -451,14 +449,12 @@ keys = [
 #   because its check_set names an `open-as-draft` check that gates the
 #   draft->ready flip. Nothing writes it: the refinery's publication opens every
 #   PR as a draft and records none (refinery-publish.sh). Its PRESENCE tells
-#   gate-ensure.sh and services/gctk/prstatus (the status: label and the board's
-#   PR phase) the anchor is still in the open-as-draft stage. Absent means the PR opened ready,
-#   or is a draft someone else owns. Never cleared. An oid.
+#   gate-ensure.sh the anchor is still in the open-as-draft stage. Absent means
+#   the PR opened ready, or is a draft someone else owns. Never cleared. An oid.
 # draft_readied — the head oid a PR was read ready at. Nothing writes it: the
 #   landing order marks a PR ready from GitHub's draft flag. Its PRESENCE tells
-#   gate-ensure.sh and services/gctk/prstatus the anchor reached the
-#   ready-for-review stage. Absent means the arm has not read it ready. Never
-#   cleared. An oid.
+#   gate-ensure.sh the anchor reached the ready-for-review stage. Absent means
+#   the arm has not read it ready. Never cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
@@ -1068,13 +1064,10 @@ keys = [
 # city's answer, `<count>@<head oid>`: unresolved, with no answer of the city's
 # after their newest feedback, where a post not for review, one the city marked
 # handled with its THUMBS_UP, or one a dismissal retired is neither
-# (gc_thread_awaits_answer in pr-post.sh). Nothing writes it: the landing
-# order's evaluator counts a PR's unanswered threads as it gathers the PR's
-# facts. prstatus reads it for held: review,
-# through gctk pr status for the labels and in the helm board, and only at the
-# head the posture was read at. Absent means no visit has counted the threads
-# yet, and nothing reads as waiting. It is plain, not dated, and never cleared:
-# the next count replaces it.
+# (gc_thread_awaits_answer in pr-post.sh). Nothing writes it or reads it: the PR
+# watch saves the threads that wait in the GitHub read it keeps on the bead,
+# which the landing order's evaluator reads. It is plain, not dated, and never
+# cleared.
 keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation", "pr.unanswered_threads"]
 
 [metadata.pr_status_label]

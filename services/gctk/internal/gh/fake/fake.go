@@ -146,10 +146,12 @@ func (g *GitHub) FullAsked() [][]int {
 	return slices.Clone(g.full)
 }
 
-// Repo is one repository's default branch and the checks at each ref.
+// Repo is one repository's default branch, the checks at each ref, and the
+// deployments of each environment, newest first, by the environment's name.
 type Repo struct {
 	DefaultBranch string
 	Checks        map[string]*gh.HeadChecks
+	Deployments   map[string][]gh.Deployment
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -718,6 +720,18 @@ func (g *GitHub) HeadChecks(repo, ref string) (*gh.HeadChecks, error) {
 	out := *h
 	out.Runs, out.Statuses = slices.Clone(h.Runs), slices.Clone(h.Statuses)
 	return &out, nil
+}
+
+// Deployments answers the newest n of the deployments Repos holds for
+// environment, as the read's window takes them, failing as
+// Fail["Deployments"] says. An environment it holds none for has none.
+func (g *GitHub) Deployments(repo, environment string, n int) ([]gh.Deployment, error) {
+	r, err := g.repo("Deployments", repo)
+	if err != nil {
+		return nil, err
+	}
+	d := r.Deployments[environment]
+	return slices.Clone(d[:min(n, len(d))]), nil
 }
 
 func (g *GitHub) repo(read, repo string) (*Repo, error) {

@@ -274,6 +274,7 @@ type land struct {
 	*world
 	co     *checkout
 	gates  *gates
+	wakes  *waking
 	l      pr.Landing
 	watch  pr.Watcher
 	clock  time.Time
@@ -296,7 +297,7 @@ func newLand(t *testing.T) *land {
 	co := &checkout{origin: origin, reachable: map[string]bool{merged: true}, descends: map[string][]string{},
 		prHead: func() string { return w.pr.Facts.HeadRefOid }}
 	g := &gates{}
-	d := &land{world: w, co: co, gates: g, clock: time.Date(2026, 11, 12, 8, 0, 0, 0, time.UTC)}
+	d := &land{world: w, co: co, gates: g, wakes: &waking{}, clock: time.Date(2026, 11, 12, 8, 0, 0, 0, time.UTC)}
 	dir := t.TempDir()
 	d.l = pr.Landing{
 		Ledger:   ledger.New(w.store),
@@ -314,6 +315,7 @@ func newLand(t *testing.T) *land {
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
 		Checkout: co,
 		Gates:    g,
+		Wake:     d.wakes,
 		Now:      func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) },
 		Wait:     5 * time.Second,
 		Shuffle:  func([]string) {},
@@ -680,8 +682,12 @@ func TestAnOpenChangedHeadIsRequeuedForValidation(t *testing.T) {
 	d := newLand(t)
 	d.pr.Facts.HeadRefOid = other
 	is(t, d.once(t), pr.ActRequeued)
-	if ws := d.runWrites(); len(ws) != 1 || !slices.Contains(ws[0].Args, "--assignee="+refinery) {
-		t.Fatalf("the requeue wrote %+v, want one write that hands the head to the refinery", ws)
+	if ws := d.runWrites(); len(ws) != 3 || !slices.Contains(ws[1].Args, "--assignee="+refinery) ||
+		!slices.Contains(ws[2].Args, "pr_reconcile_pending") {
+		t.Fatalf("the requeue wrote %+v, want the requeue, the refinery's assignment and the settle that clears the marker", ws)
+	}
+	if got := d.wakes.woken(); len(got) != 1 || !strings.HasPrefix(got[0], refinery+": ") || !strings.Contains(got[0], bead) {
+		t.Fatalf("the refinery was woken %q, want once for %s", got, bead)
 	}
 	b := d.row(t)
 	if b.Status != "open" || b.Assignee != refinery {
@@ -2006,8 +2012,8 @@ func TestARecordWriteWaitsWhileAnActHoldsTheLockAndLandsAfterItsLastWrite(t *tes
 		t.Fatal(err)
 	}
 	ws := d.store.Writes()[mark:]
-	if len(ws) != 3 || !slices.Contains(ws[0].Args, "merge_result="+record.HeadChanged) ||
-		!slices.Contains(ws[2].Args, "pr_head_sha="+other) {
+	if len(ws) != 5 || !slices.Contains(ws[0].Args, "merge_result="+record.HeadChanged) ||
+		!slices.Contains(ws[2].Args, "pr_reconcile_pending") || !slices.Contains(ws[4].Args, "pr_head_sha="+other) {
 		t.Fatalf("the writes landed out of order: %+v", ws)
 	}
 	b := d.row(t)
@@ -2355,8 +2361,8 @@ func TestASecondRunActsOnARecordOnlyOnceTheFirstHasWrittenIt(t *testing.T) {
 	if len(secondOut) != 1 || secondOut[0].Action != pr.ActSkipped {
 		t.Fatalf("the second run did %+v, want it to read the record as the first left it, with no marker", secondOut)
 	}
-	if n := len(d.store.Writes()) - mark; n != 1 {
-		t.Fatalf("%d writes, want the first run's one", n)
+	if n := len(d.store.Writes()) - mark; n != 3 {
+		t.Fatalf("%d writes, want the first run's three: the requeue, the refinery's assignment and the settle", n)
 	}
 }
 
