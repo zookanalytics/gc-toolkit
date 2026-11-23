@@ -22,6 +22,12 @@
 #   triage-index-gap      files the observation with that anchor in its title,
 #                         provenance and quote.
 #
+# The review-ruling skill's block for a red check the PR's target carries files
+# the target's failure as its log reads: a log holding quotes, a command
+# substitution, backticks and variables reaches the tracker's message as one
+# argument, nothing in it runs, and the ask waits on the tracker the filing
+# printed, in bash and in zsh.
+#
 # The suite finds each skill through the index and names none, so a change to a
 # skill alone selects it only as a tree-wide suite.
 #
@@ -203,6 +209,62 @@ for sh in $SHELLS; do
   esac
   has "$ARGS" "Triage on tk-anchor1 at $OID." "($sh) its quote names the anchor and the reviewed commit"
 done
+
+echo "# the ruling's tracker block files the target's failure as its log reads"
+# preexisting-failure.sh and gctk stand in to record their arguments, and the
+# failure's placeholder takes the log wherever the block puts it, as an agent
+# pastes it there.
+RB="$TMP/blocks/ruling"; mkdir -p "$RB"
+blocks "$ROOT/skills/review-ruling/SKILL.md" "$RB"
+TRACK=$(grep -l 'preexisting-failure.sh" file' "$RB"/*.sh 2>/dev/null | head -1)
+if [ -z "$TRACK" ]; then
+  bad "the ruling's tracker block extracts from the skill" "no block files a tracker"
+else
+  ok "the ruling's tracker block extracts from the skill"
+  RS="$TMP/ruling-pack/assets/scripts"; mkdir -p "$RS"
+  cat > "$RS/preexisting-failure.sh" <<'PF'
+#!/usr/bin/env bash
+case "$1" in
+  key) printf 'TestTheCap\n' ;;
+  file) printf '%s\0' "$@" > "$TRACKER_ARGS"; printf 'tk-tracker1\n' ;;
+  *) exit 2 ;;
+esac
+PF
+  cat > "$TMP/gctk-stub" <<'GS'
+#!/usr/bin/env bash
+printf '%s\0' "$@" > "$ASK_ARGS"
+GS
+  chmod +x "$RS/preexisting-failure.sh" "$TMP/gctk-stub"
+  LOG="$TMP/target.log"
+  printf '%s\n' '--- FAIL: TestTheCap (0.01s)' \
+    "    cap_test.go:12: expected \"two words\", got 'one'; ran \$(touch $TMP/ran-substitution) and \`touch $TMP/ran-backtick\`" \
+    '    beside $HOME, ${UNSET_IN_LOG} and a \ backslash' 'FAIL' > "$LOG"
+  sed -e 's|<binding>|kit|g' -e 's|<the failing test function>|TestTheCap|g' -e "s|<the PR's bead>|tk-anchor1|g" \
+      -e 's|<the red-check ask>|tk-ask1|g' -e "s|<the PR's branch>|polecat/x|g" -e 's|<target>|main|g' \
+      -e 's|<the check>|test|g' "$TRACK" > "$RB/tracker.tmpl"
+  PH="<the failure as the target's run shows it, with its log>"
+  stray=$(grep -oE '<[a-z][^>]*>' "$RB/tracker.tmpl" | grep -vxF "$PH" | sort -u | paste -sd' ' -)
+  eq "$stray" "" "the tracker block's placeholders are the ones this case fills"
+  PH="$PH" LOGF="$LOG" awk 'BEGIN { ph = ENVIRON["PH"]; while ((getline l < ENVIRON["LOGF"]) > 0) text = text (n++ ? "\n" : "") l }
+    { out = ""; s = $0; while ((i = index(s, ph)) > 0) { out = out substr(s, 1, i - 1) text; s = substr(s, i + length(ph)) }; print out s }' \
+    "$RB/tracker.tmpl" > "$RB/tracker.sh"
+  printf '%s\0' file TestTheCap --message "$(cat "$LOG")" > "$TMP/tracker.want"
+  printf '%s\0' review ask tk-anchor1 --source tk-ask1 --waiting-on tk-tracker1 --reason \
+    "Bring 'polecat/x' current by merging origin/main in once tk-tracker1 fixes test on 'main'." > "$TMP/ask.want"
+  for sh in $SHELLS; do
+    rm -f "$TMP/tracker.args" "$TMP/ask.args" "$TMP/ran-substitution" "$TMP/ran-backtick"
+    run "$sh" "$RB/tracker.sh" STUB_SCRIPTS="$RS" GCTK_BIN="$TMP/gctk-stub" TRACKER_ARGS="$TMP/tracker.args" ASK_ARGS="$TMP/ask.args"
+    eq "$RC" "0" "($sh) the tracker block runs under set -u"
+    cmp -s "$TMP/tracker.args" "$TMP/tracker.want" \
+      && ok "($sh) the tracker's message is the target's failure as its log reads, in one argument" \
+      || bad "($sh) the tracker's message is the target's failure as its log reads, in one argument" \
+             "got: $(tr '\0' '|' 2>/dev/null < "$TMP/tracker.args")"
+    [ ! -e "$TMP/ran-substitution" ] && [ ! -e "$TMP/ran-backtick" ] && ok "($sh) nothing in the log runs" \
+      || bad "($sh) nothing in the log runs" "a command the log holds ran"
+    cmp -s "$TMP/ask.args" "$TMP/ask.want" && ok "($sh) the ask waits on the tracker the filing printed" \
+      || bad "($sh) the ask waits on the tracker the filing printed" "got: $(tr '\0' '|' 2>/dev/null < "$TMP/ask.args")"
+  done
+fi
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

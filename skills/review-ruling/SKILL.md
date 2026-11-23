@@ -106,12 +106,19 @@ When the target carries the failure, send it to its one tracker and leave the
 PR waiting on that tracker. `preexisting-failure.sh key` derives the failure's
 key from its test function (`--test`), its path (`--target`) or its lint
 finding (`--lint`), and `file` prints the tracker it finds under that key, or
-the one it files and sends to be fixed. The ask then waits on the tracker:
+the one it files and sends to be fixed. The tracker's message is the failure as
+the target's run shows it, with its log, which goes on the lines between the
+quoted here-document's delimiters, where every character stays as the log has
+it. The ask then waits on the tracker:
 
 ```bash
 SCRIPTS="$(gc <binding> scripts-dir)"
 KEY=$("$SCRIPTS/preexisting-failure.sh" key --test <the failing test function>)
-TRACKER=$("$SCRIPTS/preexisting-failure.sh" file "$KEY" --message "<the failure as the target's run shows it, with its log>")
+FAILURE=$(cat <<'TARGET_LOG'
+<the failure as the target's run shows it, with its log>
+TARGET_LOG
+)
+TRACKER=$("$SCRIPTS/preexisting-failure.sh" file "$KEY" --message "$FAILURE")
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
