@@ -18,13 +18,14 @@
 #
 # On a repository we own, a post (a comment, a review, a thread reply, or an
 # edit of one) has to carry the provenance mark assets/scripts/pr-post.sh
-# appends. pr-facts.sh tells the city's own posts from feedback by that mark,
-# so an unmarked post under the city's login reads back as feedback and loops
-# into rework (docs/gh-origin-guard.md, "Posts carry the city's mark").
+# appends. The definition of feedback tells the city's own posts from a
+# person's by that mark, so an unmarked post under the city's login reads back
+# as feedback, which the landing order takes as an ask the city then answers
+# (docs/gh-origin-guard.md, "Posts carry the city's mark").
 #
 # What it sees: the command an agent types into Bash. A `gh` call made inside a
-# script the agent runs is invisible here, and pr-facts.sh already pins --repo
-# to an origin it resolves itself. This guards reach by
+# script the agent runs is invisible here, and the pack's own writers pin
+# --repo to an origin they resolve themselves. This guards reach by
 # accident; it is not a sandbox and a determined bypass stays available.
 #
 # Contract:
@@ -716,7 +717,7 @@ function analyze(   i, j, k, w, noun, verb, key, repo, inl, inlhost, urlop, meth
         }
     }
     # issue comment, pr comment and pr review post a body on the conversation or
-    # the review; the two creates post nothing pr-facts reads as feedback.
+    # the review; the two creates post nothing the city reads as feedback.
     ppost = 0; pbody = ""; pfile = ""; pevent = ""; pinter = 0
     if (verb == "comment" || verb == "review") porcelain_post(i + 2)
     printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", noun, verb, repo, inl, cdspec, ghset, ghval, inlhost, hostset, hostval, urlop, endpoint, ppost, pevent, pinter, pbody, (pfile != "" ? "\036" pfile : ""), inbody, ""
@@ -1099,10 +1100,10 @@ if [ -n "$UNMARKED" ]; then
     deny "gh-origin-guard: refused \`gh $NOUN $VERB\`${TARGET:+ on $TARGET}: $UNMARKED.
 
 The city posts on a pull request under the bot account that backs every
-agent's gh token, so pr-facts.sh tells the city's own posts from feedback by
-the provenance mark, not by the author. A post without the mark reads back as
-feedback, and the reconcile routes it into a rework child that answers the
-city's own words.
+agent's gh token, so the city tells its own posts from feedback by the
+provenance mark, not by the author. A post without the mark reads back as
+feedback, and the landing order files it as an ask that answers the city's own
+words.
 
 Post through $PR_POST, which appends the mark:
   comment --repo <host/owner/name> --pr <n> --body-file <path>

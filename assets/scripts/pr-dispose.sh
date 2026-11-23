@@ -192,7 +192,7 @@ fi
 # anything.
 PR_URL=$(printf '%s' "$AJSON" | jq -r '.[0].metadata.pr_url // ""')
 PR_REPO_Q=$(url_repo_q "$PR_URL")
-[ -n "$PR_REPO_Q" ] || die "no parseable pr_url on $ANCHOR (metadata.pr_url='$PR_URL'); refusing to run GitHub calls a bare PR number would aim at the checkout's origin repo. Close the PR by hand, and pr-facts auto-disposes $ANCHOR once it is CLOSED" 1
+[ -n "$PR_REPO_Q" ] || die "no parseable pr_url on $ANCHOR (metadata.pr_url='$PR_URL'); refusing to run GitHub calls a bare PR number would aim at the checkout's origin repo. Close the PR by hand, and once the landing order has recorded the close, dispose $ANCHOR directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
 URL_NUM="${PR_URL##*/pull/}"; URL_NUM="${URL_NUM%%[!0-9]*}"
 case "$URL_NUM" in ''|*[!0-9]*) die "the pr_url on $ANCHOR ('$PR_URL') carries no numeric PR number" 1 ;; esac
 if [ -n "$PRNUM" ] && [ "$PRNUM" != "$URL_NUM" ]; then

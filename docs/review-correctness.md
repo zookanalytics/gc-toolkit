@@ -227,10 +227,9 @@ commands it changes.
   record, and every direct landing's record is a `gctk lifecycle` write, which
   `lifecycle.sh` execs with no shell fallback. So a gctk defect reaches every
   landing in the city.
-- **One meaning, several lists.** `lifecycle/lifecycle.toml` declares the
-  postures. prstatus carries them as its `knownPosture` switch, and
-  `lifecycle.test.sh` holds it to the TOML. `prstatus.Derive` reads a recorded
-  posture it does not know as needs-attention.
+- **One meaning, several lists.** `services/gctk/pr/record` declares the
+  pending record's values. `doctor/check-state-space` carries them as
+  `RECORD_STATES`, and its `run.test.sh` holds that copy to the Go file.
 - **A port reads what its script read.** gctk reads bead fields the way jq
   does. `Bead.Meta` in `internal/gcbd/gcbd.go` stringifies a scalar as
   `(v // "") | tostring` would, so a metadata number reads as its digits, and

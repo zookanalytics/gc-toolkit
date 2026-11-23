@@ -27,7 +27,7 @@ closed.
 
 Two distinct BEAD questions, the same way: the bead you claimed is not always
 the bead the branch is gated by. On a rework or rebase child the anchor is a
-separate bead, and the refinery and pr-facts.sh read the anchor.
+separate bead, and the refinery and the landing order read the anchor.
 work-submit.sh resolves it once, and the summary follows it.
 
 Rejection-aware: metadata.branch + metadata.rejection_reason mean a prior

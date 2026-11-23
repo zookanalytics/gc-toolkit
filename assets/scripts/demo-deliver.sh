@@ -162,8 +162,7 @@ echo "$PROG: delivered $FILE to PR#$PR on $ORIGIN_REPO_Q"
 # way a merged commit does. Record the attached comment's URL as the fix unit's
 # durable evidence and close the fix unit, in one write, so gate-ensure's
 # close-answered resolves the finding off the closed fix unit (it reads the fix
-# unit's closed status, not a commit) and pr-facts cites this evidence in place
-# of a head commit. A plain or hand-attached demo — any delivery with no rework
+# unit's closed status, not a commit). A plain or hand-attached demo — any delivery with no rework
 # --subject — keeps the no-close behavior; closing it is out of this seam.
 #
 # Fail closed: a successful attach that cannot record evidence and close the fix

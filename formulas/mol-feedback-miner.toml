@@ -251,8 +251,8 @@ dropped with a logged count, and the window re-covers those PRs next run.
 ## 4. Flag the city's unmarked posts, move the outside capture's day, summarize, and drain
 
 A city post without its mark, posted after its PR's provenance cutover and not
-`/code-review` output, came from a writer that skipped the mark, so
-pr-facts.sh reads it as feedback to answer. The flag names each such post
+`/code-review` output, came from a writer that skipped the mark, so the
+landing order takes it as feedback to answer. The flag names each such post
 once, in one patrol finding, which a proactive first reaction disposes.
 Advance moves the outside capture's day to the oldest last update among the
 PRs the run still owes, unread or with an outside post unrecorded, or to this

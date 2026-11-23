@@ -54,7 +54,7 @@ func (t takeOf) of() string { return "the take of " + t.url }
 
 // takePlans are the takes and the conversions the PRs the store's live beads
 // own owe, read through pass: a conversion for each PR whose bead carries
-// pr-facts.sh's receipts and owes their conversion (unconvertible), and a take
+// the old receipts and owes their conversion (unconvertible), and a take
 // for each PR whose bead's saved read holds a post the city has not taken,
 // while the bead may have it taken (untakenOn), which a bead carrying the
 // receipts may not. A PR more than one live bead owns owes neither, since the
@@ -86,7 +86,7 @@ func (u *run) takePlans(pass *ledger.Ledger) ([]plan, error) {
 // which the take files and marks, or why it takes none: the bead must own the
 // PR on the record, as an ask's filing requires, be open or blocked, be
 // assigned to nobody or to the refinery, as any act's bead is, name its branch,
-// which each ask names, and carry none of pr-facts.sh's receipts, which the
+// which each ask names, and carry none of the old receipts, which the
 // conversion turns into the city's marks first, and the saved read must be of
 // its PR, show the PR open and have applied the definition of feedback from the
 // bead's provenance instant.
@@ -94,7 +94,7 @@ func (u *run) untakenOn(o owned) ([]Post, string) {
 	s := o.saved
 	switch {
 	case len(o.receipts) > 0:
-		return nil, "the bead carries pr-facts.sh's receipts (" + strings.Join(o.receipts, ", ") +
+		return nil, "the bead carries the old receipts (" + strings.Join(o.receipts, ", ") +
 			"), which their conversion turns into the city's marks before a take"
 	case !record.OnRecord(o.rec.Result):
 		return nil, fmt.Sprintf("the bead owns no PR on the record: its merge_result reads %q", o.rec.Result)

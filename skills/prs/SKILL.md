@@ -24,8 +24,8 @@ puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.prs`.
 ## Answer its review comments
 
 The message is the city's answer to a reviewer: a fix that landed, an answer to
-a question, or a decision. The reviewer reads it, and the reconcile reads it as
-the city's own post rather than new feedback.
+a question, or a decision. The reviewer reads it, and the landing order reads it
+as the city's own post rather than new feedback.
 
 Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 
@@ -34,23 +34,23 @@ Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 - A conversation comment:
   `"$(gc <binding> scripts-dir)/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`.
 
-It appends the city's mark. The reconcile reads a post without that mark as new
-feedback and routes it into rework, so never post with `gh` directly.
+It appends the city's mark. The landing order reads a post without that mark as
+new feedback and files it as an ask, so never post with `gh` directly.
 
-A rework that answers a review's findings posts no answer of its own. It records
-each answer with `finding.sh answer`, as its work order says, and the city's one
-living comment per review shows the reviewer how each point was answered. A
-reply through `pr-post.sh` only adds detail that answer leaves out.
+The PR's review run answers each person's post where it was made, in the round
+that rules it: a reply in the post's thread, which it then resolves, a comment
+that links a post with no thread, and the city's 👍 once nothing more is owed.
+A reply through `pr-post.sh` only adds detail that answer leaves out.
 
-Resolve a thread only once its answer has landed. The write-back resolves a
-thread whose fix a rework landed, and one whose declined or deferred point its
-answer is on. A thread you answered yourself, a decline or a deferral included,
-with nothing left to land, you resolve with GitHub's `resolveReviewThread`
-mutation on the thread's `PRRT_` id:
+Resolve a thread only once its answer has landed. A thread you answered
+yourself, a decline or a deferral included, with nothing left to land, you
+resolve with GitHub's `resolveReviewThread` mutation on the thread's `PRRT_`
+id:
 `gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t=<PRRT_ id>`.
 Leave a thread open when a person replied in it after you, or when it holds a
-needs-you point, because that person's ruling closes it. A reply in a thread
-the city resolved is still feedback, which the reconcile reads and routes.
+question a person must answer, because that person's answer closes it. A reply
+in a thread the city resolved is still feedback, which the landing order takes
+as an ask.
 
 ## Send it back for rework
 

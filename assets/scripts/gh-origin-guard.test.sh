@@ -499,12 +499,13 @@ allowed "api POST to a non-repo endpoint"        "$RIG" "gh api -X POST gists -f
 allowed "api GET own repo detail is a read"      "$RIG" "gh api repos/zookanalytics/gc-toolkit"
 
 # --- (26) a post on our own repository carries the city's mark ------------
-# pr-facts.sh tells the city's own posts from feedback by the provenance mark
-# pr-post.sh appends, not by the author, so an unmarked post under the city's
-# login reads back as feedback and loops into rework. On an owned repository a
-# post passes only when its body visibly carries the mark; the write-back's
-# marker counts, as it does for pr-facts. The mark is read from the body or from
-# a body file, never guessed at in a body the shell builds as the command runs.
+# The city tells its own posts from feedback by the provenance mark pr-post.sh
+# appends, not by the author, so an unmarked post under the city's login reads
+# back as feedback and loops into an ask. On an owned repository a post passes
+# only when its body visibly carries the mark; the write-back's marker counts,
+# as it does in the definition of feedback. The mark is read from the body or
+# from a body file, never guessed at in a body the shell builds as the command
+# runs.
 echo "  -- unmarked posts on our own repository"
 MARKED="$SANDBOX/marked.md";     printf 'Fixed on the branch.\n\n<!-- gc:city -->\n' > "$MARKED"
 UNMARKED="$SANDBOX/unmarked.md"; printf 'Fixed on the branch.\n' > "$UNMARKED"

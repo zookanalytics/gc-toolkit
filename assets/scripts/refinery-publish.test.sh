@@ -286,8 +286,8 @@ eq "$(bstatus kid) $(meta kid merge_result)" "open blocked" "the parked rework c
 hasnt "$(bnotes bp)" "Rework landed" "the bead that owns the PR is not closed as a landed rework"
 
 # guarded — the anchor ga, whose PR #71 is open from polecat/ga, and its rework
-# child gk on that branch in the shape pr-facts.sh files one: a source key and
-# the anchor's PR keys. gk is handed back and prepared over a main that moved,
+# child gk on that branch in the shape a rework child is filed in: a source key
+# and the anchor's PR keys. gk is handed back and prepared over a main that moved,
 # so its prepared head is new. BEFORE is the branch's tip before the
 # publication.
 guarded() {

@@ -8,10 +8,11 @@ description: Which pull-request comments the city never reads as review feedback
 The city reads every review, inline comment and conversation comment on a pull
 request that it did not post itself as feedback, whoever wrote it
 ([state-machine.md](state-machine.md#operator-feedback)). Each piece of
-feedback becomes a finding a validator rules, and the batch it arrives in
-becomes a rework child that takes a polecat. A comment that informs rather than
-asks, such as a deployment notice or a report a workflow posts on every pull
-request, would cost that round each time it appears. Such a comment is not for
+feedback becomes an ask on the bead that owns the pull request, which the city
+marks 👀 and the pull request's review run rules and answers, and the merge
+waits until it is answered. A comment that informs rather than asks, such as a
+deployment notice or a report a workflow posts on every pull request, would
+cost that round each time it appears. Such a comment is not for
 review, and a comment not for review is never feedback, whoever posted it.
 
 ## Scope
@@ -119,13 +120,12 @@ exits 1.
 
 Nothing. It is never feedback, so:
 
-- it raises no unanswered feedback, so it neither holds the merge nor moves a
-  watermark;
-- it files no finding, rework child, validation pass or human gate;
-- the write-back neither acknowledges nor answers it, and in a review thread it
-  neither asks the city for an answer nor ends a wait on the reviewer;
+- it is never among the posts the city has not taken, so it holds no merge;
+- the landing order files no ask for it and puts no 👀 on it;
+- no review round answers it, and in a review thread it neither asks the city
+  for an answer nor ends a wait on the reviewer;
 - it is nothing said, so a pull request whose only comments are not for review
-  reads quiet;
+  owes the city's answer to nobody;
 - the feedback miner skips it as a notice, and files no observation from it.
 
 A review's state is not its body. An approval still counts as an approval, and a

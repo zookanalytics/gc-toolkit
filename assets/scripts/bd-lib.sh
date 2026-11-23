@@ -888,9 +888,8 @@ pr_finishing_birth() {
 }
 
 # The longest a settle of PR-finishing work waits for the store's priority lock
-# when a script of the merge cadence runs it: gate-ensure.sh and pr-facts.sh.
-# The cadence runs its arms one after another, so a longer wait holds every arm
-# after it. A bead whose settle times out in the cadence is settled by a later
+# when a script of the merge cadence runs it, gate-ensure.sh. The cadence runs
+# its arms one after another, so a longer wait holds every arm after it. A bead whose settle times out in the cadence is settled by a later
 # pass. queue-priority.sh's own default wait is longer, and
 # rework-child.sh, which runs in a review or converse session rather than in the
 # cadence, keeps it.
@@ -908,25 +907,9 @@ pr_finishing_settle() {
     "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
 }
 
-# route_finishing <child> <pool> — route a PR-finishing child to <pool> at its
-# priority, for the creator whose child runs with no poured formula
-# (pr-facts.sh). The route makes the child claimable, so the
-# child is settled first (pr_finishing_settle). Then `gc sling <pool> <child>
-# --no-formula --no-convoy` routes it, with no priority in the write, no formula
-# poured and no convoy filed. No pool can claim the child before the route
-# lands, and a priority move that runs between the settle and the sling rewrites
-# the child itself. The sling's exit is the answer, since it fails when its
-# route write fails, and its refusal is on stderr. Returns non-zero when the
-# child does not settle, having routed nothing, or when the sling fails, and the
-# caller leaves the child for a later pass.
-route_finishing() {
-  pr_finishing_settle "${1:-}" >/dev/null || return 1
-  gc sling "${2:-}" "$1" --no-formula --no-convoy </dev/null >/dev/null
-}
-
-# The keys a validation pass is found by: signoff.sh's machine-lane probe and
-# pr-facts.sh's human-lane probe both select a pass by its task_kind, its anchor
-# and its lane, so a pass short of one of them is one neither can find.
+# The keys a validation pass is found by: signoff.sh's lane probe selects a pass
+# by its task_kind, its anchor and its lane, so a pass short of one of them is
+# one it cannot find.
 # shellcheck disable=SC2034  # read by the scripts that source this file
 VALIDATION_SELECT="task_kind,anchor_bead,check_name"
 
@@ -942,10 +925,6 @@ validation_work_order() {
     '{task_kind: "validation", anchor_bead: $a, check_name: $l}
      + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
-
-# The gating-PR read's field set. pr-facts.sh asks for it plus labels.
-# shellcheck disable=SC2034  # read by the scripts that source this file
-PR_FIELDS="state,isDraft,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,mergeStateStatus,mergeable,reviewDecision,url"
 
 # Per-rig state and the pass lock. An order that runs once per rig keeps its
 # state in a directory named for the rig, and a pass that must never overlap

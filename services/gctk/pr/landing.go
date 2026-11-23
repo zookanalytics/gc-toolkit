@@ -387,7 +387,7 @@ const (
 	// filed before, marked each post with the city's EYES, and had the one-PR
 	// update read the PR's conversation again.
 	ActTaken = "taken"
-	// ActConverted: the bead carried pr-facts.sh's receipts, and the run turned
+	// ActConverted: the bead carried the old receipts, and the run turned
 	// them into the city's marks on its own read of the PR: it filed the post
 	// of each open human finding as its ask and closed the finding onto it,
 	// marked each other post they reach that carried neither of the city's
@@ -459,8 +459,8 @@ type Options struct {
 // no write and no read of GitHub. With Labels set, each PR the live beads own
 // whose saved labels differ from the ones the store derives owes a label write
 // too (labelPlans), each PR whose bead's saved read holds a post the city has
-// not taken owes its take, and each PR whose bead carries pr-facts.sh's
-// receipts owes their conversion in place of a take (takePlans). The records
+// not taken owes its take, and each PR whose bead carries the old receipts owes
+// their conversion in place of a take (takePlans). The records
 // that owe an act, the PRs whose labels owe a write and the PRs that owe a
 // take or a conversion are taken in a shuffled order, so one whose act is slow
 // or keeps failing holds no other back, and none is started past o.Window. Each

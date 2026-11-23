@@ -118,7 +118,7 @@ eq "$rc" 0 "exits 0"
 eq "$(meta A1 'gc.pr_close_disposition_kind')" "duplicate" "kind stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor')" "S1" "successor stamped"
 eq "$(meta A1 'gc.pr_close_disposition_successor_store')" "<absent>" "no store key when none given"
-eq "$(bstatus A1)" "open" "the anchor is NOT closed — that terminal close is pr-facts's"
+eq "$(bstatus A1)" "open" "the anchor is NOT closed — that terminal close is the landing order's"
 eq "$(cat "$STUB_DEPS")" "" "…and no edge is written here (bead-rehome is its sole writer)"
 hasnt "$(cat "$STUB_GH_LOG")" "pr close" "--no-close-pr closes no PR"
 
@@ -133,7 +133,7 @@ has "$out" "closed PR#71" "reports the close"
 has "$(cat "$STUB_GH_LOG")" "pr comment 71 --repo github.com/zook/gc-toolkit --body Closing as re-homed: disposition recorded on anchor A2 (successor S2)." \
   "the closing comment is posted on the PR"
 has "$(cat "$STUB_GH_LOG")" "ruled out" "…carrying the note"
-has "$(cat "$STUB_GH_LOG")" "<!-- gc:city -->" "…and the city's mark, so pr-facts never reads it back as feedback"
+has "$(cat "$STUB_GH_LOG")" "<!-- gc:city -->" "…and the city's mark, so the city never reads it back as feedback"
 eq "$(grep -E '^pr (comment|close) ' "$STUB_GH_LOG" | cut -d' ' -f2 | tr '\n' ' ')" "comment close " \
   "the comment is posted before the close"
 hasnt "$(grep '^pr close ' "$STUB_GH_LOG")" "--comment" "the close posts no comment of its own"

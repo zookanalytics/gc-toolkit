@@ -28,18 +28,12 @@
 #     no --current-labels, so this writer reads the PR's labels.
 #   - gctk pr compare, the net, which calls clear on each PR its search finds
 #     carrying a label of these families that no live bead owns.
-#   - pr-facts.sh, which calls reconcile for each open PR its full pass's paced
-#     walk reaches, after a posture value it changes and after it routes a
-#     feedback batch, and clear when it records a merge or a close.
 #   - signoff.sh, which calls reconcile after a verdict.
-# A clear pr-facts.sh makes that does not land is recorded on the anchor as
-# status_label_clear_owed, and its full pass retries it. A
-# write the landing order or the net makes that does not land records nothing,
-# and their next run finds the same difference.
+# A write the landing order or the net makes that does not land records
+# nothing, and their next run finds the same difference.
 #
-# Every GitHub write is pinned to a repository the caller resolved (--repo), the
-# same origin-pinning pr-facts.sh already applies; gh-origin-guard.sh
-# guards agent-typed gh, not a script's own calls.
+# Every GitHub write is pinned to a repository the caller resolved (--repo);
+# gh-origin-guard.sh guards agent-typed gh, not a script's own calls.
 #
 # Verbs:
 #   ensure    --repo Q [--host H]                         create the status: and held: labels, or correct a description
@@ -125,9 +119,9 @@ command -v jq >/dev/null 2>&1 || { warn "jq is required; nothing done"; exit 1; 
 
 # --- repository identity --------------------------------------------------
 
-# Resolve host/owner-name the way pr-facts.sh does, so a self-resolved origin and
-# a caller-passed --repo pin the same repository. host is kept: dropping it lets
-# another forge with the same owner/name read as ours.
+# Resolve host/owner-name from --repo or the checkout's origin, so a
+# self-resolved origin and a caller-passed --repo pin the same repository. host
+# is kept: dropping it lets another forge with the same owner/name read as ours.
 resolve_origin() { # sets ORIGIN_HOST, ORIGIN_REPO, ORIGIN_REPO_Q from --repo or git
   ORIGIN_HOST=""; ORIGIN_REPO=""; ORIGIN_REPO_Q=""
   local q="${1:-}" h="${2:-}"
@@ -190,9 +184,9 @@ ensure_labels() { # uses ORIGIN_*
 
 # --- the projection derivation (one Go code path) -------------------------
 
-# The values are computed by one Go package, services/gctk/pr/prstatus, exported so
-# the helm board derives the same per-bead state from it, so a bead's PR labels
-# and its board liveness cannot disagree. `gctk pr status <anchor>`
+# The values are computed by one Go package, services/gctk/pr/prstatus, exported
+# so the helm board derives the same per-bead state from it, so a bead's PR
+# labels and its board liveness cannot disagree. `gctk pr status <anchor>`
 # prints working|merging|needs-review|needs-attention, and with --json one
 # object carrying that status, the held values and the reasons behind them,
 # {"status": ..., "held": [...], "reasons": [...]}, of which this script reads

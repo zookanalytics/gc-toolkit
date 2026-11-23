@@ -15,7 +15,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
 
-// The conversion of pr-facts.sh's receipts (specs/tk-1tfzr71.161/design.md,
+// The conversion of the old receipts (specs/tk-1tfzr71.161/design.md,
 // section 2's "The old receipts on a moved bead" and section 11's tests for
 // unit 3), on the landing order's world: a bead on the pending record that
 // carries the old path's watermarks, answered marks and batch ledgers has the
@@ -23,7 +23,7 @@ import (
 // city's own posts resolved and its open human findings filed as the asks of
 // their posts, before any take, and then the receipts unset.
 
-// receipts are pr-facts.sh's receipts as the cases put them on the bead: they
+// receipts are the old receipts as the cases put them on the bead: they
 // reach review 200, inline comment 600, past a watermark of 550, and
 // conversation comment 900, and the inline batch went to the ask tk-9.
 var receipts = map[string]string{
@@ -36,7 +36,7 @@ var receipts = map[string]string{
 // converting is the landing order's world whose bead carries the receipts and
 // whose PR holds, besides the approval the world starts with, posts on both
 // sides of them: below the marks a review's message, an approval's message, a
-// review pr-facts.sh marked when it routed it, two inline comments and a
+// review the old path marked when it routed it, two inline comments and a
 // conversation comment, and above them a review, an inline comment and a
 // conversation comment. One thread holds only the city's own finding, and in
 // another a person answered the city's finding.
@@ -87,7 +87,7 @@ func conversionOf(t *testing.T, out []pr.RunOutcome) (pr.RunOutcome, []pr.RunOut
 	var c pr.RunOutcome
 	var rest []pr.RunOutcome
 	for _, o := range out {
-		if strings.Contains(o.Detail, "the conversion of pr-facts.sh's receipts on "+bead) {
+		if strings.Contains(o.Detail, "the conversion of the old receipts on "+bead) {
 			if c.Action != "" {
 				t.Fatalf("two conversions in one run: %+v", out)
 			}
@@ -124,8 +124,8 @@ func carriesNoReceipt(t *testing.T, d *land) {
 // The conversion marks with the city's EYES each post the receipts reach that
 // carries neither of the city's marks, and files nothing for them: the review
 // message, the inline comments at or below the answered mark and the
-// conversation comment. It leaves the review pr-facts.sh marked as it is, and
-// an approval's message, which no receipt reaches, since pr-facts.sh routed
+// conversation comment. It leaves the review the old path marked as it is, and
+// an approval's message, which no receipt reaches, since the old path routed
 // none. It resolves the thread that holds only the city's own finding and
 // leaves the one a person answered. Once the one-PR update has read the
 // conversation again, it unsets the receipts, and the run makes no take. The
@@ -521,7 +521,7 @@ func TestNoReviewRunIsPouredWhileTheReceiptsStand(t *testing.T) {
 		t.Fatalf("over the receipts the record reported %+v and %d runs were poured", rest, p.count())
 	}
 	is(t, rest[0], pr.ActChecked)
-	says(t, rest[0], "no review run is poured while the bead carries pr-facts.sh's receipts")
+	says(t, rest[0], "no review run is poured while the bead carries the old receipts")
 	delete(d.github.Fail, "ResolveThread")
 	c, rest = conversionOf(t, d.reconcile(t, pr.Options{}))
 	is(t, c, pr.ActConverted)

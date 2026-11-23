@@ -17,7 +17,7 @@ import (
 
 // The conversion of the old receipts (specs/tk-1tfzr71.161/design.md, section
 // 2, "The old receipts on a moved bead", and section 11, row 3). A bead that
-// owns a PR on the record can carry pr-facts.sh's receipts: in each id space
+// owns a PR on the record can carry the old path's receipts: in each id space
 // the highest id it routed (a watermark) and the highest its review threads had
 // answered past that (an answered mark), and the batches it routed, each with
 // the bead it went to. The landing order converts them into the city's marks,
@@ -32,7 +32,7 @@ import (
 // city's marks (oldMarks.covers), resolves each unresolved thread that holds
 // only the city's own posts, the old path's machine findings, and closes the
 // asks the batches went to and each finding whose post is gone. A post
-// pr-facts.sh marked when it routed it carries the city's EYES already, so the
+// the old path marked when it routed it carries the city's EYES already, so the
 // act leaves it as it is. With the lock free, the disposition writer closes
 // each finding onto the ask of its post, and the one-PR update reads the PR's
 // conversation again, since a mark and a resolution move no sign the cheap
@@ -46,38 +46,38 @@ import (
 // receipts on the bead, and the next run converts again from where GitHub and
 // the store then stand.
 
-// pr-facts.sh's receipts on the bead that owns a PR (lifecycle/lifecycle.toml,
-// [posture] and [metadata.pr_posture]). pr-facts.sh writes each, and the
-// landing order's conversion reads them and unsets them.
+// The old receipts on the bead that owns a PR (lifecycle/lifecycle.toml,
+// [metadata.pr_posture]). Nothing writes them, and the landing order's
+// conversion reads them and unsets them.
 var (
 	reviewWatermarkKey = ledger.Declare("pr_review_watermark", ledger.String,
-		"The highest id of a review whose message pr-facts.sh routed, among the comments and requests for "+
+		"The highest id of a review whose message the old path routed, among the comments and requests for "+
 			"changes it counts. "+receiptDoc)
 	commentWatermarkKey = ledger.Declare("pr_comment_watermark", ledger.String,
-		"The highest id of an inline comment pr-facts.sh routed. "+receiptDoc)
+		"The highest id of an inline comment the old path routed. "+receiptDoc)
 	issueCommentWatermarkKey = ledger.Declare("pr_issue_comment_watermark", ledger.String,
-		"The highest id of a conversation comment pr-facts.sh routed. "+receiptDoc)
+		"The highest id of a conversation comment the old path routed. "+receiptDoc)
 	reviewAnsweredKey = ledger.Declare("pr_review_answered", ledger.String,
 		"How far past pr_review_watermark the review threads had answered the counted reviews' messages when "+
-			"pr-facts.sh last read them. "+receiptDoc)
+			"the old path last read them. "+receiptDoc)
 	commentAnsweredKey = ledger.Declare("pr_comment_answered", ledger.String,
-		"How far past pr_comment_watermark the review threads had answered the inline comments when pr-facts.sh "+
-			"last read them. "+receiptDoc)
+		"How far past pr_comment_watermark the review threads had answered the inline comments when the old "+
+			"path last read them. "+receiptDoc)
 	reviewBatchKey = ledger.Declare("pr_review_batch", ledger.String,
-		"The batches of review messages pr-facts.sh routed, oldest first, as <disposition>|<exclusive floor>|"+
+		"The batches of review messages the old path routed, oldest first, as <disposition>|<exclusive floor>|"+
 			"<inclusive mark> records joined by ;, each disposition rework:<bead> or human:<gate>. "+receiptDoc)
 	commentBatchKey = ledger.Declare("pr_comment_batch", ledger.String,
-		"The batches of inline comments pr-facts.sh routed, in pr_review_batch's form. "+receiptDoc)
+		"The batches of inline comments the old path routed, in pr_review_batch's form. "+receiptDoc)
 	issueCommentBatchKey = ledger.Declare("pr_issue_comment_batch", ledger.String,
-		"The batches of conversation comments pr-facts.sh routed, in pr_review_batch's form. "+receiptDoc)
+		"The batches of conversation comments the old path routed, in pr_review_batch's form. "+receiptDoc)
 	commentDispositionKey = ledger.Declare("pr_comment_disposition", ledger.String,
-		"What pr-facts.sh routed a PR's last batch of posts to: rework:<bead>, the bead that answers it, or "+
+		"What the old path routed a PR's last batch of posts to: rework:<bead>, the bead that answers it, or "+
 			"human:<gate>. "+receiptDoc)
 )
 
-// receiptDoc says, for each receipt, who writes it and what the conversion does
-// with it.
-const receiptDoc = "pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the " +
+// receiptDoc says, for each receipt, that nothing writes it and what the
+// conversion does with it.
+const receiptDoc = "Nothing writes it. On a bead that owns a PR on the " +
 	"pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each " +
 	"post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
 
@@ -86,11 +86,11 @@ var receiptKeys = []ledger.Key[string]{reviewWatermarkKey, commentWatermarkKey, 
 	reviewAnsweredKey, commentAnsweredKey, reviewBatchKey, commentBatchKey, issueCommentBatchKey,
 	commentDispositionKey}
 
-// The keys of a human finding that the conversion reads, which finding.sh
-// writes as pr-facts.sh routes a person's post.
+// The keys of a human finding that the conversion reads, which finding.sh wrote
+// on a finding the old path filed for a person's post.
 var (
 	findingLaneKey = ledger.ReadOnly("finding.lane", ledger.String,
-		"The lane a finding was raised on: human for a person's post pr-facts.sh routed. finding.sh writes it "+
+		"The lane a finding was raised on: human for a person's post the old path routed. finding.sh writes it "+
 			"on a finding alone, in the create that files it.")
 	findingCommentKey = ledger.ReadOnly("finding.comment_id", ledger.String,
 		"The id of the post a human finding was raised from, in its own id space.")
@@ -110,7 +110,7 @@ func receiptsOn(r *ledger.Record) []string {
 	return out
 }
 
-// oldMarks is how far pr-facts.sh's receipts on a bead reach in each id space:
+// oldMarks is how far the old receipts on a bead reach in each id space:
 // the highest id a watermark, an answered mark or a record of a batch ledger
 // names there. batches are the beads the batches went to, as each disposition
 // names one with rework:<bead>.
@@ -120,8 +120,7 @@ type oldMarks struct {
 }
 
 // marksOf reads the receipts on r. A value that does not read as an id, and a
-// ledger record that does not read as one, reach nothing, as pr-facts.sh reads a
-// watermark that is not a number as 0.
+// ledger record that does not read as one, reach nothing.
 func marksOf(r *ledger.Record) oldMarks {
 	var m oldMarks
 	id := func(k ledger.Key[string]) int64 {
@@ -166,7 +165,7 @@ func (m *oldMarks) went(disposition string) {
 // covers reports whether the receipts reach p: an inline comment or a
 // conversation comment at or below its space's mark, or the message of a
 // comment or a request for changes at or below the review space's.
-// pr-facts.sh routed no approval's message, so no receipt reaches one, and the
+// The old path routed no approval's message, so no receipt reaches one, and the
 // take files it once the receipts are gone.
 func (m oldMarks) covers(p Post) bool {
 	switch p.Kind {
@@ -192,7 +191,7 @@ type finding struct {
 
 // findingsOn reads the open human findings on the bead id: the live beads whose
 // anchor_bead names it, raised on the human lane, which only a finding names. A
-// finding names its post as pr-facts.sh records it: by its comment id, with its
+// finding names its post as finding.sh records it: by its comment id, with its
 // review id the comment id itself for a review's message, the review that
 // carried it for an inline comment, and none for a conversation comment.
 func findingsOn(l *ledger.Ledger, id string) ([]finding, error) {
@@ -253,7 +252,7 @@ type convertOf struct {
 }
 
 // of names the conversion, as each outcome it reports opens.
-func (c convertOf) of() string { return "the conversion of pr-facts.sh's receipts on " + c.bead }
+func (c convertOf) of() string { return "the conversion of the old receipts on " + c.bead }
 
 // unconvertible says why the bead o reads owes no conversion now, and is empty
 // when it owes one: it carries the receipts, owns the PR on the record, is open
@@ -265,7 +264,7 @@ func (u *run) unconvertible(o owned) string {
 	s := o.saved
 	switch {
 	case len(o.receipts) == 0:
-		return "the bead carries none of pr-facts.sh's receipts"
+		return "the bead carries none of the old receipts"
 	case !record.OnRecord(o.rec.Result):
 		return fmt.Sprintf("the bead owns no PR on the record: its merge_result reads %q", o.rec.Result)
 	case o.status != "open" && o.status != "blocked":
@@ -339,7 +338,7 @@ func (u *run) convertFree(ctx context.Context, c convertOf, done converted) RunO
 		}
 		err := u.Dispositions.Close(Disposal{Bead: f.finding, Status: f.status, Assignee: f.assignee,
 			Disposition: Disposition{Kind: "re-homed", Successor: f.ask},
-			Note: fmt.Sprintf("The landing order's conversion of pr-facts.sh's receipts on %s filed this finding's post "+
+			Note: fmt.Sprintf("The landing order's conversion of the old receipts on %s filed this finding's post "+
 				"(%s) as the ask %s, which carries it now.", c.bead, f.post, f.ask)})
 		if err != nil {
 			done.failed = append(done.failed, fmt.Sprintf("%s did not close onto %s: %v", f.finding, f.ask, err))
@@ -566,7 +565,7 @@ func (u *run) convertRead(ctx context.Context, o owned, hub Hub, marks oldMarks,
 		if stopped("the close of the batch's ask " + a.ID) {
 			continue
 		}
-		note := fmt.Sprintf("The landing order closed this ask (%s) in converting pr-facts.sh's receipts on %s: each "+
+		note := fmt.Sprintf("The landing order closed this ask (%s) in converting the old receipts on %s: each "+
 			"post of its batch carries the city's mark, and each one its open findings name is an ask of its own, so no "+
 			"review run takes it.", at, o.id)
 		if err := u.moot(a.ID, a.Status, "", note); err != nil {
@@ -582,7 +581,7 @@ func (u *run) convertRead(ctx context.Context, o owned, hub Hub, marks oldMarks,
 		if stopped("the close of finding " + f.id) {
 			continue
 		}
-		note := fmt.Sprintf("The landing order closed this finding (%s) in converting pr-facts.sh's receipts on %s: "+
+		note := fmt.Sprintf("The landing order closed this finding (%s) in converting the old receipts on %s: "+
 			"its post, %s %d, is no longer on the PR, so nothing is owed to it.", at, o.id, f.kind, f.post)
 		if err := u.moot(f.id, f.status, f.assignee, note); err != nil {
 			done.failed = append(done.failed, fmt.Sprintf("finding %s, whose post is gone, did not close: %v", f.id, err))
@@ -679,7 +678,7 @@ func (u *run) unsetReceipts(ctx context.Context, c convertOf, did []string) RunO
 			k.Clear(w)
 		}
 	}
-	w.Note(fmt.Sprintf("The landing order converted pr-facts.sh's receipts on this bead (%s) into the city's marks on "+
+	w.Note(fmt.Sprintf("The landing order converted the old receipts on this bead (%s) into the city's marks on "+
 		"its PR's posts, and unset %s.", u.stamp(), strings.Join(o.receipts, ", ")))
 	if err := u.Ledger.Commit(w); err != nil {
 		if errors.Is(err, ledger.ErrGuard) {

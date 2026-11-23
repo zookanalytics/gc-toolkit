@@ -750,9 +750,9 @@ hasnt "$(calls)" "pr-dispose" "(RECORD-REFUSED) …before the retirement acts"
 hasnt "$(calls)" "gate resolve" "(RECORD-REFUSED) …and before any gate is answered"
 
 # An attempt that retires the member's PR and answers its gate, then stops
-# because the conversation's close does not land, asks for a re-run. pr-facts
-# can consummate the retirement before it, closing the member's anchor, which is
-# then no open PR the ruling reaches. The re-run takes the PR from the record
+# because the conversation's close does not land, asks for a re-run. The landing
+# order can consummate the retirement before it, closing the member's anchor,
+# which is then no open PR the ruling reaches. The re-run takes the PR from the record
 # the first attempt wrote on the conversation, finds it closed and goes on,
 # rather than falling back to the epic, which pr-dispose.sh refuses.
 epic_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
@@ -1268,8 +1268,8 @@ esac
 eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
 eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
 eq "$(acts tk-conv)" "Retired the PR of tk-anc.|Ruled: the work moved to the new design" "(RETIRE) …and the conversation records the PR it retired, then the ruling"
-# The same sign-off run again once pr-facts has consummated the retirement,
-# closing the anchor: nothing is disposed again, and the conversation keeps the
+# The same sign-off run again once the landing order has consummated the
+# retirement, closing the anchor: nothing is disposed again, and the conversation keeps the
 # action the first attempt recorded.
 setf tk-anc status closed; edge tk-anc supersedes tk-conv
 : > "$CALLS"

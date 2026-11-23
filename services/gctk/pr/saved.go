@@ -317,8 +317,8 @@ func sameRuns(a, b []RequiredRun) bool {
 // owned is a live bead that owns a PR, as the PR watch reads it: the bead, its
 // status and assignee, the PR's URL, host, repository and number, its pending
 // record, branch and provenance instant, the read saved on it, nil when it
-// holds none or one that does not decode, and the receipts of pr-facts.sh it
-// carries (receiptsOn).
+// holds none or one that does not decode, and the old receipts it carries
+// (receiptsOn).
 type owned struct {
 	id, status, assignee string
 	url, host, repo      string

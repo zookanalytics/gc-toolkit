@@ -150,7 +150,7 @@
     "readers": [
       "pr"
     ],
-    "doc": "The lane a finding was raised on: human for a person's post pr-facts.sh routed. finding.sh writes it on a finding alone, in the create that files it."
+    "doc": "The lane a finding was raised on: human for a person's post the old path routed. finding.sh writes it on a finding alone, in the create that files it."
   },
   {
     "name": "finding.review_id",
@@ -545,25 +545,25 @@
     "name": "pr_comment_answered",
     "type": "string",
     "owner": "pr",
-    "doc": "How far past pr_comment_watermark the review threads had answered the inline comments when pr-facts.sh last read them. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "How far past pr_comment_watermark the review threads had answered the inline comments when the old path last read them. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_comment_batch",
     "type": "string",
     "owner": "pr",
-    "doc": "The batches of inline comments pr-facts.sh routed, in pr_review_batch's form. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The batches of inline comments the old path routed, in pr_review_batch's form. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_comment_disposition",
     "type": "string",
     "owner": "pr",
-    "doc": "What pr-facts.sh routed a PR's last batch of posts to: rework:\u003cbead\u003e, the bead that answers it, or human:\u003cgate\u003e. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "What the old path routed a PR's last batch of posts to: rework:\u003cbead\u003e, the bead that answers it, or human:\u003cgate\u003e. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_comment_watermark",
     "type": "string",
     "owner": "pr",
-    "doc": "The highest id of an inline comment pr-facts.sh routed. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The highest id of an inline comment the old path routed. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_github_read",
@@ -582,13 +582,13 @@
     "name": "pr_issue_comment_batch",
     "type": "string",
     "owner": "pr",
-    "doc": "The batches of conversation comments pr-facts.sh routed, in pr_review_batch's form. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The batches of conversation comments the old path routed, in pr_review_batch's form. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_issue_comment_watermark",
     "type": "string",
     "owner": "pr",
-    "doc": "The highest id of a conversation comment pr-facts.sh routed. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The highest id of a conversation comment the old path routed. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_last_checked_at",
@@ -630,19 +630,19 @@
     "name": "pr_review_answered",
     "type": "string",
     "owner": "pr",
-    "doc": "How far past pr_review_watermark the review threads had answered the counted reviews' messages when pr-facts.sh last read them. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "How far past pr_review_watermark the review threads had answered the counted reviews' messages when the old path last read them. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_review_batch",
     "type": "string",
     "owner": "pr",
-    "doc": "The batches of review messages pr-facts.sh routed, oldest first, as \u003cdisposition\u003e|\u003cexclusive floor\u003e|\u003cinclusive mark\u003e records joined by ;, each disposition rework:\u003cbead\u003e or human:\u003cgate\u003e. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The batches of review messages the old path routed, oldest first, as \u003cdisposition\u003e|\u003cexclusive floor\u003e|\u003cinclusive mark\u003e records joined by ;, each disposition rework:\u003cbead\u003e or human:\u003cgate\u003e. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_review_watermark",
     "type": "string",
     "owner": "pr",
-    "doc": "The highest id of a review whose message pr-facts.sh routed, among the comments and requests for changes it counts. pr-facts.sh writes it on the bead that owns the PR. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
+    "doc": "The highest id of a review whose message the old path routed, among the comments and requests for changes it counts. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_state",

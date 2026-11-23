@@ -6,10 +6,11 @@ description: The exec orders around a PR's merge — the merge cadence, with its
 # Refinery merge cadence
 
 The merge side of the anchor lifecycle is driven by orders, never by an agent.
-The landing order merges each PR on the pending record
-([The landing order](#the-landing-order)), and the merge cadence's arms read
-and route what happens on the PR. The cadence's liveness has its own doctor
-check (`check-cadence-live`).
+The landing order merges each PR on the pending record and takes each person's
+post on it, its red checks and its conflicts as work
+([The landing order](#the-landing-order)), and the merge cadence's arms keep the
+old review path's dispatch and sweeps. The cadence's liveness has its own
+doctor check (`check-cadence-live`).
 
 ## Scope
 
@@ -37,7 +38,7 @@ which runs the arms in order and exits.
 | Working directory | the rig's own root, so `git remote get-url origin` resolves |
 | Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
 | Timeout | `timeout = "600s"`, tunable per rig from city.toml `[[orders.overrides]]` — it bounds how long a wedged pass holds the per-rig lock. It must cover a whole pass at the slow end of host load and stay under the driver's `REFINERY_RECONCILE_LOCK_STALL_SECS`, and it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
-| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) is shared by the arms that walk a set growing with the queue, listed in `PACED_ARMS` in refinery-reconcile.sh: pr-feedback, gate-ensure and pr-facts. Each paced arm's deadline is an equal share of what the budget has left when it starts, split among it and the listed arms still to run, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20); an arm the pass does not run leaves the split. Each visits first the anchors it can act on and then resumes its rotation from its cursor in the pass state dir. Set both per rig through the override's `env` |
+| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) bounds the arm that walks a set growing with the queue, listed in `PACED_ARMS` in refinery-reconcile.sh: gate-ensure. Its deadline is what the budget has left when it starts, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20). It visits first the anchors it can act on and then resumes its rotation from its cursor in the pass state dir. Set both per rig through the override's `env` |
 
 Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
 one `[order.env]` serves every registration. The refinery agent does not drive
@@ -47,69 +48,6 @@ the cadence — the arms run whether or not any refinery session is awake.
 
 Each arm keeps the number the driver logs it under.
 
-- **(1) pr-facts.sh --posture-only** — the posture record, which the
-   PR-finishing rank and the board read. It runs first, and writes `pr_posture`
-   and `pr_merge_state` at the live head for every open non-draft anchor, then
-   stops: no dispatch, no watermark, and MERGED/CLOSED reconciliation stays with
-   arm 7. A held merge still gets one, because recording a fact is not a
-   dispatch. Its rc is reported and fails the order. Where this arm
-   changes an anchor's posture value, it also
-   re-derives that PR's `status:` and `held:` labels, so an approval moves them
-   in the pass that records it
-   ([state-machine.md](state-machine.md#the-status-label-github-projection)).
-
-   Its cost follows the PRs that moved, not the PR set. One paginated GraphQL
-   read lists every open PR with its head, base, draft flag, review decision,
-   merge state, `updatedAt`, and the count and newest id of its reviews and of
-   its Conversation comments. An inline comment arrives inside a review of its
-   own, so it moves the review count. GitHub computes the merge state per PR on
-   request and times out on about a hundred at once, so the read pages 25 PRs at
-   a time. The arm keeps, in `pr-posture.seen` in the pass state dir, the facts
-   each posture was last derived from: those PR facts with the anchor's
-   watermarks, its provenance cutover, its lift line (`bring_current_lifted_at`),
-   the acting login, and a checksum of the script and of the city's own-post
-   definition. An anchor whose facts all read the same, and whose bead still
-   carries that posture at that head, keeps it with no per-PR read, and its
-   merge state is recorded from the batched read.
-   Any other anchor is read whole, as every anchor is when the batched read
-   fails. A `commented` posture keeps no basis, because a routing or a cleared
-   human gate can release it with nothing on the PR moving, and neither does a posture an
-   unengaged-thread candidate decided, because that answer turns on bead state.
-   A derivation whose answered marks (`pr_comment_answered`,
-   `pr_review_answered`) did not record keeps none either. The marks let the
-   next derivation drop answered feedback without reading the review threads, so
-   until they land each derivation reads the threads again. The marks stay out of
-   the basis, because only a derivation writes them.
-   `updatedAt` cannot stand in for the counts: GitHub can leave it at the first
-   of several reviews submitted seconds apart. The batched read and the per-PR
-   reads are separate requests, and GitHub can answer one of them from a moment
-   ahead of the other, so a derivation's lists can be older than the facts the
-   batched read gave. A derivation therefore records its basis only as a
-   candidate, which keeps no posture. The next pass derives the posture again,
-   and a derivation that reads the same facts and derives the same posture
-   confirms the basis. A PR that moved is therefore read whole on two passes.
-- **(4) pr-facts.sh --route-comments-only** — the feedback routing of arm 7, run
-   ahead of the slow arms. Arm 7 runs behind gate-ensure, so a pass the timeout
-   kills before arm 7 would leave the operator's review stamped-as-seen by the
-   posture yet unrouted while the anchor reads as handled. This arm closes that
-   window: it re-reads each open anchor's feedback and dispatches the same
-   rework child or human gate and opens the same validation pass arm 7 would, or
-   on a PR on the pending record files the same ask, then
-   stops — no write-back sweep, no external-fact reconciliation, none of the
-   arms that belong at the tail. A batch it routes is live work on the anchor,
-   which the `status:` label reads, so it re-derives that PR's labels as it
-   routes. Arm 7 still runs the routing idempotently (a
-   landed batch's watermark and `pr_comment_disposition` make the re-run a
-   no-op) and still owns the write-back and the terminal-state records. Its rc
-   is reported but holds nothing: the full pass is the backstop. It runs ahead of
-   gate-ensure, so a validation pass it opens is in place for gate-ensure to
-   dispatch a validator onto. It walks the PRs under its share of the pass
-   budget, first the anchors whose recorded posture is `commented` (feedback no
-   routing has answered) and the `changes_requested` ones whose PR changed since
-   this arm last visited them (that posture alone cannot say whether its
-   feedback is routed), then the rest in a rotation. The observability half is
-   `doctor/check-feedback-routing-owed`, which flags an anchor whose posture still
-   says a human is waiting with no disposition past a window.
 - **(6) gate-ensure.sh** — check satisfiability, on the old review path, for an
    anchor at `pre_open_gate` or `pull_request`, which no bead carries; a PR on
    the pending record has a review run instead ([state-machine.md](state-machine.md#checks)). Every gating
@@ -166,218 +104,6 @@ Each arm keeps the number the driver logs it under.
    enumeration it could not read) is reported without failing the order or
    holding anything.
 
-- **(7) pr-facts.sh** — external facts only, no merge authority: PR merged
-   out-of-band (record), closed-unmerged (→ `abandoned` + a human gate), base
-   changed (→ `retargeted` + a human gate), CONFLICTING (one rework child per head, on an
-   approved PR only, by the approval rule `review-verdict.sh` states; the child's
-   handoff runs `bring-current-guard.sh`, which refuses it until the worker's
-   audit covers every conflict and, when the round conflicted, reopens triage
-   to rule on what it reopens and whether the approval stands, adding triage
-   to an anchor whose `check_set` declares no triage lane, or, on the `none`
-   or `off` opt-out, lifting the approval itself; a ruling that lifts the
-   approval draws `bring_current_lifted_at`, before which no approval counts,
-   and files no gate
-   ([state-machine.md](state-machine.md#bringing-a-branch-current)). When the
-   conflict is a landed change deleting code the branch edits,
-   the approved PR gets the operator's supersession decision instead of the
-   child), `BLOCKED` on an unresolved review thread or a
-   missing required approving review (→ no gate. The write-back below resolves
-   every thread the city rules on, whether it fixed, declined or deferred the
-   point, and a thread whose question only a person can answer waits on a gate
-   of its own, as a `needs-you` finding's does.
-   A missing approving review is the operator's own review queue, the state the
-   board's review section already surfaces from the recorded `pr_posture`.
-   Neither asks a person anything, so the cadence withdraws any open
-   `merge-blocked-threads` or `merge-blocked-approval` gate, resolving it
-   `moot:`, at the top of its run ahead of the no-anchors early-exit and in
-   every rig. It lists the store's gates and reaches the beads each one blocks
-   from the gate's end, and leaves a gate whose beads do not read for the next
-   pass), hold-resolved retraction, and the withdrawal of its own merge-path gates
-   once their situation is gone (an unengaged-threads gate once the head moves
-   past the one it counted, the retarget and abandoned gates once the base or
-   the PR is back, and a red-check park's gate once GitHub reads the PR
-   mergeable). A feedback gate
-   waits for its answer, and a gate a person is assigned is left to them. It re-reviews no moved head: a lane state is a
-   state of the lane, and only gate-ensure dispatches on it. It also records every open
-   non-draft anchor's **posture** — `pr_posture`, `pr_merge_state`, and the
-   comment watermarks ([state-machine.md](state-machine.md#posture)) — before
-   any of those arms run, and routes unanswered review feedback — under a
-   `commented` posture and equally under a human `changes_requested` — to a
-   rework child, or to a human gate when no fix pool is configured or the head
-   branch is unresolved. Feedback is every review, inline comment and
-   conversation comment that is neither the city's own post nor marked as not
-   for review ([state-machine.md](state-machine.md#operator-feedback)), whoever
-   wrote it.
-   The posture write is idempotent, so re-running it
-   here after arm 1 costs nothing when nothing changed. The routing runs in two
-   places by design: arm 4 picks the feedback up ahead of the slow arms, and this
-   arm re-runs the same routing idempotently — a landed batch's watermark and
-   `pr_comment_disposition` make the second run a no-op — while owning the
-   write-back sweep and the terminal-state records that only make sense after
-   merge. Arm 1 records the posture; arm 4 and this arm decide what answers it.
-   Each batch it
-   routes also opens one validation pass on the anchor — a
-   `task_kind=validation` bead, unrouted, blocking the anchor — from which
-   `gate-ensure.sh`'s quiescence holds a fresh whole-diff review while the
-   validator rules the batch.
-   The batch is watermarked only once that pass records the shape the validator
-   reads — `anchor_bead`, `check_name=human`, `reviewed_oid` — and its `blocks`
-   edge holds.
-   A write-back sweep then answers the operator in the PR itself, marking each
-   routed comment as looked at, awaiting a person, or resolved. On an anchor
-   carrying `pr_comment_disposition`, every comment at or below its space's
-   watermark gets an EYES reaction. The watermarks are cumulative and a
-   disposition holds one batch at a time, so each id space keeps a ledger of the
-   batches routed under it: `pr_comment_batch` for inline comments,
-   `pr_review_batch` for review bodies, and `pr_issue_comment_batch` for
-   Conversation comments. A ledger holds one `<disposition>|<floor>|<mark>`
-   record per batch, oldest first, written in the same transition that advances
-   the disposition, and a comment's batch names the bead that answers it. While
-   that bead is a human gate still open, the comment gets an answer that leads
-   with a question mark and names the gate. A rework child closes when it lands,
-   and a gate when a person clears it. Once the comment's bead has closed, and
-   its own finding has closed if it has one, the comment is resolved: an answer
-   leading with a check mark says what resolved it, and the comment trades its
-   EYES reaction for THUMBS_UP. An answer for a rework child names the commits
-   it made: the PR's non-merge commits whose message names the child, and of
-   those only the ones naming the comment when any do. It says Fixed when the
-   comment's must-fix finding closed with that rework. It never names the PR
-   head for being the head, since the head can be a merge of the base. A
-   finding ruled needs-you keeps its comment awaiting a person while it is
-   open, and its owed reply is the answer, leading with the question mark. A
-   declined or deferred finding's owed reply is its comment's answer too. That
-   reply leads with the ruling ("Declined" or "Deferred"), so a reader scanning
-   the PR tells a fix from a pushback. The comment trades EYES for THUMBS_UP
-   once the reply is on the PR. Whether an
-   owed reply is on the PR is read back off GitHub on every pass, by its own
-   text, so another reply in the thread never stands in for it. An inline
-   comment is answered in its thread.
-   The thread is answered once every routed comment in it is resolved: the
-   comments a batch resolved by one reply naming each bead, and a comment its
-   own finding answers by that finding's owed reply. It is resolved behind
-   those answers, whether the city fixed, declined or deferred the point, on
-   a pass whose own read of the PR shows each owed reply in it, never on a
-   stamp an earlier read left. A thread
-   holding a needs-you finding stays open until the person rules. A post in a
-   thread the city resolved is feedback like any other, so a reply of the
-   reviewer's there is ruled as a finding of its own, and the declined or
-   deferred finding stays closed. A needs-you finding closes once the human
-   gate holding its question, followed
-   through any re-home, has been cleared with a reason headed `ruled:` (or the
-   finding records the bead whose ruling released it, `finding.ruling_bead`),
-   and no fix unit on its lane, nor a ruling's rework child, is in flight, and
-   its comment then resolves through its batch's bead like any other. A gate
-   cleared `moot:` or `benign:` carries no ruling and releases nothing. A
-   Conversation comment has no thread, so a Conversation comment of the city's
-   links to the comments one bead answers and carries their answer. A review
-   body has no thread either, and its review round's living answer carries its
-   answer and the mark that trades its reaction. Each review round that raised
-   findings has one living answer. A round is the reviews one reviewer
-   submitted against one commit, however many GitHub reviews their client split
-   that pass into. The answer is a Conversation comment posted once the round's
-   pickup reactions land and edited in place whenever its rendering changes
-   (`assets/scripts/review-answer.sh` states what it shows): any human gate
-   waiting on the operator first, a count line, then one point per finding, sorted into
-   Needs you, Worth a look, In progress and Done, each a label linked to the
-   comment, a sentence in the words of whoever answered it, and the commit,
-   follow-up or gate carrying it. A declined or deferred point that owes its
-   raiser a reply is worth a look, since the city resolves its thread, and a
-   reply of the reviewer's in that thread is a point of its own. The count line
-   counts the points under Needs you, so it never reads all answered while one
-   waits, and it still says where the other points stand. It carries a digest of its own
-   rendering, so a pass that changes nothing writes nothing. When the city
-   holds more than one comment for a round, each keyed to one of its reviews,
-   the pass keeps one, moves every mark the others carry into it, and deletes
-   the others. It is rendered to fit the size GitHub takes in one comment: a
-   long review shortens its notes from the fix, then its quoted replies, then its
-   sentences, each cut naming the bead that holds the whole text, and past that
-   lists the points that fit and names the rest. Once every finding a human
-   CHANGES_REQUESTED review raised has closed and every answer one of them owes
-   is on the PR, the sweep re-requests the reviewer and dismisses that review
-   with a one-line note linking its round's living answer, which then says the
-   review was dismissed. A review whose body was ruled restates waits for every
-   finding of its round. A dismissal is not an approval. The routing arm leaves
-   out of a batch the feedback the review threads already answered: an inline
-   comment in a resolved thread with a later post of the city's, or a review
-   body whose every inline comment is one. Such feedback sits inside the
-   batch's range, but the batch's bead never saw it, so unless a finding names
-   it, it is acknowledged and never marked. A record is dropped once
-   every comment it covers carries its final mark and every inline comment the
-   batch answered sits in a resolved thread, unless the comment's own finding
-   answers it, which the plan reads from the finding until its thread is
-   resolved. The reactions are written
-   first and bounded per pass; when the cap or a failed write leaves one owing,
-   that pass posts no answer, so no comment is answered before it is
-   acknowledged. A thread with a post after the city's own reply that is not
-   itself the city's own is left open, and so is one holding a comment above
-   the mark: no batch covers that
-   comment, so nothing has answered it, and resolving would put the thread past
-   every later pass. A thread left open this way keeps its batch's record, so
-   every later pass still answers for it: the post that left it open routes as
-   feedback of its own, and the answer to that post resolves the thread. A
-   thread the city answered for a batch or for a ruled machine finding (below)
-   and cannot resolve under its identity (GitHub reports `viewerCanResolve`
-   false) stays owed. Each pass tries the resolve again and logs the thread,
-   and files the situation through `patrol-finding.sh` as one finding for the
-   repository, keyed `pr-thread-unresolvable.<owner>.<repo>`. The finding names
-   no anchor, so it holds no merge. Idempotence is read back off GitHub, so a
-   repeat pass writes nothing and a failed write is retried by the next one.
-   The per-anchor walk runs under the arm's share of the pass budget,
-   first the anchors that need action, then the rest in a rotation. Needing
-   action is a PR that left the open list (a merge or a close to record), an
-   approved PR the posture arm recorded `DIRTY` at its head with no rework child
-   in flight (it owes a merge-in), and a PR whose head, base, draft flag, review
-   decision, or review or comment count changed since this walk last visited
-   it. An approved conflicting PR under a `merge_hold`, a `rebase_hold` or an
-   armed re-dispatch owes no merge-in, because the conflict arm stands down on
-   each, so it rotates with the rest until the hold lifts. The marks live in
-   `pr-facts.cursor.seen`, and a walk with none records them and puts nothing
-   first for a change. The write-back sweep reads GitHub only for the anchors
-   carrying a disposition or owed a finding post or answer (below), at least
-   four calls each, so it runs under the same deadline in a rotation of its own
-   (`pr-facts.cursor.writeback`), with one anchor visited even on a pass whose
-   walk spent the deadline. It visits first an anchor whose disposition, a
-   watermark, or its live children changed since the sweep last visited it: a
-   batch routed, or the work answering one closing. An anchor with no
-   disposition, there only for the findings its PR is owed, rotates with the
-   rest.
-   The same sweep carries each machine-lane finding ruled worth fixing
-   (`must-fix` or `deferred`) to the PR. A finding whose locus begins with a
-   file the diff touches becomes a file-level review comment on that file, and
-   any other locus becomes a Conversation comment. Once the finding closes, the
-   comment is answered with how it closed: the fix units and the commits they
-   made, the deferral's follow-up, or the decline. Its thread is then
-   resolved, whether the finding was fixed, declined or deferred, unless a post
-   that is feedback has come after it. A thread the identity cannot resolve
-   leaves the finding owed its answer, as above. A declined or deferred
-   finding's answer is recorded `settled`. One recorded `1` can still have its
-   thread open, behind an answer carrying the `<!-- gc-finding:<id>:open -->`
-   line, so it is answered again, and its thread is resolved by the same rule.
-   A Conversation comment is edited to carry the answer. A finding that closed
-   before it was posted, as a pre-open round's findings have, is posted with its
-   answer already in place. A human finding is never posted, because it already
-   sits on the PR where its raiser wrote it and is answered there. One
-   store-wide read of the findings serves the pass, and `finding.pr_comment` and
-   `finding.pr_answered` record each write, so an anchor whose findings are
-   settled costs no GitHub call; at most `WB_FINDING_CAP` posts and answers go
-   out per pass. A posted finding holds nothing, since a `must-fix` holds the
-   merge through its own `blocks` edge. Its comments go through `pr-post.sh`, so
-   they carry the city's mark and no feedback reader routes them or reads their
-   thread as unengaged. Each also carries a `<!-- gc-finding:<id> -->` marker,
-   which is how a later pass finds the finding's comment.
-
-   On a PR on the pending record every arm of this script runs but the three
-   that record the PR merged, closed without merging or moved to another base,
-   which are the landing order's ([The landing order](#the-landing-order)). Its
-   posture, its feedback routing, its conflict merge-in and its red-check fix and
-   park reach that PR. The park files only its human gate. The merge-in, the
-   red-check fix and a feedback batch each go to the PR's review run as an ask
-   (`gctk review ask`), with no rework child and, for a batch, no validation
-   pass: each comment becomes a human finding. The pass lists such an
-   anchor at `pull_request_pending` on a blocked bead and at
-   `pull_request_head_changed` on an open one, beside `pull_request` on an open
-   one, which no bead carries. Each of its writes on such a bead is one plain
-   metadata write guarded on the status and assignee the pass read.
 - **(8) review-sweep.sh** — cleanup over closed anchors on the old review path, no
    merge authority. A
    dispatched review whose anchor is closed and whose `review_branch` is gone
@@ -390,7 +116,7 @@ Each arm keeps the number the driver logs it under.
    left alone. Branch existence comes from one `git ls-remote --heads origin`
    per pass, and a listing that could not be read sweeps nothing. The release
    verb lives here rather than as a third `signoff.sh` verdict because the
-   residue is filed by two dispatchers, arm 6 and arm 7.
+   residue is filed by more than one dispatcher.
 - **(9) scaffolding-sweep.sh** — cleanup over DISPOSED anchors' old review
    scaffolding, no merge authority.
    An anchor withdrawn won't-do or closed not-planned carries a disposition —
@@ -413,12 +139,10 @@ Each arm keeps the number the driver logs it under.
    inline comments are read once per anchor that carries such a candidate. It
    leaves `task_kind=review` to review-sweep, a human gate or a conversation to
    the human side, and a `rebase_hold` freeze to the operator, and never closes
-   the anchor itself: that is `bead-rehome.sh`'s (via arm 7), held by `finalize-gate.sh`
-   while a human gate on the anchor is open — which clearing the machine
-   scaffolding here lets land once none is. Arm 7 runs this same sweep with `--anchor` for
-   the one anchor whose PR-close disposition it is consummating, just before
-   that close, so the close lands in the pass that reads the closed PR. A
-   merged anchor is a landing, never a disposal, and is skipped.
+   the anchor itself: that is `bead-rehome.sh`'s, which the landing order runs
+   once the PR has closed, held by `finalize-gate.sh` while a human gate on the
+   anchor is open — which clearing the machine scaffolding here lets land once
+   none is. A merged anchor is a landing, never a disposal, and is skipped.
 
 ## Single-flight: the tracking gate and the pass lock
 
@@ -512,8 +236,7 @@ how a pass ended:
 | `=== <ts> rig=<rig> refinery=<agent>` | a pass started |
 | `-- (<n>) <arm> (started <ts>)` | an arm started; its output follows |
 | `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
-| `<arm>: visited <k> of <n> ...` | how much of its walk a paced arm covered; `the next pass resumes at <id>` follows when its share of the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set every walking arm's cost grows with. gate-ensure and pr-facts add `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
-| `pr-facts: posture-only — ...; <k> unchanged since the basis they were derived from, <r> read per PR` | the posture arm's split between the anchors it kept from the batched read and the ones it read whole. `<r>` covers each PR that moved, on the pass that sees the move and on the pass after, which confirms its basis. It covers every PR on a pass whose batched read failed (a `WARN` line names it), and on the first two passes after the script changes or after `pr-posture.seen` is lost |
+| `<arm>: visited <k> of <n> ...` | how much of its walk the paced arm covered; `the next pass resumes at <id>` follows when the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set its cost grows with. It adds `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
 | `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
 | a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
 | `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
@@ -557,7 +280,8 @@ them a 30-second pass, 4 by default. The city's clock-driven orders, these
 three among them, need about 12 starts a pass at their set intervals, counted
 from the intervals `gc order list` gave on 2026-11-20, so the city's
 `city.toml` sets the budget to 16 and holds the old refinery pass,
-`refinery-reconcile`, at 5 minutes until the GitHub intake retires it. Under a
+`refinery-reconcile`, at 5 minutes until the old review path's retirement
+deletes it. Under a
 smaller budget each order starts later than its interval.
 
 A PR is owned when a live bead names it as its own and is no other bead's
@@ -726,8 +450,7 @@ passes.
 
 **The cost, and the PRs it is sized for.** The PR watch and the landing order
 draw on the city login's GraphQL allowance, 5,000 points an hour, beside every
-other reader of GitHub in the city, such as the old intake `pr-facts.sh` until
-it retires and the agents' own `gh` calls. A pass of the cheap question costs 1
+other reader of GitHub in the city, such as the agents' own `gh` calls. A pass of the cheap question costs 1
 point for each 50 PRs a rig owns, and a rig that owns none asks nothing, so it
 costs 60 points an hour for each rig that owns a PR. A pass of the net costs 1
 or 2 points for each 10 owned PRs, more for a PR whose lists run past a page,
@@ -869,7 +592,7 @@ while one is open, and the order still reads it.
 **A person's post.** Each post the saved read keeps untaken becomes an ask on
 the bead that owns the PR, which the PR's review run rules. For each PR whose
 bead owns it on the record, is open or blocked, is assigned to nobody or to the
-refinery and carries none of `pr-facts.sh`'s receipts (below), while the saved
+refinery and carries none of the old path's receipts (below), while the saved
 read shows the PR open and applied the definition of feedback from the bead's
 provenance instant, an act under the record lock files the post's ask
 (`gctk review ask`'s filing), then marks the post `EYES`.
@@ -892,8 +615,8 @@ merge, and the run exits 2. The merge's own re-read applies the same condition,
 so a post made seconds before a merge holds it though no saved read held it
 yet.
 
-**The old path's receipts.** A bead open when the GitHub intake lands can carry
-`pr-facts.sh`'s receipts: in each id space the highest id it routed (a
+**The old path's receipts.** A bead open when the GitHub intake landed can carry
+the old path's receipts: in each id space the highest id it routed (a
 watermark) and the highest its review threads had answered past that (an
 answered mark), and the batches it routed with the bead each went to (the
 batch ledgers and `pr_comment_disposition`). The run converts them into the
@@ -908,9 +631,9 @@ the reason the take would give it, and marks the post `EYES` once the ask
 stands. It marks `EYES` on each other post the receipts reach that is feedback
 carrying neither of the city's marks: an inline comment or a conversation
 comment at or below its space's mark, and the message of a comment or a
-request for changes at or below the review space's. `pr-facts.sh` routed no
+request for changes at or below the review space's. The old path routed no
 approval's message, so no receipt reaches one, and the take files it once the
-receipts are gone. A post `pr-facts.sh` marked when it routed it is taken
+receipts are gone. A post the old path marked when it routed it is taken
 already, and the act leaves it as it is. The act resolves each unresolved
 review thread that holds only the city's own posts, the old path's machine
 findings, closes each open ask a batch went to, and closes each finding whose
@@ -993,7 +716,7 @@ refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
 `binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
 while another open bead names the PR's branch, such as a rework child, while the
-bead carries `pr-facts.sh`'s receipts, which their conversion turns into the
+bead carries the old path's receipts, which their conversion turns into the
 city's marks first (above), or while a human gate holds it, unless every gate
 that holds it is a question a review run put to a person
 (`review-question-<key>`) and an ask the run can take carries a person's post

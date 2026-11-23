@@ -689,17 +689,18 @@ resolve_live_subject() {
 
 # _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
 # LIVE anchor that owns this PR, or exit 4 fail-closed. pr_number / pr_url are
-# bare metadata keys (signoff.sh, pr-facts.sh). Filtered CLIENT-SIDE: bd list's
-# --metadata-field mangles a numeric value into non-JSON here. A URL additionally
-# pins the repo, so a bare number several repos share is disambiguated by it.
+# bare metadata keys (gctk pr record, rework-child.sh). Filtered CLIENT-SIDE:
+# bd list's --metadata-field mangles a numeric value into non-JSON here. A URL
+# additionally pins the repo, so a bare number several repos share is
+# disambiguated by it.
 # The anchor records its own PR, and so does a bead that works on the PR, such
 # as a rework child, which names the anchor in anchor_bead. So each bead that
 # records the PR stands for its anchor_bead, or for itself when it names none,
 # and the PR is ambiguous only when those are two different anchors. An
 # anchor_bead must name a bead live in a store the search read, so a live
 # rework of a closed anchor refuses, naming both.
-# The status set is the pack's live-PR set (LIVE_STATUSES in pr-facts.sh): an
-# anchor is live in deferred/hooked/pinned
+# The status set is the pack's live set (_BD_ANCHOR_STATUSES in bd-lib.sh, less
+# closed): an anchor is live in deferred/hooked/pinned
 # too, so a narrower query would fail to resolve a PR whose bead sits in one of
 # those states. The number's uniqueness holds only across EVERY live store, so
 # any rig the search cannot fully read refuses the whole resolution (exit 4)

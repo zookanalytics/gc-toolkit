@@ -15,8 +15,9 @@
 #
 # The definition also covers what the city posted before it marked anything.
 # A post under the city's login that carries no mark is the city's own when it
-# predates the anchor's provenance cutover (pr_provenance_since, stamped by
-# pr-facts.sh the first time it reads the PR). With no cutover known, every
+# predates the anchor's provenance cutover (pr_provenance_since, stamped by the
+# one-PR update the first time it saves the PR's conversation). With no cutover
+# known, every
 # post under that login is the city's own. Two purpose markers that only the
 # city has written count as the mark too: the write-back reply marker and the
 # sitting reminder's marker, <!-- gc:sitting:<task> -->.
@@ -26,8 +27,9 @@
 # mark below, which a person or a workflow writes into it, or begins with a
 # prefix the rig declares for a third-party integration in not-for-review.toml
 # at the root of its repository (docs/not-for-review.md). The repository is the
-# one the caller runs in, whose origin pr-facts.sh and the feedback miner read
-# pull requests from, or GC_RIG_ROOT's when the caller runs in none. The file
+# one the caller runs in, such as the rig's clone whose origin the landing order
+# and the feedback miner read pull requests from, or GC_RIG_ROOT's when the
+# caller runs in none. The file
 # counts as the repository's default branch carries it (origin/HEAD, as last
 # fetched), so a declaration counts once it merges, and no branch or
 # uncommitted edit changes which comments count. With nothing declared, a
@@ -295,13 +297,13 @@ LIVE_DEF='def live_comments($revs):
         then . + { gc_review_submitted_at: $submitted[$parent] } else . end ];
 '
 
-# The city's two marks on a post, each a reaction of its own. Its EYES says
-# the city has taken the post and owes it an answer (gc_city_taken): the
-# write-back in pr-facts.sh puts it on a post the city picked up
-# (WB_REACTION). Its THUMBS_UP says the city owes the post nothing more
-# (gc_city_handled): the write-back puts it in place of the EYES
-# (WB_RESOLVED_REACTION). A post that carries either mark is one the city has
-# taken, so a reader asking whether the city has taken a post asks both.
+# The city's two marks on a post, each a reaction of its own, which
+# services/gctk/pr/marks.go names. Its EYES says the city has taken the post
+# and owes it an answer (gc_city_taken): the landing order's take puts it on a
+# post once the post's ask stands. Its THUMBS_UP says the city owes the post
+# nothing more (gc_city_handled): a review round puts it once the post's answer
+# is on the PR. A post that carries either mark is one the city has taken, so a
+# reader asking whether the city has taken a post asks both.
 # viewerHasReacted names the reader's own reaction, so a reader reads the posts
 # as the acting login and asks for each one's reactionGroups.
 MARKS_DEF='def gc_city_taken:
@@ -465,8 +467,7 @@ case "$VERB" in
   reply)
     [ -n "$HOST" ] || die_usage "reply needs --host"
     [ -n "$THREAD" ] || die_usage "reply needs --thread <thread node id>"
-    # A mutation that exits 0 with nothing on stdout did not answer, the same
-    # test pr-facts.sh applies to every GraphQL write.
+    # A mutation that exits 0 with nothing on stdout did not answer.
     out=$(gh api graphql --hostname "$HOST" \
       -f query='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){clientMutationId}}' \
       -f t="$THREAD" -f b="$BODY") || exit 1
