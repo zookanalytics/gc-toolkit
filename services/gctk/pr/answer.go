@@ -42,10 +42,12 @@ import (
 //   - the city's handled mark on each such post once its words are on the PR,
 //     but on a post put to a person, which waits for the answer;
 //   - the resolve of each thread such a post sits in, once nothing in it is
-//     owed: every post in it carries the handled mark, but the city's own;
+//     owed: every post in it that the definition of feedback reads as feedback
+//     carries the handled mark;
 //   - the dismissal of each person's standing request for changes once every
-//     point it raised carries the handled mark, after the review request that
-//     asks its author to review again.
+//     point it raised that the definition reads as feedback carries the
+//     handled mark, after the review request that asks its author to review
+//     again.
 //
 // A reply opens with a line naming its ask (answerMark), a handled mark is
 // found by the city's own reaction, a resolve by the thread's state and a
@@ -160,9 +162,10 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 // answering is one round's post as it goes: the PR, the account the city's gh
 // token acts as, the definition of feedback, the round's rulings and the head
 // it pushed, the bead that owns the PR with its asks and the beads it waits on,
-// the post's read of the PR, the posts that read shows as feedback the city has
-// not taken and the posts this post marked handled, each by node id, the
-// questions on the bead, and each write that did not land.
+// the post's read of the PR, the reviews and the posts in that read's review
+// threads that the definition of feedback reads as feedback and the posts this
+// post marked handled, each by node id, the questions on the bead, and each
+// write that did not land.
 type answering struct {
 	l          Landing
 	hub        Hub
@@ -179,7 +182,7 @@ type answering struct {
 	reviews    []gh.Review
 	threads    []gh.Thread
 	comments   []gh.IssueComment
-	untaken    map[string]bool
+	owed       map[string]bool
 	blockers   []*ledger.Record
 	questions  map[string]*question
 	byAsk      map[string][]review.Ruling
@@ -225,8 +228,9 @@ func (a *answering) read() error {
 }
 
 // reread reads the PR's review threads and conversation comments again, which
-// a reply changes, and which posts the definition of feedback reads, from the
-// bead's provenance instant, as feedback the city has not taken.
+// a reply changes, and which reviews and posts in the threads the definition
+// of feedback reads, from the bead's provenance instant, as feedback, whatever
+// marks of the city's they carry: the posts the city owes an answer.
 func (a *answering) reread() error {
 	var err error
 	if a.threads, err = a.hub.ReviewThreads(a.repo, a.number); err != nil {
@@ -239,13 +243,31 @@ func (a *answering) reread() error {
 	if err != nil {
 		return err
 	}
-	posts, err := untakenOf(a.rule, a.self, strings.TrimSpace(since), a.reviews, a.threads, a.comments)
+	// The definition reads a post as untaken when it is feedback and carries
+	// neither of the city's marks, so over the posts with their reactions set
+	// aside it names each post that is feedback.
+	reviews := make([]gh.Review, 0, len(a.reviews))
+	for _, v := range a.reviews {
+		v.ViewerReactions = nil
+		reviews = append(reviews, v)
+	}
+	threads := make([]gh.Thread, 0, len(a.threads))
+	for _, t := range a.threads {
+		cs := make([]gh.Comment, 0, len(t.Comments))
+		for _, c := range t.Comments {
+			c.ViewerReactions = nil
+			cs = append(cs, c)
+		}
+		t.Comments = cs
+		threads = append(threads, t)
+	}
+	posts, err := untakenOf(a.rule, a.self, strings.TrimSpace(since), reviews, threads, nil)
 	if err != nil {
 		return err
 	}
-	a.untaken = map[string]bool{}
+	a.owed = map[string]bool{}
 	for _, p := range posts {
-		a.untaken[p.Node] = true
+		a.owed[p.Node] = true
 	}
 	return nil
 }
@@ -567,9 +589,10 @@ func (a *answering) handled(node string, reacted []string) bool {
 }
 
 // resolve resolves thread i, which holds the post at url the round answered,
-// once nothing in it is owed: each post in it carries the handled mark, but a
-// post of the city's own that the city never took. A post the definition of
-// feedback reads as one the city has not taken, whoever's login made it, a
+// once nothing in it is owed: each post in it that the definition of feedback
+// reads as feedback, whoever's login made it, carries the handled mark. A post
+// the definition sets aside, such as the city's own, one not for review or one
+// a dismissal retired, owes nothing. A post the city has not taken, a
 // question's post and a post the city took and has not answered keep it open.
 func (a *answering) resolve(i int, url string) {
 	t := a.threads[i]
@@ -577,11 +600,7 @@ func (a *answering) resolve(i int, url string) {
 		return
 	}
 	for _, c := range t.Comments {
-		if a.untaken[c.NodeID] {
-			return
-		}
-		own := c.Author == a.self && !slices.Contains(c.ViewerReactions, takenMark)
-		if !own && !a.handled(c.NodeID, c.ViewerReactions) {
+		if a.owed[c.NodeID] && !a.handled(c.NodeID, c.ViewerReactions) {
 			return
 		}
 	}
@@ -665,9 +684,8 @@ func (a *answering) settle() {
 }
 
 // dismiss dismisses each person's standing request for changes once every
-// point it raised carries the city's handled mark, its message when it has one
-// and each inline comment it carries, after the review request that asks its
-// author to review again. A request for changes stands while it is its author's
+// point it raised carries the city's handled mark (pointsOf), after the review
+// request that asks its author to review again. A request for changes stands while it is its author's
 // latest review that approves, requests changes or was dismissed, as the
 // approval rule reads it. A request for changes under the city's own login asks
 // no review, since GitHub takes none of a PR's author.
@@ -727,16 +745,18 @@ func (a *answering) dismiss() error {
 	return nil
 }
 
-// pointsOf is each point the review v raised: its message, when it carries
-// text, and each inline comment it carries.
+// pointsOf is each point the review v raised that the definition of feedback
+// reads as feedback: its message, when it carries text, and each inline comment
+// it carries. A post the definition sets aside, such as one not for review, is
+// owed no answer, so it raises no point.
 func (a *answering) pointsOf(v gh.Review) []spot {
 	var out []spot
-	if strings.TrimSpace(v.Body) != "" {
+	if a.owed[v.NodeID] {
 		out = append(out, spot{kind: PostReview, id: v.ID, node: v.NodeID, url: v.URL, reacted: v.ViewerReactions, thread: -1})
 	}
 	for i, t := range a.threads {
 		for _, c := range t.Comments {
-			if c.Review != nil && c.Review.ID == v.ID {
+			if c.Review != nil && c.Review.ID == v.ID && a.owed[c.NodeID] {
 				out = append(out, spot{kind: PostInline, id: c.ID, node: c.NodeID, url: c.URL, reacted: c.ViewerReactions, thread: i})
 			}
 		}

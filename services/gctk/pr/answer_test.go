@@ -450,6 +450,34 @@ func TestAPostUnderTheCitysLoginWithoutItsMarkKeepsTheThreadOpen(t *testing.T) {
 	}
 }
 
+// A post the definition of feedback sets aside owes the city nothing, so a
+// thread is resolved once the posts in it that are feedback carry the city's
+// THUMBS_UP, whatever marks a set-aside post carries: one not for review, and
+// one a dismissed review carried, each another person's.
+func TestAPostTheDefinitionSetsAsideHoldsNoThreadOpen(t *testing.T) {
+	for _, kind := range []string{"not for review", "of a dismissed review"} {
+		t.Run(kind, func(t *testing.T) {
+			d := newRounds(t)
+			url := d.person(pr.PostInline)
+			c := gh.Comment{ID: 263, NodeID: "PRRC_263", URL: prURL + "#discussion_r263", Author: "another",
+				Body: "a note"}
+			if kind == "not for review" {
+				d.world.rule.notFeedback[263] = true
+			} else {
+				c.Review = &gh.CommentReview{ID: 198, State: "DISMISSED", SubmittedAt: "2026-11-12T01:00:00Z"}
+			}
+			d.pr.Threads[0].Comments = append(d.pr.Threads[0].Comments, c)
+			ask := d.ask(t, "Inline comment", url, "2026-11-12T03:00:00Z")
+			d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "A nit."})
+			d.posted(t)
+			if !d.reacted("PRRC_260", "THUMBS_UP") || !d.resolved("T1") {
+				t.Fatalf("the ruled post is marked %v and the thread resolved %v, want both",
+					d.reacted("PRRC_260", "THUMBS_UP"), d.resolved("T1"))
+			}
+		})
+	}
+}
+
 // A person's request for changes is dismissed once its last point is answered
 // on the PR, and not before, with its author asked to review again first and a
 // one-line note that counts what became of the points.
@@ -519,6 +547,26 @@ func TestARequestForChangesIsDismissedOnceItsLastPointIsAnswered(t *testing.T) {
 	asks := len(d.github.Asks())
 	if got := d.posted(t); len(got.Dismissed)+len(got.Requested) != 0 || len(d.github.Asks()) != asks {
 		t.Fatalf("the post run again dismissed %v and asked %v", got.Dismissed, d.github.Asks()[asks:])
+	}
+}
+
+// A point of a request for changes that the definition of feedback sets aside,
+// here an inline comment not for review, is owed no answer, so the request is
+// dismissed once the points that are feedback are answered.
+func TestAPointTheDefinitionSetsAsideHoldsNoDismissal(t *testing.T) {
+	d := newRounds(t)
+	const cr = prURL + "#pullrequestreview-210"
+	d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
+		Author: "operator", AuthorCanPush: true, Body: "one thing", SubmittedAt: "2026-11-12T02:00:00Z",
+		ViewerReactions: []string{"EYES"}})
+	d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: "T2", Comments: []gh.Comment{{ID: 261, NodeID: "PRRC_261",
+		URL: prURL + "#discussion_r261", Author: "operator", Body: "a note",
+		Review: &gh.CommentReview{ID: 210, State: "CHANGES_REQUESTED"}}}})
+	d.world.rule.notFeedback[261] = true
+	message := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
+	d.rule(t, 1, head, "", review.Ruling{Ask: message, Ruling: review.RulingDeclined, Reason: "A nit."})
+	if got := d.posted(t); !slices.Equal(got.Dismissed, []string{cr}) {
+		t.Fatalf("the request for changes whose one point that is feedback is answered: dismissed %v", got.Dismissed)
 	}
 }
 
