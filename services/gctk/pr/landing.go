@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/gate"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -181,7 +182,10 @@ func (e *HeldClose) Error() string { return e.Why }
 // carries none. Wake gives the refinery its turn for each changed head the run
 // hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
-// when it is nil. Wait bounds how long a writer waits for the lock, and Yield
+// when it is nil. Status reads a PR's own status, at which a stay's gate on its
+// bead resolves (gates.go), and a run resolves no such gate on a PR, and
+// requests no merge of one a gate names, when it is nil. Wait bounds how long
+// a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
 // waiting for it takes it. Shuffle orders the acts a run takes, at random when
 // nil. Now is the clock a write's stamp and a run's window read, the system's
@@ -201,6 +205,7 @@ type Landing struct {
 	Audit        Audit
 	Wake         Waker
 	Labels       Labels
+	Status       Status
 	Now          func() time.Time
 	Wait         time.Duration
 	Yield        time.Duration
@@ -344,6 +349,12 @@ const (
 	ActAssigned = "assigned"
 	// ActSettled: no further run is owed, and the run cleared the marker.
 	ActSettled = "settled"
+	// ActResolved: a stay's gate is resolved: an open gctk:needs-review gate
+	// named the bead, whose PR read needs-review or merging in its own right,
+	// and the run put the hold of each conversation waiting on it on the PR
+	// and resolved the gate, requesting nothing else of the PR; or the gate's
+	// work had closed, and the run resolved the gate.
+	ActResolved = "resolved"
 	// ActBlocked: the publication's second write had landed on a bead still
 	// open, and the run moved it to blocked.
 	ActBlocked = "blocked"
@@ -418,10 +429,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 	}
 	var acts []string
 	writes := map[string]labelWrite{}
+	resolves := map[string]gate.Gate{}
 	for _, p := range plans {
 		switch {
 		case p.write != nil:
 			writes[p.id] = *p.write
+		case p.resolve != nil:
+			resolves[p.id] = *p.resolve
 		case !p.due:
 			tally(p.out)
 			continue
@@ -441,6 +455,11 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 						"the run started no act past its %s, so the next run compares the labels of %s", o.Window, w.url)})
 					continue
 				}
+				if g, ok := resolves[left]; ok {
+					report(RunOutcome{Bead: g.ID, Action: ActLeft, Detail: fmt.Sprintf(
+						"the run started no act past its %s, so the next run resolves the gate of %s, which has closed", o.Window, g.Work)})
+					continue
+				}
 				report(RunOutcome{Bead: left, Action: ActLeft,
 					Detail: fmt.Sprintf("the run started no act past its %s, so the next run acts on the record", o.Window)})
 			}
@@ -448,6 +467,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 		if w, ok := writes[id]; ok {
 			tally(u.writeLabels(w, o.Stop))
+			if l.Yield > 0 && i < len(acts)-1 {
+				time.Sleep(l.Yield)
+			}
+			continue
+		}
+		if g, ok := resolves[id]; ok {
+			tally(u.resolveClosed(g, o.Stop))
 			if l.Yield > 0 && i < len(acts)-1 {
 				time.Sleep(l.Yield)
 			}
@@ -715,14 +741,16 @@ type act func(ctx context.Context, c carriedOut) RunOutcome
 // again once the one-PR update has re-read the PR in full (rereadAndDecide).
 // In a run's list of plans, due says the record owes an act, which its act
 // decides again under the record lock (one), and a PR whose labels owe a write
-// is planned under its URL, with write holding the write.
+// is planned under its URL, with write holding the write. A gate whose work has
+// closed is planned under its id, with resolve holding the gate.
 type plan struct {
-	id     string
-	out    RunOutcome
-	act    act
-	reread bool
-	due    bool
-	write  *labelWrite
+	id      string
+	out     RunOutcome
+	act     act
+	reread  bool
+	due     bool
+	write   *labelWrite
+	resolve *gate.Gate
 }
 
 func none(s state, action, detail string) plan {
@@ -762,7 +790,7 @@ func (u *run) plan() ([]plan, error) {
 	}
 	if !every {
 		if len(ruled) == 0 {
-			return nil, nil
+			return u.gateCloses(pass), nil
 		}
 		if _, err := pass.Find(ledger.Every()); err != nil {
 			return nil, err
@@ -834,6 +862,7 @@ func (u *run) plan() ([]plan, error) {
 		}
 		out = append(out, writes...)
 	}
+	out = append(out, u.gateCloses(pass)...)
 	slices.SortFunc(out, func(a, b plan) int { return strings.Compare(a.id, b.id) })
 	return out, nil
 }
@@ -1486,6 +1515,9 @@ func (u *run) decideAtHead(s state, f seen) plan {
 	if err != nil {
 		return none(s, ActRetry, "the evaluator's read of the store did not answer; the next run decides again: "+err.Error())
 	}
+	if owed, ok := u.decideGates(s, f, ans); ok {
+		return owed
+	}
 	if !ans.Ready {
 		if i := slices.IndexFunc(ans.Conditions, func(c Condition) bool { return c.Kind == KindGitHubUnread }); i >= 0 {
 			return u.withCarry(s, f, none(s, ActChecked, ans.Conditions[i].Detail+"; the record waits for the PR "+
@@ -1528,6 +1560,16 @@ func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedO
 	if now == nil || now.Status() != s.status || now.Assignee() != s.assignee {
 		return RunOutcome{Bead: s.id, Action: ActMoved, Detail: withNote(
 			"the bead moved during the act's reads, so no merge was requested; the next run reads it as it stands", c.note)}
+	}
+	// A stay's gate is no edge of the bead's, so the read above does not see one
+	// filed during the act: the store's open gates are listed again here.
+	switch gates, err := openGates(u.Ledger, s.id); {
+	case err != nil:
+		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote("the store's open gates did not read again before the merge "+
+			"request; the next run decides again: "+err.Error(), c.note)}
+	case len(gates) > 0:
+		return RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(fmt.Sprintf("the gate %s, filed during the act, names "+
+			"the bead, so no merge is requested; the next run puts the hold on and resolves it", gates[0].ID), c.note)}
 	}
 	hub := u.Hub(ctx, f.host)
 	method, ask := "merge", hub.MergePullRequest
