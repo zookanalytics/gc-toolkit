@@ -9,7 +9,10 @@
 # are more than one command, and so is a command substitution that holds more
 # than one. A substitution holding a single command is an argument of the
 # command around it, so `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one
-# call. A cd that && runs after a call weighs nothing, and neither does that
+# call. A command that only assigns literal values, with no $, backtick, < or >
+# in its text, does nothing but name them, so it is no command, and a formula
+# step's `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"` is one
+# call too. A cd that && runs after a call weighs nothing, and neither does that
 # &&: it moves the agent's own shell once the call exits 0, which no script can
 # do for its caller.
 #
@@ -377,8 +380,11 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
 # position is a keyword. segs drops a case clause's pattern label before this
 # reads the segment, so a word that ends in ) closes a subshell and is the
 # subshell's last command. A cd that an && runs takes back that &&, which segs
-# counted when it split there, and counts no command.
-function seg_end(g,   nw, ww, j, t, and) {
+# counted when it split there, and counts no command. o is the segment as
+# written, with a comment's text blanked. A segment whose words are all
+# assignments, and whose o holds no $, backtick, < or >, only names literal
+# values, so it counts no command.
+function seg_end(g, o,   nw, ww, j, t, and) {
     nw = split(g, ww, /[ \t]+/)
     j = 1
     while (j <= nw && ww[j] == "") j++
@@ -397,15 +403,24 @@ function seg_end(g,   nw, ww, j, t, and) {
         if (t ~ /^[A-Za-z_][A-Za-z0-9_:.-]*\(\)/ || ww[j + 1] ~ /^\(\)/) { SC_CF++; SC_W = SC_W " function"; return }
         break
     }
-    if (j <= nw) SC_CMD++
+    if (j > nw) return
+    if (o !~ /[$`<>]/) {
+        ww[j] = t
+        while (j <= nw && (ww[j] == "" || ww[j] ~ /^[A-Za-z_][A-Za-z0-9_]*[+]?=/)) j++
+        if (j > nw) return
+    }
+    SC_CMD++
 }
 # Split a masked line into commands at ; ;; & | |& && || and newlines. A
 # redirection's & or | (>& <& &> >|) is part of a word. A case clause opens
 # with its pattern label, which is no command: the first word after case ...
 # in, or after ;; ;& or ;;&. SC_LBL says one is due, across lines, and the
-# label is skipped whole, alternatives and all, so its | is not a pipe.
-function segs(m,   n, i, c, nx, pv, g) {
-    n = length(m); g = ""; SC_CMD = 0; SC_CF = 0; SC_W = ""; SC_AND = 0
+# label is skipped whole, alternatives and all, so its | is not a pipe. s is
+# the line as written, which scan masked into m character for character, and o
+# gathers each segment's characters from it, with a blank wherever m has one,
+# since m blanks a comment's text.
+function segs(m, s,   n, i, c, nx, pv, g, o) {
+    n = length(m); g = ""; o = ""; SC_CMD = 0; SC_CF = 0; SC_W = ""; SC_AND = 0
     for (i = 1; i <= n; i++) {
         c = substr(m, i, 1); nx = substr(m, i + 1, 1); pv = (i > 1) ? substr(m, i - 1, 1) : ""
         if (SC_LBL && c != " " && c != "\t" && c != "\n") {
@@ -414,27 +429,27 @@ function segs(m,   n, i, c, nx, pv, g) {
             if (match(substr(m, i), CASE_LABEL)) { i += RLENGTH - 1; continue }
         }
         if (c == "&") {
-            if (nx == "&") { seg_end(g); g = ""; SC_CF++; SC_W = SC_W " &&"; SC_AND = 1; i++; continue }
-            if (pv == ">" || pv == "<" || nx == ">") { g = g c; continue }
-            seg_end(g); g = ""; continue
+            if (nx == "&") { seg_end(g, o); g = ""; o = ""; SC_CF++; SC_W = SC_W " &&"; SC_AND = 1; i++; continue }
+            if (pv == ">" || pv == "<" || nx == ">") { g = g c; o = o c; continue }
+            seg_end(g, o); g = ""; o = ""; continue
         }
         if (c == "|") {
-            if (nx == "|") { seg_end(g); g = ""; SC_CF++; SC_W = SC_W " ||"; i++; continue }
-            if (pv == ">") { g = g c; continue }
+            if (nx == "|") { seg_end(g, o); g = ""; o = ""; SC_CF++; SC_W = SC_W " ||"; i++; continue }
+            if (pv == ">") { g = g c; o = o c; continue }
             if (nx == "&") i++
-            seg_end(g); g = ""; continue
+            seg_end(g, o); g = ""; o = ""; continue
         }
         if (c == ";") {
             if (nx == ";" || nx == "&") {
                 i++; if (substr(m, i + 1, 1) == "&") i++
-                seg_end(g); g = ""; SC_LBL = 1; continue
+                seg_end(g, o); g = ""; o = ""; SC_LBL = 1; continue
             }
-            seg_end(g); g = ""; continue
+            seg_end(g, o); g = ""; o = ""; continue
         }
-        if (c == "\n") { seg_end(g); g = ""; continue }
-        g = g c
+        if (c == "\n") { seg_end(g, o); g = ""; o = ""; continue }
+        g = g c; o = o (c == " " ? c : substr(s, i, 1))
     }
-    seg_end(g)
+    seg_end(g, o)
 }
 # AC_CMD, AC_CF and AC_W for a whole command line: its own commands and
 # control flow, plus each command substitution's control flow, and the
@@ -445,7 +460,7 @@ function analyze(s, depth,   m, n, i, subs, cmd, cf, w, lbl) {
     scan(s)
     m = SM; n = SN
     for (i = 1; i <= n; i++) subs[i] = SS[i]
-    segs(m)
+    segs(m, s)
     cmd = SC_CMD; cf = SC_CF; w = SC_W; lbl = SC_LBL
     if (depth < 16) {
         for (i = 1; i <= n; i++) {

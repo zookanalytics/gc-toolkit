@@ -182,7 +182,7 @@ field()   { jq -r --arg id "$1" --arg k "$2" 'first(.[] | select(.id == $id) | .
 beads()   { jq 'length' "$STUB_STORE"; }
 calls()   { grep -c -- "$1" "$STUB_GC_LOG" | tr -d ' '; }
 ROUTE="gc-toolkit/gc-toolkit.polecat"
-PAGES=(--page agents/claude.md --page formulas/mol-polecat-base.md)
+PAGES=(--page agents/claude.render.md --page formulas/mol-polecat-base.render.md)
 reaudit() { # id [status] [assignee] [extra-metadata-json]
   printf '{"id":"%s","status":"%s","assignee":"%s","metadata":{"seed_audit_reaudit":"main","target":"main"%s},"notes":""}' \
     "$1" "${2:-open}" "${3:-}" "${4:-}"
@@ -227,8 +227,8 @@ has "$(cat "$STUB_GC_LOG")" '--metadata {"seed_audit_reaudit":"main","target":"m
 eq "$(calls '^bd update re-1')" "0" "…with no second write to complete it"
 eq "$(field re-1 title)" "Re-render the seed audit on main: its pages no longer render as committed" "…titled for the work"
 BODY=$(field re-1 description)
-has "$BODY" "- generated/seed-audit/agents/claude.md" "…listing each file it was handed"
-has "$BODY" "- generated/seed-audit/formulas/mol-polecat-base.md" "…every one of them"
+has "$BODY" "- generated/seed-audit/agents/claude.render.md" "…listing each file it was handed"
+has "$BODY" "- generated/seed-audit/formulas/mol-polecat-base.render.md" "…every one of them"
 has "$BODY" "The merge gate, checking PR#7, found main stale in the files of generated/seed-audit below" "…and who found it"
 has "$BODY" "The \`gc\` binary moves the text its builtin packs carry" "…naming a gc that moved its text as one way a page goes stale"
 has "$BODY" "a landing whose render was made before another landing moved an input it renders" "…and a landing as the other"

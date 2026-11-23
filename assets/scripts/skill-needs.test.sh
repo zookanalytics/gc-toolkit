@@ -802,8 +802,8 @@ fenced_block() {
 # it is rendered with, which the seed audit renders as gc-toolkit.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
-KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
-MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.md"
+KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.render.md"
+MECHANIK_RENDER="$REPO/generated/seed-audit/agents/mechanik.render.md"
 HANDOFF='gc sling <qualified-name> <bead> --no-formula --no-convoy'
 have "the dispatch fragment gives the work skill's hand-off to a named agent" "$HANDOFF" "$DISPATCH"
 have "…the hand-off the work skill gives" "$HANDOFF" "$WORK_SKILL"
