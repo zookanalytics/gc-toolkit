@@ -51,7 +51,7 @@ Every old run keeps the sampling and changes what it samples.
 The two arms are the whole rendered page
 `generated/seed-audit/agents/converse-claude-opus.md`, as the system prompt: the
 old arm at 8d778ffee, the integration branch's base, and the new arm at the
-entry's commit, 013656dfa. A diff of the two holds the entry's anchor and its
+entry's commit, eca44162f. A diff of the two holds the entry's anchor and its
 seven lines and nothing else. The model is `claude-opus-5-5`, which that seat
 runs. The seat's sittings outnumber the Fable seat's: 86 transcript
 directories touched since 2026-11-16, against 27.
