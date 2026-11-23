@@ -1,6 +1,6 @@
 ---
 name: The arch check on gc-toolkit
-description: The method extension the arch check appends on gc-toolkit reviews. It adds the divergence lens, which holds new pack surface to what Gas City ships, with when the lens applies, its checks and how they reach the verdict, what counts as evidence of what Gas City ships, and where the pack records its warrants.
+description: The method extension the arch check appends on gc-toolkit reviews. It adds the divergence lens, which holds new pack surface, and pack code that accommodates a behavior of Gas City, to what Gas City ships, with when the lens applies, its checks and how they reach the verdict, what counts as evidence of what Gas City ships, and where the pack records its warrants.
 ---
 
 # The arch check on gc-toolkit
@@ -12,6 +12,8 @@ the primitives include Gas City's, and the divergence lens below is how new
 surface is held to them. The pack's architecture docs describe the pack as it
 is, divergence included, so a change can fit them and still rebuild what Gas
 City ships. The lens holds new surface to Gas City's own documentation instead.
+It holds a change that accommodates a behavior of Gas City to that behavior's
+reason, tested in this city, and to the fix at its source.
 
 ## Scope
 
@@ -42,6 +44,12 @@ a warrant covers. Operational surface here is:
 
 Prompts, skills, checklists, a formula's prose and work queries are not
 operational surface, and neither are tests or the fixtures they use.
+
+The lens also applies to a change that accommodates a behavior of Gas City,
+whether or not the change adds surface: one that avoids one of Gas City's
+routes, mirrors one of its skips or works around one of its faults. A call that
+steps around Gas City's API is one, and so is an alarm that leaves out what one
+of its orders skips.
 
 ## The checks
 
@@ -84,6 +92,21 @@ operational surface, and neither are tests or the fixtures they use.
    a change that builds further on a noun whose trigger has fired: the move onto
    Gas City's primitive is the work, filed as its own bead when no bead carries
    it yet.
+5. **An accommodation tests Gas City's reason and names the fix at the
+   source.** A change that accommodates a behavior of Gas City shows the search
+   of check 1 whether or not it adds surface, and its record holds the two
+   things
+   [AGENTS.md](../AGENTS.md#a-change-that-adds-operational-surface-or-accommodates-gas-city-shows-its-gas-city-search)
+   adds for an accommodation: the measurement that tests the behavior's reason
+   in this city, and, where the behavior is a fault or its reason does not hold
+   here, the fix at the source with the bead that carries it. Read the reason
+   at the upstream source the record cites, and check that the measurement
+   tests that reason and not something beside it. A skip whose reason is that
+   nothing writes to a store, for example, is tested by counting the writes
+   the store took. Look up the bead the record names. A record without the
+   measurement is a finding, and so is one without the fix where a fix is
+   owed, or a measurement that does not test the reason it cites. The finding
+   names the behavior and the reason Gas City gives for it, read upstream.
 
 On this rig a change fits the architecture only when it also passes the lens
 wherever the lens applies. A change that fails one of its checks earns
