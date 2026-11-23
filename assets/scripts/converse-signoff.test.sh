@@ -2276,6 +2276,8 @@ has "$OUT" "the store refused the staying: line that names what conversation tk-
 eq "$(field tk-conv status)/$(filed)" "in_progress/1" "(STAY-LINE-REFUSED) …the conversation still claimed, its gate filed"
 run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
 eq "$RC/$(filed)" "0/1" "(STAY-LINE-REFUSED) the re-run stays, filing no second gate"
+has "$OUT" "it waits on the gate tk-gate1, which the landing order resolves once tk-anc's PR reads needs-review" "(STAY-LINE-REFUSED) …coming back for the PR it sent back"
+hasnt "$OUT" "brings no return of its own" "(STAY-LINE-REFUSED) …and not saying that PR brings no return of its own"
 eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the retry backs off (waits on tk-gate1)" "(STAY-LINE-REFUSED) …naming the gate it found open"
 eq "$(field tk-conv status)" "open" "(STAY-LINE-REFUSED) …and leaving the conversation open"
 # The status write does not land, after the line that names the gate has.

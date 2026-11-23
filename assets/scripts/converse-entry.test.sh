@@ -404,6 +404,7 @@ fresh; hook drain; conv tk-c in_progress "staying: keep the API (waits on tk-gat
 assigned "$FIXDIR/row-tk-c.json"
 enter >/dev/null
 is "a stay stopped before its status write, its gate open, is interrupted" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+has "…naming its gate and the gate's work" "$(line ENTRY)" "waits on its gate tk-gate for tk-w, which is still open, but is still claimed"
 is "…which the stay's skill runs again" "$(line NEXT=)" "NEXT=converse-stay"
 is "…with the gate's work" "$(line WORK=)" "WORK=tk-w"
 # Work that had closed by the stay needs no gate: the line names the work

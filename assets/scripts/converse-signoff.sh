@@ -1228,6 +1228,7 @@ take_recommendation() {
 # before any write.
 STAY_ON=""
 STAY_KEPT=""
+STAY_FOR=""
 STAY_PIECE=""
 STAY_UNRETURNED=""
 if [ -n "$STAY" ]; then
@@ -1239,7 +1240,10 @@ if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
   CONV_WAITS=$(gc bd dep list "$CONVERSATION" --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
     | jq -ce 'if type == "array" then [ .[] | objects ] else error("unread") end' 2>/dev/null) \
     || stopped "the beads conversation $CONVERSATION waits on could not be read, to tell whether a gate the sitting filed holds it for its return; nothing was written"
+  # An open gate, and the work it is for, its await id. On a re-run, the gate
+  # can be the one this call filed before it stopped.
   STAY_KEPT=$(printf '%s' "$CONV_WAITS" | jq -r "$STAY_GATE_JQ"'[ .[] | select(open_stay_gate) | (.id // "") | tostring | select(. != "") ] | join(" ")')
+  STAY_FOR=$(printf '%s' "$CONV_WAITS" | jq -r "$STAY_GATE_JQ"'[ .[] | select(open_stay_gate) | (.await_id // "") | tostring | select(. != "") ] | unique | join(" ")')
   # Each piece this call sends: the PR its rework sends back, then the subject
   # its acceptance dispatches.
   SENDS=""
@@ -1247,6 +1251,7 @@ if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
   [ -z "$ACCEPT" ] || [ "$SUBJECT" = "$SENDS" ] || SENDS="${SENDS:+$SENDS }$SUBJECT"
   if [ -z "$STAY_KEPT" ] && [ -n "$SENDS" ]; then
     STAY_PIECE="${SENDS%% *}"
+    STAY_FOR="$STAY_PIECE"
     [ "${STAY_PIECE%%-*}" = "${CONVERSATION%%-*}" ] \
       || die "--stay would file its gate on $STAY_PIECE, which this ruling sends, and $STAY_PIECE is in another store than conversation $CONVERSATION, where a gate holds the conversation for nothing; nothing was written. A sitting whose work is in another rig ends at the hand-off: sign off without --stay"
     [ "${GC_ALIAS:-}" = "$HOLDER" ] \
@@ -1264,7 +1269,10 @@ if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
   # A piece this call sends that the stay does not come back for brings no
   # return of its own, which the stay says once it lands.
   for w in $SENDS; do
-    [ "$w" = "$STAY_PIECE" ] || STAY_UNRETURNED="${STAY_UNRETURNED:+$STAY_UNRETURNED }$w"
+    case " $STAY_FOR " in
+      *" $w "*) ;;
+      *) STAY_UNRETURNED="${STAY_UNRETURNED:+$STAY_UNRETURNED }$w" ;;
+    esac
   done
 fi
 if [ -n "$STAY_CITY" ]; then
@@ -1576,13 +1584,10 @@ if [ "$RULED" = yes ]; then
     # re-run or a second stay from a sitting woken early, the write changes
     # nothing, and its guard is what finds a dismiss that closed the
     # conversation while this call ran.
-    STAY_FOR=""
     if [ -z "$STAY_CITY" ]; then
       if [ -n "$STAY_KEPT" ]; then
         STAY_ON="$STAY_KEPT"
-        STAY_FOR=$(printf '%s' "$CONV_WAITS" | jq -r --arg kept " $STAY_KEPT " '[ .[] | select(((.id // "") | tostring) as $g | $kept | contains(" " + $g + " ")) | (.await_id // "") | tostring | select(. != "") ] | unique | join(" ")')
       else
-        STAY_FOR="$STAY_PIECE"
         PROW=$(show_row "$STAY_PIECE") \
           || stopped "$STAY_PIECE, the work this stay comes back for, could not be read to tell whether it has closed, which decides whether it needs a gate; every gate above is answered, the conversation is not yet left to wait, and a re-run files its gate"
         if [ "$(printf '%s' "$PROW" | jq -r '(.status // "") | ascii_downcase')" = closed ]; then

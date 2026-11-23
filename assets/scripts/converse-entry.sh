@@ -262,6 +262,8 @@ stay_entry() {
     echo "ENTRY returned: the gate ${gate%% *} this sitting stayed on has closed${why:+ ($why)}, so ${gate#* } is back with conversation $c."
   elif [ -z "$pending" ]; then
     echo "ENTRY returned: the work this sitting stayed for has closed, and conversation $c is back with it."
+  elif [ "$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')" = in_progress ] && [ -n "$gate" ]; then
+    echo "ENTRY interrupted: conversation $c waits on its gate ${gate%% *} for ${gate#* }, which is still open, but is still claimed, so a stay stopped short of leaving it to wait. Run the stay's call again."
   elif [ "$(printf '%s' "$row" | jq -r '(.status // "") | ascii_downcase')" = in_progress ]; then
     echo "ENTRY interrupted: conversation $c waits on work that is still open ($pending) but is still claimed, so a stay stopped short of leaving it to wait. Run the stay's call again."
   elif [ -n "$gate" ]; then
