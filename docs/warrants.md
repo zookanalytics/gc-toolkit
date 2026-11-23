@@ -231,13 +231,20 @@ no warrant.
   `ready`, `list`, `query` or `search`, orders by a parent's priority. Gas City
   and bd copy a priority from another bead only when they create a bead: a
   sling pours its workflow at the priority of the bead it is slung on
-  (`BeadPriorityOverride` in `internal/sling/sling.go`), and `bd swarm` creates
-  its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
-  the copy when the source's priority changes. Neither one's documentation
-  describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
+  (`BeadPriorityOverride` in `internal/sling/sling.go`), a cook attached to a
+  bead makes its whole sub-workflow at that bead's priority and takes none of
+  its own (`Attach` in `internal/molecule/molecule.go`, and the flags of
+  `newFormulaCookCmd` in `cmd/gc/cmd_formula.go`), a fragment a running
+  workflow adds takes its root's (`InstantiateFragment` in
+  `internal/molecule/molecule.go`), and `bd swarm` creates its molecule at its
+  epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
+  source's priority changes. Neither one's documentation describes a priority
+  that follows another bead's.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 97c0c9b3b11b
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
-  `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
+  `internal/sling/sling.go`, `Attach` and `InstantiateFragment` in
+  `internal/molecule/molecule.go`, `newFormulaCookCmd` in
+  `cmd/gc/cmd_formula.go`), and at `gastownhall/beads` main 786241099046 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,

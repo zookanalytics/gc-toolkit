@@ -413,7 +413,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Mark:         func() (string, error) { return cityMark(rt) },
 		Checkout:     checkout{dir: dir},
 		Gates:        actGates{rt: rt},
-		Runs:         runs{rt: rt.In(dir)},
+		Runs:         runs{rt: rt.In(dir), db: db},
 		Dispositions: dispositions{rt: rt.As(refinery)},
 		Audit:        audit,
 		Wake:         wakes{rt: rt},
@@ -547,12 +547,18 @@ func (a seedAudit) Reaudit(branch, seenBy string, pages []string) (string, error
 	return res.Tail(), nil
 }
 
-// runs pours a review run through the runtime adapter's cook. A cook that did
-// not exit 0, or that named no root, is an error carrying why.
-type runs struct{ rt gascity.Runtime }
+// runs pours a review run through the runtime adapter's cook, and settles its
+// priority through the pack's priority writer, `queue-priority.sh settle` on
+// its root in the store at db, from the scripts directory GCTK_SCRIPTS_DIR
+// names. A cook that did not exit 0, or that named no root, and a settle that
+// did not exit 0 or did not run, are errors carrying why.
+type runs struct {
+	rt gascity.Runtime
+	db string
+}
 
-func (r runs) Pour(formula, bead string, vars map[string]string) (string, error) {
-	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars})
+func (r runs) Pour(formula, bead string, vars, meta map[string]string) (string, error) {
+	res := r.rt.Cook(gascity.Cook{Formula: formula, Bead: bead, Vars: vars, Meta: meta})
 	if f := res.Failure(); f != "" {
 		return "", fmt.Errorf("gc formula cook %s --attach %s: %s", formula, bead, f)
 	}
@@ -560,6 +566,14 @@ func (r runs) Pour(formula, bead string, vars map[string]string) (string, error)
 		return "", fmt.Errorf("gc formula cook %s --attach %s named no root: %s", formula, bead, res.Tail())
 	}
 	return res.Root, nil
+}
+
+func (r runs) Rank(ctx context.Context, root string) error {
+	res := r.rt.Within(ctx).Script("queue-priority.sh", "settle", root, "--db", r.db)
+	if f := res.Failure(); f != "" {
+		return fmt.Errorf("queue-priority.sh settle %s: %s", root, f)
+	}
+	return nil
 }
 
 // dispositions closes a bead whose PR a ruling retired through the runtime

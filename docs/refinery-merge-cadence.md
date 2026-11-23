@@ -840,7 +840,13 @@ while one is open, and the order still reads it.
 record's PR bead, head, target and branch, and the pools and the binding the
 refinery's address names (`<rig>/<binding>refinery`): `review_target`
 `<rig>/<binding>polecat-codex`, `repair_target` `<rig>/<binding>polecat` and
-`binding_prefix` `<binding>`. It pours none while a run is attached to the bead,
+`binding_prefix` `<binding>`. The review run is the bead's PR-finishing work
+([steering.md](steering.md#pr-finishing-work)), so the cook writes
+`priority_shift=-1` on its root. The pour gives every bead it makes the bead's
+own priority, so once the act has freed the record lock, the order settles the
+review run's root and its steps with `queue-priority.sh settle`, in what is
+left of the act's bound. A settle that fails or is stopped is said in the act's
+line and fails no act. It pours none while a run is attached to the bead,
 while another open bead names the PR's branch, such as a rework child, or while
 a human gate holds it. A conversation on the PR holds its merge and nothing
 else, so runs are poured while one is open, and the evaluator's wait holds the

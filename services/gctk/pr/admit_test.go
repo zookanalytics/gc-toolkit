@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,6 +16,7 @@ import (
 	ghfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -27,27 +29,35 @@ import (
 const boundRefinery = "rig/gc-toolkit.refinery"
 
 // pours is the pour of a review run as gc formula cook --attach makes it: the
-// root, which carries its formula and vars, and the bead's blocks edge onto it,
-// which the store's blocked listing holds the bead on. err fails the pour.
+// root, which carries its formula, its vars and the meta written on it, and the
+// bead's blocks edge onto it, which the store's blocked listing holds the bead
+// on. err fails the pour. Its rank records the root it settles, runs onRank
+// first when that is set, and answers rankErr.
 type pours struct {
-	mu    sync.Mutex
-	store *fake.Store
-	vars  []map[string]string
-	err   error
+	mu      sync.Mutex
+	store   *fake.Store
+	vars    []map[string]string
+	metas   []map[string]string
+	ranked  []string
+	err     error
+	rankErr error
+	onRank  func(ctx context.Context, root string)
 }
 
-func (p *pours) Pour(formula, b string, vars map[string]string) (string, error) {
+func (p *pours) Pour(formula, b string, vars, meta map[string]string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return "", p.err
 	}
 	p.vars = append(p.vars, maps.Clone(vars))
+	p.metas = append(p.metas, maps.Clone(meta))
 	root := fmt.Sprintf("tk-run%d", len(p.vars))
 	md := map[string]string{"gc.kind": "workflow", "gc.formula_name": formula}
 	for k, v := range vars {
 		md["gc.var."+k] = v
 	}
+	maps.Copy(md, meta)
 	p.store.Put(fake.Bead{ID: root, Title: formula, Status: "open", Metadata: md})
 	row, _ := p.store.Row(b)
 	row.Edges = append(row.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: root, Title: formula, Status: "open"})
@@ -56,10 +66,26 @@ func (p *pours) Pour(formula, b string, vars map[string]string) (string, error) 
 	return root, nil
 }
 
+func (p *pours) Rank(ctx context.Context, root string) error {
+	if p.onRank != nil {
+		p.onRank(ctx, root)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ranked = append(p.ranked, root)
+	return p.rankErr
+}
+
 func (p *pours) count() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.vars)
+}
+
+func (p *pours) ranks() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.ranked)
 }
 
 // admitting is the landing order's world with no review result at the
@@ -200,6 +226,78 @@ func TestAHeadValidatedWithNoResultGetsOneRunUnderOverlappingPasses(t *testing.T
 	wg.Wait()
 	if n := e.runs.count(); n != 1 {
 		t.Fatalf("four overlapping runs of the order poured %d review runs, want one", n)
+	}
+}
+
+// A review run is PR-finishing work of the bead that owns the PR
+// (docs/steering.md), so its root is poured one level sooner than the bead,
+// and the act settles the run's priority once it has freed the record lock,
+// before its own bound ends, since the pour gave every bead of the run the
+// bead's own priority. A later run, which finds the run attached, settles
+// nothing.
+func TestAPouredRunIsSettledAsPRFinishingWorkOnceTheLockIsFree(t *testing.T) {
+	d := newAdmit(t)
+	free, bounded := true, true
+	d.runs.onRank = func(ctx context.Context, _ string) {
+		if _, ok := ctx.Deadline(); !ok || ctx.Err() != nil {
+			bounded = false
+		}
+		release, err := record.Lock(d.l.Dir, 0)
+		if err != nil {
+			free = false
+			return
+		}
+		release()
+	}
+	d.refresh(t)
+	out := d.reconcile(t, pr.Options{Stop: time.Minute})
+	if len(out) != 1 {
+		t.Fatalf("one record, %d outcomes: %+v", len(out), out)
+	}
+	is(t, out[0], pr.ActPoured)
+	if got := d.runs.metas[0]; !maps.Equal(got, map[string]string{"priority_shift": "-1"}) {
+		t.Fatalf("the run's root was poured with %v, want priority_shift -1", got)
+	}
+	if root, _ := d.store.Row("tk-run1"); root.Metadata["priority_shift"] != "-1" {
+		t.Fatalf("the run's root carries priority_shift %q, want -1", root.Metadata["priority_shift"])
+	}
+	if got := d.runs.ranks(); !slices.Equal(got, []string{"tk-run1"}) {
+		t.Fatalf("the run settled %v, want the run's root tk-run1", got)
+	}
+	if !free || !bounded {
+		t.Fatalf("the settle ran with the record lock free: %v, and inside the act's bound: %v; want both", free, bounded)
+	}
+	if !strings.Contains(out[0].Detail, "; its priority settled") {
+		t.Fatalf("the pour says %q", out[0].Detail)
+	}
+	is(t, d.once(t), pr.ActChecked)
+	if n := len(d.runs.ranks()); n != 1 {
+		t.Fatalf("the runs settled %d times in all, want 1", n)
+	}
+}
+
+// A settle that fails leaves the run poured, since the act is done: the run
+// waits at the bead's priority until the priority pass reaches it, which the
+// outcome says, and the next run pours no second one. A pour that fails
+// settles nothing.
+func TestARunWhosePriorityDoesNotSettleStaysPoured(t *testing.T) {
+	d := newAdmit(t)
+	d.runs.rankErr = errors.New("queue-priority.sh settle tk-run1: exit 1: could not take the priority lock")
+	o := d.once(t)
+	is(t, o, pr.ActPoured)
+	if !strings.Contains(o.Detail, "its priority did not settle") || !strings.Contains(o.Detail, "could not take the priority lock") {
+		t.Fatalf("the pour whose settle failed says %q", o.Detail)
+	}
+	is(t, d.once(t), pr.ActChecked)
+	if n := d.runs.count(); n != 1 {
+		t.Fatalf("a settle that failed led to %d pours, want 1", n)
+	}
+
+	e := newAdmit(t)
+	e.runs.err = errors.New("gc formula cook: exit 1: the store did not answer")
+	is(t, e.once(t), pr.ActRetry)
+	if got := e.runs.ranks(); len(got) != 0 {
+		t.Fatalf("a pour that failed settled %v", got)
 	}
 }
 

@@ -265,9 +265,9 @@ func TestTheRefinerysWakeWakesThenNudgesThroughTheRuntime(t *testing.T) {
 }
 
 // The landing order pours a review run through the runtime adapter's cook,
-// attached to the bead that owns the PR, with its vars, and answers with the
-// root the cook named. A cook that did not exit 0, or that named no root, is an
-// error that says why.
+// attached to the bead that owns the PR, with its vars and the meta its root
+// carries, and answers with the root the cook named. A cook that did not exit
+// 0, or that named no root, is an error that says why.
 func TestAReviewRunIsPouredAttachedToItsBeadThroughTheRuntime(t *testing.T) {
 	l, err := landing(filepath.Join(t.TempDir(), ".beads"), "rig/gc-toolkit.refinery")
 	if err != nil {
@@ -278,26 +278,59 @@ func TestAReviewRunIsPouredAttachedToItsBeadThroughTheRuntime(t *testing.T) {
 	}
 	rt := &gcfake.Runtime{}
 	vars := map[string]string{"pr_bead": "tk-1", "head": validated, "target": "main"}
-	root, err := runs{rt: rt}.Pour("mol-pr-review", "tk-1", vars)
+	meta := map[string]string{"priority_shift": "-1"}
+	root, err := runs{rt: rt}.Pour("mol-pr-review", "tk-1", vars, meta)
 	if err != nil || root != "cooked-1" {
 		t.Fatalf("the pour answered %q, %v", root, err)
 	}
-	if got := rt.Cooks(); len(got) != 1 || got[0].Formula != "mol-pr-review" || got[0].Bead != "tk-1" || !maps.Equal(got[0].Vars, vars) {
-		t.Fatalf("cooked %+v, want mol-pr-review attached to tk-1 with its vars", got)
+	if got := rt.Cooks(); len(got) != 1 || got[0].Formula != "mol-pr-review" || got[0].Bead != "tk-1" ||
+		!maps.Equal(got[0].Vars, vars) || !maps.Equal(got[0].Meta, meta) {
+		t.Fatalf("cooked %+v, want mol-pr-review attached to tk-1 with its vars and meta", got)
 	}
 
 	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
 		return gascity.CookResult{Result: gascity.Result{Code: 1, Output: "gc formula cook: attach bead tk-1: not found"}}
 	}}
-	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil ||
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars, meta); err == nil ||
 		!strings.Contains(err.Error(), "gc formula cook mol-pr-review --attach tk-1: exit 1") {
 		t.Fatalf("a cook that did not exit 0 answered %v", err)
 	}
 	rt = &gcfake.Runtime{OnCook: func(gascity.Cook) gascity.CookResult {
 		return gascity.CookResult{Result: gascity.Result{Output: "Root: tk-other"}}
 	}}
-	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars); err == nil || !strings.Contains(err.Error(), "named no root") {
+	if _, err := (runs{rt: rt}).Pour("mol-pr-review", "tk-1", vars, meta); err == nil || !strings.Contains(err.Error(), "named no root") {
 		t.Fatalf("a cook that named no root answered %v", err)
+	}
+}
+
+// The landing order settles a review run's priority through the pack's
+// priority writer: queue-priority.sh settle on the run's root, in the store the
+// order acts on. A settle that did not exit 0 is an error that says why.
+func TestAReviewRunsPriorityIsSettledThroughThePriorityWriter(t *testing.T) {
+	db := filepath.Join(t.TempDir(), ".beads")
+	l, err := landing(db, "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := l.Runs.(runs); !ok || r.db != db {
+		t.Fatalf("the landing order settles through %+v, not the runtime in the store at %s", l.Runs, db)
+	}
+	rt := &gcfake.Runtime{}
+	if err := (runs{rt: rt, db: db}).Rank(context.Background(), "tk-root"); err != nil {
+		t.Fatalf("the settle answered %v", err)
+	}
+	want := []gcfake.Call{{Name: "queue-priority.sh", Args: []string{"settle", "tk-root", "--db", db}}}
+	if got := rt.Scripts(); !slices.EqualFunc(got, want, func(a, b gcfake.Call) bool {
+		return a.Name == b.Name && slices.Equal(a.Args, b.Args)
+	}) {
+		t.Fatalf("ran %+v, want %+v", got, want)
+	}
+	rt = &gcfake.Runtime{OnScript: func(gcfake.Call) gascity.Result {
+		return gascity.Result{Code: 1, Output: "queue-priority.sh: settle: could not take the priority lock"}
+	}}
+	if err := (runs{rt: rt, db: db}).Rank(context.Background(), "tk-root"); err == nil ||
+		!strings.Contains(err.Error(), "queue-priority.sh settle tk-root: exit 1") {
+		t.Fatalf("a settle that did not exit 0 answered %v", err)
 	}
 }
 

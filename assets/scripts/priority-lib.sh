@@ -10,7 +10,9 @@
 #     the input convoy it names, and an input convoy (gc.synthetic, tracking
 #     exactly one bead) the bead it tracks. Which convoy a root names and which
 #     beads a convoy tracks are run-lib.sh's defs, the one reading of a run's
-#     link to its bead.
+#     link to its bead. The root of a PR's review run is the exception: it
+#     names the bead that owns the PR in its pr_bead var (gc.var.pr_bead), it is
+#     that bead's PR-finishing work, below, and the run's steps follow it.
 #   * PR-finishing work, a bead carrying anchor_bead, follows its anchor. Once
 #     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
 #     approved when its anchor owns an open PR, its merge_result a value of the
@@ -30,11 +32,12 @@
 # are closed, pinned or absent from the store follows nothing.
 #
 # The shift is the signed integer in priority_shift: +1 is one level later, -1
-# is one level sooner, and absent or empty reads as 0. A workflow's convoy, root
-# and steps carry no shift, and a bead that follows nothing has nothing to shift
-# from, so neither reads one. A shift that is not a signed integer makes its
-# bead unreadable, and so every bead that follows it: no priority is computed
-# from a guess.
+# is one level sooner, and absent or empty reads as 0. A workflow's convoy,
+# root and steps carry no shift, and a bead that follows nothing has nothing to
+# shift from, so neither reads one. The one root that reads a shift is a review
+# run's, which is PR-finishing work and reads the shift its pour wrote. A shift
+# that is not a signed integer makes its bead unreadable, and so every bead that
+# follows it: no priority is computed from a guess.
 #
 # The bd priority field holds the priority a bead competes at, because a pool's
 # claim reads it and a pour copies it once. So a bead that follows something
@@ -118,16 +121,20 @@ PRIORITY_JQ="$RUN_JQ"'
 
   # What this bead can follow: {kind, on}, where kind is workflow, anchor,
   # parent or none, and on lists the beads it could follow. priority_of
-  # decides which of them it does follow.
+  # decides which of them it does follow. The root of a review run follows the
+  # bead its pr_bead var names, as PR-finishing work of that bead, and not the
+  # input convoy it also names, so it is the bead its steps were poured for.
   def prio_follows:
     ((.id // "") | tostring) as $self
     | prio_str("gc.root_bead_id") as $root
     | run_convoy as $convoy
     | prio_str("anchor_bead") as $anchor
+    | prio_str("gc.var.pr_bead") as $pr
     | run_tracked as $tracked
     | ([ prio_edges[] | select(.type == "parent-child") | .to ]
        + (if ((.parent // "") | tostring) != "" then [(.parent | tostring)] else [] end)) as $parents
     | if $root != "" and $root != $self then {kind: "workflow", on: [$root]}
+      elif prio_str("gc.kind") == "workflow" and $pr != "" and $pr != $self then {kind: "anchor", on: [$pr]}
       elif prio_str("gc.kind") == "workflow" and $convoy != "" and $convoy != $self then {kind: "workflow", on: [$convoy]}
       elif ((.issue_type // "") | tostring) == "convoy" and (prio_str("gc.synthetic") | ascii_downcase) == "true"
            and ($tracked | length) == 1 and $tracked[0] != $self then {kind: "workflow", on: [$tracked[0]]}

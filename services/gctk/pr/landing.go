@@ -176,9 +176,9 @@ func (e *HeldClose) Error() string { return e.Why }
 // a run requests no merge when it is nil. Feedback loads the definition of
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
-// it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
-// ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
-// carries none. Wake gives the refinery its turn for each changed head the run
+// it. Runs pours a PR's review run and settles its priority, and
+// Dispositions closes a bead whose PR a ruling retired. Audit is the rig's seed
+// audit, nil for a rig whose repository carries none. Wake gives the refinery its turn for each changed head the run
 // hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
@@ -370,8 +370,9 @@ const (
 // does not end, since a cook stopped before it attaches its run leaves a run
 // the order never reads, so an act starts a pour only while pourReserve of its
 // bound is left. The disposition writer a closed retired PR's bead goes to once
-// the act has freed the lock runs past the bound too (Dispositions). A bound
-// of zero is no bound.
+// the act has freed the lock runs past the bound too (Dispositions). The settle
+// of a poured review run's priority runs once the act has freed the lock, in
+// what is left of the act's bound (Runs). A bound of zero is no bound.
 type Options struct {
 	Window time.Duration
 	Stop   time.Duration
@@ -454,10 +455,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 			continue
 		}
 		ctx, cancel := bounded(o.Stop)
-		u.landed, u.disposal, u.rereadDue, u.reread = nil, nil, "", ""
+		u.landed, u.disposal, u.rereadDue, u.reread, u.poured = nil, nil, "", "", ""
 		out := u.one(ctx, id, o.Stop)
 		if u.rereadDue != "" {
 			out = u.rereadAndDecide(ctx, id, u.rereadDue, o.Stop)
+		}
+		if u.poured != "" {
+			out.Detail += u.rank(ctx, u.poured)
 		}
 		cancel()
 		if u.disposal != nil {
@@ -553,9 +557,10 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 // audit's check once the lock is free, disposal the close the act just made
 // owes the disposition writer once the lock is free, rereadDue the PR the act
 // found ready on the saved read, which the one-PR update re-reads once the lock
-// is free, reread the bead whose PR the act has had re-read, and audited names,
-// for each tip of the default branch the run has checked, the bead whose
-// landing checked it.
+// is free, reread the bead whose PR the act has had re-read, poured the root of
+// the review run the act poured, whose priority the act settles once the lock
+// is free, and audited names, for each tip of the default branch the run has
+// checked, the bead whose landing checked it.
 type run struct {
 	Landing
 	feedback  Feedback
@@ -568,6 +573,7 @@ type run struct {
 	disposal  *Disposal
 	rereadDue string
 	reread    string
+	poured    string
 	audited   map[string]string
 }
 

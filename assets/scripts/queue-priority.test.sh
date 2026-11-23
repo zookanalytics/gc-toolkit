@@ -39,6 +39,13 @@
 #               plus its shift; a move refuses a P-value on it and says the
 #               approval holds it at P0, writes a shift on it, and leaves it at
 #               P0 when its epic moves.
+#   (RUN)       a PR's review run is PR-finishing work of the bead that owns
+#               the PR: a settle of that bead writes the run's input convoy and
+#               leaves the run's root and steps as they are, while a settle of
+#               the root writes it and its steps on every pool one level sooner
+#               than the bead, at the shift its pour wrote, and at P0 once the
+#               bead's PR is approved; a move on a step names the root, and a
+#               move takes a shift on the root, as on any PR-finishing work.
 #   (FIXTURE)   settle on every bead and the move on every bead that follows
 #               nothing leave priority-lib.fixture.json's store at the same
 #               priorities, the ones its cases name.
@@ -47,7 +54,8 @@
 #               computes from the queued beads as it reads them itself, not as
 #               bd ready prints them. It settles a queued bead's whole workflow
 #               in one pass after a raw edit on its epic, a queued step whose
-#               root lost its input convoy with that root, and a queued step of
+#               root lost its input convoy with that root, a queued step of a
+#               review run with the run's root, and a queued step of
 #               a workflow poured for a step of another workflow with every
 #               bead between them; it finds the rig's polecat pool in the roster
 #               under whatever binding the rig imports the pack, and fails,
@@ -573,6 +581,47 @@ eq "$(prio tk-ap)" 1 "(APPROVED) a move of the epic reaches the approved anchor"
 eq "$(prio tk-ra)" 0 "(APPROVED) and leaves its finishing work at P0"
 eq "$(prio tk-rc)" 0 "(APPROVED) while the other anchor's finishing work follows it, one level sooner"
 
+# A PR's review run is PR-finishing work of the bead that owns the PR. tk-pr
+# owns a PR that is not approved, under the P2 epic tk-e2. Its review run is the
+# input convoy tk-cvpr, the root tk-rpr, which names tk-pr in its pr_bead var
+# and carries the shift its pour wrote, the triage step tk-tpr queued for the
+# codex pool and the repair step tk-qpr queued for the polecat pool. The root and
+# steps sit at a stale P3, which neither rank gives, so each write shows.
+REVIEW_RUN='[
+ {"id":"tk-e2","status":"open","issue_type":"epic","priority":2,"metadata":{},"dependencies":[]},
+ {"id":"tk-pr","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","branch":"polecat/tk-pr"},
+  "dependencies":[{"issue_id":"tk-pr","depends_on_id":"tk-e2","type":"parent-child"}]},
+ {"id":"tk-cvpr","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
+  "dependencies":[{"issue_id":"tk-cvpr","depends_on_id":"tk-pr","type":"tracks"}]},
+ {"id":"tk-rpr","status":"open","issue_type":"task","priority":3,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvpr","gc.formula_name":"mol-pr-review","gc.var.pr_bead":"tk-pr","priority_shift":"-1"},"dependencies":[]},
+ {"id":"tk-tpr","status":"open","issue_type":"task","priority":3,"metadata":{"gc.root_bead_id":"tk-rpr","gc.step_ref":"review-loop.iteration.1.triage","gc.routed_to":"gc-toolkit/gc-toolkit.polecat-codex"},"dependencies":[]},
+ {"id":"tk-qpr","status":"open","issue_type":"task","priority":3,"metadata":{"gc.root_bead_id":"tk-rpr","gc.step_ref":"review-loop.iteration.1.rule-and-repair","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]}
+]'
+reset_store
+add_beads "$REVIEW_RUN"
+qp settle tk-pr
+eq "$RC" 0 "(RUN) settle of the bead that owns the PR exits 0"
+eq "$(prio tk-cvpr)" 2 "(RUN) the review run's input convoy follows that bead, at shift 0"
+for b in tk-rpr tk-tpr tk-qpr; do eq "$(prio "$b")" 3 "(RUN) the run is not one of the bead's workflows, so the settle leaves $b as it is"; done
+qp settle tk-rpr
+eq "$RC" 0 "(RUN) settle of the run's root exits 0"
+has "$OUT" "settled tk-rpr at P1: anchor tk-pr P2, shift -1" "(RUN) the root ranks as PR-finishing work, one level sooner than the bead, and the derivation says so"
+for b in tk-rpr tk-tpr tk-qpr; do eq "$(prio "$b")" 1 "(RUN) $b, the root or a step on either pool, is written P1"; done
+qp move tk-qpr --shift -1
+eq "$RC" 2 "(RUN) a move on a step of the run is refused"
+has "$ERR" "Move tk-rpr instead." "(RUN) naming the run's root, whose priority its steps take"
+qp move tk-rpr P0
+eq "$RC" 2 "(RUN) a P-value on the run's root is refused, as on any PR-finishing work"
+has "$ERR" "P0 is --shift -2" "(RUN) and the refusal names the shift that lands it there"
+qp move tk-rpr --shift +1
+eq "$RC" 0 "(RUN) a shift on the run's root exits 0"
+eq "$(meta tk-rpr priority_shift)" "1" "(RUN) the shift is written on the root"
+for b in tk-rpr tk-tpr tk-qpr; do eq "$(prio "$b")" 3 "(RUN) $b, the root or a step, is written P3, one level later than the bead"; done
+jq -c 'map(if .id == "tk-pr" then .metadata += {"pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"} else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
+qp settle tk-rpr
+has "$OUT" "settled tk-rpr at P0: anchor tk-pr has an approved PR, shift +1 aside" "(RUN) once the bead's PR is approved, the run settles at P0 whatever its shift"
+for b in tk-rpr tk-tpr tk-qpr; do eq "$(prio "$b")" 0 "(RUN) $b is written P0"; done
+
 reset_store
 qp move tk-w1 P3
 eq "$RC" 2 "(MOVE) a P-value on a member is refused (exit 2)"
@@ -762,6 +811,16 @@ eq "$(prio tk-ss)" 1 "(PASS) the queued step takes its root's priority"
 eq "$(prio tk-rs)" 1 "(PASS) and the root keeps its own"
 qp reconcile --db "$DB" --pool "$POOL"
 has "$OUT" "0 at a stale priority" "(PASS) so the next pass finds nothing stale"
+
+# The review run's repair step queued at a stale priority: the pass
+# settles it with the run's root, the bead its steps were poured for, and the
+# run's triage step queued for the codex pool with it.
+reset_store
+add_beads "$REVIEW_RUN"
+qp reconcile --db "$DB" --pool "$POOL"
+eq "$RC" 0 "(PASS) a pass over a queued step of a review run exits 0"
+has "$OUT" "settled tk-rpr at P1: anchor tk-pr P2, shift -1" "(PASS) it settles the step with the run's root, one level sooner than the bead that owns the PR"
+for b in tk-rpr tk-tpr tk-qpr; do eq "$(prio "$b")" 1 "(PASS) $b of the review run is written P1"; done
 
 # The order passes no --pool, so the pass finds the rig's polecat pool in the
 # roster.
