@@ -133,26 +133,37 @@ Accept answers first and reads the gate back. It runs the act only when the
 gate took its own answer. When another answer reached the gate first, that
 answer stands: Accept runs no act, and the work goes as that answer leaves it.
 
-An answer releases what the gate held, and two releases can act before Accept
-does. Deferred dispatch sends an armed bead under the bead's dispatch lock, and
-the landing order requests a PR's merge under the record lock of the PR's
-store. So before it answers, Accept takes the bead's dispatch lock, and for
-`retire` the record lock too. It takes them in that order, after its
-acceptance lock, and takes no other lock while it holds the record lock, as no
-holder of that lock does. `proceed` takes neither, since the release is what
+An answer releases what the gate held, and three releases can act before
+Accept does. A pool's claim takes a routed bead once nothing blocks it,
+deferred dispatch sends an armed bead under the bead's dispatch lock, and the
+landing order requests a PR's merge under the record lock of the PR's store.
+A pool's claim takes no lock of the pack's, so no lock Accept holds keeps a
+pool off the bead. So before it answers, for every act but `proceed`, Accept
+puts Gas City's dispatch hold, `hold:mayor`, on the bead. No pool's claim and
+no arm's send serves a bead that carries a dispatch hold
+(`DispatchHoldLabels` in Gas City's `internal/beadmeta/hold_labels.go`, which
+`gc hook --claim` checks, and the serve rule of gctk's arm domain), so nothing
+starts the work while the hold is on. Accept takes the bead's dispatch lock,
+and for `retire` the record lock too, before it writes the hold, and holds
+them across its answer. It takes them in that order, after its acceptance
+lock, and takes no other lock while it holds the record lock, as no holder of
+that lock does. `proceed` takes no hold and no lock, since the release is what
 its yes asks for.
 
-On another answer, Accept lets the locks go, having written nothing. On its own
-answer, it writes what keeps each release from acting before it lets them go:
-it removes any arm, and for `retire` it stamps the PR's disposition, under
-which the landing order requests no merge. Then it runs the rest of the act.
+On another answer, Accept lifts the hold, unless the bead carried it before
+Accept put it on, as `gc.acceptance` records, and lets the locks go, having
+written nothing else. So the work goes as that answer leaves it. On its own
+answer, it writes what keeps each release from acting before it lets the locks
+go: it removes any arm, and for `retire` it stamps the PR's disposition, under
+which the landing order requests no merge. Then it runs the rest of the act,
+which ends the hold last, once no arm is left to send the bead.
 
 | `act` | What a yes does | The rest of the act |
 |---|---|---|
 | `proceed` | The work waiting on the question goes on by the wait it already has: an arm that re-slings it once the gate clears, a merge the gate holds, or the next run that reads the answer. | Nothing. |
 | `sling` | Starts `formula` on the bead, with `vars`. | It slings once under the token and lifts `hold:mayor`, since a sling is a placement. |
-| `stand-down` | The waiting work does not go on, and the bead closes as not needed. | It ends the run and clears the bead's route (`gctk bead takeaway --release`), then closes the bead with the gate as its evidence (`bead-rehome.sh`). |
-| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | It closes the PR, and the landing order closes the bead under the disposition once it reads the PR closed. |
+| `stand-down` | The waiting work does not go on, and the bead closes as not needed. | It ends the run and clears the bead's route (`gctk bead takeaway --release`), then closes the bead with the gate as its evidence (`bead-rehome.sh`). The hold stays on until the bead closes, so no pool takes the bead before its route is cleared. |
+| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | It lifts the hold and closes the PR, and the landing order closes the bead under the disposition once it reads the PR closed. |
 
 Before it answers, Accept also makes the checks each act's writer makes before
 its first write, such as `stand-down.sh`'s refusal of an open PR and
@@ -161,8 +172,11 @@ act leaves the question as it was.
 
 The two acts that stop work use their writers' steps in this order, rather than
 running the writers whole. `stand-down.sh` carries out a person's ruling: it
-ends the run before it answers, and it closes the bead whichever answer the
-gate took. `pr-dispose.sh` takes the record lock for its stamp alone. Run
+ends the run and clears the bead's route before it answers, so no pool is
+offered the bead its answer frees, and it closes the bead whichever answer the
+gate took. Accept keeps the pools off with its hold instead, which it lifts
+when another answer stands, so it ends the run and clears the route only after
+its own answer. `pr-dispose.sh` takes the record lock for its stamp alone. Run
 before the answer, it would close the PR whichever answer the gate then took.
 Run after it, it would leave the merge free between the answer and the stamp.
 So unit 2 moves `pr-dispose.sh` into gctk, where Accept stamps under the lock it
@@ -177,13 +191,14 @@ closes on any answer: a sitting's ruling the other way, or its filer's
 
 When an act does not land, Accept says what landed and what runs it again, as
 today. When the arm's removal or the stamp does not land after its own answer,
-Accept reopens the gate from that answer before it lets the locks go, so
-nothing is released and the question is back on your board. A sling that
-poured nothing reopens the gate the same way. A run that stopped after those
-writes is finished by the next run under the same token, whoever runs it, and
-that holds for every act. A lock ends with the run that holds it, so a run that
-stopped between its answer and those writes leaves the arm or the merge free to
-act before the next run finishes it.
+Accept reopens the gate from that answer, then lifts its hold, before it lets
+the locks go, so nothing is released and the question is back on your board. A
+sling that poured nothing reopens the gate the same way. A run that stopped
+after those writes is finished by the next run under the same token, whoever
+runs it, and that holds for every act. A run that stopped between its answer
+and those writes leaves its hold on, so no pool and no arm starts the work
+before the next run finishes it. A lock ends with the run that holds it, so
+such a run leaves the merge free to act before the next run finishes it.
 
 ## 4. The askers
 
@@ -240,7 +255,7 @@ makes it safe:
 - its token, which titles the pour and names the answer;
 - its record of what was accepted, `gc.acceptance` on the gate, which now holds
   the accepted record's `rev` and its act, with any var a sitting's ruling
-  settled;
+  settled, and whether Accept put the dispatch hold on the bead;
 - the read that lets the first answer stand;
 - the reopen when a sling pours nothing, and the finishing of an acceptance an
   earlier run left.
@@ -248,10 +263,12 @@ makes it safe:
 It changes in these ways. It reads the recommendation from the question, not
 from the bead. It takes any question whose asker recorded one, and only the
 version of its record that the caller read. It carries out four acts where it
-carried out one. It removes the bead's arm only once the gate took its own
-answer, holding the dispatch lock across the answer, where today its first
-write removes the arm. It refuses while a conversation other than the
-caller's is open on the question, where today it only warns.
+carried out one. Before it answers, it puts Gas City's dispatch hold on the
+bead, where today it only lifts one after its sling. It removes the bead's arm
+only once the gate took its own answer, holding the dispatch lock across the
+answer, where today its first write removes the arm. It refuses while a
+conversation other than the caller's is open on the question, where today it
+only warns.
 
 So the first reaction's recommendation moves from `gc.recommended_formula` on
 the bead to its gate's record. The bead keys `gc.recommended_formula` and
@@ -373,7 +390,7 @@ with a Debt entry that the last unit to land removes.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. Accept holds the bead's dispatch lock across its answer and removes the arm under it, which the arm domain lets a caller do. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
+| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. Accept puts the dispatch hold on the bead under the bead's dispatch lock, holds the lock across its answer and removes the arm under it, which the arm domain lets a caller do. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
 | 2 | `stand-down` and `retire` in both verbs, in section 3's order and with their writers' checks. `pr-dispose.sh` moves into gctk as `gctk pr dispose` by the rules a domain move follows, and its callers call that verb. | unit 1 |
 | 3 | The board's Accept: the course on a row that qualifies, the button, `POST /helm/accept`, the panel's answer, and the Question row of docs/bead-standing.md. | unit 1 |
 | 4 | The askers: the validating closer's step 2b records its course; the waits skill says how any asker records one, which a decliner and a wait on outside work follow; the polecat doctrine's paragraph on declining points there. | units 1 and 2 |

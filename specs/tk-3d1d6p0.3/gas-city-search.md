@@ -89,17 +89,26 @@ the bead, and writes the record in one write.
 - `gc sling` refuses a second launch of a formula at a bead only while the
   first root is live, and no flag checks an earlier root by a caller's key
   ([the search for today's Accept](../tk-1tfzr71.226/gas-city-search.md#accept-gc-slings-launch-lock)).
+- Gas City's dispatch holds, `hold:mayor` and `hold:external`
+  (`DispatchHoldLabels`, `internal/beadmeta/hold_labels.go`), keep a bead out
+  of every path that serves it as work, `gc hook --claim` among them, until
+  the label goes. A hold answers to its label, not to the gate's answer, so it
+  starts no work on one answer either. What it gives is a stop that outlives
+  the process that wrote it, which no lock does.
 
 **Leaves.** Nothing starts work, closes a bead or retires a PR on one answer of
 a gate and not on another. So `gctk gate accept` runs the act itself, and only
 once the gate took its own answer. It holds the lock today's Accept holds
 ([warrants.md](../../docs/warrants.md#accepts-lock)), and across the answer the
 pack's locks that the answer's releases act under
-([design.md](design.md), section 3). It runs each act through steps the pack
-already has: `gc sling` with today's token for `sling`, gctk's disarm and
-takeaway with `bead-rehome.sh` for `stand-down`, and `pr-dispose.sh`'s stamp
-and close, moved into gctk, for `retire`. `proceed` composes the wait the bead
-already has, a `blocks` edge with what it releases, and adds nothing.
+([design.md](design.md), section 3). A pool's claim takes none of those locks,
+so before it answers Accept also puts the dispatch hold on the bead, and lifts
+it once its act is done or another answer stands. It runs each act through
+steps the pack already has: `gc sling` with today's token for `sling`, gctk's
+disarm and takeaway with `bead-rehome.sh` for `stand-down`, and
+`pr-dispose.sh`'s stamp and close, moved into gctk, for `retire`. `proceed`
+composes the wait the bead already has, a `blocks` edge with what it
+releases, and adds nothing.
 
 ## 4. The board's door for the write
 
