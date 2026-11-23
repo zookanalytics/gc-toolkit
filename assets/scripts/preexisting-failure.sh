@@ -10,9 +10,9 @@
 # Callers: the refinery's merge gate (formulas/mol-refinery-patrol.toml,
 # handle-failures, through refinery-pre-existing.sh), a polecat's pre-flight
 # and self-review (formulas/mol-polecat-work.toml), a review run's ruling of a
-# red check its PR's target carries (skills/review-ruling/SKILL.md), and an
-# agent that finds a failure on a default branch some other way
-# (skills/work/SKILL.md).
+# red check that its PR's target, the default branch, carries
+# (skills/review-ruling/SKILL.md), and an agent that finds a failure on a
+# default branch some other way (skills/work/SKILL.md).
 #
 # The key names the failure, never its wording, and `key` is what derives it,
 # so two gates that meet one red reach one key. A failing test function is its

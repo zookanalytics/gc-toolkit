@@ -88,9 +88,15 @@ The PR stays the change the operator reviewed.
 ## A red check the target carries
 
 A red-check ask names a required check that fails at the PR's head. The check
-is the branch's to fix, unless the target's own head fails it for the same
-reason, such as the same test, which no change on the branch can fix. Read the
-target's checks there:
+is the branch's to fix, unless the PR's target is the rig's default branch and
+its own head fails the check for the same reason, such as the same test, which
+no change on the branch can fix. The tracker below is the default branch's
+alone: `preexisting-failure.sh file` sends a tracker it files with no target,
+so its fix branches from the rig's default branch and lands there. A failure
+another target carries, such as an effort's integration branch, stays the
+branch's to fix, since the PR's merge carries the fix to that target.
+`gc rig list --json` names each rig's `default_branch`. Read the target's
+checks at its head:
 
 ```bash
 gh api "repos/<owner>/<repo>/commits/<target>/check-runs" --jq '.check_runs[] | "\(.name) \(.conclusion) \(.html_url)"'
