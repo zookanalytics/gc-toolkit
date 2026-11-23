@@ -372,7 +372,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   `blocks` edges (`bd_human_gates` in `assets/scripts/bd-lib.sh`), and takes a
   cleared gate's answer from its resolve reason, so a gate holds what it blocks
   whoever filed it. The board folds each open gate onto the row of every bead
-  it blocks.
+  it blocks. An asker that recommends one course records it on its gate, with
+  what a yes to it does, and the board offers Accept from that record alone,
+  never from the question's words.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
   blocks nothing but an open PR's anchor, whose merge it holds until it closes,
@@ -422,10 +424,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   each monitor order's last good run. It reads no store of its own. The write
   verbs are gctk commands, which skills, prompts and the board's write routes
   call. The board's one write that gctk does not carry is archiving a mailbox
-  message, which Gas City's mail performs. Accept clears a first reaction's
-  recommendation gate and nothing else, under the bead's acceptance lock. The
-  po's backlog refinement works the queue, every bead `hold:mayor` holds in any
-  spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
+  message, which Gas City's mail performs. Accept, which the board and a
+  sitting's sign-off both call, answers a question with the operator's yes to
+  its recorded recommendation and carries that recommendation out, under the
+  acceptance lock. The po's backlog refinement works the queue, every bead
+  `hold:mayor` holds in any spelling
+  ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
   longer than one render.
 
@@ -532,6 +536,9 @@ first. Either way the change is a decision on the record, not a drift.
   such as an iOS app, so the command keeps that app on fixture data. Any other
   rig's start command reaches what the rig's tests reach, the live city
   included.
+- **An act only a yes may start runs from Accept, never from the gate's
+  close.** Any answer closes a gate, so only a recommendation that the waiting
+  work go on is left to the wait that work already has.
 
 ## Debt
 
@@ -552,6 +559,10 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
+- **No question offers Accept on the board yet.** Accept takes only a first
+  reaction's recommendation, through a sitting's sign-off, so every other
+  question with one recommendation costs a conversation. The units of
+  tk-3d1d6p0.4 retire it, and the last of them to land removes this entry.
 - **The board lists no mailbox yet.** It neither reads Gas City's `human`
   mailbox nor archives a message in it, so no message there reaches the
   operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
