@@ -69,9 +69,12 @@ leaves the PR's title as it stands. The PR is the one the bead's record names,
 else the one it records for the refinery to reuse (existing_pr), in the rig's
 own repository, the one the origin of the clone it runs in names
 ($GC_RIG_ROOT, else the working directory), and open from the bead's branch.
-It prints one line saying what it edited.
+It prints one line saying what it edited, and names on stderr each section it
+left as it stands: one the body carries no markers it can read for, as in a
+hand-written body, and the branch-beads section when its beads did not read.
 
-exit: 0 printed; with --edit, the PR shows the composition, edited or already
+exit: 0 printed; with --edit, the PR shows the composition, edited or already,
+        but for each section named on stderr as left as it stands
       1 usage, or with --edit a PR outside the rig's own repository
       2 the bead, the store holding it, or the body named did not read:
         nothing is printed; with --edit, GitHub did not answer or refused the
@@ -229,8 +232,21 @@ func prComposeEdit(bead string, req pr.Request, stdout, stderr io.Writer) int {
 	if err != nil {
 		return editFailed(bead, err, stderr)
 	}
-	if got.Composition != nil && got.Composition.Unread != nil {
-		fmt.Fprintf(stderr, "gctk pr compose: the beads on %s's branch did not read: %v; the branch-beads section is left as it stands\n", bead, got.Composition.Unread)
+	left := false
+	if c := got.Composition; c != nil {
+		if c.Unread != nil {
+			fmt.Fprintf(stderr, "gctk pr compose: the beads on %s's branch did not read: %v; the branch-beads section is left as it stands\n", bead, c.Unread)
+			left = true
+		}
+		for _, s := range []struct {
+			outcome pr.Outcome
+			name    string
+		}{{c.Summary, "summary region"}, {c.BranchBeads, "branch-beads section"}} {
+			if s.outcome == pr.Unmanaged {
+				fmt.Fprintf(stderr, "gctk pr compose: the body of %s carries no %s its markers let it read, so it is left as it stands\n", got.URL, s.name)
+				left = true
+			}
+		}
 	}
 	switch {
 	case got.Title && got.Body:
@@ -239,6 +255,8 @@ func prComposeEdit(bead string, req pr.Request, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "%s: edited the title of %s\n", bead, got.URL)
 	case got.Body:
 		fmt.Fprintf(stdout, "%s: edited the body of %s\n", bead, got.URL)
+	case left:
+		fmt.Fprintf(stdout, "%s: edited nothing on %s\n", bead, got.URL)
 	default:
 		fmt.Fprintf(stdout, "%s: %s shows its composition already\n", bead, got.URL)
 	}

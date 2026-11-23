@@ -304,9 +304,11 @@ func runEdit(t *testing.T) (string, string, int) {
 }
 
 // --edit reads the PR's title and body, edits both to the anchor's
-// composition in one request, and asks nothing of a PR that shows it already.
-// A closed PR is refused with nothing edited, a PR outside the rig's origin is
-// a usage error with nothing read, and an edit GitHub does not answer exits 2.
+// composition in one request, and asks nothing of a PR that shows it already,
+// nor of one whose hand-written body carries no summary region, which it names
+// on stderr in place of saying the PR shows its composition. A closed PR is
+// refused with nothing edited, a PR outside the rig's origin is a usage error
+// with nothing read, and an edit GitHub does not answer exits 2.
 func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
 	hermeticGit(t)
 	const origin = "git@github.com:acme/widgets.git"
@@ -344,6 +346,14 @@ func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
 		t.Fatalf("a PR that shows its composition was edited:\n%s", raw)
+	}
+	calls = stubEdit(t, origin, "OPEN", composedNow.Title, "A person wrote this body.")
+	if out, errs, code := runEdit(t); code != 0 || out != "tk-a: edited nothing on https://github.com/acme/widgets/pull/7\n" ||
+		!strings.Contains(errs, "carries no summary region its markers let it read, so it is left as it stands") {
+		t.Fatalf("a hand-written body: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("a hand-written body was edited:\n%s", raw)
 	}
 
 	stubEdit(t, origin, "CLOSED", "chore: an old title (tk-a)", old)
