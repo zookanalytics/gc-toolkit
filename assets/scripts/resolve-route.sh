@@ -33,9 +33,10 @@ usage() {
 usage: resolve-route.sh <name>
 
 Prints the live agent identity <name> resolves to. Accepts the identity
-itself, the rig-unqualified form of one (`gc-toolkit.polecat`), a form
-carrying a qualifier the identity does not (`gc-toolkit/gc-toolkit.deacon`), or
-a bare role (`refinery`).
+itself, the rig-unqualified form of one (`<binding>.polecat`), a form carrying
+a qualifier the identity does not (`<rig>/<binding>.deacon`), or a bare role
+(`refinery`), whose binding, the key the city imports the pack under, the
+roster supplies.
 
 Route to what it prints, and file nothing when it prints nothing:
   ROUTE=$(resolve-route.sh polecat) || true

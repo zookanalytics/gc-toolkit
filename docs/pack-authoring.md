@@ -538,12 +538,22 @@ and both scopes ship in one pack:
 
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
-| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+| deacon, mechanik | `city` | `<binding>.<role>`, with no rig segment, so in a city that imports the pack as gc-toolkit the deacon is `gc-toolkit.deacon` |
+| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `<rig>/<binding>.<role>`, so in that city the gc-toolkit rig's refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 `[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read
 that field for an agent the table does not name.
+
+The binding is the key the city imports the pack under, so no pack text
+spells it. A formula renders `{{binding_prefix}}`, a prompt or fragment
+`{{ .BindingPrefix }}`, a skill writes `<binding>` for the agent to fill in,
+and an order names its pool bare (`pool = "polecat"`), which Gas City qualifies
+with the rig and the binding of the order's own pack. A script or gctk takes
+the name from the roster, through `resolve-route.sh` below or gctk's
+`rigPool`. `assets/scripts/pack-self-location.test.sh` refuses the binding
+spelled as gc-toolkit in front of one of the pack's agents, in pack text and in
+gctk's Go.
 
 An author who copies a qualifier from the recipe beside the one being written
 is right only when the two agents happen to share a scope. Over-qualifying a
