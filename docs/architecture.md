@@ -532,6 +532,14 @@ first. Either way the change is a decision on the record, not a drift.
   such as an iOS app, so the command keeps that app on fixture data. Any other
   rig's start command reaches what the rig's tests reach, the live city
   included.
+- **A demo of a rig whose app reads the city can neither read the credentials
+  kept in the home folders nor write where a tool the agents run outside it
+  finds code, except in the change's tree it runs from.** Its capture and its
+  copy's start command both hold to that. It still reads the keys held in
+  process environments, its own and those of the host's other processes, and
+  it writes the git metadata of the tree it runs from, which the agents' git
+  later reads. [demo-capture-sandbox.md](demo-capture-sandbox.md) holds what
+  else it reaches.
 
 ## Debt
 

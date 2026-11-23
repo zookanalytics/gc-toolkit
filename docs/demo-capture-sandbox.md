@@ -123,6 +123,11 @@ same Appium. So a rig's iOS app is captured from a worktree of a rig whose
   system's temporary folders, which hold the files the agents' sessions and
   tools leave there and the own directories of the other captures and copies
   that run at the time.
+- **Git's settings, through the worktree it runs from.** A run writes that
+  worktree, with the file there that leads git to the worktree's own directory
+  in the rig's repository, and it writes that directory, which leads git to the
+  repository's settings. So it can lead the agents' later git commands in the
+  worktree to settings it wrote, and such settings can name a command git runs.
 - **Keys in its own environment.** The engine, a terminal capture's commands
   and a copy's serve command start with the environment of the session that
   runs the capture, less the variables that point at the city, so they hold
