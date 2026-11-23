@@ -26,6 +26,9 @@ var (
 	testRecord = Declare("test.ledger.record", JSON[record](), "a JSON value")
 	testShell  = ReadOnly("test.ledger.shell", String, "a key shell writes")
 	testFlag   = Declare("test.ledger.flag", JSON[bool](), "a JSON flag")
+	_          = Declare("test.ledger.moving", String, "a key that puts work in motion", InMotion(), Alias("test.ledger.old_moving"))
+	_          = ReadOnly("test.ledger.carried", String, "a key a domain carries its bead out by", CarriedOut())
+	_          = ReadOnly("test.ledger.carried", String, "the same key, read elsewhere")
 )
 
 func TestOneActIsOneWrite(t *testing.T) {
@@ -710,5 +713,37 @@ func TestABlockerOfAnotherPrefixIsRefused(t *testing.T) {
 	}
 	if len(s.Writes()) != 0 {
 		t.Fatalf("a refused edge was written: %+v", s.Writes())
+	}
+}
+
+// A declaration's motion reaches the registry, the farthest any declaration of
+// the key states, and the rows that hold such a key: by its current spelling or
+// an alias, not when the value is empty or a stored false.
+func TestAKeysMotionIsReadFromItsDeclarations(t *testing.T) {
+	byName := map[string]Entry{}
+	for _, e := range Registry() {
+		byName[e.Name] = e
+	}
+	for name, want := range map[string]string{"test.ledger.moving": "in-motion", "test.ledger.carried": "carried-out", "test.ledger.text": ""} {
+		if got := byName[name].Motion; got != want {
+			t.Errorf("(REGISTRY) %s's motion = %q, want %q", name, got, want)
+		}
+	}
+	for _, c := range []struct {
+		meta               string
+		moving, carriedOut []string
+	}{
+		{`{"test.ledger.moving":"x"}`, []string{"test.ledger.moving"}, nil},
+		{`{"test.ledger.old_moving":"x"}`, []string{"test.ledger.moving"}, nil},
+		{`{"test.ledger.carried":"x","test.ledger.moving":"y"}`, []string{"test.ledger.carried", "test.ledger.moving"}, []string{"test.ledger.carried"}},
+		{`{"test.ledger.moving":"","test.ledger.carried":false,"test.ledger.text":"x"}`, nil, nil},
+	} {
+		r := rowOf(t, c.meta)
+		if got := InMotionKeys(r); !slices.Equal(got, c.moving) {
+			t.Errorf("(ROW) %s: in motion %v, want %v", c.meta, got, c.moving)
+		}
+		if got := CarriedOutKeys(r); !slices.Equal(got, c.carriedOut) {
+			t.Errorf("(ROW) %s: carried out %v, want %v", c.meta, got, c.carriedOut)
+		}
 	}
 }

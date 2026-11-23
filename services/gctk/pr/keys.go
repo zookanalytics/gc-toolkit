@@ -54,7 +54,7 @@ var withdrawHeadKey = ledger.Declare("withdraw_head", ledger.String,
 	"The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead "+
 		"that owns the PR. The landing order dismisses each approval that stands on a commit that does not "+
 		"contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is "+
-		"filed, and never cleared.")
+		"filed, and never cleared. A bead carrying it takes no first reaction.", ledger.CarriedOut())
 
 // The runtime's stamps on a workflow root, which tell the landing order that a
 // review run is attached to the bead that owns a PR: a live root of the review

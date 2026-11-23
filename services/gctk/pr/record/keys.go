@@ -26,7 +26,7 @@ var (
 			"the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr "+
 			"evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition "+
 			"finds the beads whose work the branch carries by it, and a review run takes only an ask that names "+
-			"the branch of its PR.")
+			"the branch of its PR.", ledger.InMotion())
 	mergeResultKey = ledger.Declare("merge_result", ledger.String,
 		"Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads "+
 			Pending+", "+HeadChanged+", "+Merged+", "+Incomplete+" or one of the exceptions, "+Invalid+", "+
@@ -36,11 +36,11 @@ var (
 			"blocked or refused_false_completion for the refinery's park. "+
 			"A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one "+
 			"that reads merged, or "+Merged+", "+CloseRefused+" or "+MergedUnvalidatedHead+", as having landed "+
-			"its work on its merged_target.")
+			"its work on its merged_target.", ledger.InMotion())
 	prURLKey = ledger.Declare("pr_url", ledger.String,
-		"The URL of the PR the record names, https://<host>/<owner>/<repo>/pull/<number>.")
+		"The URL of the PR the record names, https://<host>/<owner>/<repo>/pull/<number>.", ledger.InMotion())
 	prNumberKey = ledger.Declare("pr_number", ledger.String,
-		"The number of the PR the record names, in decimal.")
+		"The number of the PR the record names, in decimal.", ledger.InMotion())
 	prRepoKey = ledger.Declare("pr_repo", ledger.String,
 		"The repository of the PR the record names, owner/name, which matches the rig's origin and is "+
 			"compared without case.")

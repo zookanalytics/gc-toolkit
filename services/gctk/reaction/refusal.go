@@ -62,10 +62,10 @@ var (
 		"A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane.")
 	workDirKey = ledger.ReadOnly("work_dir", ledger.String,
 		"The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that "+
-			"carries one, as work in flight.")
+			"carries one, as work in flight.", ledger.InMotion())
 	checkNameKey = ledger.ReadOnly("check_name", ledger.String,
 		"The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as "+
-			"work in flight.")
+			"work in flight.", ledger.InMotion())
 )
 
 // standingKinds are the task kinds of a standing record, open by design and
@@ -219,9 +219,10 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 }
 
 // rowRefusal is the refusal bead's own row carries, nil when it carries none:
-// its kind first, since a standing record and a feedback pattern take no first
-// reaction in any state, then its status, its assignee, its dispatch path and
-// its dispatch hold. A dispatch path is a route a pool queue serves or an arm
+// its kind first, since a standing record, a feedback pattern and a bead its
+// domain carries out itself (ledger.CarriedOut) take no first reaction in any
+// state, then its status, its assignee, its dispatch path and its dispatch
+// hold. A dispatch path is a route a pool queue serves or an arm
 // (assets/scripts/dispatch-path.sh), either one not blank, and each is named
 // on its own.
 func rowRefusal(row *ledger.Record) *Refusal {
@@ -231,6 +232,9 @@ func rowRefusal(row *ledger.Record) *Refusal {
 		return &Refusal{Code: Excluded, Why: fmt.Sprintf("it is a standing record (%s=%s), open by design, so a first reaction has no disposition to make on it", taskKindKey.Name(), kind)}
 	case kind == feedbackPattern:
 		return &Refusal{Code: Excluded, Why: "it is a feedback pattern, which the feedback distiller dispatches"}
+	}
+	if held := ledger.CarriedOutKeys(row); len(held) > 0 {
+		return &Refusal{Code: Excluded, Why: "it is a bead its domain files and carries out itself (it holds " + strings.Join(held, ", ") + "), so a first reaction has no disposition to make on it"}
 	}
 	if st := row.Status(); st != "" && st != "open" {
 		return &Refusal{Code: Decided, Why: "its status is " + st + ", and a first reaction takes only an open bead"}

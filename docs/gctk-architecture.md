@@ -492,6 +492,12 @@ Nothing outside it parses a metadata value or spells a key's name.
   `services/gctk/key-registry.json`, and a test fails when it is stale. Each
   entry names its key, its owner, its type, its aliases and, for a pack noun,
   its warrant, and a key no domain owns yet names the packages that read it.
+  An entry also names its key's motion, when a declaration gives it one: in
+  motion, for a key that puts its bead's work under way, which the first
+  reaction's sweep passes over, or carried out, for a key that marks a bead its
+  domain files and carries out itself, which no first reaction takes. The sweep
+  and the reaction's check read the motion from the declarations, so a domain
+  that files a new kind of bead declares it on the key it files the bead with.
   A doctor check that reads the registry reads the generated one, so the
   registry cannot drift from the code. A key that shell still writes stays in
   `lifecycle/lifecycle.toml` until its writer moves or retires, and the change

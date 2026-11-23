@@ -8,7 +8,8 @@
       "pr",
       "reaction"
     ],
-    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
+    "motion": "in-motion",
+    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool. The sweep passes over a bead that carries one, as work in flight."
   },
   {
     "name": "blocked_reason",
@@ -20,6 +21,7 @@
     "name": "branch",
     "type": "string",
     "owner": "pr/record",
+    "motion": "in-motion",
     "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes, and the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition finds the beads whose work the branch carries by it, and a review run takes only an ask that names the branch of its PR."
   },
   {
@@ -28,6 +30,7 @@
     "readers": [
       "reaction"
     ],
+    "motion": "in-motion",
     "doc": "The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as work in flight."
   },
   {
@@ -480,6 +483,7 @@
     "name": "merge_result",
     "type": "string",
     "owner": "pr/record",
+    "motion": "in-motion",
     "doc": "Where the work a bead carries stands on its way to its target. On Gas Town's pending record it reads pull_request_pending, pull_request_head_changed, mr_merged, pull_request_record_incomplete or one of the exceptions, pull_request_reconcile_invalid, pull_request_closed_unmerged, pull_request_merged_unvalidated_head, pull_request_merge_evidence_contradiction, pull_request_legacy_closed_unverified and pull_request_merged_close_refused, each of which keeps the bead blocked behind a human gate keyed by its value. Absent, the bead has not landed and owns no open PR. Outside the record it reads merged for a direct landing, and blocked or refused_false_completion for the refinery's park. A PR's composition reads a bead on its branch that carries one as the branch's anchor, and one that reads merged, or mr_merged, pull_request_merged_close_refused or pull_request_merged_unvalidated_head, as having landed its work on its merged_target."
   },
   {
@@ -569,6 +573,7 @@
     "name": "pr_number",
     "type": "string",
     "owner": "pr/record",
+    "motion": "in-motion",
     "doc": "The number of the PR the record names, in decimal."
   },
   {
@@ -623,6 +628,7 @@
     "name": "pr_url",
     "type": "string",
     "owner": "pr/record",
+    "motion": "in-motion",
     "doc": "The URL of the PR the record names, https://\u003chost\u003e/\u003cowner\u003e/\u003crepo\u003e/pull/\u003cnumber\u003e."
   },
   {
@@ -691,7 +697,8 @@
     "name": "withdraw_head",
     "type": "string",
     "owner": "pr",
-    "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared."
+    "motion": "carried-out",
+    "doc": "The head a withdrawal of a PR's approvals names, on the bead `gctk pr withdraw` files, which blocks the bead that owns the PR. The landing order dismisses each approval that stands on a commit that does not contain this head, and closes the withdrawal once none stands. Written once, when the withdrawal is filed, and never cleared. A bead carrying it takes no first reaction."
   },
   {
     "name": "work_dir",
@@ -699,6 +706,7 @@
     "readers": [
       "reaction"
     ],
+    "motion": "in-motion",
     "doc": "The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that carries one, as work in flight."
   }
 ]

@@ -11,6 +11,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	// The pr domain declares the withdrawal's key. The sweep and the check read
+	// what the binary's declarations say, and gctk links every domain.
+	_ "github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
 
 // ready puts each bead in the store as one bd reports ready.
@@ -47,7 +50,8 @@ func ids(lines []Swept, outcome string) []string {
 // bead that is no input: a standing record, a feedback pattern, a review lane,
 // a route or an arm, a capped one included, a dispatch hold in any case, a
 // topology root, a step of any formula, a reaction's own included, a type the
-// allowlist leaves out, no description, a work marker and a parent. Keys left
+// allowlist leaves out, no description, each key whose declaration puts its
+// work in motion, a withdrawal's head among them, and a parent. Keys left
 // blank, a step key left empty and the retired placement marker decide
 // nothing.
 func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
@@ -95,6 +99,7 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 		"tk-pr-number":     meta("pr_number", "1"),
 		"tk-lane":          meta("check_name", "correctness"),
 		"tk-anchored":      meta("anchor_bead", "tk-anchor"),
+		"tk-withdrawal":    meta("withdraw_head", "4521c96ed80e332fd05950c5e7d9f368922d184d"),
 		"tk-member":        func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-epic"}} },
 	}
 	for _, k := range standingKinds {
@@ -425,5 +430,31 @@ func TestTheSweepsDropAndTheSlingsRefusalAgree(t *testing.T) {
 	}
 	if want := []string{"tk-building", "tk-reacting"}; !slices.Equal(dropped, want) || !slices.Equal(refused, want) {
 		t.Errorf("(AGREE) the sweep drops %v and the sling refuses %v; want %v", dropped, refused, want)
+	}
+}
+
+// The check refuses a bead its domain files and carries out itself, such as a
+// withdrawal of a PR's approvals, which the landing order closes, whoever asks
+// for a reaction on it. It does not refuse a bead whose work is only in motion,
+// such as the bead that owns a PR, on which operator intake asks for one.
+func TestTheCheckRefusesWhatItsDomainCarriesOut(t *testing.T) {
+	w := newWorld(t)
+	w.ready(input("tk-withdrawal", func(b *fake.Bead) {
+		b.Metadata["withdraw_head"] = "4521c96ed80e332fd05950c5e7d9f368922d184d"
+	}))
+	w.ready(input("tk-anchor", func(b *fake.Bead) {
+		for k, v := range map[string]string{"branch": "polecat/tk-anchor", "merge_result": "pull_request_pending",
+			"pr_url": "https://github.com/zook/repo/pull/1", "pr_number": "1"} {
+			b.Metadata[k] = v
+		}
+	}))
+	if code, said := w.check("tk-withdrawal", "tk-root-asking"); code != Excluded || !strings.Contains(said, "withdraw_head") {
+		t.Errorf("(WITHDRAWAL) the check answered %d %q; want %d, naming withdraw_head", code, said, Excluded)
+	}
+	if code, said := w.sling("tk-withdrawal"); code != Excluded {
+		t.Errorf("(WITHDRAWAL) the sling answered %d %q; want %d", code, said, Excluded)
+	}
+	if code, said := w.check("tk-anchor", "tk-root-asking"); code != 0 {
+		t.Errorf("(ANCHOR) the check refused the bead that owns a PR: %d %q", code, said)
 	}
 }

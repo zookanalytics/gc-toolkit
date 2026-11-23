@@ -9,7 +9,6 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -40,13 +39,6 @@ type stringKey interface {
 	Get(*ledger.Record) (string, bool, error)
 }
 
-// workMarkers are the keys that put a bead's work in motion: a review lane's
-// check_name and anchor_bead, and an implementation anchor's branch,
-// merge_result, work_dir, pr_url and pr_number. An anchor is a task or a bug
-// with no task_kind, so its markers alone set it apart from raw input.
-var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prrecord.PRURL, prrecord.PRNumber,
-	checkNameKey, anchorKey}
-
 // isCandidate reports whether a ready bead is raw input a fresh first reaction
 // may take, top-level and not already in motion. Each clause drops one kind of
 // bead that is no input: one with a dispatch path or a dispatch hold, whose
@@ -55,8 +47,11 @@ var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prre
 // them, which advance only through their own run; a standing record and a
 // feedback pattern; a review lane; one that carries a headline, which every
 // exit of a first reaction and a sitting's ruling write, so it has been
-// triaged; one whose work markers put it in motion; and a member of a parent,
-// whose parent-child edge is its own. The sling's refusals are read again at
+// triaged; one that holds a key whose declaration puts its work in motion
+// (ledger.InMotion), such as an anchor's branch or a withdrawal's head, since
+// an anchor is a task or a bug with no task_kind, which its keys alone set
+// apart from raw input; and a member of a parent, whose parent-child edge is
+// its own. The sling's refusals are read again at
 // its sling, since a bead can change while the sweep runs.
 func isCandidate(r *ledger.Record) (bool, error) {
 	if len(dispatchPaths(r)) > 0 || gascity.HasDispatchHold(r.Labels()) {
@@ -73,10 +68,8 @@ func isCandidate(r *ledger.Record) (bool, error) {
 	if kind := raw(taskKindKey, r); slices.Contains(standingKinds, kind) || kind == feedbackPattern || kind == reviewKind {
 		return false, nil
 	}
-	for _, k := range workMarkers {
-		if raw(k, r) != "" {
-			return false, nil
-		}
+	if len(ledger.InMotionKeys(r)) > 0 {
+		return false, nil
 	}
 	parents, err := r.Parents()
 	if err != nil {

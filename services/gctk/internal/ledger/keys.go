@@ -76,6 +76,38 @@ func Warrant(anchor string) Option {
 	return func(d *decl) { d.warrant = anchor }
 }
 
+// motion is how far a key's presence on a bead says who moves the bead next.
+type motion int
+
+const (
+	// unmoved: the key says nothing about who moves the bead.
+	unmoved motion = iota
+	// underway: the bead's work is under way, and a domain, a pool or a run
+	// moves it.
+	underway
+	// carriedOut: the bead is one its declaring domain files and carries out
+	// itself.
+	carriedOut
+)
+
+// motionNames are the names the registry gives each motion but unmoved.
+var motionNames = map[motion]string{underway: "in-motion", carriedOut: "carried-out"}
+
+// InMotion declares that a bead holding the key has its work under way, which
+// a domain, a pool or a run moves, so the first reaction's sweep offers it no
+// reaction. A reaction someone asks for by name may still take it, as operator
+// intake asks for one on the bead that owns a PR.
+func InMotion() Option {
+	return func(d *decl) { d.motion = max(d.motion, underway) }
+}
+
+// CarriedOut declares that a bead holding the key is one the declaring domain
+// files and carries out itself, closing it when it is done, so no first
+// reaction takes it, whoever asks. Such a bead's work is in motion as well.
+func CarriedOut() Option {
+	return func(d *decl) { d.motion = carriedOut }
+}
+
 // Declare declares a key the calling package owns: it is the key's one writer,
 // and every other package asks it the key's questions. doc says what the key
 // holds, what writes and reads it, and what its absence means.
@@ -93,7 +125,7 @@ func ReadOnly[T any](name string, c Codec[T], doc string, opts ...Option) Key[T]
 }
 
 func declare[T any](name string, c Codec[T], doc string, readOnly bool, opts []Option) Key[T] {
-	d := &decl{name: name, typ: c.Type, doc: doc, readOnly: readOnly, pkg: callerPackage(3)}
+	d := &decl{name: name, typ: c.Type, doc: doc, readOnly: readOnly, falseUnset: c.falseUnset, pkg: callerPackage(3)}
 	for _, o := range opts {
 		o(d)
 	}
@@ -174,7 +206,8 @@ func (k Key[T]) Clear(w *Write) {
 type decl struct {
 	name, typ, doc, warrant, pkg string
 	aliases                      []string
-	readOnly                     bool
+	readOnly, falseUnset         bool
+	motion                       motion
 }
 
 // registry holds every declaration the binary's packages made as they
@@ -218,6 +251,7 @@ type Entry struct {
 	Readers []string `json:"readers,omitempty"`
 	Aliases []string `json:"aliases,omitempty"`
 	Warrant string   `json:"warrant,omitempty"`
+	Motion  string   `json:"motion,omitempty"`
 	Doc     string   `json:"doc"`
 }
 
@@ -227,7 +261,7 @@ func Registry() []Entry {
 	defer registry.mu.Unlock()
 	out := make([]Entry, 0, len(registry.byName))
 	for name, decls := range registry.byName {
-		e := Entry{Name: name, Type: decls[0].typ}
+		e := Entry{Name: name, Type: decls[0].typ, Motion: motionNames[motionOf(decls)]}
 		var docs []string
 		for _, d := range decls {
 			if d.readOnly {
@@ -253,6 +287,49 @@ func Registry() []Entry {
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// motionOf is the farthest motion any declaration of one key states.
+func motionOf(decls []*decl) motion {
+	m := unmoved
+	for _, d := range decls {
+		m = max(m, d.motion)
+	}
+	return m
+}
+
+// InMotionKeys names each key r holds whose declaration puts a bead's work in
+// motion, CarriedOut keys among them, by its current spelling, sorted. A key
+// holds a value when its current spelling or an alias holds one that is not
+// empty. It reads the declarations the binary's packages made, so a key counts
+// once the package that declares it is linked in, as gctk links every domain.
+func InMotionKeys(r *Record) []string { return heldAtLeast(r, underway) }
+
+// CarriedOutKeys names each key r holds whose declaration says its domain
+// carries the bead out itself, as InMotionKeys names its keys.
+func CarriedOutKeys(r *Record) []string { return heldAtLeast(r, carriedOut) }
+
+func heldAtLeast(r *Record, least motion) []string {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	var out []string
+	for name, decls := range registry.byName {
+		if motionOf(decls) < least {
+			continue
+		}
+		spellings := []string{name}
+		for _, d := range decls {
+			spellings = append(spellings, d.aliases...)
+		}
+		if slices.ContainsFunc(spellings, func(s string) bool {
+			v, ok := r.value(s, decls[0].falseUnset)
+			return ok && v != ""
+		}) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

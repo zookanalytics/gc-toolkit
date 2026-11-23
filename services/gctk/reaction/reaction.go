@@ -47,7 +47,8 @@ var recommendedFormulaKey = ledger.Declare("gc.recommended_formula", ledger.Stri
 // The keys the dispose reads and does not write. No domain owns them yet.
 var (
 	anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
-		"The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool.")
+		"The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool. The sweep "+
+			"passes over a bead that carries one, as work in flight.", ledger.InMotion())
 	failureKey = ledger.ReadOnly("failure_key", ledger.String,
 		"The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files "+
 			"the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix.")
