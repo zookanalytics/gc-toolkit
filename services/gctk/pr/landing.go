@@ -63,17 +63,20 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order and the draft cycle reach it: the reads an
-// act makes of what it changes, such as a withdrawal's of the reviews it
-// dismisses, a merge request or an enqueue pinned to the head the evaluator
-// judged, the PR's moves between draft and ready, and the dismissal of a
-// review.
+// Hub is GitHub as the landing order, the draft cycle and a review round's
+// edit of the PR's text reach it: the reads an act makes of what it changes,
+// such as a withdrawal's of the reviews it dismisses and an edit's of the PR's
+// title and body, a merge request or an enqueue pinned to the head the
+// evaluator judged, the PR's moves between draft and ready, the edit of its
+// title and body, and the dismissal of a review.
 type Hub interface {
 	GitHub
 	MergePullRequest(id, head string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
+	PullRequestText(repo string, number int) (*gh.Text, error)
+	EditPullRequest(id string, title, body *string) error
 	DismissReview(repo string, number int, id int64, message string) error
 }
 

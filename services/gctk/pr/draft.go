@@ -45,58 +45,83 @@ func (e *DraftRefusal) Error() string {
 // is ready. A conversion GitHub refused or did not answer is an error, and the
 // PR may still be ready, so the writer pushes nothing.
 func (l Landing) Draft(bead, url string) (Drafted, error) {
+	o, why, err := l.owned(bead, url)
+	if err != nil {
+		return Drafted{URL: o.url}, err
+	}
+	if why != "" {
+		return Drafted{}, &DraftRefusal{Bead: bead, Why: why}
+	}
+	hub := l.Hub(context.Background(), o.host)
+	p, err := hub.PullRequest(o.repo, o.number)
+	if err != nil {
+		return Drafted{URL: o.url}, err
+	}
+	if why := notOpenFrom(p, o.branch); why != "" {
+		return Drafted{URL: o.url}, &DraftRefusal{Bead: bead, Why: why}
+	}
+	if p.IsDraft {
+		return Drafted{URL: o.url}, nil
+	}
+	if err := hub.ConvertToDraft(p.ID); err != nil {
+		return Drafted{URL: o.url}, fmt.Errorf("PR %s did not return to draft, so it may still be ready: %w", o.url, err)
+	}
+	return Drafted{URL: o.url, Converted: true}, nil
+}
+
+// ownedPR is the PR a bead owns, as a writer onto it takes it: its URL, the
+// host, repository and number the URL names, and the bead's branch, "" when
+// it records none.
+type ownedPR struct {
+	url, host, repo, branch string
+	number                  int
+}
+
+// owned is the PR the bead owns as Draft and Edit take it: the one url names,
+// else the one the bead's record names, else the PR the bead records for the
+// refinery to reuse, in the rig's own repository. why says why the bead names
+// no PR they take, "" when it names one. A PR outside the rig's repository is
+// an OriginError, and a read that fails returns the store's error.
+func (l Landing) owned(bead, url string) (o ownedPR, why string, err error) {
 	r, err := l.read(bead)
 	if err != nil {
-		return Drafted{}, err
+		return ownedPR{}, "", err
 	}
 	if r == nil {
-		return Drafted{}, &DraftRefusal{Bead: bead, Why: "the store holds no such bead"}
+		return ownedPR{}, "the store holds no such bead", nil
 	}
 	rec, err := record.Read(r)
 	if err != nil {
-		return Drafted{}, err
+		return ownedPR{}, "", err
 	}
 	branch, _, err := record.Branch.Get(r)
 	if err != nil {
-		return Drafted{}, err
+		return ownedPR{}, "", err
 	}
-	branch = strings.TrimSpace(branch)
 	if url == "" {
 		url = firstOf(rec.URL, rec.ExistingPR)
 	}
 	if url == "" {
-		return Drafted{}, &DraftRefusal{Bead: bead, Why: "it names no PR"}
+		return ownedPR{}, "it names no PR", nil
 	}
 	host, repo, number, ok := record.ParseURL(url)
 	if !ok {
-		return Drafted{}, &DraftRefusal{Bead: bead, Why: fmt.Sprintf("%q is not a pull request's URL", url)}
+		return ownedPR{}, fmt.Sprintf("%q is not a pull request's URL", url), nil
 	}
+	o = ownedPR{url: url, host: host, repo: repo, number: number, branch: strings.TrimSpace(branch)}
 	if err := l.sameOrigin(host, repo); err != nil {
-		return Drafted{URL: url}, err
+		return ownedPR{url: url}, "", err
 	}
-	hub := l.Hub(context.Background(), host)
-	p, err := hub.PullRequest(repo, number)
-	if err != nil {
-		return Drafted{URL: url}, err
-	}
-	if why := undraftable(p, branch); why != "" {
-		return Drafted{URL: url}, &DraftRefusal{Bead: bead, Why: why}
-	}
-	if p.IsDraft {
-		return Drafted{URL: url}, nil
-	}
-	if err := hub.ConvertToDraft(p.ID); err != nil {
-		return Drafted{URL: url}, fmt.Errorf("PR %s did not return to draft, so it may still be ready: %w", url, err)
-	}
-	return Drafted{URL: url, Converted: true}, nil
+	return o, "", nil
 }
 
-// undraftable says why the PR GitHub reports is not one Draft returns to
-// draft, and is empty when it is.
-func undraftable(p *gh.PullRequest, branch string) string {
+// notOpenFrom says why the PR GitHub reports is not one a writer takes onto
+// the bead's branch, and is empty when it is: it is open, and open from the
+// branch when the bead records one.
+func notOpenFrom(p *gh.PullRequest, branch string) string {
 	switch {
 	case p.State != "OPEN":
-		return fmt.Sprintf("PR %s is %s, so it has no draft to return to", p.URL, strings.ToLower(p.State))
+		return fmt.Sprintf("PR %s is %s, not open", p.URL, strings.ToLower(p.State))
 	case branch != "" && p.HeadRefName != branch:
 		return fmt.Sprintf("PR %s is open from %s, not from the bead's branch %s", p.URL, p.HeadRefName, branch)
 	}
