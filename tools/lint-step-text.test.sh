@@ -171,10 +171,15 @@ with_step new "$(block 'B=x   # $Y > z, a comment
 run_lint "$F"
 expect 0 "a comment after a literal assignment is no part of it: exit 0"
 
+with_step new "$(block 'B="$Y"; C=x')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a literal assignment after an expanding one on its line is no command: exit 0"
+
 # An assignment that expands a parameter, substitutes a command or carries a
 # redirection does more than name a value, so it is a command.
 for body in 'B="$Y"; "$S/new.sh" --bead "$B"' 'B=$(gc bd show "$Y" --json); "$S/new.sh" --bead "$B"' \
-  'B=`gc whoami`; "$S/new.sh" --bead "$B"' 'B=x>out.txt; "$S/new.sh" --bead "$B"'; do
+  'B=`gc whoami`; "$S/new.sh" --bead "$B"' 'B=x>out.txt; "$S/new.sh" --bead "$B"' \
+  'B=x<in.txt; "$S/new.sh" --bead "$B"'; do
   with_step new "$(block "$body")" > "$REPO/$F"
   run_lint "$F"
   expect 1 "an assignment that does more than name a value is a command: $body" "with 2 commands\. "
