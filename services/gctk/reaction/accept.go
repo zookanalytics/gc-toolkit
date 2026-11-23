@@ -42,12 +42,12 @@ import (
 // that no open human gate blocks the bead, slings the formula titled
 // `<formula> accept:<token>` with each var, lifts the bead's hold:mayor, since an
 // Accept is a placement, and records the dispatch by clearing the
-// recommendation. A gate filed in the meantime, or a sling that poured no root
+// recommendation. A gate filed in the meantime, or a sling that landed no pour
 // under the token, reopens the gate from Accept's own answer. A run that
 // stopped after its answer leaves the acceptance unfinished, and the next run
-// finishes it under the same token: it records the dispatch when a root carries
-// the token, and otherwise reads that no gate blocks the bead and slings the
-// vars the gate records under the token, whoever runs it.
+// finishes it under the same token: it records the dispatch when a pour under
+// the token landed, and otherwise reads that no gate blocks the bead and slings
+// the vars the gate records under the token, whoever runs it.
 
 // The keys an acceptance writes, which this package alone writes.
 // converse-signoff.sh still reads the dispatch's record in shell
@@ -231,22 +231,20 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 		switch {
 		case err != nil:
 			return out, stop(4, "could not search for a root of acceptance %s on %s (%v), which proves nothing, so nothing is dispatched or written. Run it again once the store answers: gctk reaction accept %s", out.Token, bead, err, bead)
-		case root.state == rootLanded:
-			out.Root = root.id
+		case root != "":
+			out.Root = root
 			if err := r.liftHold(bead, ""); err != nil {
-				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root.id, err, bead)
+				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
 			}
 			if err := r.markDispatched(bead, formula, out.Token, req.Reason); err != nil {
-				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the record did not land (%v). The next Accept finishes the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root.id, err, bead)
+				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the record did not land (%v). The next Accept finishes the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
 			}
 			if len(vars) > 0 {
-				r.say("root %s keeps the vars it was poured with, so the --var given here does not reach it", root.id)
+				r.say("root %s keeps the vars it was poured with, so the --var given here does not reach it", root)
 			}
 			return out, nil
-		case root.state == rootUnfinished:
-			return out, stop(4, "acceptance %s on %s poured root %s, and Gas City left that pour unfinished (%s). gc sling refuses another pour of %s on %s while it is open, and Accept ends no Gas City run itself, so nothing is dispatched or written. Close the root and its steps (gc convoy delete %s --force), then run it again, and it slings the vars the acceptance recorded: gctk reaction accept %s", out.Token, bead, root.id, root.why, formula, bead, root.id, bead)
 		}
-		// No root carries the token, so this run slings, and it slings the
+		// No pour under the token landed, so this run slings, and it slings the
 		// input the acceptance was made with, read off the gate, never this
 		// run's own: a finishing run given no var would otherwise undo a var the
 		// operator's ruling settled.
@@ -299,13 +297,11 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 		switch {
 		case err != nil:
 			return out, stop(4, "gc sling of %s exited %d for %s, and whether it poured could not be read (%v), so nothing more is written. The next Accept finishes acceptance %s once the store answers: gctk reaction accept %s", formula, res.Code, bead, err, out.Token, bead)
-		case root.state == rootLanded:
-			r.say("gc sling of %s exited %d for %s, but root %s carries acceptance %s, so the dispatch landed", formula, res.Code, bead, root.id, out.Token)
-		case root.state == rootUnfinished:
-			return out, stop(4, "gc sling of %s exited %d for %s and left its pour unfinished at root %s (%s), so nothing more is written. Close the root and its steps (gc convoy delete %s --force), then run it again, and it finishes acceptance %s: gctk reaction accept %s", formula, res.Code, bead, root.id, root.why, root.id, out.Token, bead)
+		case root != "":
+			r.say("gc sling of %s exited %d for %s, but root %s carries acceptance %s, so the dispatch landed", formula, res.Code, bead, root, out.Token)
 		default:
-			back := r.reopen("Accept's sling of "+formula+" poured nothing, so the question stands", recGates)
-			why := fmt.Sprintf("gc sling of %s failed (%s) and poured no root under acceptance %s", formula, res.Failure(), out.Token)
+			back := r.reopen("Accept's sling of "+formula+" landed no pour, so the question stands", recGates)
+			why := fmt.Sprintf("gc sling of %s failed (%s) and landed no pour under acceptance %s", formula, res.Failure(), out.Token)
 			if res.Code == 3 {
 				why = formula + " already runs at " + bead + " from another dispatch, which Gas City's launch lock refused to start twice"
 			}
@@ -390,51 +386,27 @@ func (r *Reactions) answer(bead, formula string, vars, recGates []string, out *A
 	return stop(4, "the recommendation gate %s on %s did not close on its answer, so Accept dispatches nothing. Run it again, or resolve it by hand.%s", strings.Join(unclosed, " "), bead, back)
 }
 
-// The states of a search for an acceptance's root.
-const (
-	rootNone       = iota // no root carries the token, or only a pour Gas City closed as failed
-	rootLanded            // a root carries the token and its pour finished
-	rootUnfinished        // an open root carries the token and Gas City left its pour unfinished
-)
-
-// tokenFind is what a search for an acceptance's root found: the root, its
-// state, and for an unfinished pour why it reads unfinished.
-type tokenFind struct {
-	id, why string
-	state   int
-}
-
-// tokenRoot searches for the root a sling under the token poured: a listing of
-// the beads whose title holds accept:<token>, closed ones and gate-typed ones
-// among them, since only a sling under that acceptance titles a root with its
-// token. A root whose pour finished, open or closed, is the dispatch. Gas City
-// closes a pour that failed part way, and such a root is no dispatch. While the
-// city's gc can leave a pour unfinished (gc-3znzo8), an open root that is still
-// fenced or carries molecule_failed is unfinished, as deferred dispatch's start
-// reads one (arm.Unfinished).
-func (r *Reactions) tokenRoot(token string) (tokenFind, error) {
+// tokenRoot searches for the root a sling under the token poured, and names
+// the one whose pour landed, or none: a listing of the beads whose title holds
+// accept:<token>, closed ones and gate-typed ones among them, since only a
+// sling under that acceptance titles a root with its token. A root, open or
+// closed, is the dispatch unless Gas City stamped it as a pour that failed,
+// which is no dispatch, as deferred dispatch's start reads one (arm.FailedPour).
+func (r *Reactions) tokenRoot(token string) (string, error) {
 	rows, err := r.Ledger.Find(ledger.Titled("accept:" + token).WithClosed())
 	if err != nil {
-		return tokenFind{}, err
+		return "", err
 	}
 	slices.SortFunc(rows, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
-	var unfinished tokenFind
 	for _, row := range rows {
 		if !strings.Contains(row.Title(), "accept:"+token) || raw(rootBeadKey, row) != "" {
 			continue
 		}
-		why, err := arm.Unfinished(r.Ledger, row)
-		if err != nil {
-			return tokenFind{}, err
-		}
-		switch {
-		case why == "":
-			return tokenFind{id: row.ID, state: rootLanded}, nil
-		case row.Status() != "closed" && unfinished.id == "":
-			unfinished = tokenFind{id: row.ID, why: why, state: rootUnfinished}
+		if !arm.FailedPour(row) {
+			return row.ID, nil
 		}
 	}
-	return unfinished, nil
+	return "", nil
 }
 
 // humanGates is the human gates on the bead, open and closed: each bead a blocks

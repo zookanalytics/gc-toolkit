@@ -29,15 +29,10 @@ import (
 var (
 	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
 		"gctk bead arm refuses a routed bead, which is dispatched already.")
-	rootBeadKey = ledger.ReadOnly("gc.root_bead_id", ledger.String,
-		"The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished.")
 	moleculeFailedKey = ledger.ReadOnly("molecule_failed", ledger.String,
 		"Gas City's stamp on each bead of a pour that failed part way (markFailed in internal/molecule). "+
-			"A root that carries true is an unfinished pour.")
-	instantiatingKey = ledger.ReadOnly("gc.instantiating", ledger.String,
-		"Gas City's fence on a bead it is still pouring, true until it lifts it to empty "+
-			"(fenceGraphWorkflowBead in internal/molecule). A root that it, or a bead under it, still fences "+
-			"is an unfinished pour.")
+			"The start and Accept read a root under their token that carries true as an attempt that failed, "+
+			"and any other such root as the pour that landed.")
 )
 
 // Arms is the arm's verbs and its start over one store: the store's ledger,

@@ -1236,10 +1236,12 @@ slings the formula titled
 `<formula> accept:<token>`, and records the dispatch by stripping
 `gc.recommended_formula` beside `gc.recommended_formula_dispatched`. An answer
 another reached first stands, and Accept slings nothing. A gate filed in the
-meantime, or a sling that poured no root, reopens the recommendation's gate. A
-run that stopped after its resolve leaves an unfinished acceptance, which the
-next Accept finishes under the same token, slinging only when no root carries
-the token. That sling carries the vars the acceptance recorded, whoever
+meantime, or a sling whose pour did not land, reopens the recommendation's
+gate. A run that stopped after its resolve leaves an unfinished acceptance,
+which the next Accept finishes under the same token, slinging only when no root
+under the token landed. A root Gas City stamped as a failed pour
+(`molecule_failed=true`) did not land, and any other root did. That sling
+carries the vars the acceptance recorded, whoever
 finishes it: a run given no var slings them, and
 a run given vars other than the recorded ones dispatches nothing. The lock's
 warrant is in [warrants.md](warrants.md).

@@ -216,8 +216,8 @@ action is retire, start, sent, hold, ask, leave, withdrawn or fail:
   start      it was slung on formula, and its arm cleared
   sent       its work is sent already, so the arm is cleared and nothing
              slung: an earlier attempt's pour landed, or gc sling's exit 3
-             named a live workflow on it that is not an unfinished pour; roots
-             names them
+             named a live workflow on it that Gas City did not stamp as
+             failed; roots names them
   hold       something holds it, and the arm stays: a wait of its own or of
              an ancestor that has not started (blocked, held), a waits-for edge
              the store cannot judge (unjudged), a wait edge into another store
@@ -225,8 +225,7 @@ action is retire, start, sent, hold, ask, leave, withdrawn or fail:
              a status other than open (status), an epic (epic), or bd's
              readiness (unready)
   ask        a person is asked, and the arm stays: its attempts reached the cap
-             (cap), or Gas City left a pour of it unfinished (unfinished), which
-             roots names
+             (cap)
   leave      left untouched for the next pass: another call holds its dispatch
              lock (locked), or the pass is near its deadline (deadline)
   withdrawn  its arm was removed after the pass listed it, and nothing was sent

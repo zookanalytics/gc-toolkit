@@ -254,14 +254,6 @@
     "doc": "The input convoy a graph.v2 workflow root was poured over. The convoy tracks the bead the run works, and the bead a live run works is in flight once the run has passed load-context. A root without it works the bead its gc.var.issue names."
   },
   {
-    "name": "gc.instantiating",
-    "type": "string",
-    "readers": [
-      "arm"
-    ],
-    "doc": "Gas City's fence on a bead it is still pouring, true until it lifts it to empty (fenceGraphWorkflowBead in internal/molecule). A root that it, or a bead under it, still fences is an unfinished pour."
-  },
-  {
     "name": "gc.kind",
     "type": "string",
     "readers": [
@@ -329,12 +321,11 @@
     "name": "gc.root_bead_id",
     "type": "string",
     "readers": [
-      "arm",
       "reaction",
       "review",
       "waits"
     ],
-    "doc": "The workflow root a step was poured under. The start reads the fence of each bead poured under a root to tell a pour Gas City left unfinished. A review run's outputs are on the beads that name its root. A first reaction takes no bead that names a root, which is a step."
+    "doc": "The workflow root a step was poured under. A review run's outputs are on the beads that name its root. A first reaction takes no bead that names a root, which is a step."
   },
   {
     "name": "gc.routed_to",
@@ -501,7 +492,7 @@
     "readers": [
       "arm"
     ],
-    "doc": "Gas City's stamp on each bead of a pour that failed part way (markFailed in internal/molecule). A root that carries true is an unfinished pour."
+    "doc": "Gas City's stamp on each bead of a pour that failed part way (markFailed in internal/molecule). The start and Accept read a root under their token that carries true as an attempt that failed, and any other such root as the pour that landed."
   },
   {
     "name": "observed_pr_head_sha",
