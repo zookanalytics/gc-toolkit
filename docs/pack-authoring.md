@@ -197,18 +197,20 @@ header says how it renders a step and which formulas no hook delivers.
 
 A block's placeholder takes either words the agent writes for that block or
 text it copies as it stands: a person's words, a ruling or an answer that
-quotes them, a card's or a brief's own text, verbatim feedback, or a run's raw
-output. Copied text can hold a double quote, which ends a double-quoted
-argument, a backtick span or a `$(...)`, which runs as a command, and a `$`,
-which expands. So its placeholder never sits inside double quotes. It sits
-alone in the body of a here-document whose delimiter is quoted, and the command
-takes what the here-document captured. Step text keeps the here-document
-inside the argument, where a substitution that holds a single command weighs
-nothing. A skill may capture the text into a variable first, as when two writes
-take the same words. A block that holds one starts at the left margin, even
-under a list item, because the here-document ends only at a delimiter line
-with nothing before it. `assets/scripts/copied-text.test.sh` holds the rule,
-and runs every block that holds such a here-document under bash and zsh.
+quotes them, a bead's, a card's or a brief's own text, verbatim feedback, or a
+run's raw output. Copied text can hold a double quote, which ends a
+double-quoted argument, a backtick span or a `$(...)`, which runs as a command,
+and a `$`, which expands. So its placeholder never sits inside double quotes. It
+sits alone in the body of a here-document whose delimiter is quoted, and the
+command takes what the here-document captured. The placeholder says what it
+copies, in the words `assets/scripts/copied-text.test.sh` reads as copied text,
+so the suite finds one left inside double quotes. Step text keeps the
+here-document inside the argument, where a substitution that holds a single
+command weighs nothing. A skill may capture the text into a variable first, as
+when two writes take the same words. A block that holds one starts at the left
+margin, even under a list item, because the here-document ends only at a
+delimiter line with nothing before it. The suite holds the rule, and runs every
+block that holds such a here-document under bash and zsh.
 
 ## A landed pack change is confirmed on the deployed checkout
 

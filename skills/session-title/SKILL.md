@@ -70,13 +70,18 @@ proposal.
 
 ## Set
 
+Use the operator's text verbatim, in the quoted here-document, where a double
+quote, a backtick or a `$` in it cannot end the title or run:
+
 ```bash
-gc session rename "$GC_SESSION_ID" "<title text>"
+gc session rename "$GC_SESSION_ID" "$(cat <<'TITLE'
+<the operator's text, verbatim>
+TITLE
+)"
 ```
 
-Use the operator's text verbatim. Don't add quotes, prefixes, or
-status decoration. Don't truncate — render-side surfaces (footer,
-dashboard) handle width budgets themselves.
+Don't add quotes, prefixes, or status decoration. Don't truncate —
+render-side surfaces (footer, dashboard) handle width budgets themselves.
 
 After the rename completes, echo the new title back as a single line
 so the operator sees confirmation without having to re-query:

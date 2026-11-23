@@ -353,8 +353,14 @@ holds it. Settle what the refusal names and run the line again.
 
 **4. On continue or shift, aim the next body of work.** On a shift, re-aim
 each open Delivery whose aim the shift changes. Read its description, then
-write it back whole with the new `Aim:` line:
-`gc bd update <delivery> --description "<the description, with its new Aim: and Done when: lines>"`.
+write it back whole with the new `Aim:` line, in the quoted here-document, which
+keeps the quotes, backticks and `$` it holds as written:
+```bash
+gc bd update <delivery> --description "$(cat <<'DESCRIPTION'
+<the description's own text, with its new Aim: and Done when: lines>
+DESCRIPTION
+)"
+```
 
 When the ruling aims a next Delivery, list the epic's open Deliveries first, and
 put work an open Delivery's aim already covers into that one. A list that errors

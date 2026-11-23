@@ -5,8 +5,8 @@
 # A block in a skill, a formula step, an agent prompt or a prompt fragment is a
 # command an agent runs once it fills its placeholders. Some placeholders take
 # text the agent did not write and copies as it stands: a person's words, a
-# ruling or an answer that quotes them, a card's or a brief's own text,
-# verbatim feedback, or a run's raw output. Pasted inside a double-quoted
+# ruling or an answer that quotes them, a bead's, a card's or a brief's own
+# text, verbatim feedback, or a run's raw output. Pasted inside a double-quoted
 # argument, a double quote in that text ends the argument, a backtick span or
 # a $(...) runs as a command, and a $ expands. So each such placeholder sits
 # alone in the body of a quoted here-document, whose text the shell hands on
@@ -15,19 +15,24 @@
 #   1. No block or inline command in that text puts a placeholder that names
 #      copied text inside double quotes, or in the body of an unquoted
 #      here-document, which expands it the same way, outside the files the
-#      deletion plan retires (tools/deletion-plan.tsv). A placeholder names copied text when
-#      it asks for their words, reason or answer, the operator's words, reason
-#      or ruling, a ruling, verbatim or quoted text, raw output, a brief's own
-#      text, a card's text, or what they stated.
+#      deletion plan retires (tools/deletion-plan.tsv). A placeholder names
+#      copied text when it asks for their words, reason or answer, the
+#      operator's words, reason or ruling, a ruling, verbatim or quoted text,
+#      raw output, a brief's or a bead's own text, a card's text, or what they
+#      stated.
 #   2. Every fenced block whose quoted here-document holds a placeholder runs,
 #      under bash and under zsh, with each placeholder in such a body filled
 #      with text that holds a double quote, a backtick span, a $(...), $HOME
-#      and an apostrophe, and every other placeholder filled with x. Stubs
-#      stand in for gc, gctk, git, every pack script and a command named x,
-#      and log the arguments and the stdin they are given. The text must reach a logged command as written, and
+#      and an apostrophe, marked with the body's number, and every other
+#      placeholder filled with x. Stubs stand in for gc, gctk, git, every pack
+#      script and a command named x, and log each argument on a line of its
+#      own, then the stdin they are given. Each body's text must reach a
+#      logged command as written, inside one argument or its stdin, and
 #      nothing in it may run.
-#   3. Controls: the same text pasted inside double quotes fails that check,
-#      and part 1 reports a copied-text placeholder left inside double quotes.
+#   3. Controls: that check fails the same text pasted inside double quotes, a
+#      captured text passed unquoted, which bash splits, and a block that
+#      drops one of its two bodies. Part 1 reports a copied-text placeholder
+#      left inside double quotes.
 #
 # Hermetic: reads the tree's own files and runs extracted blocks under stubs,
 # from an empty directory, with no live city, store or network.
@@ -214,19 +219,24 @@ def walk(lines):
 
 
 def fill(lines, bodies):
-    inside = set()
+    """Return the filled block and the number of bodies that hold a placeholder.
+    The k-th such body takes the hostile text marked (body k)."""
+    body_of, k = {}, 0
     for start, end in bodies:
-        inside.update(range(start, end))
+        if any(PLACEHOLDER.search(lines[n]) for n in range(start, end)):
+            k += 1
+            body_of.update((n, k) for n in range(start, end))
     out = []
     for n, line in enumerate(lines):
         for pat, val in TEMPLATE:
             line = pat.sub(val, line)
-        if n in inside:
-            line = PLACEHOLDER.sub(lambda m: os.environ["HOSTILE"], line)
+        if n in body_of:
+            text = f"{os.environ['HOSTILE']} (body {body_of[n]})"
+            line = PLACEHOLDER.sub(lambda m: text, line)
         else:
             line = FILL_OUTSIDE.sub("x", line)
         out.append(line)
-    return "\n".join(out) + "\n"
+    return "\n".join(out) + "\n", k
 
 
 def main():
@@ -259,11 +269,12 @@ def main():
                     for i, ph in found:
                         if COPIED.search(ph):
                             static.write(f"{label}:{start + i + 1}: <{ph}>\n")
-                    if any(PLACEHOLDER.search(lines[k]) for s, e in bodies for k in range(s, e)):
+                    filled, count = fill(lines, bodies)
+                    if count:
                         n += 1
                         with open(os.path.join(outdir, f"{n}.sh"), "w") as fh:
-                            fh.write(fill(lines, bodies))
-                        index.write(f"{n}\t{label}:{start + 1}\n")
+                            fh.write(filled)
+                        index.write(f"{n}\t{count}\t{label}:{start + 1}\n")
                 for i, span in inline_spans(text):
                     found, _ = walk([span])
                     for _, ph in found:
@@ -299,10 +310,11 @@ echo "── each quoted here-document hands its text on as written ──"
 mkdir -p "$TMP/bin" "$TMP/pack" "$TMP/away" "$TMP/city/.gc/services/gctk/bin"
 cat >"$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-# Logs each call on one line, with what it reads on stdin. Answers scripts-dir
-# under any binding, an id for a create, the bead asked for on a show, an empty
-# list for a list, and a convoy of one member.
-{ printf 'gc'; printf ' %s' "$@" | tr '\n' ' '; printf ' <stdin> '; tr '\n' ' '; echo; } >>"$COPIED_LOG"
+# Logs each call: its name, each argument on a line of its own with any newline
+# in it turned to a space, and what it reads on stdin. Answers scripts-dir under
+# any binding, an id for a create, the bead asked for on a show, an empty list
+# for a list, and a convoy of one member.
+{ echo '== gc'; for a in "$@"; do printf '%s\n' "${a//$'\n'/ }"; done; printf '<stdin> '; tr '\n' ' '; echo; } >>"$COPIED_LOG"
 [ "${2:-}" = scripts-dir ] && { printf '%s\n' "$COPIED_PACK"; exit 0; }
 [ "${1:-} ${2:-}" = "bd --rig" ] && set -- bd "${@:4}"
 case "${1:-} ${2:-}" in
@@ -316,7 +328,7 @@ exit 0
 STUB
 cat >"$TMP/bin/logger-stub" <<'STUB'
 #!/usr/bin/env bash
-{ printf '%s' "${0##*/}"; printf ' %s' "$@" | tr '\n' ' '; printf ' <stdin> '; tr '\n' ' '; echo; } >>"$COPIED_LOG"
+{ printf '== %s\n' "${0##*/}"; for a in "$@"; do printf '%s\n' "${a//$'\n'/ }"; done; printf '<stdin> '; tr '\n' ' '; echo; } >>"$COPIED_LOG"
 exit 0
 STUB
 chmod +x "$TMP/bin/gc" "$TMP/bin/logger-stub"
@@ -342,20 +354,28 @@ run_block() {
         $1 "$2" </dev/null >"$TMP/out" 2>&1)
     echo $?
 }
-# as_written — the last run handed the text on as written, and ran none of it.
-as_written() { grep -qF -- "$HOSTILE" "$TMP/log" && [ ! -e "$TMP/away/RAN" ]; }
+# as_written <bodies> — the last run handed each body's text on as written,
+# inside one argument or the stdin of a logged call, and ran none of it.
+as_written() {
+    local k=1
+    while [ "$k" -le "$1" ]; do
+        grep -qF -- "$HOSTILE (body $k)" "$TMP/log" || return 1
+        k=$((k + 1))
+    done
+    [ ! -e "$TMP/away/RAN" ]
+}
 
 shells="bash"
 command -v zsh >/dev/null 2>&1 && shells="bash zsh"
 count=$(grep -c . "$TMP/blocks/index" || true)
 [ "$count" -gt 0 ] && ok "blocks with a quoted here-document were found ($count)" \
     || bad "blocks with a quoted here-document were found" "none"
-while IFS="$(printf '\t')" read -r n label; do
+while IFS="$(printf '\t')" read -r n bodies label; do
     for sh_ in $shells; do
         run=$sh_
         [ "$sh_" = zsh ] && run="zsh -f"
         rc=$(run_block "$run" "$TMP/blocks/$n.sh")
-        if as_written; then
+        if as_written "$bodies"; then
             ok "($sh_) $label"
         else
             bad "($sh_) $label" "exit $rc; calls: $(tr '\n' ';' <"$TMP/log" | head -c 600); output: $(tr '\n' ' ' <"$TMP/out" | head -c 300)"
@@ -364,18 +384,62 @@ while IFS="$(printf '\t')" read -r n label; do
 done <"$TMP/blocks/index"
 
 echo "── controls ──"
-printf 'gc bd update tk-x --append-notes "%s"\n' "$HOSTILE" >"$TMP/pasted.sh"
+printf 'gc bd update tk-x --append-notes "%s (body 1)"\n' "$HOSTILE" >"$TMP/pasted.sh"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
     run_block "$run" "$TMP/pasted.sh" >/dev/null
-    if as_written; then
+    if as_written 1; then
         bad "($sh_) the same text pasted inside double quotes fails the check" "it passed"
     else
         ok "($sh_) the same text pasted inside double quotes fails the check"
     fi
 done
 mkdir -p "$TMP/control"
+cat >"$TMP/control/unquoted.md" <<'MD'
+```bash
+RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+)
+gc bd update tk-x --append-notes $RULING
+```
+MD
+cat >"$TMP/control/dropped.md" <<'MD'
+```bash
+WORDS=$(cat <<'WORDS'
+<their words>
+WORDS
+) && RULING=$(cat <<'RULING'
+<the ruling, one line>
+RULING
+) && gc bd update tk-x --append-notes "$WORDS"
+```
+MD
+# control <name> <bodies> <shells> <what> — the block in <name>.md, extracted
+# as the pack's are with <bodies> bodies, fails the check under each shell.
+control() {
+    python3 -I "$TMP/extract.py" "$ROOT" "$TMP/control/$1" "$TMP/control/$1.md"
+    local n bodies sh_ run
+    IFS="$(printf '\t')" read -r n bodies _ <"$TMP/control/$1/index"
+    if [ "$bodies" != "$2" ]; then
+        bad "$4 is extracted with $2 bodies" "index: $(cat "$TMP/control/$1/index")"
+        return
+    fi
+    for sh_ in $3; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        run_block "$run" "$TMP/control/$1/$n.sh" >/dev/null
+        if as_written "$bodies"; then
+            bad "($sh_) $4 fails the check" "it passed"
+        else
+            ok "($sh_) $4 fails the check"
+        fi
+    done
+}
+# zsh does not split an unquoted expansion, so only bash shows this one.
+control unquoted 1 bash "a captured text passed unquoted"
+control dropped 2 "$shells" "a block that drops one of its two bodies"
 cat >"$TMP/control/pasted.md" <<'MD'
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --ruled yes --ruling "<the ruling, one line>" --no-wait
