@@ -169,7 +169,9 @@
 # rig of a PR the ruling acts on by the REAL bead-store.sh over the fake's rig
 # list, and the rig whose pool runs the subject's validating closer by the REAL
 # rig-map.sh over the same list: rig-a carries the prefix tk, rig-b the prefix
-# rb, and the city's own row the prefix hq.
+# rb, and the city's own row the prefix hq. That pool is the one the REAL
+# resolve-route.sh finds in the fake's roster, where each rig runs the pack
+# under the binding gc-toolkit.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -420,7 +422,7 @@ P
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh resolve-route.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
@@ -430,8 +432,10 @@ RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY
 STUB_RIGS="$TMP/rigs.json"
 printf '{"rigs":[{"name":"the-city","prefix":"hq","path":"%s","hq":true},{"name":"rig-a","prefix":"tk","path":"%s","hq":false},{"name":"rig-b","prefix":"rb","path":"%s","hq":false}]}\n' \
     "$CITY_ROOT" "$RIG_A" "$RIG_B" > "$STUB_RIGS"
+STUB_AGENTS="$TMP/agents.json"
+printf '{"agents":[{"qualified_name":"rig-a/gc-toolkit.polecat"},{"qualified_name":"rig-b/gc-toolkit.polecat"},{"qualified_name":"gc-toolkit.mechanik"}]}\n' > "$STUB_AGENTS"
 GH_CALLS="$TMP/gh-calls" GCTK_CALLS="$TMP/gctk-calls" GCTK_BIN="$BIN/gctk" GC_RIG_ROOT="$TMP/rig"
-export STUB_RIGS GH_CALLS GCTK_CALLS GCTK_BIN GC_RIG_ROOT RIG_A RIG_B CITY_ROOT
+export STUB_RIGS STUB_AGENTS GH_CALLS GCTK_CALLS GCTK_BIN GC_RIG_ROOT RIG_A RIG_B CITY_ROOT
 
 # --- fixtures -----------------------------------------------------------------
 # A bead's edge is a dep row: `edge <id> <type> <on>` is <id>'s edge onto <on>.
@@ -929,6 +933,20 @@ has "$OUT" "NOT SIGNED OFF" "(CLOSER-ARM-FAILS) …saying not to post the sign-o
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-ARM-FAILS) …before any gate is answered"
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-ARM-FAILS) the re-run arms the closer and signs off"
+
+# A city names the key it imports the pack under, so the closer's pool is the
+# one the roster names in the subject's rig under that key.
+closer_case
+printf '{"agents":[{"qualified_name":"rig-a/kit.polecat"},{"qualified_name":"rig-b/kit.polecat"}]}\n' > "$TMP/agents-kit.json"
+STUB_AGENTS="$TMP/agents-kit.json" run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER-BINDING) a city that imports the pack under another key signs off"
+eq "$(meta tk-sub gc.dispatch_when_ready)" "rig-a/kit.polecat" "(CLOSER-BINDING) …arming the closer to its rig's pool under that key"
+closer_case
+printf '{"agents":[{"qualified_name":"rig-b/gc-toolkit.polecat"}]}\n' > "$TMP/agents-none.json"
+STUB_AGENTS="$TMP/agents-none.json" run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-NO-POOL) a rig the roster names no polecat pool in stops the sign-off"
+hasnt "$(calls)" "gctk bead arm" "(CLOSER-NO-POOL) …before the arm"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-NO-POOL) …with the gate and the conversation still open"
 eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
 closer_case
 STUB_SHOW_FAIL_ON=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"

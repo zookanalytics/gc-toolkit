@@ -129,7 +129,7 @@ conflict() {
 }
 # What a conflict sends, in order: the pool's route, the task's create, its
 # settle, and its sling to the rig's polecat pool with a direct landing.
-SENT="pool-route gc-toolkit.polecat
+SENT="pool-route polecat
 create
 queue-priority settle task-1
 sling rig-a/gc-toolkit.polecat task-1 --on mol-polecat-work --merge direct"
@@ -236,14 +236,14 @@ eq "$RC $(logged scripts)" "4 $SENT" "the task is filed and sent all the same"
 echo "# a pool with no route files nothing"
 fresh "$DEPS_EPIC"; conflict
 export STUB_POOL_ROUTE_RC=1; run; unset STUB_POOL_ROUTE_RC
-eq "$RC $(logged scripts | tr '\n' '|') $(tip integration/land-1) $(bstatus ho-1)" "1 pool-route gc-toolkit.polecat| $OWN open" \
+eq "$RC $(logged scripts | tr '\n' '|') $(tip integration/land-1) $(bstatus ho-1)" "1 pool-route polecat| $OWN open" \
   "the call stops with nothing filed, sent, pushed or closed"
-has "$OUT" "the pool gc-toolkit.polecat resolves to no route, so no task was filed for it" "it says the pool has no route"
+has "$OUT" "the pool polecat resolves to no route, so no task was filed for it" "it says the pool has no route"
 
 echo "# a create that wrote nothing stops before anything is sent"
 fresh "$DEPS_EPIC"; conflict
 export STUB_CREATE_FAIL=1; run; unset STUB_CREATE_FAIL
-eq "$RC $(logged scripts | tr '\n' '|') $(tip integration/land-1) $(bstatus ho-1)" "1 pool-route gc-toolkit.polecat|create| $OWN open" \
+eq "$RC $(logged scripts | tr '\n' '|') $(tip integration/land-1) $(bstatus ho-1)" "1 pool-route polecat|create| $OWN open" \
   "the call stops with nothing sent, pushed or closed"
 has "$OUT" "the create of its task wrote nothing; call again" "it says the create wrote nothing and a call again retries"
 
@@ -257,14 +257,14 @@ eq "$(tip integration/land-1) $(bstatus ho-1)" "$OWN open" "…pushing nothing, 
 echo "# a create that answers no id, and a hand-off that does not read then"
 fresh "$DEPS_EPIC"; conflict
 export STUB_CREATE_NOID=1 STUB_SHOW_FAIL_AFTER_CREATE=1; run; unset STUB_CREATE_NOID STUB_SHOW_FAIL_AFTER_CREATE
-eq "$RC $(logged scripts | tr '\n' '|')" "1 pool-route gc-toolkit.polecat|create|" "the call stops with nothing sent"
+eq "$RC $(logged scripts | tr '\n' '|')" "1 pool-route polecat|create|" "the call stops with nothing sent"
 has "$OUT" "reading ho-1 did not settle whether the create wrote it. gc bd show ho-1 lists what it waits on: finish from the settle with the open task titled \"Merge origin/main into integration/land-1 and resolve its conflicts\", or call again when it waits on none" \
   "it says how to find the task and what to do either way"
 
 echo "# a settle that does not land stops before the send"
 fresh "$DEPS_EPIC"; conflict
 export STUB_QUEUE_PRIORITY_RC=1; run; unset STUB_QUEUE_PRIORITY_RC
-eq "$RC $(logged scripts | tr '\n' '|')" "1 pool-route gc-toolkit.polecat|create|queue-priority settle task-1|" \
+eq "$RC $(logged scripts | tr '\n' '|')" "1 pool-route polecat|create|queue-priority settle task-1|" \
   "the call stops before the send"
 has "$OUT" "filed task-1 for the conflict in other.txt, shared.txt, but task-1 was not settled, so it was not sent; finish from the settle" \
   "it names the settle as the step to finish from"

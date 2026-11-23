@@ -26,7 +26,8 @@
 # branch's to fix. --page names a file the caller found stale, by its path under
 # generated/seed-audit, and the bead lists it; the re-render covers every file
 # whatever the list says. --seen-by names who found it, for the bead's record.
-# --pool defaults to gc-toolkit.polecat.
+# --pool defaults to polecat, which pool-route.sh resolves to the rig's polecat
+# pool under the binding the city imports the pack under.
 #
 # The base owns at most one live re-audit, the live bead carrying
 # seed_audit_reaudit=<base>. One already dispatched is reported and left alone.
@@ -89,7 +90,7 @@ LIVE_STATUSES="open,in_progress,blocked,deferred,hooked,pinned"
 KEY="seed_audit_reaudit"
 WORK_FORMULA="mol-polecat-work"
 
-BASE=""; SEEN_BY=""; POOL_NAME="gc-toolkit.polecat"
+BASE=""; SEEN_BY=""; POOL_NAME="polecat"
 PAGES=()
 need() { [ "$2" -gt 1 ] || usage "$1 needs a value"; }
 while [ $# -gt 0 ]; do

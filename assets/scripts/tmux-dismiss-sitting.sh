@@ -108,10 +108,12 @@ fi
 field() { printf '%s' "$ROWS" | jq -r --arg k "$1" '.[0][$k] // "" | tostring' 2>/dev/null || true; }
 
 # A converse sitting runs a converse template: the pack's base converse agent
-# or one of its per-model variants, under any rig.
+# or one of its per-model variants, under any rig and under whatever binding the
+# city imports the pack under, which leads the name the rig is stripped from.
 TEMPLATE=$(field template)
-case "${TEMPLATE##*/}" in
-    gc-toolkit.converse|gc-toolkit.converse-*) ;;
+AGENT_NAME=${TEMPLATE##*/}
+case "${AGENT_NAME#*.}" in
+    converse|converse-*) ;;
     *)
         say 8000 "dismiss: '$SESSION' is not a converse sitting (template '${TEMPLATE:-none}') — nothing dismissed"
         exit 0 ;;
