@@ -1,0 +1,17 @@
+# mail-notify-on-reply — when mail is replied to, request a turn for each
+# converse sitting that holds unread mail no notice has told it of. It runs
+# the same pass as mail-notify-on-send, whose header states what the pass does
+# and how to tune it, because an order's event trigger names one event type
+# and a reply records mail.replied, not mail.sent. A city that changes
+# GCTK_MAIL_NOTIFY_AGENTS changes it for both orders.
+[order]
+description = "When mail is replied to, request a turn for each converse sitting that holds unread mail no notice has told it of"
+trigger = "event"
+on = "mail.replied"
+timeout = "150s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" mail notify --agents \"$GCTK_MAIL_NOTIFY_AGENTS\""
+scope = "city"
+
+[order.env]
+# The pack's converse templates, the agents under agents/converse-*.
+GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus"
