@@ -2028,6 +2028,8 @@ has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL) …i
 has "$CALLED" "Load that skill" "(SKILL) …which has the sitting load the skill"
 has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, frame through the lens and wait"
 has "$CALLED" "session new converse-claude-opus --alias tk-new" "(SKILL) …then a sitting spawns for the new conversation"
+hasnt "$CALLED" "session nudge" "(SKILL) …and the claude-opus sitting reads the lens from its ask, unkicked"
+has "$OUT" "✓ converse-claude-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
 
 # A city names the key it imports the pack under, so the sitting's agent is the
 # one the roster names under that key, and its roster is read there.
@@ -2035,8 +2037,6 @@ STUB_BINDING=kit run_fresh tk-subj --skill review-arch --no-input --no-attach
 eq "$RC" 0 "(SKILL-BINDING) --skill in a city that imports the pack under another key exits 0"
 has "$CALLED" "skill list --agent gc-toolkit/kit.converse-claude-opus" "(SKILL-BINDING) …checking the name against that key's sitting"
 has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL-BINDING) …and resolving it against that sitting's roster"
-hasnt "$CALLED" "session nudge" "(SKILL) …and the claude-opus sitting reads the lens from its ask, unkicked"
-has "$OUT" "✓ converse-claude-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
 
 echo "# a full skill name resolves to exactly that skill"
 run_fresh tk-subj --skill gc-toolkit.review-pm --no-input --no-attach

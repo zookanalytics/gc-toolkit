@@ -933,6 +933,7 @@ has "$OUT" "NOT SIGNED OFF" "(CLOSER-ARM-FAILS) …saying not to post the sign-o
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-ARM-FAILS) …before any gate is answered"
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-ARM-FAILS) the re-run arms the closer and signs off"
+eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
 
 # A city names the key it imports the pack under, so the closer's pool is the
 # one the roster names in the subject's rig under that key.
@@ -947,7 +948,6 @@ STUB_AGENTS="$TMP/agents-none.json" run_signoff --conversation tk-conv --outcome
 eq "$RC" 1 "(CLOSER-NO-POOL) a rig the roster names no polecat pool in stops the sign-off"
 hasnt "$(calls)" "gctk bead arm" "(CLOSER-NO-POOL) …before the arm"
 eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-NO-POOL) …with the gate and the conversation still open"
-eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
 closer_case
 STUB_SHOW_FAIL_ON=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-UNREAD) a wait that does not read stops the sign-off"
