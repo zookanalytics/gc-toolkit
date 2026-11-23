@@ -39,11 +39,16 @@ operator now gets the smallest stopgap that stops the harm, and no new test
 suite.
 
 An epic is held to the plan as well. When you file an epic for this repository
-or review one, read its boundaries against the schedule, because a scheduled
-bead can already retire code the epic would change. The epic gives that code no
-new work, so its boundaries name the code as work the epic is not, along with
-the bead that retires it. At a review, boundaries that do not name such code
-are a gap, and the change you propose names it.
+or review one, read the schedule for code the epic's own work would change,
+because a scheduled bead can already retire it. The epic gives that code no new
+work, so its boundaries name the code as work the epic is not, in a clause that
+says how the epic's work would change it and which bead retires it. Retiring
+code the epic's work would not change gets no line, and an epic with none
+carries no line about the schedule. At a review, both are gaps: retiring code
+the epic's work would change that the boundaries leave out, and a line that
+names retiring code without saying how the epic's work would change it. The
+change you propose names the code with its connection, or removes a line that
+has none.
 
 ## A change that adds operational surface shows its Gas City search
 
