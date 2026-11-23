@@ -40,7 +40,8 @@ leaves.`,
 const reactionRefusals = `A first reaction triages a bead nobody has decided on, so a bead whose next
 move is someone's already is refused, by the first of these that holds:
 
-  6  its kind takes none: a standing record or a feedback pattern
+  6  its kind takes none: a standing record, a feedback pattern, or a bead
+     its domain carries out itself, such as a withdrawal of a PR's approvals
   5  its status is not open, it is assigned, it is routed or armed, or it
      carries hold:mayor or hold:external
   3  an open conversation tracks it

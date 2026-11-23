@@ -206,7 +206,7 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 		{refused[Reacting], "already reacting or in a conversation"},
 		{refused[Driven], "driven by a live workflow"},
 		{refused[Decided], "already routed, armed, held, assigned or waiting on a person"},
-		{refused[Excluded], "a standing record or a feedback pattern"},
+		{refused[Excluded], "of a kind that takes no first reaction"},
 		{failed, "not slung for an error"},
 	} {
 		if s.n > 0 {

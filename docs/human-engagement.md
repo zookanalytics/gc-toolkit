@@ -634,8 +634,8 @@ gc sling refuses a route that cannot work, such as to a proactive pool the city
 does not configure, or it refuses the subject because a first reaction already
 runs on it or an open conversation tracks it, a live workflow already drives
 it, it is already routed or armed, held, assigned or not open, an open human
-gate blocks it, or it is a standing record or a feedback pattern, whose kind
-takes no first reaction. The intake asks nothing about the pool before the
+gate blocks it, or its kind takes no first reaction, such as a standing record,
+a feedback pattern or a withdrawal of a PR's approvals. The intake asks nothing about the pool before the
 sling: a reaction slung to a proactive pool that is suspended, or capped at no
 sessions, waits there until the pool runs, and no framing reaches the operator
 until then. `--no-react` files the conversation at once.

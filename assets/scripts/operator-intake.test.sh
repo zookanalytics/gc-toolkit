@@ -340,18 +340,19 @@ hasnt "$ERR" "a live workflow already drives" "(ROUTED) it is NOT reported as a 
 hasnt "$ERR" "FAILED" "(ROUTED) it is NOT reported as a failure to file"
 unset FAKE_SLING_RC
 
-# --- (KIND) a standing record or a feedback pattern files the conversation directly
+# --- (KIND) a subject whose kind takes no first reaction files the conversation directly
 # the sling returns its fourth no-op code (6) when the subject's kind takes no first
-# reaction: a standing record is open by design, and the feedback distiller
-# dispatches a pattern. No reaction will put the topic to the operator, so the
+# reaction: a standing record is open by design, the feedback distiller
+# dispatches a pattern, and the landing order carries out a withdrawal of a PR's
+# approvals. No reaction will put the topic to the operator, so the
 # conversation is filed directly, its ask naming that cause, not another skip
 # and not a failure to sling.
 FAKE_SLING_RC=6 run yes "a topic on a standing record"
 eq "$RC" "0" "(KIND) exits 0 — the conversation is filed"
 has "$CALLS" "gctk reaction sling tk-newsub" "(KIND) the sling was attempted"
-has "$CALLS" "helm open tk-newsub" "(KIND) a standing record or pattern falls through to filing the conversation"
-has "$CALLS" "the subject is a standing record or a feedback pattern" "(KIND) the conversation's ask names the kind"
-has "$ERR" "subject tk-newsub is a standing record or a feedback pattern" "(KIND) the reason names the no-op skip"
+has "$CALLS" "helm open tk-newsub" "(KIND) such a subject falls through to filing the conversation"
+has "$CALLS" "the subject is of a kind that takes no first reaction" "(KIND) the conversation's ask names the kind"
+has "$ERR" "subject tk-newsub is of a kind that takes no first reaction" "(KIND) the reason names the no-op skip"
 hasnt "$ERR" "a first reaction already runs" "(KIND) it is NOT reported as an already-reacting subject"
 hasnt "$ERR" "already routed or armed" "(KIND) it is NOT reported as a routed subject"
 hasnt "$ERR" "FAILED" "(KIND) it is NOT reported as a failure to sling"

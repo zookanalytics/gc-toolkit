@@ -17,9 +17,10 @@
 # reaction already runs on the subject or an open conversation tracks it
 # (gctk reaction sling exit 3), a live workflow already drives it (exit 4), it
 # is already routed or armed, held, assigned, not open, or waits on a person's
-# answer (exit 5), or it is a standing record or a feedback pattern, whose kind
-# takes no first reaction (exit 6), so the sling is a no-op that slings
-# nothing: nothing would put the topic to the operator, so this does.
+# answer (exit 5), or its kind takes no first reaction, such as a standing
+# record, a feedback pattern or a withdrawal of a PR's approvals (exit 6), so
+# the sling is a no-op that slings nothing: nothing would put the topic to the
+# operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
 # read, with rig-map.sh's reason, or the city has no rigs) · 4 runtime failure.
 set -u
@@ -406,8 +407,8 @@ if [ -z "$NO_REACT" ]; then
     # the live-workflow no-op (a reaction never races work in flight), exit 5
     # the decided no-op (the subject is already routed or armed, held,
     # assigned, not open, or waits on a person's answer), and exit 6 the kind
-    # no-op (a standing record or a feedback pattern takes no first reaction),
-    # each distinct from a real failure to sling: name the actual cause so the
+    # no-op (a standing record, a feedback pattern and a bead its domain
+    # carries out itself take no first reaction), each distinct from a real failure to sling: name the actual cause so the
     # ask the converse session reads is accurate.
     if [ "$REACT_RC" -eq 3 ]; then
         note "$PROG: a first reaction already runs on subject $SUBJECT, or an open conversation tracks it — no new reaction was slung; filing the conversation directly"
@@ -419,8 +420,8 @@ if [ -z "$NO_REACT" ]; then
         note "$PROG: subject $SUBJECT is already routed or armed, held, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: the subject is already routed or armed, held, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     elif [ "$REACT_RC" -eq 6 ]; then
-        note "$PROG: subject $SUBJECT is a standing record or a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
-        REACT_WHY="no: the subject is a standing record or a feedback pattern, whose kind takes no first reaction"
+        note "$PROG: subject $SUBJECT is of a kind that takes no first reaction, such as a standing record, a feedback pattern or a withdrawal of a PR's approvals — filing the conversation directly"
+        REACT_WHY="no: the subject is of a kind that takes no first reaction, such as a standing record, a feedback pattern or a withdrawal of a PR's approvals"
     else
         note "$PROG: slinging the first reaction FAILED — falling back to filing the conversation directly"
         REACT_WHY="no: slinging the first reaction failed"
