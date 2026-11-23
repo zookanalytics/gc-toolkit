@@ -260,8 +260,8 @@ The block's last line, for each exit:
 # rig's polecat pool by default, which runs mol-polecat-work; --route names
 # another). Your card is the dispatch note the worker reads. Route the ONE
 # bead you reacted to: where several beads share one cause, the card says so
-# and one bead naming the cause is the one routed. A subject that is not a
-# member of an epic is held for placement instead of routed.
+# and one bead naming the cause is the one routed. A subject intake does not
+# admit is held for placement instead of routed.
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable
 # An emergency, a red main or a broken gate: the exit checks main's checks and
 # routes at P0 only when the check it names is failing.
@@ -272,8 +272,9 @@ The block's last line, for each exit:
 # the bead ready.
 # A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
-# holds it for placement. It refuses the deacon and the witness, which take
-# mail and no bead, and the keeper, which takes no first reaction's bead.
+# holds what intake does not admit for placement. It refuses the deacon and
+# the witness, which take mail and no bead, and the keeper, which takes no
+# first reaction's bead.
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
@@ -282,8 +283,8 @@ The block's last line, for each exit:
 # the subject's with that title is reused. When the bead is plainly work
 # once the wait lifts, ALWAYS --then-route it: that arms the deferred
 # dispatch so the blocker closing sends it to the pool, with nothing left to
-# remember. On a bead that is not a member of an epic the exit arms nothing
-# and holds it for placement instead, so pass --then-route either way. A
+# remember. On a bead intake does not admit the exit arms nothing and holds
+# it for placement instead, so pass --then-route either way. A
 # blocked work bead left unrouted and unheld is the debt
 # doctor/check-blocked-work-armed flags. Waiting work that is a named agent's
 # own takes --then-assign <agent> instead: the subject is handed to the
