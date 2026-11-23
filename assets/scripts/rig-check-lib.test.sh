@@ -10,12 +10,16 @@
 #             absent or unparsable mark, another check's key, or an input that
 #             is not a bead row.
 #   (READERS) the scripts that read a rig_check_pre_existing mark, its writer
-#             aside, source this file and apply $PRE_EXISTING_JQ, and no script
-#             or formula reads one any other way.
-#   (NO-COPY) no other file defines pre_existing.
+#             aside, source bd-lib.sh and this file and judge by
+#             pre_existing_judgment, which reads the trackers, never by
+#             $PRE_EXISTING_JQ alone, and no script or formula reads one any
+#             other way.
+#   (NO-COPY) no other file defines pre_existing, pre_existing_judgment or
+#             pre_existing_tracker.
 # A reader with a private copy of the judgment drifts silently from this one.
-# The behavioral half lives beside each reader (self-review-check.test.sh,
-# review-evidence.test.sh).
+# The behavioral half, the trackers' reading included, lives beside each reader
+# (self-review-check.test.sh, review-evidence.test.sh) and the writer
+# (rig-check-pre-existing.test.sh).
 # Reads the repo only; no gc, no city, no network.
 #
 # run-tests-scope: tree
@@ -93,26 +97,32 @@ for r in $READERS; do
   if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi
   grep -qE '^[[:space:]]*\.[[:space:]].*rig-check-lib\.sh' < <(code "$f") \
     && ok "(READERS) $r sources rig-check-lib.sh" || bad "(READERS) $r sources rig-check-lib.sh"
-  grep -qF '"$PRE_EXISTING_JQ"'"' pre_existing(" < <(code "$f") \
-    && ok "(READERS) $r applies pre_existing from \$PRE_EXISTING_JQ" || bad "(READERS) $r applies pre_existing from \$PRE_EXISTING_JQ"
+  grep -qE '^[[:space:]]*\.[[:space:]].*bd-lib\.sh' < <(code "$f") \
+    && ok "(READERS) $r sources bd-lib.sh, which reads the trackers" || bad "(READERS) $r sources bd-lib.sh, which reads the trackers"
+  grep -qE 'pre_existing_judgment[[:space:]]+"' < <(code "$f") \
+    && ok "(READERS) $r judges by pre_existing_judgment" || bad "(READERS) $r judges by pre_existing_judgment"
+  grep -qF 'PRE_EXISTING_JQ' < <(code "$f") \
+    && bad "(READERS) $r applies \$PRE_EXISTING_JQ itself, which leaves the trackers unread" \
+    || ok "(READERS) $r applies no \$PRE_EXISTING_JQ itself, which would leave the trackers unread"
 done
 # The writer reads the key back to merge trackers into its own judgment, which
-# is not this question; every other script or formula that names the key is a
-# reader.
+# is not this question, and this file names it where it defines the judgment;
+# every other script or formula that names the key is a reader.
 WRITER="assets/scripts/rig-check-pre-existing.sh"
+LIBRARY="assets/scripts/rig-check-lib.sh"
 NAMED=$(git -C "$ROOT" grep -l -F 'rig_check_pre_existing' -- 'assets/scripts/*.sh' 'formulas/*.toml' 'packs' 'doctor' 'orders' 'tools' ':!*.test.sh' 2>/dev/null)
 [ -n "$NAMED" ] && ok "(READERS) the scan finds the scripts that name the key" || bad "(READERS) the scan finds the scripts that name the key"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  [ "$f" = "$WRITER" ] && continue
+  [ "$f" = "$WRITER" ] || [ "$f" = "$LIBRARY" ] && continue
   grep -qF 'rig_check_pre_existing' < <(code "$ROOT/$f") || continue
   grep -qxF -- "$f" <<< "$READERS" && ok "(READERS) $f reads a mark and is a listed reader" \
     || bad "(READERS) $f reads a mark and is a listed reader" "add it to READERS and have it source rig-check-lib.sh"
 done <<< "$NAMED"
 
 echo "# no private copies"
-COPIES=$(git -C "$ROOT" grep -l -E 'def[[:space:]]+pre_existing[^[:alnum:]_]' -- . ':!assets/scripts/rig-check-lib.sh' ':!specs' 2>/dev/null | grep -v '\.test\.sh$')
-eq "$COPIES" "" "(NO-COPY) no other file defines pre_existing"
+COPIES=$(git -C "$ROOT" grep -l -E 'def[[:space:]]+pre_existing[^[:alnum:]_]|(^|[[:space:]])pre_existing_(judgment|tracker)[[:space:]]*\(\)' -- . ':!assets/scripts/rig-check-lib.sh' ':!specs' 2>/dev/null | grep -v '\.test\.sh$')
+eq "$COPIES" "" "(NO-COPY) no other file defines pre_existing, pre_existing_judgment or pre_existing_tracker"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -7,11 +7,14 @@
 #     commit, and prints a line per check: a pass or a fail with its scope,
 #     exit code and command, nothing recorded, or a record gctk could not read.
 #     The first line names the gctk binary.
-#   - A fail's line says it is pre-existing, with its trackers, only when the
-#     anchor's rig_check_pre_existing.<check> holds that very record at the
-#     commit. A mark for another run's record, a mark at another commit, an
-#     anchor with no mark and an anchor that does not read leave the fail the
-#     commit's. The anchor is read once, and only when some record fails.
+#   - A fail's line says it is pre-existing, with its live trackers, only when
+#     the anchor's rig_check_pre_existing.<check> holds that very record at the
+#     commit and a tracker it names is live. A mark for another run's record, a
+#     mark at another commit, an anchor with no mark and an anchor that does not
+#     read leave the fail the commit's, and so does a mark whose trackers all
+#     closed, which says to merge the base in or names the live bead to mark
+#     against, or one whose tracker does not read. The anchor is read once, and
+#     only when some record fails.
 #   - No gctk binary prints that there is none and reads nothing.
 #   - A worktree that is not at the commit, though the caller's checkout is, a
 #     worktree that cannot be entered, and a call missing a value, an empty
@@ -61,7 +64,8 @@ ELSEWHERE="$TMP/elsewhere"; git -C "$REPO" worktree add -q --detach "$ELSEWHERE"
 # gctk answers `rig <check> --check` with STUB_REC_<check>, STUB_ERR_<check> on
 # stderr and exit STUB_RC_<check> (default 3, nothing recorded), logging its
 # call and the directory it ran in. gc answers `bd show` with STUB_ANCHOR, or
-# fails when STUB_BD_FAIL is 1, logging every call.
+# fails when STUB_BD_FAIL is 1, and `bd list --id <bead>` with that bead's row
+# of STUB_TRACKERS, or fails when STUB_LIST_FAIL is 1, logging every call.
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$TMP/gctk" <<'GCTK'
 #!/usr/bin/env bash
@@ -76,12 +80,18 @@ cat > "$BIN/gc" <<'GC'
 printf 'gc %s\n' "$*" >> "$STUB_LOG"
 case "$1 ${2:-}" in
   "bd show") [ "${STUB_BD_FAIL:-0}" = 1 ] && exit 1; printf '%s\n' "$STUB_ANCHOR" ;;
+  "bd list")
+    [ "${STUB_LIST_FAIL:-0}" = 1 ] && exit 1
+    id=""; while [ "$#" -gt 0 ]; do [ "$1" = --id ] && id="${2:-}"; shift; done
+    printf '%s\n' "${STUB_TRACKERS:-[]}" | jq -c --arg id "$id" '[ .[] | select(.id == $id) ]' ;;
   *) exit 1 ;;
 esac
 GC
 chmod +x "$TMP/gctk" "$BIN/gc"
 export STUB_LOG="$TMP/stub.log"
 NO_MARK='[{"id":"tk-anchor1","metadata":{}}]'
+# The trackers the cases' marks name, each live unless a case says otherwise.
+LIVE='[{"id":"tk-t1","status":"open"},{"id":"tk-l1","status":"in_progress"}]'
 
 # record <check> <pass|fail> [scope] : a record as gctk prints it at the
 # reviewed commit.
@@ -102,7 +112,7 @@ marked() {
 evidence() {
   : > "$STUB_LOG"; RC=0
   RUNTMP="$TMP/run.$RANDOM"; mkdir -p "$RUNTMP"
-  OUT=$(cd "$ELSEWHERE" && env PATH="$BIN:$PATH" TMPDIR="$RUNTMP" GCTK_BIN="$TMP/gctk" STUB_ANCHOR="$NO_MARK" "$@" \
+  OUT=$(cd "$ELSEWHERE" && env PATH="$BIN:$PATH" TMPDIR="$RUNTMP" GCTK_BIN="$TMP/gctk" STUB_ANCHOR="$NO_MARK" STUB_TRACKERS="$LIVE" "$@" \
     bash "$SUT" --anchor tk-anchor1 --commit "${COMMIT:-$OID}" --worktree "${WORKTREE:-$REPO}" 2>"$TMP/err") || RC=$?
   ERR=$(cat "$TMP/err")
 }
@@ -157,6 +167,23 @@ eq "$(calls 'gc bd show tk-anchor1')" 1 "two fails read the anchor once"
 COMMIT=${OID:0:12} evidence STUB_RC_test=1 STUB_REC_test="$FAILREC" STUB_ANCHOR="$(marked test "$OID" tk-t1 "$FAILREC")"
 eq "$RC" 0 "an abbreviated commit is the checkout's commit"
 has "$(line test)" "pre-existing, tracked by tk-t1" "…and a mark naming the full sha answers for it"
+
+echo "# a mark holds only while a tracker it names is live"
+evidence STUB_RC_test=1 STUB_REC_test="$FAILREC" STUB_ANCHOR="$(marked test "$OID" tk-t1 "$FAILREC")" STUB_TRACKERS='[{"id":"tk-t1","status":"closed"}]'
+eq "$(line test)" "test: fail, scope affected, exit 1, command: run-the-tests; the anchor's pre-existing mark at this commit names no live tracker, so it judges nothing: tk-t1 is not live and no live bead carries its failure, so merge the base in" \
+  "a fail whose tracker closed with no live bead carrying it is the commit's, and says to merge the base in"
+FOLDED='[{"id":"tk-t1","status":"closed","dependencies":[{"issue_id":"tk-t1","depends_on_id":"tk-batch","type":"supersedes"}]},{"id":"tk-batch","status":"open"}]'
+evidence STUB_RC_test=1 STUB_REC_test="$FAILREC" STUB_ANCHOR="$(marked test "$OID" tk-t1 "$FAILREC")" STUB_TRACKERS="$FOLDED"
+has "$(line test)" "names no live tracker, so it judges nothing: tk-t1 has closed, and tk-batch carries its failure now, so mark the fail against tk-batch" \
+  "a fail whose tracker was folded into a live bead is the commit's, naming the bead to mark against"
+hasnt "$(line test)" "pre-existing, tracked by" "…and is not called pre-existing"
+evidence STUB_RC_test=1 STUB_REC_test="$FAILREC" STUB_ANCHOR="$(marked test "$OID" tk-t1 "$FAILREC")" STUB_LIST_FAIL=1
+has "$(line test)" "the trackers of the anchor's pre-existing mark at this commit did not read, so nothing shows the mark still holds: tk-t1 did not read" \
+  "a fail whose tracker does not read is the commit's, and says why"
+TWO=$(jq -nc --arg c "$OID" --argjson r "$FAILREC" '[{id: "tk-anchor1", metadata: {"rig_check_pre_existing.test": ({commit: $c, record: $r, trackers: ["tk-t1", "tk-t2"]} | tojson)}}]')
+evidence STUB_RC_test=1 STUB_REC_test="$FAILREC" STUB_ANCHOR="$TWO" STUB_TRACKERS='[{"id":"tk-t1","status":"closed"},{"id":"tk-t2","status":"blocked"}]'
+eq "$(line test)" "test: fail, scope affected, exit 1, command: run-the-tests; pre-existing, tracked by tk-t2" \
+  "a mark one of whose trackers is still live holds, naming that one"
 
 echo "# a record gctk could not read"
 evidence STUB_RC_test=4 STUB_ERR_test="gctk rig test: the record store did not answer"

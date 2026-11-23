@@ -88,6 +88,9 @@ premark() {
   for t in "$@"; do trackers+="${trackers:+,}$(json_str "$t")"; done
   printf '{"commit":%s,"record":%s,"trackers":[%s]}' "$(json_str "$c")" "$r" "$trackers"
 }
+# The rows of the trackers the cases' marks name, each live; a case sets
+# TRACKER_ROWS to rows of its own.
+LIVE_TRACKERS='{"id":"tk-t1","status":"open","metadata":{}},{"id":"tk-b1","status":"in_progress","metadata":{}}'
 # pour_vars : the vars the case's pour renders, in the pour's order, as
 # POUR_NAMES and POUR_VALUES. A command defaults to what green and SB_GREEN
 # ran, and a case sets VAR_<NAME> to declare another, or to empty for a command
@@ -138,6 +141,7 @@ write_state() {
   if [ -n "${MD_MAX_ATTEMPTS-3}" ]; then
     rows+=",{\"id\":\"control-1\",\"metadata\":{\"gc.kind\":\"ralph\",\"gc.step_id\":\"self-review\",\"gc.max_attempts\":$(json_str "${MD_MAX_ATTEMPTS-3}"),\"gc.root_bead_id\":$(json_str "$root")}}"
   fi
+  rows+=",${TRACKER_ROWS-$LIVE_TRACKERS}"
   store "[$rows]"
   # The run of the root, as run-lib.sh would name it: by default it works the
   # case's issue, and RUN_BEAD="" is a run that names no bead.
@@ -149,8 +153,9 @@ write_state() {
 # script must resolve the worktree from bead metadata, never from cwd.
 # GC_ITERATION default 1 keeps the gate cases far from the budget so they never
 # trip the exhaustion note. GC_COLD=1 is the ralph condition env with a cold
-# import cache, where every gc call dies before doing any work, and
-# UPDATE_FAILS=1 a store that refuses the work bead's write.
+# import cache, where every gc call dies before doing any work,
+# UPDATE_FAILS=1 a store that refuses the work bead's write, and LIST_FAIL_ON a
+# store that fails each list whose arguments carry its text.
 run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
@@ -158,6 +163,7 @@ run_case() {
       GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
       RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
       STUB_GC_FAIL="${GC_COLD:+1}" STUB_UPDATE_FAIL="${UPDATE_FAILS:+${ISSUE_ID-gc-issue}}" \
+      STUB_LIST_FAIL_ON="${LIST_FAIL_ON-}" \
       GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then ok "$desc (exit $got)"
@@ -184,6 +190,7 @@ reset_env() {
   unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK MD_NOTES
+  unset TRACKER_ROWS LIST_FAIL_ON
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
   clear_records
 }
@@ -226,6 +233,31 @@ run_case "FAIL when the pre-existing mark names another commit" 1
 reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)"); write_state
 run_case "FAIL when the pre-existing mark names no tracker" 1
+
+# A mark holds only while a tracker it names is live.
+CLOSED_T1='{"id":"tk-t1","status":"closed","metadata":{}}'
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); TRACKER_ROWS=$CLOSED_T1; write_state
+run_case "FAIL when the mark's tracker closed with no live bead carrying its failure" 1
+assert_out "says to merge the base in" "lint: the pre-existing mark at $HEAD_SHA names no live tracker, so it judges nothing: tk-t1 is not live and no live bead carries its failure, so merge the base in"
+
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1)
+TRACKER_ROWS='{"id":"tk-t1","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-t1","depends_on_id":"tk-batch","type":"supersedes"}]},{"id":"tk-batch","status":"open","metadata":{}}'
+write_state
+run_case "FAIL when the mark's tracker was folded into a live bead" 1
+assert_out "names the bead to mark against" "tk-t1 has closed, and tk-batch carries its failure now, so mark the fail against tk-batch"
+
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1 tk-t2)
+TRACKER_ROWS="$CLOSED_T1"',{"id":"tk-t2","status":"blocked","metadata":{}}'; write_state
+run_case "PASS when one tracker the mark names is still live" 0
+assert_out "names the live one only" "pre-existing, tracked by tk-t2"
+
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); LIST_FAIL_ON="--id tk-t1"; write_state
+run_case "FAIL when the mark's tracker does not read" 1
+assert_out "says nothing shows the mark holds" "did not read, so nothing shows the mark still holds: tk-t1 did not read"
 
 # --- 3d2. a run that replaced the marked record --------------------------------
 # gctk rig replaces a commit's record when a call declares another run. When the
@@ -536,6 +568,9 @@ reset_env; GC_COLD=1; write_state; green
 run_case "PASS under a cold gc (resolution is bd-only, and the record reads call no gc)" 0
 if grep -q '^convoy ' "$CALLS"; then bad "resolution must not shell out to gc convoy"; sed 's/^/       /' "$CALLS"
 else ok "resolution must not shell out to gc convoy"; fi
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); GC_COLD=1; write_state
+run_case "PASS under a cold gc on a mark whose live tracker is read through bd" 0
 
 # --- 12. exhaustion note ----------------------------------------------------
 # The last failing attempt (GC_ITERATION >= gc.max_attempts) notes the

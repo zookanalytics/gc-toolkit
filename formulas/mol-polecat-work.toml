@@ -444,7 +444,7 @@ the gate the same way, with `--test '<its test command>'` on the call.
 file its tracker with `preexisting-failure.sh`, as preflight-tests does for a
 failure on the base, then mark its record at this HEAD on the work bead; the
 exit condition takes the mark in place of a passing record while that record
-stands:
+stands and a tracker the mark names is live:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-check-pre-existing.sh" --bead "<the work bead>" --check "<test, lint, typecheck, setup or build: the red check>" --commit "<git rev-parse HEAD>" --trackers "<the tracker id of each failure in it, space-separated>"
 ```

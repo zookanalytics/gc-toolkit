@@ -970,8 +970,10 @@ keys = [
 #   the reviewed commit, so a review's gather calls that fail pre-existing and
 #   the correctness method runs no suite for it. Both judge by rig-check-lib.sh,
 #   which reads a value whose record is not the one --check reads now, such as
-#   one a run with another command or scope replaced, as no judgment. Only the
-#   self-review writes and reads a setup or build value, against its note.
+#   one a run with another command or scope replaced, as no judgment, and one
+#   none of whose trackers is still live as no judgment too. The writer refuses
+#   a tracker that is not live. Only the self-review writes and reads a setup
+#   or build value, against its note.
 #   Absent means no caller judged a fail pre-existing. Never cleared.
 
 [metadata.pr_posture]

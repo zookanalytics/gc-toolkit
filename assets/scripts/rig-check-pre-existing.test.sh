@@ -17,6 +17,10 @@
 #   - with no recorded fail of the named commit to mark (a pass, nothing
 #     recorded, another commit's fail, no gctk binary), a bead that does not
 #     read, or a write that does not read back, it exits 1 and writes nothing;
+#   - every tracker named must be live: one that closed with no live bead
+#     carrying its failure is refused with the base to merge in, one folded
+#     into a live bead is refused naming that bead, and one that does not read
+#     is refused as well, each exiting 1 and writing nothing;
 #   - a check outside test, lint, typecheck, setup and build, an abbreviated
 #     or missing commit, no tracker, and a worktree that is not a directory
 #     are refused before anything is written;
@@ -44,7 +48,7 @@ harness_init
 [ -n "$GCTK_BUILT" ] || { echo "FAIL - $GCTK_BUILD_ERR"; exit 1; }
 
 SUT="$TMP/sut"
-mk_sut_dir "$SUT" "$HERE/rig-check-pre-existing.sh"
+mk_sut_dir "$SUT" "$HERE/rig-check-pre-existing.sh" "$HERE/rig-check-lib.sh"
 
 # The fixture rig: a work commit, and a prep worktree at the base commit, each
 # with its own records under the clone's git common directory. A PATH with the
@@ -75,8 +79,18 @@ value() { jq -cS --arg id "$1" --arg k "rig_check_pre_existing.$2" '.[] | select
 mark() { local c="$1" r="$2"; shift 2; jq -cSn --arg c "$c" --argjson r "$r" '{commit: $c, record: $r, trackers: $ARGS.positional}' --args "$@"; }
 # run <args...> : the writer, from the work tree unless --worktree says otherwise.
 run() { OUT=$(cd "$REPO" && PATH="$REAL_PATH" bash "$SUT/rig-check-pre-existing.sh" "$@" 2>&1); RC=$?; }
+# fresh_store [row...] : the work bead tk-w, a live tracker for each id the
+# cases name, and the rows given.
+fresh_store() {
+  local t rows='{"id":"tk-w","status":"open","metadata":{}}'
+  for t in tk-t1 tk-t2 tk-t3 tk-t4 tk-t5 tk-t9 tk-l1 tk-b1 tk-b2 tk-b3 tk-x; do
+    rows+=",{\"id\":\"$t\",\"status\":\"open\",\"metadata\":{}}"
+  done
+  for t in "$@"; do rows+=",$t"; done
+  store "[$rows]"
+}
 
-store '[{"id":"tk-w","status":"open","metadata":{}}]'
+fresh_store
 
 echo "# a write names the commit, the failed record and its trackers"
 rec "$REPO" test --scope affected --command false
@@ -167,10 +181,31 @@ rec "$REPO" typecheck --command false
 STUB_SHOW_FAIL=1 run --bead tk-w --check typecheck --commit "$WORK_HEAD" --trackers "tk-x"
 eq "$RC" 1 "an unreadable bead exits 1"
 eq "$(value tk-w typecheck)" "" "…and nothing is written"
-store '[{"id":"tk-w","status":"open","metadata":{}}]'
+fresh_store
 STUB_DROP_KEYS="tk-w:rig_check_pre_existing.typecheck" run --bead tk-w --check typecheck --commit "$WORK_HEAD" --trackers "tk-x"
 eq "$RC" 1 "a write that does not read back exits 1"
 has "$OUT" "did not read back as written" "…and says so"
+
+echo "# every tracker named must be live"
+fresh_store '{"id":"tk-fixed","status":"closed","metadata":{}}' \
+  '{"id":"tk-folded","status":"closed","metadata":{},"dependencies":[{"issue_id":"tk-folded","depends_on_id":"tk-batch","type":"supersedes"}]}' \
+  '{"id":"tk-batch","status":"in_progress","metadata":{}}'
+: > "$STUB_GC_LOG"
+run --bead tk-w --check test --commit "$WORK_HEAD" --trackers "tk-fixed"
+eq "$RC" 1 "a tracker that closed with no live bead carrying its failure exits 1"
+has "$OUT" "nothing was written: tk-fixed is not live and no live bead carries its failure, so merge the base in" "…and says to merge the base in"
+run --bead tk-w --check test --commit "$WORK_HEAD" --trackers "tk-folded"
+eq "$RC" 1 "a tracker folded into a live bead exits 1"
+has "$OUT" "tk-folded has closed, and tk-batch carries its failure now, so mark the fail against tk-batch" "…and names the bead to mark against"
+run --bead tk-w --check test --commit "$WORK_HEAD" --trackers "tk-t1 tk-fixed"
+eq "$RC" 1 "one tracker that is not live among live ones exits 1"
+STUB_LIST_FAIL_ON="--id tk-t1" run --bead tk-w --check test --commit "$WORK_HEAD" --trackers "tk-t1"
+eq "$RC" 1 "a tracker that does not read exits 1"
+has "$OUT" "tk-t1 did not read" "…and says so"
+eq "$(grep -c 'bd update' "$STUB_GC_LOG")" 0 "none of them wrote anything"
+eq "$(value tk-w test)" "" "…so test has no value"
+run --bead tk-w --check test --commit "$WORK_HEAD" --trackers "tk-batch"
+eq "$RC" 0 "the live bead a fold moved the failure to is taken"
 
 echo "# usage is refused before any write"
 : > "$STUB_GC_LOG"
@@ -192,12 +227,12 @@ echo "# the self-review's call, as mol-polecat-work ships it"
 ROOT="$(cd "$HERE/../.." && pwd)"
 # The pack the caller finds the writer in.
 PACK="$TMP/pack"
-mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh"
+mk_sut_dir "$PACK/assets/scripts" "$HERE/rig-check-pre-existing.sh" "$HERE/rig-check-lib.sh"
 
 grep -qF 'rig-check-pre-existing.sh" --bead "<the work bead>" --check "<' "$ROOT/formulas/mol-polecat-work.toml" \
   && ok "self-review calls it with the bead, the check, the commit and the trackers" \
   || bad "self-review calls it with the bead, the check, the commit and the trackers"
-store '[{"id":"tk-w","status":"open","metadata":{}}]'
+fresh_store
 ( cd "$REPO" && env PATH="$REAL_PATH" "$PACK/assets/scripts/rig-check-pre-existing.sh" --bead tk-w --check lint --commit "$WORK_HEAD" --trackers "tk-t1 tk-t2" ) >/dev/null 2>&1
 eq "$(value tk-w lint)" "$(mark "$WORK_HEAD" "$RL" tk-t1 tk-t2)" "the self-review marks lint's record at the worktree's HEAD on the work bead"
 

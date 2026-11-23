@@ -36,8 +36,17 @@
 # write for another record, at that commit or another, replaces the value, so
 # a judgment never carries over to a run it did not see.
 #
+# Every tracker named must be live, because the readers honor a mark only
+# while a tracker it names is, and a closed one no longer says the failure is
+# red on the base. A tracker that is not live is refused with what to do
+# instead, by rig-check-lib.sh's reading of it: mark the fail against the live
+# bead its failure moved to, or merge the base in when no live bead carries it.
+# A tracker that does not read is refused as well, because nothing shows it is
+# live.
+#
 # Exit: 0 written and read back · 1 no recorded fail of <sha> to mark, the bead
-# did not read, or the write did not read back as written · 2 usage
+# did not read, a tracker named is not live or did not read, or the write did
+# not read back as written · 2 usage
 set -uo pipefail
 
 PROG="rig-check-pre-existing"
@@ -45,6 +54,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=rig-check-lib.sh
+. "$HERE/rig-check-lib.sh" || { echo "$PROG: cannot source rig-check-lib.sh beside this script" >&2; exit 1; }
 
 usage() {
   [ -z "${1:-}" ] || echo "$PROG: $1" >&2
@@ -119,6 +130,15 @@ case "$CHECK" in
       exit 1
     fi ;;
 esac
+REFUSED=""
+while IFS= read -r T; do
+  R=$(pre_existing_tracker "$T")
+  [ "$R" = live ] || REFUSED="$REFUSED${REFUSED:+; }${R#*: }"
+done < <(printf '%s' "$LIST" | jq -r '.[]')
+if [ -n "$REFUSED" ]; then
+  echo "$PROG: a mark holds only while a tracker it names is live, so nothing was written: $REFUSED" >&2
+  exit 1
+fi
 KEY="rig_check_pre_existing.$CHECK"
 # bd keeps a JSON value as a string, so the earlier value is parsed before its
 # trackers are kept.

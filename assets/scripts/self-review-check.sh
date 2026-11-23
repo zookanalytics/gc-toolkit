@@ -284,7 +284,7 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 #
 # A recorded fail passes only when the work bead's
 # rig_check_pre_existing.<check> holds that very record at this HEAD: the
-# iteration found the same failure red on the base and carried by a tracker
+# iteration found the same failure red on the base, carried by a live tracker
 # (rig-check-pre-existing.sh). A run with another command or scope replaces the
 # record, and its fail needs a judgment of its own. rig-check-lib.sh holds the
 # one definition of that judgment.
@@ -293,18 +293,28 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || fail "could not resolve 
 . "$HERE/rig-check-lib.sh" || fail "cannot source rig-check-lib.sh beside this script"
 FAILED=""
 UNRECORDED=""
+# The judgment reads the trackers a mark names through bd-lib.sh, whose reads go
+# through _bd_call, pinned here to bd like every read in this script.
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || fail "cannot source bd-lib.sh beside this script"
+# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
+_bd_call() { bd "$@"; }
 # judged <check> <record> : a fail at HEAD fails the check unless the work
-# bead's pre-existing mark for it holds <record> and names a tracker.
+# bead's pre-existing mark for it holds <record> and names a live tracker.
 judged() {
 	local pre
-	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" \
-		"$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
+	pre=$(pre_existing_judgment "$ISSUE_JSON" "$1" "$HEAD_SHA" "$2")
 	case "$pre" in
 	"tracked by "*) note "$1: the fail at $HEAD_SHA is pre-existing, $pre" ;;
 	"another run")
 		FAILED="$FAILED $1"
 		note "$1: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
 		;;
+	"no live tracker: "*)
+		FAILED="$FAILED $1"
+		note "$1: the pre-existing mark at $HEAD_SHA names no live tracker, so it judges nothing: ${pre#no live tracker: }"
+		;;
+	"unread: "*) fail "$1: the trackers of the pre-existing mark at $HEAD_SHA did not read, so nothing shows the mark still holds: ${pre#unread: }" ;;
 	*) FAILED="$FAILED $1" ;;
 	esac
 }

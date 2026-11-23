@@ -2,9 +2,9 @@
 # review-evidence.sh — what `gctk rig` recorded at the commit a review reads.
 #   review-evidence.sh --anchor <bead> --commit <sha> --worktree <path>
 # Reads the review's worktree, which --worktree names and which must be checked
-# out at <sha>, whatever directory the call is made in. Callers: the
-# review-gather block of formulas/mol-review.toml and of
-# formulas/mol-review-quorum-signoff.toml, which every check's review runs.
+# out at <sha>, whatever directory the call is made in. Callers: a review run's
+# lane (review-run.sh lane), and the review-gather block of
+# formulas/mol-review.toml and of formulas/mol-review-quorum-signoff.toml.
 #
 # A call that names no worktree reads the checkout it is made in. A run keeps
 # the step text it was poured with, and a review poured before its gather named
@@ -24,8 +24,9 @@
 #
 # A record says what a command did at a commit and never whose failure it is.
 # A fail's line says whether the anchor's rig_check_pre_existing.<check> holds
-# that very record at <sha>, and which trackers carry it, by rig-check-lib.sh's
-# definition of that judgment. The anchor is read only when some record fails.
+# that very record at <sha>, and which of its trackers are live and carry it, or
+# when none is, why the mark judges nothing, by rig-check-lib.sh's definition of
+# that judgment. The anchor is read only when some record fails.
 #
 # Exit: 0 printed · 1 nothing printed: the worktree cannot be entered or is not
 # at <sha>, or a lib beside this script or a temp file is missing · 2 usage, a
@@ -116,11 +117,12 @@ for CHECK in test lint typecheck; do
         if [ -z "$ANCHOR_JSON" ]; then
           LINE="$LINE; the anchor $ANCHOR did not read, so no pre-existing mark is known"
         else
-          PRE=$(printf '%s' "$ANCHOR_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" --arg rec "$REC" \
-            "$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
+          PRE=$(pre_existing_judgment "$ANCHOR_JSON" "$CHECK" "$HEAD_SHA" "$REC")
           case "$PRE" in
             "tracked by "*) LINE="$LINE; pre-existing, $PRE" ;;
             "another run") LINE="$LINE; the anchor's pre-existing mark at this commit judged another run's fail" ;;
+            "no live tracker: "*) LINE="$LINE; the anchor's pre-existing mark at this commit names no live tracker, so it judges nothing: ${PRE#no live tracker: }" ;;
+            "unread: "*) LINE="$LINE; the trackers of the anchor's pre-existing mark at this commit did not read, so nothing shows the mark still holds: ${PRE#unread: }" ;;
           esac
         fi
       fi
