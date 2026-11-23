@@ -136,12 +136,16 @@ func (g *GitHub) FullAsked() [][]int {
 	return slices.Clone(g.full)
 }
 
-// Repo is one repository's default branch, the checks at each ref, and the
-// deployments of each environment, newest first, by the environment's name.
+// Repo is one repository's default branch, the checks at each ref, the
+// deployments of each environment, newest first, by the environment's name,
+// the runs of each workflow, newest first, by its file's name, and the jobs of
+// each run's latest attempt, by the run's id.
 type Repo struct {
 	DefaultBranch string
 	Checks        map[string]*gh.HeadChecks
 	Deployments   map[string][]gh.Deployment
+	Runs          map[string][]gh.WorkflowRun
+	Jobs          map[int64][]gh.Job
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -565,6 +569,32 @@ func (g *GitHub) Deployments(repo, environment string, n int) ([]gh.Deployment, 
 	}
 	d := r.Deployments[environment]
 	return slices.Clone(d[:min(n, len(d))]), nil
+}
+
+// WorkflowRuns answers the newest n of the runs Repos holds for workflow, as
+// the read's window takes them, whatever branch it names, failing as
+// Fail["WorkflowRuns"] says. A workflow it holds no runs for is one the
+// repository does not hold, an error as GitHub's answer is.
+func (g *GitHub) WorkflowRuns(repo, workflow, branch string, n int) ([]gh.WorkflowRun, error) {
+	r, err := g.repo("WorkflowRuns", repo)
+	if err != nil {
+		return nil, err
+	}
+	runs, ok := r.Runs[workflow]
+	if !ok {
+		return nil, fmt.Errorf("github: %s holds no workflow %s", repo, workflow)
+	}
+	return slices.Clone(runs[:min(n, len(runs))]), nil
+}
+
+// RunJobs answers the jobs Repos holds for run, failing as Fail["RunJobs"]
+// says. A run it holds no jobs for has none.
+func (g *GitHub) RunJobs(repo string, run int64) ([]gh.Job, error) {
+	r, err := g.repo("RunJobs", repo)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(r.Jobs[run]), nil
 }
 
 func (g *GitHub) repo(read, repo string) (*Repo, error) {

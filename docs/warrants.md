@@ -808,11 +808,16 @@ no warrant.
     (`internal/bootstrap/packs/core/assets/scripts/escalate.sh`).
   - `gc event emit` appends one event to the city's log and keeps no state per
     key (`cmd/gc/cmd_event_emit.go`).
+  - The PR monitor keeps one open repair bead per pull request's head
+    (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`). Its key is the
+    pull request's repository, number and head
+    (`githubPRRepairDedupeMetadata`), so no other reader can file under it, and
+    nothing clears it when the pull request turns green.
   - A doctor result needs no such record, because the doctor order records
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6168.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
 

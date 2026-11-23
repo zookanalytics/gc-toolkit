@@ -1,0 +1,37 @@
+# actions-failure-report — once an hour, in each rig, read the GitHub Actions
+# workflows the rig marks on its default branch, and keep one patrol finding in
+# the rig's own store for each one whose runs there fail. A workflow's file
+# marks it with a line of its own, from the line's first character:
+#
+#   # gc:report-failures
+#
+# The pass reads the mark from the rig's checkout, at the default branch as the
+# checkout last fetched it, so the mark goes with the workflow's file. A rig
+# opts a workflow in or out by editing that file, and the city's config names
+# no rig and no workflow. A rig whose branch marks nothing costs a pass no
+# GitHub read.
+#
+# For each marked workflow, the newest run on the default branch that failed or
+# succeeded decides. A failure files the workflow's finding, or notes it on the
+# one already open: a bug naming the failed run, its commit, its failed jobs and
+# steps, the command that prints their log, and the success before the run of
+# failures. patrol-finding.sh slings the finding's first reaction, which routes
+# it or puts it to the operator. A success clears the finding's situation.
+# `gctk actions report --help` states the rule.
+#
+# Exec, not a formula: a pass reads the checkout and GitHub and records what it
+# found, with no judgment for an LLM. Rig-scoped, so each pass reports its own
+# rig into its own store, and on in every rig, since a rig opts in from its own
+# repository. Each GitHub read is bounded, and a pass starts no workflow past
+# its start bound (ReadBound and StartBound in services/gctk/actions), so it
+# ends inside the timeout however many workflows a rig marks. A cooldown counts
+# from a run's start, so the interval stays above the timeout, and an hour is
+# the background tier: a failure is in the rig's queue within about an hour of
+# the run that failed.
+[order]
+description = "Report each GitHub Actions workflow a rig marks that fails on its default branch as one patrol finding in its store, and clear it once a run succeeds"
+trigger = "cooldown"
+interval = "1h"
+timeout = "300s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" actions report --rig \"$GC_RIG\""
+scope = "rig"

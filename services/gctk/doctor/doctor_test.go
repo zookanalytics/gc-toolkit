@@ -335,7 +335,7 @@ func TestMonitorsLastGoodRun(t *testing.T) {
 		})
 	}
 	out := c.runAt(t, t0, nil)
-	want := []string{"doctor-run=none", "seat-progress-detect=none", "refinery-queue-detect=none", "production-deploy-report=none", "spawn-storm-detect=none", "orphan-sweep=-5m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
+	want := []string{"doctor-run=none", "seat-progress-detect=none", "refinery-queue-detect=none", "production-deploy-report=none", "actions-failure-report=none", "spawn-storm-detect=none", "orphan-sweep=-5m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
 	if got := rows(out.Record.Monitors); !reflect.DeepEqual(got, want) {
 		t.Fatalf("first run's monitors = %v", got)
 	}
@@ -346,7 +346,7 @@ func TestMonitorsLastGoodRun(t *testing.T) {
 		gascity.Event{Type: "order.completed", Subject: "mol-dog-backup", Ts: at(-24 * time.Hour)},
 	)
 	out = c.runAt(t, t0.Add(time.Hour), nil)
-	want = []string{"doctor-run=4m0s", "seat-progress-detect=30m0s", "refinery-queue-detect=none", "production-deploy-report=none", "spawn-storm-detect=none", "orphan-sweep=55m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
+	want = []string{"doctor-run=4m0s", "seat-progress-detect=30m0s", "refinery-queue-detect=none", "production-deploy-report=none", "actions-failure-report=none", "spawn-storm-detect=none", "orphan-sweep=55m0s", "reaper=-2h0m0s", "reaper:rig:a=-4h0m0s", "reaper:rig:b=-3h0m0s", "mol-dog-doctor=none", "mol-dog-backup=none", "dolt-health=none"}
 	if got := rows(out.Record.Monitors); !reflect.DeepEqual(got, want) {
 		t.Fatalf("second run's monitors = %v", got)
 	}

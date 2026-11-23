@@ -28,7 +28,8 @@
 # reconcile's assets/scripts/pr-facts.sh, the feedback miner's
 # assets/scripts/feedback-miner.sh, the feedback distiller's memory intake,
 # `gctk memory settle`, the production-deploy-report order's
-# `gctk deployment report`, the boot-health order's
+# `gctk deployment report`, the actions-failure-report order's
+# `gctk actions report`, the boot-health order's
 # assets/scripts/boot-health.sh, and an agent home's setup at pre_start,
 # assets/scripts/worktree-setup.sh.
 # Filing a finding asks no person anything. A finding needing the operator's

@@ -13,7 +13,8 @@ import (
 // The reads of a commit a caller names, which the review domain's check index
 // and its review run make: whether a clone holds the commit, the commit fetched
 // by its id when it does not, a file's text at the commit, whether one commit
-// is behind another, and the paths a change touches.
+// is behind another, and the paths a change touches. The actions report reads
+// the files at a rig's default branch that hold its mark, through Grep.
 
 // Toplevel is the top-level directory of the worktree dir sits in, and false
 // when dir sits in none.
@@ -85,6 +86,37 @@ func FileAt(dir, rev, path string) (text string, held bool, err error) {
 		return "", true, err
 	}
 	return text, true, nil
+}
+
+// Grep is each file at rev in the clone dir sits in, among those the pathspecs
+// in paths name, whose text holds a line pattern matches, an extended regular
+// expression, each path from the top of the tree, in git's order. Files at rev
+// that hold no such line give none, which git grep answers with exit 1, and an
+// error is a read that did not answer.
+func Grep(dir, rev, pattern string, paths ...string) ([]string, error) {
+	args := append([]string{"-C", dir, "grep", "-l", "-z", "-I", "--full-name", "-E", "-e", pattern, rev, "--"}, paths...)
+	cmd := exec.Command("git", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	var ee *exec.ExitError
+	msg := strings.TrimSpace(stderr.String())
+	switch {
+	case err == nil:
+	case errors.As(err, &ee) && ee.ExitCode() == 1 && msg == "":
+		return nil, nil
+	case msg != "":
+		return nil, fmt.Errorf("git grep: %s", msg)
+	default:
+		return nil, fmt.Errorf("git grep: %w", err)
+	}
+	var files []string
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name != "" {
+			files = append(files, strings.TrimPrefix(name, rev+":"))
+		}
+	}
+	return files, nil
 }
 
 // IsAncestor reports whether commit a is b or an ancestor of b in the clone
