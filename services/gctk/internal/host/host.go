@@ -121,7 +121,8 @@ type Sandbox struct {
 	// starts.
 	Record string
 	// Caches, when set, is the directory where a process inside the sandbox
-	// keeps the caches of npm and Go, which its caller makes and removes.
+	// keeps its temporary files and the caches of npm and Go, which its caller
+	// makes and removes.
 	Caches string
 }
 

@@ -875,9 +875,9 @@ func Lead(h host.Host, dir string) int {
 	}
 	// relayed closes once the serve command's output is all in the log.
 	var relayed <-chan struct{}
-	// caches is the directory the serve command keeps npm's and Go's caches in
-	// inside the sandbox, which no tool outside it reads, and which goes once
-	// the copy's group has ended.
+	// caches is the directory the serve command keeps its temporary files and
+	// npm's and Go's caches in inside the sandbox, which no tool outside it
+	// reads, and which goes once the copy's group has ended.
 	caches := ""
 	end := func(code int) int {
 		h.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP, syscall.SIGUSR1)

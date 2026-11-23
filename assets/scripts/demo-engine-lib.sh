@@ -49,6 +49,12 @@
 #     their caches in a directory of the run's own, and its git reads no user
 #     settings, which live in a home folder. Of what its arguments name, it
 #     reaches in a home folder only a rig worktree and its git directories.
+#   - a write anywhere but the directories the run's arguments name, as below,
+#     a directory of the run's own, and the terminal and null devices. Tools the
+#     agents run outside the sandbox also live, and keep caches they run code
+#     from, in places outside the home folders that the user can write, such as
+#     Homebrew's prefix and the system's temporary folders, where npm keeps the
+#     compiled code of its own modules.
 #   - every loopback port but the run's own, and every Unix socket but the
 #     system resolver's, so the supervisor's API, the Dolt server and the
 #     session server do not answer. The run's own port is the engine's own
@@ -59,11 +65,11 @@
 # that point a command at the city: GC_*, GT_*, BEADS_*, BD_*, DOLT_*, TMUX and
 # TMUX_PANE.
 #
-# A run in the sandbox keeps the caches of npm and Go in a directory of its
-# own, which npm_config_cache, GOCACHE and GOMODCACHE name, so nothing it writes
-# there reaches a build or a tool outside the sandbox. demo_engine_cli makes the
-# directory under TMPDIR and removes it once the run ends, and
-# demo_engine_sandboxed takes the one its caller names.
+# A run in the sandbox keeps its temporary files and the caches of npm and Go
+# in a directory of its own, which TMPDIR, npm_config_cache, GOCACHE and
+# GOMODCACHE name, so nothing it writes there reaches a build or a tool outside
+# the sandbox. demo_engine_cli makes the directory under TMPDIR and removes it
+# once the run ends, and demo_engine_sandboxed takes the one its caller names.
 #
 # Inside the city's directories a run in the sandbox reads and writes only what
 # the engine's own arguments name: its working directory, the output's
@@ -192,13 +198,13 @@
 #                        of the copy's record, and reports what it holds as the
 #                        copy's sandboxed. The shell becomes the command, so its
 #                        exit status is the command's and nothing after the call
-#                        runs. So a command inside the sandbox keeps its own
-#                        caches in the directory DEMO_ENGINE_CACHE_DIR names,
-#                        which `gctk rig serve` makes for a copy and removes
-#                        once the copy ends, and every command runs without
-#                        that variable. With no directory named, it makes one
-#                        under TMPDIR, which stays once the command ends, and
-#                        says so on stderr.
+#                        runs. So a command inside the sandbox keeps its
+#                        temporary files and its own caches in the directory
+#                        DEMO_ENGINE_CACHE_DIR names, which `gctk rig serve`
+#                        makes for a copy and removes once the copy ends, and
+#                        every command runs without that variable. With no
+#                        directory named, it makes one under TMPDIR, which
+#                        stays once the command ends, and says so on stderr.
 #                        Returns 1, having said why on stderr, when the run is
 #                        refused or that file cannot be written.
 #   demo_engine_copy <dir> <command>
@@ -945,7 +951,8 @@ demo_engine_cli() {
   # The loopback ports the run may reach are its --serve-dir server's, where
   # nothing may answer before the run starts, or the port of a rig's app that a
   # --base-url on this host names. An iOS app run, which runs with no sandbox,
-  # gets three free ports for the servers it drives the app through.
+  # gets three free ports for the servers it drives the app through, once
+  # Appium is provisioned below.
   _demo_engine_city || return 1
   if [ -n "$base" ] && demo_engine_ios_app "$base"; then
     if [ -n "$serve_dir" ]; then
@@ -957,8 +964,6 @@ demo_engine_cli() {
       return 1
     fi
     ios=1
-    open=$(_demo_engine_free_ports 3) || { _demo_engine_say "could not find three free ports for the servers of the iOS app run"; return 1; }
-    args+=(--port "$(printf '%s' "$open" | tr '\n' ',')")
   elif [ -n "$base" ] && _demo_engine_loopback "$base"; then
     if [ -n "$serve_dir" ]; then
       _demo_engine_say "--base-url $base and --serve-dir each name an app to capture; give one"
@@ -1030,7 +1035,13 @@ demo_engine_cli() {
     served) _demo_engine_say "--base-url $base is served from a worktree of $_DEMO_ENGINE_LOCAL_RIG, whose $DEMO_ENGINE_READS_CITY_VAR is \"false\"" ;;
   esac
   _demo_engine_say "the capture runs as an ordinary process, with no sandbox, because what it captures lies in $(_demo_engine_plain_why)"
-  [ -z "$ios" ] || _demo_engine_provision_ios || return 1
+  # The ports are picked once Appium is in place, so the time its install takes
+  # does not come between picking them and the engine's use of them.
+  if [ -n "$ios" ]; then
+    _demo_engine_provision_ios || return 1
+    open=$(_demo_engine_free_ports 3) || { _demo_engine_say "could not find three free ports for the servers of the iOS app run"; return 1; }
+    args+=(--port "$(printf '%s' "$open" | tr '\n' ',')")
+  fi
   _demo_engine_env
   "${_DEMO_ENGINE_ENV[@]}" "$@" ${args[@]+"${args[@]}"}
 }
@@ -1095,9 +1106,9 @@ _demo_engine_env() {
 
 # _demo_engine_sandbox_run <ports> <dirs> <files> <command...>: runs the
 # command inside the sandbox _demo_engine_sandbox composes for the rest, with
-# its own caches in a directory it makes under TMPDIR and removes once the
-# command ends. Returns the command's exit status, or 1, having said why, when
-# the run is refused.
+# its temporary files and caches in a directory it makes under TMPDIR and
+# removes once the command ends. Returns the command's exit status, or 1,
+# having said why, when the run is refused.
 _demo_engine_sandbox_run() {
   local caches rc=1
   caches=$(mktemp -d "${TMPDIR:-/tmp}/demo-engine-caches.XXXXXX") \
@@ -1148,9 +1159,11 @@ _demo_engine_tool_places() {
 # <dirs>, one per line, is read and written as _demo_engine_reach widens it, each
 # of <files> is read, and the engine checkout, when one was chosen, is read. Of
 # the home folders it reaches only the parts _demo_engine_tool_places names, the
-# engine's own executable, and the rig worktrees among <dirs> and <files>. npm
-# and Go keep their caches in <caches>, a directory the caller makes and
-# removes. Returns 1, having said why, when the run is refused.
+# engine's own executable, and the rig worktrees among <dirs> and <files>. The
+# command keeps its temporary files and npm's and Go's caches in <caches>, a
+# directory the caller makes and removes, and writes nowhere else but <dirs>
+# and the terminal and null devices. Returns 1, having said why, when the run
+# is refused.
 _demo_engine_sandbox() {
   local NL='
 ' open="$1" cand="$2" files="$3" caches places homes tools="" inhome rw="" ro="" p d reach kind engine="" bin="" profile
@@ -1175,10 +1188,11 @@ EOF
   # _demo_engine_reach widens it.
   places="$_DEMO_ENGINE_PLACES"
 
-  # The run's own caches, which npm and Go write instead of the shared ones in
-  # the home folders, where every agent's builds and tools read them. They
-  # need no rule of their own, so they must lie outside what the profile shuts.
-  { mkdir -p -- "$4/npm" "$4/go-build" "$4/go-mod" && caches=$(_demo_engine_canon "$4") && [ -n "$caches" ]; } 2>/dev/null \
+  # The run's own directory, where its temporary files and npm's and Go's caches
+  # go instead of the shared ones, which the agents' own builds and tools read.
+  # The profile opens it for writing before it shuts the home folders and the
+  # city's directories, so it must lie outside them.
+  { mkdir -p -- "$4/npm" "$4/go-build" "$4/go-mod" "$4/tmp" && caches=$(_demo_engine_canon "$4") && [ -n "$caches" ]; } 2>/dev/null \
     || { _demo_engine_say "could not make the run's own caches in '$4'"; return 1; }
   while IFS= read -r p; do
     [ -n "$p" ] && _demo_engine_under "$caches" "$p" || continue
@@ -1226,11 +1240,17 @@ $places
 $rw
 $ro
 ${engine:-}
+$caches
 EOF
 
-  # The tools' parts are opened after the home folders are denied, and the
-  # city's directories are denied after both, so no tool's part opens one.
+  # A run writes only in its own directory, the directories it reads and
+  # writes, which are opened below, and the terminal and null devices. The
+  # tools' parts are opened after the home folders are denied, and the city's
+  # directories are denied after both, so no tool's part opens one.
   profile="(version 1)$NL(allow default)"
+  profile="$profile$NL(deny file-write*)"
+  profile="$profile$NL(allow file-write* (subpath \"$caches\"))"
+  profile="$profile$NL(allow file-write-data (literal \"/dev/null\") (literal \"/dev/zero\") (literal \"/dev/dtracehelper\") (literal \"/dev/ptmx\") (regex #\"^/dev/tty\") (regex #\"^/dev/fd/\"))"
   while IFS= read -r p; do
     [ -z "$p" ] || profile="$profile$NL(deny file-read-data file-write* (subpath \"$p\"))"
   done <<EOF
@@ -1280,11 +1300,11 @@ EOF
   # process of the same user under any profile, a (deny default) one included.
 
   # git stops at a settings file it cannot read, and its user settings live in
-  # the home folder, so the run's git is pointed at none. npm and Go are
-  # pointed at the run's own caches.
+  # the home folder, so the run's git is pointed at none. Its temporary files
+  # and npm's and Go's caches go in the run's own directory.
   _demo_engine_env
   _DEMO_ENGINE_SANDBOX=("${_DEMO_ENGINE_ENV[@]}" GIT_CONFIG_GLOBAL=/dev/null
-    npm_config_cache="$caches/npm" GOCACHE="$caches/go-build" GOMODCACHE="$caches/go-mod" sandbox-exec -p "$profile")
+    npm_config_cache="$caches/npm" GOCACHE="$caches/go-build" GOMODCACHE="$caches/go-mod" TMPDIR="$caches/tmp" sandbox-exec -p "$profile")
 }
 
 # The gctk binary that runs a copy: $GCTK_BIN, else the city's build.

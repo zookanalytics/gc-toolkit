@@ -146,6 +146,11 @@ reports it. So the command:
   the build. An Xcode build passes
   `-IDEPackageSupportDisableManifestSandbox=YES` for Swift packages and
   `'OTHER_SWIFT_FLAGS=$(inherited) -disable-sandbox'` for Swift macros;
+- for a rig that keeps the sandbox, writes only in its checkout and in the
+  directory `TMPDIR` names, which also holds npm's and Go's caches, because the
+  sandbox refuses a write anywhere else. macOS's `mktemp` makes its file in the
+  user's temporary folder, whatever `TMPDIR` says, unless its template names a
+  directory, so the command names one, as in `mktemp -d "${TMPDIR%/}/app.XXXXXX"`;
 - is up within ten minutes, as long as a start waits before it stops the copy,
   then runs until it is stopped, and ends within a minute of that, removing
   what it made outside the checkout, such as its simulator device;

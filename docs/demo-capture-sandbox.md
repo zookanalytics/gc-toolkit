@@ -80,11 +80,17 @@ A process inside the sandbox:
   its `PATH`, Playwright's browsers and Go's own files. Its git reads none of
   the user's settings. Of the directories and files the capture names, it
   reaches one in a home folder only when it lies in a rig worktree.
-- keeps the caches of npm and Go in a directory of the run's own, which
-  `npm_config_cache`, `GOCACHE` and `GOMODCACHE` name, so nothing a run writes
-  there reaches a build or a tool outside the sandbox. A capture's run makes
-  the directory and removes it once the run ends, and `gctk rig serve` does so
-  for each copy, so each copy builds its app on caches that start empty.
+- writes only in the directories the capture names, as above, in a directory
+  of the run's own, and to the terminal and the null device. Tools the agents
+  run outside the sandbox also live, and keep caches they run code from, in
+  places outside the home folders that the session's user can write, such as
+  Homebrew's prefix, where git, jq and gh live, and the system's temporary
+  folders, where npm keeps the compiled code of its own modules.
+- keeps its temporary files and the caches of npm and Go in its own directory,
+  which `TMPDIR`, `npm_config_cache`, `GOCACHE` and `GOMODCACHE` name. A
+  capture's run makes the directory and removes it once the run ends, and
+  `gctk rig serve` does so for each copy, so each copy builds its app on caches
+  that start empty.
 - cannot connect to a loopback port it was not given, so the supervisor's API,
   the Dolt server and every agent session's own port do not answer it. A run is
   given its own port. A copy is given its own port, and a capture of the copy
@@ -112,10 +118,11 @@ same Appium. So a rig's iOS app is captured from a worktree of a rig whose
 - **The internet.** Any remote host answers, such as the package registries a
   start command installs from, GitHub, and the speech service a narrated clip
   uses.
-- **Files outside the city's directories and the home folders.** A process can
-  read and write the rest of the disk the session's user can, such as the
-  system's temporary folders, which hold each run's own caches, its own and
-  those of the other captures and copies that run in the sandbox at the time.
+- **Reading files outside the city's directories and the home folders.** A
+  process can read the rest of the disk the session's user can, such as the
+  system's temporary folders, which hold the files the agents' sessions and
+  tools leave there and the own directories of the other captures and copies
+  that run at the time.
 - **Keys in its own environment.** The engine, a terminal capture's commands
   and a copy's serve command start with the environment of the session that
   runs the capture, less the variables that point at the city, so they hold

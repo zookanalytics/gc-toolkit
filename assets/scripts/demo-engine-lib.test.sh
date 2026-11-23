@@ -36,10 +36,11 @@
 #               the city's directories, the loopback ports but its own server's,
 #               every Unix socket but the resolver's, and signals outside the
 #               sandbox, and allows what the engine's arguments name; the
-#               variables that point at the city do not reach it; its npm and
-#               Go keep their caches in a directory of the run's own, which the
-#               run removes once it ends, and the profile lets it write in no
-#               home folder
+#               variables that point at the city do not reach it; its
+#               temporary files and npm's and Go's caches go in a directory of
+#               the run's own, which the run removes once it ends, and the
+#               profile lets it write nowhere else but what its arguments name
+#               and the terminal and null devices
 #   (NO-SANDBOX) a host without sandbox-exec stops the capture before anything
 #               is installed
 #   (CITY)      a known city whose rig map does not read, a working directory
@@ -59,7 +60,7 @@
 #               of this user's listens, stop the capture
 #   (IOS)       a --base-url that names an iOS app on a simulator is refused a
 #               run that keeps the sandbox, before Appium is provisioned; a run
-#               with no sandbox provisions Appium through the engine first, and
+#               with no sandbox provisions Appium through the engine first, then
 #               picks three free ports, which the engine gets as --port; its
 #               screenshot takes no --scale; a call that also names a
 #               --serve-dir or a --port is refused, and zsh and bash 3.2 hand
@@ -98,10 +99,11 @@
 #               does none of that, though the same command outside does, while
 #               it reads a Node on PATH and Playwright's browsers there and runs
 #               git; one whose command writes in the caches of npm, Go and the
-#               engine in a home folder writes in none of them, though the same
-#               command outside does, while it writes in the run's own caches,
-#               which the variables npm and Go read name, and which are gone
-#               once the run ends; a
+#               engine in a home folder, and in the caller's temporary folder,
+#               writes in none of them, though the same command outside does,
+#               while it writes in the run's own directory, which TMPDIR and the
+#               variables npm and Go read name, and which is gone once the run
+#               ends; a
 #               capture's own server answers it on each of a run of free ports,
 #               which opens neither another loopback service nor a Unix socket;
 #               and with the host's lsof, a copy of a rig set to "true" answers
@@ -435,6 +437,9 @@ capture() {
   RC=$?
 }
 profile() { cat "$SANDBOX_PROFILE" 2>/dev/null; }
+# The profile with the run's own directory, whose name each run draws anew,
+# named alike, so the profiles of two runs compare.
+run_profile() { profile | sed -E 's#/demo-engine-caches\.[^/"]+#/demo-engine-caches.X#'; }
 # no_sandbox <cap> <case> <rig checkout>: the capture just run ran its engine's
 # capture with no sandbox-exec, which marks what it runs with IN_SANDBOX,
 # without the variables that point at the city, and said it runs so because
@@ -728,8 +733,12 @@ for cap in video screenshot; do
   ok "($cap) Go's build cache is in a directory the run made under TMPDIR ($CACHES)" "case '$CACHES' in '$TMPD'/demo-engine-caches.?*) true ;; *) false ;; esac"
   has "npm_config_cache=$CACHES/npm" "$(cat "$SANDBOX_ENV")" "($cap) npm's cache is there too"
   has "GOMODCACHE=$CACHES/go-mod" "$(cat "$SANDBOX_ENV")" "($cap) and Go's module cache"
+  has "TMPDIR=$CACHES/tmp" "$(cat "$SANDBOX_ENV")" "($cap) and the run's temporary files"
   ok "($cap) the run removes that directory once it ends" "[ -n '$CACHES' ] && [ ! -e '$CACHES' ]"
   hasnt "(allow file-read-data file-write* (subpath \"$UHOME" "$(profile)" "($cap) the profile lets the run write in no home folder"
+  W=$(profile_line "(deny file-write*)"); O=$(profile_line "(allow file-write* (subpath \"$CACHES\"))"); A=$(profile_line "(allow file-read-data file-write* (subpath \"$WORK\"))")
+  ok "($cap) the profile denies every write, then opens the run's own directory and what its arguments name (lines $W, $O, $A)" "[ '$W' -gt 0 ] && [ '$O' -gt '$W' ] && [ '$A' -gt '$W' ]"
+  has "(allow file-write-data (literal \"/dev/null\")" "$(profile)" "($cap) and the null device"
 
   echo "# ($cap) NO-SANDBOX: a host without sandbox-exec stops the capture before anything is installed"
   STUB_PATH="$NOSBX" capture "$cap" SS_RIG="$ENGINE"
@@ -860,6 +869,7 @@ for cap in video screenshot; do
   eq "$RC" 1 "($cap) an iOS app that a run in the sandbox would drive exits 1"
   has "--base-url $IOS_APP is an iOS app, which the engine drives through the Appium it keeps in the home folder. Appium starts only from a directory it can write" "$(err)" "($cap) it says why"
   hasnt "provision:appium" "$(calls)" "($cap) and provisions no Appium"
+  hasnt "node port-pick" "$(calls)" "($cap) and picks no port"
   not_run "$cap"
   capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
   eq "$RC" 0 "($cap) an iOS app captures from a worktree of a rig whose app_reads_city is \"false\""
@@ -868,13 +878,15 @@ for cap in video screenshot; do
   has "[--port] [50301,50302,50303]" "$(calls)" "($cap) and gets the three ports as --port"
   P=$(line_of "npm run provision:appium (in $ENGINE)"); E=$(line_of "$(local_call "$cap")")
   ok "($cap) the engine checkout provisions Appium before the capture runs (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
+  K=$(line_of "node port-pick")
+  ok "($cap) and the three ports are picked once Appium is in place (lines $P, $K, $E)" "[ '$K' -gt '$P' ] && [ '$E' -gt '$K' ]"
   [ "$cap" != screenshot ] || hasnt "[--scale]" "$(calls)" "(screenshot) an iOS app's PNG is the device's own, with no --scale"
   capture "$cap" FROM="$RWT" "${LOCAL_ENV[@]}" RIGS_JSON="$(printf '%s' "$RIGS_LOCAL" | jq -c '.rigs |= map(select(.name != "sprintshow"))')" \
     FREE_PORT="$(printf '50301\n50302\n50303')" -- --base-url "$IOS_APP"
   eq "$RC" 0 "($cap) an iOS app captures on the published engine"
   P=$(line_of "npx --yes @zookanalytics/sprintshow provision appium"); E=$(line_of "$(published_call "$cap")")
   ok "($cap) which provisions Appium first (lines $P, $E)" "[ '$P' -gt 0 ] && [ '$E' -gt '$P' ]"
-  capture "$cap" SS_RIG="$ENGINE" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
+  capture "$cap" FROM="$RWT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" FREE_PORT="$(printf '50301\n50302')" -- --base-url "$IOS_APP"
   eq "$RC" 1 "($cap) an iOS app with fewer than three free ports exits 1"
   has "could not find three free ports" "$(err)" "($cap) it says so"
   not_run "$cap"
@@ -1293,7 +1305,9 @@ ENGINE
   # the loopback service, prints every variable that points at the city, and
   # reads the fixture beside it.
   PROBE="cat '$CITY/city.toml' '$CITY/.beads/issues.jsonl' '$RIGA/.beads/issues.jsonl' '$OUTRIG/.beads/issues.jsonl' '$GCH/cities.toml'; echo rigs: '$CITY'/rigs/*; ${APIPORT:+(exec 3<>/dev/tcp/127.0.0.1/$APIPORT && cat <&3);} env | awk '/^(GC|GT|BEADS|BD|DOLT)_/ || /^TMUX=/ { print \"CITY-VARIABLE \" \$0 }'; cat fixture.txt"
-  CMD_OUT="$TMPD/command.out"; : >"$CMD_OUT"
+  # The engine stubs keep what the command prints in the working directory,
+  # where a run in the sandbox writes.
+  CMD_OUT="$WORK/command.out"; : >"$CMD_OUT"
   out=$( cd "$WORK" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${CITY_ENV[@]}" \
       bash "$SHOT" terminal --command "$PROBE" --cwd "$WORK" --output "$WORK/probe.png" 2>&1 ); rc=$?
@@ -1347,14 +1361,17 @@ ENGINE
 
   # The caches in the home folders, which the agents' own builds and tools run
   # code from, take no write from the command: npm's, Go's build and module
-  # caches, and the engine's. The run's own caches, which the variables npm and
-  # Go read name, take one each, and they are gone once the run ends. Outside
-  # the sandbox the same command writes each shared cache.
-  SHARED=("$AHOME/.npm" "$AHOME/Library/Caches/go-build" "$AHOME/go/pkg/mod" "$AHOME/Library/Caches/sprintshow")
+  # caches, and the engine's. Nor does the caller's temporary folder, where npm
+  # keeps the compiled code of its own modules, which stands for every place
+  # the run's arguments do not name. The run's own directory, which TMPDIR and
+  # the variables npm and Go read name, takes one in each part, and it is gone
+  # once the run ends. Outside the sandbox the same command writes in each
+  # shared place.
+  SHARED=("$AHOME/.npm" "$AHOME/Library/Caches/go-build" "$AHOME/go/pkg/mod" "$AHOME/Library/Caches/sprintshow" "$TMPD/node-compile-cache")
   mkdir -p "${SHARED[@]}"
   CPROBE=""
   for c in "${SHARED[@]}"; do CPROBE="$CPROBE echo SHARED-WRITTEN:$c >'$c/probe' && cat '$c/probe';"; done
-  CPROBE="$CPROBE for v in npm_config_cache GOCACHE GOMODCACHE; do echo OWN-WRITTEN:\$v >\"\${!v}/probe\" && cat \"\${!v}/probe\"; done; echo \"OWN-DIR=\$GOCACHE\""
+  CPROBE="$CPROBE for v in npm_config_cache GOCACHE GOMODCACHE TMPDIR; do echo OWN-WRITTEN:\$v >\"\${!v}/probe\" && cat \"\${!v}/probe\"; done; echo \"OWN-DIR=\$GOCACHE\""
   : >"$CMD_OUT"
   out=$( cd "$WORK" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$EXEC_STUB" CMD_OUT="$CMD_OUT" SS_RIG="$ENGINE" "${CITY_ENV[@]}" \
@@ -1365,11 +1382,11 @@ ENGINE
     hasnt "SHARED-WRITTEN:$c" "$inside" "(ISOLATION) the command writes nothing in ${c//"$TMPD"\//}"
     ok "(ISOLATION) and leaves nothing there" "[ ! -e '$c/probe' ]"
   done
-  for v in npm_config_cache GOCACHE GOMODCACHE; do
-    has "OWN-WRITTEN:$v" "$inside" "(ISOLATION) the command writes in the run's own cache that $v names"
+  for v in npm_config_cache GOCACHE GOMODCACHE TMPDIR; do
+    has "OWN-WRITTEN:$v" "$inside" "(ISOLATION) the command writes in the part of the run's own directory that $v names"
   done
   OWN=$(sed -n 's#^OWN-DIR=\(.*\)/go-build$#\1#p' "$CMD_OUT")
-  ok "(ISOLATION) the run's own caches are in a directory it made under TMPDIR ($OWN)" "case '$OWN' in '$TMPD'/demo-engine-caches.?*) true ;; *) false ;; esac"
+  ok "(ISOLATION) the run's own directory is one it made under the caller's TMPDIR ($OWN)" "case '$OWN' in '$TMPD'/demo-engine-caches.?*) true ;; *) false ;; esac"
   ok "(ISOLATION) which is gone once the run ends" "[ -n '$OWN' ] && [ ! -e '$OWN' ]"
   outside=$( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$AHOME" "${CITY_ENV[@]}" bash -c "$CPROBE" 2>&1 )
   for c in "${SHARED[@]}"; do
@@ -1668,7 +1685,7 @@ shell_run bash "$TMPD/skill-serve.sh"
 eq "$RC" 0 "(shells) this suite's bash runs the engine call"
 has "node [$ENGINE/src/cli.ts] [run] [demo.md] [--serve-dir] [app] [--port] [5199] [-o] [clip.mp4]" "$(calls)" "(shells) and the engine gets its arguments"
 has '(allow network-outbound (remote ip "localhost:5199"))' "$(profile)" "(shells) and the profile opens the port they name"
-SERVE_CALLS="$(calls)"; SERVE_PROFILE="$(profile)"
+SERVE_CALLS="$(calls)"; SERVE_PROFILE="$(run_profile)"
 shell_run bash "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
 eq "$RC" 0 "(shells) this suite's bash runs an engine call whose --base-url a worktree of a rig whose app_reads_city is \"false\" serves"
 ok "(shells) and runs it with no sandbox-exec" "[ ! -e '$SANDBOX_PROFILE' ]"
@@ -1677,7 +1694,7 @@ BASE_CALLS="$(calls)"
 shell_run bash "$TMPD/skill-copy.sh" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT"
 eq "$RC" 0 "(shells) this suite's bash runs an engine call whose --base-url is a copy of a rig set to \"true\""
 has '(allow network-outbound (remote ip "localhost:5181"))' "$(profile)" "(shells) and the profile opens the copy's port"
-COPY_CALLS="$(calls)"; COPY_PROFILE="$(profile)"
+COPY_CALLS="$(calls)"; COPY_PROFILE="$(run_profile)"
 shell_run bash "$TMPD/skill-two.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
 eq "$RC" 1 "(shells) an engine call that names a --base-url on this host and a --serve-dir exits 1"
 has "--base-url http://127.0.0.1:5180/ and --serve-dir each name an app to capture" "$(err)" "(shells) it says the call names two apps"
@@ -1720,7 +1737,7 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-serve.sh"
   eq "$RC" 0 "(shells) $sh runs the engine call"
   eq "$(calls)" "$SERVE_CALLS" "(shells) $sh hands the engine the same arguments"
-  eq "$(profile)" "$SERVE_PROFILE" "(shells) $sh builds the same profile"
+  eq "$(run_profile)" "$SERVE_PROFILE" "(shells) $sh builds the same profile"
   eq "$(grep -cE '^((GC|GT|BEADS|BD|DOLT)_|TMUX)' "$SANDBOX_ENV")" 0 "(shells) $sh drops the variables that point at the city"
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4242 $RWT"
   eq "$RC" 0 "(shells) $sh runs the engine call whose --base-url a worktree of a rig whose app_reads_city is \"false\" serves"
@@ -1731,7 +1748,7 @@ for sh in /bin/zsh /bin/bash; do
   shell_run "$sh" "$TMPD/skill-copy.sh" "${LOCAL_ENV[@]}" GCTK_BIN="$GCTK_STUB" COPY_PORT=5181 LISTENERS="5181 4243 $BWT"
   eq "$RC" 0 "(shells) $sh runs the engine call whose --base-url is a copy of a rig set to \"true\""
   eq "$(calls)" "$COPY_CALLS" "(shells) $sh asks gctk and hands the engine what this suite's bash does"
-  eq "$(profile)" "$COPY_PROFILE" "(shells) $sh builds the same profile for it"
+  eq "$(run_profile)" "$COPY_PROFILE" "(shells) $sh builds the same profile for it"
   shell_run "$sh" "$TMPD/skill-base.sh" "${LOCAL_ENV[@]}" LISTENERS="5180 4243 $BWT"
   eq "$RC" 1 "(shells) $sh refuses the same call when a worktree of a rig set to \"true\" serves the port"
   has "for which city.toml sets app_reads_city = \"true\"" "$(err)" "(shells) $sh names why"
