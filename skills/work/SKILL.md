@@ -1,15 +1,15 @@
 ---
 name: work
-description: Use when you carry out a decision about work, such as filing it as a task or an epic in the right rig under the right parent, routing or slinging it to a pool on a formula, assigning it to a named agent, taking a recommended formula, stopping or redirecting it once dispatched, or closing a bead that needs no work or duplicates another. Not for doing the work yourself. To make work wait first, use waits; for work that is already a pull request, use prs.
+description: Use when you carry out a decision about work, such as filing it as a task or an epic in the right rig under the right parent, routing or slinging it to a pool on a formula, assigning it to a named agent, taking a recommended formula, stopping, redirecting or revising it once dispatched, or closing a bead that needs no work or duplicates another. Not for doing the work yourself. To make work wait first, use waits; for work that is already a pull request, use prs.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # Work: file it, send it, stop it, or close it
 
 Use this skill to file new work, send a bead to a pool or a named agent, stand
-up an integration effort, take a recommended formula, choose a formula, stop or
-redirect work already sent, or close a bead that needs no work. The pool or
-agent you send a bead to does the work.
+up an integration effort, take a recommended formula, choose a formula, stop,
+redirect or revise work already sent, or close a bead that needs no work. The
+pool or agent you send a bead to does the work.
 
 Commands call the gc-toolkit pack's scripts as
 `"$(gc <binding> scripts-dir)/<script>"`, and only that way. The call looks up
@@ -359,7 +359,7 @@ orders and review cadence start those. Set a formula's variables with
 `--var <name>=<value>` on the sling. When you put the choice to the operator,
 name the formula and why you chose it.
 
-## Stop or redirect work already sent
+## Stop, redirect or revise work already sent
 
 A release stops work already sent, or sends it on. It stops any workflow
 running on the bead, through the pack's run-cancel.sh, which it finds where
@@ -402,9 +402,33 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<wh
   recommendation to the operator open until it is answered. When the bead
   itself should go, close it instead (below).
 
+When the work should go on with a change to what it does, such as a premise
+that moved or a requirement added or dropped, revise it. A note alone reaches
+the session doing the work only at its run's next read of the notes, which can
+come after it has built on what the change overrules. The revision appends the
+change to the bead's notes and sends it at once to each session working the
+bead, which it finds through the bead's assignee and its live run, since a bead
+whose workflow runs reads open and unassigned:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead revise <bead> "<what changes, and what the work does now>"
+```
+
+A Claude Code session takes the revision inside its running turn, with its next
+tool result. Gas City holds it for a Codex session that is running a turn until
+that turn ends, so until then that session has the revision only where its run
+reads the bead's notes. With no session working the bead, the note is all it
+needs, since whoever takes the work next reads the notes. Each line it prints
+names a session and what Gas City said of its nudge. Exit 3 means the note
+landed but a session may not have the revision, and the message gives the
+nudge to send by hand.
+
 When the work already has an open pull request, retire the pull request instead
-of stopping the bead, and send more work on its branch as an ask on the pull
-request, both through the prs skill.
+of stopping the bead, and send a change or more work on its branch as an ask on
+the pull request, both through the prs skill.
 
 ## Close a bead that needs no work
 

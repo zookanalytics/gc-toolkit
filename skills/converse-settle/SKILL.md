@@ -63,6 +63,10 @@ sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
 
+When the ruling changes what work already sent should do, and that work goes
+on, revise it (the `work` skill, work already sent). A note on its bead alone
+reaches the session doing the work only at its run's next read of the notes.
+
 The work you send is yours to get right. What the operator says is direction to
 reason through: take each point up in the course or say why not. A remark is
 not an order to carry out to the letter, and it is not a decision they made.
