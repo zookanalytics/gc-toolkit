@@ -23,9 +23,10 @@ import (
 // bead holds contract"), and `gctk bead stands` where each stands
 // (beadstands.go). `gctk bead arm`, `gctk bead disarm` and `gctk bead
 // start-armed` are the arm's verbs, through the arm package
-// (docs/deferred-dispatch.md), and `gctk bead takeaway` is the takeaway's,
-// through the takeaway package (beadtakeaway.go). None holds a rule: the
-// domain decides, and the command prints its answer.
+// (docs/deferred-dispatch.md), `gctk bead takeaway` is the takeaway's,
+// through the takeaway package (beadtakeaway.go), and `gctk bead revise` is
+// the revision's, through the revise package (beadrevise.go). None holds a
+// rule: the domain decides, and the command prints its answer.
 
 const beadHoldsLong = `Prints what holds each bead named, from one read of the store: one JSON
 object per line, in the order named, each bead once.
@@ -95,14 +96,15 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
-	return group("bead", "what holds a bead, where it stands, its arm, its park, its placement and its headline",
+	return group("bead", "what holds a bead, where it stands, its arm, its park, its placement, its headline and a revision of its work",
 		"A bead's waits, what holds it, read from the store, where it stands and whose move it is, "+
 			"the arm that starts it by itself once nothing does, "+
 			"the park that holds everything under it that has not started, the placement of a bead held for one, "+
-			"and the headline its handling concluded, written with the release that takes it out of play.",
+			"the headline its handling concluded, written with the release that takes it out of play, "+
+			"and a revision of what its work should do, sent to the sessions doing that work while it runs.",
 		holds, newBeadStandsCmd(stdout, stderr), newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr),
 		newBeadStartArmedCmd(stdout, stderr), newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr),
-		newBeadTakeawayCmd(stdout, stderr))
+		newBeadTakeawayCmd(stdout, stderr), newBeadReviseCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the

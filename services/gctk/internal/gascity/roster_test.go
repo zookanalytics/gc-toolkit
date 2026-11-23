@@ -232,10 +232,12 @@ func TestTheSlingNudgeAndFormulaCalls(t *testing.T) {
 	}
 }
 
-// Sessions reads each row's identities, its state and its times, and reads a
-// last_active of "" or one that does not parse as no time.
+// Sessions reads each row's identities, its provider, its state and its times,
+// reads a row with no provider, as gc prints one for a session that runs a
+// command of its own, as no provider, and reads a last_active of "" or one that
+// does not parse as no time.
 func TestSessionsReadsTheList(t *testing.T) {
-	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","_cache_age_s":2.5,"filters":{},"sessions":[{"id":"hq-1","name":"rig__polecat-hq-1","template":"rig/gc-toolkit.polecat","state":"active","rig":"rig","agent_name":"rig/gc-toolkit.polecat-3","session_name":"rig__polecat-hq-1","created_at":"2026-11-16T20:00:00Z","last_active":"2026-11-16T23:15:36Z","attached":false,"closed":false},{"id":"hq-2","name":"rig/gc-toolkit.refinery","template":"rig/gc-toolkit.refinery","state":"asleep","alias":"rig/gc-toolkit.refinery","created_at":"2026-11-01T00:00:00Z","last_active":""},{"id":"hq-3","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":"yesterday"}],"summary":{"total":3}}'
+	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","_cache_age_s":2.5,"filters":{},"sessions":[{"id":"hq-1","name":"rig__polecat-hq-1","template":"rig/gc-toolkit.polecat","provider":"claude","state":"active","rig":"rig","agent_name":"rig/gc-toolkit.polecat-3","session_name":"rig__polecat-hq-1","created_at":"2026-11-16T20:00:00Z","last_active":"2026-11-16T23:15:36Z","attached":false,"closed":false},{"id":"hq-2","name":"rig/gc-toolkit.refinery","template":"rig/gc-toolkit.refinery","provider":"claude-watch","state":"asleep","alias":"rig/gc-toolkit.refinery","created_at":"2026-11-01T00:00:00Z","last_active":""},{"id":"hq-3","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":"yesterday"}],"summary":{"total":3}}'
 `)
 	got, err := c.Sessions(context.Background())
 	if err != nil {
@@ -254,8 +256,38 @@ func TestSessionsReadsTheList(t *testing.T) {
 	if got[1].Alias != "rig/gc-toolkit.refinery" || !got[1].LastActive.IsZero() || !got[2].LastActive.IsZero() {
 		t.Errorf("rows %+v", got[1:])
 	}
+	if s.Provider != "claude" || got[1].Provider != "claude-watch" || got[2].Provider != "" {
+		t.Errorf("providers %q, %q, %q", s.Provider, got[1].Provider, got[2].Provider)
+	}
 	if strings.Join(log(), " ") != "session list --json" {
 		t.Errorf("gc ran with %q", log())
+	}
+}
+
+// Named finds a session by each form a claim's assignee takes, its id, its
+// session name, its alias or the end of its alias, and Handle addresses it by
+// its id, else its session name, else its alias.
+func TestNamedMatchesTheFormsAClaimWrites(t *testing.T) {
+	list := []Session{
+		{ID: "hq-1", SessionName: "rig__polecat-hq-1", AgentName: "rig/gc-toolkit.polecat-1"},
+		{ID: "hq-2", Alias: "rig/gc-toolkit.refinery"},
+		{SessionName: "s-3", Alias: "rig/gc-toolkit.ripley"},
+		{Alias: "rig/gc-toolkit.witness"},
+	}
+	for name, want := range map[string]string{
+		"hq-1":                    "hq-1",
+		"rig__polecat-hq-1":       "hq-1",
+		"rig/gc-toolkit.refinery": "hq-2",
+		"gc-toolkit.ripley":       "s-3",
+		"rig/gc-toolkit.witness":  "rig/gc-toolkit.witness",
+	} {
+		var got []string
+		for _, s := range Named(list, name) {
+			got = append(got, s.Handle())
+		}
+		if strings.Join(got, " ") != want {
+			t.Errorf("Named(%q) is %q, want %q", name, got, want)
+		}
 	}
 }
 
