@@ -53,15 +53,16 @@
 #   (r) gc's writes stay out of git status in the worktree and in the rig
 #       checkout that shares its exclude file: the skill links the ownership
 #       manifest in each skill sink names, each manifest, the settings and
-#       hooks a claude and a codex session start with, .gc/settings.json and
-#       .beads.gate.lock, and none of them fails a sync. Everything else a
-#       person keeps there still shows and stages, in both: a plain file, a
-#       link of their own, a new skill directory, changes to a skill the repo
-#       tracks, and their commands, skills, agents and prompts under .claude/,
-#       .codex/ and .gemini/. A link gc adds later is hidden by the next run, a
-#       manifest name git would read as a pattern or that ends in a newline is
-#       never written, and without jq or a readable manifest the run still
-#       succeeds and adds no name;
+#       hooks a claude and a codex session start with, .gc/settings.json,
+#       .beads.gate.lock and a per-bead tree at the home's root, and none of
+#       them fails a sync. Everything else a person keeps there still shows and
+#       stages, in both: a plain file, a link of their own, a new skill
+#       directory, changes to a skill the repo tracks, and their commands,
+#       skills, agents and prompts under .claude/, .codex/ and .gemini/. A
+#       worktrees/ directory below the home's root shows too. A link gc adds
+#       later is hidden by the next run, a manifest name git would read as a
+#       pattern or that ends in a newline is never written, and without jq or
+#       a readable manifest the run still succeeds and adds no name;
 #   (s) a home on a branch not its own fails the start and stays on it;
 #   (t) in a rig that tracks a provider settings file, gc's merge into it is
 #       no edit, and the home fast-forwards with it; when the tip changes that
@@ -497,9 +498,11 @@ eq "$(cat "$P/agentQ/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(q) it still 
 #         exact paths, so what a person keeps beside them still shows: under
 #         .agents/skills/, a skill the repo tracks, a new skill, a plain file
 #         and a link of their own, and under .claude/, .codex/ and .gemini/,
-#         their commands, skills, agents and prompts. The runs after a person's
-#         files land provision without --sync, which those files would fail.
-#         Its own rig, so no other case's exclude file is reused. --------------
+#         their commands, skills, agents and prompts. The per-bead trees are
+#         hidden only at a home's root, so a worktrees/ directory below it
+#         shows. The runs after a person's files land provision without
+#         --sync, which those files would fail. Its own rig, so no other case's
+#         exclude file is reused. ----------------------------------------------
 SR="$TMP/skillsrc"; git init -q -b main "$SR"
 mkdir -p "$SR/.agents/skills/tracked-skill"
 echo seed > "$SR/README.md"; echo skill > "$SR/.agents/skills/tracked-skill/SKILL.md"
@@ -541,9 +544,15 @@ gc_writes() {
 gc_link "$SKR" gc-toolkit.work local-skill; gc_writes "$SKR"
 eq "$(rc_of "$SKR" "$W" agentR --sync)" "0" "(r) the run succeeds"
 gc_link "$W" gc-toolkit.work local-skill; gc_writes "$W"
+# The per-bead trees work-setup.sh makes sit at a home's root.
+mkdir -p "$W/worktrees/tk-x"; echo work > "$W/worktrees/tk-x/README.md"
 eq "$(git -C "$W" status --porcelain)" ""    "(r) gc's writes stay out of the worktree's git status"
 eq "$(git -C "$SKR" status --porcelain)" ""  "(r) and out of the rig checkout's, which shares the exclude file"
 eq "$(sync_in "$SKR" "$W" agentR)" ""        "(r) and none of them fails a sync"
+mkdir -p "$W/docs/worktrees"; echo mine > "$W/docs/worktrees/notes.md"
+has "$(git -C "$W" status --porcelain --untracked-files=all)" "?? docs/worktrees/notes.md" \
+    "(r) a worktrees/ directory below the home's root shows"
+rm -rf "$W/docs"
 # A person's commands, skills, agents and prompts beside gc's files under the
 # providers' directories, in each.
 PERSON_FILES='.claude/commands/review.md
