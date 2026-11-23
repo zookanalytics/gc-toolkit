@@ -133,20 +133,24 @@ case "$1" in
         id=$(awk -F'|' -v k="$key" '$2==k && $3=="open"{print $1; exit}' "$FAKE_LEDGER" 2>/dev/null)
         [ -n "$id" ] && printf '[{"id":"%s"}]\n' "$id" || printf '[]\n' ;;
       create)
-        n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"
-        printf '%s||open\n' "$id" >> "$FAKE_LEDGER"
+        # A bead's rig key comes from its create's --metadata alone, as update
+        # sets no key, so a bead filed without one is a bead no lookup finds.
+        n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"; key=""
         printf '%s\n' "$1" > "$FAKE_LEDGER.$id.title"
-        while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
+        while [ $# -gt 0 ]; do
+          [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
+          [ "$1" = "--metadata" ] && key=$(printf '%s' "$2" | jq -r '.reconcile_rig // empty')
+          shift
+        done
+        printf '%s|%s|open\n' "$id" "$key" >> "$FAKE_LEDGER"
         printf '{"id":"%s"}\n' "$id" ;;
       update)
-        id="$1"; shift; key=""
+        id="$1"; shift
         while [ $# -gt 0 ]; do
-          [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
           [ "$1" = "--title" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.title"
           [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
           shift
-        done
-        [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
+        done ;;
       close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
   session) : ;;

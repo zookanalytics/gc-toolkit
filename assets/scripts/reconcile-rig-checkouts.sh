@@ -167,10 +167,12 @@ while IFS=$'\t' read -r name path; do
     if [ -n "$bead" ]; then
         gc bd --rig "$RECONCILE_RIG" update "$bead" --title "$title" --description "$body" >/dev/null 2>&1 || true
     else
-        bead=$(gc bd --rig "$RECONCILE_RIG" create "$title" \
-            -t task -d "$body" --json 2>/dev/null | jq -r '.id // empty' 2>/dev/null || true)
+        # The rig key rides the create. A bead filed without it is one
+        # open_bead never finds, and the next pass files a second bead and gate.
+        bead=$(gc bd --rig "$RECONCILE_RIG" create "$title" -t task -d "$body" \
+            --metadata "$(jq -cn --arg rig "$name" '{reconcile_rig: $rig}')" --json 2>/dev/null \
+            | jq -r '.id // empty' 2>/dev/null) || bead=""
         [ -n "$bead" ] || { warn "could not file a reconcile bead for rigs/$name — its stalled deploy is UNTRACKED and nobody was asked"; continue; }
-        gc bd --rig "$RECONCILE_RIG" update "$bead" --set-metadata reconcile_rig="$name" >/dev/null 2>&1 || true
     fi
 
     # Make someone hear about it. A failure here is reported, never swallowed —
