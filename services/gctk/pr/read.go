@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -239,6 +240,32 @@ func postAsks(l *ledger.Ledger, r *ledger.Record, url string, waits []Condition)
 
 // head is the head the store holds for the PR (storeHead).
 func (b side) head() string { return storeHead(b.rec) }
+
+// AwaitsReview reports whether a PR waits on a person's review as the read the
+// one-PR update saved on its bead shows it, from three of the bead's values as
+// stored: its merge_result, the head the refinery validated (pr_head_sha) and
+// the saved read (pr_github_read). It does when the bead is on the pending
+// record at that head ([record.Pending]), the saved read is of the PR at that
+// head, open and no draft, and no approval stands there with no request for
+// changes beside it, the approval prio_pr_approved in
+// assets/scripts/priority-lib.sh reads for the rank. A read that is absent,
+// does not decode, or is of another head shows nothing, so the PR waits on the
+// PR watch's next read and on no person yet.
+func AwaitsReview(result, head, saved string) bool {
+	head = strings.TrimSpace(head)
+	if strings.TrimSpace(result) != record.Pending || head == "" || strings.TrimSpace(saved) == "" {
+		return false
+	}
+	var read SavedRead
+	if err := json.Unmarshal([]byte(saved), &read); err != nil || read.PR == nil || read.Conversation == nil {
+		return false
+	}
+	if read.PR.Head != head || !strings.EqualFold(read.PR.State, "OPEN") || read.PR.Draft {
+		return false
+	}
+	c := read.Conversation
+	return len(c.Approvers) == 0 || len(c.Requesters) > 0
+}
 
 // storeHead is the head the store holds for a record's PR: the one the landing
 // order found when the record reads a changed head, and the one the refinery

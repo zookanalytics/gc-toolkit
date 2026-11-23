@@ -4,7 +4,7 @@
 // the store once, and services/gctk/standing answers over the listing where
 // each row's bead stands and whose move it is, from the shared readers'
 // answers it gathers: services/gctk/waits for what holds a bead and whether it
-// is in flight, services/gctk/prstatus for what a person owes on a bead and
+// is in flight, services/gctk/pr/prstatus for what a person owes on a bead and
 // where a pull request stands, and services/gctk/queue for the order the rig's
 // work is expected to land in. services/gctk/conversation says what a
 // conversation is. Where a pull request on Gas Town's pending record stands is

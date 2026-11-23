@@ -132,7 +132,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 }
 
 // RowFacts are the facts a bead's own row records, read off its metadata: its
-// holds, the posture and its landing state. [Read] adds what it gathers beside
+// holds and its landing state. [Read] adds what it gathers beside
 // the row to them: the gates, the beads a person owes, the beads that wait on
 // work of their own first, the in-flight count and the review runs. [Holding]
 // weighs a merge anchor it reaches by its row's facts.
@@ -140,7 +140,6 @@ func RowFacts(md map[string]string) Facts {
 	return Facts{
 		MergeHold:   md["merge_hold"],
 		RebaseHold:  md["rebase_hold"],
-		PRPosture:   md["pr_posture"],
 		MergeResult: md["merge_result"],
 	}
 }

@@ -37,7 +37,9 @@ resetlog() { : > "$STUB_GH_LOG"; }
 
 # ---------------------------------------------------------------------------
 # derive: whose move it is, read off the anchor's own state.
-# Precedence needs-attention > merging > working > needs-review.
+# Precedence needs-attention > working > needs-review. A bead's own state holds
+# no approval, so only the evaluator's answer for a PR on the pending record
+# reads merging.
 # ---------------------------------------------------------------------------
 
 # needs-review — settled at the head, nothing outstanding (a born gate-green PR).
@@ -53,16 +55,6 @@ eq "$("$SUT" derive --anchor tk-a)" "working" "an open rework child => working"
 store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-k","status":"closed","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a closed rework child hands back to needs-review"
-
-# needs-review — a sticky changes_requested posture with no open rework does NOT trap
-# the label in working (the whole point of resting the flip on the child).
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"changes_requested@abc123@2026-09-20T00:00:00Z"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-review" "sticky changes_requested + no open child => needs-review, not stuck working"
-
-# working — changes_requested WITH an open rework child is the city reworking.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"changes_requested@abc123@t"}},
-        {"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "working" "changes_requested + an open rework child => working"
 
 # working — the in-flight set is ANY live bead anchored here, not just task_kind=rework.
 # A human changes-requested batch travels the validation-pass path (task_kind=validation),
@@ -102,39 +94,21 @@ eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an operator freeze (merge
 store '[{"id":"tk-a","status":"open","metadata":{"rebase_hold":"true"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a rebase hold => needs-attention"
 
-# merging — approved, and nothing holds it: the city has it.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "merging" "approved, nothing holding it => merging"
-
-# merging — GitHub's BLOCKED covers a required check still running, so the
-# derivation does not read it.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"BLOCKED@abc"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "merging" "approved + BLOCKED while a required check runs => merging, not needs-attention"
-
-# needs-attention — a recorded value the derivation has no word for.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"dismissed@abc@t"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "a posture outside the vocabulary => needs-attention"
-
-# needs-review — a non-blocking review left comments; a human looks again.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"commented@abc@t"}}]'
-eq "$("$SUT" derive --anchor tk-a)" "needs-review" "posture commented, no rework => needs-review"
-
 # precedence — a hold outranks an open rework child.
 store '[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}},
         {"id":"tk-k","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]'
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (hold + open child)"
 
 # needs-attention — an open human gate that blocks the anchor is a hold: the
-# landing order holds the merge while it stands, so an approved PR that would
-# otherwise read merging (here conflicting, DIRTY) waits on a person.
+# landing order holds the merge while it stands, so the PR waits on a person.
 GATE='{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x","title":"answer the review","metadata":{}}'
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         '"$GATE"']'
 printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open human gate on an approved PR => needs-attention, not working"
+eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an open human gate on the anchor => needs-attention"
 
 # needs-attention — a gate in any status but closed holds the PR.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-g","status":"in_progress","issue_type":"gate","await_type":"human","metadata":{}}]'
 printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "an in_progress human gate => needs-attention"
@@ -146,41 +120,41 @@ store '[{"id":"tk-a","status":"open","metadata":{}},
 printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
 eq "$("$SUT" derive --anchor tk-a)" "needs-attention" "needs-attention outranks working (open human gate + open child)"
 
-# merging — a CLEARED gate no longer holds the PR.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"DIRTY@abc"}},
+# needs-review — a CLEARED gate no longer holds the PR.
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","metadata":{}}]'
 printf 'tk-g|blocks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "merging" "a cleared gate releases the PR back to merging"
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a cleared gate releases the PR"
 
-# merging — the gate is anchor-scoped: a gate that blocks another bead never
-# holds this PR.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+# needs-review — the gate is anchor-scoped: a gate that blocks another bead
+# never holds this PR.
+store '[{"id":"tk-a","status":"open","metadata":{}},
         '"$GATE"']'
 printf 'tk-g|blocks|tk-other\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "merging" "a gate on another bead does not hold this PR"
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a gate on another bead does not hold this PR"
 
-# merging — only a human gate holds: a gate with no await type, and a task that
-# blocks the anchor, are not one.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+# needs-review — only a human gate holds: a gate with no await type, and a task
+# that blocks the anchor, are not one.
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-p","status":"open","issue_type":"gate","metadata":{}},
         {"id":"tk-t","status":"open","issue_type":"task","metadata":{}}]'
 printf 'tk-p|blocks|tk-a\ntk-t|blocks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "merging" "a gate with no await type and a blocking task do not hold the PR"
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a gate with no await type and a blocking task do not hold the PR"
 
-# merging — a bead that tracks the anchor blocks nothing: a visit, a
+# needs-review — a bead that tracks the anchor blocks nothing: a visit, a
 # conversation or a first reaction holds no PR.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t","pr_merge_state":"CLEAN@abc"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-v","status":"open","metadata":{"task_kind":"visit","gc.continuation_group":"tk-a","gc.routed_to":"human"}},
         {"id":"tk-r","status":"open","metadata":{"task_kind":"reaction"}}]'
 printf 'tk-v|tracks|tk-a\ntk-r|tracks|tk-a\n' > "$STUB_DEPS"
-eq "$("$SUT" derive --anchor tk-a)" "merging" "a bead that tracks the anchor does not hold the PR"
+eq "$("$SUT" derive --anchor tk-a)" "needs-review" "a bead that tracks the anchor does not hold the PR"
 : > "$STUB_DEPS"
 
 # The held: gate value reads the human gates that hold the PR through its open
 # blocks edges, so a gate on a rework the anchor waits on holds it as one on the
 # anchor does, and a person can find it from the PR.
 RW_ROW='{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}'
-UNAPPROVED='{"id":"tk-a","status":"open","metadata":{"pr_posture":"review_required@abc@t"}}'
+UNAPPROVED='{"id":"tk-a","status":"open","metadata":{}}'
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
 eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"}]}' "an open gate on the rework the anchor waits on holds the PR, and names the gate"
@@ -323,12 +297,12 @@ has "$(ghlog)" "label create held: gate --repo $REPO --color D93F0B" "the held: 
 has "$(ghlog)" "label create status: working --repo $REPO --color 1D76DB" "…apart from the status: group's"
 
 # a PR nothing holds carries no held: label.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}}]'
+store '[{"id":"tk-a","status":"open","metadata":{}}]'
 : > "$STUB_DEPS"
 pv 70 '[{"name":"bug"}]'
 resetlog
 "$SUT" reconcile --anchor tk-a --pr 70 --repo "$REPO" --current-labels "bug"
-eq "$(pv_labels 70)" "bug,status: merging" "a PR nothing holds gets its status: label and no held: label"
+eq "$(pv_labels 70)" "bug,status: needs-review" "a PR nothing holds gets its status: label and no held: label"
 
 # held: gate — an open human gate on the anchor holds it, though its rework is
 # live work the city would otherwise be doing.
@@ -375,30 +349,30 @@ eq "$(pv_labels 72)" "status: working" "…and resolving it takes held: gate off
 : > "$STUB_DEPS"
 
 # held: blocked — a live decision, which no automated actor clears.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-d","status":"open","issue_type":"decision","metadata":{}}]'
 printf 'tk-d|blocks|tk-a\n' > "$STUB_DEPS"
-pv 72 '[{"name":"status: merging"}]'
+pv 72 '[{"name":"status: needs-review"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "status: merging"
-eq "$(pv_labels 72)" "held: blocked,status: needs-attention" "a blocker a person owes => held: blocked, and needs-attention over merging"
+"$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "status: needs-review"
+eq "$(pv_labels 72)" "held: blocked,status: needs-attention" "a blocker a person owes => held: blocked, and needs-attention over needs-review"
 
 # a blocker the city is landing is no hold, and the PR keeps its status.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"}}]'
 resetlog
 "$SUT" reconcile --anchor tk-a --pr 72 --repo "$REPO" --current-labels "held: blocked,status: needs-attention"
-eq "$(pv_labels 72)" "status: merging" "a blocker a pool is landing => held: blocked comes off, and the PR reads merging"
+eq "$(pv_labels 72)" "status: needs-review" "a blocker a pool is landing => held: blocked comes off, and the PR reads needs-review"
 : > "$STUB_DEPS"
 
 # more than one value stands at once, each its own label.
-store '[{"id":"tk-a","status":"open","metadata":{"pr_posture":"approved@abc@t"}},
+store '[{"id":"tk-a","status":"open","metadata":{}},
         {"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","metadata":{}},
         {"id":"tk-d","status":"open","issue_type":"decision","metadata":{}}]'
 printf 'tk-d|blocks|tk-a\ntk-g|blocks|tk-a\n' > "$STUB_DEPS"
-pv 74 '[{"name":"status: merging"},{"name":"bug"}]'
+pv 74 '[{"name":"status: needs-review"},{"name":"bug"}]'
 resetlog
-"$SUT" reconcile --anchor tk-a --pr 74 --repo "$REPO" --current-labels "status: merging,bug"
+"$SUT" reconcile --anchor tk-a --pr 74 --repo "$REPO" --current-labels "status: needs-review,bug"
 eq "$(pv_labels 74)" "bug,held: blocked,held: gate,status: needs-attention" "a human gate and a decision blocker => two held: labels"
 : > "$STUB_DEPS"
 

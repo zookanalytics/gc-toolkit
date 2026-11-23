@@ -25,8 +25,8 @@ import (
 	"sync"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )

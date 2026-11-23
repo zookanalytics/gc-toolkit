@@ -58,7 +58,7 @@ func TestClears(t *testing.T) {
 		{"closed in your queue", Blocker{ID: "b", Status: "closed", IssueType: "bug", Assignee: "human"}, false},
 		{"assigned to an agent", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik"}, false},
 		{"a merge anchor waiting on a review", Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task",
-			Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}}, false},
+			Metadata: map[string]string{"merge_result": "pull_request_pending"}}, false},
 	} {
 		if got := Clears(tc.b); got != tc.want {
 			t.Errorf("%s: Clears(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)

@@ -17,7 +17,9 @@ var (
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
 // Keeping them here too proves the rule in isolation from the gathering
-// ([Read]), so a failure names the logic or the wiring, never both at once.
+// ([Read]), so a failure names the logic or the wiring, never both at once. The
+// facts hold no approval, so Derive gives no merging: only the evaluator's
+// answer for a PR on the pending record reads one ([Render]).
 func TestDerive(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -27,30 +29,18 @@ func TestDerive(t *testing.T) {
 		{"nothing outstanding", Facts{}, NeedsReview},
 		{"one bead in the in-flight set", Facts{InFlightCount: 1}, Working},
 		{"empty in-flight set", Facts{InFlightCount: 0}, NeedsReview},
-		{"sticky changes_requested, empty in-flight set", Facts{PRPosture: "changes_requested@oid@t"}, NeedsReview},
-		{"changes_requested with live work", Facts{PRPosture: "changes_requested@oid@t", InFlightCount: 1}, Working},
 		{"operator freeze merge_hold=true", Facts{MergeHold: "true"}, NeedsAttention},
 		{"rebase hold", Facts{RebaseHold: "true"}, NeedsAttention},
-		{"posture commented, empty in-flight set", Facts{PRPosture: "commented@oid@t"}, NeedsReview},
 		{"needs-attention outranks working (hold + live work)", Facts{MergeHold: "true", InFlightCount: 2}, NeedsAttention},
 		{"open human gate on the anchor", Facts{Gates: oneGate}, NeedsAttention},
-		{"open human gate on an approved PR", Facts{Gates: oneGate, PRPosture: "approved@oid@t"}, NeedsAttention},
 		{"open human gate outranks live work", Facts{Gates: oneGate, InFlightCount: 2}, NeedsAttention},
-		{"a hold outranks an approval", Facts{MergeHold: "true", PRPosture: "approved@oid@t"}, NeedsAttention},
+		{"a hold outranks a bead that stays for its work", Facts{MergeHold: "true", Staying: personOwed}, NeedsAttention},
+		{"a bead that stays for its work holds the PR as working", Facts{Staying: personOwed}, Working},
 
 		// Whatever Held names is a thing a person has to act on, so it holds the PR
 		// as a human gate on the anchor does, whatever is in flight beside it.
 		{"a bead a person owes", Facts{Owed: personOwed}, NeedsAttention},
-		{"a bead a person owes on an approved PR with work in flight", Facts{Owed: personOwed, PRPosture: "approved@oid@t", InFlightCount: 1}, NeedsAttention},
-
-		// An approved PR with nothing known blocking it is the city's to land,
-		// whatever it waits on, city work in flight on the way included.
-		{"approved, nothing in flight", Facts{PRPosture: "approved@oid@t"}, Merging},
-		{"approved with city work in flight", Facts{PRPosture: "approved@oid@t", InFlightCount: 1}, Merging},
-
-		// A recorded posture outside its writer's vocabulary is a state the
-		// derivation cannot name.
-		{"an unknown posture value", Facts{PRPosture: "dismissed@oid@t"}, NeedsAttention},
+		{"a bead a person owes with work in flight", Facts{Owed: personOwed, InFlightCount: 1}, NeedsAttention},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := Derive(tc.f); got != tc.want {
@@ -71,7 +61,7 @@ func TestHeld(t *testing.T) {
 		want []Hold
 	}{
 		{"nothing holds the PR", Facts{}, nil},
-		{"an approved PR the city is landing", Facts{PRPosture: "approved@oid@t", InFlightCount: 1}, nil},
+		{"a PR the city is changing", Facts{InFlightCount: 1}, nil},
 		{"the merge freeze carries no held value", Facts{MergeHold: "true"}, nil},
 		{"the rebase hold carries no held value", Facts{RebaseHold: "true"}, nil},
 
@@ -112,25 +102,5 @@ func TestIsSetMatchesTheShellTruthiness(t *testing.T) {
 		if !isSet(v) {
 			t.Errorf("isSet(%q) = false, want true (a set value)", v)
 		}
-	}
-}
-
-// A posture stored as value@oid@instant is read as its value and the oid after
-// it; a bare value with no '@' reads whole, with no oid.
-func TestSplitDated(t *testing.T) {
-	for _, tc := range []struct{ in, value, oid string }{
-		{"", "", ""},
-		{"approved", "approved", ""},
-		{"approved@oid", "approved", "oid"},
-		{"approved@oid@2026-09-27T00:00:00Z", "approved", "oid"},
-		{"commented@@2026-09-27T00:00:00Z", "commented", ""},
-	} {
-		if value, oid := splitDated(tc.in); value != tc.value || oid != tc.oid {
-			t.Errorf("splitDated(%q) = (%q, %q), want (%q, %q)", tc.in, value, oid, tc.value, tc.oid)
-		}
-	}
-	// The split reaches Derive: a dated approved posture lands merging.
-	if got := Derive(Facts{PRPosture: "approved@abc123@2026-09-27T00:00:00Z"}); got != Merging {
-		t.Errorf("dated approved posture derived %q, want merging", got)
 	}
 }

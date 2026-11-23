@@ -89,6 +89,6 @@ a park holds it.
   `services/helm/internal/rigboard/table.go`.
 - The rule that places a bead, part by part in the order the parts are tried,
   is [gctk-architecture.md](gctk-architecture.md#the-bead-stands-contract).
-- A pull request's status words are declared in `services/gctk/prstatus`, as
+- A pull request's status words are declared in `services/gctk/pr/prstatus`, as
   `State` and, for the `held:` labels, `Hold`.
   [pull-request-states.md](pull-request-states.md) explains them.

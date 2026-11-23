@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 

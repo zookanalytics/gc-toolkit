@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus/fixture"
 )
 
 // Each scenario every reader is tested against pins the status and the held

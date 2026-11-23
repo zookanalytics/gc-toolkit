@@ -16,7 +16,7 @@
 # workflow state, never an approval, and never assert a PR may merge: the
 # landing order's evaluator decides that. The values themselves —
 # what each projects from, and their precedence — are decided by one Go package,
-# services/gctk/prstatus, reached through `gctk pr status` and exported so
+# services/gctk/pr/prstatus, reached through `gctk pr status` and exported so
 # the helm board derives the same per-bead state, so a bead's PR labels and its
 # board liveness cannot disagree.
 #
@@ -190,7 +190,7 @@ ensure_labels() { # uses ORIGIN_*
 
 # --- the projection derivation (one Go code path) -------------------------
 
-# The values are computed by one Go package, services/gctk/prstatus, exported so
+# The values are computed by one Go package, services/gctk/pr/prstatus, exported so
 # the helm board derives the same per-bead state from it, so a bead's PR labels
 # and its board liveness cannot disagree. `gctk pr status <anchor>`
 # prints working|merging|needs-review|needs-attention, and with --json one

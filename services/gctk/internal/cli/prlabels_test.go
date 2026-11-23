@@ -11,7 +11,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 )
 
 // The landing order and the net keep the PRs' labels through the writer's two

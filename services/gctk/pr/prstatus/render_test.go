@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
@@ -158,7 +158,7 @@ func TestRenderReasons(t *testing.T) {
 	})
 	t.Run("a thread the city's work acts on holds nothing", func(t *testing.T) {
 		acted := pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindThread, Value: "T1"}, {Kind: pr.KindWait, ID: "tk-fix"}}}
-		if got := prstatus.RenderReasons(acted, prstatus.Facts{PRPosture: "review_required@oid@t"}); len(got) != 0 {
+		if got := prstatus.RenderReasons(acted, prstatus.Facts{}); len(got) != 0 {
 			t.Fatalf("RenderReasons = %+v, want none", got)
 		}
 	})

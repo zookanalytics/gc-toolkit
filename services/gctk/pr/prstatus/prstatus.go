@@ -2,10 +2,10 @@
 // stands. Every reader asks it: the PR's labels through `gctk pr status`
 // (assets/scripts/pr-status-label.sh), gc-helm.sh engage through the same verb,
 // and the helm board (services/helm), which imports the package. [Read] gathers
-// what the city records about each anchor through a [Store], the reader's
-// adapter onto the bead store, which holds no rule of its own. [Derive], [Held]
-// and [Reasons] decide from the [Facts] it gathers. No reader gathers or decides
-// any of it for itself, so the readers cannot disagree.
+// what the city records about each anchor through a [Store], the reader's read
+// of the bead store through the ledger, which holds no rule of its own. [Derive],
+// [Held] and [Reasons] decide from the [Facts] it gathers. No reader gathers or
+// decides any of it for itself, so the readers cannot disagree.
 //
 // Where the PR stands is the anchor's status: vocabulary — working, merging,
 // needs-review, needs-attention — which says whose move it is on an open PR.
@@ -26,14 +26,11 @@
 //
 // The facts are state the city records: the anchor's holds
 // (merge_hold/rebase_hold), the open human gates and the beads a person owes the
-// next move on that its `blocks` edges reach, the pr-facts.sh posture, the
-// anchor's landing state (merge_result), the review runs attached to it, and
-// its in-flight set — any live bead carrying anchor_bead, the same membership
-// test pr-facts.sh applies in its own arms. The rule reads none of GitHub's
-// state itself. It does not consult GitHub's review posture directly — the
-// working -> needs-review flip rests on that live work, which closes as it
-// hands back, so a sticky changes_requested never traps the value in working
-// after the set empties.
+// next move on that its `blocks` edges reach, the anchor's landing state
+// (merge_result), the review runs attached to it, and its in-flight set, any
+// live bead carrying anchor_bead. The rule reads none of GitHub's state itself:
+// the working -> needs-review flip rests on that live work, which closes as it
+// hands back.
 //
 // Gas Town's pending record is the record a PR's bead carries from its
 // publication to its merge, whose values services/gctk/pr/record declares and
@@ -55,14 +52,13 @@
 // reports alike as BLOCKED. [Derive], [Held] and [Reasons] read the facts
 // alone: for a bead off the record, such as the one engage asks what holds or
 // one whose record a writer left half written, and for each merge anchor the
-// walk reaches ([Holding]), which it weighs by its row because the walk reads
-// no GitHub.
+// walk reaches ([Holding]), which it weighs by its row and the read the one-PR
+// update saved on it ([pr.AwaitsReview]), because the walk reads no GitHub.
 package prstatus
 
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
@@ -88,8 +84,7 @@ const (
 	// settled head.
 	NeedsReview State = "needs-review"
 	// NeedsAttention: a blocker stands that the city will not clear on its own:
-	// a merge or rebase hold, anything [Held] names, or a recorded posture the
-	// derivation has no word for.
+	// a merge or rebase hold, or anything [Held] names.
 	NeedsAttention State = "needs-attention"
 )
 
@@ -117,8 +112,8 @@ const (
 )
 
 // Facts is the state the city records about the anchor, as stored. [Read]
-// gathers it, and each string field carries the raw metadata value: Derive
-// splits the dated posture and applies the truthiness rule itself.
+// gathers it, and each string field carries the value as stored: Derive
+// applies the truthiness rule itself.
 type Facts struct {
 	// MergeHold is metadata.merge_hold: any truthy value is an operator freeze or
 	// other merge hold.
@@ -150,10 +145,6 @@ type Facts struct {
 	// waits on that work first and is no person's move yet, approved or not.
 	// Once the work closes, the bead is among Owed.
 	Staying []person.Blocker
-	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
-	// read before the first '@', and the oid after it is the head the posture
-	// was read at, the current head as far as the city knows.
-	PRPosture string
 	// InFlightCount is the size of the anchor's in-flight set: every bead
 	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
 	// rework or fix child, a validation pass, a review, a finding). Non-zero
@@ -196,26 +187,18 @@ func runsOf(blockers []person.Blocker) []Run {
 // over them.
 var InFlightStatuses = []string{"open", "in_progress", "blocked", "deferred", "hooked", "pinned"}
 
-// Derive returns the state the anchor projects. Precedence:
-// needs-attention > merging > working > needs-review. A blocker the city will
-// not clear holds the PR whatever else stands. An approved PR with nothing
-// blocking it is the city's to land, whatever work is in flight on the way. A
-// bead among [Facts.Staying] holds the merge until the work it waits on closes,
-// so the PR is working while one does, approved or not. Live city work on an
-// unapproved PR comes before the review verdict it leads to, and the verdict is
-// what remains when neither stands.
+// Derive returns the state the anchor projects from the facts alone, which
+// hold no approval: only the evaluator's answer for a PR on the pending record
+// reads one ([Render]). Precedence: needs-attention > working > needs-review. A
+// blocker the city will not clear holds the PR whatever else stands. A bead
+// among [Facts.Staying] holds the merge until the work it waits on closes, so
+// the PR is working while one does. Live city work comes before the review
+// verdict it leads to, and the verdict is what remains when neither stands.
 func Derive(f Facts) State {
-	posture, _ := splitDated(f.PRPosture)
-
 	// needs-attention: a blocker the city will not clear on its own. A hold
 	// stands, or something [Reasons] names, each a thing a person has to act
 	// on.
 	if isSet(f.MergeHold) || isSet(f.RebaseHold) || len(Reasons(f)) > 0 {
-		return NeedsAttention
-	}
-	// A recorded posture outside the vocabulary its writer declares is a state
-	// the derivation cannot name.
-	if !knownPosture(posture) {
 		return NeedsAttention
 	}
 
@@ -225,12 +208,7 @@ func Derive(f Facts) State {
 		return Working
 	}
 
-	// merging: approved, and nothing known blocks the merge.
-	if posture == "approved" {
-		return Merging
-	}
-
-	// working: the city is changing an unapproved PR.
+	// working: the city is changing the PR.
 	if f.InFlightCount > 0 {
 		return Working
 	}
@@ -305,43 +283,14 @@ func threadsAwaiting(n int) string {
 	return fmt.Sprintf("%d review threads wait on the city's answer", n)
 }
 
-// knownPosture is the posture vocabulary pr-facts.sh records ([posture]
-// postures in lifecycle/lifecycle.toml), plus no posture recorded yet.
-func knownPosture(v string) bool {
-	switch v {
-	case "", "approved", "changes_requested", "commented", "review_required", "none":
-		return true
-	}
-	return false
-}
-
-// isSet is the truthiness rule pr-facts.sh and pr-status-label.sh share,
-// applied to the value as `(v // "") | tostring` renders it: null and false
-// already arrive empty, and the string spellings of an unset flag are treated as
-// unset too, so a hold means the same thing everywhere.
+// isSet is the truthiness rule lifecycle/lifecycle.toml gives the holds
+// ([metadata.holds]): a stored null or false arrives empty, and the string
+// spellings of an unset flag are treated as unset too, so a hold means the same
+// thing everywhere.
 func isSet(v string) bool {
 	switch v {
 	case "", "false", "False", "FALSE", "0", "null":
 		return false
 	}
 	return true
-}
-
-// splitDated splits a dated value, value@oid@instant, into its value and its
-// oid. A bare value with no '@' reads whole with no oid.
-func splitDated(s string) (value, oid string) {
-	value = before(s, "@")
-	if len(value) < len(s) {
-		oid = before(s[len(value)+1:], "@")
-	}
-	return value, oid
-}
-
-// before returns the part of s before the first sep, or all of s when sep is
-// absent — the split("@")[0] the dated posture needs.
-func before(s, sep string) string {
-	if i := strings.Index(s, sep); i >= 0 {
-		return s[:i]
-	}
-	return s
 }
