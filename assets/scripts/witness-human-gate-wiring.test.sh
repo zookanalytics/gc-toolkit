@@ -8,6 +8,7 @@
 # escalation channel.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$HERE/../.."
 TOML="$ROOT/formulas/mol-witness-patrol.toml"
 PROMPT="$ROOT/agents/witness/prompt.template.md"

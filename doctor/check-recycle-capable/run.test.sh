@@ -9,6 +9,7 @@
 # where it does not.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 OVERLAY="$HERE/../../overlays/cycle-recycle/.claude"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-recycle-capable-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT

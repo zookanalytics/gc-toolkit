@@ -15,6 +15,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 SUT="$HERE/measure.sh"
 PLAN="$HERE/deletion-plan.tsv"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-measure-test.XXXXXX")"

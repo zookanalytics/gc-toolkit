@@ -20,6 +20,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 PREP="$ROOT/skills/converse-prep/SKILL.md"
 for f in "$HERE/converse-signoff.sh" "$HERE/pr-sitting-comment.sh" "$HERE/pr-post.sh" "$PREP"; do

@@ -35,6 +35,7 @@
 # run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pool-nudge-wiring.XXXXXX")" || { echo "mktemp failed" >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT

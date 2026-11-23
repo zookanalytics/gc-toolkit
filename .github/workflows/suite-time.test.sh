@@ -12,6 +12,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUT="$HERE/suite-time.sh"
 [ -f "$SUT" ] || { echo "suite-time.test.sh: cannot find $SUT" >&2; exit 2; }

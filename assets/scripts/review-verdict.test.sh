@@ -25,6 +25,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 LIB="$HERE/review-verdict.sh"
 

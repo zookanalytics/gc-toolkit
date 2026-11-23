@@ -30,6 +30,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-review-workspace-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"

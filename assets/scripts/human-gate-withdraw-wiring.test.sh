@@ -10,6 +10,7 @@
 # for a person.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$HERE/../.."
 FRAG="$ROOT/template-fragments/human-gate-withdraw.template.md"
 HG="$HERE/human-gate.sh"

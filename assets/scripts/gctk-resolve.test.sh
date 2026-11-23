@@ -10,6 +10,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-resolve-test.XXXXXX")"
 # gctk-resolve.sh exports its own directory, named through cd and pwd, as
 # GCTK_SCRIPTS_DIR. cd and pwd drop the doubled slash that a TMPDIR ending in /

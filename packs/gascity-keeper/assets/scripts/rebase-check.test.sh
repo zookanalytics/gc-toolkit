@@ -31,6 +31,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../../../tools/test-floor.sh" || exit 2
 SCRIPT="$HERE/rebase-check.sh"
 RUN_LIB_STUB="$(cd "$HERE/../../../../assets/scripts" && pwd)/run-lib.stub.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-rebase-check-test.XXXXXX")"

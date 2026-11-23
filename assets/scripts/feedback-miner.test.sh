@@ -7,6 +7,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SUT="$HERE/feedback-miner.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-feedback-miner-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT

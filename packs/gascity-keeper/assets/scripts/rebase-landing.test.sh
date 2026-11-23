@@ -22,6 +22,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../../../tools/test-floor.sh" || exit 2
 KIT_SRC="$(cd "$HERE/../../../../assets/scripts" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk rebase-landing-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT

@@ -23,6 +23,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 RUNNER="$HERE/lint-learned.sh"
 
 PASS=0; FAIL=0

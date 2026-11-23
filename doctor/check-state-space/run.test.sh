@@ -2,6 +2,7 @@
 # Hermetic test for doctor/check-state-space (I2). Stub gc/bd; no live city.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-state-space-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0

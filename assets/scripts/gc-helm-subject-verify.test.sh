@@ -18,7 +18,9 @@
 # verify_subject (a precondition refusing first would carry different words).
 set -u
 
-SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gc-helm.sh"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
+SCRIPT="$HERE/gc-helm.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-subjverify.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 

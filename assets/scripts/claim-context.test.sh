@@ -32,6 +32,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT_DIR="$(cd "$HERE/../.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-claim-context-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT

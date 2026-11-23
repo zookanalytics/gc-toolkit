@@ -2,6 +2,7 @@
 # Hermetic test for doctor/check-cadence-live (I10). Stub gc; fixture pack.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0

@@ -9,6 +9,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SCRIPT="$HERE/check-jq.sh"
 
 [ -f "$SCRIPT" ] || { echo "check-jq.test.sh: cannot find check-jq.sh at $SCRIPT" >&2; exit 2; }

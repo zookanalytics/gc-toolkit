@@ -17,6 +17,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 SUT="$HERE/warrants-touched.sh"
 REAL_ROOT="$(cd "$HERE/.." && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-warrants-touched-test.XXXXXX")"

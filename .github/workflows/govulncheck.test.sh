@@ -28,6 +28,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 WF="$HERE/govulncheck.yml"
 
 [ -f "$WF" ] || { echo "govulncheck.test.sh: cannot find govulncheck.yml at $WF" >&2; exit 2; }

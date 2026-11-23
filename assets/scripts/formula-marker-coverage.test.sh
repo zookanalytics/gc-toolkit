@@ -36,6 +36,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 SELF="assets/scripts/formula-marker-coverage.test.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-formula-marker-coverage-test.XXXXXX")"

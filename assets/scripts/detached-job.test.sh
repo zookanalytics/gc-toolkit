@@ -11,6 +11,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 JOB="$HERE/detached-job.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-detached-job-test.XXXXXX")"
 # Any job a failed assertion left running is stopped before the record goes.

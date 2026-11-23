@@ -158,6 +158,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SCRIPT="$HERE/tmux-intake-prompt.sh"
 BINDINGS="$HERE/tmux-bindings.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-tmux-intake-prompt-test.XXXXXX")"

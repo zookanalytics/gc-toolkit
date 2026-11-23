@@ -15,6 +15,7 @@
 # run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$HERE/../.."
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }

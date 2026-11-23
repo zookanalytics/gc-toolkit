@@ -35,6 +35,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 REPO="$HERE/../.."
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-converse-title-test.XXXXXX")"
 SOCK="gcttl-test-$$"

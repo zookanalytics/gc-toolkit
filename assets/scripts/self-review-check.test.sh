@@ -15,6 +15,7 @@ set -uo pipefail
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/self-review-check-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 # The fixture worktree and gctk rig run the real git, which harness_init puts
 # beneath the harness's git stub and the test floor's refusal.
 REAL_GIT="$(command -v git)" || { echo "git is required for this test" >&2; exit 1; }

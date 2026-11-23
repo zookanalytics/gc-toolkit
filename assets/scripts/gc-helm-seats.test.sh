@@ -32,6 +32,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SCRIPT="$HERE/gc-helm.sh"
 SCRIPT_REAL="$(readlink -f "$SCRIPT" 2>/dev/null || printf '%s' "$SCRIPT")"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-seats-test.XXXXXX")"

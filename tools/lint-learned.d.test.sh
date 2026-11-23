@@ -25,6 +25,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 DET="$HERE/lint-learned.d/raw-bd-invocation.sh"
 DET_MK="$HERE/lint-learned.d/mktemp-untemplated.sh"
 

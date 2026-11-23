@@ -22,6 +22,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 FRAG="$ROOT/template-fragments/where-to-search.template.md"
 RENDERS="$ROOT/generated/seed-audit/agents"

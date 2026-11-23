@@ -118,6 +118,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SVC="$HERE/gc-helm-svc.sh"
 BUILD="$HERE/gc-build.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-helm-svc-test.XXXXXX")"

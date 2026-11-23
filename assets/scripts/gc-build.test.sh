@@ -60,6 +60,7 @@ done
 unset _leak
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-build-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Resolved, so every fixture is reached by its real path whatever TMPDIR's

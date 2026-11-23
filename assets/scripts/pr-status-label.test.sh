@@ -5,6 +5,7 @@
 # that takes it off a PR that merged or closed. No live city, gh, or network.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-prlabel-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 . "$HERE/test-harness.sh"
 unset GC_RIG 2>/dev/null || true

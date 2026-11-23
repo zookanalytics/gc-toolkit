@@ -78,6 +78,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 REPO="$HERE/../.."
 SKILLS="$REPO/skills"
 PROMPT="$REPO/agents/_converse/prompt.template.md"

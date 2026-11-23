@@ -2,6 +2,7 @@
 # Hermetic test for doctor/check-wait-is-an-edge (I1). Stubs `gc`; no live city.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-wait-is-an-edge-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0

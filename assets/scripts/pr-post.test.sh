@@ -13,6 +13,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SUT="$HERE/pr-post.sh"
 REPO="$(cd "$HERE/../.." && pwd)"
 DETECTOR="$REPO/tools/lint-learned.d/pr-post-bypass.sh"

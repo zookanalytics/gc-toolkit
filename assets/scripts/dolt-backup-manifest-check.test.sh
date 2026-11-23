@@ -34,6 +34,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 TOML="$ROOT/formulas/mol-deacon-patrol.toml"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-dolt-backup-manifest-check-test.XXXXXX")"

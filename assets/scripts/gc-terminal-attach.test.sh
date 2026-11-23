@@ -15,6 +15,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 GUARD="$HERE/gc-terminal-attach.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-gc-terminal-attach-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT

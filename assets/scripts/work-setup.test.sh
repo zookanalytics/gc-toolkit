@@ -13,6 +13,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-work-setup-test.XXXXXX")"
 # git prints a worktree by its resolved path.
 TMP="$(cd "$TMP" && pwd -P)"

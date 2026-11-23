@@ -34,6 +34,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 REPO="$(cd "$HERE/../.." && pwd)"
 INSTALL="$HERE/gh-origin-guard-codex.sh"
 OVERLAY="$REPO/overlays/gh-origin-guard/.claude/settings.json"

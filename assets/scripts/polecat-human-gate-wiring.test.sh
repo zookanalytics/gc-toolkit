@@ -18,6 +18,7 @@
 # step that triages it.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$HERE/../.."
 DOCTRINE="$ROOT/template-fragments/polecat-doctrine.template.md"
 WITNESS="$ROOT/formulas/mol-witness-patrol.toml"

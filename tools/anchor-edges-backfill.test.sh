@@ -3,6 +3,7 @@
 # to them by the membership edge and marking the store joined.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-anchor-edges-backfill-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=../assets/scripts/test-harness.sh
 . "$HERE/../assets/scripts/test-harness.sh"

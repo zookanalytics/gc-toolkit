@@ -3,6 +3,7 @@
 # check reads pack.toml and the agent prompts, with no gc, city, or network.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cycle-recycle-hook-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0

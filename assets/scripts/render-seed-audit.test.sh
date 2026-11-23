@@ -74,6 +74,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-render-seed-audit-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # Host signing of commits and tags must not make this suite need a signing agent.

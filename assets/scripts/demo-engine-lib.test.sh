@@ -118,6 +118,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 LIB="$HERE/demo-engine-lib.sh"
 VIDEO="$HERE/rig-demo-capture.sh"
 SHOT="$HERE/demo-screenshot.sh"

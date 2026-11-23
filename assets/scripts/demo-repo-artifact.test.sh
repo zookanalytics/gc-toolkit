@@ -13,6 +13,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 SUT="$HERE/demo-repo-artifact.sh"
 [ -x "$SUT" ] || { echo "not found or not executable: $SUT" >&2; exit 2; }
 command -v jq  >/dev/null 2>&1 || { echo "jq is required for this test" >&2; exit 2; }

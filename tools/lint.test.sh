@@ -29,6 +29,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/test-floor.sh" || exit 2
 SUT="$HERE/lint.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-lint-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT

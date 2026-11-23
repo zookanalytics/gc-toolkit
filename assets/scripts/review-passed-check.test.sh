@@ -9,6 +9,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 # shellcheck source=test-harness.sh
 . "$HERE/test-harness.sh"   # assertions only
 PASS=0; FAIL=0

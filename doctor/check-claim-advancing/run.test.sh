@@ -15,6 +15,7 @@
 # give is, for that step, an instruction to hand it back to the pool.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 CHECK="$HERE/run.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-claim-advancing-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0

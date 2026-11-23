@@ -83,6 +83,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 HOOK="$HERE/gh-origin-guard.sh"
 
 PASS=0; FAIL=0

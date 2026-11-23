@@ -29,6 +29,7 @@
 # run-tests-scope: tree
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 ROOT="$(cd "$HERE/../.." && pwd)"
 FRAGMENT="$ROOT/template-fragments/file-feedback-observations.template.md"
 RENDERS="$ROOT/generated/seed-audit/agents"

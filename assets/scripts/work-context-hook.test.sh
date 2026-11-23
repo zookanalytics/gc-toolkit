@@ -51,6 +51,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 REPO="$HERE/../.."
 HOOK="$REPO/overlays/work-context/.claude/hooks/work-context.sh"
 

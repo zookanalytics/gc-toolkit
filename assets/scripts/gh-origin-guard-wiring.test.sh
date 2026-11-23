@@ -25,6 +25,7 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
 REPO="$(cd "$HERE/../.." && pwd)"
 GUARD_REL="assets/scripts/gh-origin-guard.sh"
 CODEX_REL="assets/scripts/gh-origin-guard-codex.sh"
