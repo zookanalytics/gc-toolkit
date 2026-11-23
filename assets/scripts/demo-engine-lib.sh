@@ -38,6 +38,14 @@
 #     each rig checkout in the city's rig map. A directory's listing and a file's
 #     contents are denied, and their metadata is not, because node resolves a
 #     path by reading the metadata of each directory above it.
+#   - the contents of the home folders, this session's own and the user's that
+#     the system's user record names, which holds the home of each agent a host
+#     keeps inside it. Tools keep their credentials there, such as the GitHub
+#     CLI's token, an agent's sign-in and SSH keys. A run reads only the parts
+#     of them its tools need: each Node on PATH, with the npm and corepack it
+#     holds, Playwright's browsers, and Go's root and settings. It reads and
+#     writes the caches of npm, the engine and Go, and its git reads no user
+#     settings, which live in a home folder.
 #   - every loopback port but the run's own, and every Unix socket but the
 #     system resolver's, so the supervisor's API, the Dolt server and the
 #     session server do not answer. The run's own port is the engine's own
@@ -59,8 +67,9 @@
 # reads the engine checkout, except the dot-directories where a rig keeps its
 # store and its agents' state, and no rig's or city's store is readable
 # whatever else is. The run is refused before the engine starts when:
-#   - a directory it would read and write holds one of the city's directories,
-#     or lies inside one in no rig's worktree;
+#   - a directory it would read and write holds one of the city's directories
+#     or a home folder, or lies inside one of the city's directories in no
+#     rig's worktree;
 #   - gc's home holds a city registry that `gc cities` does not read, because
 #     then the cities to deny are unknown;
 #   - a city is known and its rig map does not read, because then the rig
@@ -538,10 +547,30 @@ $1
 EOF
 }
 
+# _demo_engine_homes: the home folders, one canonical path per line: this
+# session's own, and the user's, which the system's user record names. Tools
+# keep their credentials in a home folder, and the user's holds the home of
+# every agent a host keeps inside it. The disk's root is never one.
+_demo_engine_homes() {
+  local p user
+  # id -P prints the user's record, whose last two fields are the home and the
+  # shell: name:password:uid:gid:class:change:expire:gecos:home:shell.
+  user=$(id -P 2>/dev/null) || user=""
+  user=${user%:*}
+  while IFS= read -r p; do
+    case "$p" in /*) p=$(_demo_engine_canon "$p") ;; *) continue ;; esac
+    [ -z "$p" ] || [ "$p" = / ] || printf '%s\n' "$p"
+  done <<EOF
+${HOME:-}
+${user##*:}
+EOF
+}
+
 # _demo_engine_city: reads where the live city keeps its state into
 # _DEMO_ENGINE_RIGS, each rig checkout its rig map lists, _DEMO_ENGINE_HQ, the
 # checkout of the map's hq entry, which is the city's own repository, and
-# _DEMO_ENGINE_PLACES, each of its directories, one canonical path per line.
+# _DEMO_ENGINE_PLACES, each of its directories, one canonical path per line, and
+# the home folders into _DEMO_ENGINE_HOMES, as _demo_engine_homes names them.
 # Returns 1, having said why, when gc does not read a city registry, or when a
 # city is known and its rig map does not read, because the cities or the rig
 # checkouts to deny are then unknown.
@@ -560,6 +589,7 @@ _demo_engine_city() {
       | while IFS= read -r p; do case "$p" in (/*) _demo_engine_canon "$p" ;; esac; done)
   fi
   _DEMO_ENGINE_PLACES=$(_demo_engine_city_places "$_DEMO_ENGINE_RIGS")
+  _DEMO_ENGINE_HOMES=$(_demo_engine_homes)
 }
 
 # _demo_engine_rig_of <dir>: after _demo_engine_city, the canonical checkout of
@@ -580,8 +610,8 @@ EOF
 # writes the directory may reach: the directory, widened to the rig worktree
 # that holds it, and that worktree's own git directory, each on a line after
 # "rw ", and the worktree's repository on a line after "ro ". Returns 1, having
-# said why, when the directory holds one of the city's directories, or lies in
-# one in no rig's worktree.
+# said why, when the directory holds one of the city's directories or a home
+# folder, or lies in one of the city's directories in no rig's worktree.
 _demo_engine_reach() {
   local d top common="" gd="" checkout p
   d=$(_demo_engine_canon "$1"); [ -n "$d" ] || return 0
@@ -604,6 +634,17 @@ _demo_engine_reach() {
     fi
   done <<EOF
 ${_DEMO_ENGINE_PLACES:-}
+EOF
+  while IFS= read -r p; do
+    [ -n "$p" ] && _demo_engine_under "$p" "$top" || continue
+    if [ "$p" = "$top" ]; then
+      _demo_engine_say "$top is a home folder, where tools keep their credentials, so a capture cannot read or write it; capture from a rig worktree, or from a directory that holds no home folder"
+    else
+      _demo_engine_say "$top holds $p, a home folder, where tools keep their credentials, so a capture cannot read or write it; capture from a rig worktree, or from a directory that holds no home folder"
+    fi
+    return 1
+  done <<EOF
+${_DEMO_ENGINE_HOMES:-}
 EOF
   printf 'rw %s\n' "$top"
   [ -z "$gd" ] || printf 'rw %s\n' "$gd"
@@ -995,16 +1036,60 @@ _demo_engine_sandbox_run() {
   "${_DEMO_ENGINE_SANDBOX[@]}" "$@"
 }
 
+# _demo_engine_tool_places: the parts of the home folders that the tools a run
+# in the sandbox starts need, each canonical path on a line after "ro ", for one
+# the run reads, or "rw ", for one it reads and writes. It reads each Node on
+# PATH, with the npm and corepack that Node holds, Playwright's browsers, and
+# Go's root and settings. It writes the caches of npm, the engine and Go, and
+# the engine keeps the Appium that drives an iOS app in its own. A path that
+# does not exist is left out.
+_demo_engine_tool_places() {
+  local d p kind rest="${PATH:-}:"
+  {
+    while [ -n "$rest" ]; do
+      d=${rest%%:*}; rest=${rest#*:}
+      case "$d" in /*) [ -x "$d/node" ] || continue ;; *) continue ;; esac
+      p=$(_demo_engine_canon "$d/node")
+      [ -z "$p" ] || printf 'ro %s\n' "$(dirname -- "$(dirname -- "$p")")"
+    done
+    printf 'ro %s\n' "${PLAYWRIGHT_BROWSERS_PATH:-${HOME:-}/Library/Caches/ms-playwright}"
+    printf 'rw %s\n' "${npm_config_cache:-${HOME:-}/.npm}" "${HOME:-}/Library/Caches/sprintshow"
+    if command -v go >/dev/null 2>&1; then
+      go env GOROOT GOENV GOMODCACHE GOCACHE 2>/dev/null | awk '{ print (NR <= 2 ? "ro " : "rw ") $0 }'
+    fi
+  } | while read -r kind p; do
+    case "$p" in /*) p=$(_demo_engine_canon "$p") ;; *) continue ;; esac
+    [ -z "$p" ] || printf '%s %s\n' "$kind" "$p"
+  done
+}
+
 # _demo_engine_sandbox <ports> <dirs> <files>: after _demo_engine_city, sets
 # _DEMO_ENGINE_SANDBOX to the words that, with a command after them, run that
 # command inside the sandbox, in the caller's working directory, with the
 # ports given, one per line, the only loopback ports it may reach. Each of <dirs>, one per line, is read and
 # written as _demo_engine_reach widens it, each of <files> is read, and the
-# engine checkout, when one was chosen, is read. Returns 1, having said why,
+# engine checkout, when one was chosen, is read. Of the home folders it reaches
+# only the parts _demo_engine_tool_places names. Returns 1, having said why,
 # when the run is refused.
 _demo_engine_sandbox() {
   local NL='
-' open="$1" cand="$2" files="$3" places rw="" ro="" p d reach kind engine="" profile
+' open="$1" cand="$2" files="$3" places homes tools="" inhome rw="" ro="" p d reach kind engine="" profile
+
+  # The home folders, which no run reads but for the parts of them its tools
+  # need, and each such part that lies in one, unless it would open one whole.
+  homes="${_DEMO_ENGINE_HOMES:-}"
+  while IFS=' ' read -r kind p; do
+    inhome=""
+    while IFS= read -r d; do
+      [ -n "$d" ] && [ -n "$p" ] || continue
+      if _demo_engine_under "$d" "$p"; then p=""; elif _demo_engine_under "$p" "$d"; then inhome=1; fi
+    done <<EOF
+$homes
+EOF
+    [ -z "$p" ] || [ -z "$inhome" ] || tools="$tools$NL$kind $p"
+  done <<EOF
+$(_demo_engine_tool_places)
+EOF
 
   # The city's directories, and each directory the run reads and writes, as
   # _demo_engine_reach widens it.
@@ -1035,13 +1120,30 @@ EOF
         return 1 ;;
     esac
   done <<EOF
+$homes
+$tools
 $places
 $rw
 $ro
 ${engine:-}
 EOF
 
+  # The tools' parts are opened after the home folders are denied, and the
+  # city's directories are denied after both, so no tool's part opens one.
   profile="(version 1)$NL(allow default)"
+  while IFS= read -r p; do
+    [ -z "$p" ] || profile="$profile$NL(deny file-read-data file-write* (subpath \"$p\"))"
+  done <<EOF
+$homes
+EOF
+  while IFS=' ' read -r kind p; do
+    case "$kind" in
+      ro) profile="$profile$NL(allow file-read-data (subpath \"$p\"))" ;;
+      rw) profile="$profile$NL(allow file-read-data file-write* (subpath \"$p\"))" ;;
+    esac
+  done <<EOF
+$tools
+EOF
   while IFS= read -r p; do
     [ -z "$p" ] || profile="$profile$NL(deny file-read-data file-write* (subpath \"$p\"))"
   done <<EOF
@@ -1076,9 +1178,14 @@ EOF
 $open
 EOF
   profile="$profile$NL(deny signal)$NL(allow signal (target same-sandbox))"
+  # No rule keeps the run from reading another process's arguments and
+  # environment: macOS gives them, through sysctl's KERN_PROCARGS2, to every
+  # process of the same user under any profile, a (deny default) one included.
 
+  # git stops at a settings file it cannot read, and its user settings live in
+  # the home folder, so the run's git is pointed at none.
   _demo_engine_env
-  _DEMO_ENGINE_SANDBOX=("${_DEMO_ENGINE_ENV[@]}" sandbox-exec -p "$profile")
+  _DEMO_ENGINE_SANDBOX=("${_DEMO_ENGINE_ENV[@]}" GIT_CONFIG_GLOBAL=/dev/null sandbox-exec -p "$profile")
 }
 
 # The gctk binary that runs a copy: $GCTK_BIN, else the city's build.
