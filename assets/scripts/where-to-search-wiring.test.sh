@@ -65,7 +65,7 @@ for dir in "$ROOT"/agents/*/ "$ROOT"/packs/*/agents/*/; do
     continue
   fi
   render=""
-  for cand in "$RENDERS/$name.md" "$RENDERS/$pack.$name.md"; do
+  for cand in "$RENDERS/$name.render.md" "$RENDERS/$pack.$name.render.md"; do
     [ -f "$cand" ] && { render="$cand"; break; }
   done
   if [ -z "$render" ]; then

@@ -5,7 +5,7 @@
      delivered none, as on a runtime gc cannot send a startup prompt to, and
      Claude Code saves hook context past 10,000 characters to a file, leaving
      the session a 2 KB preview. Keep the render under that
-     cap: generated/seed-audit/agents/po.md shows its size. */ -}}
+     cap: generated/seed-audit/agents/po.render.md shows its size. */ -}}
 # The po — the operator's prioritization partner
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
