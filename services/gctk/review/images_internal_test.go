@@ -46,7 +46,8 @@ func TestVariantParts(t *testing.T) {
 
 // Comments split where one would pass GitHub's limit on a comment's length:
 // groups pack into as few comments as fit, a group too long for one comment
-// splits into parts, and each comment says which it is.
+// splits into parts, the images it moves without a change among them, and
+// each comment says which it is.
 func TestImageCommentsSplitUnderTheLimit(t *testing.T) {
 	head, base := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	im := Images{Head: head, MergeBase: base}
@@ -84,5 +85,38 @@ func TestImageCommentsSplitUnderTheLimit(t *testing.T) {
 	}
 	if got := two.comments("github.com", "acme/widgets", len(one[0])/2+50); len(got) != 2 {
 		t.Fatalf("two groups with room for one a comment took %d comments", len(got))
+	}
+
+	// The images a group moves without a change split the same way, after its
+	// rows, so a change that moves many images fits too.
+	for _, c := range []struct {
+		why            string
+		changed, moved int
+	}{
+		{"a thousand images moved", 0, 1000},
+		{"rows past one comment, then images moved", 150, 300},
+	} {
+		im := Images{Head: head, MergeBase: base}
+		for i := 0; i < c.changed; i++ {
+			im.Changes = append(im.Changes, Image{Kind: ImageChanged,
+				Path: fmt.Sprintf("tests/visual/after/a-page-with-a-long-name-%04d-dark-desktop-chromium-linux.png", i)})
+		}
+		for i := 0; i < c.moved; i++ {
+			name := fmt.Sprintf("an-unchanged-page-with-a-long-name-%04d-dark-desktop-chromium-linux.png", i)
+			im.Changes = append(im.Changes, Image{Kind: ImageMoved, Path: "tests/visual/after/" + name, From: "tests/visual/before/" + name})
+		}
+		bodies := im.ImageComments("github.com", "acme/widgets")
+		shown, moved := 0, 0
+		for i, b := range bodies {
+			if n := len(b); n > commentLimit-100 {
+				t.Errorf("%s: comment %d holds %d bytes, more than GitHub takes with the city's mark", c.why, i+1, n)
+			}
+			shown += strings.Count(b, `alt="after: `)
+			moved += strings.Count(b, " from <code>tests/visual/before/")
+		}
+		if len(bodies) < 2 || shown != c.changed || moved != c.moved {
+			t.Errorf("%s: %d comments show %d images and name %d moved, want more than one showing %d and naming %d",
+				c.why, len(bodies), shown, moved, c.changed, c.moved)
+		}
 	}
 }

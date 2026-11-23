@@ -425,46 +425,57 @@ func (im Images) opening(groups int) string {
 }
 
 // groupBlocks renders a group as one block, or as several, each within room,
-// when one would not fit in a comment.
+// when one would not fit in a comment. A block shows its images in a table,
+// then names those moved without a change in a sentence.
 func (im Images) groupBlocks(g ImageGroup, host, repo string, open bool, room int) []string {
-	var rows, moved []string
-	for _, c := range g.Images {
-		if c.Kind == ImageMoved {
-			moved = append(moved, fmt.Sprintf("%s from %s", code(path.Base(c.Path)), code(c.From)))
-			continue
-		}
-		rows = append(rows, im.row(c, host, repo))
-	}
-	tail := ""
-	if len(moved) > 0 {
-		tail = "Moved without a change: " + joinList(moved) + ".\n\n"
-	}
-	head := fmt.Sprintf("| Before, at %s | After, at %s |\n|---|---|\n", short(im.MergeBase), short(im.Head))
-	// Rows go into parts that each fit in room with their summary, which
-	// takes at most a few hundred characters beyond the group's label.
-	reserve := 400 + len(g.Dir+g.Stem)
-	var parts [][]string
-	var cur []string
-	size := len(head + tail)
-	for _, r := range rows {
-		if len(cur) > 0 && size+len(r)+reserve > room {
-			parts = append(parts, cur)
-			cur, size = nil, len(head)
-		}
-		cur = append(cur, r)
-		size += len(r)
-	}
-	parts = append(parts, cur)
-	attr := ""
-	if open {
-		attr = " open"
-	}
 	label := code(g.Dir + "/")
 	if g.Dir == "." {
 		label = "the repository's top directory"
 	}
 	if g.Stem != "" {
 		label += " <b>" + escape(g.Stem) + "</b>"
+	}
+	head := fmt.Sprintf("| Before, at %s | After, at %s |\n|---|---|\n", short(im.MergeBase), short(im.Head))
+	const movedLead, movedEnd, movedSep = "Moved without a change: ", ".\n\n", " and "
+	// A block keeps room for its summary, at most a few hundred characters
+	// beyond the group's label, its table's head and its sentence's ends. Its
+	// items fill the rest, a moved image with the longest separator a list
+	// puts beside it.
+	type item struct {
+		text  string
+		moved bool
+	}
+	var items []item
+	for _, c := range g.Images {
+		if c.Kind != ImageMoved {
+			items = append(items, item{text: im.row(c, host, repo)})
+		}
+	}
+	for _, c := range g.Images {
+		if c.Kind == ImageMoved {
+			items = append(items, item{text: fmt.Sprintf("%s from %s", code(path.Base(c.Path)), code(c.From)), moved: true})
+		}
+	}
+	fixed := 400 + len(label) + len(head) + len(movedLead) + len(movedEnd)
+	var parts [][]item
+	var cur []item
+	size := fixed
+	for _, it := range items {
+		cost := len(it.text)
+		if it.moved {
+			cost += len(movedSep)
+		}
+		if len(cur) > 0 && size+cost > room {
+			parts = append(parts, cur)
+			cur, size = nil, fixed
+		}
+		cur = append(cur, it)
+		size += cost
+	}
+	parts = append(parts, cur)
+	attr := ""
+	if open {
+		attr = " open"
 	}
 	counts := (Images{Changes: g.Images}).Counts()
 	var blocks []string
@@ -473,15 +484,23 @@ func (im Images) groupBlocks(g ImageGroup, host, repo string, open bool, room in
 		if len(parts) > 1 {
 			of = fmt.Sprintf(", part %d of %d", i+1, len(parts))
 		}
+		var rows, moved []string
+		for _, it := range p {
+			if it.moved {
+				moved = append(moved, it.text)
+			} else {
+				rows = append(rows, it.text)
+			}
+		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "<details%s>\n<summary>%s · %s%s</summary>\n\n", attr, label, counts, of)
-		if len(p) > 0 {
+		if len(rows) > 0 {
 			b.WriteString(head)
-			b.WriteString(strings.Join(p, ""))
+			b.WriteString(strings.Join(rows, ""))
 			b.WriteString("\n")
 		}
-		if i == len(parts)-1 {
-			b.WriteString(tail)
+		if len(moved) > 0 {
+			b.WriteString(movedLead + joinList(moved) + movedEnd)
 		}
 		b.WriteString("</details>\n\n")
 		blocks = append(blocks, b.String())
