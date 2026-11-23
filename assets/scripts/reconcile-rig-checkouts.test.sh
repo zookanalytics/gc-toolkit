@@ -25,7 +25,10 @@
 # as in (d) once back on it; (j) a recovered rig whose gate withdrawal fails
 # keeps its subject open until a later withdrawal succeeds; (k) a rig whose
 # fetch fails is skipped, with nothing touched or filed; (l) no escalation
-# tells a person to run git reset --hard or --keep.
+# tells a person to run git reset --hard or --keep; (m) a pass that cannot read
+# a rig's bead, whether the store fails or answers with something other than a
+# list of beads, warns and files, withdraws and closes nothing, and a later pass
+# that reads the store keeps to the bead already open.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,6 +46,8 @@ bad()  { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
 eq()   { [ "$1" = "$2" ] && ok "$3" || bad "$3 (got '$1' want '$2')"; }
 
 commit() { echo "$2" > "$1/f.txt"; git -C "$1" add -A; git -C "$1" commit -qm "$2"; }
+# count every bead the fake ledger has filed, whatever its key or status.
+filed_count() { wc -l < "$TMP/ledger" | tr -d ' '; }
 # count OPEN reconcile beads in the fake ledger for a given rig key.
 open_count() { awk -F'|' -v k="$1" '$2==k && $3=="open"' "$TMP/ledger" 2>/dev/null | wc -l | tr -d ' '; }
 # id of the OPEN reconcile bead for a rig key (empty if none).
@@ -115,24 +120,37 @@ case "$1" in
     shift; [ "$1" = "--rig" ] && shift 2; sub="$1"; shift
     case "$sub" in
       list)
+        # FAKE_LIST_FAIL answers as a store that cannot be read: error is bd's
+        # error object at a non-zero exit, status a list at a non-zero exit,
+        # object an answer that is not a list, and noid a row with no id.
+        case "${FAKE_LIST_FAIL:-}" in
+          error)  printf '{"error":"invalid connection"}\n'; exit 1 ;;
+          status) printf '[]\n'; exit 1 ;;
+          object) printf '{"issues":[]}\n'; exit 0 ;;
+          noid)   printf '[{"title":"Reconcile"}]\n'; exit 0 ;;
+        esac
         key=""; while [ $# -gt 0 ]; do [ "$1" = "--metadata-field" ] && key="${2#reconcile_rig=}"; shift; done
         id=$(awk -F'|' -v k="$key" '$2==k && $3=="open"{print $1; exit}' "$FAKE_LEDGER" 2>/dev/null)
         [ -n "$id" ] && printf '[{"id":"%s"}]\n' "$id" || printf '[]\n' ;;
       create)
-        n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"
-        printf '%s||open\n' "$id" >> "$FAKE_LEDGER"
+        # A bead's rig key comes from its create's --metadata alone, as update
+        # sets no key, so a bead filed without one is a bead no lookup finds.
+        n=$(( $(wc -l < "$FAKE_LEDGER" 2>/dev/null || echo 0) + 1 )); id="esc-$n"; key=""
         printf '%s\n' "$1" > "$FAKE_LEDGER.$id.title"
-        while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
+        while [ $# -gt 0 ]; do
+          [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
+          [ "$1" = "--metadata" ] && key=$(printf '%s' "$2" | jq -r '.reconcile_rig // empty')
+          shift
+        done
+        printf '%s|%s|open\n' "$id" "$key" >> "$FAKE_LEDGER"
         printf '{"id":"%s"}\n' "$id" ;;
       update)
-        id="$1"; shift; key=""
+        id="$1"; shift
         while [ $# -gt 0 ]; do
-          [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
           [ "$1" = "--title" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.title"
           [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
           shift
-        done
-        [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
+        done ;;
       close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
   session) : ;;
@@ -423,6 +441,62 @@ eq "$(esc_count rho)" "0" "a rig whose fetch fails files no gate"
 eq "$(open_count rho)" "0" "a rig whose fetch fails files no reconcile bead"
 eq "$(retract_count rho)" "0" "a rig whose fetch fails withdraws nothing"
 eq "$RHO_OUT" "reconcile-rig-checkouts: 0 advanced, 0 blocked" "a rig whose fetch fails is counted neither advanced nor blocked"
+
+# --- A rig whose bead cannot be read. ----------------------------------------
+# nu is diverged. A pass whose lookup of nu's bead fails, in each way the fake
+# list answers under FAKE_LIST_FAIL, warns and files nothing, whether nu has a
+# bead yet or not. The next pass that reads the store keeps to the bead already
+# open, and once nu recovers, a pass that cannot read it withdraws and closes
+# nothing, leaving both to the pass after.
+git init -q -b main "$TMP/nu.src"; commit "$TMP/nu.src" n1; commit "$TMP/nu.src" n2
+git clone -q --bare "$TMP/nu.src" "$TMP/nu.git"
+git clone -q "$TMP/nu.git" "$TMP/nu"
+commit "$TMP/nu" n3-local                                        # diverge
+commit "$TMP/nu.src" n3-remote
+git -C "$TMP/nu.src" push -q "$TMP/nu.git" main
+NU_REMOTE="$(git -C "$TMP/nu.git" rev-parse main)"
+NU_WARNED='could not read the reconcile bead of rigs/nu'
+rigs_json nu
+: > "$TMP/escalations"; : > "$TMP/retractions"
+FILED_BEFORE="$(filed_count)"
+NU_OUT="$(FAKE_LIST_FAIL=error bash "$SCRIPT" 2>"$TMP/nu.err")"
+eq "$(filed_count)" "$FILED_BEFORE" "a pass that cannot read the store files no bead for a rig with none"
+eq "$(esc_count nu)" "0" "a pass that cannot read the store files no gate for a rig with no bead"
+eq "$NU_OUT" "reconcile-rig-checkouts: 0 advanced, 1 blocked" "a rig whose bead cannot be read is still counted blocked"
+grep -q "$NU_WARNED" "$TMP/nu.err" \
+  && ok "a pass that cannot read the store warns, naming the rig" \
+  || bad "a pass that cannot read the store warns, naming the rig (got '$(cat "$TMP/nu.err")')"
+bash "$SCRIPT" >/dev/null
+eq "$(open_count nu)" "1" "the next pass that reads the store files the bead"
+NU_BEAD="$(bead_for nu)"
+for shape in error status object noid; do
+  : > "$TMP/escalations"
+  FILED_BEFORE="$(filed_count)"
+  FAKE_LIST_FAIL="$shape" bash "$SCRIPT" >/dev/null 2>"$TMP/nu.err"
+  eq "$(filed_count)" "$FILED_BEFORE" "a lookup that fails ($shape) files no second bead beside the open one"
+  eq "$(esc_count nu)" "0" "a lookup that fails ($shape) files no second gate"
+  grep -q "$NU_WARNED" "$TMP/nu.err" \
+    && ok "a lookup that fails ($shape) warns" \
+    || bad "a lookup that fails ($shape) warns (got '$(cat "$TMP/nu.err")')"
+done
+: > "$TMP/escalations"
+bash "$SCRIPT" >/dev/null
+eq "$(bead_for nu)" "$NU_BEAD" "the next pass that reads the store keeps to the bead already open"
+eq "$(open_count nu)" "1" "the rig still has one open bead"
+eq "$(esc_subject nu)" "$NU_BEAD" "the next pass files its gate on the bead already open"
+
+git -C "$TMP/nu" reset --hard -q origin/main
+: > "$TMP/retractions"
+FAKE_LIST_FAIL=error bash "$SCRIPT" >/dev/null 2>"$TMP/nu.err"
+eq "$(git -C "$TMP/nu" rev-parse HEAD)" "$NU_REMOTE" "a rig whose bead cannot be read still fast-forwards"
+eq "$(retract_count nu)" "0" "a pass that cannot read a recovered rig's bead withdraws no gate"
+eq "$(open_count nu)" "1" "a pass that cannot read a recovered rig's bead closes nothing"
+grep -q "$NU_WARNED" "$TMP/nu.err" \
+  && ok "a pass that cannot read a recovered rig's bead warns" \
+  || bad "a pass that cannot read a recovered rig's bead warns (got '$(cat "$TMP/nu.err")')"
+bash "$SCRIPT" >/dev/null
+eq "$(retract_subject nu)" "$NU_BEAD" "the next pass that reads the store withdraws the recovered rig's gate"
+eq "$(open_count nu)" "0" "the next pass that reads the store closes the recovered rig's bead"
 
 # No subject bead or gate message this suite filed tells a person to run a
 # reset that overwrites what is in its way.
