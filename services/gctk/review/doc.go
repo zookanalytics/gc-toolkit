@@ -12,7 +12,8 @@
 // through Results, and FileAsk files the asks the run works, whose checks the
 // domain's review_checks names.
 //
-// For the demo check, ReadImages reads what a change does to the images its
-// repository holds, and ImageComments renders the comments that show each one
-// on its PR, a changed one before and after (images.go).
+// For the demo check, ShowImages reads what a change does to the images its
+// repository holds and lays out the comments that show each one on its PR, a
+// changed one before and after, and Post posts them through the writer of the
+// city's PR posts (images.go).
 package review

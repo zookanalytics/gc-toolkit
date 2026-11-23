@@ -1,21 +1,16 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -49,9 +44,6 @@ exit: 0 posted, or printed with --dry-run
         comments that did
       2 usage
       3 the change touches no image, so nothing posted`
-
-// postBound is the longest one comment's post may take.
-const postBound = 2 * time.Minute
 
 // pullRequestURL is a pull request's address on its host.
 var pullRequestURL = regexp.MustCompile(`^https://([^/]+)/([^/]+/[^/]+)/pull/([0-9]+)/?$`)
@@ -101,74 +93,29 @@ type imagesCall struct {
 }
 
 func reviewImages(c imagesCall, stdout, stderr io.Writer) int {
-	origin, err := git.OriginURL(c.dir)
+	show, err := review.ShowImages(c.dir, c.pr, c.host, c.repo, c.number, c.base, c.oid)
 	if err != nil {
-		fmt.Fprintf(stderr, "gctk review images: the clone's origin did not read: %v\n", err)
+		fmt.Fprintf(stderr, "gctk review images: %v\n", err)
+		if errors.Is(err, review.ErrNoImages) {
+			return 3
+		}
 		return 1
 	}
-	if host, repo, ok := git.RemoteRepository(origin); !ok || !strings.EqualFold(host, c.host) || !strings.EqualFold(repo, c.repo) {
-		fmt.Fprintf(stderr, "gctk review images: %s is a pull request of %s/%s, not of the repository the clone's origin names (%s); nothing posted\n",
-			c.pr, c.host, c.repo, origin)
-		return 1
+	if c.dryRun {
+		for i, b := range show.Comments {
+			fmt.Fprintf(stdout, "== comment %d of %d\n%s\n", i+1, len(show.Comments), b)
+		}
+		fmt.Fprintf(stdout, "gctk review images: would post %s\n", show.Summary())
+		return 0
 	}
-	im, err := review.ReadImages(c.dir, c.base, c.oid)
+	printed, err := show.Post(gascity.New().In(c.dir))
+	for _, out := range printed {
+		fmt.Fprintln(stdout, out)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review images: %v\n", err)
 		return 1
 	}
-	if len(im.Changes) == 0 {
-		fmt.Fprintf(stderr, "gctk review images: the change from %s to %s adds, changes, moves or removes no image; nothing posted\n", c.base, c.oid)
-		return 3
-	}
-	bodies := im.ImageComments(c.host, c.repo)
-	groups := len(im.Groups())
-	what := fmt.Sprintf("%s, in %d %s, at %s", im.Counts(), groups, plural(groups, "group", "groups"), im.Head)
-	if c.dryRun {
-		for i, b := range bodies {
-			fmt.Fprintf(stdout, "== comment %d of %d\n%s\n", i+1, len(bodies), b)
-		}
-		fmt.Fprintf(stdout, "gctk review images: would post %d %s on %s: %s\n", len(bodies), plural(len(bodies), "comment", "comments"), c.pr, what)
-		return 0
-	}
-	tmp, err := os.MkdirTemp("", "gctk-review-images-")
-	if err != nil {
-		fmt.Fprintf(stderr, "gctk review images: no directory for the comments: %v; nothing posted\n", err)
-		return 1
-	}
-	defer func() { _ = os.RemoveAll(tmp) }()
-	rt := gascity.New().In(c.dir)
-	for i, b := range bodies {
-		file := filepath.Join(tmp, fmt.Sprintf("comment-%d.md", i+1))
-		res := gascity.Result{Code: -1}
-		if err = os.WriteFile(file, []byte(b), 0o600); err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), postBound)
-			res = rt.Within(ctx).Script("pr-post.sh", "comment", "--repo", c.host+"/"+c.repo,
-				"--pr", strconv.Itoa(c.number), "--body-file", file)
-			cancel()
-		}
-		why := res.Failure()
-		if err != nil {
-			why = err.Error()
-		}
-		if why != "" {
-			posted := "none posted"
-			if i > 0 {
-				posted = fmt.Sprintf("comments 1 to %d posted", i)
-			}
-			fmt.Fprintf(stderr, "gctk review images: comment %d of %d did not post on %s: %s; %s\n", i+1, len(bodies), c.pr, why, posted)
-			return 1
-		}
-		if out := strings.TrimSpace(res.Output); out != "" {
-			fmt.Fprintln(stdout, out)
-		}
-	}
-	fmt.Fprintf(stdout, "gctk review images: posted %d %s on %s: %s\n", len(bodies), plural(len(bodies), "comment", "comments"), c.pr, what)
+	fmt.Fprintf(stdout, "gctk review images: posted %s\n", show.Summary())
 	return 0
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
 }

@@ -2,8 +2,13 @@ package review
 
 import (
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	rtfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 )
 
 // The parts of a name that vary are the last ones that take few values,
@@ -118,5 +123,41 @@ func TestImageCommentsSplitUnderTheLimit(t *testing.T) {
 			t.Errorf("%s: %d comments show %d images and name %d moved, want more than one showing %d and naming %d",
 				c.why, len(bodies), shown, moved, c.changed, c.moved)
 		}
+	}
+}
+
+// A comment that does not post ends the post. The error names it and the
+// comments that posted, which stay on the PR, and what the writer printed for
+// those comes back.
+func TestPostNamesTheCommentThatDidNotPostAndThoseThatDid(t *testing.T) {
+	var bodies []string
+	rt := &rtfake.Runtime{OnScript: func(c rtfake.Call) gascity.Result {
+		body, err := os.ReadFile(c.Args[len(c.Args)-1])
+		if err != nil {
+			t.Errorf("the writer was handed no comment to post: %v", err)
+		}
+		bodies = append(bodies, string(body))
+		if len(bodies) == 2 {
+			return gascity.Result{Code: 1, Output: "HTTP 502: Bad Gateway"}
+		}
+		return gascity.Result{Output: fmt.Sprintf("https://github.com/acme/widgets/pull/7#issuecomment-%d\n", len(bodies))}
+	}}
+	show := ImagesOnPR{Comments: []string{"one", "two", "three"}, PR: "https://github.com/acme/widgets/pull/7",
+		host: "github.com", repo: "acme/widgets", number: 7}
+	printed, err := show.Post(rt)
+	if err == nil || !strings.Contains(err.Error(), "comment 2 of 3 did not post on https://github.com/acme/widgets/pull/7: ") ||
+		!strings.HasSuffix(err.Error(), "; comments 1 to 1 posted") {
+		t.Errorf("a post that failed at its second comment answered %v", err)
+	}
+	if !slices.Equal(printed, []string{"https://github.com/acme/widgets/pull/7#issuecomment-1"}) {
+		t.Errorf("the writer's lines for the comments that posted are %q", printed)
+	}
+	if !slices.Equal(bodies, []string{"one", "two"}) {
+		t.Errorf("the writer was handed %q", bodies)
+	}
+	calls := rt.Scripts()
+	want := []string{"comment", "--repo", "github.com/acme/widgets", "--pr", "7", "--body-file"}
+	if len(calls) != 2 || calls[0].Name != "pr-post.sh" || len(calls[0].Args) != len(want)+1 || !slices.Equal(calls[0].Args[:len(want)], want) {
+		t.Errorf("the post made the calls %+v", calls)
 	}
 }

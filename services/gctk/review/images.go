@@ -1,15 +1,22 @@
 package review
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"html"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 )
 
@@ -548,4 +555,108 @@ func code(s string) string { return "<code>" + escape(s) + "</code>" }
 // escape makes s HTML text, safe inside an attribute and in a table cell.
 func escape(s string) string {
 	return strings.ReplaceAll(html.EscapeString(s), "|", "&#124;")
+}
+
+// ErrNoImages is a change that adds, changes, moves or removes no image, so it
+// has nothing to show on its PR.
+var ErrNoImages = errors.New("adds, changes, moves or removes no image; nothing posted")
+
+// ImagesOnPR is a change's images as its PR shows them: the comments that
+// show them, in order, and the PR, by its address and as its host, its
+// repository, owner/name, and its number.
+type ImagesOnPR struct {
+	Images
+	Comments []string
+	PR       string
+	host     string
+	repo     string
+	number   int
+}
+
+// ShowImages reads, in the clone dir sits in, what the change from the merge
+// base of base and oid to oid does to its images, and lays them out as the
+// comments that show them on the PR at the address pr, which is number in
+// repo on host. The PR must be one of the repository the clone's origin names,
+// because each image is drawn from the PR's repository at a commit the clone
+// read. A change that touches no image is ErrNoImages.
+func ShowImages(dir, pr, host, repo string, number int, base, oid string) (ImagesOnPR, error) {
+	origin, err := git.OriginURL(dir)
+	if err != nil {
+		return ImagesOnPR{}, fmt.Errorf("the clone's origin did not read: %w", err)
+	}
+	if h, r, ok := git.RemoteRepository(origin); !ok || !strings.EqualFold(h, host) || !strings.EqualFold(r, repo) {
+		return ImagesOnPR{}, fmt.Errorf("%s is a pull request of %s/%s, not of the repository the clone's origin names (%s); nothing posted",
+			pr, host, repo, origin)
+	}
+	im, err := ReadImages(dir, base, oid)
+	if err != nil {
+		return ImagesOnPR{}, err
+	}
+	if len(im.Changes) == 0 {
+		return ImagesOnPR{}, fmt.Errorf("the change from %s to %s %w", base, oid, ErrNoImages)
+	}
+	return ImagesOnPR{Images: im, Comments: im.ImageComments(host, repo), PR: pr, host: host, repo: repo, number: number}, nil
+}
+
+// Summary names what the comments show and where: how many comments, on which
+// PR, how many images of each kind, in how many groups, at which commit.
+func (s ImagesOnPR) Summary() string {
+	groups := len(s.Groups())
+	return fmt.Sprintf("%d %s on %s: %s, in %d %s, at %s", len(s.Comments), plural(len(s.Comments), "comment", "comments"),
+		s.PR, s.Counts(), groups, plural(groups, "group", "groups"), s.Head)
+}
+
+// imagePostBound is the longest one comment's post may take.
+const imagePostBound = 2 * time.Minute
+
+// Scripts is Gas City as the post of the images reaches it: the pack's
+// scripts, each run stopped once the context it is bound to ends.
+type Scripts interface {
+	Within(ctx context.Context) gascity.Runtime
+}
+
+// Post posts the comments in order, each through pr-post.sh comment, the
+// writer of the city's PR posts, within imagePostBound. It returns what the
+// writer printed for each comment that posted. A comment that does not post
+// ends the post, and the error names it and the comments that did, which stay
+// on the PR.
+func (s ImagesOnPR) Post(scripts Scripts) ([]string, error) {
+	tmp, err := os.MkdirTemp("", "gctk-review-images-")
+	if err != nil {
+		return nil, fmt.Errorf("no directory for the comments: %v; nothing posted", err)
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	var printed []string
+	for i, b := range s.Comments {
+		file := filepath.Join(tmp, fmt.Sprintf("comment-%d.md", i+1))
+		res := gascity.Result{Code: -1}
+		if err = os.WriteFile(file, []byte(b), 0o600); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), imagePostBound)
+			res = scripts.Within(ctx).Script("pr-post.sh", "comment", "--repo", s.host+"/"+s.repo,
+				"--pr", strconv.Itoa(s.number), "--body-file", file)
+			cancel()
+		}
+		why := res.Failure()
+		if err != nil {
+			why = err.Error()
+		}
+		if why != "" {
+			posted := "none posted"
+			if i > 0 {
+				posted = fmt.Sprintf("comments 1 to %d posted", i)
+			}
+			return printed, fmt.Errorf("comment %d of %d did not post on %s: %s; %s", i+1, len(s.Comments), s.PR, why, posted)
+		}
+		if out := strings.TrimSpace(res.Output); out != "" {
+			printed = append(printed, out)
+		}
+	}
+	return printed, nil
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

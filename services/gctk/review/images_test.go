@@ -1,6 +1,7 @@
 package review_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -212,5 +213,29 @@ func TestAFewImagesShowOpen(t *testing.T) {
 	body := im.ImageComments("github.com", "acme/widgets")[0]
 	if !strings.Contains(body, "<details open>\n<summary>the repository's top directory · 1 changed and 1 added</summary>") {
 		t.Errorf("two images did not show open:\n%s", body)
+	}
+}
+
+// A PR shows a change's images only when it is a PR of the repository the
+// clone's origin names, whose commits the images are drawn from, and a change
+// that touches no image has nothing to show.
+func TestShowImagesRefusesWhatItCannotShow(t *testing.T) {
+	dir, base, head := imageRepo(t)
+	run(t, dir, "remote", "add", "origin", "git@github.com:acme/widgets.git")
+	_, err := review.ShowImages(dir, "https://github.com/acme/other/pull/7", "github.com", "acme/other", 7, base, head)
+	if err == nil || !strings.Contains(err.Error(), "is a pull request of github.com/acme/other, not of the repository the clone's origin names") {
+		t.Errorf("a PR of another repository answered %v", err)
+	}
+	_, err = review.ShowImages(dir, "https://github.com/acme/widgets/pull/7", "github.com", "acme/widgets", 7, base, base)
+	if !errors.Is(err, review.ErrNoImages) {
+		t.Errorf("a change to no image answered %v", err)
+	}
+	show, err := review.ShowImages(dir, "https://github.com/acme/widgets/pull/7", "github.com", "acme/widgets", 7, "main", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(show.Comments) != 1 || !strings.HasPrefix(show.Summary(), "1 comment on https://github.com/acme/widgets/pull/7: ") ||
+		!strings.HasSuffix(show.Summary(), " at "+head) {
+		t.Errorf("a PR of the origin's repository shows %d comments: %s", len(show.Comments), show.Summary())
 	}
 }
