@@ -332,7 +332,7 @@ func TestALedgerThatDoesNotReadNudgesNothing(t *testing.T) {
 	}
 }
 
-// Two passes at once, as the two orders' runs can be, request one turn for one
+// Two passes at once, as the orders' runs can be, request one turn for one
 // message: the second waits for the first's lock and reads the ledger it wrote.
 func TestTwoPassesAtOnceRequestOneTurn(t *testing.T) {
 	s := sitting("hq-1", "tk-1", "active")

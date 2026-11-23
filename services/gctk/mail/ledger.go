@@ -15,7 +15,7 @@ import (
 // has requested a turn for, with the session it nudged and when. A pass writes
 // it whole once it has visited every session, through a file it renames into
 // place, so a reader never sees half of one. LockFile is the lock every pass
-// holds from before it reads the ledger until after it writes it, so the two
+// holds from before it reads the ledger until after it writes it, so the
 // orders' runs, and a run by hand, never nudge a session twice for one
 // message. The lock is the kernel's advisory lock on the file, which the
 // kernel releases when its holder ends however it ends, and Go opens the file

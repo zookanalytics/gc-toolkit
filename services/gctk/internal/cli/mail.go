@@ -15,8 +15,8 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/mail"
 )
 
-// gctk mail notify is the mail-notify-on-send and mail-notify-on-reply orders'
-// verb (docs/gctk-architecture.md, "The surface"), through the mail package.
+// gctk mail notify is the mail-notify orders' verb (docs/gctk-architecture.md,
+// "The surface"), through the mail package.
 
 func newMailCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("mail", "mail between sessions, and the turn it asks of its recipient",
@@ -25,10 +25,12 @@ requests a recipient's turn only when the sender asks for one.`,
 		newMailNotifyCmd(stdout, stderr))
 }
 
-const mailNotifyLong = `One pass of the mail-notify-on-send and mail-notify-on-reply orders, which
-run it when mail is sent or replied to. Gas City requests a recipient's turn
-only when the sender passes --notify, so the pass requests it for every other
-mail to the sessions of the agents --agents names.
+const mailNotifyLong = `One pass of the mail-notify orders, which run it when mail is sent
+(mail-notify-on-send) or replied to (mail-notify-on-reply), and on a cadence
+(mail-notify-reconcile) for mail whose event's run failed or never came.
+Gas City requests a recipient's turn only when the sender passes --notify, so
+the pass requests it for every other mail to the sessions of the agents
+--agents names.
 
 It reads gc session list --json once, and for each session of a named agent
 whose state is active, awake, asleep, creating or start-pending, it reads its

@@ -3,9 +3,9 @@
 // recipient's turn only for a sender who asks it to. The domain owns the notify
 // ledger, the unread messages its pass has requested a turn for, and the lock
 // its passes share, both in the city's .gc/runtime/packs/gc-toolkit. Its pass,
-// `gctk mail notify`, which the mail-notify-on-send and mail-notify-on-reply
-// orders run when mail is sent or replied to, requests a turn for each listed
-// agent's session that holds unread mail no notice has told it of.
+// `gctk mail notify`, which the mail-notify orders run when mail is sent or
+// replied to and on a cadence, requests a turn for each listed agent's session
+// that holds unread mail no notice has told it of.
 package mail
 
 import (

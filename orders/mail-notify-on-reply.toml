@@ -3,7 +3,7 @@
 # the same pass as mail-notify-on-send, whose header states what the pass does
 # and how to tune it, because an order's event trigger names one event type
 # and a reply records mail.replied, not mail.sent. A city that changes
-# GCTK_MAIL_NOTIFY_AGENTS changes it for both orders.
+# GCTK_MAIL_NOTIFY_AGENTS changes it for each mail-notify order.
 [order]
 description = "When mail is replied to, request a turn for each converse sitting that holds unread mail no notice has told it of"
 trigger = "event"

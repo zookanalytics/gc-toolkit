@@ -1,6 +1,6 @@
 ---
 name: Gas City search — waking a converse sitting for its mail
-description: The search behind the mail-notify-on-send and mail-notify-on-reply orders and their verb, gctk mail notify: the primitive looked for in Gas City and its published packs, and why none covers the need. Read it when changing the orders or the verb, or when a review asks why the wake is the pack's.
+description: The search behind the mail-notify orders and their verb, gctk mail notify: the primitive looked for in Gas City and its published packs, why none covers the wake, and the cooldown trigger the pack composes for the orders' cadence. Read it when changing the orders or the verb, or when a review asks why the wake is the pack's.
 ---
 
 # Gas City search for tk-qpnzxnj
@@ -56,7 +56,31 @@ reads what it needs again ("Orders", the `event` trigger in
 once and that event orders share the per-pass dispatch budget). The course the
 operator ruled out was a Gas City setting built on the city's fork, which only
 the CLI's send and reply applied. Once a Gas City release wakes a session on
-its mail as #1966 rules, the two orders and their verb retire.
+its mail as #1966 rules, the mail-notify orders and their verb retire.
+
+## The cadence order, mail-notify-reconcile
+
+**Searched.** A Gas City primitive that runs the pass again when a mail
+event's run fails, or when no run comes for the mail at all.
+
+- An exec order on an event moves its event cursor before its command runs,
+  "otherwise a crash after the side effect can replay the event"
+  (`memoryOrderDispatcher.dispatchExec` in `cmd/gc/order_dispatch.go`). So a
+  run that fails does not see its event again.
+- An order that has never run fires only on events recorded after the
+  orchestrator started, or after the reload that added it (the `event` trigger
+  in `docs/tutorials/07-orders.md`). So mail sent before the orders load starts
+  no run.
+- The `cooldown` trigger runs an order once its `interval` has passed since its
+  last run, whatever the bus carried (`Order.Interval` in
+  `internal/orders/order.go`, and the trigger table in
+  `docs/tutorials/07-orders.md`).
+
+**Gap.** None. The cooldown trigger is the primitive, and the pack composes
+it: mail-notify-reconcile runs the event orders' pass every 15 minutes, under
+the same lock and ledger, so mail whose event's run failed, whose event the bus
+lost, or which came before the orders loaded still requests its sitting's turn
+with no new mail.
 
 ## The verb, `gctk mail notify`, and what it reads
 
@@ -130,7 +154,7 @@ no second turn. The city this pack runs in is one: its `city.toml` has no
 no `--if-revision`, so no `[ops]` setting would record a keyed nudge there. The
 verb keeps the record as core does, in the pack's state directory,
 `.gc/runtime/packs/gc-toolkit`, holding only messages still unread, under a
-lock both orders' runs take. It passes no `--key` beside the ledger, because in
+lock every order's run takes. It passes no `--key` beside the ledger, because in
 such a city the key records nothing and adds a warning to every nudge, and in a
 city whose journal records nudges the ledger already holds what the key would.
 Once the city keeps its sessions in a store the journal records, the ledger's

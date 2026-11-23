@@ -5,12 +5,13 @@
 # operator next types in it. `gctk mail notify --help` states the rule.
 #
 # The event starts the pass and decides nothing. The pass reads each sitting's
-# unread mail again, so mail whose event Gas City did not record wakes its
-# sitting at the next pass, and a message already read, mail a sitting sends
-# itself, such as a handoff, and mail whose sender's --notify notice is still
-# queued request no turn. A sitting that has finished, or is suspended, keeps
-# its mail waiting. Its twin, mail-notify-on-reply, runs the same pass when
-# mail is replied to, since an order's event trigger names one event type.
+# unread mail again, so a message already read, mail a sitting sends itself,
+# such as a handoff, and mail whose sender's --notify notice is still queued
+# request no turn. A sitting that has finished, or is suspended, keeps its mail
+# waiting. mail-notify-on-reply runs the same pass when mail is replied to,
+# since an order's event trigger names one event type, and
+# mail-notify-reconcile runs it every 15 minutes, for mail whose event's run
+# failed or never came.
 #
 # A running sitting's turn arrives on the orders lane's next pass after the
 # mail, about 30 seconds by default ([daemon] patrol_interval), and later when
@@ -27,15 +28,15 @@
 #
 # GCTK_MAIL_NOTIFY_AGENTS names the agents whose sessions are woken, by the
 # name the pack gives each. A city wakes another agent's sessions the same way
-# with an entry for each of the two orders in city.toml:
+# with an entry for each mail-notify order in city.toml:
 #
 #   [[orders.overrides]]
 #   name = "mail-notify-on-send"
 #   env = { GCTK_MAIL_NOTIFY_AGENTS = "<the converse templates> <another agent>" }
 #
 # Gas City has ruled to wake a session on its mail natively, with a debounce
-# (gastownhall/gascity#1966). Once the city runs a Gas City that does, the two
-# orders and the verb retire.
+# (gastownhall/gascity#1966). Once the city runs a Gas City that does, the
+# mail-notify orders and the verb retire.
 [order]
 description = "When mail is sent, request a turn for each converse sitting that holds unread mail no notice has told it of"
 trigger = "event"

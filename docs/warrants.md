@@ -869,9 +869,9 @@ no warrant.
 ## Mail wake
 
 - **Covers.** `orders/mail-notify-on-send.toml`,
-  `orders/mail-notify-on-reply.toml` and `services/gctk/mail`, the pass they
-  run, with the notify ledger and its lock that the pass keeps under the city's
-  `.gc/runtime/packs/gc-toolkit`.
+  `orders/mail-notify-on-reply.toml`, `orders/mail-notify-reconcile.toml` and
+  `services/gctk/mail`, the pass they run, with the notify ledger and its lock
+  that the pass keeps under the city's `.gc/runtime/packs/gc-toolkit`.
 - **Stands in for.** A session's turn requested for its unread mail whoever
   sent it, as `--notify` requests one when the sender asks. The notify ledger
   stands in for the replay of a keyed `gc session nudge`, which Gas City gives
@@ -905,7 +905,7 @@ no warrant.
     [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
 - **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
 - **Retires when.** A Gas City release requests a session's turn for its unread
-  mail whoever sent it, as #1966 rules. The two orders and the verb then retire,
+  mail whoever sent it, as #1966 rules. The orders and the verb then retire,
   and each agent they list is woken by Gas City. Before that, once the city
   keeps its sessions in a store the op journal records, the notify ledger's
   move onto a keyed nudge is due.
