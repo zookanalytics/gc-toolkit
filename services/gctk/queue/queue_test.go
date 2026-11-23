@@ -478,6 +478,11 @@ func TestScheduled(t *testing.T) {
 		{name: "assigned and held, in any spelling", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"learning", " Hold:Mayor "}, want: false},
 		{name: "worked and held", worked: true, labels: []string{"hold:mayor"}, want: true},
 		{name: "routed, with a label that is no hold", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"learning", "hold:mayor-later"}, want: true},
+		{name: "armed and waiting on a person", h: armed, labels: []string{"human"}, want: false},
+		{name: "routed and waiting on a person, the label trimmed", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"learning", " human "}, want: false},
+		{name: "assigned and waiting on a person", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"human"}, want: true},
+		{name: "worked and waiting on a person", worked: true, labels: []string{"human"}, want: true},
+		{name: "routed, with labels that only resemble the human label", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"Human", "humans"}, want: true},
 	} {
 		if got := scheduled(c.h, c.worked, c.routedTo, c.assignee, c.labels); got != c.want {
 			t.Errorf("%s: scheduled = %v, want %v", c.name, got, c.want)

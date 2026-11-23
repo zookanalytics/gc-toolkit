@@ -267,25 +267,17 @@ func holdsNow(r *ledger.Record, h waits.Holds) string {
 }
 
 // holdLabel is the label on a bead that holds it from any pool: Gas City's
-// human label, compared as bd's ready read compares it, or one of its dispatch
-// holds, as the runtime adapter compares them (gascity.IsDispatchHold). It is
-// empty when none does.
+// human label or one of its dispatch holds, each compared as Gas City compares
+// it (gascity.IsHumanLabel, gascity.IsDispatchHold). It is empty when none
+// does.
 func holdLabel(labels []string) string {
 	for _, l := range labels {
-		if l == humanLabel {
-			return l
-		}
-		if gascity.IsDispatchHold(l) {
+		if gascity.IsHumanLabel(l) || gascity.IsDispatchHold(l) {
 			return strings.TrimSpace(l)
 		}
 	}
 	return ""
 }
-
-// humanLabel is Gas City's label for a bead that waits on a person's decision,
-// which a pool's serve rule leaves out beside the dispatch holds
-// (beadmeta.HumanLabel, read at gastownhall/gascity 8d2fb3120c).
-const humanLabel = "human"
 
 // serveRule is the pool's serve rule over armed beads, the flags Gas City
 // renders for a pool's routed demand (PoolDemandServeRulesForQuery in
@@ -294,7 +286,7 @@ const humanLabel = "human"
 var serveRule = ledger.ServeRule{
 	Unassigned:    true,
 	ExcludeTypes:  []string{"epic"},
-	ExcludeLabels: append(gascity.DispatchHoldLabels(), humanLabel),
+	ExcludeLabels: append(gascity.DispatchHoldLabels(), gascity.HumanLabel),
 }
 
 func describeWaits(ws []waits.Wait) string {

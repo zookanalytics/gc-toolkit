@@ -746,7 +746,8 @@ with what the person can do.
      ([In flight](steering.md#in-flight)), or work a live run works, and
      where its pull request stands is part of the answer.
   10. `scheduled`: it is work that is armed, routed or assigned, and no
-      dispatch hold holds it.
+      dispatch hold holds it. An arm or a route sends no work that carries
+      bd's `human` label.
   11. `not-ready`: it is any other work, which nothing sends and the store
       does not serve as ready.
 

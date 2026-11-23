@@ -103,8 +103,7 @@ const (
 	// run's start. Group queued.
 	RuleInFlight Rule = "in-flight"
 	// RuleScheduled: something sends the work as things stand, as its place in
-	// queue's order says (queue.Place): it is armed, routed to a pool or
-	// assigned to an agent, and no dispatch hold holds it. Group queued.
+	// queue's order says (queue.Place's Scheduled). Group queued.
 	RuleScheduled Rule = "scheduled"
 	// RuleNotReady: any other work, which nothing sends and the store does not
 	// serve as ready. The answer names each wait that holds it. Group
