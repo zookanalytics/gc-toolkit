@@ -82,11 +82,13 @@ func Render(a pr.Answer, f Facts) State {
 // aside and the city's work ranked before an approval
 // (specs/tk-ai367om/design.md, section 3). What holds a PR is a hold set by
 // hand and a wait of its bead's own on a bead only a person clears, by the
-// person rules: one of the facts' human gates, beads a person owes and beads
-// that stay for work ([Facts.Gates], [Facts.Owed] and [Facts.Staying]). A wait
-// on work is the PR's own, whoever that work waits for. The landing order
-// resolves a gctk:needs-review gate once the PR's own status is needs-review or
-// merging. First match:
+// person rules ([person.IsHumanGate] and [person.Clears]): a human gate, a
+// decision, a conversation or a bead assigned to a person, among the facts'
+// [Facts.Gates], [Facts.Owed] and [Facts.Staying]. A wait on work is the PR's
+// own, whoever that work waits for: a wait on another PR's bead is one, even
+// when Owed lists that PR because its next move is a person's. The landing
+// order resolves a gctk:needs-review gate once the PR's own status is
+// needs-review or merging. First match:
 //
 //   - needs-attention: something of its own that only a person clears: its
 //     record does not read or the PR is not open, a required check failed, a
@@ -106,7 +108,9 @@ func Own(a pr.Answer, f Facts) State {
 	}
 	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	held := func(id string) bool {
-		return slices.ContainsFunc(persons, func(b person.Blocker) bool { return b.ID == id })
+		return slices.ContainsFunc(persons, func(b person.Blocker) bool {
+			return b.ID == id && (person.IsHumanGate(b.IssueType, b.AwaitType) || person.Clears(b))
+		})
 	}
 	var attention, approval, city bool
 	mergeState := ""

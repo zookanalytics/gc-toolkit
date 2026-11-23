@@ -8,6 +8,11 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
+// heldBy is a conversation that holds the PR's merge while its sitting holds
+// it.
+var heldBy = person.Blocker{ID: "tk-conv", Title: "a conversation", IssueType: "task", Status: "in_progress",
+	Assignee: "gc-toolkit/gc-toolkit.tk-conv"}
+
 // Own reads the label's rule over the PR's own conditions: what holds it is
 // set aside, and the city's work comes before an approval
 // (specs/tk-ai367om/design.md, section 3).
@@ -15,6 +20,8 @@ func TestOwnReadsThePRsOwnConditions(t *testing.T) {
 	cond := func(k pr.Kind, value string) pr.Condition { return pr.Condition{Kind: k, Value: value} }
 	wait := func(id string) pr.Condition { return pr.Condition{Kind: pr.KindWait, ID: id} }
 	run := prstatus.Facts{Runs: []prstatus.Run{{ID: "tk-run", Status: "closed", Head: "h1", Target: "main", ClosedAt: "2026-11-23T01:00:00Z"}}}
+	otherPR := prstatus.Facts{Owed: []person.Blocker{{ID: "tk-other-pr", Title: "another PR that waits on its review",
+		IssueType: "task", Status: "blocked", Metadata: map[string]string{"merge_result": "pending"}}}}
 	cases := []struct {
 		name  string
 		ready bool
@@ -34,6 +41,8 @@ func TestOwnReadsThePRsOwnConditions(t *testing.T) {
 		{"a wait on other work is working, whoever that work waits for",
 			false, []pr.Condition{cond(pr.KindApproval, ""), wait("tk-other")},
 			prstatus.Facts{Owed: []person.Blocker{{ID: "tk-behind-other", Title: "a conversation behind the other work"}}}, prstatus.Working},
+		{"a wait on another PR whose next move is a person's is working",
+			false, []pr.Condition{cond(pr.KindApproval, ""), wait("tk-other-pr")}, otherPR, prstatus.Working},
 		{"an attached review run is working", false, []pr.Condition{cond(pr.KindApproval, ""), cond(pr.KindInFlight, "")}, prstatus.Facts{}, prstatus.Working},
 		{"an approved PR the city is still changing is working", false, []pr.Condition{cond(pr.KindHead, "")}, prstatus.Facts{}, prstatus.Working},
 		{"an approved PR with nothing of its own left is merging", false, nil, prstatus.Facts{}, prstatus.Merging},
@@ -57,11 +66,16 @@ func TestOwnReadsThePRsOwnConditions(t *testing.T) {
 			return f
 		}},
 		{"a conversation that holds the merge", wait("tk-conv"), func(f prstatus.Facts) prstatus.Facts {
-			f.Owed = append(f.Owed, person.Blocker{ID: "tk-conv", Title: "a conversation"})
+			f.Owed = append(f.Owed, heldBy)
 			return f
 		}},
 		{"a conversation that stays for the work", wait("tk-conv"), func(f prstatus.Facts) prstatus.Facts {
-			f.Staying = append(f.Staying, person.Blocker{ID: "tk-conv", Title: "a staying conversation"})
+			f.Staying = append(f.Staying, person.Blocker{ID: "tk-conv", Title: "a staying conversation", IssueType: "task",
+				Status: "open", Assignee: "gc-toolkit/gc-toolkit.tk-conv"})
+			return f
+		}},
+		{"a decision", wait("tk-dec"), func(f prstatus.Facts) prstatus.Facts {
+			f.Owed = append(f.Owed, person.Blocker{ID: "tk-dec", Title: "pick one", IssueType: "decision", Status: "open"})
 			return f
 		}},
 	}
@@ -91,7 +105,7 @@ func TestOwnDiffersFromTheLabelWhereTheDesignSays(t *testing.T) {
 		t.Errorf("an approved PR with a check running: label %s, own %s; want merging and working", label, own)
 	}
 	held := pr.Answer{Bead: "tk-pr", Head: "h1", Target: "main", Conditions: []pr.Condition{{Kind: pr.KindApproval}, {Kind: pr.KindWait, ID: "tk-conv"}}}
-	facts := prstatus.Facts{Owed: []person.Blocker{{ID: "tk-conv", Title: "a conversation"}}}
+	facts := prstatus.Facts{Owed: []person.Blocker{heldBy}}
 	if label, own := prstatus.Render(held, facts), prstatus.Own(held, facts); label != prstatus.NeedsAttention || own != prstatus.NeedsReview {
 		t.Errorf("a PR a conversation holds that waits on an approval: label %s, own %s; want needs-attention and needs-review", label, own)
 	}
