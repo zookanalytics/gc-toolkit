@@ -903,8 +903,10 @@ withdrawal ends, since its end changes what the record's decision reads of the
 store. A run that comes to the act more than 45 seconds in does
 not start it, and leaves the wake to a later run. A wake that does not land
 records nothing, as an act that does not complete records nothing: the marker
-stays, and the next run wakes the refinery again. The search for a Gas City
-primitive that covers the wake is
+stays, and the next run wakes the refinery again. A record a dead writer left
+half written, which the run sends back to the refinery for its full
+validation, is handed over the same way, and its wake says the record is
+incomplete. The search for a Gas City primitive that covers the wake is
 [specs/tk-1tfzr71.165/gas-city-search.md](../specs/tk-1tfzr71.165/gas-city-search.md).
 
 A merge request binds only the head the evaluator judged on the merge's re-read,

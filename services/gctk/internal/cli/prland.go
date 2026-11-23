@@ -171,7 +171,10 @@ do, the run assigns the bead to the refinery, wakes the refinery and nudges it
 (gc session wake, then gc session nudge), and only then clears the marker. A
 wake that does not land keeps the marker, and the next run wakes the refinery
 again. While another wait holds the bead, the run hands the head over in the
-one write and wakes no one.
+one write and wakes no one. A record a writer left half written, an open bead
+whose marker stands with no whole record, goes back to the refinery for its
+full validation as pull_request_record_incomplete, handed over the same way,
+with a wake that says the record is incomplete.
 
 A PR a ruling retired is decided apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record
