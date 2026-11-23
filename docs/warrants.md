@@ -674,6 +674,15 @@ no warrant.
     `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
     the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
     a closed bead and has no uncommitted work.
+  - Nothing in Gas City hides from git what it writes into a home or a rig
+    checkout. It adds ignore lines only to a scope root's tracked `.gitignore`
+    (`ensureGitignoreEntries` in `cmd/gc/gitignore.go`). Of what it writes into
+    a work dir, it records only the skill links, in the ownership manifest it
+    keeps in each sink (`ownershipManifestFile` in
+    `internal/materialize/skills.go`), which the script reads to name each
+    link. [gastownhall/gascity#6736](https://github.com/gastownhall/gascity/issues/6736),
+    open, proposes a block of gc's own in the exclude file, for its `.beads`
+    files and `.gc/`.
   - Nothing in Gas City brings a failed `pre_start` to a person. The command's
     output goes into the start's error, which the controller and reconciler log
     ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
@@ -681,20 +690,24 @@ no warrant.
     (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
     `cmd/gc/session_types.go`), and a failed pending create also counts toward
     a startup-health episode (`recordStartupHealthFailure` in
-    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
-    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
-    the doctor check that lists episodes leaves the error out
+    `cmd/gc/session_lifecycle_parallel.go`). An episode that reaches that count
+    records one `session.startup_health_alert` event and one reconciler log line,
+    both without the error (`emitStartupHealthAlert` in
+    `cmd/gc/startup_health_backoff.go`), and nothing in Gas City acts on that
+    event. The doctor check that lists episodes leaves the error out too
     (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
   - The search, and each way this script differs from Gas Town's and why, are
-    in two records:
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
-    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
-    for when the script fetches, its retry of the add and its signal traps.
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
-  `gastownhall/gascity-packs` main 2a3b142e3fbd.
+    in its records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md);
+    [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps; and
+    [specs/tk-rdimhd9/gas-city-search.md](../specs/tk-rdimhd9/gas-city-search.md)
+    for which of gc's writes its excludes name.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main dfd5200c3ee3 and
+  `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.

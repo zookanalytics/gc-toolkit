@@ -7,6 +7,15 @@
 # Uses a real temp git rig (a clone of a bare remote, so origin/HEAD resolves)
 # and drives the real script, with a stub in place of patrol-finding.sh that
 # records each call. No live city, gc, store or network. Covers:
+#   (a) a new home's run writes Gas City's exclude block, which names each
+#       path gc and the pack write and no whole provider directory, and names
+#       every file under the pack's overlays/;
+#   (b) a run rewrites a block an older run left: the lines GC_WRITES no
+#       longer holds, a second start marker and a pattern under a skill sink
+#       leave, and the skill links the block gathered stay, as does what a
+#       person keeps before it. The block gains an end marker, a person's line
+#       after it survives the next run, and a run with nothing new to write
+#       leaves the file untouched;
 #   (e) a file staged from a non-empty target loses to the file the checkout
 #       brought, and a file only the stage holds comes back;
 #   (f) a normal run leaves no stage dir behind, and the provider settings gc
@@ -26,7 +35,8 @@
 #   (l) a detached home whose per-target branch holds a commit the tip lacks
 #       moves to the tip detached, and the branch keeps its commit;
 #   (m) an untracked file gc did not write fails the start, the file intact,
-#       and the report lists five such files and counts the rest;
+#       and the report lists five such files and counts the rest. A file
+#       under .claude/ fails it too, while gc's settings beside it do not;
 #   (n) a post-checkout hook that fails the add leaves a half-built worktree
 #       (git keeps it), over which no second add is tried, and the re-run
 #       gives it the bead redirect and the Gas City exclude marker, so runtime
@@ -41,15 +51,17 @@
 #   (q) a worktree whose git metadata is gone still gets its redirect, and the
 #       run still exits 0;
 #   (r) gc's writes stay out of git status in the worktree and in the rig
-#       checkout that shares its exclude file: the skill links its ownership
-#       manifests name under .agents/skills/, the manifest itself,
-#       .gc/settings.json and .beads.gate.lock, and none of them fails a sync.
-#       Everything else a person keeps there still shows and stages, in both:
-#       a plain file, a link of their own, a new skill directory, and changes
-#       to a skill the repo tracks. A link gc adds later is hidden by the next
-#       run, a manifest name git would read as a pattern or that ends in a
-#       newline is never written, and without jq or a readable manifest the
-#       run still succeeds and adds no name;
+#       checkout that shares its exclude file: the skill links the ownership
+#       manifest in each skill sink names, each manifest, the settings and
+#       hooks a claude and a codex session start with, .gc/settings.json and
+#       .beads.gate.lock, and none of them fails a sync. Everything else a
+#       person keeps there still shows and stages, in both: a plain file, a
+#       link of their own, a new skill directory, changes to a skill the repo
+#       tracks, and their commands, skills, agents and prompts under .claude/,
+#       .codex/ and .gemini/. A link gc adds later is hidden by the next run, a
+#       manifest name git would read as a pattern or that ends in a newline is
+#       never written, and without jq or a readable manifest the run still
+#       succeeds and adds no name;
 #   (s) a home on a branch not its own fails the start and stays on it;
 #   (t) in a rig that tracks a provider settings file, gc's merge into it is
 #       no edit, and the home fast-forwards with it; when the tip changes that
@@ -57,8 +69,9 @@
 #       reason, and the report names the move to make by hand, for a home on
 #       its branch and for a detached one. After that move, and gc's merge
 #       made again, the next start goes through;
-#   (u) a path gc writes that the rig's .gitignore re-includes is no edit
-#       either, and a person's file beside it still fails the start;
+#   (u) a link gc writes where the rig's .gitignore re-includes it is no edit
+#       either, and once a run reads the manifest naming it, git status hides
+#       it too. A person's file beside it still fails the start;
 #   (v) a rebase, a merge and a bisect a session left stopped each fail the
 #       start, their state kept;
 #   (w) a repository with no origin is left where it is, silently and with no
@@ -172,6 +185,101 @@ calls() {
 reported() {
     awk -F'\t' -v k="$(key_of "$1" "$2")" '$1 == k && $2 == "report" { line = $3 " | " $4 } END { print line }' "$FINDING_LOG"
 }
+# inode_of <file> — the file's inode, which a replace by rename changes
+inode_of() { ls -i "$1" | awk '{print $1}'; }
+
+# The lines Gas City's exclude block opens with, each path gc and the pack
+# write, in the order the script writes them.
+BLOCK_HEAD='# Gas City worktree infrastructure (local excludes)
+.beads/redirect
+.beads/hooks/
+.beads/formulas/
+/worktrees/
+.claude/settings.json
+.claude/hooks/cycle-recycle.sh
+.claude/hooks/patrol-continue.sh
+.claude/hooks/work-context.sh
+.codex/hooks.json
+.gc/
+.beads.gate.lock
+.worktree-stale'
+BLOCK_END='# End of Gas City worktree infrastructure'
+
+# --- (a) a new home's run writes Gas City's exclude block. It names each path
+#         gc and the pack write and no whole provider directory, since a rig
+#         keeps files of its own under one, and it names every file the pack's
+#         overlays stage into a home. Its own rig, so the block holds no link
+#         another case's manifest names. ---------------------------------------
+AR="$TMP/arig"; git clone -q "$TMP/remote.git" "$AR"
+P="$TMP/a"; mkdir -p "$P"; W="$P/agentA"
+eq "$(rc_of "$AR" "$W" agentA)" "0"          "(a) the home is made"
+EXF=$(gitpath "$W" info/exclude)
+eq "$(awk -v m="# Gas City worktree infrastructure (local excludes)" '$0 == m { f = 1 } f' "$EXF")" \
+    "$BLOCK_HEAD
+$BLOCK_END" "(a) the block names each path gc and the pack write, and no provider directory"
+OVERLAY_FILES=$(cd "$HERE/../../overlays" && find . -type f | sed 's#^\./[^/]*/##' | LC_ALL=C sort -u)
+[ -n "$OVERLAY_FILES" ] && ok "(a) the pack's overlays hold files to check" || bad "(a) the pack's overlays hold files to check (none found)"
+while IFS= read -r F; do
+    [ -n "$F" ] || continue
+    if grep -qxF "$F" "$EXF"; then ok "(a) the block names $F, which an overlay stages"
+    else bad "(a) the block names $F, which an overlay stages (GC_WRITES lacks it)"; fi
+done <<EOF
+$OVERLAY_FILES
+EOF
+
+# --- (b) a run rewrites the block an older run left, which only ever gained
+#         lines. The lines GC_WRITES no longer holds leave, and so do a second
+#         start marker and a pattern under a skill sink. The skill links the
+#         block gathered stay, since another home's manifest can still name
+#         them, and so does what a person keeps before the block. The block
+#         gains an end marker, and a line a person adds after it survives the
+#         next run, which has nothing new to write and leaves the file
+#         untouched. Its own rig. ----------------------------------------------
+OR="$TMP/oldrig"; git clone -q "$TMP/remote.git" "$OR"
+EXF=$(gitpath "$OR" info/exclude)
+cat > "$EXF" <<'OLD_BLOCK'
+# a person's own exclude
+mine-before.txt
+# Gas City worktree infrastructure (local excludes)
+.beads/redirect
+.beads/hooks/
+.beads/formulas/
+.runtime/
+.logs/
+worktrees/
+__pycache__/
+.claude/
+.codex/
+.gemini/
+.opencode/
+.github/hooks/
+.github/copilot-instructions.md
+state.json
+.agents/skills/.gc-skill-ownership.json
+.gc/
+.beads.gate.lock
+.worktree-stale
+.agents/skills/gathered-skill
+.agents/skills/*
+# Gas City worktree infrastructure (local excludes)
+.agents/skills/another-skill
+OLD_BLOCK
+P="$TMP/b"; mkdir -p "$P"; W="$P/agentB"
+eq "$(rc_of "$OR" "$W" agentB)" "0"          "(b) the home is made"
+eq "$(cat "$EXF")" "# a person's own exclude
+mine-before.txt
+$BLOCK_HEAD
+.agents/skills/.gc-skill-ownership.json
+.agents/skills/another-skill
+.agents/skills/gathered-skill
+$BLOCK_END" "(b) the block holds the current list and the links it gathered, after what a person keeps before it"
+eq "$(ls -l "$EXF" | cut -c1-10)" "-rw-r--r--" "(b) and the rewritten file is readable to all, as git writes it"
+echo mine-after.txt >> "$EXF"
+INODE=$(inode_of "$EXF")
+eq "$(rc_of "$OR" "$W" agentB)" "0"          "(b) the next run succeeds"
+eq "$(tail -n 2 "$EXF")" "$BLOCK_END
+mine-after.txt"                              "(b) a line a person adds after the block survives the next run"
+eq "$(inode_of "$EXF")" "$INODE"             "(b) which has nothing new to write and leaves the file untouched"
 
 
 # --- (e) a non-empty target: the file the checkout brought wins over a staged
@@ -285,7 +393,10 @@ eq "$(git -C "$RIG" rev-parse "refs/heads/$BR")" "$MINE" "(l) and its branch kee
 eq "$ERR:$(calls "$W" agentL report)" ":0"   "(l) silently, with no report"
 
 # --- (m) an untracked file gc did not write fails the start, the file intact.
-#         The report lists five such files and counts the rest. ---------------
+#         The report lists five such files and counts the rest. A file under
+#         .claude/ that gc did not write fails it too, and git lists the
+#         directory, which holds no file git tracks. The settings gc writes
+#         beside it fail nothing. ---------------------------------------------
 P="$TMP/m"; mkdir -p "$P"; W="$P/agentM"
 run "$W" agentM
 BEFORE=$(head_of "$W")
@@ -298,6 +409,13 @@ has "$(reported "$W" agentM)" "files git does not track (findings.json)" "(m) th
 for N in 1 2 3 4 5; do echo n > "$W/note$N.md"; done
 has "$(sync_stderr "$W" agentM)" "files git does not track (findings.json, note1.md, note2.md, note3.md, note4.md, and 1 more)" \
     "(m) five files are listed, and the rest counted"
+rm -f "$W/findings.json" "$W"/note?.md
+mkdir -p "$W/.claude"; echo '{"hooks":{}}' > "$W/.claude/settings.json"; echo '{}' > "$W/.claude/settings.local.json"
+ERR=$(sync_stderr "$W" agentM)
+has "$ERR" "files git does not track (.claude/)" "(m) a file under .claude/ that gc did not write fails the start"
+present "$W/.claude/settings.local.json"     "(m) and stays as it was"
+rm -f "$W/.claude/settings.local.json"
+eq "$(sync_stderr "$W" agentM)" ""           "(m) while the settings gc writes beside it fail nothing"
 
 # --- (n) a post-checkout hook that fails the add: git keeps the worktree, so the
 #         first run leaves it half-built, and the re-run completes it. The
@@ -374,12 +492,14 @@ eq "$(cat "$P/agentQ/.beads/redirect" 2>/dev/null)" "$RIG/.beads" "(q) it still 
 
 # --- (r) gc's writes stay out of git status, in the worktree and in the rig
 #         checkout, which shares its exclude file, and none of them fails a
-#         sync. gc's skill links are hidden by the exact names its ownership
-#         manifest records, so what a person keeps under .agents/skills/ still
-#         shows: a skill the repo tracks, a new skill, a plain file and a link
-#         of their own. The runs after a person's files land provision without
-#         --sync, which those files would fail. Its own rig, so no other case's
-#         exclude file is reused. ---------------------------------------------
+#         sync. gc's skill links are hidden by the exact names the ownership
+#         manifest in each skill sink records, and its provider files by their
+#         exact paths, so what a person keeps beside them still shows: under
+#         .agents/skills/, a skill the repo tracks, a new skill, a plain file
+#         and a link of their own, and under .claude/, .codex/ and .gemini/,
+#         their commands, skills, agents and prompts. The runs after a person's
+#         files land provision without --sync, which those files would fail.
+#         Its own rig, so no other case's exclude file is reused. --------------
 SR="$TMP/skillsrc"; git init -q -b main "$SR"
 mkdir -p "$SR/.agents/skills/tracked-skill"
 echo seed > "$SR/README.md"; echo skill > "$SR/.agents/skills/tracked-skill/SKILL.md"
@@ -387,21 +507,35 @@ git -C "$SR" add -A; git -C "$SR" commit -qm init
 git clone -q --bare "$SR" "$TMP/skills.git"
 SKR="$TMP/skillrig"; git clone -q "$TMP/skills.git" "$SKR"
 P="$TMP/r"; mkdir -p "$P"; W="$P/agentR"
-# gc_link <checkout> <name>... — what gc's skill pass leaves in a checkout's
-# .agents/skills/: a link per name to a skill directory by its absolute path,
-# and the ownership manifest recording every name it linked there.
-gc_link() {
-    local co="$1" name json="" sep=""; shift
+# gc_link_in <sink> <checkout> <name>... — what gc's skill pass leaves in one
+# of a checkout's skill sinks: a link per name to a skill directory by its
+# absolute path, and the ownership manifest recording every name it linked
+# there.
+gc_link_in() {
+    local sink="$1" co="$2" name json="" sep=""; shift 2
+    mkdir -p "$co/$sink"
     for name in "$@"; do
         mkdir -p "$TMP/linked/$name"
-        [ -L "$co/.agents/skills/$name" ] || ln -s "$TMP/linked/$name" "$co/.agents/skills/$name"
+        [ -L "$co/$sink/$name" ] || ln -s "$TMP/linked/$name" "$co/$sink/$name"
         json="$json$sep\"$name\":\"$TMP/linked/$name\""; sep=","
     done
-    printf '{"targets":{%s}}' "$json" > "$co/.agents/skills/.gc-skill-ownership.json"
+    printf '{"targets":{%s}}' "$json" > "$co/$sink/.gc-skill-ownership.json"
 }
-# gc_writes <checkout> — the rest of what gc and bd leave in a checkout: the
-# staged session settings and bd's workspace gate.
-gc_writes() { mkdir -p "$1/.gc"; echo '{}' > "$1/.gc/settings.json"; : > "$1/.beads.gate.lock"; }
+# gc_link <checkout> <name>... — the same, in .agents/skills/
+gc_link() { gc_link_in .agents/skills "$@"; }
+# gc_writes <checkout> — the rest of what gc and bd leave in a checkout: a link
+# in every other skill sink, the settings and hooks a claude and a codex
+# session start with, the staged session settings and bd's workspace gate.
+gc_writes() {
+    local sink
+    for sink in .claude/skills .gemini/skills .opencode/skills .mimocode/skills; do
+        gc_link_in "$sink" "$1" gc-toolkit.work
+    done
+    mkdir -p "$1/.claude/hooks" "$1/.codex" "$1/.gc"
+    echo '{}' > "$1/.claude/settings.json"; echo hook > "$1/.claude/hooks/work-context.sh"
+    echo '{}' > "$1/.codex/hooks.json"
+    echo '{}' > "$1/.gc/settings.json"; : > "$1/.beads.gate.lock"
+}
 # The rig checkout's links exist before the agent starts: a skill from an
 # imported pack, and a bare name from an agent-local skill.
 gc_link "$SKR" gc-toolkit.work local-skill; gc_writes "$SKR"
@@ -410,6 +544,32 @@ gc_link "$W" gc-toolkit.work local-skill; gc_writes "$W"
 eq "$(git -C "$W" status --porcelain)" ""    "(r) gc's writes stay out of the worktree's git status"
 eq "$(git -C "$SKR" status --porcelain)" ""  "(r) and out of the rig checkout's, which shares the exclude file"
 eq "$(sync_in "$SKR" "$W" agentR)" ""        "(r) and none of them fails a sync"
+# A person's commands, skills, agents and prompts beside gc's files under the
+# providers' directories, in each.
+PERSON_FILES='.claude/commands/review.md
+.claude/skills/my-skill/SKILL.md
+.claude/agents/helper.md
+.codex/prompts/fix.md
+.gemini/commands/plan.toml'
+for CO in "$W" "$SKR"; do
+    while IFS= read -r F; do mkdir -p "$CO/${F%/*}"; echo mine > "$CO/$F"; done <<EOF
+$PERSON_FILES
+EOF
+    ST=$(git -C "$CO" status --porcelain --untracked-files=all)
+    ADDED=$(git -C "$CO" add -A --dry-run)
+    while IFS= read -r F; do
+        has "$ST" "?? $F"      "(r) a person's $F shows (${CO##*/})"
+        has "$ADDED" "add '$F'" "(r) and git add -A stages it (${CO##*/})"
+    done <<EOF
+$PERSON_FILES
+EOF
+    for GC_FILE in .claude/settings.json .claude/hooks/work-context.sh .codex/hooks.json .gc-skill-ownership.json; do
+        lacks "$ADDED" "$GC_FILE" "(r) while gc's $GC_FILE stays unstaged (${CO##*/})"
+    done
+    while IFS= read -r F; do rm -f "$CO/$F"; done <<EOF
+$PERSON_FILES
+EOF
+done
 # A person's plain file and their own link to a skill directory, in each.
 for CO in "$W" "$SKR"; do
     echo notes > "$CO/.agents/skills/README.md"
@@ -519,9 +679,10 @@ eq "$(sync_in "$TR" "$W" agentT)" ""         "(t) after the detached move, the n
 eq "$(head_of "$W"):$(branch_of "$W")" "$(git -C "$TMP/t.git" rev-parse main):$BR" \
     "(t) back on its own branch at the tip"
 
-# --- (u) a path gc writes stays no edit when the rig's .gitignore re-includes
+# --- (u) a link gc writes stays no edit when the rig's .gitignore re-includes
 #         it, as a repository that tracks skills under .claude/skills/ does, so
-#         git status shows gc's link there. A person's file beside it still
+#         git status shows gc's link there until a run reads the manifest that
+#         names it, and from then on hides it. A person's file beside it still
 #         fails the start. Its own remote. ------------------------------------
 US="$TMP/usrc"; git init -q -b main "$US"
 mkdir -p "$US/.claude/skills/tracked"; echo skill > "$US/.claude/skills/tracked/SKILL.md"
@@ -531,9 +692,10 @@ git clone -q --bare "$US" "$TMP/u.git"
 UR="$TMP/urig"; git clone -q "$TMP/u.git" "$UR"
 P="$TMP/u"; mkdir -p "$P"; W="$P/agentU"
 eq "$(rc_of "$UR" "$W" agentU)" "0"          "(u) the home is made"
-mkdir -p "$TMP/linked/u-skill"; ln -s "$TMP/linked/u-skill" "$W/.claude/skills/gc-linked"
+gc_link_in .claude/skills "$W" gc-linked
 has "$(git -C "$W" status --porcelain)" "?? .claude/skills/gc-linked" "(u) git status shows gc's link"
 eq "$(sync_in "$UR" "$W" agentU)" ""         "(u) and it does not fail the start"
+eq "$(git -C "$W" status --porcelain)" ""    "(u) which read the manifest, so git status hides the link and the manifest"
 echo mine > "$W/notes.txt"
 ERR=$(sync_in "$UR" "$W" agentU)
 has "$ERR" "files git does not track (notes.txt)" "(u) a person's file beside it does"

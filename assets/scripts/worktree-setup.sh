@@ -24,31 +24,34 @@ AGENT="${3:?missing agent-name}"
 SYNC="${4:-}"
 FINDING="${GC_PATROL_FINDING_TOOL:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/patrol-finding.sh}"
 
-# What gc writes into a home, one gitignore pattern per line: the bead redirect
-# and bd's files beside it, each provider's settings, hooks and skills, runtime
-# state and logs, the per-bead worktrees under the home, the city settings
-# session start stages under .gc/, and the marker the worker-dir prune leaves
-# in a home it keeps. The skill links an ownership manifest records join them
-# (gc_writes). provision_worktree hides each from git status, and sync_worktree
-# counts none of them as an edit.
+# What gc and the pack write into a home or the rig checkout, one gitignore
+# pattern per line, each naming its writer's own files. A rig keeps commands,
+# skills, agents and prompts of its own under a provider's directory, so no
+# line names a whole one. The lines are the bead redirect and bd's files beside
+# it, the per-bead worktrees at a home's root, the Claude settings gc merges
+# the pack's overlays into, each hook those overlays stage, the Codex hooks gc
+# installs, the city settings session start stages under .gc/, bd's workspace
+# gate, and the marker the worker-dir prune leaves in a home it keeps. The
+# skill links gc records join them (gc_writes). provision_worktree hides each
+# from git status, and sync_worktree counts none of them as an edit.
+# worktree-setup.test.sh holds the list to the files under overlays/.
 GC_WRITES='.beads/redirect
 .beads/hooks/
 .beads/formulas/
-.runtime/
-.logs/
-worktrees/
-__pycache__/
-.claude/
-.codex/
-.gemini/
-.opencode/
-.github/hooks/
-.github/copilot-instructions.md
-state.json
-.agents/skills/.gc-skill-ownership.json
+/worktrees/
+.claude/settings.json
+.claude/hooks/cycle-recycle.sh
+.claude/hooks/patrol-continue.sh
+.claude/hooks/work-context.sh
+.codex/hooks.json
 .gc/
 .beads.gate.lock
 .worktree-stale'
+
+# The directories gc links skills into, one for each provider that reads them,
+# Gas City's vendorSinks. Each holds the ownership manifest naming gc's links
+# there, in a home and in the rig checkout.
+SKILL_SINKS='.claude/skills .agents/skills .gemini/skills .opencode/skills .mimocode/skills'
 
 # The provider settings files gc merges its hooks into, Gas City's
 # mergeablePaths. In a rig that tracks one of them, gc's merge is a tracked
@@ -94,46 +97,83 @@ provision_worktree() {
     mkdir -p "$(dirname "$EXCLUDE")"
     touch "$EXCLUDE"
 
+    # Gas City's block runs from MARKER to END_MARKER, or to the end of the
+    # file when no end marker follows. Each run leaves it holding GC_WRITES and
+    # the skill links: every link the block already names, since another
+    # home's manifest can still name a link this home no longer has, and every
+    # one this run reads. So a line GC_WRITES drops leaves the block at the
+    # next run. What a person keeps before or after the block stays. The file
+    # is replaced whole, and only when it changes. Of two runs at once, the one
+    # that replaces it last drops the links only the other read, until that
+    # home's next start reads them again. A home's sync reads its own
+    # manifests, not this file.
     MARKER="# Gas City worktree infrastructure (local excludes)"
-    if ! grep -qF "$MARKER" "$EXCLUDE" 2>/dev/null; then
-        if [ -s "$EXCLUDE" ] && [ "$(tail -c 1 "$EXCLUDE" 2>/dev/null || true)" != "" ]; then
-            printf '\n' >> "$EXCLUDE"
-        fi
-        printf '%s\n' "$MARKER" >> "$EXCLUDE"
+    END_MARKER="# End of Gas City worktree infrastructure"
+    LINKS=$(exclude_part links)
+    NEW=$(mktemp "$EXCLUDE.XXXXXX")
+    {
+        exclude_part before
+        printf '%s\n' "$MARKER" "$GC_WRITES"
+        { printf '%s\n' "$LINKS"; skill_links "$WT"; skill_links "$RIG_ROOT"; } | sed '/^$/d' | LC_ALL=C sort -u
+        printf '%s\n' "$END_MARKER"
+        exclude_part after
+    } > "$NEW"
+    if cmp -s "$NEW" "$EXCLUDE"; then
+        rm -f "$NEW"
+    else
+        chmod 644 "$NEW"
+        mv -f "$NEW" "$EXCLUDE"
     fi
-
-    gc_writes | while IFS= read -r PATTERN; do
-        [ -n "$PATTERN" ] || continue
-        grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
-    done
 }
 
-# gc_writes — GC_WRITES, then each skill link gc records in the ownership
-# manifest of this worktree and of the rig checkout, one pattern per line.
+# exclude_part <before|links|after> — one part of the exclude file: the lines
+# before Gas City's block, the skill links the block names, or the lines after
+# the block. A link is a sink in SKILL_SINKS, a slash and a name skill_links
+# would write.
+exclude_part() {
+    awk -v part="$1" -v start="$MARKER" -v end="$END_MARKER" -v sinks="$SKILL_SINKS" '
+        BEGIN { n = split(sinks, sink, " ") }
+        at == 0 && $0 == start { at = 1; next }
+        at == 1 && $0 == end { at = 2; next }
+        at == 0 && part == "before" { print }
+        at == 2 && part == "after" { print }
+        at == 1 && part == "links" {
+            for (i = 1; i <= n; i++) {
+                p = sink[i] "/"
+                name = substr($0, length(p) + 1)
+                if (index($0, p) == 1 && name ~ /^[A-Za-z0-9._-]+$/ && name != "." && name != "..") print
+            }
+        }' "$EXCLUDE"
+}
+
+# gc_writes — GC_WRITES, then the skill links and manifests skill_links reads
+# in this worktree and in the rig checkout, one pattern per line.
 gc_writes() {
     printf '%s\n' "$GC_WRITES"
     skill_links "$WT"
     skill_links "$RIG_ROOT"
 }
 
-# skill_links <checkout> — gc links each skill into .agents/skills/ for Codex
-# and pi, one symlink per skill, and records each link's name in an ownership
-# manifest beside them. A person can keep files, links and skills of their own
-# in that directory, so only the names the manifest records are gc's, each by
-# its exact path. A link gc adds later counts once a run reads it, and the
-# exclude file only gains lines, so a name gc drops stays hidden. git reads
-# each line as a pattern, so a name is taken only when it is letters, digits,
-# dots, dashes and underscores, which git matches literally. The match is
-# anchored with \A and \z, because jq's $ also matches before a final newline,
-# and a name ending in one would reach git as another name. Any other name
-# stays visible rather than risk a pattern that hides a person's file. A
-# missing or unreadable manifest, or no jq, gives no name.
+# skill_links <checkout> — gc links each skill into the sinks of the providers
+# that read it, one symlink per skill, and records each link's name in the
+# ownership manifest it keeps in that sink. A person can keep files, links and
+# skills of their own in a sink, so only the names a manifest records are gc's,
+# each by its exact path, and the manifest is gc's too. A link gc adds later
+# counts once a run reads it. git reads each line as a pattern, so a name is
+# taken only when it is letters, digits, dots, dashes and underscores, which
+# git matches literally. The match is anchored with \A and \z, because jq's $
+# also matches before a final newline, and a name ending in one would reach git
+# as another name. Any other name stays visible rather than risk a pattern that
+# hides a person's file. A manifest jq cannot read, or no jq, gives no link.
 skill_links() {
-    MANIFEST="$1/.agents/skills/.gc-skill-ownership.json"
-    [ -f "$MANIFEST" ] || return 0
-    NAMES=$(jq -r '.targets | keys[] | select(test("\\A[A-Za-z0-9._-]+\\z") and . != "." and . != "..")' \
-        "$MANIFEST" 2>/dev/null) || return 0
-    [ -z "$NAMES" ] || printf '%s\n' "$NAMES" | sed 's#^#.agents/skills/#'
+    for SINK in $SKILL_SINKS; do
+        MANIFEST="$1/$SINK/.gc-skill-ownership.json"
+        [ -f "$MANIFEST" ] || continue
+        printf '%s\n' "$SINK/.gc-skill-ownership.json"
+        NAMES=$(jq -r '.targets | keys[] | select(test("\\A[A-Za-z0-9._-]+\\z") and . != "." and . != "..")' \
+            "$MANIFEST" 2>/dev/null) || continue
+        [ -z "$NAMES" ] || printf '%s\n' "$NAMES" | sed "s#^#$SINK/#"
+    done
 }
 
 # --sync brings a home to the remote default branch's tip at every start. A
