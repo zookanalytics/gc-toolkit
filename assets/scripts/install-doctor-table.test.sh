@@ -2,7 +2,7 @@
 # install-doctor-table.test.sh — docs/install.md's gc doctor table names
 # exactly the checks the pack ships under doctor/.
 #
-# install.md §5 tells an operator what each `gc doctor` failure means, one row
+# install.md's doctor table tells an operator what each failure means, one row
 # per check. The shipped set is a directory scan — every doctor/check-<name>/
 # is a check, with no manifest — so the table is the one hand-kept copy of that
 # set, and it drifts the moment a check is added or renamed without its row.

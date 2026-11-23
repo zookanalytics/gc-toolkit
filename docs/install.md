@@ -24,7 +24,8 @@ Covered here:
 2. [The mechanik named session](#2-the-mechanik-named-session)
 3. [Sub-pack opt-in: gascity-keeper](#3-sub-pack-opt-in-gascity-keeper)
 4. [The helm board service](#4-the-helm-board-service)
-5. [Verification](#5-verification)
+5. [The Claude providers](#5-the-claude-providers)
+6. [Verification](#6-verification)
 
 For Gas City background, see [`gascity/README.md`](gascity/README.md).
 
@@ -207,7 +208,39 @@ document for agents. See
 
 ---
 
-## 5. Verification
+## 5. The Claude providers
+
+On macOS, Linux and WSL, Claude Code runs `grep` and `find` in its Bash tool as
+embedded versions of ugrep and bfs, and leaves its own Glob and Grep tools out
+of the session. A recursive `grep` there skips whatever each `.gitignore` it
+meets ignores, and says nothing of what it skipped. A search from the city root
+then passes over the city's runtime state under `.gc/`, which `gc init` lists
+in the city's `.gitignore`, so an empty answer is no evidence about what `.gc/`
+holds.
+
+A session started with Grep or Glob named in `--allowedTools` runs the system's
+`grep` and `find` in its Bash tool, and has Claude Code's Glob and Grep tools
+([Claude Code's tools reference](https://code.claude.com/docs/en/tools-reference#glob-tool-behavior)).
+An allow rule in a settings file does not have this effect, and a pack cannot
+add an argument to a provider the city defines. So the city adds the flag to
+every provider that runs a Claude agent of the pack, including a provider that
+a rig's override names:
+
+```toml
+[providers.claude]
+base = "builtin:claude"
+args_append = ["--allowedTools=Grep,Glob"]
+```
+
+The flag is written with its `=`, because as two words `--allowedTools` would
+also take a prompt that follows it as a tool name. A session takes the flag when
+it next starts. In such a session, `type grep` in the Bash tool prints the
+system's grep, such as `grep is /usr/bin/grep`, rather than
+`grep is a function`.
+
+---
+
+## 6. Verification
 
 ### `gc doctor`
 
