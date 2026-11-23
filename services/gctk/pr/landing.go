@@ -178,8 +178,8 @@ func (e *HeldClose) Error() string { return e.Why }
 // city's mark, which a dismissal's message carries, from the writer that owns
 // it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
 // ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
-// carries none. Wake gives the refinery a turn for a changed head that only
-// conversations and asks hold. Labels keeps the labels of each PR the store's
+// carries none. Wake gives the refinery its turn for each changed head the run
+// hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
@@ -1400,10 +1400,10 @@ func (u *run) decideHeadChanged(s state, f seen) plan {
 // place of the one the refinery validated, once the act has carried out the
 // record's withdrawals as c says, and hands the head to the refinery.
 // The bead keeps its marker, assigned to nobody, while a withdrawal is still
-// open or a review run is attached, and until the hand-over has assigned the
-// bead to a refinery that nothing else tells of the head and woken it
-// (handOver). shown, when set, says for the outcome what showed that the head
-// is not the validated one.
+// open or a review run is attached, and, whenever the refinery can take the
+// bead, until the hand-over has assigned the bead to the refinery and woken it
+// (wakeAndSettle). shown, when set, says for the outcome what showed that the
+// head is not the validated one.
 func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carriedOut) RunOutcome {
 	r := s.rec
 	reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
@@ -1418,15 +1418,17 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	// The requeue keeps the marker, and the bead assigned to nobody, while a
 	// withdrawal or an attached run holds the changed head, and for the
 	// hand-over that assigns the bead to the refinery and wakes it once the
-	// requeue lands, or that reads what holds the bead again when this read
-	// fails. Otherwise its own write hands the head to the refinery.
+	// requeue lands, whenever the refinery can take the bead, or that reads what
+	// holds the bead again when this read fails. Otherwise another wait holds
+	// the bead, and the requeue's own write hands the head to the refinery.
 	watched := c.held || len(s.runs) > 0
 	var holds []hold
+	var takeable bool
 	var unread error
 	if !watched {
-		holds, unread = u.mergeHolds(s)
+		holds, takeable, unread = u.mergeHolds(s)
 	}
-	keep := watched || unread != nil || len(holds) > 0
+	keep := watched || unread != nil || takeable
 	to, done := u.Refinery, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail + "; the bead is assigned to the refinery"}
 	if keep {
 		to, done.Detail = "", detail
