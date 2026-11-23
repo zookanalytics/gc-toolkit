@@ -74,6 +74,8 @@
 # store-only-exit.sh takes the run whose root its session's claimed step
 # names, to confirm it is live and works the bead over the step's --convoy
 # before that root holds the validating closer it arms until the run ends.
+# With no --convoy it takes the runs that work its bead, and arms the closer,
+# which nothing then holds, only when none of them is live.
 #
 # run-lib.test.sh runs every verb over run-lib.fixture.json, the cases a copy
 # of the rule in another language must agree with, as the Go copy in

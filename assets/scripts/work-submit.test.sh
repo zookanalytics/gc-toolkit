@@ -765,6 +765,41 @@ eq "$(meta gc.routed_to)" "" "(38) unrouted"
 eq "$(closed_step)" "in_progress" "(38) no step is written"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(38) and the drain is last"
 
+# Its brief's closer is armed on the bead handed back, and no refusal drains.
+# STORE_ONLY_DONE_RC is the exit of the call that carries --done.
+mv "$PACK/store-only-exit.sh" "$TMP/store-only-exit.real"
+cat > "$PACK/store-only-exit.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'storeonly %s\n' "$*" >> "$LOG"
+case " $* " in *" --done "*) exit "${STORE_ONLY_DONE_RC:-0}" ;; esac
+exit "${STORE_ONLY_RC:-0}"
+STUB
+chmod +x "$PACK/store-only-exit.sh"
+direct_done() { submit STUB_HOOK_CURRENT=tk-w "$@" -- --store-only "tk-z" --notes "n" --done "the brief" --bead tk-w --base main; }
+prepare DETACHED "$FRESH"; hold tk-w sess-me
+direct_done
+eq "$RC" 0 "(38b) a direct claim's store-only exit with a brief exits 0: $OUT"
+eq "$(words)" "storeonly update update storeonly drain " "(38b) the check, the record, the hand-back, the closer, then the drain"
+eq "$(grep '^storeonly ' "$LOG" | tr '\n' '|')" "storeonly --bead tk-w --base main|storeonly --bead tk-w --base main --done the brief|" \
+  "(38b) the check carries no brief, and the closer's call no convoy"
+eq "$(meta halt_reason) $(field status) $(field assignee)" "store_only open " "(38b) the exit is recorded and the claim released"
+prepare DETACHED "$FRESH"; hold tk-w sess-me
+direct_done STORE_ONLY_RC=1
+eq "$RC|$(words)" "3|storeonly " "(38c) a direct claim's refused check: exits 3, and writes and drains nothing"
+eq "$(field status) $(field assignee)" "in_progress sess-me" "(38c) the claim stays this session's"
+has "$OUT" "tk-w stays this session's claim" "(38c) and says so"
+prepare DETACHED "$FRESH"; hold tk-w sess-me
+direct_done STORE_ONLY_DONE_RC=1
+eq "$RC|$(words)" "3|storeonly update update storeonly " "(38d) a closer refused after the hand-back: exits 3 and drains nothing"
+eq "$(field status) $(field assignee)" "open " "(38d) the bead stays handed back"
+has "$OUT" "tk-w is handed back, but its validating closer is not armed" "(38d) and says so"
+: > "$LOG"
+direct_done
+eq "$RC" 0 "(38e) the call again exits 0: $OUT"
+eq "$(grep -c -- '^storeonly .* --done the brief$' "$LOG" | tr -d ' ')" 1 "(38e) and arms the closer"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(38e) and the drain is last"
+mv "$TMP/store-only-exit.real" "$PACK/store-only-exit.sh"
+
 prepare polecat/tk-w '{"merge_result":"merged"}'; hold tk-w sess-me
 bset tk-w status=closed
 direct
