@@ -13,9 +13,8 @@
 # The engine is @zookanalytics/sprintshow, consumed from the local `sprintshow`
 # rig checkout when the city has one and the published npm package otherwise.
 # demo-engine-lib.sh finds it, provisions its browser and runs its CLI, as it
-# does for the screenshot capture. Capture is engine-driven (the engine drives
-# Playwright headlessly): the only path available to a pool session, which
-# carries no browser MCP.
+# does for the screenshot capture. Capture is engine-driven: the engine drives
+# Playwright headlessly.
 #
 # A script drives the surface the engine's parser names for it. One that drives
 # an app, such as a page or an iOS app on a simulator, needs that app: one app

@@ -17,7 +17,7 @@ by one, and the cases a run is refused in before it starts are in the header of
 [`demo-engine-lib.sh`](../assets/scripts/demo-engine-lib.sh), which writes the
 profile. How a rig's start command brings its app up is the start contract in
 the [`gc-toolkit.demo-capture`](../skills/demo-capture/SKILL.md#the-rigs-start-command)
-skill. The browser the demo agent drives over MCP runs outside this sandbox.
+skill.
 
 ## Which rigs get it
 

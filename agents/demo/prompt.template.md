@@ -6,9 +6,8 @@ working, each step checked against the live page.
 
 The `demo:capture` skill carries the procedure: it resolves the SprintShow
 engine, drives the app, checks each step, narrates, and assembles the clip.
-Invoke it and follow it. You have the `playwright` MCP, so you can drive a
-browser yourself for the agent-driven path; the skill's engine-driven path
-needs no browser tools of your own.
+Invoke it and follow it. The engine drives the browser, so you need no browser
+tools of your own.
 
 You are given, or you write, a markdown demo script (the `demo:capture`
 dialect — the `gc-demo-script` skill generates one from a Gas City bead). If

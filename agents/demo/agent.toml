@@ -1,10 +1,10 @@
 # demo — a hand-opened session that captures a narrated video demo of the rig's
-# app with the demo:capture skill (the SprintShow engine). It carries the
-# `playwright` MCP so the session can drive a browser itself; that browser-driving
-# MCP is scoped to this agent's own mcp/ dir, so ordinary polecats never load it.
-# Open one with `gc session new demo <...>`: an origin=manual session, not
-# pool_managed, so no pool backstop governs it and a pane held open for a capture
-# is not reaped by a no-nudge drain.
+# app with the demo:capture skill. The SprintShow engine that skill runs drives
+# the browser, inside the capture sandbox when the rig keeps it. The session
+# carries no browser tools of its own, such as a browser MCP, because one would
+# run outside that sandbox. Open one with `gc session new demo <...>`: an
+# origin=manual session, not pool_managed, so no pool backstop governs it and a
+# pane held open for a capture is not reaped by a no-nudge drain.
 scope = "rig"
 provider = "claude"
 # A rig worktree so the capture drives the rig it serves and gh/git resolve to
