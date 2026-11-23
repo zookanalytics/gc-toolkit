@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text or a skill makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -16,8 +16,8 @@ convention rests on one of them, it links there.
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
 agents follow where Gas City leaves the choice to the pack: how a step closes
 and how a run declines, how step text and skills reach a pack script, why each
-shell block in step text makes one call, how a landed pack change is confirmed
-live, the names the pack's artifacts carry, how one text names another's step,
+shell block in step text or a skill makes one call, how a landed pack change is
+confirmed live, the names the pack's artifacts carry, how one text names another's step,
 where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an
 owner or an address.
 
@@ -150,13 +150,14 @@ holds the pack to this.
 
 ## Step text calls a tested script
 
-Step text holds no procedure. Each shell block in a formula step makes one
-call, to a tested pack script reached as the section above shows or to one
-command such as `gc`, and anything two steps need is one script. No shell block
-in step text is shellchecked, and a block runs in a test only where a suite
-extracts it, while a script carries a test of its own. So the procedure lives
-in the script, and the step passes the call its own facts as arguments.
-Existing step text changes at its own rewrite.
+Step text holds no procedure, and neither does a skill. Each shell block in a
+formula step or a skill makes one call, to a tested pack script reached as the
+section above shows or to one command such as `gc`, and anything two of them
+need is one script. No shell block in step text or a skill is shellchecked, and
+a block runs in a test only where a suite extracts it, while a script carries a
+test of its own. So the procedure lives in the script, and the step or the
+skill passes the call its own facts as arguments. Existing step text and skills
+change at their own rewrite.
 
 A block does more than make one call when it holds control flow (`if`, `elif`,
 `else`, `case`, `for`, `select`, `while`, `until`, a function definition, `&&`
@@ -173,15 +174,32 @@ do for its caller, and Claude Code carries the shell's directory from one call
 to the next. So a call that removes the directory the agent's shell stands in
 ends in `&& cd <a directory that stays>`.
 
+The gctk-bin block is no procedure either. Text that calls gctk sets `GCTK` in
+that block, whose one line `assets/scripts/gctk-bin.test.sh` holds every copy
+to, so a block that holds the gctk-bin block and one `"$GCTK" <verb>` call makes
+one call. Between the block's markers, an assignment to `GCTK` that runs no
+command counts as no command.
+
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
-files a change names. It reads every TOML string in a formula as Python's
-`tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
-only what a change adds. It weighs each step by
-the commands and the control flow of the procedures its blocks hold, and fails
-a step the change makes heavier in either count. A new step fails when it holds
-a procedure at all. A block the change leaves alone, or moves without editing
-it, weighs nothing, so a step that only gains single calls passes, and so does
-one that trades a procedure for a call.
+files a change names: formulas, and the Markdown files of a skill, under
+`skills/<name>/` or a sub-pack's or an agent's `<dir>/skills/<name>/`. It skips
+a skill file that is a symlink, because its text is the file it points to, such
+as a prompt fragment. It reads every TOML string in a formula as Python's
+`tomllib` decodes it, so a change that names a formula needs a Python 3.11 or
+newer on PATH.
+
+The lint judges only what a change adds. It weighs each step, and each skill,
+by the commands and the control flow of the procedures its blocks hold, and
+fails a step or a skill the change makes heavier in either count. A skill is
+weighed whole, all its files together, because an agent loads it as one text,
+as it reads a step, and its directory names it as an id names a step, while a
+section's heading is prose a change may reword. A new step or skill fails when
+it holds a procedure at all. A block the change leaves alone, or moves without
+editing it, weighs nothing, so a step or a skill that only gains single calls
+passes, and so does one that trades a procedure for a call. A moved block is
+found within its own formula, and across every skill file the change names, a
+file it deletes included, so a block moved from one skill to another weighs
+nothing.
 
 A step also reaches its agent whole. gc delivers an agent's current step in a
 hook's output, which Claude Code keeps to 10,000 characters and Codex to 10,000
