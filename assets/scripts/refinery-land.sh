@@ -23,11 +23,12 @@
 # merge_result=refused_false_completion, and never retried silently.
 #
 # direct lands through direct-merge-push.sh, which records merged and closes the
-# bead, and deletes the branch when delete_merged_branches says so. A push it
-# finds refused for branch protection promotes the bead to mr. mr runs
-# refinery-publish.sh, which publishes the prepared head on its owner's PR and
-# records the PR pending until the landing order verifies its merge, and closes
-# a rework child handed back once its head is pushed.
+# bead, and deletes the branch when delete_merged_branches says so, unless the
+# branch moved after the prep read it. A push it finds refused for branch
+# protection promotes the bead to mr. mr runs refinery-publish.sh, which
+# publishes the prepared head on its owner's PR and records the PR pending
+# until the landing order verifies its merge, and closes a rework child handed
+# back once its head is pushed.
 #
 # Every park files its human gate first, sets the merge_result, and keeps the
 # bead with the refinery, so clearing the gate hands it back. A bead handed
