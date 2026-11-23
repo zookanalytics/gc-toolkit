@@ -65,7 +65,8 @@
 # names it and it carries no gc.step_ref, so there is no step to close and no other
 # bead to write. Any other --bead caller must hold this step, as claim-close.sh judges
 # it. Both are read before anything is pushed or written, because a close refused
-# after the handoff can only be reported.
+# after the handoff can only be reported, and a claim that does not read is refused
+# with what gc hook current said.
 #
 # A converse sitting hands its change off with --held-by <conversation> beside
 # --bead. Its claim is the conversation, so in place of that check the bead must
@@ -219,11 +220,12 @@ if [ -n "$WORK_HELD_BY" ]; then
   [ -n "$BASE" ] || work_held_stop "$WORK_ID records no target, the branch its change lands on, so nothing is pushed"
   DIRECT_CLAIM=1
 elif [ -n "$BEAD" ] && [ "$ANCHOR_ONLY" = 0 ]; then
-  CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
   OWNER=$(work_field .assignee)
   if [ -n "$(work_meta gc.step_ref)" ]; then
     refuse_claim "$WORK_ID is the step $(work_meta gc.step_ref), and --bead names the work bead."
-  elif [ "$CLAIMED" != "$WORK_ID" ]; then
+  elif ! claimed_bead; then
+    refuse_claim "--bead $WORK_ID cannot be shown to be this session's claim: $CLAIMED_WHY."
+  elif [ "$CLAIMED_ID" != "$WORK_ID" ]; then
     "$SCRIPT_DIR/claim-close.sh" --step "$STEP" --dry-run >/dev/null \
       || refuse_claim "--bead $WORK_ID is not this session's claim, and neither is $STEP."
   elif [ -n "$OWNER" ] && [ "$OWNER" != "$REFINERY_TARGET" ] && ! work_is_self "$OWNER"; then

@@ -78,6 +78,8 @@ case "$1 $2" in
     ONE='{"children":[{"id":"tk-work"}]}'
     printf '%s\n' "${FAKE_CONVOY:-$ONE}"; exit 0 ;;
   "runtime drain-ack") printf 'DRAIN\n' >> "$FAKE_LOG"; exit 0 ;;
+  # The step this session claimed, which a decline reads before it writes.
+  "hook current") printf '%s\n' "${FAKE_HOOK_CURRENT:-tk-step}"; exit 0 ;;
   # With --state all, gc lists every session the city ever closed, so a dead
   # owner would read as live: the owner check reads the default listing.
   "session list")

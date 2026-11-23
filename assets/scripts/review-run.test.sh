@@ -6,8 +6,9 @@
 #
 # Covers triage's read cancelling a run that must stop with no result, a run
 # that does not read as one included, cancelling nothing for a step that is not
-# triage's or whose ref does not read, stopping with nothing made when its check
-# of the run does not answer, and making the run's workspace private to its
+# triage's or whose ref does not read, or for a claim that does not read,
+# stopping with nothing made when its check of the run does not answer, and
+# making the run's workspace private to its
 # user; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
 # writing nothing for an output gctk refuses; triage's withdrawal; the push
@@ -42,9 +43,9 @@ unset "${!GC_@}" "${!BEADS_@}" GCTK_SCRIPTS_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # The scripts directory: the script under test and review-workspace.sh with the
-# lib it sources, and a stub for every other script it calls, each logging.
+# libs they source, and a stub for every other script it calls, each logging.
 SD="$TMP/scripts"; mkdir -p "$SD"
-cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$SD/"
+cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$HERE/bd-lib.sh" "$SD/"
 LOG="$TMP/calls.log"; export LOG
 for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh finding.sh; do
     { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SD/$s" <<'STUB'
@@ -77,7 +78,8 @@ export STUB_FACTS="$TMP/facts.json" STUB_GCTK_OUT="$TMP/gctk.out"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
-    "hook current") echo "${STUB_HELD:-tk-step}" ;;
+    "hook current") [ -z "${STUB_HOOK_SAYS:-}" ] || { echo "$STUB_HOOK_SAYS" >&2; exit 1; }
+                    echo "${STUB_HELD:-tk-step}" ;;
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
     "bd show") [ -z "${STUB_RC_BD_SHOW:-}" ] || exit "$STUB_RC_BD_SHOW"
                if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
@@ -155,6 +157,10 @@ STUB_STEP_REF=mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane STUB
 eq "$RC/$(called decline.sh)" "3/0" "a step that is not triage's cancels nothing"
 STUB_RC_BD_SHOW=1 STUB_STANDS_OUT="x" run triage
 eq "$RC/$(called decline.sh)" "2/0" "a step whose ref does not read cancels nothing"
+STUB_HOOK_SAYS="gc hook current: open session store: connection refused" STUB_STANDS_OUT="x" run triage
+eq "$RC/$(called decline.sh)" "2/0" "a claim that does not read is a read that did not answer, and cancels nothing"
+has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: open session store: connection refused)" \
+    "and quotes gc's own words"
 run triage
 eq "$RC" 0 "triage's read goes on for a run that stands"
 has "$OUT" "The run's workspace: $WS" "and prints the run's workspace"

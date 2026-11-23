@@ -14,9 +14,12 @@
 # the metadata read it shares with them, bd_gates_open_under_key, the order
 # every writer and reader of one situation's human gates reads them in, and
 # $DISPOSITION_JQ, the one reading of a disposition, are pinned first; they read
-# no store. bd_disposed_to, its store read, follows them. The readers that judge
-# a gate by $HUMAN_GATE_JQ are checked last, for sourcing it rather than copying
-# it.
+# no store. bd_disposed_to, its store read, follows them. session_identities,
+# claimed_bead and claimed_step, this session's read of its own claim and the
+# check that the claim is the step a script runs, come after row_meta_all. The
+# readers that judge a gate by $HUMAN_GATE_JQ are checked last, for sourcing it
+# rather than copying it, and the scripts that read this session's claim, for
+# reading it through claimed_bead or claimed_step.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-bd-lib-test.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -75,6 +78,95 @@ row_meta_all WIDE_META '{"error":"no issues found"}'
 eq "${#WIDE_META[@]}" 0 "…and a row that is not a show array as no key at all"
 row_meta_all 'not-a-name' "$ROW"
 eq "$?" 2 "…and refuses an array name that is not a name"
+
+# --- session_identities: the names this session goes by, each once ------------
+eq "$(GC_ALIAS=al GC_SESSION_ID=sid GC_SESSION_NAME=sn GC_AGENT=ag session_identities | paste -sd, -)" "al,sid,sn,ag" \
+  "session_identities: the alias, the session id, the session name and GC_AGENT, in that order"
+eq "$(GC_SESSION_ID=sid GC_SESSION_NAME=sn GC_AGENT=sid session_identities | paste -sd, -)" "sid,sn" \
+  "…each name once, as a pool session's GC_AGENT repeats its id"
+eq "$(GC_ALIAS=' ' GC_SESSION_ID=sid session_identities | paste -sd, -)" "sid" "…no name that is only blank"
+eq "$(session_identities)" "" "…and nothing when none is set"
+
+# --- claimed_bead and claimed_step: this session's claim, its step, its holder -
+# The fake answers gc hook current with the bead STUB_HOOK_CURRENT names, for the
+# session GC_SESSION_ID names, and with exit 1 and gc's own words when it names
+# none. A read that fails is gc's other exit 1, which the fake has no setting
+# for, so a shell function named gc answers it with $HOOK_SAYS and hands every
+# other call to the fake.
+gc() {
+  if [ "${1:-} ${2:-}" = "hook current" ] && [ -n "${HOOK_SAYS:-}" ]; then
+    printf '%s\n' "$HOOK_SAYS" >&2
+    return 1
+  fi
+  command gc "$@"
+}
+claim() { export STUB_HOOK_CURRENT="$1"; }
+export GC_SESSION_ID=s-me
+claim st-1
+claimed_bead; CRC=$?
+eq "$CRC|$CLAIMED_ID|$CLAIMED_WHY" "0|st-1|" "claimed_bead: the bead gc hook current names"
+claim ""
+claimed_bead; CRC=$?
+eq "$CRC|$CLAIMED_ID" "1|" "…naming no claim, it returns 1 and names no bead"
+eq "$CLAIMED_WHY" "gc hook current exited 1 without naming a claim (it said: gc hook current: session s-me has no current claim (nothing claimed through gc hook --claim))" \
+  "…and why carries gc's exit status and its own words"
+claim st-1
+HOOK_SAYS="gc hook current: open session store: connection refused"
+claimed_bead; CRC=$?
+eq "$CRC|$CLAIMED_ID" "1|" "…a read that fails is a claim not read too, so running again can change it"
+has "$CLAIMED_WHY" "exited 1 without naming a claim (it said: gc hook current: open session store: connection refused)" \
+  "…and why names the read's own failure, not a missing claim"
+unset HOOK_SAYS
+
+store '[
+ {"id":"st-1","status":"in_progress","assignee":"s-me","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"st-it","status":"in_progress","assignee":"s-me","metadata":{"gc.step_ref":"self-review.iteration.1"}},
+ {"id":"st-it2","status":"in_progress","assignee":"s-me","metadata":{"gc.step_ref":"mol-x.self-review.iteration.2"}},
+ {"id":"st-9","status":"in_progress","assignee":"s-me9","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"st-free","status":"open","assignee":"","metadata":{"gc.step_ref":"mol-x.load"}},
+ {"id":"plain","status":"in_progress","assignee":"s-me","metadata":{}}
+]'
+check_claim() { claim "$1"; claimed_step "$2"; CRC=$?; }
+check_claim st-1 mol-x.load
+eq "$CRC|$CLAIMED_ID|$CLAIMED_REF|$CLAIMED_STATUS|$CLAIMED_ASSIGNEE|$CLAIMED_WHY" "0|st-1|mol-x.load|in_progress|s-me|" \
+  "claimed_step: the claim is the step, held under the session id"
+eq "$(jq -r '.[0].id' <<< "$CLAIMED_ROW")" "st-1" "…and CLAIMED_ROW is the step's show row"
+check_claim st-it self-review
+eq "$CRC" 0 "…a check loop's first iteration answers to the loop's name"
+check_claim st-it2 self-review
+eq "$CRC" 0 "…and so does a later one, which carries a formula's name before the loop's"
+check_claim st-it self
+eq "$CRC" 2 "…and a prefix of the loop's name is not its name"
+check_claim st-it2 review
+eq "$CRC" 2 "…nor the end of it"
+check_claim plain mol-x.load
+eq "$CRC|$CLAIMED_WHY" "2|this session's current claim is plain (not a formula step), not mol-x.load" \
+  "…a claim on a bead that is no step is not the step"
+check_claim st-free mol-x.load
+eq "$CRC|$CLAIMED_WHY" "3|st-free (mol-x.load) has no assignee, so this session no longer holds it" \
+  "…the step with no holder is not this session's"
+check_claim st-9 mol-x.load
+eq "$CRC|$CLAIMED_WHY" "3|st-9 (mol-x.load) is held by s-me9, not this session" \
+  "…nor the step whose holder's name only begins with this session's"
+export GC_AGENT=s-me9
+check_claim st-9 mol-x.load
+eq "$CRC" 0 "…and a step held under GC_AGENT is this session's"
+unset GC_AGENT
+check_claim "" mol-x.load
+eq "$CRC|$CLAIMED_ID" "1|" "…gc hook current naming no claim is a claim not read, and names no bead"
+has "$CLAIMED_WHY" "gc hook current exited 1 without naming a claim (it said: " "…and why is claimed_bead's"
+export STUB_SHOW_FAIL=1
+check_claim st-1 mol-x.load
+eq "$CRC|$CLAIMED_ID|$CLAIMED_WHY" "1|st-1|could not read st-1, the bead gc hook current names" \
+  "…a claimed bead the store does not answer for is a claim not read"
+export STUB_SHOW_FAIL=""
+check_claim st-none mol-x.load
+eq "$CRC" 1 "…and so is a claimed bead the store does not return"
+claimed_step ""; CRC=$?
+eq "$CRC" 2 "…and no step named is no step this session holds"
+unset -f gc
+unset GC_SESSION_ID
+claim ""
 
 # --- bd_gates_open_under_key: the open gates under a key, in the one order ----
 # gate_row <id> <key> <status> <created_at> — one row as bd_human_gates prints it.
@@ -1046,6 +1138,31 @@ for r in doctor/check-blocked-work-armed/run.sh doctor/check-hq-marooned-work/ru
   if grep -q 'await_type' <<< "$code"; then bad "(READERS) $r tests no gate's await type itself"
   else ok "(READERS) …and tests no gate's await type itself"; fi
 done
+
+# The scripts that read the bead this session claimed read it through
+# claimed_bead or claimed_step and call gc hook current nowhere else, so each
+# tells a read that failed from no claim the same way and holds a step under the
+# same names. gc-helm.sh is sh and cannot source this library, so it copies
+# session_identities, with the same names in the same order.
+for s in claim-close decline review-run run-cancel store-only-exit work-enter work-lib work-setup work-submit; do
+  code=$(grep -vE '^[[:space:]]*#' "$HERE/$s.sh")
+  if grep -qE '(^|[^A-Za-z0-9_])claimed_(bead|step)([^A-Za-z0-9_]|$)' <<< "$code"; then ok "(CLAIMED) $s.sh reads its claim through claimed_bead or claimed_step"
+  else bad "(CLAIMED) $s.sh reads its claim through claimed_bead or claimed_step"; fi
+done
+own=""
+for f in "$ROOT"/assets/scripts/*.sh "$ROOT"/doctor/*/run.sh; do
+  case "$f" in *.test.sh|*/bd-lib.sh) continue ;; esac
+  code=$(grep -vE '^[[:space:]]*#' "$f")
+  grep -qE 'gc[[:space:]]+hook[[:space:]]+current[[:space:]]*(-|<|>|\)|[0-9]>|$)' <<< "$code" && own="$own ${f#"$ROOT"/}"
+done
+eq "${own# }" "" "(CLAIMED) no script but bd-lib.sh calls gc hook current itself"
+identity_vars() { # <file> -> the GC_* names its session_identities reads, in order
+  awk '/^session_identities\(\)/ { b = 1 } b { print } b && /^}/ { exit }' "$1" | grep -oE 'GC_[A-Z_]+' | paste -sd, -
+}
+eq "$(identity_vars "$HERE/bd-lib.sh")" "GC_ALIAS,GC_SESSION_ID,GC_SESSION_NAME,GC_AGENT" \
+  "(CLAIMED) session_identities reads the alias, the session id, the session name and GC_AGENT"
+eq "$(identity_vars "$HERE/gc-helm.sh")" "$(identity_vars "$HERE/bd-lib.sh")" \
+  "(CLAIMED) gc-helm.sh's copy of session_identities reads the same names in the same order"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

@@ -44,8 +44,9 @@
 #
 # A caller sets PROG and SCRIPT_DIR before it sources this file, and STEP and
 # FORMULA before it calls work_stop_with_gate. It sources run-lib.sh before it
-# calls work_held_by_proof or work_writing. WORK_READ_TRIES and WORK_READ_WAIT
-# bound the retry; a suite sets the wait to 0.
+# calls work_held_by_proof or work_writing, and bd-lib.sh before it calls
+# work_held_by_proof. WORK_READ_TRIES and WORK_READ_WAIT bound the retry; a
+# suite sets the wait to 0.
 
 WORK_READ_TRIES="${WORK_READ_TRIES:-3}"
 WORK_READ_WAIT="${WORK_READ_WAIT:-5}"
@@ -179,7 +180,7 @@ work_writing() { # <bead> <status> <assignee>
 # ready (dispatch-path.sh). Every reason is named, the holder's first, so a bead
 # the refinery has is refused as the refinery's whether or not its edge stands.
 work_held_by_proof() {
-  local why="" owner runs live route claimed
+  local why="" owner runs live route
   owner=$(work_field .assignee)
   [ -z "$owner" ] || why="$why; it is assigned to $owner"
   case "$(work_meta merge_result)" in
@@ -191,8 +192,11 @@ work_held_by_proof() {
   [ -z "$live" ] || why="$why; a run works it ($live)"
   route=$(work_meta gc.routed_to)
   [ -z "$(printf '%s' "$route" | tr -d '[:space:]')" ] || why="$why; it is routed to $route"
-  claimed=$(gc hook current --id-only </dev/null 2>/dev/null) || claimed=""
-  [ "$claimed" = "$WORK_HELD_BY" ] || why="$why; gc hook current names ${claimed:-no bead}, not $WORK_HELD_BY"
+  if ! claimed_bead; then
+    why="$why; $CLAIMED_WHY, where it must name $WORK_HELD_BY"
+  elif [ "$CLAIMED_ID" != "$WORK_HELD_BY" ]; then
+    why="$why; gc hook current names $CLAIMED_ID, not $WORK_HELD_BY"
+  fi
   printf '%s' "$WORK_ROW" | jq -e --arg c "$WORK_HELD_BY" \
       'any(.[0].dependencies[]?; (.id // "") == $c and (.dependency_type // "") == "blocks")' >/dev/null 2>&1 \
     || why="$why; it has no blocks edge onto $WORK_HELD_BY"

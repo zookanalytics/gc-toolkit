@@ -51,7 +51,8 @@ SH
 # STUB_SHOW_FAIL for a show that does not answer, STUB_UPDATE_FAIL=tk-w for a
 # store that refuses every write, and STUB_UPDATE_FAIL_ON for one that refuses
 # the write carrying a text, as an outage or a guard does. STUB_HOOK_CURRENT is
-# the claim gc hook current names, and STUB_SESSIONS the session list.
+# the claim gc hook current names, tk-step, a step of the run, unless a case
+# names another, and STUB_SESSIONS the session list.
 chmod +x "$BIN/git"
 
 recorder() { # <name> <log word>
@@ -130,10 +131,10 @@ setup_run() {
 # again [<VAR=value>...] — the script run in $C against the store as the last run
 # left it, the way the bead's next run reaches it.
 again() {
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me STUB_HOOK_CURRENT=tk-step "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
 }
 tool() { # <args...> — another mode of the script, in $C
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me ${TOOL_ENV:-} "$PACK/work-setup.sh" "$@" 2>"$TMP/err"); RC=$?
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me STUB_HOOK_CURRENT=tk-step ${TOOL_ENV:-} "$PACK/work-setup.sh" "$@" 2>"$TMP/err"); RC=$?
 }
 set_meta() { # <key> <value> — what another writer put on the bead between runs, through bd
   STUB_GC_LOG=/dev/null gc bd update tk-w --set-metadata "$1=$2" >/dev/null
@@ -320,7 +321,20 @@ clone polecat/w2
 setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")")"
 TOOL_ENV=ASK_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16) a question that reaches no gate stops the stop"
+eq "$(grep -c '^bca ask ' "$CALLS")" "1" "(16) after it asked"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16) and the merge stays open"
+# gc exits 1 both for no claim and for a read of its own that failed, so this
+# session cannot tell a run's step from a claim on the work bead itself.
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
+: > "$CALLS"
+TOOL_ENV=STUB_HOOK_CURRENT= tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "1" "(16c) a claim that does not read stops the stop"
+eq "$(grep -cE '^(bca ask|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16c) before it asks, and nothing waits, cancels or drains"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16c) the merge stays open"
+has "$(cat "$TMP/err")" "gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
+  "(16c) and it quotes gc's own words"
+hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16c) and the notes record no stop, as a bead with no molecule's would"
 for held in tk-step tk-w; do
   clone polecat/w2
   setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
@@ -604,7 +618,7 @@ for case in edge hook no-hook holder refinery pending head-changed run route tar
   case "$case" in
     edge)     deps=""; want="no blocks edge onto tk-conv" ;;
     hook)     envs=(STUB_HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
-    no-hook)  envs=(STUB_HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
+    no-hook)  envs=(STUB_HOOK_CURRENT=); want="gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-sit has no current claim (nothing claimed through gc hook --claim)), where it must name tk-conv" ;;
     holder)   who=sess-other; want="assigned to sess-other" ;;
     refinery) who=gc-toolkit/gc-toolkit.refinery; want="assigned to gc-toolkit/gc-toolkit.refinery" ;;
     pending)  members+=",$(kv merge_result pull_request_pending)"; want="its PR waits on the pending record (pull_request_pending)" ;;

@@ -23,7 +23,7 @@ no()  { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac;
 
 unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 PACK="$TMP/pack"; mkdir -p "$PACK" "$TMP/bin"
-cp "$HERE/decline.sh" "$PACK/"
+cp "$HERE/decline.sh" "$HERE/bd-lib.sh" "$PACK/"
 for pair in human-gate.sh:GATE:GATE_RC await-ruling.sh:AWAIT:AWAIT_RC run-cancel.sh:CANCEL:CANCEL_RC; do
   IFS=: read -r name word rc <<<"$pair"
   cat > "$PACK/$name" <<STUB
@@ -34,8 +34,15 @@ exit "\${$rc:-0}"
 STUB
   chmod +x "$PACK/$name"
 done
+# gc hook current names the step this session claimed, $FAKE_STEP, or fails
+# saying $FAKE_HOOK_SAYS, as gc does when its own read fails. A show answers
+# nothing, so the claim reads as a step whose cancel proves the run.
 cat > "$TMP/bin/gc" <<'GC'
 #!/usr/bin/env bash
+if [ "$1 $2" = "hook current" ]; then
+  [ -z "${FAKE_HOOK_SAYS:-}" ] || { printf '%s\n' "$FAKE_HOOK_SAYS" >&2; exit 1; }
+  printf '%s\n' "${FAKE_STEP:-tk-step}"; exit 0
+fi
 [ "$1 $2" = "runtime drain-ack" ] && printf 'DRAIN\n' >> "$LOG"
 exit 0
 GC
@@ -79,6 +86,19 @@ has "$OUT" "NOT draining" "and it says so"
 GATE_RC=1 run "${GATED[@]}"
 no "$OUT" "run-cancel" "a stop at the gate never names the cancel as tried"
 
+# A claim that does not read: gc exits 1 both for no claim and for a read of its
+# own that failed, so what this session holds is not known, and the decline
+# stops before it writes anything.
+for how in plain gated; do
+  if [ "$how" = plain ]; then set -- --step mol.x --reason why; else set -- "${GATED[@]}" --formula mol-f; fi
+  FAKE_HOOK_SAYS="gc hook current: open session store: connection refused" run "$@"
+  eq "$RC" 1 "$how: a claim that does not read exits 1"
+  eq "$TRACE" "" "$how: …and asks, waits, cancels and drains nothing"
+  has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: open session store: connection refused)" \
+    "$how: …quoting gc's exit status and its own words"
+  has "$OUT" "Nothing was written, and NOT cancelling or draining" "$how: …and saying so"
+done
+
 for bad_args in "" "--step mol.x" "--reason why" "--step mol.x --reason why --subject tk-w" \
   "--step mol.x --reason why --key k" "--step mol.x --reason why --formula f" "--nope" "--step"; do
   # shellcheck disable=SC2086  # each case's words are the arguments
@@ -97,7 +117,9 @@ BEADS="$TMP/beads.json"
 # update that matches applies its status, assignee and metadata edits there, the
 # way bd applies one write whole.
 case "$1 $2" in
-  "hook current") printf '%s\n' "${FAKE_CURRENT:-}"; exit 0 ;;
+  "hook current")
+    [ -n "${FAKE_CURRENT:-}" ] || { echo "gc hook current: session ${GC_SESSION_ID:-} has no current claim (nothing claimed through gc hook --claim)" >&2; exit 1; }
+    printf '%s\n' "$FAKE_CURRENT"; exit 0 ;;
   "bd show")
     jq -e --arg id "$3" 'has($id)' "$BEADS" >/dev/null 2>&1 \
       || { printf '{"error":"no issues found matching the provided IDs"}\n'; exit 1; }
@@ -214,7 +236,10 @@ has "$OUT" "run-cancel.sh did not end the run; NOT draining, so the next worker 
 FAKE_CURRENT=tk-other run_claim "$HELD" --step mol.x --reason why
 eq "$TRACE" "" "gc hook current names a bead that does not read: a step, never handed back"
 FAKE_CURRENT="" run_claim "$HELD" --step mol.x --reason why
-eq "$TRACE" "" "gc hook current names nothing: nothing is handed back"
+eq "$RC|$TRACE" "1|" "gc hook current names nothing: the decline stops, and nothing is handed back"
+has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
+  "…in gc's own words"
+eq "$(now status)|$(now assignee)" "in_progress|sess-me" "…so the claim stays with this session"
 
 echo
 echo "decline: $PASS passed, $FAIL failed"

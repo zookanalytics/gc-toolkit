@@ -40,7 +40,9 @@ case "$1 $2" in
   "convoy status")
     ONE='{"children":[{"id":"tk-w"}]}'
     printf '%s\n' "${CONVOY:-$ONE}"; exit 0 ;;
-  "hook current") [ -n "${HOOK_CURRENT:-}" ] || exit 1; printf '%s\n' "$HOOK_CURRENT"; exit 0 ;;
+  "hook current")
+    [ -n "${HOOK_CURRENT:-}" ] || { echo "gc hook current: session ${GC_SESSION_ID:-} has no current claim (nothing claimed through gc hook --claim)" >&2; exit 1; }
+    printf '%s\n' "$HOOK_CURRENT"; exit 0 ;;
   "bd show")
     [ -z "${SHOW_DOWN:-}" ] || exit 1
     out=$(jq -c --arg id "$3" '[.[] | select(.id == $id)]' "$STORE")
@@ -77,6 +79,13 @@ has "$OUT" "a late correction" "the notes, read at this moment, are printed"
 eq "$(git -C "$T" branch --show-current)" "polecat/tk-w" "the recorded branch is checked out"
 case "$(cat "$LOG")" in *"update tk-w"*) bad "entering the tree writes nothing on the work bead" ;; *) ok "entering the tree writes nothing on the work bead" ;; esac
 has "$(cat "$LOG")" "update root-1 --set-metadata gc.var.issue=tk-w" "a self-review iteration stamps the root's issue"
+
+row open '{}'
+run HOOK_CURRENT=
+eq "$RC|$(printf '%s\n' "$OUT" | tail -n 1)" "0|$T" "a claim that does not read: the tree is still entered"
+case "$(cat "$LOG")" in *"gc.var.issue"*) bad "…and no root is stamped" ;; *) ok "…and no root is stamped" ;; esac
+has "$(cat "$TMP/err")" "NOTE: gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
+  "…and it says why, in gc's own words"
 
 row closed '{}'
 run

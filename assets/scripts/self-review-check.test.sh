@@ -599,9 +599,10 @@ assert_out "says the note did not land" "the exhaustion note did not land on gc-
 DECLINE_CALL=$(grep -E '^`"\$\(b=.\{\{binding_prefix\}\}.; gc "\$\{b%\.\}" scripts-dir\)/decline\.sh" --step self-review ' "$ROOT/formulas/mol-polecat-work.toml")
 if [ "$(printf '%s\n' "$DECLINE_CALL" | grep -c 'decline\.sh')" = 1 ]; then ok "the self-review step carries one decline.sh call for its last attempt"; else
   bad "the self-review step carries one decline.sh call for its last attempt (found: $DECLINE_CALL)"; fi
-# The pack the fake's scripts-dir names: the real decline.sh beside them.
+# The pack the fake's scripts-dir names: the real decline.sh, with the library it
+# sources, beside them.
 DPACK="$TMP/decline-pack/assets/scripts"; mkdir -p "$DPACK"
-cp "$HERE/decline.sh" "$DPACK/"
+cp "$HERE/decline.sh" "$HERE/bd-lib.sh" "$DPACK/"
 for stub in human-gate:gate await-ruling:await run-cancel:cancel; do
   printf '#!/usr/bin/env bash\nprintf %s "$*" >> "$DCALLS"\n' "'${stub#*:} %s\\n'" > "$DPACK/${stub%%:*}.sh"
 done

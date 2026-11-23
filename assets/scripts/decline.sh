@@ -14,9 +14,11 @@
 # benign before is asked again.
 #
 # What this session holds is read before anything is written: the bead `gc hook
-# current` names. A bead with a gc.step_ref is a step of a run, and the run ends
-# through run-cancel.sh. A bead with none is a claim with no run, which a claimant
-# with no poured workflow holds on the work bead itself, so nothing is cancelled.
+# current` names, through bd-lib.sh's claimed_bead. A claim that does not read
+# stops the call there, since running again can change that. A bead with a
+# gc.step_ref is a step of a run, and the run ends through run-cancel.sh. A bead
+# with none is a claim with no run, which a claimant with no poured workflow
+# holds on the work bead itself, so nothing is cancelled.
 # A gated decline of such a claim ends once the gate and its wait have landed,
 # and await-ruling.sh has then released the claim. A gate asked with no wait, as
 # for a parked bead, leaves the bead as it is, this session's name included: a
@@ -111,6 +113,8 @@ if [ -n "$FORMULA" ] && [ -z "$SUBJECT" ]; then
 fi
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SCRIPT_DIR/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script; nothing was written" >&2; exit 1; }
 
 # claim_read <bead> -> "<status>|<assignee>|<gc.step_ref>|<gc.routed_to>", or
 # nothing when the bead does not read.
@@ -122,18 +126,19 @@ claim_read() {
     else empty end' 2>/dev/null
 }
 
-# A claim with no run: what `gc hook current` names reads, and carries no
-# gc.step_ref. Anything this cannot read is a step, whose cancel proves the run
-# is this session's or refuses.
+if ! claimed_bead; then
+  echo "$PROG: $CLAIMED_WHY, so what this session holds is not known. Nothing was written, and NOT cancelling or draining, so running this again can end it." >&2
+  exit 1
+fi
+# A claim with no run: the bead the claim names reads, and carries no
+# gc.step_ref. A bead this cannot read is a step, whose cancel proves the run is
+# this session's or refuses.
 CLAIM=""; CLAIM_STATUS=""
-HELD=$(gc hook current --id-only </dev/null 2>/dev/null) || HELD=""
-if [ -n "$HELD" ]; then
-  ROW=$(claim_read "$HELD")
-  IFS='|' read -r ROW_STATUS _ ROW_STEP _ <<<"$ROW"
-  if [ -n "$ROW" ] && [ -z "$ROW_STEP" ]; then
-    CLAIM="$HELD"
-    CLAIM_STATUS="$ROW_STATUS"
-  fi
+ROW=$(claim_read "$CLAIMED_ID")
+IFS='|' read -r ROW_STATUS _ ROW_STEP _ <<<"$ROW"
+if [ -n "$ROW" ] && [ -z "$ROW_STEP" ]; then
+  CLAIM="$CLAIMED_ID"
+  CLAIM_STATUS="$ROW_STATUS"
 fi
 if [ -n "$CLAIM" ]; then
   KEEP="NOT draining: $CLAIM is a claim with no run, so it stays with this session, which can run this again."

@@ -820,7 +820,8 @@ has "$OUT" "not mol-polecat-work.submit-and-exit" "(42b) and claim-close.sh name
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
 submit STUB_HOOK_CURRENT= -- --bead tk-w --base main --notes "n"
 refused "(43) no current claim can be read"
-has "$OUT" "gc hook current names no bead" "(43) names that"
+has "$OUT" "--bead tk-w cannot be shown to be this session's claim: gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
+  "(43) names that, in gc's own words"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
 direct
 refused "(44) the bead is another session's claim"
@@ -949,7 +950,7 @@ for case in edge hook no-hook holder run route target; do
   case "$case" in
     edge)    printf '%s\n' "$TRACKS" > "$STUB_DEPS"; want="no blocks edge onto tk-conv" ;;
     hook)    envs=(STUB_HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
-    no-hook) envs=(STUB_HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
+    no-hook) envs=(STUB_HOOK_CURRENT=); want="gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim (nothing claimed through gc hook --claim)), where it must name tk-conv" ;;
     holder)  bset tk-w assignee=sess-other; want="assigned to sess-other" ;;
     run)     envs=("GC_RUN_LIB=$HERE/run-lib.stub.sh" "RUN_LIB_STUB_RUNS=$TMP/runs.json"); want="a run works it (root-9)" ;;
     route)   bset tk-w metadata.gc.routed_to=gc-toolkit/gc-toolkit.polecat; want="routed to gc-toolkit/gc-toolkit.polecat" ;;

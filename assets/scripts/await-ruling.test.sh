@@ -128,6 +128,9 @@ case "${1:-} ${2:-}" in
     exit 0 ;;
   "runtime drain-ack")
     printf 'DRAIN\n' >> "${FAKE_TRACE:-/dev/null}"; exit 0 ;;
+  # The step this session claimed, which a decline arm reads before it writes.
+  "hook current")
+    printf '%s\n' "${FAKE_HOOK_CURRENT:-tk-step}"; exit 0 ;;
 esac
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift
@@ -643,7 +646,7 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "as the decline arms call it
 # follows and the cancel after it are stubs that record their turn, and the gate is
 # already open.
 mkdir -p "$TMP/pack"
-cp "$HERE/decline.sh" "$TMP/pack/decline.sh"
+cp "$HERE/decline.sh" "$HERE/bd-lib.sh" "$TMP/pack/"
 for v in human-gate:GATE run-cancel:CANCEL; do
   printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/${v%%:*}.sh"
 done

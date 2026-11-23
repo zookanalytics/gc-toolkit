@@ -1015,7 +1015,7 @@ hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and does not drain"
 restart; bring
 store "[$(child MI22)]"
 : > "$STUB_GC_LOG"; : > "$ASK_LOG"
-ASK_RC=1 unres MI22; rc=$?
+ASK_RC=1 HOOK_CURRENT=ST1 unres MI22; rc=$?
 eq "$rc" "1" "a question that reached no gate exits 1"
 [ -f "$R/.git/MERGE_HEAD" ] && ok "…leaving the merge in progress, for the retry" || bad "the merge must not be aborted before a gate asks the question"
 hasnt "$(cat "$STUB_GC_LOG")" "drain-ack" "…and not draining"
