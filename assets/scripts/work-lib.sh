@@ -21,11 +21,12 @@
 #                                 whether someone writes the bead's branch now:
 #                                 0 yes, 1 no, 2 the runs that work it did not
 #                                 read
-#   work_outage <what>            stops the step, having asked nothing
+#   work_outage <what>            gives the step back, having asked nothing
 #   work_stop_with_gate <key> <message> <reason>
 #                                 a person must rule before the work goes on, so
 #                                 the run ends on a gate its work bead waits on
-#   work_drain                    ends the session's run
+#   work_drain                    gives back a claim the session still holds,
+#                                 then ends the session's run
 #   work_held_by_proof            whether the sitting WORK_HELD_BY names holds the
 #                                 work bead: 0, or 1 having said why not
 #   work_held_stop <why>          stops a sitting's call, ending nothing
@@ -127,8 +128,8 @@ work_owner_listed() {
 # call again.
 work_outage() {
   [ -z "${WORK_HELD_BY:-}" ] || work_held_stop "$1. The store did not answer, so run this again once it answers"
-  echo "$PROG: $1. The store did not answer, so nothing was asked and nothing was cancelled, and this step goes back to the pool." >&2
-  gc runtime drain-ack
+  echo "$PROG: $1. The store did not answer, so nothing was asked and nothing was cancelled." >&2
+  work_drain
   exit 1
 }
 
@@ -138,8 +139,31 @@ work_stop_with_gate() {
   exit 1
 }
 
+# Gas City acknowledges a session's own drain only while the session holds no
+# claim it started and has not finished, and it gives none of those back. So the
+# claim gc hook current names, a step of the run or the work bead a claimant with
+# no poured workflow holds, goes back first while it reads in_progress, through
+# hand-back.sh. It keeps its route, so its pool offers it to the next worker. A
+# claim the call closed or released already, or one no read answers, stays as it
+# is.
 work_drain() {
-  [ -n "${WORK_HELD_BY:-}" ] || gc runtime drain-ack
+  local held status
+  [ -z "${WORK_HELD_BY:-}" ] || return 0
+  held=$(gc hook current --id-only </dev/null 2>/dev/null) || held=""
+  if [ -n "$held" ]; then
+    status=$(gc bd show "$held" --json </dev/null 2>/dev/null | grep -a -vE '^gc bd:' | scrub \
+      | jq -r --arg id "$held" 'if type == "array" and (.[0].id // "") == $id then (.[0].status // "") else empty end' 2>/dev/null)
+    case "$status" in
+      in_progress)
+        if "$SCRIPT_DIR/hand-back.sh" "$held" >&2; then
+          echo "$PROG: $held goes back to the pool." >&2
+        else
+          echo "$PROG: $held is not given back." >&2
+        fi ;;
+      "") echo "$PROG: $held could not be read, so it is not given back." >&2 ;;
+    esac
+  fi
+  gc runtime drain-ack
 }
 
 work_held_stop() {

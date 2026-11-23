@@ -123,7 +123,7 @@ printf 'other\n' > "$SEED2/other.txt"; g "$SEED2" add other.txt; g "$SEED2" comm
 
 # The step this session holds, and the run's input convoy, whose tracks edge onto
 # the work bead is a dep row.
-STEP_ROW='{"id":"st-submit","status":"in_progress","assignee":"sess-me","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1"}}'
+STEP_ROW='{"id":"st-submit","status":"in_progress","assignee":"sess-me","metadata":{"gc.step_ref":"mol-polecat-work.submit-and-exit","gc.root_bead_id":"root-1","gc.routed_to":"gc-toolkit/gc-toolkit.polecat","gc.session_id":"sess-me","gc.session_name":"hq-me"}}'
 CONVOY_ROW='{"id":"cv-1","title":"input convoy for tk-w","status":"open","issue_type":"convoy"}'
 TRACKS='cv-1|tracks|tk-w'
 
@@ -176,6 +176,17 @@ pushed() { grep -c '^push ' "$LOG" | tr -d ' '; }
 ON_ORIGIN() { g "$CO" rev-parse -q --verify "refs/heads/$1" 2>/dev/null; }
 closed_step() { field status st-submit; }
 registered() { grep -qxF "worktree $C" <<< "$(g "$R" worktree list --porcelain)"; }
+# given_back <label> — a stop that leaves the step to the next worker gives it
+# back before the drain, since Gas City acknowledges no drain while the session
+# holds a step it started: open and unassigned, its pins removed and its route
+# kept, so its pool offers it again.
+given_back() {
+  eq "$(closed_step) $(field assignee st-submit)" "open " "$1 the step goes back to the pool, open and unassigned"
+  eq "$(meta gc.session_id st-submit) $(meta gc.session_name st-submit)" "<absent> <absent>" "$1 its pins removed"
+  eq "$(meta gc.routed_to st-submit)" "gc-toolkit/gc-toolkit.polecat" "$1 its route kept"
+  [ "$(grep -n '^bd update st-submit --if-status=in_progress ' "$LOG" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^runtime drain-ack$' "$LOG" | tail -n 1 | cut -d: -f1)" ] 2>/dev/null \
+    && ok "$1 before the drain" || bad "$1 before the drain"
+}
 
 echo "# fresh work lands whole"
 FRESH='{}'
@@ -456,7 +467,7 @@ prepare polecat/tk-w "$FRESH"
 submit -- --store-only "filed tk-z" --notes "n" --convoy cv-1 --base main --done ""
 eq "$RC" 1 "(8b) a run with a commit ahead of the base: refused"
 eq "$(meta halt_reason)" "<absent>" "(8b) nothing is recorded"
-eq "$(closed_step)" "in_progress" "(8b) the step stays open"
+given_back "(8b)"
 eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 1 "(8b) the session drains, so the step is offered again"
 
 mv "$PACK/store-only-exit.sh" "$TMP/store-only-exit.real"
@@ -466,7 +477,8 @@ submit -- --store-only "filed tk-z" --notes "n" --done "the brief" --convoy cv-1
 has "$(grep '^storeonly ' "$LOG")" "storeonly --bead tk-w --base main --convoy cv-1 --done the brief" "(8c) the bead, the base, the convoy and the brief reach the check"
 prepare DETACHED "$FRESH"
 submit STORE_ONLY_RC=1 -- --store-only "filed tk-z" --notes "n" --convoy cv-1 --base main
-eq "$RC|$(words)" "1|storeonly drain " "(8d) a refused check writes nothing, drains and exits 1"
+eq "$RC|$(words)" "1|storeonly update drain " "(8d) a refused check writes nothing but the step's release, drains and exits 1"
+given_back "(8d)"
 mv "$TMP/store-only-exit.real" "$PACK/store-only-exit.sh"
 
 echo "# withdrawn work ends the run, and landed work closes the step"
@@ -495,13 +507,14 @@ eq "$RC" 1 "(11) a refused push: stops"
 has "$OUT" "PUSH FAILED" "(11) says so"
 has "$OUT" "Never force-push" "(11) with the merge instruction"
 eq "$(field assignee)" "" "(11) nothing is handed off"
-eq "$(closed_step)" "in_progress" "(11) the step stays open"
+given_back "(11)"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(11) the session drains"
 prepare polecat/tk-w "$FRESH"
 go "LS_REMOTE_WRONG=$TMP/ls-seen-$N"
 eq "$RC" 1 "(12) a ref on origin that is not HEAD: stops"
 has "$OUT" "PUSH VERIFICATION FAILED" "(12) says so"
 eq "$(field assignee)" "" "(12) nothing is handed off"
+given_back "(12)"
 prepare polecat/tk-w "$FRESH"
 go LS_REMOTE_DOWN=1
 eq "$RC" 1 "(12b) a read of origin that does not answer: stops"
@@ -509,7 +522,7 @@ has "$OUT" "ORIGIN UNREAD" "(12b) says origin's read did not answer"
 hasnt "$OUT" "moved under you" "(12b) …never that the branch moved"
 eq "$(pushed)" 0 "(12b) nothing is pushed"
 eq "$(field assignee)" "" "(12b) nothing is handed off"
-eq "$(closed_step)" "in_progress" "(12b) the step stays open"
+given_back "(12b)"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(12b) the session drains"
 
 echo "# the bring-current guard holds the handoff"
@@ -531,6 +544,7 @@ eq "$RC" 1 "(15) a guard that did not finish: stops"
 has "$OUT" "BRING-CURRENT GUARD DID NOT FINISH" "(15) says so"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(15) the session drains"
 eq "$(field assignee)" "" "(15) nothing is handed off"
+given_back "(15)"
 # The real guard, over a work bead that names neither its branch nor an anchor while
 # a reviewed anchor stands on that branch: the guard finds the anchor only through
 # the branch this call records, and holds a merge resolved by hand with no audit.
@@ -579,6 +593,7 @@ eq "$RC" 1 "(17) an address no agent holds: stops"
 has "$OUT" "REFINERY ADDRESS NAMES NO AGENT" "(17) says so"
 has "$OUT" "gc-toolkit/other.refinery" "(17) names the bound refineries"
 eq "$(field assignee)" "" "(17) nothing is handed off"
+given_back "(17)"
 prepare polecat/tk-w "$FRESH"
 go "STUB_FAIL_ON=agent list"
 eq "$RC" 0 "(18) a roster that cannot be read: hands off unchecked"
@@ -688,7 +703,9 @@ eq "$RC" 1 "(33) a store that does not answer: stops"
 has "$OUT" "The store did not answer" "(33) says so"
 eq "$(pushed)" 0 "(33) nothing is pushed: an absent target or auto_push is not read off a failed read"
 eq "$(grep -cE '^(gate|cancel) ' "$LOG" | tr -d ' ')" 0 "(33) asks nothing and cancels nothing"
-eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(33) the step goes back to the pool"
+has "$OUT" "st-submit could not be read, so it is not given back" "(33) a step no read answers is not given back, and the output says so"
+eq "$(closed_step) $(field assignee st-submit)" "in_progress sess-me" "(33) so it stays this session's"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(33) and the drain is still asked for"
 prepare polecat/tk-w "$FRESH"
 store "[$STEP_ROW,$CONVOY_ROW]"
 go
@@ -704,8 +721,8 @@ eq "$(pushed)" 0 "(34b) nothing is pushed"
 eq "$(ON_ORIGIN polecat/tk-w)" "$BEFORE" "(34b) origin's ref is unchanged"
 eq "$(grep -c '^guard ' "$LOG" | tr -d ' ')" 0 "(34b) and no guard runs"
 eq "$(meta branch)" "<absent>" "(34b) the store holds no branch"
-eq "$(closed_step)" "in_progress" "(34b) the step stays open"
-eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(34b) the step goes back to the pool"
+given_back "(34b)"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(34b) and the drain is last"
 
 echo "# a close that does not land leaves the step for the next run"
 prepare polecat/tk-w "$FRESH"
@@ -738,6 +755,15 @@ eq "$(grep -c '^bd update st-submit ' "$LOG" | tr -d ' ')" 0 "(36) not even a st
 eq "$(g "$R" branch --list polecat/tk-w)" "" "(36) and the local branch deleted"
 eq "$(meta work_dir)" "<absent>" "(36) and work_dir cleared"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(36) and the drain is last"
+# A stop that leaves the work to the next worker gives back the claim itself.
+prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
+submit STUB_HOOK_CURRENT=tk-w LS_REMOTE_DOWN=1 -- --bead tk-w --base main --notes "Implemented: it"
+eq "$RC" 1 "(36b) a direct claim whose origin read does not answer: stops"
+eq "$(field status) $(field assignee)" "open " "(36b) the work bead goes back to the pool, open and unassigned"
+eq "$(meta gc.session_id)" "<absent>" "(36b) with its pins removed"
+eq "$(meta gc.routed_to)" "pool" "(36b) and its route kept, so its pool offers it again"
+eq "$(closed_step)" "in_progress" "(36b) no step is written"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(36b) and the drain is last"
 
 prepare polecat/tk-w '{"auto_push":"false"}'; hold tk-w sess-me
 direct
