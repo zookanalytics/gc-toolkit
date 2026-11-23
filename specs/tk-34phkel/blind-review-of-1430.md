@@ -33,9 +33,9 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin:/Users/gc/.local/bin TMPD
 ```
 
 Safe mode loads no `CLAUDE.md`, memory, hooks or skills, and restricted mode
-keeps every read inside the run's directory. So no reviewer saw the operator's
-later corrections, which the implementing session's memory and the city's
-beads hold. Subagents were not used for the same reason: a subagent loads its
+keeps every read inside the run's directory. So no reviewer read the
+implementing session's memory or the city's beads, where the operator's later
+corrections are recorded. Subagents were not used, because a subagent loads its
 session's project instructions and memory index. The last two runs used
 `--output-format stream-json --verbose`, so their tool calls are on record.
 
@@ -49,6 +49,13 @@ it, `_review/` held:
   updated 2026-11-09);
 - the diff from the reviewed base to the reviewed commit, and the commit
   messages between them.
+
+A reviewer read what its prompt named: the reviewed tree's own `AGENTS.md`,
+which the prompt has it read first, and the files above. Main's method brings
+its work-quality standards, and two of their rules were adopted or revised on
+2026-11-17, after #1430's review. So the runs saw no correction that only
+memory or a bead holds, and they did see every rule those standards held at
+539a62ca9.
 
 Every run had the same prompt, given in full at the end of this record, apart
 from the reviewed commit and base.
