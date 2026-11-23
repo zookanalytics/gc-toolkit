@@ -77,8 +77,11 @@ no warrant.
     cancelling it with what releases the work on the work bead. Upstream's has no
     such gate. `gc sling` keeps one live run of a formula on a bead, and the gate
     reads the same record for what gets past it, a forced relaunch and a claimant
-    with no poured workflow, so it adds no key and writes nothing to let a run
-    through.
+    with no poured workflow, so it adds no key. To let a run through it writes
+    nothing but the removal of a claimant's wait onto that run's own gate step: a
+    claimant beside a run whose gate has not let it through leaves the bead
+    waiting on that step with a re-sling armed, since that gate can refuse the
+    claim in turn and nothing else would offer the bead again.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
@@ -116,10 +119,17 @@ no warrant.
     `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
+  - `internal/sling/sling_core.go`, `resolveIdempotentShortCircuit` and
+    `restampWorkBeadRouting`: an `--on` sling reads the claim before it pours,
+    skipping a bead claimed with no molecule (`SkippedForClaim`), and clears the
+    bead's pool route only after the pour, so a pool claim that lands between the
+    two leaves a claimant beside a run. `cmd/gc/cmd_sling.go` exits 3 on a `sourceworkflow.ConflictError`, a live
+    run of the formula on the bead, which the armed re-sling's start reads as the
+    work already sent.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df6d and
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6168 and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end

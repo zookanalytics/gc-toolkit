@@ -23,6 +23,12 @@
 #      its own waits, and an own waits-for edge holds as unjudged, while a
 #      pinned blocker of its own holds nothing. A read with no answer asks
 #      nothing and cancels nothing.
+#   8. THE HAND-OFF: a claimant beside a run whose gate has not let it through
+#      leaves the bead waiting on that gate's step with a re-sling armed, so when
+#      each refuses the other, in either order of their reads or at once, the
+#      bead is offered again. The run's gate removes that wait onto the step it
+#      holds and judges the bead without it, and a wait that does not land leaves
+#      the claimant's refusal as it was.
 #
 # The siblings it calls are stubs that log, except decline.sh and work-lib.sh,
 # which are the real ones, and run-lib.stub.sh answers which runs work a bead.
@@ -87,10 +93,29 @@ case "$1 $2" in
     if [ -n "${FAKE_SHOW_OUT+x}" ]; then printf '%s' "$FAKE_SHOW_OUT"; exit "${FAKE_SHOW_RC:-1}"; fi
     cat "$FAKE_ROW_FILE"; exit 0 ;;
   "bd update") shift 2; printf 'UPDATE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_UPDATE:-/dev/null}"; exit "${FAKE_UPDATE_RC:-0}" ;;
+  # A run's steps are listed by their root, and the roots by their ids.
   "bd list")
     shift 2; printf '%s\n' "$*" >> "${FAKE_LIST:-/dev/null}"
     [ -z "${FAKE_LIST_DOWN:-}" ] || exit 1
-    printf '%s' "${FAKE_ROOTS:-[]}"; exit 0 ;;
+    case " $* " in
+      *" gc.root_bead_id="*) [ -z "${FAKE_STEPS_DOWN:-}" ] || exit 1; printf '%s' "${FAKE_STEPS:-[]}" ;;
+      *) printf '%s' "${FAKE_ROOTS:-[]}" ;;
+    esac
+    exit 0 ;;
+  # The bead this session holds: none, unless the case names one.
+  "hook current")
+    printf '%s\n' "$*" >> "${FAKE_HOOK:-/dev/null}"
+    [ -n "${FAKE_HELD:-}" ] || exit 1
+    printf '%s\n' "$FAKE_HELD"; exit 0 ;;
+  # An edge removed leaves the store gctk reads as well.
+  "bd dep")
+    shift 2
+    [ "${1:-}" = remove ] || { echo "gc stub: unsupported 'bd dep $*'" >&2; exit 2; }
+    printf 'DEPRM\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "${FAKE_DEPRM:-/dev/null}"
+    [ -z "${FAKE_DEPRM_RC:-}" ] || exit "$FAKE_DEPRM_RC"
+    jq -c --arg a "$2" --arg b "$3" 'map(if .id == $a then .dependencies |= ((. // []) | map(select(.id != $b))) else . end)' \
+      "$HOLDS_STORE" > "$HOLDS_STORE.new" && mv "$HOLDS_STORE.new" "$HOLDS_STORE"
+    exit 0 ;;
 esac
 echo "gc stub: unsupported '$*'" >&2
 exit 2
@@ -117,6 +142,7 @@ row() { printf '[%s]' "$(jq -c '. + {id: "tk-work"}' <<<"$1")"; }
 # each bead the row names an edge onto, at the status the edge reads.
 run() {
   : > "$TMP/log"; : > "$TMP/update"; : > "$TMP/cancel"; : > "$TMP/await"; : > "$TMP/gate"; : > "$TMP/finding"; : > "$TMP/run-reads"; : > "$TMP/list"
+  : > "$TMP/hook"; : > "$TMP/deprm"
   printf '%s' "$1" > "$TMP/row.json"
   jq -c --argjson more "${FAKE_STORE_ROWS:-[]}" '(if type == "array" then . else [] end) as $r
     | $more + $r + [ $r[].dependencies[]? | {id, status: (.status // "open")} ] | unique_by(.id)' \
@@ -130,7 +156,7 @@ run() {
     WORK_READ_WAIT=0 FAKE_ROW_FILE="$TMP/row.json" HOLDS_STORE="$TMP/holds.json" \
     GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" RUN_LIB_STUB_LOG="$TMP/run-reads" FAKE_LIST="$TMP/list" \
     FAKE_LOG="$TMP/log" FAKE_UPDATE="$TMP/update" FAKE_CANCEL="$TMP/cancel" FAKE_AWAIT="$TMP/await" FAKE_GATE="$TMP/gate" FAKE_FINDING="$TMP/finding" \
-    FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" \
+    FAKE_HOOK="$TMP/hook" FAKE_DEPRM="$TMP/deprm" FAKE_SESSIONS="${FAKE_SESSIONS-$SESS_EMPTY}" \
       "$PACK/work-gate.sh" "$@" ) > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -321,10 +347,20 @@ for round in 1 2 3; do
   eq "$(cat "$TMP/race-a/log" 2>/dev/null)" "" "two concurrent dispatches, round $round: the one that builds writes nothing"
 done
 
-eq "$(FAKE_RUNS="[$PEER]" run "$FREE" --bead tk-work)" "$DONE_NOBODY" "a direct claim beside a live run: it has no run of its own, so it refuses"
-has "$(cat "$TMP/cancel")" "in flight in live run r-peer" "a direct claim beside a live run: the reason names it"
-eq "$(cat "$TMP/list")" "" "a direct claim beside a live run: no ages are read"
-eq "$(FAKE_RUNS="[$(run_of r-old "")]" run "$FREE" --bead tk-work)" "$DONE_NOBODY" "a direct claim beside a classic molecule, which names no convoy: refuses"
+# A claimant reads the oldest live run's gate step, the step at --step under its
+# root. A gate that has let its run through closed that step with outcome pass.
+CLAIMED="$(row "{\"status\":\"in_progress\",\"assignee\":\"$SELF_ALIAS\",\"metadata\":{\"gc.execution_routed_to\":\"rig/pool\"}}")"
+PEER_AGE='[{"id":"r-peer","created_at":"2026-11-01T09:00:00Z"}]'
+gate_step() { # <status> [<outcome>] -> the run's gate step, as the store lists it
+  jq -nc --arg s "$1" --arg o "${2:-}" '[{id: "s-peer", status: $s, metadata: ({"gc.step_ref": "mol-polecat-work.load-context", "gc.root_bead_id": "r-peer"} + (if $o == "" then {} else {"gc.outcome": $o} end))}]'
+}
+PASSED="$(gate_step closed pass)"
+eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$PASSED" run "$CLAIMED" --bead tk-work)" "$DONE_NOBODY" "a direct claim beside a run its gate has let through: it has no run of its own, so it refuses"
+has "$(cat "$TMP/cancel")" "duplicate dispatch: tk-work in flight in live run r-peer" "a direct claim beside a run past its gate: the reason names the run"
+eq "$(cat "$TMP/await")" "" "a direct claim beside a run past its gate: nothing waits, since that run builds the bead"
+has "$(cat "$TMP/list")" "--metadata-field gc.root_bead_id=r-peer --metadata-field gc.step_ref=mol-polecat-work.load-context " "a direct claim beside a live run: the run's gate step is read by its root and the step's ref"
+eq "$(FAKE_RUNS="[$(run_of r-old "")]" FAKE_ROOTS='[{"id":"r-old","created_at":"2026-11-01T09:00:00Z"}]' run "$FREE" --bead tk-work)" "$DONE_NOBODY" "a direct claim beside a classic molecule, which names no convoy and has no gate step: refuses"
+eq "$(cat "$TMP/await")" "" "a direct claim beside a run with no gate step: nothing waits"
 eq "$(FAKE_RUNS='[]' run "$FREE" --bead tk-work)" "0|" "a direct claim with no run on the bead: passes"
 eq "$(FAKE_RUNS="[$(run_of r-peer cv-0 mol-review)]" run "$FREE" --bead tk-work)" "0|" "a direct claim beside another formula's run: passes"
 
@@ -417,6 +453,110 @@ eq "$(cat "$TMP/await")" "" "a failed blocked listing: no wait is recorded"
 for owner in hq-busy sess-busy rig/rig.polecat-busy rig.polecat-busy; do
   eq "$(FAKE_SESSIONS="$SESS_REAL" run "$(row "{\"status\":\"in_progress\",\"assignee\":\"$owner\",\"metadata\":{}}")")" "$DONE_NOBODY" "in_progress under '$owner', a listed session's name: refused"
 done
+
+# --- 8. The hand-off. -------------------------------------------------------------
+# A claimant and a run of the formula meet at their gates. The run's gate refuses
+# a claim it reads live, and the claimant refuses the run, so a claimant beside a
+# run whose gate has not let it through leaves the bead waiting on that gate's
+# step, with a re-sling armed that pours again unless the run goes on.
+AT_GATE="$(gate_step open)"
+
+# The claimant reads first, while the run's gate has not let it through.
+eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "the claimant reads first, the run at its gate: waits on the gate step, notes the arm, ends, drains"
+eq "$(cat "$TMP/await")" "tk-work --blocked-by s-peer --formula mol-polecat-work" "the claimant reads first: the bead waits on that run's gate step, armed to re-sling on the formula"
+has "$(cat "$TMP/update")" "Claim handed to a run at its gate; re-sling armed" "the claimant reads first: the note names the hand-off"
+has "$(cat "$TMP/update")" "run r-peer's gate step s-peer has not let that run through" "the claimant reads first: the note names the run and its gate step"
+has "$(cat "$TMP/cancel")" "duplicate dispatch: tk-work in flight in live run r-peer" "the claimant reads first: the reason is a live run's"
+has "$(cat "$TMP/cancel")" "it waits on s-peer with a re-sling armed" "the claimant reads first: the reason records the wait"
+eq "$(asked)" "" "the claimant reads first: nothing asked"
+
+# …and the run's gate reads after it. The bead, handed back, waits on this run's
+# gate step, the bead this session holds.
+HANDED_DEP='{"id":"s-mine","dependency_type":"blocks","status":"in_progress"}'
+HANDED="$(row "{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"resling_target\":\"rig/pool\"},\"dependencies\":[$HANDED_DEP]}")"
+eq "$(FAKE_HELD=s-mine FAKE_RUNS="[$MINE]" run "$HANDED")" "0|DEPRM;" "the run's gate reads the hand-off after: its edge is removed, and the run builds"
+eq "$(cat "$TMP/deprm")" "remove tk-work s-mine" "the hand-off: the one edge removed is the bead's onto the step this session holds"
+eq "$(cat "$TMP/await")" "" "the hand-off: nothing waits"
+
+# The run reads first, while the claim is live, and refuses it.
+eq "$(FAKE_SESSIONS="$SESS_REAL" run "$(row '{"status":"in_progress","assignee":"hq-busy","metadata":{}}')")" "$DONE_NOBODY" \
+  "the run reads first, the claim live: refuses it"
+# …and the claimant reads after it, with that run still live: the cancel puts
+# the gate step back to not started and closes it, and closes the root last.
+for st in "$(gate_step open)" "$(gate_step closed canceled)"; do
+  eq "$(FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$st" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+    "the claimant reads after the run refused it, its gate step $(jq -r '.[0] | .status + " " + (.metadata["gc.outcome"] // "")' <<<"$st"): waits on it"
+  eq "$(cat "$TMP/await")" "tk-work --blocked-by s-peer --formula mol-polecat-work" \
+    "…its close leaves the bead held by nothing, so the arm re-slings it once that run has ended"
+done
+
+# Both read the same rows at once: each refuses the other, and the claimant's
+# wait is what offers the bead again.
+meet() { # <dir> <session name> <gate args...>, in the background
+  local dir="$1" name="$2"; shift 2
+  mkdir -p "$dir"
+  printf '%s' "$(row '{"status":"in_progress","assignee":"hq-busy","metadata":{"gc.execution_routed_to":"rig/pool"}}')" > "$dir/row.json"
+  cp "$dir/row.json" "$dir/holds.json"
+  printf '%s' "[$MINE]" > "$dir/runs.json"
+  ( cd "$TMP" || exit 97
+    env GC_SESSION_NAME="$name" GC_SESSION_ID="sess-$name" GC_AGENT="rig/rig.$name" GC_ALIAS="$name" \
+      WORK_READ_WAIT=0 FAKE_ROW_FILE="$dir/row.json" HOLDS_STORE="$dir/holds.json" GC_RUN_LIB="$PACK/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$dir/runs.json" \
+      FAKE_LOG="$dir/log" FAKE_CANCEL="$dir/cancel" FAKE_AWAIT="$dir/await" FAKE_SESSIONS="$SESS_REAL" \
+      FAKE_ROOTS='[{"id":"r-mine","created_at":"2026-11-01T09:00:00Z"}]' \
+      FAKE_STEPS='[{"id":"s-mine","status":"in_progress","metadata":{"gc.step_ref":"mol-polecat-work.load-context","gc.root_bead_id":"r-mine"}}]' \
+      "$PACK/work-gate.sh" "$@" >"$dir/out" 2>&1
+    echo "$?" > "$dir/rc" ) &
+}
+for round in 1 2 3; do
+  rm -rf "$TMP/meet-run" "$TMP/meet-claim"
+  meet "$TMP/meet-run" "$SELF_NAME" --convoy cv-1; meet "$TMP/meet-claim" hq-busy --bead tk-work; wait
+  eq "$(cat "$TMP/meet-run/rc")$(tr '\n' ';' < "$TMP/meet-run/log")" "1UPDATE;CANCEL;DRAIN;" "a claimant and a run at once, round $round: the run refuses the live claim"
+  eq "$(cat "$TMP/meet-claim/rc")$(tr '\n' ';' < "$TMP/meet-claim/log")" "1AWAIT;UPDATE;CANCEL;DRAIN;" "a claimant and a run at once, round $round: the claimant refuses the run and waits on its gate step"
+  eq "$(cat "$TMP/meet-claim/await")" "tk-work --blocked-by s-mine --formula mol-polecat-work" "a claimant and a run at once, round $round: the run's cancel closes that step, and the arm re-slings the bead"
+done
+
+# Of two live runs the claimant hands the bead to the oldest, the one that builds.
+eq "$(FAKE_RUNS="[$PEER,$(run_of r-third cv-2)]" FAKE_ROOTS='[{"id":"r-third","created_at":"2026-11-01T10:00:00Z"},{"id":"r-peer","created_at":"2026-11-01T09:00:00Z"}]' FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" \
+  "1|AWAIT;UPDATE;CANCEL;DRAIN;" "two live runs: the claimant waits on a gate step"
+has "$(cat "$TMP/list")" "--metadata-field gc.root_bead_id=r-peer " "two live runs: the gate step read is the oldest run's"
+
+# The wait does not land: the claimant refuses as it does beside a run past its
+# gate, and the live run is the record.
+eq "$(FAKE_AWAIT_RC=1 FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" FAKE_STEPS="$AT_GATE" run "$CLAIMED" --bead tk-work)" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "the claimant's wait does not land: it refuses"
+has "$(cat "$TMP/update")" "Duplicate dispatch refused; run cancelled" "the wait does not land: the note is the refusal's"
+no "$(cat "$TMP/update")" "re-sling armed" "the wait does not land: no note claims an arm"
+has "$(cat "$TMP/cancel")" "The wait on s-peer did not land, so nothing re-slings it if that gate refuses it" "the wait does not land: the reason says so"
+eq "$(asked)" "" "the wait does not land: nothing asked"
+
+# What the claimant reads fails: no fact about the run, so it asks nothing and
+# ends nothing.
+eq "$(FAKE_STEPS_DOWN=1 FAKE_RUNS="[$PEER]" FAKE_ROOTS="$PEER_AGE" run "$CLAIMED" --bead tk-work)" "1|DRAIN;" "a gate step that cannot be read: asks nothing, ends nothing, drains"
+has "$(cat "$TMP/out")" "could not read the gate step of run r-peer, which works tk-work" "a gate step that cannot be read: says so"
+eq "$(FAKE_LIST_DOWN=1 FAKE_RUNS="[$PEER]" run "$CLAIMED" --bead tk-work)" "1|DRAIN;" "a claim whose runs' ages cannot be read: asks nothing, ends nothing, drains"
+
+# The hand-off is no hold on the run whose step it waits on, and on nothing else.
+eq "$(FAKE_HELD=s-mine FAKE_RUNS="[$MINE]" run "$(row '{"status":"open","assignee":"","metadata":{"resling_target":"rig/pool"},"dependencies":[{"id":"s-peer","dependency_type":"blocks","status":"open"}]}')")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "a bead handed to another run's gate: held by that wait, waits on it, ends"
+eq "$(cat "$TMP/deprm")" "" "a bead handed to another run's gate: no edge removed"
+eq "$(cat "$TMP/await")" "tk-work --held-by s-peer --formula mol-polecat-work" "a bead handed to another run's gate: the arm waits on that gate step"
+eq "$(FAKE_RUNS="[$MINE]" run "$HANDED")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" "a hand-off the session cannot match to a step it holds: held, so the arm re-slings once that step closes"
+eq "$(cat "$TMP/deprm")" "" "an unmatched hand-off: no edge removed"
+eq "$(FAKE_HELD=s-mine run "$(row "{\"status\":\"open\",\"assignee\":\"\",\"metadata\":{\"resling_target\":\"rig/pool\"},\"dependencies\":[$HANDED_DEP,{\"id\":\"tk-sib\",\"dependency_type\":\"blocks\",\"status\":\"open\"}]}")")" "1|AWAIT;UPDATE;CANCEL;DRAIN;" \
+  "a handed bead with a blocker of its own: held, nothing removed"
+eq "$(cat "$TMP/deprm")" "" "a handed bead with a blocker of its own: no edge removed"
+has "$(cat "$TMP/update")" "tk-sib" "a handed bead with a blocker of its own: the note names the blocker"
+
+# Removed, the hand-off leaves what holds the bead without it: a parked
+# ancestor still holds work that has not started.
+eq "$(FAKE_HELD=s-mine FAKE_STORE_ROWS="$PARKED" run "$(row "{\"status\":\"open\",\"assignee\":\"\",\"parent\":\"tk-epic\",\"metadata\":{\"resling_target\":\"rig/pool\"},\"dependencies\":[$HANDED_DEP]}")")" \
+  "1|DEPRM;AWAIT;UPDATE;CANCEL;DRAIN;" "a bead handed this run under a parked epic: the hand-off is removed, and the park holds it"
+eq "$(cat "$TMP/await")" "tk-work --held-by tk-park --formula mol-polecat-work" "a handed bead under a parked epic: it waits on the park"
+
+eq "$(FAKE_DEPRM_RC=1 FAKE_HELD=s-mine FAKE_RUNS="[$MINE]" run "$HANDED")" "1|DEPRM;DRAIN;" "the hand-off's edge is not removed: asks nothing, cancels nothing, drains"
+has "$(cat "$TMP/out")" "could not remove the wait of work bead tk-work on s-mine, the step this session holds" "the hand-off's edge is not removed: says so"
+eq "$(FAKE_HELD=s-mine FAKE_RUNS="[$MINE]" run "$FREE"; cat "$TMP/hook")" "0|" "a bead nothing holds: the gate asks Gas City for no step"
 
 # --- usage ------------------------------------------------------------------------
 OUT="$("$PACK/work-gate.sh" 2>&1)"; eq "$?" "2" "no work named: usage error"

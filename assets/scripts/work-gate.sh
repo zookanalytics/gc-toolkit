@@ -35,10 +35,13 @@
 # relaunch and a claimant with no poured workflow. Of the live runs of this formula
 # on the bead the oldest builds it and the others refuse, a rule both dispatches
 # reach alike from the same rows, with nothing written. A claimant with no run of
-# its own refuses any of them. Another formula's run is no duplicate, as it is none
-# to `gc sling`. A sibling on the branch is met at workspace-setup's checkout, which
-# no two runs can race past. What holds the bead is read first, because a bead that
-# must wait has no business meeting another run.
+# its own refuses any of them. While the oldest's gate has not let it through, that
+# gate can still refuse the claim it reads as a live owner, so the claimant first
+# leaves the bead waiting on that gate's step with a re-sling armed, which offers
+# the bead again unless the gate lets its run through. Another formula's run is no
+# duplicate, as it is none to `gc sling`. A sibling on the branch is met at
+# workspace-setup's checkout, which no two runs can race past. What holds the bead
+# is read first, because a bead that must wait has no business meeting another run.
 #
 # exit: 0 this run builds the bead · 1 it does not, and decline.sh or the step's
 # retry has what follows · 2 usage
@@ -195,21 +198,43 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 [ -x "$GCTK" ] || work_outage "could not read what holds work bead $WORK_ID: no gctk binary at '$GCTK'"
 # The answer as one line: clear, or the status, the bead its first wait is on and
-# what holds it, tab-separated.
-# shellcheck disable=SC2016  # jq source; its $names are jq's
-HOLD=$("$GCTK" bead holds "$WORK_ID" </dev/null 2>/dev/null | jq -r --arg id "$WORK_ID" '
-  select(type == "object" and .id == $id)
-  | (.waits // []) as $w | ($w | map(.id | tostring) | join(", ")) as $on
-  | if .error != null then empty
-    elif .status == "clear" then "clear"
-    elif ($w | length) == 0 then empty
-    elif .status == "blocked" then "blocked\t\($w[0].id)\theld by its own wait on \($on)"
-    elif .status == "held" then "held\t\($w[0].id)\theld through its ancestor \($w[0].ancestor), which waits on \($on), and its work has not started"
-    elif .status == "unjudged" then "unjudged\t\($w[0].id)\theld by its own waits-for edge onto \($on), which the store cannot judge yet"
-    else empty end' 2>/dev/null | head -n 1)
+# what holds it, tab-separated, and for a blocked bead, the beads its waits are
+# on, comma-separated.
+hold_read() {
+  # shellcheck disable=SC2016  # jq source; its $names are jq's
+  "$GCTK" bead holds "$WORK_ID" </dev/null 2>/dev/null | jq -r --arg id "$WORK_ID" '
+    select(type == "object" and .id == $id)
+    | (.waits // []) as $w | ($w | map(.id | tostring) | join(", ")) as $on
+    | if .error != null then empty
+      elif .status == "clear" then "clear"
+      elif ($w | length) == 0 then empty
+      elif .status == "blocked" then "blocked\t\($w[0].id)\theld by its own wait on \($on)\t\($w | map(.id | tostring) | join(","))"
+      elif .status == "held" then "held\t\($w[0].id)\theld through its ancestor \($w[0].ancestor), which waits on \($on), and its work has not started"
+      elif .status == "unjudged" then "unjudged\t\($w[0].id)\theld by its own waits-for edge onto \($on), which the store cannot judge yet"
+      else empty end' 2>/dev/null | head -n 1
+}
+HOLD=$(hold_read)
 [ -n "$HOLD" ] || work_outage "could not read what holds work bead $WORK_ID (gctk bead holds gave no answer for it)"
+# A claimant that hands this run the bead, below, leaves it waiting on this run's
+# gate step, the bead this session holds (gc hook current). That wait is the
+# hand-off and holds nothing against this run. When it is the bead's only wait of
+# its own, its edge is removed and what holds the bead is read again, so an
+# ancestor's wait on work that has not started still holds it. Any other wait of
+# its own holds the bead with or without the hand-off.
+if [ -n "$CONVOY" ] && [ "$HOLD" != clear ]; then
+  IFS=$'\t' read -r HOLD_STATUS _ _ HOLD_OWN <<< "$HOLD"
+  if [ "$HOLD_STATUS" = blocked ]; then
+    HELD=$(gc hook current --id-only </dev/null 2>/dev/null) || HELD=""
+    if [ -n "$HELD" ] && [ "$HOLD_OWN" = "$HELD" ]; then
+      gc bd dep remove "$WORK_ID" "$HELD" </dev/null >/dev/null 2>&1 \
+        || work_outage "could not remove the wait of work bead $WORK_ID on $HELD, the step this session holds"
+      HOLD=$(hold_read)
+      [ -n "$HOLD" ] || work_outage "could not read what holds work bead $WORK_ID (gctk bead holds gave no answer for it)"
+    fi
+  fi
+fi
 if [ "$HOLD" != clear ]; then
-  IFS="$(printf '\t')" read -r HOLD_STATUS HOLD_ON HOLD_WHAT <<< "$HOLD"
+  IFS=$'\t' read -r HOLD_STATUS HOLD_ON HOLD_WHAT _ <<< "$HOLD"
   if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --held-by "$HOLD_ON" --formula "$FORMULA"; then
     note "Held work bead; run cancelled, re-sling armed" "$HOLD_WHAT (gctk bead holds: $HOLD_STATUS). A re-sling is armed to fire once nothing holds it"
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "work bead $WORK_ID is $HOLD_WHAT ($HOLD_STATUS); a re-sling is armed for when nothing holds it"
@@ -227,13 +252,41 @@ LIVE=$(printf '%s' "$RUNS" | jq -c --arg f "$FORMULA" '[.[] | select(.live and .
 OTHERS=$(printf '%s' "$LIVE" | jq -r --arg mine "$CONVOY" '[.[] | select($mine == "" or .convoy != $mine) | .root] | join(", ")')
 [ -n "$OTHERS" ] || exit 0
 
+# A root's created_at has one form and a second's resolution, so its id breaks a
+# tie, and a root the store does not return cannot be the oldest.
+OLDEST=$(bd_json list --id "$(printf '%s' "$LIVE" | jq -r 'map(.root) | join(",")')" --all --include-ephemeral --limit 0 \
+  | jq -r 'sort_by([.created_at, .id]) | .[0].id // empty' 2>/dev/null)
+[ -n "$OLDEST" ] || work_outage "could not read the age of the runs that work $WORK_ID"
 if [ -n "$CONVOY" ]; then
-  # A root's created_at has one form and a second's resolution, so its id breaks a
-  # tie, and a root the store does not return cannot be the oldest.
-  OLDEST=$(bd_json list --id "$(printf '%s' "$LIVE" | jq -r 'map(.root) | join(",")')" --all --include-ephemeral --limit 0 \
-    | jq -r 'sort_by([.created_at, .id]) | .[0].id // empty' 2>/dev/null)
-  [ -n "$OLDEST" ] || work_outage "could not read the age of the runs that work $WORK_ID"
   MINE=$(printf '%s' "$LIVE" | jq -r --arg mine "$CONVOY" '[.[] | select(.convoy == $mine) | .root] | .[0] // empty')
   [ "$OLDEST" != "$MINE" ] || exit 0
+else
+  # A claimant hands the bead to the oldest run. That run's gate step, the step at
+  # --step under its root, closes with outcome pass once its gate lets the run
+  # through. Until then the gate can still read this claim as a live owner and
+  # refuse, which ends its run, and no row records when the claim was taken, so
+  # the two cannot order themselves. So the bead waits on that step, with a
+  # re-sling armed, before the claim is handed back. A gate that lets its run
+  # through closes the step and leaves the run live, so the arm's start finds the
+  # run working the bead (gc sling exits 3) and retires with no pour. A gate that
+  # refuses, or a run cancelled at it, closes the step and ends the run, so the
+  # arm re-slings the bead. A run with no such step, or one whose gate has passed,
+  # builds the bead, and the claim is handed back as it is beside any live run.
+  # A wait that does not land leaves that hand-back, with the live run as its
+  # record.
+  GATE_STEP=$(bd_json list --metadata-field "gc.root_bead_id=$OLDEST" --metadata-field "gc.step_ref=$STEP" --all --include-ephemeral --limit 0 \
+    | jq -r 'if type != "array" then error("not a listing")
+             elif any(.[]; (.status // "") == "closed" and (.metadata["gc.outcome"] // "") == "pass") then ""
+             else (.[0].id // "") end' 2>/dev/null) \
+    || work_outage "could not read the gate step of run $OLDEST, which works $WORK_ID"
+  if [ -n "$GATE_STEP" ]; then
+    AT_GATE="in flight in live run $OTHERS, and run $OLDEST's gate step $GATE_STEP has not let that run through"
+    if "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --blocked-by "$GATE_STEP" --formula "$FORMULA"; then
+      note "Claim handed to a run at its gate; re-sling armed" "$AT_GATE. It waits on $GATE_STEP with a re-sling armed: a gate that lets the run through retires the arm with no pour, and one that refuses re-slings $WORK_ID"
+      "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "duplicate dispatch: $WORK_ID $AT_GATE; it waits on $GATE_STEP with a re-sling armed"
+      exit 1
+    fi
+    refuse "$DUPLICATE_NOTE" "duplicate dispatch" "$AT_GATE. The wait on $GATE_STEP did not land, so nothing re-slings it if that gate refuses it"
+  fi
 fi
 refuse "$DUPLICATE_NOTE" "duplicate dispatch" "in flight in live run $OTHERS"

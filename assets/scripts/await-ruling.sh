@@ -84,7 +84,8 @@
 # Callers: decline.sh, for work a worker declines until a person rules, and any
 # agent the waits skill sends here for the same; and work-gate.sh and
 # work-setup.sh, the decline arms of mol-polecat-work that wait for what already
-# holds the work bead, a person or a sibling.
+# holds the work bead, a person or a sibling, and work-gate.sh's claimant, which
+# waits on the gate step of a live run its gate has not let through.
 # exit: 0 the work bead waits on the gate and is armed, or is closed and needs
 #       neither · 1 the wait did not land · 2 usage
 set -uo pipefail
