@@ -1,11 +1,12 @@
 description = """
 A PR's review run for one head: a checked loop that judges one head per
 iteration. In each iteration triage first checks that the run still stands,
-then reads the change at the head and picks the checks it needs, a lane of
-mol-pr-review-lane runs each picked check by its own method, and
-rule-and-repair rules every finding and every ask the round can take, makes the
-round's fixes as one push, and answers them on the PR: in one comment for the
-head, and at each person's post, where it was made. A push is a new head, which the next iteration triages. The loop's check,
+then reads the change at the head, picks the checks it needs and answers each
+person's post that needs only an answer, a lane of mol-pr-review-lane runs each
+picked check by its own method, and rule-and-repair rules every finding and
+every ask triage left it, makes the round's fixes as one push, and answers them
+on the PR: in one comment for the head, and at each person's post, where it was
+made. A push is a new head, which the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
 the iteration that ends the loop, a pass or the last attempt, it writes the
 result for the last head the run judged and its target, which the landing order
@@ -73,8 +74,9 @@ id = "review-loop"
 title = "Review {{pr_bead}} until a head passes"
 description = """
 The loop: each iteration judges one head of `{{pr_bead}}`'s PR. Triage picks
-the head's checks, one mol-pr-review-lane runs each, and rule-and-repair rules
-and fixes. The check after each iteration is `gctk review passed --record`, and
+the head's checks and answers each post that needs only an answer, one
+mol-pr-review-lane runs each check, and rule-and-repair rules and fixes the
+rest. The check after each iteration is `gctk review passed --record`, and
 a round that pushed, ruled a finding must-fix or left one unruled gets the next
 iteration, up to {{max_attempts}}. The iteration that ends the loop, a pass or
 the last attempt, has its check record the run's result before the loop closes.
@@ -116,25 +118,41 @@ it. Read the change in that worktree with git, and a merge with
 and what was decided.
 
 **3. Judge the head by the method.** It picks the checks the head needs, closed
-over the index, and rules whether the change is material. When it is, withdraw
-the approvals given before this head, before you write the output, naming the
-call, what it means for the PR, and where to look:
+over the index, rules whether the change is material, and answers each person's
+post an ask the round can take carries when the post needs only an answer,
+leaving every other ask to rule-and-repair. When the change is material,
+withdraw the approvals given before this head, before you write the output,
+naming the call, what it means for the PR, and where to look:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" withdraw --reason "<the call, what it means for the PR, and where to look>"`
 Exit 0 filed it, or found it filed. Exit 2: run it again.
 
 **4. Write the output** to `output.json` in triage's part of the workspace, the
 directory the read printed, as one JSON object: `review` reading `triage`, the
 `head` it judged, `checks` with one `{"check": <name>, "head": <head>}` for each
-check picked, and `material`. Then check and write it:
+check picked, `material`, and, when it answers a post, `rulings` with one
+`{"ask": <the ask>, "ruling": "answered", "reason": <the answer>}` for each post
+it answers, with `"wordless": true` on a post owed no words, whose answer is
+the city's 👍 alone. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it
 again. When this step closes, each pick bonds one lane.
 
-**5. Close this step.**
+**5. Answer the posts it answered**, when the output carries rulings, where
+each post was made:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
+Each post gets its reply where words are owed and the city's 👍, an inline
+comment's thread is resolved, and when triage picked no check and answered
+every ask the round can take, the head's comment is posted too, since
+rule-and-repair has nothing left. Run again, it posts nothing twice. Exit 1:
+an answer did not land, and exit 2: a read did not answer: run it again, and
+when it still fails, cancel the run, which the landing order pours again:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "triage's answers did not land on the PR"`
+
+**6. Close this step.**
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** the head judged, a withdrawal filed when it is material, the
-output written, this step closed.
+output written, each post it answered answered on the PR, this step closed.
 """
 metadata = { "gc.run_target" = "{{review_target}}" }
 
@@ -154,15 +172,17 @@ this step applies. Load it from your skill catalog and apply it.
 **2. Read the round.**
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" repair`
 It makes the run's worktree at the head the round judged and prints each lane's
-verdict and findings, each ask the round can take, and each lane's part of the
-workspace, which holds its evidence. A worktree an earlier session of this step
-left is kept as it stands, and the read prints its commits past the head and
-its uncommitted edits: go on from them. Exit 3: the worktree is not at the head
+verdict and findings, the asks triage answered, each ask triage left this step,
+and each lane's part of the workspace, which holds its evidence. When it says
+triage left rule-and-repair nothing, this step has nothing to rule or to post:
+close it (part 7) with nothing written. A worktree an earlier session of this
+step left is kept as it stands, and the read prints its commits past the head
+and its uncommitted edits: go on from them. Exit 3: the worktree is not at the head
 or past it, so the run must stop. Cancel it, and the landing order pours one at
 the PR's head:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the run's worktree is not at the head the round judged"`
 
-**3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
+**3. Rule every finding and every ask triage left, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the
 commit in its ruling. A point ruled declined, deferred, answered or put to a
 person gets no change. A fix outside the reviewed diff goes to a bead of its
@@ -187,9 +207,10 @@ not read: run it again.
 
 **5. Write the output** to `output.json` in the repair's part of the workspace:
 `review` reading `repair`, the `head` the round judged, `rulings` with one
-`{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
-`commit` of a must-fix and the `gate` of a question, and `pushed`, the head the
-push printed, when it pushed. The ruling of an ask whose post settles a question
+`{"check", "finding"}` or `{"ask"}` for each finding and each ask triage left,
+each with its `ruling`, its `reason`, the `commit` of a must-fix and the `gate`
+of a question, and `pushed`, the head the push printed, when it pushed. An
+answer of a post owed no words reads `"wordless": true`. The ruling of an ask whose post settles a question
 a gate on `{{pr_bead}}` asks also names that gate in `settles`, with `moot`
 reading `true` when the post makes the question moot. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
@@ -214,7 +235,8 @@ landing order pours again:
 run's result when the round ends the loop.
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
-**Exit criteria:** every finding and ask ruled, the round's fixes pushed, the
-output written, the round's answers posted, this step closed.
+**Exit criteria:** every finding and every ask triage left ruled, the round's
+fixes pushed, the output written, the round's answers posted, this step closed;
+or, when triage left this step nothing, nothing written and this step closed.
 """
 metadata = { "gc.run_target" = "{{repair_target}}" }

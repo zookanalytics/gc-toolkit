@@ -284,23 +284,27 @@ head, the one the refinery validated, then each head its own repair pushes.
   first head, else the whole PR, with each merge in it read from its commit
   ([Bringing a branch current](#bringing-a-branch-current)). It picks the
   checks the head needs, `correctness` at the PR's first judged head whatever
-  the diff and the checks an ask the run takes sends back, and rules whether the
-  change is material.
+  the diff and the checks an ask the run takes sends back, rules whether the
+  change is material, and answers each person's post that needs only an answer
+  ([Operator feedback](#operator-feedback)).
 - **A lane** of `mol-pr-review-lane` runs each check triage picked, by its
   method, in a worktree of its own at that head
   ([review-workspace.md](review-workspace.md)), and writes its verdict and
   findings as its step's output.
 - **Rule-and-repair** rules every finding by its own lane's rule for what blocks
-  and every ask the round can take, by the bar the `review-ruling` skill holds.
+  and every ask triage left it, by the bar the `review-ruling` skill holds.
   It pushes the round's fixes as one new head, and answers them on the PR: in
   one comment for the head, which carries every lane's verdict at that head,
   and at each person's post, where it was made
-  ([Operator feedback](#operator-feedback)).
+  ([Operator feedback](#operator-feedback)). When triage picked no check and
+  answered every ask the round can take, its read says so, and the step closes
+  at once with nothing written. Its session still wakes, since Gas City makes a
+  round's steps when it makes the round.
 
 The loop's check, `gctk review passed --record`, passes an iteration when
 triage wrote the head it judged, every lane it picked wrote its verdict there,
-every finding and every ask the round could take was ruled, nothing was ruled
-must-fix and nothing was pushed. A finding its lane's rule declines, and a
+every finding and every ask the round could take was ruled, by triage's answer
+or by rule-and-repair, nothing was ruled must-fix and nothing was pushed. A finding its lane's rule declines, and a
 question put to a person, count as ruled, and a finding ruled must-fix at an
 earlier head names the commit that fixes it. The check reads only the store,
 and it exits 75 when the store does not answer, which runs it again without
@@ -513,7 +517,12 @@ answers it where it was made (`review-run.sh post`, through `gctk pr answer`):
 a reply in an inline comment's thread, which it then resolves, a comment that
 links a review's message or a conversation comment where the ruling owes words,
 and the city's 👍 once nothing more is owed, while a question's reply names its
-gate and leaves its thread open. Once every point of a person's request for
+gate and leaves its thread open. Triage, the run's first step, answers a post
+that asks for no change to the branch and no person's decision, such as a
+question about the change, a thank-you or an approval's "looks good": a reply
+where words are owed, and the city's 👍 alone where none are. It answers none
+while a question the run put to a person is open on the bead, and the ruling
+step rules every other post. Once every point of a person's request for
 changes is answered, the round's post dismisses that review and asks its author
 to review again. `pr-facts.sh` also routes a batch there as an ask whose
 comments are human findings, until the GitHub intake (tk-1tfzr71.21) retires

@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: Use when you hold a review bead whose check is triage, triage's step of a review run, or when asked which review checks a diff warrants.
+description: Use when you hold a review bead whose check is triage, triage's step of a review run, or when asked which review checks a diff warrants or whether a person's post on a PR needs only an answer.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -9,7 +9,9 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 You are classifying, not judging. Whether the change is correct is the
 `correctness` check's question, not yours. Yours is narrower:
 **which specialist checks does this diff warrant?** The usual honest answer is
-none.
+none. On a review run you also answer a person's post that needs only an
+answer, by the narrow bar below, and leave every other post to the step that
+rules it.
 
 ## What it reads
 
@@ -191,6 +193,41 @@ act on; on a lift it is the decision above. Never give the approval predating
 the round as the reason for a lift: every round postdates the approval it would
 lift, so that tells the operator nothing.
 
+## A post that needs only an answer
+
+On a review run, each post a person makes on the PR is an ask the run can take,
+and the read lists it with the run so far: its reason names the post's kind and
+author and ends with the post's URL. When the post needs only an answer, or
+nothing, you answer it yourself, and rule-and-repair does no work for it.
+
+- **Answer a post only when it asks for no change to the branch and no
+  person's decision**, such as a question about the change, a thank-you or an
+  approval's "looks good". Read it first, at the URL its reason ends with.
+  The URL's last part names it: `#issuecomment-<id>` reads with
+  `gh api 'repos/{owner}/{repo}/issues/comments/<id>' --jq .body`,
+  `#discussion_r<id>` with
+  `gh api 'repos/{owner}/{repo}/pulls/comments/<id>' --jq '.path, .line, .body'`,
+  and `#pullrequestreview-<id>` with
+  `gh api 'repos/{owner}/{repo}/pulls/<number>/reviews/<id>' --jq '.state, .body'`,
+  each run in your worktree, whose origin gh fills `{owner}/{repo}` from.
+- **Leave every other post to rule-and-repair**: one that asks for a change,
+  however small, one that asks a person to choose, one whose answer you cannot
+  give from the change and the read, and every ask that names no post, such as
+  a red check or a conflict. Leaving a post costs a ruling session, and a
+  wrong answer costs the person who asked.
+- **While a question the run put to a person is open on the PR's bead, answer
+  no post.** A post may settle the question, which rule-and-repair rules, and
+  an ask filed before such a question was put may be the question's own. The
+  output check refuses both and names the question.
+
+Rule each post you answer `answered`, and write its reason as the answer, to
+the person who made the post: the reason is what the reply says and what the
+head's comment shows. Mark it `wordless` when it is owed no words, as a
+thank-you or a "looks good" is: its answer is then the city's 👍 alone. An ask
+you answered in an earlier round of the run is still open until the run records
+its result, so answer it again at each head while it still meets the bar. The
+formula's post call puts your answers on the PR.
+
 ## What blocks
 
 Nothing. Triage never blocks: on a review bead its verdict is always `approve`,
@@ -200,7 +237,9 @@ no findings, so it has no findings block.
 
 - It never judges correctness, and it never files findings about the code. A
   defect you notice while skimming belongs in the `correctness` review, not here;
-  say so in the verdict body and let that check hold it.
+  say so in the verdict body and let that check hold it. Answering a question
+  about the change is not judging it: an answer that would need you to judge
+  the change is a post you leave.
 - It never fixes anything, and it never touches the anchor other than through
   the calls its formula names.
 
@@ -209,8 +248,9 @@ no findings, so it has no findings block.
 The verdict goes where the formula you run under says. A review run's triage
 writes it as its step's output: the head it judged, each check it picks as one
 `{"check", "head"}`, which the run bonds as a lane at that head, with nothing
-picked the common case, and whether the change is `material`. At the PR's first
-judged head the rig's first check, `correctness`, is picked whatever the diff,
+picked the common case, whether the change is `material`, and its ruling of
+each post it answers. At the PR's first judged head the rig's first check,
+`correctness`, is picked whatever the diff,
 and the checks an ask the run can take sends back are picked whatever the
 change. At a head that already passed into the run's target, the read says
 there is no change to judge, because its checks ran and their findings were
