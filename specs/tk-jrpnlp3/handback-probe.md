@@ -13,8 +13,12 @@ detail above the hand-back does not already lay one out.
 
 Each arm is a rendered converse page, `generated/seed-audit/agents/converse-opus.md`.
 Main's arm is taken at 8d778ffee. Three wordings of this branch were tried in turn,
-and the third is the one committed. The page went in as the system prompt, and the
-case went in as the user message, in one call with no tools from an empty directory:
+and the third is the one committed, with two edits made after the probe. The list of
+how a hand-back names its subject keeps main's bullets, where the third wording ran
+it into one sentence, and the body's sentence on what the conversation is settling
+opens with "Every hand-back's body" in place of "Either one". No measure below reads
+either. The page went in as the system prompt, and the case went in as the user
+message, in one call with no tools from an empty directory:
 
 `claude -p --safe-mode --restricted --strict-mcp-config --disable-slash-commands --no-session-persistence --tools "" --model claude-opus-5-5 --max-turns 1 --output-format json --system-prompt "<arm>" < <case>`
 
@@ -81,8 +85,8 @@ return's result settles, because no case turns on them.
 ## Size
 
 240 runs: 120 hand-backs (1.64M tokens, 25 agent minutes) and 120 grades
-(0.50M tokens, 11 agent minutes). The committed section is 852 words, against
-611 on main, and the rendered converse page grows from 4,866 words to 5,107.
+(0.50M tokens, 11 agent minutes). The committed section is 856 words, against
+611 on main, and the rendered converse page grows from 4,866 words to 5,111.
 
 ## Kept copy
 

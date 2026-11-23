@@ -688,8 +688,8 @@ have "the hand-back gives only what helps the operator decide or act, in words t
     "The hand-back gives the operator only what helps them decide or act, in words they can follow without the city's internals." "$PROMPT_JOINED"
 have "…a later hand-back opens with where the subject stands, and a return with what its result settles and leaves open" \
     'A later hand-back opens with where the subject stands now, and a return with what its result settles and what it leaves open.' "$PROMPT_JOINED"
-have "…and either says what the conversation is settling and what kind of answer it brings" \
-    'Either one says what the conversation is settling and what kind of answer it brings' "$PROMPT_JOINED"
+have "…and every hand-back's body says what the conversation is settling and what kind of answer it brings" \
+    "Every hand-back's body says what the conversation is settling and what kind of answer it brings" "$PROMPT_JOINED"
 have "the sitting reads the hand-back as the operator would and puts each word they have not used in plain words, whoever coined it" \
     "The operator acts on the hand-back alone, so before you post it, read it as they would, knowing nothing of your reading, and replace each word they have not used and cannot see there with plain words for what it stands for, even when the detail above has used it: a term of the city's process, a name from the code, or a label you made up while you worked." "$PROMPT_JOINED"
 have "…and an alternative it names is weighed with its reason, or left out" \
