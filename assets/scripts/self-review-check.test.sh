@@ -7,9 +7,9 @@
 # run-lib.sh stub (the run of the root each case names), a real fixture git
 # worktree, and the real `gctk` built from this checkout, whose records the
 # cases write by running `gctk rig` in the fixture the way an iteration does. So
-# the exit-code contract (0 verified-green, 1 everything else, fail-closed on
-# any unreadable state), the record reads and the exhaustion note are pinned
-# against the code that ships, not a paraphrase.
+# the exit-code contract (0 verified-green, 75 for a read the script could not
+# make, 1 for every other state), the record reads and the exhaustion note are
+# pinned against the code that ships, not a paraphrase.
 set -uo pipefail
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/self-review-check-test.XXXXXX")"
@@ -149,14 +149,15 @@ write_state() {
 # script must resolve the worktree from bead metadata, never from cwd.
 # GC_ITERATION default 1 keeps the gate cases far from the budget so they never
 # trip the exhaustion note. GC_COLD=1 is the ralph condition env with a cold
-# import cache, where every gc call dies before doing any work, and
-# UPDATE_FAILS=1 a store that refuses the work bead's write.
+# import cache, where every gc call dies before doing any work,
+# UPDATE_FAILS=1 a store that refuses the work bead's write, and SHOW_FAILS_ON
+# names a bead whose read the store does not answer.
 run_case() {
   local desc="$1" want="$2"
-  : > "$CALLS"
+  : > "$CALLS"; : > "$TMP/gctk.calls"
   ( cd "$TMP" && GC_WISP_ID="${ROOT_ID-wisp-1}" GC_BEAD_ID=iter-1 \
       GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
-      RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
+      RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" STUB_SHOW_FAIL_ON="${SHOW_FAILS_ON-}" \
       STUB_GC_FAIL="${GC_COLD:+1}" STUB_UPDATE_FAIL="${UPDATE_FAILS:+${ISSUE_ID-gc-issue}}" \
       GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
@@ -181,7 +182,7 @@ assert_out() {
 }
 
 reset_env() {
-  unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
+  unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD SHOW_FAILS_ON
   unset MD_WORK_DIR MD_BRANCH MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK MD_NOTES
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
@@ -478,8 +479,18 @@ assert_out "names the check with no record" "nothing recorded at $HEAD_SHA for: 
 
 # --- 3f. no gctk binary ------------------------------------------------------
 reset_env; GCTK=none; write_state; green
-run_case "FAIL (fail-closed) with no gctk binary to read the records" 1
-assert_out "names the missing binary" "no gctk binary"
+run_case "NO VERDICT with no gctk binary to read the records" 75
+assert_out "names the missing binary" "NO VERDICT: no gctk binary"
+
+# shim <name> <body> : a gctk at $TMP/<name> that logs each call's arguments to
+# $TMP/gctk.calls, which run_case empties, then runs <body>.
+shim() {
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\n%s\n' "$TMP/gctk.calls" "$2" > "$TMP/$1"
+  chmod +x "$TMP/$1"
+}
+shim gctk-logged "exec $(printf %q "$GCTK_BUILT") \"\$@\""
+shim gctk-usage 'echo "gctk rig test: unknown flag: --check" >&2; exit 2'
+shim gctk-killed 'kill -KILL $$'
 
 # --- 4. dirty worktree -------------------------------------------------------
 reset_env; write_state; green
@@ -488,18 +499,40 @@ run_case "FAIL when the worktree is dirty" 1
 assert_out "names the dirty-tree reason" "worktree is dirty"
 rm -f "$WT/untracked"
 
-# --- 4b. a read gctk cannot make ---------------------------------------------
-# Config hides the untracked file from the clean-tree check's status but not
-# from gctk's, so --check reads nothing, and the verdict gives gctk's reason, not
-# a red check.
-reset_env; write_state; green
+# --- 4b. a change config hides from a plain status ---------------------------
+# The clean-tree check reads status with gctk's flags, so a tree gctk would
+# refuse to certify is a dirty tree before gctk is asked.
+reset_env; GCTK="$TMP/gctk-logged"; write_state; green
 git -C "$WT" config status.showUntrackedFiles no
 echo dirt > "$WT/untracked"
-run_case "FAIL when gctk rig --check reads nothing at HEAD" 1
-assert_out "gives gctk's reason" "gctk rig test --check read nothing at $HEAD_SHA: gctk rig test: machine failure, nothing recorded: the checkout has changes HEAD does not hold"
+run_case "FAIL as a dirty tree when config hides an untracked file from a plain status" 1
+assert_out "gives the dirty-tree reason" "worktree is dirty"
 assert_out "…naming the file" "?? untracked"
-grep -qF "not green" "$TMP/out" && bad "it does not call the code red" || ok "it does not call the code red"
+if [ -s "$TMP/gctk.calls" ]; then bad "…without asking gctk"; sed 's/^/       /' "$TMP/gctk.calls"
+else ok "…without asking gctk"; fi
 rm -f "$WT/untracked"; git -C "$WT" config --unset status.showUntrackedFiles
+
+# --- 4c. a record store gctk cannot read -------------------------------------
+# A plain file where the store's directory goes fails gctk's lookup with
+# ENOTDIR, as it would for a suite run as root, which reads through a mode that
+# refuses others. The run on the budget's last attempt spent no attempt, so it
+# notes nothing.
+reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state; green
+mv "$WT/.git/gc-rig-checks" "$TMP/records"; : > "$WT/.git/gc-rig-checks"
+run_case "NO VERDICT on the budget's last attempt when gctk cannot read the record store" 75
+assert_out "gives gctk's reason" "NO VERDICT: gctk rig test --check read nothing at $HEAD_SHA: gctk rig test: machine failure, nothing recorded: cannot read the record store"
+assert_out "…a lookup that failed with ENOTDIR" "not a directory"
+refute_call "…and notes nothing on the work bead" "--append-notes"
+rm -f "$WT/.git/gc-rig-checks"; mv "$TMP/records" "$WT/.git/gc-rig-checks"
+run_case "PASS on the same records once the store reads again" 0
+
+# --- 4d. gctk's other exits ----------------------------------------------------
+reset_env; GCTK="$TMP/gctk-usage"; write_state; green
+run_case "FAIL when gctk refuses the call as wired" 1
+assert_out "quotes gctk's refusal" "gctk rig test --check refused the call: gctk rig test: unknown flag: --check"
+reset_env; GCTK="$TMP/gctk-killed"; write_state; green
+run_case "NO VERDICT when gctk is stopped by a signal" 75
+assert_out "names the exit" "NO VERDICT: gctk rig test --check exited 137"
 
 # --- 5. fail-closed on an absent worktree ------------------------------------
 reset_env; MD_WORK_DIR="$TMP/does-not-exist"; write_state
@@ -509,9 +542,15 @@ run_case "FAIL (fail-closed) when recorded work_dir does not exist" 1
 reset_env; MD_WORK_DIR="$TMP"; write_state
 run_case "FAIL (fail-closed) when work_dir is not a git worktree" 1
 
-# --- 7. fail-closed when the run is unreadable and no gc.var.issue -----------
+# --- 7. a bead the store does not answer for ---------------------------------
 reset_env; RUN_FAILS=1; MD_ROOT_ISSUE=""; write_state
-run_case "FAIL (fail-closed) when the run of the root is unreadable and no gc.var.issue" 1
+run_case "NO VERDICT when the run of the root is unreadable and no gc.var.issue" 75
+reset_env; SHOW_FAILS_ON=gc-issue; write_state; green
+run_case "NO VERDICT when the work bead cannot be read" 75
+assert_out "names the read" "NO VERDICT: could not read work bead gc-issue"
+reset_env; SHOW_FAILS_ON=wisp-1; write_state; green
+run_case "NO VERDICT when the root cannot be read" 75
+assert_out "names the read" "NO VERDICT: could not read root bead wisp-1"
 
 # --- 8. resilient fallback: the run unreadable but gc.var.issue set -----------
 reset_env; RUN_FAILS=1; write_state; green
