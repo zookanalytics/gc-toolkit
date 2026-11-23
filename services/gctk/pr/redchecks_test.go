@@ -10,7 +10,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // The red-check and conflict acts (specs/tk-1tfzr71.161/design.md, section 4,
@@ -128,6 +130,31 @@ func (d *redWorld) closeAsks(t *testing.T, at string) {
 	d.store.Unlist(closed...)
 }
 
+// closeRedAsks closes each red-check ask on the bead's branch at at, as a
+// review run's record closes one it ruled, and leaves its other asks open.
+func (d *redWorld) closeRedAsks(t *testing.T, at string) {
+	t.Helper()
+	var closed []string
+	for _, c := range d.store.Creates() {
+		b, ok := d.store.Row(c.ID)
+		if !ok || b.IssueType != "task" || b.Metadata["branch"] != branch || b.Status == "closed" ||
+			!strings.HasPrefix(b.Description, "Required check(s) failing") {
+			continue
+		}
+		b.Status, b.ClosedAt = "closed", at
+		d.store.Put(b)
+		closed = append(closed, c.ID)
+	}
+	d.edit(t, func(b *fake.Bead) {
+		for i := range b.Edges {
+			if slices.Contains(closed, b.Edges[i].ID) {
+				b.Edges[i].Status, b.Edges[i].ClosedAt = "closed", at
+			}
+		}
+	})
+	d.store.Unlist(closed...)
+}
+
 // askedAt files a red-check ask at h on the bead, closed at at, as the act
 // filed one at an earlier head and the review run closed it there.
 func (d *redWorld) askedAt(t *testing.T, id, h, at string) {
@@ -215,6 +242,34 @@ func TestAHeadStillRedAfterItsAskClosedIsGated(t *testing.T) {
 	}
 	if got := d.redAsks(); len(got) != 1 {
 		t.Fatalf("the act filed a second ask at the head: %q", got)
+	}
+}
+
+// A closed ask at a head still red there files no gate while another ask is
+// open on the bead, such as one a review run left waiting on the tracker of a
+// failure the target carries, and pr-fix-unmoved once that ask closes with the
+// head still red.
+func TestAHeadStillRedWaitsWhileAnotherAskIsOpen(t *testing.T) {
+	d := newRed(t)
+	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	is(t, d.runRed(t), pr.ActAsked)
+	d.store.Put(fake.Bead{ID: "tk-tracker", Title: "Pre-existing failure: TestTheCap", Status: "open", IssueType: "bug"})
+	if _, ok, err := review.FileAsk(ledger.New(d.store), review.AskRequest{Bead: bead, WaitingOn: []string{"tk-tracker"},
+		Reason: "Bring '" + branch + "' current by merging origin/main in once tk-tracker fixes test on 'main'."},
+		nil); err != nil || !ok {
+		t.Fatalf("the waiting ask did not file: %v", err)
+	}
+	d.closeRedAsks(t, "2026-11-12T08:59:00Z")
+	if red := d.runRed(t); red.Action != "" {
+		t.Fatalf("a run with another ask open on the bead made %+v, want no act", red)
+	}
+	if got := d.gates.list(); len(got) != 0 {
+		t.Fatalf("the act filed %v while another ask was open", got)
+	}
+	d.closeAsks(t, "2026-11-12T09:30:00Z")
+	is(t, d.runRed(t), pr.ActGated)
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-unmoved.7"}) {
+		t.Fatalf("the act filed %v, want the unmoved gate", got)
 	}
 }
 

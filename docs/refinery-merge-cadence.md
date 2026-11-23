@@ -674,9 +674,12 @@ created last that holds one for it, a skip aside.
 - A required check that failed for a code cause, whose name is not a deploy's,
   gets one ask for the head, naming the PR, the head, the failing checks with
   their logs and the branch. An ask closed at the head while the PR is still
-  red there files `pr-fix-unmoved.<n>` in place of a second, and a red head
-  after three earlier heads each drew an ask files `pr-fix-capped.<n>` in
-  place of a fourth. A deploy's failed check files `pr-fix-noncode.<n>`.
+  red there files `pr-fix-unmoved.<n>` in place of a second, unless another
+  ask is open on the bead, such as one a review run left waiting on the
+  tracker of a failure the target carries, which the run takes before a
+  person is asked. A red head after three earlier heads each drew an ask files
+  `pr-fix-capped.<n>` in place of a fourth. A deploy's failed check files
+  `pr-fix-noncode.<n>`.
 - A required check that timed out, was cancelled, failed to start, wants an
   action or went stale has the failed jobs of the GitHub Actions run behind it
   re-run, once per head and only once that run has finished. The head reads

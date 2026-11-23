@@ -85,6 +85,38 @@ waiting on the PR's bead, armed to start once the PR lands, with the PR's
 target as its own. Rule the point deferred, and name the bead in the reason.
 The PR stays the change the operator reviewed.
 
+## A red check the target carries
+
+A red-check ask names a required check that fails at the PR's head. The check
+is the branch's to fix, unless the target's own head fails it for the same
+reason, such as the same test, which no change on the branch can fix. Read the
+target's checks there:
+
+```bash
+gh api "repos/<owner>/<repo>/commits/<target>/check-runs" --jq '.check_runs[] | "\(.name) \(.conclusion) \(.html_url)"'
+```
+
+When the target carries the failure, send it to its one tracker and leave the
+PR waiting on that tracker. `preexisting-failure.sh key` derives the failure's
+key from its test function (`--test`), its path (`--target`) or its lint
+finding (`--lint`), and `file` prints the tracker it finds under that key, or
+the one it files and sends to be fixed. The ask then waits on the tracker:
+
+```bash
+SCRIPTS="$(gc <binding> scripts-dir)"
+KEY=$("$SCRIPTS/preexisting-failure.sh" key --test <the failing test function>)
+TRACKER=$("$SCRIPTS/preexisting-failure.sh" file "$KEY" --message "<the failure as the target's run shows it, with its log>")
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" review ask <the PR's bead> --source <the red-check ask> --waiting-on "$TRACKER" --reason "Bring '<the PR's branch>' current by merging origin/<target> in once $TRACKER fixes <the check> on '<target>'."
+```
+
+Rule the red-check ask declined, and name the tracker and the new ask in its
+reason. While that ask is open, the landing order asks no person about the
+head staying red, and once the tracker closes, the run that takes the ask
+brings the branch current.
+
 ## A person's comment
 
 A person's comment reaches the run as an ask. Grade it on the scale the

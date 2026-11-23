@@ -167,15 +167,16 @@ var redAskReason = regexp.MustCompile(`^Required check\(s\) failing on PR#([0-9]
 // redState is what the acts decide one owned PR on: the bead, the read saved on
 // it, what holds the bead from an act that files work, re-runs or restarts a
 // check or files a gate, empty when nothing does, the open human gates on the
-// bead under each red-check key, the red-check asks on it, the open beads other
-// than its asks that name its branch, read only for a PR GitHub reads as
-// conflicting, whether the review loop passed at the head the refinery
-// validated, and the clock.
+// bead under each red-check key, the red-check asks on it, its other open
+// asks, the open beads other than its asks that name its branch, read only for
+// a PR GitHub reads as conflicting, whether the review loop passed at the head
+// the refinery validated, and the clock.
 type redState struct {
 	o       owned
 	held    string
 	gates   map[string][]string
 	asks    []redAsk
+	others  []string
 	writers []string
 	passed  bool
 	now     time.Time
@@ -325,8 +326,11 @@ func (s redState) conflict() redStep {
 // files pr-fix-unmoved in place of a second: the review run closes an ask it
 // fixed only once a later round judged the head that carries the fix, by which
 // time the PR watch has saved that head, so an ask closed at the head the saved
-// read still gives was answered there with no change. Three earlier heads that
-// each drew an ask file pr-fix-capped in place of a fourth.
+// read still gives was answered there with no change. While another ask is
+// open on the bead, such as one a run left waiting on the tracker of a failure
+// the target carries, the run still has work on the PR, so no person is asked
+// yet. Three earlier heads that each drew an ask file pr-fix-capped in place
+// of a fourth.
 func (s redState) codeFailure(code []headCheck) redStep {
 	p := s.pr()
 	head := strings.ToLower(p.Head)
@@ -343,6 +347,11 @@ func (s redState) codeFailure(code []headCheck) redStep {
 		default:
 			earlier[a.head] = true
 		}
+	}
+	if closedHere != nil && len(s.others) > 0 {
+		return s.none(fmt.Sprintf("ask %s closed at head %s with %s still red, and ask %s is open on the bead, which the "+
+			"PR's review run takes before a person is asked", closedHere.id, p.Head, checkNames(code),
+			strings.Join(s.others, ", ")))
 	}
 	if closedHere != nil {
 		return s.gate(keyUnmoved, fmt.Sprintf("PR #%d (%s) is still red on required check(s) %s at head %s, and the city's "+
@@ -586,6 +595,9 @@ func (u *run) redOn(l *ledger.Ledger, r *ledger.Record, o owned) (redState, stri
 	for _, a := range asks {
 		m := redAskReason.FindStringSubmatch(a.Reason)
 		if m == nil || m[1] != fmt.Sprint(o.number) {
+			if a.Open() {
+				s.others = append(s.others, a.ID)
+			}
 			continue
 		}
 		s.asks = append(s.asks, redAsk{id: a.ID, head: strings.ToLower(m[2]), open: a.Open(), closed: closed[a.ID]})
