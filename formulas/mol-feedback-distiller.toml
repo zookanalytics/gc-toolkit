@@ -526,7 +526,7 @@ BODY="## Rule
 - review-rubric -> skills/review-correctness/SKILL.md, What to check; its anchor goes in skills/review-correctness/rubric-ledger.md, one line ending with the dimension it amends, never in SKILL.md (a reviewer reads the whole method file)
 - exemplar      -> template-fragments/learning-exemplars.template.md (cap {{exemplar_cap}})
 - learning-rubric proposals target skills/learning-distill/SKILL.md, no anchor and no inventory row: the rubric is the loop's own method, not an adopted rule the retirement pass judges
-- Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<YYYY-MM-DD> -->
+- Anchor: <!-- rule:$PATTERN src:<short provenance refs> adopted:<the day the rule is built> -->
 
 ## Evidence
 - Pattern bead: $PATTERN (evidence_count=<n>, distinct_sources=<k>, first_seen=<date>, last_seen=<date>)

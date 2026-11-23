@@ -87,7 +87,13 @@ prose bullet is one of five, not the default.
 Then adjudicate the edit against what exists. A fix starts from the file that
 already owns the rule, as Fixes in code says. Within a carrier, the three
 promotion gates decide whether it may be adopted at all. Read the target
-surface's current entries and the pattern-bead set, then pick exactly one:
+surface's current entries, the pattern-bead set, and what else already decides
+the same thing. For a rule that places, closes, removes or hands away
+something, grep the rendered prompts of the roles it binds, the repo's
+`AGENTS.md` and its architecture page for text that makes that thing or rules
+it out, list the live instances, and say in the proposal how they meet. Run
+each path and command the rule names from a session of the pool that will read
+it, and grep the tree for each key it names. Then pick exactly one:
 
 - **ADD** — genuinely new; no existing bullet covers it.
 - **UPDATE** — an existing bullet sharpened or widened. One edit, never
@@ -117,6 +123,8 @@ A proposed bullet:
 - **names its scope** (`repo:<rig>` / `agent:<role>` / `global` — infer
   narrow; explicit operator scope wins);
 - states the *why* only when non-obvious;
+- when it asks an author to cite or record something, **names where the record
+  goes**, in a place the reviewing method reads;
 - is a **transferable distillation, never a transcript quote** — it
   states the general boundary it enforces, not the particulars of the
   incident that produced it, and must instruct an agent who never saw
@@ -198,7 +206,10 @@ Choose by what the learning *is*:
   repository's `docs/review-correctness.md`, through an engineering bead.
 - **`convention`** when the behavior must be carried *into* the turn by one
   role and no reviewer sees the moment it goes wrong — a claiming rule, a
-  handoff, the choice to ask a person.
+  handoff, the choice to ask a person. A role's conventions render in every
+  prompt that composes them, and the polecat conventions render in the review
+  pool's, so this carrier does not keep a standard out of review. The
+  reviewing method's own list does that.
 - **`exemplar`** when the lesson is a shape rather than a statement: two
   versions of the same artifact where the better one is obvious side by side
   and mushy in a sentence. Costs the most per read, so it earns its place
@@ -362,6 +373,17 @@ dimension a reader applies to the diff, or the author's own discrimination in
 the moment. This is why clearing gate 1 on an endorsed direction is not
 enough — the operator can be right that a behavior matters while a static
 entry remains unable to act on it.
+
+**When the evidence holds a real case, run it before clearing this gate.** Put
+the case's facts through the old text and the new, three runs a cell and more
+in both arms on the cell the call leans on, reporting them all, on a prompt
+holding the whole section the entry joins. Use the provider of the agent who
+will read it: `claude -p` for a polecat, `codex exec` for a reviewer, since
+the review pool runs on codex. When the carrier reaches a reviewer, also run a
+change the operator already approved, as the control for over-firing. Name in
+the reasoning which part of the trigger moved and the provider behind each
+number. A part that did not move routes as this gate says, and a case too thin
+to run is named as unrun.
 
 *Worked example.* A candidate of the form "choose the right X for the
 situation" states the outcome (the right X) but leaves the choosing — the
