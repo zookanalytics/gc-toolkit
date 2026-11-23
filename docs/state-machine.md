@@ -222,10 +222,11 @@ refinery, or met an exception whose human gate is filed. A changed head keeps
 its marker, and its bead stays assigned to nobody, while a withdrawal is open
 on the bead or a review run is attached to it, so the order still carries the
 withdrawal out there and reads the run's end. `gctk pr withdraw` marks such a
-record when it files one. A head that only conversations and asks hold is
-handed to the refinery in two writes with the wake between them: the order
-assigns the bead to the refinery and keeps the marker, wakes and nudges the
-refinery, and only then clears the marker. A wake that does not land leaves the
+record when it files one. A head the refinery can take, because nothing holds
+its bead or only conversations and asks do, is handed to the refinery in two
+writes with the wake between them: the order assigns the bead to the refinery
+and keeps the marker, wakes and nudges the refinery, and only then clears the
+marker. A wake that does not land leaves the
 bead assigned to the refinery and marked, the run prints why and exits 2, and
 the next run wakes the refinery again
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). A
