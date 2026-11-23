@@ -277,11 +277,14 @@ steps wrote as their outputs (services/gctk/review/run.go) and the asks open on
 the bead that owns the PR.
 
 The iteration passes when triage wrote the head it judged, every lane triage
-bonded wrote its verdict at that head, rule-and-repair ruled every finding and
-every ask it took, ruled nothing must-fix and pushed nothing, and every ask open
-on the bead that nothing holds is one the round took, with each check it sends
-back run at that head. An ask that something holds, by gctk bead holds, counts
-for nothing. Each finding or ask an earlier iteration ruled must-fix must name
+bonded wrote its verdict at that head, the round ruled every finding and every
+ask it took, ruled nothing must-fix and pushed nothing, and every ask open on
+the bead that nothing holds is one the round took, with each check it sends
+back run at that head. The round's rulings are triage's answers of the posts it
+answers and rule-and-repair's rulings, and rule-and-repair writes none when
+triage left it nothing: no check picked, and every ask the round can take
+answered. --explain says what triage left it. An ask that something holds, by
+gctk bead holds, counts for nothing. Each finding or ask an earlier iteration ruled must-fix must name
 the commit that fixes it. A finding declined by its lane's rule counts as
 ruled, and so does a question put to a person through a gate.
 
@@ -293,8 +296,8 @@ run} for the last head the run judged and the run's target, run naming the
 run's root, in review_results on the bead that owns the PR, under the store's
 record lock, replacing the entry for the same head and target. It passes only
 when the iteration passed and no gate the run put a question to is open. Each
-ask the round at that head answered, ruled declined, deferred or answered,
-closes with its work record: shipped with the commit of the run's must-fix
+ask the round at that head answered, ruled declined, deferred or answered by
+triage or rule-and-repair, closes with its work record: shipped with the commit of the run's must-fix
 ruling of it, else no-op. The round's step has posted each ask's answer on the
 PR before it closed (gctk pr answer), so an ask closes once its answer is
 there. At an exhausted loop it asks a person through a review-loop-exhausted

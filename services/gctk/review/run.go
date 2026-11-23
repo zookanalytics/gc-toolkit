@@ -13,8 +13,9 @@ import (
 // A review run judges one head of one PR: a root of the review formula,
 // attached to the bead that owns the PR, whose vars name that bead, the head
 // and the target. Its loop is a checked template step, one iteration per head
-// it judges. In each iteration triage picks the checks the head needs, one lane
-// runs each, and rule-and-repair rules every finding and every ask it takes
+// it judges. In each iteration triage picks the checks the head needs and
+// answers each person's post that needs only an answer, one lane runs each
+// check, and rule-and-repair rules every finding and every ask triage left it
 // and makes the round's fixes as one push.
 //
 // What the run judged is in its steps' outputs, which Gas City keeps on the
@@ -61,14 +62,17 @@ const (
 var rulings = []string{RulingMustFix, RulingDeclined, RulingDeferred, RulingAnswered, RulingQuestion}
 
 // Triage is what the triage step writes: the head it judged, the checks it
-// picked for that head, one lane bonded for each, and whether the change it
-// judged is material.
+// picked for that head, one lane bonded for each, whether the change it judged
+// is material, and its ruling of each ask it answers. It answers a person's
+// post that asks for no change to the branch and no person's decision, so
+// rule-and-repair does no work for it, and it rules such a post answered.
 type Triage struct {
-	Review    string `json:"review"`
-	Iteration int    `json:"iteration"`
-	Head      string `json:"head"`
-	Checks    []Pick `json:"checks"`
-	Material  bool   `json:"material"`
+	Review    string   `json:"review"`
+	Iteration int      `json:"iteration"`
+	Head      string   `json:"head"`
+	Checks    []Pick   `json:"checks"`
+	Material  bool     `json:"material"`
+	Rulings   []Ruling `json:"rulings,omitempty"`
 }
 
 // Pick is one check triage picked at its head, the item its fan-out bonds a
@@ -125,16 +129,21 @@ type Repair struct {
 // of a question a person's post settles, which only the ruling of that post's
 // ask names, and Moot says the post makes the question moot rather than
 // answering it. The round's post closes that gate with the post as its answer.
+// Wordless says the post an answered ask carries is owed no words, such as a
+// thank-you or an approval's "looks good": its answer on the PR is the city's
+// 👍 alone, and the head's comment carries the reason. A post made while a
+// question it does not settle stands still gets the reply that says so.
 type Ruling struct {
-	Check   string `json:"check,omitempty"`
-	Finding string `json:"finding,omitempty"`
-	Ask     string `json:"ask,omitempty"`
-	Ruling  string `json:"ruling"`
-	Reason  string `json:"reason,omitempty"`
-	Commit  string `json:"commit,omitempty"`
-	Gate    string `json:"gate,omitempty"`
-	Settles string `json:"settles,omitempty"`
-	Moot    bool   `json:"moot,omitempty"`
+	Check    string `json:"check,omitempty"`
+	Finding  string `json:"finding,omitempty"`
+	Ask      string `json:"ask,omitempty"`
+	Ruling   string `json:"ruling"`
+	Reason   string `json:"reason,omitempty"`
+	Commit   string `json:"commit,omitempty"`
+	Gate     string `json:"gate,omitempty"`
+	Settles  string `json:"settles,omitempty"`
+	Moot     bool   `json:"moot,omitempty"`
+	Wordless bool   `json:"wordless,omitempty"`
 }
 
 // QuestionKey opens the key of each human gate a review run puts a question to
@@ -215,6 +224,56 @@ type Iteration struct {
 	Triage *Triage
 	Lanes  []Lane
 	Repair *Repair
+}
+
+// Rulings is every ruling of the iteration's round: triage's answers, then
+// rule-and-repair's rulings.
+func (it *Iteration) Rulings() []Ruling {
+	var out []Ruling
+	if it.Triage != nil {
+		out = append(out, it.Triage.Rulings...)
+	}
+	if it.Repair != nil {
+		out = append(out, it.Repair.Rulings...)
+	}
+	return out
+}
+
+// Ruled reports whether a step of the iteration's round wrote its rulings:
+// rule-and-repair, or triage with an answer.
+func (it *Iteration) Ruled() bool {
+	return it != nil && (it.Repair != nil || (it.Triage != nil && len(it.Triage.Rulings) > 0))
+}
+
+// Pushed is the head the iteration's round pushed, "" when it pushed nothing.
+func (it *Iteration) Pushed() string {
+	if it.Repair == nil {
+		return ""
+	}
+	return it.Repair.Pushed
+}
+
+// Left is what iteration n's triage leaves rule-and-repair, each as the run's
+// account names it: the lane of each check it picked, whose verdict the head's
+// comment carries and whose findings the step rules, and each ask among asks
+// the round can take that triage did not answer. With nothing left the step
+// has nothing to rule and nothing to post, so it closes at once and writes
+// nothing. Before triage writes, its head is left.
+func (run *Run) Left(n int, asks []Ask) []string {
+	it := run.Iterations[n]
+	if it == nil || it.Triage == nil {
+		return []string{"the head triage has not judged"}
+	}
+	var out []string
+	for _, p := range it.Triage.Checks {
+		out = append(out, "the "+p.Check+" lane")
+	}
+	for _, a := range asks {
+		if a.Takeable() && !slices.ContainsFunc(it.Triage.Rulings, func(r Ruling) bool { return r.Ask == a.ID }) {
+			out = append(out, "ask "+a.ID)
+		}
+	}
+	return out
 }
 
 // NotARun is the error of a bead that is neither a review run's root nor a

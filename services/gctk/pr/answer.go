@@ -17,22 +17,27 @@ import (
 )
 
 // A review round's post (specs/tk-1tfzr71.161/design.md, sections 3 and 6).
-// The round that rules a person's post answers it where it was made, since the
+// The step that rules a person's post answers it where it was made, since the
 // step that rules a post is the one that knows what became of it, and the
-// loop's check, which records the run's result, has no GitHub login. The post
-// makes each write the round owes on GitHub, in this order:
+// loop's check, which records the run's result, has no GitHub login: triage,
+// for a post it answers, and rule-and-repair for the rest of the round. The
+// post makes each write the round owes on GitHub, in this order:
 //
 //   - the head's one comment (review.Comment), posted, or edited where its mark
-//     finds it;
+//     finds it, once the round has ruled all it will: rule-and-repair wrote
+//     its rulings, or triage left it nothing (review.Run.Left). Triage's post
+//     before then answers the posts triage ruled and leaves the comment to
+//     rule-and-repair's;
 //   - the gate of each question that a person's post settles or makes moot,
 //     which the post's ruling names in settles, closed with the post's words
 //     and its URL as the answer, headed ruled: or moot:;
 //   - a reply to each post that an ask the round ruled carries: in an inline
 //     comment's thread, and for a post with no thread a comment that links it,
 //     where the ruling owes words. A must-fix point on a post with no thread
-//     owes none, since the head's comment names its commit, unless the post
-//     settles a question or was made while one it does not settle was open. A
-//     must-fix point is answered once the round has pushed its fix;
+//     owes none, since the head's comment names its commit, and a wordless
+//     answer owes none on any post, unless the post settles a question or was
+//     made while one it does not settle was open. A must-fix point is answered
+//     once the round has pushed its fix;
 //   - the city's handled mark on each such post once its words are on the PR,
 //     but on a post put to a person, which waits for the answer;
 //   - the resolve of each thread such a post sits in, once nothing in it is
@@ -82,9 +87,10 @@ func (e *Unanswered) Error() string {
 
 // AnswerRound posts the round of iteration n of the review run id names, its
 // root or any bead poured under it, and with n 0 the round of the latest
-// iteration whose round wrote its rulings. The PR is the one the bead that owns
-// it names, and it must be in the rig's own repository. A read that fails
-// returns its error, and a write that does not land an *Unanswered.
+// iteration whose round wrote its rulings, triage's answers among them. The PR
+// is the one the bead that owns it names, and it must be in the rig's own
+// repository. A read that fails returns its error, and a write that does not
+// land an *Unanswered.
 func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 	run, err := review.ReadRun(l.Ledger, id)
 	if err != nil {
@@ -92,14 +98,14 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 	}
 	if n == 0 {
 		for m, it := range run.Iterations {
-			if it.Repair != nil && m > n {
+			if it.Ruled() && m > n {
 				n = m
 			}
 		}
 	}
 	out := Answered{Run: run.Root, Bead: run.PRBead, Iteration: n}
 	it := run.Iterations[n]
-	if n == 0 || it == nil || it.Repair == nil || it.Triage == nil {
+	if n == 0 || it == nil || it.Triage == nil || !it.Ruled() {
 		return out, &AnswerRefusal{Run: run.Root, Why: fmt.Sprintf("iteration %d has no rulings yet", n)}
 	}
 	owner, err := l.read(run.PRBead)
@@ -133,11 +139,14 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 		return out, errors.New("nothing posts the city's posts here, so nothing is answered")
 	}
 	a := &answering{l: l, hub: l.Hub(context.Background(), host), host: host, repo: repo, number: number,
-		run: run, rp: it.Repair, owner: owner, asks: asks, url: out.URL, out: &out, marked: map[string]bool{}}
+		run: run, rulings: it.Rulings(), pushed: it.Pushed(), owner: owner, asks: asks, url: out.URL, out: &out,
+		marked: map[string]bool{}}
 	if err := a.read(); err != nil {
 		return out, err
 	}
-	a.comment(body, review.Mark(run.Root, it.Triage.Head))
+	if it.Repair != nil || len(run.Left(n, asks)) == 0 {
+		a.comment(body, review.Mark(run.Root, it.Triage.Head))
+	}
 	if err := a.answer(); err != nil {
 		return out, err
 	}
@@ -148,10 +157,10 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 }
 
 // answering is one round's post as it goes: the PR, the account the city's gh
-// token acts as, the round's rulings, the bead that owns the PR with its asks
-// and the beads it waits on, the post's read of the PR, the posts this post
-// marked handled by node id, the questions on the bead, and each write that
-// did not land.
+// token acts as, the round's rulings and the head it pushed, the bead that owns
+// the PR with its asks and the beads it waits on, the post's read of the PR,
+// the posts this post marked handled by node id, the questions on the bead, and
+// each write that did not land.
 type answering struct {
 	l          Landing
 	hub        Hub
@@ -159,7 +168,8 @@ type answering struct {
 	number     int
 	self       string
 	run        *review.Run
-	rp         *review.Repair
+	rulings    []review.Ruling
+	pushed     string
 	owner      *ledger.Record
 	asks       []review.Ask
 	url        string
@@ -276,7 +286,7 @@ func (a *answering) answer() error {
 	}
 	a.settle()
 	var dues []due
-	for _, r := range a.rp.Rulings {
+	for _, r := range a.rulings {
 		if d, ok := a.due(r); ok {
 			dues = append(dues, d)
 		}
@@ -362,7 +372,7 @@ func (a *answering) due(r review.Ruling) (due, bool) {
 		return due{}, false
 	}
 	ask := a.asks[i]
-	url := postNamed(ask.Reason, a.url)
+	url := PostNamed(ask.Reason, a.url)
 	if url == "" {
 		return due{}, false
 	}
@@ -371,7 +381,7 @@ func (a *answering) due(r review.Ruling) (due, bool) {
 	case !ok:
 		a.leave("%s: GitHub holds the post %s no longer", r.Ask, url)
 		return due{}, false
-	case r.Ruling == review.RulingMustFix && a.rp.Pushed == "":
+	case r.Ruling == review.RulingMustFix && a.pushed == "":
 		a.leave("%s: %s is ruled must-fix, and the round pushed nothing, so its fix is not on the PR", r.Ask, url)
 		return due{}, false
 	}
@@ -390,14 +400,14 @@ func (a *answering) due(r review.Ruling) (due, bool) {
 			}
 		}
 	}
-	if p.thread < 0 && r.Ruling == review.RulingMustFix && settled == nil && len(standing) == 0 {
+	if (r.Wordless || (p.thread < 0 && r.Ruling == review.RulingMustFix)) && settled == nil && len(standing) == 0 {
 		return d, true
 	}
 	var parts []string
 	if settled != nil {
 		parts = append(parts, settledSentence(r, settled, url))
 	}
-	ans := review.Punctuated(r.Answer(a.rp.Pushed))
+	ans := review.Punctuated(r.Answer(a.pushed))
 	if r.Ruling == review.RulingQuestion {
 		if p.thread >= 0 {
 			ans += " It waits for your answer on the board, and this thread stays open until the question is settled."
@@ -587,7 +597,7 @@ func (a *answering) readQuestions() error {
 // makes moot, with the post's words and its URL as the answer, headed ruled:
 // or moot:. A gate closed already is left with the answer it has.
 func (a *answering) settle() {
-	for _, r := range a.rp.Rulings {
+	for _, r := range a.rulings {
 		if r.Settles == "" || r.Ask == "" {
 			continue
 		}
@@ -602,7 +612,7 @@ func (a *answering) settle() {
 		i := slices.IndexFunc(a.asks, func(x review.Ask) bool { return x.ID == r.Ask })
 		url := ""
 		if i >= 0 {
-			url = postNamed(a.asks[i].Reason, a.url)
+			url = PostNamed(a.asks[i].Reason, a.url)
 		}
 		if url == "" {
 			a.leave("%s carries no person's post, so it settles no question, and %s stays open", r.Ask, q.id)
@@ -726,7 +736,7 @@ func (a *answering) dismissalNote(points []spot) (string, error) {
 		_, frag, _ := strings.Cut(p.url, "#")
 		how := review.RulingAnswered
 		for _, ask := range a.asks {
-			url := postNamed(ask.Reason, a.url)
+			url := PostNamed(ask.Reason, a.url)
 			if _, f, _ := strings.Cut(url, "#"); url == "" || f != frag {
 				continue
 			}
@@ -786,11 +796,7 @@ func (a *answering) rulingsByAsk() (map[string][]review.Ruling, error) {
 	a.byAsk = map[string][]review.Ruling{}
 	for _, run := range runs {
 		for _, m := range slices.Sorted(maps.Keys(run.Iterations)) {
-			rp := run.Iterations[m].Repair
-			if rp == nil {
-				continue
-			}
-			for _, r := range rp.Rulings {
+			for _, r := range run.Iterations[m].Rulings() {
 				if r.Ask != "" {
 					a.byAsk[r.Ask] = append(a.byAsk[r.Ask], r)
 				}

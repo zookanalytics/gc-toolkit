@@ -155,7 +155,9 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	if code, out, errs := checking(t, s, rt, 1); code != 1 || result(s) != "" || len(rt.Scripts()) != 0 {
 		t.Fatalf("an iteration that pushed, not the last = exit %d, review_results %q, scripts %v: %s%s", code, result(s), scripts(rt), out, errs)
 	}
-	putOutput(s, "tk-o3", triage(2, runNext))
+	// The last attempt picked a check, so it leaves rule-and-repair a lane to
+	// rule, and no lane or ruling was written.
+	putOutput(s, "tk-o3", `{"review":"triage","iteration":2,"head":"`+runNext+`","checks":[{"check":"correctness","head":"`+runNext+`"}],"material":false}`)
 	code, out, errs = checking(t, s, rt, 2)
 	if code != 1 || !strings.Contains(result(s), `"head":"`+runNext+`","target":"main","passed":false`) {
 		t.Fatalf("the last attempt not passing = exit %d, review_results %s: %s%s", code, result(s), out, errs)

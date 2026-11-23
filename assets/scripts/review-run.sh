@@ -8,7 +8,7 @@
 # Every verb acts for the step this session holds, the bead `gc hook current`
 # names, and reads the run's facts for it with `gctk review step`: the run, the
 # PR, its branch and target, the iteration and the head it judges. A verb the
-# step does not own is refused, so a lane cannot push and triage cannot post.
+# step does not own is refused, so a lane cannot push or post.
 #
 # The run's result belongs to no step: the loop's check records it as it ends
 # the loop (review-passed-check.sh), and the review-workspace-reap order
@@ -38,10 +38,12 @@
 #       that fails is weighed by the branch on origin: at the repair's head it
 #       landed, at the judged head nothing moved (exit 2, run it again), and at
 #       any other commit the branch moved (exit 1)
-#   review-run.sh post                            [rule-and-repair]
-#       post the round's answers on the PR (gctk pr answer): the head's comment,
-#       or an edit of the one its mark finds, and each person's post an ask the
-#       round ruled carries, answered where it was made
+#   review-run.sh post                            [triage, rule-and-repair]
+#       post the round's answers on the PR (gctk pr answer): each person's post
+#       an ask the round ruled carries, answered where it was made, and the
+#       head's comment, or an edit of the one its mark finds, once the round has
+#       ruled all it will. Triage's post answers the posts triage ruled, with
+#       the comment when triage leaves rule-and-repair nothing
 #   review-run.sh defer --title <text> --file <path>   [rule-and-repair]
 #       file a fix outside the reviewed diff as a bead of its own, waiting on the
 #       PR's bead and armed to start once it lands, its target the PR's
@@ -320,7 +322,7 @@ cmd_push() {
 # worktree when the repair's read made it, else the rig's checkout, whose
 # origin names the PR's repository. Its exits are this script's own.
 cmd_post() {
-    load; owns rule-and-repair
+    load; owns triage rule-and-repair
     local dir="$WS/repair/wt"
     if [ ! -d "$dir" ]; then
         dir=$("$HERE/rig-root.sh") && [ -n "$dir" ] || die 2 "cannot resolve the rig's checkout"

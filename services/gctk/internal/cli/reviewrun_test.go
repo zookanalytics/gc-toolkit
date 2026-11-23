@@ -133,12 +133,47 @@ func TestReviewOutputExits(t *testing.T) {
 	if code := reviewOutputIn(ledger.New(s), material, &out, &errb); code != 0 {
 		t.Errorf("a material head with its withdrawal filed = exit %d: %s", code, errb.String())
 	}
+
+	// Triage answers an ask that carries a person's post on the PR, which the
+	// command reads through the pr domain, and no other.
+	ask(s, "tk-post", "Conversation comment by operator on PR #7: https://github.com/o/r/pull/7#issuecomment-5")
+	ask(s, "tk-change", "change it")
+	answer := func(id string) review.OutputRequest {
+		return review.OutputRequest{Step: "tk-tri", Raw: []byte(`{"review":"triage","head":"` + runHead + `","checks":[],` +
+			`"rulings":[{"ask":"` + id + `","ruling":"answered","reason":"Five is the cap the design sets."}]}`)}
+	}
+	if code := reviewOutputIn(ledger.New(s), answer("tk-post"), &out, &errb); code != 0 {
+		t.Errorf("triage's answer of a post = exit %d: %s", code, errb.String())
+	}
+	errb.Reset()
+	if code := reviewOutputIn(ledger.New(s), answer("tk-change"), &out, &errb); code != 3 || !strings.Contains(errb.String(), "carries no person's post") {
+		t.Errorf("triage's answer of an ask with no post = exit %d: %s; want 3", code, errb.String())
+	}
 }
 
-// comment refuses an iteration whose round has written no rulings.
+// ask puts an open ask on the PR's bead in s, its reason given.
+func ask(s *fake.Store, id, reason string) {
+	s.Put(fake.Bead{ID: id, Status: "open", IssueType: "task", Description: reason,
+		Metadata: map[string]string{"branch": "polecat/tk-pr"}})
+	pr, _ := s.Row("tk-pr")
+	pr.Edges = append(pr.Edges, gcbd.Edge{ID: id, Type: gcbd.EdgeBlocks})
+	s.Put(pr)
+}
+
+// comment refuses an iteration whose round has written no rulings, and renders
+// one whose only rulings are triage's answers.
 func TestReviewCommentExits(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := reviewCommentIn(ledger.New(runStore()), "tk-run", 0, &out, &errb); code != 3 {
 		t.Errorf("a run with no rulings yet = exit %d; want 3", code)
+	}
+	s := runStore()
+	ask(s, "tk-post", "Conversation comment by operator on PR #7: https://github.com/o/r/pull/7#issuecomment-5")
+	putOutput(s, "tk-o1", `{"review":"triage","iteration":1,"head":"`+runHead+`","checks":[],"material":false,`+
+		`"rulings":[{"ask":"tk-post","ruling":"answered","reason":"Five is the cap the design sets."}]}`)
+	out.Reset()
+	if code := reviewCommentIn(ledger.New(s), "tk-run", 0, &out, &errb); code != 0 ||
+		!strings.Contains(out.String(), "(tk-post): Answered: Five is the cap the design sets.") {
+		t.Errorf("a run whose triage answered a post = exit %d: %s%s", code, out.String(), errb.String())
 	}
 }

@@ -209,7 +209,7 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 }
 
 // postAsks names, on each of waits that is an open ask filed for a post on the
-// PR at url, the post it carries, as the URL its reason ends with (postNamed),
+// PR at url, the post it carries, as the URL its reason ends with (PostNamed),
 // since a person's post the city works reads working on the PR. It reads the
 // asks on the bead r only when the bead waits on something.
 func postAsks(l *ledger.Ledger, r *ledger.Record, url string, waits []Condition) error {
@@ -224,7 +224,7 @@ func postAsks(l *ledger.Ledger, r *ledger.Record, url string, waits []Condition)
 		if !a.Open() {
 			continue
 		}
-		post := postNamed(a.Reason, url)
+		post := PostNamed(a.Reason, url)
 		if post == "" {
 			continue
 		}

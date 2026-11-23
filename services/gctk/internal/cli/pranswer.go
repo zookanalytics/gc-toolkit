@@ -19,18 +19,24 @@ import (
 // builds the pr domain's Landing over the adapters and prints what the post did.
 
 const prAnswerLong = `Posts the round of a review run on the pull request the run judges, which the
-round's step calls through review-run.sh post (services/gctk/pr/answer.go). <run>
-is the run's root, or any bead poured under it, and --iteration the iteration
-whose round it posts, else the latest whose round wrote its rulings.
+round's steps call through review-run.sh post (services/gctk/pr/answer.go):
+triage for the posts it answers, and rule-and-repair for the rest of the round.
+<run> is the run's root, or any bead poured under it, and --iteration the
+iteration whose round it posts, else the latest whose round wrote its rulings,
+triage's answers among them.
 
-It posts the head's comment (gctk review comment), or edits the city's comment
-its mark finds, then answers each person's post an ask the round ruled carries,
-where the post was made. An inline comment gets a reply in its thread. A
-review's message or a conversation comment gets a comment that links it where
-its ruling owes words: declined, deferred, answered, a question, a post that
-settles one, and a post made while a question it does not settle is open. A
-must-fix point on such a post owes none, since the head's comment names its
-commit, and a must-fix point is answered once the round has pushed its fix.
+It answers each person's post an ask the round ruled carries, where the post
+was made, and posts the head's comment (gctk review comment), or edits the
+city's comment its mark finds, once the round has ruled all it will:
+rule-and-repair wrote its rulings, or triage left it nothing, no check picked
+and every ask the round can take answered. An inline comment gets a reply in
+its thread. A review's message or a conversation comment gets a comment that
+links it where its ruling owes words: declined, deferred, answered, a question,
+a post that settles one, and a post made while a question it does not settle
+is open. A must-fix point on such a post owes none, since the head's comment
+names its commit, and a wordless answer owes none on any post, the city's
+THUMBS_UP alone. A must-fix point is answered once the round has pushed its
+fix.
 Each post the round ruled then gets the city's THUMBS_UP, once its words are on
 the PR, but a question's, which waits on its gate; its reply names the gate and
 its thread stays open. A thread is resolved once each post in it carries the

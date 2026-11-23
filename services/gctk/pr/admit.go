@@ -177,7 +177,7 @@ func askedSince(s state, open []*ledger.Record, asks []review.Ask) bool {
 		}
 	}
 	for _, a := range asks {
-		if !a.Takeable() || postNamed(a.Reason, s.rec.URL) == "" {
+		if !a.Takeable() || PostNamed(a.Reason, s.rec.URL) == "" {
 			continue
 		}
 		if at, err := time.Parse(time.RFC3339Nano, a.Filed); err == nil && at.After(newest) {

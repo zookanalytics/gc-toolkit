@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -33,14 +34,17 @@ import (
 // then says so, so the approver reads the diff for one.
 
 // OutputRequest is one step's output to check: the step's bead, the text the
-// step wrote, the checkouts that can read the reviewed commit, and the reader
-// of the withdrawal filed on a bead for a head, open or closed, "" when none
-// is, which the pr domain answers (pr.WithdrawalFor).
+// step wrote, the checkouts that can read the reviewed commit, the reader of
+// the withdrawal filed on a bead for a head, open or closed, "" when none is,
+// which the pr domain answers (pr.WithdrawalFor), and the reader of the
+// person's post on the PR at pr that an ask's reason names, "" when it names
+// none, which the pr domain answers too (pr.PostNamed).
 type OutputRequest struct {
 	Step       string
 	Raw        []byte
 	Repos      []string
 	Withdrawal func(bead, head string) (string, error)
+	Post       func(reason, pr string) string
 }
 
 // Refused is the error of an output the step must write again: why.
@@ -82,11 +86,11 @@ func Output(l *ledger.Ledger, req OutputRequest) ([]byte, error) {
 	var v any
 	switch st.Output {
 	case OutputTriage:
-		v, err = triageOutput(run, n, req)
+		v, err = triageOutput(l, st, req)
 	case OutputLane:
 		v, err = laneOutput(run, n, req)
 	case OutputRepair:
-		v, err = repairOutput(l, run, n, req)
+		v, err = repairOutput(l, st, req)
 	}
 	if err != nil {
 		return nil, err
@@ -112,8 +116,10 @@ func decode(raw []byte, v any, what string) error {
 // triageOutput checks triage's output. A head ruled material keeps the
 // approvals given before it only until the landing order carries out the
 // withdrawal triage files for it, so the output stands only once that
-// withdrawal is on the bead that owns the PR, open or closed.
-func triageOutput(run *Run, n int, req OutputRequest) (*Triage, error) {
+// withdrawal is on the bead that owns the PR, open or closed. Its answers
+// stand by triageAnswers.
+func triageOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Triage, error) {
+	run, n := st.Run, st.Iteration
 	var t Triage
 	if err := decode(req.Raw, &t, OutputTriage); err != nil {
 		return nil, err
@@ -150,7 +156,129 @@ func triageOutput(run *Run, n int, req OutputRequest) (*Triage, error) {
 				"given before it (review-run.sh withdraw), then write the output", t.Head, run.PRBead)
 		}
 	}
+	if err := triageAnswers(l, st, t.Rulings, req); err != nil {
+		return nil, err
+	}
 	return &t, nil
+}
+
+// triageAnswers is why triage's rulings do not stand, nil when they do. Triage
+// answers a person's post that asks for no change to the branch and no
+// person's decision, and leaves every other ask to rule-and-repair, so each of
+// its rulings names, once, an ask the round can take whose reason names a
+// person's post on the PR, and rules it answered, with the reason the PR
+// shows and no commit, gate or question it settles. It answers nothing while a
+// question a review run put to a person is open on the bead that owns the PR,
+// since a post may settle that question, and no ask filed before such a
+// question was put, which may be the question's own: rule-and-repair rules
+// those by the person's answer. A read that fails returns the store's error.
+func triageAnswers(l *ledger.Ledger, st *Step, rs []Ruling, req OutputRequest) error {
+	if len(rs) == 0 {
+		return nil
+	}
+	if req.Post == nil {
+		return errors.New("no reader of the posts an ask names was given, so triage's answers cannot be checked")
+	}
+	asks, err := AsksOn(l, st.Run.PRBead)
+	if err != nil {
+		return err
+	}
+	questions, err := questionsOn(l, st.Run.PRBead)
+	if err != nil {
+		return err
+	}
+	for _, q := range questions {
+		if q.open {
+			return refuse("the question at %s is open on %s, and a post may settle it, which rule-and-repair rules: "+
+				"answer no post while it is open", q.id, st.Run.PRBead)
+		}
+	}
+	seen := map[string]bool{}
+	for _, r := range rs {
+		switch {
+		case r.Ask == "":
+			return refuse("a ruling names no ask, and triage rules no lane's finding, since the lanes run after it")
+		case r.Check != "" || r.Finding != "":
+			return refuse("a ruling names the ask %s and a lane's finding at once", r.Ask)
+		case seen[r.Ask]:
+			return refuse("%s is ruled twice", r.Subject())
+		}
+		seen[r.Ask] = true
+		i := slices.IndexFunc(asks, func(a Ask) bool { return a.ID == r.Ask })
+		switch {
+		case i < 0 || !asks[i].Takeable():
+			return refuse("%s is not an ask the round can take: open on the bead, with nothing holding it", r.Subject())
+		case req.Post(asks[i].Reason, st.PR()) == "":
+			return refuse("%s carries no person's post on the PR, and triage answers only a post: leave it to rule-and-repair", r.Subject())
+		case r.Ruling != RulingAnswered:
+			return refuse("%s is ruled %q, and triage rules a post only %s, leaving every other ruling to rule-and-repair",
+				r.Subject(), r.Ruling, RulingAnswered)
+		case strings.TrimSpace(r.Reason) == "":
+			return refuse("%s is answered with no reason, and the reason is the answer the PR shows", r.Subject())
+		case r.Commit != "" || r.Gate != "" || r.Settles != "" || r.Moot:
+			return refuse("%s is answered with a commit, a gate or a question it settles, which only rule-and-repair names", r.Subject())
+		}
+		for _, q := range questions {
+			if !after(asks[i].Filed, q.filed) {
+				return refuse("%s was filed before the question at %s was put to a person, so it may be that question's own "+
+					"ask, which rule-and-repair rules by the answer: leave it to rule-and-repair", r.Subject(), q.id)
+			}
+		}
+	}
+	return nil
+}
+
+// question is a gate through which a review run put a question to a person on
+// the bead that owns a PR: its id, when it was filed, and whether it is open.
+type question struct {
+	id, filed string
+	open      bool
+}
+
+// questionsOn is each question a review run put to a person on bead, open or
+// closed: a human gate under a key QuestionKey opens, which bead waits on by a
+// blocks edge. A read that fails returns the store's error.
+func questionsOn(l *ledger.Ledger, bead string) ([]question, error) {
+	owner, err := one(l, bead)
+	if err != nil {
+		return nil, err
+	}
+	edges, err := owner.Edges()
+	if err != nil {
+		return nil, &ledger.ReadError{ID: owner.ID, Reason: "its edges did not decode: " + err.Error()}
+	}
+	var ids []string
+	for _, e := range edges {
+		if e.Type == ledger.EdgeBlocks && !slices.Contains(ids, e.ID) {
+			ids = append(ids, e.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := l.Find(ledger.ByID(ids...).WithClosed())
+	if err != nil {
+		return nil, err
+	}
+	var out []question
+	for _, g := range rows {
+		if strings.EqualFold(g.IssueType(), "gate") && g.AwaitType() == "human" && strings.HasPrefix(g.AwaitID(), QuestionKey) {
+			out = append(out, question{id: g.ID, filed: g.CreatedAt(), open: g.Status() != "closed"})
+		}
+	}
+	return out, nil
+}
+
+// after reports whether the instant a is later than the instant b, each as the
+// store writes a bead's times. An instant that does not read is later than
+// none, and none is later than it.
+func after(a, b string) bool {
+	x, err := time.Parse(time.RFC3339Nano, a)
+	if err != nil {
+		return false
+	}
+	y, err := time.Parse(time.RFC3339Nano, b)
+	return err == nil && x.After(y)
 }
 
 func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
@@ -219,7 +347,12 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 	return &ln, nil
 }
 
-func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair, error) {
+// repairOutput checks rule-and-repair's output: a ruling for every finding a
+// lane raised and every ask the round can take that triage did not answer,
+// each standing by checkRuling, and none for an ask triage answered, whose
+// answer the round already posted.
+func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error) {
+	run, n := st.Run, st.Iteration
 	var rp Repair
 	if err := decode(req.Raw, &rp, OutputRepair); err != nil {
 		return nil, err
@@ -236,9 +369,16 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 	if err != nil {
 		return nil, err
 	}
+	answered := map[string]bool{}
+	for _, r := range it.Triage.Rulings {
+		answered[r.Ask] = true
+	}
 	declined := earlierDeclines(run, n)
 	subjects := map[subject]bool{}
 	for _, r := range rp.Rulings {
+		if r.Ask != "" && answered[r.Ask] {
+			return nil, refuse("triage answered %s in this round, so rule-and-repair does not rule it again", r.Subject())
+		}
 		if err := checkRuling(r, it, asks, declined); err != nil {
 			return nil, err
 		}
@@ -246,6 +386,15 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 			return nil, refuse("%s is ruled twice", r.Subject())
 		}
 		subjects[r.subject()] = true
+		if r.Wordless {
+			if req.Post == nil {
+				return nil, errors.New("no reader of the posts an ask names was given, so a wordless answer cannot be checked")
+			}
+			i := slices.IndexFunc(asks, func(a Ask) bool { return a.ID == r.Ask })
+			if req.Post(asks[i].Reason, st.PR()) == "" {
+				return nil, refuse("%s is answered wordless, and it carries no person's post on the PR for the city's 👍", r.Subject())
+			}
+		}
 	}
 	for _, ln := range it.Lanes {
 		for _, f := range ln.Findings {
@@ -255,7 +404,7 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 		}
 	}
 	for _, a := range asks {
-		if a.Takeable() && !subjects[Ruling{Ask: a.ID}.subject()] {
+		if a.Takeable() && !answered[a.ID] && !subjects[Ruling{Ask: a.ID}.subject()] {
 			return nil, refuse("ask %s is open and nothing holds it, so the round rules it", a.ID)
 		}
 	}
@@ -340,9 +489,10 @@ var (
 // checkRuling is why one ruling of iteration it's round does not stand: a
 // subject no lane raised and no ask the round can take, a ruling outside the
 // set, a must-fix with no fixing commit, a commit on a ruling that changes no
-// code, a question with no gate, and a fix for an ask an earlier round of the
-// run declined, which a later ruling of its own overrules only through an ask
-// that carries it.
+// code, a question with no gate, a wordless ruling that is not an ask's answer
+// or that settles a question, and a fix for an ask an earlier round of the run
+// declined, which a later ruling of its own overrules only through an ask that
+// carries it.
 func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string) error {
 	switch {
 	case r.Ask != "" && (r.Check != "" || r.Finding != ""):
@@ -373,6 +523,10 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("%s is ruled %s and names the gate %s, which only a question goes to", r.Subject(), r.Ruling, r.Gate)
 	case strings.TrimSpace(r.Reason) == "":
 		return refuse("%s is ruled %s with no reason", r.Subject(), r.Ruling)
+	case r.Wordless && (r.Ask == "" || r.Ruling != RulingAnswered):
+		return refuse("%s is ruled %s and wordless, and only an answer of an ask's post is wordless", r.Subject(), r.Ruling)
+	case r.Wordless && r.Settles != "":
+		return refuse("%s settles the question at %s and is wordless, and a post that settles a question is told so", r.Subject(), r.Settles)
 	}
 	if was, ok := declined[r.Ask]; ok && r.Ask != "" && r.Ruling == RulingMustFix {
 		return refuse("an earlier round of this run ruled %s %s, so no repair changes code for it; a ruling that overrules that "+

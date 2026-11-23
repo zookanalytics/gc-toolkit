@@ -166,15 +166,21 @@ candidate), an approve that carries a blocking finding (a P0, a P1 or an
 ungraded one) and a request-changes that carries none, a demo verdict with no
 visual decision or one its rules refuse (none only with an approve; a
 fallback, screenshot or video, costlier than the modality delivered), a visual
-on another check's verdict, a ruling of a finding no lane raised or of an ask
-the round cannot take, a finding or an ask left unruled, a must-fix with no
-fixing commit, a commit on a ruling that changes no code, a question with no
-gate, a fix for an ask an earlier round of the run declined, and a settles,
-the gate of a question an ask's post settles, that is no open question gate
-holding the bead that owns the PR, that a finding's or a question's ruling
-names, that two rulings name, or that the round also puts a question to, and a
-moot with no settles beside it. A correctness
-lane's approve on a change that edits its own review guidance
+on another check's verdict, triage's answer of an ask that carries no person's
+post on the PR (read through the pr domain), of one it cannot take or answers
+twice, outside answered, with no reason, or with a commit, a gate or a
+settles, any answer while a question a review run put to a person is open on
+the bead that owns the PR, and an answer of an ask filed before such a
+question was put, a ruling of a finding no lane raised or of an ask the round
+cannot take, a ruling of an ask triage answered in the round, a finding or an
+ask left unruled, a must-fix with no fixing commit, a commit on a ruling that
+changes no code, a question with no gate, a wordless ruling that is not an
+answer of an ask's post or that settles a question, a fix for an ask an
+earlier round of the run declined, and a settles, the gate of a question an
+ask's post settles, that is no open question gate holding the bead that owns
+the PR, that a finding's or a question's ruling names, that two rulings name,
+or that the round also puts a question to, and a moot with no settles beside
+it. A correctness lane's approve on a change that edits its own review guidance
 (review-checks.toml, docs/review-*.md) is refused until needs_you names the
 edit for the person who approves the merge, and when the paths cannot be
 listed, needs_you says the edit is unchecked.
@@ -222,9 +228,11 @@ func reviewOutput(bead, db, file string, stdout, stderr io.Writer) int {
 }
 
 // reviewOutputIn checks the output over l. The withdrawal a material head
-// needs is the pr domain's to answer, read through the same store.
+// needs, and the post an ask's reason names, are the pr domain's to answer,
+// the withdrawal read through the same store.
 func reviewOutputIn(l *ledger.Ledger, req review.OutputRequest, stdout, stderr io.Writer) int {
 	req.Withdrawal = func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) }
+	req.Post = pr.PostNamed
 	out, err := review.Output(l, req)
 	var refused *review.Refused
 	var notRun *review.NotARun
@@ -245,8 +253,9 @@ names the run and the head, each lane's verdict, approvals included, each
 finding a lane raised with how the round ruled it and what the head carries for
 it, and each ask the round took (services/gctk/review/comment.go). <run> is the
 run's root, or any bead poured under it. It renders --iteration, else the
-latest iteration whose round wrote its rulings, and prints nothing when that
-iteration has nothing to answer: no lane ran there and the round took no ask.
+latest iteration whose round wrote its rulings, triage's answers among them, and prints nothing
+when that iteration has nothing to answer: no lane ran there and the round took
+no ask.
 
 exit: 0 printed, nothing included
       1 usage
@@ -297,12 +306,12 @@ func reviewCommentIn(l *ledger.Ledger, id string, n int, stdout, stderr io.Write
 	}
 	if n == 0 {
 		for m, it := range run.Iterations {
-			if it.Repair != nil && m > n {
+			if it.Ruled() && m > n {
 				n = m
 			}
 		}
 	}
-	if it := run.Iterations[n]; n == 0 || it == nil || it.Repair == nil {
+	if it := run.Iterations[n]; n == 0 || !it.Ruled() {
 		fmt.Fprintf(stderr, "gctk review comment: iteration %d of %s has no rulings yet\n", n, run.Root)
 		return 3
 	}

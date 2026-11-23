@@ -12,15 +12,18 @@ import (
 
 // The pass rule, the check script of a review run's loop. An iteration passes
 // when triage wrote the head it judged, every lane triage bonded wrote its
-// verdict at that head, rule-and-repair ruled every finding and every ask it
-// took, ruled nothing must-fix and pushed nothing, and every ask open on the
-// bead that the run can take is one the round took, with each check it sends
-// back run at the head. An ask that something holds counts for nothing, so it
-// spends no attempt, and its own edge holds the PR until a later run takes it.
-// Each finding or ask the run ruled must-fix at an earlier head must name the
-// commit that fixes it. A finding declined by its lane's own rule counts as
-// ruled, and so does a question put to a person, so the loop stops there
-// rather than spend its attempts on a question only a person can settle.
+// verdict at that head, the round ruled every finding and every ask it took,
+// ruled nothing must-fix and pushed nothing, and every ask open on the bead
+// that the run can take is one the round took, with each check it sends back
+// run at the head. The round's rulings are triage's answers and
+// rule-and-repair's rulings, and rule-and-repair writes none when triage left
+// it nothing: no check picked, and every ask the round can take answered. An
+// ask that something holds counts for nothing, so it spends no attempt, and
+// its own edge holds the PR until a later run takes it. Each finding or ask
+// the run ruled must-fix at an earlier head must name the commit that fixes
+// it. A finding declined by its lane's own rule counts as ruled, and so does a
+// question put to a person, so the loop stops there rather than spend its
+// attempts on a question only a person can settle.
 //
 // The rule reads only the store, because a check runs inside the control
 // dispatcher with a PATH that has no gh, and the steps' outputs carry the
@@ -90,13 +93,17 @@ func judge(run *Run, n int, asks []Ask) []string {
 		}
 	}
 	rp := it.Repair
-	if rp == nil {
-		return append(why, fmt.Sprintf("rule-and-repair wrote no rulings in iteration %d", n))
-	}
-	if rp.Head != head {
+	switch {
+	case rp == nil:
+		if left := run.Left(n, asks); len(left) > 0 {
+			return append(why, fmt.Sprintf("rule-and-repair wrote no rulings in iteration %d, and triage left it %s",
+				n, strings.Join(left, ", ")))
+		}
+	case rp.Head != head:
 		why = append(why, fmt.Sprintf("rule-and-repair ruled at %s, not at the head triage judged, %s", rp.Head, head))
 	}
-	for _, r := range rp.Rulings {
+	round := it.Rulings()
+	for _, r := range round {
 		why = append(why, ruled(r, head)...)
 	}
 	for _, p := range it.Triage.Checks {
@@ -109,19 +116,19 @@ func judge(run *Run, n int, asks []Ask) []string {
 				why = append(why, fmt.Sprintf("a %s finding names no id, so no ruling can answer it", ln.Check))
 				continue
 			}
-			if _, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) }); !ok {
+			if _, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) }); !ok {
 				why = append(why, fmt.Sprintf("%s finding %s is not ruled", ln.Check, f.ID))
 			}
 		}
 	}
-	if rp.Pushed != "" {
-		why = append(why, fmt.Sprintf("the round pushed %s, which triage has not judged", rp.Pushed))
+	if pushed := it.Pushed(); pushed != "" {
+		why = append(why, fmt.Sprintf("the round pushed %s, which triage has not judged", pushed))
 	}
 	for _, a := range asks {
 		if !a.Takeable() {
 			continue
 		}
-		if _, ok := rulingOf(rp, func(r Ruling) bool { return r.Ask == a.ID }); !ok {
+		if _, ok := rulingOf(round, func(r Ruling) bool { return r.Ask == a.ID }); !ok {
 			why = append(why, fmt.Sprintf("ask %s is open and nothing holds it, and the round did not take it", a.ID))
 		}
 		for _, c := range a.Checks {
@@ -172,12 +179,9 @@ func lane(it *Iteration, check string) (Lane, bool) {
 	return Lane{}, false
 }
 
-// rulingOf is the round's first ruling that match accepts.
-func rulingOf(rp *Repair, match func(Ruling) bool) (Ruling, bool) {
-	if rp == nil {
-		return Ruling{}, false
-	}
-	for _, r := range rp.Rulings {
+// rulingOf is the first of a round's rulings that match accepts.
+func rulingOf(round []Ruling, match func(Ruling) bool) (Ruling, bool) {
+	for _, r := range round {
 		if match(r) {
 			return r, true
 		}
@@ -186,13 +190,16 @@ func rulingOf(rp *Repair, match func(Ruling) bool) (Ruling, bool) {
 }
 
 // Explain is the account --explain prints of the iteration the verdict
-// judged: its head and picks, each lane's verdict and findings, each ruling,
-// the push, the asks on the bead, and the verdict with its reasons.
+// judged: its head and picks, each ask triage answered, each lane's verdict
+// and findings, each of rule-and-repair's rulings, or what triage left it
+// while it has written none, the push, the asks on the bead that triage did
+// not answer, and the verdict with its reasons.
 func (v *Verdict) Explain() string {
 	var b strings.Builder
 	run := v.Run
 	fmt.Fprintf(&b, "run %s on %s, first head %s, into %s\n", run.Root, run.PRBead, run.Head, run.Target)
 	it := run.Iterations[v.Iteration]
+	answered := map[string]bool{}
 	if it == nil {
 		fmt.Fprintf(&b, "iteration %d: nothing written\n", v.Iteration)
 	} else {
@@ -202,7 +209,11 @@ func (v *Verdict) Explain() string {
 			for _, p := range t.Checks {
 				picks = append(picks, p.Check)
 			}
-			fmt.Fprintf(&b, "  triage: head %s, material %t, picked %s\n", t.Head, t.Material, orNone(picks))
+			fmt.Fprintf(&b, "  triage: head %s, material %t, picked %s, answered %d ask(s)\n", t.Head, t.Material, orNone(picks), len(t.Rulings))
+			for _, r := range t.Rulings {
+				explainRuling(&b, r)
+				answered[r.Ask] = true
+			}
 		} else {
 			fmt.Fprintln(&b, "  triage: nothing written")
 		}
@@ -215,33 +226,24 @@ func (v *Verdict) Explain() string {
 				fmt.Fprintf(&b, "    %s %s %s: %s\n", f.ID, f.Severity, f.Locus, oneLine(f.Message))
 			}
 		}
-		if rp := it.Repair; rp != nil {
+		switch rp := it.Repair; {
+		case rp != nil:
 			fmt.Fprintf(&b, "  rule-and-repair at %s: %d ruling(s), pushed %s\n", rp.Head, len(rp.Rulings), orNone([]string{rp.Pushed}))
 			for _, r := range rp.Rulings {
-				fmt.Fprintf(&b, "    %s: %s", r.Subject(), r.Ruling)
-				if r.Commit != "" {
-					fmt.Fprintf(&b, " by %s", r.Commit)
-				}
-				if r.Gate != "" {
-					fmt.Fprintf(&b, " through %s", r.Gate)
-				}
-				switch {
-				case r.Settles != "" && r.Moot:
-					fmt.Fprintf(&b, ", making the question at %s moot", r.Settles)
-				case r.Settles != "":
-					fmt.Fprintf(&b, ", settling the question at %s", r.Settles)
-				}
-				if r.Reason != "" {
-					fmt.Fprintf(&b, ": %s", oneLine(r.Reason))
-				}
-				fmt.Fprintln(&b)
+				explainRuling(&b, r)
 			}
-		} else {
+		case it.Triage == nil:
 			fmt.Fprintln(&b, "  rule-and-repair: nothing written")
+		default:
+			if left := run.Left(it.N, v.Asks); len(left) > 0 {
+				fmt.Fprintf(&b, "  rule-and-repair: nothing written, and triage left it %s\n", strings.Join(left, ", "))
+			} else {
+				fmt.Fprintln(&b, "  rule-and-repair: nothing written, and triage left it nothing: it picked no check and answered every ask the round can take, so the step has nothing to rule or post")
+			}
 		}
 	}
 	for _, a := range v.Asks {
-		if !a.Open() {
+		if !a.Open() || answered[a.ID] {
 			continue
 		}
 		fmt.Fprintf(&b, "ask %s (%s, holds %s), checks %s: %s\n", a.ID, a.Status, a.Holds, orNone(a.Checks), oneLine(a.Reason))
@@ -255,6 +257,31 @@ func (v *Verdict) Explain() string {
 		}
 	}
 	return b.String()
+}
+
+// explainRuling writes one ruling's line of the account: what it rules, the
+// ruling, its commit, its gate, the question it settles and its reason.
+func explainRuling(b *strings.Builder, r Ruling) {
+	fmt.Fprintf(b, "    %s: %s", r.Subject(), r.Ruling)
+	if r.Wordless {
+		fmt.Fprint(b, " with the city's 👍 alone")
+	}
+	if r.Commit != "" {
+		fmt.Fprintf(b, " by %s", r.Commit)
+	}
+	if r.Gate != "" {
+		fmt.Fprintf(b, " through %s", r.Gate)
+	}
+	switch {
+	case r.Settles != "" && r.Moot:
+		fmt.Fprintf(b, ", making the question at %s moot", r.Settles)
+	case r.Settles != "":
+		fmt.Fprintf(b, ", settling the question at %s", r.Settles)
+	}
+	if r.Reason != "" {
+		fmt.Fprintf(b, ": %s", oneLine(r.Reason))
+	}
+	fmt.Fprintln(b)
 }
 
 func orNone(list []string) string {

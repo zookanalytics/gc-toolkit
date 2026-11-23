@@ -21,7 +21,8 @@ func (w *world) check(step string, wrote any, v any, repos ...string) error {
 	}
 	l := w.ledger()
 	out, err := review.Output(l, review.OutputRequest{Step: step, Raw: raw, Repos: repos,
-		Withdrawal: func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) }})
+		Withdrawal: func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) },
+		Post:       pr.PostNamed})
 	if err != nil {
 		return err
 	}

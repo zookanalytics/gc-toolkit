@@ -9,11 +9,12 @@ import (
 // The head's comment is where every lane's verdict at a head reaches the PR,
 // the place the operator decides from: one comment for each head a run
 // judged, carrying each lane's verdict, approvals included, each finding the
-// lane raised and how the round ruled it, and each ask the round took. Each
-// point's answer says what the head carries for it: the commit that fixes it
-// and the head that carries the commit, or that the head carries no change for
-// it. The comment opens with its mark, which names the run and the head, so a
-// retry finds the comment and edits it rather than posting a second.
+// lane raised and how the round ruled it, and each ask the round took, the
+// asks triage answered among them. Each point's answer says what the head
+// carries for it: the commit that fixes it and the head that carries the
+// commit, or that the head carries no change for it. The comment opens with
+// its mark, which names the run and the head, so a retry finds the comment and
+// edits it rather than posting a second.
 
 // Mark is the line that opens the comment of the run root at head.
 func Mark(root, head string) string {
@@ -21,17 +22,18 @@ func Mark(root, head string) string {
 }
 
 // Comment is the comment for iteration n of the run: its head's checks, their
-// findings and the round's rulings, and the asks the round took, with asks
-// naming the ones on the bead. It is "" when the iteration has nothing to
-// answer: no lane ran there and the round took no ask.
+// findings and the round's rulings, and the asks the round took, triage's and
+// rule-and-repair's, with asks naming the ones on the bead. It is "" when the
+// iteration has nothing to answer: triage has not written, or no lane ran
+// there and the round took no ask.
 func Comment(run *Run, n int, asks []Ask) string {
 	it := run.Iterations[n]
-	if it == nil || it.Triage == nil || it.Repair == nil {
+	if it == nil || it.Triage == nil {
 		return ""
 	}
-	rp := it.Repair
+	round, pushed := it.Rulings(), it.Pushed()
 	var askRulings []Ruling
-	for _, r := range rp.Rulings {
+	for _, r := range round {
 		if r.Ask != "" {
 			askRulings = append(askRulings, r)
 		}
@@ -61,7 +63,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 			if g == "" {
 				g = "none"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ln.Check, ln.Verdict, g, tally(ln, rp))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ln.Check, ln.Verdict, g, tally(ln, round))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -76,8 +78,8 @@ func Comment(run *Run, n int, asks []Ask) string {
 				grade = "ungraded"
 			}
 			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, oneLine(f.Message))
-			r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
-			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, rp))
+			r, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
+			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, pushed))
 		}
 		fmt.Fprintln(&b, "\n</details>")
 		fmt.Fprintln(&b)
@@ -92,7 +94,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 					what = fmt.Sprintf("%s (%s)", oneLine(a.Reason), r.Ask)
 				}
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(r, true, rp), r))
+			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(r, true, pushed), r))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -116,14 +118,14 @@ func summary(it *Iteration) string {
 		ran = strings.Join(lanes, ", ")
 	}
 	count := map[string]int{}
-	for _, r := range it.Repair.Rulings {
+	for _, r := range it.Rulings() {
 		count[r.Ruling]++
 	}
 	var did []string
 	if c := count[RulingMustFix]; c > 0 {
-		switch {
-		case it.Repair.Pushed != "":
-			did = append(did, fmt.Sprintf("fixed %d in `%s`", c, short(it.Repair.Pushed)))
+		switch pushed := it.Pushed(); {
+		case pushed != "":
+			did = append(did, fmt.Sprintf("fixed %d in `%s`", c, short(pushed)))
 		default:
 			did = append(did, fmt.Sprintf("ruled %d must-fix", c))
 		}
@@ -176,13 +178,13 @@ func grades(ln Lane) string {
 }
 
 // tally is a lane's findings by how the round ruled them.
-func tally(ln Lane, rp *Repair) string {
+func tally(ln Lane, round []Ruling) string {
 	if len(ln.Findings) == 0 {
 		return "none"
 	}
 	count := map[string]int{}
 	for _, f := range ln.Findings {
-		r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
+		r, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
 		if !ok {
 			count["unruled"]++
 			continue
@@ -198,12 +200,13 @@ func tally(ln Lane, rp *Repair) string {
 	return strings.Join(out, ", ")
 }
 
-// answer is one point's answer: its ruling, and what the head carries for it.
-func answer(r Ruling, ok bool, rp *Repair) string {
+// answer is one point's answer: its ruling, and what the head carries for it,
+// where pushed is the head the round pushed.
+func answer(r Ruling, ok bool, pushed string) string {
 	if !ok {
 		return "Not ruled."
 	}
-	return r.Answer(rp.Pushed)
+	return r.Answer(pushed)
 }
 
 // settles is an ask's answer with what its ruling says of the question the

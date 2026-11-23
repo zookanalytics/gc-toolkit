@@ -189,11 +189,7 @@ func (out *Recorded) write(l *ledger.Ledger, dir string, wait time.Duration, run
 func gates(run *Run) []string {
 	var out []string
 	for _, n := range slices.Sorted(maps.Keys(run.Iterations)) {
-		rp := run.Iterations[n].Repair
-		if rp == nil {
-			continue
-		}
-		for _, r := range rp.Rulings {
+		for _, r := range run.Iterations[n].Rulings() {
 			if r.Ruling == RulingQuestion && r.Gate != "" && !slices.Contains(out, r.Gate) {
 				out = append(out, r.Gate)
 			}
@@ -203,17 +199,14 @@ func gates(run *Run) []string {
 }
 
 // answeredAsks is each ask the round of iteration last answered: ruled
-// declined, deferred or answered there. Its work record is shipped with the
-// commit of the run's last must-fix ruling of it, when an earlier round fixed
-// it, and no-op otherwise. An ask ruled must-fix there waits for a head that
-// carries the fix to be judged, and a question waits for its answer.
+// declined, deferred or answered there, by triage or by rule-and-repair. Its
+// work record is shipped with the commit of the run's last must-fix ruling of
+// it, when an earlier round fixed it, and no-op otherwise. An ask ruled
+// must-fix there waits for a head that carries the fix to be judged, and a
+// question waits for its answer.
 func answeredAsks(run *Run, last int) []ClosedAsk {
-	rp := run.Iterations[last].Repair
-	if rp == nil {
-		return nil
-	}
 	var out []ClosedAsk
-	for _, r := range rp.Rulings {
+	for _, r := range run.Iterations[last].Rulings() {
 		if r.Ask == "" || slices.ContainsFunc(out, func(c ClosedAsk) bool { return c.ID == r.Ask }) {
 			continue
 		}

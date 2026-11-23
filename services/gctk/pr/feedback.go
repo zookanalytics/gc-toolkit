@@ -69,7 +69,7 @@ func (p Post) name() string {
 // author, the PR, an inline comment's file and the line it was made on, and its
 // URL, where a run reads the post as it stands. It holds nothing an edit of the
 // post changes, so the take finds the ask it filed for the post (review.FileAsk)
-// however often it runs, and postNamed reads the URL back.
+// however often it runs, and PostNamed reads the URL back.
 func (p Post) reason(number int) string {
 	who := p.Author
 	if who == "" {
@@ -99,9 +99,9 @@ func (p Post) reason(number int) string {
 // comment's or a conversation comment's, which names the kind and then the id.
 var postFragment = regexp.MustCompile(`^(pullrequestreview-|discussion_r|issuecomment-)([0-9]+)$`)
 
-// postNamed is the URL of the post on the PR at pr that an ask's reason names,
+// PostNamed is the URL of the post on the PR at pr that an ask's reason names,
 // as the take writes one (Post.reason), or "" when it names none.
-func postNamed(reason, pr string) string {
+func PostNamed(reason, pr string) string {
 	i := strings.LastIndex(reason, ": ")
 	if i < 0 {
 		return ""
