@@ -43,12 +43,14 @@ only the conversation.
    the wording's work, which the epic leaves out. The other way is to read the
    recommendation from the text. It changes no asker, but Accept could act on a
    misreading.
-2. **Your yes can do one of four things, each through a writer the pack
-   already has.** It can let the waiting work go on, start a formula on a
-   bead, stand the work down, or retire a PR. Recommended. At least six of your
-   answers since 2026-11-02 closed a PR unmerged or stood work down. The
-   smaller build, the first two only, leaves every recommendation to stop work
-   a conversation.
+2. **Your yes can do one of four things.** It can let the waiting work go on,
+   start a formula on a bead, stand the work down, or retire a PR.
+   Recommended. At least six of your answers since 2026-11-02 closed a PR
+   unmerged or stood work down. The two that stop work cost more to build.
+   Each runs its writer's steps in a new order, so that your yes never stops
+   work that another answer already let go on, and retiring a PR moves
+   `pr-dispose.sh` into gctk. The smaller build, the first two only, leaves
+   every recommendation to stop work a conversation.
 3. **A yes with one change stays a conversation** (22 of the 83 answers the
    epic counted). Recommended. A change alters what the yes does, which
    someone must rewrite, and Discuss opens that conversation.
@@ -125,15 +127,46 @@ also names its own conversation, which the refusal of section 1 passes over.
 The asker decides what its yes does when it asks, and records it. Most askers
 have ended by the time you answer: a polecat that declined has drained, and a
 first reaction's or a validating closer's run has finished. So Accept carries
-the recommendation out right after the answer, from the record, through the
-writer the pack already uses for each act, and in the order that writer needs.
+the recommendation out itself, from the record.
 
-| `act` | What a yes does | The writer, and its order with the answer |
+Accept answers first and reads the gate back. It runs the act only when the
+gate took its own answer. When another answer reached the gate first, that
+answer stands: Accept runs no act, and the work goes as that answer leaves it.
+
+An answer releases what the gate held, and two releases can act before Accept
+does. Deferred dispatch sends an armed bead under the bead's dispatch lock, and
+the landing order requests a PR's merge under the record lock of the PR's
+store. So before it answers, Accept takes the bead's dispatch lock, and for
+`retire` the record lock too. It takes them in that order, after its
+acceptance lock, and takes no other lock while it holds the record lock, as no
+holder of that lock does. `proceed` takes neither, since the release is what
+its yes asks for.
+
+On another answer, Accept lets the locks go, having written nothing. On its own
+answer, it writes what keeps each release from acting before it lets them go:
+it removes any arm, and for `retire` it stamps the PR's disposition, under
+which the landing order requests no merge. Then it runs the rest of the act.
+
+| `act` | What a yes does | The rest of the act |
 |---|---|---|
-| `proceed` | The work waiting on the question goes on by the wait it already has: an arm that re-slings it once the gate clears, a merge the gate holds, or the next run that reads the answer. | The answer alone. |
-| `sling` | Starts `formula` on the bead, with `vars`. | Today's Accept: it removes the bead's arm, answers, slings once under the token, and lifts `hold:mayor`, since a sling is a placement. |
-| `stand-down` | The waiting work does not go on, and the bead closes as not needed. | `stand-down.sh`, which removes the arm, ends the run, answers the gate, and closes the bead with the gate as its evidence. |
-| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | `pr-dispose.sh` first, then the answer, since an answered gate would let an approved PR merge before its retirement. |
+| `proceed` | The work waiting on the question goes on by the wait it already has: an arm that re-slings it once the gate clears, a merge the gate holds, or the next run that reads the answer. | Nothing. |
+| `sling` | Starts `formula` on the bead, with `vars`. | It slings once under the token and lifts `hold:mayor`, since a sling is a placement. |
+| `stand-down` | The waiting work does not go on, and the bead closes as not needed. | It ends the run and clears the bead's route (`gctk bead takeaway --release`), then closes the bead with the gate as its evidence (`bead-rehome.sh`). |
+| `retire` | The bead's PR does not land, as `kind` says, with `successor` where the kind needs one. | It closes the PR, and the landing order closes the bead under the disposition once it reads the PR closed. |
+
+Before it answers, Accept also makes the checks each act's writer makes before
+its first write, such as `stand-down.sh`'s refusal of an open PR and
+`pr-dispose.sh`'s refusal of a PR that is not on the pending record. A refused
+act leaves the question as it was.
+
+The two acts that stop work use their writers' steps in this order, rather than
+running the writers whole. `stand-down.sh` carries out a person's ruling: it
+ends the run before it answers, and it closes the bead whichever answer the
+gate took. `pr-dispose.sh` takes the record lock for its stamp alone. Run
+before the answer, it would close the PR whichever answer the gate then took.
+Run after it, it would leave the merge free between the answer and the stamp.
+So unit 2 moves `pr-dispose.sh` into gctk, where Accept stamps under the lock it
+already holds, and `stand-down.sh` stays as it is for a person's ruling.
 
 Accept runs the act, rather than leaving it to the gate's close, because a gate
 closes on any answer: a sitting's ruling the other way, or its filer's
@@ -143,10 +176,14 @@ closes on any answer: a sitting's ruling the other way, or its filer's
 `await-ruling.sh` and the review run's next round already work.
 
 When an act does not land, Accept says what landed and what runs it again, as
-today. A sling that poured nothing reopens the gate from Accept's own answer,
-so the question is back on your board. A run that stopped after its answer is
-finished by the next run under the same token, whoever runs it, and that holds
-for every act.
+today. When the arm's removal or the stamp does not land after its own answer,
+Accept reopens the gate from that answer before it lets the locks go, so
+nothing is released and the question is back on your board. A sling that
+poured nothing reopens the gate the same way. A run that stopped after those
+writes is finished by the next run under the same token, whoever runs it, and
+that holds for every act. A lock ends with the run that holds it, so a run that
+stopped between its answer and those writes leaves the arm or the merge free to
+act before the next run finishes it.
 
 ## 4. The askers
 
@@ -208,10 +245,12 @@ makes it safe:
 - the reopen when a sling pours nothing, and the finishing of an acceptance an
   earlier run left.
 
-Four things change. It reads the recommendation from the question, not from
-the bead. It takes any question whose asker recorded one, and only the version
-of its record that the caller read. It carries out four acts where it carried
-out one. It refuses while a conversation other than the
+It changes in these ways. It reads the recommendation from the question, not
+from the bead. It takes any question whose asker recorded one, and only the
+version of its record that the caller read. It carries out four acts where it
+carried out one. It removes the bead's arm only once the gate took its own
+answer, holding the dispatch lock across the answer, where today its first
+write removes the arm. It refuses while a conversation other than the
 caller's is open on the question, where today it only warns.
 
 So the first reaction's recommendation moves from `gc.recommended_formula` on
@@ -317,11 +356,13 @@ boundaries:
   question is worded. The closer's step and the waits skill gain the call that
   records the course their wording already states.
 
-The units change no script beyond a fix in place and add none. The sign-off
-only changes the command its `--accept` runs, the closer's step and the waits
-skill call a gctk verb, and one script, `converse-invalidate-recommendation.sh`,
-is deleted. Each new rule is Go in gctk, apart from the board's own code in
-its service.
+The units add no script. Two scripts go: `converse-invalidate-recommendation.sh`
+is deleted, and `pr-dispose.sh` moves into gctk by the rules a domain move
+follows (unit 2), because Accept stamps a disposition under a lock the script
+takes itself. Every other script the units change takes a fix in place: the
+sign-off only changes the commands its `--accept` and `--retire` run, and the
+closer's step and the waits skill call a gctk verb. Each new rule is Go in
+gctk, apart from the board's own code in its service.
 
 ## 10. Units
 
@@ -332,7 +373,7 @@ with a Debt entry that the last unit to land removes.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
-| 2 | `stand-down` and `retire` in both verbs, each in its writer's order. | unit 1 |
+| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. Accept holds the bead's dispatch lock across its answer and removes the arm under it, which the arm domain lets a caller do. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
+| 2 | `stand-down` and `retire` in both verbs, in section 3's order and with their writers' checks. `pr-dispose.sh` moves into gctk as `gctk pr dispose` by the rules a domain move follows, and its callers call that verb. | unit 1 |
 | 3 | The board's Accept: the course on a row that qualifies, the button, `POST /helm/accept`, the panel's answer, and the Question row of docs/bead-standing.md. | unit 1 |
 | 4 | The askers: the validating closer's step 2b records its course; the waits skill says how any asker records one, which a decliner and a wait on outside work follow; the polecat doctrine's paragraph on declining points there. | units 1 and 2 |
