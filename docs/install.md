@@ -218,25 +218,29 @@ then passes over the city's runtime state under `.gc/`, which `gc init` lists
 in the city's `.gitignore`, so an empty answer is no evidence about what `.gc/`
 holds.
 
-A session started with Grep or Glob named in `--allowedTools` runs the system's
-`grep` and `find` in its Bash tool, and has Claude Code's Glob and Grep tools
+A session started with Glob or Grep named in `--allowedTools` runs the system's
+`grep` and `find` in its Bash tool, and has both of Claude Code's Glob and Grep
+tools. An allow rule in a settings file does not have this effect
 ([Claude Code's tools reference](https://code.claude.com/docs/en/tools-reference#glob-tool-behavior)).
-An allow rule in a settings file does not have this effect, and a pack cannot
-add an argument to a provider the city defines. So the city adds the flag to
-every provider that runs a Claude agent of the pack, including a provider that
-a rig's override names:
+Glob finds gitignored files by default, but the Grep tool skips them as the
+embedded ugrep does, and its description tells Claude to search with it rather
+than with `grep`. Naming Grep in `--disallowedTools` as well takes that tool out
+of the session, so Claude searches file contents with the system's `grep`.
+
+A pack cannot add an argument to a provider the city defines, so the city adds
+both flags to every provider that runs a Claude agent of the pack, including a
+provider that a rig's override names:
 
 ```toml
 [providers.claude]
 base = "builtin:claude"
-args_append = ["--allowedTools=Grep,Glob"]
+args_append = ["--allowedTools=Glob", "--disallowedTools=Grep"]
 ```
 
-The flag is written with its `=`, because as two words `--allowedTools` would
-also take a prompt that follows it as a tool name. A session takes the flag when
-it next starts. In such a session, `type grep` in the Bash tool prints the
-system's grep, such as `grep is /usr/bin/grep`, rather than
-`grep is a function`.
+Each flag is written with its `=`, because as two words it would also take a
+prompt that follows it as a tool name. A session takes the flags when it next
+starts. In such a session, `type grep` in the Bash tool prints the system's
+grep, such as `grep is /usr/bin/grep`, rather than `grep is a function`.
 
 ---
 
