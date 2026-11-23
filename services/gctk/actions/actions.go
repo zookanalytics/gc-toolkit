@@ -347,12 +347,14 @@ func message(repo, branch, file string, v Verdict, jobs []gh.Job) string {
 	b.WriteString("\n\n")
 	switch {
 	case v.Good != nil && len(v.Failed) == 1:
-		fmt.Fprintf(&b, "The run before it, %s at %s, succeeded%s\n\n", runName(v.Good), stamp(v.Good.Started), changes(repo, v.Good, n))
+		fmt.Fprintf(&b, "The last success before it was %s at %s%s\n\n", runName(v.Good), stamp(v.Good.Started), changes(repo, v.Good, n))
 	case v.Good != nil:
-		fmt.Fprintf(&b, "%d runs in a row have failed, the first %s at %s. The one before them, %s at %s, succeeded%s\n\n",
+		fmt.Fprintf(&b, "%d runs in a row have failed, the first %s at %s. The last success before them was %s at %s%s\n\n",
 			len(v.Failed), runName(first), stamp(first.Started), runName(v.Good), stamp(v.Good.Started), changes(repo, v.Good, first))
 	case v.Through:
 		fmt.Fprintf(&b, "None of the newest %d runs of the workflow on %s succeeded, so the failures may have begun before them.\n\n", Window, branch)
+	case len(v.Failed) == 1:
+		fmt.Fprintf(&b, "No run of the workflow on %s has succeeded, and none failed before this one.\n\n", branch)
 	default:
 		fmt.Fprintf(&b, "No run of the workflow on %s has succeeded. %d have failed, the first %s at %s.\n\n",
 			branch, len(v.Failed), runName(first), stamp(first.Started))

@@ -238,7 +238,7 @@ func TestAFailingRunIsReportedAsOneFinding(t *testing.T) {
 	}
 	for _, want := range []string{
 		"\n\nIt ran for the schedule event on commit ccccccc: change 13\n\n",
-		"2 runs in a row have failed, the first run #12 at 2026-11-20 08:00 UTC. The one before them, run #11 at 2026-11-20 07:00 UTC, succeeded, and the changes between their commits are https://github.com/owner/repo-a/compare/" + strings.Repeat("a", 40) + "..." + strings.Repeat("b", 40) + "\n\n",
+		"2 runs in a row have failed, the first run #12 at 2026-11-20 08:00 UTC. The last success before them was run #11 at 2026-11-20 07:00 UTC, and the changes between their commits are https://github.com/owner/repo-a/compare/" + strings.Repeat("a", 40) + "..." + strings.Repeat("b", 40) + "\n\n",
 		"What failed in run #13:\n- the job test: failure, at the step Run the tests (failure), https://github.com/owner/repo-a/actions/runs/1013/job/1\n\n",
 		"Its failed steps' log prints with: gh run view 1013 --repo owner/repo-a --log-failed\n\n",
 		"The failed runs, newest first:\n- run #13 at 2026-11-20 09:00 UTC, for the schedule event on commit ccccccc: failure, https://github.com/owner/repo-a/actions/runs/1013\n- run #12 at 2026-11-20 08:00 UTC, for the schedule event on commit bbbbbbb: timed_out, https://github.com/owner/repo-a/actions/runs/1012\n\n",
@@ -458,17 +458,19 @@ func TestTheMessageMovesOnlyWithTheRun(t *testing.T) {
 	}
 }
 
-// A lone failure after a success on the same commit says the code did not
-// change, a run with no success says how long it is, a run GitHub ran again
-// names its attempt, and a failed run with no failed job says so.
+// A lone failure names the last success before it, past a run that decided
+// nothing, and says the code did not change when the two ran on one commit. A
+// run with no success says how long it is, and a workflow's first failure that
+// none failed before it. A run GitHub ran again names its attempt, and a failed
+// run with no failed job says so.
 func TestTheRunsAroundTheFailureAreNamed(t *testing.T) {
-	again := run('a', 12, 2, "failure")
+	again := run('a', 13, 3, "failure")
 	again.Attempt = 2
-	lone := message("owner/repo-a", "main", "nightly.yml", Judge([]gh.WorkflowRun{again, run('a', 11, 1, "success")}, false), nil)
+	lone := message("owner/repo-a", "main", "nightly.yml", Judge([]gh.WorkflowRun{again, run('a', 12, 2, "cancelled"), run('a', 11, 1, "success")}, false), nil)
 	for _, want := range []string{
-		"in run #12 (attempt 2) at 2026-11-20 08:00 UTC",
-		"The run before it, run #11 at 2026-11-20 07:00 UTC, succeeded, on the same commit, so the code did not change between them.\n\n",
-		"What failed in run #12 (attempt 2):\n- GitHub lists no failed job in it\n",
+		"in run #13 (attempt 2) at 2026-11-20 09:00 UTC",
+		"The last success before it was run #11 at 2026-11-20 07:00 UTC, on the same commit, so the code did not change between them.\n\n",
+		"What failed in run #13 (attempt 2):\n- GitHub lists no failed job in it\n",
 	} {
 		if !strings.Contains(lone, want) {
 			t.Errorf("a lone failure on an unchanged commit does not say %q:\n%s", want, lone)
@@ -477,6 +479,9 @@ func TestTheRunsAroundTheFailureAreNamed(t *testing.T) {
 	never := message("owner/repo-a", "main", "nightly.yml", Judge(failures(3, 5), false), nil)
 	if !strings.Contains(never, "No run of the workflow on main has succeeded. 3 have failed, the first run #1 at 2026-11-20 09:00 UTC.") {
 		t.Errorf("a run with no success reads:\n%s", never)
+	}
+	if first := message("owner/repo-a", "main", "nightly.yml", Judge(failures(1, 1), false), nil); !strings.Contains(first, "No run of the workflow on main has succeeded, and none failed before this one.\n\n") {
+		t.Errorf("a workflow's first failure reads:\n%s", first)
 	}
 	var jobs []gh.Job
 	for i := range Listed + 2 {

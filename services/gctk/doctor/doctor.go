@@ -58,12 +58,13 @@ const (
 // failing deployments, production-deploy-report, and of the workflows a rig
 // marks that fail on its default branch, actions-failure-report, core's
 // spawn-storm-detect, orphan-sweep and reaper, and the dolt pack's
-// mol-dog-doctor, mol-dog-backup and dolt-health. A good run is the newest order.completed Gas City recorded
-// for the order, which it records when an exec order's run exits 0 and when a
-// formula order pours its wisp (dispatchExec in cmd/gc/order_dispatch.go at
-// gastownhall/gascity c7eb6d2f43). Whether a monitor is late or failing is Gas
-// City's verdict, in its order-firing-current and order-outcome-healthy checks,
-// which reach a run as checks.
+// mol-dog-doctor, mol-dog-backup and dolt-health. A good run is the newest
+// order.completed Gas City recorded for the order, which it records when an
+// exec order's run exits 0 and when a formula order pours its wisp
+// (dispatchExec in cmd/gc/order_dispatch.go at gastownhall/gascity
+// c7eb6d2f43). Whether a monitor is late or failing is Gas City's verdict, in
+// its order-firing-current and order-outcome-healthy checks, which reach a run
+// as checks.
 var Monitors = []string{"doctor-run", "seat-progress-detect", "refinery-queue-detect", "production-deploy-report",
 	"actions-failure-report", "spawn-storm-detect", "orphan-sweep", "reaper", "mol-dog-doctor", "mol-dog-backup", "dolt-health"}
 
