@@ -476,16 +476,11 @@ func (c *Client) StoreOf(id string) (path string, ok bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	best := ""
-	for _, r := range rigs {
-		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
-			continue
-		}
-		if !ok || len(r.Prefix) > len(best) {
-			best, path, ok = r.Prefix, filepath.Join(r.Path, ".beads"), true
-		}
+	i, ok := holder(rigs, id)
+	if !ok {
+		return "", false, nil
 	}
-	return path, ok, nil
+	return filepath.Join(rigs[i].Path, ".beads"), true, nil
 }
 
 // InRig reports whether a rig's store holds id: whether the store whose bead
@@ -498,16 +493,24 @@ func (c *Client) InRig(id string) (rig, ok bool, err error) {
 	if err != nil {
 		return false, false, err
 	}
-	best := ""
-	for i, r := range rigs {
+	i, ok := holder(rigs, id)
+	return ok && i > 0, ok, nil
+}
+
+// holder is the index among rigs of the store whose bead prefix begins id, the
+// longest such prefix when several do and the first of those when they tie. ok
+// is false when no store's prefix begins id.
+func holder(rigs []configuredRig, id string) (i int, ok bool) {
+	i = -1
+	for j, r := range rigs {
 		if r.Prefix == "" || r.Path == "" || !strings.HasPrefix(id, r.Prefix+"-") {
 			continue
 		}
-		if !ok || len(r.Prefix) > len(best) {
-			best, rig, ok = r.Prefix, i > 0, true
+		if i < 0 || len(r.Prefix) > len(rigs[i].Prefix) {
+			i = j
 		}
 	}
-	return rig, ok, nil
+	return i, i >= 0
 }
 
 // RigStore names the store of the rig called name, from the stores the city's
