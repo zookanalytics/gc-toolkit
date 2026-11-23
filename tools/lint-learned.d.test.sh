@@ -2605,6 +2605,16 @@ OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_TF" "$TF/good.test.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "the suite scan failed" "…and says so"
 
+# A thousand findings outgrow any pipe, so passing them through a here-string
+# would need a temp file, and with file writes capped that write fails.
+TB="$TMP/tf-big/a-directory-name-long-enough-that-a-thousand-paths-outgrow-any-pipe"
+mkdir -p "$TB"
+big=()
+for ((i = 1; i <= 1000; i++)); do : > "$TB/no-floor-$i.test.sh"; big+=("$TB/no-floor-$i.test.sh"); done
+OUT="$( (trap '' XFSZ; ulimit -f 8; "$DET_TF" "${big[@]}") 2>&1)"; RC=$?
+eq "$RC" 1 "with file writes capped, a report larger than a pipe still exits 1"
+eq "$(printf '%s\n' "$OUT" | grep -c ':1: sources no tools/test-floor.sh')" 1000 "…and names every suite"
+
 echo "── every detector: a tool that fails never reads as a clean scan ──"
 
 # The runner tells a broken detector from a clean one only by its exit status,

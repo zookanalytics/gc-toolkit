@@ -53,11 +53,14 @@ if [ -e "$plan" ]; then
     done < "$plan" || { echo "suite-test-floor: cannot read $plan, so no suite was checked"; exit 2; }
 fi
 
-# One line per suite: "<1 or 0> <path>", 1 when a line sources the floor. A
-# here-document's body runs to the line that holds only its word, after leading
-# tabs for `<<-`. `<<<` opens a here-string, not a body. A load that fails
-# leaves an empty program, which awk runs as a scan that finds nothing in any
-# suite, so it ends the run instead.
+# The scan prints the finding for each suite with no line that sources the
+# floor, and the report reaches the shell only through the command
+# substitution's pipe. Read back through a here-string, it would need a temp
+# file once it outgrew a pipe, and a write that failed there would lose every
+# finding into a clean exit. A here-document's body runs to the line that holds
+# only its word, after leading tabs for `<<-`. `<<<` opens a here-string, not a
+# body. A load that fails leaves an empty program, which awk runs as a scan
+# that finds nothing in any suite, so it ends the run instead.
 SCAN=$(cat <<'AWK'
 FNR == 1 { if (file != "") R[file] = hit; file = FILENAME; hit = 0; hd = ""; strip = 0 }
 hit { next }
@@ -88,7 +91,9 @@ END {
         f = ARGV[i]
         if (f in seen) continue
         seen[f] = 1
-        printf "%d %s\n", R[f] + 0, f
+        if (R[f]) continue
+        sub(/^\.\//, "", f)
+        printf "%s:1: %s\n", f, ENVIRON["SUITE_TEST_FLOOR_FIX"]
     }
 }
 AWK
@@ -115,17 +120,14 @@ done
 
 found=0
 if [ "${#suites[@]}" -gt 0 ]; then
-    if ! results="$(awk "$SCAN" "${suites[@]}")"; then
+    if ! report="$(SUITE_TEST_FLOOR_FIX="$FIX" awk "$SCAN" "${suites[@]}")"; then
         echo "suite-test-floor: the suite scan failed, so no suite was checked"
         exit 2
     fi
-    while read -r entered suite; do
-        [ -n "$suite" ] || continue
-        if [ "$entered" != 1 ]; then
-            echo "${suite#./}:1: $FIX"
-            found=1
-        fi
-    done <<< "$results"
+    if [ -n "$report" ]; then
+        printf '%s\n' "$report"
+        found=1
+    fi
 fi
 
 [ "$unreadable" -eq 0 ] || exit 2
