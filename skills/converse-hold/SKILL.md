@@ -154,7 +154,8 @@ separable.
 
 Post the framing as a hand-back whose decision leads with your recommendation,
 and record it on the conversation first (the prompt's hand-back). When the
-recommendation sends work, the decision names the formula the work goes on,
+recommendation sends work, the decision says what that work changes before
+what it costs and when it lands, then names the formula the work goes on,
 chosen as the `work` skill says. The decision also says whether you recommend
 that the sitting end at its hand-off or stay for the work's return, and why
 (the prompt's End or stay). It says when a stay would come back, in the

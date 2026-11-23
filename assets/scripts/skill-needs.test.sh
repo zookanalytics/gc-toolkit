@@ -684,8 +684,18 @@ have "the body opens on the subject, its state and why it reached the operator, 
 have "a report with no PR involved says so" 'a report with no PR involved says so' "$PROMPT_JOINED"
 have "a message with detail opens the way the body does" \
     'A message with detail above its hand-back opens the way the body does' "$PROMPT_JOINED"
-have "the message keeps pipeline vocabulary out or says what it means" \
-    'Pipeline vocabulary (moot, twin, fold, retract, park) and names learned from code stay out, or say what they mean' "$PROMPT_JOINED"
+have "the hand-back gives only what helps the operator decide or act, in words they can follow" \
+    "The hand-back gives the operator only what helps them decide or act, in words they can follow without the city's internals." "$PROMPT_JOINED"
+have "…a later hand-back opens with where the subject stands, and a return with what its result settles and leaves open" \
+    'A later hand-back opens with where the subject stands now, and a return with what its result settles and what it leaves open.' "$PROMPT_JOINED"
+have "…and either says what the conversation is settling and what kind of answer it brings" \
+    'Either one says what the conversation is settling and what kind of answer it brings' "$PROMPT_JOINED"
+have "the message keeps out a word the operator would not know, whoever coined it, or says what it means" \
+    "A word they would not know stays out, or says what it means where it is used, whether the city's process, the code or the sitting itself coined it." "$PROMPT_JOINED"
+have "…and an alternative it names is weighed with its reason, or left out" \
+    'An alternative the message names is weighed, with its reason, or left out.' "$PROMPT_JOINED"
+lacks "…in place of a list of pipeline words" 'moot, twin, fold' "$PROMPT_JOINED" \
+    "a word the operator would not know stays out, whoever coined it"
 # A decision leads with the course as the changes it makes. An option is
 # another way to reach what the operator wants, leaving things as they are is
 # one only when it has a case the operator has not already weighed, any course
@@ -694,7 +704,13 @@ have "the message keeps pipeline vocabulary out or says what it means" \
 # sitting renders says what an option's cost is, so the prompt uses its terms
 # and leaves the sentence to the profile.
 have "the decision states the course as what would be built or changed, before any reason for it" \
-    'State it as the course before any reason for it: what would be built or changed, each change given as what it is today and what it becomes.' "$PROMPT_JOINED"
+    'State it as the course before any reason for it: what would be built or changed and how it would be used, so the operator knows what their yes sets going.' "$PROMPT_JOINED"
+have "…names each change by what it does, before its cost and timing, never only by its place in the process" \
+    "Name each change by what it does, before what it costs or when it lands, and never only by its place in the city's process" "$PROMPT_JOINED"
+have "…and says each change once, in full only where the detail above does not" \
+    'Say each change once: one the detail above already explains is named in a phrase, and one it does not is stated in full.' "$PROMPT_JOINED"
+lacks "…in place of a form that restates each change" 'what it is today and what it becomes' "$PROMPT_JOINED" \
+    "the course says each change once"
 have "…and that course is the whole decision when the operator asked for the best solution" \
     'When the operator asked for the best solution, that course is the whole decision.' "$PROMPT_JOINED"
 have "…states a course that changed again whole" \
@@ -736,6 +752,10 @@ have "…counts sharing a file, a screen or a record entry as no scope" \
     'Sharing a file, a screen or a record entry with the PR does not make a point the PR'"'"'s.' "$HOLD_JOINED"
 have "…and leaves a follow-up only a point outside that scope, or one the operator rules separable" \
     'A follow-up carries only a point outside that scope, or one the operator rules separable.' "$HOLD_JOINED"
+# A framing that sends work says what the work changes before its cost and
+# timing, as the prompt's hand-back asks of every decision.
+have "the hold's framing says what the work it sends changes before what it costs and when it lands" \
+    'When the recommendation sends work, the decision says what that work changes before what it costs and when it lands, then names the formula the work goes on' "$HOLD_JOINED"
 # The close-out ends the sitting and offers no course, so its reason names the
 # sitting's topic and that it closed without a ruling.
 have "the close-out's reason names only the sitting's topic and that it closed without a ruling" \
