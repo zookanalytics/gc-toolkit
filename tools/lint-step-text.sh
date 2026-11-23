@@ -546,10 +546,12 @@ function finish() {
 }
 # Whether command line s is the line a gctk-bin block holds between its
 # markers, which weighs nothing: one assignment to GCTK that runs no command.
+# With its quotes masked, the line holds no blank and no ;, & or |, any of which
+# could join a command to the assignment.
 function gctk_line(s,   t) {
     scan(s)
     t = SM; gsub(/^[ \t]+|[ \t]+$/, "", t)
-    return SN == 0 && t ~ /^GCTK=[^ \t]*$/
+    return SN == 0 && t ~ /^GCTK=[^ \t;&|]*$/
 }
 # An L record for each of the block's lines not yet recorded.
 function code_lines(lines,   n, i, bl) {

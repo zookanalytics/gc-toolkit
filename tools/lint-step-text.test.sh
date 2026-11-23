@@ -8,19 +8,20 @@
 # quote, the gctk-bin block before a gctk call, a placeholder that names
 # alternatives), a procedure read as a single call (a pipeline, a sequence, a
 # substitution holding a pipeline, && or ||, a substitution an expanding
-# here-document's body runs, a command inside the gctk-bin markers, a command
-# after a placeholder that holds an apostrophe, shell syntax between a < and a
-# > read as a placeholder), step text left unread (a TOML string of any kind
-# wherever it sits, an edit inside a here-document's body, a block fenced with
-# tildes, a longer run or a capitalized language, a block a fence line inside
-# it cut short, a block inline code at a line's start hid), skill text left
-# unread (a new skill, a sub-pack's or an agent's skill, a file moved into a
-# skill), text that predates the rule failing because a change touched its
-# file, a moved or trimmed block read as new (within a formula, or across a
-# skill's files and between skills, a file the change deletes included), text
-# read that is not the skill's own (a symlinked file, a block a file leaves
-# open running into the next), and a change it cannot read passing as clean (an
-# unreadable file, a file that is not TOML, no Python to decode it).
+# here-document's body runs, a command inside the gctk-bin markers, on a line
+# of its own or joined to the assignment, a command after a placeholder that
+# holds an apostrophe, shell syntax between a < and a > read as a placeholder),
+# step text left unread (a TOML string of any kind wherever it sits, an edit
+# inside a here-document's body, a block fenced with tildes, a longer run or a
+# capitalized language, a block a fence line inside it cut short, a block
+# inline code at a line's start hid), skill text left unread (a new skill, a
+# sub-pack's or an agent's skill, a file moved into a skill), text that
+# predates the rule failing because a change touched its file, a moved or
+# trimmed block read as new (within a formula, or across a skill's files and
+# between skills, a file the change deletes included), text read that is not
+# the skill's own (a symlinked file, a block a file leaves open running into
+# the next), and a change it cannot read passing as clean (an unreadable file,
+# a file that is not TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
 # change is measured from (refs/remotes/origin/main). A case writes the formula
@@ -164,6 +165,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 with_step new "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')" > "$REPO/$F"
 run_lint "$F"
 expect 0 "a step whose block is the gctk-bin block and one gctk call: exit 0"
+
+with_step new "$(block '# >>> gctk-bin
+GCTK=x;echo
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a command joined to the gctk-bin assignment with no blank weighs: exit 1" "with 3 commands\. "
 
 with_step new "$(block 'gc bd show "$X" --json | jq -r .id')" > "$REPO/$F"
 run_lint "$F"
@@ -695,6 +703,18 @@ new_skill skills/t "$(block 'GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gc
 "$GCTK" bead takeaway "$X" y')"
 run_lint skills/t/SKILL.md
 expect 1 "the assignment outside a gctk-bin block weighs: exit 1" "with 2 commands\. "
+
+# A command joined to the assignment with no blank weighs, in a sub-pack's
+# skill too, whose gctk-bin blocks gctk-bin.test.sh does not read.
+for join in ';echo' '&&echo' '||echo' '|cat' '&echo'; do
+  skill_reset
+  new_skill packs/sub/skills/g "$(block '# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'"$join"'
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')"
+  run_lint packs/sub/skills/g/SKILL.md
+  expect 1 "a command joined to the gctk-bin assignment by $join weighs: exit 1" "with 3 commands"
+done
 
 skill_reset
 base_skill | awk '{ print } /^  echo "\$A"$/ { print "  gc runtime drain-ack" }' > "$REPO/$SK"
