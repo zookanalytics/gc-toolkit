@@ -1183,8 +1183,8 @@ if [ -n "$RETIRED_BRANCH" ]; then
     esac
     # The bead records what became of its branch. The landing order runs this
     # script for its exit status and keeps its output only when it fails, so
-    # the note is what a later reader finds. A re-run that reaches the same outcome adds nothing,
-    # so the notes are read before the append.
+    # the note is what a later reader finds. A re-run that reaches the same
+    # outcome adds nothing, so the notes are read before the append.
     if [ -n "$END_NOTE" ]; then
         case "$(bead_row "$ORIGIN_PATH" "$ORIGIN" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in
             *"$END_NOTE"*) ;;

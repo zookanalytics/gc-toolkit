@@ -17,10 +17,9 @@
 # A post under the city's login that carries no mark is the city's own when it
 # predates the anchor's provenance cutover (pr_provenance_since, stamped by the
 # one-PR update the first time it saves the PR's conversation). With no cutover
-# known, every
-# post under that login is the city's own. Two purpose markers that only the
-# city has written count as the mark too: the write-back reply marker and the
-# sitting reminder's marker, <!-- gc:sitting:<task> -->.
+# known, every post under that login is the city's own. Two purpose markers that
+# only the city has written count as the mark too: the write-back reply marker
+# and the sitting reminder's marker, <!-- gc:sitting:<task> -->.
 #
 # A post that informs rather than asks is not for review, and is never feedback,
 # whoever posted it. It says so at its start: its body opens with the no-review
@@ -29,12 +28,11 @@
 # at the root of its repository (docs/not-for-review.md). The repository is the
 # one the caller runs in, such as the rig's clone whose origin the landing order
 # and the feedback miner read pull requests from, or GC_RIG_ROOT's when the
-# caller runs in none. The file
-# counts as the repository's default branch carries it (origin/HEAD, as last
-# fetched), so a declaration counts once it merges, and no branch or
-# uncommitted edit changes which comments count. With nothing declared, a
-# third-party post is feedback. A review's state is not its body: an approval
-# or a change request counts whatever its body carries.
+# caller runs in none. The file counts as the repository's default branch
+# carries it (origin/HEAD, as last fetched), so a declaration counts once it
+# merges, and no branch or uncommitted edit changes which comments count. With
+# nothing declared, a third-party post is feedback. A review's state is not its
+# body: an approval or a change request counts whatever its body carries.
 #
 # Each verb keeps the gh call its callers make, with the marker appended:
 #   comment  a conversation comment (gh pr comment), with an optional inline

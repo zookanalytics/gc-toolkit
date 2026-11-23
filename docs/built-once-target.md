@@ -117,10 +117,10 @@ a draft, and the operator reads each lane's verdict at a head in the run's one
 comment for that head on the PR, beside how each finding was ruled.
 
 The trade: review beads, lane derivation, validation passes, machine finding
-beads and the sweeps that close their leftovers go. No rig has run them since
-its cutover, and the old path's retirement (tk-1tfzr71.122) deletes them. A
-person's post on a PR is an ask the PR's review run rules and answers where it
-was made.
+beads and the sweeps that close their leftovers go. Since its cutover a rig
+files none of those beads, the merge cadence's sweeps close what is left of
+them, and the old path's retirement (tk-1tfzr71.122) deletes it all. A person's
+post on a PR is an ask the PR's review run rules and answers where it was made.
 
 ### Merge
 
@@ -190,13 +190,15 @@ yet. Each remaining difference names its reason and what ends it:
   a conflict on an approved PR, re-runs a check that failed for a cause no code
   fixes, and asks a person where the city cannot go on. The PR's review run
   works every ask. Gas City's PR monitor would file a repair bead that a second
-  worker takes onto the PR's branch, copy GitHub's facts onto it, and file one
-  for a check that is not required or a PR that only waits on a review, since
-  its query reads no check's required flag
-  ([the search](../specs/tk-1tfzr71.161/gas-city-search.md)). The first two
-  rest on the city's rules of one writer per branch and one copy of GitHub's
-  state, so no upstream change ends them. The third ends once the monitor reads
-  each check's required flag and files nothing for a PR that only waits on a
+  worker takes onto the PR's branch, and copy GitHub's facts onto it. It would
+  also file one for a check that is not required, since its query reads no
+  check's required flag, read a cancelled check as still pending, and file one
+  for a PR that only waits on a review
+  ([the design, section 4](../specs/tk-1tfzr71.161/design.md#4-red-checks-and-conflicts)).
+  The first two rest on the city's rules of one writer per branch and one copy
+  of GitHub's state, so no upstream change ends them. The third ends once the
+  monitor reads each check's required flag, spells a cancelled check's
+  conclusion as GitHub does, and files nothing for a PR that only waits on a
   review.
 - **Only the city's own PRs.** The `mr` step takes a PR only when the city's
   account opened it, and parks the bead behind a gate when another account
@@ -526,7 +528,7 @@ approves its design.
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,580, and the cutover script |
+| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,698, and the cutover script |
 | B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |

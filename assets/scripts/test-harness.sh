@@ -526,7 +526,7 @@ case "$sub" in
       printf -v "$1" '%s' "$val"
     }
     if [ "$path" = "graphql" ]; then
-      # The review-thread surface: three reads plus four mutations, over a fixture
+      # The review-thread surface: its reads and its mutations, over a fixture
       # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
       gqvar num num

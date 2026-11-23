@@ -160,13 +160,12 @@ since_format = "RFC 3339 UTC"
 # a retired key only where that key means something is wrong: its HEALER_RE
 # list holds the keys deleted with their healer writers, and its RETIRED_KEYS
 # list the retired keys whose carrier leaves work undone or shows a retired
-# writer still stamping, each with its remedy. Each
-# key's definition names five things a reader needs and only two of which the
-# value shows: what WRITES it, what READS it, what its ABSENCE means, how it is
-# CLEARED, and its value TYPE. Prose is spent where a reader cannot recover
-# those from the group and the sections above; a key whose mechanics already sit
-# in [gates], [posture], [holds], [machine_axis] or [dated_keys] is
-# defined there and only registered here.
+# writer still stamping, each with its remedy. Each key's definition names five
+# things a reader needs and only two of which the value shows: what WRITES it,
+# what READS it, what its ABSENCE means, how it is CLEARED, and its value TYPE.
+# Prose is spent where a reader cannot recover those from the group and the
+# sections above; a key whose mechanics already sit in [gates], [holds],
+# [machine_axis] or [dated_keys] is defined there and only registered here.
 #
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
@@ -302,10 +301,11 @@ keys = [
 #   later pass can tell which head it spoke for. Written by the refinery's
 #   requeue (refinery-requeue.sh), the landing order's requeue of a changed head
 #   (gctk pr reconcile), signoff.sh and mol-polecat-work.toml; read at
-#   load-context to resume rather than redo. Cleared by the direct landing's merged transition
-#   (lifecycle.sh), by the publication of a pending record (gctk pr record),
-#   and by the polecat once the merge its resume runs concludes. A stop before then, such as a question for a person, leaves
-#   it, so the bead's next run resumes again. Freeform instruction text.
+#   load-context to resume rather than redo. Cleared by the direct landing's
+#   merged transition (lifecycle.sh), by the publication of a pending record
+#   (gctk pr record), and by the polecat once the merge its resume runs
+#   concludes. A stop before then, such as a question for a person, leaves it,
+#   so the bead's next run resumes again. Freeform instruction text.
 # graduation — RETIRED. `true`, set on a convoy bead when convoy graduation
 #   carried its integration branch to the default branch. Nothing writes or
 #   reads it now: a landing bead carries an integration effort to the default
@@ -375,7 +375,8 @@ keys = [
 #   it, with bring_current_scope beside it. Never cleared; the next resume
 #   overwrites it. An oid.
 # bring_current_scope — whether bringing the branch current is the resumed
-#   bead's whole job: merge-only for a conflict rejection, else with-work. Written by the resume block beside bring_current_from, and as
+#   bead's whole job: merge-only for a conflict rejection, else with-work.
+#   Written by the resume block beside bring_current_from, and as
 #   with-work by a worker whose hand-off the guard refused for recording no
 #   start. On a merge-only bead the guard counts a commit of the bead's own as
 #   an edit beyond the merge, which owes an audit entry. Absent reads as

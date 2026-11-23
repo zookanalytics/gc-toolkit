@@ -433,11 +433,12 @@ no warrant.
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
   converts the old receipts on a bead whose saved read shows the PR open, and
-  unsets them once the saved conversation shows no post they reach untaken (`unconvertible` and `unsetReceipts` in
-  `services/gctk/pr/convert.go`, which has the update read the conversation
-  again the same way), decides each owned PR's red checks and conflict from
-  its checks, its merge state and its approvals (`redPlans`, `redOn` and
-  `decideRed` in `services/gctk/pr/redchecks.go`), and compares each owned
+  unsets them once the saved conversation shows no post they reach untaken
+  (`unconvertible` and `unsetReceipts` in `services/gctk/pr/convert.go`, which
+  has the update read the conversation again the same way), decides each owned
+  PR's red checks and conflict from its checks, its merge state and its
+  approvals (`redPlans`, `redOn` and `decideRed` in
+  `services/gctk/pr/redchecks.go`), and compares each owned
   PR's saved labels with the ones the store derives (`labelPlans` in
   `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
   PR's signs with the ones each part keeps and reads again a conversation part

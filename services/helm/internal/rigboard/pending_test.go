@@ -78,8 +78,9 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 // order saved on its bead. Its row carries the status and the held: values
 // `gctk pr status` gives it, prstatus.Render's over the answer, where the
 // facts alone would read needs-review every time, so each case that renders
-// another status fails if the board falls back to them. A PR the city is moving reads as its
-// pull request in the queue, and one that waits on a person is a need.
+// another status fails if the board falls back to them. A PR the city is
+// moving reads as its pull request in the queue, and one that waits on a person
+// is a need.
 func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 	cases := []struct {
 		name    string

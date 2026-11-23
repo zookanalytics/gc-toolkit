@@ -988,11 +988,13 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   would have bounded, and the runaway shapes left — a reviewer that dies after
   claim, a rework child filed with its dependency edge reversed — stop the PR
   moving rather than spin the dispatcher.
-- **External rework** (the landing order): a CONFLICTING PR that is approved,
-  by the approvers its saved read names, gets one ask to merge its target in
-  while nothing holds the bead and no other open bead names its branch, and a
-  required check that failed for a cause a code change fixes gets an ask to fix
-  it ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
+- **External rework** (the landing order): a PR that is approved, by the
+  approvers its saved read names, and that GitHub reads `DIRTY`, or `BEHIND` a
+  target that requires a current branch, gets one ask to merge its target in
+  while nothing holds the bead and no open bead other than an ask names its
+  branch, and a required check that failed for a cause a code change fixes gets
+  an ask to fix it
+  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
   The PR's review run takes each. An unapproved PR that conflicts gets nothing:
   a bring-current costs a run's round and a CI run and goes stale whenever main
   moves, and a PR nobody approved cannot land however current its branch is. A
