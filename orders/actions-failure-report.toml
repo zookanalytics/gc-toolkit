@@ -26,8 +26,12 @@
 # its start bound (ReadBound and StartBound in services/gctk/actions), so it
 # ends inside the timeout however many workflows a rig marks. A cooldown counts
 # from a run's start, so the interval stays above the timeout, and an hour is
-# the background tier: a failure is in the rig's queue within about an hour of
-# the run that failed.
+# the background tier. While each pass reads every workflow the rig marks, a
+# failure is in the rig's queue within about an hour of the run that failed. A
+# workflow the start bound leaves unread is read by a later pass: each pass
+# starts one workflow further on than the last (Turn in services/gctk/actions),
+# so with n workflows marked, the pass that takes it first comes within about
+# n hours.
 [order]
 description = "Report each GitHub Actions workflow a rig marks that fails on its default branch as one patrol finding in its store, and clear it once a run succeeds"
 trigger = "cooldown"
