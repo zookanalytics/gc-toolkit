@@ -74,10 +74,13 @@ skill), or leave it for the operator to place.
   operator), by hand or by Accept. A failure on the default branch is one you
   saw fail at its head, whether a check there shows it or you ran it there
   yourself, and its tracker is filed and sent in one call (below). Other
-  critical work runs now only when the operator routes it. File any other bead
-  with Gas City's `hold:mayor` label in its create and no route or arm: the
-  operator decides where it goes. `gc beads list --label hold:mayor` lists each
-  bead filed so that still waits, in every rig.
+  critical work runs now only when the operator routes it. So does a change to
+  how agents work that you propose and should not adopt on your own, even as a
+  member of an epic, since placing it is the operator's approval. File any other
+  bead, such a change included, with Gas City's `hold:mayor` label in its
+  create and no route or arm: the operator decides where it goes.
+  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
+  in every rig.
 - **A failure on the default branch is filed as its tracker, and never held.**
   The tracker writer files one tracker per failure, with no hold, and sends the
   tracker it files to its rig's polecat pool, so the failure goes to be fixed.

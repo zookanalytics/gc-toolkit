@@ -187,10 +187,14 @@ files in the memory directory's hidden `.memory-intake` folder, since an agent
 that opened one before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
-memory carries in its prompt (`template-fragments/memory-notes.template.md`),
-a list of three places: its memory holds what should change the next agent's
-behavior, an observation holds a correction to how agents work, and a bead's
-notes hold the state of its open work.
+memory carries in its prompt (`template-fragments/memory-notes.template.md`).
+Its memory holds what should change the next agent's behavior, an observation
+holds a correction to how agents work, new work held for placement holds a
+change the agent thinks would help but should not adopt on its own, and a
+bead's notes hold the state of its open work. Such a change reaches the
+operator outside the loop. They approve it by placing it in the po's backlog
+refinement, or turn it down there, before it steers any agent
+([steering.md](steering.md#the-queue-the-po-works)).
 
 ## The promotion path
 

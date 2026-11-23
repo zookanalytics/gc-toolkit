@@ -522,6 +522,10 @@ operator's wording as `## Statement`, and `"obs.source": "operator"` plus
   Otherwise say it is yours.
 - **An observation**, which the `gc-toolkit.records` skill files, holds a
   correction to how agents work, from a review, a rework or the operator.
+- **New work held for placement**, which the `gc-toolkit.work` skill files,
+  holds a change to how agents work that you think would help but should not
+  adopt on your own. Keep it out of your memory, which would steer the next
+  agent before the operator rules on it.
 - **A bead's notes** hold the state of its open work.
 
 Leave out what the pack already says.
