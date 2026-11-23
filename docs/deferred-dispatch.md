@@ -265,8 +265,8 @@ Two records Gas City keeps send each arm once.
   bead, and it names each one. Gas City's launch check refuses a second pour of
   the same formula while the first run is live, so two passes, or a pass and a
   sling a killed pass left running, pour once. An exit 3 that names a workflow
-  which is not an unfinished pour (below) means the work is sent already, so
-  the arm is cleared and nothing is slung.
+  which is not a failed pour (below) means the work is sent already, so the arm
+  is cleared and nothing is slung.
 - The token `arm:<bead>@<armed at>` titles the root each start pours. `gctk
   bead arm` records the arm's time to the nanosecond, and the bead's dispatch
   lock writes its arms one after the other, so each arm's token is its own and
@@ -275,20 +275,21 @@ Two records Gas City keeps send each arm once.
   died after its sling landed and before it cleared the arm would pour again
   once that run had ended. After an earlier attempt, the start searches for the
   token first (`gc bd list --all --include-ephemeral --include-gates
-  --title-contains "arm:<bead>@<armed at>"`). A root it finds that is not an
-  unfinished pour means that attempt landed, whichever formula it poured, so the
+  --title-contains "arm:<bead>@<armed at>"`). A root it finds that is not a
+  failed pour means that attempt landed, whichever formula it poured, so the
   arm is cleared and nothing is slung. A start that succeeds the first time
   searches nothing.
 
-A root is an unfinished pour when it carries `molecule_failed=true`, or when it
-or a bead poured under it still carries the fence `gc.instantiating`, whatever
-their status. Gas City leaves one when a pour fails part way or the sling that
-made it is killed, and while such a root is open, `gc sling` refuses every pour
-of that formula on the bead. So the start never reads one as the work sent.
-When each root an exit 3 names, or each open root the token finds, is an
-unfinished pour, the start keeps the arm and asks a person, naming each root
-and the command that closes it with its steps, `gc convoy delete <root>
---force`. A closed unfinished pour holds nothing back, so the next start slings.
+A root is a failed pour when it carries `molecule_failed=true`, the stamp Gas
+City puts on a pour that failed part way. The start reads the root's own stamp
+alone, and a failed pour is an attempt that failed. After an earlier attempt
+the start slings again past one, open or closed, and when each root an exit 3
+names is a failed pour, it keeps the arm with the attempt counted, as after any
+sling that failed, so the cap on attempts asks a person once they run out
+(below). Any other root is the pour that landed. That includes a root Gas
+City's bead-by-bead pour left still fenced by `gc.instantiating` when the sling
+that made it was killed part way: its dispatch reads as sent, and its work does
+not run.
 
 The retire on a delivered bead covers what neither record sees: the run that
 delivered the work was not poured by the arm, so it carries no token, and once
@@ -359,8 +360,7 @@ attempts. So the start begins no sling once less than one sling's allowance,
 90 seconds, is left before its deadline, 7 minutes after it began, which sits
 below the order's 600-second timeout. Each bead it leaves keeps its arm
 untouched, and the next pass starts it. A sling the timeout does kill is found
-by the next start's token search, which asks a person when that sling left its
-pour unfinished.
+by the next start's token search.
 
 `--dry-run` writes, slings and asks nothing and takes no lock. It prints the
 line a pass would print for each armed bead.

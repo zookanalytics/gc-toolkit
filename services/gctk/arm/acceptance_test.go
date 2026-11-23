@@ -347,7 +347,8 @@ func TestStoreAcceptanceAPacksDefaultFormula(t *testing.T) {
 
 // After an earlier attempt the start searches the arm's token among the roots
 // the store holds, each made as Gas City leaves it, a fenced or failed bead
-// typed as a gate.
+// typed as a gate. A root stamped as failed is an attempt that failed, so the
+// start slings again, and any other root is the pour that landed.
 func TestStoreAcceptanceTheTokenAfterAnEarlierAttempt(t *testing.T) {
 	a := newAccept(t)
 	// root makes a workflow root titled with id's token for formula, closed
@@ -384,11 +385,9 @@ func TestStoreAcceptanceTheTokenAfterAnEarlierAttempt(t *testing.T) {
 		cases = append(cases, tcase{id, action, slung})
 	}
 	add("another formula landed", arm.ActSent, false, func(id string) { root(id, "mol-other", true) })
-	add("an open failed pour", arm.ActAsk, false, func(id string) { root(id, "mol-x", false, "molecule_failed=true") })
-	add("an open fenced pour", arm.ActAsk, false, func(id string) { root(id, "mol-x", false, "gc.instantiating=true") })
-	add("an open root over a fenced step", arm.ActAsk, false, func(id string) { step(root(id, "mol-x", false), "gc.instantiating=true") })
+	add("an open fenced pour", arm.ActSent, false, func(id string) { root(id, "mol-x", false, "gc.instantiating=true") })
+	add("an open failed pour", arm.ActStart, true, func(id string) { root(id, "mol-x", false, "molecule_failed=true") })
 	add("a closed failed pour", arm.ActStart, true, func(id string) { root(id, "mol-x", true, "molecule_failed=true") })
-	add("a closed root over a fenced step", arm.ActStart, true, func(id string) { step(root(id, "mol-x", true), "gc.instantiating=true") })
 	add("a root whose step alone failed", arm.ActSent, false, func(id string) { step(root(id, "mol-x", false), "molecule_failed=true") })
 
 	lines := a.pass(false, "0")
@@ -397,18 +396,18 @@ func TestStoreAcceptanceTheTokenAfterAnEarlierAttempt(t *testing.T) {
 		if got := a.slungBead(c.id); got != c.slung {
 			t.Errorf("%s (%s): slung %v, want %v", c.id, lines[c.id].Start.Why, got, c.slung)
 		}
-		if got, want := a.isArmed(c.id), c.action == arm.ActAsk; got != want {
-			t.Errorf("%s (%s): armed %v, want %v", c.id, lines[c.id].Start.Why, got, want)
+		if a.isArmed(c.id) {
+			t.Errorf("%s (%s): still armed", c.id, lines[c.id].Start.Why)
 		}
-		if c.action == arm.ActAsk && !strings.Contains(a.askLog(), "deferred-dispatch-sling-failed."+c.id) {
-			t.Errorf("%s: asks %q; want a gate under its key", c.id, a.askLog())
-		}
+	}
+	if asks := a.askLog(); asks != "" {
+		t.Errorf("asked %q", asks)
 	}
 }
 
 // gc sling exits 3 only when a live workflow works the bead already. One that
-// Gas City finished retires the arm; when each one named is an unfinished pour,
-// the arm stays and a person is asked, naming it.
+// Gas City did not stamp as failed retires the arm. When each one named carries
+// the stamp, the attempt failed, so the arm stays and nobody is asked.
 func TestStoreAcceptanceExit3(t *testing.T) {
 	a := newAccept(t)
 	working := a.bead("worked already")
@@ -425,8 +424,8 @@ func TestStoreAcceptanceExit3(t *testing.T) {
 	failed := a.bead("mol-x failed", "--type", "gate")
 	a.set(failed, "molecule_failed=true")
 	lines = a.pass(false, "3", failed)
-	act(t, lines, stuck, arm.ActAsk, "unfinished", failed)
-	if !a.isArmed(stuck) || !strings.Contains(a.askLog(), "gc convoy delete "+failed+" --force") {
-		t.Errorf("armed %v, asks %q; want the arm kept and a gate naming the root's close", a.isArmed(stuck), a.askLog())
+	act(t, lines, stuck, arm.ActFail, "sling", failed)
+	if !a.isArmed(stuck) || a.askLog() != "" {
+		t.Errorf("armed %v, asks %q; want the arm kept and nobody asked", a.isArmed(stuck), a.askLog())
 	}
 }

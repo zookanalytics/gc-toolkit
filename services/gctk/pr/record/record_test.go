@@ -105,8 +105,8 @@ func has(args []string, flag string) bool {
 
 // The bead's assignee says who works it now: the writes that end the
 // refinery's work on it assign it to nobody, the writes that hand it to the
-// refinery assign the refinery, and a requeue that keeps the marker leaves the
-// assignee as it is.
+// refinery assign the refinery, and a requeue or a revalidation that keeps the
+// marker leaves the assignee as it is.
 func TestTheRecordsWritesAssignTheBeadToWhoWorksItNow(t *testing.T) {
 	const refinery = "rig/refinery"
 	p := record.Publication{URL: "https://github.com/acme/widgets/pull/7", Repo: "acme/widgets", Number: 7, Head: head, Target: "main"}
@@ -124,13 +124,20 @@ func TestTheRecordsWritesAssignTheBeadToWhoWorksItNow(t *testing.T) {
 			t.Errorf("%s writes %q, want %s", name, args, c.want)
 		}
 	}
-	kept := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "") })
-	for _, a := range kept {
-		if strings.HasPrefix(a, "--assignee") || a == "pr_reconcile_pending" {
-			t.Fatalf("a requeue that keeps the marker writes %q", kept)
+	for name, c := range map[string]struct{ keep, hand func(*ledger.Write) }{
+		"requeue": {func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", "") },
+			func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }},
+		"revalidation": {func(w *ledger.Write) { record.Revalidate(w, "why", "") },
+			func(w *ledger.Write) { record.Revalidate(w, "why", refinery) }},
+	} {
+		kept := writes(t, c.keep)
+		for _, a := range kept {
+			if strings.HasPrefix(a, "--assignee") || a == "pr_reconcile_pending" {
+				t.Fatalf("a %s that keeps the marker writes %q", name, kept)
+			}
 		}
-	}
-	if handed := writes(t, func(w *ledger.Write) { record.Requeue(w, p.URL, head, "why", refinery) }); !has(handed, "pr_reconcile_pending") {
-		t.Fatalf("a requeue that hands the head over keeps the marker: %q", handed)
+		if handed := writes(t, c.hand); !has(handed, "pr_reconcile_pending") {
+			t.Fatalf("a %s that hands the bead over keeps the marker: %q", name, handed)
+		}
 	}
 }

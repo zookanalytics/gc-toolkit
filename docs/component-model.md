@@ -82,9 +82,9 @@ applies its one rule:
 
 - **A human gate** is a bead whose `issue_type` is `gate` and whose
   `await_type` is `human`. The rule is `human_gate` in `HUMAN_GATE_JQ`
-  ([`bd-lib.sh`](../assets/scripts/bd-lib.sh)). gctk's `IsHumanGate`
-  ([`gcbd.go`](../services/gctk/internal/gcbd/gcbd.go)) applies the same rule
-  in Go.
+  ([`bd-lib.sh`](../assets/scripts/bd-lib.sh)). gctk's `person.IsHumanGate`
+  ([`person.go`](../services/gctk/standing/person/person.go)) applies the same
+  rule in Go.
 - **A conversation** is an ordinary task with exactly one `tracks` edge, onto
   the bead it is about. It is assigned to `human` while it waits in the
   operator's queue, and to the alias of the sitting that holds it, which names

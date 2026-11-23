@@ -3,9 +3,10 @@
 # change's size: the section `tools/measure.sh --pr` prints from the merge base
 # to the head, which rule 3 of docs/built-once-target.md asks each pull request
 # to show. Below the size the comment shows the suite's time, the section
-# suite-time.sh reads from the tests run at the head. pr-size.yml runs this on
-# each push to a pull request, each change of the branch it merges into, and
-# each end of one of its tests runs.
+# suite-time.sh reads from the tests run at the head. pr-size.yml runs this
+# after a push to a pull request or a change of the branch it merges into, and
+# when one of its tests runs passes or fails. The workflow's header says what
+# starts each run.
 #
 # The tool and the deletion plan it reads are the merge base's, never the
 # head's, so a change cannot edit either to hide what it adds. The tool runs
