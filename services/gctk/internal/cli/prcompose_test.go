@@ -374,6 +374,24 @@ func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
 	}
 }
 
+// An edit given no --gates leaves a summary region that must be written as it
+// stands. It names that region on stderr, edits nothing, and does not say the
+// PR shows its composition.
+func TestPRComposeEditWithNoGatesNamesTheSummaryItLeft(t *testing.T) {
+	hermeticGit(t)
+	stale := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
+	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "feat: Add the widget (tk-a)", stale)
+	var out, errb bytes.Buffer
+	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--edit"}, "", &out, &errb)
+	if code != 0 || out.String() != "tk-a: edited nothing on https://github.com/acme/widgets/pull/7\n" ||
+		!strings.Contains(errb.String(), "the summary region of https://github.com/acme/widgets/pull/7 must be written, and no --gates gave the gate set it names, so it is left as it stands") {
+		t.Fatalf("an edit with no --gates: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("an edit with no --gates changed the PR:\n%s", raw)
+	}
+}
+
 // Each way an edit stops has its exit: a refusal 3, a PR outside the rig's own
 // repository 1, and any other error 2.
 func TestAnEditsFailureExits(t *testing.T) {

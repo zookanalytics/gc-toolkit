@@ -71,7 +71,9 @@ own repository, the one the origin of the clone it runs in names
 ($GC_RIG_ROOT, else the working directory), and open from the bead's branch.
 It prints one line saying what it edited, and names on stderr each section it
 left as it stands: one the body carries no markers it can read for, as in a
-hand-written body, and the branch-beads section when its beads did not read.
+hand-written body, the summary region when it must be written and no --gates
+gave the gate set it names, and the branch-beads section when its beads did
+not read.
 
 exit: 0 printed; with --edit, the PR shows the composition, edited or already,
         but for each section named on stderr as left as it stands
@@ -242,8 +244,12 @@ func prComposeEdit(bead string, req pr.Request, stdout, stderr io.Writer) int {
 			outcome pr.Outcome
 			name    string
 		}{{c.Summary, "summary region"}, {c.BranchBeads, "branch-beads section"}} {
-			if s.outcome == pr.Unmanaged {
+			switch s.outcome {
+			case pr.Unmanaged:
 				fmt.Fprintf(stderr, "gctk pr compose: the body of %s carries no %s its markers let it read, so it is left as it stands\n", got.URL, s.name)
+				left = true
+			case pr.NeedsGates:
+				fmt.Fprintf(stderr, "gctk pr compose: the %s of %s must be written, and no --gates gave the gate set it names, so it is left as it stands\n", s.name, got.URL)
 				left = true
 			}
 		}
