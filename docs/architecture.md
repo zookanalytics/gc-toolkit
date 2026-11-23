@@ -536,9 +536,9 @@ first. Either way the change is a decision on the record, not a drift.
   such as an iOS app, so the command keeps that app on fixture data. Any other
   rig's start command reaches what the rig's tests reach, the live city
   included.
-- **An act only a yes may start runs from Accept, after the answer, never from
-  the gate's close.** Any answer closes a gate, so only a recommendation that
-  the waiting work go on is left to the wait that work already has.
+- **An act only a yes may start runs from Accept, never from the gate's
+  close.** Any answer closes a gate, so only a recommendation that the waiting
+  work go on is left to the wait that work already has.
 
 ## Debt
 
