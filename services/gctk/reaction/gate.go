@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // gateMessage is the message of the gate a ruling or a recommend files: the
@@ -77,7 +77,7 @@ func (r *Reactions) openGates(bead, key string) ([]*ledger.Record, error) {
 	}
 	var out []*ledger.Record
 	for _, g := range gates {
-		if prstatus.IsHumanGate(g.IssueType(), g.AwaitType()) && g.Status() != "closed" && g.AwaitID() == key {
+		if person.IsHumanGate(g.IssueType(), g.AwaitType()) && g.Status() != "closed" && g.AwaitID() == key {
 			out = append(out, g)
 		}
 	}

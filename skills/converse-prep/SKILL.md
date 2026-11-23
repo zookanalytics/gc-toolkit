@@ -62,9 +62,9 @@ distilled truth. Read each gate in the entry's `GATES` too, with
 `gc bd show <gate>`, which gives the gate's framing. The subject's other
 conversations are its history:
 `gc bd dep list "$SUBJECT" --direction=up --type tracks`.
-`"$CONV/bead-context.sh" "$SUBJECT" --frontier --horizon` adds, in one
-cross-store call, the subject's core state, its readiness with its open
-blockers named, and for an epic a snapshot of its children. Then do the
+`"$CONV/bead-context.sh" "$SUBJECT" --frontier --horizon` adds, in one call
+that reads the subject's own store, the subject's core state, its readiness
+with its open blockers named, and for an epic a snapshot of its children. Then do the
 preparation the conversation's ask calls for.
 
 **A gate's message was written when the gate was filed.** Before you prepare,

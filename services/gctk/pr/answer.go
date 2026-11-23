@@ -14,6 +14,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // A review round's post (specs/tk-1tfzr71.161/design.md, sections 3 and 6).
@@ -585,7 +586,7 @@ func (a *answering) readQuestions() error {
 		return err
 	}
 	for _, b := range a.blockers {
-		if isHumanGate(b) && strings.HasPrefix(b.AwaitID(), review.QuestionKey) {
+		if person.IsHumanGate(b.IssueType(), b.AwaitType()) && strings.HasPrefix(b.AwaitID(), review.QuestionKey) {
 			a.questions[b.ID] = &question{id: b.ID, title: b.Title(), filed: b.CreatedAt(), reason: b.CloseReason(),
 				closed: b.Status() == "closed"}
 		}

@@ -297,22 +297,6 @@ func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
 	}
 }
 
-// TestAnOpenPullRequestOnTheRecord: a bead owns an open pull request at either
-// value Gas Town's pending record gives one, and at no value that records a
-// landing or an end without one.
-func TestAnOpenPullRequestOnTheRecord(t *testing.T) {
-	for _, v := range []string{"pull_request_pending", "pull_request_head_changed"} {
-		if !hasOpenPullRequest(bead{MergeResult: v}) {
-			t.Errorf("merge_result %s owns an open pull request", v)
-		}
-	}
-	for _, v := range []string{"", "mr_merged", "pull_request_closed_unmerged", "pull_request_reconcile_invalid"} {
-		if hasOpenPullRequest(bead{MergeResult: v}) {
-			t.Errorf("merge_result %q owns no open pull request", v)
-		}
-	}
-}
-
 // TestReadListsTheReadyWorkNothingSends reads a store through the read itself
 // and holds the Not scheduled list to the work queue's answer, item by item.
 // Each member is listed by its title on every read, from the store as it then
@@ -320,8 +304,9 @@ func TestAnOpenPullRequestOnTheRecord(t *testing.T) {
 // scheduled" exactly when the list holds it, so the two never disagree. A bead
 // counts as worked only while a live run works it: tk-ended keeps the route
 // its pour stamped and the branch its run cut, and tk-poured's run has not yet
-// passed load-context. hold:external waits outside the city, and hold:mayor,
-// in any spelling, waits for the Product Owner on the Unprioritized page.
+// passed load-context, so it reads in flight from the run's start.
+// hold:external waits outside the city, and hold:mayor, in any spelling, waits
+// for the Product Owner on the Unprioritized page.
 // Whether a bead waits comes from the store, through its ready set and waits:
 // tk-behind waits on tk-idle, and tk-c is held through its parent.
 func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
@@ -380,7 +365,7 @@ func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
 	oneAnswer(doc)
 	for id, want := range map[string]string{
 		"tk-ended":  "Not scheduled",
-		"tk-poured": "Queued",
+		"tk-poured": "In flight",
 		"tk-vendor": "Waits outside the city",
 		"tk-desk":   "Waits for the Product Owner",
 		"tk-behind": "Waits on tk-idle",

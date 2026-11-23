@@ -14,6 +14,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // The red-check and conflict acts (specs/tk-1tfzr71.161/design.md, section 4).
@@ -555,7 +556,7 @@ func (u *run) redOn(l *ledger.Ledger, r *ledger.Record, o owned) (redState, stri
 	keys := redKeys(o.number)
 	var gates []*ledger.Record
 	for _, b := range blockers {
-		if b.Status() == "closed" || !isHumanGate(b) {
+		if b.Status() == "closed" || !person.IsHumanGate(b.IssueType(), b.AwaitType()) {
 			continue
 		}
 		if s.held == "" {

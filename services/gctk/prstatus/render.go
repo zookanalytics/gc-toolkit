@@ -6,13 +6,17 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Render returns where a PR on Gas Town's pending record stands, in the status
 // vocabulary, from the evaluator's answer for its anchor and the facts [Read]
 // gathers about the anchor, whose walk names the human gates and the beads a
-// person owes the next move on. A display asks the evaluator over the read the
-// one-PR update saved on the bead ([pr.FromStore]). The precedence is
+// person owes the next move on. The pending record is the record a PR's bead
+// carries from its publication to its merge, whose values
+// services/gctk/pr/record declares and docs/state-machine.md ("The pending
+// record") defines. A display asks the evaluator over the read the one-PR
+// update saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one
@@ -146,7 +150,7 @@ func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f
 func threadsHeld(a pr.Answer, f Facts) int {
 	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	person := func(id string) bool {
-		return slices.ContainsFunc(persons, func(b Blocker) bool { return b.ID == id })
+		return slices.ContainsFunc(persons, func(b person.Blocker) bool { return b.ID == id })
 	}
 	n := 0
 	for _, c := range a.Conditions {
