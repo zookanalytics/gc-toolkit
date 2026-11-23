@@ -218,8 +218,9 @@ a ruling must-fix in the PR's summary, or as a reason that the check has not
 run since: no diff shows that fix, and the run does not pass until the check
 has judged the PR's text. At a head that already passed into the run's target,
 the read says there is no change to judge, because its checks ran and their
-findings were ruled: pick only the checks an ask the run can take sends back,
-and nothing when no ask sends one. The rest of this section is a review bead's
+findings were ruled: pick only the checks an ask the run can take sends back
+and the check a fix in the PR's summary waits on, and nothing when neither
+names one. The rest of this section is a review bead's
 verdict, whose formula's one `signoff.sh` call carries the verdict and the
 widening together, `approve` with these flags:
 

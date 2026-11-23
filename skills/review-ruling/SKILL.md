@@ -10,9 +10,9 @@ You rule every finding a lane raised at the head the round judged and every ask
 the round can take, and you make the round's fixes. The step that rules is the
 step that fixes, so a ruling is what you change: a point ruled must-fix gets a
 commit, or a fix in the PR's title or summary, and a point ruled declined,
-deferred, answered or put to a person gets no change at all. Each point is ruled by the rule its source carries, below,
-and each ruling carries its reason, which the head's comment shows the operator
-as that point's answer.
+deferred, answered or put to a person gets no change at all. Each point is
+ruled by the rule its source carries, below, and each ruling carries its
+reason, which the head's comment shows the operator as that point's answer.
 
 The method for a lane's own check is not yours to apply again. A lane already
 judged its finding by its method. You decide what the round does about it.
@@ -154,5 +154,5 @@ The head's comment is rendered from your rulings, so write each reason as the
 answer the operator reads. A must-fix point's answer is the commit that fixes
 it, which the head the round pushed carries, or the fix the PR's title or
 summary carries. Any other point's answer says why the head carries no change
-for it. A reason never says a point is fixed that
-the head does not carry the fix for.
+for it. A reason never says a point is fixed that neither the head nor the
+PR's title or summary carries the fix for.
