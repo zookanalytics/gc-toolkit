@@ -2151,6 +2151,18 @@ run_signoff --conversation tk-conv --outcome "staying — the retry is reworked"
 eq "$RC" 0 "(STAY-REWORK-RESTART-OPEN) the same call, run while its rework is open, exits 0"
 has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv" "(STAY-REWORK-RESTART-OPEN) …sending the rework again, which the writer adopts"
 hasnt "$(calls)" "gc.ruling_consequence=" "(STAY-REWORK-RESTART-OPEN) …with the record already naming it"
+# After a return the operator sends the PR back again: the earlier stay's gate
+# has closed, so the second stay files a gate of its own after its ask, and
+# names it.
+open_pr
+run_signoff --conversation tk-conv --outcome "staying — the retry is reworked" --ruled yes --ruling "fix the retry" --rework --no-wait --stay "the retry backs off"
+setf tk-child status closed; setf tk-gate1 status closed; setf tk-conv status in_progress
+bset tk-conv "notes=$(field tk-conv notes)"$'\n'"holding: rule on the reworked retry"
+REWORK_CHILD=tk-child2 run_signoff --conversation tk-conv --outcome "staying — the timeout is reworked" --ruled yes --ruling "fix the timeout too" --rework --no-wait --stay "the timeout is bounded"
+eq "$RC" 0 "(STAY-AGAIN) a second stay after a return, sending the PR back again, exits 0"
+has "$(calls)" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the timeout too" "(STAY-AGAIN) …sending the second rework"
+eq "$(filed)" 2 "(STAY-AGAIN) …filing a gate of its own, since the earlier one has closed"
+eq "$(field tk-conv notes | grep -E '^(holding|staying):' | tail -n 1)" "staying: the timeout is bounded (waits on tk-gate2)" "(STAY-AGAIN) …and naming it"
 # A PR in another rig's store, or a call under another alias than the
 # conversation's holder, cannot carry the gate, so the stay is refused before
 # its send.

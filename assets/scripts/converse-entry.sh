@@ -52,7 +52,8 @@
 #   hold and the stay write as their records (the converse-hold skill,
 #   converse-signoff.sh --stay). A `holding:` line newest means the operator
 #   owes the hold an answer. A stay writes two `staying:` lines, and nothing
-#   but a stay gives a conversation a `blocks` edge. Its first line,
+#   but a stay, and the gate a sitting files before it stays, gives a
+#   conversation a `blocks` edge. Its first line,
 #   `staying: <what was agreed>`, comes before every other write it makes, and
 #   says its sign-off has not finished. Its second, `staying: <what was agreed>
 #   (waits on <ids>)`, comes once everything but the wait has landed and names
