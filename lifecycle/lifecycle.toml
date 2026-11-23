@@ -1553,6 +1553,24 @@ keys = [
 #   own dispatch. Absent means that dispatch has not happened, so a resume runs
 #   it. Not cleared. A string.
 
+[metadata.rig_demo]
+# The paths formulas/mol-rig-demo.toml records on its demo-request bead, the
+# input convoy's one member. Each later step derives the bead again and reads
+# the path from it, so the path outlives the session that recorded it.
+keys = ["demo_script_path", "demo_mp4_path"]
+# demo_script_path — the demo:capture script the capture runs, written by the
+#   prepare-script step once the file exists: the pour's demo_script, or the
+#   path the gc-toolkit.gc-demo-script skill reports for a source_bead. The
+#   capture step reads it, and stops, asking for prepare-script to run again,
+#   when it is absent or names no file. Not cleared. A file path, absolute or
+#   relative to the capture session's working directory.
+# demo_mp4_path — the clip the capture step wrote, under
+#   ${TMPDIR:-/tmp}/rig-demo/<request bead>/, outside the repo tree, written
+#   once rig-demo-capture.sh exits 0. The deliver-and-finalize step reads it to
+#   deliver the clip with demo-deliver.sh or to report where it is, and stops,
+#   asking for capture to run again, when it is absent or names an empty or
+#   missing file. Not cleared. A file path.
+
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the
 # observation surface — obs.category, obs.scope, obs.source, obs.directive,
