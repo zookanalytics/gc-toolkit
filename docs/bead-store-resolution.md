@@ -221,9 +221,10 @@ dance by hand. It returns, and nothing outside this:
   provenance routes; the anchor state (merge_result, pr_number, branch,
   merged_target) when the bead carries a merge_result; the first_reaction fields;
   gc.origin; and the distilled gc.takeaway headline with its settled flag.
-- **Context edges**, shown but never gating — the parent, the relates-to edges,
-  the beads that track it, its conversations among them, the beads that wait
-  on it by a `blocks` or an `until` edge, and a count per class.
+- **Context edges**, shown but never gating — the parent and the relates-to
+  edges, a link into another rig's store included, the beads that track it, its
+  conversations among them, the beads that wait on it by a `blocks` or an
+  `until` edge, and a count per class.
 - **Store** — the store that answered, and the db it read.
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
