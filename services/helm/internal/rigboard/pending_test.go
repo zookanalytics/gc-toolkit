@@ -81,22 +81,18 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 // `gctk pr status` gives it, prstatus.Render's over the answer, where the
 // recorded posture alone would read merging every time, so four of the cases
 // fail if the board falls back to it. A PR the city is moving reads as its
-// pull request in the queue, and one that waits on a person for a reason of
-// its own is a need. One the question on the board alone holds is listed beneath
-// it and reads what it waits on, with its label's words left to its pull
-// request.
+// pull request in the queue, and one that waits on a person is a need.
 func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 	cases := []struct {
-		name     string
-		gated    bool
-		read     func(*pr.GitHubRead)
-		state    string
-		held     []string
-		reasons  []Reason
-		signal   string
-		group    Group
-		ask      Ask
-		beneathQ bool
+		name    string
+		gated   bool
+		read    func(*pr.GitHubRead)
+		state   string
+		held    []string
+		reasons []Reason
+		signal  string
+		group   Group
+		ask     Ask
 	}{
 		{name: "a ready PR is merging", state: "merging", signal: "Pull request #7", group: GroupQueued},
 		{name: "an unapproved draft with the city's work left is working",
@@ -110,16 +106,10 @@ func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 			state: "needs-attention", held: []string{"review"},
 			reasons: []Reason{{Held: "review", Title: "1 review thread waits on the city's answer"}},
 			signal:  "needs-attention", group: GroupWaitingOnYou, ask: AskPullRequest},
-		{name: "a human gate the PR waits on needs attention, beneath the question's need", gated: true,
-			state: "needs-attention", held: []string{"gate"},
-			signal: "Waits on your answer", group: GroupWaitingOnYou, beneathQ: true},
-		{name: "a failed required check beside the gate is a need of its own as well", gated: true,
-			read: func(r *pr.GitHubRead) {
-				r.Checks = []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "FAILURE"}}
-			},
+		{name: "a human gate the PR waits on needs attention", gated: true,
 			state: "needs-attention", held: []string{"gate"},
 			reasons: []Reason{{Held: "gate", ID: "tk-q", Title: "which way?"}},
-			signal:  "needs-attention", group: GroupWaitingOnYou, ask: AskPullRequest, beneathQ: true},
+			signal:  "needs-attention", group: GroupWaitingOnYou, ask: AskPullRequest},
 		{name: "a failed required check needs attention",
 			read: func(r *pr.GitHubRead) {
 				r.Checks = []pr.RequiredRun{{Name: "test", Status: "COMPLETED", Conclusion: "FAILURE"}}
@@ -143,9 +133,6 @@ func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 			if r.Signal != c.signal || r.Group != c.group || r.Ask != c.ask {
 				t.Errorf("tk-a reads %q in %q asking %q, want %q in %q asking %q",
 					r.Signal, r.Group, r.Ask, c.signal, c.group, c.ask)
-			}
-			if beneath := slices.Contains(doc.Rows["tk-q"].Holds, "tk-a"); beneath != c.beneathQ {
-				t.Errorf("tk-q lists tk-a beneath it: %v, want %v", beneath, c.beneathQ)
 			}
 			if c.group == GroupQueued && (r.Note != c.state || !slices.Contains(doc.WorkQueue.Queue, "tk-a")) {
 				t.Errorf("tk-a notes %q and the Work queue lists %v, want %s and tk-a in it",

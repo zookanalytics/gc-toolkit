@@ -285,14 +285,8 @@ asked, and red when it could not be read.
 **How it draws.** Two views make up the pages. Needs you is one entry per need
 (a question, a decision, a conversation, a pull request waiting on the
 operator's review, work assigned to them, a ruling), with every bead the need
-holds beneath it in the Work queue's order. A pull request that needs
-attention only for the questions and the other beads a person owes that hold
-it is listed beneath each of their needs and reads what it waits on. It is a
-need of its own only for a reason of its own beside them
-(`prstatus.OwnAttention`, or `prstatus.RenderOwnAttention` for one on Gas
-Town's pending record), such as a failed check, or while no need on the board
-lists it. Each Needs you view leads with how many of its needs count, and
-beneath that how many of each kind count: pull
+holds beneath it in the Work queue's order. Each Needs you view leads with how
+many of its needs count, and beneath that how many of each kind count: pull
 requests, questions, conversations waiting for you, in conversation and
 rulings, a zero among them, then assigned to you when one counts. A kind's count
 shows that kind alone, and a second click shows every kind again. The needs
@@ -420,21 +414,23 @@ document never mixes two reads of a bead:
 
 | Reader | What the read takes from it |
 |---|---|
-| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`), a person's to clear (`prstatus.IsPersonBlocker`), or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
+| `services/gctk/standing` (`Read` over the listing) | where each row's bead stands and whose move it is: its group, the rule that placed it, its ask and the beads that rule names, answered from the readers below, whose answers it gathers over the listing's rows and the page reuses |
+| `services/gctk/listing` | each bead's fields and the keys the page shows, decoded through the listing's declarations; whether a bead is a run's root or a step poured under one (`waits.IsRootOrStep`) or a row of the store's ephemeral plane; every bead that records a hand-back (`Listing.HandedBack`) |
 | `services/gctk/waits` (`Listing.Holds`) | what holds each bead, the waits behind it, whether it is in flight, its arm |
-| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`, and `Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
-| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`, `OwnAttention`) | each open pull request's facts, and where one on the old record stands, what holds it and whether it needs attention for a reason of its own |
-| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`, `RenderOwnAttention`) | where a pull request on Gas Town's pending record stands, what holds it and whether it needs attention for a reason of its own: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
+| `services/gctk/prstatus` (`Holding` over `Listing.Blockers`), and `services/gctk/standing/person` (`Stays`) | what a person owes on a bead through its `blocks` edges, and whether a conversation or a decision waits on work of its own first, which is no person's move until that work closes |
+| `services/gctk/prstatus` (`Read` over the listing, `Derive`, `Held`, `Reasons`) | each open pull request's facts, and where one on the old record stands and what holds it |
+| `services/gctk/pr` (`FromStore` through `Listing.PRAnswers`), rendered by `prstatus` (`Render`, `RenderHeld`, `RenderReasons`) | where a pull request on Gas Town's pending record stands and what holds it: the evaluator's answer over the listing's rows and the read the one-PR update saved on the PR's bead, as `gctk pr status` gives it, so the board reads no GitHub. A pull request whose answer did not read, because a read of the store failed, reads unread |
 | `services/gctk/conversation` | what a conversation is, what it tracks and replies to, so a decision it tracks and a gate it replies to read its state |
 | `services/gctk/queue` (`Order` over the listing) | the order the rig's open work is expected to land in, which `queue` reads from the listing's rows, waits' answers, the store's ready set and the live runs, and which of it is the ready work nothing sends anywhere |
 
 The listing reads the store's ephemeral plane and its templates because waits
 reads every run, and a row is a bead bd's own listing shows: the board leaves
 out a wisp, a row stored with no history, such as an order run's tracking bead,
-and a template molecule. `internal/rigboard/table.go` is the one table that
-turns the readers' answers into a row's group and signal, first match wins,
-and the only place those words are chosen. The read adds no rule about what
-holds a bead, whose move it is or whether work is moving. The blocked status
+and a template molecule. `services/gctk/standing` turns the readers' answers
+into each row's group and the rule that placed it, first match wins, and
+`internal/rigboard/table.go` is the only place the row's words for that answer
+are chosen. The read adds no rule about what holds a bead, whose move it is or
+whether work is moving. The blocked status
 Gas Town's pending record writes on a bead whose pull request it holds is the
 record's own and holds nothing, so such a pull request reads "Pull request
 #n" with where it stands, in the Work queue.
@@ -466,12 +462,12 @@ counts them by kind (`NeedsYou` in `internal/rigboard/document.go`), so a count
 reaches zero only when nothing that counts needs the operator. A need does not
 count when what it is about is parked or waits for the Product Owner. It is
 parked itself when it, or an epic or Delivery above it, waits on a park, which
-the read tells as a wait on a gate that is no human gate, the wait the table
-reads as "Held by a gate" (`gateHold`). A gate, a decision or a conversation
-does not count when every bead it holds or is about is parked, is a need that
-does not count, or carries hold:mayor. A pull request or other work that is
-itself a need counts unless it is parked itself, and a need about nothing else
-counts. A question a sitting
+the read tells as a wait on a gate that is no human gate, the wait standing
+reads as parked (`Reading.Parked`) and the row as "Held by a gate". A gate, a
+decision or a conversation does not count when every bead it holds or is about
+is parked, is a need that does not count, or carries hold:mayor. A pull request
+or other work that is itself a need counts unless it is parked itself, and a
+need about nothing else counts. A question a sitting
 is talking over counts as in conversation. An epic's or a Delivery's needs
 count on its line counts the needs that count too.
 `specs/tk-yhquh93.14/needs-you-count.md` records the rule and the calls it

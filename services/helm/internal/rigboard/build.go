@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
 )
 
 // ownRow reports whether a bead is a row of its own. A child of a merge anchor
@@ -21,9 +20,7 @@ import (
 // detail a working system does not expose. Nor is a bead bd's listing leaves
 // out unless asked: a row of the store's ephemeral plane, such as an order
 // run's tracking bead, or a template molecule.
-func ownRow(b bead) bool {
-	return issueType(b) != "convoy" && b.Anchor == "" && !b.Run && !b.EphemeralPlane && !b.Template
-}
+func ownRow(b bead) bool { return standing.Stands(b.Standing()) }
 
 // index is the gathered beads by id, with what each is.
 type index struct {
@@ -62,7 +59,10 @@ func newIndex(g *gathered) *index {
 		}
 	}
 	for _, id := range ix.rows {
-		ix.kinds[id] = ix.kindOf(ix.beads[id])
+		ix.kinds[id] = Kind(g.reading.Kind(id))
+		if c := g.reading.AnsweredBy(id); c != "" {
+			ix.answeredBy[id] = c
+		}
 	}
 	for _, id := range ix.rows {
 		ix.within[id] = ix.containers(id)
@@ -75,16 +75,8 @@ func newIndex(g *gathered) *index {
 		if ix.kinds[id] != KindConversation || !isOpen(b) {
 			continue
 		}
-		subj, replies, _ := conversation.Shape(conversationEdges(b))
+		subj, _, _ := conversation.Shape(conversationEdges(b))
 		ix.subject[id] = subj
-		for _, r := range replies {
-			if ix.openHumanGate(r) && ix.answeredBy[r] == "" {
-				ix.answeredBy[r] = id
-			}
-		}
-		if ix.openDecision(subj) && ix.answeredBy[subj] == "" {
-			ix.answeredBy[subj] = id
-		}
 	}
 	for _, c := range g.handedBack {
 		if strings.TrimSpace(c.Handback) == "" || !conversation.IsCandidate(issueType(c), c.Assignee, c.ID) {
@@ -120,59 +112,6 @@ func conversationEdges(b bead) []conversation.Edge {
 		out = append(out, conversation.Edge{Type: e.Type, DependsOnID: e.ID})
 	}
 	return out
-}
-
-// kindOf is what a bead is. A Delivery is an epic whose parent is an epic and
-// which carries no hypothesis (docs/epics.md, "What a Delivery is as a bead").
-func (ix *index) kindOf(b bead) Kind {
-	k := ownKind(b)
-	if k == KindEpic && b.Epic.Hypothesis == "" {
-		for _, p := range parents(b) {
-			if pb, ok := ix.beads[p]; ok && issueType(pb) == "epic" {
-				return KindDelivery
-			}
-		}
-	}
-	return k
-}
-
-// ownKind is what a bead is by its own row, an epic and a Delivery alike
-// reading as an epic. A conversation is a task in the shape
-// conversation.Shape reads.
-func ownKind(b bead) Kind {
-	switch issueType(b) {
-	case "gate":
-		return KindGate
-	case "decision":
-		return KindDecision
-	case "epic":
-		return KindEpic
-	}
-	if conversation.IsCandidate(issueType(b), b.Assignee, b.ID) {
-		if _, _, ok := conversation.Shape(conversationEdges(b)); ok {
-			return KindConversation
-		}
-	}
-	return KindWork
-}
-
-// openWork is every open piece of work among the live beads that is a row of
-// its own, work held for the Product Owner included, by id. It is the work the
-// read asks queue to place.
-func openWork(live []bead) []string {
-	var out []string
-	for _, b := range live {
-		if ownRow(b) && isOpen(b) && ownKind(b) == KindWork {
-			out = append(out, b.ID)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-func (ix *index) openHumanGate(id string) bool {
-	b, ok := ix.beads[id]
-	return ok && isOpen(b) && prstatus.IsHumanGate(b.IssueType, b.AwaitType)
 }
 
 func (ix *index) openDecision(id string) bool {
@@ -263,102 +202,20 @@ func build(g *gathered) Document {
 		pos: map[string]int{}, after: map[string]bool{}, concern: map[string][]string{}, held: map[string][]string{},
 		counts: map[string]bool{}}
 
-	// Whether each conversation and decision waits on work of its own first,
-	// read before any ask, since a conversation's ask reads whether the
-	// decision it tracks stays.
-	stays := map[string]bool{}
+	// Each row's ask first: a row's words read its ask.
+	answers := map[string]standing.Answer{}
 	for _, id := range ix.rows {
-		if k := ix.kinds[id]; k == KindConversation || k == KindDecision {
-			if h, ok := g.holds[id]; ok {
-				stays[id] = staying(ix.beads[id], h)
-			}
+		a, ok := g.reading.Answer(id)
+		if !ok {
+			a = standing.Answer{Rule: standing.RuleUnread}
 		}
-	}
-	askingDecision := func(id string) bool { return ix.openDecision(id) && !stays[id] }
-
-	askFor := func(id string, beneath bool) *askAnswer {
-		b := ix.beads[id]
-		k := ix.kinds[id]
-		conv := ix.answeredBy[id]
-		convAssignee := ""
-		if conv != "" {
-			convAssignee = ix.beads[conv].Assignee
+		answers[id] = a
+		if ask := bt.askWords(id, a); ask != nil {
+			bt.asks[id] = ask
 		}
-		// An epic's or a Delivery's members are the work, the Deliveries and
-		// the child epics its children's parent-child edges place under it. A
-		// child epic with a hypothesis of its own reads as an epic, not a
-		// Delivery, and while it is open its parent is not done.
-		members, open := 0, 0
-		if k == KindEpic || k == KindDelivery {
-			for _, c := range ix.children[id] {
-				if ck := ix.kinds[c]; ck == KindWork || ck == KindDelivery || ck == KindEpic {
-					members++
-					if isOpen(ix.beads[c]) {
-						open++
-					}
-				}
-			}
-		}
-		return askOf(b, k, conv, convAssignee, ix.openHumanGate, askingDecision, factsOf(g, id), open, members, stays[id], beneath)
-	}
-
-	// Row 2 first: the table reads whether a row is an ask.
-	for _, id := range ix.rows {
-		// Work held for the Product Owner is no need, whatever it would ask
-		// of a person, such as a review of its pull request: hold:mayor names
-		// the Product Owner as its next actor, and the Unprioritized page
-		// alone lists it.
-		if bt.forProductOwner(id) {
-			continue
-		}
-		if a := askFor(id, false); a != nil {
-			bt.asks[id] = a
-		}
-	}
-	// A pull request listed beneath another need is asked again as beneath it,
-	// so one held by the beads it waits on alone leaves its ask to theirs. One
-	// pass answers every row in any order: it only takes asks away, and a pull
-	// request beneath another whose ask goes stays beneath that one's holder,
-	// which its own Holding walk reaches through it, so no pull request leaves
-	// Needs you.
-	for _, id := range ix.rows {
-		if a := bt.asks[id]; a == nil || a.kind != AskPullRequest || len(bt.holders(id)) == 0 {
-			continue
-		}
-		switch a := askFor(id, true); {
-		case a == nil:
-			delete(bt.asks, id)
-		case a.kind != AskPullRequest:
-			bt.asks[id] = a
-		}
-	}
-	places := map[string]queue.Place{}
-	unsent := map[string]bool{}
-	for _, list := range [][]queue.Place{g.order.Queue, g.order.NotScheduled} {
-		for _, p := range list {
-			places[p.ID] = p
-		}
-	}
-	for _, p := range g.order.NotScheduled {
-		unsent[p.ID] = true
 	}
 	for _, id := range ix.rows {
-		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
-			prUnread: g.noFacts[id], notScheduled: unsent[id]}
-		if p, ok := places[id]; ok {
-			in.place = &p
-		}
-		if h, ok := g.holds[id]; ok {
-			in.holds = &h
-			if root := rootOf(id, h); root != "" {
-				if hold, ok := g.holding[root]; ok {
-					in.holding = &hold
-				} else if g.unwalked[root] {
-					in.unwalked = true
-				}
-			}
-		}
-		bt.verdict[id] = table(in)
+		bt.verdict[id] = bt.verdictOf(id, answers[id])
 	}
 
 	for _, id := range ix.rows {
@@ -378,33 +235,6 @@ func build(g *gathered) Document {
 	return doc
 }
 
-// rootOf is the bead whose Holding answer a row reads: itself while its own
-// waits hold it, the ancestor waits names while it is held through one, and
-// none while nothing holds it.
-func rootOf(id string, h waits.Holds) string {
-	switch h.Status {
-	case waits.Blocked, waits.Unjudged:
-		return id
-	case waits.Held:
-		return holdingAncestor(h)
-	}
-	return ""
-}
-
-// factsOf is what the read knows of a bead's open pull request, nil when it
-// has none or a reader could not answer for it.
-func factsOf(g *gathered, id string) *prFacts {
-	f, ok := g.facts[id]
-	if !ok || g.noFacts[id] {
-		return nil
-	}
-	p := &prFacts{facts: f}
-	if a, ok := g.answers[id]; ok {
-		p.answer = &a
-	}
-	return p
-}
-
 // row is one row before the asks are linked and the counts made.
 func (bt *built) row(id string) Row {
 	ix := bt.ix
@@ -417,16 +247,16 @@ func (bt *built) row(id string) Row {
 	if a := bt.asks[id]; a != nil {
 		r.Ask = a.kind
 		if a.kind == AskPullRequest {
-			r.Reasons = reasonsOf(factsOf(ix.g, id))
+			r.Reasons = reasonsOf(ix.g.reading.PullRequest(id))
 		}
 	}
-	if h, ok := ix.g.holds[id]; ok {
+	if h, ok := ix.g.reading.Holds(id); ok {
 		r.Waits = refsOf(h.Waits)
 		if r.Waits == nil {
 			r.Waits = []Ref{}
 		}
 	}
-	r.PullRequest = pullRequestOf(b, factsOf(ix.g, id))
+	r.PullRequest = pullRequestOf(b, ix.g.reading.PullRequest(id))
 	if k == KindEpic {
 		r.Contract = contractOf(b)
 	}
@@ -516,10 +346,7 @@ func (bt *built) isWork(id string) bool {
 // open piece of work that carries hold:mayor. The Unprioritized page alone
 // lists it, so no view lists it and no count counts it, though the work behind
 // it waits on it all the same.
-func (bt *built) forProductOwner(id string) bool {
-	b := bt.ix.beads[id]
-	return bt.ix.kinds[id] == KindWork && isOpen(b) && carriesHoldMayor(b)
-}
+func (bt *built) forProductOwner(id string) bool { return bt.ix.g.reading.ForProductOwner(id) }
 
 // place lists the rig's open work in the Work queue's order once, the order
 // services/gctk/queue gave the read, so every view lists work in that one
@@ -533,7 +360,7 @@ func (bt *built) forProductOwner(id string) bool {
 func (bt *built) place() {
 	list := func(places []queue.Place, after bool) {
 		for _, p := range places {
-			if !bt.isWork(p.ID) || bt.verdict[p.ID].out == outUnread {
+			if !bt.isWork(p.ID) || bt.verdict[p.ID].rule == standing.RuleUnread {
 				continue
 			}
 			bt.pos[p.ID] = len(bt.order)
@@ -543,8 +370,9 @@ func (bt *built) place() {
 			}
 		}
 	}
-	list(bt.ix.g.order.Queue, false)
-	list(bt.ix.g.order.NotScheduled, true)
+	order := bt.ix.g.reading.Order()
+	list(order.Queue, false)
+	list(order.NotScheduled, true)
 	for _, id := range bt.ix.rows {
 		if _, placed := bt.pos[id]; bt.isWork(id) && !placed {
 			bt.unread = append(bt.unread, id)
@@ -557,7 +385,7 @@ func (bt *built) place() {
 // it.
 func (bt *built) linkWaits() {
 	for _, id := range bt.ix.rows {
-		h, ok := bt.ix.g.holds[id]
+		h, ok := bt.ix.g.reading.Holds(id)
 		if !ok {
 			continue
 		}
@@ -582,9 +410,17 @@ func (bt *built) linkWaits() {
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
+		hold, ok := ix.g.reading.Holding(id)
+		if !ok {
+			continue
+		}
 		k := ix.kinds[id]
 		listed := (k == KindWork || k == KindEpic || k == KindDelivery) && !bt.forProductOwner(id)
-		for _, a := range bt.holders(id) {
+		for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
+			a := bt.askID(x.ID)
+			if a == "" || a == id {
+				continue
+			}
 			if !slices.Contains(bt.held[a], id) {
 				bt.held[a] = append(bt.held[a], id)
 			}
@@ -599,28 +435,6 @@ func (bt *built) linkHolds() {
 		bt.inOrder(r.Holds)
 		bt.rows[id] = r
 	}
-}
-
-// holders is the needs a row is listed beneath: the ask each human gate and
-// each bead a person owes that its Holding answer names stands in (askID),
-// other than the row's own, each once, in Holding's order.
-func (bt *built) holders(id string) []string {
-	ix := bt.ix
-	h, ok := ix.g.holds[id]
-	if !ok {
-		return nil
-	}
-	hold, ok := ix.g.holding[rootOf(id, h)]
-	if !ok {
-		return nil
-	}
-	var out []string
-	for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
-		if a := bt.askID(x.ID); a != "" && a != id && !slices.Contains(out, a) {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // inOrder sorts ids into the Work queue's order: the work it places by its
@@ -711,13 +525,13 @@ func (bt *built) live(id string) bool {
 }
 
 // parked reports whether a bead waits on a park, or an epic or a Delivery above
-// it does: a wait behind its status on a gate that is no human gate (gateHold),
-// as waits answers the bead and each of those above it. Each is read for its own
-// waits, so work in flight under a parked epic, which the epic's wait does not
-// hold, is parked with it.
+// it does: a wait behind its status on a gate that is no human gate, as
+// standing reads the bead and each of those above it (Reading.Parked). Each is
+// read for its own waits, so work in flight under a parked epic, which the
+// epic's wait does not hold, is parked with it.
 func (bt *built) parked(id string) bool {
 	for _, x := range append([]string{id}, bt.ix.ancestors(id)...) {
-		if h, ok := bt.ix.g.holds[x]; ok && gateHold(h) != nil {
+		if _, ok := bt.ix.g.reading.Parked(x); ok {
 			return true
 		}
 	}

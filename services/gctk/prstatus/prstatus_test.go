@@ -3,14 +3,16 @@ package prstatus
 import (
 	"slices"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // oneGate is one open human gate that holds the anchor, as [Facts.Gates] carries
 // it, and personOwed one bead a person owes the next move on, as [Facts.Owed]
 // carries it.
 var (
-	oneGate    = []Blocker{gate("g")}
-	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
+	oneGate    = []person.Blocker{gate("g")}
+	personOwed = []person.Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
 )
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
@@ -78,7 +80,7 @@ func TestHeld(t *testing.T) {
 
 		{"a bead a person owes", Facts{Owed: personOwed}, []Hold{HeldBlocked}},
 		{"…and holds whatever is in flight beside it", Facts{Owed: personOwed, InFlightCount: 2}, []Hold{HeldBlocked}},
-		{"two beads a person owes are one value", Facts{Owed: []Blocker{personOwed[0], {ID: "e", Title: "pick the reviewer", Status: "open", IssueType: "decision"}}}, []Hold{HeldBlocked}},
+		{"two beads a person owes are one value", Facts{Owed: []person.Blocker{personOwed[0], {ID: "e", Title: "pick the reviewer", Status: "open", IssueType: "decision"}}}, []Hold{HeldBlocked}},
 
 		{"a human gate and a bead a person owes stand together", Facts{Gates: oneGate, Owed: personOwed}, []Hold{HeldGate, HeldBlocked}},
 	} {

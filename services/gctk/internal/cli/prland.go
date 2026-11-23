@@ -164,12 +164,17 @@ A changed head goes to the refinery once no withdrawal is open on the bead and
 no review run is attached to it, in the write that assigns the bead to the
 refinery and clears the marker. Until then the bead stays assigned to nobody
 and keeps its marker, so a later run reads the run's end, and no run attached
-to the bead is ever one whose input bead the refinery is assigned. Gas City
-gives the refinery a turn for the bead only once nothing holds it, so when
-only conversations and asks hold it, the run assigns the bead to the
-refinery, wakes the refinery and nudges it (gc session wake, then gc session
-nudge), and only then clears the marker. A wake that does not land keeps the
-marker, and the next run wakes the refinery again.
+to the bead is ever one whose input bead the refinery is assigned. An
+assignment alone gives a running refinery no turn, so whenever the refinery
+can take the bead, because nothing holds it or only conversations and asks
+do, the run assigns the bead to the refinery, wakes the refinery and nudges it
+(gc session wake, then gc session nudge), and only then clears the marker. A
+wake that does not land keeps the marker, and the next run wakes the refinery
+again. While another wait holds the bead, the run hands the head over in the
+one write and wakes no one. A record a writer left half written, an open bead
+whose marker stands with no whole record, goes back to the refinery for its
+full validation as pull_request_record_incomplete, handed over the same way,
+with a wake that says the record is incomplete.
 
 A PR a ruling retired is decided apart from these: its bead carries the
 disposition pr-dispose.sh records before it closes the PR, under the record

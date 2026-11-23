@@ -22,7 +22,9 @@ state, what each value means, and whose move it is.
 
 **Boundaries.** Which part of the city writes each state, and when, is
 [state-machine.md](state-machine.md). How the city decides when to merge is
-[refinery-merge-cadence.md](refinery-merge-cadence.md).
+[refinery-merge-cadence.md](refinery-merge-cadence.md). Where the PR's bead
+stands on the board, and whose move it is, is
+[bead-standing.md](bead-standing.md).
 
 ## The labels on a pull request
 
@@ -39,15 +41,22 @@ shows the same value on the PR's row.
 When more than one applies, the label shows the first that does, in this
 order: `needs-attention`, `merging`, `working`, `needs-review`.
 
-A `held:` label names one kind of thing that holds the PR for a person. More
-than one can show at once, and any of them makes the status
-`needs-attention`.
+`services/gctk/prstatus` declares the four values as `State`, each with its
+meaning, and `gctk pr status <bead>` prints the one a PR reads. The board also
+places the PR's bead by whose move it is: a bead whose PR reads `needs-review`
+or `needs-attention` waits on you, and one whose PR reads `working` or
+`merging` is the city's
+([bead-standing.md](bead-standing.md#where-a-beads-words-meet-its-pull-requests)).
+
+A `held:` label names one kind of thing that holds the PR for a person, one of
+the values `services/gctk/prstatus` declares as `Hold`. More than one can show
+at once, and any of them makes the status `needs-attention`.
 
 | Label | What holds the PR | What you can do |
 |---|---|---|
 | `held: gate` | A question the city asked a person, about the PR or about work the PR waits on. | Answer the question on the board. |
 | `held: review` | Review comments that wait for the city's answer, with no work under way to answer them. | Resolve the threads that are done, and decide what the city should do about the rest. |
-| `held: blocked` | Something else only a person can move: a decision, an open conversation about the PR, or another PR it waits on that is itself waiting on a person. | Make the decision, close the conversation, or move the other PR. |
+| `held: blocked` | Something else only a person can move: a decision, an open conversation about the PR, a bead in your queue (assigned to `human`), or another PR it waits on that is itself waiting on a person. | Make the decision, close the conversation, act on the bead in your queue, or move the other PR. |
 
 A PR can also read `needs-attention` with no `held:` label, for example when
 a required check failed, the branch conflicts with its base, or merges are
@@ -55,8 +64,11 @@ frozen.
 
 ## The merge state on the bead
 
-The bead's `merge_result` says where its PR stands, and `bd show <bead>`
-prints it.
+The bead carries the pending record, the city's record of its PR from the
+time the city publishes the PR until it merges
+([state-machine.md](state-machine.md#the-pending-record)). The record's
+`merge_result` is the bead's merge state: it says where the PR is on its way to
+merging, and `bd show <bead>` prints it.
 
 | `merge_result` | What it means | Whose move |
 |---|---|---|
