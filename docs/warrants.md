@@ -82,8 +82,9 @@ no warrant.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
-    from one base shares one recorded run, and keys a tracker on a stamp. Core's
-    runs each command raw per polecat and matches trackers by title.
+    from one base shares one recorded run, keys a tracker on a stamp, and has the
+    tracker it files sent to the rig's polecat pool. Core's runs each command raw
+    per polecat, matches trackers by title and routes the one it files nowhere.
   - `self-review` is a bounded check loop over those records, whose last attempt
     asks a person through a human gate when a check is still red, where Gas
     Town's is one inline step.
@@ -96,7 +97,8 @@ no warrant.
 - **Evidence.** In `gastownhall/gascity`:
   - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
     `load-context` has no duplicate-dispatch gate, its `preflight-tests` runs
-    `{{test_command}}` raw, and its `workspace-setup` is a placeholder each
+    `{{test_command}}` raw and files its tracker with a `gc bd create` that
+    routes it nowhere, and its `workspace-setup` is a placeholder each
     variant overrides with a tree of its own. `mol-polecat-commit.toml` and
     `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
     `git worktree remove` once the work is pushed.
@@ -117,7 +119,7 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df6d and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
