@@ -85,8 +85,9 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
   --dry-run  resolve and report; write nothing and send nothing.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session in --step mode.
-     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city, else `gc status`
-     does; GC_HOME holds supervisor.toml and cities.toml.
+     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city's path, else
+     `gc status` does, and `gc cities` names the city at that path; GC_HOME
+     holds supervisor.toml.
 
 exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 USAGE
