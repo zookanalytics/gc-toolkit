@@ -128,17 +128,10 @@ const walkDepth = 50
 //     in the conversation's store, at any status, past the work's own hold on
 //     the conversation, as bd's cycle check would.
 func (p *Promises) Create(req Request) (Filed, error) {
-	work, conv := strings.TrimSpace(req.Work), strings.TrimSpace(req.Conversation)
-	switch {
-	case !slices.Contains(Types, strings.TrimSpace(req.Type)):
-		return Filed{}, refuse("%q is no gate type the pack defines; the types are %s", req.Type, strings.Join(Types, ", "))
-	case work == "" || conv == "":
-		return Filed{}, refuse("the gate needs the work's bead (--await-id) and the conversation's (--blocks)")
-	case work == conv:
-		return Filed{}, refuse("%s cannot wait on a gate for itself", conv)
-	case prefixOf(work) != prefixOf(conv):
-		return Filed{}, refuse("%s is in another store than %s, and a gate holds a conversation only on work in its own store", work, conv)
+	if err := Validate(req); err != nil {
+		return Filed{}, err
 	}
+	work, conv := strings.TrimSpace(req.Work), strings.TrimSpace(req.Conversation)
 	rows, err := p.Ledger.Find(ledger.ByID(conv, work).WithClosed())
 	if err != nil {
 		return Filed{}, fmt.Errorf("%s and %s did not read: %w", conv, work, err)
@@ -192,6 +185,24 @@ func (p *Promises) Create(req Request) (Filed, error) {
 		return Filed{}, err
 	}
 	return Filed{Gate: id}, nil
+}
+
+// Validate refuses a promise no read of the store is needed to refuse: a type
+// the package does not define, a missing bead, a conversation named as its own
+// work, and work in another store than the conversation's.
+func Validate(req Request) error {
+	work, conv := strings.TrimSpace(req.Work), strings.TrimSpace(req.Conversation)
+	switch {
+	case !slices.Contains(Types, strings.TrimSpace(req.Type)):
+		return refuse("%q is no gate type the pack defines; the types are %s", req.Type, strings.Join(Types, ", "))
+	case work == "" || conv == "":
+		return refuse("the gate needs the work's bead (--await-id) and the conversation's (--blocks)")
+	case work == conv:
+		return refuse("%s cannot wait on a gate for itself", conv)
+	case prefixOf(work) != prefixOf(conv):
+		return refuse("%s is in another store than %s, and a gate holds a conversation only on work in its own store", work, conv)
+	}
+	return nil
 }
 
 // holds refuses a conversation that is not open or in progress under one of

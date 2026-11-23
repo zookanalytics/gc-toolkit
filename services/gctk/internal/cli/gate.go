@@ -62,6 +62,10 @@ func newGateCreateCmd(stdout, stderr io.Writer) *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			const prog = "gctk gate create"
 			req := gate.Request{Type: strings.TrimSpace(typ), Work: strings.TrimSpace(work), Conversation: strings.TrimSpace(conv)}
+			if err := gate.Validate(req); err != nil {
+				fmt.Fprintf(stderr, "%s: %v. Nothing was written\n", prog, err)
+				return exit(2)
+			}
 			l, err := ledger.Open(db, req.Conversation)
 			if err != nil {
 				fmt.Fprintf(stderr, "%s: could not open %s's store (%v). Nothing was written\n", prog, req.Conversation, err)
