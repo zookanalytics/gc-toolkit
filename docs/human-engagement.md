@@ -738,6 +738,16 @@ has no such clock: its work closing does not end it, idleness only sleeps it,
 and attaching wakes it. The idle sleep its template sets never reaches a sitting
 that holds its conversation or has a client attached.
 
+**Mail starts the sitting's turn.** Mail sent or replied to a sitting, from any
+sender and from the dashboard too, starts the sitting's turn within about 30
+seconds, on the next pass of Gas City's orders lane, and later when that lane
+is busy. The mail-notify-on-send and mail-notify-on-reply orders run
+`gctk mail notify`, which nudges the sitting with "You have mail from
+<sender>" unless a notice a sender's `--notify` queued will tell it first. A
+sitting that sleeps is woken, and the nudge reaches it once it has started. A
+sitting that has finished, or is suspended, keeps its mail waiting.
+`gctk mail notify --help` states the rule.
+
 **The claim.** The sitting enters through `converse-entry.sh`, which its
 prompt runs first each time the session starts or wakes, and which claims with
 a plain `gc hook --claim`. The default work query finds the task assigned to the
