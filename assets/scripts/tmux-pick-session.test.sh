@@ -98,13 +98,14 @@
 #              seconds on an idle city and several on a busy one, so in
 #              front of an operator it is a visible delay that turns into a
 #              timeout under the load that makes the roster worth checking.
-#              It asks gc nothing either, since only the fetch needs the
-#              city's name.
+#              Nor does it ask gc for the city's name, which only the fetch
+#              needs.
 #   (REGNAME)  the refresh fetches the city under the name `gc cities` lists
 #              at its path, the one name the supervisor serves it under,
 #              which need not be the path's basename.
-#   (UNLISTED) a city path gc lists no name at is fetched under no name: the
-#              refresh writes no map, and the menu says it has no roles.
+#   (UNLISTED) a city path gc lists no name at gets no fetch, under its
+#              basename or any other name. With no map from before, its menu
+#              says it has no roles.
 #   (FRESH)    a map as young as the last keypress carries no marker.
 #   (STALE)    an old one does, with its age, because the counts and the
 #              folding are that old too.
@@ -434,8 +435,8 @@ has "$ALLMENU" 'switch-client -t gc-toolkit--gc-toolkit__polecat-1-pool' \
 # throttled off, so its curl log is the keypress's own record.
 eq "$(wc -l < "$CURL_LOG" | tr -d ' ')" '0' \
     "NOFETCH: rendering the menu makes no supervisor API call"
-eq "$(cat "$GC_LOG")" '' \
-    "NOFETCH: ...and asks gc nothing, the city's name included"
+hasnt "$(cat "$GC_LOG")" 'cities' \
+    "NOFETCH: ...and does not ask gc for the city's name"
 [ -s "$ROLES_CACHE" ] && ok "REFRESH: --refresh-cache wrote the role map" \
     || bad "REFRESH: --refresh-cache wrote no role map"
 has "$(cat "$ROLES_CACHE")" 'gc-toolkit/gc-toolkit.polecat-codex' \
@@ -445,8 +446,9 @@ eq "$PRIME_GC" 'cities --json' \
 eq "$PRIME_FETCH" "call http://127.0.0.1:8372/v0/city/town-t/sessions" \
     "REGNAME: ...and fetches the city under the name listed at its path, not its basename"
 
-# A city path gc lists no name at: the refresh asks, fetches nothing and writes
-# no map, and the keypress after it renders with no roles.
+# A city path gc lists no name at, with no map from before: the refresh asks,
+# fetches nothing and writes no map, so the keypress after it renders with no
+# roles.
 : > "$CURL_LOG"; : > "$GC_LOG"; : > "$STUB_MENU"
 picker_env GC_CITY_PATH="$TMP/unlisted" STUB_API="$TMP/api.json" "$SUT" --refresh-cache >/dev/null 2>&1
 eq "$(cat "$GC_LOG")" 'cities --json' "UNLISTED: the refresh asks gc cities for the city's name"
@@ -454,7 +456,7 @@ eq "$(wc -l < "$CURL_LOG" | tr -d ' ')" '0' \
     "UNLISTED: ...and fetches nothing, under the path's basename or any other name"
 picker_env GC_CITY_PATH="$TMP/unlisted" GC_PICKER_REFRESH_EVERY=999999 "$SUT" >/dev/null 2>&1
 has "$(cat "$STUB_MENU")" ' Sessions ▫ no roles ' \
-    "UNLISTED: ...so the menu says it has no roles"
+    "UNLISTED: ...so, with no map from before, the menu says it has no roles"
 
 hasnt "$APIMENU" '▫' \
     "FRESH: a map as young as the last keypress carries no marker"
