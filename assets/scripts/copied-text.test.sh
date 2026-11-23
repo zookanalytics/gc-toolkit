@@ -6,33 +6,36 @@
 # command an agent runs once it fills its placeholders. Some placeholders take
 # text the agent did not write and copies as it stands: a person's words, a
 # ruling or an answer that quotes them, a bead's, a card's or a brief's own
-# text, verbatim feedback, or a run's raw output. Pasted inside a double-quoted
-# argument, a double quote in that text ends the argument, a backtick span or
-# a $(...) runs as a command, and a $ expands. So each such placeholder sits
-# alone in the body of a quoted here-document, whose text the shell hands on
-# untouched, and the command takes what the here-document captured.
+# text, verbatim feedback, or a run's raw output. The shell parses such text
+# wherever a block puts it: a double quote ends an argument, a backtick span or
+# a $(...) runs, a $ expands, and a line equal to a here-document's delimiter
+# ends the here-document. So the agent writes copied text to a temp file with
+# its own file tool, and the block reads that file, as
+# "$(cat "<the file holding ...>")", whose output the shell takes as it stands.
 #
-#   1. No block or inline command in that text puts a placeholder that names
-#      copied text inside double quotes, or in the body of an unquoted
-#      here-document, which expands it the same way, outside the files the
+#   1. No block or inline command in that text holds a placeholder that names
+#      copied text other than through such a read, outside the files the
 #      deletion plan retires (tools/deletion-plan.tsv). A placeholder names
 #      copied text when it asks for their words, reason or answer, the
 #      operator's words, reason or ruling, a ruling, verbatim or quoted text,
 #      raw output, a brief's or a bead's own text, a card's text, or what they
 #      stated.
-#   2. Every fenced block whose quoted here-document holds a placeholder runs,
-#      under bash and under zsh, with each placeholder in such a body filled
-#      with text that holds a double quote, a backtick span, a $(...), $HOME
-#      and an apostrophe, marked with the body's number, and every other
-#      placeholder filled with x. Stubs stand in for gc, gctk, git, every pack
-#      script and a command named x, and log each argument on a line of its
-#      own, then the stdin they are given. Each body's text must reach a
-#      logged command as written, inside one argument or its stdin, and
-#      nothing in it may run.
-#   3. Controls: that check fails the same text pasted inside double quotes, a
-#      captured text passed unquoted, which bash splits, and a block that
-#      drops one of its two bodies. Part 1 reports a copied-text placeholder
-#      left inside double quotes.
+#   2. Every fenced block that reads such a file runs, under bash and under
+#      zsh, with each file it names holding several lines: one with a double
+#      quote, a backtick span, a $(...), $HOME and an apostrophe, one for each
+#      here-document delimiter the pack has used around copied text, a lone ),
+#      a line that creates a file if it runs, and a last line marked with the
+#      file's number. Every other placeholder is filled with x. Stubs stand in
+#      for gc, gctk, git, every pack script and a command named x, and log each
+#      argument on a line of its own, its newlines as spaces, then the stdin
+#      they are given. Each file's text must reach a logged command as written,
+#      inside one argument or its stdin, and nothing in it may run.
+#   3. Controls: that check fails the same text pasted inside double quotes,
+#      the same text in a quoted here-document whose delimiter is one of its
+#      lines, a file's text passed unquoted, which bash splits, and a block
+#      that drops one of the two files it reads. Part 1 reports a copied-text
+#      placeholder inside double quotes in a block, in a here-document's body,
+#      and inside double quotes in an inline command, and none for a file read.
 #
 # Hermetic: reads the tree's own files and runs extracted blocks under stubs,
 # from an empty directory, with no live city, store or network.
@@ -49,9 +52,31 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+: $2}"; }
 
-IFS= read -r HOSTILE <<'TEXT'
+# The text each file holds; @K@ becomes the file's number.
+IFS= read -r -d '' HOSTILE <<'HOSTILE_TEXT_END' || true
 they said "ship it", `touch RAN` and $(touch RAN) stay, $HOME too, and it's as written
-TEXT
+RULING
+FIELD
+WORDS
+FAILURE
+STATED
+ANSWER
+TOPIC
+TITLE
+REASON
+QUESTIONS
+OUTPUT
+MESSAGE
+DESCRIPTION
+CHANGE
+BRIEF
+BODY
+EOF
+)
+touch RAN
+end of the copied text (file @K@)
+HOSTILE_TEXT_END
+HOSTILE=${HOSTILE%$'\n'}
 export HOSTILE
 
 # The extractor: python3 with tomllib decodes each formula's step text, which
@@ -69,11 +94,12 @@ COPIED = re.compile(
     r"|\bown text\b|\bcard\b|\bthey stated\b",
     re.I,
 )
+FILE = re.compile(r"^the file holding\b")
 PLACEHOLDER = re.compile(r"<([^\s<>'\"$(][^<>\n]*)>")
+FILE_READ = re.compile(r"<(the file holding\b[^<>\n]*)>")
 FILL_OUTSIDE = re.compile(r"(?<![<\w])<([^\s<>'\"$(][^<>\n]*)>")
 FENCE_ANY = re.compile(r"^[ \t]*```")
 FENCE_BASH = re.compile(r"^([ \t]*)```bash[ \t]*$")
-HEREDOC = re.compile(r"<<-?[ \t]*(?:'([A-Za-z_][A-Za-z0-9_]*)'|\"([A-Za-z_][A-Za-z0-9_]*)\"|\\([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 INLINE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 TEMPLATE = [
     (re.compile(r"\{\{binding_prefix\}\}"), "kit."),
@@ -81,6 +107,10 @@ TEMPLATE = [
     (re.compile(r"\{\{ *\.RigName *\}\}"), "rig"),
     (re.compile(r"\{\{[^}]*\}\}"), "x"),
 ]
+
+
+def copied(ph):
+    return COPIED.search(ph) and not FILE.match(ph)
 
 
 def texts(path):
@@ -127,120 +157,69 @@ def inline_spans(text):
                     yield i, m.group(1)
 
 
-def walk(lines):
-    """Return the placeholders that expand, as (line, text): inside double quotes
-    or in the body of an unquoted here-document. Also the bodies of the quoted
-    here-documents, as (start, end)."""
-    found, bodies, stack = [], [], []
-    i = 0
-    while i < len(lines):
-        line, j, pending = lines[i], 0, []
-        while j < len(line):
-            c = line[j]
-            top = stack[-1] if stack else None
-            if top == "sq":
-                if c == "'":
-                    stack.pop()
-                j += 1
-                continue
-            if top == "dq":
-                if c == "\\":
-                    j += 2
-                    continue
-                if c == '"':
-                    stack.pop()
-                    j += 1
-                    continue
-                if line.startswith("$(", j):
-                    stack.append("sub")
-                    j += 2
-                    continue
-                if c == "`":
-                    stack.append("bt")
-                    j += 1
-                    continue
-                m = PLACEHOLDER.match(line, j)
-                if m:
-                    found.append((i, m.group(1)))
-                    j = m.end()
-                    continue
-                j += 1
-                continue
-            if c == "\\":
-                j += 2
-                continue
-            if c == "#" and (j == 0 or line[j - 1] in " \t;(|&"):
-                break
+def in_double_quotes(span):
+    """Return the placeholders inside double quotes in one inline command."""
+    found, stack, j = [], [], 0
+    while j < len(span):
+        c, top = span[j], (stack[-1] if stack else None)
+        if top == "sq":
             if c == "'":
-                stack.append("sq")
-                j += 1
-                continue
+                stack.pop()
+            j += 1
+            continue
+        if c == "\\":
+            j += 2
+            continue
+        if top == "dq":
             if c == '"':
-                stack.append("dq")
-                j += 1
-                continue
-            if line.startswith("$(", j):
-                stack.append("sub")
-                j += 2
-                continue
-            if c == "`":
-                if top == "bt":
-                    stack.pop()
-                else:
-                    stack.append("bt")
-                j += 1
-                continue
-            if c == "(" and top in ("sub", "paren"):
-                stack.append("paren")
-                j += 1
-                continue
-            if c == ")" and top in ("sub", "paren"):
                 stack.pop()
                 j += 1
                 continue
-            m = HEREDOC.match(line, j)
+            m = PLACEHOLDER.match(span, j)
             if m:
-                quoted = m.group(4) is None
-                pending.append((m.group(1) or m.group(2) or m.group(3) or m.group(4), quoted))
+                found.append(m.group(1))
                 j = m.end()
                 continue
+            if span.startswith("$(", j):
+                stack.append("sub")
+                j += 2
+                continue
             j += 1
-        i += 1
-        for delim, quoted in pending:
-            start = i
-            while i < len(lines) and lines[i] != delim:
-                if not quoted:
-                    found.extend((i, m.group(1)) for m in PLACEHOLDER.finditer(lines[i]))
-                i += 1
-            if quoted:
-                bodies.append((start, i))
-            i += 1
-    return found, bodies
+            continue
+        if c == "'":
+            stack.append("sq")
+        elif c == '"':
+            stack.append("dq")
+        elif span.startswith("$(", j):
+            stack.append("sub")
+            j += 1
+        elif c == ")" and top == "sub":
+            stack.pop()
+        j += 1
+    return found
 
 
-def fill(lines, bodies):
-    """Return the filled block and the number of bodies that hold a placeholder.
-    The k-th such body takes the hostile text marked (body k)."""
-    body_of, k = {}, 0
-    for start, end in bodies:
-        if any(PLACEHOLDER.search(lines[n]) for n in range(start, end)):
-            k += 1
-            body_of.update((n, k) for n in range(start, end))
+def fill(lines, prefix):
+    """Return the filled block and the number of files it reads. The k-th file
+    it names is written to <prefix>.file<k> with the hostile text marked k."""
+    files = {}
+    for line in lines:
+        for m in FILE_READ.finditer(line):
+            files.setdefault(m.group(1), len(files) + 1)
+    for ph, k in files.items():
+        with open(f"{prefix}.file{k}", "w") as fh:
+            fh.write(os.environ["HOSTILE"].replace("@K@", str(k)) + "\n")
     out = []
-    for n, line in enumerate(lines):
+    for line in lines:
         for pat, val in TEMPLATE:
             line = pat.sub(val, line)
-        if n in body_of:
-            text = f"{os.environ['HOSTILE']} (body {body_of[n]})"
-            line = PLACEHOLDER.sub(lambda m: text, line)
-        else:
-            line = FILL_OUTSIDE.sub("x", line)
-        out.append(line)
-    return "\n".join(out) + "\n", k
+        line = FILE_READ.sub(lambda m: f"{prefix}.file{files[m.group(1)]}", line)
+        out.append(FILL_OUTSIDE.sub("x", line))
+    return "\n".join(out) + "\n", len(files)
 
 
 def main():
-    root, outdir = sys.argv[1], sys.argv[2]
+    root, outdir = sys.argv[1], os.path.abspath(sys.argv[2])
     paths = sys.argv[3:]
     if not paths:
         listed = subprocess.run(
@@ -265,20 +244,19 @@ def main():
             for step, text in texts(full):
                 label = rel + (f" [{step}]" if step else "")
                 for start, lines in blocks(text):
-                    found, bodies = walk(lines)
-                    for i, ph in found:
-                        if COPIED.search(ph):
-                            static.write(f"{label}:{start + i + 1}: <{ph}>\n")
-                    filled, count = fill(lines, bodies)
-                    if count:
+                    for i, line in enumerate(lines):
+                        for m in PLACEHOLDER.finditer(line):
+                            if copied(m.group(1)):
+                                static.write(f"{label}:{start + i + 1}: <{m.group(1)}>\n")
+                    if any(FILE_READ.search(line) for line in lines):
                         n += 1
+                        filled, count = fill(lines, os.path.join(outdir, str(n)))
                         with open(os.path.join(outdir, f"{n}.sh"), "w") as fh:
                             fh.write(filled)
                         index.write(f"{n}\t{count}\t{label}:{start + 1}\n")
                 for i, span in inline_spans(text):
-                    found, _ = walk([span])
-                    for _, ph in found:
-                        if COPIED.search(ph):
+                    for ph in in_double_quotes(span):
+                        if copied(ph):
                             static.write(f"{label}:{i + 1}: <{ph}> (inline)\n")
 
 
@@ -292,7 +270,7 @@ if ! python3 -c 'import tomllib' 2>/dev/null; then
     exit 1
 fi
 
-echo "── copied text never sits inside double quotes ──"
+echo "── copied text reaches a block only through a file it reads ──"
 if python3 -I "$TMP/extract.py" "$ROOT" "$TMP/blocks"; then
     ok "the extractor read the pack's text"
 else
@@ -300,13 +278,13 @@ else
 fi
 if [ -s "$TMP/blocks/static" ]; then
     while IFS= read -r line; do
-        bad "copied text enters through a quoted here-document" "$line"
+        bad "copied text enters through a file the block reads" "$line"
     done <"$TMP/blocks/static"
 else
-    ok "no placeholder for copied text sits inside double quotes"
+    ok "no placeholder for copied text sits in a block or an inline command outside a file read"
 fi
 
-echo "── each quoted here-document hands its text on as written ──"
+echo "── each file a block reads reaches its command as written ──"
 mkdir -p "$TMP/bin" "$TMP/pack" "$TMP/away" "$TMP/city/.gc/services/gctk/bin"
 cat >"$TMP/bin/gc" <<'STUB'
 #!/usr/bin/env bash
@@ -354,12 +332,14 @@ run_block() {
         $1 "$2" </dev/null >"$TMP/out" 2>&1)
     echo $?
 }
-# as_written <bodies> — the last run handed each body's text on as written,
-# inside one argument or the stdin of a logged call, and ran none of it.
+# as_written <prefix> <files> — the last run handed the text of each of
+# <prefix>.file1 to <prefix>.file<files> on as written, inside one argument or
+# the stdin of a logged call, and ran none of it.
 as_written() {
-    local k=1
-    while [ "$k" -le "$1" ]; do
-        grep -qF -- "$HOSTILE (body $k)" "$TMP/log" || return 1
+    local k=1 want
+    while [ "$k" -le "$2" ]; do
+        want=$(tr '\n' ' ' <"$1.file$k")
+        grep -qF -- "${want% }" "$TMP/log" || return 1
         k=$((k + 1))
     done
     [ ! -e "$TMP/away/RAN" ]
@@ -368,14 +348,14 @@ as_written() {
 shells="bash"
 command -v zsh >/dev/null 2>&1 && shells="bash zsh"
 count=$(grep -c . "$TMP/blocks/index" || true)
-[ "$count" -gt 0 ] && ok "blocks with a quoted here-document were found ($count)" \
-    || bad "blocks with a quoted here-document were found" "none"
-while IFS="$(printf '\t')" read -r n bodies label; do
+[ "$count" -gt 0 ] && ok "blocks that read a file of copied text were found ($count)" \
+    || bad "blocks that read a file of copied text were found" "none"
+while IFS="$(printf '\t')" read -r n files label; do
     for sh_ in $shells; do
         run=$sh_
         [ "$sh_" = zsh ] && run="zsh -f"
         rc=$(run_block "$run" "$TMP/blocks/$n.sh")
-        if as_written "$bodies"; then
+        if as_written "$TMP/blocks/$n" "$files"; then
             ok "($sh_) $label"
         else
             bad "($sh_) $label" "exit $rc; calls: $(tr '\n' ';' <"$TMP/log" | head -c 600); output: $(tr '\n' ' ' <"$TMP/out" | head -c 300)"
@@ -384,53 +364,57 @@ while IFS="$(printf '\t')" read -r n bodies label; do
 done <"$TMP/blocks/index"
 
 echo "── controls ──"
-printf 'gc bd update tk-x --append-notes "%s (body 1)"\n' "$HOSTILE" >"$TMP/pasted.sh"
-for sh_ in $shells; do
-    run=$sh_
-    [ "$sh_" = zsh ] && run="zsh -f"
-    run_block "$run" "$TMP/pasted.sh" >/dev/null
-    if as_written 1; then
-        bad "($sh_) the same text pasted inside double quotes fails the check" "it passed"
-    else
-        ok "($sh_) the same text pasted inside double quotes fails the check"
-    fi
-done
 mkdir -p "$TMP/control"
+printf '%s\n' "${HOSTILE//@K@/1}" >"$TMP/control/text.file1"
+# control_script <name> <what> <shells> — the script <name>.sh, which carries
+# text.file1's text another way, fails the check under each shell.
+control_script() {
+    local sh_ run
+    for sh_ in $3; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        run_block "$run" "$TMP/control/$1.sh" >/dev/null
+        if as_written "$TMP/control/text" 1; then
+            bad "($sh_) $2 fails the check" "it passed"
+        else
+            ok "($sh_) $2 fails the check"
+        fi
+    done
+}
+printf 'gc bd update tk-x --append-notes "%s"\n' "$(cat "$TMP/control/text.file1")" >"$TMP/control/pasted.sh"
+control_script pasted "the same text pasted inside double quotes" "$shells"
+{
+    printf '%s\n' "WORDS=\$(cat <<'WORDS'"
+    cat "$TMP/control/text.file1"
+    printf '%s\n' "WORDS" ")" "gc bd update tk-x --append-notes \"\$WORDS\""
+} >"$TMP/control/collision.sh"
+control_script collision "the same text in a quoted here-document whose delimiter is one of its lines" "$shells"
 cat >"$TMP/control/unquoted.md" <<'MD'
 ```bash
-RULING=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)
-gc bd update tk-x --append-notes $RULING
+WORDS=$(cat "<the file holding their words>")
+gc bd update tk-x --append-notes $WORDS
 ```
 MD
 cat >"$TMP/control/dropped.md" <<'MD'
 ```bash
-WORDS=$(cat <<'WORDS'
-<their words>
-WORDS
-) && RULING=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-) && gc bd update tk-x --append-notes "$WORDS"
+WORDS=$(cat "<the file holding their words>") && RULING=$(cat "<the file holding the ruling, one line>") && gc bd update tk-x --append-notes "$WORDS"
 ```
 MD
-# control <name> <bodies> <shells> <what> — the block in <name>.md, extracted
-# as the pack's are with <bodies> bodies, fails the check under each shell.
+# control <name> <files> <shells> <what> — the block in <name>.md, extracted
+# as the pack's are with <files> files, fails the check under each shell.
 control() {
     python3 -I "$TMP/extract.py" "$ROOT" "$TMP/control/$1" "$TMP/control/$1.md"
-    local n bodies sh_ run
-    IFS="$(printf '\t')" read -r n bodies _ <"$TMP/control/$1/index"
-    if [ "$bodies" != "$2" ]; then
-        bad "$4 is extracted with $2 bodies" "index: $(cat "$TMP/control/$1/index")"
+    local n files sh_ run
+    IFS="$(printf '\t')" read -r n files _ <"$TMP/control/$1/index"
+    if [ "$files" != "$2" ]; then
+        bad "$4 is extracted with $2 files" "index: $(cat "$TMP/control/$1/index")"
         return
     fi
     for sh_ in $3; do
         run=$sh_
         [ "$sh_" = zsh ] && run="zsh -f"
         run_block "$run" "$TMP/control/$1/$n.sh" >/dev/null
-        if as_written "$bodies"; then
+        if as_written "$TMP/control/$1/$n" "$files"; then
             bad "($sh_) $4 fails the check" "it passed"
         else
             ok "($sh_) $4 fails the check"
@@ -438,19 +422,25 @@ control() {
     done
 }
 # zsh does not split an unquoted expansion, so only bash shows this one.
-control unquoted 1 bash "a captured text passed unquoted"
-control dropped 2 "$shells" "a block that drops one of its two bodies"
-cat >"$TMP/control/pasted.md" <<'MD'
+control unquoted 1 bash "a file's text passed unquoted"
+control dropped 2 "$shells" "a block that drops one of the two files it reads"
+cat >"$TMP/control/placed.md" <<'MD'
 ```bash
 "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --ruled yes --ruling "<the ruling, one line>" --no-wait
+WORDS=$(cat <<'WORDS'
+<their words>
+WORDS
+)
+gc bd update tk-x --append-notes "$(cat "<the file holding their words>")"
 ```
-And `gc bd gate resolve <gate> --reason "ruled: <their answer>"`.
+And `gc bd gate resolve <gate> --reason "ruled: <their answer>"`, but not
+`gc bd gate resolve <gate> --reason "ruled: $(cat "<the file holding their answer>")"`.
 MD
-python3 -I "$TMP/extract.py" "$ROOT" "$TMP/control/out" "$TMP/control/pasted.md"
-if [ "$(grep -c . "$TMP/control/out/static")" = 2 ]; then
-    ok "part 1 reports a copied-text placeholder inside double quotes, in a block and inline"
+python3 -I "$TMP/extract.py" "$ROOT" "$TMP/control/out" "$TMP/control/placed.md"
+if [ "$(grep -c . "$TMP/control/out/static")" = 3 ]; then
+    ok "part 1 reports copied text in double quotes, in a here-document and inline, and no file read"
 else
-    bad "part 1 reports a copied-text placeholder inside double quotes, in a block and inline" "$(cat "$TMP/control/out/static")"
+    bad "part 1 reports copied text in double quotes, in a here-document and inline, and no file read" "$(cat "$TMP/control/out/static")"
 fi
 
 echo

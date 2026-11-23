@@ -19,6 +19,11 @@ under, which gc puts in front of this skill's name: `gc-toolkit` in
 `gc-toolkit.work`. `gc skill list` prints it in this skill's FROM column. A
 script's `--help` lists its flags.
 
+A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+stands, such as a person's words, a ruling or a run's output. Write that text to
+a temp file with your file tool, not with the shell, and put the file's path
+there.
+
 ## File new work
 
 File a bead for the work. The worker reads its description to learn what to do:
@@ -82,15 +87,12 @@ skill), or leave it for the operator to place.
   The tracker writer files one tracker per failure, with no hold, and sends the
   tracker it files to its rig's polecat pool, so the failure goes to be fixed.
   Derive the failure's key, then file it, in a checkout of the rig or with
-  `GC_RIG=<rig>` in front of each call. The output goes in the quoted
-  here-document as the run printed it, quotes, backticks and `$` included:
+  `GC_RIG=<rig>` in front of each call. Write the output to a temp file
+  with your file tool as the run printed it, quotes, backticks and `$` included:
 
 ```bash
 KEY=$("$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>")
-"$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "$(cat <<'FAILURE'
-<where it failed: the branch and commit, the check or the command that ran, and its raw output>
-FAILURE
-)"
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "$(cat "<the file holding where it failed: the branch and commit, the check or the command that ran, and its raw output>")"
 ```
 
   `key --target <repo-relative path>` keys a failure with no test function,
@@ -141,23 +143,15 @@ has no hypothesis to answer, so it is not an epic, and its work is ordinary
 flow (`docs/epics.md`, "Epics are mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
-hypothesis, and files nothing. It prints the new epic's id. A field the
-operator stated goes in its quoted here-document as they said it:
+hypothesis, and files nothing. It prints the new epic's id. Write each field to
+a temp file of its own with your file tool, and a field the operator stated as
+they said it:
 
 ```bash
 "$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
-  --hypothesis "$(cat <<'FIELD'
-<for whom, what changes, and the signal that shows it worked>
-FIELD
-)" \
-  --handle "$(cat <<'FIELD'
-<three to five words>
-FIELD
-)" \
-  --boundaries "$(cat <<'FIELD'
-<the axis it is cut on, and the work beside it that it is not, with where that lives>
-FIELD
-)" \
+  --hypothesis "$(cat "<the file holding the hypothesis: for whom, what changes, and the signal that shows it worked>")" \
+  --handle "$(cat "<the file holding the handle, three to five words>")" \
+  --boundaries "$(cat "<the file holding the boundaries: the axis it is cut on, and the work beside it that it is not, with where that lives>")" \
   -d "<what the epic is about>"
 ```
 
@@ -166,10 +160,7 @@ FIELD
 has printed the epic's id, record on the epic whose words each field is:
 
 ```bash
-gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: $(cat <<'STATED'
-<each field they stated, and where they stated it, or none>
-STATED
-)."
+gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: $(cat "<the file holding each field they stated, and where they stated it, or none>")."
 ```
 
 Work the epic plainly owns goes on under it meanwhile, and the epic's next
@@ -181,10 +172,7 @@ hypothesis, and `epic_handle`, `epic_boundaries`, `epic_closure_condition` and
 `epic_indicators` go the same way:
 
 ```bash
-gc bd update <epic> --set-metadata epic_hypothesis="$(cat <<'WORDS'
-<the operator's words>
-WORDS
-)" \
+gc bd update <epic> --set-metadata epic_hypothesis="$(cat "<the file holding the operator's words>")" \
   --append-notes "Stated by the operator in <where they said it>: the hypothesis."
 ```
 
@@ -192,10 +180,7 @@ A change you would make yourself is a proposal for the epic's next review:
 leave the keys as they are, and record the change with its evidence:
 
 ```bash
-gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): $(cat <<'CHANGE'
-<the change, quoted>
-CHANGE
-). Evidence: <what you read or ran>."
+gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): $(cat "<the file holding the change, quoted>"). Evidence: <what you read or ran>."
 ```
 
 When work you must do depends on the operator's answer, file a human gate on
@@ -478,15 +463,12 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   after the sign-off, which answers the gates the ruling settles.
 
 When a person rules that work a human gate holds will not go on, one call does
-all of this in order (the waits skill), with the ruling in its quoted
-here-document. In a sitting it runs before the sign-off, with
+all of this in order (the waits skill), with the ruling written to a
+temp file with your file tool. In a sitting it runs before the sign-off, with
 `--successor <conversation>` (the converse-settle step):
 
 ```bash
-"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'RULING'
-<the ruling, one sentence>
-RULING
-)"
+"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat "<the file holding the ruling, one sentence>")"
 ```
 
 A bead that needs no work only once another bead lands is not closed now. Make

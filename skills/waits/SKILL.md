@@ -202,13 +202,10 @@ limits arming too (the work skill).
 - **A bead checked once other work lands** needs nothing: the closer checks it
   once the blocker closes. To keep it as work instead, disarm it (below) and
   remove the edge: `gc bd dep remove <bead> <blocker>`.
-- **A wait a person owed** is released by the answer, which goes in the quoted
-  here-document as they gave it:
+- **A wait a person owed** is released by the answer, written to a temp file
+  with your file tool as they gave it:
 ```bash
-gc bd gate resolve <gate> --reason "ruled: $(cat <<'ANSWER'
-<their answer>
-ANSWER
-)"
+gc bd gate resolve <gate> --reason "ruled: $(cat "<the file holding their answer>")"
 ```
   The reason opens with `ruled:` when the person decided, approved or acted,
   `moot:` when the premise no longer holds, and `benign:` when it holds but
@@ -217,12 +214,9 @@ ANSWER
   resolves the gates a ruling settles on a turn that does not sign off (the
   converse-continue step).
 - **A wait a person owed, when they rule the work will not go on**, takes the
-  stand-down, with the ruling in its quoted here-document:
+  stand-down, with the ruling written to a temp file with your file tool:
 ```bash
-"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'RULING'
-<the ruling, one sentence>
-RULING
-)"
+"$(gc <binding> scripts-dir)/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat "<the file holding the ruling, one sentence>")"
 ```
   The key is the gate's `await_id`. It removes the arm, ends the run beneath
   the bead, answers the gate with the ruling and closes the bead. A gate

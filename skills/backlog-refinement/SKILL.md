@@ -19,6 +19,11 @@ The pack's scripts are called through `gc <binding> scripts-dir`, where
 `<binding>` is the name the city imports the pack under. `gc skill list` prints
 it in this skill's FROM column.
 
+A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+stands, such as a person's words, a ruling or a run's output. Write that text to
+a temp file with your file tool, not with the shell, and put the file's path
+there.
+
 ## 1. Read the queue against the rig's goals
 
 Open from your rig's product goals and each doc that page says its goals come
@@ -54,20 +59,15 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
   notes: open from them, and ask nothing.
 - **Otherwise ask the operator what the rig's work is for.** Their answer is the
   rig's goals for this sitting. Once they agree on the words, put them on the
-  request as they said them, in the quoted here-document, so the page states
-  them and no later sitting asks again. On the request the list found:
+  request as they said them, written to a temp file with your file tool, so the
+  page states them and no later sitting asks again. On the request the list
+  found:
 ```bash
-gc bd --rig <rig> update <bead> --append-notes "The operator's product goals: $(cat <<'WORDS'
-<their words>
-WORDS
-)"
+gc bd --rig <rig> update <bead> --append-notes "The operator's product goals: $(cat "<the file holding their words>")"
 ```
   None, when the list printed `[]`:
 ```bash
-gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "$(cat <<'WORDS'
-<their words>
-WORDS
-)" --json
+gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "$(cat "<the file holding their words>")" --json
 ```
   A list that printed no JSON array did not answer: file nothing, and tell the
   operator their words wait for the store.
@@ -83,13 +83,10 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --stand
 ```
 
 When the operator changes goals the rig already keeps, file the change once they
-agree on its words, with their words in the quoted here-document, and send it
-with `gc sling <rig>/<binding>.polecat <bead>`:
+agree on its words, with their words written to a temp file with your file
+tool, and send it with `gc sling <rig>/<binding>.polecat <bead>`:
 ```bash
-gc bd --rig <rig> create "docs: <the change> in the rig's product goals" -t task -d "$(cat <<'WORDS'
-<their words>
-WORDS
-)" --json
+gc bd --rig <rig> create "docs: <the change> in the rig's product goals" -t task -d "$(cat "<the file holding their words>")" --json
 ```
 
 ## 2. Propose one disposition for each bead
@@ -179,10 +176,7 @@ that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
 
 ```bash
-gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: <what was proposed>; the operator declined: $(cat <<'REASON'
-<their reason>
-REASON
-)."
+gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: <what was proposed>; the operator declined: $(cat "<the file holding their reason>")."
 ```
 
 A close runs the `work` skill's disposition writer, `bead-rehome.sh`, with the

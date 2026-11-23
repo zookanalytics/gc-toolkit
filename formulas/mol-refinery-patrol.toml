@@ -202,11 +202,11 @@ session with `gc runtime drain-ack`.
 
 **Pre-existing on the target:** track each failure once, then land. Run it
 once per failure (each failing test function, each failing target with none,
-each file a linter flagged), with the failure's evidence on stdin:
+each file a linter flagged), with the failure's evidence on stdin. Write the
+check that failed, where it ran and its raw output to a temp file with your file
+tool, and give the file as stdin:
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-pre-existing.sh" --bead <the bead> --check <test|lint|typecheck|setup|build> --test "<failing test function>" <<'FAILLOG'
-<the check that failed, where it ran, and its raw output>
-FAILLOG
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-pre-existing.sh" --bead <the bead> --check <test|lint|typecheck|setup|build> --test "<failing test function>" <"<the file holding the check that failed, where it ran, and its raw output>"
 ```
 Give `--target <repo-relative path>` for a failure with no test function, or
 `--lint <linter> <repo-relative path>` for a lint finding, in place of

@@ -646,19 +646,10 @@ When a turn brings you corrective feedback about *standing* agent
 behavior — a PR review comment, an operator correction, a rework whose
 cause was a habit rather than a one-off — do two things, in order: fix
 the instance in front of you, then file one observation bead before the
-turn ends:
+turn ends. Write its description to a temp file with your file tool first,
+the feedback quoted as it stands:
 
-```bash
-OBS_META=$(jq -nc \
-  --arg category "<free-slug>" \
-  --arg scope "<repo:<rig> or agent:<role> or global — guess narrow>" \
-  --arg directive "<standing or diff>" \
-  --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
-  '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
-    "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
-    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
-OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
-  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "$(cat <<'BODY'
+```markdown
 ## Statement
 <the generalizable point>
 
@@ -670,15 +661,28 @@ OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source re
 
 ## Context
 <optional: what the diff was doing>
-BODY
-)" --json)
+```
+
+Then file it:
+
+```bash
+OBS_META=$(jq -nc \
+  --arg category "<free-slug>" \
+  --arg scope "<repo:<rig> or agent:<role> or global — guess narrow>" \
+  --arg directive "<standing or diff>" \
+  --arg provenance "<pr:<owner/repo>#<n>:comment:<id> or bead:<id>:turn:<date>>" \
+  '{task_kind: "observation", "obs.category": $category, "obs.scope": $scope,
+    "obs.source": "self", "obs.directive": $directive, "obs.provenance": $provenance,
+    "gc.outcome": "recorded", "gc.work_outcome": "no-op"}')
+OBS_JSON=$(gc bd create "obs: <one-line restatement of the feedback> (<source ref>)" \
+  -t task -l learning -l observation --metadata "$OBS_META" --status=closed -d "$(cat "<the file holding the description>")" --json)
 OBS=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$OBS" ] || { CREATE_ERR=$(printf '%s' "$OBS_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "observation not filed${CREATE_ERR:+: $CREATE_ERR}" >&2; exit 1; }
 ```
 
 The metadata and the closed status ride the create, so the observation is
-filed whole or not at all. The quoted here-document keeps the feedback's
-quotes, backticks and `$` as written.
+filed whole or not at all. The file keeps the feedback's quotes, backticks and
+`$` as written.
 
 The provenance key's `<owner/repo>` is origin's full slug — derive it with
 `gh repo view "$(git remote get-url origin)" --json nameWithOwner -q .nameWithOwner`,

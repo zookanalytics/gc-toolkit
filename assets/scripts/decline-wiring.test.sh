@@ -151,7 +151,7 @@ skill_has waits '--successor <the bead that records the ruling>' "the waits skil
 skill_has waits 'Never remove that edge yourself first' "the waits skill rules out taking an armed bead off a gate by hand"
 skill_has work '/stand-down.sh" <bead> --key <situation-key> --ruling "' "the work skill gives the stand-down's command"
 skill_has work "Its first write removes the bead's deferred-dispatch arm" "the work skill says a stop removes the bead's arm first"
-skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat <<'"'"'RULING'"'"' <the ruling, one line> RULING )" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
+skill_has converse-settle '/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat "<the file holding the ruling, one line>")" --successor "$CONVERSATION"' "the converse-settle step gives the stand-down's command, with the conversation as its evidence"
 skill_has converse-settle 'Stand the subject down first' "the converse-settle step stands the subject down before the sign-off"
 skill_has converse-settle 'add `--leave <gate>` for that gate unless the ruling settles the other bead too' "the converse-settle step keeps a gate's other bead waiting through the sign-off"
 # mol-polecat-work's step scripts file their gates through decline.sh, which ends

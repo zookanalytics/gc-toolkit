@@ -28,6 +28,11 @@ when the stay would come back after the merge:
 | New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
 | Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
 
+A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+stands, such as a person's words, a ruling or a run's output. Write that text to
+a temp file with your file tool, not with the shell, and put the file's path
+there.
+
 ## Record
 
 Append the outcome to the subject's notes (the `records` skill). Notes are
@@ -112,13 +117,10 @@ lands, in one plain sentence that names no other rig or its beads.
   (`converse-stay`).
 - **Another rig's pool**: run the create as `gc bd --rig <rig> create`.
 - **An epic the ruling files**: create it with the `work` skill's epic create,
-  then append a note that says whose words each field is, with theirs in the
-  quoted here-document as they said them:
+  then append a note that says whose words each field is, with theirs written
+  to a temp file with your file tool as they said them:
 ```bash
-gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: $(cat <<'STATED'
-<each field they stated or approved, quoting their words, or none>
-STATED
-)."
+gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: $(cat "<the file holding each field they stated or approved, quoting their words, or none>")."
 ```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
@@ -219,10 +221,7 @@ Then take the case that fits the ruling:
   0. Without that line, answer nothing:
 
 ```bash
-WHY=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)
+WHY=$(cat "<the file holding the ruling, one line>")
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
@@ -247,18 +246,15 @@ ROW=$(gc bd show "$SUBJECT" --json) \
 
 That comment lists the ruling and each act recorded on the conversation, so
 keep other rigs and their beads out of both. When the sign-off exits non-zero,
-it stopped short, and you must NOT post the sign-off. The ruling goes in its
-quoted here-document as written, so a double quote, a backtick or a `$` in it
-reaches the writer unchanged. A re-run with the same `--ruling` is safe,
+it stopped short, and you must NOT post the sign-off. The ruling goes to a
+temp file you write with your file tool, so a double quote, a backtick or a `$`
+in it reaches the writer unchanged. A re-run with the same `--ruling` is safe,
 because the writer keys what it recorded to that ruling.
 The writer refuses, with nothing written, the one re-run it cannot make safe: a
 rework that an earlier attempt may have filed and never recorded (below):
 
 ```bash
-RULING=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)
+RULING=$(cat "<the file holding the ruling, one line>")
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "<outcome> — <what this sitting settled or needs next, at most 140 characters, or 95 when the ruling leaves an open PR standing>" \
      --ruled yes --ruling "$RULING" --no-wait
@@ -335,13 +331,10 @@ Take the case that fits the ruling:
   epic's member asks about the member's recommendation, which this case does
   not take.
 - **The work will not go on, and a human gate holds the subject.** Stand the
-  subject down first, with the gate's `await_id` as the key and the ruling in
-  the quoted here-document:
+  subject down first, with the gate's `await_id` as the key and the ruling
+  written to a temp file with your file tool:
 ```bash
-"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)" --successor "$CONVERSATION"
+"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "$(cat "<the file holding the ruling, one line>")" --successor "$CONVERSATION"
 ```
   The stand-down removes the arm, ends any run beneath it, answers the gate and
   closes the subject. When it exits non-zero, repair what it printed and run it
@@ -403,10 +396,7 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
 To retire the subject's PR:
 
 ```bash
-"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)" --no-wait --retire not-needed
+"$CONV/converse-signoff.sh" --conversation "$CONVERSATION" --outcome "<headline>" --ruled yes --ruling "$(cat "<the file holding the ruling, one line>")" --no-wait --retire not-needed
 ```
 
 Given none of the three, the sign-off refuses and writes nothing, because a

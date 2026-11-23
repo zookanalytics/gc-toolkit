@@ -593,12 +593,10 @@ gc runtime drain-ack                    # end this one-shot session
 ```
 
 Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
-witness as `HELP`, with what the exit or the check printed in the quoted
-here-document as it printed it; everything else is a nudge or a bead note:
+witness as `HELP`, with what the exit or the check printed written to a temp
+file with your file tool as it printed it; everything else is a nudge or a bead
+note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: $(cat <<'OUTPUT'
-<the raw message the exit or the check printed>
-OUTPUT
-). Need: <what unblocks it>."
+gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: $(cat "<the file holding the raw message the exit or the check printed>"). Need: <what unblocks it>."
 ```

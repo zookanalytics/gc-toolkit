@@ -601,14 +601,17 @@ A `refused` line is a note that changed since it was read: it stays, due again.
 
 A contested rule is a human gate on its pattern bead under the key
 `distiller-contention`: the pattern's rule waits on the operator's ruling.
+Write the gate's message to a temp file with your file tool, the adopted rule
+quoted as it stands:
+```text
+Contested rule: <rule summary>
+<the adopted rule, quoted, with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>
+```
+Then file the gate:
 ```bash
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -x "$SCRIPTS/human-gate.sh" ] || SCRIPTS=""
 "${SCRIPTS:?human-gate.sh not found in the pack}/human-gate.sh" --subject "$PATTERN" --key distiller-contention \
-  --message "$(cat <<'MESSAGE'
-Contested rule: <rule summary>
-<the adopted rule, quoted, with its anchor + original provenance, versus the new contradicting evidence; likely outcomes scope-narrowing / retirement / dismissal — the operator picks>
-MESSAGE
-)" >/dev/null \
+  --message "$(cat "<the file holding the message>")" >/dev/null \
   || { echo "human-gate.sh filed no gate on $PATTERN — stop, address what it reported, and re-run this block" >&2; exit 1; }
 ```
 

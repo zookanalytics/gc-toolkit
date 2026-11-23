@@ -8,6 +8,11 @@ description: Converse's stay, which keeps a sitting until the work it sent retur
 Each call starts a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT`
 literally, from the entry's output, at the top of every call below.
 
+A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+stands, such as a person's words, a ruling or a run's output. Write that text to
+a temp file with your file tool, not with the shell, and put the file's path
+there.
+
 ## Stay
 
 Stay only once the operator has agreed to it, after you have told them when the
@@ -45,10 +50,7 @@ as an epic or the anchor of a PR, where it refuses the brief and names the
 case. When the call exits non-zero, it stopped short, and you have not stayed:
 
 ```bash
-RULING=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-)
+RULING=$(cat "<the file holding the ruling, one line>")
 if "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
      --outcome "staying — <what this conversation waits for, at most 140 characters>" \
      --ruled yes --ruling "$RULING" --waiting-on <the work> \

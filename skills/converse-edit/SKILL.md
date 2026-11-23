@@ -14,6 +14,11 @@ a fresh shell, so set `CONV`, `CONVERSATION` and `SUBJECT` literally, from the
 entry's output, at the top of every call below, and `CHANGE` and `TREE`, with
 `PR` and `BRANCH` for an open PR, too once the calls below have printed them.
 
+A block that reads `"$(cat "<the file holding …>")"` takes text you copy as it
+stands, such as a person's words, a ruling or a run's output. Write that text to
+a temp file with your file tool, not with the shell, and put the file's path
+there.
+
 ## The line
 
 You change a repository only when the operator rules, in this sitting, that you
@@ -73,18 +78,15 @@ go as this section ends.
 conversation holds the PR's merge while the conversation is open. Every
 conversation on an open PR carries that edge, and bd takes an edge it holds
 already as a no-op, so add it whatever stands. Then prove that you hold the PR,
-and record the ruling on the bead. Their words go in the quoted here-document as
-they said them, where a double quote, a backtick or a `$` among them cannot end
-the note or run:
+and record the ruling on the bead. Write their words to a temp file with your
+file tool as they said them, where a double quote, a backtick or a `$` among
+them cannot end the note or run:
 
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-WORDS=$(cat <<'WORDS'
-<their words>
-WORDS
-) \
+WORDS=$(cat "<the file holding their words>") \
   && gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
   && "$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check \
   && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"$WORDS\""
@@ -229,10 +231,7 @@ once the one before it has landed. Add `--parent "$SUBJECT"` to the create when
 the subject is an epic:
 
 ```bash
-WORDS=$(cat <<'WORDS'
-<their words>
-WORDS
-) \
+WORDS=$(cat "<the file holding their words>") \
   && CHANGE=$(gc bd create "<what the change does>" -t task --metadata '{"target":"<the target>"}' \
     -d "Made with the operator in conversation $CONVERSATION, on their ruling of $(date -u +%Y-%m-%d): \"$WORDS\"
 Scope: <what the change covers>" --json | jq -er '.id') \
@@ -310,10 +309,7 @@ hold, and append this sitting's ruling to the change, which as the subject also
 takes your outcome record:
 
 ```bash
-WORDS=$(cat <<'WORDS'
-<their words>
-WORDS
-) \
+WORDS=$(cat "<the file holding their words>") \
   && gc bd dep add "$SUBJECT" "$CONVERSATION" --type=blocks \
   && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): resumed in conversation $CONVERSATION on the operator's ruling: \"$WORDS\". <what is left to do>" \
   && echo "held and recorded"
@@ -570,10 +566,7 @@ own edge onto the conversation:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-RULING=$(cat <<'RULING'
-<the operator's ruling, one sentence>
-RULING
-) \
+RULING=$(cat "<the file holding the operator's ruling, one sentence>") \
   && "$GCTK" bead disarm <the subject that waits on it> --reason "the operator dropped $CHANGE in conversation $CONVERSATION" \
   && gc bd update "$CHANGE" --set-metadata gc.work_outcome=no-op \
   && "$CONV/bead-rehome.sh" --origin "$CHANGE" --successor "$CONVERSATION" --kind not-needed --note "$RULING"
@@ -643,14 +636,8 @@ as the one edge you wrote, so the subject carries one close brief and one
 closer's arm. The converse-settle step carries the rest of the call:
 
 ```bash
-RULING=$(cat <<'RULING'
-<the ruling, one line>
-RULING
-) \
-  && BRIEF=$(cat <<'BRIEF'
-<the brief's own text, as you wrote it at filing>
-BRIEF
-) \
+RULING=$(cat "<the file holding the ruling, one line>") \
+  && BRIEF=$(cat "<the file holding the brief's own text, as you wrote it at filing>") \
   && "$CONV/converse-signoff.sh" --conversation "$CONVERSATION" \
     --outcome "<what this sitting settled or needs next, at most 140 characters>" \
     --ruled yes --ruling "$RULING" \

@@ -70,14 +70,11 @@ proposal.
 
 ## Set
 
-Use the operator's text verbatim, in the quoted here-document, where a double
-quote, a backtick or a `$` in it cannot end the title or run:
+Write the operator's text verbatim to a temp file with your file tool, where a
+double quote, a backtick or a `$` in it cannot end the title or run:
 
 ```bash
-gc session rename "$GC_SESSION_ID" "$(cat <<'TITLE'
-<the operator's text, verbatim>
-TITLE
-)"
+gc session rename "$GC_SESSION_ID" "$(cat "<the file holding the operator's text, verbatim>")"
 ```
 
 Don't add quotes, prefixes, or status decoration. Don't truncate —

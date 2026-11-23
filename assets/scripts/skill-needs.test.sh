@@ -349,6 +349,9 @@ CMD="$ROOT/commands/scripts-dir/run.sh"
 [ -x "$CMD" ] && ok "commands/scripts-dir/run.sh is an executable pack command" \
     || bad "commands/scripts-dir/run.sh is an executable pack command" "missing or not executable: $CMD"
 mkdir -p "$TMP/away" "$TMP/no-scripts"
+# The blocks run from here. A block that reads a file of copied text reads x once
+# its placeholders are filled with x, so x is a file that holds x.
+printf 'x\n' >"$TMP/away/x"
 got=$(cd "$TMP/away" && env -u GC_PACK_DIR GC_PACK_DIR="$ROOT" "$CMD" 2>/dev/null)
 [ "$got" = "$ROOT/assets/scripts" ] && ok "it prints GC_PACK_DIR's assets/scripts" \
     || bad "it prints GC_PACK_DIR's assets/scripts" "printed '$got'"
@@ -529,7 +532,7 @@ have "the settle step gives the arm it names" '"$GCTK" bead arm <follow-up>' "$S
 have "…once the follow-up and the blocker carry one id prefix" '[ "$(echo <follow-up> | cut -d- -f1)" = "$(echo <blocker> | cut -d- -f1)" ]' "$SETTLE"
 have "…and holds a follow-up on another rig's bead with a human gate in its own store" 'human-gate.sh" --subject <follow-up>' "$SETTLE"
 have "the settle skill gives the disposal writer's call" 'bead-rehome.sh" --origin "$SUBJECT"' "$SETTLE"
-RETIRE_CALL='--ruled yes --ruling "$(cat <<'"'"'RULING'"'"' <the ruling, one line> RULING )" --no-wait --retire not-needed'
+RETIRE_CALL='--ruled yes --ruling "$(cat "<the file holding the ruling, one line>")" --no-wait --retire not-needed'
 have "the settle skill gives the retire call, through the sign-off" "$RETIRE_CALL" "$TMP/settle-squeezed"
 tr -s '[:space:]' ' ' <"$PRS_SKILL" >"$TMP/prs-squeezed"
 have "…as the prs skill does" "$RETIRE_CALL" "$TMP/prs-squeezed"
@@ -793,6 +796,18 @@ fenced_block() {
             buf = buf l "\n"
             if (index($0, m)) hit = 1
         }
+    ' "$1"
+}
+# fenced_text <file> <marker> — the first fenced text block in <file> that holds
+# <marker>, such as a template an agent writes to a file before its block reads it.
+fenced_text() {
+    awk -v m="$2" '
+        /^[ \t]*```/ {
+            if (inb) { if (hit) { printf "%s", buf; exit } inb = 0; buf = ""; hit = 0 }
+            else if ($0 ~ /```text[ \t]*$/) inb = 1
+            next
+        }
+        inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }
     ' "$1"
 }
 # The dispatch fragment renders into the keeper's prompt. The keeper comes from
@@ -1190,7 +1205,10 @@ have "the ruling line names the block the worker starts from" 'to the scaffold i
 have "…and the sign-off files the rework" '--no-wait --rework' "$ITERATE"
 have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
 have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
-fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
+fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' \
+    | sed "s#\"<the file holding the block>\"#\"$CH/scaffold\"#" | fill_block >"$CH/block"
+fenced_text "$ITERATE" 'Open questions: none' | sed 's#<[^>]*>#x#g' >"$CH/scaffold"
+sed 's/^x$/the `echo ran` and $HOME stay as written/' "$CH/scaffold" >"$CH/literal-scaffold"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -1209,7 +1227,7 @@ for sh_ in $shells; do
     else
         bad "($sh_) converse-iterate-document: the block leaves the worker the words, and a section it does not name as it is" "exit $rc, notes: $(head -c 400 "$CH/notes")"
     fi
-    sed 's/^x$/the `echo ran` and $HOME stay as written/' "$CH/block" >"$CH/literal-block"
+    sed "s#$CH/scaffold#$CH/literal-scaffold#" "$CH/block" >"$CH/literal-block"
     rc=$(run_chain "$run" "$CH/literal-block")
     if [ "$rc" -eq 0 ] && grep -qxF 'the `echo ran` and $HOME stay as written' "$CH/notes"; then
         ok "($sh_) converse-iterate-document: what the block quotes stays as written"
@@ -1874,9 +1892,9 @@ have "the answers before the closes are the landed Deliveries' gates" \
 have "…and a gate on waiting work is the sign-off's, once every write has landed" \
     'A gate on work that waits for a judgment takes no call here, because its answer sends that work on. The sign-off answers it once every write below has landed' "$EPIC_REVIEW_JOINED"
 have "a close stands down waiting work it retires, which disarms it before the answer" \
-    '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat <<'"'"'RULING'"'"' <the ruling, one sentence> RULING )" --successor "$CONVERSATION"' "$EPIC_REVIEW_JOINED"
+    '"$CONV/stand-down.sh" <bead> --key <situation-key> --ruling "$(cat "<the file holding the ruling, one sentence>")" --successor "$CONVERSATION"' "$EPIC_REVIEW"
 have "…and releases waiting work it re-homes into another store, a release that disarms it first, before its gate is answered" \
-    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "$(cat <<'"'"'RULING'"'"' <the ruling, one sentence> RULING )" --release --no-wait' "$EPIC_REVIEW_JOINED"
+    'GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "$(cat "<the file holding the ruling, one sentence>")" --release --no-wait' "$EPIC_REVIEW"
 have "…then answers that gate on its own call and runs the writer last" \
     'then answer its gate on a call of its own, as write 2 answers one, and run the writer last' "$EPIC_REVIEW_JOINED"
 have "each gate on a PR's anchor is answered on a call of its own, under that PR's own ruling" \

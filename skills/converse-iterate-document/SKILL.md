@@ -116,13 +116,11 @@ operator would want to make. Read each line that way:
 The block goes on the subject. When the PR's anchor is another bead, it goes on
 that anchor instead, because the rework's reviewers read it there, so use that
 bead's id in place of `$SUBJECT` and name that bead in the subject's record,
-because the next sitting primes from the subject. The first lines below are the
-worker's rules, so keep them as they stand:
+because the next sitting primes from the subject. Write the block to a temp
+file with your file tool, its words marked exact as they were settled. Its first
+lines after the ruling are the worker's rules, so keep them as they stand:
 
-```bash
-TODAY=$(date -u +%Y-%m-%d) \
-  && SCAFFOLD="## Current state ($TODAY)
-$(cat <<'BLOCK'
+```text
 <what the operator ruled and where the document stands, in a sentence or two>
 
 This block is the rework's scaffold: decisions, not questions, settled against <the files> at <the commit>.
@@ -144,8 +142,14 @@ OTHER FILES: <each other file the decisions reach, with the same verbs, and what
 VERIFY: <each fact nobody has settled, where to read it, and where the document states it>
 
 Open questions: none
-BLOCK
-)" \
+```
+
+Then write it:
+
+```bash
+TODAY=$(date -u +%Y-%m-%d) \
+  && SCAFFOLD="## Current state ($TODAY)
+$(cat "<the file holding the block>")" \
   && gc bd update "$SUBJECT" --append-notes "$SCAFFOLD" \
   && echo "the scaffold is written, dated $TODAY"
 ```
