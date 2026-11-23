@@ -546,7 +546,7 @@ Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 that field for an agent the table does not name.
 
 The binding is the key the city imports the pack under, so no pack text
-spells it. A formula renders `{{binding_prefix}}`, a prompt or fragment
+spells it in an agent's name. A formula renders `{{binding_prefix}}`, a prompt or fragment
 `{{ .BindingPrefix }}`, a skill writes `<binding>` for the agent to fill in,
 and an order names its pool bare (`pool = "polecat"`), which Gas City qualifies
 with the rig and the binding of the order's own pack. A script or gctk takes
@@ -566,8 +566,10 @@ the identity that is live. It reads `gc agent list`, keeps only the
 candidates a bead in this store can be offered to (the city-scoped ones plus
 `$GC_RIG`'s), and refuses an ambiguous name rather than picking one. An
 unreadable roster is the absence of proof rather than proof of an empty city,
-so there the name comes back unchanged on exit 3 and the caller files
-unverified rather than not at all.
+so there the name comes back unchanged on exit 3, and a caller whose name
+carries its binding files unverified rather than not at all. A bare role
+carries no binding, so it addresses nobody unverified, and `pool-route.sh`
+refuses it there.
 
 The witness resolves the identity of the rig-scoped refinery before it reads
 the refinery's queue. Its recipe is the `refinery-stuck-handoff` block in

@@ -39,12 +39,13 @@ a qualifier the identity does not (`<rig>/<binding>.deacon`), or a bare role
 roster supplies.
 
 Route to what it prints, and file nothing when it prints nothing:
-  ROUTE=$(resolve-route.sh polecat) || true
+  ROUTE=$(resolve-route.sh <binding>.polecat) || true
   [ -n "$ROUTE" ] && gc sling "$ROUTE" <bead>
 
 `|| true`, not `|| ROUTE=""`: only a refusal prints nothing, and an
 unverified name arrives on stdout with a non-zero status that the second
-form would throw away.
+form would throw away. A bare role carries no binding, so its unverified
+echo addresses nobody: route a bare role only on exit 0.
 
 Refuses rather than guesses when a name resolves to several live identities;
 name the one you mean. Exit 3 means the roster could not be read: <name> comes
