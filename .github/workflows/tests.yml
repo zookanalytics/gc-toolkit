@@ -30,8 +30,9 @@ name: tests
 # own skipped at a ready head would hold that pull request's merge.
 # Each job that runs the suite keeps each run's seconds, in its job summary and
 # as the artifact suite-times-<job>, whether the suite passed or failed.
-# pr-size.yml reads them when this workflow completes, for the size comment's
-# section on the suite's time (suite-time.sh). They fail no check.
+# pr-size.yml reads them when a pull request's run of this workflow ends in
+# success or failure, for the size comment's section on the suite's time
+# (suite-time.sh). They fail no check.
 
 on:
   pull_request:

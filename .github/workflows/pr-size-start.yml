@@ -1,0 +1,37 @@
+name: pr-size-start
+
+# Starts pr-size.yml, which keeps each pull request's size comment current.
+# This runs when a pull request into any branch is opened, reopened or pushed
+# to, and when an edit changes the branch it merges into. The end of each run
+# starts pr-size.yml through its workflow_run trigger, as the default branch
+# carries it, and that run measures the pull request when this run's job
+# succeeded.
+#
+# pull_request runs this file as the pull request's merge commit carries it, so
+# the job holds no permissions, checks out nothing and runs nothing from the
+# pull request. A pull request that breaks or removes this file stops its own
+# size updates, and its comment stays at the head it last measured. GitHub runs
+# no pull_request workflow while a pull request has a merge conflict, so the
+# comment waits until the conflict is resolved.
+
+on:
+  pull_request:
+    # Specifying types replaces GitHub's default set, so opened, synchronize and
+    # reopened are kept explicitly. GitHub reports a change of the branch a pull
+    # request merges into as edited, and that change moves the merge base the
+    # size is counted from.
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+jobs:
+  start:
+    name: Start the size check
+    # An edit of the title or body skips the job, and pr-size.yml measures
+    # nothing when a run ends skipped. The city edits both often.
+    if: github.event.action != 'edited' || github.event.changes.base
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Hand the pull request to pr-size.yml
+        run: echo "This run's end starts pr-size.yml, which measures the pull request and updates its size comment."
