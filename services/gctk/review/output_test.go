@@ -345,14 +345,15 @@ func (w *world) question(id, key, status string, holds bool) {
 // A ruling of an ask names the gate of a question the ask's post settles, an
 // open human gate under a question's key that holds the bead that owns the PR,
 // with moot when the post makes the question moot. Moot with no gate, a
-// finding's ruling or a question's that settles a gate, two rulings that
-// settle one, a gate the round also puts a question to, and a gate that is
-// closed, keyed as no question, missing or not holding the bead are refused.
+// finding's ruling or a question's that settles a gate, an ask that carries no
+// person's post, two rulings that settle one, a gate the round also puts a
+// question to, and a gate that is closed, keyed as no question, missing or not
+// holding the bead are refused.
 func TestARulingThatSettlesAQuestion(t *testing.T) {
 	setup := func() (*world, string) {
 		w := newWorld(t)
-		w.ask("tk-ask", "")
-		w.ask("tk-ask2", "")
+		w.postAsk("tk-ask", "Conversation comment", "issuecomment-5", "2026-11-12T03:00:00Z")
+		w.postAsk("tk-ask2", "Inline comment", "discussion_r260", "2026-11-12T03:00:00Z")
 		w.output(triage(1, h1))
 		w.question("tk-q1", review.QuestionKey+"scope", "open", true)
 		return w, w.step(1, "rule-and-repair")
@@ -377,6 +378,8 @@ func TestARulingThatSettlesAQuestion(t *testing.T) {
 	}{
 		{"moot with no gate", []review.Ruling{{Ask: "tk-ask", Ruling: review.RulingAnswered, Reason: "r", Moot: true}, other},
 			nil, "names no gate"},
+		{"an ask that carries no person's post", []review.Ruling{settles("tk-ask3", "tk-q1", false), other},
+			func(w *world) { w.ask("tk-ask3", "") }, "tk-ask3 settles the question at tk-q1, and it carries no person's post"},
 		{"a question that settles a gate", []review.Ruling{{Ask: "tk-ask", Ruling: review.RulingQuestion, Reason: "r",
 			Gate: "tk-q9", Settles: "tk-q1"}, other}, nil, "a question settles none"},
 		{"two rulings that settle one gate", []review.Ruling{settles("tk-ask", "tk-q1", false),

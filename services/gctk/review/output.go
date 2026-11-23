@@ -350,7 +350,9 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 // repairOutput checks rule-and-repair's output: a ruling for every finding a
 // lane raised and every ask the round can take that triage did not answer,
 // each standing by checkRuling, and none for an ask triage answered, whose
-// answer the round already posted.
+// answer the round already posted. A wordless answer and a ruling that settles
+// a question each rule an ask that carries a person's post on the PR, since
+// the city's 👍 goes on that post and the question is answered with it.
 func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error) {
 	run, n := st.Run, st.Iteration
 	var rp Repair
@@ -386,13 +388,20 @@ func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error
 			return nil, refuse("%s is ruled twice", r.Subject())
 		}
 		subjects[r.subject()] = true
-		if r.Wordless {
+		settles := r.Ask != "" && strings.TrimSpace(r.Settles) != ""
+		if r.Wordless || settles {
 			if req.Post == nil {
-				return nil, errors.New("no reader of the posts an ask names was given, so a wordless answer cannot be checked")
+				return nil, errors.New("no reader of the posts an ask names was given, so a wordless answer or a " +
+					"settled question cannot be checked")
 			}
 			i := slices.IndexFunc(asks, func(a Ask) bool { return a.ID == r.Ask })
-			if req.Post(asks[i].Reason, st.PR()) == "" {
+			switch {
+			case req.Post(asks[i].Reason, st.PR()) != "":
+			case r.Wordless:
 				return nil, refuse("%s is answered wordless, and it carries no person's post on the PR for the city's 👍", r.Subject())
+			default:
+				return nil, refuse("%s settles the question at %s, and it carries no person's post on the PR to answer "+
+					"the question with", r.Subject(), r.Settles)
 			}
 		}
 	}
