@@ -210,8 +210,11 @@ FAILLOG
 ```
 Give `--target <repo-relative path>` for a failure with no test function, or
 `--lint <linter> <repo-relative path>` for a lint finding, in place of
-`--test`. Exit 0 prints the tracker. Exit 1 means no tracker was found or
-filed, and the bead does not land: end the session with
+`--test`. Exit 0 prints the tracker. Exit 1 means the bead does not land, and
+the output says why. When it names the bead itself or its anchor as the
+failure's tracker, the bead was sent to fix that failure and it still fails:
+send the work back as branch-caused, with that failure as the reason.
+Otherwise no tracker was found or filed: end the session with
 `gc runtime drain-ack`.
 
 **GATE**: no landing unless every check passed or every failure is tracked."""

@@ -16,6 +16,11 @@
 # stdin: the check, where it ran, and its raw output. The filing sends it to
 # the rig's polecat pool to be fixed (preexisting-failure.sh).
 #
+# A tracker that is the bead itself, or the anchor it lands for, carries the
+# failure the bead was sent to fix. That failure being red on the target too
+# is no exemption, so nothing is marked and nothing lands, and the refinery
+# sends the work back as a failure its branch caused.
+#
 # The bead must be assigned to this refinery ($GC_AGENT), and the refinery's
 # tree for it must hold its branch (refinery-lib.sh). The tracker is then
 # marked on the bead whose PR a review reads at the prepared head
@@ -25,7 +30,8 @@
 #
 # stdout: the tracker's id.
 # Exit: 0 the failure is tracked, so the landing goes ahead · 1 no tracker was
-#       found or filed, so nothing lands; the output says why · 2 usage
+#       found or filed, or the tracker is the bead or its anchor, so nothing
+#       lands; the output says why · 2 usage
 set -uo pipefail
 
 PROG="refinery-pre-existing"
@@ -84,7 +90,19 @@ $LOG") || stop "no tracker was filed for $KEY"
   echo "$PROG: $KEY is tracked as $TRACKER, filed now" >&2
 fi
 
-MARKED_ON=$(bead_meta anchor_bead)
+ANCHOR=$(bead_meta anchor_bead)
+OWN=""
+if [ "$TRACKER" = "$BEAD" ]; then
+  OWN="$BEAD itself"
+elif [ -n "$ANCHOR" ] && [ "$TRACKER" = "$ANCHOR" ]; then
+  OWN="the anchor $BEAD lands for"
+fi
+if [ -n "$OWN" ]; then
+  echo "$PROG: $KEY is tracked by $TRACKER, which is $OWN, so $BEAD was sent to fix that failure, and it still fails at the merged head. Nothing is marked, and $BEAD does not land: send it back as a failure its branch caused" >&2
+  exit 1
+fi
+
+MARKED_ON="$ANCHOR"
 [ -n "$MARKED_ON" ] || MARKED_ON="$BEAD"
 "$HERE/rig-check-pre-existing.sh" --bead "$MARKED_ON" --check "$CHECK" --commit "$PREP_HEAD" --worktree "$PREP_TREE" --trackers "$TRACKER" >&2 \
   || echo "$PROG: the mark on $MARKED_ON did not land; the landing goes on, and a review at $PREP_HEAD runs the suite itself" >&2
