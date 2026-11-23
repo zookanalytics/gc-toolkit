@@ -271,9 +271,10 @@ gc session reset "$GC_SESSION_ID"
 ```
 The fresh session adopts the new wisp at startup and begins it. A pass begun
 in this session can be cut short: the refinery runs `wake_mode = "fresh"`, and
-Gas City restarts such a session when the work assigned to it changes while it
-holds no claim in progress, as after the rotation. When the reset fails, end
-the session with `gc runtime drain-ack` instead.
+Gas City restarts its session once the bead it records as the session's work
+is gone, or was closed while the session was awake, and other work is assigned
+to it. That bead is often the wisp this step has just burned. When the reset
+fails, end the session with `gc runtime drain-ack` instead.
 
 Exit 1: the next wisp is not in place and this one is kept; end the session
 with `gc runtime drain-ack`, and the startup reconcile takes it up."""
