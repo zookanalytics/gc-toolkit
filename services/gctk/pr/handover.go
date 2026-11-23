@@ -21,10 +21,10 @@ import (
 // once no open withdrawal and no attached review run holds the head. A bead a
 // run is attached to stays assigned to nobody, since Gas City retires a
 // workflow at its next claim once its input bead is assigned to an agent
-// outside it (workflowInputMembersSettled). A half-written record goes to the
-// refinery for its full validation in the write that sends the record back
-// (revalidate). The refinery can take the
-// bead at its next find-work once nothing holds it but merge holds: a
+// outside it (workflowInputMembersSettled). A half-written record is sent back
+// for its full validation, and it too goes to the refinery in the write that
+// assigns the bead to it and clears the marker (revalidate). The refinery can
+// take the bead at its next find-work once nothing holds it but merge holds: a
 // conversation on the PR, or an ask on it, each of which holds the PR's merge
 // and not the refinery's take of the head (refinery-find-work.sh). An
 // assignment alone gives a running refinery no turn: an open bead assigned to
@@ -153,8 +153,9 @@ func (u *run) settle(s state, action, detail string) RunOutcome {
 	}
 }
 
-// handOverLater leaves the marker of a changed head the run could not hand
-// over and writes nothing, so the next run finds the head and hands it over.
+// handOverLater leaves the marker on a bead whose changed head or half-written
+// record the run could not hand over, and writes nothing, so the next run finds
+// the marker and hands the bead over.
 func (u *run) handOverLater(s state, detail, why string) RunOutcome {
 	return RunOutcome{Bead: s.id, Action: ActRetry, Detail: detail + "; " + why}
 }
