@@ -25,11 +25,14 @@
 #     the agent comes from, here taken as the pack the file sits in, so a
 #     sub-pack's text reaches the sub-pack's own scripts.
 #
-# A path a form reaches that ends in .sh is a pack script. The pack must ship
-# it, and ship it executable unless the text sources it (. or source) or only
-# tests that it is there to read (-r, -f or -e), as a library's callers do. A
-# placeholder such as <writer> names no script, and a path that is not a
-# script, such as a fragment a skill reads through $CONV, is outside the check.
+# A path a form reaches is a pack script when it ends in .sh or sits directly
+# in a pack's assets/scripts, and the pack must ship it. A .sh must also be
+# executable, unless the text sources it (. or source) or only tests that it is
+# there to read (-r, -f or -e), as a library's callers do. Another name can be
+# data the text reads, so it need only ship. A name the text completes with a
+# placeholder, a variable or a glob, such as <writer> or review-<check>.sh,
+# names no script, and a path that is not a script, such as a fragment a skill
+# reads through $CONV, is outside the check.
 #
 # Hermetic: reads the repo, and builds fixture packs in a temporary directory.
 #
@@ -74,6 +77,7 @@ pack_text() {
 # binding still resolves, and the second prints one line for each pack script
 # a call form reaches:
 #   <file>:<line> TAB <the call as written> TAB <the script's path> TAB <run|read>
+# where run marks a .sh the text runs.
 SCAN=$(
     cat <<'AWK'
 function norm(p,    n, a, i, k, out) {
@@ -141,10 +145,14 @@ pass == 1 {
         path = substr(m, RLENGTH + 1)
         sub("^\"?/", "", path)
         sub(/[.]+$/, "", path)
-        if (path !~ /[.]sh$/) continue
-        use = "run"
-        if ((" " before) ~ /[^A-Za-z0-9_.]([.]|source)[ \t]+"?$/ || before ~ /-[rfe][ \t]+"?$/) use = "read"
-        printf "%s:%d\t%s\t%s\t%s\n", FILENAME, FNR, m, norm(base "/" path), use
+        c = substr(rest, 1, 1)
+        if (c != "" && index("<{*?[$", c)) continue
+        script = norm(base "/" path)
+        sh = (script ~ /[.]sh$/)
+        if (!sh && script !~ "^(packs/[^/]+/)?assets/scripts/[^/]+$") continue
+        use = "read"
+        if (sh && (" " before) !~ /[^A-Za-z0-9_.]([.]|source)[ \t]+"?$/ && before !~ /-[rfe][ \t]+"?$/) use = "run"
+        printf "%s:%d\t%s\t%s\t%s\n", FILENAME, FNR, m, script, use
     }
 }
 AWK
@@ -166,7 +174,7 @@ unshipped() {
         case "$script" in
             ../*) printf '%s: %s reaches %s, outside the pack\n' "$where" "$call" "$script" ;;
             *)
-                if [ ! -f "$1/$script" ]; then
+                if [ ! -e "$1/$script" ]; then
                     printf '%s: %s reaches %s, which the pack does not ship\n' "$where" "$call" "$script"
                 elif [ "$use" = run ] && [ ! -x "$1/$script" ]; then
                     printf '%s: %s runs %s, which is not executable\n' "$where" "$call" "$script"
@@ -191,6 +199,7 @@ for s in assets/scripts/a.sh tools/t.sh packs/sub/assets/scripts/s.sh; do
     chmod +x "$FX/$s"
 done
 printf 'lib_fn() { :; }\n' >"$FX/assets/scripts/lib.sh"
+printf '{}\n' >"$FX/assets/scripts/data.json"
 printf '[pack]\nname = "sub"\nschema = 2\n' >"$FX/packs/sub/pack.toml"
 cat >"$FX/formulas/formula.toml" <<'EOF'
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/ROOT_SH" --step x
@@ -231,15 +240,18 @@ EOF
 cat >"$FX/packs/sub/template-fragments/shared.template.md" <<'EOF'
 "$(gc <binding> scripts-dir)/ROOT_SH" <bead>
 EOF
-# A library its callers source or test for reading, which ships without the
-# executable bit, and text that names no script through a call form.
+# A library its callers source or test for reading and data a skill reads,
+# which ship without the executable bit, and text that names no script through
+# a call form.
 cat >"$FX/skills/library/SKILL.md" <<'EOF'
 . "$(gc <binding> scripts-dir)/lib.sh" && lib_fn
 SCRIPTS=$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir) && [ -r "$SCRIPTS/lib.sh" ] || SCRIPTS=""
 ( . "$SCRIPTS/lib.sh"; lib_fn )
+cat "$(gc <binding> scripts-dir)/data.json"
 EOF
 cat >"$FX/skills/none/SKILL.md" <<'EOF'
 Every writer is "$(gc <binding> scripts-dir)/<writer>".
+"$(gc <binding> scripts-dir)/review-<check>.sh" --bead <bead>
 cat "$CONV"/../../template-fragments/x.template.md
 "$GC_CITY_PATH/rigs/x/assets/scripts/x.sh"
 EOF
@@ -282,11 +294,11 @@ $(printf '%s\n' "$SHIPPED" | awk -F'\t' -v f="$file" 'index($1, f ":") == 1')"
     fi
 done <<<"$FORM_ROWS"
 got=$(unshipped "$TMP/shipped")
-[ -z "$got" ] && ok "a pack that ships every script its text calls passes, the library its callers source included" \
-    || bad "a pack that ships every script its text calls passes, the library its callers source included" "$got"
+[ -z "$got" ] && ok "a pack that ships every script its text calls passes, the library its callers source and the data a skill reads included" \
+    || bad "a pack that ships every script its text calls passes, the library its callers source and the data a skill reads included" "$got"
 got=$(printf '%s\n' "$SHIPPED" | awk -F'\t' 'index($1, "skills/none/SKILL.md:") == 1')
-[ -z "$got" ] && ok "a placeholder, a path that is not a script and a variable bound to no scripts-dir resolution name no script" \
-    || bad "a placeholder, a path that is not a script and a variable bound to no scripts-dir resolution name no script" "$got"
+[ -z "$got" ] && ok "a placeholder, a name with a placeholder in it, a path that is not a script and a variable bound to no scripts-dir resolution name no script" \
+    || bad "a placeholder, a name with a placeholder in it, a path that is not a script and a variable bound to no scripts-dir resolution name no script" "$got"
 
 instance "$TMP/gone" gone.sh gone.sh gone.sh
 GONE=$(unshipped "$TMP/gone")
@@ -307,6 +319,16 @@ got=$(unshipped "$TMP/shipped")
 case "$got" in
     "skills/library/SKILL.md:1: "*" runs assets/scripts/lib.sh, which is not executable") ok "the check fails text that runs a script the pack ships without the executable bit" ;;
     *) bad "the check fails text that runs a script the pack ships without the executable bit" "the check printed: ${got:-nothing}" ;;
+esac
+
+instance "$TMP/bare" a.sh t.sh s.sh
+cat >"$TMP/bare/formulas/bare.toml" <<'EOF'
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/a" --step x
+EOF
+got=$(unshipped "$TMP/bare")
+case "$got" in
+    "formulas/bare.toml:1: "*" reaches assets/scripts/a, which the pack does not ship") ok "the check fails a call to a name without .sh that the scripts directory does not hold" ;;
+    *) bad "the check fails a call to a name without .sh that the scripts directory does not hold" "the check printed: ${got:-nothing}" ;;
 esac
 
 echo "── every script the pack's text calls ships ──"
