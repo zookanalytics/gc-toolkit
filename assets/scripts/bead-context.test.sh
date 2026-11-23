@@ -188,6 +188,37 @@ for i in 11 10 09 08 07 06 05 04 03 02 01 00; do
   edge "tk-hw-$i" blocks tk-hub
 done
 
+# tk-xlinks: links into otherrig's store, which a show leaves out and only the
+# list row carries. Its parent is or-xparent, written as the parent-child edge
+# alone, since bd's show names no parent it cannot read. Two of its relates
+# edges are there too, one in each spelling: or-xfar, a gate that store holds,
+# which a listing hides unless asked, and or-xgone, which it does not hold. Its
+# third, tk-xnear, is in its own store.
+bead tk-xlinks <<'J'
+{"id":"tk-xlinks","title":"links into another store","status":"open","issue_type":"task","metadata":{}}
+J
+edge tk-xlinks parent-child or-xparent
+edge tk-xlinks related tk-xnear
+edge tk-xlinks relates-to or-xfar
+edge tk-xlinks related or-xgone
+bead tk-xnear <<'J'
+{"id":"tk-xnear","title":"related work here","status":"open","issue_type":"task","metadata":{}}
+J
+bead or-xparent <<'J'
+{"id":"or-xparent","title":"an epic in another store","status":"open","issue_type":"epic","metadata":{}}
+J
+bead or-xfar <<'J'
+{"id":"or-xfar","title":"a gate in another store","status":"closed","closed_at":"2026-10-01T00:00:00Z","issue_type":"gate","metadata":{}}
+J
+# tk-xghost: a gate, which a listing hides unless asked, whose one link is a
+# related edge onto zz-xghost. No rig carries that prefix, and the city's store
+# holds a bead of that id, which an unpinned read would answer with.
+bead tk-xghost <<'J'
+{"id":"tk-xghost","title":"a link onto a prefix no rig carries","status":"open","issue_type":"gate","metadata":{}}
+J
+edge tk-xghost related zz-xghost
+put "$HQ/.beads" '{"id":"zz-xghost","title":"a bead of that id in the city store","status":"open","issue_type":"task","metadata":{}}'
+
 # Frontier verdict fixtures: one open unrouted blocker (stuck), one open
 # pool-routed blocker (advancing), one open human gate (stuck).
 bead tk-stuck <<'J'
@@ -744,6 +775,54 @@ hasnt "$OUT" "awaited-by" "  ... and prints no awaited-by line"
 run hq-city --db "$HQ/.beads"
 has "$OUT" "$NO_EDGES" "a bead with no edge of any class reads (none)"
 
+# Links into another store, which a show leaves out and the list row keeps. A
+# far bead is read from the store its prefix binds, with the rest of that
+# store's, for its title and status.
+: > "$STUB_GC_LOG"
+run tk-xlinks --json
+E=$(after "$J" edges)
+has "$E" '"parent":{"id":"or-xparent","title":"an epic in another store","status":"open"}' \
+  "a parent in another store, which the show row does not name, is listed with the title and status its store holds"
+has "$E" '"relates_to":[{"id":"tk-xnear","title":"related work here","status":"open"},{"id":"or-xgone","title":null,"status":null},{"id":"or-xfar","title":"a gate in another store","status":"closed"}]' \
+  "relates edges into another store, in either spelling, follow the show row's, null where that store holds no such bead"
+has "$E" '"counts":{"parent":1,"relates_to":3,' "  ... and each is counted"
+eq "$(logcount "--db $R_OR/.beads list --id or-xfar,or-xgone,or-xparent --all --brief") $(logcount 'list --id [^ ]*or-x')" "1 1" \
+  "  ... the far beads read once, together, from the store their prefix binds"
+eq "$(logcount 'list --id [^ ]*tk-xnear')" 0 "  ... and the link the show row carries is not read again"
+run tk-xlinks
+has "$OUT" "    parent      or-xparent  an epic in another store (open)" "  ... and the text view lists the parent"
+has "$OUT" "    relates-to  3: tk-xnear (open), or-xgone (?), or-xfar (closed)" \
+  "  ... and the relates edges, with ? for a status no store gave"
+
+STUB_LIST_FAIL_ON=or-xfar run tk-xlinks --json
+E=$(after "$J" edges)
+has "$E" '"parent":{"id":"or-xparent","title":null,"status":null}' \
+  "a far store that does not answer leaves the parent listed, with a null title and status"
+has "$E" '"relates_to":[{"id":"tk-xnear","title":"related work here","status":"open"},{"id":"or-xgone","title":null,"status":null},{"id":"or-xfar","title":null,"status":null}]' \
+  "  ... and the relates edges into it, while the show row's keeps its title and status"
+has "$E" '"counts":{"parent":1,"relates_to":3,' "  ... each still counted"
+STUB_LIST_FAIL_ON=or-xfar run tk-xlinks
+has "$OUT" "    parent      or-xparent   (?)" "  ... and the text view lists the parent with ? for its status"
+
+STUB_LIST_FAIL_ON=tk-xlinks run tk-xlinks --json
+E=$(after "$J" edges)
+eq "$RC $(val "$E" parent) $(json_get_ids "$E" relates_to) $(val "$(after "$E" counts)" relates_to)" "0 null tk-xnear 1" \
+  "a subject whose list row does not read keeps the links its show row carries"
+
+: > "$STUB_GC_LOG"
+run tk-xghost --json
+has "$(after "$J" edges)" '"relates_to":[{"id":"zz-xghost","title":null,"status":null}]' \
+  "a relates edge onto a prefix no rig carries is listed with a null title and status"
+eq "$(logcount 'list --id [^ ]*zz-xghost')" 0 "  ... and never read, so the city store's bead of that id does not answer for it"
+run tk-xghost
+has "$OUT" "    relates-to  1: zz-xghost (?)" "  ... the text view lists it"
+hasnt "$OUT" "$NO_EDGES" "  ... so a bead whose only link is that edge does not read as having none"
+
+: > "$STUB_GC_LOG"
+run tk-anchor --json
+eq "$(logcount 'list --id')" 1 \
+  "a bead whose only edge the show row leaves out is a blocks edge reads its own list row and no far bead"
+
 # --- B. Frontier (opt-in) ---------------------------------------------------
 # Default output carries no frontier; it is added only on --frontier. A frontier
 # run starts the gctk under test, which reads the store several times, so each
@@ -806,9 +885,6 @@ eq "$(val "$(after "$F" blockers)" open)" 0        "  ... counted as no open blo
 eq "$(json_get_strs "$F" foreign)"        zz-ghost "  ... and listed as foreign"
 
 # --- B2. The transitive walk --------------------------------------------------
-# The walk reads a row by id with --brief, which gctk's reads do not carry.
-WALKREAD='list --id [^ ]+ --all --brief'
-
 run tk-w-sub1 --frontier --json
 eq "$(val "$(after "$J" frontier)" verdict)" stuck "a routed blocker held by an orphan is stuck: the walk looks past one level"
 eq "$(blkr tk-w-routed)" "stuck tk-w-orphan unrouted" "  ... and stuck_on names the orphan beneath it, unrouted"
@@ -891,7 +967,9 @@ eq "$(blkr tk-a-rreview)" "stuck tk-a-rreview approval" "a PR on the pending rec
 eq "$(blkr tk-a-rnopost)" "stuck tk-a-rnopost unread" "a PR on the pending record with no recorded posture is unread, so stuck"
 eq "$(blkr tk-a-rhead)" "advancing - -" "a PR whose head moved advances: the refinery validates the new head"
 eq "$(blkr tk-a-rhold)" "stuck tk-a-rhold merge-hold" "an operator merge hold on the pending record is stuck"
-eq "$(logcount "$WALKREAD")" 1 "  ... the same-store blockers cost one read"
+# The walk reads rows by id with --brief, which gctk's reads do not carry. The
+# subject's read of its own list row does too, so the count names the blockers.
+eq "$(logcount 'list --id tk-a-[^ ]+ --all --brief')" 1 "  ... the same-store blockers cost one read"
 
 # A bead's own state, one rule per blocker.
 run tk-w-kinds --frontier --json

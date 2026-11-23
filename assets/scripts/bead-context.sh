@@ -11,10 +11,11 @@
 #      record an older reaction left on its subject); gc.origin; and the
 #      distilled gc.takeaway headline (with gc.takeaway_settled). The free-text
 #      body is never parsed.
-#   D. Context edges, shown but never gating — the parent, the relates-to edges,
-#      the beads that track it (a conversation about it, a convoy carrying it),
-#      the beads that wait on this one by a blocks or an until edge (open ones
-#      first, at most AWAITED_CAP named), and a count per class.
+#   D. Context edges, shown but never gating — the parent and the relates-to
+#      edges, a link into another rig's store included, the beads that track it
+#      (a conversation about it, a convoy carrying it), the beads that wait on
+#      this one by a blocks or an until edge (open ones first, at most
+#      AWAITED_CAP named), and a count per class.
 #   E. Store — the store that answered, and the db it read.
 # and, each behind its own opt-in flag:
 #   B. --frontier — what holds it. A verdict over {ready, advancing, stuck}:
@@ -466,8 +467,19 @@ STORE_JSON=$(jq -nc --arg rig "$SUBJ_RIG" --arg db "$DB" \
 
 # ── D. Context edges (never gating) ─────────────────────────────────────────
 # The parent link and the relates-to edges are outbound, so they come from the
-# subject's own read. Both edge spellings live in the store — `relates-to` and
-# the older `related` — so the class matches either. The beads that track it are
+# subject's own record. Both edge spellings live in the store — `relates-to` and
+# the older `related` — so the class matches either. The show row leaves out a
+# link whose far bead its store does not hold, such as one in another rig's
+# store, and the subject's list row keeps every edge. A show row that names no
+# parent takes the list row's parent-child edge, and the relates-to edges only
+# the list row carries follow the show row's. Such a link's far bead is read
+# from the store its id's prefix binds, one read per store, for its title and
+# status. Both are null when that store does not answer or does not hold the
+# bead, and when no single rig carries the prefix. Such a bead is not read,
+# because an unpinned read would answer from the caller's own store. `gc bd
+# list` hides gates, infrastructure beads, templates and ephemeral rows unless
+# asked, and the subject or a far bead can be any of them, so each list read
+# asks for all four. The beads that track it are
 # an INBOUND `tracks` edge (a conversation tracks the bead it is about, and the
 # subject carries no reverse edge), so they are read with a reverse dep-list.
 # The beads that wait on the subject carry a `blocks` or an `until` edge to it,
@@ -485,12 +497,54 @@ AWAITED=$(printf '%s' "$SUBJ" | jq -c --argjson cap "$AWAITED_CAP" '
   | unique_by(.id) | sort_by(.status == "closed")
   | {total: length, open: ([.[] | select(.status != "closed")] | length), named: .[:$cap]}' 2>/dev/null)
 [ -n "$AWAITED" ] || AWAITED='{"total":0,"open":0,"named":[]}'
-EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" --argjson awaited "$AWAITED" '
+# LIST_ONLY holds the links the list row carries and the show row does not, as
+# {type, id}: the parent link when the show row names none, the relates-to
+# edges, and the far ids the two name, under read.
+SUBJ_ROWS=$(bd_json "$DB" list --id "$(printf '%s' "$SUBJ" | jq -r '.id')" \
+  --all --brief --include-gates --include-infra --include-templates --include-ephemeral --limit 0)
+LIST_ONLY=$(printf '%s\n%s\n' "$SUBJ" "$SUBJ_ROWS" | jq -sc '
+  .[0] as $s | ($s.parent // null) as $pid
+  | [$s.dependencies[]? | {type: .dependency_type, id}] as $shown
+  | [.[1] | if type == "array" then .[] else empty end | objects | select(.id == $s.id)
+      | .dependencies[]? | objects
+      | {type: ((.type // .dependency_type) // ""), id: ((.depends_on_id // .id) // "")}
+      | select(.id != "") | . as $l | select(any($shown[]; . == $l) | not)] as $only
+  | (if ($pid == null or $pid == "") then ([$only[] | select(.type == "parent-child")] | .[0]) else null end) as $p
+  | [$only[] | select(.type == "relates-to" or .type == "related")] as $rel
+  | {parent: $p, relates_to: $rel, read: ([($p // empty), $rel[]] | map(.id) | unique)}' 2>/dev/null)
+[ -n "$LIST_ONLY" ] || LIST_ONLY='{"parent":null,"relates_to":[],"read":[]}'
+# id<TAB>store for each far bead, the id first so an unresolved store survives
+# as an empty field. Each far row is cut to the {id, title, status} an edge
+# shows of it as it is read.
+FAR_PAIRS=""
+while IFS= read -r id; do
+  [ -n "$id" ] && FAR_PAIRS+="$id"$'\t'"$(db_for_prefix "${id%%-*}")"$'\n'
+done < <(printf '%s' "$LIST_ONLY" | jq -r '.read[]?' 2>/dev/null)
+FAR_ROWS='[]'
+while IFS= read -r fdb; do
+  [ -n "$fdb" ] || continue
+  FAR_IDS=()
+  while IFS=$'\t' read -r id idb; do
+    [ -n "${id:-}" ] && [ "${idb:-}" = "$fdb" ] && FAR_IDS+=("$id")
+  done <<< "$FAR_PAIRS"
+  FAR_GOT=$(bd_json "$fdb" list --id "$(IFS=,; printf '%s' "${FAR_IDS[*]}")" \
+    --all --brief --include-gates --include-infra --include-templates --include-ephemeral --limit 0)
+  FAR_MERGED=$(printf '%s\n%s\n' "$FAR_ROWS" "$FAR_GOT" | jq -sc '.[0] + (.[1] | if type == "array"
+    then [.[] | objects | select((.id // "") != "") | {id, title: (.title // null), status: (.status // null)}]
+    else [] end)' 2>/dev/null)
+  [ -n "$FAR_MERGED" ] && FAR_ROWS="$FAR_MERGED"
+done < <(printf '%s' "$FAR_PAIRS" | cut -f2 | sort -u)
+EDGES_JSON=$(printf '%s' "$SUBJ" | jq -c --argjson tracked "$TRACKED_BY" --argjson awaited "$AWAITED" \
+    --argjson only "$LIST_ONLY" --argjson far "$FAR_ROWS" '
+  ([$far[] | {key: .id, value: .}] | from_entries) as $farrow
+  | def far_edge: . as $id | ($farrow[$id] // {id: $id, title: null, status: null});
   (.parent // null) as $pid |
   ([.dependencies[]? | select(.dependency_type == "parent-child" and .id == $pid) | {id, title, status}] | .[0]) as $pedge |
   {
-    parent: (if ($pid == null or $pid == "") then null else ($pedge // {id: $pid, title: null, status: null}) end),
-    relates_to: [.dependencies[]? | select(.dependency_type == "relates-to" or .dependency_type == "related") | {id, title, status}],
+    parent: (if ($pid != null and $pid != "") then ($pedge // {id: $pid, title: null, status: null})
+             elif $only.parent != null then ($only.parent.id | far_edge) else null end),
+    relates_to: ([.dependencies[]? | select(.dependency_type == "relates-to" or .dependency_type == "related") | {id, title, status}]
+                 + [$only.relates_to[]?.id | far_edge]),
     tracked_by: $tracked,
     awaited_by: $awaited.named
   }
@@ -788,7 +842,7 @@ if [ "$(g '.edges.parent')" != "null" ]; then
 fi
 REL_N=$(g '.edges.counts.relates_to')
 if [ "$REL_N" != "0" ]; then
-  printf '    relates-to  %s: %s\n' "$REL_N" "$(g '.edges.relates_to | map("\(.id) (\(.status))") | join(", ")')"
+  printf '    relates-to  %s: %s\n' "$REL_N" "$(g '.edges.relates_to | map("\(.id) (\(.status // "?"))") | join(", ")')"
 fi
 TB_N=$(g '.edges.counts.tracked_by')
 if [ "$TB_N" != "0" ]; then
