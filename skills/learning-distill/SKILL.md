@@ -379,11 +379,20 @@ the case's facts through the old text and the new, three runs a cell and more
 in both arms on the cell the call leans on, reporting them all, on a prompt
 holding the whole section the entry joins. Use the provider of the agent who
 will read it: `claude -p` for a polecat, `codex exec` for a reviewer, since
-the review pool runs on codex. When the carrier reaches a reviewer, also run a
-change the operator already approved, as the control for over-firing. Name in
-the reasoning which part of the trigger moved and the provider behind each
-number. A part that did not move routes as this gate says, and a case too thin
-to run is named as unrun.
+the review pool runs on codex. A Claude session can run under an account
+profile's home, which holds no Codex login. Run codex on the login the review
+pool's sessions use, in the home directory of your user account, and keep the
+probe's session files out of it:
+
+```bash
+CODEX_HOME="$(perl -e 'print((getpwuid($<))[7])')/.codex" \
+  codex exec --ephemeral --skip-git-repo-check -s read-only "<prompt>"
+```
+
+When the carrier reaches a reviewer, also run a change the operator already
+approved, as the control for over-firing. Name in the reasoning which part of
+the trigger moved and the provider behind each number. A part that did not move
+routes as this gate says, and a case too thin to run is named as unrun.
 
 *Worked example.* A candidate of the form "choose the right X for the
 situation" states the outcome (the right X) but leaves the choosing — the
