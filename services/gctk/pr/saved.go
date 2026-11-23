@@ -242,8 +242,10 @@ func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.L
 // before the update read them. The PR part of an open PR whose merge state
 // GitHub read as UNKNOWN stays stale until a read finds the state, since GitHub
 // computes it after a push or a base move and moves no sign when it does; a
-// merged or closed PR's reads UNKNOWN for good. Every part is stale when the
-// saved read lacks a part or stale says it is not current for the bead.
+// merged or closed PR's reads UNKNOWN for good. A conversation part that holds
+// no list of the posts the city has not taken is stale, since the take and the
+// evaluator read the list. Every part is stale when the saved read lacks a part
+// or stale says it is not current for the bead.
 func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
 		saved.Labels == nil {
@@ -255,7 +257,7 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 		saved.Checks.Suites == nil
 	c := saved.Conversation.Signs
 	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
-	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
+	p.conversation = counts || c.UpdatedAt != s.UpdatedAt || saved.Conversation.Untaken == nil
 	unknown := saved.PR.State == "OPEN" && saved.PR.MergeState == "UNKNOWN"
 	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts || unknown
 	return p
@@ -314,8 +316,9 @@ func sameRuns(a, b []RequiredRun) bool {
 
 // owned is a live bead that owns a PR, as the PR watch reads it: the bead, its
 // status and assignee, the PR's URL, host, repository and number, its pending
-// record, branch and provenance instant, and the read saved on it, nil when it
-// holds none or one that does not decode.
+// record, branch and provenance instant, the read saved on it, nil when it
+// holds none or one that does not decode, and the receipts of pr-facts.sh it
+// carries (receiptsOn).
 type owned struct {
 	id, status, assignee string
 	url, host, repo      string
@@ -323,6 +326,7 @@ type owned struct {
 	rec                  record.Record
 	branch, since        string
 	saved                *SavedRead
+	receipts             []string
 }
 
 // stale says why the saved read is not current for the bead, and is empty when

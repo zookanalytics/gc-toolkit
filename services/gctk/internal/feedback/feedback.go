@@ -5,8 +5,9 @@
 // runs it through jq, as each shell reader does, and holds none of it. It
 // answers which posts are feedback (gc_feedback) that the city has not taken,
 // since they carry neither of its marks (gc_city_taken and gc_city_handled),
-// among the inline comments a dismissal has not retired (live_comments), and
-// which review threads wait on the city's answer (gc_thread_awaits_answer).
+// among the inline comments a dismissal has not retired (live_comments), which
+// review threads wait on the city's answer (gc_thread_awaits_answer), and which
+// unresolved threads hold only the city's own posts (gc_city_own).
 //
 // The definition is loaded once, from the pack's scripts directory, in the
 // rig's checkout, whose default branch declares the posts that are not for
@@ -170,6 +171,20 @@ func groups(reactions []string) []map[string]any {
 // Awaiting returns the ids of the review threads that wait on the city's
 // answer.
 func (r *Rule) Awaiting(self, since string, threads []Thread) ([]string, error) {
+	return r.threads(self, since, `[ .[] | select(gc_thread_awaits_answer($self; $since)) | .id ]`, threads)
+}
+
+// OwnThreads returns the ids of the unresolved review threads that hold only
+// the city's own posts (gc_city_own), each thread holding at least one.
+func (r *Rule) OwnThreads(self, since string, threads []Thread) ([]string, error) {
+	return r.threads(self, since, `[ .[] | select(((.isResolved // false) == false)
+    and ((.comments.nodes // []) | length > 0)
+    and all((.comments.nodes // [])[]; gc_city_own($self; $since))) | .id ]`, threads)
+}
+
+// threads applies program, which names thread ids, to threads as GraphQL
+// reviewThread nodes with their comments.
+func (r *Rule) threads(self, since, program string, threads []Thread) ([]string, error) {
 	nodes := make([]map[string]any, 0, len(threads))
 	for _, t := range threads {
 		posts := make([]map[string]any, 0, len(t.Comments))
@@ -184,7 +199,7 @@ func (r *Rule) Awaiting(self, since string, threads []Thread) ([]string, error) 
 		nodes = append(nodes, map[string]any{"id": t.ID, "isResolved": t.Resolved,
 			"comments": map[string]any{"nodes": posts}})
 	}
-	out, err := r.run(self, since, `[ .[] | select(gc_thread_awaits_answer($self; $since)) | .id ]`, nodes)
+	out, err := r.run(self, since, program, nodes)
 	if err != nil {
 		return nil, err
 	}

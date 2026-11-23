@@ -16,10 +16,12 @@ import (
 // Feedback is the pack's one definition of feedback, which the feedback
 // adapter's Rule applies and its fake answers: which posts are feedback that
 // the city has not taken, among the inline comments a dismissal has not
-// retired, and which review threads wait on the city's answer.
+// retired, which review threads wait on the city's answer, and which unresolved
+// threads hold only the city's own posts.
 type Feedback interface {
 	Untaken(self, since string, reviews []feedback.Review, inline, conversation []feedback.Comment) (feedback.Untaken, error)
 	Awaiting(self, since string, threads []feedback.Thread) ([]string, error)
+	OwnThreads(self, since string, threads []feedback.Thread) ([]string, error)
 }
 
 // countedReviewStates are the states of a review whose message the intake
@@ -156,24 +158,39 @@ func untakenOf(rule Feedback, self, since string, reviews []gh.Review, threads [
 	out := []Post{}
 	for _, id := range sorted(got.Reviews) {
 		if v, ok := byReview[id]; ok {
-			out = append(out, Post{Kind: PostReview, ID: id, Node: v.NodeID, Author: v.Author, URL: v.URL, State: v.State})
+			out = append(out, reviewPost(v))
 		}
 	}
 	for _, id := range sorted(got.Inline) {
 		if c, ok := byInline[id]; ok {
-			p := Post{Kind: PostInline, ID: id, Node: c.NodeID, Author: c.Author, URL: c.URL, Path: c.Path, Line: c.OriginalLine}
-			if c.Review != nil {
-				p.Review = c.Review.ID
-			}
-			out = append(out, p)
+			out = append(out, inlinePost(c))
 		}
 	}
 	for _, id := range sorted(got.Conversation) {
 		if c, ok := byConvo[id]; ok {
-			out = append(out, Post{Kind: PostConversation, ID: id, Node: c.NodeID, Author: c.Author, URL: c.URL})
+			out = append(out, conversationPost(c))
 		}
 	}
 	return out, nil
+}
+
+// reviewPost, inlinePost and conversationPost are a review's message, an inline
+// comment and a conversation comment as a Post, with what an ask's reason names
+// it by and the node id a mark goes by.
+func reviewPost(v gh.Review) Post {
+	return Post{Kind: PostReview, ID: v.ID, Node: v.NodeID, Author: v.Author, URL: v.URL, State: v.State}
+}
+
+func inlinePost(c gh.Comment) Post {
+	p := Post{Kind: PostInline, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL, Path: c.Path, Line: c.OriginalLine}
+	if c.Review != nil {
+		p.Review = c.Review.ID
+	}
+	return p
+}
+
+func conversationPost(c gh.IssueComment) Post {
+	return Post{Kind: PostConversation, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL}
 }
 
 // sorted is ids in order, each once.
@@ -229,6 +246,17 @@ func unrouted(targets []Approval, untaken []Post) []Post {
 // awaiting is the ids of the review threads that wait on the city's answer, by
 // the definition.
 func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string, error) {
+	return rule.Awaiting(self, since, threadsOf(threads))
+}
+
+// ownThreads is the ids of the unresolved review threads that hold only the
+// city's own posts, by the definition.
+func ownThreads(rule Feedback, self, since string, threads []gh.Thread) ([]string, error) {
+	return rule.OwnThreads(self, since, threadsOf(threads))
+}
+
+// threadsOf is threads in the facts the definition weighs a thread by.
+func threadsOf(threads []gh.Thread) []feedback.Thread {
 	var ts []feedback.Thread
 	for _, t := range threads {
 		ft := feedback.Thread{ID: t.ID, Resolved: t.Resolved}
@@ -237,7 +265,7 @@ func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string,
 		}
 		ts = append(ts, ft)
 	}
-	return rule.Awaiting(self, since, ts)
+	return ts
 }
 
 func reviewOf(v gh.Review) feedback.Review {
