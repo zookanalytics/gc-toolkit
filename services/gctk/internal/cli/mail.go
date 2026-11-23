@@ -45,7 +45,9 @@ finished, or is held from running, keeps its mail waiting.
 
 The ledger, mail-notify.json, and the lock every pass holds while it reads and
 writes it, mail-notify.lock, live in the city's .gc/runtime/packs/gc-toolkit. A
-pass ends its reads and nudges at its two-minute deadline.
+session list that does not read, or lists no session, reads no mail and leaves
+the ledger as it is. A pass ends its reads and nudges at its two-minute
+deadline.
 
 The pass's record goes to standard output as JSON:
 

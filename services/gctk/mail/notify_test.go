@@ -300,6 +300,22 @@ func TestASessionListThatDoesNotReadNudgesNothing(t *testing.T) {
 	}
 }
 
+// A session list that reads with no session in it is a read that went wrong,
+// as the session domain holds, so it nudges nothing and leaves the ledger as it
+// was rather than letting go of every message it holds.
+func TestAnEmptySessionListKeepsTheLedger(t *testing.T) {
+	s := sitting("hq-1", "tk-1", "active")
+	c := newCity(s)
+	c.mail(s, msg("hq-m1", "human", time.Minute))
+	state := t.TempDir()
+	c.pass(t, state)
+	c.SessionList = nil
+	out := c.pass(t, state)
+	if out.Record != nil || len(out.Failures) != 1 || !notified(t, state).has("hq-m1") {
+		t.Errorf("record %+v, failures %q, ledger %+v", out.Record, out.Failures, notified(t, state))
+	}
+}
+
 // A ledger that does not read nudges nothing, since nudging past it would
 // request a second turn for every message it holds.
 func TestALedgerThatDoesNotReadNudgesNothing(t *testing.T) {

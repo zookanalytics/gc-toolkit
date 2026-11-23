@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/session"
 )
 
 const (
@@ -142,6 +143,9 @@ func (n *Notify) Run(ctx context.Context) Outcome {
 		return Outcome{Failures: []string{err.Error() + ", so no session was nudged"}}
 	}
 	list, err := n.City.Sessions(ctx)
+	if err == nil {
+		_, err = session.Read(list)
+	}
 	if err != nil {
 		return Outcome{Failures: []string{"the session list did not read, so no session's mail was read: " + err.Error()}}
 	}
