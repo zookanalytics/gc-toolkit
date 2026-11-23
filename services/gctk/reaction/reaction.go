@@ -45,8 +45,13 @@ var recommendedFormulaKey = ledger.Declare("gc.recommended_formula", ledger.Stri
 		"(docs/gctk-architecture.md, Debt). Absent or empty, the bead carries no recommendation.")
 
 // The keys the dispose reads and does not write. No domain owns them yet.
-var anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
-	"The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool.")
+var (
+	anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
+		"The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool.")
+	failureKey = ledger.ReadOnly("failure_key", ledger.String,
+		"The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files "+
+			"the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix.")
+)
 
 // GateKey is the situation key of the human gate a ruling or a recommend files
 // on its subject, one open gate per subject under it.
