@@ -1637,10 +1637,11 @@ keys = [
 
 # Runtime-owned: documented here so readers know they exist; the claim, pour and
 # step semantics belong to the Gas City runtime, not to pack transitions. The
-# pack does write some of these as decisions — gc.routed_to is a routing stamp
-# (lifecycle.sh --route, stamp-don't-sling), gc.execution_routed_to is cleared by
-# mol-polecat-work's blocked-work guard and by await-ruling.sh, and gc.outcome
-# is stamped by many pack components — but their meaning is the runtime's.
+# pack does write some of these as decisions, but their meaning is the
+# runtime's. gc.routed_to is a routing stamp (lifecycle.sh --route,
+# stamp-don't-sling). The pack only ever clears gc.execution_routed_to, as
+# await-ruling.sh, refinery-requeue.sh and gctk's ledger Release do. The entries
+# below name its writes of the others.
 [metadata.runtime_owned]
 keys = [
   "gc.routed_to", "gc.execution_routed_to", "gc.run_target", "gc.outcome",
@@ -1660,11 +1661,19 @@ keys = [
 #   run cancel stamps on every member of a run it ends; read by the done gates
 #   and the review graph. gc.routed_to and gc.execution_routed_to are
 #   the route stamps (see the ROUTE rule in the preamble). The rest — assignee,
-#   the session and claim stamps, the step and root linkage, the poured vars and
-#   gc.formula_source, gc.session_affinity (the continuation backstop acts only
-#   on a step marked `require`) and pin_awake (settable only by
-#   `gc session pin`) — are written by the runtime; the pack reads them and does
-#   not write them.
+#   the session stamps and gc.claimed_at, the step and root linkage, the poured
+#   vars and gc.formula_source, gc.session_affinity (the continuation backstop
+#   acts only on a step marked `require`) and pin_awake (settable only by
+#   `gc session pin`) — are written by the runtime. The pack writes some of
+#   them where work changes hands. It sets assignee when it hands a bead to its
+#   next holder, such as a polecat's hand-off to the refinery, and clears it
+#   when it releases one. It never sets gc.session_id or gc.session_name, and
+#   removes both when it releases or hands on a bead a session claimed, since a
+#   pin left behind is the owner orphan recovery resolves the bead to
+#   (orphan-dispose.sh, pin_args). orphan-dispose.sh's release of a step also
+#   removes gc.session_affinity. work-enter.sh writes the poured var
+#   gc.var.issue on a mol-polecat-work root at self-review. The pack writes
+#   none of the others.
 # gc.run_target — a third route stamp beside gc.routed_to and
 #   gc.execution_routed_to, written by the runtime: gascity's
 #   ReleaseWorkBead re-stamps it as a fallback route on a drained session's work
