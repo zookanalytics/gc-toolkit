@@ -227,6 +227,10 @@ CLI="$ENGINE/src/cli.ts"
 
 # Fixtures: a demo script, a static app, a markdown file, captured output.
 WORK="$TMPD/work"; mkdir -p "$WORK"
+# Each run takes $AHOME as its HOME, an agent's home that holds none of the
+# fixtures, because a capture refuses a directory in a home folder outside any
+# rig worktree.
+AHOME="$TMPD/home"; mkdir -p "$AHOME"
 SCRIPT="$WORK/demo.md"; printf '# Demo: fixture\n\n**Start:** `/`\n' >"$SCRIPT"
 APP="$WORK/app"; mkdir -p "$APP"; printf '<!doctype html><title>x</title>\n' >"$APP/index.html"
 MD="$WORK/comment.md"; printf '**Approve.** Nothing needs you.\n\n<details>\n<summary>trail</summary>\n\nx\n</details>\n' >"$MD"
@@ -246,7 +250,7 @@ run() {
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ $# -gt 0 ] && shift
   : >"$CALLLOG"; rm -f "$HANDED" "$GH_REQ" "$SCRIPT_HANDED" "$SERVED"; : >"$COPY_STATE"
-  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" \
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" \
       GH_REQ="$GH_REQ" ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" \
       GCTK_BIN="$BIN/gctk" COPY_STATE="$COPY_STATE" "${envs[@]}" bash "$SUT" "$@" 2>&1 )
 }
@@ -611,7 +615,7 @@ out="$(run GC_RIG_ROOT="$SLASHED" -- markdown --file "$MD" --output "$OUT")"; rc
 eq "$rc" 0 "an origin ending in .git/ gives the context"
 eq "$(jq -r '.context' "$GH_REQ" 2>/dev/null)" "octo/widgets" "its trailing slash and its .git are both dropped"
 NOGIT="$TMPD/norepo"; mkdir -p "$NOGIT"
-out="$(cd "$NOGIT" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" \
+out="$(cd "$NOGIT" && env -i PATH="$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" HANDED="$HANDED" GH_REQ="$GH_REQ" \
   ENGINE_STUB="$ENGINE_STUB" SCRIPT_HANDED="$SCRIPT_HANDED" SERVED="$SERVED" SS_RIG="$ENGINE" bash "$SUT" markdown --file "$MD" --output "$OUT" 2>&1)"; rc=$?
 eq "$rc" 0 "no origin still renders"
 has "render without a repository context" "$out" "it says references render without a context"

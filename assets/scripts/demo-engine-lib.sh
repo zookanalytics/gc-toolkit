@@ -45,7 +45,8 @@
 #     of them its tools need: each Node on PATH, with the npm and corepack it
 #     holds, Playwright's browsers, and Go's root and settings. It reads and
 #     writes the caches of npm, the engine and Go, and its git reads no user
-#     settings, which live in a home folder.
+#     settings, which live in a home folder. Of what its arguments name, it
+#     reaches in a home folder only a rig worktree and its git directories.
 #   - every loopback port but the run's own, and every Unix socket but the
 #     system resolver's, so the supervisor's API, the Dolt server and the
 #     session server do not answer. The run's own port is the engine's own
@@ -68,8 +69,10 @@
 # store and its agents' state, and no rig's or city's store is readable
 # whatever else is. The run is refused before the engine starts when:
 #   - a directory it would read and write holds one of the city's directories
-#     or a home folder, or lies inside one of the city's directories in no
-#     rig's worktree;
+#     or a home folder, or lies inside one of the city's directories or a home
+#     folder in no rig's worktree;
+#   - a file it would read, other than the engine's own executable, lies inside
+#     a home folder in no rig's worktree;
 #   - gc's home holds a city registry that `gc cities` does not read, because
 #     then the cities to deny are unknown;
 #   - a city is known and its rig map does not read, because then the rig
@@ -566,6 +569,18 @@ ${user##*:}
 EOF
 }
 
+# _demo_engine_home_of <path>: after _demo_engine_city, the home folder that is
+# the path or holds it, or nothing, returning 1.
+_demo_engine_home_of() {
+  local h
+  while IFS= read -r h; do
+    if [ -n "$h" ] && _demo_engine_under "$1" "$h"; then printf '%s\n' "$h"; return 0; fi
+  done <<EOF
+${_DEMO_ENGINE_HOMES:-}
+EOF
+  return 1
+}
+
 # _demo_engine_city: reads where the live city keeps its state into
 # _DEMO_ENGINE_RIGS, each rig checkout its rig map lists, _DEMO_ENGINE_HQ, the
 # checkout of the map's hq entry, which is the city's own repository, and
@@ -611,7 +626,8 @@ EOF
 # that holds it, and that worktree's own git directory, each on a line after
 # "rw ", and the worktree's repository on a line after "ro ". Returns 1, having
 # said why, when the directory holds one of the city's directories or a home
-# folder, or lies in one of the city's directories in no rig's worktree.
+# folder, or lies in one of the city's directories or a home folder in no rig's
+# worktree.
 _demo_engine_reach() {
   local d top common="" gd="" checkout p
   d=$(_demo_engine_canon "$1"); [ -n "$d" ] || return 0
@@ -646,6 +662,10 @@ EOF
   done <<EOF
 ${_DEMO_ENGINE_HOMES:-}
 EOF
+  if [ -z "$common" ] && p=$(_demo_engine_home_of "$top"); then
+    _demo_engine_say "$top lies in $p, a home folder, where tools keep their credentials, and in no rig's worktree, so a capture cannot read or write it; capture from a rig worktree, or from a directory outside the home folders"
+    return 1
+  fi
   printf 'rw %s\n' "$top"
   [ -z "$gd" ] || printf 'rw %s\n' "$gd"
   [ -z "$common" ] || printf 'ro %s\n' "$common"
@@ -1075,11 +1095,12 @@ _demo_engine_tool_places() {
 # ports given, one per line, the only loopback ports it may reach. Each of <dirs>, one per line, is read and
 # written as _demo_engine_reach widens it, each of <files> is read, and the
 # engine checkout, when one was chosen, is read. Of the home folders it reaches
-# only the parts _demo_engine_tool_places names. Returns 1, having said why,
+# only the parts _demo_engine_tool_places names, the engine's own executable,
+# and the rig worktrees among <dirs> and <files>. Returns 1, having said why,
 # when the run is refused.
 _demo_engine_sandbox() {
   local NL='
-' open="$1" cand="$2" files="$3" places homes tools="" inhome rw="" ro="" p d reach kind engine="" profile
+' open="$1" cand="$2" files="$3" places homes tools="" inhome rw="" ro="" p d reach kind engine="" bin="" profile
 
   # The home folders, which no run reads but for the parts of them its tools
   # need, and each such part that lies in one, unless it would open one whole.
@@ -1111,8 +1132,14 @@ EOF
   done <<EOF
 $cand
 EOF
+  [ -z "${DEMO_ENGINE_BIN:-}" ] || bin=$(_demo_engine_canon "$DEMO_ENGINE_BIN")
   while IFS= read -r p; do
-    [ -z "$p" ] || ro="$ro$NL$(_demo_engine_canon "$p")"
+    p=$(_demo_engine_canon "$p"); [ -n "$p" ] || continue
+    if [ "$p" != "$bin" ] && d=$(_demo_engine_home_of "$p") && [ -z "$(_demo_engine_rig_of "$(dirname -- "$p")")" ]; then
+      _demo_engine_say "$p lies in $d, a home folder, where tools keep their credentials, and in no rig's worktree, so a capture cannot read it; give the capture a copy in a rig worktree, or in a directory outside the home folders"
+      return 1
+    fi
+    ro="$ro$NL$p"
   done <<EOF
 $files
 EOF

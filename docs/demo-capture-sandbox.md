@@ -77,7 +77,9 @@ A process inside the sandbox:
   as the GitHub CLI's token, an agent's sign-in, SSH keys and the supervisor's
   service file. A process reads each Node on its `PATH`, Playwright's browsers
   and Go's own files, and it reads and writes the caches of npm, the engine and
-  Go. Its git reads none of the user's settings.
+  Go. Its git reads none of the user's settings. Of the directories and files
+  the capture names, it reaches one in a home folder only when it lies in a rig
+  worktree.
 - cannot connect to a loopback port it was not given, so the supervisor's API,
   the Dolt server and every agent session's own port do not answer it. A run is
   given its own port, or the three an iOS app run's servers use. A copy is
@@ -90,7 +92,8 @@ A process inside the sandbox:
 
 A capture also refuses, before anything starts, a run it cannot keep to those
 rules. Examples are a working directory that holds the city's or a home folder,
-a server already listening on the port it would open, a `--base-url` on this
+an output or a `--cwd` that lies in a home folder outside any rig worktree, a
+server already listening on the port it would open, a `--base-url` on this
 host that neither a copy nor a worktree of a rig whose `app_reads_city` is
 `"false"` serves, and a copy that runs outside the sandbox its rig now keeps.
 The library's header lists every such refusal.

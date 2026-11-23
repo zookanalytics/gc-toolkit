@@ -45,6 +45,11 @@
 #               each stop the capture, the checkout before anything is
 #               installed; a rig worktree inside the city is allowed, with its
 #               git directories
+#   (HOME)      a working directory that is a home folder, and a working
+#               directory, an output, a terminal script's --cwd or music that
+#               lies in one in no rig's worktree, each stop the capture; a
+#               worktree of a rig set to "true" inside a home folder captures,
+#               opened after the home folder is shut
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
@@ -243,7 +248,9 @@ exit 0
 GC
 printf '#!/usr/bin/env bash\nexit 0\n' >"$BIN/ffmpeg"
 # id answers -P with the record of a user whose home is $UHOME, which holds the
-# homes of that user's agents, as the host's user record names a home.
+# homes of that user's agents, as the host's user record names a home. Each run
+# below takes $AHOME, one of those agents' homes, as its HOME, and holds none of
+# the fixtures, as an agent's home on the city's host holds no rig worktree.
 UHOME="$TMPD/users/me"; AHOME="$UHOME/agents/me-1"; mkdir -p "$AHOME"
 printf '#!/usr/bin/env bash\n[ "${1:-}" = -P ] || exit 64\necho "me:********:501:20::0:0:me:%s:/bin/bash"\n' "$UHOME" >"$BIN/id"
 cat >"$BIN/sandbox-exec" <<'SBX'
@@ -380,28 +387,30 @@ start_of() { case "$1" in video) echo "engine lint $SCRIPT" ;; screenshot) echo 
 local_call() { case "$1" in video) echo "node [$ENGINE/src/cli.ts] [run] [$SCRIPT]" ;; screenshot) echo "node [$ENGINE/src/cli.ts] [screenshot]" ;; esac; }
 published_call() { case "$1" in video) echo "npx --yes @zookanalytics/sprintshow run $SCRIPT" ;; screenshot) echo "npx --yes @zookanalytics/sprintshow screenshot " ;; esac; }
 
-# capture <video|screenshot> [VAR=VAL ...] [FROM=<dir>] [-- <app target...>]:
-# run that capture against the stubs, from $WORK or the FROM directory, serving
-# $WORK/app unless an app target follows --, with stdout in $OUTF, stderr in
-# $ERRF and the exit status in $RC. $STUB_PATH replaces the stub directory for
-# one call.
+# capture <video|screenshot> [VAR=VAL ...] [FROM=<dir>] [OUT=<file>]
+# [-- <app target...>]: run that capture against the stubs, from $WORK or the
+# FROM directory, writing its output_of file or the OUT file, serving $WORK/app
+# unless an app target follows --, with stdout in $OUTF, stderr in $ERRF and
+# the exit status in $RC. $STUB_PATH replaces the stub directory for one call.
 capture() {
-  local cap="$1" from="$WORK"; shift
+  local cap="$1" from="$WORK" out; shift
   local -a argv envs target=(--serve-dir "$WORK/app")
+  out=$(output_of "$cap")
   while [ $# -gt 0 ]; do
     case "$1" in
       --) shift; target=("$@"); break ;;
       FROM=*) from="${1#FROM=}" ;;
+      OUT=*) out="${1#OUT=}" ;;
       *) envs+=("$1") ;;
     esac
     shift
   done
   case "$cap" in
-    video)      argv=(bash "$VIDEO" --script "$SCRIPT" --output "$(output_of video)" "${target[@]}") ;;
-    screenshot) argv=(bash "$SHOT" page --script "$SCRIPT" "${target[@]}" --output "$(output_of screenshot)") ;;
+    video)      argv=(bash "$VIDEO" --script "$SCRIPT" --output "$out" "${target[@]}") ;;
+    screenshot) argv=(bash "$SHOT" page --script "$SCRIPT" "${target[@]}" --output "$out") ;;
   esac
   : >"$CALLLOG"; rm -f "$(output_of "$cap")" "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
-  ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
       ${envs[@]+"${envs[@]}"} "${argv[@]}" >"$OUTF" 2>"$ERRF" )
   RC=$?
@@ -562,7 +571,7 @@ done
 kind_run() {
   local script="$1"; shift
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
-  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" \
       "$@" bash -c '. "$1" && demo_engine_script_kind "$2"' kind "$LIB" "$script" >"$OUTF" 2>"$ERRF" )
   RC=$?
@@ -745,6 +754,30 @@ for cap in video screenshot; do
   eq "$RC" 1 "($cap) a working directory in the city's, in no rig worktree, exits 1"
   has "$CITY/.gc/notes lies in $CITY" "$(err)" "($cap) it says the directory lies in the city's"
   not_captured "$cap"
+
+  echo "# ($cap) HOME: a working directory or an output that is a home folder, or lies in one outside any rig worktree, stops the capture, and a rig worktree in one captures"
+  mkdir -p "$AHOME/.ssh"; printf 'SECRET-SSH\n' >"$AHOME/.ssh/id_fixture"
+  capture "$cap" FROM="$AHOME" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) a working directory that is the session's home folder exits 1"
+  has "$AHOME is a home folder" "$(err)" "($cap) it says the directory is a home folder"
+  not_captured "$cap"
+  capture "$cap" FROM="$AHOME/.ssh" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) a working directory in the session's home folder, in no rig worktree, exits 1"
+  has "$AHOME/.ssh lies in $AHOME, a home folder, where tools keep their credentials, and in no rig's worktree" "$(err)" "($cap) it says the directory lies in a home folder"
+  not_captured "$cap"
+  home_out="$AHOME/.ssh/$(basename "$(output_of "$cap")")"
+  capture "$cap" OUT="$home_out" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) an output in the session's home folder, in no rig worktree, exits 1"
+  has "$AHOME/.ssh lies in $AHOME, a home folder" "$(err)" "($cap) it says the output's directory lies in a home folder"
+  ok "($cap) and nothing is written there" "[ ! -e '$home_out' ]"
+  mkdir -p "$UHOME/Desktop"
+  capture "$cap" OUT="$UHOME/Desktop/$(basename "$(output_of "$cap")")" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) an output in the user's home folder, in no rig worktree, exits 1"
+  has "$UHOME/Desktop lies in $UHOME, a home folder" "$(err)" "($cap) it names the user's home folder"
+  capture "$cap" FROM="$BWT" SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" HOME="$CITY/.gc/worktrees/beta" -- --base-url https://preview.example.com
+  eq "$RC" 0 "($cap) a capture from a worktree of a rig set to \"true\" that lies in the session's home folder captures"
+  in_sandbox "$cap" "that capture"
+  ok "($cap) its home folder is shut, and the worktree opened after it" "[ $(profile_line "(deny file-read-data file-write* (subpath \"$CITY/.gc/worktrees/beta\"))") -gt 0 ] && [ $(profile_line "(deny file-read-data file-write* (subpath \"$CITY/.gc/worktrees/beta\"))") -lt $(profile_last "(allow file-read-data file-write* (subpath \"$BWT\"))") ]"
   capture "$cap" FROM="$RIGA" SS_RIG="$ENGINE" "${CITY_ENV[@]}" RIG_VARS='{"alpha":{"app_reads_city":"true"}}'
   eq "$RC" 1 "($cap) the own checkout of a rig set to \"true\", which holds its store, exits 1"
   has "$RIGA holds " "$(err)" "($cap) it names the checkout"
@@ -1006,6 +1039,14 @@ no_sandbox video "that capture" "$RIGA"
 SCRIPT="$TSCRIPT" capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --cwd "$BWT"
 eq "$RC" 0 "(video) the same script starting in a worktree of a rig set to \"true\" captures"
 in_sandbox video "that capture"
+SCRIPT="$TSCRIPT" capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --cwd "$AHOME/.ssh"
+eq "$RC" 1 "(video) a terminal script whose shell starts in a home folder, in no rig worktree, exits 1"
+has "$AHOME/.ssh lies in $AHOME, a home folder" "$(err)" "(video) it says the --cwd lies in a home folder"
+not_run video
+capture video SS_RIG="$ENGINE" "${LOCAL_ENV[@]}" -- --serve-dir "$WORK/app" --music "$AHOME/.ssh/id_fixture"
+eq "$RC" 1 "(video) music in a home folder, in no rig worktree, exits 1"
+has "$AHOME/.ssh/id_fixture lies in $AHOME, a home folder, where tools keep their credentials, and in no rig's worktree, so a capture cannot read it" "$(err)" "(video) it says the music lies in a home folder"
+not_run video
 
 echo "# PLAIN: a call of the library's CLI whose --base-url is its copy's app captures from the copy's checkout, whatever --cwd it names"
 cat >"$TMPD/copy-cli.sh" <<'SH'
@@ -1022,7 +1063,7 @@ copy_cli() {
   while [ $# -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
-  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
       PACK_SCRIPTS="$HERE" DEMO_ENGINE_BIN="$ENGINE_STUB" GCTK_BIN="$GCTK_STUB" \
       ${envs[@]+"${envs[@]}"} bash "$TMPD/copy-cli.sh" "$@" >"$OUTF" 2>"$ERRF" )
@@ -1065,7 +1106,7 @@ sandboxed() {
   shift
   [ ! -d "${2:-}" ] || from="$2"
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV"
-  ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$from" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="${SB_SCRIPTS:-$HERE}" \
       ${envs[@]+"${envs[@]}"} bash "$TMPD/sandboxed.sh" "$@" >"$OUTF" 2>"$ERRF" )
   RC=$?
@@ -1116,7 +1157,7 @@ for run in "sandboxed|$BWT" "plain|$RWT"; do
   IFS='|' read -r how dir <<<"$run"
   PIDF="$TMPD/sandboxed.pid"; rm -f "$PIDF"
   START=$SECONDS
-  GOT=$(cat < <( cd "$dir" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  GOT=$(cat < <( cd "$dir" && env -i PATH="$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" PACK_SCRIPTS="$HERE" PIDF="$PIDF" \
       "${LOCAL_ENV[@]}" bash "$TMPD/sandboxed.sh" 5197 "$dir" \
       bash -c 'echo $$ >"$PIDF"; printf closed; exec 1>&-; exec /bin/sleep 30' 2>"$ERRF" ))
@@ -1483,7 +1524,7 @@ skill_block 2 | sed 's#<command> <arguments\.\.\.>#lint demo.md#' >"$TMPD/skill-
 skill_run() {
   local blk="$1"; shift
   : >"$CALLLOG"
-  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$WORK" && env -i PATH="${STUB_PATH:-$BIN}:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" "$@" bash "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
 }
@@ -1522,7 +1563,7 @@ skill_block 2 | sed 's#<command> <arguments\.\.\.>#run demo.md --serve "npm run 
 shell_run() {
   local sh="$1" blk="$2"; shift 2
   : >"$CALLLOG"; rm -f "$SANDBOX_PROFILE" "$SANDBOX_ENV" "$ENGINE_ENV"
-  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
+  ( cd "$WORK" && env -i PATH="$BIN:$FARM" HOME="$AHOME" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
       ENGINE_STUB="$ENGINE_STUB" PACK_SCRIPTS="$HERE" SANDBOX_PROFILE="$SANDBOX_PROFILE" SANDBOX_ENV="$SANDBOX_ENV" ENGINE_ENV="$ENGINE_ENV" \
       "${CITY_ENV[@]}" "$@" "$sh" "$blk" >"$OUTF" 2>"$ERRF" )
   RC=$?
