@@ -70,10 +70,10 @@ cadence, owned by the merge workflow"), and a line may name work no epic holds:
 an epic cut on the operator's time on a pull request names "how much reading a
 design asks, which no epic holds". The lines come from the hypothesis, not from
 a list of the other epics. What decides is what the work is for, not what it
-touches. Work that serves another outcome gets no line, even when it shares
-code, machinery or records with the epic's work, because nobody who reads the
-hypothesis would ask whether the epic covers it. Such a line is true but tells
-the reader nothing. The boundaries do not catalog members.
+touches. Work for an outcome that no reader of the hypothesis would take for the
+epic's gets no line, even when it shares code, machinery or records with the
+epic's work. Such a line is true but tells the reader nothing. The boundaries do
+not catalog members.
 
 **Closure condition.** Three to six checks a person can run without opening a
 child, each of which fails today. Closing every child is not one of them: an

@@ -68,8 +68,8 @@ said, and write the change you propose for each gap:
   yet arrives;
 - boundaries that take in ground another epic owns, until that epic closes,
   whatever its status. This read lists the boundaries of every epic not yet
-  closed, to find that overlap and nothing else: an epic this one does not
-  overlap gets no line in its boundaries. The list always includes this epic,
+  closed, to find that overlap and nothing else: being on the list gives an
+  epic no line in this one's boundaries. The list always includes this epic,
   so a run without it has not answered:
   `gc bd list -t epic --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
 - a boundary line for work nobody who reads the hypothesis would mistake for the
