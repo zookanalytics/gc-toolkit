@@ -6,6 +6,12 @@
 # record, pending or at a changed head, with the landing order named as its
 # closer, and a closed anchor, an exception of that record or a value off it
 # refused;
+# at an exception, the copy of record.Exception's values held to record.go, and
+# each PR the record names read from GitHub with the lock free: one still open
+# named for its close in place of the direct verb, with nothing written and no
+# comment or close, closed or merged ones naming the direct verb, and a read that
+# does not answer, a key that is no PR's URL or a record that names no PR refused
+# with what to repair;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url
@@ -32,11 +38,13 @@ mk_sut_dir "$SD" "$HERE/pr-dispose.sh"
 SUT="$SD/pr-dispose.sh"
 
 # gh: pr-dispose reads the PR (state, url and comments) and closes it, both
-# pinned to the --repo it derives from the anchor's pr_url. The harness gh stub
-# cats a whole fixture and has no `close`, so override it with a minimal one that
+# pinned to the --repo it derives from the anchor's pr_url, and at an exception
+# it reads a PR's state by the URL the record holds. The harness gh stub cats a
+# whole fixture and has no `close`, so override it with a minimal one that
 # serves a canned state (per PR, default OPEN), a url built from the pinned
-# --repo and a canned conversation, and logs the closing comment and the close,
-# honouring the refusal knobs. Written after harness_init so it wins on PATH.
+# --repo, or from the URL it was given, and a canned conversation, and logs the
+# closing comment and the close, honouring the refusal knobs. Written after
+# harness_init so it wins on PATH.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'GH'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
@@ -50,6 +58,10 @@ while [ $# -gt 0 ]; do
     *)      [ -z "$num" ] && num="$1"; shift ;;
   esac
 done
+# A PR named by its URL carries its repository and its number.
+case "$num" in
+  https://*/pull/*) repo="${num#https://}"; repo="${repo%/pull/*}"; num="${num##*/pull/}" ;;
+esac
 # STUB_LOCK_PROBE names the record lock: each call then records whether the lock
 # was free while GitHub was reached.
 if [ -n "${STUB_LOCK_PROBE:-}" ]; then
@@ -155,10 +167,12 @@ hasnt "$(cat "$STUB_GH_LOG")" "pr close" "no PR close on an already-disposed anc
 
 echo "# an anchor off the pending record is refused, naming bead-rehome"
 store "[{\"id\":\"A5\",\"status\":\"open\",\"title\":\"t\",\"notes\":\"\",\"metadata\":{\"merge_result\":\"abandoned\",\"pr_number\":\"74\"}}, $(succ S5)]"
+: > "$STUB_GH_LOG"
 out=$("$SUT" --anchor A5 --successor S5 --kind not-needed 2>&1); rc=$?
 eq "$rc" 1 "exits 1"
 has "$out" "bead-rehome.sh --origin A5" "names the direct disposition verb for an anchor off the pending record"
 eq "$(meta A5 'gc.pr_close_disposition_kind')" "<absent>" "no marker stamped on the refused anchor"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and GitHub is not asked"
 
 echo "# an anchor on the pending record: the marker is stamped and the PR closed, for the landing order"
 store "[$(anchor A30 100 | jq -c '.status = "blocked" | .metadata.merge_result = "pull_request_pending"'), $(succ S30)]"
@@ -180,8 +194,8 @@ eq "$(meta A31 'gc.pr_close_disposition_kind')" "re-homed" "kind stamped"
 eq "$(bstatus A31)" "open" "the anchor is left open"
 has "$(cat "$STUB_GH_LOG")" "pr close 101" "the PR is closed"
 
-echo "# a closed anchor, or an exception of the pending record, is refused, naming bead-rehome"
-for c in "A32 closed pull_request_pending" "A33 blocked pull_request_closed_unmerged"; do
+echo "# a closed anchor, or a value on the record that is no exception, is refused, naming bead-rehome"
+for c in "A32 closed pull_request_pending" "A33 open pull_request_record_incomplete"; do
   set -- $c
   store "[$(anchor "$1" 102 | jq -c --arg s "$2" --arg m "$3" '.status = $s | .metadata.merge_result = $m'), $(succ S32)]"
   : > "$STUB_GH_LOG"
@@ -193,6 +207,8 @@ for c in "A32 closed pull_request_pending" "A33 blocked pull_request_closed_unme
 done
 
 pending() { anchor "$1" "$2" | jq -c '.status = "blocked" | .metadata.merge_result = "pull_request_pending"'; }
+# gh_other — the gh calls this run made other than a read of a PR.
+gh_other() { grep -vc '^pr view ' "$STUB_GH_LOG"; }
 
 echo "# the read of the anchor and the stamp wait while another writer holds the record lock"
 store "[$(pending A40 110), $(succ S40)]"
@@ -215,6 +231,7 @@ echo "# a run's last write before the lock frees is what the ruling reads"
 # recorded the record's exception, so the ruling that waited finds an anchor
 # past the pending record and stamps nothing.
 store "[$(pending A41 111), $(succ S41)]"
+printf 'CLOSED\n' > "$GH_DIR/pr_state_111"
 : > "$STUB_GH_LOG"
 hold_lock '(.[] | select(.id == "A41") | .metadata.merge_result) = "pull_request_closed_unmerged"'
 "$SUT" --anchor A41 --successor S41 --kind not-needed >"$TMP/out" 2>&1 &
@@ -223,9 +240,9 @@ sleep 1
 release_lock
 rc=0; wait "$RULING" || rc=$?
 eq "$rc" 1 "the ruling reads the anchor the run left and refuses it"
-has "$(cat "$TMP/out")" "bead-rehome.sh --origin A41" "…naming the direct disposition verb"
+has "$(cat "$TMP/out")" "bead-rehome.sh --origin A41" "…naming the direct disposition verb, since GitHub reads its PR closed"
 eq "$(meta A41 'gc.pr_close_disposition_kind')" "<absent>" "…with no marker stamped"
-hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and no gh call"
+eq "$(gh_other)" 0 "…and GitHub is only read"
 
 echo "# a lock that does not come within the wait writes nothing and closes no PR"
 store "[$(pending A42 112), $(succ S42)]"
@@ -268,6 +285,103 @@ eq "$(meta A44 'gc.pr_close_disposition_kind')" "not-needed" "…with the marker
 eq "$(cat "$STUB_FD_LOG")" "" "no gc call holds the lock's descriptor"
 has "$(cat "$LOCK.probe" 2>/dev/null)" "pr close: lock free" "the PR is closed with the lock free"
 hasnt "$(cat "$LOCK.probe" 2>/dev/null)" "held" "…and every gh call finds it free"
+
+echo "# an anchor at an exception of the pending record: GitHub is asked about each PR its record names"
+ROOT="$(cd "$HERE/../.." && pwd)"
+RECORD_GO="$ROOT/services/gctk/pr/record/record.go"
+EXCEPTIONS=$(for name in $(awk '/^func Exception\(/ { f = 1 } f && /case / { sub(/^[[:space:]]*case /, ""); sub(/:.*/, ""); gsub(/,/, " "); print; exit }' "$RECORD_GO"); do
+    awk -v n="$name" '$1 == n && $2 == "=" { gsub(/"/, "", $3); print $3 }' "$RECORD_GO"
+  done | sort | paste -sd ' ' -)
+COPY=$(sed -n 's/^RECORD_EXCEPTIONS="\(.*\)"$/\1/p' "$SUT" | tr ' ' '\n' | sort | paste -sd ' ' -)
+if [ -n "$EXCEPTIONS" ]; then
+  eq "$COPY" "$EXCEPTIONS" "(NO-DRIFT) the script's exceptions are the values record.Exception names"
+else
+  bad "(NO-DRIFT) no exception read from $RECORD_GO"
+fi
+GHR="https://github.com/zook/gc-toolkit/pull"
+# excepted <id> <num> <merge_result> [<jq edit>] — the anchor at an exception of
+# the pending record, blocked behind its gate, or closed at the exception that
+# records a closed bead, with its record naming PR <num> by its URL.
+excepted() {
+  local st=blocked
+  [ "$3" != pull_request_legacy_closed_unverified ] || st=closed
+  anchor "$1" "$2" | jq -c --arg s "$st" --arg m "$3" ".status = \$s | .metadata.merge_result = \$m${4:+ | $4}"
+}
+# dispose <id> [<flag>...] — dispose of <id> onto SE as not-needed, into out and rc.
+dispose() {
+  local id="$1"; shift
+  : > "$STUB_GH_LOG"
+  out=$("$SUT" --anchor "$id" --successor SE --kind not-needed "$@" 2>&1); rc=$?
+}
+n=140
+for v in $EXCEPTIONS; do
+  n=$((n + 1))
+  store "[$(excepted "E$n" "$n" "$v"), $(succ SE)]"
+  dispose "E$n"
+  eq "$rc" 1 "$v, its PR open: exits 1"
+  has "$out" "gh pr close $GHR/$n" "$v, its PR open: it names the PR's close"
+  hasnt "$out" "bead-rehome.sh" "$v, its PR open: it names no direct verb yet"
+  eq "$(meta "E$n" 'gc.pr_close_disposition_kind')" "<absent>" "$v, its PR open: no marker is stamped"
+  eq "$(gh_other)" 0 "$v, its PR open: GitHub is only read"
+done
+
+store "[$(excepted E150 150 pull_request_reconcile_invalid ".metadata.existing_pr = \"$GHR/150\""), $(succ SE)]"
+printf 'CLOSED\n' > "$GH_DIR/pr_state_150"
+dispose E150
+eq "$rc" 1 "an exception whose PR reads closed: exits 1"
+has "$out" "bead-rehome.sh --origin E150 --successor SE --kind not-needed" "…naming the direct disposition verb"
+eq "$(grep -c '^pr view ' "$STUB_GH_LOG")" 1 "…after one read of the PR both keys name"
+eq "$(gh_other)" 0 "…and no other gh call"
+
+store "[$(excepted E151 151 pull_request_merged_unvalidated_head), $(succ SE)]"
+printf 'MERGED\n' > "$GH_DIR/pr_state_151"
+dispose E151
+eq "$rc" 1 "an exception whose PR reads merged: exits 1"
+has "$out" "bead-rehome.sh --origin E151" "…naming the direct disposition verb"
+
+store "[$(excepted E152 152 pull_request_reconcile_invalid), $(succ SE)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_PR_VIEW_RC=1 "$SUT" --anchor E152 --successor SE --kind not-needed 2>&1); rc=$?
+eq "$rc" 1 "an exception whose PR does not read: exits 1"
+has "$out" "GitHub did not say whether its PR $GHR/152 is still open" "…saying so"
+hasnt "$out" "bead-rehome.sh" "…and naming no direct verb"
+
+store "[$(excepted E153 153 pull_request_legacy_closed_unverified "del(.metadata.pr_url) | .metadata.existing_pr = \"$GHR/154\""), $(succ SE)]"
+dispose E153
+eq "$rc" 1 "an exception whose record names its PR only as existing_pr: exits 1"
+has "$out" "gh pr close $GHR/154" "…naming that PR's close"
+
+store "[$(excepted E155 155 pull_request_closed_unmerged ".metadata.existing_pr = \"$GHR/156\""), $(succ SE)]"
+printf 'CLOSED\n' > "$GH_DIR/pr_state_155"
+dispose E155
+eq "$rc" 1 "an exception whose record names a second PR, open: exits 1"
+has "$out" "gh pr close $GHR/156" "…naming that one's close"
+
+store "[$(excepted E157 157 pull_request_reconcile_invalid '.metadata.pr_url = "157"'), $(succ SE)]"
+dispose E157
+eq "$rc" 1 "an exception whose pr_url is no PR's URL: exits 1"
+has "$out" "pr_url reads '157'" "…naming the key and its value"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and GitHub is not asked"
+
+store "[$(excepted E158 158 pull_request_reconcile_invalid 'del(.metadata.pr_url)'), $(succ SE)]"
+dispose E158
+eq "$rc" 1 "an exception whose record names no PR: exits 1"
+has "$out" "neither pr_url nor existing_pr names its PR" "…saying so"
+hasnt "$(cat "$STUB_GH_LOG")" "pr " "…and GitHub is not asked"
+
+store "[$(excepted E159 159 pull_request_legacy_closed_unverified '.metadata.pr_url = " " | .metadata.existing_pr = ""'), $(succ SE)]"
+dispose E159
+has "$out" "neither pr_url nor existing_pr names its PR" "an exception whose PR keys are empty: it says so"
+
+store "[$(excepted E160 160 pull_request_merge_evidence_contradiction), $(succ SE)]"
+dispose E160 --dry-run
+eq "$rc" 1 "a dry run at an exception whose PR is open: exits 1"
+has "$out" "gh pr close $GHR/160" "…naming the PR's close"
+hasnt "$out" "dry run" "…and reporting no plan"
+rm -f "$LOCK.probe"
+out=$(STUB_LOCK_PROBE="$LOCK" "$SUT" --anchor E160 --successor SE --kind not-needed 2>&1); rc=$?
+has "$(cat "$LOCK.probe" 2>/dev/null)" "pr view: lock free" "an exception's PR is read with the record lock free"
+hasnt "$(cat "$LOCK.probe" 2>/dev/null)" "held" "…and no read finds it held"
 
 echo "# an anchor with no parseable pr_url is refused before stamping"
 store "[{\"id\":\"A6\",\"status\":\"open\",\"metadata\":{\"merge_result\":\"pull_request_pending\",\"pr_number\":\"80\"}}, $(succ S6)]"
