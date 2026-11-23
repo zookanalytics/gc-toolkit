@@ -65,8 +65,10 @@ one.
 
 A failure is reported as one patrol finding in the rig's store, through the
 pack's patrol-finding.sh in the scripts directory GCTK_SCRIPTS_DIR names, under
-the key actions.<file> and the scope actions-report, a bug at priority %d. Its
-text names the newest failure and its link, its commit, how long the run of
+the key actions.<file> and the scope actions-report, a bug at priority %d. For
+a file name with a character a key does not take, the key turns each such
+character into a dash and adds a dot and 8 hex digits of the name's SHA-256,
+so no two workflows share a key. Its text names the newest failure and its link, its commit, how long the run of
 failures is, the success before it and the changes since, the failed jobs and
 steps of the newest failure, read in one more GitHub read, the command that
 prints their log, and the run's newest failures. A report of a run that has not

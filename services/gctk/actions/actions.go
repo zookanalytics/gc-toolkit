@@ -15,6 +15,8 @@
 package actions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"slices"
@@ -295,15 +297,24 @@ func (r *Report) workflow(w *Workflow, rig, repo, branch string, dryRun bool) {
 }
 
 // Key is the finding's key for the workflow whose file is named file: one
-// finding per workflow in a rig's store. A character a key does not take
-// becomes a dash.
+// finding per workflow in a rig's store. A name made only of the characters a
+// key takes stands in the key as it is. In any other name each other character
+// becomes a dash, and a dot and the first 8 hex digits of the name's SHA-256
+// follow, so names that differ only in such characters keep keys of their own.
+// A workflow's file name ends in .yml or .yaml, which hex digits cannot spell,
+// so a name that stands as it is never meets one with a digest.
 func Key(file string) string {
-	return "actions." + strings.Map(func(c rune) rune {
+	tail := strings.Map(func(c rune) rune {
 		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' {
 			return c
 		}
 		return '-'
 	}, file)
+	if tail != file {
+		sum := sha256.Sum256([]byte(file))
+		tail += "." + hex.EncodeToString(sum[:4])
+	}
+	return "actions." + tail
 }
 
 // findingArgs are the finding writer's arguments for how a workflow stands: a

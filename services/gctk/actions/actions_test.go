@@ -115,17 +115,42 @@ func TestOnlyTheBranchsOwnRunsCount(t *testing.T) {
 	}
 }
 
-// The key is one per workflow file, in the characters a finding's key takes.
+// The key is one per workflow file, in the characters a finding's key takes,
+// and a name with any other character keeps a key no other name has.
 func TestTheKeyIsOnePerWorkflow(t *testing.T) {
 	valid := regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	for file, want := range map[string]string{
 		"nightly.yml":        "actions.nightly.yml",
 		"Nightly_Build.yaml": "actions.Nightly_Build.yaml",
-		"a b+c.yml":          "actions.a-b-c.yml",
+		"a-b.yml":            "actions.a-b.yml",
+		"a+b.yml":            "actions.a-b.yml.ab0be9a8",
+		"a b.yml":            "actions.a-b.yml.943ac576",
+		"a b+c.yml":          "actions.a-b-c.yml.f8024e0a",
 	} {
 		if got := Key(file); got != want || !valid.MatchString(got) {
 			t.Errorf("Key(%q) = %q, want %q", file, got, want)
 		}
+	}
+}
+
+// Two workflows whose names differ only in characters a key does not take
+// keep findings of their own, so one's success leaves the other's failure
+// standing.
+func TestWorkflowsWhoseNamesDashAlikeKeepTheirOwnFindings(t *testing.T) {
+	w := newWorld(map[string][]gh.WorkflowRun{
+		"a+b.yml": {run('a', 1, 1, "failure")},
+		"a-b.yml": {run('b', 2, 2, "success")},
+	})
+	if out := w.report.Run("rig-a", false); out.Failure != "" {
+		t.Fatalf("the report failed: %s", out.Failure)
+	}
+	keys := map[bool]string{}
+	for _, c := range w.city.Scripts() {
+		_, cleared := arg(c.Args, "--cleared")
+		keys[cleared], _ = arg(c.Args, "--key")
+	}
+	if len(w.city.Scripts()) != 2 || keys[false] != Key("a+b.yml") || keys[true] != Key("a-b.yml") || keys[false] == keys[true] {
+		t.Errorf("the failure was filed under %q and the success cleared %q, in %+v", keys[false], keys[true], w.city.Scripts())
 	}
 }
 
