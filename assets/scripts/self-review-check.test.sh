@@ -514,9 +514,9 @@ rm -f "$WT/untracked"; git -C "$WT" config --unset status.showUntrackedFiles
 
 # --- 4c. a record store gctk cannot read -------------------------------------
 # A plain file where the store's directory goes fails gctk's lookup with
-# ENOTDIR, as it would for a suite run as root, which reads through a mode that
-# refuses others. The run on the budget's last attempt spent no attempt, so it
-# notes nothing.
+# ENOTDIR, whether or not the suite runs as root. A mode that refuses reads
+# would not stop root. The run on the budget's last attempt spent no attempt,
+# so it notes nothing.
 reset_env; ITERATION=3; MD_MAX_ATTEMPTS=3; write_state; green
 mv "$WT/.git/gc-rig-checks" "$TMP/records"; : > "$WT/.git/gc-rig-checks"
 run_case "NO VERDICT on the budget's last attempt when gctk cannot read the record store" 75
@@ -545,6 +545,7 @@ run_case "FAIL (fail-closed) when work_dir is not a git worktree" 1
 # --- 7. a bead the store does not answer for ---------------------------------
 reset_env; RUN_FAILS=1; MD_ROOT_ISSUE=""; write_state
 run_case "NO VERDICT when the run of the root is unreadable and no gc.var.issue" 75
+assert_out "names the read" "NO VERDICT: could not read the run of root wisp-1, and the root carries no gc.var.issue"
 reset_env; SHOW_FAILS_ON=gc-issue; write_state; green
 run_case "NO VERDICT when the work bead cannot be read" 75
 assert_out "names the read" "NO VERDICT: could not read work bead gc-issue"
