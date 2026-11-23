@@ -1173,7 +1173,8 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   state its canonical is in, because the canonical carries the work. While the
   canonical has neither closed nor shipped, each open bead the duplicate blocks
   first gains a `blocks` edge onto it, so none goes ready before the canonical
-  delivers (Disposition, below). Converse and operator dispositions use the
+  delivers, as under every kind whose successor carries the work (Disposition,
+  below). Converse and operator dispositions use the
   same writer, and so does a polecat whose work
   bead duplicates another: that close is the one a polecat makes on its work
   bead, before it declines its run. A never-dispatched rework twin, an open
@@ -1355,18 +1356,22 @@ and any patrol judging a closed bead.
 the origin recorded no work, and under `fixed-upstream` that the successor is
 closed or shipped, unless the origin carries the operator's pre-recorded
 PR-close disposition for that kind and successor.
-Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
-follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
-canonical that has neither closed nor shipped closes, each open bead it blocks
-gains a `blocks` edge onto the canonical, each add taking its exit. The
-canonical itself and a
-bead it already blocks need none. A waiter that cannot take the edge refuses the
-close before anything is written: one the canonical already joins by another
-edge type, since bd keeps one edge per pair, and every waiter of a canonical in
-another store, where the edge would hold nothing. A waiter bd refuses the edge,
-for a cycle or a parent chain, refuses the close too, once the edges before it
-are written, and those stay. Every other kind ends the waits on the bead with its
-close.
+Under every kind but `not-needed` it also keeps the waits on the bead in force,
+because the successor carries the bead's work, and bd's ready rule follows a
+`blocks` edge and never a `duplicates` or `supersedes` edge. So before such a
+close, while the successor has neither closed nor shipped, each open bead the
+origin blocks gains a `blocks` edge onto the successor, all in one bulk write
+that bd commits whole or not at all. A `fixed-upstream` close meets this only on
+a ruling that closes it before its fix has landed. The successor itself, a bead
+it already blocks, and a bead a ruling has recorded a PR-close disposition on
+need none: the ruled bead closes under that ruling and waits for nothing more.
+A waiter that cannot take the edge refuses the close before anything is
+written: one the successor already joins by another edge type, since bd keeps
+one edge per pair, and every waiter of a successor in another store, where the
+edge would hold nothing. A write bd refuses, for a cycle or a parent chain,
+refuses the close too. A bead that comes to wait on the origin while it closes
+gains its edge just after the close. Under `not-needed` nothing carries the
+work, and the waits on the bead end with its close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close

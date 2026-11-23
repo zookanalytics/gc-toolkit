@@ -359,7 +359,11 @@ one. Each item goes one of three ways:
   itself, and a run or PR in flight goes on under it:
   `gc bd update <bead> --parent <delivery-or-epic>`. An edge holds only within
   one store, so work whose epic is in another rig's store is filed again there,
-  and this bead closes as re-homed onto the new one. With a PR in flight, that
+  and this bead closes as re-homed onto the new one. A bead here that waits on
+  it can wait on nothing there, so first give each that needs the work a human
+  gate that names the new bead and end its wait on this one, as the `work`
+  skill's close says: the writer refuses the close while one still waits, a
+  retired PR's anchor included. With a PR in flight, that
   close is the PR's retirement on its own call, with
   `--retire re-homed --successor <new bead>`, and otherwise it is the
   disposition writer:
