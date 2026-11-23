@@ -5,7 +5,6 @@
 # refusal of a route that is not rig-qualified, `human` included; the clear of
 # the executor identity with the assignee; --set-dated's compare-and-preserve
 # rule for the @<since> component; the --takeaway writer and its cap;
-# --keep-route, the write that records on a bead and writes no route;
 # a landing's work record and its clear of the live objections; and the
 # refusal when no gctk binary resolves.
 #
@@ -31,22 +30,6 @@ if [ -z "$GCTK_BUILT" ]; then
     echo "passed: $PASS  failed: $FAIL"
     exit 1
 fi
-
-# --- lifecycle.toml's postures against their Go copy ------------------------------
-# The postures are declared in lifecycle.toml, and services/gctk/prstatus reads
-# them for the status: label and the board. prstatus.Derive reads a recorded
-# posture outside the vocabulary as a state it cannot name, needs-attention, so
-# the values its knownPosture switch accepts must be the ones declared here.
-echo "# lifecycle.toml's postures against their Go copy"
-TOML="$ROOT/lifecycle/lifecycle.toml"
-go_known() { # <func>: the values its switch accepts, sorted, "" dropped
-  sed -n "/^func $1(/,/^}/p" "$ROOT/services/gctk/prstatus/prstatus.go" \
-    | sed -n 's/^[[:space:]]*case \(.*\):$/\1/p' | tr ',' '\n' | tr -d '" \t' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'
-}
-sorted_words() { tr ' ' '\n' | sed '/^$/d' | sort | tr '\n' ' ' | sed 's/ *$//'; }
-TOML_POSTURES=$(sed -n 's/^postures = \[\(.*\)\]/\1/p' "$TOML" | tr -d '",' | sorted_words)
-[ -n "$TOML_POSTURES" ] && ok "postures declared in lifecycle.toml" || bad "postures = [...] missing from lifecycle.toml"
-eq "$(go_known knownPosture)" "$TOML_POSTURES" "prstatus knows exactly the postures lifecycle.toml declares"
 
 # --- transition: happy path is ONE update carrying everything -------------------
 echo "# transition happy path"
@@ -480,33 +463,6 @@ eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches 
 store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 out="$("$SUT" transition p-11 --to blocked --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
 eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
-
-# --- a record on an anchor staying in its state moves no route -------------------
-# pr-facts.sh records the rank an anchor's PR-finishing work settled at with a
-# self-transition, and that write must move no route. So --keep-route writes no
-# route at all.
-echo "# --keep-route records without routing"
-store '[{"id":"k-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":""}},
-        {"id":"k-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":"","gc.takeaway":"PR#7 was closed without merging"}},
-        {"id":"k-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/gc-toolkit.mechanik"}},
-        {"id":"k-4","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/gc-toolkit.polecat"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition k-1 --to refused_false_completion --expect refused_false_completion --keep-route --set pr_finishing_settled=unapproved 2>&1)"; rc=$?
-eq "$rc" 0 "a self-transition with no route and no takeaway records under --keep-route"
-eq "$(meta k-1 pr_finishing_settled)|$(meta k-1 'gc.routed_to')" "unapproved|" "…and the route stays empty"
-hasnt "$(grep '^bd update k-1' "$STUB_GC_LOG")" "gc.routed_to" "…since the write names no route"
-"$SUT" transition k-2 --to refused_false_completion --expect refused_false_completion --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
-eq "$(meta k-2 pr_finishing_settled)|$(meta k-2 'gc.routed_to')" "unapproved|" "…and one that carries a takeaway keeps its empty route"
-"$SUT" transition k-3 --to blocked --expect blocked --keep-route --set pr_finishing_settled=unapproved >/dev/null 2>&1
-eq "$(meta k-3 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…a route a person gave the bead is kept"
-"$SUT" transition k-4 --to blocked --expect blocked --keep-route --set pr_finishing_settled=approved >/dev/null 2>&1
-eq "$(meta k-4 pr_finishing_settled)|$(meta k-4 'gc.routed_to')" "approved|rig/gc-toolkit.polecat" "…and so is a pool's"
-store '[{"id":"k-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"refused_false_completion","gc.routed_to":""}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition k-6 --to refused_false_completion --expect refused_false_completion --keep-route --route rig/gc-toolkit.mechanik 2>&1)"; rc=$?
-eq "$rc" 1 "--keep-route with --route exits 1"
-has "$out" "opposite things" "…saying the two contradict"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and the refusal does not reach bd"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"

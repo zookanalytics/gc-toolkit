@@ -409,38 +409,6 @@ no warrant.
   running from a block, for example once its PR monitor reads the base
   branch's rules. The axis then moves onto that record.
 
-## Owed status label clear
-
-- **Covers.** The `status_label_clear_owed` key, in the
-  `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
-  writer: `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
-  "retry the status: label clears that terminal records still owe" section of
-  `assets/scripts/pr-facts.sh`.
-- **Stands in for.** A retry of a failed write to an outside service, kept
-  until a later pass lands it.
-- **Evidence.**
-  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
-    dispatch failure" in `engdocs/architecture/orders.md`), and
-    `[steps.retry]` retries a formula step's attempt within its run (section
-    3.2 of `docs/reference/specs/formula-spec-v2.md`). Gas City keeps no
-    outbox or retry queue that a pack can hand a write to an outside
-    service. Its usage facts retry a failed write with a marker of their
-    own: a fact whose sink fails leaves the session bead's
-    `usage_compute_emitted_at` marker unset for the next reconcile tick
-    (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
-  - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
-    marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
-    the `oversight-rig` pack's `delivered` label.
-  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
-  `gastownhall/gascity-packs` main 44b9db7168f6.
-- **Retires when.** Gas City ships a retry that a pack can hand a failed write
-  to an outside service, such as an outbox that a later pass drains, or its
-  writer retires, since the landing order makes the clears it retries by
-  comparing the labels the PR watch saved for a PR with the ones the store
-  derives, and the net by searching for the city's labels on PRs no live bead
-  owns, and neither records anything.
-
 ## Saved GitHub read
 
 - **Covers.** The `pr_github_read` key, declared as `githubReadKey` in
@@ -464,9 +432,8 @@ no warrant.
   takes each post the conversation keeps untaken as its own ask (`takePlans`,
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
-  converts the receipts `pr-facts.sh` left on a bead whose saved read shows the
-  PR open, and unsets them once the saved conversation shows no post they reach
-  untaken (`unconvertible` and `unsetReceipts` in
+  converts the old receipts on a bead whose saved read shows the PR open, and
+  unsets them once the saved conversation shows no post they reach untaken (`unconvertible` and `unsetReceipts` in
   `services/gctk/pr/convert.go`, which has the update read the conversation
   again the same way), decides each owned PR's red checks and conflict from
   its checks, its merge state and its approvals (`redPlans`, `redOn` and

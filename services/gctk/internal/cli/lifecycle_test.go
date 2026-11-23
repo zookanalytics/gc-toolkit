@@ -128,7 +128,6 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		// refusal is decided on arguments alone, so it happens before any bead is
 		// read.
 		{"--route human", []string{"b-1", "--to", "blocked", "--route", "human"}, "not rig-qualified"},
-		{"--route beside --keep-route", []string{"b-1", "--to", "blocked", "--keep-route", "--route", "rig/pool"}, "ask for opposite things"},
 		{"empty --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", ""}, "tells the operator nothing"},
 		{"whitespace-only --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", " \t\n "}, "tells the operator nothing"},
 		{"--takeaway over the cap", []string{"b-1", "--to", "blocked", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},

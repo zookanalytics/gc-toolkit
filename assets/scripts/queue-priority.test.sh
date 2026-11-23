@@ -33,8 +33,8 @@
 #               epic queues at P0, then P1 once the epic moves to P2; under a P0
 #               epic a feature at -1 stays P0 and a task under it at +1 is P1; two
 #               parents follow the more urgent; a parked epic's members move too.
-#   (APPROVED)  PR-finishing work of an approved PR, its posture in the stored
-#               shape, settles at P0 with its workflow whatever its shift, while
+#   (APPROVED)  PR-finishing work of a PR its saved read shows approved
+#               settles at P0 with its workflow whatever its shift, while
 #               that of a PR that is not approved runs at its anchor's priority
 #               plus its shift; a move refuses a P-value on it and says the
 #               approval holds it at P0, writes a shift on it, and leaves it at
@@ -538,20 +538,19 @@ qp settle tk-two --print; eq "$OUT" "2" "(RULES) a bead with two parents queues 
 
 # PR-finishing work of an approved PR runs at P0 whatever its shift, and that of
 # any other PR at its anchor's priority plus its shift. tk-ap and tk-cm are
-# anchors under the P2 epic tk-e2, tk-ap approved and tk-cm holding an
-# unanswered comment, each posture in the shape pr-facts.sh stores it, so a rank
-# that compared the whole stored value with approved would put tk-ra at P1.
+# anchors under the P2 epic tk-e2, tk-ap approved by the read the one-PR update
+# saved at the head the store holds and tk-cm with no saved read yet.
 reset_store
 add_beads '[
  {"id":"tk-e2","status":"open","issue_type":"epic","priority":2,"metadata":{},"dependencies":[]},
- {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"approved@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z","pr_head_oid":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
+ {"id":"tk-ap","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_head_sha":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901","pr_github_read":"{\"pr\":{\"head\":\"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901\",\"state\":\"OPEN\"},\"conversation\":{\"approvers\":[\"operator\"],\"requesters\":[],\"untaken\":[]}}"},
   "dependencies":[{"issue_id":"tk-ap","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-ra","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-ap","task_kind":"rework","priority_shift":-1},"dependencies":[]},
  {"id":"tk-cvra","status":"open","issue_type":"convoy","priority":2,"metadata":{"gc.synthetic":"true"},
   "dependencies":[{"issue_id":"tk-cvra","depends_on_id":"tk-ra","type":"tracks"}]},
  {"id":"tk-rra","status":"in_progress","issue_type":"task","priority":2,"metadata":{"gc.kind":"workflow","gc.input_convoy_id":"tk-cvra"},"dependencies":[]},
  {"id":"tk-sra","status":"open","issue_type":"task","priority":2,"metadata":{"gc.root_bead_id":"tk-rra","gc.step_ref":"mol-polecat-work.implement","gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependencies":[]},
- {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_posture":"commented@0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901@2026-10-11T00:00:00Z"},
+ {"id":"tk-cm","status":"open","issue_type":"task","priority":2,"metadata":{"merge_result":"pull_request_pending","pr_head_sha":"0f38036a1b2c3d4e5f60718293a4b5c6d7e8f901"},
   "dependencies":[{"issue_id":"tk-cm","depends_on_id":"tk-e2","type":"parent-child"}]},
  {"id":"tk-rc","status":"open","issue_type":"task","priority":2,"metadata":{"anchor_bead":"tk-cm","task_kind":"rework","priority_shift":-1},"dependencies":[]}
 ]'
