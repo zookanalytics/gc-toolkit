@@ -12,7 +12,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Accept answers a first reaction's recommendation: it clears the human gate
@@ -456,7 +456,7 @@ func (r *Reactions) humanGates(row *ledger.Record) ([]*ledger.Record, error) {
 	}
 	var out []*ledger.Record
 	for _, g := range rows {
-		if prstatus.IsHumanGate(g.IssueType(), g.AwaitType()) {
+		if person.IsHumanGate(g.IssueType(), g.AwaitType()) {
 			out = append(out, g)
 		}
 	}

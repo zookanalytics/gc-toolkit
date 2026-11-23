@@ -61,6 +61,10 @@ type Wait struct {
 	Ancestor  string `json:"ancestor,omitempty"`
 }
 
+// Unjudged reports whether the wait is one the store cannot judge yet, a
+// waits-for wait ([Unjudged]).
+func (w Wait) Unjudged() bool { return w.Type == ledger.EdgeWaitsFor }
+
 // Foreign is one of a bead's wait edges onto a bead its store does not hold, an
 // edge into another store, which holds nothing.
 type Foreign struct {
