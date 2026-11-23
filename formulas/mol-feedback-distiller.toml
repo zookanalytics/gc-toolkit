@@ -160,9 +160,10 @@ DISTILL_RUN=open   # open | gated | aborted
 Pending = observation beads not yet stamped `obs.distilled` (observations
 are CLOSED at creation, so list closed). The due memory notes, at most
 {{memory_notes_per_run}} and oldest first, seed the set, each marked by its
-`memory_ref`. FAIL-SAFE: an unreadable rig set or
-an unreadable listing for ANY store sets `DISTILL_RUN=aborted`, closes this
-step `--outcome fail`, and files nothing — never judge on partial data.
+`memory_ref`. FAIL-SAFE: never judge on partial data. An unreadable rig set,
+an unreadable listing for ANY store, or a write that fails to add a store's
+observations to the pending set aborts the run: it sets `DISTILL_RUN=aborted`,
+closes this step `--outcome fail`, and files nothing.
 
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
@@ -173,15 +174,14 @@ SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "
 RIGSET=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
 # The later blocks read $PENDING, so the trap keeps it only once this block
 # reaches the handoff at its end. Every earlier exit removes it with the rest.
-# The `.next` merge scratch is never handed on. An unset $RAW or $PENDING is
-# guarded because `rm -f "$RAW.pending"` would otherwise name `.pending` in
-# the cwd.
+# The `.next` merge scratch is never handed on. An unset $PENDING is guarded
+# because `rm -f "$PENDING.next"` would otherwise name `.next` in the cwd.
 RAW=""
 PENDING=""
 PENDING_HANDOFF=""
 distill_scratch_rm() {
   rm -f "$RIGSET"
-  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  [ -n "$RAW" ] && rm -f "$RAW"
   if [ -n "$PENDING" ]; then
     rm -f "$PENDING.next"
     [ -n "$PENDING_HANDOFF" ] || rm -f "$PENDING"
@@ -211,7 +211,7 @@ PENDING=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX"); "${GCTK_BIN:
 TAB=$(printf '\\t')
 while IFS="$TAB" read -r R RPATH; do
   [ -n "$R" ] || continue
-  [ -n "$RAW" ] && rm -f "$RAW" "$RAW.pending"
+  [ -n "$RAW" ] && rm -f "$RAW"
   RAW=$(mktemp "${TMPDIR:-/tmp}/gctk-feedback-distiller.XXXXXX")
   if [ -n "$RPATH" ]; then
     gc bd -C "$RPATH" list -l observation --status=closed --json --limit=0 > "$RAW" 2>/dev/null
@@ -225,12 +225,18 @@ while IFS="$TAB" read -r R RPATH; do
     exit 0
   fi
   # obs_rig_path rides along so file-and-dispatch's stamping reopens the SAME
-  # store.
-  jq --arg rig "$R" --arg rigpath "$RPATH" '[.[]
+  # store. One call filters and merges, so an entry jq cannot read fails the
+  # write instead of dropping the store's observations.
+  if ! jq --slurpfile set "$PENDING" --arg rig "$R" --arg rigpath "$RPATH" '($set | add // []) + [.[]
       | select((.metadata.task_kind // "") == "observation")
       | select((.metadata["obs.distilled"] // "") == "")
-      | . + {obs_rig: $rig, obs_rig_path: $rigpath}]' "$RAW" > "$RAW.pending"
-  jq -s 'add' "$PENDING" "$RAW.pending" > "$PENDING.next" && mv "$PENDING.next" "$PENDING"
+      | . + {obs_rig: $rig, obs_rig_path: $rigpath}]' "$RAW" > "$PENDING.next" ||
+     ! mv "$PENDING.next" "$PENDING"; then
+    DISTILL_RUN=aborted
+    echo "FAIL-SAFE: the observations of store $R did not reach the pending set — DISTILL_RUN=aborted, nothing judged, nothing filed"
+    "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
+    exit 0
+  fi
 done < "$RIGSET"
 # The pending set is complete: hand it past the trap to the later blocks.
 PENDING_HANDOFF=1
@@ -242,21 +248,27 @@ PENDING_HANDOFF=1
 Judge iff: pending >= {{distill_min_pending}}, OR any pending observation is
 urgent (`obs.endorsed=operator` / `obs.directive=standing`), OR the oldest
 pending exceeds {{distill_max_age_days}} days (an unparseable timestamp
-forces the trickle guard OPEN, not shut).
+forces the trickle guard OPEN, not shut). A set that is missing or does not
+parse as an array aborts the run as §2's fail-safe does, because a count the
+gate cannot read is no count below the floor.
 
 ```bash
 # >>> distiller-cadence-gate
-N=$(jq 'length' "$PENDING")
-URGENT=$(jq '[.[] | select(((.metadata["obs.endorsed"] // "") == "operator")
-                        or ((.metadata["obs.directive"] // "") == "standing"))] | length' "$PENDING")
-NOW=$(date -u +%s)
-OLDEST=$(jq -r '[.[] | (.created_at // .created // empty)] | sort | first // empty' "$PENDING")
-AGE_D=0
-if [ -n "$OLDEST" ]; then
-  if OLDEST_S=$(jq -rn --arg t "$OLDEST" '$t | fromdateiso8601' 2>/dev/null); then AGE_D=$(( (NOW - OLDEST_S) / 86400 )); else AGE_D=$(( {{distill_max_age_days}} + 1 )); fi
-elif [ "$N" -gt 0 ]; then
-  AGE_D=$(( {{distill_max_age_days}} + 1 ))
+if ! GATE=$(jq -er --argjson max_age "{{distill_max_age_days}}" 'if type != "array" then error("the pending set is not an array") else
+    ([.[] | (.created_at // .created // empty)] | sort | first) as $oldest
+    | [length,
+       ([.[] | select(((.metadata["obs.endorsed"] // "") == "operator")
+                   or ((.metadata["obs.directive"] // "") == "standing"))] | length),
+       (if $oldest == null then (if length > 0 then $max_age + 1 else 0 end)
+        else (try ((now - ($oldest | fromdateiso8601)) / 86400 | floor) catch ($max_age + 1)) end)]
+    | map(tostring) | join(" ") end' "$PENDING"); then
+  DISTILL_RUN=aborted
+  echo "FAIL-SAFE: the pending set is missing or unreadable — DISTILL_RUN=aborted, nothing judged, nothing filed"
+  [ -n "${PENDING:-}" ] && rm -f "$PENDING"
+  "${SC:?claim-close.sh not found in the pack}" --step mol-feedback-distiller.load-and-gate --outcome fail
+  exit 0
 fi
+read -r N URGENT AGE_D <<< "$GATE"
 if [ "$N" -ge "{{distill_min_pending}}" ] || [ "$URGENT" -gt 0 ] || [ "$AGE_D" -gt "{{distill_max_age_days}}" ]; then
   DISTILL_RUN=open
   echo "DISTILL_RUN=open — gate open: $N pending, $URGENT urgent, oldest ${AGE_D}d"

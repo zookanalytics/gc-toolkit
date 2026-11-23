@@ -10,6 +10,11 @@
 # on every run that has anything pending. The cases below pin the age the gate
 # computes and the verdict on each side of the limit.
 #
+# A set the gate cannot read, whether missing, empty, cut off or holding no
+# array, aborts the run and fails the step. A count read from no set is no
+# number, a test on it is false, and such a set would otherwise read as one
+# below every threshold and gate the run with nothing judged.
+#
 # The block is extracted verbatim between the distiller-cadence-gate markers
 # and EXECUTED against a scratch pending set, so what passes is the shipped
 # formula text and not a paraphrase of it.
@@ -118,6 +123,31 @@ mixed() {  # <observations> <notes> -> the verdict and the count
 }
 eq "$(mixed 1 4)" "open 5" "one observation and four due notes reach the floor"
 eq "$(mixed 0 4)" "gated 4" "four due notes alone wait for volume"
+
+echo "── a set the gate cannot read aborts the run ──"
+cat > "$SANDBOX/claim-close.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_CLOSE_LOG"
+STUB
+chmod +x "$SANDBOX/claim-close.sh"
+
+# unread [content] -> the disposition the gate prints, the step close it makes
+# and whether the set is left, for a set holding the content, or for no set
+# when no content is given.
+unread() {
+  rm -f "$SANDBOX/pending.json"
+  : > "$SANDBOX/close.log"
+  [ "$#" -eq 0 ] || printf '%s' "$1" > "$SANDBOX/pending.json"
+  verdict="$(PENDING="$SANDBOX/pending.json" SC="$SANDBOX/claim-close.sh" STUB_CLOSE_LOG="$SANDBOX/close.log" \
+    bash "$SANDBOX/block.sh" 2>/dev/null | sed -n 's/.*DISTILL_RUN=\([a-z]*\).*/\1/p')"
+  left=gone; [ -e "$SANDBOX/pending.json" ] && left=left
+  printf '%s; %s; set %s' "$verdict" "$(cat "$SANDBOX/close.log")" "$left"
+}
+ABORTED="aborted; --step mol-feedback-distiller.load-and-gate --outcome fail; set gone"
+eq "$(unread)" "$ABORTED" "a missing set aborts the run, fails the step and leaves no set"
+eq "$(unread '')" "$ABORTED" "so does an empty one, which holds no value to count"
+eq "$(unread '[{"metadata": {"task_kind": "observation"}}, {"meta')" "$ABORTED" "so does one cut off partway"
+eq "$(unread '{}')" "$ABORTED" "so does an object, which jq would count as an empty set"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
