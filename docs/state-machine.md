@@ -304,9 +304,10 @@ head, the one the refinery validated, then each head its own repair pushes.
 The loop's check, `gctk review passed --record`, passes an iteration when
 triage wrote the head it judged, every lane it picked wrote its verdict there,
 every finding and every ask the round could take was ruled, by triage's answer
-or by rule-and-repair, nothing was ruled must-fix and nothing was pushed. A finding its lane's rule declines, and a
-question put to a person, count as ruled, and a finding ruled must-fix at an
-earlier head names the commit that fixes it. The check reads only the store,
+or by rule-and-repair, nothing was ruled must-fix and nothing was pushed. A
+finding its lane's rule declines, and a question put to a person, count as
+ruled, and a finding ruled must-fix at an earlier head names the commit that
+fixes it. The check reads only the store,
 and it exits 75 when the store does not answer, which runs it again without
 spending an attempt.
 

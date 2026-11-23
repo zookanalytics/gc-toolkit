@@ -142,9 +142,10 @@ again. When this step closes, each pick bonds one lane.
 Each post you answered gets its reply where words are owed and the city's 👍,
 where it was made, an inline comment's thread is resolved, and when you picked
 no check and answered every ask the round can take, the head's comment is
-posted too, since rule-and-repair has nothing left. Run again, it posts nothing twice. Exit 1:
-an answer did not land, and exit 2: a read did not answer: run it again, and
-when it still fails, cancel the run, which the landing order pours again:
+posted too, since rule-and-repair has nothing left. Run again, it posts nothing
+twice. Exit 1: an answer did not land, and exit 2: a read did not answer: run
+it again, and when it still fails, cancel the run, which the landing order
+pours again:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "triage's answers did not land on the PR"`
 
 **6. Close this step.**
@@ -176,14 +177,14 @@ and each lane's part of the workspace, which holds its evidence. When it says
 triage left rule-and-repair nothing, this step has nothing to rule or to post:
 close it (part 7) with nothing written. A worktree an earlier session of this
 step left is kept as it stands, and the read prints its commits past the head
-and its uncommitted edits: go on from them. Exit 3: the worktree is not at the head
-or past it, so the run must stop. Cancel it, and the landing order pours one at
-the PR's head:
+and its uncommitted edits: go on from them. Exit 3: the worktree is not at the
+head or past it, so the run must stop. Cancel it, and the landing order pours
+one at the PR's head:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the run's worktree is not at the head the round judged"`
 
-**3. Rule every finding and every ask triage left, by the bar.** Fix each must-fix point in
-the run's worktree with a commit of its own, its siblings with it, and name the
-commit in its ruling. A point ruled declined, deferred, answered or put to a
+**3. Rule every finding and every ask triage left, by the bar.** Fix each
+must-fix point in the run's worktree with a commit of its own, its siblings with
+it, and name the commit in its ruling. A point ruled declined, deferred, answered or put to a
 person gets no change. A fix outside the reviewed diff goes to a bead of its
 own, armed to start once the PR lands, which the call prints for the ruling's
 reason:
@@ -209,9 +210,9 @@ not read: run it again.
 `{"check", "finding"}` or `{"ask"}` for each finding and each ask triage left,
 each with its `ruling`, its `reason`, the `commit` of a must-fix and the `gate`
 of a question, and `pushed`, the head the push printed, when it pushed. An
-answer of a post owed no words reads `"wordless": true`. The ruling of an ask whose post settles a question
-a gate on `{{pr_bead}}` asks also names that gate in `settles`, with `moot`
-reading `true` when the post makes the question moot. Then check and write it:
+answer of a post owed no words reads `"wordless": true`. The ruling of an ask
+whose post settles a question a gate on `{{pr_bead}}` asks also names that gate
+in `settles`, with `moot` reading `true` when the post makes the question moot. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 

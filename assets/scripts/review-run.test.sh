@@ -16,7 +16,8 @@
 # moved, and weighing a failed push by the branch on origin (landed, unmoved
 # and to run again, moved, or not read); the round's answers posted through
 # gctk pr answer, from triage's step or rule-and-repair's, in the run's
-# worktree or else the rig's checkout, with its exit passed on; a deferred fix filed with its wait on the PR's bead in its
+# worktree or else the rig's checkout, with its exit passed on; a deferred fix
+# filed with its wait on the PR's bead in its
 # create and the PR's target, and armed, found rather than filed again, armed
 # then when the call that filed it did not arm it, and left as it stands when
 # it is armed, closed or routed; a question put to a gate; triage's read at a

@@ -253,9 +253,9 @@ names the run and the head, each lane's verdict, approvals included, each
 finding a lane raised with how the round ruled it and what the head carries for
 it, and each ask the round took (services/gctk/review/comment.go). <run> is the
 run's root, or any bead poured under it. It renders --iteration, else the
-latest iteration whose round wrote its rulings, triage's answers among them, and prints nothing
-when that iteration has nothing to answer: no lane ran there and the round took
-no ask.
+latest iteration whose round wrote its rulings, triage's answers among them,
+and prints nothing when that iteration has nothing to answer: no lane ran there
+and the round took no ask.
 
 exit: 0 printed, nothing included
       1 usage
