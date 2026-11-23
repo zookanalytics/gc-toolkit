@@ -143,8 +143,8 @@ claim_payload() { # claim_payload <session> <bead-id-json-blob>
 echo "── runner ──"
 
 # (16) The shipped hook followed by `exit 19`: it injects as it always does,
-# then exits non-zero. RC must read 19, which fails every exit-0 assertion
-# below, and OUT must still hold the injection.
+# then exits non-zero. RC must read 19, or the exit-0 assertions below pass
+# for a hook that fails, and OUT must still hold the injection.
 EXIT19_HOOK="$SANDBOX/hook-then-exit-19.sh"
 printf 'sh "%s"\nexit 19\n' "$HOOK" > "$EXIT19_HOOK"
 HOOK="$EXIT19_HOOK" run_hook "$(claim_payload s-runner '{"bead_id":"tk-step1"}')"
