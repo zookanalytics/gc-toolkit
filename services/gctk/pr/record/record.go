@@ -181,11 +181,13 @@ func Block(w *ledger.Write) {
 // open, merge_result head changed, the head found, and why, keeping the
 // validated head. With to naming the refinery, the same write hands the head to
 // it: the bead assigned to the refinery and the marker gone, as in Gas Town's
-// requeue (requeue_changed_open_head). With to empty, the bead stays assigned
-// to nobody and keeps its marker: the landing order keeps it while a withdrawal
-// still open on the bead or a review run attached to it holds the head from the
-// refinery, and until it has assigned the bead to a refinery that nothing else
-// tells of the head and woken it, and then hands the head over (Settle).
+// requeue (requeue_changed_open_head), which the landing order writes only
+// while another wait holds the bead and the refinery cannot take it yet. With
+// to empty, the bead stays assigned to nobody and keeps its marker: the landing
+// order keeps it while a withdrawal still open on the bead or a review run
+// attached to it holds the head from the refinery, and, whenever the refinery
+// can take the bead, until it has assigned the bead to the refinery and woken
+// it, and then hands the head over (Settle).
 func Requeue(w *ledger.Write, prURL, observed, reason, to string) {
 	w.Status("open")
 	mergeResultKey.Set(w, HeadChanged)
