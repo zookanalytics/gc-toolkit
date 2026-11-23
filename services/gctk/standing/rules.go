@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/gate"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
@@ -513,10 +514,11 @@ func holdingAnswer(h waits.Holds, hold prstatus.Holds) Answer {
 // on a gate that is no human gate, and nil when none is: a park
 // (docs/steering.md, "A park"), whose gate gctk bead park files with no await
 // type. A gate of a type bd closes by itself, such as a timer, reads as one
-// too.
+// too. A gate the city closes ([gate.CityCloses]), a stay's, is none: a
+// conversation that waits on it stays.
 func gateHold(h waits.Holds) *waits.Wait {
 	for i, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) {
+		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) && !gate.CityCloses(w.IssueType, w.AwaitType) {
 			return &h.Waits[i]
 		}
 	}

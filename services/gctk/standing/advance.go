@@ -3,6 +3,7 @@ package standing
 import (
 	"sort"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/gate"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -154,6 +155,13 @@ func (r *Reading) advance(id string, on map[string]bool) Advance {
 	case RuleStaying, RuleInFlight, RuleScheduled:
 		// The rule names the waits behind what holds the bead.
 		adv = r.behind(id, r.holds[id].Waits, on)
+	case RuleGate:
+		// A gate the city closes, a stay's, resolves at its condition while
+		// the work it awaits is out, so what waits on it advances.
+		adv = stuck(id, string(a.Rule))
+		if b := r.beads[id]; gate.CityCloses(b.IssueType, b.AwaitType) {
+			adv = Advance{Advancing: true}
+		}
 	default:
 		adv = stuck(id, string(a.Rule))
 	}
