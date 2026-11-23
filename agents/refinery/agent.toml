@@ -4,20 +4,17 @@
 scope = "rig"
 wake_mode = "fresh"
 # {{.AgentBase}} names the one session the cap below allows, so each rig has one
-# tree. Gas Town's refinery takes the parent directory, which holds that tree
-# here. A work_dir there would leave the tree untracked inside the new one, and
-# worktree-setup.sh --sync fails a start on an untracked file.
+# tree. Gas Town's refinery works in the parent directory, which holds that tree
+# here. Moving work_dir there would leave the tree untracked inside the new one,
+# and worktree-setup.sh --sync fails a start on an untracked file.
 work_dir = ".gc/worktrees/{{.Rig}}/refinery/{{.AgentBase}}"
 nudge = "Run gc prime, then the startup wisp reconcile; process the merge queue."
 pre_start = ["{{.ConfigDir}}/assets/scripts/worktree-setup.sh {{.RigRoot}} {{.WorkDir}} {{.AgentBase}} --sync"]
 idle_timeout = "2h"
 # A rig runs one refinery: the patrol reconcile in prompt.template.md keeps one
 # wisp per rig by title and burns the rest, so two refineries burn each other's
-# in-flight wisps. Work routed to the refinery asks Gas City's pool for a
-# session, and this cap of 1 puts that pool on the named session's identity.
-# Routed work then wakes the named session, and the pool starts none of its own
-# while the named session holds the identity. With no cap, or a higher one, the
-# pool starts numbered refineries beside the named one
-# (docs/gascity/agent-types.md, "A cap of 1 puts routed work on the named
-# session").
+# in-flight wisps. This cap of 1 puts work routed to the refinery on the named
+# session. With no cap, or a higher one, Gas City's pool starts numbered
+# refineries beside it (docs/gascity/agent-types.md, "A cap of 1 puts routed
+# work on the named session").
 max_active_sessions = 1
