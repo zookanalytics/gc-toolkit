@@ -9,17 +9,18 @@
 # alternatives), a procedure read as a single call (a pipeline, a sequence, a
 # substitution holding a pipeline, && or ||, a substitution an expanding
 # here-document's body runs, a command inside the gctk-bin markers, a command
-# after a placeholder that holds an apostrophe), step text left unread (a TOML string of any kind wherever
-# it sits, an edit inside a here-document's body, a block fenced with tildes, a
-# longer run or a capitalized language, a block a fence line inside it cut
-# short, a block inline code at a line's start hid), skill text left unread (a
-# new skill, a sub-pack's or an agent's skill, a file moved into a skill), text
-# that predates the rule failing because a change touched its file, a moved or
-# trimmed block read as new (within a formula, or across a skill's files and
-# between skills, a file the change deletes included), text read that is not
-# the skill's own (a symlinked file, a block a file leaves open running into
-# the next), and a change it cannot read passing as clean (an unreadable file,
-# a file that is not TOML, no Python to decode it).
+# after a placeholder that holds an apostrophe, shell syntax between a < and a
+# > read as a placeholder), step text left unread (a TOML string of any kind
+# wherever it sits, an edit inside a here-document's body, a block fenced with
+# tildes, a longer run or a capitalized language, a block a fence line inside
+# it cut short, a block inline code at a line's start hid), skill text left
+# unread (a new skill, a sub-pack's or an agent's skill, a file moved into a
+# skill), text that predates the rule failing because a change touched its
+# file, a moved or trimmed block read as new (within a formula, or across a
+# skill's files and between skills, a file the change deletes included), text
+# read that is not the skill's own (a symlinked file, a block a file leaves
+# open running into the next), and a change it cannot read passing as clean (an
+# unreadable file, a file that is not TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
 # change is measured from (refs/remotes/origin/main). A case writes the formula
@@ -739,6 +740,26 @@ skill_reset
 new_skill skills/t "$(block 'sort <in.txt | uniq >out.txt')"
 run_lint skills/t/SKILL.md
 expect 1 "a redirection is no placeholder, so a pipe between its < and a later > counts: exit 1" "with 2 commands\. "
+
+# Text between a < and a > that holds shell syntax is no placeholder either,
+# with no blank before the >.
+skill_reset
+new_skill skills/t "$(block 'sort <in.txt | uniq>out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "a pipe beside a blank between a < and a > is no placeholder: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block 'cat <in.txt && echo yes>out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "an && between a < and a > is no placeholder: exit 1" "with 2 commands and control flow (&&)\. "
+
+for text in 'cat <in.txt; echo yes>out.txt' 'cat <in.txt & echo yes>out.txt' 'cat <in.txt||echo no>out.txt' \
+  'sort <in.txt |uniq>out.txt' 'cat <in.txt|>out.txt' 'cat <in $(a|b)>out' 'cat <in `a|b`>out'; do
+  skill_reset
+  new_skill skills/t "$(block "$text")"
+  run_lint skills/t/SKILL.md
+  expect 1 "shell syntax between a < and a > is no placeholder, in $text: exit 1" "skill text gains a procedure"
+done
 
 # Main's one call names alternatives in a placeholder, so it weighs nothing, and
 # a change that rewrites it into a procedure gains one.
