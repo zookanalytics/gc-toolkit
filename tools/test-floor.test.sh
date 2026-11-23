@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# test-floor.test.sh — tests for tools/test-floor.sh, the file every suite
-# sources so the test floor sits beneath its stubs when it runs by itself.
+# test-floor.test.sh — tests for tools/test-floor.sh, the file a suite sources
+# so the test floor sits beneath its stubs when it runs by itself.
 #
 # Hermetic: fixture suites, a canary and a scratch HOME in a temp dir. The
 # canary stands in for the real gc, bd and gh: it sits behind the floor on PATH

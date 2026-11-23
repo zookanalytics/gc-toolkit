@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-floor.sh — puts the test floor, tools/test-floor, at the front of PATH.
-# Sourced, never run. Every *.test.sh sources it right after it sets HERE,
-# before anything else it runs, with the path from its own directory:
+# Sourced, never run. A *.test.sh sources it right after it sets HERE, before
+# anything else it runs, with the path from its own directory:
 #
 #   . "$HERE/../../tools/test-floor.sh" || exit 2
 #
