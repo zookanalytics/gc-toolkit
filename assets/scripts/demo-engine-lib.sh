@@ -77,6 +77,8 @@
 #     then the cities to deny are unknown;
 #   - a city is known and its rig map does not read, because then the rig
 #     checkouts to deny are unknown;
+#   - `id -P` does not print the user's record, because then the home folders
+#     to deny are unknown;
 #   - the engine is given --serve. A capture serves an app with a command as a
 #     copy that `gctk rig serve` runs, and points the engine at the copy with
 #     --base-url, so the engine never starts a server of its own, whose port a
@@ -103,8 +105,10 @@
 #     from before that report started it, and nothing shows how it runs. The
 #     refusal stops no copy: one the capture started is demo_engine_copy_stop's
 #     to end.
-# A run with no sandbox is refused in each of these cases but the first and the
-# last. A host without sandbox-exec runs no capture at all.
+# A run with no sandbox is refused in each of these cases except those of a
+# directory it would read and write, a file it would read, and a copy whose
+# report does not say it runs inside the sandbox. A host without sandbox-exec
+# runs no capture at all.
 #
 # app_reads_city is a formula var that mol-rig-demo declares with the default
 # "false". A city sets it to "true" in city.toml for each rig whose app reads
@@ -553,19 +557,26 @@ EOF
 # _demo_engine_homes: the home folders, one canonical path per line: this
 # session's own, and the user's, which the system's user record names. Tools
 # keep their credentials in a home folder, and the user's holds the home of
-# every agent a host keeps inside it. The disk's root is never one.
+# every agent a host keeps inside it. The disk's root is never one. Returns 1,
+# having said why, when the user's record does not read, because the home
+# folders to deny are then unknown.
 _demo_engine_homes() {
-  local p user
+  local p user home
   # id -P prints the user's record, whose last two fields are the home and the
   # shell: name:password:uid:gid:class:change:expire:gecos:home:shell.
   user=$(id -P 2>/dev/null) || user=""
-  user=${user%:*}
+  home=${user%:*}; home=${home##*:}
+  case "$home" in
+    /*) ;;
+    *) _demo_engine_say "id -P did not print the user's record with its home folder, so the home folders to keep out of the capture's reach are unknown; macOS's own id, /usr/bin/id, prints it, and GNU's id does not take -P"
+       return 1 ;;
+  esac
   while IFS= read -r p; do
     case "$p" in /*) p=$(_demo_engine_canon "$p") ;; *) continue ;; esac
     [ -z "$p" ] || [ "$p" = / ] || printf '%s\n' "$p"
   done <<EOF
 ${HOME:-}
-${user##*:}
+$home
 EOF
 }
 
@@ -586,9 +597,9 @@ EOF
 # checkout of the map's hq entry, which is the city's own repository, and
 # _DEMO_ENGINE_PLACES, each of its directories, one canonical path per line, and
 # the home folders into _DEMO_ENGINE_HOMES, as _demo_engine_homes names them.
-# Returns 1, having said why, when gc does not read a city registry, or when a
-# city is known and its rig map does not read, because the cities or the rig
-# checkouts to deny are then unknown.
+# Returns 1, having said why, when the cities, the rig checkouts or the home
+# folders to deny are unknown: gc does not read a city registry, a city is known
+# and its rig map does not read, or the user's record does not read.
 _demo_engine_city() {
   local p
   _demo_engine_cities || return 1
@@ -604,7 +615,7 @@ _demo_engine_city() {
       | while IFS= read -r p; do case "$p" in (/*) _demo_engine_canon "$p" ;; esac; done)
   fi
   _DEMO_ENGINE_PLACES=$(_demo_engine_city_places "$_DEMO_ENGINE_RIGS")
-  _DEMO_ENGINE_HOMES=$(_demo_engine_homes)
+  _DEMO_ENGINE_HOMES=$(_demo_engine_homes) || return 1
 }
 
 # _demo_engine_rig_of <dir>: after _demo_engine_city, the canonical checkout of

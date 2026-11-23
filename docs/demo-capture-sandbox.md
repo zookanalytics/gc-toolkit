@@ -135,7 +135,7 @@ ports or its sockets.
 
 Such a capture still starts without the variables that point a command at the
 city, so nothing in its environment names this session's city, store or tmux.
-It takes each refusal the library's header lists but the first and the last: a
+It takes each refusal the library's header lists for a run with no sandbox: a
 `--base-url` on this host must still name a copy, or a server a worktree of a
 rig whose `app_reads_city` is `"false"` serves.
 

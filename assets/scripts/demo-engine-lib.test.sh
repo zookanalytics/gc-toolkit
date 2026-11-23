@@ -49,7 +49,8 @@
 #               directory, an output, a terminal script's --cwd or music that
 #               lies in one in no rig's worktree, each stop the capture; a
 #               worktree of a rig set to "true" inside a home folder captures,
-#               opened after the home folder is shut
+#               opened after the home folder is shut; an id -P that prints no
+#               record with a home folder stops the capture before anything runs
 #   (PORTS)     a --serve-dir with no --port gets a free one; a port a server
 #               already answers on, and a --base-url on this host where nothing
 #               of this user's listens, stop the capture
@@ -287,17 +288,26 @@ chmod +x "$BIN"/node "$BIN"/npm "$BIN"/npx "$BIN"/gc "$BIN"/ffmpeg "$BIN"/id "$B
 # The same stubs without npx, without node, without ffmpeg, and without
 # sandbox-exec.
 NONPX="$TMPD/bin-nonpx"; mkdir -p "$NONPX"
-for s in jq node npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NONPX/$s"; done
+for s in jq node npm gc ffmpeg sandbox-exec id; do ln -s "$BIN/$s" "$NONPX/$s"; done
 NONODE="$TMPD/bin-nonode"; mkdir -p "$NONODE"
-for s in jq npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NONODE/$s"; done
+for s in jq npx npm gc ffmpeg sandbox-exec id; do ln -s "$BIN/$s" "$NONODE/$s"; done
 NOFFMPEG="$TMPD/bin-noffmpeg"; mkdir -p "$NOFFMPEG"
-for s in jq node npx npm gc sandbox-exec; do ln -s "$BIN/$s" "$NOFFMPEG/$s"; done
+for s in jq node npx npm gc sandbox-exec id; do ln -s "$BIN/$s" "$NOFFMPEG/$s"; done
 NOSBX="$TMPD/bin-nosandbox"; mkdir -p "$NOSBX"
-for s in jq node npx npm gc ffmpeg; do ln -s "$BIN/$s" "$NOSBX/$s"; done
+for s in jq node npx npm gc ffmpeg id; do ln -s "$BIN/$s" "$NOSBX/$s"; done
 NOGC="$TMPD/bin-nogc"; mkdir -p "$NOGC"
-for s in jq node npx npm ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOGC/$s"; done
+for s in jq node npx npm ffmpeg sandbox-exec id; do ln -s "$BIN/$s" "$NOGC/$s"; done
 NOLSOF="$TMPD/bin-nolsof"; mkdir -p "$NOLSOF"
-for s in jq node npx npm gc ffmpeg sandbox-exec; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
+# An id that answers -P with $ID_RECORD, or refuses -P, as GNU's id does, when
+# that is empty. A call puts it ahead of the stubs with STUB_PATH.
+BADID="$TMPD/bin-badid"; mkdir -p "$BADID"
+cat >"$BADID/id" <<'ID'
+#!/usr/bin/env bash
+[ -n "${ID_RECORD:-}" ] || { echo "id: invalid option -- 'P'" >&2; exit 1; }
+printf '%s\n' "$ID_RECORD"
+ID
+chmod +x "$BADID/id"
+for s in jq node npx npm gc ffmpeg sandbox-exec id; do ln -s "$BIN/$s" "$NOLSOF/$s"; done
 
 # The engine's CLI: help lists its commands, lint passes, run writes the clip
 # and the engine's closing report, and screenshot writes the PNG. It keeps the
@@ -753,6 +763,17 @@ for cap in video screenshot; do
   capture "$cap" FROM="$CITY/.gc/notes" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
   eq "$RC" 1 "($cap) a working directory in the city's, in no rig worktree, exits 1"
   has "$CITY/.gc/notes lies in $CITY" "$(err)" "($cap) it says the directory lies in the city's"
+  not_captured "$cap"
+
+  echo "# ($cap) HOME: an id -P that prints no record with a home folder stops the capture before anything runs"
+  STUB_PATH="$BADID:$BIN" capture "$cap" SS_RIG="$ENGINE" "${CITY_ENV[@]}"
+  eq "$RC" 1 "($cap) an id that refuses -P, as GNU's does, exits 1"
+  has "id -P did not print the user's record with its home folder, so the home folders to keep out of the capture's reach are unknown" "$(err)" "($cap) it says the home folders to deny are unknown"
+  eq "$(calls | grep -c -v '^gc ')" 0 "($cap) and nothing is installed, and nothing runs, before the refusal"
+  not_captured "$cap"
+  STUB_PATH="$BADID:$BIN" capture "$cap" SS_RIG="$ENGINE" "${CITY_ENV[@]}" ID_RECORD="me:********:501:20::0:0:me::/bin/bash"
+  eq "$RC" 1 "($cap) a record whose home folder is empty exits 1"
+  has "id -P did not print the user's record with its home folder" "$(err)" "($cap) it says so"
   not_captured "$cap"
 
   echo "# ($cap) HOME: a working directory or an output that is a home folder, or lies in one outside any rig worktree, stops the capture, and a rig worktree in one captures"

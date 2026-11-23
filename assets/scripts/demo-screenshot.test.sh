@@ -11,8 +11,8 @@
 # engine's floor, finds the engine, provisions its browser and runs its CLI,
 # and demo-engine-lib.test.sh checks that through this script. Every case runs
 # under `env -i` with a PATH of a coreutils symlink farm and stubs for node,
-# npm, gc, gh and sandbox-exec, so nothing reaches the network, a browser, or a
-# city. demo-engine-lib.test.sh checks the sandbox the engine runs in. The
+# npm, gc, gh, id and sandbox-exec, so nothing reaches the network, a browser,
+# or a city. demo-engine-lib.test.sh checks the sandbox the engine runs in. The
 # node stub hands the engine checkout's CLI to an engine stub, and otherwise
 # stands in for the renderer: it logs its argv, keeps a copy of the file it was
 # handed, and leaves a page at --output. The engine stub keeps the script and
@@ -231,6 +231,10 @@ WORK="$TMPD/work"; mkdir -p "$WORK"
 # fixtures, because a capture refuses a directory in a home folder outside any
 # rig worktree.
 AHOME="$TMPD/home"; mkdir -p "$AHOME"
+# id answers -P with the record of a user whose home is $AHOME, as macOS's id
+# does, because a capture refuses to run when no record names the user's home.
+printf '#!/usr/bin/env bash\n[ "${1:-}" = -P ] || exit 64\necho "me:********:501:20::0:0:me:%s:/bin/bash"\n' "$AHOME" >"$BIN/id"
+chmod +x "$BIN/id"
 SCRIPT="$WORK/demo.md"; printf '# Demo: fixture\n\n**Start:** `/`\n' >"$SCRIPT"
 APP="$WORK/app"; mkdir -p "$APP"; printf '<!doctype html><title>x</title>\n' >"$APP/index.html"
 MD="$WORK/comment.md"; printf '**Approve.** Nothing needs you.\n\n<details>\n<summary>trail</summary>\n\nx\n</details>\n' >"$MD"
