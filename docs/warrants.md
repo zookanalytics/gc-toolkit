@@ -461,8 +461,10 @@ no warrant.
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
   what the one-PR update saves once it has re-read the PR in full
   (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
-  and compares each owned PR's saved labels with the ones the store derives
-  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
+  compares each owned PR's saved labels with the ones the store derives
+  (`labelPlans` in `services/gctk/pr/labels.go`), and reads a PR's own status
+  for a stay's gate (`decideGates` in `services/gctk/pr/gates.go`, through
+  `PROwn` in `services/gctk/listing/pr.go`), and the PR watch
   itself, which compares a PR's signs with the ones each part keeps (`moved` in
   `services/gctk/pr/saved.go`) and the net's full read with each part's facts
   (`differs` there).
@@ -515,7 +517,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -578,7 +580,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -865,3 +867,41 @@ no warrant.
   Code's directory, with the judge's decisions on those beads and their links,
   and the list, the kept text and the read of Claude Code's directories
   retire.
+
+## The stay's gate
+
+- **Covers.** `services/gctk/gate`, the gate type `gctk:needs-review` it
+  defines, with the rule that the city closes a gate of it, the gate's filing
+  and its resolve. The verb that files it, `gctk gate create`
+  (`services/gctk/internal/cli/gate.go`), and its closer, the stay's step of
+  the landing order (`services/gctk/pr/gates.go`).
+- **Stands in for.** Gas City's session wait, `gc session wait <session>
+  --on-beads <ids> --note <text>`, as the promise that brings a staying
+  sitting back to its conversation once the work it sent comes back.
+- **Evidence.**
+  - The session wait cannot hold the promise. An attach that starts a sleeping
+    session cancels its waits (`Store.WakeSession` calls
+    `cancelWaitsAndCollectNudgeIDs`, in `internal/session/wait_store.go`). A
+    fresh restart cancels each wait registered before it as
+    continuation-stale (`WaitInfo.ContinuationStale` in
+    `internal/session/waits.go`). A ready wait does not wake a session that
+    slept at the end of its idle window, since the idle latch lets through an
+    attach, assigned work, an explicit wake, routed demand, pool demand on a
+    non-interactive session and the min-active floor, and no ready wait
+    (`wakeDemandOverridesSleepSuppression` in `cmd/gc/session_reconciler.go`).
+  - No gate resolves when a PR is left with only a person's part. bd's own
+    check evaluates `gh:run`, `gh:pr`, `timer` and `bead` gates, a `gh:pr` gate
+    only at the PR's merge (`evaluateGates` and `checkGHPR` in
+    `cmd/bd/gate.go`), and stores any other type unchecked (`buildGateIssue`).
+    Gas City's core sweep checks only timer and `gh` gates
+    (`internal/bootstrap/packs/core/assets/scripts/gate-sweep.sh`).
+  - The rest of the gate is native: a bd gate, filed with `bd gate create`,
+    whose await id names the work and whose blocked bead is the conversation,
+    which Gas City reads as ready work once the gate closes. The search is
+    [specs/tk-ai367om/gas-city-search.md](../specs/tk-ai367om/gas-city-search.md).
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+  `steveyegge/beads` v1.3.4, the bd the city runs.
+- **Retires when.** Gas City's session wait keeps its promise through an
+  attach and a fresh restart, and wakes a session that slept at the end of its
+  idle window; or bd or Gas City ships a gate that resolves when a PR is left
+  with only a person's part. The stay then moves onto that primitive.
