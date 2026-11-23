@@ -62,14 +62,20 @@ Triage adds `demo` when the diff changes a surface a person looks at:
 - output a person reads in a terminal, such as a command's report;
 - markdown the city posts on GitHub, such as a review comment or a PR body;
 - a message the rig's app sends people, such as an email, that the diff adds or
-  whose sender, subject or body it alters, even when no screen changes.
+  whose sender, subject or body it alters, even when no screen changes;
+- an image the diff adds or changes, such as a golden image, the picture a test
+  compares the app's rendering with, whatever else the diff changes.
 
 Logic, refactors, internal plumbing, tests, and docs read as text need no
 visual, and triage adds nothing for them. That is the common case. A message is
 text in the diff, as a doc is, but its recipient reads the message and never the
-diff, so a diff that changes only a message still adds `demo`. The default check
-set is the baseline, `correctness,triage`, so under it `demo` runs only on a
-diff triage added it to.
+diff, so a diff that changes only a message still adds `demo`. An image's path
+makes `demo` mandatory: a diff that adds or changes a file whose name ends in
+`.png`, `.jpg`, `.jpeg`, `.gif`, `.svg` or `.webp`, in any case, adds `demo`,
+even when the image belongs to a test. A golden image is the picture the change
+holds the app to, and a PR's conversation shows no image its diff commits. The
+default check set is the baseline, `correctness,triage`, so under it `demo` runs
+only on a diff triage added it to.
 
 ### Decide need
 
@@ -84,6 +90,9 @@ settles need: a visual is needed.
 A message the change adds or alters settles need the same way, whatever the
 check decides for the change's screens: the check shows each one, as the
 section Show each message says.
+
+An image the change adds or changes settles need the same way: the check shows
+each one, as the section Show each image says.
 
 If the rig's guidance names a design or writing standard, any change to what a
 screen renders settles need, whatever its size. Capture each changed screen as
@@ -132,11 +141,13 @@ is no capture, and the verdict says so, as for any visual that cannot be
 produced here. The sandbox is macOS's `sandbox-exec`, and a host without it
 runs no capture; `doctor/check-demo-toolchain` reports whether this one has it.
 
-Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
---subject <anchor_bead>` resolves the PR from the anchor and attaches the file
-to it in a comment, inline and uncommitted. It refuses a PR outside the rig's
-origin and exits non-zero when it cannot attach. `doctor/check-demo-toolchain`
-reports whether the `gh` it needs is present.
+Every capture, and every committed visual you pick, reaches the PR the same
+way. `demo-deliver.sh --file <path> --subject <anchor_bead>` resolves the PR
+from the anchor and attaches the file to it in a comment, inline and
+uncommitted. It refuses a PR outside the rig's origin and exits non-zero when it
+cannot attach. `doctor/check-demo-toolchain` reports whether the `gh` it needs
+is present. The images a change commits reach the PR by a call of their own, as
+the section Show each image says.
 
 - `video`: record it in this review with `rig-demo-capture.sh --script demo.md
   --output demo.mp4 <app target>`, the rig-demo mol's capture core. Do not pour
@@ -310,6 +321,51 @@ screenshot of any screen the change alters. When the change alters many
 messages in the same way, such as a footer they share, capture and check each
 one, then deliver an example or two and list the rest in the verdict.
 
+### Show each image
+
+When the change adds or changes an image, the check shows on the PR each image
+the change adds, changes, moves or removes, a changed one before and after, at
+the reviewed commit. A golden image, the picture a test compares the app's
+rendering with, is the common case: the change holds the app to look like it.
+One call shows them all, in comments of their own. Run it from the review
+workspace, as you run a capture:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" review images --pr "<review_pr_url>" --base "origin/<review_base>" --oid "<reviewed_oid>" --repo "<worktree>"
+```
+
+`--pr` is the PR's address, `<review_pr_url>`, or in a review run's lane the
+PR its read names. Each image is drawn from the file the repository holds, at
+the address GitHub serves that file from at a commit, so a reader sees it on
+the PR's page, in a private repository too, and nothing is uploaded. A before
+is the image at the commit the change branches from, and an after the image at
+the reviewed commit. The images group by directory, and within one by the page
+or state their names share once the parts that vary drop, such as a theme, a
+device or a browser. When the change shows more than four images, each group
+shows as one line that a reader opens, so the page stays short. Exit 0 means it
+posted, and its last line names what it posted, which the verdict repeats.
+Exit 3 is a change that touches no image, and exit 1 says what stopped the
+post.
+
+Then judge the images as you judge a capture, because each is a picture of the
+app that the change accepts as right. Open the after at `<worktree>/<path>`.
+For a changed one, also open the before, at the path its comment shows it from,
+which `git -C "<worktree>" show "<the merge base>:<path>" > "<a file>"` writes
+to a file in the review workspace. The merge base is the commit the comment
+names for the before, and
+`git -C "<worktree>" merge-base "origin/<review_base>" "<reviewed_oid>"` prints
+it in full. An image that shows an error, a broken layout, or a state the change
+does not claim is a finding, with the image as its evidence. When the change
+alters many images in the same way, open an example or two of each group, and
+name in the verdict the ones you opened.
+
+The images are committed visuals, so the verdict's visual is `repo-artifact`
+when they are all it delivers. When a clip or a screenshot is delivered beside
+them, the verdict names the costlier modality.
+
 ### Review against the rig's standards
 
 A rig's guidance, its `docs/review-demo.md`, can name a design standard, a
@@ -450,10 +506,13 @@ for live data, or the draft's preview and why. A verdict on a change that adds
 or alters a message names each message it shows, by its subject, and each one
 it could not show, with what stopped it. Where it
 shows an example or two of many messages the change alters in the same way, it
-also names the rest, by subject. If the rig names a standard, the verdict names
-it. The verdict also lists each screen and message you checked against it, in
-which states, and each screen, message or state you could not check, with what
-stopped it. The PR shows only the demo, so this list is how a person sees what
+also names the rest, by subject. A verdict on a change that adds or changes an
+image says how many images it showed of each kind, in how many groups, and on
+which comments, as the call that showed them names them, or what stopped the
+call, and it names the images it opened. If the rig names a standard, the
+verdict names it. The verdict also lists each screen and message you checked
+against it, in which states, and each screen, message or state you could not
+check, with what stopped it. The PR shows only the demo, so this list is how a person sees what
 the check covered.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach

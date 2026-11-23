@@ -142,9 +142,11 @@ rules bound the judgment:
   anchor never gets.
 - **Adding nothing is the expected common case.** A one-file fix to one
   component's internals, a test addition, a typo fixed in a doc, a
-  formula-poured mechanical change — none earns a specialist review. Widening
-  costs a cadence hop and a session per anchor, and the feedback distiller
-  watches the add-rate for exactly that drift.
+  formula-poured mechanical change — none earns a specialist review unless it
+  touches a path a check's method makes mandatory. A test addition that
+  commits an image touches one, since the demo method makes images mandatory.
+  Widening costs a cadence hop and a session per anchor, and the feedback
+  distiller watches the add-rate for exactly that drift.
 
 **Whether the change is material** is also yours to rule. A change is material
 when it made a call that is the operator's to make: it changed what the PR

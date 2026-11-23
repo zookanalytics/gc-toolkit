@@ -89,6 +89,14 @@
 #     change alters many messages in the same way, the check still captures and
 #     checks each one, but it delivers only an example or two and names the
 #     rest in its verdict.
+#   - The demo method lists an image the diff adds or changes, a golden image
+#     among them, among the surfaces triage adds it for. An image's path makes
+#     the check mandatory, even when the image belongs to a test, and triage's
+#     common case of adding nothing gives way to such a path. An image settles
+#     need. The check shows each image the change adds, changes, moves or
+#     removes on the PR's page, a changed one before and after, through one
+#     call, judges the images as it judges a capture, and its verdict says what
+#     it showed.
 #   - When a rig's guidance for the demo check names a design or writing
 #     standard, the demo method reviews the change against it:
 #     - Any change to what a screen shows needs a visual, however small.
@@ -445,7 +453,7 @@ echo "# the demo method shows each message a change adds or alters, as its recip
 awk '/^### When triage adds it$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.triage"
 hasF "$TMP/demo.triage" "a message the rig's app sends people, such as an email" \
   "triage adds the demo check for a message the rig's app sends people"
-hasF "$TMP/demo.triage" 'even when no screen changes.' "…even when no screen changes"
+hasF "$TMP/demo.triage" 'even when no screen changes;' "…even when no screen changes"
 awk '/^### Decide need$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.need"
 hasF "$TMP/demo.need" 'A message the change adds or alters settles need the same way' \
   "a message the change adds or alters settles need"
@@ -462,6 +470,30 @@ hasF "$TMP/demo.messages" 'When the change alters many messages in the same way,
 hasF "$TMP/verdict.demo" 'names each message it shows, by its subject' "the demo verdict names each message it shows"
 hasF "$TMP/verdict.demo" 'Where it shows an example or two of many messages the change alters in the same way, it also names the rest, by subject.' \
   "…and the rest of many messages altered in the same way"
+
+echo "# the demo method shows each image a change adds or changes, a changed one before and after"
+hasF "$TMP/demo.triage" 'an image the diff adds or changes, such as a golden image, the picture a test compares the app'"'"'s rendering with, whatever else the diff changes.' \
+  "triage adds the demo check for an image the diff adds or changes, a golden image among them"
+hasF "$TMP/demo.triage" 'An image'"'"'s path makes `demo` mandatory' "…and an image's path makes it mandatory"
+hasF "$TMP/demo.triage" 'even when the image belongs to a test.' "…even when the image belongs to a test"
+hasF "$TMP/demo.need" 'An image the change adds or changes settles need the same way' \
+  "an image the change adds or changes settles need"
+awk '/^### Show each image$/ {f = 1; next} f && /^##/ {exit} f' "$DEMO" > "$TMP/demo.images"
+hasF "$TMP/demo.images" 'each image the change adds, changes, moves or removes, a changed one before and after, at the reviewed commit.' \
+  "the check shows each image the change adds or changes, a changed one before and after, at the reviewed commit"
+hasF "$TMP/demo.images" '"$GCTK" review images --pr "<review_pr_url>" --base "origin/<review_base>" --oid "<reviewed_oid>" --repo "<worktree>"' \
+  "…through one call that shows them all"
+hasF "$TMP/demo.images" 'so a reader sees it on the PR'"'"'s page, in a private repository too, and nothing is uploaded.' \
+  "…on the PR's page, from a private repository too, with nothing uploaded"
+hasF "$TMP/demo.images" 'An image that shows an error, a broken layout, or a state the change does not claim is a finding' \
+  "…and judges each image as it judges a capture"
+hasF "$TMP/demo.images" 'open an example or two of each group, and name in the verdict the ones you opened.' \
+  "…opening an example or two of each group of images altered in the same way"
+hasF "$TMP/verdict.demo" 'A verdict on a change that adds or changes an image says how many images it showed of each kind' \
+  "the demo verdict says what images it showed"
+TRIAGE="$ROOT/skills/review-triage/SKILL.md"
+hasF "$TRIAGE" 'none earns a specialist review unless it touches a path a check'"'"'s method makes mandatory.' \
+  "triage's common case of adding nothing gives way to a path a check's method makes mandatory"
 
 echo "# the demo method reviews changed screens and messages against the standards the rig's guidance names"
 awk '/^## What it reads$/ {f = 1; next} f && /^#/ {exit} f' "$DEMO" > "$TMP/demo.reads"

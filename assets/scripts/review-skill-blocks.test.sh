@@ -9,10 +9,15 @@
 # in zsh: <worktree> is a checkout of the fixture's commit in a scratch rig
 # repository, and `gc <binding> scripts-dir` answers a directory holding the
 # pack's scripts. What reaches past the scratch repository is stubbed: gc's
-# store, gh and bring-current-audit.sh's read of the store. Every placeholder a
-# block uses is a key of the record, <worktree> or <binding>.
+# store, gh and bring-current-audit.sh's read of the store. The repository's
+# origin names a GitHub repository, as a rig's does, and git may use no
+# transport but a local one, so no block reaches the network. Every placeholder
+# a block uses is a key of the record, <worktree> or <binding>.
 #
-# Beyond running, the triage blocks are held to what they do:
+# Beyond running, the demo check's image block posts one comment on the PR the
+# record names, through the pack's writer of the city's posts, drawing the image
+# the change adds at the reviewed commit. And the triage blocks are held to
+# what they do:
 #   triage-index-read     lists the pack's checks with the rig's own laid over
 #                         them, from a checkout that holds no pack; a commit
 #                         with no index lists the pack's alone; a commit the
@@ -75,6 +80,8 @@ git -C "$RIG" checkout -q main
 git init -q --bare "$TMP/origin.git"
 git -C "$RIG" push -q "$TMP/origin.git" main polecat/x
 git -C "$RIG" remote add origin "$TMP/origin.git"; git -C "$RIG" fetch -q origin
+git -C "$RIG" remote set-url origin https://github.com/acme/rig.git
+export GIT_ALLOW_PROTOCOL=file
 git -C "$RIG" worktree add -q --detach "$TMP/wt" "$OID"
 WT="$TMP/wt"
 
@@ -104,7 +111,14 @@ case "$1 ${2:-}" in
   *) exit 1 ;;
 esac
 GC
-printf '#!/usr/bin/env bash\nprintf "gh %%s\\n" "$*" >> "$STUB_LOG"\nexit 1\n' > "$BIN/gh"
+cat > "$BIN/gh" <<'GH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$STUB_LOG"
+case "$1 ${2:-}" in
+  "pr comment") printf '%s\n' 'https://github.com/acme/rig/pull/7#issuecomment-1' ;;
+  *) exit 1 ;;
+esac
+GH
 chmod +x "$BIN/gc" "$BIN/gh"
 export STUB_LOG="$TMP/stub.log" STUB_CREATE="$TMP/create.args" AUDIT_LOG="$TMP/audit.log"
 
@@ -114,7 +128,8 @@ ALLOWED="review_bead check anchor_bead review_branch review_base reviewed_oid re
 fill() { # <check> <oid> : the block on stdin, its placeholders filled in
   sed -e 's|<review_bead>|tk-review1|g' -e "s|<check>|$1|g" -e 's|<anchor_bead>|tk-anchor1|g' \
       -e 's|<review_branch>|polecat/x|g' -e 's|<review_base>|main|g' -e "s|<reviewed_oid>|$2|g" \
-      -e 's|<review_pr_url>||g' -e 's|<review_pr_number>||g' -e 's|<review_context>|a lane short of green|g' \
+      -e 's|<review_pr_url>|https://github.com/acme/rig/pull/7|g' -e 's|<review_pr_number>|7|g' \
+      -e 's|<review_context>|a lane short of green|g' \
       -e "s|<worktree>|$WT|g" -e 's|<binding>|kit|g'
 }
 # blocks <skill> <dir> : each ```bash block of the skill, one file per block, named
@@ -156,6 +171,24 @@ while IFS= read -r c; do
   done
 done <<< "$NAMES"
 [ "$TOTAL" -gt 0 ] && ok "the check skills carry shell blocks ($TOTAL)" || bad "the check skills carry shell blocks" "none found"
+
+echo "# the demo check's image block, run as written"
+IB=$(grep -l -F -e 'review images' "$TMP"/blocks/demo/*.sh 2>/dev/null | head -1)
+[ -n "$IB" ] && ok "the demo skill carries the image block" || bad "the demo skill carries the image block" "no block calls review images"
+if [ -n "$IB" ]; then
+  fill demo "$OID" < "$IB" > "$IB.run"
+  for sh in $SHELLS; do
+    run "$sh" "$IB.run"
+    eq "$RC" "0" "($sh) the image block exits 0"
+    has "$(cat "$STUB_LOG")" "gh pr comment 7 --repo github.com/acme/rig --body **Images in this change**, at ${OID:0:12}: 1 added." \
+      "($sh) …posting one comment on the PR the record names, through the pack's writer"
+    has "$(cat "$STUB_LOG")" "<img src=\"https://github.com/acme/rig/raw/$OID/web/page.png\" alt=\"after: web/page.png\"" \
+      "($sh) …which draws the image the change adds at the reviewed commit"
+    has "$(cat "$STUB_LOG")" "<!-- gc:city -->" "($sh) …with the city's mark"
+    has "$OUT" "gctk review images: posted 1 comment on https://github.com/acme/rig/pull/7: 1 added, in 1 group, at $OID" \
+      "($sh) …and its last line names what it posted"
+  done
+fi
 
 echo "# the triage blocks, run as written"
 TB="$TMP/blocks/triage"
