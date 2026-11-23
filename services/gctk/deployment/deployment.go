@@ -192,25 +192,8 @@ func (r *Report) Run(rig, environment string, dryRun bool) Outcome {
 	if f := res.Failure(); f != "" {
 		return fail("%s did not record the %s deployments of %s: %s", Script, environment, repo, f)
 	}
-	out.Recorded = said(res)
+	out.Recorded = res.Said("patrol-finding")
 	return out
-}
-
-// said is what the finding's writer said of its record: its own lines, which
-// it opens with its name, joined, or the last line of its output when it said
-// none. The rest of its output is the first reaction it slings.
-func said(res gascity.Result) string {
-	const prog = "patrol-finding: "
-	var lines []string
-	for _, l := range strings.Split(res.Output, "\n") {
-		if l = strings.TrimSpace(l); strings.HasPrefix(l, prog) {
-			lines = append(lines, strings.TrimPrefix(l, prog))
-		}
-	}
-	if len(lines) == 0 {
-		return res.Tail()
-	}
-	return strings.Join(lines, "; ")
 }
 
 // Key is the finding's key for environment: one finding per environment in a

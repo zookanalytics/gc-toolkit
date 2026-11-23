@@ -595,6 +595,24 @@ func (r Result) Tail() string {
 	return "it printed nothing"
 }
 
+// Said is what a pack script said of its own act: each line of its output that
+// opens with prog and a colon, as the pack's scripts open their own lines, with
+// that opening cut, joined by "; ", or the output's last line when it said
+// none. The rest of a script's output is what the commands it ran printed,
+// such as the first reaction patrol-finding.sh slings.
+func (r Result) Said(prog string) string {
+	var lines []string
+	for _, l := range strings.Split(r.Output, "\n") {
+		if l, ok := strings.CutPrefix(strings.TrimSpace(l), prog+": "); ok {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 {
+		return r.Tail()
+	}
+	return strings.Join(lines, "; ")
+}
+
 // Failure is why a result is a failure, in one line, empty for exit 0.
 func (r Result) Failure() string {
 	if r.Err == nil && r.Code == 0 {

@@ -234,6 +234,18 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 	}
 }
 
+// What a script said is its own lines, which open with its name, joined, and
+// not what the commands it ran printed, or its last line when it said none.
+func TestSaidIsTheScriptsOwnLines(t *testing.T) {
+	r := Result{Output: "patrol-finding: filed ra-1 for [actions.nightly.yml]\n{\"slung\":true}\n  patrol-finding: slung its first reaction\npatrol-findings: another\n"}
+	if got := r.Said("patrol-finding"); got != "filed ra-1 for [actions.nightly.yml]; slung its first reaction" {
+		t.Errorf("Said = %q", got)
+	}
+	if got := (Result{Output: "ok\nthe last line\n\n"}).Said("patrol-finding"); got != "the last line" {
+		t.Errorf("a script that said nothing of its own said %q", got)
+	}
+}
+
 // A city Within a context stops each command it runs once the context ends,
 // and says so, whether or not the command's child still holds its output. A
 // city with no context lets the same command run to its end.
