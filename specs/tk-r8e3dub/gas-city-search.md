@@ -5,9 +5,10 @@ description: The Gas City surfaces searched before doctor/check-pour-text-curren
 
 # Gas City search for reading a failed rig fetch
 
-The change grows `doctor/check-pour-text-current` (I9). Its UNFETCHED finding
-now also fires when the checkout's last `git fetch` left `.git/FETCH_HEAD`
-empty, not only when nothing has fetched there past the threshold. The check's
+The change corrects how `doctor/check-pour-text-current` (I9) dates a fetch.
+Its UNFETCHED finding now also fires when the checkout's last `git fetch` left
+`.git/FETCH_HEAD` empty, not only when nothing has fetched there past the
+threshold. The check's
 first line names an UNFETCHED checkout instead of calling the pack current. The
 change adds no script, order, metadata key, bead kind or lifecycle state, and
 `assets/scripts/reconcile-rig-checkouts.sh` changes only its header. Gas City is
@@ -41,7 +42,12 @@ runs in a row found failing (`services/helm/README.md`, "The city page"). A
 blip clears at the next reconcile pass, so at most one doctor run sees it and
 the page does not show it. A fetch that keeps failing shows after the second
 run. A fetch caught while it runs reads as failed for the seconds it takes, and
-the same two-run rule absorbs it.
+the same two-run rule absorbs it. Other fetches in the rig root write the same
+file, such as the landing order's fetch of a PR's branch or its target
+(`FetchBranch` in `services/gctk/internal/git/git.go`, which
+`gctk pr reconcile` runs in `GC_RIG_ROOT`). One of them that fails reads as a
+failed fetch until a fetch there works, as the reconcile's next pass does, so
+the two-run rule absorbs it as it does a blip.
 
 The deacon's doctor sweep, which the deletion plan retires
 (`tools/deletion-plan.tsv`), files a check it finds failing as a finding for a

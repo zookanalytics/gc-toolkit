@@ -5,16 +5,15 @@
 # pour and never re-renders, and rigs/<rig> — the checkout the runtime
 # executes — advances on the reconciler's 15m cooldown
 # (orders/reconcile-rig-checkouts.toml). Three findings: LAGGED, a checkout
-# behind its remote past the self-heal window; UNFETCHED, the remote-tracking
-# ref not refreshed, because the checkout's last fetch failed or because
-# nothing has fetched there for longer than the threshold. That is the
-# fail-open case: a fetch that failed or never ran leaves the ref where it was,
-# so the behind-count misses what landed since the last fetch that worked, and
-# it is reported as a floor;
-# STALE-TEXT, a live molecule root whose gc.formula_source last changed (git
-# history, not mtime) after the root poured. Deliberately never fetches — a
-# doctor check is a read, and fetching would repair the condition it observes.
-# Read-only.
+# behind its remote past the self-heal window; UNFETCHED, a remote-tracking ref
+# not refreshed, because the checkout's last fetch failed or because nothing
+# has fetched there for longer than the threshold; STALE-TEXT, a live molecule
+# root whose gc.formula_source last changed (git history, not mtime) after the
+# root poured. UNFETCHED is the fail-open case: a fetch that failed or never
+# ran leaves the ref where it was, so the behind-count misses what landed since
+# the last fetch that worked, and the check reports it as a floor. Deliberately
+# never fetches — a doctor check is a read, and fetching would repair the
+# condition it observes. Read-only.
 # Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then "  - detail"
 # lines. Live probes are bounded; an UNREADABLE probe warns (1), never passes.
 
