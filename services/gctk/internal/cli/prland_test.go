@@ -418,9 +418,9 @@ func TestTheSeedAuditChecksACommitThroughThePacksRenderer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("STUB_PAGES", "agents/claude.md formulas/mol-polecat-base.md")
+	t.Setenv("STUB_PAGES", "agents/claude.render.md formulas/mol-polecat-base.render.md")
 	pages, err := l.Audit.Stale(validated)
-	if err != nil || strings.Join(pages, ",") != "agents/claude.md,formulas/mol-polecat-base.md" {
+	if err != nil || strings.Join(pages, ",") != "agents/claude.render.md,formulas/mol-polecat-base.render.md" {
 		t.Fatalf("Stale = %v, %v, want the two pages the script named", pages, err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(scripts, "calls.render"))
@@ -450,16 +450,16 @@ func TestTheSeedAuditHandsItsPagesToThePacksWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := l.Audit.Reaudit("main", "The landing order, checking main,", []string{"agents/claude.md", "formulas/mol-x.md"})
+	answer, err := l.Audit.Reaudit("main", "The landing order, checking main,", []string{"agents/claude.render.md", "formulas/mol-x.render.md"})
 	if err != nil || answer != "re-1 gc-toolkit/gc-toolkit.polecat filed" {
 		t.Fatalf("Reaudit = %q, %v, want the writer's last line", answer, err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(scripts, "calls.reaudit"))
-	if want := "--base\nmain\n--seen-by\nThe landing order, checking main,\n--page\nagents/claude.md\n--page\nformulas/mol-x.md\n"; string(raw) != want {
+	if want := "--base\nmain\n--seen-by\nThe landing order, checking main,\n--page\nagents/claude.render.md\n--page\nformulas/mol-x.render.md\n"; string(raw) != want {
 		t.Fatalf("seed-audit-reaudit.sh got %q, want %q", raw, want)
 	}
 	t.Setenv("STUB_EXIT", "2")
-	if _, err := l.Audit.Reaudit("main", "x,", []string{"agents/claude.md"}); err == nil ||
+	if _, err := l.Audit.Reaudit("main", "x,", []string{"agents/claude.render.md"}); err == nil ||
 		!strings.Contains(err.Error(), "exit 2: seed-audit-reaudit: the dedup query failed") {
 		t.Fatalf("a writer that dispatched nothing read as %v", err)
 	}
@@ -490,7 +490,7 @@ func TestTheSeedAuditsWriterRunsInTheClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Audit.Reaudit("trunk", "The landing order, checking trunk,", []string{"agents/claude.md"}); err != nil {
+	if _, err := l.Audit.Reaudit("trunk", "The landing order, checking trunk,", []string{"agents/claude.render.md"}); err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := filepath.EvalSymlinks(clone)
