@@ -62,10 +62,18 @@ not a reopening.
 
 **Belongs and Boundaries.** The epic's scope, in the two-part form every
 authoritative doc uses. *Belongs* is the hypothesis plus the work it owns.
-*Boundaries* names the axis the epic is cut on — a capability, a service, a
-surface — and the adjacent work it is *not*, pointing at the epic that owns that
-instead ("not the merge cadence, owned by the merge workflow"). A boundary marks
-an edge and names where the neighbor lives; it does not catalog members.
+*Boundaries* names the axis the epic is cut on (a capability, a service, a
+surface) and the work that someone who reads the hypothesis could mistake for
+the epic's own, such as a neighbor on that axis or work already mistaken for
+the epic's. Each line names that work and where it lives ("not the merge
+cadence, owned by the merge workflow"), and a line may name work no epic holds:
+an epic cut on the operator's time on a pull request names "how much reading a
+design asks, which no epic holds". The lines come from the hypothesis, not from
+a list of the other epics. What decides is what the work is for, not what it
+touches. Work that serves another outcome gets no line, even when it shares
+code, machinery or records with the epic's work, because nobody who reads the
+hypothesis would ask whether the epic covers it. Such a line is true but tells
+the reader nothing. The boundaries do not catalog members.
 
 **Closure condition.** Three to six checks a person can run without opening a
 child, each of which fails today. Closing every child is not one of them: an
