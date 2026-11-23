@@ -1024,7 +1024,7 @@ sequenceDiagram
   W->>L: gctk pr refresh — save GitHub's side of the PR on the bead
   O->>L: the evaluator finds the PR ready on the saved read
   O->>G: gctk pr refresh's re-read of the PR in full, saved on the bead
-  O->>G: mergePullRequest, pinned to the head the evaluator judged on that read (expectedHeadOid)
+  O->>G: mergePullRequest, pinned to the head the evaluator judged on that read (expectedHeadOid),<br/>under the subject the bead's title composes to at the request (commitHeadline)
   W->>L: the watch saves the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
