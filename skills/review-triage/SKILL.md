@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: Use when you hold a review bead whose check is triage, triage's step of a review run, or when asked which review checks a diff warrants or whether a person's post on a PR needs only an answer.
+description: Use when you hold a review bead whose check is triage, triage's step of a review run, or when asked which review checks a diff warrants.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 

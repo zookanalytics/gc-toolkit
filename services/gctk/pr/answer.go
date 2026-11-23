@@ -17,11 +17,11 @@ import (
 )
 
 // A review round's post (specs/tk-1tfzr71.161/design.md, sections 3 and 6).
-// The step that rules a person's post answers it where it was made, since the
-// step that rules a post is the one that knows what became of it, and the
-// loop's check, which records the run's result, has no GitHub login: triage,
-// for a post it answers, and rule-and-repair for the rest of the round. The
-// post makes each write the round owes on GitHub, in this order:
+// The step that rules a person's post answers it where it was made, since it
+// knows what became of the post, and the loop's check, which records the run's
+// result, has no GitHub login. That step is triage for a post it answers, and
+// rule-and-repair for the rest of the round. The post makes each write the
+// round owes on GitHub, in this order:
 //
 //   - the head's one comment (review.Comment), posted, or edited where its mark
 //     finds it, once the round has ruled all it will: rule-and-repair wrote

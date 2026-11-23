@@ -137,13 +137,12 @@ the city's 👍 alone. Then check and write it:
 Exit 3 prints why the output does not stand: correct the file and run it
 again. When this step closes, each pick bonds one lane.
 
-**5. Answer the posts it answered**, when the output carries rulings, where
-each post was made:
+**5. Post the answers on the PR**, when the output carries rulings:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
-Each post gets its reply where words are owed and the city's 👍, an inline
-comment's thread is resolved, and when triage picked no check and answered
-every ask the round can take, the head's comment is posted too, since
-rule-and-repair has nothing left. Run again, it posts nothing twice. Exit 1:
+Each post you answered gets its reply where words are owed and the city's 👍,
+where it was made, an inline comment's thread is resolved, and when you picked
+no check and answered every ask the round can take, the head's comment is
+posted too, since rule-and-repair has nothing left. Run again, it posts nothing twice. Exit 1:
 an answer did not land, and exit 2: a read did not answer: run it again, and
 when it still fails, cancel the run, which the landing order pours again:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "triage's answers did not land on the PR"`
@@ -152,7 +151,7 @@ when it still fails, cancel the run, which the landing order pours again:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** the head judged, a withdrawal filed when it is material, the
-output written, each post it answered answered on the PR, this step closed.
+output written, its answers posted when it answered a post, this step closed.
 """
 metadata = { "gc.run_target" = "{{review_target}}" }
 
