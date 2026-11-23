@@ -902,8 +902,8 @@ reset; SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-conv --
 eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" \
     "(PR-HOLD) …holding the PR's merge through the anchor's blocks edge onto the conversation"
-HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1)
-SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1)
+HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1 || true)
+SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1 || true)
 [ -n "$HOLD_AT" ] && [ -n "$SPAWN_AT" ] && [ "$HOLD_AT" -lt "$SPAWN_AT" ] \
     && ok "(PR-HOLD) …before the sitting starts" \
     || bad "(PR-HOLD) …before the sitting starts (hold at ${HOLD_AT:-none}, spawn at ${SPAWN_AT:-none})"
@@ -1921,7 +1921,7 @@ echo "# --new-subject whose post-create gate aborts still files the subject's on
 run_fresh "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
 has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ-ABORT) the subject was already created (the abort is post-create)"
-CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
+CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1 || true)"
 has "$CONV_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one conversation, carrying its opener"
 eq "$(cat "$STATE_DIR/tk-newsubj.assignee" 2>/dev/null)" "" "(NEWSUBJ-ABORT) …and hands the subject to it"
 has "$OUT" "waiting in the operator's queue" "(NEWSUBJ-ABORT) …and tells the operator it waits in their queue to engage"
@@ -1939,7 +1939,7 @@ case "$(cat "$STATE_DIR/newsubj.description")" in
   *) bad "(NEWSUBJ-LONG) the subject's description should open with the question unchanged (got: $(head -c 120 "$STATE_DIR/newsubj.description"))" ;;
 esac
 eq "$(cat "$STATE_DIR/tk-new.description")" "$LONG_Q" "(NEWSUBJ-LONG) …and the conversation's ask is the question, unchanged"
-NS_TITLE="$(cat "$STATE_DIR/newsubj.title")"
+NS_TITLE="$(cat "$STATE_DIR/newsubj.title" 2>/dev/null || true)"
 case "$NS_TITLE" in
   "Why does the refinery hold siblings for a full pass when only one changed? Context: - the merge queue"*"…") ok "(NEWSUBJ-LONG) the title is the question's opening on one line, cut with an ellipsis" ;;
   *) bad "(NEWSUBJ-LONG) the title should be the opening on one line (got: $NS_TITLE)" ;;
