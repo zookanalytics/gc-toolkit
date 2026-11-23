@@ -73,8 +73,9 @@ offers Accept when all of these hold:
 The record is a JSON object on the gate. `course` is the one line the board
 shows beside Accept and the answer names. `act` is what a yes does (section
 3), with the fields that act needs, and `bead` is the bead the question is
-about, the one the act works on. The board reads the record, never the
-question's text, through gctk's listing, which decodes each key the board
+about, the one the act works on. `rev` names this version of the record, and
+each write of the record gives it a new one. The board reads the record, never
+the question's text, through gctk's listing, which decodes each key the board
 shows.
 
 A question with several options or none carries no record, so it shows only
@@ -111,11 +112,13 @@ answer.
   and keeps the first answer, so Accept reads the gate after it answers, and
   the first answer stands, as it does today.
 
-Accept is one command, `gctk gate accept <gate>`. The board calls it with the
-course it showed (`--course`), and Accept refuses, writing nothing, when the
-live record's course differs, so your yes reaches only the recommendation you
-read. A sitting's sign-off calls it with its own conversation, which the
-refusal of section 1 passes over.
+Accept is one command, `gctk gate accept <gate> --rev <rev>`. Its caller names
+the version of the record you read: the board names the `rev` its row showed,
+and a sitting's sign-off names the `rev` its sitting put to you. Accept
+refuses, writing nothing, when the live record's `rev` differs. So your yes
+reaches only the recommendation you read, and a record written again after you
+read it waits for a new yes, whatever the write changed. A sitting's sign-off
+also names its own conversation, which the refusal of section 1 passes over.
 
 ## 3. How the recommendation is carried out
 
@@ -170,18 +173,19 @@ the first reaction files its gate today, so an asker that ends in one call,
 such as `decline.sh`, records first and the decline then finds the gate open.
 It checks that the act can run on the bead: a formula for `sling`, no open PR
 for `stand-down`, and a PR on the pending record for `retire`. It then writes
-the record in one write. A recommendation recorded again replaces the last. A
-question whose record did not land keeps the conversation and loses only
+the record in one write, with a new `rev`. A recommendation recorded again
+replaces the last, so Accept refuses a click on a row that showed the last one.
+A question whose record did not land keeps the conversation and loses only
 Accept.
 
 ## 5. The board
 
 On a row that qualifies (section 1), Accept sits beside Start the
 conversation, with the recommendation's course beside it. A click posts the
-gate and the course to a third write route, `POST /helm/accept`, beside
-`/helm/open` and `/helm/engage`. The route runs
-`gctk gate accept <gate> --course <course>` and drops the rig's cached
-document, as a write does. The side panel shows Accept's answer as it shows an
+gate and the `rev` of the record the row showed to a third write route,
+`POST /helm/accept`, beside `/helm/open` and `/helm/engage`. The route runs
+`gctk gate accept <gate> --rev <rev>` and drops the rig's cached document, as a
+write does. The side panel shows Accept's answer as it shows an
 engage's: what was accepted and what started, or why nothing did. The row
 then reads as the answer left it. Discuss opens a conversation as today. The
 board's design as a whole is the Board UI design epic's (tk-yhquh93), so this
@@ -198,14 +202,16 @@ makes it safe:
   Accept's lock);
 - its token, which titles the pour and names the answer;
 - its record of what was accepted, `gc.acceptance` on the gate, which now holds
-  the accepted act with any var a sitting's ruling settled;
+  the accepted record's `rev` and its act, with any var a sitting's ruling
+  settled;
 - the read that lets the first answer stand;
 - the reopen when a sling pours nothing, and the finishing of an acceptance an
   earlier run left.
 
 Four things change. It reads the recommendation from the question, not from
-the bead. It takes any question whose asker recorded one. It carries out four
-acts where it carried out one. It refuses while a conversation other than the
+the bead. It takes any question whose asker recorded one, and only the version
+of its record that the caller read. It carries out four acts where it carried
+out one. It refuses while a conversation other than the
 caller's is open on the question, where today it only warns.
 
 So the first reaction's recommendation moves from `gc.recommended_formula` on
@@ -213,8 +219,8 @@ the bead to its gate's record. The bead keys `gc.recommended_formula` and
 `gc.recommended_formula_dispatched` retire, with their lifecycle entries and
 their readers:
 
-- The sign-off's `--accept` names the gate its ruling answers and leaves the
-  refusals to Accept.
+- The sign-off's `--accept` names the gate its ruling answers and the `rev` its
+  sitting put to you, and leaves the refusals to Accept.
 - `converse-invalidate-recommendation.sh` retires. It strips a recommendation
   so that no Accept runs during the sitting, and under this design no Accept
   runs while the sitting's conversation is open. The sitting answers the gate
@@ -326,7 +332,7 @@ with a Debt entry that the last unit to land removes.
 
 | Unit | What it builds | Waits on |
 |---|---|---|
-| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts and the refusal while another conversation is open. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
+| 1 | The gate domain: the `gc.recommendation` record; `gctk gate recommend` with `proceed` and `sling`; `gctk gate accept`, moved from `gctk reaction accept`, with the same two acts, the refusal of a `rev` that is not the live one, and the refusal while another conversation is open. The first reaction's recommend exit records on its gate. `gc.recommended_formula`, `gc.recommended_formula_dispatched` and `converse-invalidate-recommendation.sh` retire, and the sign-off's `--accept` calls the gate verb. | nothing |
 | 2 | `stand-down` and `retire` in both verbs, each in its writer's order. | unit 1 |
 | 3 | The board's Accept: the course on a row that qualifies, the button, `POST /helm/accept`, the panel's answer, and the Question row of docs/bead-standing.md. | unit 1 |
 | 4 | The askers: the validating closer's step 2b records its course; the waits skill says how any asker records one, which a decliner and a wait on outside work follow; the polecat doctrine's paragraph on declining points there. | units 1 and 2 |
