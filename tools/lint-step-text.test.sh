@@ -604,9 +604,11 @@ expect 1 "a new sub-pack formula's procedure: exit 1" "the new step new"
 # change names in one pass, so a block pairs with its old self wherever it now
 # sits. Here main's skill makes one call, whose placeholder names alternatives,
 # and holds one old procedure in its SKILL.md and another in a reference, and a
-# doc page outside any skill holds a third.
+# doc page outside any skill holds a third. A sub-pack's skill on main makes one
+# gctk call through the gctk-bin block.
 SK=skills/s/SKILL.md
 MORE=skills/s/references/more.md
+GSK=packs/sub/skills/m/SKILL.md
 OLD_PROC='```bash
 A=$(gc bd show "$B" --json)
 if [ -n "$A" ]; then
@@ -640,10 +642,12 @@ new_skill() {
 }
 
 fresh_repo
-mkdir -p "$REPO/skills/s/references" "$REPO/docs"
+mkdir -p "$REPO/skills/s/references" "$REPO/docs" "$REPO/${GSK%/*}"
 base_skill > "$REPO/$SK"
 printf '# More\n\nAnother old procedure:\n%s\n' "$MORE_PROC" > "$REPO/$MORE"
 printf '# Guide\n\n%s\n' "$MORE_PROC" > "$REPO/docs/guide.md"
+printf -- '---\nname: m\ndescription: A sub-pack skill.\n---\n\n# M\n\n%s\n' \
+  "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')" > "$REPO/$GSK"
 g add -A
 g commit -qm skill
 g update-ref refs/remotes/origin/main HEAD
@@ -715,6 +719,17 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'"$join"'
   run_lint packs/sub/skills/g/SKILL.md
   expect 1 "a command joined to the gctk-bin assignment by $join weighs: exit 1" "with 3 commands"
 done
+
+# The markers change what the assignment between them weighs, so they are part
+# of the text a block pairs by, and a block that only loses them is edited.
+skill_reset
+run_lint "$GSK"
+expect 0 "main's sub-pack skill, a gctk-bin block and one gctk call, unchanged: exit 0" "1 skill file(s), no procedure added"
+sed '/gctk-bin/d' "$REPO/$GSK" > "$TMP/gsk.md"
+cat "$TMP/gsk.md" > "$REPO/$GSK"
+run_lint "$GSK"
+expect 1 "a block that only loses its gctk-bin markers weighs the assignment: exit 1" \
+  "^$GSK:[0-9]*: skill text gains a procedure: skill packs/sub/skills/m gains shell blocks that do more than call a script, with 2 commands\. "
 
 skill_reset
 base_skill | awk '{ print } /^  echo "\$A"$/ { print "  gc runtime drain-ack" }' > "$REPO/$SK"

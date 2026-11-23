@@ -337,8 +337,9 @@ AWKEOF
 # `F<FS>open<FS>commands<FS>control<FS>words<FS>text<FS>step`; for each line of
 # a block's code, here-document bodies included, `L<FS>line<FS>open`; and each
 # step's S record as it came. <FS> is \034, open is the line of the block's
-# opening fence, words names its control flow, text is its code with every
-# newline written as \035, and step is the step's place in the file.
+# opening fence, words names its control flow, text is its code and its
+# gctk-bin markers with every newline written as \035, and step is the step's
+# place in the file.
 PARSE_AWK=$(cat <<'AWKEOF'
 function fill(w,   o) { o = ""; while (w-- > 0) o = o "."; return o }
 function blanks(w,   o) { o = ""; while (w-- > 0) o = o " "; return o }
@@ -591,7 +592,9 @@ function fence_close(   t) {
 # inside a here-document is the body's, and joins the block's text and lines.
 # Once a body whose delimiter is unquoted ends, the shell expands it, so its
 # substitutions are weighed then; a block that closes first ends the body. A
-# comment line that opens a gctk-bin block, or closes one, sets gctkbin.
+# comment line that opens a gctk-bin block, or closes one, sets gctkbin and
+# joins the block's text, since it changes what the block weighs, so a block
+# that loses its markers does not pair with its old self as unchanged.
 function shell_line(s, lines,   t, i) {
     if (hdn > hdi) {
         t = s
@@ -610,8 +613,8 @@ function shell_line(s, lines,   t, i) {
     if (buf == "") {
         if (s ~ /^[ \t]*$/) return
         if (s ~ /^[ \t]*#/) {
-            if (s ~ /^[ \t]*# >>> gctk-bin[ \t]*$/) gctkbin = 1
-            else if (s ~ /^[ \t]*# <<< gctk-bin[ \t]*$/) gctkbin = 0
+            if (s ~ /^[ \t]*# >>> gctk-bin[ \t]*$/) { gctkbin = 1; ftext = ftext s "\n" }
+            else if (s ~ /^[ \t]*# <<< gctk-bin[ \t]*$/) { gctkbin = 0; ftext = ftext s "\n" }
             return
         }
         buf = s; blines = lines
