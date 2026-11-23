@@ -77,6 +77,67 @@ func Render(a pr.Answer, f Facts) State {
 	return NeedsReview
 }
 
+// Own returns where a PR on Gas Town's pending record stands in its own right:
+// [Render]'s rule read over the PR's own conditions, with what holds it set
+// aside and the city's work ranked before an approval
+// (specs/tk-ai367om/design.md, section 3). What holds a PR is a hold set by
+// hand and a wait of its bead's own on a bead only a person clears, by the
+// person rules: one of the facts' human gates, beads a person owes and beads
+// that stay for work ([Facts.Gates], [Facts.Owed] and [Facts.Staying]). A wait
+// on work is the PR's own, whoever that work waits for. The landing order
+// resolves a gctk:needs-review gate once the PR's own status is needs-review or
+// merging. First match:
+//
+//   - needs-attention: something of its own that only a person clears: its
+//     record does not read or the PR is not open, a required check failed, a
+//     review run ended with no result, a review thread waits on the city's
+//     answer and nothing acts on it, or an approved PR with nothing else left
+//     is in a merge state that holds it.
+//   - working: the city still has something to do, approved or not, such as a
+//     draft, GitHub unread at its head, a pending check, no passed review at
+//     its head, a wait on work, or anything else the evaluator lists.
+//   - merging: an approval stands and nothing of its own is left, or only the
+//     merge state GitHub has yet to compute (UNKNOWN).
+//   - needs-review: only an approval is left, or a request for changes its
+//     author has to lift.
+func Own(a pr.Answer, f Facts) State {
+	if a.Ready {
+		return Merging
+	}
+	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
+	held := func(id string) bool {
+		return slices.ContainsFunc(persons, func(b person.Blocker) bool { return b.ID == id })
+	}
+	var attention, approval, city bool
+	mergeState := ""
+	for _, c := range a.Conditions {
+		switch {
+		case c.Kind == pr.KindHold, c.Kind == pr.KindWait && held(c.ID):
+		case c.Kind == pr.KindRecord, c.Kind == pr.KindOpen, c.Kind == pr.KindCheckFailed:
+			attention = true
+		case c.Kind == pr.KindApproval, c.Kind == pr.KindChangesRequested:
+			approval = true
+		case c.Kind == pr.KindMergeState:
+			mergeState = c.Value
+		case c.Kind == pr.KindThread:
+		default:
+			city = true
+		}
+	}
+	_, failed := runFailed(a, f)
+	switch {
+	case attention, failed, threadsHeld(a, f) > 0:
+		return NeedsAttention
+	case city:
+		return Working
+	case !approval && mergeState != "" && mergeState != "UNKNOWN":
+		return NeedsAttention
+	case !approval:
+		return Merging
+	}
+	return NeedsReview
+}
+
 // RenderReasons returns what holds a PR on Gas Town's pending record, in this
 // order: each open human gate the walk names, a review run that ended without a
 // result at the PR's head, the review threads the evaluator finds waiting on

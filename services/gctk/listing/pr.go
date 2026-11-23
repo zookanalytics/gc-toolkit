@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
@@ -64,4 +65,57 @@ func (ls *Listing) PRLabels(ids []string) (map[string][]string, map[string]error
 		labels[id] = prstatus.Labels(prstatus.Render(a, facts[id]), prstatus.RenderHeld(a, facts[id]))
 	}
 	return labels, failed
+}
+
+// PROwn returns the own status of the PR each bead named owns ([prstatus.Own])
+// for a bead on Gas Town's pending record: the evaluator's answer beside the
+// facts prstatus.Read gathers, as PRLabels reads them for the label. It
+// returns the status of each bead it read, and the error of each it could
+// not, a bead whose PR is on no pending record among them.
+func (ls *Listing) PROwn(ids []string) (map[string]prstatus.State, map[string]error) {
+	own, failed := map[string]prstatus.State{}, map[string]error{}
+	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
+	facts, err := prstatus.Read(ids, ls)
+	if err == nil {
+		err = errors.New("prstatus.Read gave no facts for it")
+	}
+	var pending []string
+	for _, id := range ids {
+		f, ok := facts[id]
+		switch {
+		case !ok:
+			failed[id] = fmt.Errorf("what the city records about %s's PR did not read: %w", id, err)
+		case !pr.OnRecord(f.MergeResult):
+			failed[id] = fmt.Errorf("%s's PR is on no pending record (merge_result %q)", id, f.MergeResult)
+		default:
+			pending = append(pending, id)
+		}
+	}
+	answers, unanswered := ls.PRAnswers(pending)
+	for _, id := range pending {
+		a, ok := answers[id]
+		if !ok {
+			failed[id] = fmt.Errorf("the evaluator gave no answer for %s's PR: %w", id, unanswered[id])
+			continue
+		}
+		own[id] = prstatus.Own(a, facts[id])
+	}
+	return own, failed
+}
+
+// OwnStatus is the PR's own status as the landing order asks for it
+// (pr.Status): [Listing.PROwn] over a listing of the pass the order hands it.
+type OwnStatus struct{}
+
+// Own returns the own status of the PR bead owns, read through pass.
+func (OwnStatus) Own(pass *ledger.Ledger, bead string) (string, error) {
+	ls, err := Over(pass)
+	if err != nil {
+		return "", fmt.Errorf("the store's listing did not read: %w", err)
+	}
+	own, failed := ls.PROwn([]string{bead})
+	if err := failed[bead]; err != nil {
+		return "", err
+	}
+	return string(own[bead]), nil
 }
