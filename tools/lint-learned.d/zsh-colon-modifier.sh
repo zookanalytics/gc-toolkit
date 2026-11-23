@@ -20,6 +20,11 @@
 # TOML is read through its basic-string escapes, so a `\\` in the file is the
 # one backslash the agent's shell sees.
 #
+# A fence that ends with a quote, a substitution or a heredoc still open is a
+# finding at the line that opened it, because the shell, like the scan, reads
+# the rest of the fence as part of it. An apostrophe in an unquoted placeholder
+# such as <the PR's bead> opens a quote this way.
+#
 # Scope: ```bash, ```sh and ```shell fences in formula TOMLs, agent prompt
 # templates, startup fragments, skills, and the paste-to-run docs runbooks
 # named below. Untagged fences in these files mostly hold checklists, templates
@@ -42,9 +47,10 @@ SCAN_AWK=$(cat <<'AWKEOF'
 # Frames, FR[1..sp], with a nesting depth in DP[] where one is needed:
 #   T top level   S '…'   A $'…'   Q "…"   C $(…)   B `…`
 #   H unquoted heredoc body   R $((…))   K ${…}
-# T, Q, C, B and H expand parameters. S, A, R and K are skipped whole.
+# T, Q, C, B and H expand parameters. S, A, R and K are skipped whole. FL[]
+# holds the line each frame opened on, and HL[] the line each heredoc did.
 function reset_state() { sp = 1; FR[1] = "T"; DP[1] = 0; hn = 0; hi = 0; hb = 0 }
-function push(t, d) { FR[++sp] = t; DP[sp] = d }
+function push(t, d) { FR[++sp] = t; DP[sp] = d; FL[sp] = FNR }
 function pop() { if (sp > 1) sp-- }
 function shell_fence(l,   lang) {
     lang = l
@@ -72,6 +78,15 @@ function body_begin() {
 function body_end() {
     if (!hbq) sp = hbsp
     if (++hi <= hn) body_begin(); else { hb = 0; hn = 0; hi = 0 }
+}
+# Prints the line that opened the innermost frame or heredoc still open where a
+# fence ends, its letter or "heredoc", and the fence's last line. A heredoc
+# body's own depth is where a frame opened inside it starts.
+function open_at_end(last,   base) {
+    base = hb ? hbsp + (hbq ? 0 : 1) : 1
+    if (sp > base) print FL[sp] "\topen\t" FR[sp] "\t" last
+    else if (hb) print HL[hi] "\topen\theredoc\t" last
+    else if (hn > 0) print HL[1] "\topen\theredoc\t" last
 }
 # Returns "name<TAB>modifiers" for the first expansion on the line that a zsh
 # modifier rewrites, or "". CONT is set when the line ends in an escaping
@@ -120,7 +135,7 @@ function scan(s,   n, i, c, t, hit, rest, nm, w, dash, tok) {
             match(rest, /^[[:space:]]*/); w += RLENGTH; rest = substr(rest, RLENGTH + 1)
             if (match(rest, /^[A-Za-z_'"\\][^[:space:]<>;&|()]*/)) {
                 tok = substr(rest, 1, RLENGTH)
-                HQ[++hn] = (tok ~ /['"\\]/)
+                HQ[++hn] = (tok ~ /['"\\]/); HL[hn] = FNR
                 gsub(/['"\\]/, "", tok)
                 HT[hn] = tok; HD[hn] = dash
                 i += 1 + w + RLENGTH
@@ -132,7 +147,7 @@ function scan(s,   n, i, c, t, hit, rest, nm, w, dash, tok) {
 }
 BEGIN { reset_state() }
 /^[[:space:]]*```/ {
-    if (inb) { inb = 0; reset_state() }
+    if (inb) { open_at_end(FNR); inb = 0; reset_state() }
     else if (other) other = 0
     else if (shell_fence($0)) { inb = 1; reset_state() }
     else other = 1
@@ -149,10 +164,11 @@ BEGIN { reset_state() }
         if (hbq) next
     }
     hit = scan(line)
-    if (hit != "") print FNR "\t" hit
+    if (hit != "") print FNR "\tmod\t" hit
     # A heredoc body starts on the line after the command that opened it ends.
     if (!hb && hn > 0 && !CONT && FR[sp] != "S" && FR[sp] != "Q" && FR[sp] != "A") { hi = 1; body_begin() }
 }
+END { if (inb) open_at_end(NR) }
 AWKEOF
 ) || { echo "zsh-colon-modifier: could not load its scan program — detector cannot scan" >&2; exit 2; }
 
@@ -179,10 +195,25 @@ for f in "$@"; do
         echo "zsh-colon-modifier: cannot scan $f" >&2
         exit 2
     fi
-    while IFS=$'\t' read -r no name mod; do
+    while IFS=$'\t' read -r no kind a b; do
         [ -n "$no" ] || continue
-        echo "$f:$no: unbraced \$$name:$mod — zsh reads :$mod as a modifier on \$$name and rewrites the text after it, where bash keeps it literal; write \${$name}:$mod (learned rule: zsh-colon-modifier)"
         found=1
+        if [ "$kind" = mod ]; then
+            echo "$f:$no: unbraced \$$a:$b — zsh reads :$b as a modifier on \$$a and rewrites the text after it, where bash keeps it literal; write \${$a}:$b (learned rule: zsh-colon-modifier)"
+            continue
+        fi
+        hint=""
+        case "$a" in
+            S) what="a '…' quote"; hint=", or reword an unquoted <placeholder> whose apostrophe opened it" ;;
+            A) what="a \$'…' quote" ;;
+            Q) what="a \"…\" quote" ;;
+            C) what="a \$(…) substitution" ;;
+            B) what="a \`…\` substitution" ;;
+            R) what="a \$((…)) expansion" ;;
+            K) what="a \${…} expansion" ;;
+            *) what="a heredoc" ;;
+        esac
+        echo "$f:$no: $what opened on this line is still open where the shell fence ends at line $b, so the shell, like this scan, reads the rest of the fence as part of it; close it$hint (learned rule: zsh-colon-modifier)"
     done <<< "$hits"
 done
 

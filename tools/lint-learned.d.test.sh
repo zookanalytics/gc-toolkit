@@ -1270,6 +1270,98 @@ eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and nothing else in the skill is"
 runz "$BRACED"
 eq "$RC" 0 "the braced fixture is clean"
 
+echo "── zsh-colon-modifier: a fence that ends with a quote still open ──"
+
+# The shell, like the scan, reads the rest of a fence as part of a quote,
+# substitution or heredoc that opens in it and never closes, so a modifier
+# there goes unseen. Each such fence is a finding at the line that opened the
+# innermost one, naming the fence's last line, and the fence after it is read
+# afresh. An apostrophe in an unquoted placeholder opens a quote this way, in a
+# skill as in a formula TOML. Inside double quotes it is literal.
+cat > "$SKILL" <<'FIX'
+```bash
+gc bd show <the PR's bead>
+echo "$V:hello"
+```
+```bash
+echo $V:hello
+```
+```bash
+gc bd show "<the PR's bead>"
+```
+FIX
+runz "$SKILL"
+eq "$RC" 1 "an apostrophe in an unquoted placeholder is a finding"
+has "$OUT" "SKILL.md:2: a '…' quote opened on this line is still open where the shell fence ends at line 4" \
+    "at the placeholder's line, naming the fence's last line"
+has "$OUT" "reword an unquoted <placeholder> whose apostrophe opened it" "and naming the fix"
+hasnt "$OUT" "SKILL.md:3:" "the modifier inside the open quote is not reported"
+has "$OUT" "SKILL.md:6: unbraced \$V:h" "the next fence is read afresh"
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 2 "and the placeholder inside double quotes is no finding"
+printf '%s\n' 'description = """' '```bash' "gc bd show <the PR's bead>" '```' '"""' > "$ZC/formulas/open.toml"
+runz "$ZC/formulas/open.toml"
+eq "$RC" 1 "the same placeholder in a formula TOML is a finding"
+has "$OUT" "formulas/open.toml:3: a '…' quote opened on this line" "at its line"
+
+# Each frame and heredoc the scan keeps, left open, one fence each. A heredoc is
+# reported at its command's line. A heredoc opened inside a substitution, and a
+# substitution opened inside a heredoc's body, are each the innermost.
+cat > "$SKILL" <<'FIX'
+```bash
+echo "unclosed
+```
+```bash
+X=$(printf x
+```
+```bash
+echo `printf x
+```
+```bash
+echo ${V
+```
+```bash
+echo $(( 1 +
+```
+```bash
+echo $'unclosed
+```
+```bash
+cat <<EOF
+body
+```
+```bash
+cat <<'EOF'
+body
+```
+```bash
+X="$(cat <<'BODY'
+body
+```
+```bash
+cat <<EOF
+$(printf x
+```
+FIX
+runz "$SKILL"
+eq "$RC" 1 "a fence left open is a finding"
+has "$OUT" 'SKILL.md:2: a "…" quote opened' 'an open "…" quote, at its line'
+has "$OUT" 'SKILL.md:5: a $(…) substitution opened' 'an open $(…) substitution'
+has "$OUT" 'SKILL.md:8: a `…` substitution opened' 'an open `…` substitution'
+has "$OUT" 'SKILL.md:11: a ${…} expansion opened' 'an open ${…} expansion'
+has "$OUT" 'SKILL.md:14: a $((…)) expansion opened' 'an open $((…)) expansion'
+has "$OUT" "SKILL.md:17: a \$'…' quote opened" "an open \$'…' quote"
+has "$OUT" 'SKILL.md:20: a heredoc opened' 'a heredoc with no terminator'
+has "$OUT" 'SKILL.md:24: a heredoc opened' 'a quoted heredoc with no terminator'
+has "$OUT" 'SKILL.md:28: a heredoc opened' 'a heredoc opened inside a substitution'
+has "$OUT" 'SKILL.md:33: a $(…) substitution opened' 'a substitution opened inside a heredoc body'
+eq "$(printf '%s\n' "$OUT" | grep -c .)" 10 "one finding for each fence"
+
+# A fence with no closing line ends with its file.
+printf '%s\n' '```bash' 'echo "unclosed' > "$SKILL"
+runz "$SKILL"
+has "$OUT" 'SKILL.md:2: a "…" quote opened on this line is still open where the shell fence ends at line 2' \
+    "a fence left open to the end of its file is a finding"
+
 echo "── zsh-colon-modifier: every real shell fence is scanned to its end ──"
 
 # A canary expansion goes in before the closing line of every shell fence in
