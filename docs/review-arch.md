@@ -99,14 +99,15 @@ of its orders skips.
    [AGENTS.md](../AGENTS.md#a-change-that-adds-operational-surface-or-accommodates-gas-city-shows-its-gas-city-search)
    adds for an accommodation: the measurement that tests the behavior's reason
    in this city, and, where the behavior is a fault or its reason does not hold
-   here, the fix at the source with the bead that carries it. Read the reason
-   at the upstream source the record cites, and check that the measurement
-   tests that reason and not something beside it. A skip whose reason is that
-   nothing writes to a store, for example, is tested by counting the writes
-   the store took. Look up the bead the record names. A record without the
-   measurement is a finding, and so is one without the fix where a fix is
-   owed, or a measurement that does not test the reason it cites. The finding
-   names the behavior and the reason Gas City gives for it, read upstream.
+   here, the fix at the source with its size and the bead that carries it.
+   Read the reason at the upstream source the record cites, and check that the
+   measurement tests that reason and not something beside it. A skip whose
+   reason is that nothing writes to a store, for example, is tested by
+   counting the writes the store took. Look up the bead the record names. A
+   record without the measurement is a finding, and so is one without the fix
+   where a fix is owed, or a measurement that does not test the reason it
+   cites. The finding names the behavior and the reason Gas City gives for
+   it, read upstream.
 
 On this rig a change fits the architecture only when it also passes the lens
 wherever the lens applies. A change that fails one of its checks earns
