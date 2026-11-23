@@ -1098,16 +1098,15 @@ the change because someone else holds it, the sitting removes the edge itself,
 and a conversation's close ends its effect.
 
 **The tree.** Work's setup, `work-setup.sh --held-by <conversation>`, cuts the
-change's tree at `<the sitting's home>/worktrees/<bead>` on `polecat/<bead>`,
-fresh from its target, and records `work_dir` and `branch` on the bead, where and
-how it cuts a polecat's. It refuses a change that carries a rejection reason,
-writing nothing: a check sent that change back, and a polecat's resume brings
-its branch current by merging its target in, which a sitting never does. The
-home's start syncs the home to the default branch and leaves `worktrees/`
-alone. Before its first edit the sitting reads the polecat class's standards
-from their fragments. It commits after each step the operator agrees, with no
-identity flags, because each agent home's git configuration signs its commits,
-and the commits stay local until Work's hand-off pushes them.
+change's tree at `.gc/worktrees/<rig>/<bead>`, beside the agents' homes, on
+`polecat/<bead>`, fresh from its target, and records `work_dir` and `branch` on
+the bead, where and how it cuts a polecat's. It refuses a change that carries a
+rejection reason, writing nothing: a check sent that change back, and a
+polecat's resume brings its branch current by merging its target in, which a
+sitting never does. Before its first edit the sitting reads the polecat class's
+standards from their fragments. It commits after each step the operator agrees,
+with no identity flags, because each agent home's git configuration signs its
+commits, and the commits stay local until Work's hand-off pushes them.
 
 **The hand-off to the refinery** comes on the operator's go, which the sitting
 asks for once the agreed steps are in, or which the operator gives when they
@@ -1175,9 +1174,10 @@ proves that it holds the PR (`gctk pr push --check`): the bead owns a PR on the
 pending record and waits on the conversation through the `blocks` edge every
 conversation on an open PR carries, and the conversation is in progress under
 the sitting. It edits a checkout of the branch's tip in a tree under its home
-that has no local branch, and pushes through `gctk pr push`, which proves the
-holding again, refuses a checkout whose origin reaches any repository but the
-PR's, returns the PR to draft and pushes under the lease. A review run or
+that has no local branch. The home's start syncs the home to the default branch
+and leaves `worktrees/` alone. The sitting pushes through `gctk pr push`, which
+proves the holding again, refuses a checkout whose origin reaches any repository
+but the PR's, returns the PR to draft and pushes under the lease. A review run or
 another writer can work the branch at the same time, and the lease keeps
 either push from overwriting the other: when the branch holds a commit the tree
 does not, the push sends nothing, and the sitting merges that commit in and
