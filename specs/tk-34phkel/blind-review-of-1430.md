@@ -121,6 +121,8 @@ wrote:
 - the verdict's "The PR shows only the demo, so this list is how a person sees
   what the check covered." The P1 adds that the sentence is not quite true,
   because "Show each message" puts message captures on the PR beside the demo.
+  The skill counts those captures as part of the demo ("When the change alters
+  no screen, the messages are the whole demo"), so that addition does not hold.
 
 Its P2, under Line by line, found that a finding in a message outside the
 example or two the PR gets names, as its evidence, a capture the PR never
@@ -137,12 +139,11 @@ shows.
   shape. Its finding no longer waits on the reviewer finding the sentence hard
   to read.
 - v2 blocks text the operator accepted. On #1430 as merged it would have asked
-  for one more round to cut two sentences that give a reason, one of which also
-  made a claim the skill contradicts. The operator's later reviews ask for that
-  cut. Of a sentence in #1557's guidance they asked "does that change agents
-  behavior or is it just commentary?" (conversation tk-kitxol9, 2026-11-19),
-  and of the header of `tools/run-tests.sh` on #1525 "Why do I need 2
-  paragraphs tod escribe all the reasons Bash 5.1 is used."
+  for one more round to cut two sentences that give a reason. The operator's
+  later reviews ask for that cut. Of a sentence in #1557's guidance they asked
+  "does that change agents behavior or is it just commentary?" (conversation
+  tk-kitxol9, 2026-11-19), and of the header of `tools/run-tests.sh` on #1525
+  "Why do I need 2 paragraphs tod escribe all the reasons Bash 5.1 is used."
   (pr:zookanalytics/gc-toolkit#1525:comment:4580456972).
 
 ## Limits
