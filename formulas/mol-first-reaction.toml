@@ -7,10 +7,11 @@ or put a question to the operator as a human gate. A reaction never closes the
 bead, and code it produces takes the gated `mr` path only.
 
 `gctk reaction sling <bead>` slings this formula on the bead, once its
-refusals pass: `gc sling <rig>/gc-toolkit.proactive <bead> --on
-mol-first-reaction`. The run is the reaction's lease, Gas City's run cancel is
-its stop, and gc sling refuses a second live run on the bead, so a reaction
-happens once at a time.
+refusals pass, to the proactive pool the roster names in the rig:
+`gc sling <rig>/<binding>.proactive <bead> --on mol-first-reaction`, where
+`<binding>` is the name the city imports the pack under. The run is the
+reaction's lease, Gas City's run cancel is its stop, and gc sling refuses a
+second live run on the bead, so a reaction happens once at a time.
 
 ## The contract
 
