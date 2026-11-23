@@ -206,9 +206,9 @@ func Requeue(w *ledger.Write, prURL, observed, reason, to string) {
 // waits for the order to carry it out.
 func Mark(w *ledger.Write) { pendingKey.Set(w, "true") }
 
-// Settle hands the changed head of an open bead to the refinery: the bead
-// assigned to it, and the marker cleared, the write Gas Town's recovery of an
-// interrupted requeue makes.
+// Settle hands an open bead's changed head, or its half-written record, to the
+// refinery: the bead assigned to it, and the marker cleared, the write Gas
+// Town's recovery of an interrupted requeue makes.
 func Settle(w *ledger.Write, refinery string) {
 	w.Assignee(refinery)
 	for _, k := range []ledger.Key[string]{pendingKey, blockedReasonKey} {
@@ -217,17 +217,25 @@ func Settle(w *ledger.Write, refinery string) {
 }
 
 // Revalidate sends a half-written record back to the refinery for its full
-// validation: the bead assigned to the refinery, merge_result incomplete, why,
-// and the partial evidence and the marker cleared, keeping the PR the refinery
-// may reuse so it opens no second one.
-func Revalidate(w *ledger.Write, reason, refinery string) {
+// validation: the bead open, merge_result incomplete, why, and the partial
+// evidence cleared, keeping the PR the refinery may reuse so it opens no second
+// one. With to naming the refinery, the same write hands the record to it: the
+// bead assigned to the refinery and the marker gone, which the landing order
+// writes only while another wait holds the bead and the refinery cannot take
+// it yet. With to empty, the bead keeps its assignee and its marker until the
+// landing order has assigned the bead to the refinery and woken it, and then
+// hands the record over (Settle).
+func Revalidate(w *ledger.Write, reason, to string) {
 	w.Status("open")
-	w.Assignee(refinery)
 	mergeResultKey.Set(w, Incomplete)
 	rejectionReasonKey.Set(w, reason)
 	for _, k := range []ledger.Key[string]{prURLKey, prNumberKey, prHeadKey, prRepoKey, mergedSHAKey,
-		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey, pendingKey} {
+		mergedTargetKey, mergedAtKey, observedHeadKey, blockedReasonKey} {
 		k.Clear(w)
+	}
+	if to != "" {
+		w.Assignee(to)
+		pendingKey.Clear(w)
 	}
 }
 

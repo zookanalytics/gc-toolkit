@@ -209,13 +209,15 @@ refinery that dies between them leaves an open bead that names its PR, never a
 blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge, had its changed head handed to the
-refinery, or met an exception whose human gate is filed. A changed head keeps
+the bead closed on a verified merge, had its changed head or its half-written
+record handed to the refinery, or met an exception whose human gate is filed.
+A changed head keeps
 its marker, and its bead stays assigned to nobody, while a withdrawal is open
 on the bead or a review run is attached to it, so the order still carries the
 withdrawal out there and reads the run's end. `gctk pr withdraw` marks such a
-record when it files one. A head the refinery can take, because nothing holds
-its bead or only conversations and asks do, is handed to the refinery in two
+record when it files one. A head or a half-written record the refinery can
+take, because nothing holds its bead or only conversations and asks do, is
+handed to the refinery in two
 writes with the wake between them: the order assigns the bead to the refinery
 and keeps the marker, wakes and nudges the refinery, and only then clears the
 marker. A wake that does not land leaves the

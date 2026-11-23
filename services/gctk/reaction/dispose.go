@@ -256,8 +256,9 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		return out, fmt.Errorf("%w: %s is %s, and an exit writes only to an open subject, so nothing was written and there is nothing for this reaction to dispose", errNotOpen, d.Bead, status)
 	}
 
-	// Intake: only a member of an epic, PR-finishing work or a confirmed
-	// emergency enters a pool (docs/steering.md). The pool route this exit
+	// Intake: only a member of an epic, PR-finishing work, the tracker of a
+	// failure on a base branch or a confirmed emergency enters a pool
+	// (docs/steering.md). The pool route this exit
 	// would write is the actionable exit's route or the blocked exit's
 	// --then-route. A named agent's own work is no pool route, and the close
 	// exit's closer shrinks the queue rather than adding to it.
@@ -283,12 +284,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 			if err != nil {
 				return out, fmt.Errorf("could not read %s's parent (%v), so intake cannot decide; nothing was written", d.Bead, err)
 			}
-			anchor := raw(anchorKey, subject)
+			anchor, failure := raw(anchorKey, subject), raw(failureKey, subject)
 			switch {
 			case len(parents) > 0:
 				admit, admitWhy = "member", "a member of "+parents[0]
 			case anchor != "":
 				admit, admitWhy = "pr-finishing", "PR-finishing work of "+anchor
+			case failure != "":
+				admit, admitWhy = "tracker", "the tracker of "+failure+", a failure on a base branch"
 			}
 		}
 		if admit != "" {
@@ -301,7 +304,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 			if holdWhy != "" {
 				holdWhy += "; "
 			}
-			holdWhy += d.Bead + " has no parent epic and is not PR-finishing work"
+			holdWhy += d.Bead + " has no parent epic and is not PR-finishing work or a failure's tracker"
 			r.say("intake holds %s for placement instead of %s: %s", d.Bead, poolTarget, holdWhy)
 		}
 	}

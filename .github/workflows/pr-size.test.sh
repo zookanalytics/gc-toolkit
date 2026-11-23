@@ -4,9 +4,13 @@
 # below it. It measures the head and base the pull request has when the run
 # starts, and writes only while the pull request still has them. pr-size.yml
 # runs as the default branch carries it, from the tip of the pull request's
-# base branch, again when the pull request changes that branch, and again when
-# one of its tests runs ends, and every run that measures one pull request takes
-# that pull request's one concurrency group.
+# base branch. It measures when a pull request's run of pr-size-start.yml
+# succeeds, which each push and each change of that branch start, and when one
+# of its tests runs passes or fails. Every run that measures one pull request
+# takes that pull request's one concurrency group, and every other run a group
+# of its own.
+# pr-size-start.yml runs on a pull request into any branch and runs nothing
+# from it, and no workflow runs on pull_request_target.
 #
 # The cases build a repository whose base commit carries tools/measure.sh and a
 # deletion plan, and whose head adds lines to a file the plan retires while it
@@ -17,17 +21,29 @@
 # it posted. What the suite's time section says is suite-time.test.sh's to pin.
 # It sources test-harness.sh for the assertions only, because harness_init would
 # stub git out.
+#
+# The workflow cases read every YAML file under .github/ with Psych, the YAML
+# parser Ruby ships, so a workflow added later is held to them with no edit
+# here. A judge evaluates the expressions that decide whether a run measures
+# and which concurrency group it takes, for a sample of each event that starts
+# one, and fixture cases first prove the judge on the rules GitHub's
+# expressions reference states. Needs ruby, with the Psych it bundles.
+#
+# run-tests-scope: tree
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUT="$HERE/pr-size.sh"
 WF="$HERE/pr-size.yml"
+START_WF="$HERE/pr-size-start.yml"
 TOOL="$ROOT/tools/measure.sh"
 PR_POST="$ROOT/assets/scripts/pr-post.sh"
-for f in "$SUT" "$WF" "$TOOL" "$PR_POST"; do
+for f in "$SUT" "$WF" "$START_WF" "$TOOL" "$PR_POST"; do
   [ -f "$f" ] || { echo "pr-size.test.sh: cannot find $f" >&2; exit 2; }
 done
+ruby -e 'require "psych"' 2>/dev/null \
+  || { echo "pr-size.test.sh: needs ruby with Psych, its YAML parser, to read the workflows" >&2; exit 2; }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-pr-size-test.XXXXXX")" || { echo "pr-size.test.sh: mktemp failed" >&2; exit 2; }
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=../../assets/scripts/test-harness.sh
@@ -311,33 +327,461 @@ alone --repo o/r --pr 7; eq "$?" 2 "--repo must name its host"
 alone --repo github.com/o/r --pr 7 --base refs/remotes/origin/main --head "$HEAD_SHA"
 eq "$?" 2 "it takes no head or base from its caller, since it reads both from the pull request"
 
-echo "# pr-size.yml runs as the default branch carries it"
-ON=$(awk '/^on:/ { on = 1; next } on && /^[^[:space:]#]/ { on = 0 } on' "$WF")
-has "$ON" "pull_request_target:" "it runs on pull_request_target, which takes the job from the default branch"
-eq "$(printf '%s\n' "$ON" | grep -vE '^[[:space:]]*#' | grep -E '^  [a-z_]+:' | tr '\n' ' ')" "  pull_request_target:   workflow_run: " \
-  "…and on workflow_run, which does too, and on no event that runs the pull request's own copy of it"
+echo "# every YAML file under .github/ is read as a YAML parser reads it"
+# yaml_json <file>...: one line for each file, the JSON of what Psych reads from
+# it, with on under its own name, since YAML 1.1, which Psych follows, reads
+# that key as true. A file that does not parse gets its error instead.
+yaml_json() {
+  ruby -rpsych -rjson -e '
+    ARGV.each do |f|
+      begin
+        d = Psych.safe_load(File.read(f), aliases: true)
+        d["on"] = d.delete(true) if d.is_a?(Hash) && d.key?(true)
+        puts JSON.generate("file" => f, "doc" => d)
+      rescue StandardError => e
+        puts JSON.generate("file" => f, "error" => "#{e.class}: #{e.message}")
+      end
+    end' "$@"
+}
+YML=()
+while IFS= read -r f; do YML+=("$f"); done < <(find "$ROOT/.github" -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)
+YAMLS=$(yaml_json "${YML[@]}")
+doc_of() { printf '%s\n' "$YAMLS" | jq -c --arg f "$1" 'select(.file == $f) | .doc'; }
+SIZE_DOC=$(doc_of "$WF")
+START_DOC=$(doc_of "$START_WF")
+TESTS_NAME=$(doc_of "$HERE/tests.yml" | jq -r '.name // empty')
+START_NAME=$(printf '%s' "$START_DOC" | jq -r '.name // empty')
+eq "$(printf '%s\n' "$YAMLS" | jq -r 'select(.error) | "\(.file): \(.error)"')" "" "each of them parses"
+
+# The judge: for each sample event on stdin, a github context on a JSON line of
+# its own with the case it stands for, whether the workflow's one job runs, the
+# concurrency group the run takes, and the env of its steps, as GitHub renders
+# them. Its argument is the workflow, as a JSON file. It evaluates as much of
+# GitHub's expression syntax as these workflows use: string, number, boolean and
+# null literals, property and index access, !, == and !=, && and ||, parentheses
+# and format(). Anything else is an error, so an expression that outgrows it
+# fails the suite instead of being misread. It follows the rules of GitHub's
+# expressions reference: && and || each return one of their operands, false, 0,
+# '' and null are falsy, a property that is not there is null, strings compare
+# ignoring case, and operands of two types compare as numbers.
+JUDGE="$TMP/judge.rb"
+cat > "$JUDGE" <<'RUBY'
+require 'json'
+
+module Expr
+  module_function
+
+  def lex(src)
+    toks = []
+    rest = src
+    until rest.empty?
+      if (m = rest.match(/\A\s+/))
+        nil
+      elsif (m = rest.match(/\A'((?:[^']|'')*)'/))
+        toks << [:lit, m[1].gsub("''", "'")]
+      elsif (m = rest.match(/\A(?:==|!=|&&|\|\||[!()\[\].,])/))
+        toks << [:op, m[0]]
+      elsif (m = rest.match(/\A\d+/))
+        toks << [:lit, m[0].to_i]
+      elsif (m = rest.match(/\A[A-Za-z_][\w-]*/))
+        word = { 'true' => [:lit, true], 'false' => [:lit, false], 'null' => [:lit, nil] }
+        toks << word.fetch(m[0], [:id, m[0]])
+      else
+        raise "cannot read #{rest.inspect} in #{src.inspect}"
+      end
+      rest = m.post_match
+    end
+    toks
+  end
+
+  class Parser
+    def initialize(src)
+      @src = src
+      @toks = Expr.lex(src)
+    end
+
+    def parse
+      tree = disjunction
+      raise "#{@src.inspect} goes on past its expression" unless @toks.empty?
+      tree
+    end
+
+    private
+
+    def at?(op)
+      @toks.first == [:op, op]
+    end
+
+    def take(op = nil)
+      t = @toks.shift
+      raise "#{@src.inspect} ends before its expression does" if t.nil?
+      raise "#{@src.inspect} has #{t[1].inspect} where #{op} goes" if op && t != [:op, op]
+      t
+    end
+
+    def disjunction
+      tree = conjunction
+      while at?('||')
+        take
+        tree = [:or, tree, conjunction]
+      end
+      tree
+    end
+
+    def conjunction
+      tree = comparison
+      while at?('&&')
+        take
+        tree = [:and, tree, comparison]
+      end
+      tree
+    end
+
+    def comparison
+      tree = negation
+      while at?('==') || at?('!=')
+        op = take[1] == '==' ? :eq : :ne
+        tree = [op, tree, negation]
+      end
+      tree
+    end
+
+    def negation
+      return access unless at?('!')
+      take
+      [:not, negation]
+    end
+
+    def access
+      tree = primary
+      loop do
+        if at?('.')
+          take
+          t = take
+          raise "#{@src.inspect} has #{t[1].inspect} after a dot" unless t[0] == :id
+          tree = [:prop, tree, t[1]]
+        elsif at?('[')
+          take
+          tree = [:index, tree, disjunction]
+          take(']')
+        else
+          return tree
+        end
+      end
+    end
+
+    def primary
+      t = take
+      return [:lit, t[1]] if t[0] == :lit
+      if t[0] == :id
+        return [:ctx, t[1]] unless at?('(')
+        take('(')
+        args = []
+        until at?(')')
+          take(',') unless args.empty?
+          args << disjunction
+        end
+        take(')')
+        return [:call, t[1], args]
+      end
+      raise "#{@src.inspect} has #{t[1].inspect} where a value goes" unless t == [:op, '(']
+      tree = disjunction
+      take(')')
+      tree
+    end
+  end
+
+  def kind(v)
+    case v
+    when nil then :null
+    when true, false then :bool
+    when Numeric then :number
+    when String then :string
+    else :object
+    end
+  end
+
+  def truthy(v)
+    case kind(v)
+    when :null then false
+    when :bool then v
+    when :number then !(v.zero? || v.to_f.nan?)
+    when :string then !v.empty?
+    else true
+    end
+  end
+
+  def number(v)
+    case kind(v)
+    when :null then 0.0
+    when :bool then v ? 1.0 : 0.0
+    when :number then v.to_f
+    when :string
+      s = v.strip
+      return 0.0 if s.empty?
+      s.match?(/\A-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\z/) ? s.to_f : Float::NAN
+    else Float::NAN
+    end
+  end
+
+  def same(a, b)
+    return number(a) == number(b) unless kind(a) == kind(b)
+    case kind(a)
+    when :string then a.casecmp(b).zero?
+    when :object then a.equal?(b)
+    else a == b
+    end
+  end
+
+  def text(v)
+    case kind(v)
+    when :null then ''
+    when :number then v.is_a?(Integer) || !v.finite? || v != v.floor ? v.to_s : v.to_i.to_s
+    when :object then v.is_a?(Array) ? 'Array' : 'Object'
+    else v.to_s
+    end
+  end
+
+  def value(tree, ctx)
+    case tree[0]
+    when :lit then tree[1]
+    when :ctx then ctx[tree[1]]
+    when :prop
+      o = value(tree[1], ctx)
+      o.is_a?(Hash) ? o[tree[2]] : nil
+    when :index
+      o = value(tree[1], ctx)
+      i = value(tree[2], ctx)
+      if o.is_a?(Array) && i.is_a?(Integer) && i >= 0 then o[i]
+      elsif o.is_a?(Hash) && i.is_a?(String) then o[i]
+      end
+    when :not then !truthy(value(tree[1], ctx))
+    when :eq then same(value(tree[1], ctx), value(tree[2], ctx))
+    when :ne then !same(value(tree[1], ctx), value(tree[2], ctx))
+    when :and
+      l = value(tree[1], ctx)
+      truthy(l) ? value(tree[2], ctx) : l
+    when :or
+      l = value(tree[1], ctx)
+      truthy(l) ? l : value(tree[2], ctx)
+    when :call
+      raise "#{tree[1]}() is not a function the judge evaluates" unless tree[1].casecmp('format').zero?
+      args = tree[2].map { |a| text(value(a, ctx)) }
+      args.fetch(0, '').gsub(/\{\{|\}\}|\{(\d+)\}/) do |m|
+        if m == '{{' then '{'
+        elsif m == '}}' then '}'
+        else args.fetch(Regexp.last_match(1).to_i + 1) { raise "format() has no argument for #{m}" }
+        end
+      end
+    end
+  end
+
+  def evaluate(src, ctx)
+    value(Parser.new(src).parse, ctx)
+  end
+
+  # The index of the }} that closes an expression begun before from, past any
+  # }} inside a string.
+  def close(s, from)
+    quoted = false
+    (from...s.length).each do |i|
+      if s[i] == "'"
+        quoted = !quoted
+      elsif !quoted && s[i, 2] == '}}'
+        return i
+      end
+    end
+    raise "#{s.inspect} leaves an expression open"
+  end
+
+  # A value with ${{ }} in it, as GitHub renders it: the text around each
+  # expression, and each expression's value as text.
+  def render(s, ctx)
+    out = String.new
+    rest = s.to_s
+    while (i = rest.index('${{'))
+      out << rest[0, i]
+      j = close(rest, i + 3)
+      out << text(evaluate(rest[(i + 3)...j], ctx))
+      rest = rest[(j + 2)..-1]
+    end
+    out << rest
+  end
+
+  # A job's if:, which GitHub reads with or without ${{ }} around it. A job
+  # with no if: runs.
+  def runs?(cond, ctx)
+    return true if cond.nil?
+    s = cond.to_s.strip
+    s = s[3...-2] if s.start_with?('${{') && close(s, 3) == s.length - 2
+    truthy(evaluate(s, ctx))
+  end
+end
+
+wf = JSON.parse(File.read(ARGV[0]))
+jobs = wf['jobs']
+unless jobs.is_a?(Hash) && jobs.size == 1
+  raise "#{ARGV[0]} holds #{jobs.is_a?(Hash) ? jobs.size : 'no'} jobs, and the judge reads a workflow of one"
+end
+job = jobs.values.first
+conc = wf['concurrency']
+group = conc.is_a?(Hash) ? conc['group'] : conc
+STDIN.each_line do |line|
+  sample = JSON.parse(line)
+  ctx = { 'github' => sample['github'] }
+  env = {}
+  (job['steps'] || []).each { |st| (st['env'] || {}).each { |k, v| env[k] = Expr.render(v, ctx) } }
+  puts JSON.generate('case' => sample['case'], 'job' => Expr.runs?(job['if'], ctx) ? 'runs' : 'skips',
+                     'group' => group.nil? ? nil : Expr.render(group, ctx), 'env' => env)
+end
+RUBY
+
+echo "# the judge follows GitHub's rules for expressions"
+# Each fixture: what it shows, the value GitHub renders, and the value with
+# expressions in it, rendered as a step's env against a github context that
+# holds n, a list and an empty list.
+FIXTURES=$(cat <<'EOF'
+[
+  ["strings compare ignoring case", "true", "${{ 'tests' == 'TESTS' }}"],
+  ["!= is the negation of ==", "false", "${{ 'tests' != 'Tests' }}"],
+  ["|| returns its first truthy operand", "x", "${{ github.none || 'x' }}"],
+  ["&& returns its first falsy operand", "", "${{ '' && 'x' }}"],
+  ["…and its last operand when both are truthy", "7", "${{ 'x' && github.n }}"],
+  ["&& binds tighter than ||", "true", "${{ true || false && false }}"],
+  ["! negates whether a value is truthy", "true", "${{ !github.none }}"],
+  ["operands of two types compare as numbers, '' as 0", "true", "${{ 0 == '' }}"],
+  ["…true as 1", "true", "${{ 1 == true }}"],
+  ["…and a string that is no number as no number at all", "false", "${{ 'x' == 0 }}"],
+  ["a property that is not there is null, which renders as nothing", "", "${{ github.no.such.property }}"],
+  ["an object is truthy", "yes", "${{ github.list[0] && 'yes' }}"],
+  ["an index past an array's end is null", "", "${{ github.empty[0] && 'yes' }}"],
+  ["an index and a property read into the context", "7", "${{ github.list[0].n }}"],
+  ["format() puts its arguments in place of {N}, and {{ and }} stand for braces", "{-7}", "${{ format('{{-{0}}}', github.n) }}"],
+  ["'' stands for a quote inside a string", "it's", "${{ 'it''s' }}"],
+  ["the text around each expression is kept", "pr-size-7-x", "pr-size-${{ github.n }}-${{ 'x' }}"]
+]
+EOF
+)
+printf '%s' "$FIXTURES" | jq -c '{jobs: {fixtures: {steps: [{env: (to_entries | map({key: "F\(.key)", value: .value[2]}) | from_entries)}]}}}' > "$TMP/fixtures.json"
+RENDERED=$(printf '%s\n' '{"case": "fixtures", "github": {"n": 7, "list": [{"n": 7}], "empty": []}}' | ruby "$JUDGE" "$TMP/fixtures.json" 2>&1)
+for ((i = 0; i < $(printf '%s' "$FIXTURES" | jq length); i++)); do
+  eq "$(printf '%s' "$RENDERED" | jq -r --arg k "F$i" '.env[$k]' 2>&1)" "$(printf '%s' "$FIXTURES" | jq -r ".[$i][1]")" \
+    "$(printf '%s' "$FIXTURES" | jq -r ".[$i][0]")"
+done
+printf '%s' '{"jobs": {"fixtures": {"steps": [{"env": {"F": "${{ contains(github.list, 7) }}"}}]}}}' > "$TMP/unknown.json"
+printf '%s\n' '{"case": "unknown", "github": {}}' | ruby "$JUDGE" "$TMP/unknown.json" >/dev/null 2>&1
+eq "$?" 1 "a function the judge does not evaluate is an error, not a guess"
+
+echo "# pr-size.yml starts when a run of tests.yml or pr-size-start.yml ends, and runs as the default branch carries it"
+eq "$(printf '%s' "$SIZE_DOC" | jq -c '.on | keys')" '["workflow_run"]' \
+  "it runs on workflow_run alone, which takes the job from the default branch, and on no event that runs the pull request's own copy of it"
+eq "$(printf '%s' "$SIZE_DOC" | jq -cS '.on.workflow_run | .workflows |= sort')" \
+  "$(jq -ncS --arg t "$TESTS_NAME" --arg s "$START_NAME" '{workflows: ([$t, $s] | sort), types: ["completed"]}')" \
+  "…when a run of tests.yml or of pr-size-start.yml completes, whatever branch it ran on"
 eq "$(grep -cE '^[[:space:]]*ref:' "$WF")" 0 "its checkout takes no ref, so it checks out the default branch and never the head"
 CODE=$(grep -vE '^[[:space:]]*#' "$WF")
 has "$CODE" '--repo "${GITHUB_SERVER_URL#https://}/$GITHUB_REPOSITORY" --pr "$PR_NUMBER"' "it hands pr-size.sh the pull request"
 eq "$(printf '%s\n' "$CODE" | grep -cE 'head\.sha|head_sha|base\.ref|--head|--base')" 0 \
   "…and no head or base from the event, which can be older than the pull request"
-hasnt "$CODE" GITHUB_SHA "…nor GITHUB_SHA, the default branch's tip under both events"
-
-echo "# pr-size.yml runs again when a tests run of a pull request ends"
-has "$ON" "  workflow_run:
-    workflows: [tests]
-    types: [completed]" "it runs when the tests workflow completes"
+hasnt "$CODE" GITHUB_SHA "…nor GITHUB_SHA, which is the default branch's tip under workflow_run"
 has "$CODE" "  actions: read" "…and may read a run's jobs and artifacts"
 
-echo "# pr-size.yml measures again when a pull request changes its base branch"
-has "$ON" "types: [opened, synchronize, reopened, edited]" \
-  "it runs on edited, which is how GitHub reports a change of the base branch"
-eq "$(grep -E '^    if:' "$WF")" "    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] || github.event_name == 'pull_request_target' && (github.event.action != 'edited' || github.event.changes.base)" \
-  "…and the job runs for an edit only when the edit changes the base branch, and for a tests run only when a pull request started it"
-GROUP=$(grep -E '^  group:' "$WF")
-eq "$GROUP" "  group: pr-size-\${{ github.event.pull_request.number || github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number || github.run_id }}\${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}" \
-  "…and every run whose job measures takes its pull request's concurrency group, while any other edit and the end of a tests run no pull request started take groups of their own, so they cancel no run that measures"
-hasnt "$GROUP" event_name "…so the event that started a run never sets it apart, and no two runs write one pull request's comment at once"
+echo "# pr-size-start.yml runs on every pull request and runs nothing from it"
+eq "$(printf '%s' "$START_DOC" | jq -cS '.on')" '{"pull_request":{"types":["opened","synchronize","reopened","edited"]}}' \
+  "it runs on pull_request when a pull request opens, reopens, takes a push or is edited, and filters no branch, so a pull request into any branch runs it"
+eq "$(printf '%s' "$START_DOC" | jq -c '.permissions')" '{}' \
+  "…and holds no permissions, since pull_request runs it as the pull request's merge commit carries it"
+eq "$(printf '%s' "$START_DOC" | jq -c 'keys_unsorted - ["name", "on", "permissions", "jobs"]')" '[]' \
+  "…and sets no env, defaults or concurrency group, so no run of it cancels another"
+eq "$(printf '%s' "$START_DOC" | jq -c '[(.jobs | length), (.jobs[] | keys_unsorted - ["name", "if", "runs-on", "timeout-minutes", "steps"])]')" '[1,[]]' \
+  "…and its one job grants itself no permissions, takes no env and calls no other workflow"
+eq "$(printf '%s' "$START_DOC" | jq -c '[.jobs[].steps | length, (.[] | keys_unsorted - ["name", "run"])]')" '[1,[]]' \
+  "…and has one step, which uses no action, so nothing is checked out"
+eq "$(printf '%s' "$START_DOC" | jq -r '.jobs[].steps[].run | contains("${{")')" false \
+  "…and whose command takes no expression, so nothing of the pull request's reaches the shell"
+
+echo "# no workflow runs on pull_request_target"
+eq "$(printf '%s\n' "$YAMLS" | jq -r '
+    select((if (.doc | type) == "object" then .doc.on else null end)
+           | if type == "string" then [.] elif type == "array" then . elif type == "object" then keys else [] end
+           | index("pull_request_target"))
+    | .file')" "" \
+  "no workflow under .github/ runs on pull_request_target, which GitHub's default event policy blocks in a public repository"
+
+echo "# pr-size-start.yml's job runs when a pull request's head or base moves, and skips any other edit"
+printf '%s' "$START_DOC" > "$TMP/start.json"
+# pr_event <case> <action> [<draft>] [<changes>]: the github context of a
+# pull_request event on pull request 7.
+pr_event() {
+  jq -nc --arg c "$1" --arg a "$2" --argjson d "${3:-false}" --argjson ch "${4:-null}" \
+    '{case: $c, github: {event_name: "pull_request", run_id: "500",
+      event: ({action: $a, number: 7, pull_request: {number: 7, draft: $d}}
+              + (if $ch == null then {} else {changes: $ch} end))}}'
+}
+STARTS=$( {
+  pr_event opened opened true
+  pr_event draft-push synchronize true
+  pr_event ready-push synchronize false
+  pr_event reopened reopened
+  pr_event title-edit edited false '{"title": {"from": "an earlier title"}}'
+  pr_event body-edit edited false '{"body": {"from": "an earlier body"}}'
+  pr_event base-change edited false '{"base": {"ref": {"from": "main"}, "sha": {"from": "0123456789abcdef0123456789abcdef01234567"}}}'
+} | ruby "$JUDGE" "$TMP/start.json" 2>"$TMP/judge.err")
+eq "$?:$(cat "$TMP/judge.err")" "0:" "the judge reads pr-size-start.yml"
+job_of() { printf '%s\n' "$2" | jq -r --arg c "$1" 'select(.case == $c) | .job'; }
+eq "$(job_of opened "$STARTS")" runs "a pull request that opens runs the job"
+eq "$(job_of draft-push "$STARTS")" runs "…and so does a push to a draft, whose tests run skips every job"
+eq "$(job_of ready-push "$STARTS")" runs "…a push to a pull request that is ready"
+eq "$(job_of reopened "$STARTS")" runs "…a pull request that reopens"
+eq "$(job_of base-change "$STARTS")" runs "…and an edit that changes the branch the pull request merges into"
+eq "$(job_of title-edit "$STARTS")" skips "an edit of the title skips the job"
+eq "$(job_of body-edit "$STARTS")" skips "…and so does an edit of the body"
+
+echo "# pr-size.yml measures when a pull request's run ends with something to show, and only then takes the pull request's group"
+printf '%s' "$SIZE_DOC" > "$TMP/size.json"
+# run_ended <case> <workflow> <conclusion> <event> <pull requests> <run id>: the
+# github context of a workflow_run event for a run that completed.
+run_ended() {
+  jq -nc --arg c "$1" --arg w "$2" --arg k "$3" --arg e "$4" --argjson p "$5" --arg id "$6" \
+    '{case: $c, github: {event_name: "workflow_run", run_id: $id,
+      event: {action: "completed",
+              workflow_run: {name: $w, status: "completed", conclusion: $k, event: $e, pull_requests: $p}}}}'
+}
+PR7='[{"number": 7, "head": {"ref": "polecat/tk-x", "sha": "fedcba9876543210fedcba9876543210fedcba98"}, "base": {"ref": "integration/tk-y", "sha": "0123456789abcdef0123456789abcdef01234567"}}]'
+ENDS=$( {
+  run_ended start-success "$START_NAME" success pull_request "$PR7" 601
+  run_ended start-skipped "$START_NAME" skipped pull_request "$PR7" 602
+  run_ended start-failure "$START_NAME" failure pull_request "$PR7" 603
+  run_ended start-cancelled "$START_NAME" cancelled pull_request "$PR7" 604
+  run_ended tests-success "$TESTS_NAME" success pull_request "$PR7" 605
+  run_ended tests-failure "$TESTS_NAME" failure pull_request "$PR7" 606
+  run_ended tests-skipped "$TESTS_NAME" skipped pull_request "$PR7" 607
+  run_ended tests-cancelled "$TESTS_NAME" cancelled pull_request "$PR7" 608
+  run_ended tests-on-main "$TESTS_NAME" success push '[]' 609
+  run_ended tests-push-names-pr "$TESTS_NAME" success push "$PR7" 612
+  run_ended tests-no-pr "$TESTS_NAME" success pull_request '[]' 610
+  run_ended start-no-pr "$START_NAME" success pull_request '[]' 611
+} | ruby "$JUDGE" "$TMP/size.json" 2>"$TMP/judge.err")
+eq "$?:$(cat "$TMP/judge.err")" "0:" "the judge reads pr-size.yml"
+end_of() { printf '%s\n' "$2" | jq -r --arg c "$1" 'select(.case == $c) | "\(.job) \(.group)"'; }
+eq "$(end_of start-success "$ENDS")" "runs pr-size-7" \
+  "the end of a pr-size-start.yml run that succeeded, which a push or a change of base branch starts, measures the pull request in its group"
+eq "$(end_of tests-success "$ENDS")" "runs pr-size-7" "…and so does the end of a tests run that passed, which brings the suite's time"
+eq "$(end_of tests-failure "$ENDS")" "runs pr-size-7" "…or that failed"
+eq "$(printf '%s\n' "$ENDS" | jq -r 'select(.job == "runs") | .env.PR_NUMBER' | sort -u)" 7 \
+  "…and each hands pr-size.sh the pull request that GitHub names in the run's pull_requests"
+eq "$(end_of tests-skipped "$ENDS")" "skips pr-size-607" \
+  "the end of a draft's tests run, whose jobs all skip, measures nothing and takes a group of its own, so it cannot cancel the run that the end of the same push's pr-size-start.yml run started"
+eq "$(end_of tests-cancelled "$ENDS")" "skips pr-size-608" "…and so does the end of a tests run that was cancelled"
+eq "$(end_of start-skipped "$ENDS")" "skips pr-size-602" "…of a pr-size-start.yml run that an edit of the title or body skipped"
+eq "$(end_of start-failure "$ENDS")" "skips pr-size-603" "…of one that failed"
+eq "$(end_of start-cancelled "$ENDS")" "skips pr-size-604" "…or that was cancelled"
+eq "$(end_of tests-on-main "$ENDS")" "skips pr-size-609" "…of a tests run that a push to main started"
+eq "$(end_of tests-push-names-pr "$ENDS")" "skips pr-size-612" "…even one whose run names a pull request, since a pull request did not start it"
+eq "$(end_of tests-no-pr "$ENDS")" "skips pr-size-610" "…and of a tests run or a pr-size-start.yml run that names no pull request, as a fork's does"
+eq "$(end_of start-no-pr "$ENDS")" "skips pr-size-611" "…whichever workflow it is"
+eq "$(printf '%s\n' "$ENDS" | jq -r 'select((.job == "runs") != (.group == "pr-size-7")) | .case')" "" \
+  "a run takes the pull request's group exactly when its job measures, so the group's expression and the job's condition agree"
 
 echo
 echo "passed: $PASS  failed: $FAIL"

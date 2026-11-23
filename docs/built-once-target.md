@@ -166,6 +166,11 @@ yet. Each remaining difference names its reason and what ends it:
   keys a failure already on the target by its symptom, where Gas Town searches
   open bugs by title. Two agents title one failure two ways, and the key finds
   the tracker after a retitle. This ends when Gas Town keys its tracker.
+- **A pre-existing failure goes to be fixed when it is filed.**
+  `preexisting-failure.sh` slings each tracker it files to its rig's polecat
+  pool, where Gas Town files the bug unrouted and moves on. Here new work waits
+  for the operator's placement, and a failure on the target is work to fix
+  rather than new work to place. No end is planned.
 - **Human gates in place of mayor mail.** Where a person must act, such as the
   refinery's park or an exception the landing order finds, the pack files a
   human gate on the bead, keyed by the case. Gas Town routes the bead to
@@ -575,8 +580,9 @@ Every change follows these rules.
    ([suite-time.sh](../.github/workflows/suite-time.sh)).
    `tools/measure.sh --pr` computes the size, and gc-toolkit's CI
    ([pr-size.yml](../.github/workflows/pr-size.yml)) posts both on each PR as
-   one comment that it rewrites on each push, each change of the PR's base
-   branch and each end of the PR's tests run.
+   one comment. It rewrites the comment on each push and each change of the
+   PR's base branch, while the PR has no merge conflict, and each time one of
+   the PR's tests runs passes or fails.
 
 ## Keeping it true
 

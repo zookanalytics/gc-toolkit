@@ -390,11 +390,6 @@ func TestAcceptFinishRefusals(t *testing.T) {
 			a.Edges = append(a.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: "tk-late", Status: "open"})
 			w.store.Put(a)
 		}, nil, "another human gate still blocks tk-anc"},
-		{"an open pour Gas City left unfinished", func(w *acceptWorld) {
-			stopAfterAnswer(w, token, nil)
-			w.store.Put(fake.Bead{ID: "tk-root", Title: "mol-fix accept:" + token, Status: "open", IssueType: "molecule",
-				Metadata: map[string]string{"molecule_failed": "true"}})
-		}, nil, "Gas City left that pour unfinished (it carries molecule_failed=true)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newAcceptWorld(t)
@@ -408,14 +403,37 @@ func TestAcceptFinishRefusals(t *testing.T) {
 	}
 }
 
-// A pour Gas City closed as failed is no dispatch, so the finish slings again.
-func TestAcceptFinishSlingsPastAFailedClosedPour(t *testing.T) {
-	w := newAcceptWorld(t)
-	stopAfterAnswer(w, token, nil)
-	w.store.Put(fake.Bead{ID: "tk-root", Title: "mol-fix accept:" + token, Status: "closed", IssueType: "molecule",
-		Metadata: map[string]string{"molecule_failed": "true"}})
-	if _, err := w.accept(AcceptRequest{}); err != nil || len(w.rt.Slings()) != 1 {
-		t.Fatalf("Accept = %v, slings %v; want a sling past the failed pour", err, w.rt.Slings())
+// A root under the token that Gas City stamped as failed, open or closed, is an
+// attempt that failed and no dispatch, so the finish slings again. Any other
+// root is the dispatch, one Gas City still fences among them, so the finish
+// records it and slings nothing.
+func TestAcceptFinishReadsARootByItsFailureStamp(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		root   fake.Bead
+		slings int
+	}{
+		{"an open root that failed part way", fake.Bead{Status: "open", IssueType: "molecule", Metadata: map[string]string{"molecule_failed": "true"}}, 1},
+		{"a closed root that failed part way", fake.Bead{Status: "closed", IssueType: "molecule", Metadata: map[string]string{"molecule_failed": "true"}}, 1},
+		{"an open root still fenced", fake.Bead{Status: "open", IssueType: "gate", Metadata: map[string]string{"gc.instantiating": "true"}}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newAcceptWorld(t)
+			stopAfterAnswer(w, token, nil)
+			root := tc.root
+			root.ID, root.Title = "tk-root", "mol-fix accept:"+token
+			w.store.Put(root)
+			out, err := w.accept(AcceptRequest{})
+			if err != nil || len(w.rt.Slings()) != tc.slings {
+				t.Fatalf("Accept = %+v, %v, slings %v; want %d sling(s)", out, err, w.rt.Slings(), tc.slings)
+			}
+			if wantRoot := map[int]string{0: "tk-root", 1: ""}[tc.slings]; out.Root != wantRoot {
+				t.Errorf("root = %q, want %q", out.Root, wantRoot)
+			}
+			if a := w.row("tk-anc"); a.Metadata["gc.recommended_formula_dispatched"] != "mol-fix" {
+				t.Errorf("tk-anc = %+v, want the dispatch recorded", a)
+			}
+		})
 	}
 }
 
@@ -431,10 +449,12 @@ func TestAcceptReadsTheTokenRootAfterAFailedSling(t *testing.T) {
 		reopn bool
 	}{
 		{"a pour that committed", 1, &fake.Bead{ID: "tk-root", Status: "open", IssueType: "molecule"}, 0, "", false},
-		{"no pour", 1, nil, 1, "poured no root under acceptance", true},
+		{"a pour still fenced", 1, &fake.Bead{ID: "tk-root", Status: "open", IssueType: "gate",
+			Metadata: map[string]string{"gc.instantiating": "true"}}, 0, "", false},
+		{"no pour", 1, nil, 1, "landed no pour under acceptance", true},
+		{"a pour that failed part way", 1, &fake.Bead{ID: "tk-root", Status: "open", IssueType: "molecule",
+			Metadata: map[string]string{"molecule_failed": "true"}}, 1, "landed no pour under acceptance", true},
 		{"Gas City's launch lock", 3, nil, 1, "which Gas City's launch lock refused to start twice", true},
-		{"an open pour left unfinished", 1, &fake.Bead{ID: "tk-root", Status: "open", IssueType: "molecule",
-			Metadata: map[string]string{"gc.instantiating": "true"}}, 4, "left its pour unfinished at root tk-root (it is still fenced by gc.instantiating)", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newAcceptWorld(t)

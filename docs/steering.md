@@ -48,6 +48,12 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is a member of an epic, or of a Delivery under one, which means it has a
   parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
+- it is the tracker of a failure already red on a base branch, which means it
+  carries `failure_key`. A gate files one when it reproduces a failure on the
+  base, and `preexisting-failure.sh` sends each tracker it files to its rig's
+  polecat pool in the same call, so a failure on main goes to be fixed with no
+  placement, a route the operator directed
+  ([gas-city-search.md](../specs/tk-jmxx0vm/gas-city-search.md#the-need));
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
 - the operator routed it, through a sitting, a hand sling or an Accept;
 - it is the seed audit's re-audit, the one bead `seed-audit-reaudit.sh` slings
@@ -78,18 +84,22 @@ runs its fix (`formulas/mol-deacon-patrol.toml`).
 Each writer that files or disposes new work follows the rule.
 
 - **The first reaction** (`gctk reaction dispose`). It still reacts to every
-  finding, because its card is the triage that backlog refinement reads.
-  Its actionable exit routes a member, PR-finishing work or a confirmed
-  emergency. It releases any other bead with no route, then holds it with
-  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The blocked
-  exit's `--then-route` arms a dispatch only for a bead the rule admits. Any
-  other bead it holds, and arms nothing, while its wait still lands as a
-  `blocks` edge. The close exit keeps its validating closer,
-  because a close shrinks the queue, whether it slings the closer now or arms it
-  for when the bead that ends its job lands (`--waiting-on`). Work that is a
-  named agent's own (`--assign`, `--then-assign`) is not pool work, so the rule
-  does not read it. Neither flag may name the po, which takes no work by
-  assignment.
+  finding, because its card is the triage that backlog refinement reads. Its
+  actionable exit routes a member, PR-finishing work, a failure's tracker or a
+  confirmed emergency. It releases any other bead with no route, then holds it
+  with `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The
+  blocked exit's `--then-route` arms a dispatch only for a bead the rule admits.
+  Any other bead it holds, and arms nothing, while its wait still lands as a
+  `blocks` edge. The close exit keeps its validating closer, because a close
+  shrinks the queue, whether it slings the closer now or arms it for when the
+  bead that ends its job lands (`--waiting-on`). Work that is a named agent's
+  own (`--assign`, `--then-assign`) is not pool work, so the rule does not read
+  it. Neither flag may name the po, which takes no work by assignment.
+- **The tracker writer** (`assets/scripts/preexisting-failure.sh file`) files
+  each failure's tracker with no hold and sends it with a `gc sling` that names
+  no target, which Gas City routes to the `default_sling_target` of the rig the
+  bead's prefix names, on that agent's default formula. A bead it finds already
+  tracking the failure it sends nowhere, so a failure is sent once.
 - **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
   from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
   `bug-file` block).

@@ -14,12 +14,14 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
-// The hand-over of a changed head (handover.go). An assignment gives a running
-// refinery no turn, so whenever the refinery can take a bead's changed head,
-// because nothing holds the bead or only merge holds do, the conversations and
-// asks on its PR, the landing order wakes and nudges the refinery for it, once
-// no withdrawal and no review run holds that head. While another wait holds
-// the bead, the refinery cannot take it yet, and the order wakes no one.
+// The hand-over of a changed head, and of a half-written record (handover.go).
+// An assignment gives a running refinery no turn, so whenever the refinery can
+// take a bead's changed head, because nothing holds the bead or only merge
+// holds do, the conversations and asks on its PR, the landing order wakes and
+// nudges the refinery for it, once no withdrawal and no review run holds that
+// head, and for a record it sends back to be validated again. While another
+// wait holds the bead, the refinery cannot take it yet, and the order wakes no
+// one.
 
 // waking records each wake the order asks for, as "<session>: <message>", and
 // err fails each.
@@ -493,4 +495,131 @@ func TestARequeueThatCannotReadWhatHoldsTheBeadLeavesTheWakeToTheNextRun(t *test
 	says(t, o, "only conversation tk-conv holds the bead, so the refinery was woken and nudged")
 	d.wokeOnce(t, "tk-conv")
 	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+}
+
+// halfWritten puts the bead as a writer that died between the publication's
+// two writes leaves it: open, assigned to assignee, "" for nobody, with the
+// marker, the PR the refinery may reuse and part of the record.
+func (d *handing) halfWritten(assignee string) {
+	d.md = map[string]string{"branch": branch, "pr_reconcile_pending": "true", "existing_pr": prURL,
+		"pr_url": prURL, "pr_head_sha": head}
+	d.put("open", assignee)
+}
+
+// wokeForTheRecord fails unless the order has woken the refinery once for the
+// bead, with a message that says its record is incomplete, not that its head
+// changed, and names no merge hold, since nothing holds the bead.
+func (d *handing) wokeForTheRecord(t *testing.T) {
+	t.Helper()
+	d.wokeOnceFree(t)
+	if got := d.wakes.woken()[0]; !strings.Contains(got, "PR record incomplete on "+bead) || strings.Contains(got, "head changed") {
+		t.Fatalf("the refinery was woken with %q, want the bead's record named incomplete", got)
+	}
+}
+
+// A half-written record that nothing holds is the refinery's to take, and an
+// assignment alone gives a running refinery no turn, so the order sends the
+// record back with the marker kept, assigns the bead to the refinery when it
+// is not already, wakes and nudges the refinery with a message that says the
+// record is incomplete, and only then clears the marker, so no later run reads
+// the record or wakes the refinery again.
+func TestAHalfWrittenRecordNothingHoldsWakesTheRefinery(t *testing.T) {
+	for _, c := range []struct {
+		name, assignee string
+		writes         int
+	}{
+		{"the refinery's", boundRefinery, 2},
+		{"nobody's", "", 3},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newHanding(t)
+			d.halfWritten(c.assignee)
+			o := d.once(t)
+			is(t, o, pr.ActRevalidate)
+			says(t, o, "the record was half written", "nothing holds the bead, so the refinery was woken and nudged",
+				"the marker is cleared")
+			d.wokeForTheRecord(t)
+			ws := d.runWrites()
+			assigns := func(w fake.Write) bool {
+				return slices.ContainsFunc(w.Args, func(a string) bool { return strings.HasPrefix(a, "--assignee=") })
+			}
+			if len(ws) != c.writes || assigns(ws[0]) || slices.Contains(ws[0].Args, "pr_reconcile_pending") ||
+				!slices.Contains(ws[len(ws)-1].Args, "pr_reconcile_pending") {
+				t.Fatalf("the revalidation wrote %+v, want the record sent back with the marker kept, the refinery's "+
+					"assignment when the bead is nobody's, then the settle that clears the marker", ws)
+			}
+			b := d.row(t)
+			if b.Status != "open" || b.Assignee != boundRefinery {
+				t.Fatalf("the revalidation left the bead %s under %q", b.Status, b.Assignee)
+			}
+			meta(t, b, map[string]string{"merge_result": record.Incomplete, "existing_pr": prURL, "pr_url": "<absent>",
+				"pr_head_sha": "<absent>", "pr_reconcile_pending": "<absent>"})
+			if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
+				t.Fatalf("the revalidation left the record for another run: %+v", out)
+			}
+			d.wokeForTheRecord(t)
+		})
+	}
+}
+
+// A wake that does not land after a half-written record goes back keeps the
+// marker, and the next run sends the record back again, wakes the refinery
+// again and clears the marker.
+func TestAHalfWrittenRecordsWakeThatDoesNotLandIsMadeAgainByTheNextRun(t *testing.T) {
+	d := newHanding(t)
+	d.halfWritten("")
+	d.wakes.fail(errors.New("gc session nudge rig/gc-toolkit.refinery: exit 1: the session is closed"))
+	o := d.once(t)
+	is(t, o, pr.ActRetry)
+	says(t, o, "nothing holds the bead, and the refinery's wake did not land", "the session is closed")
+	meta(t, d.row(t), map[string]string{"merge_result": record.Incomplete, "pr_reconcile_pending": "true"})
+	assignedTo(t, d.land, boundRefinery)
+	d.wakes.fail(nil)
+	is(t, d.run(t), pr.ActRevalidate)
+	meta(t, d.row(t), map[string]string{"merge_result": record.Incomplete, "pr_reconcile_pending": "<absent>"})
+	assignedTo(t, d.land, boundRefinery)
+	if got := d.wakes.woken(); len(got) != 2 || !strings.Contains(got[1], "PR record incomplete on "+bead) {
+		t.Fatalf("the refinery was asked to wake %q, want the failed wake and one more for the record", got)
+	}
+}
+
+// While another wait holds the bead, such as a human gate, the refinery cannot
+// take it yet: the write that sends a half-written record back assigns the
+// bead to the refinery and clears the marker, and the order wakes no one.
+func TestAHalfWrittenRecordAnotherWaitHoldsWakesNoOne(t *testing.T) {
+	d := newHanding(t)
+	d.halfWritten("")
+	d.gate(t, "tk-gate", "a-question")
+	is(t, d.once(t), pr.ActRevalidate)
+	if ws := d.runWrites(); len(ws) != 1 {
+		t.Fatalf("the revalidation wrote %d times, want the one write that hands the record over: %+v", len(ws), ws)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.Incomplete, "pr_reconcile_pending": "<absent>"})
+	assignedTo(t, d.land, boundRefinery)
+	d.wokeNone(t)
+}
+
+// A revalidation whose read of what holds the bead fails sends the record back
+// with the marker kept and records nothing else, and the next run reads the
+// bead's holds again, wakes the refinery and clears the marker.
+func TestAHalfWrittenRecordThatCannotReadWhatHoldsTheBeadLeavesTheWakeToTheNextRun(t *testing.T) {
+	d := newHanding(t)
+	d.halfWritten("")
+	d.refresh(t)
+	d.store.BlockedErr = errors.New("bd's blocked listing did not answer")
+	o := d.run(t)
+	is(t, o, pr.ActRetry)
+	says(t, o, "what holds the bead did not read", "bd's blocked listing did not answer")
+	if w := d.runWrites(); len(w) != 1 {
+		t.Fatalf("the run wrote %d times, want the revalidation alone: %+v", len(w), w)
+	}
+	meta(t, d.row(t), map[string]string{"merge_result": record.Incomplete, "pr_reconcile_pending": "true"})
+	assignedTo(t, d.land, "")
+	d.wokeNone(t)
+
+	d.store.BlockedErr = nil
+	is(t, d.run(t), pr.ActRevalidate)
+	d.wokeForTheRecord(t)
+	meta(t, d.row(t), map[string]string{"pr_reconcile_pending": "<absent>"})
+	assignedTo(t, d.land, boundRefinery)
 }
