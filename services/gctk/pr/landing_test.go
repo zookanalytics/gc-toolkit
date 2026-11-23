@@ -954,6 +954,24 @@ func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
 	}
 }
 
+// The bead is a plain task, so Gas City's work-record gate reads its close, and
+// once enforced it refuses a close whose record names no outcome. The verified
+// merge's close names the work shipped in the merge commit on the target, over
+// the branch workspace-setup stamped when the work was cut.
+func TestAVerifiedMergesCloseCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	is(t, d.once(t), pr.ActLanded)
+	b := d.row(t)
+	if b.Status != "closed" {
+		t.Fatalf("under an enforced work-record gate the verified merge left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+}
+
 // The one-PR update writes pr_state=merged once it reads the PR merged, which
 // can come before a run lands the bead: the record is still pending, and the
 // run lands it.
@@ -1010,6 +1028,38 @@ func TestAVerifiedMergeWhoseCloseBdRefusesIsAnExceptionBehindAGate(t *testing.T)
 	}
 	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("a run after the exception read %+v, want nothing: the marker is cleared", out)
+	}
+}
+
+// Once what held a refused close is gone, a person closes the bead with the
+// command its gate names. An enforced work-record gate reads that close too,
+// and the exception's record already names the work shipped in the merge
+// commit on the target.
+func TestTheCloseARefusedLandingsGateNamesCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	held := true
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		if held && slices.Contains(args, "--status=closed") {
+			return errors.New("exit status 1: Error: cannot close blocked issue: " + bead + " is blocked by [tk-kid]")
+		}
+		return nil
+	}
+	is(t, d.once(t), pr.ActExcepted)
+	meta(t, d.row(t), map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+	closing := "--status=closed --set-metadata merge_result=" + record.Merged
+	if msg := d.gates.messages[0]; !strings.Contains(msg, "gc bd update "+bead+" "+closing) {
+		t.Fatalf("the gate's message %q names another close", msg)
+	}
+	held = false
+	if out, err := d.store.Update(bead, strings.Fields(closing)...); err != nil {
+		t.Fatalf("the close the gate names was refused: %v %s", err, out)
+	}
+	if b := d.row(t); b.Status != "closed" || b.Metadata["merge_result"] != record.Merged {
+		t.Fatalf("the close the gate names left the bead %s with merge_result %q", b.Status, b.Metadata["merge_result"])
 	}
 }
 

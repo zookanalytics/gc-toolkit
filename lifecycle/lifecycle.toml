@@ -1690,7 +1690,10 @@ keys = [
 #   with the branch the work is cut on, since the claim stamps the pool
 #   worktree's base checkout. The lifecycle writer's transition into `merged`
 #   writes gc.work_commit (merged_sha) and gc.work_branch (merged_target) from
-#   the landing it records, when that landing names both.
+#   the landing it records, when that landing names both. The landing order
+#   (`gctk pr reconcile`) writes them from a verified merge, the merge commit and
+#   the target it fetched that commit on, in the close that lands the PR's bead
+#   and in the exception it records when bd refuses that close.
 #   mol-refinery-patrol.toml's rework hand-back close writes them from the head
 #   it read back from origin and the branch that head is on. The close of an ask
 #   an earlier round of the run fixed, by `gctk review passed --record`, writes
@@ -1715,7 +1718,8 @@ keys = [
 #   like gc.outcome: the runtime's work-record gate checks it when a plain task
 #   bead closes, and warns on a missing or unknown value unless
 #   GC_WORK_RECORD_ENFORCE makes it block the close. The pack stamps `shipped`
-#   from the lifecycle writer's transition into `merged`, from
+#   from the lifecycle writer's transition into `merged`, from the landing
+#   order's record of a verified merge, from
 #   mol-refinery-patrol.toml's rework hand-back close, from the review loop's
 #   check (`gctk review passed --record`) closing an ask an earlier round fixed
 #   and from the gascity-keeper sub-pack's landing check closing a landed
