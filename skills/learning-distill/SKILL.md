@@ -93,7 +93,10 @@ something, grep the rendered prompts of the roles it binds, the repo's
 `AGENTS.md` and its architecture page for text that makes that thing or rules
 it out, list the live instances, and say in the proposal how they meet. Run
 each path and command the rule names from a session of the pool that will read
-it, and grep the tree for each key it names. Then pick exactly one:
+it, and grep the tree for each key it names. A command that changes state, such
+as one that claims, closes, slings or hands away work, runs only when
+everything it changes was made for the test, and otherwise the proposal names
+it as unrun. Then pick exactly one:
 
 - **ADD** — genuinely new; no existing bullet covers it.
 - **UPDATE** — an existing bullet sharpened or widened. One edit, never
@@ -382,9 +385,12 @@ will read it: `claude -p` for a polecat, `codex exec` for a reviewer, since
 the review pool runs on codex. A Claude session can run under an account
 profile's home, which holds no Codex login. Run codex on the login the review
 pool's sessions use, in the home directory of your user account, without the
-shared background server, and keep the probe's session files out of it:
+shared background server, and keep the probe's session files out of it. A
+probe must change nothing, so run Claude with no tools and codex in a read-only
+sandbox:
 
 ```bash
+claude -p --tools "" -- "<prompt>"
 CODEX_HOME="$(perl -e 'print((getpwuid($<))[7])')/.codex" \
   codex --no-daemon exec --ephemeral --skip-git-repo-check -s read-only \
   "<prompt>" </dev/null
