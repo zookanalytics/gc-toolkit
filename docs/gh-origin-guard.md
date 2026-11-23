@@ -85,9 +85,11 @@ The posts it reads:
 
 A body carries the mark by `pr-post.sh`'s own definition (`gc_city_marked`, which
 `pr-post.sh own-def` prints and the guard reads from beside itself):
-`<!-- gc:city -->`, or the write-back's `<!-- gc-writeback -->`. The guard reads
-a body it can see: an inline value, or a file it can open, resolved against the
-directory the call runs in. A body the shell builds as the command runs
+`<!-- gc:city -->`, the write-back's `<!-- gc-writeback -->`, or the marker of a
+visit's comment on its PR, `<!-- gc:sitting:<task> -->`
+([human-engagement.md](human-engagement.md#engage)). The guard reads a body it
+can see: an inline value, or a file it can open, resolved against the directory
+the call runs in. A body the shell builds as the command runs
 (`--body "$(cat f)"`, `--body "$B"`), standard input, and an editor or browser
 body cannot be read, so they are refused. An approval and a change request are
 refused whatever their body carries, because the city posts COMMENT reviews
@@ -343,11 +345,8 @@ take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and ru
 |---|---|
 | `overlays/work-context` | polecat |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
-| `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, converse-opus, converse-fable, mechanik, po, proactive, demo |
-| the Codex home, by `pre_start` | polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex |
-
-converse-opus, converse-fable and converse-codex are the converse templates
-engage withdraws, kept configured for the sittings already open on them.
+| `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, mechanik, po, proactive, demo |
+| the Codex home, by `pre_start` | polecat-codex, converse-codex-sol, converse-codex-astra |
 
 Every registration runs the same command, which resolves the script from
 `$GC_RIG_ROOT` and then from `$GC_CITY_PATH/rigs/gc-toolkit`. Both are set by
