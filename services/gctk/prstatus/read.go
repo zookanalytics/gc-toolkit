@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Row is a bead as [Read] reads it: its id and its metadata, each value as the
@@ -29,7 +31,7 @@ type Store interface {
 	// Blockers returns, for each id, the far bead of each of its `blocks` edges,
 	// open and closed, with its metadata. It is the read [Holding] walks
 	// ([ReadBlockers]).
-	Blockers(ids []string) (map[string][]Blocker, error)
+	Blockers(ids []string) (map[string][]person.Blocker, error)
 }
 
 // ErrUnresolved reports an anchor the store holds no row for. Nothing about it
@@ -89,8 +91,8 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		return nil, err
 	}
 	// The walk's first level is the anchors' own edges, already read.
-	holds, err := Holding(resolved, func(level []string) (map[string][]Blocker, error) {
-		out := make(map[string][]Blocker, len(level))
+	holds, err := Holding(resolved, func(level []string) (map[string][]person.Blocker, error) {
+		out := make(map[string][]person.Blocker, len(level))
 		var rest []string
 		for _, id := range level {
 			if b, ok := own[id]; ok {

@@ -217,13 +217,15 @@ refinery that dies between them leaves an open bead that names its PR, never a
 blocked bead with half a record. The
 landing order reads a record whose marker is `true` while its bead is open,
 blocked or closed, and clears the marker once the record owes no further run:
-the bead closed on a verified merge, had its changed head handed to the
-refinery, or met an exception whose human gate is filed. A changed head keeps
+the bead closed on a verified merge, had its changed head or its half-written
+record handed to the refinery, or met an exception whose human gate is filed.
+A changed head keeps
 its marker, and its bead stays assigned to nobody, while a withdrawal is open
 on the bead or a review run is attached to it, so the order still carries the
 withdrawal out there and reads the run's end. `gctk pr withdraw` marks such a
-record when it files one. A head the refinery can take, because nothing holds
-its bead or only conversations and asks do, is handed to the refinery in two
+record when it files one. A head or a half-written record the refinery can
+take, because nothing holds its bead or only conversations and asks do, is
+handed to the refinery in two
 writes with the wake between them: the order assigns the bead to the refinery
 and keeps the marker, wakes and nudges the refinery, and only then clears the
 marker. A wake that does not land leaves the
@@ -814,7 +816,7 @@ carries none.
 |---|---|---|
 | `held: gate` | an open human gate holds the anchor: on the anchor itself, or behind a bead it waits on, such as a rework | `prstatus.Holding`, which follows the anchor's `blocks` edges through every blocker that is not closed and keeps the human gates it reaches, one a person has claimed included. A conversation is no human gate, so it never counts here: one that holds an open PR's merge counts under `held: blocked`, except while its sitting stays for the work it sent |
 | `held: review` | review feedback the city has not answered, and nothing in flight acts on it | the review threads the evaluator finds waiting on the city's answer in the GitHub read the PR watch saved, by the rule below |
-| `held: blocked` | a live blocker holds the PR that no automated actor will clear | a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is a decision, though not while a ruling leaves it waiting on the work it sent, with an open `blocks` edge of its own onto a bead that is no gate, is a conversation, which holds an open PR's merge until it closes, though not while its sitting stays for the work it sent, open under the sitting with an open `blocks` edge of its own (each as `prstatus.Stays` reads it), or is another merge anchor whose own status, derived from the facts its row records and its own `blocks` edges (`prstatus.Derive`, since the walk reads no GitHub), is `needs-attention`, or `needs-review` once its PR is open at the head the refinery validated and its posture is recorded. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, because `held: gate` counts it |
+| `held: blocked` | a live blocker holds the PR that no automated actor will clear | a bead a person owes the next move on that `prstatus.Holding` reaches through the anchor's open `blocks` edges, on the anchor or behind a bead it waits on, such as its rework. That bead is a decision, though not while a ruling leaves it waiting on the work it sent, with an open `blocks` edge of its own onto a bead that is no gate, is a conversation, which holds an open PR's merge until it closes, though not while its sitting stays for the work it sent, open under the sitting with an open `blocks` edge of its own (each as `person.Stays` reads it), is any other bead assigned to `human`, the operator's queue, or is another merge anchor whose own status, derived from the facts its row records and its own `blocks` edges (`prstatus.Derive`, since the walk reads no GitHub), is `needs-attention`, or `needs-review` once its PR is open at the head the refinery validated and its posture is recorded. An open bead on that anchor's edges that no person moves counts as work in flight on it, so a PR the city is changing or landing holds nothing, and the gates and the beads a person owes on those edges are counted once, by the walk. Live work that waits on such a bead is not the city changing the PR, so the PR reads `needs-attention` and not `working`. A human gate is not among them, because `held: gate` counts it |
 
 Any `held:` label reads `status: needs-attention`, because each names something
 a person has to act on. The merge freeze and the rebase hold carry no `held:`

@@ -115,7 +115,7 @@ func TestMetaOnNilBeadIsEmpty(t *testing.T) {
 }
 
 // A `gc bd dep list <bead> --type blocks --json` row carries the far bead's
-// issue_type and await_type, the two fields prstatus.IsHumanGate reads, and bd
+// issue_type and await_type, the two fields person.IsHumanGate reads, and bd
 // leaves an empty field out of the row. The decode keeps each as the row has
 // it, an absent or null one as empty.
 func TestRowsCarryTheGateFields(t *testing.T) {

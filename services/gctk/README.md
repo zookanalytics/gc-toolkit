@@ -15,6 +15,7 @@ through `gc bd` and the supervisor's API.
 | Command | What it does | Documented in |
 |---|---|---|
 | `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
+| `bead stands` | where each bead named stands and whose move it is, from one listing of the store: its group in the helm board's words, the rule that placed it, what a person owes when the bead is itself the ask, the beads that rule names, how far the city carries it without a person and the bead that stops it, and where it stands by what it waits on, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead stands --help`, `internal/cli/beadstands.go`, `standing`, [docs/bead-standing.md](../../docs/bead-standing.md) |
 | `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
 | `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
 | `bead park`, `bead place` | the operator's steering moves on a bead: a park, which holds everything under it that has not started behind a gate it files, born with its `blocks` edge, or behind a bead that exists, and refuses a bead in flight; and a placement, which gives a bead `hold:mayor` holds its parent or none, settles its priority, slings it or arms it while a wait holds it, and lifts the hold, each write taking its exit | `gctk bead park --help`, `gctk bead place --help`, `internal/cli/bead_steer.go`, `park`, `place`, [docs/steering.md](../../docs/steering.md) |
@@ -240,6 +241,13 @@ listing/             one pass's read of a store for the helm board: every live b
                      prstatus's and the pr evaluator's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
+standing/            where a bead stands and whose move it is: its group in the helm board's
+                     words, the rule that placed it, its ask and the beads that rule names,
+                     how far the city carries it and where it stands by what it waits on,
+                     from waits', prstatus's and queue's answers, read through the Store a
+                     listing implements
+standing/person/     the rules about one bead: a human gate, a bead only a person clears, and
+                     one that waits on work of its own first
 review/              the review domain: the check index and a rig's guidance at a commit; the
                      shape a review run's steps write, the loop's pass rule over it, the run's
                      result in review_results, and the asks a run works, in review_checks

@@ -228,57 +228,68 @@ dance by hand. It returns, and nothing outside this:
 
 and, each behind an opt-in flag so a caller pays only for what it needs:
 
-- **`--frontier`** — the blockers. A verdict over `ready | advancing | stuck`:
-  ready with no open blocker, else the worst open blocker's `advance`. Each open
-  `blocks`-dep is named `{id, title, status, advance}`, plus `stuck_on {id, why}`
-  when it is stuck, and the closed ones are a count.
+- **`--frontier`** — what holds it. A verdict over `ready | advancing | stuck`:
+  ready when nothing holds it, else advancing when every wait behind what holds
+  it advances, and stuck when one does not. Each wait is named
+  `{id, title, status, advance}`, plus `stuck_on {id, why}` when it is stuck,
+  `ancestor` when it is an ancestor's wait, and `unjudged` when it is a
+  `waits-for` wait the store cannot judge yet. `holds` names what holds it in
+  one word, an edge into another store, which holds nothing, is listed under
+  `foreign`, and its own closed blockers are a count.
 - **`--horizon`** — the direct children. The epic-health snapshot
   `{total, open, closed, advancing, stuck}`, with open children named the same
   way and done children counted only, so a hundred-story epic stays bounded.
 
-`advance` answers whether the city finishes that bead without a person, and it
-is transitive. A bead is `advancing` when its own state moves and every open
-blocker beneath it advances too. Its own state moves when it is in progress or
-hooked, routed to a worker or pool, assigned to an agent, a review, rework,
-validation or finding bead of the review cycle, armed for deferred dispatch, a
-merge anchor the cadence will act on, or the bead a live run works. Anything
-else is `stuck`, and `stuck_on` names the bead that stops it, with one of these
-reasons:
+`advance` answers whether the city carries a bead to its end without a person,
+by the rule the helm board reads
+([the `bead stands` contract](gctk-architecture.md#the-bead-stands-contract)),
+and `gctk bead stands` answers it for the subject and each bead the sections
+name. A bead advances when the city takes it as things stand, queued in the
+board's words, and every bead it waits on advances, and an epic or a Delivery
+advances while every open member does. Anything else is `stuck`, and `stuck_on`
+names the bead that stops it, with the word that says why: the ask, when that
+bead is itself what a person owes, and otherwise the rule that names it.
+`services/gctk/standing` declares each of these words with its meaning: the
+asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
+`stuck` in `advance.go`.
 
 | `why` | The bead that stops it |
 |---|---|
-| `human` | is a human gate, is assigned to `human`, is a decision, is a finding that needs the operator, or is an anchor parked in a human state |
-| `unrouted` | is open with no route, no arm, no assignee and no live run working it, so nothing picks it up |
-| `held` | has any status but open, in progress or hooked: blocked, deferred, pinned, or a status its store adds |
-| `approval` | is a PR the cadence has settled, waiting on the operator's review (review required, or changes requested) |
-| `merge-hold` | carries an operator merge or rebase hold |
-| `merge-blocked` | is an anchor whose machine axis says no automated actor can move it |
-| `unread` | is an anchor whose machine axis, or whose PR posture at that axis's head, is not recorded |
-| `capped` | is armed, but its dispatch hit the sling-failure cap and went to a person |
-| `cycle` | waits, through its blockers, on itself |
-| `unknown` | could not be read, lives in a store no rig carries, or is open with no route, no arm and no assignee and was read from a store the walk could not place or whose runs could not be read |
-| `budget` | lies past where the walk stopped reading |
+| `question` | is an open human gate, or an open decision that does not wait on work of its own first |
+| `conversation` | is an open conversation its sitting does not stay in, which answers no open human gate and tracks no decision that asks |
+| `pull-request` | carries a pull request that waits on the operator's review, or needs the operator's attention for a reason of its own. One that needs it only for a question or another ask that holds it is stuck on the gate or the bead a person owes instead, by `own-wait` or `further-along` |
+| `assigned-to-you` | is any other open bead only a person clears, such as a task in the operator's queue |
+| `ruling` | is an epic with members and none of them open, or a landed Delivery |
+| `own-wait` | is a human gate, or a bead only a person clears, that the stuck bead waits on through a wait of its own |
+| `further-along` | is such a gate or bead further along its waits, an ancestor's included |
+| `parked` | is a gate that is no human gate, which holds the stuck bead, its own or an ancestor's |
+| `status` | has a status no pool offers, such as deferred, pinned or a status its store adds |
+| `answers` | is the question a conversation answers, which the question's own reading carries |
+| `members` | is an epic or a Delivery with no members at all |
+| `gate` | is a gate that is no human gate |
+| `not-scheduled` | is ready work that nothing sends anywhere: the store serves it as ready, no dispatch hold holds it, and no arm, route, assignee or live run moves it |
+| `outside` | is work that waits outside the city: `hold:external` holds it and no live run works it |
+| `for-product-owner` | is work nothing sends that is held for the Product Owner's placement, `hold:mayor` |
+| `not-ready` | is any other work nothing sends, which the store does not serve as ready |
+| `unread` | could not be read, has no standing of its own and no bead that speaks for it, waits on itself through the beads it waits on, or is a `waits-for` wait the store cannot judge yet |
 
-So an armed bead takes its blockers' verdict, and a routed bead behind an orphan
-is stuck on the orphan. A merge anchor is judged by its recorded `pr.machine`
-and `pr_posture`, never by the route the merge cadence clears or by a run that
-works it. A human gate, a decision or a bead assigned to `human` outranks every
-moving state except in progress.
+So a queued bead is stuck on what stops the first of its waits that does not
+advance, and an epic or a Delivery on what stops the first of its open members:
+a routed bead behind work nobody routes is stuck on that work, and a bead
+behind a human gate further along is stuck on the gate. A decision a ruling
+left waiting on the work it sent, and a conversation its sitting stays in,
+advance while that work does. A wait on a bead with no standing of its own,
+such as a merge anchor's rework or the root of a run, reads as the bead that
+speaks for it: the anchor the rework names, or the bead the run works. Where
+that is the waiting bead itself, the wait is its own work and stops nothing, so
+a pull request whose review run or rework is under way is not stuck on it.
 
 A pour leaves the bead its run works open, unassigned and unrouted, so its row
-alone cannot say a run holds it. The walk asks the bead's store which beads its
-live runs work, through the map verb of `assets/scripts/run-lib.sh`, the pack's
-one reader of that link. It asks only a store it has placed, the one `--db` or
-`--store` names or a bead's prefix binds. A read of runs names no bead, so gc
-would answer an unpinned one from the caller's own store, whichever store the
-bead came from. Such a bead read from a store the walk could not place reads
-`unknown`. A run is live until its root closes. Its input convoy
-is no sign of one, because a run that finished or was cancelled leaves the
-convoy open for as long as the bead is open. The runs name the bead a run works
-and none of its steps, so an inline step, which carries no route of its own,
-reads `unrouted`. Liveness is out of reach of these reads: a claim, a route or
-a run whose session has died still reads advancing, and
-`doctor/check-root-advancing` reports a stranded root.
+alone cannot say a run holds it. The answer reads that bead in flight from the
+run's start, by the runs of the subject's store. Whether a claim's, a route's
+or a run's session is still up is out of reach of these reads: one whose
+session has died still reads advancing, and `doctor/check-root-advancing`
+reports a stranded root.
 
 The converse opening opts into both, so its subject slice, the readiness verdict
 and the epic-health snapshot arrive from one call. A caller that only needs
@@ -330,31 +341,16 @@ is not counted as a child.
 
 The subject read passes `--brief-deps`, so a listed bead's body is never fetched
 to read its status, and a same-store closed blocker's status rides the edge at no
-extra cost — the common bulk on an epic. `gc bd show` leaves out an edge whose far
-end lives in another rig's store, so the subject's own list row is read too, in
-the first level's batch, and its edges complete the subject's set. Each blocker
-the walk reads is a list row, `gc bd list --id … --all --brief`, which keeps
-every edge but embeds no status, so a blocker's closed edges come back in the
-next level's batch and drop out there. A child's row comes with the `--parent`
-listing, so only its blockers are read. A blocker whose store no rig carries
-reads unknown and fails the verdict closed, never landed.
+extra cost — the common bulk on an epic. What holds the subject and where the
+named beads stand are one `gctk` call each, pinned to the subject's store:
+`gctk bead holds` reads the subject's waits, and `gctk bead stands` lists the
+store once and reads beyond that list only what the beads it answers need, such
+as the closed members of an epic none of whose members is open. A read that does
+not answer fails the verdict closed, and a bead with no answer reads stuck on
+itself, `unread`.
 
 A `blocks` edge into another store holds nothing for bd: the bead stays in `bd
 ready`, and a deferred dispatch does not wait on it (`docs/component-model.md`,
-I1). The frontier still names that blocker and judges it, because its author
-declared the wait. A reader who finds one should mirror the wait into the
-waiting bead's own store, where it holds.
-
-The walk reads level by level, with one read per store per level. It stops
-descending at the first stuck bead on a branch, since nothing below can make
-that branch advance. The subject's own blockers are always read. Below them the
-walk reads at most 50 open beads (`--walk-budget <n>`), and it descends at most
-six levels. Each read asks for no more of those beads than the budget has left,
-nearest first, and counts each one as open until its row comes back, so a level
-wider than the budget has left is cut short. A closed row costs nothing against
-the budget. When a cut read brings back closed rows, the beads it left out lead
-the next read, which counts as a level. Anything the walk has not read when it
-stops reads stuck with `why=budget`. A store's runs are read once in a walk,
-and only once the store holds a walked bead whose row alone reads `unrouted`, or
-holds the subject while a walked bead waits on it, since nothing else reads the
-subject's own state.
+I1). The frontier lists it under `foreign` and judges nothing in the other
+store. A reader who finds one should mirror the wait into the waiting bead's
+own store, where it holds.

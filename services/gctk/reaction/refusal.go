@@ -11,7 +11,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -331,7 +331,7 @@ func (r *Reactions) personsGates(bead, run string, listed []*ledger.Record) ([]s
 	}
 	var open []waits.Wait
 	for _, w := range h.Waits {
-		if prstatus.IsHumanGate(w.IssueType, w.AwaitType) && !strings.EqualFold(w.Status, "closed") &&
+		if person.IsHumanGate(w.IssueType, w.AwaitType) && !strings.EqualFold(w.Status, "closed") &&
 			!slices.ContainsFunc(open, func(o waits.Wait) bool { return o.ID == w.ID }) {
 			open = append(open, w)
 		}
@@ -378,7 +378,7 @@ func (r *Reactions) ownGates(gates []waits.Wait, run string) (map[string]bool, e
 			return nil, fmt.Errorf("the gate %s did not read", id)
 		}
 		g := rows[i]
-		if !prstatus.IsHumanGate(g.IssueType(), g.AwaitType()) || g.Status() == "closed" || g.AwaitID() != GateKey {
+		if !person.IsHumanGate(g.IssueType(), g.AwaitType()) || g.Status() == "closed" || g.AwaitID() != GateKey {
 			continue
 		}
 		for _, w := range word.FindAllString(g.Description(), -1) {

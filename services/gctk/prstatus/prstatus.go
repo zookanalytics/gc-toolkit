@@ -35,8 +35,11 @@
 // hands back, so a sticky changes_requested never traps the value in working
 // after the set empties.
 //
-// A PR on Gas Town's pending record ([pr.OnRecord]) stands where the pr
-// domain's evaluator says, in the same vocabulary: [Render], [RenderHeld] and
+// Gas Town's pending record is the record a PR's bead carries from its
+// publication to its merge, whose values services/gctk/pr/record declares and
+// docs/state-machine.md ("The pending record") defines. A PR on that record
+// ([pr.OnRecord]) stands where the pr domain's evaluator says, in the same
+// vocabulary: [Render], [RenderHeld] and
 // [RenderReasons] read its answer beside the facts [Read] gathers. `gctk pr
 // status`, and through it the labels and engage, and the rig board
 // (services/helm/internal/rigboard) ask the evaluator over the read the one-PR
@@ -60,10 +63,13 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // State is a PR anchor's status value: one label of the mutually-exclusive
-// `status:` group.
+// `status:` group. docs/pull-request-states.md ("The labels on a pull
+// request") gives each value to a person, with what the person can do.
 type State string
 
 const (
@@ -89,7 +95,8 @@ const (
 
 // Hold is a held: value, one thing that holds an open PR which the city will
 // not clear on its own. Each value is a `held:` label of its own, beside the one
-// status value, so more than one can stand at once.
+// status value, so more than one can stand at once. docs/pull-request-states.md
+// gives each value to a person, with what the person can do.
 type Hold string
 
 const (
@@ -126,7 +133,7 @@ type Facts struct {
 	// holds. So a gate reads as a hold, as merge_hold and rebase_hold do,
 	// whatever work is in flight. A conversation is no human gate, so it is
 	// never among them: one that holds the anchor's merge is among Owed.
-	Gates []Blocker
+	Gates []person.Blocker
 	// Owed are the beads other than human gates that a person owes the next move
 	// on, on the anchor's own blockers or behind a bead it waits on, nearest
 	// first, as [Holding] reads them ([Holds.Owed]): a decision, a conversation
@@ -134,7 +141,7 @@ type Facts struct {
 	// own state is a person's to move, such as a PR waiting on a review that a
 	// rework of this one waits for. No automated actor will move any of them, so
 	// each holds the PR.
-	Owed []Blocker
+	Owed []person.Blocker
 	// Staying are the beads a person would owe that the PR waits on, on its own
 	// blockers or behind a bead it waits on, while each waits on work of its own
 	// first, as [Holding] reads them ([Holds.Staying]): a conversation whose
@@ -142,7 +149,7 @@ type Facts struct {
 	// the work it sent. Each holds the merge until that work closes, so the PR
 	// waits on that work first and is no person's move yet, approved or not.
 	// Once the work closes, the bead is among Owed.
-	Staying []Blocker
+	Staying []person.Blocker
 	// PRPosture is metadata.pr_posture, stored value@oid@instant. The value is
 	// read before the first '@', and the oid after it is the head the posture
 	// was read at, the current head as far as the city knows.
@@ -171,7 +178,7 @@ type Run struct {
 const reviewFormula = "mol-pr-review"
 
 // runsOf is the review runs among an anchor's blockers.
-func runsOf(blockers []Blocker) []Run {
+func runsOf(blockers []person.Blocker) []Run {
 	var out []Run
 	for _, b := range blockers {
 		if b.Metadata["gc.kind"] != "workflow" || b.Metadata["gc.formula_name"] != reviewFormula {
@@ -240,6 +247,17 @@ func Derive(f Facts) State {
 // their own.
 func Held(f Facts) []Hold { return holdsOf(Reasons(f)) }
 
+// OwnAttention reports whether the PR reads needs-attention for a reason of its
+// own: one [Derive] still reads once each human gate and each bead a person owes
+// the next move on that holds it is answered, such as a merge or rebase hold or
+// a recorded posture outside the vocabulary its writer declares. A PR whose
+// needs-attention rests on those beads alone has none, and answering them is the
+// person's move on it.
+func OwnAttention(f Facts) bool {
+	f.Gates, f.Owed = nil, nil
+	return Derive(f) == NeedsAttention
+}
+
 // holdsOf is the held: value of each reason, once each, in their order. A
 // reason that is the machine's fault stands for none.
 func holdsOf(reasons []Reason) []Hold {
@@ -268,7 +286,7 @@ type Reason struct {
 
 // gateReason is the reason a human gate holds the PR: a person's hold, or the
 // machine's fault for a gate a review run's failure filed.
-func gateReason(g Blocker) Reason {
+func gateReason(g person.Blocker) Reason {
 	if IsMachineGate(g) {
 		return Reason{ID: g.ID, Title: g.Title}
 	}

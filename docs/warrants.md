@@ -82,8 +82,9 @@ no warrant.
   - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
     rebases it under an open PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
-    from one base shares one recorded run, and keys a tracker on a stamp. Core's
-    runs each command raw per polecat and matches trackers by title.
+    from one base shares one recorded run, keys a tracker on a stamp, and has the
+    tracker it files sent to the rig's polecat pool. Core's runs each command raw
+    per polecat, matches trackers by title and routes the one it files nowhere.
   - `self-review` is a bounded check loop over those records, whose last attempt
     asks a person through a human gate when a check is still red, where Gas
     Town's is one inline step.
@@ -96,7 +97,8 @@ no warrant.
 - **Evidence.** In `gastownhall/gascity`:
   - `internal/bootstrap/packs/core/formulas/mol-polecat-base.toml`: its
     `load-context` has no duplicate-dispatch gate, its `preflight-tests` runs
-    `{{test_command}}` raw, and its `workspace-setup` is a placeholder each
+    `{{test_command}}` raw and files its tracker with a `gc bd create` that
+    routes it nowhere, and its `workspace-setup` is a placeholder each
     variant overrides with a tree of its own. `mol-polecat-commit.toml` and
     `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
     `git worktree remove` once the work is pushed.
@@ -117,7 +119,7 @@ no warrant.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
   `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
   branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df6d and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -453,8 +455,9 @@ no warrant.
   (`gctk pr refresh`). Its readers are `FromStore` in
   `services/gctk/pr/read.go`, which `answerFromStore` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
-  `PRAnswers` in `services/gctk/listing/pr.go` calls for the rig board, from
-  `services/helm/internal/rigboard/gather.go`, the landing order, which finds
+  `PRAnswers` in `services/gctk/listing/pr.go` calls from `Read` in
+  `services/gctk/standing/standing.go`, which the rig board's read and
+  `gctk bead stands` ask, the landing order, which finds
   and does its work from it and the store (`plan`, `seenPR` and
   `decideAtHead` in `services/gctk/pr/landing.go`, through `Reconcile` for
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
@@ -500,9 +503,12 @@ no warrant.
     merge commit (`gh pr view` in `gastown/commands/pr-merge-reconcile/run.sh`
     180-181), and writes only its record's own keys, such as `pr_state`,
     `observed_pr_head_sha` and `pr_reconcile_error`. No pack keeps GitHub's
-    checks, reviews or merge state for a PR on a bead. The review keys packs
-    write are about the reviews their own runs make or ask for, such as the
-    `gascity` pack's `gc.github.review_outcome`.
+    reviews or merge state for a PR on a bead, or its checks on the bead that
+    owns the PR: the `pr-review` pack's `mol-pr-ci-diagnose` notes counts of a
+    PR's checks from `gh pr checks` on its own run's root, with no required
+    flag and no head (`pr-review/formulas/mol-pr-ci-diagnose.formula.toml`).
+    The review keys packs write are about the reviews their own runs make or
+    ask for, such as the `gascity` pack's `gc.github.review_outcome`.
   - In `gastownhall/beads`, `bd github sync` reads and writes issues, their
     sub-issues and blocking links, and their labels through bd's GitHub client
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
@@ -723,7 +729,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The

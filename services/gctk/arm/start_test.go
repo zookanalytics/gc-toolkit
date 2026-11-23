@@ -359,10 +359,10 @@ func exit3(live ...string) func(gascity.Sling) gascity.SlingResult {
 }
 
 // gc sling exits 3 only when a live workflow works the bead already, naming
-// each. One that is not an unfinished pour means the work is sent, so the arm
-// retires. When each is an unfinished pour, none of them can finish, so the arm
-// stays and a person is asked, naming each root and the command that closes it.
-// A named root the store does not hold leaves the arm for the next pass.
+// each. One that Gas City did not stamp as failed means the work is sent, so the
+// arm retires, whether or not Gas City still fences it. When each carries the
+// stamp, the attempt failed, so the arm stays with it counted and nobody is
+// asked. A named root the store does not hold leaves the arm for the next pass.
 func TestStartReadsExit3(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -375,17 +375,13 @@ func TestStartReadsExit3(t *testing.T) {
 		{name: "a live workflow that is working", live: []string{"r1"},
 			roots:  []fake.Bead{{ID: "r1", Status: "open"}},
 			action: arm.ActSent, says: "gc sling found r1 working it already"},
-		{name: "a root that failed part way", live: []string{"r1"},
-			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Metadata: map[string]string{"molecule_failed": "true"}}},
-			action: arm.ActAsk, kase: "unfinished", says: "r1 (it carries molecule_failed=true)"},
 		{name: "a root still fenced", live: []string{"r1"},
 			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Metadata: map[string]string{"gc.instantiating": "true"}}},
-			action: arm.ActAsk, kase: "unfinished", says: "still fenced"},
-		{name: "a root activated over a fenced step", live: []string{"r1"},
-			roots: []fake.Bead{{ID: "r1", Status: "open"},
-				{ID: "r1.s", Status: "open", IssueType: "gate", Metadata: map[string]string{"gc.root_bead_id": "r1", "gc.instantiating": "true"}}},
-			action: arm.ActAsk, kase: "unfinished", says: "fences r1.s under it"},
-		{name: "an unfinished pour beside a working one", live: []string{"r1", "r2"},
+			action: arm.ActSent, says: "gc sling found r1 working it already"},
+		{name: "a root that failed part way", live: []string{"r1"},
+			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Metadata: map[string]string{"molecule_failed": "true"}}},
+			action: arm.ActFail, kase: "sling", says: "naming only pours Gas City stamped as failed (r1), so the attempt failed, and it stays armed with 1 attempt(s) counted"},
+		{name: "a failed pour beside a working one", live: []string{"r1", "r2"},
 			roots: []fake.Bead{{ID: "r1", Status: "open", Metadata: map[string]string{"molecule_failed": "true"}},
 				{ID: "r2", Status: "open"}},
 			action: arm.ActSent, says: "found r2 working it"},
@@ -404,57 +400,64 @@ func TestStartReadsExit3(t *testing.T) {
 			w.rt.OnSling = exit3(tc.live...)
 			lines, _ := w.run(false)
 			act(t, lines, "b", tc.action, tc.kase, tc.says)
-			if got, want := w.armed("b"), tc.action != arm.ActSent; got != want {
-				t.Errorf("armed = %v, want %v", got, want)
+			sent := tc.action == arm.ActSent
+			if got := w.armed("b"); got == sent {
+				t.Errorf("armed = %v, want %v", got, !sent)
 			}
-			asks := w.rt.Scripts()
-			if tc.action == arm.ActAsk {
-				if len(asks) != 1 || asks[0].Name != "human-gate.sh" || !slices.Contains(asks[0].Args, "deferred-dispatch-sling-failed.b") ||
-					!strings.Contains(strings.Join(asks[0].Args, " "), "gc convoy delete r1 --force") {
-					t.Errorf("asks = %+v; want one gate naming the root and its close", asks)
-				}
-			} else if len(asks) != 0 {
+			if want := map[bool]string{true: "", false: "1"}[sent]; w.attempts("b") != want {
+				t.Errorf("attempts = %q, want %q", w.attempts("b"), want)
+			}
+			if asks := w.rt.Scripts(); len(asks) != 0 {
 				t.Errorf("asked %+v", asks)
 			}
+			readsUnder(t, w)
 		})
 	}
 }
 
+// readsUnder fails a test whose start read the beads poured under a root: the
+// start reads a root by its own stamp alone.
+func readsUnder(t *testing.T, w *world) {
+	t.Helper()
+	for _, q := range w.store.Finds() {
+		if q.Key == "gc.root_bead_id" {
+			t.Errorf("the start read the beads under a root: %+v", q)
+		}
+	}
+}
+
 // After an earlier attempt the start first searches the arm's token. A root
-// found there that is not an unfinished pour means that attempt landed,
-// whichever formula it poured, so the arm retires with no sling. An open
-// unfinished pour there keeps the arm and asks a person. A closed unfinished
-// pour holds nothing back, so the retry slings. A failure stamp under a root
-// does not make the root's own pour unfinished.
+// found there that Gas City did not stamp as failed means that attempt landed,
+// whichever formula it poured and whether or not Gas City still fences it, so
+// the arm retires with no sling. A root stamped as failed, open or closed, is
+// an attempt that failed, so the start slings again, and at the cap it asks a
+// person instead. A failure stamp on a bead under a root does not make the
+// root's own pour fail.
 func TestStartFindsAnEarlierAttemptByItsToken(t *testing.T) {
 	token := "arm:b@" + armedAt
 	for _, tc := range []struct {
-		name   string
-		roots  []fake.Bead
-		action string
-		kase   string
-		slung  bool
+		name     string
+		attempts string
+		roots    []fake.Bead
+		action   string
+		kase     string
+		slung    bool
 	}{
 		{name: "a root of another formula that landed",
 			roots:  []fake.Bead{{ID: "r1", Status: "closed", Title: "mol-other " + token}},
 			action: arm.ActSent},
-		{name: "an open root that failed part way",
-			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Title: "mol-x " + token, Metadata: map[string]string{"molecule_failed": "true"}}},
-			action: arm.ActAsk, kase: "unfinished"},
 		{name: "an open root still fenced",
 			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Title: "mol-x " + token, Metadata: map[string]string{"gc.instantiating": "true"}}},
-			action: arm.ActAsk, kase: "unfinished"},
-		{name: "an open root over a step still fenced",
-			roots: []fake.Bead{{ID: "r1", Status: "open", Title: "mol-x " + token},
-				{ID: "r1.s", Status: "open", IssueType: "gate", Metadata: map[string]string{"gc.root_bead_id": "r1", "gc.instantiating": "true"}}},
-			action: arm.ActAsk, kase: "unfinished"},
+			action: arm.ActSent},
+		{name: "an open root that failed part way",
+			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Title: "mol-x " + token, Metadata: map[string]string{"molecule_failed": "true"}}},
+			action: arm.ActStart, slung: true},
 		{name: "a closed root that failed part way",
 			roots:  []fake.Bead{{ID: "r1", Status: "closed", IssueType: "gate", Title: "mol-x " + token, Metadata: map[string]string{"molecule_failed": "true"}}},
 			action: arm.ActStart, slung: true},
-		{name: "a closed root over a step still fenced",
-			roots: []fake.Bead{{ID: "r1", Status: "closed", Title: "mol-x " + token},
-				{ID: "r1.s", Status: "open", IssueType: "gate", Metadata: map[string]string{"gc.root_bead_id": "r1", "gc.instantiating": "true"}}},
-			action: arm.ActStart, slung: true},
+		{name: "a root that failed part way, at the cap", attempts: "3",
+			roots:  []fake.Bead{{ID: "r1", Status: "open", IssueType: "gate", Title: "mol-x " + token, Metadata: map[string]string{"molecule_failed": "true"}}},
+			action: arm.ActAsk, kase: "cap"},
 		{name: "a root whose only marked bead under it failed",
 			roots: []fake.Bead{{ID: "r1", Status: "open", Title: "mol-x " + token},
 				{ID: "r1.f", Status: "open", Metadata: map[string]string{"gc.root_bead_id": "r1", "molecule_failed": "true"}}},
@@ -464,8 +467,12 @@ func TestStartFindsAnEarlierAttemptByItsToken(t *testing.T) {
 			action: arm.ActStart, slung: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			attempts := tc.attempts
+			if attempts == "" {
+				attempts = "1"
+			}
 			w := newWorld(t)
-			w.put(fake.Bead{ID: "b", Metadata: armedBead("mol-x", map[string]string{"gc.dispatch_when_ready_fail_count": "1"})})
+			w.put(fake.Bead{ID: "b", Metadata: armedBead("mol-x", map[string]string{"gc.dispatch_when_ready_fail_count": attempts})})
 			for _, r := range tc.roots {
 				w.put(r)
 			}
@@ -478,9 +485,10 @@ func TestStartFindsAnEarlierAttemptByItsToken(t *testing.T) {
 			if tc.slung && w.attempts("b") != "" {
 				t.Errorf("a landed retry left attempts %q", w.attempts("b"))
 			}
-			if tc.action == arm.ActAsk && (!w.armed("b") || w.attempts("b") != "1") {
+			if tc.action == arm.ActAsk && (!w.armed("b") || w.attempts("b") != attempts) {
 				t.Errorf("an ask left armed %v, attempts %q; want the arm as it was", w.armed("b"), w.attempts("b"))
 			}
+			readsUnder(t, w)
 		})
 	}
 	// A first attempt searches no token.

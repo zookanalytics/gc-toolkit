@@ -3,14 +3,16 @@ package prstatus
 import (
 	"slices"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // oneGate is one open human gate that holds the anchor, as [Facts.Gates] carries
 // it, and personOwed one bead a person owes the next move on, as [Facts.Owed]
 // carries it.
 var (
-	oneGate    = []Blocker{gate("g")}
-	personOwed = []Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
+	oneGate    = []person.Blocker{gate("g")}
+	personOwed = []person.Blocker{{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}}
 )
 
 // The precedence table, one row per case pr-status-label.test.sh asserts.
@@ -78,7 +80,7 @@ func TestHeld(t *testing.T) {
 
 		{"a bead a person owes", Facts{Owed: personOwed}, []Hold{HeldBlocked}},
 		{"…and holds whatever is in flight beside it", Facts{Owed: personOwed, InFlightCount: 2}, []Hold{HeldBlocked}},
-		{"two beads a person owes are one value", Facts{Owed: []Blocker{personOwed[0], {ID: "e", Title: "pick the reviewer", Status: "open", IssueType: "decision"}}}, []Hold{HeldBlocked}},
+		{"two beads a person owes are one value", Facts{Owed: []person.Blocker{personOwed[0], {ID: "e", Title: "pick the reviewer", Status: "open", IssueType: "decision"}}}, []Hold{HeldBlocked}},
 
 		{"a human gate and a bead a person owes stand together", Facts{Gates: oneGate, Owed: personOwed}, []Hold{HeldGate, HeldBlocked}},
 	} {
@@ -89,6 +91,38 @@ func TestHeld(t *testing.T) {
 			}
 			if len(got) > 0 && Derive(tc.f) != NeedsAttention {
 				t.Errorf("Held(%+v) = %v but Derive = %q, want needs-attention while any value stands", tc.f, got, Derive(tc.f))
+			}
+		})
+	}
+}
+
+// OwnAttention tells a PR whose needs-attention rests on the human gates and
+// the beads a person owes that hold it from one that reads needs-attention for
+// a reason of its own as well, which still stands once those beads are
+// answered.
+func TestOwnAttention(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		f    Facts
+		want bool
+	}{
+		{"an open human gate alone", Facts{Gates: oneGate}, false},
+		{"…on an approved PR", Facts{Gates: oneGate, PRPosture: "approved@oid@t"}, false},
+		{"a bead a person owes alone", Facts{Owed: personOwed}, false},
+		{"a human gate and a bead a person owes together", Facts{Gates: oneGate, Owed: personOwed}, false},
+		{"a human gate beside the merge freeze", Facts{Gates: oneGate, MergeHold: "true"}, true},
+		{"a bead a person owes beside the rebase hold", Facts{Owed: personOwed, RebaseHold: "true"}, true},
+		{"a human gate beside a posture outside its writer's vocabulary", Facts{Gates: oneGate, PRPosture: "dismissed@oid@t"}, true},
+		{"the merge freeze alone", Facts{MergeHold: "true"}, true},
+		{"a PR that waits only on its review", Facts{}, false},
+		{"an approved PR the city lands", Facts{PRPosture: "approved@oid@t"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OwnAttention(tc.f); got != tc.want {
+				t.Errorf("OwnAttention(%+v) = %v, want %v", tc.f, got, tc.want)
+			}
+			if OwnAttention(tc.f) && Derive(tc.f) != NeedsAttention {
+				t.Errorf("OwnAttention(%+v) holds but Derive = %q, want needs-attention", tc.f, Derive(tc.f))
 			}
 		})
 	}
