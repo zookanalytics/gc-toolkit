@@ -164,7 +164,10 @@ A block does more than make one call when it holds control flow (`if`, `elif`,
 or `||`) or more than one command. A sequence and a pipeline are more than one
 command, and so is a command substitution that holds more than one. A
 substitution that holds a single command is an argument of the command around
-it. A here-document's body is data when any part of its delimiter is quoted.
+it. A placeholder outside a quote, such as `<the PR's bead>` or
+`<approve|request-changes>`, is one word, since the agent writes a value in its
+place before the block runs. A here-document's body is data when any part of
+its delimiter is quoted.
 Otherwise the shell expands the body, and a substitution in it counts as one
 in an argument does.
 

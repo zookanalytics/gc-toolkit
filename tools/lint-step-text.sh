@@ -10,7 +10,9 @@
 # command. A sequence and a pipeline are more than one command, and so is a
 # command substitution that holds more than one. A substitution holding a
 # single command is an argument of the command around it, so
-# `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one call. A cd that &&
+# `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one call. A placeholder
+# outside a quote, such as <the PR's bead> or <approve|request-changes>, is one
+# word, since the agent writes a value in its place. A cd that &&
 # runs after a call weighs nothing, and neither does that &&: it moves the
 # agent's own shell once the call exits 0, which no script can do for its
 # caller. Between the markers of a gctk-bin block, an assignment to GCTK that
@@ -375,7 +377,8 @@ function heredoc_op(s, i,   j, n, tabs, d, c, q, lit) {
 # it opens. The context stack holds S '', E $'', D "", K ``, C $() <() >(),
 # P a ( inside C, A $(( )) or (( )), Q a ( inside A, Z ${ } and T [[ ]]. With
 # SCAN_BODY set, s is an expanding here-document's body, which the stack opens
-# as H: a D in which " is a plain character.
+# as H: a D in which " is a plain character. A PLACEHOLDER outside a quote is
+# one word.
 function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
     n = length(s); top = 0; out = ""; SN = 0; SHN = 0; subd = 0; at = 0
     if (SCAN_BODY) { st[1] = "H"; top = 1 }
@@ -404,6 +407,8 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
             j = index(substr(s, i), "\n")
             w = j ? j - 1 : n - i + 1
             if (k == "") { out = out blanks(w); i += w; continue }
+        } else if (c == "<" && (k == "" || k == "C" || k == "P" || k == "K") && match(substr(s, i), PLACEHOLDER)) {
+            w = RLENGTH
         } else if (c == "'") {
             st[++top] = "S"
         } else if (c == "\"") {
@@ -648,10 +653,14 @@ function rendered(s, lines,   first, t, c, n, tag) {
 # open in it.
 # CASE_IN is a case's own `in` on a line of its own, and CASE_LABEL a pattern
 # label: an optional (, one or more patterns joined by |, and the closing ).
+# PLACEHOLDER is a placeholder: a < and a letter, then the line's text up to the
+# next >, whose last character before it is no blank, so a redirection such as
+# `<in >out` is no placeholder.
 BEGIN {
     FS = "\034"
     CASE_IN = "^in([ \t\n]|$)"
     CASE_LABEL = "^[(]?[^ \t\n;&|()<>]+([|][^ \t\n;&|()<>]+)*[)]"
+    PLACEHOLDER = "^<[A-Za-z]([^<>\n]*[^<>\n \t])?>"
 }
 $1 == "S" { print; next }
 $1 == "T" { stepn = $2 + 0; next }

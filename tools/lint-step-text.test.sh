@@ -5,10 +5,11 @@
 # The defects it guards against: a single script call read as a procedure (a
 # substitution in an argument, the body of a here-document whose delimiter is
 # quoted, a quoted separator, a redirection, a TOML-escaped continuation or
-# quote, the gctk-bin block before a gctk call), a procedure read as a single
-# call (a pipeline, a sequence, a substitution holding a pipeline, && or ||, a
-# substitution an expanding here-document's body runs, a command inside the
-# gctk-bin markers), step text left unread (a TOML string of any kind wherever
+# quote, the gctk-bin block before a gctk call, a placeholder that names
+# alternatives), a procedure read as a single call (a pipeline, a sequence, a
+# substitution holding a pipeline, && or ||, a substitution an expanding
+# here-document's body runs, a command inside the gctk-bin markers, a command
+# after a placeholder that holds an apostrophe), step text left unread (a TOML string of any kind wherever
 # it sits, an edit inside a here-document's body, a block fenced with tildes, a
 # longer run or a capitalized language, a block a fence line inside it cut
 # short, a block inline code at a line's start hid), skill text left unread (a
@@ -148,6 +149,10 @@ expect 0 "a new step whose block is one call, separators quoted: exit 0"
 with_step new "$(block '"$(gc gc-toolkit scripts-dir)/new.sh" --bead "$X" 2>&1 >/dev/null')" > "$REPO/$F"
 run_lint "$F"
 expect 0 "a substitution holding one command and redirections stay one call: exit 0"
+
+with_step new "$(block "\"\$(gc gc-toolkit scripts-dir)/new.sh\" --check <test|lint|build> --bead <the PR's bead>")" > "$REPO/$F"
+run_lint "$F"
+expect 0 "placeholders, one naming alternatives and one with an apostrophe, are words of one call: exit 0"
 
 # The gctk-bin block sets GCTK to the one tested line, so a block that holds it
 # and one gctk call is one call. Between the markers, only an assignment to
@@ -588,9 +593,9 @@ expect 1 "a new sub-pack formula's procedure: exit 1" "the new step new"
 # A skill's Markdown is weighed as step text is, with the skill, named by its
 # directory, as the step: all its files together, and every skill file the
 # change names in one pass, so a block pairs with its old self wherever it now
-# sits. Here main's skill makes one call and holds one old procedure in its
-# SKILL.md and another in a reference, and a doc page outside any skill holds a
-# third.
+# sits. Here main's skill makes one call, whose placeholder names alternatives,
+# and holds one old procedure in its SKILL.md and another in a reference, and a
+# doc page outside any skill holds a third.
 SK=skills/s/SKILL.md
 MORE=skills/s/references/more.md
 OLD_PROC='```bash
@@ -605,7 +610,7 @@ gc bd list --json | jq length
 
 base_skill() {
   printf -- '---\nname: s\ndescription: A test skill.\n---\n\n# S\n\n## Call\n\nRun the call:\n'
-  block '"$(gc gc-toolkit scripts-dir)/one.sh" --bead "$X"'
+  block '"$(gc gc-toolkit scripts-dir)/one.sh" --bead "$X" --verdict <approve|request-changes>'
   printf '\n\n## Old\n\nThe old procedure:\n%s\n' "$OLD_PROC"
 }
 
@@ -709,6 +714,41 @@ skill_reset
 skill_with_old "" > "$REPO/$SK"
 run_lint "$SK"
 expect 0 "a skill edit that only removes: exit 0" "1 skill file(s), no procedure added"
+
+# A placeholder outside a quote is one word, since the agent writes a value in
+# its place: a | between its alternatives is no pipe, and an apostrophe in it
+# opens no quote.
+skill_reset
+new_skill skills/t "$(block '"$(gc gc-toolkit scripts-dir)/two.sh" --bead "$X" --verdict <approve|request-changes>')"
+run_lint skills/t/SKILL.md
+expect 0 "a new skill whose one call names alternatives in a placeholder: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+new_skill skills/t "$(block "gc bd show <the PR's bead> --json
+gc bd show \"\$Y\"")"
+run_lint skills/t/SKILL.md
+expect 1 "an apostrophe in a placeholder hides no command after it: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block "K=\$(\"\$S/key.sh\" --bead <the PR's bead>)
+gc bd show \"\$K\"")"
+run_lint skills/t/SKILL.md
+expect 1 "an apostrophe in a placeholder inside a substitution hides no command after it: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block 'sort <in.txt | uniq >out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "a redirection is no placeholder, so a pipe between its < and a later > counts: exit 1" "with 2 commands\. "
+
+# Main's one call names alternatives in a placeholder, so it weighs nothing, and
+# a change that rewrites it into a procedure gains one.
+skill_reset
+base_skill | sed 's#^"\$(gc gc-toolkit scripts-dir)/one.sh" .*$#gc bd show "$X" | jq -r .title#' > "$REPO/$SK"
+grep -qx 'gc bd show "$X" | jq -r .title' "$REPO/$SK" && ok "the rewrite fixture replaces main's one call" \
+  || bad "the rewrite fixture replaces main's one call"
+run_lint "$SK"
+expect 1 "a one call whose placeholder names alternatives, rewritten into a procedure: exit 1" \
+  "skill skills/s gains shell blocks that do more than call a script, with 2 commands\. "
 
 # A skill is weighed whole, so a procedure that leaves one of its files pays
 # for a lighter one that another of its files gains.
