@@ -313,29 +313,6 @@ func contractOf(b bead) *Contract {
 	}
 }
 
-// askID is the ask a bead stands in: a conversation that answers a gate stands
-// in the gate's ask, the first of its replies when it answers more than one,
-// then one that answers the decision it tracks stands in the decision's ask
-// while the decision is one, and any other ask stands in its own. It is empty
-// for a bead that is no ask.
-func (bt *built) askID(id string) string {
-	if bt.ix.kinds[id] == KindConversation {
-		subject, replies, _ := conversation.Shape(conversationEdges(bt.ix.beads[id]))
-		for _, g := range replies {
-			if bt.ix.answeredBy[g] == id {
-				return g
-			}
-		}
-		if _, ok := bt.asks[subject]; ok && bt.ix.kinds[subject] == KindDecision && bt.ix.answeredBy[subject] == id {
-			return subject
-		}
-	}
-	if _, ok := bt.asks[id]; ok {
-		return id
-	}
-	return ""
-}
-
 // isWork reports whether a row is work a Work queue lists: an open piece of
 // work that is not held for the Product Owner.
 func (bt *built) isWork(id string) bool {
@@ -402,30 +379,21 @@ func (bt *built) linkWaits() {
 }
 
 // linkHolds fills the beads each need holds through any chain of waits, each
-// row whose Holding answer names the need. held takes every one of them,
-// whatever its kind and work held for the Product Owner included, since whether
-// a need counts reads every bead it holds. A need's Holds, the list the board
-// draws beneath it, takes each piece of work, epic and Delivery among them, in
-// the Work queue's order, less work held for the Product Owner.
+// row that stands beneath the need, as standing answers it (Reading.Beneath).
+// held takes every one of them, whatever its kind and work held for the Product
+// Owner included, since whether a need counts reads every bead it holds. A
+// need's Holds, the list the board draws beneath it, takes each piece of work,
+// epic and Delivery among them, in the Work queue's order, less work held for
+// the Product Owner.
 func (bt *built) linkHolds() {
 	ix := bt.ix
 	for _, id := range ix.rows {
-		hold, ok := ix.g.reading.Holding(id)
-		if !ok {
-			continue
-		}
 		k := ix.kinds[id]
 		listed := (k == KindWork || k == KindEpic || k == KindDelivery) && !bt.forProductOwner(id)
-		for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
-			a := bt.askID(x.ID)
-			if a == "" || a == id {
-				continue
-			}
-			if !slices.Contains(bt.held[a], id) {
-				bt.held[a] = append(bt.held[a], id)
-			}
-			ar := bt.rows[a]
-			if listed && !slices.Contains(ar.Holds, id) {
+		for _, a := range ix.g.reading.Beneath(id) {
+			bt.held[a] = append(bt.held[a], id)
+			if listed {
+				ar := bt.rows[a]
 				ar.Holds = append(ar.Holds, id)
 				bt.rows[a] = ar
 			}
