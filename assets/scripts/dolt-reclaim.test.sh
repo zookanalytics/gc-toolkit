@@ -87,6 +87,10 @@ esac
 STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
+export STUB_DOLT_ROOT
+# The city must come from the stubbed `gc service list`, never the ambient
+# session, so every gc call the script makes is the stub's to answer.
+unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
 
 # --- the test's clock --------------------------------------------------------
 # A run with $TMP/clock first on PATH reads `date +%s` from CLOCK_FILE, which
@@ -100,10 +104,6 @@ if [ "\$*" = "+%s" ] && [ -f "\${CLOCK_FILE:-}" ]; then cat "\$CLOCK_FILE"; else
 CLOCK
 chmod +x "$TMP/clock/date"
 export CLOCK_FILE="$TMP/clock/now"
-export STUB_DOLT_ROOT
-# The city must come from the stubbed `gc service list`, never the ambient
-# session, so every gc call the script makes is the stub's to answer.
-unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
 
 # --- fixtures ----------------------------------------------------------------
 # make_db <name> <noms_bytes>: a database dir with a noms file of that size.
