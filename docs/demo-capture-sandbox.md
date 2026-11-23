@@ -70,6 +70,16 @@ A process inside the sandbox:
   the session's environment names, and every rig's checkout. It reads and
   writes the rig worktree it runs from and the directories the capture names,
   and it reads the engine's checkout.
+- cannot list or read the contents of the home folders, or write in them, but
+  for the parts its tools need. The home folders are the session's own and the
+  user's, which the system's user record names and which holds the home of
+  each agent a host keeps inside it. Tools keep their credentials there, such
+  as the GitHub CLI's token, an agent's sign-in, SSH keys and the supervisor's
+  service file. A process reads each Node on its `PATH`, Playwright's browsers
+  and Go's own files, and it reads and writes the caches of npm, the engine and
+  Go. Its git reads none of the user's settings. Of the directories and files
+  the capture names, it reaches one in a home folder only when it lies in a rig
+  worktree.
 - cannot connect to a loopback port it was not given, so the supervisor's API,
   the Dolt server and every agent session's own port do not answer it. A run is
   given its own port, or the three an iOS app run's servers use. A copy is
@@ -81,27 +91,34 @@ A process inside the sandbox:
   `GC_*`, `GT_*`, `BEADS_*`, `BD_*`, `DOLT_*`, `TMUX` and `TMUX_PANE`.
 
 A capture also refuses, before anything starts, a run it cannot keep to those
-rules. Examples are a working directory that holds the city's, a server already
-listening on the port it would open, a `--base-url` on this host that neither a
-copy nor a worktree of a rig whose `app_reads_city` is `"false"` serves, and a
-copy that runs outside the sandbox its rig now keeps. The library's header
-lists every such refusal.
+rules. Examples are a working directory that holds the city's or a home folder,
+an output or a `--cwd` that lies in a home folder outside any rig worktree, a
+server already listening on the port it would open, a `--base-url` on this
+host that neither a copy nor a worktree of a rig whose `app_reads_city` is
+`"false"` serves, and a copy that runs outside the sandbox its rig now keeps.
+The library's header lists every such refusal.
 
 ## What it lets through
 
 - **The internet.** Any remote host answers, such as the package registries a
   start command installs from, GitHub, and the speech service a narrated clip
   uses.
-- **Files outside the city's directories.** A process can read and write the
-  rest of the disk the session's user can, including the home folder of the
-  session that runs the capture. That folder holds the credentials tools keep
-  there, such as the GitHub CLI's `~/.config/gh/hosts.yml`, Claude Code's
-  `~/.claude/.credentials.json` and `~/.ssh`. The other agents' home folders,
-  and the files in them, are open to it as well.
-- **Other processes' arguments and environment.** macOS lets a process read
-  those of every process its user runs, inside the sandbox too, so a capture can
-  read the environment of the city's own `gc` process and of every agent
-  session.
+- **Files outside the city's directories and the home folders.** A process can
+  read and write the rest of the disk the session's user can, such as the
+  system's temporary folders.
+- **The tools' caches in the home folders.** A process writes the caches of
+  npm, the engine and Go, which the session's own tools read later.
+- **Keys in its own environment.** The engine, a terminal capture's commands
+  and a copy's serve command start with the environment of the session that
+  runs the capture, less the variables that point at the city, so they hold
+  keys the supervisor hands sessions, such as the speech service's.
+- **Other processes' arguments and environment.** macOS gives a process those
+  of every process its user runs, through `sysctl`'s `KERN_PROCARGS2`, under
+  any sandbox profile, and `launchctl print` shows it the environment launchd
+  gives a job, such as the supervisor's. So a capture can read the environment
+  of the engine, of the city's own `gc` processes and of every agent session,
+  with the keys they carry: those the supervisor hands sessions, the Dolt
+  server's password and the sessions' own tokens.
 - **The system's services.** What macOS reaches through Mach and XPC stays open,
   such as the simulator service that runs an iOS app outside the sandbox.
 
@@ -118,22 +135,23 @@ ports or its sockets.
 
 Such a capture still starts without the variables that point a command at the
 city, so nothing in its environment names this session's city, store or tmux.
-It takes each refusal the library's header lists but the first and the last: a
+It takes each refusal the library's header lists for a run with no sandbox: a
 `--base-url` on this host must still name a copy, or a server a worktree of a
 rig whose `app_reads_city` is `"false"` serves.
 
 ## Look for yourself
 
 Any command runs in a copy's sandbox, with the loopback port it may reach as
-the first argument, from a directory that holds none of the city's and that no
-rig holds, such as `/tmp`. This one lists `~/.ssh` from inside it:
+the first argument, from a directory that holds none of the city's, holds no
+home folder and that no rig holds, such as `/tmp`. This one lists `~/.ssh` from
+inside it:
 
 ```bash
 cd /tmp && bash -c '. "$(gc gc-toolkit scripts-dir)/demo-engine-lib.sh" && demo_engine_sandboxed 5999 "$PWD" "$@"' _ ls ~/.ssh
 ```
 
-A read the sandbox refuses prints `Operation not permitted`, as `cat` of the
-city's `city.toml` does there. Run from a worktree of a rig whose
-`app_reads_city` is `"false"`, with that worktree in place of `/tmp`, the same
-call says the command runs as an ordinary process, and `cat` prints
-`city.toml`.
+A read the sandbox refuses prints `Operation not permitted`, as the listing of
+`~/.ssh` and `cat` of the city's `city.toml` do there. Run from a worktree of a
+rig whose `app_reads_city` is `"false"`, with that worktree in place of `/tmp`,
+the same call says the command runs as an ordinary process, the listing shows
+`~/.ssh`, and `cat` prints `city.toml`.

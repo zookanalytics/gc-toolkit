@@ -289,7 +289,11 @@ case "$*" in
   *) exit 1 ;;
 esac
 LSOF
-chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$TMP/bin/npx" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof"
+# id answers -P with the record of a user whose home is $TMP/home, the runs'
+# HOME, as macOS's id does, because a capture refuses to run when no record
+# names the user's home. Any other call goes to the system's id.
+printf '%s\n[ "${1:-}" = -P ] || exec /usr/bin/id "$@"\necho "me:********:501:20::0:0:me:%s:/bin/bash"\n' "$SHEBANG" "$TMP/home" > "$TMP/bin/id"
+chmod +x "$TMP/bin/engine" "$TMP/bin/sandbox-exec" "$TMP/bin/node" "$TMP/bin/npx" "$CITY/.gc/services/gctk/bin/gctk" "$TMP/bin/lsof" "$TMP/bin/id"
 # gc adds the rig list the sandbox denies by, and the rig's formula vars, whose
 # ui_serve_command is FAKE_UI_SERVE and whose app_reads_city is FAKE_READS_CITY,
 # each unset when it is empty.

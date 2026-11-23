@@ -10,9 +10,9 @@
 # stubs — no host node, npx, gc, or sprintshow — so nothing touches the network
 # or the real engine, and each case plants exactly the install result, lint
 # result, run result, and output-file outcome it means to exercise. A
-# sandbox-exec stub runs the engine it is handed, and a node stub answers the
-# library's port pick and port check; demo-engine-lib.test.sh checks the
-# sandbox itself.
+# sandbox-exec stub runs the engine it is handed, a node stub answers the
+# library's port pick and port check, and an id stub names the user's home;
+# demo-engine-lib.test.sh checks the sandbox itself.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,7 +161,12 @@ case "$*" in
   *) exit 1 ;;
 esac
 LSOF
-chmod +x "$SBX/sandbox-exec" "$SBX/node" "$SBX/gctk" "$SBX/lsof"
+# id answers -P with the record of a user whose home holds none of the
+# fixtures, as macOS's id does, because a capture refuses to run when no record
+# names the user's home.
+mkdir -p "$ETMP/home"
+printf '#!/usr/bin/env bash\n[ "${1:-}" = -P ] || exit 64\necho "me:********:501:20::0:0:me:%s:/bin/bash"\n' "$ETMP/home" >"$SBX/id"
+chmod +x "$SBX/sandbox-exec" "$SBX/node" "$SBX/gctk" "$SBX/lsof" "$SBX/id"
 for c in git jq; do
   p="$(command -v "$c")" || { echo "test setup: required tool '$c' not found" >&2; exit 2; }
   ln -s "$p" "$SBX/$c"
