@@ -696,7 +696,7 @@ run_lint "$SK"
 expect 1 "an edit that adds a command to a skill's procedure: exit 1" \
   "in skill skills/s, the shell blocks that do more than call a script grow from 3 commands and 1 control-flow construct to 4 commands and 1 control-flow construct"
 line=$(grep -n '^  gc runtime drain-ack$' "$REPO/$SK" | cut -d: -f1)
-printf '%s\n' "$OUT" | grep -q "^$SK:$line: skill text gains a procedure" \
+grep -q "^$SK:$line: skill text gains a procedure" <<< "$OUT" \
   && ok "the finding names the skill file and the line the change adds" \
   || bad "the finding names the skill file and the line the change adds (want $SK:$line): $OUT"
 
@@ -724,7 +724,7 @@ expect 1 "the lighter procedure alone, its trade unnamed, weighs: exit 1" \
 
 skill_reset
 skill_with_old "" | BLOCK="$OLD_PROC" awk '/^Run the call:$/ { print ENVIRON["BLOCK"] } { print }' > "$REPO/$SK"
-grep -c '^A=\$(gc bd show' "$REPO/$SK" | grep -qx 1 && ok "the section-move fixture holds the procedure once" \
+[ "$(grep -c '^A=\$(gc bd show' "$REPO/$SK")" = 1 ] && ok "the section-move fixture holds the procedure once" \
   || bad "the section-move fixture holds the procedure once"
 run_lint "$SK"
 expect 0 "a block moved unedited to another section of its skill: exit 0" "1 skill file(s), no procedure added"
