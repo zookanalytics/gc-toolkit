@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # finalize-gate.sh — the composable "may this bead be finalized?" precondition set.
 #
-# Finalizing a bead is the terminal, hard-to-reverse act on it: merging its PR
-# (merge.sh) or closing the bead with its successor (bead-rehome.sh, which asks
-# before it writes anything). This gate is the single place
+# Finalizing a bead is the terminal, hard-to-reverse act on it: closing the bead
+# with its successor (bead-rehome.sh, which asks before it writes anything), or
+# closing an epic's Delivery or the epic itself at its review. This gate is the
+# single place
 # that answers, for one bead, whether every precondition for that act holds. It
 # is a SET of independent clauses run in order; the first to refuse stops the set
 # and names why. The clauses are no-open-human-gate and epic-ruling-recorded (an
@@ -16,14 +17,13 @@
 # the bead's finalization. A bead's human gates are the beads its `blocks` edges
 # reach whose issue_type is `gate` and whose await_type is `human`, read by
 # bd_human_gates in bd-lib.sh, the one read every reader of them makes. bd
-# already refuses an unforced close of a blocked bead, and gctk merge holds on a
-# live blocker, so the clause states the gate's hold as an explicit
-# precondition: a close path that passes --force skips bd's refusal. A gate
-# blocks only the beads whose edges reach it, so the clause holds this bead
-# alone and reads nothing of its children. A conversation is no human gate, so
-# the clause leaves it out: one on an open PR blocks the PR's anchor until it
-# closes, and bd's refusal and gctk merge's hold on a live blocker hold the
-# merge on it.
+# already refuses an unforced close of a blocked bead, and the landing order's
+# evaluator holds a PR's merge on each wait of its bead, so the clause states
+# the gate's hold as an explicit precondition: a close path that passes --force
+# skips bd's refusal. A gate blocks only the beads whose edges reach it, so the
+# clause holds this bead alone and reads nothing of its children. A
+# conversation is no human gate, so the clause leaves it out: one on an open PR
+# holds the PR's merge through the landing order's evaluator.
 #
 # One exception, named by the caller: --except-key <situation-key> is the key
 # under which that caller files, through human-gate.sh, its report of a refused
@@ -112,8 +112,8 @@ clause_no_open_human_gate() {
 # the clause passes unruled, because its epic carries the ruling. A non-epic
 # bead passes untouched. FAIL CLOSED: an unreadable probe refuses.
 #
-# merge.sh finalizes merge anchors, and bead-rehome.sh, which disposes of the
-# epic, asks with <as-disposed> set, so neither reaches an undisposed epic. A
+# bead-rehome.sh, which disposes of the epic, asks with <as-disposed> set, so it
+# never reaches an undisposed epic. A
 # review of an epic (skills/converse-epic-review) runs the gate on each
 # Delivery it closes and, once it has recorded the close ruling, on the epic.
 # A bare `gc bd close` runs no gate, and
@@ -124,8 +124,8 @@ clause_no_open_human_gate() {
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     _fgr_as_disposed="${2:-}"
-    # This probe runs for EVERY finalize (every merge.sh and bead-rehome.sh close,
-    # epic or not). bd_json carries the strip of the `gc bd:` rig-store notice and
+    # This probe runs for EVERY finalize (every bead-rehome.sh close, epic or
+    # not). bd_json carries the strip of the `gc bd:` rig-store notice and
     # the C0 scrub a `gc bd --json` read needs (bead-context.sh); empty output is an
     # unreadable read (bd_json cannot signal a non-zero rc through its scrub), read
     # here as fail-closed — the act this guards cannot be taken back.
@@ -197,10 +197,10 @@ clause_epic_ruling_recorded() {
 # set.
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
-    # Every clause reads the store as it stands now, because merge.sh re-asserts
-    # this gate in the terminal window to catch a gate filed after its first
-    # check. A refinery pass memoizes bd_list (GC_RECONCILE_BD_CACHE, bd-lib.sh),
-    # so the memo is off for every clause's reads.
+    # Every clause reads the store as it stands now, because the act this gate
+    # guards cannot be taken back. A refinery pass memoizes bd_list
+    # (GC_RECONCILE_BD_CACHE, bd-lib.sh), so the memo is off for every clause's
+    # reads.
     local GC_RECONCILE_BD_CACHE=""
     clause_no_open_human_gate "$1" "${2:-}" || return 1
     clause_epic_ruling_recorded "$1" "${3:-}" || return 1

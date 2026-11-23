@@ -298,10 +298,9 @@ closes with its work record: shipped with the commit of the run's must-fix
 ruling of it, else no-op. At an exhausted loop it asks a person through a
 review-loop-exhausted gate on the bead (human-gate.sh), and it closes each
 person's finding whose ask closed (finding.sh close-answered), both from the
-scripts directory GCTK_SCRIPTS_DIR names. A shadow run (its shadow var reads true) writes and files nothing, and
-the command prints what it would have written. A record that does not land
-exits 75, so Gas City runs the check again without spending an attempt, and the
-retry replaces the same entry.
+scripts directory GCTK_SCRIPTS_DIR names. A record that does not land exits 75,
+so Gas City runs the check again without spending an attempt, and the retry
+replaces the same entry.
 
 It reads only the store, which is all a check's PATH reaches. It prints the
 verdict and each reason the iteration did not pass, with --explain the
@@ -422,8 +421,6 @@ func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io
 	switch {
 	case got.Result == nil:
 		fmt.Fprintf(stdout, "%s: no result: %s\n", got.Bead, got.NoResult)
-	case got.Shadow:
-		fmt.Fprintf(stdout, "%s: shadow run, nothing written: the result would read %s\n", got.Bead, got.Result)
 	default:
 		fmt.Fprintf(stdout, "%s: review %s\n", got.Bead, got.Result)
 	}
@@ -431,23 +428,11 @@ func (r *recorder) record(l *ledger.Ledger, v *review.Verdict, stdout, stderr io
 		fmt.Fprintf(stdout, "%s: gate %s is open\n", got.Bead, g)
 	}
 	for _, a := range got.Closed {
-		verb := "closed"
-		if got.Shadow {
-			verb = "would close"
-		}
-		fmt.Fprintf(stdout, "%s: %s ask %s, %s (%s%s)\n", got.Bead, verb, a.ID, a.Ruling, a.Outcome, commitSuffix(a.Commit))
+		fmt.Fprintf(stdout, "%s: closed ask %s, %s (%s%s)\n", got.Bead, a.ID, a.Ruling, a.Outcome, commitSuffix(a.Commit))
 	}
-	switch {
-	case got.Result == nil || !got.Exhausted:
-	case got.Shadow:
-		fmt.Fprintf(stdout, "%s: shadow run, nothing filed: the loop exhausted its attempts at %s, which asks a person through a %s gate\n",
-			got.Bead, got.Result.Head, review.LoopExhaustedKey)
-	default:
+	if got.Result != nil && got.Exhausted {
 		fmt.Fprintf(stdout, "%s: the loop exhausted its attempts at %s, so a person is asked through a %s gate\n",
 			got.Bead, got.Result.Head, review.LoopExhaustedKey)
-	}
-	if got.Shadow {
-		return 0
 	}
 	// A person's comment is a human finding until tk-1tfzr71.21 gives it its
 	// new form, and its ask closing above is what lets it close.
@@ -472,13 +457,19 @@ a task bead with no parent, no route and no assignee, which blocks the bead by
 its own edge, names the PR's branch in branch, carries --reason as its
 description, a discovered-from edge onto --source when one is named, and the
 checks it sends back in review_checks, each from the check index at the head the
-refinery validated.
+refinery validated. It waits on each --waiting-on bead by its own blocks edge,
+written in the create that files it, so no run takes it before that bead
+closes.
 
 Before it files, it finds an ask on the bead of the same source and reason,
 open or closed, and files nothing when one stands, so a filer that runs again
 after its ask closed files nothing. It refuses a bead that owns no PR on the
-record, and a check the index does not declare. It prints <ask> filed, or
-<ask> found.
+record, or that does not carry the id prefix its store gives the ask, a check
+the index does not declare, a --waiting-on bead whose edge would hold nothing,
+and an ask it finds that does not wait on every --waiting-on bead. An edge
+holds nothing onto a bead the bead's own store does not hold, and between two
+beads of different id prefixes, which bd keeps as an edge into another store
+even when this store holds both. It prints <ask> filed, or <ask> found.
 
 exit: 0 the ask stands: filed, or found
       1 usage
@@ -488,9 +479,9 @@ exit: 0 the ask stands: filed, or found
 
 func newReviewAskCmd(stdout, stderr io.Writer) *cobra.Command {
 	var db, reason, source string
-	var checks []string
+	var checks, waits []string
 	cmd := &cobra.Command{
-		Use:         "ask <bead> --reason <text> [--check <name>]... [--source <bead>]",
+		Use:         "ask <bead> --reason <text> [--check <name>]... [--source <bead>] [--waiting-on <bead>]...",
 		Short:       "file an ask on the bead that owns a PR, for its review run to work",
 		Long:        reviewAskLong,
 		Args:        cobra.ExactArgs(1),
@@ -508,13 +499,19 @@ func newReviewAskCmd(stdout, stderr io.Writer) *cobra.Command {
 					return fmt.Errorf("--check %q is not a check's name ([A-Za-z0-9_-]+)", c)
 				}
 			}
-			req := review.AskRequest{Bead: bead, Reason: reason, Source: strings.TrimSpace(source), Checks: checks}
+			for _, w := range waits {
+				if strings.TrimSpace(w) == "" {
+					return errors.New("--waiting-on names the bead the ask waits on")
+				}
+			}
+			req := review.AskRequest{Bead: bead, Reason: reason, Source: strings.TrimSpace(source), Checks: checks, WaitingOn: waits}
 			return exit(reviewAsk(req, db, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "what the ask asks, and why")
 	cmd.Flags().StringArrayVar(&checks, "check", nil, "a check the ask sends back, once per check")
 	cmd.Flags().StringVar(&source, "source", "", "the bead whose ruling or finding the ask carries")
+	cmd.Flags().StringArrayVar(&waits, "waiting-on", nil, "a bead of the same id prefix, in the same store, that must close before a run takes the ask, once per bead")
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the bead to")
 	return cmd
 }

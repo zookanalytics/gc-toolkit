@@ -22,7 +22,7 @@ worktree there at the head the round judged or past it is kept as it stands,
 with its commits and its uncommitted edits, which the repair's read prints, and
 one at any other commit is refused and kept, which stops the run.
 
-On a rig not yet cut over, a review bead reads its pinned commit in a detached
+On the old review path, a review bead reads its pinned commit in a detached
 worktree and runs there any suite its check calls for. It writes its verdict
 body and its finding set beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
 them from there. A quorum lane writes no file: the block that stores its lane

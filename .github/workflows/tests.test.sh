@@ -44,8 +44,7 @@
 # (internal/host in gctk, and suites' cases), flock (the pr package's lock
 # test, and the scripts that lock with it) and tmux (tmux-intake-prompt's
 # case), with bash 5 and jq 1.8 checked by version (the board's tests that
-# answer from the stub store, stubStore in services/helm/internal/rigboard and
-# TestPendingWaitsAreTheWaitsPackagesAnswer in services/helm/internal/source,
+# answer from the stub store, stubStore in services/helm/internal/rigboard,
 # need both).
 #
 # Main's ruleset requires a check for every job here, by the job's id, and

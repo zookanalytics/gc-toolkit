@@ -291,13 +291,13 @@ printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 # because the data plane is a binary a build order publishes. Nothing in arms 1
 # and 2 can see that, nor a binary that was never published at all.
 #
-# lifecycle.sh and merge.sh exec the binary and have no other implementation,
-# so a missing one is an error: every lifecycle transition and every merge pass
-# is refused until one lands.
+# lifecycle.sh and epic.sh exec the binary and have no other implementation,
+# so a missing one is an error: every lifecycle write and every epic the work
+# skill files is refused until one lands.
 OUT=$(GCTK_BIN="$TMP/no-such-gctk" run_check); RC=$?
-eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh and merge.sh have nothing else to exec"
+eq "$RC" "2" "no deployed binary is an ERROR — lifecycle.sh and epic.sh have nothing else to exec"
 has "$OUT" "no binary at $TMP/no-such-gctk" "the finding names where the binary should be"
-has "$OUT" "every lifecycle transition and every merge pass is refused" "…what stops without it"
+has "$OUT" "every lifecycle write and every epic the work skill files is refused" "…what stops without it"
 has "$OUT" "gctk-build" "…and the order that publishes it"
 
 gctk_stub "$PACK_REV"
@@ -460,6 +460,69 @@ EOF
 OUT=$(ORDERS_JSON="$TMP/orders-nocity.json" CITY_DIR="$TMP/city-skip" run_check); RC=$?
 eq "$RC" "0" "an order in the [orders] skip list is a NOTE, not an error"
 has "$OUT" "citywide: deliberately disabled" "the skipped order is noted"
+
+# --- 10b. an order the pack ships disabled runs only where city.toml turns it on --
+# Gas City drops a disabled order before it registers any instance, so an order
+# shipped with `enabled = false` is missing from `gc order list` wherever the
+# config leaves it off. There the absence is the pack's default, a NOTE, and a
+# rig the config turns it on for is judged like any other order's.
+cat > "$TMP/pack/orders/offbydefault.toml" <<'EOF'
+[order]
+trigger = "cooldown"
+interval = "1h"
+scope = "rig"
+enabled = false
+EOF
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an order shipped disabled and turned on nowhere is not a missing registration"
+has "$OUT" "offbydefault: ships disabled, and city.toml does not turn it on for rig alpha" "its absence on alpha is the pack's default"
+has "$OUT" "offbydefault: ships disabled, and city.toml does not turn it on for rig beta" "and on beta"
+hasnt "$OUT" "offbydefault: rig" "and no rig reads as missing it"
+
+mkdir -p "$TMP/city-off-on-beta"
+cat > "$TMP/city-off-on-beta/city.toml" <<'EOF'
+[[orders.overrides]]
+name = "offbydefault"
+rig = "beta"
+enabled = true
+EOF
+OUT=$(CITY_DIR="$TMP/city-off-on-beta" run_check); RC=$?
+eq "$RC" "2" "a rig city.toml turns a shipped-disabled order on for, with no registration there, is an ERROR"
+has "$OUT" "offbydefault: rig beta imports this pack but has NO registration" "the gap the config does not explain is named"
+has "$OUT" "offbydefault: ships disabled, and city.toml does not turn it on for rig alpha" "while the rig it stays off on is a note"
+
+cat > "$TMP/orders-off-on-beta.json" <<'EOF'
+{"orders":[
+  {"name":"tick","rig":"alpha"},{"name":"tick","rig":"beta"},
+  {"name":"gated","rig":"alpha"},{"name":"gated","rig":"beta"},
+  {"name":"citywide","rig":""},
+  {"name":"offbydefault","rig":"beta"}]}
+EOF
+printf '{"entries":[{"rig":"beta"}]}' > "$TMP/hist/offbydefault.json"
+OUT=$(ORDERS_JSON="$TMP/orders-off-on-beta.json" CITY_DIR="$TMP/city-off-on-beta" run_check); RC=$?
+eq "$RC" "0" "turned on, registered and firing where the config says is OK"
+printf '{"entries":[]}' > "$TMP/hist/offbydefault.json"
+OUT=$(ORDERS_JSON="$TMP/orders-off-on-beta.json" CITY_DIR="$TMP/city-off-on-beta" run_check); RC=$?
+eq "$RC" "2" "turned on and registered, an order that stopped firing is still an ERROR"
+has "$OUT" "offbydefault: registered on rig beta but has NOT fired" "the stall is named"
+
+# A city-scoped order shipped disabled is expected only once an override turns it on.
+cat > "$TMP/pack/orders/offbydefault.toml" <<'EOF'
+[order]
+trigger = "cooldown"
+interval = "1h"
+scope = "city"
+enabled = false
+EOF
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a city-scoped order shipped disabled and turned on nowhere is a NOTE"
+has "$OUT" "offbydefault: ships disabled, and city.toml does not turn it on —" "the city-wide default is named"
+mkdir -p "$TMP/city-off-on"
+printf '[[orders.overrides]]\nname = "offbydefault"\nenabled = true\n' > "$TMP/city-off-on/city.toml"
+OUT=$(CITY_DIR="$TMP/city-off-on" run_check); RC=$?
+eq "$RC" "2" "turned on city-wide with no registration, it is an ERROR"
+has "$OUT" "offbydefault: scope=\"city\" order has NO live registration anywhere" "the gap is named"
+rm -f "$TMP/pack/orders/offbydefault.toml" "$TMP/hist/offbydefault.json"
 
 # --- 11. the floor is one trip of the dispatch rotation --------------------------
 # The supervisor fires at most max_dispatches_per_tick clock-driven orders per

@@ -22,8 +22,11 @@ package rig
 // cannot read the city's directories, reach a loopback port but its own or a
 // Unix socket, or signal a process outside. For any other rig it is an
 // ordinary process. Either way it runs with none of the variables that point a
-// command at the city. The publish command is the city's, and it runs outside
-// any sandbox, beside the leader.
+// command at the city. The library decides which as the command starts, and
+// writes which into the copy's record before the command runs, so the copy's
+// report says how it runs once it is up, whatever the rig's setting reads by
+// then. The publish command is the city's, and it runs outside any sandbox,
+// beside the leader.
 //
 // A copy ends when its caller stops it. It also ends once the session that
 // started it has ended, through Gas City's orphan sweep, which this composes
@@ -102,7 +105,12 @@ type Report struct {
 	AppURL string `json:"app_url,omitempty"`
 	// Address is set for a running copy, and empty when it has none.
 	Address *string `json:"address,omitempty"`
-	Log     string  `json:"log,omitempty"`
+	// Sandboxed is set for a running copy whose record says how its serve
+	// command runs: true inside the capture's sandbox, false as an ordinary
+	// process. A copy whose serve command recorded neither, as one a gctk from
+	// before the record started did not, leaves it unset.
+	Sandboxed *bool  `json:"sandboxed,omitempty"`
+	Log       string `json:"log,omitempty"`
 	// ExitCode is the serve command's exit status, for a copy that ended.
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Started is set on the report of a start that found no copy running and
@@ -405,6 +413,10 @@ func (r copyRec) running(checkout string) Report {
 		app = fmt.Sprintf("http://127.0.0.1:%d/", port)
 	}
 	rep := Report{State: CopyRunning, Checkout: checkout, Port: port, AppURL: app, Address: &addr, Log: r.path("serve.log")}
+	if v := r.read("sandboxed"); v == "true" || v == "false" {
+		inside := v == "true"
+		rep.Sandboxed = &inside
+	}
 	if addr == "" {
 		rep.Detail = r.noAddressWhy()
 	}
@@ -674,7 +686,7 @@ func (c *Copies) launch(rec copyRec, checkout string, o ServeOpts) Report {
 		if err != nil {
 			return failed("no-free-port", fmt.Sprintf("no free loopback port could be picked: %v", err))
 		}
-		rec.remove("pid", "start_id", "publisher", "rc", "serve.log", "publish.log", "address", "app_url")
+		rec.remove("pid", "start_id", "publisher", "rc", "serve.log", "publish.log", "address", "app_url", "sandboxed")
 		if err := rec.write("port", strconv.Itoa(port)); err != nil {
 			return failed("no-state", fmt.Sprintf("the record %s could not be written: %v", rec.dir, err))
 		}
@@ -721,7 +733,7 @@ func (r copyRec) startLeader() (string, string) {
 	if err != nil {
 		return "no-state", fmt.Sprintf("the copy's log could not be opened: %v", err)
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	leader, err := r.h.Start(host.Spec{Argv: argv, Out: logf, Session: true})
 	if err != nil {
 		return "not-started", fmt.Sprintf("the copy's leader did not start: %v", err)
@@ -901,19 +913,20 @@ func Lead(h host.Host, dir string) int {
 	if err != nil {
 		return end(1)
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	// The serve command writes through a relay the leader copies into the
 	// log, so the sandbox never has to grant a write to the record. A serve
 	// command whose leader is gone dies at its next write. The leader reads its
 	// standard output for the app's URL on the way.
 	serve, err := h.Start(host.Spec{
-		Argv:    []string{"bash", "-c", rec.read("command")},
-		Dir:     checkout,
-		Env:     []string{"PORT=" + strconv.Itoa(port)},
-		Out:     logf,
-		Stdout:  readURL(rec, logf),
-		Relay:   true,
-		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve"},
+		Argv:   []string{"bash", "-c", rec.read("command")},
+		Dir:    checkout,
+		Env:    []string{"PORT=" + strconv.Itoa(port)},
+		Out:    logf,
+		Stdout: readURL(rec, logf),
+		Relay:  true,
+		Sandbox: &host.Sandbox{Lib: filepath.Join(rec.read("scripts"), SandboxLib), Port: port, Prog: "gctk rig serve",
+			Record: rec.path("sandboxed")},
 	})
 	if err != nil {
 		fmt.Fprintf(logf, "gctk rig serve: the serve command did not start: %v\n", err)
@@ -959,7 +972,7 @@ func leadPublish(rec copyRec, port, gen int) {
 	if err != nil {
 		return
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	pub, err := rec.h.Start(host.Spec{
 		Argv: []string{"bash", "-c", rec.read("publish_command")},
 		Dir:  rec.read("checkout"),

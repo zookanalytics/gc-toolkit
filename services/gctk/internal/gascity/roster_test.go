@@ -1,6 +1,8 @@
 package gascity
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,9 +38,9 @@ func rosterCalls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
-// The roster reads every agent with the fields the pool's and a named agent's
-// answers read, and a roster that does not answer, or answers with no list, is
-// an error rather than an empty city.
+// The roster reads every agent with the fields a named agent's answer reads,
+// and a roster that does not answer, or answers with no list, is an error
+// rather than an empty city.
 func TestTheRosterReadsEveryAgent(t *testing.T) {
 	c, _ := rosterCity(t, map[string]string{"agent-list": `{"agents":[
 		{"qualified_name":"rig/gc-toolkit.polecat","name":"polecat","dir":"rig","scope":"rig","suspended":false,"pool":{"min":0,"max":2}},
@@ -47,11 +49,11 @@ func TestTheRosterReadsEveryAgent(t *testing.T) {
 	if err != nil || len(agents) != 2 {
 		t.Fatalf("Agents = %+v, %v", agents, err)
 	}
-	if n, ok := agents[0].MaxSessions(); !ok || n != 2 || agents[0].Dir != "rig" || agents[0].Scope != "rig" {
-		t.Errorf("the pool read as %+v (max %d, %v)", agents[0], n, ok)
+	if a := agents[0]; a.QualifiedName != "rig/gc-toolkit.polecat" || a.Name != "polecat" || a.Dir != "rig" || a.Scope != "rig" || a.Suspended {
+		t.Errorf("the pool read as %+v", a)
 	}
-	if _, ok := agents[1].MaxSessions(); ok || !agents[1].Suspended || agents[1].Dir != "" {
-		t.Errorf("the named agent read as %+v", agents[1])
+	if a := agents[1]; a.Name != "mechanik" || a.Scope != "city" || !a.Suspended || a.Dir != "" {
+		t.Errorf("the named agent read as %+v", a)
 	}
 	for _, reply := range []string{`{"ok":true}`, `not json`} {
 		c, _ := rosterCity(t, map[string]string{"agent-list": reply})
@@ -192,7 +194,9 @@ func TestARigListThatNeverAnswersEndsAtItsBound(t *testing.T) {
 			t.Errorf("GC_RIG_LIST_TIMEOUT=%q bounds the read by %s, %v, want %s", v, got, err, want)
 		}
 	}
-	os.Unsetenv("GC_RIG_LIST_TIMEOUT")
+	if err := os.Unsetenv("GC_RIG_LIST_TIMEOUT"); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := rigListWait(); err != nil || got != RigListWait {
 		t.Errorf("an unset GC_RIG_LIST_TIMEOUT bounds the read by %s, %v, want %s", got, err, RigListWait)
 	}
@@ -225,5 +229,91 @@ func TestTheSlingNudgeAndFormulaCalls(t *testing.T) {
 	}
 	if got := rosterCalls(t, log); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the calls ran %q, want %q", got, want)
+	}
+}
+
+// Sessions reads each row's identities, its state and its times, and reads a
+// last_active of "" or one that does not parse as no time.
+func TestSessionsReadsTheList(t *testing.T) {
+	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","_cache_age_s":2.5,"filters":{},"sessions":[{"id":"hq-1","name":"rig__polecat-hq-1","template":"rig/gc-toolkit.polecat","state":"active","rig":"rig","agent_name":"rig/gc-toolkit.polecat-3","session_name":"rig__polecat-hq-1","created_at":"2026-11-16T20:00:00Z","last_active":"2026-11-16T23:15:36Z","attached":false,"closed":false},{"id":"hq-2","name":"rig/gc-toolkit.refinery","template":"rig/gc-toolkit.refinery","state":"asleep","alias":"rig/gc-toolkit.refinery","created_at":"2026-11-01T00:00:00Z","last_active":""},{"id":"hq-3","state":"active","created_at":"2026-11-01T00:00:00Z","last_active":"yesterday"}],"summary":{"total":3}}'
+`)
+	got, err := c.Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("read %d sessions: %+v", len(got), got)
+	}
+	s := got[0]
+	if s.ID != "hq-1" || s.AgentName != "rig/gc-toolkit.polecat-3" || s.SessionName != "rig__polecat-hq-1" || s.State != "active" || s.Rig != "rig" {
+		t.Errorf("first row %+v", s)
+	}
+	if !s.LastActive.Equal(time.Date(2026, 11, 16, 23, 15, 36, 0, time.UTC)) || !s.CreatedAt.Equal(time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)) {
+		t.Errorf("first row's times %v, %v", s.LastActive, s.CreatedAt)
+	}
+	if got[1].Alias != "rig/gc-toolkit.refinery" || !got[1].LastActive.IsZero() || !got[2].LastActive.IsZero() {
+		t.Errorf("rows %+v", got[1:])
+	}
+	if strings.Join(log(), " ") != "session list --json" {
+		t.Errorf("gc ran with %q", log())
+	}
+}
+
+// A list that reads with no sessions is an empty list, and a read that fails
+// or prints no sessions list is an error.
+func TestSessionsFailsClosed(t *testing.T) {
+	c, _ := stubGC(t, `printf '%s\n' '{"schema_version":"1","sessions":[]}'`)
+	if got, err := c.Sessions(context.Background()); err != nil || len(got) != 0 || got == nil {
+		t.Errorf("an empty list answered %v, %v", got, err)
+	}
+	for _, body := range []string{
+		"echo 'gc session list: no city' >&2\nexit 1\n",
+		"printf '%s\\n' '{\"schema_version\":\"1\"}'\n",
+		"printf '%s\\n' '{\"sessions\":null}'\n",
+		"printf 'not json\\n'\n",
+	} {
+		c, _ := stubGC(t, body)
+		if got, err := c.Sessions(context.Background()); err == nil {
+			t.Errorf("%q answered %+v and no error", body, got)
+		}
+	}
+}
+
+// Rigs reads each rig's name, path, prefix, HQ flag and suspended flag, and a
+// read that fails or prints no rigs list is an error.
+func TestRigsReadsTheList(t *testing.T) {
+	c, log := stubGC(t, `printf '%s\n' '{"city_name":"c","rigs":[{"name":"c","path":"/c","prefix":"hq","hq":true,"suspended":false,"beads":"initialized"},{"name":"tools","path":"/c/rigs/tools","prefix":"tk","hq":false,"suspended":true}]}'`)
+	got, err := c.Rigs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Rig{{Name: "c", Path: "/c", Prefix: "hq", HQ: true}, {Name: "tools", Path: "/c/rigs/tools", Prefix: "tk", Suspended: true}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("read %+v", got)
+	}
+	if strings.Join(log(), " ") != "rig list --json" {
+		t.Errorf("gc ran with %q", log())
+	}
+	for _, body := range []string{
+		"exit 2\n",
+		"printf '%s\\n' '{\"city_name\":\"c\"}'\n",
+	} {
+		c, _ := stubGC(t, body)
+		if got, err := c.Rigs(); err == nil {
+			t.Errorf("%q answered %+v and no error", body, got)
+		}
+	}
+}
+
+// A list read the context ends first answers ErrDeadline.
+func TestListReadsEndAtTheDeadline(t *testing.T) {
+	c, _ := stubGC(t, "sleep 30\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := c.Sessions(ctx); err == nil || !strings.Contains(err.Error(), ErrDeadline.Error()) {
+		t.Errorf("answered %v", err)
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Errorf("the context did not end: %v", ctx.Err())
 	}
 }

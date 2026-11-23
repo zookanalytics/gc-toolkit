@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -197,7 +198,7 @@ func elsewhere(url string, fetch, push []string) string {
 				continue
 			}
 			name := u + ", which names no repository on a host"
-			if oh, orepo, ok := originRepo(u); ok {
+			if oh, orepo, ok := git.RemoteRepository(u); ok {
 				name = oh + "/" + orepo
 			}
 			switch v, seen := verbs[name]; {

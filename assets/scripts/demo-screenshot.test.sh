@@ -116,8 +116,10 @@ SBX
 # whose serve command ended when COPY_FAIL is set, or as a checkout whose copy
 # runs another command when COPY_OTHER is set, and --stop ends it. A running
 # copy's app_url is COPY_APP, its loopback URL when that is empty, and none when
-# it is "-". lsof names the copy's process as the one listening on its port,
-# working in the checkout it was started from. Each logs to $CALLLOG.
+# it is "-", and its report says its serve command runs inside the sandbox, as a
+# capture that keeps the sandbox asks of a copy. lsof names the copy's process as
+# the one listening on its port, working in the checkout it was started from.
+# Each logs to $CALLLOG.
 cat >"$BIN/gctk" <<'GCTK'
 #!/usr/bin/env bash
 printf 'gctk %s (in %s) GCTK_SCRIPTS_DIR=%s\n' "$*" "$(pwd)" "${GCTK_SCRIPTS_DIR:-}" >>"${CALLLOG:?}"
@@ -127,7 +129,7 @@ app_url=",\"app_url\":\"$app\""; [ "$app" != - ] || app_url=""
 case "$*" in
   "rig serve --check")
     if [ -n "${COPY_RUNNING:-}" ] || [ -s "${COPY_STATE:?}" ]; then
-      printf '{"state":"running","checkout":"%s","port":%s%s,"address":""}\n' "$(pwd)" "$port" "$app_url"; exit 0
+      printf '{"state":"running","checkout":"%s","port":%s%s,"address":"","sandboxed":true}\n' "$(pwd)" "$port" "$app_url"; exit 0
     fi
     printf '{"state":"none","checkout":"%s"}\n' "$(pwd)"; exit 3 ;;
   "rig serve --command "*)
@@ -139,10 +141,10 @@ case "$*" in
     fi
     if [ -n "${COPY_RUNNING:-}" ] || [ -n "${COPY_FOUND:-}" ]; then
       [ -n "${COPY_RUNNING:-}" ] || pwd >"$COPY_STATE"
-      printf '{"state":"running","checkout":"%s","port":%s%s,"address":""}\n' "$(pwd)" "$port" "$app_url"; exit 0
+      printf '{"state":"running","checkout":"%s","port":%s%s,"address":"","sandboxed":true}\n' "$(pwd)" "$port" "$app_url"; exit 0
     fi
     pwd >"$COPY_STATE"
-    printf '{"state":"running","checkout":"%s","port":%s%s,"address":"","started":true}\n' "$(pwd)" "$port" "$app_url"; exit 0 ;;
+    printf '{"state":"running","checkout":"%s","port":%s%s,"address":"","sandboxed":true,"started":true}\n' "$(pwd)" "$port" "$app_url"; exit 0 ;;
   "rig serve --stop") : >"$COPY_STATE"; printf '{"state":"stopped","checkout":"%s"}\n' "$(pwd)"; exit 0 ;;
 esac
 exit 2

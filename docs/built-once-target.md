@@ -74,7 +74,7 @@ assumptions:
 | merge | the pack's own refinery on Gas Town's flow and record, with the pack's approval contract | 15.4k / 25.2k | 2.0k / 2.0k |
 | human engagement | native human gates and conversation tasks | 16.8k / 25.0k | 5.5k / 4.0k |
 | board | a ranked render of platform objects | 21.0k / 26.4k | 5.0k / 5.0k |
-| patrol | Gas City's orders, plus the patrols' judgment | 9.5k / 16.1k | 2.5k / 2.0k |
+| patrol | Gas City's orders, the pack's orders that look and act, and a witness woken by mail | 9.5k / 16.1k | 2.5k / 2.0k |
 | doctor | one check per surviving invariant | 7.5k / 9.3k | 3.0k / 3.0k |
 | shared glue | one call per series of native steps | 10.6k / 24.0k | 5.0k / 5.0k |
 | gctk | the rig's actions: its check runner and records, and a copy of its UI | 11.5k / 10.6k | 1.5k / 1.5k |
@@ -127,10 +127,11 @@ finding on a PR stays a record the operator rules on.
 The pack's own refinery lands a branch directly or publishes it as a PR, and
 Gas Town's pending-through-merge record keeps the work's bead open until the
 merge is verified on the target. The pack adds one approval contract for every PR the
-city opens, on any target, in one evaluator of the PR's readiness. The merge
-runs it on a fresh read of GitHub, and every display runs it on the GitHub read
-the landing order saves at each check. The pack also adds a merge request
-pinned to the head the evaluator judged, the PR's managed summary and title,
+city opens, on any target, in one evaluator of the PR's readiness. Every
+display and the landing order run it on the GitHub read the PR watch saves on
+the PR's bead when the PR moves, and the landing order runs it again on the
+one-PR update's re-read of the PR in full before it requests a merge. The pack also adds a merge request pinned to the
+head the evaluator judged, the PR's managed summary and title,
 and the step that takes a GitHub event to the bead that owns it.
 
 The trade: the pack's transition machine, its second copy of the approval
@@ -210,6 +211,24 @@ yet. Each remaining difference names its reason and what ends it:
   nothing escalated. What holds the close is no fact a run can change, so a
   retry alone leaves a landed merge holding its work with no one told. This
   ends when Gas Town's command escalates a close it cannot make.
+- **A cheap question watches every PR, and an update reads one.** A pass asks
+  GitHub whether each PR the city owns moved, in one request for each 50 PRs in
+  a repository, and reads and saves a PR only when one of its signs moved, or
+  when the net, which reads every PR in full every hour at the order budget
+  the city sets, finds it differs
+  from the read saved on its bead. Gas Town's command reads each pending PR by
+  its URL at each find-work and writes the check on the record each time. The
+  city's readers of GitHub share one allowance, and a pass whose cost follows
+  the number of PRs cannot watch them all every few minutes. A pass writes
+  nothing for a PR that did not move or differ, so `pr_last_checked_at` says
+  when the PR was last read and saved, not when it was last asked about, and
+  `pr_state` is the PR's state as that read found it, so a landing's evidence is
+  its merge commit and its time. A read or an act that fails is recorded by no
+  key, where Gas Town writes `pr_reconcile_error`, because the next pass finds
+  the same difference and acts on it. The landing order decides every record
+  on the saved read and the store, and reads GitHub first only for a merge,
+  through the one-PR update's re-read of the PR in full, since a merge made in
+  error puts work on the target, which no run takes back. No end is planned.
 - **find-work reads waits.** It skips a bead something holds or whose branch
   another open bead works on, and takes a rework child before its anchor. Gas
   Town takes any bead assigned to the refinery. Two writers on one branch would
@@ -238,8 +257,8 @@ yet. Each remaining difference names its reason and what ends it:
   an ask, which the run takes. A sitting that edits the branch with the
   operator can push while a run works it, and the lease keeps either push from
   overwriting the other. A conflict on a branch whose rework child is still
-  open goes to that child's notes, on a rig not yet cut over and for a child a
-  cutover left to finish, until the old path's retirement (tk-1tfzr71.122). Gas
+  open goes to that child's notes, until the old review path's retirement
+  (tk-1tfzr71.122). Gas
   Town has no review run and no asks. Two workers on one branch would move it
   under each other, and the lease refuses the second push until its worker
   merges the first. No end is planned.
@@ -305,45 +324,56 @@ equal all go. The web page is the board's one view for people, and
 
 ### Patrol
 
-Gas City's orders keep the fleet clean: core's orphan sweep, reaper, wisp
-compaction, spawn-storm detection, convoy backstop and branch pruning, the
-controller's closed-bead worktree reaper, and the dolt pack's orders. The
-controller's work ladder recovers a stuck pool seat. The pack's patrols carry
-only judgment: the witness's HELP-mail triage, salvage, watch on the refinery's
-queue and finding on a pool seat that keeps printing while its work stands
-still, and the deacon running `gc doctor` from an order. Patrol owns the
+Gas City's orders keep the fleet clean: core's orphan sweep, reaper,
+spawn-storm detection, convoy backstop and branch pruning, and the dolt pack's
+orders. Its controller releases a dead session's pool claims, ends the
+processes a closed session left behind, collects wisps and reaps a closed
+bead's worktree, and its work ladder recovers a stuck pool seat. The pack's
+patrol work runs as orders, one that looks and records an event and another
+that acts on it: one pair files a finding on a pool seat that keeps printing
+while its work stands still, and the other files a human gate on a refinery
+handoff that has waited too long. A dead session's work needs no pack order,
+because the session that next claims it resumes in the worktree the bead
+records. The witness
+triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
+each hour and records the run, and the board shows the checks that keep
+failing, when doctor last ran, each monitor order's last good run and the
+`human` mailbox that Gas City's orders send their alerts to. Patrol owns the
 warranted Dolt reclaim and suspended-store backup, and the reapers no native one
 covers: scratch and the review workspaces outside `.gc/worktrees/`.
 
-The trade: the liveness census stops filing human gates, and the incident
-ledger moves onto events and bead notes (tk-1tfzr71.19).
+The trade: the deacon, boot health, the incident ledger, the liveness census and
+the witness's patrol loop retire (tk-1tfzr71.19).
 
-The witness's target is Gas Town's witness. Each remaining difference names its
-reason and what ends it:
+The witness's reference is Gas Town's witness at gascity-packs 7f86098c04ea, the
+commit the refinery's copy follows. Each remaining difference names its reason
+and what ends it:
 
-- **The spacing.** Its `next-iteration` defers the next wisp an hour, so Gas
-  City's reassignment restart starts the next pass once the hour has passed. Gas
-  Town's asks for that hour through `idle_timeout = "1h"`, which Gas City does
-  not apply to an always-on session, so there its passes run back to back. This
-  ends when Gas City gives an always-on patrol an idle interval.
+- **No patrol loop.** Mail wakes the witness, and the scripted steps of Gas
+  Town's loop that the city keeps run as orders that look and orders that act,
+  because code does the work that needs no judgment (conversation tk-9l9pg0x).
+  This ends when Gas Town's witness runs its scripted steps outside its session.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the retirements of the old merge path (tk-1tfzr71.70) and the
-  old review path (tk-1tfzr71.122) land.
+  This ends as the old review path's retirement (tk-1tfzr71.122) lands.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
-  queue health. This one files findings and human gates instead, because the po
-  owns little and takes none of that load, and the operator ruled at
-  tk-rl8gz4b.29's design that it stays. This ends when an operator ruling gives
-  the po escalation handling. Gas Town's formula addresses `mayor/` by name,
-  which reaches no seat in this city, so a copy taken by import would send its
-  escalations to no reader. Such a copy keeps findings and human gates, or the
-  import is ruled (tk-1tfzr71.19).
-- **No stuck-polecat check.** The liveness sweep covers it. This ends when
-  tk-1tfzr71.19 retires the sweep.
-- **The nudge order.** Gas Town's deacon does this through a command and a step
-  we do not carry. This ends when we take Gas Town's deacon or Gas City closes
-  issue #4090 with a fix that also reaches a session stopped short of
-  `next-iteration`.
+  queue health. Here the orders and the witness file findings and human gates,
+  because the operator ruled at tk-rl8gz4b.29's design that it stays and the
+  city runs no mayor. This ends when an operator ruling gives escalation to a
+  seat.
+- **No orphan recovery.** Gas Town's witness salvages a dead owner's worktree
+  and reopens its bead. Here Gas City's controller and core's orphan sweep
+  release the claim within minutes, which a second writer would race, and the
+  session that next claims the work resumes in the worktree the bead records
+  (conversation tk-5deozip). Nothing reports an open bead assigned to a dead
+  session that no pool reclaims, a gap that ruling accepts. This ends when Gas
+  Town's witness leaves recovery to Gas City.
+- **A finding in place of a warrant on a stuck polecat.** A pool seat is judged
+  by its own writes and gets a finding, because the work ladder recovers a
+  quiet seat and no dog serves a warrant here. This ends when Gas City paces a
+  busy pool seat by its progress.
+- **No refinery wake for a stale pending check.** The landing order runs the
+  pending record with no refinery turn. No end is planned.
 
 ### Doctor
 
@@ -370,19 +400,20 @@ The wrapper that provisions an agent's home stays under its warrant, because
 
 `gctk rig` runs a rig's declared checks and records each result against the
 commit it ran at, and runs a copy of the rig's UI from a checkout, which a demo
-capture records and a sitting shows the operator. The copy came after the
-baseline, so the estimate above does not weigh it.
+capture records and a sitting shows the operator. `gctk memory` keeps the
+learning loop's memory intake. The copy and the intake came after the baseline,
+so the estimate above weighs neither.
 
-The trade: `gctk merge`'s approval rule goes with the merge member, and its
-compiled copy of the key registry goes with the registry. A domain moves into
-gctk only when it survives the migration map, and it moves whole: the change
+The trade: a domain moves into gctk only when it survives the migration map,
+and it moves whole: the change
 that ports it deletes the shell it replaces, and the PR's size line
 ([rule 3](#the-rules)) shows the port's net.
 
 ### Feedback, config and doctrine
 
-Feedback is the miner and distiller formulas, the learning-distill skill and
-their orders, and saying each fact once is the only cut its estimate takes.
+Feedback is the miner and distiller formulas, the distiller's memory step, the
+learning-distill skill and their orders, and saying each fact once is the only
+cut its estimate takes.
 Config is `pack.toml`, the check index, the overlays, the pack command, and a
 key registry that declares only the keys of surviving warranted nouns, as data:
 1,494 of the registry's 1,854 lines are comments today. Doctrine is the shared
@@ -428,10 +459,6 @@ home.
   that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
   its own run, because it returns the review to its pool through `gc sling` once
   the cancel has landed.
-- A rule kept in two languages, with a test holding the copies equal:
-  `gctk merge` and `review-verdict.sh`, `gctk lifecycle` and the key registry,
-  and the board's Go contract and its TypeScript mirror. Carried by
-  tk-1tfzr71.70, the old merge path's retirement, and tk-1tfzr71.25.
 
 ### Compatibility debt
 
@@ -476,23 +503,21 @@ more than its size. A branch already in flight shows its measured net instead.
 ### 3. The lanes
 
 Each member is armed behind the one before it, and at most two migrations are
-in flight at once, on disjoint subsystems. The two retirements last in lane A
-are the exceptions. The old merge path's (tk-1tfzr71.70) is armed behind every
-rig's cutover, and the old review path's (tk-1tfzr71.122) behind every cutover
-and tk-1tfzr71.21. A member whose method is a design convoy lands only after
+in flight at once, on disjoint subsystems. The retirement last in lane A is the
+exception: the old review path's (tk-1tfzr71.122) is armed behind every rig's
+cutover and tk-1tfzr71.21. A member whose method is a design convoy lands only after
 the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.21 | `pr-facts.sh` polling and mirroring, the merge cadence's driver and its pacing, the failure cap and the supersession check | 18,145 |
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.70 | the old merge path, once every rig's cutover has moved its PRs onto the pending record: `gctk merge` and the transition machine, `pr-open.sh`'s create, `pre-open-rebase.sh`, `merge-tail-report.sh` | 1,288, and the rows it adds |
 | A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record and the GitHub intake has landed: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
-| B | tk-1tfzr71.19 | the doctor runner, the liveness census, the incident ledger, boot health, the copied patrol steps, the salvage's branch context | 9,290 |
+| B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
-| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 1,490 |
+| B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |
 
-The whole files that the migration members name come to 49k of
+The whole files that the migration members name come to 55k of
 the 220k between the baseline and the built-once estimate. Their partial
 rewrites carry more, chiefly the board, `gc-helm.sh`, the work and patrol
 formulas and the sign-off. The page's own items below carry

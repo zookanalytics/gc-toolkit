@@ -1,0 +1,13 @@
+# refinery-queue-detect — every 30 minutes, record each refinery handoff that
+# has sat unprepared past four hours, held by nothing, as one
+# gc-toolkit.refinery-queue.stuck event, writing no bead
+# (specs/tk-1tfzr71.158/design.md, section 2). The verb's 90-second read
+# deadline and 20-second event bound end inside the 120s timeout, as
+# services/gctk/refinery's test holds. Tune from city.toml [[orders.overrides]].
+[order]
+description = "Record each refinery handoff unprepared past four hours, held by nothing, as one gc-toolkit.refinery-queue.stuck event"
+trigger = "cooldown"
+interval = "30m"
+timeout = "120s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" refinery stuck"
+scope = "city"

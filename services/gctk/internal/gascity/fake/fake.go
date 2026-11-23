@@ -1,10 +1,12 @@
 // Package fake is the runtime adapter's fake: it records each call a domain
-// makes of gascity.Runtime and answers as its test says, so a domain's rules
-// about Gas City are tested in Go with no Gas City (docs/gctk-architecture.md,
-// "The adapters").
+// makes of gascity.Runtime, and each doctor run, event and list read a domain
+// asks for through an interface of its own, and answers as its test says, so
+// a domain's rules about Gas City are tested in Go with no Gas City
+// (docs/gctk-architecture.md, "The adapters").
 package fake
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"sync"
@@ -30,10 +32,14 @@ type Runtime struct {
 	// Root is the city's root, and RootErr fails the read of it.
 	Root    string
 	RootErr error
+	// Settings is the settings file Claude sessions start with, and
+	// SettingsErr fails the read of it.
+	Settings    string
+	SettingsErr error
 	// OnSling answers a sling, and nil answers exit 0. OnScript answers a script
 	// call, and nil answers exit 0. OnCook answers a cook, and nil answers exit 0
-	// with a root of its own, the one bead it poured. OnWake answers a session's
-	// wake and OnNudge its nudge, and nil answers exit 0.
+	// with a root of its own. OnWake answers a session's wake and OnNudge its
+	// nudge, and nil answers exit 0.
 	OnSling  func(gascity.Sling) gascity.SlingResult
 	OnScript func(Call) gascity.Result
 	OnCook   func(gascity.Cook) gascity.CookResult
@@ -59,9 +65,10 @@ type Runtime struct {
 	reads   []string
 }
 
-// Nudge is one nudge: the session nudged and the message.
+// Nudge is one nudge: the session nudged, the message, and for one sent with
+// NudgeNow the bead it is about.
 type Nudge struct {
-	Session, Message string
+	Session, Message, Bead string
 }
 
 var _ gascity.Runtime = (*Runtime)(nil)
@@ -88,8 +95,7 @@ func (r *Runtime) Cook(c gascity.Cook) gascity.CookResult {
 	if on != nil {
 		return on(c)
 	}
-	root := fmt.Sprintf("cooked-%d", n)
-	return gascity.CookResult{Root: root, Beads: []string{root}}
+	return gascity.CookResult{Root: fmt.Sprintf("cooked-%d", n)}
 }
 
 // Cooks returns each cook taken, in order.
@@ -146,6 +152,20 @@ func (r *Runtime) Nudge(session, message string) gascity.Result {
 	return gascity.Result{}
 }
 
+// NudgeNow records the nudge, with the bead it is about, and answers it as
+// Nudge does.
+func (r *Runtime) NudgeNow(session, message, bead string) gascity.Result {
+	n := Nudge{Session: session, Message: message, Bead: bead}
+	r.mu.Lock()
+	r.nudges = append(r.nudges, n)
+	on := r.OnNudge
+	r.mu.Unlock()
+	if on != nil {
+		return on(n)
+	}
+	return gascity.Result{}
+}
+
 // Wakes returns each session the domain woke, in order.
 func (r *Runtime) Wakes() []string {
 	r.mu.Lock()
@@ -173,12 +193,24 @@ func (r *Runtime) Script(name string, args ...string) gascity.Result {
 	return gascity.Result{}
 }
 
+// Within answers with the runtime itself, which records every call in one
+// place: a call the fake answers ends when its answer returns.
+func (r *Runtime) Within(context.Context) gascity.Runtime { return r }
+
 // CityRoot answers Root.
 func (r *Runtime) CityRoot() (string, error) {
 	if r.RootErr != nil {
 		return "", r.RootErr
 	}
 	return r.Root, nil
+}
+
+// ClaudeSettings answers the settings file the test set.
+func (r *Runtime) ClaudeSettings() (string, error) {
+	if r.SettingsErr != nil {
+		return "", r.SettingsErr
+	}
+	return r.Settings, nil
 }
 
 // Slings returns every sling the domain made, in order.

@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# refinery-publish.sh — the refinery's mr step on a rig on the new path
-# (pending_through_merge): publish the prepared head on its PR and record the
-# PR as pending until its merge is verified.
+# refinery-publish.sh — the refinery's mr step: publish the prepared head on
+# its PR and record the PR as pending until its merge is verified.
 #
 #   refinery-publish.sh --bead <id>
 #
 # The bead is the one this iteration prepared, assigned to this refinery
 # ($GC_AGENT), and the refinery's tree for it must hold its branch
 # (refinery-lib.sh). The PR is its owner's: the bead itself, or for a rework
-# child handed back, the bead whose PR its work lands on (refinery_owner). A
-# convoy's rebuild child whose convoy is not open on its branch, is no bead in
-# the store, or is open there with no merge_result and assigned to nobody, has
-# no owner: it is parked behind the gate refinery-rebuild-convoy-not-open, with
-# merge_result=blocked, before any PR is read, pushed onto, opened or recorded.
+# child handed back, the bead whose PR its work lands on (refinery_owner). When
+# the open beads on the branch do not read, no owner can be told, and the step
+# stops before any PR is read, pushed onto, opened or recorded.
 #
 # The PR the step takes is one the owner records (existing_pr, else pr_url,
 # else pr_number), or, when it records none, the PR open on GitHub from the
@@ -100,12 +97,7 @@ TARGET=$(bead_meta target)
 park() {
   refinery_park "$BEAD" "$1" blocked "$2" "$2" || stop "the $1 gate on $BEAD did not land ($2)"
 }
-refinery_owner "$BEAD" "$BRANCH"
-case "$?" in
-  0) ;;
-  3) park refinery-rebuild-convoy-not-open "$OWNER_REFUSED" ;;
-  *) stop "the bead whose PR $BRANCH lands on cannot be told" ;;
-esac
+refinery_owner "$BEAD" "$BRANCH" || stop "the bead whose PR $BRANCH lands on cannot be told"
 REPO=$(origin_repo "$HOME_DIR") || stop "the rig's origin is not a github.com repository"
 gctk=$(gctk_path) || stop "no gctk binary to compose and record the PR with"
 PR_POST="$HERE/pr-post.sh"

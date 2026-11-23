@@ -116,7 +116,14 @@ type Sandbox struct {
 	Port int
 	// Prog is the name the sandbox's messages start with.
 	Prog string
+	// Record, when set, is the file where demo_engine_sandboxed writes whether
+	// the process runs inside the sandbox, true or false, before the process
+	// starts.
+	Record string
 }
+
+// sandboxRecordVar names Sandbox.Record to demo_engine_sandboxed.
+const sandboxRecordVar = "DEMO_ENGINE_SANDBOX_RECORD"
 
 // Child is a process Start started.
 type Child interface {
@@ -171,6 +178,9 @@ func (local) Start(s Spec) (Child, error) {
 		}
 		argv = append([]string{"bash", "-c", sandboxed, b.Prog, b.Lib, strconv.Itoa(b.Port), s.Dir}, argv...)
 		env = append(slices.Clone(env), "PROG="+b.Prog)
+		if b.Record != "" {
+			env = append(env, sandboxRecordVar+"="+b.Record)
+		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = s.Dir
@@ -208,8 +218,8 @@ func (local) Start(s Spec) (Child, error) {
 	closeAll := func() {
 		for _, r := range relays {
 			if r.r != nil {
-				r.r.Close()
-				r.w.Close()
+				_ = r.r.Close()
+				_ = r.w.Close()
 			}
 		}
 	}
@@ -227,11 +237,11 @@ func (local) Start(s Spec) (Child, error) {
 	}
 	err := cmd.Start()
 	for _, r := range relays {
-		r.w.Close()
+		_ = r.w.Close()
 	}
 	if err != nil {
 		for _, r := range relays {
-			r.r.Close()
+			_ = r.r.Close()
 		}
 		return nil, err
 	}
@@ -241,7 +251,7 @@ func (local) Start(s Spec) (Child, error) {
 		go func() {
 			defer wg.Done()
 			_, err := io.Copy(r.to, r.r)
-			r.r.Close()
+			_ = r.r.Close()
 			if e, ok := r.to.(Ender); ok && err == nil {
 				e.End()
 			}
@@ -386,7 +396,7 @@ func (local) FreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -395,7 +405,7 @@ func (local) Answers(port int) bool {
 	if err != nil {
 		return false
 	}
-	c.Close()
+	_ = c.Close()
 	return true
 }
 

@@ -51,12 +51,15 @@ macOS's `sandbox-exec` applies one profile, which the pack writes for the run,
 to the first process and to every process that one starts. A host without
 `sandbox-exec` runs no capture, of any rig.
 
-A copy runs as its rig's setting read when the copy started, until it stops.
-So a copy that started while the setting read `"false"` still runs as an
-ordinary process once the rig keeps the sandbox, and a capture of the rig takes
-it as though it ran inside, whether `--serve` finds it running or a
-`--base-url` names its port. `gctk rig serve --stop`, run from the copy's
-checkout, ends it, and the rig's next copy starts inside the sandbox.
+A copy runs as its rig's setting read when the copy started, until it stops,
+and `gctk rig serve` reports which way it runs. So a copy that started while
+the setting read `"false"` still runs as an ordinary process once the rig keeps
+the sandbox, and a capture of the rig refuses it, whether `--serve` finds it
+running or a `--base-url` names it. A copy whose report does not say how it
+runs counts as one that runs without the sandbox. The capture leaves a copy it
+found running, since the copy may serve someone else. `gctk rig serve --stop`,
+run from the copy's checkout, ends it, and the rig's next copy starts inside
+the sandbox.
 
 ## What it guarantees
 
@@ -79,9 +82,10 @@ A process inside the sandbox:
 
 A capture also refuses, before anything starts, a run it cannot keep to those
 rules. Examples are a working directory that holds the city's, a server already
-listening on the port it would open, and a `--base-url` on this host that
-neither a copy nor a worktree of a rig whose `app_reads_city` is `"false"`
-serves. The library's header lists every such refusal.
+listening on the port it would open, a `--base-url` on this host that neither a
+copy nor a worktree of a rig whose `app_reads_city` is `"false"` serves, and a
+copy that runs outside the sandbox its rig now keeps. The library's header
+lists every such refusal.
 
 ## What it lets through
 
@@ -114,9 +118,9 @@ ports or its sockets.
 
 Such a capture still starts without the variables that point a command at the
 city, so nothing in its environment names this session's city, store or tmux.
-It takes each refusal the library's header lists but the first: a `--base-url`
-on this host must still name a copy, or a server a worktree of a rig whose
-`app_reads_city` is `"false"` serves.
+It takes each refusal the library's header lists but the first and the last: a
+`--base-url` on this host must still name a copy, or a server a worktree of a
+rig whose `app_reads_city` is `"false"` serves.
 
 ## Look for yourself
 

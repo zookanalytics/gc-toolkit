@@ -950,7 +950,7 @@ printf '%s' "$(prview 12 OPEN CLEAN MERGEABLE)" | jq -c '.baseRefName = "release
 out=$(run)
 has "$out" "retargeted (base 'release'" "the retarget is recorded"
 eq "$(meta F3 merge_result)" "retargeted" "merge_result=retargeted"
-eq "$(meta F3 'gc.routed_to')" "" "no route is written: the gate it files is the park"
+eq "$(meta F3 'gc.routed_to')" "<absent>" "no route is written: the gate it files is the park"
 eq "$(meta rv-f3 gc.outcome)" "recorded" "the lane's backing review is not superseded"
 eq "$(bstatus rv-f3)" "closed" "…and stays the closed record its green derives from"
 has "$(cat "$STUB_ESC_LOG")" "--key pr-retargeted.12" "escalated once per situation key"
@@ -988,12 +988,11 @@ out=$(run)
 has "$out" "already covers branch" "an existing child suppresses a twin"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "1" "still exactly one child"
 
-echo "# …an approved PR's merge-in is routed at P0, and one under a P2 epic whose posture is not approved at P1"
+echo "# …a merge-in is routed at its anchor's rank, born carrying the PR-finishing shift"
 # GitHub reports PR#701 APPROVED, so its posture records approved, in the shape
 # pr-facts.sh stores it. PR#702 carries the external approval the merge-in waits
 # for, but GitHub reports no review decision for it, so its posture reads none.
-# A rank that compared the whole stored posture with approved would route
-# PR#701's merge-in at P1.
+# Under the P2 epic, PR#702's merge-in is routed at P1.
 store "[$EP2, $(anchor AP1 701 | under_ep2), $(anchor AP2 702 | under_ep2)]"
 printf '%s' "$(prview 701 OPEN DIRTY CONFLICTING)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_701.json"
 printf '%s' "$(prview 702 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_702.json"
@@ -1003,19 +1002,9 @@ out=$(run)
 K1=$(reworks_of AP1); K2=$(reworks_of AP2)
 eq "$(meta_pinned AP1 pr_posture)" "approved@sha-701" "PR#701's posture is recorded approved"
 has "$(meta AP1 pr_posture)" "approved@sha-701@" "…in the stored shape, dated with the instant it was first read"
-eq "$(bprio "$K1")" "0" "an approved PR's merge-in is routed at P0"
-eq "$(bprio "$K2")" "1" "…and one whose PR is not approved, under a P2 epic, at P1"
+eq "$(bprio "$K2")" "1" "a merge-in whose PR is not approved, under a P2 epic, is routed at P1"
 eq "$(meta "$K1" priority_shift)|$(meta "$K2" priority_shift)" "-1|-1" "…each born carrying the PR-finishing shift"
 eq "$(bparents "$K1")$(bparents "$K2")" "" "…and neither filed with a parent"
-# The priority writer's own write is the one pinned to its store (--db), so a
-# route that carried a priority, or a priority the creator wrote itself, fails.
-PL=$(grep -n "^bd update $K1 --priority 0 --db " "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-RL=$(grep -n "^sling $FIX $K1 --no-formula --no-convoy$" "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-if [ -n "$PL" ] && [ -n "$RL" ] && [ "$PL" -lt "$RL" ]; then
-  ok "…its priority written by the priority writer before the route"
-else
-  bad "the merge-in's priority was not written by the priority writer before its route (priority write at log line '${PL:-none}', route at '${RL:-none}')"
-fi
 hasnt "$(grep "^sling $FIX $K1 " "$STUB_GC_LOG")" "--priority" "…and the route written with no priority in it"
 
 echo "# …a merge-in whose priority does not settle is left unrouted, and the stranded arm routes it next pass"
@@ -1144,7 +1133,7 @@ store "[$(anchor F5b 16),$(demand F5b)]"
 printf '%s' "$(prview 16 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_16.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta F5b 'gc.routed_to')" "" "the anchor itself is not human-routed"
+eq "$(meta F5b 'gc.routed_to')" "<absent>" "the anchor itself is not human-routed"
 has "$out" "open human gate dm-F5b holds it for a person's decision; no rework dispatched" "the gate vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework")] | length' "$STUB_STORE")" "0" "…and no rework child is minted"
 hasnt "$(cat "$STUB_SESSION_LOG")" "wake $FIX" "…and the fix pool is not woken"
@@ -1220,7 +1209,7 @@ gc bd dep KID1 --blocks FDK1 >/dev/null 2>&1
 printf '%s' "$(prview 110 OPEN DIRTY CONFLICTING)" > "$GH_DIR/pr_view_110.json"
 : > "$STUB_SESSION_LOG"
 out=$(run)
-eq "$(meta FDK1 'gc.routed_to')" "" "the anchor itself is not human-routed"
+eq "$(meta FDK1 'gc.routed_to')" "<absent>" "the anchor itself is not human-routed"
 grep -qxF 'dm-KID1|blocks|KID1' "$STUB_DEPS" && ok "the gate blocks the rework child, not the anchor" || bad "the gate does not block the rework child"
 has "$out" "open human gate dm-KID1 holds it for a person's decision; no rework dispatched" "a human gate on the rework child vetoes the dispatch"
 eq "$(jq '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") != "validation")] | length' "$STUB_STORE")" "0" "…and no new rework child is minted"
@@ -2270,7 +2259,11 @@ finishing() { # <id> <kind> [extra-metadata]
   printf '{"id":"%s","status":"open","assignee":"","notes":"","title":"%s of PRF1","priority":1,"metadata":{"anchor_bead":"PRF1","task_kind":"%s","priority_shift":-1%s}}' \
     "$1" "$2" "$2" "${3:-}"
 }
-store "[$EP2, $(anchor PRF1 710 ',"pr_posture":"review_required@sha-710@2026-10-11T00:00:00Z","pr_merge_state":"BLOCKED@sha-710"' | under_ep2),
+# on_record moves an anchor row onto Gas Town's pending record, blocked as the
+# refinery's record leaves it, since the PR-finishing rank counts an approval
+# only there.
+on_record() { jq -c '.metadata.merge_result = "pull_request_pending" | .status = "blocked"'; }
+store "[$EP2, $(anchor PRF1 710 ',"pr_posture":"review_required@sha-710@2026-10-11T00:00:00Z","pr_merge_state":"BLOCKED@sha-710"' | under_ep2 | on_record),
         $(finishing PRW rework ',"gc.routed_to":"rig/gc-toolkit.polecat","branch":"polecat/x710"'),
         $(finishing PRV review ',"gc.execution_routed_to":"rig/gc-toolkit.polecat-codex","check_name":"correctness"'),
         {\"id\":\"PCV\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"convoy\",\"issue_type\":\"convoy\",\"priority\":1,\"metadata\":{\"gc.synthetic\":\"true\"},\"dependencies\":[{\"issue_id\":\"PCV\",\"depends_on_id\":\"PRV\",\"type\":\"tracks\"}]},
@@ -2306,11 +2299,12 @@ hasnt "$(cat "$STUB_GC_LOG")" "anchor_bead=PRF1" "…nor the PR-finishing work r
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and the record stands"
 
 # The same PR-finishing work, rebuilt at <priority> with <posture> recorded on
-# PRF1 and, unless it is empty, <rank> as the rank that work was settled at.
-prf1() { # <posture> <rank> <priority>
+# PRF1 and, unless it is empty, <rank> as the rank that work was settled at. With
+# record, PRF1 owns its PR on the pending record.
+prf1() { # <posture> <rank> <priority> [record]
   local extra=",\"pr_posture\":\"$1@sha-710@2026-10-11T00:00:00Z\",\"pr_merge_state\":\"BLOCKED@sha-710\",\"pr_head_oid\":\"sha-710\""
   [ -z "$2" ] || extra="$extra,\"pr_finishing_settled\":\"$2\""
-  store "[$EP2, $(anchor PRF1 710 "$extra" | under_ep2),
+  store "[$EP2, $(anchor PRF1 710 "$extra" | under_ep2 | if [ "${4:-}" = record ]; then on_record; else cat; fi),
           $(finishing PRW rework ',"gc.routed_to":"rig/gc-toolkit.polecat","branch":"polecat/x710"'),
           $(finishing PRV review ',"gc.execution_routed_to":"rig/gc-toolkit.polecat-codex","check_name":"correctness"'),
           {\"id\":\"PCV\",\"status\":\"open\",\"assignee\":\"\",\"notes\":\"\",\"title\":\"convoy\",\"issue_type\":\"convoy\",\"priority\":1,\"metadata\":{\"gc.synthetic\":\"true\"},\"dependencies\":[{\"issue_id\":\"PCV\",\"depends_on_id\":\"PRV\",\"type\":\"tracks\"}]},
@@ -2346,7 +2340,7 @@ echo "# a re-rank into approved whose settle fails is finished by a later pass t
 # current, and still brings the review, its workflow (the codex step among it)
 # and the validation pass to P0. A re-rank run only by the pass that writes the
 # posture leaves them at P1.
-prf1 review_required unapproved 1
+prf1 review_required unapproved 1 record
 approved_710
 : > "$STUB_GC_LOG"
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-down" run_posture); rc=$?
@@ -2368,7 +2362,7 @@ echo "# …and a re-rank out of approved whose settle fails is finished the same
 # The work was settled at the approved rank, at P0, and PRF1 records that. The
 # pass that records review_required finds the writer down, and a feedback pass
 # that writes no posture returns the work to P1.
-prf1 approved approved 0
+prf1 approved approved 0 record
 unapproved_710
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-down" run_posture)
 eq "$(meta_pinned PRF1 pr_posture)" "review_required@sha-710" "the posture-only pass records review_required while the priority writer is down"
@@ -2386,7 +2380,7 @@ echo "# a re-rank that settles part of the work, undone by the posture before an
 # unsettled, the pass that records review_required settles all of it at P1. Had
 # that record stood, the return to its rank would read as settled, and PRW and
 # PVP would keep P0.
-prf1 review_required unapproved 1
+prf1 review_required unapproved 1 record
 approved_710
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-prv-down" run_posture)
 eq "$(bprio PRW)|$(bprio PVP)|$(bprio PRV)|$(bprio PST)" "0|0|1|1" "the re-rank into approved settles PRW and PVP, and not PRV or its workflow"
@@ -2407,6 +2401,9 @@ retargeted_710() {
 }
 store_add() { jq -c --argjson b "$1" '. + [$b]' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"; }
 move_prf1() { "$SD/lifecycle.sh" transition PRF1 "$@" >/dev/null 2>&1 || bad "PRF1 did not move: $*"; }
+# back_on_record returns PRF1 to the pending record, as the refinery's record of
+# its PR does once a person has cleared what parked it.
+back_on_record() { gc bd update PRF1 --status=blocked --set-metadata merge_result=pull_request_pending >/dev/null 2>&1 || bad "PRF1 did not return to the pending record"; }
 
 echo "# an approved anchor whose PR moves to another base leaves P0 in the pass that retargets it"
 # PRF1's PR-finishing work sits at P0 under its approved PR, and PRF1 records the
@@ -2422,15 +2419,15 @@ eq "$(meta PRF1 merge_result)" "retargeted" "the full pass retargets PRF1"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…and $b leaves P0 for P1 in that pass"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
 has "$out" "PRF1 — settled 3 bead(s) of its PR-finishing work at the unapproved rank (resting in retargeted)" "…and the pass names the re-rank and where PRF1 rests"
-eq "$(meta PRF1 'gc.routed_to')" "" "…and PRF1 rests unrouted: the gate its retarget files is the park"
+eq "$(meta PRF1 'gc.routed_to')" "<absent>" "…and PRF1 rests unrouted: the gate its retarget files is the park"
 
-echo "# …and its return to pull_request, the PR still approved, brings that work back to P0, work filed while it was away included"
+echo "# …and its return to the pending record, the PR still approved, brings that work back to P0, work filed while it was away included"
 # While PRF1 rests in retargeted, a validation pass is filed at the rank it then
-# follows, P1. A person restores the base and moves PRF1 back to pull_request.
+# follows, P1. A person restores the base and PRF1 returns to the pending record.
 # Its posture still reads approved and its record names the unapproved rank, so
 # the first pass to read it settles all of that work at P0.
 store_add "$(finishing PV2 validation ',"check_name":"arch"')"
-move_prf1 --to pull_request --expect retargeted
+back_on_record
 approved_710
 out=$(run_posture)
 for b in PRW PRV PCV PRT PST PVP PV2; do eq "$(bprio "$b")" "0" "…$b reaches P0"; done
@@ -2467,9 +2464,9 @@ for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…yet $b reaches P
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
 eq "$(meta PRF1 'gc.routed_to')" "rig/gc-toolkit.mechanik" "…carrying PRF1's own route back"
 
-echo "# …and a return to pull_request before that retry still brings every bead to P0, work filed while away included"
-# The retarget's settle fails, and PRF1 returns to pull_request before any full
-# pass retries. A validation pass was filed while it was away, at P1. The first
+echo "# …and a return to the pending record before that retry still brings every bead to P0, work filed while away included"
+# The retarget's settle fails, and PRF1 returns to the pending record before any
+# full pass retries. A validation pass was filed while it was away, at P1. The first
 # pass after the return reads the record the retarget left unsettled, so it
 # settles all of that work at P0. Had the approved record survived the retarget,
 # that pass would read the work as settled, and the new pass would keep P1 under
@@ -2478,32 +2475,29 @@ prf1 approved approved 0
 retargeted_710
 GC_QUEUE_PRIORITY_TOOL="$TMP/qp-down" run >/dev/null
 store_add "$(finishing PV2 validation ',"check_name":"arch"')"
-move_prf1 --to pull_request --expect retargeted
+back_on_record
 approved_710
 out=$(run_posture)
 for b in PRW PRV PCV PRT PST PVP PV2; do eq "$(bprio "$b")" "0" "…$b reaches P0"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and PRF1 records the approved rank"
 
 echo "# an anchor another writer moves out of pull_request, a repool, is re-ranked by the next full pass"
-# rejection-repool.sh moves PRF1 to unanchored with a transition of its own,
-# which leaves the record unsettled. The next full pass, which reads no anchor in
-# pull_request, settles PRF1's work at P1. The rebuild returns PRF1 through
-# pre_open_gate, where a pre-open merge-in is filed at P1, the rank it then
-# follows. Once PRF1 rests in pull_request again under the approved PR, the
-# first pass to read it settles all of that work at P0.
-prf1 approved approved 0
+# A repool moves PRF1 to unanchored with a write of its own, which leaves the
+# record naming the approved rank. The next full pass, which reads no anchor in
+# pull_request, settles PRF1's work at P1. A merge-in is filed while it is away,
+# at P1, the rank it then follows. Once PRF1 is back on the pending record under
+# the approved PR, the first pass to read it settles all of that work at P0.
+prf1 approved approved 0 record
 move_prf1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge"
-eq "$(meta PRF1 pr_finishing_settled)" "unsettled" "the repool's own transition leaves the record unsettled"
 out=$(run)
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "1" "…and the next full pass brings $b to P1"; done
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "…and PRF1 records the unapproved rank"
 has "$out" "at the unapproved rank (resting in unanchored)" "…naming where PRF1 rests"
-move_prf1 --to pre_open_gate --expect unanchored
 store_add "$(finishing PMI rework ',"prepare_mode":"merge","branch":"polecat/x710"')"
-move_prf1 --to pull_request --expect pre_open_gate
+back_on_record
 approved_710
 out=$(run_posture)
-for b in PRW PRV PCV PRT PST PVP PMI; do eq "$(bprio "$b")" "0" "…and once PRF1 rests in pull_request under the approved PR, $b reaches P0"; done
+for b in PRW PRV PCV PRT PST PVP PMI; do eq "$(bprio "$b")" "0" "…and once PRF1 is back on the pending record under the approved PR, $b reaches P0"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and PRF1 records the approved rank"
 
 echo "# an approved record outside pull_request that no exit marked turns unsettled before the first settle"
@@ -2554,37 +2548,13 @@ out=$(run)
 eq "$(meta PRF1 pr_finishing_settled)" "unapproved" "an abandoned anchor with a takeaway and no route records its rank"
 eq "$(meta PRF1 'gc.routed_to')" "" "…and its route stays empty"
 
-echo "# an anchor back in pull_request counts no approval until its PR is read again, and then only at the PR's head"
-# PRF1 rests approved at sha-710 with its work at P0. A repool takes it out of
-# pull_request, and the rebuild brings it back on the same PR, its posture still
-# approved@sha-710. New work filed before any pass reads the PR, settled the way
-# each creator settles a child before it slings or routes it, ranks at P1: no
-# head is known for that approval to count at. The pass that reads the PR finds
-# a new head, sha-711, with GitHub asking for a review, and all of the work
-# stays at P1. Had the approval counted at any head, the new work would be at P0
-# under an unapproved PR.
-prf1 approved approved 0
-move_prf1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge"
-eq "$(meta PRF1 pr_head_oid)" "" "the repool clears the PR head pr-facts.sh read"
-out=$(run)
-move_prf1 --to pre_open_gate --expect unanchored
-move_prf1 --to pull_request --expect pre_open_gate
-store_add "$(finishing PV3 validation ',"check_name":"demo"' | jq -c '.priority = 2')"
-"$GC_QUEUE_PRIORITY_TOOL" settle PV3 >/dev/null 2>&1
-eq "$(bprio PV3)" "1" "work filed on the returned anchor settles at P1, not at P0 on the approval its posture still reads"
-printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED" | .headRefOid = "sha-711"' > "$GH_DIR/pr_view_710.json"
-echo '[]' > "$GH_DIR/reviews_710.json"; echo '[]' > "$GH_DIR/comments_710.json"
-out=$(run_posture)
-eq "$(meta_pinned PRF1 pr_posture)|$(meta PRF1 pr_head_oid)" "review_required@sha-711|sha-711" "the next posture pass reads the PR at its new head"
-for b in PRW PRV PCV PRT PST PVP PV3; do eq "$(bprio "$b")" "1" "…and $b is at P1"; done
-
 echo "# an approved anchor with no PR head recorded gets one, and its work is settled again in the same pass"
 # PRF1 records the approved rank and an approved posture, but no PR head, as an
 # anchor carries the moment the head is first recorded. A settle in that state
 # counts no approval, so its work sits at P1 under an approved PR while the
 # record names approved. The pass that records the head moves the rank, so the
 # same write marks the record unsettled and the pass brings the work to P0.
-prf1 approved approved 1
+prf1 approved approved 1 record
 jq -c 'map(if .id == "PRF1" then .metadata |= del(.pr_head_oid) else . end)' "$STUB_STORE" > "$STUB_STORE.tmp" && mv "$STUB_STORE.tmp" "$STUB_STORE"
 printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_710.json"
 approve 710; echo '[]' > "$GH_DIR/comments_710.json"
@@ -2595,29 +2565,28 @@ eq "$(meta PRF1 pr_head_oid)" "sha-710" "…and records the PR head alone"
 for b in PRW PRV PCV PRT PST PVP; do eq "$(bprio "$b")" "0" "…and $b reaches P0 in that pass"; done
 eq "$(meta PRF1 pr_finishing_settled)" "approved" "…and the anchor records the approved rank"
 
-# PRF1 approved at sha-710 with its work at P0, repooled, and back in
-# pull_request before any full pass, with a validation pass filed on the way at
+# PRF1 approved at sha-710 with its work at P0, repooled, and back on the
+# pending record before any full pass, with a validation pass filed on the way at
 # the rank it then followed. PR#710 now reads as a draft at <head>.
 returned_on_draft() { # <head>
-  prf1 approved approved 0
+  prf1 approved approved 0 record
   move_prf1 --to unanchored --assignee "" --route "" --unset gc.execution_routed_to --set rejection_reason="base moved; resume by merge"
-  move_prf1 --to pre_open_gate --expect unanchored
-  move_prf1 --to pull_request --expect pre_open_gate
+  back_on_record
   store_add "$(finishing PV4 validation ',"check_name":"demo"' | jq -c '.priority = 2')"
   "$GC_QUEUE_PRIORITY_TOOL" settle PV4 >/dev/null 2>&1
   printf '%s' "$(prview 710 OPEN BLOCKED MERGEABLE)" | jq -c --arg h "$1" '.isDraft = true | .headRefOid = $h | .reviewDecision = "APPROVED"' > "$GH_DIR/pr_view_710.json"
   approve 710; echo '[]' > "$GH_DIR/comments_710.json"
 }
 
-echo "# an anchor back in pull_request on a draft PR has its work settled, the old and the new at one rank"
+echo "# an anchor back on the pending record on a draft PR has its work settled at the PR's head"
 # The draft's posture is not read, so it still reads approved@sha-710, and the
-# repool left the record unsettled and no PR head. The PR now sits at sha-712.
-# The pass records that head, under which the approval does not count, and
-# settles every bead at P1: the work from before the repool, still at P0, and
-# the validation pass filed since. A pass that skipped the draft whole would
-# leave the old work at P0 beside the new at P1 until the PR is ready.
+# PR head the repool left is sha-710 too, so the work from before the repool and
+# the validation pass filed since both rank at P0 until a pass reads the PR. The
+# PR now sits at sha-712. The pass records that head, under which the approval
+# does not count, and settles every bead at P1. A pass that skipped the draft
+# whole would leave all of it at P0 until the PR is ready.
 returned_on_draft sha-712
-eq "$(bprio PRW)|$(bprio PV4)" "0|1" "the returned anchor's old work is at P0 and its new work at P1"
+eq "$(bprio PRW)|$(bprio PV4)" "0|0" "the returned anchor's work ranks at P0 on the approval its posture and PR head still read"
 out=$(run_posture)
 eq "$(meta PRF1 pr_head_oid)" "sha-712" "the pass records the draft's head"
 eq "$(meta_pinned PRF1 pr_posture)" "approved@sha-710" "…and leaves its posture unread"
@@ -3291,7 +3260,6 @@ printf '[{"id":8100,"user":{"login":"human1"},"body":"x"}]' > "$GH_DIR/comments_
 out=$(run)
 eq "$(cat "$STUB_ESC_LOG")" "" "a human-routed anchor does not send the batch to a person"
 has "$(meta H6 pr_comment_disposition)" "rework:" "…its feedback becomes a rework child"
-eq "$(meta H6 'gc.routed_to')" "" "…and the pass's record clears the anchor's route, since a detached anchor rests unrouted"
 store "[$(anchor H3 48)]"
 printf '%s' "$(prview 48 OPEN BLOCKED MERGEABLE)" | jq -c '.reviewDecision = "REVIEW_REQUIRED"' > "$GH_DIR/pr_view_48.json"
 echo '[]' > "$GH_DIR/reviews_48.json"
@@ -3352,7 +3320,6 @@ for hv_state in "BLOCKED MERGEABLE" "DIRTY CONFLICTING"; do
     case "$hv_hold" in
       merge_hold)  eq "$(meta "$A" merge_hold)" "true" "$L …the hold is left standing" ;;
       rebase_hold) eq "$(meta "$A" rebase_hold)" "true" "$L …the freeze is left standing" ;;
-      human)       eq "$(meta "$A" 'gc.routed_to')" "" "$L …and the human route is cleared, since a detached anchor rests unrouted" ;;
       armed)       eq "$(meta "$A" 'gc.dispatch_when_ready')" "rig/gc-toolkit.polecat" "$L …the arm is left standing" ;;
       gate)        eq "$(bstatus "dm-$A")" "open" "$L …the gate is left standing" ;;
     esac
@@ -3580,7 +3547,6 @@ printf '[{"id":8730,"user":{"login":"human1"},"body":"still not right"}]' > "$GH
 out=$(run)
 hasnt "$(vpass_id Vc)" "<none>" "the batch still opens a validation pass"
 eq "$(meta Vc merge_hold)" "true" "…but the operator's hold is left standing — this arm does not touch it"
-eq "$(meta Vc 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 eq "$(meta Vc signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 has "$(meta Vc pr_comment_disposition)" "rework:" "…and the comments still become a rework child: a hold does not send them to a person"
 
@@ -3601,7 +3567,6 @@ out=$(run)
 eq "$(meta_pinned R3 pr_posture)" "review_required@sha-57" "the city's own verdict is not an outstanding comment"
 eq "$(vpass_id R3)" "<none>" "…so no validation pass opens"
 eq "$(meta R3 merge_hold)" "true" "…the operator's hold stands, untouched"
-eq "$(meta R3 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 
 echo "# …and a rework hand-back, which posts nothing at all, is not feedback either"
 KID52='{"id":"kid-52","status":"open","assignee":"","title":"Rework PR#52","notes":"","metadata":{"anchor_bead":"R7","source_review_bead":"rv-52"}}'
@@ -3613,7 +3578,6 @@ out=$(run)
 eq "$(meta_pinned R7 pr_posture)" "review_required@sha-52" "a hand-back leaves the PR with nothing outstanding on it"
 eq "$(vpass_id R7)" "<none>" "…so no validation pass opens"
 eq "$(meta R7 merge_hold)" "true" "…and the operator's hold stands"
-eq "$(meta R7 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 
 echo "# a comment opening with the no-review mark is not feedback, from a person or an app, in every space"
 # A comment not for review informs rather than asks (docs/not-for-review.md). A
@@ -3916,7 +3880,6 @@ out=$(run)
 hasnt "$(vpass_id PB)" "<none>" "the veto opens a validation pass"
 eq "$(meta PB signoff_rounds_reset)" "<absent>" "…and no signoff_rounds_reset is written"
 eq "$(meta PB merge_hold)" "true" "…the operator's hold is left standing"
-eq "$(meta PB 'gc.routed_to')" "" "…while its human route is cleared, since a detached anchor rests unrouted"
 has "$(meta PB pr_comment_disposition)" "rework:" "…and the objection still becomes a rework child"
 
 echo "# …a review DISMISSED before it routed is never filed"
@@ -6158,7 +6121,7 @@ echo "# …a pass at the same head re-runs nothing, and the re-run's failure par
 out=$(run)
 eq "$(reruns 7110)" "0" "a second pass at the same head re-runs nothing"
 has "$out" "non-code cause; parked to human" "…the failure at a head already re-run parks the approved PR"
-eq "$(meta NC1 'gc.routed_to')" "" "the park writes no route, since its gate is the park"
+eq "$(meta NC1 'gc.routed_to')" "<absent>" "the park writes no route, since its gate is the park"
 has "$(meta NC1 'gc.takeaway')" "PR#110 has a required check failing for a non-code cause" "…with a takeaway naming what the person owes"
 has "$(meta NC1 'gc.takeaway')" "the park lifts once it is green" "…and saying the park lifts on its own"
 eq "$(meta NC1 'gc.takeaway_settled')" "" "…left unsettled, because a person still owes it"
@@ -6202,7 +6165,7 @@ approve 120
 out=$(run)
 eq "$(reruns 7120)" "0" "a cancelled check whose run still has a job running is not re-run yet"
 has "$out" "run(s) 7120 still have a job queued or running, so the re-run waits for them to finish (nothing parked)" "…the pass says the re-run waits for the run"
-eq "$(meta NC11 pr_check_rerun)/$(meta NC11 'gc.routed_to')" "<absent>/" "…and records no re-run and parks nothing"
+eq "$(meta NC11 pr_check_rerun)/$(meta NC11 'gc.routed_to')" "<absent>/<absent>" "…and records no re-run and parks nothing"
 hasnt "$(cat "$STUB_ESC_LOG")" "pr-fix-noncode.120" "…nor files a gate"
 printf '%s' "$(prview 120 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncrow test CANCELLED 7120),$(ncrow test-macos SUCCESS 7120)]")" > "$GH_DIR/pr_view_120.json"
 out=$(run)
@@ -6225,7 +6188,7 @@ printf '%s' "$(prview 111 OPEN UNSTABLE MERGEABLE ",\"statusCheckRollup\":[$(ncr
 out=$(run)
 eq "$(reruns 7111)" "1" "a startup failure at a head not yet re-run is re-run"
 eq "$(meta NC2 pr_check_rerun)" "sha-111" "…and the record moves to that head"
-eq "$(meta NC2 'gc.routed_to')" "" "…and nothing is parked"
+eq "$(meta NC2 'gc.routed_to')" "<absent>" "…and nothing is parked"
 
 echo "# …an ACTION_REQUIRED check is not re-run, and parks an approved PR"
 store "[$(anchor NC3 112)]"
@@ -6261,7 +6224,7 @@ printf '[{"type":"required_status_checks","parameters":{"required_status_checks"
 printf '%s' "$(prview 114 OPEN UNSTABLE MERGEABLE ',"statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE"},{"name":"Vercel","status":"COMPLETED","conclusion":"FAILURE"}]')" > "$GH_DIR/pr_view_114.json"
 out=$(run)
 has "$out" "required check(s) failing (test); filed" "a code failure routes a fixer even when a deploy check is also red"
-eq "$(meta NC5 'gc.routed_to')" "" "…and the anchor is NOT parked (a code fix is owed)"
+eq "$(meta NC5 'gc.routed_to')" "<absent>" "…and the anchor is NOT parked (a code fix is owed)"
 RCFIX_NC5=$(jq -r '[.[] | select(.id | startswith("new-")) | select((.metadata.task_kind // "") == "rework") | .id][0] // empty' "$STUB_STORE")
 has "$(meta "$RCFIX_NC5" rejection_reason)" "head sha-114" "the dispatched child names the head"
 hasnt "$(meta "$RCFIX_NC5" rejection_reason)" "Vercel" "…and the rework reason names only the code check, not the deploy one"
@@ -6299,7 +6262,7 @@ rcredview 121 "$CAPHX"
 : > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "reached the cap (3)" "the arm names the cap it hit"
-eq "$(meta CAP2 'gc.routed_to')" "" "the stuck anchor's park writes no route, since its gate is the park"
+eq "$(meta CAP2 'gc.routed_to')" "<absent>" "the stuck anchor's park writes no route, since its gate is the park"
 has "$(meta CAP2 'gc.takeaway')" "PR#121 is still red after 3 auto-fix attempts" "…with a takeaway naming the PR and the attempts it drew"
 eq "$(grep '^bd update CAP2 ' "$STUB_GC_LOG" | grep -cF 'gc.takeaway=PR#121' || true)" "1" "…written in the transition's one update"
 eq "$(no_rework)" "0" "…and no fourth fixer is dispatched"
@@ -6328,7 +6291,7 @@ store "[$(anchor CAP3 122),$(rwchild CK6 CAP3 122 "$CAPH1" closed),$(rwchild CK7
 rcredview 122 "$CAPHX"
 out=$(run)
 has "$out" "required check(s) failing (test); filed" "three children at one prior head count as a single attempt, so the arm still dispatches"
-eq "$(meta CAP3 'gc.routed_to')" "" "…and does not park"
+eq "$(meta CAP3 'gc.routed_to')" "<absent>" "…and does not park"
 rm -f "$GH_DIR/rules_main.json"
 
 # A worked child as the live flow leaves it. Resuming a rework (mol-polecat-work's
@@ -6380,7 +6343,7 @@ rcredview 175 "$CAPHX"
 : > "$STUB_ESC_LOG"; : > "$STUB_GC_LOG"
 out=$(run)
 has "$out" "which red-check child CK15 was already sent to fix; parked to human" "a worked child, its head only in its title, parks the anchor"
-eq "$(meta UM1 'gc.routed_to')" "" "…with no route, since its gate is the park"
+eq "$(meta UM1 'gc.routed_to')" "<absent>" "…with no route, since its gate is the park"
 has "$(meta UM1 'gc.takeaway')" "PR#175 is still red at the head an auto-fixer was already sent to" "…with a takeaway naming what the person owes"
 eq "$(grep '^bd update UM1 ' "$STUB_GC_LOG" | grep -cF 'gc.takeaway=PR#175' || true)" "1" "…written in the transition's one update"
 eq "$(no_rework)" "0" "…and no second fixer is sent to the unmoved head"

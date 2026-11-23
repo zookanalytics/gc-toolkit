@@ -37,6 +37,20 @@ func (g *graph) read(ids []string) (map[string][]Blocker, error) {
 	return out, nil
 }
 
+// holdingGates is [Holding]'s gates, root by root, with its bound and its
+// errors, the part of the walk these tests read.
+func holdingGates(roots []string, read ReadBlockers) (map[string][]Blocker, error) {
+	holds, err := Holding(roots, read)
+	if holds == nil {
+		return nil, err
+	}
+	gates := make(map[string][]Blocker, len(holds))
+	for root, h := range holds {
+		gates[root] = h.Gates
+	}
+	return gates, err
+}
+
 func gateIDs(gates []Blocker) []string {
 	out := []string{}
 	for _, g := range gates {
@@ -81,7 +95,7 @@ func TestHoldingGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := &graph{edges: tc.edges}
-			got, err := HoldingGates([]string{"a"}, g.read)
+			got, err := holdingGates([]string{"a"}, g.read)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +109,7 @@ func TestHoldingGates(t *testing.T) {
 // The gate comes back with the fields a caller names it by.
 func TestHoldingGatesKeepTheTitle(t *testing.T) {
 	g := &graph{edges: map[string][]Blocker{"a": {task("rw")}, "rw": {gate("g")}}}
-	got, err := HoldingGates([]string{"a"}, g.read)
+	got, err := holdingGates([]string{"a"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +127,7 @@ func TestHoldingGatesOverManyRoots(t *testing.T) {
 		"c":  {task("other")},
 		"rw": {gate("shared")},
 	}}
-	got, err := HoldingGates([]string{"a", "b", "c", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b", "c", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +157,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 	t.Run("a read that fails answers nothing", func(t *testing.T) {
 		boom := errors.New("store down")
 		calls := 0
-		got, err := HoldingGates([]string{"a"}, func(ids []string) (map[string][]Blocker, error) {
+		got, err := holdingGates([]string{"a"}, func(ids []string) (map[string][]Blocker, error) {
 			calls++
 			if calls == 2 {
 				return nil, boom
@@ -160,7 +174,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 		for i := 0; i <= walkDepth; i++ {
 			g.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
-		got, err := HoldingGates([]string{"n0"}, g.read)
+		got, err := holdingGates([]string{"n0"}, g.read)
 		if _, answered := got["n0"]; answered || !errors.Is(err, ErrWalkBound) {
 			t.Errorf("(%v, %v), want no answer for n0 and ErrWalkBound", got, err)
 		}
@@ -175,7 +189,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			g.edges[fmt.Sprintf("n%d", i)] = []Blocker{task(fmt.Sprintf("n%d", i+1))}
 		}
 		g.edges[fmt.Sprintf("n%d", walkDepth-1)] = nil
-		if _, err := HoldingGates([]string{"n0"}, g.read); err != nil {
+		if _, err := holdingGates([]string{"n0"}, g.read); err != nil {
 			t.Errorf("a walk of %d levels: %v", walkDepth, err)
 		}
 	})
@@ -186,7 +200,7 @@ func TestHoldingGatesFailClosed(t *testing.T) {
 			wide = append(wide, task(fmt.Sprintf("t%d", i)))
 		}
 		g := &graph{edges: map[string][]Blocker{"a": wide}}
-		if _, err := HoldingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
+		if _, err := holdingGates([]string{"a"}, g.read); !errors.Is(err, ErrWalkBound) {
 			t.Errorf("err = %v, want ErrWalkBound", err)
 		}
 		if len(g.reads) != 1 {
@@ -241,7 +255,7 @@ func TestHoldingGatesAnswerARootAloneOrInABatch(t *testing.T) {
 	for _, batch := range batches {
 		t.Run(strings.Join(batch, "+"), func(t *testing.T) {
 			g := &graph{edges: edges}
-			got, err := HoldingGates(batch, g.read)
+			got, err := holdingGates(batch, g.read)
 			wantNamed := []string{}
 			for _, root := range batch {
 				ids, answered := got[root]
@@ -297,7 +311,7 @@ func boundRoots(err error) []string {
 // that names only such beads reads nothing.
 func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 	g := &graph{edges: map[string][]Blocker{"a": {task("x")}, "x": {task("y")}, "b": {task("y")}, "y": {gate("g")}}}
-	got, err := HoldingGates([]string{"a", "b"}, g.read)
+	got, err := holdingGates([]string{"a", "b"}, g.read)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,9 +350,9 @@ func withStatus(b Blocker, s string) Blocker {
 	return b
 }
 
-// awaitingReview is an open pull request the merge pass settled with no approval:
-// its next move is a person's review.
-var awaitingReview = map[string]string{"merge_result": "pull_request", "pr_posture": "review_required@h@t", "pr.machine": "settled@h@t"}
+// awaitingReview is a pull request open on Gas Town's pending record at the head
+// the refinery validated, with no approval: its next move is a person's review.
+var awaitingReview = map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}
 
 func decision(id string) Blocker {
 	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
@@ -366,40 +380,19 @@ func TestHoldingOwed(t *testing.T) {
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {task("b.rw")}}, []string{}, []string{}},
 		{"another pull request the city is landing",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}}, []string{}, []string{}},
-		{"another pull request the merge pass blocked",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr.machine", "blocked@h@t", "pr.machine_cause", "check-failed"))}},
-			[]string{}, []string{"b"}},
 		{"another pull request under a merge hold",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "merge_hold", "true"))}},
 			[]string{}, []string{"b"}},
-		{"another pull request review feedback holds",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "pr.unanswered_threads", "1@h"))}},
+		{"a pull request waiting on a review at the blocked status the pending record gives it",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", awaitingReview), "blocked")}},
 			[]string{}, []string{"b"}},
-		{"another pull request on the pending record waiting on a review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pull request on the pending record whose head the refinery is validating",
+		{"a pull request whose head the refinery is validating",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_head_changed"))}}, []string{}, []string{}},
-		{"a pull request on the pending record in its draft stage, with no posture recorded",
+		{"a pull request in its draft stage, with no posture recorded",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", map[string]string{"merge_result": "pull_request_pending"}), "blocked")}},
 			[]string{}, []string{}},
-		{"a pull request on the pending record carrying the old record's blocked verdict and thread count",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"pr_posture", "approved@h@t", "pr.machine", "blocked@h@t", "pr.machine_cause", "review-threads", "pr.unanswered_threads", "1@h")), "blocked")}},
-			[]string{}, []string{}},
-		{"a pull request on the pending record carrying the old record's draft markers, waiting on a review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"opened_as_draft", "h")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pull request on the pending record under a merge hold",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_pending",
-				"pr_posture", "approved@h@t", "merge_hold", "true")), "blocked")}},
-			[]string{}, []string{"b"}},
-		{"a pre-open anchor whose checks are done has no pull request to review",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate"))}}, []string{}, []string{}},
-		{"a pre-open anchor the merge pass blocked",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pre_open_gate", "pr.machine", "blocked@h@t", "pr.machine_cause", "rule"))}},
-			[]string{}, []string{"b"}},
+		{"a pull request that closed unmerged has no review to wait on",
+			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_closed_unmerged"))}}, []string{}, []string{}},
 		{"a bead that is no merge anchor is no review to wait on",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("t", with(awaitingReview, "merge_result", ""))}}, []string{}, []string{}},
 		{"a pull request held only by its gate is the gate's to clear",
@@ -413,7 +406,7 @@ func TestHoldingOwed(t *testing.T) {
 			map[string][]Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b1", awaitingReview)}, "b1": {anchorBlocker("b2", awaitingReview)}},
 			[]string{}, []string{"b2"}},
 		{"a pull request that landed holds nothing",
-			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "merged")))}}, []string{}, []string{}},
+			map[string][]Blocker{"a": {task("rw")}, "rw": {closed(anchorBlocker("b", with(awaitingReview, "merge_result", "mr_merged")))}}, []string{}, []string{}},
 		{"a closed decision holds nothing", map[string][]Blocker{"a": {closed(decision("d"))}}, []string{}, []string{}},
 		{"a human gate counts once, as a gate",
 			map[string][]Blocker{"a": {task("rw")}, "rw": {gate("g")}},
@@ -515,21 +508,6 @@ func TestStays(t *testing.T) {
 		if got := Stays(tc.b, tc.own); got != tc.want {
 			t.Errorf("%s: Stays = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-// HoldingGates is Holding's gates, root by root, with its bound and its errors.
-func TestHoldingGatesIsHoldingsGates(t *testing.T) {
-	g := &graph{edges: map[string][]Blocker{"a": {task("rw"), decision("d")}, "rw": {gate("g")}, "b": nil}}
-	gates, err := HoldingGates([]string{"a", "b"}, g.read)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ids := gateIDs(gates["a"]); !slices.Equal(ids, []string{"g"}) {
-		t.Errorf("gates of a = %v, want only the gate", ids)
-	}
-	if ids, answered := gates["b"]; !answered || len(ids) != 0 {
-		t.Errorf("gates of b = %v (%v), want an answer with none", ids, answered)
 	}
 }
 

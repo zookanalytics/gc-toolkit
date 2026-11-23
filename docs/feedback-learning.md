@@ -1,18 +1,21 @@
 ---
 name: Feedback-Learning Loop
-description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads, how observations become operator-reviewed rule changes, the five carriers adopted rules land in, and the recurrence metric that says whether the loop works.
+description: The conventions of the feedback-learning loop — its ceiling-raising purpose, how feedback is recorded as observation beads and agent memory notes are read beside them, how both become operator-reviewed rule changes, the five carriers adopted rules land in, and the recurrence metric that says whether the loop works.
 ---
 
 # Feedback-Learning Loop
 
 The learning system's purpose is **ceiling-raising**: capturing what the
 operator cares about and responds to, so agents present better options
-and escalations over time. It works through one path. Feedback is
-recorded as observation beads; a distiller judges what the observations
-add up to; every resulting change to the pack lands as an operator-reviewed
-PR against this pack, a fix in code another rig owns is filed as that rig's
-work, and one in a project outside the city is recorded as an upstream finding
-for the operator. Nothing changes agent behavior until such a change merges.
+and escalations over time. It has two intakes and one judge. Feedback to
+be evaluated is recorded as observation beads, and what should change the
+next agent's behavior is written as agent memory notes. A distiller judges
+what both add up to. Every resulting change to the pack lands as an
+operator-reviewed PR against this pack, a fix in code another rig owns is
+filed as that rig's work, and one in a project outside the city is recorded
+as an upstream finding for the operator. A memory note steers the agents
+that read it from the moment it is written, with only its writer behind it,
+and nothing else changes agent behavior until such a change merges.
 
 Hardened detectors (`tools/lint-learned.d/`) and doctor checks are **not
 the learning system**. They are ordinary pack hygiene — a well-architected
@@ -23,9 +26,9 @@ graduated out of the learning system into tooling.
 ## Scope
 
 **Mandate.** The conventions of the feedback-learning loop — the
-observation contract, the capture channels, the promotion and retirement
-path, the carriers adopted rules land in, and how the loop's own success is
-measured.
+observation contract, the capture channels, the memory intake, the
+promotion and retirement path, the carriers adopted rules land in, and how
+the loop's own success is measured.
 
 **Boundaries.** The design rationale and decision record live in
 `specs/2026-08-learning-system/`. The judgment content of the promotion
@@ -141,11 +144,65 @@ Four producers file the same bead contract:
    provenance `pr:<owner/repo>#<n>:veto`) — the rubric's own misses feed
    the loop it powers.
 
+## The memory intake
+
+Claude Code keeps a directory of memory notes for each project. Its index,
+`MEMORY.md`, loads into every session that has memory, and a session reads a
+note when it needs one. The distiller's first step, read-memory, runs `gctk
+memory settle`. `gctk memory` asks Claude Code where the sessions of each rig
+and of the city's root keep memory, so it copies none of Claude Code's location
+rules, and it files one finding through `patrol-finding.sh` for a place whose
+memory directory Claude Code does not name, where it reads and removes nothing.
+
+A note is due when the distiller has not judged it at its current text, or
+when the date the judge set for it has come. The text is the note's body:
+neither its use lines nor what Claude Code rewrites in its front matter when an
+agent saves it counts as a change, and neither does an edit to its front
+matter alone. Due notes join the pending observations, count toward the
+cadence gate, and are judged oldest first, at most `memory_notes_per_run` a
+run. The judge gives each due note one outcome by the rubric's memory section,
+whose tests are the operator's three questions as
+`specs/tk-zlot608.2/design.md` quotes them. It drops a note that holds nothing
+worth keeping, once what the note shows is carried to where it goes. It sets a
+note on the feedback pattern its lesson joins, or keeps it until a date it
+chooses. A note whose fix is in code another rig or project owns waits instead
+on the bead in that rig's store that carries the fix, or on the upstream
+finding that records the problem. A note it
+cannot substantiate either way stays, and a line in it asks its users to record
+the days they use it, one dated line a day, for the judge's next look. A
+decision that does not ask again takes that line out, and the use lines stay as
+the note's dated record.
+
+A note on a pattern leaves once the pattern closes and a fix it spawned has
+landed on its repository's default branch. When the pattern closes with no fix
+landed, such as a prompt-update the operator vetoed, the note comes due at
+once, as old as the day the pattern closed, and the judge reads why. No note
+leaves because of its age. `gctk memory` keeps, for each directory, the list of
+the notes the judge kept, with each one's hash and what it waits on, and the
+text of each note it removed, in the pack's state directory. It removes a note
+only while the note is unchanged since the judge read it, and takes out the
+lines of the index and of a collection note (`hub-*.md`) that link a note it
+removed. A note it removes, and the text each of its edits replaces, stay as
+files in the memory directory's hidden `.memory-intake` folder, since an agent
+that opened one before can still write to it.
+
+Where what an agent learns goes is guidance every Claude role that keeps
+memory carries in its prompt (`template-fragments/memory-notes.template.md`),
+a list of three places: its memory holds what should change the next agent's
+behavior, an observation holds a correction to how agents work, and a bead's
+notes hold the state of its open work.
+
 ## The promotion path
 
 The distiller (`mol-feedback-distiller`, judging by the
 `learning-distill` rubric skill) dedups pending observations, clusters
-them onto pattern beads, and decides which clusters have earned a rule.
+them and the due memory notes onto pattern beads, and decides which
+clusters have earned a rule.
+One run a day serves the whole city. The `feedback-distiller` order starts it
+through `gctk distiller start` in the pack's home rig, the rig whose checkout
+holds the pack, because the changes a run proposes are edits to the pack. The
+order starts no run while one is still open there. The run reads the
+observations and memory notes of every rig.
 A pattern bead (`task_kind=feedback-pattern`) is backlog work the distiller
 triages, the way a bug is, and nothing routes or assigns it. Every run leaves
 each pattern in one of three states: closed once resolved (its rule adopted,

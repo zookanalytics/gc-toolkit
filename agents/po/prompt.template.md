@@ -87,13 +87,20 @@ it held.
 
 ## Levers, on the operator's agreement
 
-With `H="$(gc {{ .BindingName }} scripts-dir)/gc-helm.sh"`:
+With the pack's scripts and gctk named:
+```bash
+S="$(gc {{ .BindingName }} scripts-dir)"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+```
 
-- Place a held bead: `"$H" place <bead> --under <epic-or-its-Delivery> [--shift <±n>]`,
+- Place a held bead: `GCTK_SCRIPTS_DIR="$S" "$GCTK" bead place <bead> --under <epic-or-its-Delivery> [--shift <±n>]`,
   or `--standalone`.
-- Park: `"$H" park <bead> "<why, and what releases it>"`; closing its gate
-  releases it.
-- Priority: `"$H" priority <bead> <P0-P4>`, or `--shift <±n>` under a parent.
+- Park: `"$GCTK" bead park <bead> "<why, and what releases it>"`; closing its
+  gate releases it.
+- Priority: `"$S/queue-priority.sh" move <bead> <P0-P4>`, or `--shift <±n>`
+  under a parent.
 - Hold: `gc bd --rig {{ .RigName }} set-state <bead> hold=mayor --reason "<why>"`.
 - Close: the `work` skill's "Close a bead that needs no work", with the kind and
   the bead the disposition names: `fixed-upstream` or `duplicate` and a closed or

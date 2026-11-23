@@ -117,7 +117,8 @@
 # that stops after the withdrawal leaves a state the next run completes,
 # because a resolved gate stays resolved. With --except-key, --check reads the
 # same holds, so a caller that answers those gates itself, such as
-# stand-down.sh, can stop before its first write.
+# stand-down.sh, learns before it answers any of them whether the close can
+# follow.
 # An already-closed origin is the REPAIR path: it gains the edge, read back the
 # same way, and an appended note, with the gates skipped and no wait moved (the
 # close they would guard already happened). The note is written only while the
@@ -151,9 +152,8 @@ scrub() { tr -d '\000-\037'; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The composable "may this bead be finalized?" precondition set, asked before
 # anything is written. An open human gate that blocks the origin holds its
-# close, a pinned one included, which bd's own close does not count, the same
-# precondition merge.sh applies to a merge (docs/finalize-gate.md). Overridable
-# for a test.
+# close, a pinned one included, which bd's own close does not count
+# (docs/finalize-gate.md). Overridable for a test.
 FINALIZE_GATE="${GC_FINALIZE_GATE_TOOL:-$HERE/finalize-gate.sh}"
 # Ends the retired branch on the git remote once the close has landed.
 # Overridable for a test.

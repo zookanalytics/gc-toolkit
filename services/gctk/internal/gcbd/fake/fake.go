@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -26,14 +27,15 @@ import (
 // a listing does. ClosedAt is when a closed bead closed. An edge carries the far
 // bead's fields as a show row reports them, so a closed row that names no close
 // time takes the one an edge onto it names. Assignee, AwaitType, AwaitID,
-// Description, Priority, Labels, CreatedAt, CloseReason and Notes are the row's
-// own fields a listing carries, and an update's --append-notes adds a line to
-// Notes. Ephemeral and Template put the row in the ephemeral plane or make it a
-// template.
+// Description, Priority, Labels, CreatedAt, UpdatedAt, CloseReason and Notes
+// are the row's own fields a listing carries, and an update's --append-notes
+// adds a line to Notes. Ephemeral and Template put the row in the ephemeral
+// plane or make it a template.
 type Bead struct {
 	ID, Title, Status, IssueType, ClosedAt string
 	Assignee, AwaitType, Description       string
 	AwaitID, CreatedAt, CloseReason, Notes string
+	UpdatedAt                              string
 	Priority                               int
 	Labels                                 []string
 	Ephemeral, Template                    bool
@@ -79,13 +81,18 @@ type Store struct {
 	creates []Create
 	states  []State
 	added   []Edge
+	// lastWrites is the newest write the store records under each actor,
+	// which SetLastWrite sets.
+	lastWrites map[string]time.Time
+	// lastWriteReads is the actors each LastWrites read named.
+	lastWriteReads [][]string
 
-	// RowsErr, BlockedErr, FindErr, ReadyErr and DependentsErr fail the
-	// matching read when set, ReadyErr failing ReadyIDs too. UpdateErr fails
-	// every update, CreateErr every create, StateErr every set-state and
-	// EdgeErr every edge write.
-	RowsErr, BlockedErr, FindErr, ReadyErr, UpdateErr, CreateErr error
-	StateErr, EdgeErr, DependentsErr                             error
+	// RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr and DependentsErr
+	// fail the matching read when set, ReadyErr failing ReadyIDs too.
+	// UpdateErr fails every update, CreateErr every create, StateErr every
+	// set-state and EdgeErr every edge write.
+	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, CreateErr error
+	StateErr, EdgeErr, DependentsErr                                            error
 
 	// OnWrite, when set, runs after each write the store takes, outside the
 	// store's lock: its kind (update, create, set-state or dep-add), the bead
@@ -102,10 +109,27 @@ type Store struct {
 	// write, or refuse the write with the error it returns.
 	BeforeUpdate func(id string, args []string) error
 
+	// IDPrefix is the id prefix the store gives a bead it files, which its
+	// Prefix read answers: fk when unset.
+	IDPrefix string
+
 	// CloseTime, when set, is the close time an update that closes a bead
 	// stamps on a row that names none, as bd stamps a close. With none set, an
 	// update stamps nothing, and a test names a close time itself.
 	CloseTime string
+
+	// UnrelateErr fails every unrelate, ResolveErr every gate resolve and
+	// ReopenErr every reopen.
+	UnrelateErr, ResolveErr, ReopenErr error
+
+	// BeforeResolve, when set, runs ahead of each gate resolve, outside the
+	// store's lock, so a test can land another answer on the gate first, or
+	// refuse the resolve with the error it returns.
+	BeforeResolve func(id, reason string) error
+
+	unrelates []Edge
+	resolves  []Close
+	reopens   []Close
 
 	// WorkRecordGate, when set, refuses an update that closes a plain task bead
 	// as Gas City's work-record gate refuses it under GC_WORK_RECORD_ENFORCE,
@@ -267,8 +291,11 @@ func (s *Store) Rows(ids []string) ([]gcbd.Bead, error) {
 // Find returns, in id order, the row of each bead q selects, in a listing's
 // shape: every edge, with the far bead's id and the edge's type alone. A bead q
 // names that the store does not hold is left out, as a listing leaves it out.
-// A parent selects the beads whose own parent-child edge names it, and a type
-// the beads whose issue type is that one exactly.
+// A parent selects the beads whose own parent-child edge names it, a type the
+// beads whose issue type is that one exactly, an assignee the beads assigned
+// to it exactly, and statuses the beads whose status is one of them. Listed
+// leaves out each row bd's listing hides unless asked
+// ([gcbd.Bead.ListedByDefault]).
 func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.OnFind != nil {
 		s.OnFind(q)
@@ -279,7 +306,8 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 	if s.FindErr != nil {
 		return nil, s.FindErr
 	}
-	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" && !q.Every {
+	if len(q.IDs) == 0 && q.HasKey == "" && q.Key == "" && q.Parent == "" && q.TitleContains == "" && q.Type == "" &&
+		q.Assignee == "" && len(q.Statuses) == 0 && !q.Every {
 		return nil, &gcbd.ReadError{Reason: "the fake store takes no find that selects no beads"}
 	}
 	ids := slices.Sorted(maps.Keys(s.rows))
@@ -309,7 +337,17 @@ func (s *Store) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if q.Type != "" && b.IssueType != q.Type {
 			continue
 		}
-		out = append(out, s.listing(b))
+		if q.Assignee != "" && b.Assignee != q.Assignee {
+			continue
+		}
+		if len(q.Statuses) > 0 && !slices.Contains(q.Statuses, b.Status) {
+			continue
+		}
+		row := s.listing(b)
+		if q.Listed && !row.ListedByDefault() {
+			continue
+		}
+		out = append(out, row)
 	}
 	return out, nil
 }
@@ -358,12 +396,13 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes, --title and --priority to the row, and records
-// it. An argument that is no flag names another bead the update writes the same
-// way, as bd's update takes each bead it writes, and each is recorded as a write
-// of its own. A bead the store does not hold refuses the write, as bd does.
-// --if-status and --if-assignee are bd's guards: an update whose guard no
-// longer holds writes nothing and fails with an error that is gcbd.ErrGuard.
+// --assignee, --append-notes, --title, --priority, --remove-label,
+// --description and --parent to the row, and records it. An argument that is no
+// flag names another bead the update writes the same way, as bd's update takes
+// each bead it writes, and each is recorded as a write of its own. A bead the
+// store does not hold refuses the write, as bd does. --if-status and
+// --if-assignee are bd's guards: an update whose guard no longer holds writes
+// nothing and fails with an error that is gcbd.ErrGuard.
 func (s *Store) Update(id string, args ...string) (string, error) {
 	if s.BeforeUpdate != nil {
 		if err := s.BeforeUpdate(id, slices.Clone(args)); err != nil {
@@ -487,6 +526,16 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--remove-label":
+			b.Labels = slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return l == value })
+		case "--description":
+			b.Description = value
+		case "--parent":
+			edges, err := s.parented(b, value)
+			if err != nil {
+				return Bead{}, err
+			}
+			b.Edges = edges
 		case "--priority":
 			p, err := strconv.Atoi(strings.TrimPrefix(strings.ToUpper(value), "P"))
 			if err != nil || p < 0 || p > 4 {
@@ -637,20 +686,40 @@ func (s *Store) Creates() []Create {
 	return slices.Clone(s.creates)
 }
 
-// Create files a bead titled title, open, as fk-<n> for the nth create, with
-// the create's -t, -d, --metadata, a JSON object of strings, and --deps, read
-// as bd's --deps reads it: an entry blocks:<id> gives bead id a blocks edge
-// onto the new bead, a bare id, depends-on:<id> and blocked-by:<id> name a bead
-// the new one waits on by a blocks edge, and any other type, such as
-// discovered-from, gives the new bead its own edge of that type. A bead --deps
-// names that the store does not hold refuses the create.
+// Prefix answers the id prefix the store gives a bead it files.
+func (s *Store) Prefix() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prefix(), nil
+}
+
+func (s *Store) prefix() string {
+	if s.IDPrefix == "" {
+		return "fk"
+	}
+	return s.IDPrefix
+}
+
+// Create files a bead titled title, open, as <prefix>-<n> for the nth create,
+// or the first n after it whose id the store does not hold, as bd mints no id
+// a store holds. It takes the create's -t, -d, --metadata, a JSON object of
+// strings, and --deps, read as bd's --deps reads it: an entry blocks:<id> gives
+// bead id a blocks edge onto the new bead, a bare id, depends-on:<id> and
+// blocked-by:<id> name a bead the new one waits on by a blocks edge, and any
+// other type, such as discovered-from, gives the new bead its own edge of that
+// type. A bead --deps names that the store does not hold refuses the create.
 func (s *Store) Create(title string, args ...string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.CreateErr != nil {
 		return "", s.CreateErr
 	}
-	id := fmt.Sprintf("fk-%d", len(s.creates)+1)
+	n := len(s.creates) + 1
+	id := fmt.Sprintf("%s-%d", s.prefix(), n)
+	for _, held := s.rows[id]; held; _, held = s.rows[id] {
+		n++
+		id = fmt.Sprintf("%s-%d", s.prefix(), n)
+	}
 	b := Bead{ID: id, Title: title, Status: "open", IssueType: "task", Metadata: map[string]string{}}
 	var blocks []string
 	for i := 0; i < len(args); i++ {
@@ -781,6 +850,9 @@ func bead(b Bead, deps []any) gcbd.Bead {
 	}
 	if b.CreatedAt != "" {
 		out.CreatedAt = b.CreatedAt
+	}
+	if b.UpdatedAt != "" {
+		out.UpdatedAt = b.UpdatedAt
 	}
 	if b.CloseReason != "" {
 		out.CloseReason = b.CloseReason

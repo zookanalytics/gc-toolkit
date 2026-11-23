@@ -1,13 +1,13 @@
 package pr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -29,46 +29,41 @@ import (
 //
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
-// so the order keeps no list of its own. The pour gives every bead it created
-// the bead's priority, then the bead its blocks edge onto the root. A run whose
-// pr_bead var names the bead and that no edge of the bead names, live or ended,
-// as a pour that stopped before its edge landed leaves it, gets that edge from
-// the next run before that run decides anything of the record (attach), so it
-// holds the bead as any attached run does and counts toward how the bead's runs
-// ended. A run that ended without a result is poured again. When the last two
-// runs at the validated head both ended without one, counting only runs that
-// ended after the bead's last review-run-failed gate closed, the run asks a
-// person through a gate under that key instead.
+// so the order keeps no list of its own. A run that ended without a result is
+// poured again. When the last two runs at the validated head both ended
+// without one, counting only runs that ended after the bead's last
+// review-run-failed gate closed, the run asks a person through a gate under
+// that key instead.
 
-// Runs pours a review run: the formula, as a workflow of its own, with its
-// vars.
+// Runs pours a review run: the formula, as a sub-workflow attached to the
+// bead, with its vars. It returns the run's root.
 type Runs interface {
-	Pour(formula string, vars map[string]string) (Poured, error)
-}
-
-// Poured is what a pour created: the run's root, and every bead it created, the
-// root among them.
-type Poured struct {
-	Root  string
-	Beads []string
+	Pour(formula, bead string, vars map[string]string) (string, error)
 }
 
 // runFailedKey keys the human gate the order files when the last two runs at
 // one head ended without a result.
 const runFailedKey = "review-run-failed"
 
-// runOutsideKey keys the human gate the order files when the bead's store does
-// not hold the root of a run it poured, so no edge can hold the bead on it.
-const runOutsideKey = "review-run-outside-store"
+// pourReserve is how much of its bound an act must have left to start a review
+// run's pour. The pour is the one call an act does not stop: gc formula cook
+// --attach makes the run before it adds the edge that attaches it, and a cook
+// stopped between the two leaves a run whose steps the pools take and that the
+// order never reads, so the next run pours a second. A pour is a few store
+// calls, which take seconds, so a pour started with this much left ends inside
+// the bound. One that does not, such as a cook the store keeps waiting, holds
+// the record lock until it ends or the order's timeout ends the run.
+const pourReserve = 10 * time.Second
 
-// admit pours the review run the record s read is owed, or files the gate
-// that asks a person once two runs at its head ended without a result, and
-// says what it did. It returns false when the bead is owed no run, so the
+// admit decides the review run the record s read is owed: the pour, or the
+// gate that asks a person once two runs at its head ended without a result,
+// or why none is poured. It returns false when the bead is owed no run, so the
 // caller reports the evaluator's answer. ans is the evaluator's answer at the
-// validated head and gr the GitHub read it made, which each write carries when
-// it made one, asks the asks on the bead, and note what the run did with the
-// record's withdrawals.
-func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks []review.Ask, note string) (RunOutcome, bool) {
+// validated head, on the read the PR watch saved, and asks the asks on the
+// bead. A run owed is held off, as checked, only while a run, a gate or
+// another writer holds the branch, and a read that did not answer, or a pour
+// this run cannot make, is a retry (ActRetry).
+func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	var takeable []string
 	for _, a := range asks {
 		if a.Takeable() {
@@ -77,165 +72,58 @@ func (u *run) admit(s state, p *gh.PullRequest, ans Answer, gr *GitHubRead, asks
 	}
 	unreviewed := slices.ContainsFunc(ans.Conditions, func(c Condition) bool { return c.Kind == KindReview })
 	if !unreviewed && len(takeable) == 0 {
-		return RunOutcome{}, false
+		return plan{}, false
 	}
 	why := fmt.Sprintf("no review result passed at %s into %s", s.rec.Head, s.rec.Target)
 	if !unreviewed {
 		why = "ask " + strings.Join(takeable, ", ") + " is open, and nothing holds it"
 	}
-	checked := func(detail string) (RunOutcome, bool) {
-		w := u.Ledger.Write(s.id)
-		record.Checked(w, "open", s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActChecked, Detail: withNote(detail, note)}), true
+	checked := func(detail string) (plan, bool) { return none(s, ActChecked, detail), true }
+	retry := func(detail string) (plan, bool) {
+		return none(s, ActRetry, detail+"; the next run decides again"), true
 	}
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
-	}
-	outside, _, err := outsideRunKey.Get(s.row)
-	if err != nil {
-		return checked("no review run is poured, because the run the bead records outside its store did not read; the next run reads it: " + err.Error())
-	}
-	if root := strings.TrimSpace(outside); root != "" {
-		return u.runOutside(s, root, gr, note), true
 	}
 	if by := heldBy(s); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)
 	}
 	writers, err := u.writers(s)
 	if err != nil {
-		return checked("no review run is poured, because the beads on " + s.branch + " did not read; the next run reads them: " + err.Error())
+		return retry("no review run is poured, because the beads on " + s.branch + " did not read: " + err.Error())
 	}
 	if len(writers) > 0 {
 		return checked(fmt.Sprintf("no review run is poured while %s works %s: %s", strings.Join(writers, ", "), s.branch, why))
 	}
-	retry := func(detail string) (RunOutcome, bool) {
-		w := u.Ledger.Write(s.id)
-		record.Retry(w, "open", detail, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(detail, note)}), true
-	}
 	failed, err := u.failedRuns(s)
 	if err != nil {
-		return checked("no review run is poured, because how its earlier runs ended did not read; the next run reads it: " + err.Error())
+		return retry("no review run is poured, because how its earlier runs ended did not read: " + err.Error())
 	}
 	if len(failed) == 2 {
-		return u.runFailed(s, p, failed, gr, note), true
+		return doing(func(ctx context.Context, c carriedOut) RunOutcome { return u.runFailed(ctx, s, failed, c.note) }), true
 	}
 	vars, err := reviewVars(u.Refinery)
 	if err != nil {
-		return checked("no review run is poured: " + err.Error())
+		return retry("no review run is poured: " + err.Error())
 	}
 	vars["pr_bead"], vars["head"], vars["target"], vars["branch"] = s.id, s.rec.Head, s.rec.Target, s.branch
 	if u.Runs == nil {
-		return checked("no review run is poured, because nothing pours one here: " + why)
+		return retry("no review run is poured, because nothing pours one here: " + why)
 	}
-	poured, err := u.Runs.Pour(reviewFormula, vars)
-	if err != nil {
-		return retry(fmt.Sprintf("the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err))
-	}
-	ranked := ""
-	if err := u.Ledger.Prioritize(s.row.Priority(), poured.Beads...); err != nil {
-		ranked = fmt.Sprintf(", and its beads keep the formula's priority, as the bead's did not land on them: %v", err)
-	}
-	if err := u.Ledger.AddBlocker(s.id, poured.Root); errors.Is(err, ledger.ErrNotHeld) {
-		return u.runOutside(s, poured.Root, gr, note), true
-	} else if err != nil {
-		return retry(fmt.Sprintf("review run %s poured at %s, and the bead's edge onto it did not land; the next run attaches it: %v", poured.Root, s.rec.Head, err))
-	}
-	w := u.Ledger.Write(s.id)
-	record.Checked(w, "open", s.now)
-	if gr != nil {
-		githubReadKey.Set(w, gr)
-	}
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
-		"review run %s poured at %s into %s, attached to the bead%s: %s", poured.Root, s.rec.Head, s.rec.Target, ranked, why), note)}), true
-}
-
-// unattached reads the runs of the review formula, live and closed, whose
-// pr_bead var names the bead s read and that no blocks edge of the bead names,
-// in id order, leaving out a shadow run, which writes nothing outside itself.
-func (u *run) unattached(s state) ([]*ledger.Record, error) {
-	rows, err := u.Ledger.Find(ledger.Matching(runPRBeadVar, s.id).WithClosed())
-	if err != nil {
-		return nil, err
-	}
-	var out []*ledger.Record
-	for _, r := range rows {
-		if !isReviewRoot(r) || slices.ContainsFunc(s.blockers, func(b *ledger.Record) bool { return b.ID == r.ID }) {
-			continue
+	return doing(func(ctx context.Context, c carriedOut) RunOutcome {
+		if left, ok := ctx.Deadline(); ok && time.Until(left) < pourReserve {
+			return RunOutcome{Bead: s.id, Action: ActLeft, Detail: withNote(fmt.Sprintf("the act had less than the %s "+
+				"a review run's pour reserves left of its bound, so the next run pours the run at %s", pourReserve,
+				s.rec.Head), c.note)}
 		}
-		shadow, _, err := runShadowVar.Get(r)
+		root, err := u.Runs.Pour(reviewFormula, s.id, vars)
 		if err != nil {
-			return nil, err
+			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf(
+				"the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err), c.note)}
 		}
-		if strings.TrimSpace(shadow) != "true" {
-			out = append(out, r)
-		}
-	}
-	slices.SortFunc(out, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
-	return out, nil
-}
-
-// attach gives the bead s read its blocks edge onto each of strays, the runs
-// unattached found, before the run decides anything a run attached to the bead
-// holds: a changed head's hand-over, a draft's ready mark, a merge request, a
-// retired PR's close and a pour. Each run it attaches joins s's blockers, and a
-// live one its runs, as a read of the bead after the edge finds them. It
-// returns its account of the runs it attached, for the outcome. An edge that
-// does not land writes the retry, the next run attaches the run, and ok is
-// false.
-func (u *run) attach(s *state, strays []*ledger.Record) (note string, out RunOutcome, ok bool) {
-	var ids []string
-	for _, r := range strays {
-		if err := u.Ledger.AddBlocker(s.id, r.ID); err != nil {
-			why := fmt.Sprintf("review run %s was poured for the bead with no edge onto it, and the edge did not land; the next run attaches it: %v", r.ID, err)
-			w := u.Ledger.Write(s.id)
-			record.Retry(w, "", why, s.now)
-			return "", u.commit(*s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: why}), false
-		}
-		s.blockers, ids = append(s.blockers, r), append(ids, r.ID)
-		if r.Status() != "closed" {
-			s.runs = append(s.runs, r.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return "", RunOutcome{}, true
-	}
-	return fmt.Sprintf("review run %s had no edge of the bead onto it, and has that edge now", strings.Join(ids, ", ")), RunOutcome{}, true
-}
-
-// runOutside files the gate that asks a person about the run at root, which the
-// order poured and whose root the bead's store does not hold, so the bead
-// cannot wait on it and no later run can see it. The gate holds the bead, so no
-// other run is poured until a person clears it. A gate that does not file
-// leaves the run recorded on the bead (outsideRunKey), and the next run files
-// the gate for it in place of a pour. Each write carries gr, the GitHub read
-// the check made, when it made one.
-func (u *run) runOutside(s state, root string, gr *GitHubRead, note string) RunOutcome {
-	message := fmt.Sprintf("Review run %s was poured for %s into %s, and %s's store does not hold the run's root, so "+
-		"the bead cannot wait on the run and the landing order cannot see it. The landing order pours no other run "+
-		"while this gate is open. Cancel the run, and clear this gate once the city pours a review run into %s's "+
-		"store, since a run poured before then lands where this one did.", root, s.id, s.rec.Target, s.id, s.id)
-	w := u.Ledger.Write(s.id)
-	if gr != nil {
-		githubReadKey.Set(w, gr)
-	}
-	if err := u.Gates.File(s.id, runOutsideKey, message); err != nil {
-		why := fmt.Sprintf("%s: review run %s's root is not in the bead's store, and the human gate did not file; the next run files it in place of a pour: %v", runOutsideKey, root, err)
-		record.Retry(w, "open", why, s.now)
-		outsideRunKey.Set(w, root)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
-	}
-	record.Checked(w, "open", s.now)
-	outsideRunKey.Clear(w)
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
-		"%s: review run %s was poured, and the bead's store does not hold its root, so a person is asked before another run",
-		runOutsideKey, root), note)})
+		return RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
+			"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), c.note)}
+	}), true
 }
 
 // heldBy names the open human gate on the bead s read, which keeps the order
@@ -262,7 +150,7 @@ func isHumanGate(b *ledger.Record) bool {
 // name its branch, each of them work of its own on the branch, such as a
 // rework child.
 func (u *run) writers(s state) ([]string, error) {
-	rows, err := u.Ledger.Find(record.OnBranch(s.branch))
+	rows, err := s.reads.Find(record.OnBranch(s.branch))
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +222,7 @@ func (u *run) failedRuns(s state) ([]review.Ending, error) {
 	})
 	var out []review.Ending
 	for _, c := range closed[len(closed)-2:] {
-		e, err := review.Ended(u.Ledger, c.id)
+		e, err := review.Ended(s.reads, c.id)
 		if err != nil {
 			return nil, err
 		}
@@ -358,9 +246,8 @@ func closedTime(b *ledger.Record) (time.Time, error) {
 // runFailed files the gate that asks a person to look at the two runs at the
 // validated head that ended without a result. The gate holds the bead, so no
 // run is poured until a person clears it, and then the next run of the order
-// pours one more. Each write carries gr, the GitHub read the check made, when
-// it made one.
-func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, gr *GitHubRead, note string) RunOutcome {
+// pours one more.
+func (u *run) runFailed(ctx context.Context, s state, failed []review.Ending, note string) RunOutcome {
 	var parts []string
 	for _, e := range failed {
 		parts = append(parts, fmt.Sprintf("%s, where %s", e.Root, e.How))
@@ -368,24 +255,14 @@ func (u *run) runFailed(s state, p *gh.PullRequest, failed []review.Ending, gr *
 	message := fmt.Sprintf("The last two review runs of %s at its validated head %s into %s both ended without a result: %s. "+
 		"The landing order pours a run that ends without a result again once, so this is the city's machinery failing at "+
 		"this head, not a ruling the PR (%s) waits on. Look at the two runs and fix what stopped them, then clear this "+
-		"gate, and the landing order pours one more run.", s.id, s.rec.Head, s.rec.Target, strings.Join(parts, "; and "), p.URL)
-	if err := u.Gates.File(s.id, runFailedKey, message); err != nil {
-		w := u.Ledger.Write(s.id)
-		why := fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err)
-		record.Retry(w, "open", why, s.now)
-		if gr != nil {
-			githubReadKey.Set(w, gr)
-		}
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(why, note)})
+		"gate, and the landing order pours one more run.", s.id, s.rec.Head, s.rec.Target, strings.Join(parts, "; and "), s.rec.URL)
+	if err := u.Gates.File(ctx, s.id, runFailedKey, message); err != nil {
+		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(
+			fmt.Sprintf("%s: the human gate did not file; the next run files it: %v", runFailedKey, err), note)}
 	}
-	w := u.Ledger.Write(s.id)
-	record.Checked(w, "open", s.now)
-	if gr != nil {
-		githubReadKey.Set(w, gr)
-	}
-	return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
+	return RunOutcome{Bead: s.id, Action: ActExcepted, Detail: withNote(fmt.Sprintf(
 		"%s: review runs %s and %s ended without a result at %s, so a person is asked before another run", runFailedKey,
-		failed[0].Root, failed[1].Root, s.rec.Head), note)})
+		failed[0].Root, failed[1].Root, s.rec.Head), note)}
 }
 
 // reviewVars are the vars a review run is poured with beyond the record's:

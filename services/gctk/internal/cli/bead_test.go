@@ -15,8 +15,8 @@ import (
 // and `bd list` returns the rows its --id, --has-metadata-key, --metadata-field
 // and --all select, in a listing's shape, every edge kept. `bd blocked`
 // answers $STUB_BLOCKED and `bd sql` $STUB_MARKS. $STUB_BLOCKED_RC fails the
-// listing. `bd where` names /stub/.beads at prefix "st", and `rig list` names
-// that store alone, so no store's prefix begins an id here. Each call logs the
+// listing. `bd where` names /stub/.beads at prefix "st", and `config show`
+// names that store alone, so no store's prefix begins an id here. Each call logs the
 // store it names with bd's --db, "-" for none, to $STUB_DB_LOG.
 const storeStub = `#!/bin/sh
 db=-
@@ -52,7 +52,7 @@ case "$1 $2" in
       | .dependencies = [ (.dependencies // [])[] | {issue_id: $self, depends_on_id: .id, type: .dependency_type} ] ]' ;;
 "bd blocked") printf '%s\n' "${STUB_BLOCKED:-[]}"; exit "${STUB_BLOCKED_RC:-0}" ;;
 "bd where") printf '%s\n' '{"path":"/stub/.beads","prefix":"st"}' ;;
-"rig list") printf '%s\n' '{"rigs":[{"name":"stub","prefix":"st","path":"/stub"}]}' ;;
+"config show") printf '%s\n' '{"city_path":"/stub","config":{"Workspace":{"Name":"stub","Prefix":"st"},"Rigs":[]}}' ;;
 "bd sql") printf '%s\n' "${STUB_MARKS:-[]}" ;;
 *) echo "stub gc: no answer for $*" >&2; exit 2 ;;
 esac

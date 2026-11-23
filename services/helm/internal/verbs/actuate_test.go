@@ -69,8 +69,6 @@ func TestRunPassesVerbAndBeadAsSeparateArgs(t *testing.T) {
 		want string
 	}{
 		{"open", "argc=2 a1=open a2=tk-abc12 a3= a4="},
-		{"accept", "argc=2 a1=accept a2=tk-abc12 a3= a4="},
-		{"dismiss", "argc=2 a1=dismiss a2=tk-abc12 a3= a4="},
 		{"engage", "argc=4 a1=engage a2=tk-abc12 a3=--no-input a4=--no-attach"},
 	} {
 		res, err := o.Run(context.Background(), tc.verb, "tk-abc12")

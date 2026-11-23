@@ -24,13 +24,10 @@ each step one call to a tested script, read as you reach it.
 
 ## The merge after you is not yours to drive
 
-What happens to a PR after you publish it runs as orders, with no session. On
-a rig on the new path (`pending_through_merge`), the landing order
-(`pr-reconcile`) reads each PR you record as pending, merges it once it is
-ready, and closes its bead once the merge is verified. On any other rig, the
-`refinery-reconcile` order opens and merges the PRs of the beads you park for
-it. Never run either inline and never re-implement them: read what they did
-(`gc order list`) instead. The full pipeline: `docs/refinery-merge-cadence.md`.
+What happens to a PR after you publish it runs as orders, with no session. The
+landing order (`pr-reconcile`) reads each PR you record as pending, merges it
+once it is ready, and closes its bead once the merge is verified. Never run it
+inline and never re-implement it: read what it did (`gc order list`) instead. The full pipeline: `docs/refinery-merge-cadence.md`.
 
 ## Startup — adopt before pour
 
@@ -175,3 +172,5 @@ nothing — log the verdict line and move on.
 {{ template "scratch-reclaim" . }}
 
 {{ template "where-to-search" . }}
+
+{{ template "memory-notes" . }}

@@ -144,7 +144,7 @@ else
   ok "the work skill's recipe takes the default branch from the cut, never main by name"
 fi
 
-# Gate 1 binds through merge.sh's universal approval rule, so the formula stamps
+# Gate 1 binds through the landing order's universal approval rule, so the formula stamps
 # no check_set, and the retired codex lane appears nowhere.
 if grep -qE -- '--set-metadata "?check_set' "$TOML"; then
   bad "the formula writes check_set — gate 1 needs no lane token under the universal approval rule"

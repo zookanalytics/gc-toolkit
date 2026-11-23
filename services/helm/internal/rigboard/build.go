@@ -312,14 +312,18 @@ func build(g *gathered) Document {
 		}
 	}
 	places := map[string]queue.Place{}
+	unsent := map[string]bool{}
 	for _, list := range [][]queue.Place{g.order.Queue, g.order.NotScheduled} {
 		for _, p := range list {
 			places[p.ID] = p
 		}
 	}
+	for _, p := range g.order.NotScheduled {
+		unsent[p.ID] = true
+	}
 	for _, id := range ix.rows {
 		in := tableInput{b: ix.beads[id], kind: ix.kinds[id], ask: bt.asks[id], facts: factsOf(g, id),
-			prUnread: g.noFacts[id]}
+			prUnread: g.noFacts[id], notScheduled: unsent[id]}
 		if p, ok := places[id]; ok {
 			in.place = &p
 		}
@@ -498,13 +502,13 @@ func (bt *built) forProductOwner(id string) bool {
 
 // place lists the rig's open work in the Work queue's order once, the order
 // services/gctk/queue gave the read, so every view lists work in that one
-// order: the queue, then the work after it. The read asked for the order of
-// every open piece of work, work held for the Product Owner included, so the
-// work behind held work comes after the queue as the city takes it. Held work
-// is then left out of the order, since no view lists it. Work a reader could
-// not answer has no place in it and is listed apart: work whose row reads
-// unread, and work the order places nowhere, whose row can still read as an
-// ask.
+// order: the queue, then the ready work nothing sends anywhere after it. The
+// read asked for the order of every open piece of work, work held for the
+// Product Owner included, so the work behind held work sits behind it in the
+// queue. Held work is then left out of the order, since no view lists it. Work
+// a reader could not answer has no place in it and is listed apart: work whose
+// row reads unread, and work the order places nowhere, whose row can still
+// read as an ask.
 func (bt *built) place() {
 	list := func(places []queue.Place, after bool) {
 		for _, p := range places {
@@ -823,14 +827,14 @@ func (bt *built) view(needs []Need, covers func(string) bool) NeedsYou {
 
 // kindCounts is how many needs of each kind count, in the order a view reads
 // them: the five kinds every view shows, each one zero included, so a glance
-// tells which is empty, then Routed to you when one counts.
+// tells which is empty, then Assigned to you when one counts.
 func kindCounts(by map[NeedKind]int) []KindCount {
 	out := []KindCount{}
 	for _, k := range []NeedKind{NeedKindPullRequest, NeedKindQuestion, NeedKindWaitsForYou, NeedKindInConversation, NeedKindRuling} {
 		out = append(out, KindCount{Kind: k, Count: by[k]})
 	}
-	if n := by[NeedKindRoutedToYou]; n > 0 {
-		out = append(out, KindCount{Kind: NeedKindRoutedToYou, Count: n})
+	if n := by[NeedKindAssignedToYou]; n > 0 {
+		out = append(out, KindCount{Kind: NeedKindAssignedToYou, Count: n})
 	}
 	return out
 }
@@ -923,16 +927,10 @@ func (bt *built) needsYouPage() NeedsYou {
 }
 
 // carriesHoldMayor reports whether a bead carries hold:mayor, the label that
-// puts it on the Product Owner's desk, trimmed and in any case, as Gas City's
-// HasDispatchHold compares a label.
-func carriesHoldMayor(b bead) bool {
-	for _, l := range b.Labels {
-		if strings.EqualFold(strings.TrimSpace(l), "hold:mayor") {
-			return true
-		}
-	}
-	return false
-}
+// puts it on the Product Owner's desk, in every spelling the work queue's order
+// reads it in (queue.ForProductOwner), so a bead that hold keeps out of the
+// ready work nothing sends is on the Unprioritized page.
+func carriesHoldMayor(b bead) bool { return queue.ForProductOwner(b.Labels) }
 
 func (bt *built) unprioritizedPage() []PriorityGroup {
 	by := map[int][]string{}

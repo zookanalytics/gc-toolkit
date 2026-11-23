@@ -8,30 +8,31 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-// A Call is one run of the fake: its arguments after the program name, its
-// environment, and its standard streams.
+// A Call is one run of the fake: the name it ran under, its arguments after
+// that name, its environment, and its standard streams.
 type Call struct {
+	// Name is the program's name. A call made as bd answers as `gc bd` does.
+	Name   string
 	Args   []string
 	Env    []string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Exec replaces the process with the program at path, as a shell's exec
-	// does. The gc program sets it to syscall.Exec; with none set, the program
-	// runs as a child and the call exits with its status.
-	Exec func(path string, argv, env []string) error
-
 	// Stall holds the call for d with SIGTERM ignored, as a stalled gc
 	// command holds its lock. With none set, the process ignores SIGTERM and
 	// sleeps.
 	Stall func(d time.Duration)
+
+	// home is the store the call acts in, once route has picked it.
+	home store
 }
 
 // getenv is the value of name in the call's environment, the last one when
@@ -80,7 +81,7 @@ func (c *Call) fail(status int, msg string) error {
 	return exit(status)
 }
 
-func (c *Call) out(s string) { io.WriteString(c.Stdout, s) }
+func (c *Call) out(s string) { _, _ = io.WriteString(c.Stdout, s) }
 
 // required is a setting the harness always exports, read the way the stub's
 // ${NAME:?} reads it.
@@ -95,6 +96,13 @@ func (c *Call) required(name string) (string, error) {
 func run(c *Call) error {
 	if len(c.Args) > 0 && c.Args[0] == readFlag {
 		return harnessRead(c, c.Args[1:])
+	}
+	if len(c.Args) > 0 && c.Args[0] == writeFlag {
+		return harnessWrite(c, c.Args[1:])
+	}
+	asBd := c.Name == "bd"
+	if asBd {
+		c.Args = append([]string{"bd"}, c.Args...)
 	}
 	s, err := c.required("STUB_STORE")
 	if err != nil {
@@ -111,6 +119,15 @@ func run(c *Call) error {
 	if err := appendFile(logPath, strings.Join(c.Args, " ")+"\n"); err != nil {
 		return err
 	}
+	if !asBd && c.getenv("STUB_GC_FAIL") != "" {
+		return c.fail(1, "gc: simulated failure of every gc call")
+	}
+	if c.carries("STUB_FAIL_ON") {
+		return c.fail(1, "gc: simulated failure of a call that carries '"+c.getenv("STUB_FAIL_ON")+"'")
+	}
+	if err := c.hook(); err != nil {
+		return err
+	}
 	sub, args := shift(c.Args)
 	switch sub {
 	case "agent":
@@ -118,19 +135,59 @@ func run(c *Call) error {
 			return c.catOr(c.getenv("STUB_AGENTS"), `{"agents":[]}`)
 		}
 		return nil
-	case "convoy":
+	case "rig":
 		if first(args) == "list" {
+			if c.getenv("STUB_RIGS") == "" {
+				c.out(`{"rigs":[]}` + "\n")
+				return nil
+			}
+			return c.catOr(c.getenv("STUB_RIGS"), `{"rigs":[]}`)
+		}
+	case "config":
+		if first(args) == "show" {
+			if c.getenv("STUB_CONFIG") == "" {
+				c.out(noConfig + "\n")
+				return nil
+			}
+			return c.catOr(c.getenv("STUB_CONFIG"), noConfig)
+		}
+	case "convoy":
+		switch first(args) {
+		case "list":
 			return c.catOr(c.getenv("STUB_CONVOYS"), `{"convoys":[]}`)
+		case "status":
+			return c.convoyStatus(s, d, args[1:])
 		}
 		return nil
+	case "order":
+		if first(args) == "list" {
+			return c.catOr(c.getenv("STUB_ORDERS"), `{"orders":[]}`)
+		}
+	case "hook":
+		if first(args) == "current" {
+			return c.hookCurrent(args[1:])
+		}
+	case "runtime":
+		if first(args) == "drain-ack" {
+			return nil
+		}
 	case "session":
 		return c.session(args)
 	case "mail":
 		return nil
 	case "workflow":
-		return c.workflow(s, args)
+		sid := ""
+		if len(args) > 1 {
+			sid = args[1]
+		}
+		st := c.route(c.defaultStore(s, d), "", "", sid)
+		c.use(st)
+		return c.workflow(st.beads, args)
 	case "sling":
-		return c.sling(s, args)
+		rigName, bead := slingTarget(args)
+		st := c.route(c.defaultStore(s, d), "", rigName, bead)
+		c.use(st)
+		return c.sling(st.beads, args)
 	case "bd":
 		return c.bd(s, d, args)
 	}
@@ -139,6 +196,77 @@ func run(c *Call) error {
 		return nil
 	}
 	return c.fail(2, "gc stub: unsupported '"+sub+"'")
+}
+
+// hook runs the program STUB_HOOK names before the fake answers a call whose
+// arguments carry the text STUB_HOOK_AT names, so a test can land another
+// writer's change between two of a script's calls, or fail a call the n-th
+// time it is made. The program gets the call's arguments as its own, and an
+// environment without either setting, so its own gc calls do not run it
+// again. Its output goes to the call's stderr. The call goes on when it exits
+// 0, and otherwise fails with its exit status and answers nothing.
+func (c *Call) hook() error {
+	at, prog := c.getenv("STUB_HOOK_AT"), c.getenv("STUB_HOOK")
+	if at == "" || prog == "" || !strings.Contains(strings.Join(c.Args, " "), at) {
+		return nil
+	}
+	env, stdin := c.Env, c.Stdin
+	c.Env, c.Stdin = withEnv(env, "STUB_HOOK_AT=", "STUB_HOOK="), strings.NewReader("")
+	status, err := c.spawn(c.Stderr, append([]string{prog}, c.Args...)...)
+	c.Env, c.Stdin = env, stdin
+	if err != nil {
+		return c.fail(status, "fake gc: the hook "+prog+": "+err.Error())
+	}
+	if status != 0 {
+		return exit(status)
+	}
+	return nil
+}
+
+// noConfig is `gc config show --json` for a city whose config names no agent.
+const noConfig = `{"ok":true,"config":{"Agents":[]}}`
+
+// afterWrite runs the program STUB_AFTER_WRITE names once a bd call that writes
+// the store has landed, so a test can run another process, such as the
+// deferred-dispatch order's pass, at each moment a script's write leaves. The
+// program gets the call's arguments as its own, and an environment without the
+// setting, so its own writes do not run it again. Its output goes to the call's
+// stderr. The write has landed, so the program's exit status leaves the call's
+// as it is, and only a program that does not start fails the call.
+func (c *Call) afterWrite() error {
+	prog := c.getenv("STUB_AFTER_WRITE")
+	if prog == "" {
+		return nil
+	}
+	env, stdin := c.Env, c.Stdin
+	c.Env, c.Stdin = withEnv(env, "STUB_AFTER_WRITE="), strings.NewReader("")
+	status, err := c.spawn(c.Stderr, append([]string{prog}, c.Args...)...)
+	c.Env, c.Stdin = env, stdin
+	if err != nil {
+		return c.fail(status, "fake gc: the program "+prog+" after the write: "+err.Error())
+	}
+	return nil
+}
+
+// made reports whether a call whose arguments carry text is in the call log,
+// this call's own line included.
+func (c *Call) made(text string) (bool, error) {
+	logPath, err := c.required("STUB_GC_LOG")
+	if err != nil {
+		return false, err
+	}
+	lines, err := readLines(logPath)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, text) }), nil
+}
+
+// carries reports whether the setting names a text the call's arguments carry,
+// as a fault matched by text reads it.
+func (c *Call) carries(setting string) bool {
+	on := c.getenv(setting)
+	return on != "" && strings.Contains(strings.Join(c.Args, " "), on)
 }
 
 func shift(args []string) (string, []string) {
@@ -203,6 +331,27 @@ func (c *Call) session(args []string) error {
 			c.out(string(data))
 		}
 	}
+	return nil
+}
+
+// hookCurrent answers `gc hook current`: the bead STUB_HOOK_CURRENT names, which
+// stands for the claim gc stamps on the calling session's bead. As gc does, it
+// exits 1 for a call with no session identity and for a session that has
+// claimed nothing.
+func (c *Call) hookCurrent(args []string) error {
+	sid := strings.TrimSpace(c.getenv("GC_SESSION_ID"))
+	if sid == "" {
+		return c.fail(1, "gc hook current: no session identity (set $GC_SESSION_ID); only a session that claimed work has a current bead")
+	}
+	id := strings.TrimSpace(c.getenv("STUB_HOOK_CURRENT"))
+	if id == "" {
+		return c.fail(1, "gc hook current: session "+sid+" has no current claim (nothing claimed through gc hook --claim)")
+	}
+	if contains(args, "--id-only") {
+		c.out(id + "\n")
+		return nil
+	}
+	c.out(id + " (claimed by session " + sid + ")\n")
 	return nil
 }
 
@@ -528,23 +677,4 @@ func lookPath(name, pathEnv string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s: command not found", name)
-}
-
-// handOff ends the call by running path with argv and env in its place, as
-// the stub's exec does.
-func (c *Call) handOff(path string, argv, env []string) error {
-	if c.Exec != nil {
-		if err := c.Exec(path, argv, env); err != nil {
-			return c.fail(126, "fake gc: exec "+path+": "+err.Error())
-		}
-		return nil
-	}
-	saved := c.Env
-	c.Env = env
-	status, err := c.spawn(c.Stdout, append([]string{path}, argv[1:]...)...)
-	c.Env = saved
-	if err != nil {
-		return c.fail(status, "fake gc: "+err.Error())
-	}
-	return exit(status)
 }

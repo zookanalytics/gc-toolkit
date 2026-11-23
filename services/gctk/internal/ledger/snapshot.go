@@ -26,6 +26,9 @@ const (
 	EdgeParentChild       = gcbd.EdgeParentChild
 )
 
+// EdgeRelatesTo is bd's relates-to link, which holds neither bead.
+const EdgeRelatesTo = gcbd.EdgeRelatesTo
+
 // Record is one bead as a pass read it. A domain reads its keys through the
 // Keys it declared, and its status, type and edges through the methods here.
 type Record struct {
@@ -64,6 +67,9 @@ func (r *Record) AwaitID() string { return r.row.AwaitID }
 // CreatedAt is when the bead was created, as the row writes the time.
 func (r *Record) CreatedAt() string { return r.row.CreatedAtString() }
 
+// UpdatedAt is when the bead was last written, as the row writes the time.
+func (r *Record) UpdatedAt() string { return r.row.UpdatedAtString() }
+
 // ClosedAt is when the bead closed, as the row writes the time, "" while it is
 // live.
 func (r *Record) ClosedAt() string { return r.row.ClosedAtString() }
@@ -78,6 +84,11 @@ func (r *Record) EphemeralPlane() bool { return r.row.InEphemeralPlane() }
 
 // Template reports whether the bead is a template molecule.
 func (r *Record) Template() bool { return r.row.Template() }
+
+// ListedByDefault reports whether bd's listing shows the bead when asked for
+// nothing more: it is outside the ephemeral plane, no template molecule, and
+// neither a gate nor an infrastructure bead.
+func (r *Record) ListedByDefault() bool { return r.row.ListedByDefault() }
 
 // Rendered is every metadata value the row holds, each as the pack's scripts
 // render it, `(.metadata[k] // "") | tostring`. It is the input of a domain
@@ -118,10 +129,10 @@ func (r *Record) Parents() ([]string, error) {
 
 // value is a metadata key's stored text, and whether the row holds the key. A
 // string is itself, and any other JSON value is its JSON text. A null value is
-// one the row does not hold.
-func (r *Record) value(name string) (string, bool) {
+// one the row does not hold, and so is a false when falseUnset.
+func (r *Record) value(name string, falseUnset bool) (string, bool) {
 	v, ok := r.row.Metadata[name]
-	if !ok || v == nil {
+	if !ok || v == nil || (falseUnset && v == false) {
 		return "", false
 	}
 	switch t := v.(type) {

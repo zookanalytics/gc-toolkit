@@ -1,175 +1,7 @@
-# lifecycle.toml — the declared state space of the anchor lifecycle.
-# The anchor state is `status` x `merge_result`. This file is the single source
-# of truth: gctk lifecycle, which assets/scripts/lifecycle.sh execs, carries the
-# executable copy (services/gctk/internal/lifecycle), and lifecycle.test.sh fails
-# on drift.
+# lifecycle.toml — the pack's declared state: the gates, holds, posture and
+# machine axis an anchor carries, and every metadata key the pack writes.
 # Every metadata key the pack writes is enumerated in [metadata]; a key not
 # listed here is not pack state (docs/component-model.md §2-§3).
-
-[machine]
-# "unanchored" = merge_result ABSENT: not (or no longer) a merge anchor.
-states = [
-  "unanchored",
-  "pre_open_gate",
-  "pull_request",
-  "merged",
-  "abandoned",
-  "retargeted",
-  "blocked",
-  "refused_false_completion",
-]
-# States the merge cadence drives and no queue offers, so an anchor in one rests
-# both unrouted and unheld. lifecycle.sh writes the two halves in the same
-# atomic update: it clears gc.routed_to unless --route or --keep-route is given,
-# and it clears the assignee unless --assignee is given, at status=open only. A
-# pool route on one of these is demand for work already in the merge queue, and
-# the claim it invites moves the anchor out of `--status=open`, where merge.sh
-# and pr-facts.sh both stop seeing it. An assignee is the same anchor still
-# sitting in the refinery's own find-work queue, which flags a
-# merge_result-bearing bead it finds there and does not take it. The assignee
-# clear stops at status=open because bd refuses to take a live claim and drops
-# the whole update with it, and because a live claim is a hold to escalate
-# rather than one to overwrite.
-detached_states = ["pre_open_gate", "pull_request"]
-# States whose legal status is closed; every other declared state is open.
-# lifecycle.sh enforces the pairing both ways: --close is accepted only into a
-# closed state, and a transition into a closed state must carry --close.
-# Entering `merged` additionally requires a non-empty --set merged_sha: its
-# meaning is "landed; merged_sha recorded", so it cannot be entered without the
-# landing that defines it. The same write records the work record that landing
-# gives (gc.work_outcome, gc.work_commit, gc.work_branch; see
-# [metadata.runtime_owned]).
-closed_states = ["merged"]
-# What leaving a state writes, as <state>:<key>=<value>. A transition from that
-# state into another open state sets the key to the value in the same atomic
-# update, unless the caller writes the key itself, so no writer of such a
-# transition can leave the key behind. A transition into a closed state writes
-# none of them: the anchor's life ends there.
-# The rank of an anchor's PR-finishing work is approved only while the anchor
-# rests in pull_request (assets/scripts/priority-lib.sh), so leaving it marks
-# pr_finishing_settled unsettled, and pr-facts.sh settles that work at the rank
-# it then follows ([metadata.pr_posture]). Leaving it also clears pr_head_oid,
-# the PR head pr-facts.sh last read, so an anchor that returns counts no
-# approval until pr-facts.sh has read its PR again.
-exit_sets = ["pull_request:pr_finishing_settled=unsettled", "pull_request:pr_head_oid="]
-
-# Legal status x merge_result combinations.
-[states.unanchored]
-status = "open|closed"
-meaning = "no merge_result recorded; not a merge anchor (or rejected back to the pool)"
-
-[states.pre_open_gate]
-status = "open"
-meaning = "branch pushed, checks armed, no PR yet"
-
-[states.pull_request]
-status = "open"
-meaning = "PR open, awaiting checks + merge"
-
-[states.merged]
-status = "closed"
-meaning = "landed; merged_sha recorded"
-
-[states.abandoned]
-status = "open"
-meaning = "PR closed unmerged externally; a human gate parks it for a person"
-
-[states.retargeted]
-status = "open"
-meaning = "PR base moved externally; a human gate parks it for a person"
-
-[states.blocked]
-status = "open"
-meaning = "parked by the refinery behind a human gate: a target or branch origin does not carry, a strategy it does not land, or a PR it cannot take; still the refinery's, so clearing the gate hands it back"
-
-[states.refused_false_completion]
-status = "open"
-meaning = "the zero-diff check found no change on the branch; parked by the refinery behind a human gate and still the refinery's, so clearing the gate hands it back"
-
-# Transitions. Every edge names its writer. The lifecycle writer performs the
-# write, gctk lifecycle, which lifecycle.sh execs and gctk merge runs in-process,
-# on every edge but the two into a refinery park, which the park writes itself
-# with one gc bd update guarded on the assignee.
-# A self-edge (from == to) is always legal: an idempotent re-record.
-[[transition]]
-from = "unanchored"
-to = "pre_open_gate"
-writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset (via lifecycle.sh)"
-
-[[transition]]
-from = "unanchored"
-to = "pull_request"
-writer = "assets/scripts/refinery-land.sh, the refinery's merge-push step on a rig whose pending_through_merge is unset, for a bead that records an open PR (via lifecycle.sh)"
-
-[[transition]]
-from = "unanchored"
-to = "merged"
-writer = "assets/scripts/direct-merge-push.sh, which the refinery's merge-push step runs for the direct strategy (via lifecycle.sh): FF push verified, record + close in one call"
-
-[[transition]]
-from = "unanchored"
-to = "blocked"
-writer = "the refinery's parks, a guarded gc bd update after the park's human gate: refinery-prep.sh (a target or branch origin does not carry), refinery-land.sh (an unsupported strategy) and refinery-publish.sh (a recorded PR it cannot reuse, or one another account opened)"
-
-[[transition]]
-from = "unanchored"
-to = "refused_false_completion"
-writer = "refinery-land.sh's park, a guarded gc bd update after its human gate (the zero-diff check found no change on the branch)"
-
-[[transition]]
-from = "pre_open_gate"
-to = "pull_request"
-writer = "assets/scripts/pr-open.sh"
-
-[[transition]]
-from = "pre_open_gate"
-to = "unanchored"
-writer = "the move of a parked bead to the refinery at its rig's cutover (via lifecycle.sh; specs/tk-1tfzr71.66/design.md, section 10). signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
-
-[[transition]]
-from = "pull_request"
-to = "merged"
-writer = "assets/scripts/merge.sh; assets/scripts/pr-facts.sh (out-of-band merge record)"
-
-[[transition]]
-from = "pull_request"
-to = "abandoned"
-writer = "assets/scripts/pr-facts.sh"
-
-[[transition]]
-from = "pull_request"
-to = "retargeted"
-writer = "assets/scripts/pr-facts.sh"
-
-[[transition]]
-from = "pull_request"
-to = "unanchored"
-writer = "human. The refinery's find-work leaves a bead at pull_request to the merge cadence, and signoff.sh never transitions the anchor: request-changes clears the marker and files a blocking rework child instead."
-
-[[transition]]
-from = "abandoned"
-to = "unanchored"
-writer = "human"
-
-[[transition]]
-from = "retargeted"
-to = "pull_request"
-writer = "human (base repaired; re-engage the merge queue)"
-
-[[transition]]
-from = "retargeted"
-to = "unanchored"
-writer = "human"
-
-[[transition]]
-from = "blocked"
-to = "unanchored"
-writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
-
-[[transition]]
-from = "refused_false_completion"
-to = "unanchored"
-writer = "human; or refinery-land.sh, for a bead its gate's clearing handed back, before a direct landing records it merged or, on a rig whose pending_through_merge is unset, before the old path parks it again (via lifecycle.sh); or refinery-requeue.sh, a guarded gc bd update that sends such a bead back to the pool when its prep conflicts or its gate fails"
 
 [gates]
 # check_set: comma list of check names on the anchor. Default stamped by
@@ -183,18 +15,19 @@ check_set_sentinel = "none"
 # A lane's state is derived from its reviews (lane-state.sh) and never stored on
 # the anchor. Merge requires every declared check to derive green.
 # docs/state-machine.md holds the lane vocabulary.
-# Approval is a UNIVERSAL merge rule, not a check_set member: merge.sh requires
-# every PR to carry a latest APPROVED review by an account other than the city's,
-# standing across later pushes until it is dismissed, with a standing
-# CHANGES_REQUESTED from any other account a veto. A dismissed review is dropped
-# before each reviewer's latest is taken, so it neither approves nor vetoes, and
-# it does not hide its author's older approval. Once a ruling on a bring-current
-# round lifts the approval, no approval submitted at or before the anchor's
-# bring_current_lifted_at counts, dismissed or not. No check_set token arms or
-# opts out of it; GitHub branch protection is an
-# extra layer, not the authority. Declaration only, like the rest of this
-# section (the rule lives in gctk merge's reviewVerdict, and in
-# review-verdict.sh for the shell readers).
+# Approval is a UNIVERSAL merge rule, not a check_set member: the landing
+# order's evaluator (services/gctk/pr) merges a PR only on a standing APPROVED
+# review from an account that can push to the repository. The shell readers of
+# a PR's approval read review-verdict.sh's rule: a latest APPROVED review by an
+# account other than the city's, standing across later pushes until it is
+# dismissed, with a standing CHANGES_REQUESTED from any other account a veto. A
+# dismissed review is dropped before each reviewer's latest is taken, so it
+# neither approves nor vetoes, and it does not hide its author's older approval.
+# Once a ruling on a bring-current round lifts the approval, no approval
+# submitted at or before the anchor's bring_current_lifted_at counts, dismissed
+# or not. No check_set token arms or opts out of it; GitHub branch protection is
+# an extra layer, not the authority. Declaration only, like the rest of this
+# section.
 approval_rule = "universal-nonself-standing"
 
 # The hold markers: the metadata a live bead carries to say it is not moving.
@@ -218,7 +51,7 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # gc.takeaway is stamped by every sign-off, the one that settled its subject as
 # much as the one that parked it for a person, and only the writer knows which
-# it was — `gc-helm.sh takeaway --no-wait` says so by stamping
+# it was — `gctk bead takeaway --no-wait` says so by stamping
 # gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
 # Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
 # empty unless it means settled, so a stamp cannot inherit the disposition of
@@ -226,8 +59,8 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 #
 # blocked_reason is also the pending record's reason: the merge a bead awaits,
 # or the exception that holds it. The record writes it only on a bead whose
-# marker, pr_reconcile_pending, is true. A run of the landing order reads a
-# record whose marker is true while its bead is open, blocked or closed (due()
+# marker, pr_reconcile_pending, is true. A run of the landing order decides a
+# record whose marker is true while its bead is open, blocked or closed (plan()
 # in services/gctk/pr/landing.go, with record.Read), and the check that reads
 # this declaration reads no closed bead. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the
@@ -269,8 +102,9 @@ hold_severity = "warn"
 # standing changes_requested once the cadence has run dry — is a cause of an owed
 # row, so the instant the requirement was first read at this head is what orders
 # that row in the operator's queue. pr_merge_state keeps a plain
-# `<value>@<oid>` shape — nothing queues on it. merge.sh
-# reads these off the bead; nothing else re-derives them from GitHub.
+# `<value>@<oid>` shape — nothing queues on it. prstatus and the PR-finishing
+# rank (priority-lib.sh) read pr_posture off the bead; nothing re-derives it
+# from GitHub.
 posture_key = "pr_posture"
 # The pack's own vocabulary, lowercase, derived in this precedence order: a
 # standing CHANGES_REQUESTED outranks an unanswered comment, which outranks an
@@ -321,14 +155,13 @@ machine_key = "pr.machine"
 #                     is done and the PR waits on approval, on the merge pass,
 #                     or on nothing
 #   blocked           the merge cannot proceed without a person, and no review
-#                     verdict is what it waits on. Distinct from settled — which
-#                     waits on a review or the merge pass — so the board and the
-#                     status: label show it as needs-attention rather than
-#                     awaiting-review. The cause rides pr.machine_cause, one of
-#                     causes below, and pr.machine_reason says it in a sentence.
+#                     verdict is what it waits on. Distinct from settled, which
+#                     waits on a review or the merge pass. The cause rides
+#                     pr.machine_cause, one of causes below, and
+#                     pr.machine_reason says it in a sentence.
 machines = ["progressing", "settled", "blocked"]
-# Why a blocked verdict cannot merge, the value merge.sh records in
-# pr.machine_cause beside it:
+# Why a blocked verdict cannot merge, the value pr.machine_cause carries beside
+# it:
 #   review-threads    a required review thread is unresolved
 #   check-failed      a required check failed at the head
 #   conflict          the branch conflicts with its base, and something defers
@@ -341,16 +174,15 @@ machines = ["progressing", "settled", "blocked"]
 #   rule              branch protection holds it by a rule the merge pass
 #                     cannot name
 causes = ["review-threads", "check-failed", "conflict", "behind", "blocker", "rule"]
-# Written from pre_open_gate onward, before a PR number exists: gate-ensure.sh
-# reaches a pre-open anchor's verdict on the same pass as an open one's.
-writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh), assets/scripts/merge.sh (gctk merge, through the lifecycle writer it runs in-process)"
+# gate-ensure.sh records progressing and settled. Nothing records blocked, or
+# its cause and reason.
+writers = "assets/scripts/gate-ensure.sh (via lifecycle.sh)"
 
 [conversation]
 # Where the exchange with the operator stands, recorded on the anchor by
 # pr-facts.sh against the [posture] watermarks. A dated key,
 # `<value>@<oid>@<since>`: it is head-pinned so a value read before the branch
-# moved on never reads as current, and the board's board.prConversation gates it
-# on the pr.machine head the same way the approval clause gates the posture.
+# moved on never reads as current.
 conversation_key = "pr.conversation"
 # The values pr-facts.sh records, derived from the watermarks and the routing
 # disposition each pass:
@@ -405,15 +237,15 @@ since_format = "RFC 3339 UTC"
 # value shows: what WRITES it, what READS it, what its ABSENCE means, how it is
 # CLEARED, and its value TYPE. Prose is spent where a reader cannot recover
 # those from the group and the sections above; a key whose mechanics already sit
-# in [gates], [posture], [holds], [machine], [machine_axis] or [dated_keys] is
+# in [gates], [posture], [holds], [machine_axis] or [dated_keys] is
 # defined there and only registered here.
 #
 # Four field-vocabulary rules the whole registry rests on, each settled against
 # the code that reads it:
 #
 # ROUTE. A lifecycle transition writes no park route and routes no work. It
-# clears gc.routed_to, on a detached state's entry or for a caller's empty
-# --route, or it keeps the route the bead carries: every caller of --route
+# clears gc.routed_to for a caller's empty --route, or it keeps the route the
+# bead carries: every caller of --route
 # passes an empty route or the one the bead already carries. lifecycle.sh
 # refuses a --route that is not rig-qualified (<rig>/<agent>), `human`
 # included, and a direct --set of the key. A park is a human gate:
@@ -433,9 +265,9 @@ since_format = "RFC 3339 UTC"
 # agent clears the route; a pool route left on directly-assigned work reads as
 # demand for work no pool is offered.
 #
-# THE OPERATOR-FACING QUESTION is gc.takeaway. The helm board spends it as the
-# row's NEEDS sentence, so lifecycle.sh refuses a --takeaway that normalizes to
-# nothing, and one longer than the 140 codepoints the cell holds.
+# THE HEADLINE is gc.takeaway, one line read at a glance, so lifecycle.sh
+# refuses a --takeaway that normalizes to nothing, and one longer than 140
+# codepoints.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd
@@ -463,56 +295,59 @@ keys = [
 ]
 # A bead's PR summary, the account of what its change does, is the pr domain's
 # key, declared in services/gctk/pr and listed in services/gctk/key-registry.json.
-# merge_result is the anchor state itself and is defined in [machine] / [states]
-# above: lifecycle.sh is its only writer (set on every transition, unset on
-# `--to unanchored`), absent reads as `unanchored`, and its value is one of the
-# declared states. Every other key here is a string unless noted.
+# merge_result is the anchor state itself, declared in services/gctk/pr/record
+# with the pending record's values, which gctk pr record and the landing order
+# write. lifecycle.sh writes the values outside the record (unset on
+# `--to unanchored`), and doctor/check-state-space lists every value a bead may
+# carry; absent reads as `unanchored`. Every other key here is a string unless
+# noted.
 #
 # branch — the source branch the refinery merges, exactly. The polecat's
 #   workspace-setup writes it on the anchor; pr-facts.sh writes it on a rework
-#   child (the branch that child reworks). Read by merge.sh (the live head must
-#   match it), pr-open.sh, pr-facts.sh and gate-ensure.sh. Absent leaves those
-#   checks unarmed and pr-open skips the anchor. The gc runtime's
+#   child (the branch that child reworks). Read by the landing order, which
+#   holds a PR whose head branch is not this one, pr-facts.sh and
+#   gate-ensure.sh. Absent leaves those checks unarmed. The gc runtime's
 #   detached-handoff orphan sweep reads it too: it restores the pool route on an
 #   open, unassigned, unrouted bead only when the bead carries branch and a
 #   session pin (gc.session_id or gc.session_name). Never cleared. Shape
 #   `polecat/<bead-id>` for fresh work.
 # target — the landing branch the work merges into: the polecat records it at
 #   submit, the refinery stamps it on a rework child (pr-facts.sh,
-#   pre-open-rebase.sh, signoff.sh), and an integration effort's setup
+#   signoff.sh), and an integration effort's setup
 #   (mol-design-convoy.toml, the work skill's effort recipe) writes the
 #   effort's branch on each of its beads and the default branch on its
 #   landing bead. Read two
 #   ways — as the fallback alias for merged_target before a
-#   PR opens (pr-open.sh, gate-ensure.sh, both defaulting to the rig's default
-#   branch when both are absent), and directly as the landing branch by the
+#   PR opens (gate-ensure.sh, defaulting to the rig's default branch when both
+#   are absent), and directly as the landing branch by the
 #   polecat's submit target-resolve (mol-polecat-work.toml), the refinery's
 #   prepare and merge-push (mol-refinery-patrol.toml), the pre-open review base
 #   derived from the anchor (mol-review.toml), and signoff.sh verifying a rework
 #   child. Absent, the merged_target readers fall through to the default branch
 #   and submit falls back to base_branch. Never cleared. A branch name.
-# merged_target — where the work actually lands. pr-open.sh resolves it onto the
-#   anchor when the PR opens, and direct-merge-push.sh records it at a direct
-#   landing. Read by merge.sh, pr-facts.sh and gate-ensure.sh to catch a base
-#   moved out from under a validated PR. Absent falls back to target then the
+# merged_target — where the work actually lands. The refinery's pending record
+#   (gctk pr record) writes it with the PR, and direct-merge-push.sh records it
+#   at a direct landing. Read by the landing order, pr-facts.sh and
+#   gate-ensure.sh to catch a base moved out from under a validated PR. Absent falls back to target then the
 #   default branch. Never cleared.
-# merged_sha — the merge commit recorded at close, by merge.sh and pr-facts.sh
-#   (record-failure-cap.sh writes it by hand). I5 forbids an empty one, so a
+# merged_sha — the merge commit recorded at close, by the landing order,
+#   direct-merge-push.sh and pr-facts.sh (record-failure-cap.sh writes it by
+#   hand). I5 forbids an empty one, so a
 #   record that cannot read the oid writes the sentinel `unverified:PR#<n>`
 #   rather than nothing. Not read back; never cleared.
-# pr_url / pr_number — the open PR, written when it opens (pr-open.sh) and copied
-#   onto rework children by pr-facts.sh; a human gate carries neither, since it
+# pr_url / pr_number — the open PR, written by the refinery's pending record
+#   (gctk pr record) and copied onto rework children by pr-facts.sh; a human gate carries neither, since it
 #   names its anchor through its blocks edge. An anchor with no pr_url gets one
 #   from the write that records status_label_clear_owed on it
-#   ([metadata.pr_status_label]). merge.sh and pr-facts.sh read
+#   ([metadata.pr_status_label]). The landing order and pr-facts.sh read
 #   them to bind a bead to its live PR; a non-numeric pr_number is skipped, and an
 #   unparseable pr_url resolves to the fail-closed repo `?`. Never cleared.
 #   pr_number is an integer; pr_url is the canonical `scheme://host/owner/repo/pull/<n>`.
-# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh,
-#   rework-child.sh and refinery-requeue.sh stamp it on the rework child each
-#   files, equal to the PR the anchor owns; the refinery's requeue keeps it on a
-#   bead it sends back, and the pending record writes it (gctk pr record's first
-#   write, and the landing order's requeue of a changed head). Read by
+# existing_pr — a PR the refinery should reuse rather than open. pr-facts.sh
+#   and rework-child.sh stamp it on the rework child each files, equal to the PR
+#   the anchor owns; the refinery's requeue keeps it on a bead it sends back,
+#   and the pending record writes it (gctk pr record's first write, and the
+#   landing order's requeue of a changed head). Read by
 #   refinery-land.sh, which lands a bead that names one through its PR, by
 #   refinery-publish.sh as the PR to take, and by pr-facts.sh and
 #   rework-child.sh to verify the child each files. Absent means no PR to reuse.
@@ -527,33 +362,31 @@ keys = [
 #   resolves to `mr`, so the default branch takes work only through a PR
 #   (docs/warrants.md), and existing_pr forces `mr` too. Any other value,
 #   `local` among them, parks the bead behind a human gate. `mr` is stamped by
-#   pr-facts.sh, rework-child.sh, pre-open-rebase.sh, refinery-requeue.sh and
-#   mol-feedback-distiller.toml, and by direct-merge-push.sh, promoting a bead
-#   whose direct push was refused for branch protection into the PR path. Read
-#   by refinery-land.sh, and read back by pr-facts.sh, rework-child.sh and
-#   pre-open-rebase.sh on the rework child each stamps. Never cleared. Enum
+#   pr-facts.sh, rework-child.sh and mol-feedback-distiller.toml, and by
+#   direct-merge-push.sh, promoting a bead whose direct push was refused for
+#   branch protection into the PR path. Read
+#   by refinery-land.sh, and read back by pr-facts.sh and rework-child.sh on
+#   the rework child each stamps. Never cleared. Enum
 #   `mr | pr | direct | local`.
 # prepare_mode — how the refinery brings a rework branch current before it lands.
 #   Every branch shape (per-bead `polecat/*`, and the shared `integration/*` a
 #   landing bead carries) is stamped `merge`: the branch is brought current by
 #   merging origin/<target> in, never rebased, so no shape is rewritten or
 #   force-pushed.
-#   Written by pr-facts.sh and pre-open-rebase.sh. The
-#   prepare and resume paths merge the target in whatever the stamp says; an
-#   absent value resolves to merge too, so a dropped stamp cannot select a
-#   rewrite. A dispatch site reads the stamp back and routes a child only once it
-#   sticks, and pre-open-rebase.test.sh holds both dispatch sites to `merge`.
+#   Written by pr-facts.sh. The prepare and resume paths merge the target in
+#   whatever the stamp says; an absent value resolves to merge too, so a
+#   dropped stamp cannot select a rewrite. The dispatch site reads the stamp
+#   back and routes a child only once it sticks.
 #   Never cleared. Enum `rebase | merge`; only `merge` is stamped.
 # rejection_reason — why the last attempt bounced, embedding `head <oid>` so a
 #   later pass can tell which head it spoke for. Written by the refinery's
 #   requeue (refinery-requeue.sh), the landing order's requeue of a changed head
-#   (gctk pr reconcile), pr-facts.sh, signoff.sh, pre-open-rebase.sh and
+#   (gctk pr reconcile), pr-facts.sh, signoff.sh and
 #   mol-polecat-work.toml; read at
 #   load-context to resume rather than redo, and by pr-facts.sh to dedup a child
-#   already covering a head. Cleared with `--unset` by the refinery's
-#   merge-push in each transition it makes on a hand-back (merged, unanchored,
-#   pre_open_gate, pull_request), by the publication of a pending record (gctk pr
-#   record), and by the polecat once the merge its resume runs concludes. A stop before then, such as a question for a person, leaves
+#   already covering a head. Cleared by the direct landing's merged transition
+#   (lifecycle.sh), by the publication of a pending record (gctk pr record),
+#   and by the polecat once the merge its resume runs concludes. A stop before then, such as a question for a person, leaves
 #   it, so the bead's next run resumes again. Freeform instruction text.
 # graduation — RETIRED. `true`, set on a convoy bead when convoy graduation
 #   carried its integration branch to the default branch. Nothing writes or
@@ -590,8 +423,8 @@ keys = [
 #   path. Not cleared — the halt is terminal for that run. auto_push and
 #   branch_ready are boolean-ish; halt_reason is `auto_push_false | store_only`.
 # merge_record_failures — consecutive failures to record a merged PR on this
-#   anchor. merge.sh and pr-facts.sh both perform that record and both retry
-#   every pass with no memory, so the count is the only thing that can tell a
+#   anchor. pr-facts.sh performs that record and retries it every pass with no
+#   memory, so the count is the only thing that can tell a
 #   store busy for a tick from a refusal no later pass will clear. An integer
 #   written by record-failure-cap.sh (absent reads as 0), cleared with `--unset`
 #   by the record that lands.
@@ -612,21 +445,14 @@ keys = [
 #   comment URL.
 # opened_as_draft — the head oid a PR was opened (or adopted) as a draft at,
 #   because its check_set names an `open-as-draft` check that gates the
-#   draft->ready flip. pr-open.sh writes it on the pull_request transition: on a
-#   draft it created, or on an adopted draft only when the city's own login
-#   authored it and its timeline carries no conversion to draft. Its PRESENCE is
-#   what tells the draft-to-ready arm this is a draft the refinery owns the flip
-#   of (not an operator's manual draft or re-draft), and tells gate-ensure.sh
-#   and services/gctk/prstatus (the status: label and the board's PR phase) the
-#   anchor is still in the open-as-draft stage. Absent means the PR opened ready,
-#   or is a draft someone else owns. Never cleared. An oid.
-# draft_readied — the head oid a PR was read ready at (pr-open.sh): the head the
-#   draft-to-ready arm flipped it at, or the head it already read ready at,
-#   whatever holds the anchor. Its PRESENCE stops that arm re-reading the PR
-#   every pass and stops it ever re-flipping a PR an operator later re-drafted,
-#   and tells gate-ensure.sh and services/gctk/prstatus the anchor reached the
-#   ready-for-review stage. Absent means the arm has not read it ready. Never
-#   cleared. An oid.
+#   draft->ready flip. Nothing writes it: the refinery's publication opens every
+#   PR as a draft and records none (refinery-publish.sh). Its PRESENCE tells
+#   gate-ensure.sh the anchor is still in the open-as-draft stage. Absent means
+#   the PR opened ready, or is a draft someone else owns. Never cleared. An oid.
+# draft_readied — the head oid a PR was read ready at. Nothing writes it: the
+#   landing order marks a PR ready from GitHub's draft flag. Its PRESENCE tells
+#   gate-ensure.sh the anchor reached the ready-for-review stage. Absent means
+#   the arm has not read it ready. Never cleared. An oid.
 # bring_current_from — the PR head a rejected-branch resume started from,
 #   written by mol-polecat-work.toml's resume block before it merges the target
 #   in. bring-current-guard.sh reads it at submit as the start of the round, so
@@ -671,10 +497,8 @@ keys = [
 #   once a ruling to lift the approval is recorded, by decide for triage's and
 #   by guard for one it recorded itself, and read back before any approval is
 #   dismissed; it never moves back. The approval rule
-#   counts no approval submitted at or before it: gctk merge's reviewVerdict
-#   at the merge's approval gate and in its visit order, whose terminal re-read
-#   holds a merge when the line moved after validation, and review-verdict.sh
-#   in pr-facts.sh's conflict arm and posture arm, which records such an
+#   counts no approval submitted at or before it: review-verdict.sh in
+#   pr-facts.sh's conflict arm and posture arm, which records such an
 #   approval as review_required and keeps the line in the posture's basis. So
 #   an approval GitHub would not let the guard dismiss still lands nothing, the
 #   board shows the approval owed, and one submitted after it lands the PR.
@@ -771,8 +595,8 @@ keys = [
 #   by `--metadata-field anchor_bead=<id>`, and the closed ones through that
 #   edge (every dependent of the anchor, whatever the edge's type)
 #   once the store is marked joined (bd-lib.sh bd_anchor_children). Written by
-#   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh,
-#   pr-facts.sh and pre-open-rebase.sh, each on a child joined to
+#   gate-ensure.sh, finding.sh, review-outcome.sh, signoff.sh, rework-child.sh
+#   and pr-facts.sh, each on a child joined to
 #   the anchor no later than the stamp. A review, rework, finding or validation
 #   child carries it from the create that files it
 #   (tools/lint-learned.d/create-then-stamp.sh holds that). A human gate carries
@@ -823,12 +647,12 @@ keys = [
 #   Neither is cleared.
 # source_ruling_bead — the conversation a ruling-sourced rework child answers,
 #   the analog of source_review_bead for an operator ruling rather than a review
-#   verdict. rework-child.sh stamps it = the conversation converse-rework.sh
-#   names, the one the sitting reached the ruling in. A child rework-child.sh
-#   files carries source_review_bead or source_ruling_bead, never both, and the
-#   writer dedups a second child against that key. gate-ensure's quiescence
-#   probe counts a live child by either key. The
-#   finding lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no
+#   verdict. Nothing writes it: a ruling's rework is an ask (converse-rework.sh),
+#   and rework-child.sh stamps it only from a --ruling-bead no caller passes. A
+#   child rework-child.sh files carries source_review_bead or
+#   source_ruling_bead, never both, and the writer dedups a second child against
+#   that key. gate-ensure's quiescence probe counts a live child by either key.
+#   The finding lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no
 #   child carrying source_ruling_bead: it answers the ruling, not a finding. Not
 #   cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
@@ -869,8 +693,8 @@ keys = [
   # One of: unvalidated | must-fix | deferred | declined | needs-you | restates.
   # A reviewer files a finding unvalidated and the validator rules it; every
   # ruling ends the finding closed or puts it to a person. must-fix wires
-  # finding --blocks anchor, the hold merge.sh's blocker probe reads, until the
-  # fix unit lands. deferred files a claimable follow-up bead (gated behind the
+  # finding --blocks anchor, a wait of the anchor's own that holds its merge,
+  # until the fix unit lands. deferred files a claimable follow-up bead (gated behind the
   # anchor, its provenance edge --discovered-from the finding) and closes the
   # finding; declined closes it with the reason, no edge. restates closes a human
   # review body that only frames the inline comments of its review round, each a
@@ -1153,8 +977,7 @@ keys = [
 [metadata.pr_posture]
 # pr_posture, pr_merge_state, the two watermarks and pr_comment_disposition
 # carry their mechanics in [posture] above (pr_posture is also a [dated_keys]
-# key). pr-facts.sh is the sole writer of this group, apart from the writes
-# [machine] exit_sets makes on leaving pull_request.
+# key). pr-facts.sh is the sole writer of this group.
 keys = [
   "pr_posture", "pr_merge_state", "pr_comment_watermark",
   "pr_review_watermark", "pr_issue_comment_watermark", "pr_comment_disposition",
@@ -1199,16 +1022,16 @@ keys = [
   # anchor's priority plus each bead's shift (docs/steering.md#pr-finishing-work).
   # unsettled says a re-rank is owed: the rank that work follows moved, or a
   # settle began and did not finish. The rank is the priority function's: approved
-  # while the anchor rests in pull_request with an approved posture, unapproved
-  # anywhere else. A posture write that moves the rank and every transition out
-  # of pull_request ([machine] exit_sets) mark the record unsettled in the same
-  # write, so no reader takes the work for settled at a rank it has left. Every
-  # pass of pr-facts.sh compares the record of each anchor it reads in
-  # pull_request with that rank, and every full pass compares the record of each
+  # while the anchor's PR is open on the pending record (pull_request_pending or
+  # pull_request_head_changed) with an approved posture, unapproved anywhere
+  # else. A posture write that moves the rank marks the record unsettled in the
+  # same write, so no reader takes the work for settled at a rank it has left.
+  # Every pass of pr-facts.sh compares the record of each anchor with an open PR
+  # it reads with that rank, and every full pass compares the record of each
   # live anchor resting elsewhere. While the two differ, it settles that work
   # and writes the rank once every bead of it has settled, turning a record of
   # the other rank unsettled before the first settle. Absent means no pass
-  # recorded a rank, which a pass in pull_request settles and a full pass leaves
+  # recorded a rank, which a pass over an open PR settles and a full pass leaves
   # alone elsewhere. A present value is approved, unapproved or unsettled.
   "pr_finishing_settled",
   # The head of the anchor's PR that pr-facts.sh last read, a commit oid. A pass
@@ -1216,45 +1039,38 @@ keys = [
   # posture's write, or in a write of its own for a draft PR, whose posture it
   # does not read. The priority function counts an approved posture only when the
   # posture's oid is this head (prio_pr_approved in priority-lib.sh), so an
-  # approval read at an earlier head ranks no PR-finishing work at P0. Leaving
-  # pull_request clears it to empty ([machine] exit_sets), so an anchor that
-  # returns counts no approval until a pass has read its PR. Absent or empty
-  # means no pass has read the PR since the anchor entered pull_request.
+  # approval read at an earlier head ranks no PR-finishing work at P0. Absent or
+  # empty means no pass has read the PR.
   "pr_head_oid",
 ]
 
 [metadata.pr_round_trip]
 # pr.machine and pr.conversation are the two round-trip axes, both dated keys
 # (see [machine_axis], [conversation], [dated_keys]). pr-facts.sh writes
-# pr.conversation; gate-ensure.sh and merge.sh write pr.machine.
+# pr.conversation; gate-ensure.sh writes pr.machine.
 # pr.machine_cause and pr.machine_reason name why a `blocked` machine verdict
 # cannot merge: the cause is one value of [machine_axis] causes, which a reader
 # keys on, and the reason is the human sentence (which thread, which base, which
 # blocker). Both are plain, not dated, and read only while pr.machine is
-# `blocked`: merge.sh writes the three together and clears both whenever it
-# records any other verdict, and gate-ensure.sh's own verdicts leave them alone.
+# `blocked`, which nothing writes; gate-ensure.sh's verdicts leave them alone.
 # pr.unanswered_threads is how many of the PR's review threads wait on the
 # city's answer, `<count>@<head oid>`: unresolved, with no answer of the city's
 # after their newest feedback, where a post not for review, one the city marked
 # handled with its THUMBS_UP, or one a dismissal retired is neither
-# (gc_thread_awaits_answer in pr-post.sh). merge.sh
-# writes it, through gctk merge, for every open, non-draft PR the pass visits,
-# whenever the count or the head moves. prstatus reads it for held: review,
-# through gctk pr status for the labels and in the helm board, and only at the
-# head the posture was read at. Absent means no visit has counted the threads
-# yet, and nothing reads as waiting. It is plain, not dated, and never cleared:
-# the next count replaces it.
+# (gc_thread_awaits_answer in pr-post.sh). Nothing writes it or reads it: the PR
+# watch saves the threads that wait in the GitHub read it keeps on the bead,
+# which the landing order's evaluator reads. It is plain, not dated, and never
+# cleared.
 keys = ["pr.machine", "pr.machine_cause", "pr.machine_reason", "pr.conversation", "pr.unanswered_threads"]
 
 [metadata.pr_status_label]
-# The status: label comes off a PR once it merges or closes. The writer that
-# records the merge or the close (merge.sh, through gctk merge, or pr-facts.sh)
-# takes it off before its record, which closes the anchor or moves it out of
-# pull_request, and so out of every enumeration of open PRs.
+# The status: label comes off a PR once it merges or closes. pr-facts.sh, as it
+# records a merge or a close, takes it off before its record, which takes the
+# anchor out of every enumeration of open PRs.
 # status_label_clear_owed records a clear that did not land, valued with the PR
-# number: gctk merge carries it in its record, and pr-facts.sh writes it ahead
-# of its own. pr-facts.sh's full pass lists the anchors carrying it, in any
-# status, retries each clear, and unsets the key once the clear lands. The
+# number: pr-facts.sh writes it ahead of its own record. pr-facts.sh's full pass
+# lists the anchors carrying it, in any status, retries each clear, and unsets
+# the key once the clear lands. The
 # retry clears only the PR the anchor's pr_url names, so the write that records
 # the key on an anchor with no pr_url records the validated live PR url too.
 keys = ["status_label_clear_owed"]
@@ -1263,9 +1079,8 @@ keys = ["status_label_clear_owed"]
 # The disposition a deliberate supersede/not-planned PR close records on the
 # anchor that still owns the open PR before the PR closes, so the PR's closer
 # consummates it through bead-rehome.sh instead of filing a rework-or-close
-# gate: pr-facts.sh's close arm for an anchor at merge_result=pull_request, and
-# the landing order (gctk pr reconcile) for one on the pending record, which
-# requests no merge of a PR whose anchor carries it. Written by
+# gate: the landing order (gctk pr reconcile), which requests no merge of a PR
+# whose anchor carries it. Written by
 # assets/scripts/pr-dispose.sh, read by assets/scripts/pr-facts.sh and gctk's pr
 # domain; the marker is intent only — bead-rehome.sh stays the sole writer of
 # the disposition edge these name.
@@ -1278,18 +1093,17 @@ keys = [
 keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # merge_hold, rebase_hold and tracking_only are boolean-ish: empty, `false`, `0`
 # or `null` is not held, anything else is. merge_hold is the merge freeze an
-# operator or converse writes as a plain truthy value; merge.sh, gate-ensure.sh
-# and pr-open.sh honour it. It is not itself a [holds] marker_key, so a bare
+# operator or converse writes as a plain truthy value; the landing order's
+# evaluator and gate-ensure.sh honour it. It is not itself a [holds] marker_key, so a bare
 # merge_hold owes no blocks edge; a hold that must show as an edge asserts it
 # through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads: a rebase_hold on any bead naming a branch stops
-# pre-open-rebase.sh, pr-open.sh and pr-facts.sh from rebasing or dispatching
-# it, save the one dispatch pr-facts.sh files whatever
-# holds the anchor: a review-feedback batch's rework child, which brings the
-# branch current by merge as it answers. merge.sh reads the same freeze, so a
-# conflicting PR on a frozen branch records a blocked verdict (cause conflict)
-# rather than waiting on a merge-in. tracking_only opts a PR out of
-# merge.sh's in-flight-holder count. The pack never writes or clears either.
+# pr-facts.sh from rebasing or dispatching it, save the one dispatch
+# pr-facts.sh files whatever holds the anchor: a review-feedback batch's rework
+# child, which brings the branch current by merge as it answers. The landing
+# order's evaluator holds a PR's merge on its anchor's own rebase_hold, as on
+# merge_hold. Nothing reads tracking_only. The pack never writes or clears
+# either.
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
@@ -1310,7 +1124,6 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # attempt record before it.
 keys = [
   "gc.recommended_formula", "gc.recommended_formula_dispatched",
-  "gc.acceptance",
   "gc.proactive",
   "gc.reaction_kind", "gc.reaction_subject", "gc.reaction_subject_store",
   "gc.reacted_by", "gc.proactive_reaction", "gc.reaction_owned",
@@ -1318,34 +1131,25 @@ keys = [
   "gc.first_reaction", "gc.first_reaction_reason", "gc.first_reaction_target",
   "gc.first_reaction_at",
 ]
-# gc.recommended_formula — the execution mol a recommend exit names, which the
-#   operator can Accept from the subject's row on the board. The reaction domain
-#   owns it (services/gctk/reaction, listed in services/gctk/key-registry.json),
+# gc.recommended_formula — the execution mol a recommend exit names, which
+#   gctk reaction accept dispatches once the operator takes it, as a sitting's
+#   sign-off does with --accept. The reaction domain owns it
+#   (services/gctk/reaction, listed in services/gctk/key-registry.json),
 #   and it stays registered here while shell still clears it. gctk reaction
 #   dispose sets it once a recommend's gate is filed and unsets a stale one
-#   before any exit acts, each write taking its exit. gc-helm.sh
-#   `accept` unsets it in the write that records its dispatch, and
+#   before any exit acts, each write taking its exit. gctk reaction accept
+#   unsets it in the write that records its dispatch, and
 #   converse-invalidate-recommendation.sh unsets it when a sitting judges the
-#   recommendation no longer valid. The board's Accept derivation
-#   (services/helm/internal/board/derive.go), gc-helm.sh `accept` and
-#   converse-invalidate-recommendation.sh all read it as a non-empty value, so
-#   absent and empty both mean no live recommendation, and the subject offers
-#   Discuss only. A formula name that `gc formula show` resolves.
-# gc.recommended_formula_dispatched — the formula gc-helm.sh `accept` slung,
-#   written in the update that unsets gc.recommended_formula. `accept` reads it
-#   to resume a run that dispatched but did not finish: it completes the unset
-#   and never slings again. `accept` slings before it writes this key, so absent
-#   means no Accept has recorded a dispatch. Never cleared. A formula name.
-# gc.acceptance — on the human gate under the key first-reaction, the dispatch
-#   input of the acceptance that answers it: a JSON object {token, formula,
-#   vars}, with vars the `<key>=<value>` strings its sling carries. gc-helm.sh
-#   `accept` writes it before the resolve that names the token, and a run that
-#   finishes that acceptance slings the vars recorded under the token, so the
-#   board's Accept, which passes no --var, dispatches what the operator
-#   accepted. A record whose token no answer on the gate
-#   names, left by a run that stopped before its resolve or by an answer Accept
-#   reopened, binds nothing, and the next acceptance overwrites it. Never
-#   cleared.
+#   recommendation no longer valid. gctk reaction accept and
+#   converse-invalidate-recommendation.sh both read it as a non-empty value, so
+#   absent and empty both mean no live recommendation, which no Accept takes.
+#   A formula name that `gc formula show` resolves.
+# gc.recommended_formula_dispatched — the formula gctk reaction accept slung,
+#   written in the update that unsets gc.recommended_formula. The reaction
+#   domain owns it (services/gctk/reaction), and it stays registered here while
+#   converse-signoff.sh reads it in shell, to tell a recommendation an Accept
+#   already took. Accept slings before it writes this key, so absent means no
+#   Accept has recorded a dispatch. Never cleared. A formula name.
 # gc.proactive — RETIRED. `1`, the scan opt-in patrol-finding.sh stamped on
 #   each finding it filed. Nothing writes or reads it: the scan reads every
 #   ready, unassigned bead in its rig that is not an epic, so a finding needs no
@@ -1395,9 +1199,9 @@ keys = [
 keys = ["priority_shift"]
 # priority_shift — the bead's shift from the bead it follows: +1 is one level
 #   later and -1 one level sooner, and each level stops at P0 and P4. Written by
-#   queue-priority.sh move, which `gc-helm.sh priority --shift` runs. Each
+#   queue-priority.sh move, its --shift. Each
 #   script that files PR-finishing work (gate-ensure.sh, pr-facts.sh,
-#   pre-open-rebase.sh, rework-child.sh and signoff.sh) also writes it, -1, in
+#   rework-child.sh and signoff.sh) also writes it, -1, in
 #   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
 #   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
 #   wherever a priority is computed: queue-priority.sh settle, its move and its
@@ -1508,9 +1312,11 @@ keys = [
   "gc.ruling_consequence",
 ]
 # The gc.takeaway family carries its mechanics in the comment above and in
-# [holds] (settled_keys): gc-helm.sh, signoff.sh
-# and lifecycle.sh write the takeaway (gc.takeaway_by records which), and
-# gc.takeaway_settled is `1` when nothing waits and empty for a live wait.
+# [holds] (settled_keys): gctk bead takeaway and lifecycle.sh write the takeaway
+# (gc.takeaway_by records which), and gc.takeaway_settled is `1` when nothing
+# waits and empty for a live wait. The takeaway package
+# (services/gctk/takeaway) declares the family, and it stays registered here
+# while shell still reads it (docs/gctk-architecture.md, Debt).
 # gc.hold_demand — RETIRED. On a converse hold's VISIT, it named the demand the
 #   hold filed. A hold now files a human gate, and its conversation's replies-to
 #   edge names the gate, so nothing writes or reads the key, and
@@ -1612,13 +1418,13 @@ keys = [
 #   anchor the PR's anchor bead, and child the rework a `rework` filed.
 #   converse-signoff.sh writes a ruling's entry first, without child, and the
 #   rework or retirement acts only on its zero exit. Once converse-rework.sh
-#   names the child it filed, the sign-off writes the entry again with it,
-#   before any other write. A re-run of that ruling with the same answer acts
-#   on the anchor it names, even once that anchor has closed, as a retired PR's
-#   does when pr-facts consummates its disposition, and files no second rework
-#   once the child it names has closed. An entry binds no re-run that answers
-#   differently, which rewrites it when its answer acts on a PR. Never
-#   cleared.
+#   names the ask it filed, the sign-off writes the entry again with it as the
+#   child, before any other write. A re-run of that ruling with the same answer
+#   acts on the anchor it names, even once that anchor has closed, as a retired
+#   PR's does when the landing order consummates its disposition, and files no
+#   second rework once the child it names has closed. An entry binds no re-run
+#   that answers differently, which rewrites it when its answer acts on a PR.
+#   Never cleared.
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
@@ -1672,9 +1478,8 @@ keys = ["failure_key"]
 # The seed audit's re-audit: the one bead that re-renders generated/seed-audit on
 # the default branch, once that branch is found committing files that no longer
 # render as committed, and lands the new text in a pull request of its own.
-# Filed and slung by assets/scripts/seed-audit-reaudit.sh, which the merge gate
-# (gctk merge) and the landing order (gctk pr reconcile) call with the files
-# they found.
+# Filed and slung by assets/scripts/seed-audit-reaudit.sh, which the landing
+# order (gctk pr reconcile) calls with the files it found.
 keys = ["seed_audit_reaudit"]
 # seed_audit_reaudit — the branch the re-audit re-renders, written in the create
 #   with target set to the same branch. The writer's dedup reads it over the live

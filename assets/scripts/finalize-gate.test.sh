@@ -284,9 +284,8 @@ eq "$rc" 1 "unruled epic behind a gc bd: notice: still held"
 has "$out" "no valid epic_ruling" "the hold is the real refusal, not a probe-unreadable error"
 
 # 26. Every check reads the store as it stands, even inside a refinery pass that
-# memoizes bd_list (GC_RECONCILE_BD_CACHE). merge.sh re-asserts the gate in the
-# terminal window to catch a gate filed after its first check; here the gate
-# lands between the two checks.
+# memoizes bd_list (GC_RECONCILE_BD_CACHE): a gate filed after a first check
+# refuses the next one. Here the gate lands between the two checks.
 mkdir -p "$TMP/bd-cache"
 store "[$(work A26 open)]"; : > "$STUB_DEPS"
 out=$(GC_RECONCILE_BD_CACHE="$TMP/bd-cache" "$SUT" check A26 2>/dev/null); rc=$?

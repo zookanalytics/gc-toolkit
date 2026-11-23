@@ -56,9 +56,8 @@
 # part of the command, so a script that places several ids reads the rig map
 # once and places each one by this derivation.
 #
-# Callers: bead-rehome.sh (sourced), converse-signoff.sh and converse-rework.sh
-# (resolution modes), and any gate whose next act is destructive. Test:
-# bead-store.test.sh.
+# Callers: bead-rehome.sh (sourced), converse-signoff.sh (resolution modes),
+# and any gate whose next act is destructive. Test: bead-store.test.sh.
 
 # bead_store_map — the rig map, as rig-map.sh prints it, in BEAD_STORE_MAP. The
 # first call in a shell reads it, and leaves it empty when it does not read,

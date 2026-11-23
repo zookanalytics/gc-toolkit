@@ -25,9 +25,10 @@
 # Callers: formulas/mol-deacon-patrol.toml, formulas/mol-witness-patrol.toml
 # and its assets/scripts/seat-progress.sh, formulas/mol-refinery-patrol.toml,
 # mol-polecat-work's refusals of a work bead it cannot read, the refinery
-# reconcile's assets/scripts/merge-tail-report.sh and
-# assets/scripts/pr-facts.sh, the feedback miner's
-# assets/scripts/feedback-miner.sh, the boot-health order's
+# reconcile's assets/scripts/pr-facts.sh, the feedback miner's
+# assets/scripts/feedback-miner.sh, the feedback distiller's memory intake,
+# `gctk memory settle`, the production-deploy-report order's
+# `gctk deployment report`, the boot-health order's
 # assets/scripts/boot-health.sh, and an agent home's setup at pre_start,
 # assets/scripts/worktree-setup.sh.
 # Filing a finding asks no person anything. A finding needing the operator's
@@ -594,16 +595,13 @@ fi
 # ── Hand it to the first reaction ────────────────────────────────────
 # The reaction is what disposes the finding: routed to a pool, held on an
 # edge, handed to a validating closer, or put to the operator as a human gate.
-# A reaction that cannot be slung is not a failure of the filing: the finding
-# is a ready bead nobody has decided on, which the next
-# `gctk reaction sweep` reacts to, just later.
+# It goes to the rig's proactive pool whether or not that pool runs, and waits
+# there until it does. A reaction that cannot be slung, such as one gc sling
+# refuses, is not a failure of the filing: the finding is a ready bead nobody
+# has decided on, which the next `gctk reaction sweep` reacts to, just later.
 [ -n "$NO_REACT" ] && exit 0
 if [ ! -x "$GCTK" ]; then
   warn "cannot find gctk (looked at $GCTK); $BEAD waits for the next sweep"
-  exit 0
-fi
-if ! "$GCTK" reaction deliverable >/dev/null 2>&1; then
-  warn "the proactive pool cannot pick a reaction up right now; $BEAD waits for the next sweep"
   exit 0
 fi
 "$GCTK" reaction sling "$BEAD" \

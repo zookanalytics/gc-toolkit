@@ -122,6 +122,38 @@ func TestFakeFindAnswersAsTheListingDoes(t *testing.T) {
 	}
 }
 
+// An assignee selects the beads assigned to it exactly, statuses the beads in
+// one of them, and Listed leaves out the rows bd's listing hides unless asked:
+// a wisp, a template and a gate.
+func TestFakeFindNarrowsByAssigneeStatusAndListing(t *testing.T) {
+	s := New()
+	s.Put(Bead{ID: "c-1", Status: "open", IssueType: "task", Assignee: "rig/refinery"})
+	s.Put(Bead{ID: "c-2", Status: "in_progress", IssueType: "task", Assignee: "rig/refinery"})
+	s.Put(Bead{ID: "c-3", Status: "open", IssueType: "task", Assignee: "rig/witness"})
+	s.Put(Bead{ID: "c-4", Status: "open", IssueType: "task", Assignee: "rig/refinery", Ephemeral: true})
+	s.Put(Bead{ID: "c-5", Status: "open", IssueType: "molecule", Assignee: "rig/refinery", Template: true})
+	s.Put(Bead{ID: "c-6", Status: "open", IssueType: "gate", Assignee: "rig/refinery"})
+	s.Put(Bead{ID: "c-7", Status: "blocked", IssueType: "task"})
+	for _, tc := range []struct {
+		name string
+		q    gcbd.Query
+		want []string
+	}{
+		{"one assignee's beads, in every plane", gcbd.Query{Assignee: "rig/refinery"}, []string{"c-1", "c-2", "c-4", "c-5", "c-6"}},
+		{"one assignee's open beads that the listing shows", gcbd.Query{Assignee: "rig/refinery", Statuses: []string{"open"}, Listed: true}, []string{"c-1"}},
+		{"the beads in two statuses that the listing shows", gcbd.Query{Every: true, Statuses: []string{"open", "in_progress"}, Listed: true}, []string{"c-1", "c-2", "c-3"}},
+	} {
+		rows, err := s.Find(tc.q)
+		var got []string
+		for _, r := range rows {
+			got = append(got, r.ID)
+		}
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("%s = %v, %v; want %v", tc.name, got, err, tc.want)
+		}
+	}
+}
+
 // The fake's dependents of a bead are the beads with an edge of the type onto
 // it, closed ones among them, each the dependent's own row with the edge's type
 // and none of its edges, and a bead the store does not hold refuses the read.

@@ -15,13 +15,13 @@
 # exits (harness_run_parts, at the end of this file).
 
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
-bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; }
+bad() { FAIL=$((FAIL + 1)); echo "FAIL - $1${2:+ ($2)}"; }
 eq()  { if [ "$1" = "$2" ]; then ok "$3"; else bad "$3 (got '$1' want '$2')"; fi; }
 has() { case "$1" in *"$2"*) ok "$3" ;; *) bad "$3 (missing '$2' in: $1)" ;; esac; }
 hasnt() { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac; }
 
 # Build gctk from THIS checkout, for a suite whose scripts reach lifecycle.sh or
-# merge.sh. Each execs its gctk subcommand and has no other implementation, so
+# epic.sh. Each execs its gctk subcommand and has no other implementation, so
 # such a suite needs a binary, and the one it needs is built from the tree under
 # test.
 # Call this BEFORE harness_init: the stub git harness_init puts on PATH answers
@@ -35,11 +35,11 @@ harness_build_gctk() {
   local mod
   mod="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../services/gctk" && pwd)"
   if ! command -v go >/dev/null 2>&1; then
-    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite"
+    GCTK_BUILD_ERR="no Go toolchain: gctk was not built, so lifecycle.sh and epic.sh had nothing to exec in this suite"
   elif ( cd "$mod" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$GCTK_BUILD_LOG" 2>&1; then
     GCTK_BUILT="$TMP/gctk"
   else
-    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh, merge.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
+    GCTK_BUILD_ERR="gctk did not build, so lifecycle.sh and epic.sh had nothing to exec in this suite — $(tail -3 "$GCTK_BUILD_LOG" | tr '\n' ' ')"
   fi
 }
 
@@ -60,20 +60,16 @@ harness_init() {
   # scripts resolve a deployed `gctk` from the ambient city otherwise, and these
   # suites run from a tree INSIDE a live city, so left alone a suite would test
   # whichever binary that city last built. A suite that built nothing reaches no
-  # binary at all: lifecycle.sh, merge.sh and epic.sh refuse under
-  # GCTK_BIN=none, and pr-status-label.sh derives nothing. The pin runs the
-  # arm's verbs (bead arm, disarm and start-armed) with HOLDS_STUB_READ set, so
-  # the fake gc answers their calls through holds-store.stub.sh, whose reads
-  # keep bd's rule over this store, and with a scratch city of the suite's own
-  # when nothing names one, for the lock they take under the city's runtime
-  # directory: the sweep above cleared the session's, and the ambient city is a
-  # live one.
+  # binary at all: lifecycle.sh and epic.sh refuse under
+  # GCTK_BIN=none, and pr-status-label.sh derives nothing. The pin names a
+  # scratch city of the suite's own as gctk's city when nothing names one, for
+  # the lock the arm's verbs take under the city's runtime directory: the sweep
+  # above cleared the session's, and the ambient city is a live one.
   export GCTK_BIN=none
   if [ -n "${GCTK_BUILT:-}" ]; then
     mkdir -p "$TMP/gctk-city/.gc"
     {
       printf '#!/bin/sh\n'
-      printf 'case "${1:-} ${2:-}" in "bead arm"|"bead disarm"|"bead start-armed") HOLDS_STUB_READ=1; export HOLDS_STUB_READ ;; esac\n'
       printf 'GC_CITY_PATH="${GC_CITY_PATH:-%s}" exec '"'"'%s'"'"' "$@"\n' "$TMP/gctk-city" "$GCTK_BUILT"
     } > "$TMP/gctk-pin" && chmod +x "$TMP/gctk-pin" && GCTK_BIN="$TMP/gctk-pin"
   fi
@@ -85,11 +81,9 @@ harness_init() {
   # `gc bd` subprocess the fake serves (services/gctk/internal/daemon).
   export GC_NO_API=1
   export STUB_STORE="$TMP/beads.json"
-  # The answers the arm's verbs take (harness_init's gctk pin).
-  STUB_HOLDS_ANSWER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/holds-store.stub.sh"
-  export STUB_HOLDS_ANSWER
   export STUB_DEPS="$TMP/deps.txt"
   export STUB_KV="$TMP/kv.txt"
+  export STUB_COMMENTS="$TMP/comments.json"
   export STUB_GC_LOG="$TMP/gc.log"
   export STUB_GH_LOG="$TMP/gh.log"
   export STUB_GH_DIR="$GH_DIR"
@@ -101,8 +95,9 @@ harness_init() {
   export STUB_LIST_FAIL="" STUB_LIST_FAIL_ON="" STUB_SHOW_FAIL=""
   # STUB_SHOW_NOTICE: when set to a rig name, `gc bd show` leads its stdout with a
   # `gc bd: answering from the rig "<name>" store` notice line, the contaminant a
-  # real read can carry. Unset leaves the JSON clean.
-  export STUB_SHOW_NOTICE=""
+  # real read can carry. Unset leaves the JSON clean. STUB_SHOW_RAW_CONTROL, when
+  # set, makes a show print each control character in its answer as a raw byte.
+  export STUB_SHOW_NOTICE="" STUB_SHOW_RAW_CONTROL=""
   export STUB_CREATE_FAIL="" STUB_CREATE_GARBAGE=""
   export STUB_SLING_FAIL="" STUB_DEP_GARBAGE="" STUB_DEP_ADD_FAIL="" STUB_KV_FAIL=""
   export STUB_LS_REMOTE="" STUB_LS_REMOTE_RC=""
@@ -118,7 +113,16 @@ harness_init() {
   export STUB_SESSIONS="" STUB_SESSION_LIST_RC=""
   # The `close` verb's ownership check (see its handler). Off = any actor closes.
   export STUB_ENFORCE_CLOSE_OWNER=""
-  { echo '[]' > "$STUB_STORE" && : > "$STUB_DEPS" && : > "$STUB_KV" && : > "$STUB_GC_LOG" && : > "$STUB_GH_LOG" \
+  # The rig list `gc rig list` prints, and the hook a case runs before the call
+  # it names (the fake's doc.go). Unset, the rig list names no rig and no hook
+  # runs.
+  export STUB_RIGS="" STUB_HOOK_AT="" STUB_HOOK=""
+  # The config `gc config show` prints, the program the fake runs after each
+  # write that lands, and the text of the call after which every list fails
+  # (the fake's doc.go). Unset, the config names no agent, no program runs and
+  # no list fails.
+  export STUB_CONFIG="" STUB_AFTER_WRITE="" STUB_LIST_FAIL_AFTER=""
+  { echo '[]' > "$STUB_STORE" && echo '[]' > "$STUB_COMMENTS" && : > "$STUB_DEPS" && : > "$STUB_KV" && : > "$STUB_GC_LOG" && : > "$STUB_GH_LOG" \
       && : > "$STUB_SESSION_LOG"; } || {
     echo "harness_init: the store files under $TMP could not be written; not running" >&2; exit 2; }
   # A copy, never a link: a suite that writes a gc of its own over $BIN/gc
@@ -176,6 +180,17 @@ RUNS
 
 # A failed write of the store is a failed suite, never a store left as it was.
 store() { printf '%s' "$1" > "$STUB_STORE" || { bad "store: the write of $STUB_STORE failed"; return 1; }; }
+# json_str <text> — the text as a JSON string, escaped as jq -R escapes it, for
+# a fixture written in bash. It starts no process. A control byte other than a
+# newline, a carriage return, a tab, a backspace or a form feed stays raw, so a
+# store holding one fails its read at exit 3.
+json_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"; s="${s//$'\t'/\\t}"
+  s="${s//$'\b'/\\b}"; s="${s//$'\f'/\\f}"
+  printf '"%s"' "$s"
+}
 # The readers of what a bead carries ask the fake gc, which answers them without
 # a line in STUB_GC_LOG, and start no jq (fakegc's harnessRead).
 meta()  { "$HARNESS_FAKE_GC" --harness-read meta "$1" "$2"; }
@@ -189,6 +204,58 @@ bpoured() { "$HARNESS_FAKE_GC" --harness-read poured "$1"; }
 # edges in the dep rows, and the parent field a create or update wrote.
 bparents() { "$HARNESS_FAKE_GC" --harness-read parents "$1"; }
 notes() { "$HARNESS_FAKE_GC" --harness-read notes "$1"; }
+# A field of a bead's row (bfield <id> <name>), the beads its edges of a type
+# point at (bedges <id> <type>), the beads with such an edge onto it (bonto <id>
+# <type>), the type of its edge onto another bead (bedge <id> <other>), all the
+# store holds on it, to compare before and after a run (brecord <id>), its
+# comments, a line each (bcomments <id>), and the ids of the beads whose fields
+# hold given values (bids [<name>=<value>...]). Each reads the store a gc call
+# naming the bead acts in, and each answer's form is in fakegc's read.go.
+bfield() { "$HARNESS_FAKE_GC" --harness-read field "$1" "$2"; }
+bedges() { "$HARNESS_FAKE_GC" --harness-read edges "$1" "$2"; }
+bonto() { "$HARNESS_FAKE_GC" --harness-read onto "$1" "$2"; }
+bedge() { "$HARNESS_FAKE_GC" --harness-read edge "$1" "$2"; }
+brecord() { "$HARNESS_FAKE_GC" --harness-read record "$1"; }
+bcomments() { "$HARNESS_FAKE_GC" --harness-read comments "$1"; }
+bids() { "$HARNESS_FAKE_GC" --harness-read ids "$@"; }
+# harness_store <dir> — give a directory an empty store of its own, as a rig's
+# <path>/.beads holds one, which the fake routes a call to (fakegc's route.go).
+# A failed write is a suite that does not run.
+harness_store() {
+  { mkdir -p "$1" && echo '[]' > "$1/beads.json" && : > "$1/deps.txt" && : > "$1/kv.txt" && echo '[]' > "$1/comments.json"; } || {
+    echo "harness_store: no store could be written in $1; not running" >&2; exit 2; }
+}
+# The fixture writers set the state a case starts from, as `store` does for the
+# whole store, without a line in STUB_GC_LOG: brow <id> [<setting>...] puts a
+# row in place of any under the id, bset <id> <setting>... writes to it, and
+# bunset <id> <name>... removes fields or metadata keys from it. A setting is
+# <name>=<value>, or <name>:=<json> for a value of another type, and a name
+# metadata.<key> names a metadata key (fakegc's fixture.go). An edge is a line
+# in $STUB_DEPS.
+brow() { "$HARNESS_FAKE_GC" --harness-write row "$@" || bad "brow $*: the fixture write failed"; }
+bset() { "$HARNESS_FAKE_GC" --harness-write set "$@" || bad "bset $*: the fixture write failed"; }
+bunset() { "$HARNESS_FAKE_GC" --harness-write unset "$@" || bad "bunset $*: the fixture write failed"; }
+# Readers of a JSON answer a script under test printed, such as gctk's, read by
+# bash itself so a case starts no process for them. Each reads the first
+# "<key>" in the text, so it suits an answer whose keys are its own and not
+# repeated deeper in, and it decodes no escape: json_get <json> <key> prints
+# that key's string value, json_get_strs <json> <key> the strings of its array,
+# comma-joined, and json_get_ids <json> <key> the id of each object in its
+# array, comma-joined. Each prints nothing for a key the text does not carry.
+json_get() { local r=${1#*\""$2"\":\"}; [ "$r" = "$1" ] || printf '%s' "${r%%\"*}"; }
+json_get_strs() {
+  local r=${1#*\""$2"\":[}
+  [ "$r" = "$1" ] && return 0
+  r=${r%%]*}
+  printf '%s' "${r//\"/}"
+}
+json_get_ids() {
+  local r=${1#*\""$2"\":[} out=""
+  [ "$r" = "$1" ] && return 0
+  r=${r%%]*}
+  while [[ $r == *'"id":"'* ]]; do r=${r#*\"id\":\"}; out="$out,${r%%\"*}"; r=${r#*\"}; done
+  printf '%s' "${out#,}"
+}
 
 # Copy the SUT and the named siblings into a private scripts dir so $0-relative
 # sibling resolution hits stubs/copies, never the live tree.
@@ -216,7 +283,8 @@ mk_sut_dir() { # <dir> <file>...
   # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
   # retires, review-answer.sh, what the living answer to a review shows,
   # dispatch-path.sh, the one definition of a dispatch path and a label hold,
-  # which gc-helm.sh sources to ask how a bead is dispatched, priority-lib.sh,
+  # which converse-signoff.sh and the liveness scripts source to ask how a bead
+  # is dispatched, priority-lib.sh,
   # the priority function, whose reading of a PR's approval pr-facts.sh
   # sources, git-lib.sh, the one read of a branch's head on origin, which
   # gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of a
@@ -492,7 +560,7 @@ case "$sub" in
               | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
         *pullRequests\(states:OPEN*)
-          # merge.sh's visit-order read: every open PR, served as one page from
+          # pr-facts.sh's posture read: every open PR, served as one page from
           # open_prs.json (a list of PR nodes). No fixture is an empty list, in
           # which every anchor's PR has left the open list.
           [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
@@ -873,8 +941,8 @@ set -u
 case "$*" in
   *"remote get-url origin"*) echo "${STUB_ORIGIN_URL:-}" ;;
   *"symbolic-ref"*) echo "origin/${STUB_ORIGIN_HEAD:-main}" ;;
-  # The checkout a merge pass runs over. Empty by default, which is a host with
-  # no repository under it and therefore no committed artifact to keep current.
+  # The checkout's top level. Empty by default, which is a host with no
+  # repository under it and therefore no committed artifact to keep current.
   *"rev-parse --show-toplevel"*) printf '%s\n' "${STUB_TOPLEVEL:-}" ;;
   *"rev-parse --verify --quiet"*) printf '%s\n' "${STUB_FETCHED_HEAD:-}" ;;
   # A rig's not-for-review.toml as its default branch carries it, served from

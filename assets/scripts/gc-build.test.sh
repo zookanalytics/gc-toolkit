@@ -2,16 +2,15 @@
 # gc-build.test.sh — gc-build.sh's argument contract, and its gctk component.
 # gc-helm-svc.test.sh pins the body the components share, on helm: the scratch
 # bounding, the atomic publish, the record's revisions, deletion-only rebuilds,
-# behind_main's fetch cadence, the probe and the restart. This suite pins what
-# is gctk's own, starting with the questions that decide whether lifecycle.sh
-# and merge.sh have a binary to exec. Both exec gctk and have no other
+# the restart, and the check's restart and no-service cases. This suite pins
+# what is gctk's own, starting with the questions that decide whether
+# lifecycle.sh has a binary to exec. It execs gctk and has no other
 # implementation, so a build the city cannot perform has to show up as a failed
-# build rather than as a quiet tick.
-#   (USAGE)    no component, an unknown one, two of them, or an unknown argument
-#              exits 2 and writes nothing
+# build rather than as a quiet run.
+#   (USAGE)    no component, an unknown one, two of them, an unknown argument,
+#              or --due beside --deploy exits 2 and writes nothing
 #   (TOOLLESS) a build owed with no Go toolchain is a FAILED build: exit 1 and a
-#              last_build_rc=1 record, under --deploy too, so the board's PACK
-#              row reports it
+#              last_build_rc=1 record, under --deploy too
 #   (KEEP)     that failure leaves an existing binary, and the revision its
 #              record names, exactly as they were
 #   (CURRENT)  a current binary needs no toolchain: exit 0, recorded as success
@@ -19,11 +18,8 @@
 #   (STAMP)    the binary is stamped with the revision its record names, the
 #              identity `gctk version` reports
 #   (COMMAND)  gctk is a command, not a service: --deploy restarts nothing, the
-#              record carries restart_pending false and no probe fields, no
-#              readability status or restart marker is written, and with the
-#              city in the environment gc is never asked
-#   (BEHIND)   a checkout behind origin/main under services/gctk records the
-#              gap, and is never rebuilt for it
+#              record carries restart_pending false, no restart marker is
+#              written, and with the city in the environment gc is never asked
 #   (LISTCITY) with no city in the environment, the listing's city_path places
 #              the state root
 #   (NOCITY)   with neither, it refuses and publishes nothing
@@ -33,6 +29,16 @@
 #              moving, rebuilds with nothing newer than the binary
 #   (OTHER)    a commit that touches none of gctk's inputs, such as one under
 #              services/helm, moves no revision and rebuilds nothing
+#   (DUE)      the order's check (--due): a fresh city owes a run at once; a
+#              failed build is owed again five minutes after it, not on the
+#              passes between; a current binary owes none, however old its run;
+#              a moved checkout owes one at once. It writes nothing, asks gc
+#              nothing, and keeps stderr empty whatever it answers, since the
+#              dispatcher reports a check's stderr as a failed check
+#   (DUENOREV) a checkout whose revision cannot be read owes a run, at the same
+#              five-minute pace
+#   (DUENOCITY) with no city and no state root to read, the check refuses on
+#              stderr
 # Hermetic: a fixture tree holds a copy of the script beside a stand-in root
 # go.mod and go.sum and a stand-in services/gctk; the toolchain is a stub or
 # absent, named by GC_GO_BIN; gc is a stub named by GC_GCTK_GC_BIN; the state
@@ -44,8 +50,7 @@ set -uo pipefail
 # suite runs inside is in the ambient environment. A case that omits the
 # override must not inherit it, or it publishes a stub over the city's gctk.
 unset GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_CITY_RUNTIME_DIR GC_SERVICE_STATE_ROOT \
-      GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_GCTK_GC_BIN GC_GCTK_GOTMP \
-      GC_GCTK_ORIGIN_FETCH_TTL GC_GO_BIN
+      GC_HELM_STATE_ROOT GC_GCTK_STATE_ROOT GC_GCTK_GC_BIN GC_GCTK_GOTMP GC_GO_BIN
 for _leak in GC_CITY GC_CITY_PATH GC_CITY_ROOT GC_SERVICE_STATE_ROOT GC_GCTK_STATE_ROOT; do
   if [ -n "${!_leak:-}" ]; then
     echo "REFUSING TO RUN: $_leak is still set; this suite writes state roots and must not run against a real city." >&2
@@ -88,7 +93,7 @@ identity() { # <root> — gctk's revision at the root's HEAD, or nothing
 ROOT="$TMP/root"
 mkdir -p "$ROOT/assets/scripts" "$ROOT/services/gctk/cmd/gctk" "$ROOT/services/helm"
 cp "$HERE/gc-build.sh" "$ROOT/assets/scripts/gc-build.sh"
-printf 'module example.invalid/fixture\n\ngo 1.22\n\nrequire example.invalid/dep v1.0.0\n' > "$ROOT/go.mod"
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\nrequire example.invalid/dep v1.0.0\n' > "$ROOT/go.mod"
 printf 'example.invalid/dep v1.0.0 h1:one=\n' > "$ROOT/go.sum"
 printf 'package main\n\nfunc main() {}\n' > "$ROOT/services/gctk/cmd/gctk/main.go"
 printf 'package main\n' > "$ROOT/services/helm/main.go"
@@ -125,7 +130,7 @@ GOBIN="$TMP/no-go"   # absent until (BUILD) installs a stub toolchain
 GOLOG="$TMP/go-calls"
 run_raw() { # [args...] — the script's argv verbatim; sets OUT (stdout+stderr) and RC
   OUT=$(GC_GCTK_STATE_ROOT="$STATE" GC_CITY_PATH="$TMP/city" GC_GCTK_GOTMP="$TMP/gotmp" \
-        GC_GCTK_GC_BIN="$GCBIN" GC_GCTK_ORIGIN_FETCH_TTL=0 STUB_GC_LOG="$GCLOG" \
+        GC_GCTK_GC_BIN="$GCBIN" STUB_GC_LOG="$GCLOG" \
         STUB_GO_LOG="$GOLOG" GC_GO_BIN="$GOBIN" bash "$BUILD" "$@" 2>&1); RC=$?
 }
 run() { run_raw gctk "$@"; }
@@ -139,6 +144,17 @@ record() { # <binary_rev> <built_at> — a prior record from a successful build
       last_build_rc: 0, restart_pending: false}' > "$STATE/build-status.json"
 }
 builds() { grep -c '^build$' "$GOLOG" 2>/dev/null || true; }
+check() { # — the order's check, as the dispatcher runs it; sets OUT (stdout), ERR (stderr) and RC
+  OUT=$(GC_GCTK_STATE_ROOT="$STATE" GC_CITY_PATH="$TMP/city" GC_GCTK_GOTMP="$TMP/gotmp" \
+        GC_GCTK_GC_BIN="$GCBIN" STUB_GC_LOG="$GCLOG" \
+        STUB_GO_LOG="$GOLOG" GC_GO_BIN="$GOBIN" bash "$BUILD" gctk --due 2>"$TMP/check-stderr"); RC=$?
+  ERR=$(cat "$TMP/check-stderr")
+}
+age_record() { # <seconds> [record] — move the record's checked_at that far into the past
+  local rec="${2:-$STATE/build-status.json}" at
+  at=$(jq -nr --argjson t "$(( $(date -u +%s) - $1 ))" '$t | todate')
+  jq --arg at "$at" '.checked_at = $at' "$rec" > "$rec.new" && mv "$rec.new" "$rec"
+}
 
 # --- (USAGE) -------------------------------------------------------------------
 run_raw
@@ -150,6 +166,9 @@ run_raw gctk helm
 eq "$RC" "2" "(USAGE) two components in one run exit 2"
 run --bogus
 eq "$RC" "2" "(USAGE) an unknown argument exits 2"
+run --due --deploy
+eq "$RC" "2" "(USAGE) --due beside --deploy exits 2"
+has "$OUT" "give one of them" "(USAGE) …and says to give one"
 [ ! -e "$STATE" ] && ok "(USAGE) …and a usage error writes nothing" \
                   || bad "(USAGE) a usage error created the state root"
 
@@ -157,7 +176,7 @@ eq "$RC" "2" "(USAGE) an unknown argument exits 2"
 run --deploy
 eq "$RC" "1" "(TOOLLESS) a build owed with no Go toolchain fails the order, under --deploy too"
 has "$OUT" "no Go toolchain" "(TOOLLESS) …and says what is missing"
-eq "$(field last_build_rc)" "1" "(TOOLLESS) …recording last_build_rc=1 for the board's PACK row"
+eq "$(field last_build_rc)" "1" "(TOOLLESS) …recording last_build_rc=1"
 eq "$(field binary_rev)" "" "(TOOLLESS) …with no binary_rev, because nothing has ever built"
 [ ! -e "$STATE/bin/gctk" ] && ok "(TOOLLESS) …and it publishes nothing" \
                           || bad "(TOOLLESS) a binary appeared with no toolchain to build it"
@@ -215,40 +234,17 @@ grep -qxF -- "-X main.sourceRev=$REV" "$GOLOG" \
   && ok "(STAMP) the build stamps the revision it records, for \`gctk version\`" \
   || bad "(STAMP) no '-X main.sourceRev=$REV' in the build's arguments: $(tr '\n' ' ' < "$GOLOG")"
 
-# --- (COMMAND) no service, so no restart and no probe --------------------------
+# --- (COMMAND) no service, so no restart ---------------------------------------
 eq "$(field restart_pending)" "false" "(COMMAND) the record says nothing is pending"
-eq "$(jq -r 'has("probe_status") or has("probe_detail")' "$STATE/build-status.json")" "false" \
-   "(COMMAND) …and carries no probe fields, since nothing probes gctk"
-[ ! -e "$STATE/build-status" ] && ok "(COMMAND) no readability status is written" \
-                               || bad "(COMMAND) a build-status readability file appeared"
 [ ! -e "$STATE/restart-pending" ] && ok "(COMMAND) no restart marker is written" \
                                   || bad "(COMMAND) a restart-pending marker appeared for a command"
 [ ! -s "$GCLOG" ] && ok "(COMMAND) with its city in the environment, gc is never asked" \
                   || bad "(COMMAND) gc was called: $(tr '\n' ';' < "$GCLOG")"
 
-# --- (BEHIND) a checkout behind origin/main is reported, never rebuilt for -----
-# origin/main gets one more services/gctk commit than HEAD. The fetch is off
-# (GC_GCTK_ORIGIN_FETCH_TTL=0), so the gap is read off that ref as it stands.
-A_COMMIT=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)
-printf '// upstream gctk change\n' >> "$ROOT/services/gctk/cmd/gctk/main.go"
-commit_all "$ROOT" "upstream gctk change"
-git -C "$ROOT" update-ref refs/remotes/origin/main HEAD >/dev/null 2>&1
-git -C "$ROOT" reset -q --hard "$A_COMMIT" >/dev/null 2>&1
-run --deploy
-eq "$RC" "0" "(BEHIND) the tick exits 0"
-eq "$(field behind_main)" "1" "(BEHIND) …recording the one commit origin/main carries under services/gctk"
-BUILDS_BEFORE=$(builds)
-run --deploy
-eq "$RC" "0" "(BEHIND) the next tick exits 0"
-has "$OUT" "up to date" "(BEHIND) …with the binary current with its own sources"
-eq "$(builds)" "$BUILDS_BEFORE" "(BEHIND) …so being behind main alone never rebuilds"
-eq "$(field behind_main)" "1" "(BEHIND) …and the gap is still recorded on the no-op tick"
-git -C "$ROOT" update-ref -d refs/remotes/origin/main >/dev/null 2>&1
-
 # --- (LISTCITY) the listing names the city when the environment does not -------
 LISTED="$TMP/listed-city"
 printf '{"city_path":"%s","services":[]}' "$LISTED" > "$TMP/services.json"
-OUT=$(GC_GCTK_GOTMP="$TMP/gotmp" GC_GCTK_GC_BIN="$GCBIN" GC_GCTK_ORIGIN_FETCH_TTL=0 \
+OUT=$(GC_GCTK_GOTMP="$TMP/gotmp" GC_GCTK_GC_BIN="$GCBIN" \
       STUB_GC_LOG="$GCLOG" STUB_GC_SERVICES="$TMP/services.json" STUB_GO_LOG="$GOLOG" \
       GC_GO_BIN="$GOBIN" bash "$BUILD" gctk --deploy 2>&1); RC=$?
 eq "$RC" "0" "(LISTCITY) builds with no city in the environment"
@@ -257,7 +253,7 @@ eq "$RC" "0" "(LISTCITY) builds with no city in the environment"
   || bad "(LISTCITY) no binary at $LISTED/.gc/services/gctk/bin/gctk: $OUT"
 
 # --- (NOCITY) no city from anywhere --------------------------------------------
-OUT=$(GC_GCTK_GOTMP="$TMP/gotmp" GC_GCTK_GC_BIN="$GCBIN" GC_GCTK_ORIGIN_FETCH_TTL=0 \
+OUT=$(GC_GCTK_GOTMP="$TMP/gotmp" GC_GCTK_GC_BIN="$GCBIN" \
       STUB_GC_LOG="$GCLOG" STUB_GO_LOG="$GOLOG" \
       GC_GO_BIN="$GOBIN" bash "$BUILD" gctk --deploy 2>&1); RC=$?
 eq "$RC" "1" "(NOCITY) with no city in the environment and no listing, it refuses"
@@ -269,7 +265,7 @@ hasnt "$OUT" "built" "(NOCITY) …and publishes nothing"
 SCOPED_CITY="$TMP/scoped-city"
 OUT=$(GC_SERVICE_STATE_ROOT="$TMP/svc-root" GC_HELM_STATE_ROOT="$TMP/helm-root" \
       GC_CITY_PATH="$SCOPED_CITY" GC_GCTK_GOTMP="$TMP/gotmp" GC_GCTK_GC_BIN="$GCBIN" \
-      GC_GCTK_ORIGIN_FETCH_TTL=0 STUB_GC_LOG="$GCLOG" STUB_GO_LOG="$GOLOG" \
+      STUB_GC_LOG="$GCLOG" STUB_GO_LOG="$GOLOG" \
       GC_GO_BIN="$GOBIN" bash "$BUILD" gctk --deploy 2>&1); RC=$?
 eq "$RC" "0" "(SCOPED) builds with another service's state root in the environment"
 [ -x "$SCOPED_CITY/.gc/services/gctk/bin/gctk" ] \
@@ -288,7 +284,7 @@ STATE="$TMP/state-deps"
 run
 eq "$RC" "0" "(DEPBUMP) the first build exits 0"
 eq "$(field binary_rev)" "$REV" "(DEPBUMP) …at the fixture's revision"
-printf 'module example.invalid/fixture\n\ngo 1.22\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
+printf 'module example.invalid/fixture\n\ngo 1.22.0\n\nrequire example.invalid/dep v1.0.1\n' > "$ROOT/go.mod"
 printf 'example.invalid/dep v1.0.1 h1:two=\n' > "$ROOT/go.sum"
 commit_all "$ROOT" "bump example.invalid/dep"
 touch -d '2026-01-01 00:00:00' "$ROOT/go.mod" "$ROOT/go.sum"
@@ -317,6 +313,83 @@ run
 eq "$RC" "0" "(OTHER) the tick exits 0"
 has "$OUT" "up to date" "(OTHER) …with the binary current"
 eq "$(builds)" "0" "(OTHER) …so nothing is rebuilt"
+
+# --- (DUE) the order's check ---------------------------------------------------
+# A fresh state root, as a city has before the order's first run, and no
+# toolchain until the case installs one.
+STATE="$TMP/state-due"
+GOBIN="$TMP/no-go"
+: > "$GCLOG"
+check
+eq "$RC" "0" "(DUE) a fresh city, with no binary and no record, owes a run at once"
+has "$OUT" "no binary" "(DUE) …and says why on stdout"
+eq "$ERR" "" "(DUE) …with nothing on stderr"
+[ ! -e "$STATE" ] && ok "(DUE) …and writes nothing, not even the state root" \
+                  || bad "(DUE) the check created $STATE"
+run --deploy
+eq "$RC" "1" "(DUE) that first build fails, with no toolchain"
+check
+eq "$RC" "1" "(DUE) the next pass does not try the failed build again"
+eq "$ERR" "" "(DUE) …and keeps stderr empty, so the dispatcher reads a plain no"
+age_record 240
+check
+eq "$RC" "1" "(DUE) four minutes after the failed run, it is still not due"
+age_record 360
+SUM_BEFORE=$(cksum < "$STATE/build-status.json")
+check
+eq "$RC" "0" "(DUE) six minutes after it, the build is owed again"
+eq "$(cksum < "$STATE/build-status.json")" "$SUM_BEFORE" "(DUE) …and the check leaves the record as it was"
+GOBIN="$TMP/fake-go"
+run --deploy
+eq "$RC" "0" "(DUE) with a toolchain, the run builds"
+check
+eq "$RC" "1" "(DUE) a current binary owes no run"
+has "$OUT" "no run owed" "(DUE) …and says so"
+eq "$ERR" "" "(DUE) …on stdout alone"
+age_record 3600
+check
+eq "$RC" "1" "(DUE) …however long ago its run was"
+run --deploy
+printf 'package main\n\n// a moved checkout\nfunc main() {}\n' > "$ROOT/services/gctk/cmd/gctk/main.go"
+commit_all "$ROOT" "a gctk change"
+check
+eq "$RC" "0" "(DUE) a checkout that moved owes a run at once, though the last run was just now"
+has "$OUT" "not built from the checkout's revision" "(DUE) …naming the revision the binary lags"
+[ ! -s "$GCLOG" ] && ok "(DUE) with its city in the environment, the check asked gc nothing on any pass" \
+                  || bad "(DUE) the check called gc: $(tr '\n' ';' < "$GCLOG")"
+
+# --- (DUENOREV) a checkout whose revision cannot be read -----------------------
+# A copy of the script in a tree git does not know, with a binary in its state
+# root and a record from a run that saw the same unreadable revision.
+NOREV="$TMP/norev"
+NOREV_STATE="$TMP/state-norev"
+mkdir -p "$NOREV/assets/scripts" "$NOREV_STATE/bin"
+cp "$HERE/gc-build.sh" "$NOREV/assets/scripts/gc-build.sh"
+printf '#!/bin/sh\necho last-good\n' > "$NOREV_STATE/bin/gctk"
+chmod +x "$NOREV_STATE/bin/gctk"
+jq -n --arg at "$(date -u +%FT%TZ)" \
+  '{component: "gctk", built_at: "", source_rev: "", binary_rev: "oldrev",
+    last_build_rc: 0, restart_pending: false, checked_at: $at}' > "$NOREV_STATE/build-status.json"
+norev_check() {
+  OUT=$(GIT_CEILING_DIRECTORIES="$TMP" GC_GCTK_STATE_ROOT="$NOREV_STATE" GC_CITY_PATH="$TMP/city" \
+        GC_GCTK_GC_BIN="$GCBIN" STUB_GC_LOG="$GCLOG" \
+        bash "$NOREV/assets/scripts/gc-build.sh" gctk --due 2>"$TMP/check-stderr"); RC=$?
+  ERR=$(cat "$TMP/check-stderr")
+}
+norev_check
+eq "$RC" "1" "(DUENOREV) a run that saw the same unreadable revision just now is not run again"
+eq "$ERR" "" "(DUENOREV) …and says nothing on stderr"
+age_record 360 "$NOREV_STATE/build-status.json"
+norev_check
+eq "$RC" "0" "(DUENOREV) five minutes after it, a run is owed, since nothing shows the binary current"
+has "$OUT" "cannot be read" "(DUENOREV) …and says why"
+
+# --- (DUENOCITY) nothing names a state root ------------------------------------
+OUT=$(GC_GCTK_GC_BIN="$GCBIN" STUB_GC_LOG="$GCLOG" \
+      bash "$BUILD" gctk --due 2>"$TMP/check-stderr"); RC=$?
+ERR=$(cat "$TMP/check-stderr")
+eq "$RC" "1" "(DUENOCITY) with no city, no state root and no listing, the check owes no run"
+has "$ERR" "cannot locate the city runtime dir" "(DUENOCITY) …and says why on stderr, which the dispatcher reports"
 
 echo
 echo "gc-build: $PASS passed, $FAIL failed"

@@ -1,6 +1,6 @@
 // The rig board's page. One rig a page, with the rig in the address
-// (?rig=<name>); with no rig there, the page lists the city's rigs as links.
-// Nothing rolls up across rigs.
+// (?rig=<name>); with no rig there, the page lists the city's rigs as links,
+// and ?city is the city's page (src/cityboard). Nothing rolls up across rigs.
 //
 // The page reads one document per rig (GET <mount>/helm/rigs/{rig}), which
 // decides every group, signal, count, ask, section and order, and lays it out
@@ -9,19 +9,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActuateError, engage } from '../actuate/client';
-import type { NeedKind, Response as RigResponse } from './document.gen';
+import { CityPage } from '../cityboard/CityPage';
+import type { Asked, NeedKind, Response as RigResponse } from './document.gen';
 import { EpicsPage, MatchesPage, NeedsYouPage, UnprioritizedPage, WorkQueuePage } from './pages';
 import { SidePanel } from './Panel';
-import { READ_TIMEOUT_MS, readRigs, rigAddress, rigFromAddress } from './read';
+import { CITY_ADDRESS, READ_TIMEOUT_MS, cityFromAddress, readRigs, rigAddress, rigFromAddress } from './read';
 import { Note } from './rows';
 import { useCopy } from './useCopy';
 import { useRigDocument, type RigDocumentState } from './useRigDocument';
 import { ViewContext, type PanelState, type View } from './view';
 
-/** The page the address names: a rig's board, or the city's rigs. */
+/** The page the address names: a rig's board, the city's page, or the city's
+ *  rigs. */
 export function Page() {
   const rig = rigFromAddress(window.location.search);
-  return rig === null ? <RigList /> : <RigBoard rig={rig} />;
+  if (rig !== null) return <RigBoard rig={rig} />;
+  return cityFromAddress(window.location.search) ? <CityPage /> : <RigList />;
 }
 
 type Tab = 'epics' | 'needs' | 'queue' | 'desk';
@@ -71,6 +74,12 @@ function RigList() {
     <div className="page">
       <header className="bar">
         <Brand />
+        <nav aria-label="City and rigs" className="rig-nav">
+          <a href={CITY_ADDRESS} title="What doctor found in its last run">
+            City
+          </a>
+          <span className="rig-current">Rigs</span>
+        </nav>
       </header>
       <main className="main">
         {state.failure !== undefined && (
@@ -191,6 +200,9 @@ function RigBoard({ rig }: { rig: string }) {
       <header className="bar">
         <Brand />
         <nav aria-label="Rig" className="rig-nav">
+          <a href={CITY_ADDRESS} title="What doctor found in its last run">
+            City
+          </a>
           <a href="./" title="All of the city's rigs">
             Rigs
           </a>
@@ -243,9 +255,46 @@ function timeOf(at: string | Date): string {
   return Number.isNaN(d.getTime()) ? String(at) : d.toLocaleTimeString();
 }
 
+/** The time of day of at, with its date when it falls on another day than the
+ *  read at readAt. */
+function whenOf(at: string, readAt: string): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) {
+    return at;
+  }
+  return d.toDateString() === new Date(readAt).toDateString() ? d.toLocaleTimeString() : d.toLocaleString();
+}
+
+/** When GitHub was last asked about the rig's pull requests, as the read at
+ *  readAt judged it: the start of the newest pass of the rig's pr-poll order
+ *  that exited 0, stale past three of the order's intervals. */
+function AskedLine({ asked, readAt }: { asked: Asked; readAt: string }) {
+  switch (asked.state) {
+    case 'asked':
+      return <p className="status">GitHub last asked at {whenOf(asked.at ?? '', readAt)}.</p>;
+    case 'stale':
+      return (
+        <p className="status status--stale">GitHub last asked at {whenOf(asked.at ?? '', readAt)}, which is stale.</p>
+      );
+    case 'not_asked':
+      return (
+        <p className="status status--stale">
+          {asked.since !== undefined
+            ? `GitHub not asked: no pass since ${whenOf(asked.since, readAt)} succeeded.`
+            : "GitHub not asked: Gas City's run history holds no pass."}
+        </p>
+      );
+    case 'unwatched':
+      return <p className="status">GitHub is not asked about this rig's pull requests.</p>;
+    case 'unread':
+      return <p className="status status--failed">When GitHub was last asked could not be read: {asked.error}.</p>;
+  }
+}
+
 /** When the board on screen was read, and the latest read's failure beside
- *  it. A failed read never draws an empty board: with no document read yet,
- *  the page shows the failure alone. */
+ *  it, then when GitHub was last asked as of that read. A failed read never
+ *  draws an empty board: with no document read yet, the page shows the failure
+ *  alone. */
 function ReadStatus({ rig, state }: { rig: string; state: RigDocumentState }) {
   const last: RigResponse | undefined = state.last;
   if (last === undefined) {
@@ -258,13 +307,17 @@ function ReadStatus({ rig, state }: { rig: string; state: RigDocumentState }) {
     }
     return <Note>Reading the {rig} board…</Note>;
   }
-  if (state.failure !== undefined) {
-    return (
-      <p className="status status--failed" role="alert">
-        The latest read failed at {timeOf(state.failure.at)}: {state.failure.message}. This is the board read at{' '}
-        {timeOf(last.read_at)}.
-      </p>
-    );
-  }
-  return <p className="status">Read at {timeOf(last.read_at)}.</p>;
+  return (
+    <>
+      {state.failure !== undefined ? (
+        <p className="status status--failed" role="alert">
+          The latest read failed at {timeOf(state.failure.at)}: {state.failure.message}. This is the board read at{' '}
+          {timeOf(last.read_at)}.
+        </p>
+      ) : (
+        <p className="status">Read at {timeOf(last.read_at)}.</p>
+      )}
+      <AskedLine asked={last.asked} readAt={last.read_at} />
+    </>
+  );
 }

@@ -234,18 +234,78 @@ func (c *Call) depAdd(s, d string, args []string) error {
 			}
 		}
 	}
-	if listed(c.getenv("STUB_DEP_ADD_FAIL"), a) {
+	if listed(c.getenv("STUB_DEP_ADD_FAIL"), a) || c.carries("STUB_DEP_ADD_FAIL_ON") {
 		return c.fail(1, "Error: simulated refusal for "+a)
+	}
+	if listed(c.getenv("STUB_DEP_ADD_NOOP"), a) {
+		return nil
 	}
 	release, err := lockDir(d)
 	if err != nil {
 		return err
 	}
 	defer release()
+	if typ == "blocks" || typ == "conditional-blocks" {
+		if err := c.refuseAcrossChain(s, d, a, b); err != nil {
+			return err
+		}
+	}
 	if typ == "blocks" {
 		return c.depPut(d, b, typ, a)
 	}
 	return c.depPut(d, a, typ, b)
+}
+
+// refuseAcrossChain refuses a blocks edge from a onto b when either is the
+// other's ancestor over parent-child edges at any depth, as bd's
+// CheckBlockingHierarchyInTx does: a parent cannot close until its children
+// do, and a child inherits its parent's block.
+func (c *Call) refuseAcrossChain(s, d, a, b string) error {
+	rows, edges, err := readStore(s, d)
+	if err != nil {
+		return err
+	}
+	parents := func(id string) []string {
+		var out []string
+		for _, e := range edges {
+			if e.typ == "parent-child" && e.issue() == id {
+				out = append(out, e.on())
+			}
+		}
+		for _, r := range rows {
+			if idIs(r, id) {
+				for _, l := range linksOf(r, nil) {
+					if l.typ == "parent-child" {
+						out = append(out, l.id)
+					}
+				}
+			}
+		}
+		return out
+	}
+	above := func(id string) map[string]bool {
+		seen := map[string]bool{}
+		for frontier := []string{id}; len(frontier) > 0; {
+			var next []string
+			for _, n := range frontier {
+				for _, p := range parents(n) {
+					if !seen[p] {
+						seen[p] = true
+						next = append(next, p)
+					}
+				}
+			}
+			frontier = next
+		}
+		return seen
+	}
+	switch {
+	case above(a)[b]:
+		return c.fail(1, "Error: cannot add dependency: "+a+" is already a child of "+b+". Children inherit dependency on parent completion via hierarchy. Adding an explicit dependency would create a deadlock")
+	case above(b)[a]:
+		return c.fail(1, "Error: "+a+" cannot be blocked by its descendant "+b+": blocked status cascades to descendants, so "+b+" would inherit the block and never close")
+	}
+	return nil
 }
 
 // depAddFile lands a --file batch of {"from","to","type"} edges, which bd

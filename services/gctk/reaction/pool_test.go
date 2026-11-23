@@ -8,43 +8,6 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
-// A pool answers no only on a positive finding: a target whose rig reads
-// another store than the bead's, an agent the roster does not register, one
-// suspended, or one whose sessions are capped below one. A roster or a rig list
-// that does not read answers yes, and with no bead named the store is not
-// asked.
-func TestThePoolAnswersNoOnlyOnAFinding(t *testing.T) {
-	zero := 0
-	for name, c := range map[string]struct {
-		target, bead string
-		edit         func(*world)
-		ok           bool
-		why          string
-	}{
-		"a registered pool":        {"gc-toolkit/gc-toolkit.polecat", "tk-sub", nil, true, "is registered and not suspended"},
-		"a pool in another store":  {"gc-toolkit/gc-toolkit.polecat", "hq-sub", nil, false, "reads the gc-toolkit store (prefix tk-) but hq-sub lives in the store of town (prefix hq-)"},
-		"a store no rig owns":      {"gc-toolkit/gc-toolkit.polecat", "zz-sub", nil, false, "since none owns prefix zz-"},
-		"no bead to ask the store": {"gc-toolkit/gc-toolkit.polecat", "", func(w *world) { w.rt.RigsErr = errors.New("unasked") }, true, ""},
-		"an absent pool":           {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", nil, false, "no agent is registered at gc-toolkit/gc-toolkit.nosuch"},
-		"a suspended pool": {"gc-toolkit/gc-toolkit.polecat", "tk-sub", func(w *world) { w.rt.Roster[0].Suspended = true }, false,
-			"is suspended"},
-		"a pool capped at zero": {"gc-toolkit/gc-toolkit.polecat", "tk-sub", func(w *world) { w.rt.Roster[0].Pool.Max = &zero }, false,
-			"runs no sessions"},
-		"an unreadable roster": {"gc-toolkit/gc-toolkit.nosuch", "tk-sub", func(w *world) { w.rt.RosterErr = errors.New("gc agent list did not answer within 15s") }, true,
-			"an unreadable roster is no evidence that it is gone"},
-		"an unreadable rig list": {"gc-toolkit/gc-toolkit.polecat", "hq-sub", func(w *world) { w.rt.RigsErr = errors.New("no rigs") }, true, ""},
-	} {
-		w := newWorld(t)
-		if c.edit != nil {
-			c.edit(w)
-		}
-		ok, why := w.r.Deliverable(c.target, c.bead)
-		if ok != c.ok || !strings.Contains(why, c.why) {
-			t.Errorf("%s: Deliverable = %v, %q; want %v holding %q", name, ok, why, c.ok, c.why)
-		}
-	}
-}
-
 // A named agent is assignable only when the roster registers it by that exact
 // name, unsuspended, the city's config lists a named session for it, and, for
 // an agent scoped to a rig, its hook reads the bead's store or the city's. A

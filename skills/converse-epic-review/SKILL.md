@@ -95,7 +95,7 @@ Then read or run what the epic has of these:
 - each landed Delivery's `Aim:` line, against what its landing showed;
 - the epic's other open work: each open Delivery, each member under the epic
   itself, and each PR in flight under either, a member at `merge_result`
-  `pull_request`, `pull_request_pending` or `pull_request_head_changed`.
+  `pull_request_pending` or `pull_request_head_changed`.
 
 A checkpoint reads every Delivery landed by now and closes them all under its
 one ruling.
@@ -281,7 +281,7 @@ write 5 settles an item. A bead whose PR was retired stays open until the
 refinery's next pass over that PR finishes the retirement, so its close waits
 for that pass.
 
-Then release the bead from its park, if it has one. `gc-helm.sh park` gives a
+Then release the bead from its park, if it has one. `gctk bead park` gives a
 bead one `blocks` edge, onto a gate of its own or onto a bead it was parked
 behind, and other beads can be parked behind the same gate. This lists the
 bead's own pending waits, as `gctk bead holds` answers them, its park among
@@ -336,8 +336,11 @@ skill files them under it.
 Then set the epic's priority and park as the ruling names them. An epic under a
 parent takes `--shift <±n>` in place of the P-value:
 ```bash
-"$CONV/gc-helm.sh" priority "$EPIC" <P0-P4>
-"$CONV/gc-helm.sh" park "$EPIC" "<the ruling, and what releases the park>"
+"$CONV/queue-priority.sh" move "$EPIC" <P0-P4>
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead park "$EPIC" "<the ruling, and what releases the park>"
 ```
 A ruling that unparks the epic releases it from its park instead, by write 3's
 release step with `"$EPIC"` as the bead. When another bead still waits on that
@@ -364,10 +367,18 @@ one. Each item goes one of three ways:
   The writer refuses a bead a human gate holds, and the gate's answer would
   send that bead on in this store. So release such a bead first, a release
   whose first write removes the bead's arm, then answer its gate on a call of
-  its own, as write 2 answers one, and run the writer last:
-  `"$CONV/gc-helm.sh" takeaway <bead> "<the ruling, one sentence>" --release --no-wait`.
-  A Delivery never moves whole, because its aim answers this epic's hypothesis,
-  so its Stories move one by one.
+  its own, as write 2 answers one, and run the writer last. The release ends
+  the run beneath the bead through the pack's run-cancel.sh, which it finds
+  where GCTK_SCRIPTS_DIR points:
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+GCTK_SCRIPTS_DIR="$CONV" "$GCTK" bead takeaway <bead> "<the ruling, one sentence>" --release --no-wait
+```
+A Delivery never moves whole, because its aim answers this epic's hypothesis,
+so its Stories move one by one.
+
 - **Work worth doing on its own moves out to ordinary flow** with no parent:
   `gc bd update <bead> --parent ""`. That is a decision about the item, never
   the default for whatever is left.

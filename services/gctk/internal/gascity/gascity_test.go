@@ -1,11 +1,14 @@
 package gascity
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The previews below are the text gc sling --dry-run --force printed on the
@@ -231,6 +234,35 @@ func TestScriptRunsFromThePacksScriptsDirectory(t *testing.T) {
 	}
 }
 
+// A city Within a context stops each command it runs once the context ends,
+// and says so, whether or not the command's child still holds its output. A
+// city with no context lets the same command run to its end.
+func TestWithinStopsACommandWhenItsContextEnds(t *testing.T) {
+	dir := t.TempDir()
+	stub := "#!/bin/sh\nsleep 6 &\nsleep 6\n"
+	if err := os.WriteFile(filepath.Join(dir, "pr-status-label.sh"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	r := (&City{scriptsDir: dir}).In(dir).Within(ctx).Script("pr-status-label.sh", "clear")
+	if took := time.Since(start); took > 200*time.Millisecond+stopGrace+time.Second {
+		t.Fatalf("the stopped script held the call %s", took)
+	}
+	if r.Code != -1 || !errors.Is(r.Err, context.DeadlineExceeded) || !strings.Contains(r.Failure(), "pr-status-label.sh was stopped") {
+		t.Fatalf("a stopped script answered %+v", r)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "quick.sh"), []byte("#!/bin/sh\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quick, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stop()
+	if r := (&City{scriptsDir: dir}).Within(quick).Script("quick.sh"); r.Code != 0 || strings.TrimSpace(r.Output) != "done" {
+		t.Fatalf("a script that ends inside its bound answered %+v", r)
+	}
+}
+
 // A city In a directory starts every command there, its scripts and gc alike,
 // and a relative scripts directory still names the one it named from the
 // process's working directory. The city it came from runs where the process
@@ -295,42 +327,70 @@ func TestAsActsAsItsActorInItsDirectory(t *testing.T) {
 	}
 }
 
-// A cook passes its vars in their names' order, as --var flags, names no bead
-// to attach, and reads the root and every bead the pour created from the
-// summary line it prints with --json, the root among them. A cook that exits
+// A cook passes its vars in their names' order, as --var flags, and reads the
+// root from the summary line it prints with --json (formulaCookJSONResult in
+// cmd/gc/cmd_formula.go at gastownhall/gascity 03f6fe825c). A cook that exits
 // non-zero names no root, and one whose output names none answers with none.
-func TestCookPassesItsVarsAndReadsWhatItPoured(t *testing.T) {
+func TestCookPassesItsVarsAndReadsTheRoot(t *testing.T) {
 	dir := t.TempDir()
 	gc := filepath.Join(dir, "gc")
 	if err := os.WriteFile(gc, []byte(`#!/bin/sh
 printf '%s\n' "$*" >> "$(dirname "$0")/log"
-case "$*" in
-  *pr_bead=tk-1*) echo 'warning: gc formula cook: projecting execution facts'; echo '{"schema_version":"1","ok":true,"formula":"mol-pr-review","mode":"cook","root_id":"tk-root","created":3,"id_mapping":{"mol-pr-review":"tk-root","mol-pr-review.workflow-finalize":"tk-fin","mol-pr-review.review-loop":"tk-loop"}}' ;;
-  *pr_bead=tk-2*) echo 'gc formula cook: prepare formulas v2 invocation: no such var' >&2; exit 1 ;;
-  *pr_bead=tk-3*) echo '{"schema_version":"1","ok":true,"formula":"mol-pr-review","mode":"cook","root_id":"tk-only","created":1}' ;;
+case "$5" in
+  tk-1) echo 'warning: gc formula cook: projecting execution facts'; echo '{"schema_version":"1","ok":true,"formula":"mol-pr-review","mode":"attach","attach_bead_id":"tk-1","root_id":"tk-root","created":9}' ;;
+  tk-2) echo 'gc formula cook: attach bead tk-2: not found' >&2; exit 1 ;;
   *) echo 'Root: tk-other' ;;
 esac
 `), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	c := &City{bin: gc}
-	got := c.Cook(Cook{Formula: "mol-pr-review", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"}})
-	if got.Code != 0 || got.Root != "tk-root" || !slices.Equal(got.Beads, []string{"tk-fin", "tk-loop", "tk-root"}) {
-		t.Fatalf("the cook answered %+v, want exit 0, root tk-root and beads tk-fin, tk-loop and tk-root", got)
+	got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-1", Vars: map[string]string{"target": "main", "head": "abc", "pr_bead": "tk-1"}})
+	if got.Code != 0 || got.Root != "tk-root" {
+		t.Fatalf("the cook answered %+v, want exit 0 and root tk-root", got)
 	}
-	if got := c.Cook(Cook{Formula: "mol-pr-review", Vars: map[string]string{"pr_bead": "tk-2"}}); got.Code != 1 || got.Root != "" || got.Beads != nil {
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-2"}); got.Code != 1 || got.Root != "" {
 		t.Fatalf("a refused cook answered %+v, want exit 1 and no root", got)
 	}
-	if got := c.Cook(Cook{Formula: "mol-pr-review", Vars: map[string]string{"pr_bead": "tk-3"}}); got.Root != "tk-only" || !slices.Equal(got.Beads, []string{"tk-only"}) {
-		t.Fatalf("a cook whose summary maps no step answered %+v, want root tk-only and that bead alone", got)
-	}
-	if got := c.Cook(Cook{Formula: "mol-pr-review"}); got.Root != "" || got.Beads != nil {
-		t.Fatalf("a cook with no summary line answered %+v, want no root and no beads", got)
+	if got := c.Cook(Cook{Formula: "mol-pr-review", Bead: "tk-3"}); got.Root != "" {
+		t.Fatalf("a cook with no summary line named root %q", got.Root)
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "log"))
 	first := strings.Split(string(raw), "\n")[0]
-	if want := "formula cook mol-pr-review --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
+	if want := "formula cook mol-pr-review --attach tk-1 --json --var head=abc --var pr_bead=tk-1 --var target=main"; first != want {
 		t.Fatalf("the cook ran %q, want %q", first, want)
+	}
+}
+
+// A formula sling names the target and the formula, asks for the JSON line, and
+// reads the run's root from it: the workflow, else the molecule. A notice on
+// standard error leaves the line readable, a sling that exits non-zero names no
+// root and fails with its last line, and one whose line names neither answers
+// with no root.
+func TestAFormulaSlingReadsTheRunsRoot(t *testing.T) {
+	c, log := stubGC(t, `case "$2" in
+  rig/rig.polecat) echo 'gc sling: warning: projecting execution facts' >&2
+    echo '{"schema_version":"1","success":true,"target":"rig/rig.polecat","method":"formula","formula":"mol-x","workflow_id":"tk-root","routed":true}' ;;
+  rig/rig.wisp) echo '{"schema_version":"1","success":true,"molecule_id":"tk-wisp"}' ;;
+  rig/rig.gone) echo 'gc sling: no agent rig/rig.gone' >&2; exit 1 ;;
+  *) echo '{"schema_version":"1","success":true}' ;;
+esac
+`)
+	got := c.SlingFormula(context.Background(), "rig/rig.polecat", "mol-x")
+	if got.Failure() != "" || got.Root != "tk-root" {
+		t.Fatalf("the sling answered %+v, want root tk-root", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.wisp", "mol-x"); got.Root != "tk-wisp" {
+		t.Fatalf("a sling that names only its molecule answered %+v", got)
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.gone", "mol-x"); got.Failure() != "exit 1: gc sling: no agent rig/rig.gone" || got.Root != "" {
+		t.Fatalf("a refused sling answered %+v, failure %q", got, got.Failure())
+	}
+	if got := c.SlingFormula(context.Background(), "rig/rig.none", "mol-x"); got.Failure() != "" || got.Root != "" {
+		t.Fatalf("a sling whose line names no root answered %+v", got)
+	}
+	if want := []string{"sling", "rig/rig.polecat", "mol-x", "--formula", "--json"}; !slices.Equal(log()[:5], want) {
+		t.Fatalf("the sling ran %q, want %q", log()[:5], want)
 	}
 }
 
@@ -364,5 +424,27 @@ exit 0
 		"session\nnudge\nrig/gone.refinery\n" + msg + "\n--\n"
 	if string(raw) != want {
 		t.Fatalf("gc ran with\n%s\nwant\n%s", raw, want)
+	}
+}
+
+// The Claude settings file sits under the city's root.
+func TestTheClaudeSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	gc := filepath.Join(dir, "gc")
+	if err := os.WriteFile(gc, []byte(`#!/bin/sh
+[ "$1 $2 $3" = "rig list --json" ] || exit 2
+echo '{"rigs":[{"name":"town","path":"`+dir+`","prefix":"lx","hq":true},{"name":"r","path":"/r","prefix":"tk"}]}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY_PATH", "")
+	t.Setenv("GC_CITY", "")
+	t.Setenv("GC_CITY_ROOT", "")
+	c := &City{bin: gc}
+	if got, err := c.ClaudeSettings(); err != nil || got != filepath.Join(dir, ".gc", "settings.json") {
+		t.Errorf("ClaudeSettings = %q, %v", got, err)
 	}
 }

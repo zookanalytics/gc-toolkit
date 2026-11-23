@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for assets/scripts/seed-audit-reaudit.sh — the one writer of the
 # seed audit's re-audit. Stubbed gc over a JSON store; no live city, Dolt, or
-# network. merge.test.sh pins the merge gate's hand-off to it, and gctk's
-# landing tests (services/gctk/internal/cli/prland_test.go) the landing
-# order's. This suite pins the writer's own contract: the usage refusals; a base
+# network. gctk's landing tests (services/gctk/internal/cli/prland_test.go) pin
+# the landing order's hand-off to it. This suite pins the writer's own contract: the usage refusals; a base
 # that is not the default branch, read from origin/HEAD, filing nothing; a filed
 # re-audit carrying its identity in the create, listing the files, who found
 # them and both ways a page goes stale, settled before it is slung on

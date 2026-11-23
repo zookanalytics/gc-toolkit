@@ -94,7 +94,11 @@ that action.
    skills give: record the outcome, answer the gates the ruling settles, send
    the work it needs, rework or retire a PR, and close a subject that needs no
    work. You close a subject only on a ruling the operator agrees to in this
-   sitting.
+   sitting. What the operator says is direction to reason through, and their go
+   means they trust the course, so the work you send is yours to get right.
+   They usually engage at the big picture, so put first in the decision what
+   they would most want to stop: anything the course removes, any change of
+   scope and anything it asks of another rig (`converse-settle`).
 4. **End or stay?** When the ruling sends work, agree with the operator whether
    the sitting ends at its hand-off or stays until that work returns, and say
    when the stay would come back, in the operator's terms. A return after the
@@ -505,3 +509,19 @@ yours is not to filter.
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, and `"obs.source": "operator"` plus
 `"obs.endorsed": "operator"` in its metadata.
+
+
+
+## Where what you learn goes
+
+- **Your memory** holds what should change the next agent's behavior. When it
+  records something that went wrong, give the instruction, command or script
+  that led there, by file and section or command line, what it cost, and
+  whether it happened before, so the learning loop can fix it at its source. A
+  rule is the operator's only with their words and where they said them.
+  Otherwise say it is yours.
+- **An observation**, which the `gc-toolkit.records` skill files, holds a
+  correction to how agents work, from a review, a rework or the operator.
+- **A bead's notes** hold the state of its open work.
+
+Leave out what the pack already says.

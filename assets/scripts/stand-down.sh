@@ -17,7 +17,7 @@
 #      the gate closed reads the arm gone, and it retires an arm it finds on a
 #      closed bead.
 #   2. It ends the run beneath the bead and clears the bead's route and session
-#      pins through gc-helm.sh takeaway --release --no-wait, whose exit says the
+#      pins through gctk bead takeaway --release --no-wait, whose exit says the
 #      release landed, so the bead is left with no route. So nothing is still
 #      building the work and no pool is offered it once it is ready.
 #   3. It answers each gate under the key with the ruling, and reads each back
@@ -35,8 +35,20 @@
 # sitting's conversation. A gate this
 # bead leaves carries no ruling, so it cannot be the evidence.
 #
-# Nothing is written, and the exit is 1, for a bead whose close this cannot
-# carry out:
+# A gate can be assigned to the person who owes the action it asks for (the
+# waits skill), and bead-rehome.sh --check holds a gate a person is assigned,
+# which is how a retry of a close leaves that gate to them. The ruling answers
+# what the gate asked, so before that check this takes each gate the ruling
+# answers back from its assignee, in a write that lands only while the gate is
+# open and still assigned to whoever this read. That write stands when the check
+# then refuses, since the ruling has answered the gate either way. A dry run
+# writes nothing, so it names the gates it would take back and stops before the
+# check. A gate this bead leaves keeps its assignee, because it goes on asking
+# about another bead. So does a gate in any status but open. The check refuses
+# both.
+#
+# Apart from those take-backs, nothing is written, and the exit is 1, for a bead
+# whose close this cannot carry out:
 #   * an open PR, which the prs skill retires, because the PR has to close before
 #     an answer releases its merge;
 #   * a bead at one of the pending record's exceptions, until its record names
@@ -44,9 +56,9 @@
 #   * a gate under the key that also holds another open bead, with that gate as
 #     the only evidence. --successor names other evidence and lets this bead leave
 #     it, and an answer once this bead has closed releases the rest;
-#   * anything bead-rehome.sh --check refuses: another open human gate, a gate
-#     assigned to a person, another live blocker, an open child, a claim, or a
-#     disposition already naming other evidence.
+#   * anything bead-rehome.sh --check refuses: another open human gate, a gate a
+#     person is assigned that this does not take back, another live blocker, an
+#     open child, a claim, or a disposition already naming other evidence.
 #
 # A step that does not land exits 1 and names what has landed. Re-running
 # converges: the arm stays gone, an answered gate stays answered and still names
@@ -82,7 +94,9 @@ usage: stand-down.sh <work-bead> --key <situation-key> --ruling <why>
                 the close (required)
   --successor   the evidence the close points at; default the gate under the key,
                 which a gate that also holds another open bead cannot be
-  --dry-run     resolve and report; write nothing
+  --dry-run     resolve and report; write nothing. A gate a real run takes back
+                from its assignee ends the report, because what else would hold
+                the close is read after that write
 
 exit: 0 the bead is closed · 1 it is not, or it closed and its edge may not be
       recorded · 2 usage
@@ -131,7 +145,6 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-HELM="$SCRIPT_DIR/gc-helm.sh"
 REHOME="$SCRIPT_DIR/bead-rehome.sh"
 
 refuse() { echo "$PROG: $1 Nothing was written." >&2; exit 1; }
@@ -146,10 +159,10 @@ case "$(printf '%s' "$WORK_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" in
 esac
 WORK_MR=$(row_meta "$WORK_JSON" merge_result)
 case "$WORK_MR" in
-  # An open PR, on the old record or on the pending record, retires through the
-  # writer that records its disposition and then closes it, which the PR's
-  # closer, pr-facts or the landing order, carries out once the PR reads closed.
-  pull_request|pull_request_pending|pull_request_head_changed)
+  # An open PR on the pending record retires through the writer that records its
+  # disposition and then closes it, which the landing order carries out once the
+  # PR reads closed.
+  pull_request_pending|pull_request_head_changed)
     refuse "$WORK owns an open PR ($WORK_MR), which is retired rather than stood down, so the PR closes before an answer releases its merge: $SCRIPT_DIR/pr-dispose.sh, or --retire on a sitting's sign-off." ;;
 esac
 
@@ -215,8 +228,42 @@ case " $SHARED " in
     refuse "$SHARED_WHY, and an answer here would release it, so that gate stays open and cannot carry this ruling. Name the evidence with --successor, and $WORK alone stands down and leaves the gate. To release the rest too, answer the gate once $WORK has closed." ;;
 esac
 
-"$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null \
-  || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
+# The gates to take back, one per line: the gate, a tab, its assignee.
+TAKE_BACK=$(printf '%s' "$OPEN_GATES" | jq -r --arg shared "$SHARED" '
+  ($shared | split(" ")) as $left
+  | .[] | select(((.status // "open") | tostring) == "open")
+        | ((.assignee // "") | tostring) as $who
+        | select($who != "" and ((.id // "") as $id | $left | index($id)) == null)
+        | [.id, $who] | @tsv' 2>/dev/null) \
+  || refuse "could not read who is assigned the gates under $KEY."
+
+[ "$DRY_RUN" = 1 ] || [ -x "$GCTK" ] \
+  || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
+
+if [ -n "$TAKE_BACK" ] && [ "$DRY_RUN" = 1 ]; then
+  echo "$PROG: DRY RUN: the ruling answers each gate under $KEY, so a real run first takes back $(printf '%s\n' "$TAKE_BACK" | awk -F'\t' '{ printf "%sgate %s from %s", (NR > 1 ? ", " : ""), $1, $2 }'), and reads what else would hold the close of $WORK only after that write. A dry run writes nothing, so it cannot say whether $WORK would close."
+  exit 0
+fi
+
+# A take-back that does not land leaves the gate as the check below reads it.
+TOOK=""
+while IFS=$'\t' read -r gate who; do
+  [ -n "$gate" ] || continue
+  if gc bd update "$gate" --if-status=open --if-assignee="$who" --assignee="" </dev/null >/dev/null 2>&1; then
+    TOOK=1
+    echo "$PROG: took gate $gate back from $who, because the ruling answers it"
+  else
+    echo "$PROG: gate $gate was not taken back from $who: bd refused it, or the gate changed since it was read" >&2
+  fi
+done <<EOF
+$TAKE_BACK
+EOF
+
+if ! "$REHOME" --origin "$WORK" --successor "$SUCCESSOR" --kind not-needed --except-key "$KEY" --check >/dev/null; then
+  [ -n "$TOOK" ] || refuse "$WORK cannot close: bead-rehome.sh refused it, as printed above."
+  echo "$PROG: $WORK cannot close: bead-rehome.sh refused it, as printed above. Nothing was written but the take-back printed above, which stands, because the ruling answers what each gate asked." >&2
+  exit 1
+fi
 
 case "$RULING" in
   ruled:*) ANSWER="$RULING" ;;
@@ -228,8 +275,6 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-[ -x "$GCTK" ] || refuse "There is no gctk binary at '$GCTK' to remove the arm with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is)."
-
 # Each step below is one a re-run takes again, so a stop names what stands.
 stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exit 1; }
 
@@ -238,8 +283,11 @@ stopped() { echo "$PROG: $1 Re-run this command once that is repaired." >&2; exi
 "$GCTK" bead disarm "$WORK" --reason "stand-down: $RULING" >/dev/null \
   || stopped "the arm on $WORK was not removed, so no gate was answered."
 
-"$HELM" takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
-  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gc-helm.sh says above, so no gate was answered."
+# The release ends the run beneath the bead through the pack's run-cancel.sh,
+# which gctk runs from GCTK_SCRIPTS_DIR, this script's own directory unless the
+# caller names one.
+GCTK_SCRIPTS_DIR="${GCTK_SCRIPTS_DIR:-$SCRIPT_DIR}" "$GCTK" bead takeaway "$WORK" "Stood down on a person's ruling, so nothing builds it" --release --no-wait \
+  || stopped "the arm on $WORK is gone, but its run did not end or its route did not clear, or a live session still holds its claim, as gctk bead takeaway says above, so no gate was answered."
 
 for gate in $(printf '%s' "$OPEN_GATES" | jq -r '.[].id' 2>/dev/null); do
   case " $SHARED " in

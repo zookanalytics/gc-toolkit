@@ -2,6 +2,7 @@ package waits
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -93,6 +94,47 @@ func TestRunsAgreeWithRunLibFixture(t *testing.T) {
 	}
 }
 
+// LiveRunsOf names, for the bead of each runs case of the fixture, the live
+// runs RunsOf names for it, and finds them among live roots alone, so a closed
+// root is never read. The fixture holds a finished run beside a live one,
+// which RunsOf names and LiveRunsOf leaves out.
+func TestLiveRunsOfNamesTheLiveRunsRunsOfNames(t *testing.T) {
+	s, fx := fixtureStore(t)
+	l := ledger.New(s)
+	finished := 0
+	for _, c := range fx.Cases {
+		if c.Verb != "runs" {
+			continue
+		}
+		all, err := RunsOf(l, c.Arg)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		up, err := l.Dependents(c.Arg, tracks)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		before := len(s.Finds())
+		live, err := LiveRunsOf(l, c.Arg, up)
+		if err != nil {
+			t.Fatalf("%s: %v", c.Name, err)
+		}
+		want := slices.DeleteFunc(slices.Clone(all), func(r Run) bool { return !r.Live })
+		finished += len(all) - len(want)
+		if !slices.Equal(live, want) {
+			t.Errorf("%s: LiveRunsOf reads %+v, and the live runs RunsOf names are %+v", c.Name, live, want)
+		}
+		for _, q := range s.Finds()[before:] {
+			if q.Closed && (q.Key == inputConvoyKey.Name() || q.Key == issueVarKey.Name()) {
+				t.Errorf("%s: LiveRunsOf read closed roots (%+v)", c.Name, q)
+			}
+		}
+	}
+	if finished == 0 {
+		t.Fatal("no runs case of the fixture names a finished run, so nothing tells the live form from RunsOf")
+	}
+}
+
 // A bead the store does not hold has no runs to read: RunsOf fails, as
 // run-lib.sh's runs verb fails on bd's refusal to resolve it, rather than
 // answer none.
@@ -152,5 +194,25 @@ func TestIsRootOrStepReadsARunsOwnBeads(t *testing.T) {
 	}
 	if want := []string{"flow", "graph", "mol", "step"}; !slices.Equal(own, want) {
 		t.Errorf("a run's own beads = %v, want %v", own, want)
+	}
+}
+
+// A run's holders are the assignees of its members that are not closed, the
+// root's own among them, each once, and a closed member's assignee is none.
+func TestRunHoldersAreTheAssigneesOfItsLiveMembers(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "root-1", Status: "in_progress", Assignee: "rig/control", Metadata: map[string]string{"gc.kind": "workflow"}})
+	s.Put(fake.Bead{ID: "st-load", Status: "closed", Assignee: "polecat-done", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-impl", Status: "in_progress", Assignee: "polecat-2", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-rev", Status: "open", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-sub", Status: "blocked", Assignee: "polecat-2", Metadata: map[string]string{"gc.root_bead_id": "root-1"}})
+	s.Put(fake.Bead{ID: "st-other", Status: "in_progress", Assignee: "polecat-9", Metadata: map[string]string{"gc.root_bead_id": "root-2"}})
+	got, err := RunHolders(ledger.New(s), "root-1")
+	if err != nil || !slices.Equal(got, []string{"rig/control", "polecat-2"}) {
+		t.Fatalf("RunHolders = %q, %v; want the root's and the live step's assignees, each once", got, err)
+	}
+	s.FindErr = errors.New("the store did not answer")
+	if _, err := RunHolders(ledger.New(s), "root-1"); err == nil {
+		t.Fatal("a read that fails answered holders")
 	}
 }

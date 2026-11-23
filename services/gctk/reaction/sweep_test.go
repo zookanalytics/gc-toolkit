@@ -301,18 +301,57 @@ func TestASweepsDeadlineReadsAsAnOrdersTimeout(t *testing.T) {
 	}
 }
 
-// A rig whose proactive pool cannot take a reaction is skipped before the
-// store is read, and a sweep in no rig fails before anything is read.
-func TestASweepSkipsARigWhosePoolCannotTakeAReaction(t *testing.T) {
+// The sweep asks nothing about the rig's proactive pool: it reads no roster,
+// with a candidate or without, and slings each candidate to the pool whether
+// or not the pool runs. A sling gc sling refuses, as it
+// refuses a pool the city does not configure, is that candidate's failure, and
+// the sweep goes on to the next. A sweep in no rig fails before anything is
+// read.
+func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-a", nil))
-	w.rt.Roster = w.rt.Roster[:3]
-	w.store.ReadyErr = errors.New("the ready read was made")
-	lines, summary, err := w.sweep(false, time.Minute)
-	if err != nil || len(lines) > 0 || !strings.Contains(summary, "no sweep in this rig: no agent is registered at gc-toolkit/gc-toolkit.proactive") {
-		t.Errorf("(SWEEP-DELIVERABLE) %v, %q, %v", lines, summary, err)
+	asked := func(what string) {
+		t.Helper()
+		if slices.Contains(w.rt.Reads(), "roster") {
+			t.Errorf("(SWEEP-NOASK) %s: the reads were %v", what, w.rt.Reads())
+		}
 	}
+	for _, dryRun := range []bool{false, true} {
+		if lines, summary, err := w.sweep(dryRun, time.Minute); err != nil || len(lines) > 0 || summary == "" {
+			t.Errorf("(SWEEP-NOCANDIDATE) dry run %v: %v, %q, %v", dryRun, lines, summary, err)
+		}
+	}
+	asked("a pass with no candidate")
+
+	w = newWorld(t)
+	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
+	for i := range w.rt.Roster {
+		w.rt.Roster[i].Suspended = true
+	}
+	if _, summary, err := w.sweep(false, time.Minute); err != nil || summary != "slung 2 first reaction(s)" || !slices.Equal(w.slings(), []string{"tk-a", "tk-b"}) {
+		t.Errorf("(SWEEP-STOPPED) a pool that does not run: %q, %v, slinging %v; want both slung to it", summary, err, w.slings())
+	}
+	asked("a pool that does not run")
+
+	w = newWorld(t)
+	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
+	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
+		w.add("SLING " + s.Target + " " + s.Bead + " --on " + s.Formula)
+		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: `gc sling: agent "gc-toolkit/gc-toolkit.proactive" not found in city.toml; did you mean "gc-toolkit/gc-toolkit.po"?`}}
+	}
+	lines, summary, err := w.sweep(false, time.Minute)
+	if err != nil || summary != "slung 0 first reaction(s) (2 not slung for an error)" || !slices.Equal(w.slings(), []string{"tk-a", "tk-b"}) {
+		t.Errorf("(SWEEP-REFUSED) a pool the city does not configure: %q, %v, slinging %v; want each tried and counted", summary, err, w.slings())
+	}
+	for _, l := range lines {
+		if l.Outcome != Failed || !strings.Contains(l.Why, `agent "gc-toolkit/gc-toolkit.proactive" not found in city.toml`) {
+			t.Errorf("(SWEEP-REFUSED) %s's line is %+v; want it failed with gc sling's reason", l.ID, l)
+		}
+	}
+	asked("a pool the city does not configure")
+
+	w = newWorld(t)
 	w.r.Rig = ""
+	w.store.ReadyErr = errors.New("the ready read was made")
 	if _, _, err := w.sweep(false, time.Minute); !errors.Is(err, ErrNoRig) || len(w.slings()) > 0 {
 		t.Errorf("(SWEEP-FAILCLOSED) a sweep in no rig: %v", err)
 	}

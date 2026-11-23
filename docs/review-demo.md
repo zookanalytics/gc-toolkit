@@ -117,13 +117,10 @@ The verdict says the report shows fixture data.
 `form` command. It reads and writes only through the gc-helm.sh it is given, so
 run it against the fixture stand-in, which answers from fixture data and writes
 nothing. Build helm-svc into the review workspace, beside the capture, since no
-ignore rule covers a binary in the worktree. Every compile of `services/helm`
-needs ICU's cgo flags on macOS, so pass it the flags `icu4c_cgo_flags` works out,
-as `gc-build.sh` and `tools/lint.sh` do:
+ignore rule covers a binary in the worktree:
 
 ```bash
-. <worktree>/assets/scripts/icu4c-cgo.sh && icu4c_cgo_flags review-demo
-(cd <worktree>/services/helm && CGO_CPPFLAGS="$ICU4C_CGO_CPPFLAGS" CGO_LDFLAGS="$ICU4C_CGO_LDFLAGS" go build -o <workspace>/helm-svc ./cmd/helm-svc)
+(cd <worktree>/services/helm && go build -o <workspace>/helm-svc ./cmd/helm-svc)
 ```
 
 Then capture it with `--cwd <worktree>/services/helm`:

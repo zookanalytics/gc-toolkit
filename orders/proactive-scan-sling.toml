@@ -19,12 +19,13 @@
 # live reaction on a bead.
 #
 # scope = rig: each importing rig reacts over its own store and slings into its
-# own proactive pool. The sweep asks whether that pool can take a reaction
-# first, so a rig whose pool is absent, suspended, or capped skips cleanly.
+# own proactive pool, whether or not that pool runs: a reaction slung to a pool
+# that does not run waits there until it does. A sling gc sling refuses, as it
+# refuses a pool the city does not configure, fails that candidate alone.
 # Cadence and enablement are tunable per city via city.toml
 # [[orders.overrides]] by this order's name, not by editing here.
 [order]
-description = "proactive intake: run gctk reaction sweep so each ready bead nobody has decided on gets a first reaction at intake: an actionable one is routed, a blocked one gets an edge, one needing a ruling gets a human gate. Uncapped, deadline-bounded, roster-gated; fully exec."
+description = "proactive intake: run gctk reaction sweep so each ready bead nobody has decided on gets a first reaction at intake: an actionable one is routed, a blocked one gets an edge, one needing a ruling gets a human gate. Uncapped, deadline-bounded; fully exec."
 trigger = "cooldown"
 interval = "15m"
 exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" reaction sweep --db \"$GC_RIG_ROOT/.beads\""

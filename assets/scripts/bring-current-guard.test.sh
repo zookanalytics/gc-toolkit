@@ -918,7 +918,6 @@ cp "$HERE/work-setup.sh" "$HERE/work-lib.sh" "$HERE/decline.sh" "$HERE/bd-lib.sh
 resume() { ( cd "$R" && GC_SESSION_ID=polecat WORK_READ_WAIT=0 "$RESUME_PACK/work-setup.sh" --bead "$1" --base main ) >/dev/null 2>&1; }
 has "$(cat "$HERE/work-setup.sh")" '"stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only' "work-setup.sh reads a conflict or stale-base rejection as merge-only"
 eq "$(grep -c '"stale base at head \$head_oid: PR#\$num conflicts with' "$HERE/pr-facts.sh")" "1" "pr-facts.sh's merge-in child is rejected 'stale base at head …'"
-eq "$(grep -c 'FIX_REASON="stale base at head \$head_oid:' "$HERE/pre-open-rebase.sh")" "1" "…and so is pre-open-rebase.sh's child"
 eq "$(grep -c 'REASON="Conflicts with \$TARGET at' "$HERE/refinery-prep.sh")" "1" "the refinery's prepare re-queue is rejected 'Conflicts with …'"
 
 echo "# the resume records the start and scope before its merge, and the guard reads from there"
