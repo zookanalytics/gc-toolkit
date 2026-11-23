@@ -526,7 +526,7 @@ approves its design.
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, and the cutover script | 18,326, and the cutover script |
+| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,580, and the cutover script |
 | B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |
