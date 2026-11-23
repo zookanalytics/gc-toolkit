@@ -31,8 +31,9 @@ Claude Code session takes it inside its running turn, with its next tool
 result. Gas City holds a nudge to a Codex session that is running a turn
 until that turn ends, since Codex's submit keys would cancel the turn, so
 until then such a session has the revision only where its run reads the
-bead's notes. Each line printed names a session and what gc said of its
-nudge.
+bead's notes. It prints a line that says the note landed, then a line for each
+session working the bead, with what gc said of its nudge or why it was sent
+none, or one line that says no session works the bead.
 
 The note's writer is GC_ALIAS, else GC_SESSION_NAME, else host. --db names the
 store, a store's .beads directory. Without it the bead's store is the one gc

@@ -421,10 +421,11 @@ A Claude Code session takes the revision inside its running turn, with its next
 tool result. Gas City holds it for a Codex session that is running a turn until
 that turn ends, so until then that session has the revision only where its run
 reads the bead's notes. With no session working the bead, the note is all it
-needs, since whoever takes the work next reads the notes. Each line it prints
-names a session and what Gas City said of its nudge. Exit 3 means the note
-landed but a session may not have the revision, and the message gives the
-nudge to send by hand.
+needs, since whoever takes the work next reads the notes. It prints a line that
+says the note landed, then a line for each session working the bead, with what
+Gas City said of its nudge or why it was sent none, or one line that says no
+session works the bead. Exit 3 means the note landed but a session may not have
+the revision, and the message gives the nudge to send by hand.
 
 When the work already has an open pull request, retire the pull request instead
 of stopping the bead, and send a change or more work on its branch as an ask on
