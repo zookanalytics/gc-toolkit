@@ -26,7 +26,9 @@
 # touches the checkout: one idempotent bead per blocked rig records why, and a
 # human gate on it asks someone to act. A rig whose fetch fails is skipped until
 # a pass that can fetch, and doctor/check-pour-text-current reports its
-# remote-tracking ref going stale.
+# remote-tracking ref going stale. When the store cannot be read for a rig's
+# bead, the pass warns and leaves the bead to a pass that can, so a failed read
+# never files a second bead and gate beside the one already open.
 #
 # A stalled deploy has to reach someone, so a blocked rig is NOT handed to a
 # fixed agent address — an address no agent holds is a bead nobody works, and a
@@ -41,9 +43,9 @@
 # Runs as an exec order (no LLM, no agent, no wisp).
 set -euo pipefail
 
-warn() { echo "reconcile-rig-checkouts: $*" >&2; }
-
 SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+# shellcheck source=bd-lib.sh
+. "${GC_BD_LIB:-$SELF_DIR/bd-lib.sh}" || { echo "reconcile-rig-checkouts: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 HUMAN_GATE_SH="${GC_RECONCILE_HUMAN_GATE_TOOL:-$SELF_DIR/human-gate.sh}"
 
 # The store the per-rig subject bead lives in. Its gate lands beside it.
@@ -54,10 +56,13 @@ RECONCILE_RIG="${RECONCILE_BEAD_RIG:-gc-toolkit}"
 # after a clean sync files on a new subject bead, which no earlier answer mutes.
 QUIET_WINDOW=86400
 
-# id of the single open reconcile bead for a rig (empty if none).
+# open_bead <rig> — the id of the rig's open reconcile bead, or nothing when
+# the store holds none. A store bd_list cannot read, or a row with no id,
+# returns non-zero, so a caller never takes a failed read for a rig with no bead.
 open_bead() {
-    gc bd --rig "$RECONCILE_RIG" list --metadata-field "reconcile_rig=$1" --json 2>/dev/null \
-        | jq -r '.[0].id // empty' 2>/dev/null || true
+    local rows
+    rows=$(bd_list --rig "$RECONCILE_RIG" --metadata-field "reconcile_rig=$1") || return 1
+    jq -er 'if length == 0 then "" else .[0].id | strings | select(. != "") end' <<< "$rows" 2>/dev/null
 }
 
 # File a stalled rig as a human gate that blocks its subject bead. The exit
@@ -89,10 +94,14 @@ retract_gate() {
 
 # A rig that fast-forwarded clears its exception: withdraw the gate as moot,
 # then close the subject. The close waits on retract_gate, so a failed
-# withdrawal leaves the subject open as the retry handle.
+# withdrawal leaves the subject open as the retry handle, as a failed read of
+# the subject does.
 resolve_subject() {
     local name="$1" reading="$2" bead
-    bead=$(open_bead "$name")
+    if ! bead=$(open_bead "$name"); then
+        warn "could not read the reconcile bead of rigs/$name, which fast-forwarded — an open one keeps its gate until a pass that can read the store withdraws it"
+        return 0
+    fi
     [ -n "$bead" ] || return 0
     if retract_gate "$bead" "reconcile-diverged-$name" "$reading; the stall this gate asked about is resolved."; then
         gc bd --rig "$RECONCILE_RIG" close "$bead" --reason "$reading" >/dev/null 2>&1 || true
@@ -151,7 +160,10 @@ while IFS=$'\t' read -r name path; do
             "$porcelain" "$remote" "$local_log")
     fi
 
-    bead=$(open_bead "$name")
+    if ! bead=$(open_bead "$name"); then
+        warn "could not read the reconcile bead of rigs/$name, which is blocked — skipping it until a pass that can read the store, so no second bead or gate is filed"
+        continue
+    fi
     if [ -n "$bead" ]; then
         gc bd --rig "$RECONCILE_RIG" update "$bead" --title "$title" --description "$body" >/dev/null 2>&1 || true
     else
