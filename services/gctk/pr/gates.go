@@ -53,9 +53,9 @@ func openGates(l *ledger.Ledger, bead string) ([]gate.Gate, error) {
 
 // decideGates is the stay's step where a run decides an open PR at its head,
 // on the answer the evaluator gave there. ok is false when no open gate of the
-// pack's types names the bead, or when one does and the PR's own status is
-// neither needs-review nor merging, which leaves the PR to the rest of the
-// decision: the PR is not ready then, so no merge is requested.
+// pack's types names the bead, or when one does, the PR is not ready and its
+// own status, where one is read here, is neither needs-review nor merging. That
+// leaves the PR to the rest of the decision, where no merge is requested.
 func (u *run) decideGates(s state, f seen, ans Answer) (plan, bool) {
 	gates, err := openGates(s.reads, s.id)
 	if err != nil {
@@ -65,6 +65,9 @@ func (u *run) decideGates(s state, f seen, ans Answer) (plan, bool) {
 		return plan{}, false
 	}
 	if u.Status == nil {
+		if !ans.Ready {
+			return plan{}, false
+		}
 		return u.withCarry(s, f, none(s, ActChecked, fmt.Sprintf("the open gate %s names the bead, and nothing reads the PR's "+
 			"own status here, so no merge is requested", gates[0].ID))), true
 	}

@@ -243,6 +243,19 @@ func TestNoMergeUnderAGateTheOrderCannotRead(t *testing.T) {
 	noMerge(t, d)
 }
 
+// Without the own status, a PR a gate names that is not ready goes on to the
+// rest of the decision.
+func TestAGateTheOrderCannotReadLeavesANotReadyPRToTheRest(t *testing.T) {
+	d, g := staying(t)
+	d.l.Status = nil
+	d.pr.Suites[head][0].Runs[0] = run("test", "IN_PROGRESS", "")
+	out := d.once(t)
+	is(t, out, pr.ActChecked)
+	says(t, out, "not ready")
+	open(t, d, g)
+	noMerge(t, d)
+}
+
 // A gate filed during the merge's act, after the decision read the gates, is
 // found at the act's last read, so no merge is requested.
 func TestAGateFiledDuringTheActHoldsTheMerge(t *testing.T) {
