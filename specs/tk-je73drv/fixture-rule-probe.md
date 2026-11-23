@@ -38,7 +38,8 @@ Each call ran `claude -p --model claude-opus-5-5 --tools "" --max-turns 1
 --no-session-persistence --output-format json --setting-sources ""
 --strict-mcp-config --disable-slash-commands` from an empty directory, with
 every `GC_*` and `BEADS_*` variable unset and auto memory off. Each cell has
-three runs, and the twelve calls cost $3.06.
+three runs. The twelve calls took about 351,000 input tokens and 50,000 output
+tokens, and ran 7.5 minutes in all.
 
 Each case closes with "You have no tools in this turn. Reply with the lines,
 and with any step you would take before adding them." So a run can say that it
