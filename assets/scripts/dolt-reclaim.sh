@@ -51,9 +51,9 @@
 #                                     health probes and one store's GC, so the
 #                                     last reclaim started finishes before the
 #                                     order's hard kill.
-#      GC_DOLT_RECLAIM_HEALTH_TIMEOUT seconds the Dolt health probe before a
-#                                     reclaim may run; a probe still running
-#                                     then proves nothing and defers nothing
+#      GC_DOLT_RECLAIM_HEALTH_TIMEOUT seconds the pre-reclaim Dolt health probe
+#                                     may run; a probe still running then
+#                                     proves nothing and defers nothing
 #                                     (default 90)
 # Exit: 0 reclaimed, or nothing over the line · 1 a reclaim was attempted and
 #       failed · 2 usage, or the pass could not run at all (no gc, no --gc-only,
