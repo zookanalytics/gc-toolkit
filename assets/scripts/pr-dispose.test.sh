@@ -10,8 +10,8 @@
 # each PR the record names read from GitHub with the lock free: one still open
 # named for its close in place of the direct verb, with nothing written and no
 # comment or close, closed or merged ones naming the direct verb, and a read that
-# does not answer, a key that is no PR's URL or a record that names no PR refused
-# with what to repair;
+# does not answer, a key that is no PR's URL or a record that names no PR refused,
+# saying why;
 # --no-close-pr stamping only; the PR closed through gh when the anchor is open,
 # after a closing comment posted through pr-post.sh with the city's mark, which
 # gates the close; gh view, comment and close pinned to the anchor's own pr_url

@@ -34,11 +34,12 @@
 # anchor. An anchor already disposed (its duplicates or supersedes edge names a
 # successor) is a no-op; an anchor past that state (abandoned, merged, an
 # exception of the pending record) is refused, with bead-rehome.sh named as the
-# direct verb for it. bead-rehome.sh makes no GitHub call, and at an exception
-# the landing order no longer reads the PR, which can still be open. So at an
-# exception the refusal frees the lock and asks GitHub about each PR the record
-# names. While one reads open, the refusal names its close, gh pr close <url>,
-# in place of the direct verb. When GitHub cannot say, it names what to repair.
+# direct verb for it. bead-rehome.sh closes the bead without reading its PR, and
+# at an exception the landing order no longer reads the PR, which can still be
+# open. So at an exception the refusal frees the lock and asks GitHub about each
+# PR the record names. While one reads open, the refusal names its close,
+# gh pr close <url>, in place of the direct verb. When GitHub cannot say, the
+# refusal says why.
 #
 #   pr-dispose.sh --anchor <bead-id> --successor <bead-id> \
 #                 --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
