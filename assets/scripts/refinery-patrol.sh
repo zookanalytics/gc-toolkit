@@ -87,4 +87,4 @@ if ! gc bd update "$NEXT" --assignee="$GC_AGENT" </dev/null >/dev/null; then
 fi
 gc bd mol burn "$CURRENT" --force </dev/null >/dev/null 2>&1 \
   || { echo "$PROG: $NEXT is poured and assigned, but $CURRENT did not burn; the startup reconcile keeps the newest" >&2; exit 1; }
-echo "$PROG: poured $NEXT and burned $CURRENT; begin it from the formula's first step"
+echo "$PROG: poured $NEXT and burned $CURRENT; restart the session, and the fresh session begins $NEXT"

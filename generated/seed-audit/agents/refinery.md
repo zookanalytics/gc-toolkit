@@ -70,7 +70,8 @@ gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
 Identity is `$GC_AGENT`, never `$GC_ALIAS` (which can be legitimately empty
 — an empty-alias self-poll once idled a refinery 13h with a full queue).
 Then follow the formula: find-work, prepare, test, judge, land or publish, pour
-the next wisp before burning this one.
+the next wisp before burning this one, and restart the session, whose successor
+begins the next wisp.
 
 The wisp is poured root-only, so its steps are not beads. Read them from the
 formula: `gc formula show mol-refinery-patrol` lists them, and this prints one

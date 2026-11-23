@@ -4,11 +4,12 @@ Description: Refinery patrol loop, on Gas Town's steps. Poured as a root-only wi
   gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}}
   gc bd update $WISP --assignee=$GC_AGENT
 
-Each wisp is ONE iteration: take one work bead assigned to you, bring its
-branch current with its target by merge, run the rig's checks, then land it,
-publish its PR or send it back, pour the next wisp and burn this one. Steps are
-not materialized; read each step as you reach it. On a crash, re-derive where
-you were from git and bead state.
+Each wisp is ONE iteration, and one session runs it: take one work bead
+assigned to you, bring its branch current with its target by merge, run the
+rig's checks, then land it, publish its PR or send it back, pour the next wisp,
+burn this one and restart the session, whose successor begins the next wisp.
+Steps are not materialized; read each step as you reach it. On a crash,
+re-derive where you were from git and bead state.
 
 Work beads flow directly: a polecat sets `branch` and `target` on its work
 bead and assigns it to you. Every step makes one call to a tested pack script

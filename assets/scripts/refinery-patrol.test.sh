@@ -7,7 +7,8 @@
 #   - next pours the next wisp root-only with exactly the rig identity the
 #     startup pour passes (target_branch, rig_name, binding_prefix), stamps
 #     gc.rig, assigns it, then burns the current wisp, found as the newest
-#     mol-refinery-patrol assigned to this refinery, or as GC_BEAD_ID;
+#     mol-refinery-patrol assigned to this refinery, or as GC_BEAD_ID, and
+#     tells the session to restart so a fresh one begins the new wisp;
 #   - next removes the trees the iteration left under the refinery's home;
 #   - a current wisp that cannot be named pours nothing, and an assign that
 #     fails burns the new wisp and keeps the current one;
@@ -46,6 +47,7 @@ branch_with polecat/a a.txt >/dev/null
 prepared a polecat/a
 run next
 eq "$RC" 0 "next exits 0"
+has "$OUT" "restart the session, and the fresh session begins" "…and tells the session to restart, so the new wisp begins in a fresh one"
 has "$(logged gc)" "bd mol wisp mol-refinery-patrol --root-only --var target_branch=main --var rig_name=rig-a --var binding_prefix=gc-toolkit. --json" "the pour passes exactly the rig identity"
 NEXT=$(jq -r '[ .[] | select(.title == "mol-refinery-patrol" and .id != "w-old" and .id != "w-cur" and .id != "w-other") ][0].id' "$STORE")
 eq "$(bassignee "$NEXT") $(meta "$NEXT" gc.rig)" "$GC_AGENT rig-a" "the new wisp is rig-stamped and assigned"
