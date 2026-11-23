@@ -725,7 +725,14 @@ with what the person can do.
      Delivery, and `assigned-to-you` when it is any other open bead only a
      person clears.
      Work that carries `hold:mayor` asks nothing, because Gas City's hold
-     names the Product Owner as its next actor.
+     names the Product Owner as its next actor. A pull request whose
+     needs-attention rests only on the human gates and the beads a person owes
+     that hold it, with no reason of its own beside them, is no
+     `pull-request` while one of them is itself an ask, or is the conversation
+     that answers a question. Answering that ask is the person's move on it,
+     so the next rule answers it. The read decides this once it has answered
+     those beads, so the pull request reads the same whether it is asked about
+     alone or beside them.
   3. `own-wait` or `further-along`: a human gate, or a bead only a person
      clears, holds it through a wait of its own, or further along its waits,
      an ancestor's included.

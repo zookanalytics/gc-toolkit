@@ -135,7 +135,13 @@ const (
 	// operator once that work closes, so until then it is no person's move.
 	AskConversation Ask = "conversation"
 	// AskPullRequest: a bead whose pull request reads needs-review or
-	// needs-attention ([prstatus.NeedsReview], [prstatus.NeedsAttention]).
+	// needs-attention ([prstatus.NeedsReview], [prstatus.NeedsAttention]). One
+	// whose needs-attention rests only on the human gates and the beads a person
+	// owes that hold it, with no reason of its own beside them
+	// ([prstatus.OwnAttention], [prstatus.RenderOwnAttention]), is no ask while
+	// it stands beneath the ask of one of them ([Reading.Beneath]). Answering
+	// that ask is the person's move on it, so it reads as waiting on them, by
+	// the own-wait or the further-along rule.
 	AskPullRequest Ask = "pull-request"
 	// AskAssignedToYou: any other open bead only a person clears
 	// ([person.Clears]), such as one assigned to human.
@@ -243,21 +249,92 @@ func (r *Reading) answer(ids []string) {
 		if _, done := r.answers[id]; done {
 			continue
 		}
-		k := r.kinds[id]
-		var ask Ask
-		// Work held for the Product Owner asks nothing of a person, whatever it
-		// would ask, such as a review of its pull request: hold:mayor names the
-		// Product Owner as its next actor.
-		if !r.ForProductOwner(id) {
-			members, open := 0, 0
-			if k == KindEpic || k == KindDelivery {
-				all, live := r.members(id)
-				members, open = len(all), len(live)
-			}
-			ask = r.askOf(b, k, r.stays, open, members)
-		}
-		r.answers[id] = r.table(b, k, ask, r.stays)
+		r.answers[id] = r.table(b, r.kinds[id], r.ask(id, false), r.stays)
 	}
+}
+
+// ask is the ask a bead the read holds is itself ([Reading.askOf]), as
+// beneath another ask or not.
+func (r *Reading) ask(id string, beneath bool) Ask {
+	// Work held for the Product Owner asks nothing of a person, whatever it
+	// would ask, such as a review of its pull request: hold:mayor names the
+	// Product Owner as its next actor.
+	if r.ForProductOwner(id) {
+		return ""
+	}
+	k := r.kinds[id]
+	members, open := 0, 0
+	if k == KindEpic || k == KindDelivery {
+		all, live := r.members(id)
+		members, open = len(all), len(live)
+	}
+	return r.askOf(r.beads[id], k, r.stays, open, members, beneath)
+}
+
+// answerBeneath answers again each pull request that is an ask and stands
+// beneath another ask ([Reading.Beneath]), as beneath it. One whose
+// needs-attention rests only on the human gates and the beads a person owes
+// that hold it is then no ask and reads as waiting on them, and any other
+// keeps its ask. It runs once every bead is answered, because whether a bead
+// stands beneath an ask is read off the answers of the beads that hold it.
+// Each pull request is weighed against the answers before the pass, so no
+// answer turns on the order the pass meets them. A pull request still stands
+// beneath an ask afterwards: one that stood beneath another pull request whose
+// ask goes stands beneath that one's holders too, since prstatus.Holding walks
+// through every open blocker to what holds it.
+func (r *Reading) answerBeneath() {
+	var held []string
+	for id, a := range r.answers {
+		if a.Rule == RuleAsk && a.Ask == AskPullRequest && len(r.Beneath(id)) > 0 {
+			held = append(held, id)
+		}
+	}
+	for _, id := range held {
+		if ask := r.ask(id, true); ask != AskPullRequest {
+			r.answers[id] = r.table(r.beads[id], r.kinds[id], ask, r.stays)
+		}
+	}
+}
+
+// Beneath is each ask a bead stands beneath: the ask that each human gate and
+// each bead a person owes that its Holding answer names stands in, other than
+// the bead's own, each once, in Holding's order. A conversation that answers a
+// question ([Reading.AnsweredBy]) stands in the question's ask: the first open
+// human gate it replies to that it answers, or else the decision it tracks
+// while it answers that decision and the decision is an ask. Any other ask
+// stands in its own. The helm board lists the bead beneath each of them.
+func (r *Reading) Beneath(id string) []string {
+	hold, ok := r.Holding(id)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
+		if a := r.standsIn(x.ID); a != "" && a != id && !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// standsIn is the ask a bead stands in ([Reading.Beneath]), and "" for a bead
+// that stands in none.
+func (r *Reading) standsIn(id string) string {
+	if r.kinds[id] == KindConversation {
+		subject, replies, _ := conversation.Shape(conversationEdges(r.beads[id]))
+		for _, g := range replies {
+			if r.answeredBy[g] == id {
+				return g
+			}
+		}
+		if r.answeredBy[subject] == id && r.answers[subject].Rule == RuleAsk {
+			return subject
+		}
+	}
+	if r.answers[id].Rule == RuleAsk {
+		return id
+	}
+	return ""
 }
 
 // members are an epic's or a Delivery's members, by id, and the open ones
@@ -280,9 +357,12 @@ func (r *Reading) members(id string) (all, open []string) {
 // reach is the beads the advance and the frontier of the beads named read,
 // which the read holds and has not answered: each wait of a bead the read was
 // asked about, which its frontier reads; each bead a queued bead waits on,
-// which it advances behind; and each open member of an epic or a Delivery the
-// members rule placed, which it advances with. A wait on a bead with no
-// standing of its own reaches the bead that speaks for it.
+// which it advances behind; each open member of an epic or a Delivery the
+// members rule placed, which it advances with; and each human gate and each
+// bead a person owes that holds a pull request that is an ask, with the bead
+// each conversation among them tracks, whose answers tell whether the pull
+// request stands beneath another ask ([Reading.Beneath]). A wait on a bead with
+// no standing of its own reaches the bead that speaks for it.
 func (r *Reading) reach(ids []string) []string {
 	var next []string
 	add := func(id string) {
@@ -316,6 +396,18 @@ func (r *Reading) reach(ids []string) []string {
 			for _, m := range open {
 				add(m)
 			}
+		case RuleAsk:
+			hold, ok := r.Holding(id)
+			if a.Ask != AskPullRequest || !ok {
+				break
+			}
+			for _, x := range append(slices.Clone(hold.Gates), hold.Owed...) {
+				add(x.ID)
+				if r.kinds[x.ID] == KindConversation {
+					subject, _, _ := conversation.Shape(conversationEdges(r.beads[x.ID]))
+					add(subject)
+				}
+			}
 		}
 	}
 	sort.Strings(next)
@@ -327,8 +419,11 @@ func (r *Reading) reach(ids []string) []string {
 // gate, a decision and a conversation are each answered by their kind alone,
 // so a gate that is no human gate is never an ask. An epic or a Delivery is
 // tried as a ruling first. Any other bead, and an epic or a Delivery that is
-// no ruling, is tried as a pull request, then as assigned to you.
-func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, members int) Ask {
+// no ruling, is tried as a pull request, then as assigned to you. beneath
+// reports whether the bead stands beneath another ask ([Reading.Beneath]),
+// where a pull request that needs attention for no reason of its own is no
+// ask.
+func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, members int, beneath bool) Ask {
 	if !isOpen(b) {
 		return ""
 	}
@@ -357,7 +452,8 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 		}
 	}
 	if p := r.PullRequest(b.ID); p != nil {
-		if st := p.State(); st == prstatus.NeedsReview || st == prstatus.NeedsAttention {
+		switch st := p.State(); {
+		case st == prstatus.NeedsReview, st == prstatus.NeedsAttention && (!beneath || p.ownAttention()):
 			return AskPullRequest
 		}
 	}
