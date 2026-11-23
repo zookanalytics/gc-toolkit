@@ -202,14 +202,16 @@ nothing, you answer it yourself, and rule-and-repair does no work for it.
 
 - **Answer a post only when it asks for no change to the branch and no
   person's decision**, such as a question about the change, a thank-you or an
-  approval's "looks good". Read it first, at the URL its reason ends with.
-  The URL's last part names it: `#issuecomment-<id>` reads with
-  `gh api 'repos/{owner}/{repo}/issues/comments/<id>' --jq .body`,
+  approval's "looks good". Read it first, at the URL its reason ends with,
+  `https://github.com/<owner>/<repo>/pull/<number>#<post>`, whose last part
+  names the post: `#issuecomment-<id>` reads with
+  `gh api repos/<owner>/<repo>/issues/comments/<id> --jq .body`,
   `#discussion_r<id>` with
-  `gh api 'repos/{owner}/{repo}/pulls/comments/<id>' --jq '.path, .line, .body'`,
+  `gh api repos/<owner>/<repo>/pulls/comments/<id> --jq '.path, .line, .body'`,
   and `#pullrequestreview-<id>` with
-  `gh api 'repos/{owner}/{repo}/pulls/<number>/reviews/<id>' --jq '.state, .body'`,
-  each run in your worktree, whose origin gh fills `{owner}/{repo}` from.
+  `gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --jq '.state, .body'`,
+  each value taken from the URL. For a PR on another GitHub host, add
+  `--hostname <host>` after `gh api`.
 - **Leave every other post to rule-and-repair**: one that asks for a change,
   however small, one that asks a person to choose, one whose answer you cannot
   give from the change and the read, and every ask that names no post, such as
