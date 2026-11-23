@@ -10,12 +10,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
-// sitting is the alias the conversation tk-c's sitting goes by, and held the
-// assignee its claim records.
-const (
-	sitting = "tk-c"
-	held    = "gc-toolkit/gc-toolkit.tk-c"
-)
+// held is the alias the conversation tk-c's sitting goes by, which its claim
+// records as the conversation's assignee.
+const held = "gc-toolkit/gc-toolkit.tk-c"
 
 // newStore holds the conversation tk-c, in progress under its sitting, and the
 // work tk-w, open, in a rig's store.
@@ -28,7 +25,7 @@ func newStore() *fake.Store {
 }
 
 func promises(s *fake.Store) *Promises {
-	return &Promises{Ledger: ledger.New(s), InRig: func(string) (bool, bool, error) { return true, true, nil }, Self: []string{sitting}}
+	return &Promises{Ledger: ledger.New(s), InRig: func(string) (bool, bool, error) { return true, true, nil }, Alias: held}
 }
 
 func needsReview(work string) Request {
@@ -162,7 +159,15 @@ func TestCreateRefuses(t *testing.T) {
 			return needsReview("tk-w")
 		}, "no conversation a sitting holds"},
 		{"a conversation another sitting holds", func(_ *fake.Store, p *Promises) Request {
-			p.Self = []string{"tk-other"}
+			p.Alias = "gc-toolkit/gc-toolkit.tk-other"
+			return needsReview("tk-w")
+		}, "not to the caller"},
+		{"a caller whose alias only ends in the conversation's id", func(_ *fake.Store, p *Promises) Request {
+			p.Alias = "tk-c"
+			return needsReview("tk-w")
+		}, "not to the caller"},
+		{"a caller with no alias", func(_ *fake.Store, p *Promises) Request {
+			p.Alias = ""
 			return needsReview("tk-w")
 		}, "not to the caller"},
 		{"work in another store", func(*fake.Store, *Promises) Request { return needsReview("gc-w") }, "another store"},

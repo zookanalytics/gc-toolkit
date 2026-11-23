@@ -78,9 +78,10 @@ type Promises struct {
 	// InRig reports whether a rig's store holds a bead, and not the city's own:
 	// ok is false when no store's prefix begins its id.
 	InRig func(id string) (rig, ok bool, err error)
-	// Self is each name the caller goes by, such as its alias: a conversation
-	// is promised only by the sitting it is assigned to.
-	Self []string
+	// Alias is the caller's alias: a conversation is promised only by the
+	// sitting it is assigned to, whose claim records that alias as its
+	// assignee.
+	Alias string
 }
 
 // Request is one promise: the gate's type, the bead its await id names, the
@@ -205,8 +206,8 @@ func Validate(req Request) error {
 	return nil
 }
 
-// holds refuses a conversation that is not open or in progress under one of
-// the caller's names.
+// holds refuses a conversation that is not open or in progress under the
+// caller's alias.
 func (p *Promises) holds(c *ledger.Record) error {
 	st, who := c.Status(), strings.TrimSpace(c.Assignee())
 	if st != "open" && st != "in_progress" {
@@ -215,12 +216,10 @@ func (p *Promises) holds(c *ledger.Record) error {
 	if !conversation.IsCandidate(c.IssueType(), who, c.ID) || who == "human" {
 		return refuse("%s is no conversation a sitting holds (assignee %q)", c.ID, who)
 	}
-	for _, self := range p.Self {
-		if self = strings.TrimSpace(self); self != "" && (who == self || strings.HasSuffix(who, "/"+self) || strings.HasSuffix(who, "."+self)) {
-			return nil
-		}
+	if alias := strings.TrimSpace(p.Alias); who != alias {
+		return refuse("%s is assigned to %s, not to the caller's alias %q, and only the sitting that holds it promises work for it", c.ID, who, alias)
 	}
-	return refuse("%s is assigned to %s, not to the caller, and only the sitting that holds it promises work for it", c.ID, who)
+	return nil
 }
 
 // waitsOn is the open gates of the pack's types that conversation c waits on

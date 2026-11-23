@@ -34,7 +34,8 @@ closes. The conversation is then ready work, so Gas City wakes its sitting. The
 sitting runs this right after it sends a piece of work itself.
 
 It refuses, writing nothing: a type the pack does not define; a conversation
-that is not open or in progress under the caller's alias; work in another store,
+that is not open or in progress under the caller's alias, $GC_ALIAS, which a
+sitting's claim records as its conversation's assignee; work in another store,
 work that has closed, and work in the city's own store, which the landing order
 does not read; a conversation that already waits on an open gate of this type
 for other work; and work that waits on the conversation through another bead,
@@ -75,12 +76,7 @@ func newGateCreateCmd(stdout, stderr io.Writer) *cobra.Command {
 			if db != "" {
 				client = client.In(db)
 			}
-			p := &gate.Promises{Ledger: l, InRig: client.InRig}
-			for _, v := range []string{"GC_ALIAS", "GC_AGENT"} {
-				if s := strings.TrimSpace(os.Getenv(v)); s != "" {
-					p.Self = append(p.Self, s)
-				}
-			}
+			p := &gate.Promises{Ledger: l, InRig: client.InRig, Alias: os.Getenv("GC_ALIAS")}
 			out, err := p.Create(req)
 			switch {
 			case gate.Refused(err):
