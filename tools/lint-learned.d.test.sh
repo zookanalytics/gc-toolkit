@@ -12,7 +12,7 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded, doc-filing, create-then-stamp.
+# id-read-unguarded, doc-filing, create-then-stamp, suite-test-floor.
 #
 # Every detector in the directory, one added later included, is also held to
 # the runner's rule that a broken detector never reads as a clean scan. When a
@@ -2439,6 +2439,172 @@ OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_CS" "$TMP/cs-stamp.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
 
+echo "── suite-test-floor: what is a finding ──"
+
+DET_TF="$HERE/lint-learned.d/suite-test-floor.sh"
+[ -x "$DET_TF" ] || { echo "no detector at $DET_TF"; exit 1; }
+runtf() { OUT="$("$DET_TF" "$@" 2>&1)"; RC=$?; }
+TF="$TMP/tf"
+mkdir -p "$TF"
+
+cat > "$TF/none.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PATH="$TMP/bin:$PATH"
+FIX
+runtf "$TF/none.test.sh"
+eq "$RC" 1 "a suite that never sources the floor exits 1"
+has "$OUT" "none.test.sh:1: sources no tools/test-floor.sh" "the finding is on the suite's first line"
+has "$OUT" '. "$HERE/<path to tools>/test-floor.sh" || exit 2' "the finding names the fix"
+has "$OUT" "(learned rule: suite-test-floor)" "the finding names the rule"
+
+cat > "$TF/commented.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+# . "$HERE/../../tools/test-floor.sh" || exit 2
+  #. "$HERE/test-floor.sh"
+FIX
+runtf "$TF/commented.test.sh"
+eq "$RC" 1 "a commented-out line sources nothing"
+
+# A suite that writes a fixture suite holding the line has not sourced it.
+cat > "$TF/quoted.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+cat > "$TMP/child.test.sh" <<'CHILD'
+. "$HERE/../../tools/test-floor.sh" || exit 2
+CHILD
+cat > "$TMP/other.test.sh" <<"DQ"
+source "$HERE/test-floor.sh"
+DQ
+cat > "$TMP/third.test.sh" <<\BS
+. "$HERE/test-floor.sh" || exit 2
+BS
+FIX
+runtf "$TF/quoted.test.sh"
+eq "$RC" 1 "the line inside a here-document's body is data, whatever quotes its word"
+
+# A plain << body ends only at its word at the line's start, so a tab-indented
+# word leaves the body open over the line.
+printf '#!/usr/bin/env bash\ncat <<PLAIN\n\tPLAIN\n. "$HERE/test-floor.sh" || exit 2\nPLAIN\n' > "$TF/plain-tab.test.sh"
+runtf "$TF/plain-tab.test.sh"
+eq "$RC" 1 "a plain here-document is not ended by its word after a tab"
+
+printf '#!/usr/bin/env bash\ncat <<-TABBED\n\t. "$HERE/test-floor.sh" || exit 2\n\tTABBED\n' > "$TF/tabbed.test.sh"
+runtf "$TF/tabbed.test.sh"
+eq "$RC" 1 "the line inside a <<- body is data"
+
+runtf "$TF/none.test.sh" "$TF/commented.test.sh" "$TF/quoted.test.sh"
+eq "$(printf '%s\n' "$OUT" | grep -c ':1: sources no tools/test-floor.sh')" 3 "each suite in one call is reported once"
+
+echo "── suite-test-floor: what is not ──"
+
+cat > "$TF/good.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/../../tools/test-floor.sh" || exit 2
+FIX
+runtf "$TF/good.test.sh"
+eq "$RC" 0 "a suite that sources the floor is clean"
+eq "$OUT" "" "…and prints nothing"
+
+cat > "$TF/source.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+  source "$(dirname "${BASH_SOURCE[0]}")/test-floor.sh"
+FIX
+runtf "$TF/source.test.sh"
+eq "$RC" 0 "source, an indent and a path built inline count too"
+
+cat > "$TF/after.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+cat > "$TMP/usage" <<'EOF'
+usage
+EOF
+. "$HERE/../../tools/test-floor.sh" || exit 2
+FIX
+runtf "$TF/after.test.sh"
+eq "$RC" 0 "a line after a here-document's word counts"
+
+cat > "$TF/comment-heredoc.test.sh" <<'FIX'
+#!/usr/bin/env bash
+# Each fixture below is written with cat <<EOF.
+. "$HERE/../../tools/test-floor.sh" || exit 2
+FIX
+runtf "$TF/comment-heredoc.test.sh"
+eq "$RC" 0 "a here-document a comment names opens no body"
+
+printf '#!/usr/bin/env bash\ncat <<-TABBED\n\tbody\n\tTABBED\n. "$HERE/test-floor.sh" || exit 2\n' > "$TF/tabbed-then.test.sh"
+runtf "$TF/tabbed-then.test.sh"
+eq "$RC" 0 "a <<- body ends at its word after tabs"
+
+cat > "$TF/herestring.test.sh" <<'FIX'
+#!/usr/bin/env bash
+set -u
+read -r X <<<"$Y"
+cat <<<EOF
+. "$HERE/../../tools/test-floor.sh" || exit 2
+FIX
+runtf "$TF/herestring.test.sh"
+eq "$RC" 0 "a here-string opens no body"
+
+cp "$TF/none.test.sh" "$TF/helper.sh"
+runtf "$TF/helper.sh" "$TF/missing.test.sh"
+eq "$RC" 0 "a file that is not a *.test.sh, and a missing path, are skipped"
+
+echo "── suite-test-floor: a file the deletion plan retires ──"
+
+# The detector reads the plan beside its own directory, so a copy of it in a
+# scratch tree reads that tree's plan.
+TP="$TMP/tf-plan"
+mkdir -p "$TP/tools/lint-learned.d" "$TP/assets/scripts"
+cp "$DET_TF" "$TP/tools/lint-learned.d/suite-test-floor.sh"
+cp "$TF/none.test.sh" "$TP/assets/scripts/old.test.sh"
+cp "$TF/none.test.sh" "$TP/assets/scripts/new.test.sh"
+printf '# The files the plan retires.\nassets/scripts/old.sh\ttk-x\nassets/scripts/old.test.sh\ttk-x\n' > "$TP/tools/deletion-plan.tsv"
+OUT="$(cd "$TP" && tools/lint-learned.d/suite-test-floor.sh assets/scripts/old.test.sh assets/scripts/new.test.sh 2>&1)"; RC=$?
+eq "$RC" 1 "a suite the plan does not list is still held to the rule"
+has "$OUT" "assets/scripts/new.test.sh:1:" "…and reported"
+hasnt "$OUT" "old.test.sh" "a suite the plan lists is not"
+OUT="$("$TP/tools/lint-learned.d/suite-test-floor.sh" "$TP/assets/scripts/old.test.sh" 2>&1)"; RC=$?
+eq "$RC" 0 "the listed suite is matched by an absolute path"
+OUT="$(cd "$TP/assets/scripts" && ../../tools/lint-learned.d/suite-test-floor.sh old.test.sh 2>&1)"; RC=$?
+eq "$RC" 0 "…and by a path relative to another directory"
+rm "$TP/tools/deletion-plan.tsv"
+OUT="$(cd "$TP" && tools/lint-learned.d/suite-test-floor.sh assets/scripts/old.test.sh 2>&1)"; RC=$?
+eq "$RC" 1 "a tree with no plan retires nothing"
+
+echo "── suite-test-floor: a detector that cannot scan says so ──"
+
+printf 'assets/scripts/old.test.sh\ttk-x\n' > "$TP/tools/deletion-plan.tsv"
+chmod 000 "$TP/tools/deletion-plan.tsv"
+if [ -r "$TP/tools/deletion-plan.tsv" ]; then
+    ok "an unreadable plan (not exercised: this user can read anything)"
+else
+    OUT="$(cd "$TP" && tools/lint-learned.d/suite-test-floor.sh assets/scripts/new.test.sh 2>&1)"; RC=$?
+    eq "$RC" 2 "a plan it cannot read is an error, never a pass"
+    has "$OUT" "cannot read" "…and says so"
+fi
+chmod 644 "$TP/tools/deletion-plan.tsv"
+
+chmod 000 "$TF/good.test.sh"
+if [ -r "$TF/good.test.sh" ]; then
+    ok "an unreadable suite (not exercised: this user can read anything)"
+else
+    runtf "$TF/good.test.sh" "$TF/none.test.sh"
+    eq "$RC" 2 "a suite it cannot read is an error, never a pass"
+    has "$OUT" "good.test.sh: cannot read it" "…and the suite is named"
+    has "$OUT" "none.test.sh:1:" "the readable suites are still checked"
+fi
+chmod 644 "$TF/good.test.sh"
+
+OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_TF" "$TF/good.test.sh" 2>&1)"; RC=$?
+eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
+has "$OUT" "the suite scan failed" "…and says so"
+
 echo "── every detector: a tool that fails never reads as a clean scan ──"
 
 # The runner tells a broken detector from a clean one only by its exit status,
@@ -2555,12 +2721,17 @@ FIX
 plantct specs/x/y.md <<'FIX'
 # y
 FIX
+plantct x.test.sh <<'FIX'
+#!/usr/bin/env bash
+set -u
+echo x
+FIX
 
 for det in "$HERE"/lint-learned.d/*; do
     [ -f "$det" ] && [ -x "$det" ] || continue
     name="$(basename "$det")"
     reached=0
-    for f in x.sh formulas/x.toml docs/x.md skills/x/SKILL.md specs/x/y.md; do
+    for f in x.sh x.test.sh formulas/x.toml docs/x.md skills/x/SKILL.md specs/x/y.md; do
         # With every tool working, a file the detector does not scan, or finds
         # clean, has no finding a failure could lose.
         want="$(cd "$CT/tree" && "$det" "$f" 2>&1)"; wrc=$?

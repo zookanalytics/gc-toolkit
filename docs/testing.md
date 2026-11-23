@@ -69,6 +69,22 @@ What stands in for each outside system in a test:
 | The host's processes | gctk's host adapter fake, in Go | The host adapter's own tests, which start real processes |
 | Time | The bubble clock of `testing/synctest`, in Go | Go's testing package |
 
+## The test floor
+
+A shell suite sources [tools/test-floor.sh](../tools/test-floor.sh) right
+after it sets `HERE`, before anything else it runs, with the path from its own
+directory to `tools/`:
+
+```bash
+. "$HERE/../../tools/test-floor.sh" || exit 2
+```
+
+Every stub the suite then puts on PATH has the test floor beneath it, where
+`gc`, `bd` and `gh` refuse, whether the suite runs through `tools/run-tests.sh`
+or by itself. The file says what that guards against.
+[suite-test-floor](../tools/lint-learned.d/suite-test-floor.sh) reports a
+suite that does not source it, except one the deletion plan retires.
+
 ## The compiled fake gc
 
 The fake keeps the store's state in files and keeps bd's rules over it, such as
