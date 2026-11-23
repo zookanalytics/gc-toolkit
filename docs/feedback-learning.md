@@ -327,14 +327,7 @@ changing a repository lives in the polecats' fragment, and it reaches a converse
 sitting through the edit skill, `gc-toolkit.converse-edit`, which has the
 sitting read the polecat class's fragments before its first edit. The classes:
 polecats (polecat, polecat-codex), human (every converse-<model> sitting),
-system (deacon, mechanik, proactive, witness, refinery, keeper). The mechanik
-composes neither of its fragments, because its prime has to fit Claude Code's
-10,000-character session-start cap, which
-`assets/scripts/mechanik-prime-cap.test.sh` holds it to. Its prompt instead
-gives the command that reads both from their files, and has it read them
-before it writes anything that outlives the turn, so a promotion to either
-fragment reaches the mechanik the next time it reads them. The same suite runs
-that command against the tree, so a fragment renamed or moved fails it.
+system (deacon, mechanik, proactive, witness, refinery, keeper).
 The correctness method, `skills/review-correctness/SKILL.md`, holds the diff's
 output to every one of these fragments. It reads them from its own
 `references/` directory, where a relative link to each fragment keeps one

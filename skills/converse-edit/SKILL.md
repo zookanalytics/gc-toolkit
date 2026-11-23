@@ -313,8 +313,7 @@ sign-off.
 
 Your prompt carries the standards for what a sitting writes. The standards for
 changing a repository are the polecat class's, in their fragments, so read them
-before the first edit, as the mechanik reads its own, when they are not in your
-context:
+before the first edit, when they are not in your context:
 
 ```bash
 cat "$CONV"/../../template-fragments/work-quality-polecats.template.md "$CONV"/../../template-fragments/learned-conventions-polecat.template.md

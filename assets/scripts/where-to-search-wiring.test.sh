@@ -12,9 +12,7 @@
 #
 #   (1) the fragment defines where-to-search;
 #   (2) every agent under agents/, and under a sub-pack's agents/ in packs/,
-#       renders the rule's heading exactly once, except the mechanik, whose
-#       prime has no room for it under the session-start cap
-#       mechanik-prime-cap.test.sh holds it to;
+#       renders the rule's heading exactly once;
 #   (3) no prompt or fragment cites a formula by its file path, which reads as
 #       a file to go and find, where `gc formula show <name>` reads it.
 #
@@ -26,7 +24,6 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 FRAG="$ROOT/template-fragments/where-to-search.template.md"
 RENDERS="$ROOT/generated/seed-audit/agents"
 HEADING='## Where to search'
-EXEMPT=" agents/mechanik "
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
@@ -58,7 +55,6 @@ for dir in "$ROOT"/agents/*/ "$ROOT"/packs/*/agents/*/; do
   name="$(basename "$dir")"
   rel="${dir#"$ROOT"/}"
   case "$name" in _*) continue ;; esac
-  case "$EXEMPT" in *" $rel "*) continue ;; esac
   pack="$(pack_name "$(dirname "$(dirname "$dir")")")"
   if [ -z "$pack" ]; then
     bad "$rel has a pack name" "no [pack] name in the pack.toml two levels above it"

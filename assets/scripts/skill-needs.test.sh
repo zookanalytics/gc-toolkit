@@ -34,9 +34,8 @@
 # PR say where each of the PR's open review points lands. It pins that the
 # dispatch fragment the keeper composes arms through gctk's verb by the gctk-bin
 # block and calls gc-bd-watch.sh the work skill's way, and that the mechanik's
-# prompt calls
-# gc-bd-watch.sh and human-gate.sh under the binding it is rendered with, so
-# each render reaches the pack's own copies. It pins that a formula's own
+# prompt calls gc-bd-watch.sh under the binding it is rendered with, so its
+# render reaches the pack's own copy. It pins that a formula's own
 # description, not a doc, says which work
 # the formula fits. It pins that a problem in software the rig does not own goes
 # through the external-issue skill, which alone holds that path's commands and
@@ -798,8 +797,8 @@ fenced_block() {
 # sub-pack, which holds none of the scripts the fragment calls. So the fragment
 # calls each of them the work skill's way, and the render's calls resolve
 # through the pack command to the pack's own copy. The mechanik comes from this
-# pack, so its prompt calls its watch and its gate withdrawal under the binding
-# it is rendered with, which the seed audit renders as gc-toolkit.
+# pack, so its prompt calls its watch under the binding it is rendered with,
+# which the seed audit renders as gc-toolkit.
 DISPATCH="$REPO/template-fragments/watch-dispatched-work.template.md"
 WATCH_CALL='"$(gc <binding> scripts-dir)/gc-bd-watch.sh"'
 KEEPER_RENDER="$REPO/generated/seed-audit/agents/keeper.md"
@@ -830,10 +829,7 @@ have "…and the watch" "command: '$WATCH_CALL <bead>'" "$KEEPER_RENDER"
 named_only_via "$KEEPER_RENDER" gc-bd-watch.sh
 MECHANIK_WATCH_CALL='"$(gc gc-toolkit scripts-dir)/gc-bd-watch.sh"'
 have "the mechanik's render gives the watch as a call through the pack command" "command: '$MECHANIK_WATCH_CALL <bead>'" "$MECHANIK_RENDER"
-have "…and the withdrawal of its own gate" '"$(gc gc-toolkit scripts-dir)/human-gate.sh" --retract --subject <bead>' "$MECHANIK_RENDER"
-for script in gc-bd-watch.sh human-gate.sh; do
-    named_only_via "$MECHANIK_RENDER" "$script" gc-toolkit
-done
+named_only_via "$MECHANIK_RENDER" gc-bd-watch.sh gc-toolkit
 script=gc-bd-watch.sh
 call="\"\$(gc <binding> scripts-dir)/$script\""
 printf 'printf "%%s" %s\n' "${call/<binding>/kit}" >"$TMP/fragment-call-$script"

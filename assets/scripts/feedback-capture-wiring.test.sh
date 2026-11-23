@@ -14,10 +14,9 @@
 #   2. Every render that carries the recipe, the converse sittings' among
 #      them, tells a session the operator attends that it captures the
 #      operator's own turns too.
-#   3. The mechanik, whose prime carries no fragment it can do without under
-#      Claude Code's session-start cap, reaches the same recipe through the
-#      records skill, whose reference is the fragment itself, and its render
-#      sends an operator correction there.
+#   3. The mechanik reaches the same recipe through the records skill, whose
+#      reference is the fragment itself, and its render sends an operator
+#      correction there.
 #
 # The fragment is checked first, so a render that lacks a sentence its source
 # carries reads as a stale render. Text is compared with its line breaks

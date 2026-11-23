@@ -180,12 +180,10 @@ Choose by what the learning *is*:
   the shared base (`work-quality-base`) and a class-specific one to the
   fragment(s) of the class(es) it impacts: polecats (polecat,
   polecat-codex), human (every converse-<model> sitting), or system (deacon,
-  mechanik, proactive, witness, refinery, keeper). Every authoring role but
-  the mechanik composes the base. The mechanik's prime must fit Claude Code's
-  session-start cap, so it reads the base and its class fragment from their
-  files before it writes. A standard about changing a repository goes to the
-  polecats' fragment, which a converse sitting reads before its first edit of
-  a change the operator rules it make (`gc-toolkit.converse-edit`).
+  mechanik, proactive, witness, refinery, keeper). A standard about changing
+  a repository goes to the polecats' fragment, which a converse sitting
+  reads before its first edit of a change the operator rules it make
+  (`gc-toolkit.converse-edit`).
 - **`review-rubric`** when the failure is **visible in a diff**. Prefer this
   over `convention` for anything a reader could catch: one rubric dimension
   reaches every agent's version of the mistake through the reviewer, where a
