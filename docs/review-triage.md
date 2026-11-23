@@ -22,8 +22,9 @@ check's own method and, where this rig keeps one, by this rig's guidance for it.
 ## When `arch` is mandatory
 
 On this rig the arch check applies the divergence lens, which holds new pack
-surface to what Gas City ships ([review-arch.md](review-arch.md)). The lens runs
-in no other check, so add `arch` when the diff does any of these:
+surface, and pack code that accommodates a behavior of Gas City, to what Gas
+City ships ([review-arch.md](review-arch.md)). The lens runs in no other check,
+so add `arch` when the diff does any of these:
 
 - It adds operational surface of a kind
   [review-arch.md](review-arch.md#when-the-lens-applies) lists.
