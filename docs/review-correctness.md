@@ -99,17 +99,19 @@ Agents read and act on skills, agent prompts and the template fragments they
 compose, formula step text, and the docs that bind agents, such as `AGENTS.md`
 and this page. No gate reads whether an agent can act on that text.
 
-- **A passage that fails a first read blocks.** Read each passage the change
+- **A sentence that fails a first read blocks.** Read each sentence the change
   adds or alters as the agent that uses it reads it: once, at that point in its
   task, knowing what that agent knows, and knowing nothing of the change or its
-  anchor. When that read leaves the agent unsure what to do, or sure of the
-  wrong thing, raise a P1. This P1 joins the method's list of prose findings
-  that block. Its failure scenario names the passage, the agent that reads it,
-  and the action that agent gets wrong or cannot find.
-- **The finding quotes each sentence that fails and names its shape.** These
-  are the shapes, each with its fix:
-  - One sentence carries several conditions, an exception or a second actor.
-    The fix gives each its own sentence or list item.
+  anchor. A sentence in one of the shapes below fails that read. Raise a P1 on
+  each passage that holds such a sentence. This P1 joins the method's list of
+  prose findings that block.
+- **The finding quotes each failing sentence and names its shape.** Its failure
+  scenario names the passage, the agent that reads it, and the action that
+  agent gets wrong or cannot find. Its check reads the quoted sentences, and
+  confirms the finding when each takes the shape the finding names.
+- **These shapes fail a first read.** Each comes with its fix:
+  - One sentence carries more than one condition, an exception or a second
+    actor. The fix gives each its own sentence or list item.
   - A word is coined where the agent has a word of its own, or a term is used
     before the text says what it is. The fix uses the agent's word, or says
     what the term is where it first appears.
