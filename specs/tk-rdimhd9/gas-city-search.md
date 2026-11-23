@@ -61,15 +61,20 @@ once every manifest has been read.
 
 - No home's start fails under the new list. In no linked worktree does the
   sync's check find an untracked file it does not find today.
-- One entry newly shows, in one rig checkout. It is an untracked `rigs/`
-  directory holding a `.codex/hooks.json` that gc wrote a level down on
-  2026-11-11, which the unanchored `.codex/` line hid. Nothing the pack runs
-  reads a rig checkout's untracked files, except the report a stalled
-  reconcile files.
-- 1,143 entries are newly hidden. Each is a link gc made under `.claude/skills/`
-  in a checkout of the one rig whose `.gitignore` re-includes that directory,
-  where they show today. An exact name in the exclude file hides a file the
-  re-include does not name itself.
+- One entry newly shows, in one rig checkout: an untracked `rigs/` directory
+  the unanchored `.codex/` line hid. It holds a copy of the Codex hooks file
+  gc installs in a Codex home, written on 2026-11-07, and two empty bd gate
+  locks the rig's `.gitignore` hides. Gas City writes that copy when a Codex
+  session starts in a rig checkout, because its session start doubles the
+  hook path (gastownhall/gascity#8005), so another such start writes it
+  again. The directory was removed on 2026-11-23 at 12:02Z (tk-ivssetu).
+  Nothing the pack runs reads a rig checkout's untracked files, except the
+  report a stalled reconcile files.
+- 1,143 entries are newly hidden. Each is a link gc made under `.claude/skills/`,
+  or the ownership manifest naming those links, in a checkout of the one rig
+  whose `.gitignore` re-includes that directory, where they show today. An
+  exact name in the exclude file hides a file the re-include does not name
+  itself.
 - In this repository's own checkouts, every entry under `.claude/skills/` is a
   link its sink's manifest names, or the manifest. So the `.gitignore` line the
   change drops hides nothing a manifest misses.
