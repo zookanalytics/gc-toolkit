@@ -295,6 +295,14 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   with an earlier ruling, and say where your recommendation departs from
   what they said.
 
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback) adopted:2026-11-23 -->
+- When a design or proposal fixes a time window, an interval, an age limit
+  or another threshold, give the reason for that value and what a wrong
+  value costs, because a constant copied from a neighbouring rule is not a
+  reason. Where no reason holds the value, let the evidence that should
+  trigger the decision, or a judgment made case by case, decide instead,
+  or drop the requirement.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
      proactive, witness, refinery, and keeper. The mechanik, also in this
