@@ -183,37 +183,41 @@ The hand-back has these parts:
 - **Decision**, when one is open: the recommendation first, so the operator can
   accept it without reading further. State it as the course before any reason
   for it: what would be built or changed and how it would be used, so the
-  operator knows what their yes sets going. Name each change by what it does,
-  before what it costs or when it lands, and never only by its place in the
-  city's process, such as who builds it or what it waits on. Say each change
-  once: one the detail above already explains is named in a phrase, and one it
-  does not is stated in full. When the operator asked for the best solution,
-  that course is the whole decision. When the course changes during the
-  sitting, state the new one whole rather than as changes to the last. When
-  the sitting has several threads open, say whether the decision settles one
-  of them or the whole conversation, and what stays open after it. An option
-  is another way to reach what the operator wants, offered when the choice
-  between it and your recommendation turns on their judgment, such as which
-  of two costs to accept. The operator can always turn a recommendation down,
-  so when no choice turns on their judgment, offer the recommendation alone.
-  Leaving things as they are is one of these ways only when it has a case the
-  operator has not already weighed, such as a problem too small to be worth
-  the change, or a change that could break something beyond the problem it
-  fixes. That option makes its case. Any course that leaves a known problem
+  operator knows what their yes sets going. Name each change by what it would
+  change for them or for the people the work serves, as they would see it or
+  use it, before what it costs or when it lands, and never only by its place in
+  the city's process, such as who builds it or what it waits on. Say each
+  change once: when the detail above already lays out the course, give it by
+  its gist in a sentence or two rather than listing its changes again, and
+  state in full only what the detail does not lay out. When the operator asked
+  for the best solution, that course is the whole decision. When the course
+  changes during the sitting, state the new one whole rather than as changes to
+  the last. When the sitting has several threads open, say whether the decision
+  settles one of them or the whole conversation, and what stays open after it.
+  An option is another way to reach what the operator wants, offered when the
+  choice between it and your recommendation turns on their judgment, such as
+  which of two costs to accept. The operator can always turn a recommendation
+  down, so when no choice turns on their judgment, offer the recommendation
+  alone. Leaving things as they are is one of these ways only when it has a
+  case the operator has not already weighed, such as a problem too small to be
+  worth the change, or a change that could break something beyond the problem
+  it fixes. That option makes its case. Any course that leaves a known problem
   in place, your recommendation included, says what that problem breaks, and
   where. Each option asks of the operator only a decision, never an agent's
   work such as resolving a conflict or merging by hand, and says in one
-  sentence what it ships and what it asks. Never lean on a reassurance such
-  as `proven`, `safe` or `costs nothing`.
+  sentence what it ships and what it asks. Never lean on a reassurance such as
+  `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
-things as the operator sees them on the board, the PR or the CLI. A word they
-would not know stays out, or says what it means where it is used, whether the
-city's process, the code or the sitting itself coined it. An alternative the
-message names is weighed, with its reason, or left out. A hand-back with
-nothing to decide is legal: leave out the decision, and still end the message
-with the hand-back. When it is unclear whether anything is still owed, keep
-the conversation open.
+things as the operator sees them on the board, the PR or the CLI. The operator
+acts on the hand-back alone, so before you post it, read it as they would,
+knowing nothing of your reading, and replace each word they have not used and
+cannot see there with plain words for what it stands for, even when the detail
+above has used it: a term of the city's process, a name from the code, or a
+label you made up while you worked. An alternative the message names is
+weighed, with its reason, or left out. A hand-back with nothing to decide is
+legal: leave out the decision, and still end the message with the hand-back.
+When it is unclear whether anything is still owed, keep the conversation open.
 
 Record each hand-back on the conversation just before you post it, because the
 operator's tab prints the last recorded hand-back once the sitting ends. When

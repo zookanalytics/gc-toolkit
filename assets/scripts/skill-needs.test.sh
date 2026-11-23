@@ -690,12 +690,12 @@ have "…a later hand-back opens with where the subject stands, and a return wit
     'A later hand-back opens with where the subject stands now, and a return with what its result settles and what it leaves open.' "$PROMPT_JOINED"
 have "…and either says what the conversation is settling and what kind of answer it brings" \
     'Either one says what the conversation is settling and what kind of answer it brings' "$PROMPT_JOINED"
-have "the message keeps out a word the operator would not know, whoever coined it, or says what it means" \
-    "A word they would not know stays out, or says what it means where it is used, whether the city's process, the code or the sitting itself coined it." "$PROMPT_JOINED"
+have "the sitting reads the hand-back as the operator would and puts each word they have not used in plain words, whoever coined it" \
+    "The operator acts on the hand-back alone, so before you post it, read it as they would, knowing nothing of your reading, and replace each word they have not used and cannot see there with plain words for what it stands for, even when the detail above has used it: a term of the city's process, a name from the code, or a label you made up while you worked." "$PROMPT_JOINED"
 have "…and an alternative it names is weighed with its reason, or left out" \
     'An alternative the message names is weighed, with its reason, or left out.' "$PROMPT_JOINED"
 lacks "…in place of a list of pipeline words" 'moot, twin, fold' "$PROMPT_JOINED" \
-    "a word the operator would not know stays out, whoever coined it"
+    "each word the operator has not used is put in plain words, whoever coined it"
 # A decision leads with the course as the changes it makes. An option is
 # another way to reach what the operator wants, leaving things as they are is
 # one only when it has a case the operator has not already weighed, any course
@@ -705,10 +705,10 @@ lacks "…in place of a list of pipeline words" 'moot, twin, fold' "$PROMPT_JOIN
 # and leaves the sentence to the profile.
 have "the decision states the course as what would be built or changed, before any reason for it" \
     'State it as the course before any reason for it: what would be built or changed and how it would be used, so the operator knows what their yes sets going.' "$PROMPT_JOINED"
-have "…names each change by what it does, before its cost and timing, never only by its place in the process" \
-    "Name each change by what it does, before what it costs or when it lands, and never only by its place in the city's process" "$PROMPT_JOINED"
-have "…and says each change once, in full only where the detail above does not" \
-    'Say each change once: one the detail above already explains is named in a phrase, and one it does not is stated in full.' "$PROMPT_JOINED"
+have "…names each change by what it would change for the operator or the people the work serves, before its cost and timing" \
+    "Name each change by what it would change for them or for the people the work serves, as they would see it or use it, before what it costs or when it lands, and never only by its place in the city's process" "$PROMPT_JOINED"
+have "…and gives a course the detail above already lays out by its gist, in full only what the detail does not" \
+    'Say each change once: when the detail above already lays out the course, give it by its gist in a sentence or two rather than listing its changes again, and state in full only what the detail does not lay out.' "$PROMPT_JOINED"
 lacks "…in place of a form that restates each change" 'what it is today and what it becomes' "$PROMPT_JOINED" \
     "the course says each change once"
 have "…and that course is the whole decision when the operator asked for the best solution" \
