@@ -1471,8 +1471,9 @@ keys = ["failure_key"]
 #   statuses for both gates' lookup, then over closed beads when no live tracker
 #   holds it, to follow the most recently closed tracker's chain of
 #   disposition edges to a live bead, and over closed beads for the pre-flight's landed-fix
-#   check. `find` reads no title, so a bug without it is no tracker. Never
-#   cleared, so a retitle or a fold leaves it in place. A string.
+#   check. `find` reads no title, so a bug without it is no tracker. A first
+#   reaction's intake reads it to admit the tracker to a pool. Never cleared,
+#   so a retitle or a fold leaves it in place. A string.
 
 [metadata.seed_audit_reaudit]
 # The seed audit's re-audit: the one bead that re-renders generated/seed-audit on
