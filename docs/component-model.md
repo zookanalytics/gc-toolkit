@@ -614,7 +614,11 @@ prerequisite, and the four exclusions above are what such a check encodes.
   writer in [state-machine.md](state-machine.md)'s table, or it does not
   exist.
 - **Adding a metadata key** — it is state. Register it in `lifecycle.toml`, or
-  accept that nothing downstream can be proven exhaustive over it.
+  declare it in the gctk domain that owns it. Nothing downstream can be proven
+  exhaustive over a key that neither holds. A key a formula writes that neither
+  holds fails `TestKeyRegistryHoldsEveryKeyAFormulaWrites` in
+  `services/gctk/cmd/gctk`, and a key a script writes fails the suite that
+  checks that script's writes, where the script has one.
 - **Adding an invariant** — name its check in the same PR.
 - **Divergence** — there is no divergence section: the running system is
   generated from the declarations this model requires, so divergence is zero
