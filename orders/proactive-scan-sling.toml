@@ -2,10 +2,10 @@
 # A newly-filed bead gets no reaction until something slings a first reaction
 # at it, and Gas City starts no work on a bead nobody slung: an order that
 # fires on bead.created is told no bead, so it would run this same sweep on
-# every create. This order runs the sweep on a schedule, so each bead its filer
-# marked for a reaction gets one promptly: a bead hold:mayor files into the
-# placement queue, which reaches the po's backlog refinement with a card on it,
-# and a patrol finding whose sling at its filing failed. A bead with no mark
+# every create. This order runs the sweep on a schedule, so each ready bead its
+# filer marked for a reaction gets one promptly: a bead hold:mayor files into
+# the placement queue, which reaches the po's backlog refinement with a card on
+# it, and a patrol finding whose sling at its filing failed. A bead with no mark
 # is never slung; `gctk reaction unmarked` lists it for the po. Patrol findings
 # and the operator's captures sling theirs at once, through the same verb.
 #

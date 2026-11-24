@@ -71,9 +71,10 @@ func isUnmarked(r *ledger.Record) (bool, error) {
 // Unmarked is the open beads of the rig's store that no mark, owner, route,
 // arm, hold, wait or run claims, highest priority first: the beads filed with
 // no mark, which the po's backlog refinement opens with. The po holds each one
-// the operator agrees is new work, and the next sweep takes it. Its one read is
-// the sweep's, bd's ready set of unassigned beads that are not epics, so a bead
-// a wait holds is not listed. It keeps the beads isUnmarked takes, then drops
+// the operator agrees is new work, and the next sweep takes it unless it
+// carries a headline, which is its read. Its one read is the sweep's, bd's
+// ready set of unassigned beads that are not epics, so a bead a wait holds is
+// not listed. It keeps the beads isUnmarked takes, then drops
 // every bead a live run works, by waits' run link. A run map that does not read
 // drops nothing, which it says. An error is a ready read that failed, or a
 // bead whose edges did not decode, and lists nothing.

@@ -29,7 +29,9 @@ A first reaction takes a bead its filer marked for one: hold:mayor, which files
 new work into the placement queue, or a patrol finding's finding.scope. A bead
 filed with neither gets no first reaction and sits in no queue, so the po's
 backlog refinement opens with this list, and holds each bead the operator
-agrees is new work, which the next sweep reacts to. The list starts no work.
+agrees is new work. The next sweep reacts to a bead held that way unless it
+carries a headline, because the headline is its read, so the sitting brings
+that headline with the bead instead. The list starts no work.
 
 Its one read is the sweep's, bd's ready set of unassigned beads that are not
 epics, so a bead a wait holds is not listed. It leaves out a bead with a mark,

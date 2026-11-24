@@ -126,13 +126,15 @@ that does not settle it, propose `ask` or say that your confidence is low.
 
 - One bead, without its long notes:
   `gc bd --rig <rig> show <id> --json | jq -r '(if type == "array" then .[0] else . end) | .title, .status, .description, ((.notes // "") | .[0:1500])'`
-- Each queued bead gets a first reaction's card in its notes, headed
-  `# First reaction · run <root>`, with its Understanding, Found, Proposal,
-  Decision needed and Disposition. Read it first and start from its proposal,
-  but check it, because it can be stale. A sweep reacts only to a bead nothing
-  blocks. So a bead with no card and no open blocker gets its card on the next
-  sweep, and one with an open blocker gets none until that blocker closes:
-  read it yourself.
+- A queued bead a first reaction has read carries its card in its notes,
+  headed `# First reaction · run <root>`, with its Understanding, Found,
+  Proposal, Decision needed and Disposition. Read it first and start from its
+  proposal, but check it, because it can be stale. A sweep reacts only to a
+  bead that carries no headline and that nothing blocks. So a bead with no
+  card, no headline and no open blocker gets its card on the next sweep. One
+  with an open blocker gets none until that blocker closes: read it yourself.
+  One that carries a headline and no card gets none, because the headline is
+  its read: start from the headline.
 - Code, on the rig's default branch only, in the rig's checkout:
   `git -C <checkout> show origin/<branch>:<path>`,
   `git -C <checkout> log origin/<branch> -- <path>` and

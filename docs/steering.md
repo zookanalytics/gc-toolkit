@@ -174,13 +174,15 @@ by a write, so the label alone puts a bead in the queue, and nothing is
 inferred from the bead's other fields.
 
 Each bead filed into the queue takes a first reaction. The proactive sweep
-slings one at each bead the label holds that carries no headline, so each
-arrival comes to the sitting with a card on it, and a headline shows that a
-first reaction or a sitting has concluded on a bead. A bead filed with no mark
-sits in no queue and takes no reaction: `gctk reaction unmarked --rig <rig>`
-lists each open bead that no mark, owner, route, arm, hold, wait or run claims,
-and the sitting holds each one the operator agrees is new work, which the next
-sweep reacts to.
+slings one at each bead the label holds that carries no headline, once nothing
+blocks it, so an arrival comes to the sitting with a card on it unless a wait
+still holds it, and a headline shows that a first reaction or a sitting has
+concluded on a bead. A bead filed with no mark sits in no queue and takes no
+reaction: `gctk reaction unmarked --rig <rig>` lists each open bead that no
+mark, owner, route, arm, hold, wait or run claims, and the sitting holds each
+one the operator agrees is new work. The next sweep reacts to a bead held that
+way unless it carries a headline, because the headline is its read, so the
+sitting brings that headline with the bead instead.
 
 A rig's queue is all its po receives. `doctor/check-po-queue-only` reports
 anything else that reaches a po: a bead that no hold holds and that is routed or
