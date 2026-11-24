@@ -943,7 +943,7 @@ no warrant.
     code implements it.
   - The search is
     [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9cff.
 - **Retires when.** A Gas City release requests a session's turn for its unread
   mail whoever sent it, as #1966 rules. The orders and the verb then retire,
   and each agent they list is woken by Gas City. Before that, once the city
