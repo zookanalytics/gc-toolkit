@@ -123,7 +123,7 @@ eq "$(beads)" "1" "(first) exactly one bead filed"
 eq "$(meta new-1 'finding.key')" "doctor-sweep-failed" "(first) finding.key rode the create"
 eq "$(meta new-1 'finding.scope')" "deacon-findings" "(first) finding.scope recorded"
 eq "$(meta new-1 'finding.occurrences')" "1" "(first) occurrences starts at 1"
-eq "$(meta new-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the scan reads every ready bead"
+eq "$(meta new-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the sweep takes a finding by its finding.scope"
 eq "$(btype new-1)" "bug" "(first) default type is bug"
 has "$(body new-1)" "state=failed elapsed=612" "(first) the finding text is the bead body, verbatim"
 has "$OUT" "filed new-1" "(first) reports the bead it filed"
@@ -167,6 +167,9 @@ reset
 "$SUT" --key doctor-a --title "a" --message "finding a" >/dev/null 2>&1
 "$SUT" --key doctor-b --title "b" --message "finding b" >/dev/null 2>&1
 eq "$(beads)" "2" "(distinct keys) two situations are two beads"
+# The sweep heals a failed sling by finding.scope, so a filing that names no
+# scope still carries one.
+eq "$(meta new-1 'finding.scope')" "unscoped" "(no --scope) finding.scope rides the create as unscoped"
 
 # ── 5. --about narrows the dedup to one bead ─────────────────────────
 # A per-bead key (one finding per subject) passes --distinct on every call, so a

@@ -16,8 +16,9 @@
 # gc sling refuses, and when a first
 # reaction already runs on the subject or an open conversation tracks it
 # (gctk reaction sling exit 3), a live workflow already drives it (exit 4), it
-# is already routed or armed, held, assigned, not open, or waits on a person's
-# answer (exit 5), or it is a standing record or a feedback pattern, whose kind
+# is already routed or armed, held for an actor outside the store or held for
+# placement with a headline, assigned, not open, or waits on a person's answer
+# (exit 5), or it is a standing record or a feedback pattern, whose kind
 # takes no first reaction (exit 6), so the sling is a no-op that slings
 # nothing: nothing would put the topic to the operator, so this does.
 # Exit: 0 conversation queued · 2 usage · 3 environment (the rig map did not
@@ -416,8 +417,8 @@ if [ -z "$NO_REACT" ]; then
         note "$PROG: a live workflow already drives subject $SUBJECT — no reaction was slung; filing the conversation directly"
         REACT_WHY="no: a live workflow already drives the subject (a first reaction never races work in flight)"
     elif [ "$REACT_RC" -eq 5 ]; then
-        note "$PROG: subject $SUBJECT is already routed or armed, held, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
-        REACT_WHY="no: the subject is already routed or armed, held, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
+        note "$PROG: subject $SUBJECT is already routed or armed, held for an actor outside the store or held for placement with a headline, assigned, not open, or waits on a person's answer — no reaction was slung; filing the conversation directly"
+        REACT_WHY="no: the subject is already routed or armed, held for an actor outside the store or held for placement with a headline, assigned, not open, or waits on a person's answer (a first reaction never second-guesses a dispatch already decided)"
     elif [ "$REACT_RC" -eq 6 ]; then
         note "$PROG: subject $SUBJECT is a standing record or a feedback pattern, whose kind takes no first reaction — filing the conversation directly"
         REACT_WHY="no: the subject is a standing record or a feedback pattern, whose kind takes no first reaction"

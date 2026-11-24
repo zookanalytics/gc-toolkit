@@ -32,6 +32,21 @@ person labeled `Hold:Mayor`, which no worker is served either.
 Read your rig's open epics, with what holds each, since most dispositions name
 one (your prompt's "Reads").
 
+Then list the beads filed with no mark, which sit in no queue and get no first
+reaction: the open beads in your rig's store that no hold, patrol finding,
+owner, route, arm, wait or run claims. The list starts no work:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" reaction unmarked --rig <rig>
+```
+
+It prints one line a bead, its id, its priority and its title, or one line
+saying there are none. An exit other than 0 is a list that did not read, not an
+empty one.
+
 ### When the goals are missing or change
 
 A rig whose default branch carries no `docs/product-goals.md`, and whose
@@ -111,8 +126,11 @@ that does not settle it, propose `ask` or say that your confidence is low.
 
 - One bead, without its long notes:
   `gc bd --rig <rig> show <id> --json | jq -r '(if type == "array" then .[0] else . end) | .title, .status, .description, ((.notes // "") | .[0:1500])'`
-- A first reaction's card in the notes (Understanding, Found, Proposal,
-  Disposition) is a strong lead. Check it, because it can be stale.
+- Each queued bead gets a first reaction's card in its notes, headed
+  `# First reaction · run <root>`, with its Understanding, Found, Proposal,
+  Decision needed and Disposition. Read it first and start from its proposal,
+  but check it, because it can be stale. A bead with no card yet has its
+  reaction coming on the next sweep.
 - Code, on the rig's default branch only, in the rig's checkout:
   `git -C <checkout> show origin/<branch>:<path>`,
   `git -C <checkout> log origin/<branch> -- <path>` and
@@ -150,16 +168,25 @@ it does.
 
 - Each piece fits one screen, says what its items are in plain words, and carries
   a recommendation for each item.
-- The first piece is the clear ones, as lists the operator can accept in a word
-  or pull items from: the closes and the beads sent where the rig says, where
-  your confidence is high.
+- The first piece is the beads filed with no mark (section 1), with what each is
+  and whether you would hold it as new work, close it or send it where the rig
+  says. Hold each one the operator agrees is new work, with
+  `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<the operator's reason>"`,
+  and the next sweep gives it a first reaction, so it reaches a later sitting
+  with a card.
+- Then the clear ones, as lists the operator can accept in a word or pull items
+  from: the closes and the beads sent where the rig says, where your confidence
+  is high.
 - Then bring the rest by disposition and by subject, at most about 25 items a
   piece, with the work to place in its WSJF order.
 
 ## 6. Apply each ruling
 
 Apply the piece's rulings through your prompt's levers, let each write's exit
-say whether it landed, and only then bring the next piece. Each ruling's note
+say whether it landed, and only then bring the next piece. `place` refuses a bead
+a first reaction is still working, with nothing written, since that run's card
+lands when it ends: apply that ruling once the run has ended, and tell the
+operator it waits. Each ruling's note
 gives the operator's reason in words. When the operator turns down a proposal
 that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:

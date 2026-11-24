@@ -83,18 +83,22 @@ runs its fix (`formulas/mol-deacon-patrol.toml`).
 
 Each writer that files or disposes new work follows the rule.
 
-- **The first reaction** (`gctk reaction dispose`). It still reacts to every
-  finding, because its card is the triage that backlog refinement reads. Its
-  actionable exit routes a member, PR-finishing work, a failure's tracker or a
-  confirmed emergency. It releases any other bead with no route, then holds it
-  with `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The
-  blocked exit's `--then-route` arms a dispatch only for a bead the rule admits.
-  Any other bead it holds, and arms nothing, while its wait still lands as a
-  `blocks` edge. The close exit keeps its validating closer, because a close
-  shrinks the queue, whether it slings the closer now or arms it for when the
-  bead that ends its job lands (`--waiting-on`). Work that is a named agent's
-  own (`--assign`, `--then-assign`) is not pool work, so the rule does not read
-  it. Neither flag may name the po, which takes no work by assignment.
+- **The first reaction** (`gctk reaction dispose`). It reacts to every patrol
+  finding, every operator capture and every bead filed into the queue, because
+  its card is the triage that backlog refinement reads. Its actionable exit
+  routes a member, PR-finishing work, a failure's tracker or a confirmed
+  emergency. It releases any other bead with no route, then holds it with
+  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The blocked
+  exit's `--then-route` arms a dispatch only for a bead the rule admits. Any
+  other bead it holds, and arms nothing, while its wait still lands as a
+  `blocks` edge. A bead that arrived held keeps its hold, since its placement
+  is the sitting's: the actionable exit routes it, and the blocked exit arms
+  it, only as a confirmed emergency, and neither writes a hold over the
+  filer's. The close exit keeps its validating closer, because a close shrinks
+  the queue, whether it slings the closer now or arms it for when the bead that
+  ends its job lands (`--waiting-on`). Work that is a named agent's own
+  (`--assign`, `--then-assign`) is not pool work, so the rule does not read it.
+  Neither flag may name the po, which takes no work by assignment.
 - **The tracker writer** (`assets/scripts/preexisting-failure.sh file`) files
   each failure's tracker with no hold and sends it with a `gc sling` that names
   no target, which Gas City routes to the `default_sling_target` of the rig the
@@ -123,10 +127,13 @@ The witness and the distiller write the label in the create, which is the
 bead's own record of it. The first reaction and the po write it with
 `set-state`, which records the reason in an event bead. The first reaction
 writes it last, after the release and after intake's note, because the check a
-re-offered reaction runs first refuses a held bead. A worker cut off before the
-label lands leaves the bead released under its headline, which no pool is
-offered and the scan passes over, and the reaction's next worker finishes the
-exit.
+re-offered reaction runs first refuses a held bead that carries a headline. A
+worker cut off before the label lands leaves the bead released under its
+headline, which no pool is offered, and the reaction's next worker finishes the
+exit. A bead that arrived held carries its hold from the start, so the check
+passes over its headline when the bead's notes hold the asking run's card,
+which that run wrote before its exit, and the next worker finishes the exit
+there too.
 
 ## The emergency check
 
@@ -166,6 +173,15 @@ hold:mayor` matches only the exact text and would leave out a bead labeled
 by a write, so the label alone puts a bead in the queue, and nothing is
 inferred from the bead's other fields.
 
+Each bead filed into the queue takes a first reaction. The proactive sweep
+slings one at each bead the label holds that carries no headline, so each
+arrival comes to the sitting with a card on it, and a headline shows that a
+first reaction or a sitting has concluded on a bead. A bead filed with no mark
+sits in no queue and takes no reaction: `gctk reaction unmarked --rig <rig>`
+lists each open bead that no mark, owner, route, arm, hold, wait or run claims,
+and the sitting holds each one the operator agrees is new work, which the next
+sweep reacts to.
+
 A rig's queue is all its po receives. `doctor/check-po-queue-only` reports
 anything else that reaches a po: a bead that no hold holds and that is routed or
 assigned to the po, unread mail to the po, and a bead in the queue that is not
@@ -187,9 +203,10 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 - `doctor/check-po-queue-only` takes a bead routed or assigned to the po as
   reaching it only when no hold holds it, because Gas City serves a held bead
   to no seat;
-- the proactive scan slings no first reaction on a held bead, because its next
-  move is the sitting's, and its sling refuses one held after the scan read it
-  or named to the sling directly;
+- the proactive sweep reads `hold:mayor` as the mark that files a bead into
+  the queue and slings a first reaction on a held bead with no headline, and
+  its check refuses one held with a headline, whose next move is the
+  sitting's, and one `hold:external` holds;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
   sling reads no hold, and its dry run (`gctk bead start-armed --dry-run`)
   names the label that holds the arm, so `doctor/check-armed-dispatch-owed`
@@ -224,9 +241,10 @@ its hold, so `place` runs the writes in one order, each taking its exit:
 1. It refuses a closed bead, PR-finishing work (`anchor_bead`), a bead that
    `hold:external` also holds, a bead whose status is not open, a parent that
    is closed or not in the bead's store, `--standalone` on a bead that has a
-   parent, and a bead an arm already sends to another pool or on another
-   formula. A bead with no `hold:mayor` is refused, or reported as already
-   placed when a live run, a route, an arm or an assignee shows its dispatch.
+   parent, a bead an arm already sends to another pool or on another formula,
+   and a bead a live first reaction works, until that run ends. A bead with no
+   `hold:mayor` is refused, or reported as already placed when a live run, a
+   route, an arm or an assignee shows its dispatch.
 2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
    check writes one and `gctk bead arm` refuses a routed bead. With
    `--under` it removes a relates-to link between the bead and the parent,
@@ -248,10 +266,10 @@ held, in the queue. A run cut off between the two goes on with the hold still
 on its bead, and the next `place` finishes the lift. Running `place` again
 after a stop at any write finishes the placement without a second run: it
 dispatches nothing once an assignee, a `merge_result`, a live run or an arm
-shows a dispatch, and `gc sling` refuses a second live run of one formula at
-one bead. That holds while the run is live, or once it has claimed, landed or
-closed the bead, as the hand-off of `mol-polecat-work` does before its run
-ends. A run that ends with none of those, such as one of a formula that only
+shows a dispatch, and `gc sling` refuses a second live workflow at one bead,
+whatever its formula. That holds while the run is live, or once it has claimed,
+landed or closed the bead, as the hand-off of `mol-polecat-work` does before
+its run ends. A run that ends with none of those, such as one of a formula that only
 reads its bead, leaves nothing `place` reads as the dispatch, so a stop at the
 lift names the lift by hand, which dispatches nothing, rather than a re-run.
 
@@ -262,6 +280,12 @@ A hold also lifts these ways:
   `gctk reaction accept` lifts it in the write that sends the bead on, because
   sending a held bead on is a placement and Gas City serves no bead a hold
   label holds, assigned or not.
+- `gctk reaction dispose` lifts it from a bead that arrived held, in one write
+  that removes every spelling, before the exit hands the bead to the mechanik,
+  arms a confirmed emergency's dispatch, or sends the bead to its validating
+  closer, now or once the bead it waits on lands, since Gas City serves a held
+  bead to no hook and fires no arm on one. The refinery's assignee and an
+  emergency's route ride the takeaway's release, which lifts it there.
 - `converse-signoff.sh` lifts it from a subject the operator's ruling leaves
   waiting on work, once it has armed the subject's validating closer, because
   the ruling places the subject and deferred dispatch fires a held bead's arm
@@ -275,11 +299,11 @@ A hold also lifts these ways:
   bead that retires its code, through a `blocks` edge and its validating
   closer's arm, takes this write too, because deferred dispatch fires a held
   bead's arm only once its hold lifts. A bead lifted with nothing else
-  written is raw input again unless a first reaction held it: the proactive
-  scan reacts to it when intake is on, and the liveness sweep names it until
-  then. A bead a first reaction held keeps that reaction's headline, which
-  keeps the scan off it, so it takes another reaction only when someone asks
-  for one.
+  written carries no mark, so the proactive sweep passes over it,
+  `gctk reaction unmarked` lists it for the next sitting, and the liveness
+  sweep names it until then. A bead a first reaction or a sitting has read
+  keeps its headline, so it takes another reaction only when someone asks for
+  one.
 - A close leaves the label on a closed bead, which nothing reads.
 
 `gc bd set-state` cannot lift a hold, because it refuses an empty value. A bead

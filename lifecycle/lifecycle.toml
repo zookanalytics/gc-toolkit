@@ -1151,9 +1151,9 @@ keys = [
 #   already took. Accept slings before it writes this key, so absent means no
 #   Accept has recorded a dispatch. Never cleared. A formula name.
 # gc.proactive — RETIRED. `1`, the scan opt-in patrol-finding.sh stamped on
-#   each finding it filed. Nothing writes or reads it: the scan reads every
-#   ready, unassigned bead in its rig that is not an epic, so a finding needs no
-#   opt-in to be read. Registered so that residue on a pre-retirement bead reads
+#   each finding it filed. Nothing writes or reads it: the sweep takes a finding
+#   by the finding.scope its create carries, so a finding needs no opt-in to be
+#   read. Registered so that residue on a pre-retirement bead reads
 #   as known, not as a stray.
 # gc.reaction_kind — RETIRED. The sub-type a reaction bead carried,
 #   `first-reaction`. Nothing writes or reads it, because no pack code files a
@@ -1442,7 +1442,8 @@ keys = [
 # them re-runs with that finding's key and subject, which records a recurrence
 # there. --distinct files the new bead despite those findings, though an exact
 # match still records a recurrence. A key meant to hold one finding per subject
-# passes --distinct on every call. finding.scope is which patrol filed it;
+# passes --distinct on every call. finding.scope is which patrol filed it, and
+# the first reaction's sweep takes a finding that carries it and no headline;
 # finding.digest is the message hash that tells a recurrence with changed text
 # from an identical one. finding.occurrences counts the recurrences and
 # finding.first_seen/finding.last_seen bracket them.

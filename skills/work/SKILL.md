@@ -21,17 +21,20 @@ script's `--help` lists its flags.
 
 ## File new work
 
-File a bead for the work. The worker reads its description to learn what to do:
+File a bead for the work. The worker reads its description to learn what to
+do. New work waits for the operator's placement, so its create carries Gas
+City's `hold:mayor` label, which files it into the placement queue, where a
+first reaction reads it and the po's backlog refinement places it:
 
 ```bash
-gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
+gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --labels hold:mayor --json
 ```
 
-Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
-bead may not be sent yet (below). A bead that already exists is held with
+Leave the label off only for work you send now (below), and add
+`--parent <epic>` when an epic applies. A bead that already exists is held with
 `gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
 Filing starts nothing: afterwards, send the bead, make it wait (the waits
-skill), or leave it for the operator to place.
+skill), or leave it held for the operator to place.
 
 - **File it in the store of the pool that will work it.** A pool reads only its
   own rig's store, so a city-scoped session names the rig:
@@ -77,7 +80,9 @@ skill), or leave it for the operator to place.
   critical work runs now only when the operator routes it. File any other bead
   with Gas City's `hold:mayor` label in its create and no route or arm: the
   operator decides where it goes. `gc beads list --label hold:mayor` lists each
-  bead filed so that still waits, in every rig.
+  bead filed so that still waits, in every rig. A bead filed with neither the
+  label nor a route sits in no queue and gets no first reaction, until the po
+  finds it on the list of beads filed with no mark.
 - **A failure on the default branch is filed as its tracker, and never held.**
   The tracker writer files one tracker per failure, with no hold, and sends the
   tracker it files to its rig's polecat pool, so the failure goes to be fixed.
