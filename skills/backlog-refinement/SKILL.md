@@ -129,8 +129,10 @@ that does not settle it, propose `ask` or say that your confidence is low.
 - Each queued bead gets a first reaction's card in its notes, headed
   `# First reaction · run <root>`, with its Understanding, Found, Proposal,
   Decision needed and Disposition. Read it first and start from its proposal,
-  but check it, because it can be stale. A bead with no card yet has its
-  reaction coming on the next sweep.
+  but check it, because it can be stale. A sweep reacts only to a bead nothing
+  blocks. So a bead with no card and no open blocker gets its card on the next
+  sweep, and one with an open blocker gets none until that blocker closes:
+  read it yourself.
 - Code, on the rig's default branch only, in the rig's checkout:
   `git -C <checkout> show origin/<branch>:<path>`,
   `git -C <checkout> log origin/<branch> -- <path>` and
@@ -171,9 +173,11 @@ it does.
 - The first piece is the beads filed with no mark (section 1), with what each is
   and whether you would hold it as new work, close it or send it where the rig
   says. Hold each one the operator agrees is new work, with
-  `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<the operator's reason>"`,
-  and the next sweep gives it a first reaction, so it reaches a later sitting
-  with a card.
+  `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<the operator's reason>"`.
+  A held bead with no headline and no open blocker gets a first reaction on the
+  next sweep, so it reaches a later sitting with a card. A bead that carries a
+  headline gets no first reaction once held, because that headline is its read:
+  bring the headline with the bead when you propose its placement.
 - Then the clear ones, as lists the operator can accept in a word or pull items
   from: the closes and the beads sent where the rig says, where your confidence
   is high.
