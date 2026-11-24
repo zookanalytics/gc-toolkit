@@ -15,9 +15,9 @@
 #     the same order again. go caches no result of a shuffled run, so every run
 #     runs every Go test. all also measures the tests' statement coverage, into
 #     a file outside the tree, and when they pass it prints the total after the
-#     run's last line. In a GitHub Actions job, whose step names its summary's
-#     file in GITHUB_STEP_SUMMARY, it adds the total to that summary. The
-#     figure fails nothing;
+#     line for each kind. In a GitHub Actions job, whose step names its
+#     summary's file in GITHUB_STEP_SUMMARY, it adds the total to that summary.
+#     The figure fails nothing;
 #   - web: the board web app's checks in services/helm/web, after `npm ci`:
 #     its typecheck, its tests, and its build, whose output must match the
 #     committed dist/ file for file;
@@ -38,12 +38,13 @@
 #
 # A RUN-TESTS-OPTION goes to tools/run-tests.sh, such as CI's -j and --seconds.
 #
-# Each kind runs whether or not the one before it passed, and the run ends with
-# one line for each kind it ran. go and web run as run-tests.sh runs a suite:
-# with no GC_* or BEADS_* variable of the caller's, and with the test floor,
-# tools/test-floor, at the front of PATH. A city session's environment names
-# its live city and the gc that reaches it, so a test that reached for gc, bd
-# or gh there would reach that city, and the floor refuses the call instead.
+# Each kind runs whether or not the one before it passed. The run then prints
+# one line for each kind it ran, and all's coverage total after them. go and web
+# run as run-tests.sh runs a suite: with no GC_* or BEADS_* variable of the
+# caller's, and with the test floor, tools/test-floor, at the front of PATH. A
+# city session's environment names its live city and the gc that reaches it, so
+# a test that reached for gc, bd or gh there would reach that city, and the
+# floor refuses the call instead.
 #
 # The web build writes to a directory of its own, which is compared with dist/,
 # so a run changes no tracked file. npm ci rewrites services/helm/web's

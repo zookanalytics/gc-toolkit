@@ -26,7 +26,7 @@ state where a rule that binds only gc-toolkit's own repository lives.
 
 ## Where the gates run
 
-The repository has two test commands, the Makefile's targets, and
+The repository has two test commands, `make test` and `make test-affected`, and
 `tools/test.sh` says what each runs. `make test` runs every test: the Go tests,
 `go test -race -shuffle=on ./...` from the root, the helm web app's typecheck,
 tests and build, whose output must match the committed `dist/`, and every
