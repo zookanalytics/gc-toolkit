@@ -390,8 +390,9 @@ other value.
 **What the index does not place.** Three exclusions, each mechanical:
 
 - `*.test.sh` and the fixture library they source,
-  `assets/scripts/test-harness.sh`. Test code is run by a developer, never by
-  a city: no order, formula, or `test_command` invokes it.
+  `assets/scripts/test-harness.sh`. Test code checks what a city runs and is
+  no part of it: a city reaches it only through the test commands a rig
+  declares, and no order or pack script invokes it.
 - `doctor/check-*`. §3 places each check against the invariant it asserts.
 - `tools/`. The command surface a human drives.
 

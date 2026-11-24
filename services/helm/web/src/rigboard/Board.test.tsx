@@ -884,6 +884,10 @@ describe('a pull request', () => {
   });
 
   it('reads a state with nothing held, and a number alone, the same way in both', async () => {
+    const doc = structuredClone(board);
+    const working = doc.rows['tk-c9dcsbn'];
+    working.pull_request = { ...working.pull_request!, state: 'working' };
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     expect(readings('tk-c9dcsbn')).toEqual({ row: '#1464 · working', details: '#1464 working' });
