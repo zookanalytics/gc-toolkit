@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# doctor/check-pour-text-current — I9: a molecule executes the formula text
-# that is current when it runs (docs/component-model.md §3). Two
-# facts compose to break it: a graph.v2 step's description renders once at
-# pour and never re-renders, and rigs/<rig> — the checkout the runtime
-# executes — advances on the reconciler's 15m cooldown
-# (orders/reconcile-rig-checkouts.toml). Three findings: LAGGED, a checkout
+# doctor/check-pour-text-current — I9: the pack each rig executes is the pack
+# that landed (docs/component-model.md §3). A graph.v2 step's description
+# renders once, at pour, from rigs/<rig>, the checkout the runtime executes,
+# and that checkout advances on the reconciler's 15m cooldown
+# (orders/reconcile-rig-checkouts.toml). Two findings: LAGGED, a checkout
 # behind its remote past the self-heal window; UNFETCHED, the remote-tracking
 # ref itself unrefreshed — the fail-open case: only the reconciler's own fetch
 # advances the ref rev-list compares against, so the behind-count reads 0 the
-# moment the reconciler dies and is reported as a floor; STALE-TEXT, a live
-# molecule root whose gc.formula_source last changed (git history, not mtime)
-# after the root poured. Deliberately never fetches — a doctor check is a
-# read, and fetching would repair the condition it observes. Read-only.
+# moment the reconciler dies and is reported as a floor. A run poured before
+# its formula last changed is no finding: nothing re-renders a poured run, so
+# every formula change leaves the runs poured before it on their old text, and
+# whether one should be poured again turns on what the change did, which no
+# file history shows. Deliberately never fetches — a doctor check is a read,
+# and fetching would repair the condition it observes. Read-only.
 # Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then "  - detail"
 # lines. Live probes are bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -24,11 +25,6 @@ set -u
 # 15m cadence), and a threshold at the interval would flag the duty cycle.
 INTERVAL="${GC_DOCTOR_RECONCILE_INTERVAL:-900}"
 SLACK="${GC_DOCTOR_RECONCILE_SLACK:-3}"
-
-# How long after pouring a molecule still counts as executing. in_progress
-# alone admits husks (I8's defect — doctor/check-step-terminal); an explicit
-# age bound that reports what it excluded beats an unreliable liveness probe.
-LIVE_MAX="${GC_DOCTOR_MOLECULE_LIVE_MAX:-86400}"
 
 errors=(); warnings=(); notes=()
 # >>> doctor-budget
@@ -65,13 +61,6 @@ run_piped() { local s; s=$(budget_slice); [ "$s" -ge "$BUDGET_MIN_PROBE" ] || re
 budget_init
 # <<< doctor-budget
 detail() { local v; for v in "$@"; do printf '  - %s\n' "$v"; done; }
-# >>> control-char-scrub
-# A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
-# C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
-# above 0x1F pass through raw, which JSON permits; the output feeds jq, so
-# dropping a structural LF or TAB just minifies.
-scrub() { tr -d '\000-\037'; }
-# <<< control-char-scrub
 mins() { printf '%s' "$(( $1 / 60 ))"; }
 
 # mtime in epoch seconds, GNU then BSD stat; return 1 when neither reads it.
@@ -79,16 +68,6 @@ mtime_of() {
     local out
     out=$(stat -c %Y "$1" 2>/dev/null) && [ -n "$out" ] && { printf '%s' "$out"; return 0; }
     out=$(stat -f %m "$1" 2>/dev/null) && [ -n "$out" ] && { printf '%s' "$out"; return 0; }
-    return 1
-}
-
-# ISO-8601 to epoch seconds, GNU then BSD date; the caller warns on failure —
-# an unreadable timestamp is not evidence that a molecule is current.
-epoch_of() {
-    local ts="$1" out base
-    out=$(date -u -d "$ts" +%s 2>/dev/null) && [ -n "$out" ] && { printf '%s' "$out"; return 0; }
-    base="${ts%Z}"; base="${base%%.*}"
-    out=$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$base" +%s 2>/dev/null) && [ -n "$out" ] && { printf '%s' "$out"; return 0; }
     return 1
 }
 
@@ -117,7 +96,7 @@ fi
 scopes=$(printf '%s' "$rigs_raw" \
     | jq -r '.rigs[]? | select((.path // "") != "")
              | [((.name // "") | gsub("[[:cntrl:]]"; " ")), .path,
-                ((.hq // false) | tostring), ((.suspended // false) | tostring)]
+                ((.hq // false) | tostring)]
              | join("\u001f")' 2>/dev/null)
 if [ -z "$scopes" ]; then
     echo "cannot determine whether the executed pack is current (I9)"
@@ -125,42 +104,10 @@ if [ -z "$scopes" ]; then
     exit 1
 fi
 
-# The roster is read into arrays FIRST because the stale-text half needs the
-# whole set, not the rig it is standing in: a molecule's gc.formula_source
-# routinely points at ANOTHER rig's checkout (rig-imported packs), and
-# resolving only against the owning rig would skip every imported formula.
-scope_names=(); scope_paths=(); scope_hq=(); scope_susp=()
-while IFS=$'\037' read -r rig_name rig_path is_hq is_susp; do
-    [ -n "$rig_path" ] || continue
-    scope_names+=("${rig_name:-<unnamed>}")
-    scope_paths+=("$rig_path")
-    scope_hq+=("$is_hq")
-    scope_susp+=("$is_susp")
-done <<< "$scopes"
-if [ "${#scope_paths[@]}" -eq 0 ]; then
-    echo "cannot determine whether the executed pack is current (I9)"
-    detail "The rig roster parsed to no usable (name, path) pairs."
-    exit 1
-fi
-
-# owning_checkout <abs-file> — the scanned checkout containing this file, by
-# LONGEST matching path (a city root is a prefix of every rig under it, and
-# the nearest enclosing checkout is the one whose history dates the file).
-owning_checkout() {
-    local target="$1" best="" i
-    for i in "${!scope_paths[@]}"; do
-        case "$target" in
-            "${scope_paths[$i]}"/*)
-                if [ "${#scope_paths[$i]}" -gt "${#best}" ]; then best="${scope_paths[$i]}"; fi ;;
-        esac
-    done
-    [ -z "$best" ] || printf '%s' "$best"
-}
-
 checked=0
 
-# check_currency <label> <checkout> — the LAGGED / UNFETCHED half for one
-# pack-source checkout.
+# check_currency <label> <checkout> — LAGGED and UNFETCHED for one pack-source
+# checkout.
 check_currency() {
     local label="$1" rig_path="$2"
     local remote behind fetch_age fetched head_short oldest waited
@@ -218,16 +165,9 @@ check_currency() {
     fi
 }
 
-for idx in "${!scope_paths[@]}"; do
-    rig_name="${scope_names[$idx]}"
-    rig_path="${scope_paths[$idx]}"
-    is_hq="${scope_hq[$idx]}"
-    is_susp="${scope_susp[$idx]}"
-    label="$rig_name"
-
-    # ── LAGGED / UNFETCHED, for the rigs the reconciler promises to advance.
-    # In a function so its early returns cannot skip the stale-text half: a
-    # rig whose lag is unmeasurable can still be running molecules.
+while IFS=$'\037' read -r rig_name rig_path is_hq; do
+    [ -n "$rig_path" ] || continue
+    label="${rig_name:-<unnamed>}"
     if [ "$is_hq" = "true" ]; then
         # Not a pack source, and reconcile-rig-checkouts.sh deliberately
         # excludes it (`select(.hq != true)`) — noted, not judged.
@@ -237,96 +177,7 @@ for idx in "${!scope_paths[@]}"; do
     else
         check_currency "$label" "$rig_path"
     fi
-
-    # ── STALE-TEXT: live molecule roots in this rig's store. in_progress
-    # only — an open root carrying a formula source is a husk (I8's defect,
-    # doctor/check-step-terminal), and reporting husks would bury the finding.
-    db="$rig_path/.beads"
-    if [ "$is_susp" = "true" ]; then
-        notes+=("$label: store skipped (suspended — querying it would auto-start an orphan Dolt server); stale step text was not checked here")
-        continue
-    fi
-    if [ ! -d "$db" ]; then
-        notes+=("$label: no bead store at $db — no molecule roots to check for stale text")
-        continue
-    fi
-    roots_raw=$(run_bounded gc bd list --db "$db" \
-        --status in_progress --has-metadata-key gc.formula_source \
-        --json --limit 0 2>/dev/null)
-    roots_rc=$?
-    if [ "$roots_rc" -ne 0 ]; then
-        warnings+=("$label: could not list live molecule roots in $db (rc=$roots_rc) — stale step text was NOT checked here")
-        continue
-    fi
-    # An empty store answers `[]`; an empty STRING is a probe that produced
-    # nothing at all, which is not the same thing and is not a pass.
-    if [ -z "$roots_raw" ]; then
-        warnings+=("$label: \`gc bd list\` over $db returned no output — stale step text was NOT checked here")
-        continue
-    fi
-    rows=$(printf '%s' "$roots_raw" | scrub | jq -r '
-        .[]? | [ (.id // "" | tostring),
-                 (.created_at // "" | tostring),
-                 ((.metadata["gc.formula_source"]) // "" | tostring) ]
-             | join("\u001f")' 2>/dev/null)
-    if [ $? -ne 0 ]; then
-        warnings+=("$label: live-root listing from $db could not be parsed — stale step text was NOT checked here")
-        continue
-    fi
-
-    aged_out=0; unresolved=0
-    while IFS=$'\037' read -r root_id created src; do
-        [ -n "$root_id" ] || continue
-        if ! poured=$(epoch_of "$created"); then
-            warnings+=("$label/$root_id: unreadable created_at (\"$created\") — cannot tell whether its step text is stale")
-            continue
-        fi
-        # Older than the liveness cap: a husk, not a running molecule.
-        if [ $(( NOW - poured )) -gt "$LIVE_MAX" ]; then
-            aged_out=$((aged_out + 1))
-            continue
-        fi
-        if [ -z "$src" ]; then
-            unresolved=$((unresolved + 1))
-            continue
-        fi
-        # Which checkout owns the formula — routinely NOT this rig's, because
-        # rig-imported packs run another rig's formulas.
-        owner=$(owning_checkout "$src")
-        if [ -z "$owner" ]; then
-            # A materialized pack cache is the common shape here — no git
-            # history to date against and no reconciler advancing it.
-            notes+=("$label/$root_id: gc.formula_source is under no scanned checkout ($src) — no git history to date it against, so staleness is unanswerable here")
-            continue
-        fi
-        if [ ! -f "$src" ]; then
-            warnings+=("$label/$root_id: gc.formula_source names a file that does not exist ($src) — the molecule's own formula cannot be read")
-            continue
-        fi
-        if [ ! -d "$owner/.git" ]; then
-            notes+=("$label/$root_id: gc.formula_source lives under $owner, which is not a git checkout — staleness is unanswerable there")
-            continue
-        fi
-        rel="${src#"$owner"/}"
-        # When the formula last changed, from git history rather than mtime:
-        # a fresh clone stamps every file with the clone time, while the
-        # commit date of the last change to the path dates when it landed.
-        changed=$(run_bounded git -C "$owner" log -1 --format=%ct -- "$rel" 2>/dev/null)
-        case "$changed" in
-            ''|*[!0-9]*)
-                # No history is not "unchanged": an untracked or newly-added
-                # formula has none, and neither is evidence.
-                warnings+=("$label/$root_id: no readable git history for \`$rel\` in $owner — cannot tell whether its step text is stale")
-                continue ;;
-        esac
-        if [ "$changed" -gt "$poured" ]; then
-            errors+=("$label/$root_id: poured $(mins $(( NOW - poured )))m ago from \`$rel\`, which last changed $(mins $(( NOW - changed )))m ago — $(mins $(( changed - poured )))m AFTER the pour. Its step descriptions were rendered once and still say what the formula said before that change (I9).")
-        fi
-    done <<< "$rows"
-
-    [ "$aged_out" -eq 0 ] || notes+=("$label: $aged_out in_progress root(s) older than $(mins "$LIVE_MAX")m excluded as husks rather than live molecules — see doctor/check-step-terminal (I8)")
-    [ "$unresolved" -eq 0 ] || notes+=("$label: $unresolved live root(s) carry an empty gc.formula_source — their step text cannot be dated")
-done
+done <<< "$scopes"
 
 if [ "$checked" -eq 0 ]; then
     echo "cannot determine whether the executed pack is current (I9)"
@@ -339,7 +190,7 @@ if budget_spent; then
     warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
 fi
 if [ "${#errors[@]}" -ne 0 ]; then
-    echo "${#errors[@]} place(s) where the executed pack or a running molecule's text is not current (I9)"
+    echo "${#errors[@]} checkout(s) executing a pack that is not what landed (I9)"
     detail "${errors[@]}"
     detail ${warnings[@]+"${warnings[@]}"}
     detail ${notes[@]+"${notes[@]}"}
@@ -351,6 +202,6 @@ if [ "${#warnings[@]}" -ne 0 ]; then
     detail ${notes[@]+"${notes[@]}"}
     exit 1
 fi
-echo "OK: executed pack is current across $checked checkout(s); no live molecule is running superseded step text"
+echo "OK: executed pack is current across $checked checkout(s)"
 detail ${notes[@]+"${notes[@]}"}
 exit 0
