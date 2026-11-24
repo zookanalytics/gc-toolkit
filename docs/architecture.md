@@ -207,13 +207,11 @@ performer; the full transition table with writers is
    `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
    bead that carries its work now, or under `not-needed` the evidence that ruled
    it out ([state-machine.md](state-machine.md#disposition)). A duplicate closes
-   at once. While its canonical has neither closed nor shipped, each open bead
-   the duplicate blocks first gains a `blocks` edge onto the canonical, so none
-   goes ready before the canonical delivers. Every other disposition ends the
-   waits on its bead with the close: `fixed-upstream` once the fix has closed or
-   shipped, or on a person's ruling, and `re-homed`, `folded` and `not-needed`
-   at once. The polecat that builds a work bead never closes it, except as the
-   duplicate of another bead, through `bead-rehome.sh`.
+   at once. A disposition that moves a bead's work to a successor keeps the
+   waits for that work until the successor delivers. A `not-needed` close ends
+   the waits on its bead, since nothing carries its work. The polecat that
+   builds a work bead never closes it, except as the duplicate of another bead,
+   through `bead-rehome.sh`.
 
 An integration effort's beads take this pipeline through the handoff, and then
 the refinery lands each one directly on the effort's integration branch, which

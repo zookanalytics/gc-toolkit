@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -29,9 +30,8 @@ func typeFor(issueType string) string {
 
 // Title is the PR's title for a bead: its own title, opened with a
 // conventional-commit type when it does not open with one, then the bead's id,
-// in words, each run of whitespace one space and none at either end. The squash
-// merge takes its commit subject from it. It is empty when the bead's title has
-// no words, since a type and an id alone name nothing.
+// in words, each run of whitespace one space and none at either end. It is empty
+// when the bead's title has no words, since a type and an id alone name nothing.
 func Title(id, title, issueType string) string {
 	if words(title) == "" {
 		return ""
@@ -41,6 +41,18 @@ func Title(id, title, issueType string) string {
 		t = typeFor(issueType) + ": " + t
 	}
 	return words(t + " (" + id + ")")
+}
+
+// Subject is the commit subject a squash merge of the bead's PR, numbered
+// number, lands under: the PR's title as Title composes it, then the PR's
+// number, as GitHub's own default subject for a squash under the PR's title
+// reads. It is empty when the title is.
+func Subject(id, title, issueType string, number int) string {
+	t := Title(id, title, issueType)
+	if t == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s (#%d)", t, number)
 }
 
 // words is s with each run of whitespace one space and none at either end, so

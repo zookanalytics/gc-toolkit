@@ -79,16 +79,24 @@ does not pass until it has.
 Record the summary again whenever the round leaves it untrue: a point on it,
 and a round whose commits or questions change what it states, such as a fix's
 cost or what stands before the merge. Read the summary `<pr-bead>` records,
-the bead the round's read names beside the PR, write it again whole, to the
-standard the `<binding>.commit-conventions` skill holds for a PR's summary, in
-the repair's part of the run's workspace beside its output, and record it. Add
-`--title "<the subject line>"` when the PR's title changes:
+the bead the round's read names beside the PR:
 
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 "$GCTK" pr summary <pr-bead>
+```
+
+Write it again whole, to the standard the `<binding>.commit-conventions` skill
+holds for a PR's summary, in the repair's part of the run's workspace beside
+its output, and record it. Add `--title "<the subject line>"` when the PR's
+title changes:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 "$GCTK" pr summary <pr-bead> --file "<the summary file>"
 ```
 

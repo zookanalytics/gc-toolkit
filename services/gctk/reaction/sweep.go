@@ -139,7 +139,8 @@ func (e *SweepError) Error() string { return e.Msg }
 // candidate rule keeps the raw input among them (isCandidate). It then drops
 // every bead a live run works, by waits' run link, and a run map that does not
 // read drops nothing, which it says. Each reaction goes to the rig's proactive
-// pool whether or not the pool runs, and a sling gc sling refuses, such as to a
+// pool whether or not the pool runs, by the name the city's roster gives it,
+// read once before the first sling, and a sling gc sling refuses, such as to a
 // pool the city does not configure, fails that candidate alone. A slung run
 // waits for a pool slot at no cost, so the sweep has no cap. It has a deadline,
 // since the order's timeout stops a pour in progress: it starts no sling once
@@ -147,13 +148,13 @@ func (e *SweepError) Error() string { return e.Msg }
 // in whole seconds as its upper bound, and leaves the rest for the next sweep.
 // With dryRun it slings nothing and passes each candidate as one it would
 // sling, whose refusals its sling would read again. It returns the summary,
-// which counts each skip by its cause. A *SweepError is a ready read or a
-// candidate rule that failed, with nothing slung, and any other error a sweep
-// in no rig.
+// which counts each skip by its cause. A *SweepError is a ready read, a
+// candidate rule or the roster's naming of the proactive pool that failed, with
+// nothing slung, and any other error a sweep in no rig.
 func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept)) (string, error) {
 	start := r.now()
-	if _, err := r.proactiveTarget(); err != nil {
-		return "", err
+	if r.Rig == "" {
+		return "", ErrNoRig
 	}
 	ready, err := r.Ledger.ReadyByPriority(sweepRule)
 	if err != nil {
@@ -176,6 +177,11 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 			emit(Swept{ID: c.ID, Title: c.Title(), Priority: c.Priority(), Outcome: WouldSling})
 		}
 		return fmt.Sprintf("%d candidate(s) a sweep would sling; --dry-run slung none", len(cands)), nil
+	}
+	if len(cands) > 0 {
+		if _, err := r.proactiveTarget(); err != nil {
+			return "", &SweepError{Msg: fmt.Sprintf("%v. The sweep fails and slings nothing; it reads the roster again on its next run", err)}
+		}
 	}
 
 	slung, failed, left := 0, 0, 0

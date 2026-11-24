@@ -103,13 +103,14 @@ Four producers file the same bead contract:
      whether or not it is about standing behavior. A post that makes a
      standing correction also names the correction's slug in
      `obs.correction`, so the recurrence metric counts its repeats. A post
-     is the city's when it carries the city's mark
-     (`assets/scripts/pr-post.sh`). A post that is not for review
+     is the city's when the city's login posted it with the city's mark
+     (`assets/scripts/pr-post.sh`). The mark counts under no other login. A
+     post that is not for review
      ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
      are notices, not review feedback, whoever posted them. On a rig that
      declares no marker, so is Vercel's deployment notice, an app's
      conversation comment whose first non-blank line opens with `[vc]:`.
-     Any other unmarked post is outside when another login posted it, an
+     Any other post is outside when another login posted it, an
      app's included, or when it is Claude Code's `/code-review` output
      posted under the city's login. The rig's store records the day from
      which the outside capture still owes a read of every merged or closed

@@ -4,7 +4,8 @@
 # its prompt. A hand-back that clears the assignee alone leaves the bead
 # in_progress, which no pool's work query serves, so the bead sits stranded
 # until a person finds it. This test holds the pack's instructions to the one
-# guarded write that reopens the bead and releases the claim together:
+# guarded write that reopens the bead and releases the claim together, and every
+# nudge to the size that reaches a session whole:
 #
 #   1. Every agent nudge that tells a worker what to do with its assignee names
 #      that write as one backticked `gc bd update` command: a holder guard
@@ -31,6 +32,8 @@
 #      leaving the bead open and unassigned, with no session pins, on its
 #      route. It writes nothing to a bead another session or another alias
 #      holds, or to one already closed.
+#   5. Every agent nudge is at most 800 bytes, which a session takes as one
+#      typed read. agents/polecat/agent.toml says what a longer one turns into.
 #
 # run-tests-scope: tree
 set -u
@@ -146,6 +149,15 @@ if split:
 else:
     print("ok|every bd update in them that clears an assignee reopens the bead in the same write, or is guarded to an open bead")
 
+# --- 5. Every nudge fits one typed read. ---
+LIMIT = 800
+sizes = sorted((len(nudge.encode("utf-8")), name) for name, nudge in nudges.items())
+over = [(size, name) for size, name in sizes if size > LIMIT]
+for size, name in over:
+    print("bad|%s: the nudge is %d bytes, over the %d a session takes as one typed read" % (name, size, LIMIT))
+if sizes and not over:
+    print("ok|every agent nudge is at most %d bytes, the longest being %s at %d" % (LIMIT, sizes[-1][1], sizes[-1][0]))
+
 # --- 4. The commands the shell runs. ---
 for name in sorted(handbacks):
     print("run|%s|%s" % (name, handbacks[name]))
@@ -169,6 +181,10 @@ esac
 case "$RESULTS" in
   *"clears an assignee"*) ;;
   *) bad "the reader reported nothing about bd update commands that clear an assignee" ;;
+esac
+case "$RESULTS" in
+  *"every agent nudge is at most"* | *"a session takes as one typed read"*) ;;
+  *) bad "the reader reported nothing about the nudges' sizes" ;;
 esac
 # The lines are read back from a checked file, so a loop that reads nothing
 # cannot pass for one that found nothing wrong.

@@ -59,10 +59,13 @@
 # are the creators of PR-finishing work, and each settles a child before it
 # makes the child claimable: rework-child.sh and gate-ensure.sh before they
 # sling it, and pr-facts.sh before it writes its route, which carries no
-# priority. pr-facts.sh also settles an anchor's PR-finishing work when the
-# posture it records turns approved or stops being approved, and on each later
-# pass until all of that work has settled at the rank the anchor's state and
-# posture give.
+# priority. pr-facts.sh also settles an anchor's reviews, reworks and validation
+# passes when the posture it records turns approved or stops being approved,
+# and on each later pass until all of them have settled at the rank the
+# anchor's state and posture give. The landing order (gctk pr reconcile)
+# settles the root of each review run it pours once the pour is made, since the
+# pour gives the run's beads the bead's own priority and its steps are
+# claimable from the start.
 # Exit codes: 0 ok; 1 a read, a write or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.

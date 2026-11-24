@@ -39,6 +39,31 @@
 #     every rule here applies to it in turn, and a library reaches every suite
 #     of every script that sources it. A script sources a path when a `.` or
 #     `source` command, or a `# shellcheck source=` directive, names it;
+#   - a path a Go program is compiled from runs the suites that compile the
+#     program. A program is a main package of the repository's Go module that
+#     a tracked script compiles, on a line outside a comment that runs
+#     `go build` or `go run` on a ./<package> argument, which names the package
+#     by the end of its path. It is compiled from go.mod and go.sum and, for
+#     each package of the module it imports, its own included, from the files
+#     in the package's directory, and below it when the package embeds files,
+#     but the _test.go files. An embed pattern can match only files there, and
+#     go's list of the files a package embeds cannot name one the change
+#     deleted. A ./<package> the module no longer holds as a main
+#     package, as when the change deletes or moves the whole package, is
+#     reached by a changed path in a directory the argument names, by the end
+#     of its path. A program go marks incomplete, because it or a package it
+#     imports has an error, as when the change deletes a package the program
+#     imports or every file one of their embed patterns matches, is reached by
+#     any changed path, since go's list then cannot say what the program is
+#     compiled from. A suite that compiles a reached program runs. Another
+#     script that compiles one counts as changed, so every rule here applies
+#     to it in turn, unless it compiles the program inside a function: then
+#     the function's name, and the name of each function of the same script
+#     that calls it in turn, are named as a changed file's name is, so the
+#     suites that call them run. harness_init in assets/scripts/test-harness.sh
+#     is such a caller, of the function that builds the fake gc. When go
+#     cannot list the module's packages, a changed .go file, go.mod or go.sum
+#     reaches every program;
 #   - every subset includes the tree-wide suites. A suite that scans the tree
 #     can be broken by a file it never names, so it says so in its opening
 #     comment block with the line
@@ -120,6 +145,17 @@
 # a file that fails serially too is a real failure. --no-retry (or --retry 0)
 # reports the raw parallel result. A serial re-run keeps the caller's priority,
 # because it runs alone and cannot crowd the host.
+#
+# A run that exits 0 still fails when its log holds a shell's report of a
+# command it could not find: bash ends such a line with "<name>: command not
+# found", and zsh writes "command not found: <name>". A file counts only the
+# assertions it makes, so a call to a helper it never defines, such as one the
+# shared harness (assets/scripts/test-harness.sh) defines, in a file that does
+# not source the harness, checks nothing and leaves the file exiting 0. Such a
+# run is reported FAIL[127], the status the shell gives the call, and re-runs
+# serially like any other failure. The report fails the run wherever it comes
+# from, a script under test included, so a file that runs a missing command on
+# purpose keeps that command's output out of its log.
 #
 # Every file runs with commit and tag signing off, added after any
 # GIT_CONFIG_COUNT entries the caller already exported. A test that commits
@@ -352,6 +388,180 @@ naming() {
     | grep -vE '^[^:]*:[[:space:]]*#' | cut -d: -f1 | sort -u
 }
 
+# fn_rows <path> — each line of a tracked script that sits inside a function's
+# body, as one "<function>\t<line number>\t<line>" row. A body starts at a line
+# that names a function at its start, as NAME() or function NAME, and ends at
+# the next line that starts with } or ), and a body that closes on the line
+# that names it holds no other line. A here-document's lines are in no body,
+# because what they hold is another script's text. A line this misreads, such
+# as a "<<" inside quotes, can only leave a line outside every body, which
+# counts its whole script as the one that compiles a program.
+fn_rows() {
+  awk '
+    function heredoc(s,    i, rest) {
+      while ((i = index(s, "<<")) > 0) {
+        rest = substr(s, i + 2)
+        if (substr(s, i - 1, 1) == "<" || substr(rest, 1, 1) == "<") { s = substr(rest, 2); continue }
+        strip = (substr(rest, 1, 1) == "-")
+        if (strip) rest = substr(rest, 2)
+        sub(/^[[:space:]]*/, "", rest)
+        if (match(rest, /^["\047]?[A-Za-z_][A-Za-z0-9_]*/)) {
+          hd = substr(rest, RSTART, RLENGTH); gsub(/["\047]/, "", hd); return
+        }
+        s = rest
+      }
+    }
+    hd != "" {
+      line = $0
+      if (strip) sub(/^\t+/, "", line)
+      if (line == hd) hd = ""
+      next
+    }
+    /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/ || /^function[[:space:]]+[A-Za-z_]/ {
+      name = $0; sub(/^function[[:space:]]+/, "", name); sub(/[^A-Za-z0-9_].*$/, "", name)
+      body = $0; sub(/^(function[[:space:]]+)?[A-Za-z0-9_]+[[:space:]]*(\(\))?[[:space:]]*/, "", body)
+      cur = (body ~ /^[{(].*[})][[:space:]]*;?[[:space:]]*(#.*)?$/) ? "" : name
+      heredoc($0)
+      next
+    }
+    /^[})]/ { cur = "" }
+    cur != "" { print cur "\t" NR "\t" $0 }
+    { heredoc($0) }
+  ' "$ROOT/$1"
+}
+
+# go_reach — the Go programs the change reaches, and what compiles them (see
+# the header). A suite that compiles a reached program is added, another script
+# that compiles one outside a function joins CHANGED, and a function that
+# compiles one joins GO_NAMES, with every function of its script that calls it
+# in turn.
+declare -a GO_NAMES=()
+declare -A GO_NAMED=() REACHED=()
+GO_LISTED=1
+GO_SHAPED=0
+go_reach() {
+  local -a builds=()
+  local b file rest n text tok d p fn hit held mains=""
+  local -A main_dir=()
+  while IFS= read -r b; do builds+=("$b"); done < <(
+    git -C "$ROOT" grep -nIE --no-color \
+      '(^|[^A-Za-z0-9_.-])go[[:space:]]+(build|run)[[:space:]].*\./[A-Za-z0-9_]' -- '*.sh' \
+      | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#')
+  [ "${#builds[@]}" -gt 0 ] || return 0
+  for p in "${CHANGED[@]}"; do
+    case "$p" in *.go|go.mod|go.sum) GO_SHAPED=1 ;; esac
+  done
+  if [ -f "$ROOT/go.mod" ] && command -v go >/dev/null 2>&1 \
+    && mains="$(cd "$ROOT" && go list -e -f '{{if eq .Name "main"}}{{.Dir}}{{end}}' ./... 2>/dev/null)"; then
+    while IFS= read -r d; do
+      case "$d" in "$ROOT"/*) main_dir["${d#"$ROOT"/}"]=1 ;; esac
+    done < <(printf '%s\n' "$mains")
+  else
+    GO_LISTED=0
+  fi
+  for b in "${builds[@]}"; do
+    file="${b%%:*}"; rest="${b#*:}"; n="${rest%%:*}"; text="${rest#*:}"
+    hit=0
+    while IFS= read -r tok; do
+      tok="${tok#./}"; tok="${tok%/}"
+      [ -n "$tok" ] || continue
+      if [ "$GO_LISTED" -eq 0 ]; then
+        [ "$GO_SHAPED" -eq 0 ] || hit=1
+        continue
+      fi
+      held=0
+      for d in "${!main_dir[@]}"; do
+        case "$d" in
+          "$tok"|*/"$tok") held=1; if program_reached "$d"; then hit=1; fi ;;
+        esac
+      done
+      if [ "$held" -eq 0 ] && gone_reached "$tok"; then hit=1; fi
+    done < <(printf '%s\n' "$text" \
+      | sed -E 's/^(.*[^A-Za-z0-9_.-])?go[[:space:]]+(build|run)[[:space:]]//' \
+      | grep -oE '(^|[[:space:]"'\''=(])\./[A-Za-z0-9_][A-Za-z0-9_./-]*' | sed -E 's/^[^.]*//')
+    [ "$hit" -eq 1 ] || continue
+    case "$file" in *.test.sh) add "$ROOT/$file"; continue ;; esac
+    fn="$(fn_rows "$file" | awk -F'\t' -v n="$n" '$2 == n { print $1; exit }')"
+    if [ -z "$fn" ]; then
+      [ -n "${IN[$file]:-}" ] || { IN[$file]=1; CHANGED+=("$file"); }
+    else
+      go_callers "$file" "$fn"
+    fi
+  done
+}
+
+# program_reached <directory> — whether the change reaches the program whose
+# main package is in the directory, a path from the root (see the header).
+program_reached() {
+  local d="$1" out line p pd
+  local -A pkg_dirs=() embed_dirs=()
+  if [ -z "${REACHED[$d]:-}" ]; then
+    REACHED[$d]=0
+    if out="$(cd "$ROOT" && go list -e -deps -f '{{if not .Standard}}D {{.Dir}}{{if .Incomplete}}{{"\n"}}I{{end}}{{if .EmbedPatterns}}{{"\n"}}E {{.Dir}}{{end}}{{end}}' "./$d" 2>/dev/null)"; then
+      while IFS= read -r line; do
+        case "$line" in
+          I) REACHED[$d]=1 ;;
+          "D $ROOT") pkg_dirs[.]=1 ;;
+          "D $ROOT/"*) pkg_dirs["${line#"D $ROOT/"}"]=1 ;;
+          "E $ROOT") embed_dirs[.]=1 ;;
+          "E $ROOT/"*) embed_dirs["${line#"E $ROOT/"}"]=1 ;;
+        esac
+      done < <(printf '%s\n' "$out")
+      for p in "${CHANGED[@]}"; do
+        [ "${REACHED[$d]}" -eq 0 ] || break
+        case "$p" in
+          go.mod|go.sum) REACHED[$d]=1; break ;;
+          *_test.go) continue ;;
+        esac
+        case "$p" in */*) pd="${p%/*}" ;; *) pd=. ;; esac
+        if [ -n "${pkg_dirs[$pd]:-}" ]; then
+          REACHED[$d]=1; break
+        fi
+        while [ -z "${embed_dirs[$pd]:-}" ]; do
+          case "$pd" in .) continue 2 ;; */*) pd="${pd%/*}" ;; *) pd=. ;; esac
+        done
+        REACHED[$d]=1; break
+      done
+    elif [ "$GO_SHAPED" -eq 1 ]; then
+      REACHED[$d]=1
+    fi
+  fi
+  [ "${REACHED[$d]}" -eq 1 ]
+}
+
+# gone_reached <package> — whether the change reaches a program whose main
+# package the module no longer holds: a changed path in a directory the
+# ./<package> argument names, by the end of its path (see the header).
+gone_reached() {
+  local p pd
+  for p in "${CHANGED[@]}"; do
+    case "$p" in */*) pd="${p%/*}" ;; *) pd=. ;; esac
+    case "$pd" in "$1"|*/"$1") return 0 ;; esac
+  done
+  return 1
+}
+
+# go_callers <path> <function> — adds the function to GO_NAMES, and every
+# function of the same script that calls it, and those functions' callers in
+# turn. A call is the name on a line of the body that is not a comment. GO_NAMED
+# holds each function read, by its script's path and its name, since two
+# scripts can each define a function of one name.
+go_callers() {
+  local file="$1" f c rows
+  local -a todo=("$2")
+  rows="$(fn_rows "$file")"
+  while [ "${#todo[@]}" -gt 0 ]; do
+    f="${todo[0]}"; todo=("${todo[@]:1}")
+    [ -z "${GO_NAMED["$file:$f"]:-}" ] || continue
+    GO_NAMED["$file:$f"]=1; GO_NAMES+=("$f")
+    while IFS= read -r c; do
+      [ -n "$c" ] && todo+=("$c")
+    done < <(printf '%s\n' "$rows" | awk -F'\t' -v f="$f" '
+      { text = $0; sub(/^[^\t]*\t[^\t]*\t/, "", text) }
+      $1 != f && text !~ /^[[:space:]]*#/ && text ~ ("(^|[^A-Za-z0-9_])" f "([^A-Za-z0-9_]|$)") { print $1 }' | sort -u)
+  done
+}
+
 # The change --affected reads (see the header) becomes the PATHs. git writes the
 # names NUL-separated, so a name with a space, or with a byte git would quote,
 # arrives whole. A diff git cannot read fails the run, because read as an empty
@@ -412,6 +622,10 @@ else
     BY_BASE["${t##*/}"]+="$t"$'\n'
   done < <(git -C "$ROOT" ls-files -z)
 
+  # A script that compiles a Go program the change reaches is changed along
+  # with it, or names the function that compiles it (see the header).
+  go_reach
+
   # Whatever sources a changed file is changed along with it, and so is
   # whatever sources that.
   declare -a NAMES=() frontier=("${CHANGED[@]}")
@@ -425,6 +639,7 @@ else
       IN[$c]=1; CHANGED+=("$c"); frontier+=("$c")
     done < <(sourcers_of "${names[@]}")
   done
+  NAMES+=("${GO_NAMES[@]}")
 
   for p in "${CHANGED[@]}"; do
     case "$p" in /*) abs="$p" ;; *) abs="$ROOT/$p" ;; esac
@@ -670,11 +885,19 @@ launch() {
   PID_IDX[$pid]="$idx"; PID_START[$pid]="$SECONDS"
 }
 
+# The line a shell writes for a command it could not find, as bash and zsh word
+# it (the header says why such a run fails).
+MISSING_COMMAND=': command not found(: |$)'
+called_missing_command() { # <run-index>
+  grep -qE -- "$MISSING_COMMAND" "$LOGDIR/$1.log" 2>/dev/null
+}
+
 finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
   [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
+  [ "$rc" -ne 0 ] || ! called_missing_command "$idx" || rc=127
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -700,6 +923,7 @@ rerun_serial() {
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
   [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
+  [ "$rc" -ne 0 ] || ! called_missing_command "$idx" || rc=127
   return "$rc"
 }
 
@@ -761,10 +985,11 @@ if [ "$FAIL" -gt 0 ]; then
     lines=$(wc -l <"$log" 2>/dev/null || echo 0)
     if [ "$lines" -gt 200 ]; then
       # A failing assertion can sit anywhere in a long log, so surface the
-      # framework's FAIL markers before the tail — a plain tail of an "ok"-heavy
-      # file hides the one line that matters.
+      # framework's FAIL markers, and any command a shell could not find,
+      # before the tail — a plain tail of an "ok"-heavy file hides the one line
+      # that matters.
       printf '(%s lines; failing markers, then tail)\n' "$lines"
-      grep -nE 'FAIL|not ok|✗' "$log" | head -40
+      grep -nE "FAIL|not ok|✗|$MISSING_COMMAND" "$log" | head -40
       printf '  --- tail ---\n'
       tail -n 25 "$log"
     else

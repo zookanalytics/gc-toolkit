@@ -66,9 +66,16 @@ said, and write the change you propose for each gap:
   cannot, so it is a leading indicator and not the signal. The signal must also
   be readable soon after the work lands, not only once data that does not exist
   yet arrives;
-- boundaries on ground another epic owns until it closes, whatever its status.
-  The list always includes this epic, so a run without it has not answered:
+- boundaries that take in ground another epic owns, until that epic closes,
+  whatever its status. This read lists the boundaries of every epic not yet
+  closed, to find that overlap and nothing else: being on the list gives an
+  epic no line in this one's boundaries. The list always includes this epic,
+  so a run without it has not answered:
   `gc bd list -t epic --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json | jq -r '.[] | "\(.id) \(.metadata.epic_boundaries // "none")"'`;
+- a boundary line for work nobody who reads the hypothesis would mistake for the
+  epic's own, such as one drawn against each other epic or one for work that
+  only shares code with the epic's, which the change you propose removes
+  (`docs/epics.md`, "Belongs and Boundaries");
 - each proposal recorded since the last review, and anything the evidence below
   contradicts.
 
@@ -241,7 +248,7 @@ gc bd list --id "$CONVERSATION" --all --json | jq -r '[.[0].dependencies[]? | se
 ```bash
 gc bd update "$EPIC" --set-metadata epic_hypothesis="<the sentence: for whom, what changes, and the signal that shows it worked>" \
   --set-metadata epic_handle="<three to five words>" \
-  --set-metadata epic_boundaries="<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --set-metadata epic_boundaries="<the axis it is cut on, and the work a reader could mistake for its own, with where that lives>" \
   --set-metadata epic_closure_condition="<the checks a person runs to answer the hypothesis>" \
   --set-metadata epic_indicators="<the signals watched while it is in flight>" \
   --set-metadata epic_ruling=<continue|shift|close> \
@@ -359,7 +366,11 @@ one. Each item goes one of three ways:
   itself, and a run or PR in flight goes on under it:
   `gc bd update <bead> --parent <delivery-or-epic>`. An edge holds only within
   one store, so work whose epic is in another rig's store is filed again there,
-  and this bead closes as re-homed onto the new one. With a PR in flight, that
+  and this bead closes as re-homed onto the new one. A bead here that waits on
+  it can wait on nothing there, so first give each that needs the work a human
+  gate that names the new bead and end its wait on this one, as the `work`
+  skill's close says: the writer refuses the close while one still waits, a
+  retired PR's anchor included. With a PR in flight, that
   close is the PR's retirement on its own call, with
   `--retire re-homed --successor <new bead>`, and otherwise it is the
   disposition writer:
