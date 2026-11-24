@@ -22,16 +22,15 @@ script's `--help` lists its flags.
 ## File new work
 
 File a bead for the work. The worker reads its description to learn what to
-do. New work waits for the operator's placement, so its create carries Gas
-City's `hold:mayor` label, which files it into the placement queue, where a
-first reaction reads it and the po's backlog refinement places it:
+do. File new work held for the operator's placement, with Gas City's
+`hold:mayor` label in its create:
 
 ```bash
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --labels hold:mayor --json
 ```
 
-Leave the label off only for work you send now (below), and add
-`--parent <epic>` when an epic applies. A bead that already exists is held with
+Leave the label off only for work you send now (below). Add `--parent <epic>`
+when an epic applies. A bead that already exists is held with
 `gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
 Filing starts nothing: afterwards, send the bead, make it wait (the waits
 skill), or leave it held for the operator to place.
