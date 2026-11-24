@@ -652,7 +652,8 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed, held b
 	switch {
 	case res.Code == 3:
 		// gc sling exits 3 only when a live run of the same formula works the
-		// bead already, such as the closer an earlier run of this exit slung.
+		// bead already: a closer that started after this exit read the
+		// subject, since one live then lands the headline alone.
 		r.say("a validating closer already drives %s, so no second is slung: %s", d.Bead, oneLine(res.Output))
 	case res.Failure() != "":
 		return out, fmt.Errorf("could not sling %s to the validating closer %s (gc sling --on %s: %s). The close brief and the headline stand. When gc sling refused the route, as it refuses a pool the city does not configure and a store the pool does not read, run this exit again with --route naming a pool the city configures; otherwise clear the cause and re-run this command", d.Bead, d.Route, closer, res.Failure())
@@ -689,15 +690,15 @@ func (r *Reactions) handOver(d *Dispose, who, form string) error {
 }
 
 // sentOn names what sent the subject on while this reaction ran, empty when
-// nothing did: a live run of a formula that no exit pours on its subject, any
-// but a first reaction's and the validating closer's, an assignee, a route and
-// an arm. It passes over this exit's own hand-off to the named agent who, in
-// its form, once the subject carries a headline, since the exit writes it
-// after the headline and a step can still stop the exit after it: the
-// refinery's assignee rides the headline's write, and the nudge follows the
-// mechanik's route. Every other route or arm an exit writes is its last write,
-// so a re-run that finds one has nothing of its own left to finish, and one
-// that another actor wrote is never released.
+// nothing did: a live run of any formula but a first reaction's, an assignee,
+// a route and an arm. It passes over this exit's own hand-off to the named
+// agent who, in its form, once the subject carries a headline, since the exit
+// writes it after the headline and a step can still stop the exit after it:
+// the refinery's assignee rides the headline's write, and the nudge follows
+// the mechanik's route. Every other route, arm or closer an exit sends is its
+// last write, so a re-run that finds one has nothing of its own left to
+// finish, and one that another actor sent, such as a placement's closer, is
+// never released.
 func (r *Reactions) sentOn(subject *ledger.Record, who, form string) (string, error) {
 	own := func(in, v string) bool { return form == in && v == who && concluded(subject) }
 	var by []string
@@ -715,7 +716,7 @@ func (r *Reactions) sentOn(subject *ledger.Record, who, form string) (string, er
 		return "", err
 	}
 	for _, run := range runs {
-		if run.Live && run.Formula != Formula && run.Formula != closer {
+		if run.Live && run.Formula != Formula {
 			by = append(by, "live run "+run.Root)
 		}
 	}

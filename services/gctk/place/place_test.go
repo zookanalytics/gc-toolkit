@@ -617,3 +617,64 @@ func TestAReactionExitLeavesAPlacementThatRacedIt(t *testing.T) {
 			row.Labels, row.Metadata["gc.takeaway"])
 	}
 }
+
+// A placement that sends the bead to its validating closer while a first
+// reaction runs is a dispatch like any other. Whichever exit the reaction then
+// takes, the close exit included, lands its headline alone: the placement's
+// closer runs on, its lift stays, and no wait, gate, close brief or second
+// closer is written.
+func TestAReactionExitLeavesAPlacedCloser(t *testing.T) {
+	for _, exit := range []*rx.Dispose{
+		{Disposition: rx.Actionable, Route: pool},
+		{Disposition: rx.Blocked, WaitingOn: []string{"tk-epic"}},
+		{Disposition: rx.Close, Route: pool},
+		{Disposition: rx.Ruling},
+		{Disposition: rx.Recommend, RecommendedFormula: "mol-x"},
+	} {
+		t.Run(exit.Disposition, func(t *testing.T) {
+			w := newWorld(t)
+			liveRun(w.store, "tk-new", "tk-react", "mol-first-reaction")
+			w.store.Put(fake.Bead{ID: "tk-react-step", Status: "in_progress", Assignee: "reaction-session",
+				Metadata: map[string]string{"gc.root_bead_id": "tk-react", "gc.step_ref": "mol-first-reaction.react"}})
+			tk := &takeaway.Takeaways{Ledger: w.p.Ledger, City: reactionCity{w.rt, &rtfake.Roster{}}, Scripts: "/pack/scripts",
+				Self: []string{"reaction-session"}, Now: w.p.Now}
+			tk.Disarm = func(id, reason string) (string, error) { return "", nil }
+			r := &rx.Reactions{Ledger: w.p.Ledger, Runtime: w.rt, Rig: "gc-toolkit", Takeaway: tk.Take}
+			if refused, err := r.Check("tk-new", "tk-react"); err != nil || refused != nil {
+				t.Fatalf("the reaction's check: %v, %v; want it to react", refused, err)
+			}
+			sling, script := w.rt.OnSling, w.rt.OnScript
+			w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
+				liveRun(w.store, s.Bead, "tk-placed-closer", s.Formula)
+				return sling(s)
+			}
+			w.rt.OnScript = func(c rtfake.Call) gascity.Result {
+				if c.Name == "human-gate.sh" {
+					return gascity.Result{Output: "tk-gate"}
+				}
+				return script(c)
+			}
+			if _, err := w.p.Place(Request{Bead: "tk-new", Standalone: true, Formula: "mol-validate-close"}); err != nil {
+				t.Fatalf("the placement on the closer: %v", err)
+			}
+			exit.Bead, exit.Run, exit.Takeaway, exit.Reason = "tk-new", "tk-react", "reaction exit", "fixture"
+			_, err := r.Dispose(exit)
+			for _, c := range w.rt.Scripts() {
+				if c.Name == "run-cancel.sh" || c.Name == "human-gate.sh" {
+					t.Errorf("the %s exit ran %s %s", exit.Disposition, c.Name, strings.Join(c.Args, " "))
+				}
+			}
+			if err != nil {
+				t.Fatalf("the %s exit after the placement: %v", exit.Disposition, err)
+			}
+			if s := w.rt.Slings(); len(s) != 1 {
+				t.Errorf("slings %+v; want the placement's closer alone", s)
+			}
+			row := w.row("tk-new")
+			if row.Metadata["gc.takeaway"] != "reaction exit" || slices.Contains(row.Labels, "hold:mayor") ||
+				len(row.Edges) != 0 || strings.Contains(row.Notes, "Close brief") {
+				t.Errorf("after the %s exit: %+v; want its headline alone beside the placement", exit.Disposition, row)
+			}
+		})
+	}
+}

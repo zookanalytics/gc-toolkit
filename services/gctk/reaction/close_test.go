@@ -15,7 +15,8 @@ import (
 // is; a closer route gc sling refuses leaves the brief and the headline, says
 // what to do, and lands when run again with a pool the city configures; a
 // brief or a headline that does not land dispatches nothing; a failed sling
-// names gc sling's reason; and a closer already live is the subject's closer.
+// names gc sling's reason; and a closer gc sling finds already live is the
+// subject's closer.
 func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.dispose("tk-sub", "--disposition", "close", "--reason", "already fixed, nothing to merge", "--takeaway", "close: fixed in #123", "--run", root)
@@ -90,9 +91,9 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	w = newWorld(t)
 	w.slingCode = 3
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
-	wantCode(t, code, 0, err, "(CLOSEREOFFER) a close whose closer is already live")
-	w.saidHas("a validating closer already drives tk-sub, so no second is slung", "(CLOSEREOFFER) naming it")
-	w.saidHas("tk-closer-root", "(CLOSEREOFFER) with the run gc sling named")
+	wantCode(t, code, 0, err, "(CLOSELIVE) a close whose closer gc sling finds already live")
+	w.saidHas("a validating closer already drives tk-sub, so no second is slung", "(CLOSELIVE) naming it")
+	w.saidHas("tk-closer-root", "(CLOSELIVE) with the run gc sling named")
 }
 
 // A close whose subject's job ends once other beads land holds the subject on
