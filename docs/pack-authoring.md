@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text or a skill makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — where a rule for a step's agent is written, how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text or a skill makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -14,7 +14,8 @@ convention rests on one of them, it links there.
 ## Scope
 
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
-agents follow where Gas City leaves the choice to the pack: how a step closes
+agents follow where Gas City leaves the choice to the pack: where a rule for a
+step's agent is written, how a step closes
 and how a run declines, how step text and skills reach a pack script, why each
 shell block in step text or a skill makes one call, how a landed pack change is
 confirmed live, the names the pack's artifacts carry, how one text names another's step,
@@ -26,6 +27,28 @@ is [gascity/packs.md](gascity/packs.md); agent variants, identity and session
 lifecycle are [gascity/agent-types.md](gascity/agent-types.md). Each component's own job
 is its row in [component-model.md](component-model.md) §4, and how work moves
 end to end is [architecture.md](architecture.md).
+
+## A rule for a step's agent is written in that step
+
+The agent working a step is given that step's text and nothing else of the
+formula
+([gascity/packs.md](gascity/packs.md#a-steps-agent-is-given-its-step-bead-not-the-formulas-description)),
+and the pack's claim read, `assets/scripts/claim-context.sh`, adds the work
+bead and never the formula's description. So a formula's description says what
+the formula does, for the people who read it. A rule the agent must follow at a
+step is written in that step's text, in the skill the step loads, or in the
+agent's prompt when it binds every step that agent works, and a rule the
+description names is one written there.
+
+A rule several steps carry is the same text in each, a marked region between
+`<!-- >>> <name> -->` and `<!-- <<< <name> -->`, and a test holds every copy to
+that text. `assets/scripts/review-methods.test.sh` holds the review formulas'
+regions.
+
+A patrol is poured as a root-only wisp, which materializes no step beads. Its
+agent holds the wisp, whose description is the formula's, and reads each
+step's text from the formula as it reaches it
+([Patrol agents run a patrol-wisp cycle](#patrol-agents-run-a-patrol-wisp-cycle)).
 
 ## A step closes through `claim-close.sh`
 
