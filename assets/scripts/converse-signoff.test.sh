@@ -150,16 +150,17 @@
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
-#             printed with its link, read before the first write; one merging,
-#             working or needing attention asks for no Approve yet; a PR on the
-#             pending record is answered for and read the same way; one whose
-#             status names an approval standing beside a request for changes
-#             asks for no Approve, and its line names whose request holds it; a
-#             request beside no approval is named on the line that asks for it;
-#             a status with no conditions asks for it; several are counted in the
-#             headline and named in the reminder's actions, so it stays under the
-#             real cap; a host with no timeout tool makes no status read; a PR
-#             the ruling reworks or retires is not named
+#             printed with its link, read before the first write and from the
+#             bead as it stands, past a supervisor's copy that trails it; one
+#             merging, working or needing attention asks for no Approve yet; a
+#             PR on the pending record is answered for and read the same way;
+#             one whose status names an approval standing beside a request for
+#             changes asks for no Approve, and its line names whose request
+#             holds it; a request beside no approval is named on the line that
+#             asks for it; a status with no conditions asks for it; several are
+#             counted in the headline and named in the reminder's actions, so it
+#             stays under the real cap; a host with no timeout tool makes no
+#             status read; a PR the ruling reworks or retires is not named
 #
 # Runs the REAL converse-signoff.sh over the compiled fake gc of
 # test-harness.sh, linked into a stub pack beside the libraries it sources and
@@ -215,9 +216,11 @@ GH
 # `pr status <bead> --json` answers the status $ST/status-<bead> holds, or
 # needs-review when none is set, and the conditions array
 # $ST/conditions-<bead> holds, as a PR on the pending record carries them,
-# with no conditions key when none is set, as on the old record. Every call is
-# logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
-# every status read.
+# with no conditions key when none is set, as on the old record. A call made
+# without GC_NO_API=1 answers the status $ST/cached-status-<bead> holds instead,
+# when one is set, as gctk's read of the supervisor's copy answers with a status
+# that trails the bead. Every call is logged to $GCTK_CALLS with how many writes
+# came before it, and GCTK_DOWN fails every status read.
 #
 # `reaction accept` leaves the store as Accept's writer would, per ACCEPT_DOES:
 # take (the default) answers each open first-reaction gate on the subject with
@@ -259,6 +262,7 @@ case "${1:-} ${2:-}" in
     [ -z "$_miss" ] || exit 4 ;;
   "pr status")
     _s=needs-review; [ -f "$ST/status-$3" ] && _s=$(<"$ST/status-$3")
+    if [ "${GC_NO_API:-}" != 1 ] && [ -f "$ST/cached-status-$3" ]; then _s=$(<"$ST/cached-status-$3"); fi
     _c=""; [ -f "$ST/conditions-$3" ] && _c=",\"conditions\":$(<"$ST/conditions-$3")"
     printf '{"status":"%s","held":[],"reasons":[]%s}\n' "$_s" "$_c" ;;
   "bead disarm")
@@ -1663,6 +1667,14 @@ said "(APPROVE-RERUN)" owed
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "design approved." "${RULED[@]}" --no-rework
 said "(APPROVE-PERIOD)" owed
+
+# The status comes from the bead as it stands. With the suite's GC_NO_API=1
+# cleared for the run, the supervisor's copy still reads merging while the bead
+# needs review, and the headline asks for the Approve.
+open_pr; pr_at tk-anc 77; printf merging > "$ST/cached-status-tk-anc"
+GC_NO_API='' run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-STORE) a ruling whose PR's supervisor copy trails the bead signs off"
+said "(APPROVE-STORE) the copy reads merging and the bead needs review:" owed
 
 for _st in merging working needs-attention; do
     open_pr; pr_at tk-anc 77; pr_status tk-anc "$_st"
