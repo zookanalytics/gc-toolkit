@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Test for lint.sh — the rig's shell, step text and Go lint entry point, which
-# also prints the warrants a branch touches.
+# Test for lint.sh — the rig's lint entry point for shell, step and skill text,
+# and Go, which also prints the warrants a branch touches.
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
@@ -575,20 +575,21 @@ grep -q 'warrant list missing' "$TMP/err" \
 make_warrants 0
 
 # --- W: the step-text lint gets every file, and its verdict is the gate's. ---
-# It picks the formulas out itself, so lint.sh hands it the whole list.
+# It picks the formulas and the skill files out itself, so lint.sh hands it the
+# whole list.
 make_wrapper 0; make_go 0; make_step_text 0; : > "$TMP/step.log"
 run_sut subject.sh formulas/mol-x.toml
 [ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
 grep -qx 'stub-step-text ran: subject.sh formulas/mol-x.toml' "$TMP/step.log" \
   && ok "step text: lint-step-text.sh received every file lint.sh was handed" \
   || bad "step text: lint-step-text.sh did not receive the files: $(cat "$TMP/step.log")"
-grep -q 'step text: clean' "$TMP/out" && ok "step text clean: reported clean" \
+grep -q 'step and skill text: clean' "$TMP/out" && ok "step text clean: reported clean" \
   || bad "step text clean: no clean line in the report"
 
 make_step_text 1
 run_sut subject.sh
 [ "$rc" -eq 1 ] && ok "step text finding: exit 1" || bad "step text finding: expected 1, got $rc"
-grep -q 'step text: FAIL — a formula change adds a procedure' "$TMP/out" \
+grep -q 'step and skill text: FAIL — a change adds a procedure' "$TMP/out" \
   && ok "step text finding: report names the finding" \
   || bad "step text finding: report is silent about it"
 
