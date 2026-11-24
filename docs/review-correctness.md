@@ -28,21 +28,25 @@ state where a rule that binds only gc-toolkit's own repository lives.
 
 The repository has two test commands, the Makefile's targets, and
 `tools/test.sh` says what each runs. `make test` runs every test: the Go tests,
-`go test ./...` from the root, the helm web app's typecheck, tests and build,
-whose output must match the committed `dist/`, and every `*.test.sh`.
-`make test-affected` runs the tests a change since `origin/main` can affect:
-the Go tests again, the web checks when the change touches `services/helm`,
-and the suites `tools/run-tests.sh --affected origin/main` selects, by the
-rules in that script's header.
+`go test -race -shuffle=on ./...` from the root, the helm web app's typecheck,
+tests and build, whose output must match the committed `dist/`, and every
+`*.test.sh`. It also prints the Go tests' statement coverage, which fails
+nothing. `make test-affected` runs the tests a change since `origin/main` can
+affect: the Go tests again, the web checks when the change touches
+`services/helm`, and the suites `tools/run-tests.sh --affected origin/main`
+selects, by the rules in that script's header. The Makefile's `make lint` runs
+the lint below over the change since `origin/main`, and `make build` compiles
+every Go package.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
 declares.
 
-- The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
-  the files the branch changes, then `tools/lint.sh`, which checks the step text
-  of the formulas among them and runs shellcheck and golangci-lint over the
-  whole tracked tree. It runs `affected_tests_command`, or `test_command` where
-  the rig declares no affected one, through `gctk rig`, which records the
-  result and the command at the commit it ran at.
+- The polecat's self-review runs `lint_command`, the lint `make lint` runs:
+  `tools/lint-learned.sh` over the files the branch changes, then
+  `tools/lint.sh`, which checks the step text of the formulas among them and
+  runs shellcheck and golangci-lint over the whole tracked tree. It runs
+  `affected_tests_command`, or `test_command` where the rig declares no
+  affected one, through `gctk rig`, which records the result and the command
+  at the commit it ran at.
 - The refinery runs the same `lint_command` at merge, and no tests.
 - CI runs `make test` on Linux and on macOS (`.github/workflows/tests.yml`), as
   the checks `test` and `test-macos`, golangci-lint for Linux and for macOS
@@ -255,9 +259,12 @@ each file needing it carries as a copy.
 self-review and at merge: go vet's analyzers, errcheck, ineffassign,
 staticcheck, unused and gofmt's check, as the root's `.golangci.yml` sets them,
 at the release `.golangci-lint-version` names. It type-checks test files and
-runs none of them. Both test commands run `go test ./...` from the root, so CI
-runs every Go test, and so does a self-review whose test command runs either
-one. The shell suites drive gctk end to end, because each suite whose scripts
+runs none of them. Both test commands run `go test -race -shuffle=on ./...`
+from the root, so CI runs every Go test, and so does a self-review whose test
+command runs either one. A Go test that fails only under the race detector, or
+only in some order of its package's tests, shows a defect in the test or in the
+code it tests, as [testing.md](testing.md#a-go-test-under-the-race-detector-and-in-any-order)
+says. The shell suites drive gctk end to end, because each suite whose scripts
 reach `lifecycle.sh` builds gctk from the checkout (`harness_build_gctk` in
 `assets/scripts/test-harness.sh`), and the affected subset runs those suites
 for a change to any package gctk is built from. No suite builds or runs

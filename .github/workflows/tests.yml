@@ -19,8 +19,9 @@ name: tests
 # The tests are hermetic: each stubs gc/bd and works in its own temp dir, so a
 # runner needs no gc binary and no running city. They need bash 5, git, jq 1.8
 # or later, timeout(1), flock(1), lsof, a Python with tomllib, a Ruby with
-# Psych, make, the Go toolchain the setup-go step installs, and the Node the
-# setup-node step installs. Psych is the YAML parser Ruby ships, and
+# Psych, make, the Go toolchain the setup-go step installs, the Node the
+# setup-node step installs, and on Linux a C compiler, since Go's race detector
+# needs cgo there. Psych is the YAML parser Ruby ships, and
 # action-pins.test.sh reads the workflows with it. The Linux job installs its
 # jq and takes the rest from ubuntu-latest; the macOS job installs what its
 # image lacks.
@@ -34,7 +35,8 @@ name: tests
 # artifact suite-times-<job>, whether the tests passed or failed. pr-size.yml
 # reads them when a pull request's run of this workflow ends in success or
 # failure, for the size comment's section on the suite's time (suite-time.sh).
-# They fail no check.
+# They fail no check. make test itself adds the Go tests' coverage total to the
+# job summary when they pass, which fails no check either.
 
 on:
   pull_request:
