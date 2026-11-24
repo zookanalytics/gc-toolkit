@@ -172,7 +172,7 @@ no warrant.
     only by an operator, either with `gc dolt compact --gc-only --only-db`
     against the live server or with the offline `dolt gc` procedure
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
