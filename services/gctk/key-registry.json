@@ -28,7 +28,7 @@
     "readers": [
       "reaction"
     ],
-    "doc": "The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as work in flight."
+    "doc": "The check a review lane of the old review path runs. The unmarked list passes over a bead that carries one, as work in flight."
   },
   {
     "name": "check_set",
@@ -143,6 +143,14 @@
       "reaction"
     ],
     "doc": "The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix."
+  },
+  {
+    "name": "finding.scope",
+    "type": "string",
+    "readers": [
+      "reaction"
+    ],
+    "doc": "Which patrol filed a patrol finding, which patrol-finding.sh writes in the create that files it. It is a mark the first reaction's sweep reads: a finding that carries one and no headline takes a reaction, so a finding whose first sling failed gets one on the next sweep."
   },
   {
     "name": "fold_target",
@@ -271,7 +279,7 @@
       "review",
       "waits"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. A first reaction takes no bead whose kind is workflow, scope or spec, a topology root."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. The unmarked list passes over a bead whose kind is workflow, scope or spec, a topology root."
   },
   {
     "name": "gc.outcome",
@@ -333,7 +341,7 @@
       "review",
       "waits"
     ],
-    "doc": "The workflow root a step was poured under. A review run's outputs are on the beads that name its root. A first reaction takes no bead that names a root, which is a step."
+    "doc": "The workflow root a step was poured under. A review run's outputs are on the beads that name its root. The unmarked list passes over a bead that names a root, which is a step."
   },
   {
     "name": "gc.routed_to",
@@ -362,7 +370,7 @@
     "readers": [
       "reaction"
     ],
-    "doc": "The id of the formula step a step bead carries out, which Gas City writes at the pour. A first reaction takes no step."
+    "doc": "The id of the formula step a step bead carries out, which Gas City writes at the pour. The unmarked list passes over a step."
   },
   {
     "name": "gc.step_ref",
@@ -372,13 +380,13 @@
       "review",
       "waits"
     ],
-    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context. A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, which says the output the step writes. A first reaction takes no bead that names the step it carries out."
+    "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context. A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, which says the output the step writes. The unmarked list passes over a bead that names the step it carries out."
   },
   {
     "name": "gc.takeaway",
     "type": "string",
     "owner": "takeaway",
-    "doc": "A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged. Absent, nothing has concluded on the bead."
+    "doc": "A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged, and its check refuses a held bead that carries one. Absent, nothing has concluded on the bead."
   },
   {
     "name": "gc.takeaway_at",
@@ -390,7 +398,7 @@
     "name": "gc.takeaway_by",
     "type": "string",
     "owner": "takeaway",
-    "doc": "Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The first reaction's sweep passes over a bead that carries one, as one already triaged."
+    "doc": "Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The first reaction's sweep passes over a bead that carries one, as one already triaged, and its check refuses a held bead that carries one."
   },
   {
     "name": "gc.takeaway_settled",
@@ -685,7 +693,7 @@
       "reaction",
       "review"
     ],
-    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane."
+    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. A standing kind and a feedback pattern take no first reaction, and the unmarked list passes over them and over a review lane."
   },
   {
     "name": "withdraw_head",
@@ -699,6 +707,6 @@
     "readers": [
       "reaction"
     ],
-    "doc": "The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that carries one, as work in flight."
+    "doc": "The worktree a bead's work is built in, which work-setup.sh writes. The unmarked list passes over a bead that carries one, as work in flight."
   }
 ]

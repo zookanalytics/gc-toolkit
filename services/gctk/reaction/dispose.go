@@ -256,12 +256,17 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		return out, fmt.Errorf("%w: %s is %s, and an exit writes only to an open subject, so nothing was written and there is nothing for this reaction to dispose", errNotOpen, d.Bead, status)
 	}
 
+	// A subject that carries hold:mayor arrived in the placement queue, where
+	// its filer put it, and its placement is the po's and the operator's.
+	arrivedHeld := gascity.HasHold(subject.Labels(), gascity.HoldMayor)
+
 	// Intake: only a member of an epic, PR-finishing work, the tracker of a
 	// failure on a base branch or a confirmed emergency enters a pool
-	// (docs/steering.md). The pool route this exit
-	// would write is the actionable exit's route or the blocked exit's
-	// --then-route. A named agent's own work is no pool route, and the close
-	// exit's closer shrinks the queue rather than adding to it.
+	// (docs/steering.md), and of a subject that arrived held, only a confirmed
+	// emergency. The pool route this exit would write is the actionable exit's
+	// route or the blocked exit's --then-route. A named agent's own work is no
+	// pool route, and the close exit's closer shrinks the queue rather than
+	// adding to it.
 	poolTarget := ""
 	switch {
 	case d.Disposition == Actionable && d.Assign == "":
@@ -279,7 +284,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 				holdWhy = "--emergency was not confirmed: " + why
 			}
 		}
-		if admit == "" {
+		if admit == "" && !arrivedHeld {
 			parents, err := subject.Parents()
 			if err != nil {
 				return out, fmt.Errorf("could not read %s's parent (%v), so intake cannot decide; nothing was written", d.Bead, err)
@@ -294,13 +299,20 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 				admit, admitWhy = "tracker", "the tracker of "+failure+", a failure on a base branch"
 			}
 		}
-		if admit != "" {
+		switch {
+		case admit != "":
 			note := ""
 			if holdWhy != "" {
 				note = " (" + holdWhy + ")"
 			}
 			r.say("intake admits %s to %s: %s%s", d.Bead, poolTarget, admitWhy, note)
-		} else {
+		case arrivedHeld:
+			note := ""
+			if holdWhy != "" {
+				note = " (" + holdWhy + ")"
+			}
+			r.say("intake leaves %s held for placement instead of %s: it arrived held%s", d.Bead, poolTarget, note)
+		default:
 			if holdWhy != "" {
 				holdWhy += "; "
 			}
@@ -427,7 +439,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	}
 
 	if d.Disposition == Close {
-		return r.closeExit(d, waiting, out)
+		return r.closeExit(d, waiting, out, arrivedHeld)
 	}
 
 	gate := ""
@@ -488,23 +500,54 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// A requested arm is part of the write-back: held with no arm, the bead
 	// would wait on its edge with nothing to route it once the wait lifts. A
 	// bead intake held is armed by nothing, since its dispatch is the
-	// placement sitting's.
+	// placement sitting's. A subject that arrived held is lifted out of the
+	// queue first, since the deferred-dispatch pass fires no arm on a held
+	// bead.
 	if d.Disposition == Blocked && d.ThenRoute != "" && admit != "" {
+		if arrivedHeld {
+			if err := r.lift(d, "the dispatch to "+d.ThenRoute+" armed for when its wait lifts"); err != nil {
+				return out, err
+			}
+		}
 		if _, err := r.Arm(arm.Request{ID: d.Bead, Target: d.ThenRoute, Reason: "first reaction: " + d.Reason}); err != nil {
 			return out, fmt.Errorf("the blocked exit on %s did not land: the dispatch to %s for when its wait lifts was not armed (%v), so nothing would route %s once the wait lifts. The headline, the release and the hold stand. When the arm refused %s because the city configures no such pool, run this exit again with --then-route naming one it configures. Otherwise clear the cause and re-run this command: a re-run resumes rather than refusing", d.Bead, d.ThenRoute, err, d.Bead, d.ThenRoute)
 		}
 		r.say("armed the dispatch to %s for when the wait lifts", d.ThenRoute)
 	}
 
+	// A hand-off of a subject that arrived held lifts it out of the queue,
+	// since Gas City serves a held bead to no hook. The refinery's assignee
+	// rode the takeaway's release, which lifts the hold of a bead it sends on;
+	// the mechanik's route is the hand-off's own sling, so the lift comes
+	// before it.
 	if who != "" {
+		if arrivedHeld && form == formRoute {
+			if err := r.lift(d, "the hand-off to "+who); err != nil {
+				return out, err
+			}
+		}
 		if err := r.handOver(d, who, form); err != nil {
 			return out, err
 		}
 	}
 
+	// A subject that arrived held stays held, and gets intake's note only for
+	// an emergency its check did not confirm, which nothing else records.
+	if poolTarget != "" && admit == "" && arrivedHeld {
+		if holdWhy != "" {
+			w := r.Ledger.Write(d.Bead)
+			w.Note("## Intake (first reaction, " + intakeAt + ")\nLeft held for placement instead of reaching " + poolTarget + ": " + holdWhy + ".")
+			if err := r.Ledger.Commit(w); err != nil {
+				return out, fmt.Errorf("the %s exit on %s did not land. The headline and the release stand, and %s is still held, but intake's note saying why the emergency was not confirmed did not (%v). Clear the cause and re-run this command", d.Disposition, d.Bead, d.Bead, err)
+			}
+		}
+		return out, nil
+	}
+
 	// Intake's hold is the exit's last write, because the check a re-offered
-	// reaction runs first refuses a held bead: a worker cut off before it
-	// lands meets a subject the check passes, and re-runs this exit to the end.
+	// reaction runs first refuses a held bead that carries a headline: a
+	// worker cut off before it lands meets a subject the check passes, and
+	// re-runs this exit to the end.
 	if poolTarget != "" && admit == "" {
 		reason := "Held for placement instead of reaching " + poolTarget + ": " + holdWhy + "."
 		w := r.Ledger.Write(d.Bead)
@@ -525,8 +568,11 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 // the operator. The close brief and the headline land before any closer is
 // dispatched, so a closer that runs at once finds them. A subject whose job
 // ends once other beads land waits on each, and the closer is armed for when
-// they have closed; any other is slung to the closer now.
-func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Disposed, error) {
+// they have closed; any other is slung to the closer now. A subject that
+// arrived held has its hold lifted before the closer is sent, since the closer
+// is its next actor and the deferred-dispatch pass fires no arm on a held
+// bead.
+func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed, held bool) (Disposed, error) {
 	heldOn := ""
 	if len(waiting) > 0 {
 		heldOn = "held on " + strings.Join(waiting, ",") + ", "
@@ -545,10 +591,20 @@ func (r *Reactions) closeExit(d *Dispose, waiting []string, out Disposed) (Dispo
 				return out, fmt.Errorf("could not hold %s on %s (%v), so the closer is not armed, since the deferred-dispatch order would sling it before %s closes. bd keeps one edge type per pair of beads, so an edge of another type %s already has onto %s refuses this one: remove it with gc bd dep remove %s %s%s. Clear the cause and re-run this command", d.Bead, h, err, h, d.Bead, h, d.Bead, h, r.dbFlag())
 			}
 		}
+		if held {
+			if err := r.lift(d, "the validating closer armed for when "+strings.Join(waiting, ",")+" closes"); err != nil {
+				return out, err
+			}
+		}
 		if _, err := r.Arm(arm.Request{ID: d.Bead, Target: d.Route, Formula: closer, Reason: "first reaction close: " + d.Reason}); err != nil {
 			return out, fmt.Errorf("the close brief, the headline and the holds stand on %s, but the validating closer was not armed (%v). A wait onto a bead another store holds is an edge that holds nothing, and the arm refuses a bead that carries one: remove it (gc bd dep remove %s <that bead>%s) and put %s's close to the operator with --disposition ruling. Otherwise clear the cause and re-run this command", d.Bead, err, d.Bead, r.dbFlag(), d.Bead)
 		}
 		return out, nil
+	}
+	if held {
+		if err := r.lift(d, "the validating closer on "+d.Route); err != nil {
+			return out, err
+		}
 	}
 	res := r.Runtime.Sling(gascity.Sling{Rig: r.Rig, Target: d.Route, Bead: d.Bead, Formula: closer})
 	switch {
@@ -587,6 +643,38 @@ func (r *Reactions) handOver(d *Dispose, who, form string) error {
 		}
 	}
 	r.say("handed %s to %s", d.Bead, who)
+	return nil
+}
+
+// lift removes every spelling of hold:mayor the subject carries now, in one
+// write, for the next actor this exit sends it to, which to names. Gas City
+// reads the label trimmed and in any case, and bd removes a label only by its
+// exact text, so the labels are read again here. A subject that carries none
+// is not written. A lift that does not land stops the exit, and a re-run
+// resumes it, since the check a re-offered reaction runs passes over the
+// headline its own run wrote.
+func (r *Reactions) lift(d *Dispose, to string) error {
+	rows, err := r.Ledger.Find(ledger.ByID(d.Bead))
+	if err != nil {
+		return fmt.Errorf("the %s exit on %s did not land: its labels could not be read again (%v), so hold:mayor was not lifted for %s, and Gas City serves a held bead to no hook. The headline and the release stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Disposition, d.Bead, err, to)
+	}
+	var spellings []string
+	for _, row := range rows {
+		if row.ID == d.Bead {
+			spellings = gascity.Spellings(row.Labels(), gascity.HoldMayor)
+		}
+	}
+	if len(spellings) == 0 {
+		return nil
+	}
+	w := r.Ledger.Write(d.Bead)
+	for _, l := range spellings {
+		w.RemoveLabel(l)
+	}
+	if err := r.Ledger.Commit(w); err != nil {
+		return fmt.Errorf("the %s exit on %s did not land: the write that lifts hold:mayor for %s did not (%v), and Gas City serves a held bead to no hook. The headline and the release stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Disposition, d.Bead, to, err)
+	}
+	r.say("lifted hold:mayor from %s for %s", d.Bead, to)
 	return nil
 }
 

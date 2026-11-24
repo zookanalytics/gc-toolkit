@@ -9,30 +9,12 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
-// sweepRule is the sweep's one ready read: unassigned beads, and no epic.
+// sweepRule is the ready read of the sweep and of the unmarked list:
+// unassigned beads, and no epic.
 var sweepRule = ledger.ServeRule{Unassigned: true, ExcludeTypes: []string{"epic"}}
-
-// sweepTypes are the issue types a first reaction may take, an allowlist, so a
-// new type takes reactions only once it is added here. It leaves out the
-// convoy, epic, step and molecule types, which are machinery or work in flight,
-// a decision, which is a person's choice already, and a spec, which is an
-// output and not an input. A graph.v2 pour does not retype its steps, so a
-// workflow root and most of its steps are tasks, which the candidate rule drops
-// by their keys.
-var sweepTypes = []string{"task", "bug", "feature", "spike"}
-
-// topologyKinds are the gc.kind values of a topology root.
-var topologyKinds = []string{"workflow", "scope", "spec"}
-
-// reviewKind is the task kind of a review lane on the old review path, a
-// dispatched sign-off and so work in flight. The sweep passes over such a lane
-// while such beads exist, and the old path's retirement removes the clause.
-const reviewKind = "review"
 
 // stringKey is a String key, or its reading face, as the candidate rule reads
 // one.
@@ -40,49 +22,23 @@ type stringKey interface {
 	Get(*ledger.Record) (string, bool, error)
 }
 
-// workMarkers are the keys that put a bead's work in motion: a review lane's
-// check_name and anchor_bead, and an implementation anchor's branch,
-// merge_result, work_dir, pr_url and pr_number. An anchor is a task or a bug
-// with no task_kind, so its markers alone set it apart from raw input.
-var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prrecord.PRURL, prrecord.PRNumber,
-	checkNameKey, anchorKey}
+// isCandidate reports whether a ready bead takes a fresh first reaction: its
+// filer marked it for one (marked), no first reaction or sitting has concluded
+// on it, which a headline would show, and its own row carries no refusal. A
+// bead with no mark is never a candidate, whatever else it lacks, and the po's
+// backlog refinement lists it instead (Unmarked). The sling reads its refusals
+// again, since a bead can change while the sweep runs.
+func isCandidate(r *ledger.Record) bool {
+	return marked(r) && !concluded(r) && rowRefusal(r, "") == nil
+}
 
-// isCandidate reports whether a ready bead is raw input a fresh first reaction
-// may take, top-level and not already in motion. Each clause drops one kind of
-// bead that is no input: one with a dispatch path or a dispatch hold, whose
-// next move is decided; one with no description; one whose type the allowlist
-// leaves out; a topology root, and a step, a reaction's own root and step among
-// them, which advance only through their own run; a standing record and a
-// feedback pattern; a review lane; one that carries a headline, which every
-// exit of a first reaction and a sitting's ruling write, so it has been
-// triaged; one whose work markers put it in motion; and a member of a parent,
-// whose parent-child edge is its own. The sling's refusals are read again at
-// its sling, since a bead can change while the sweep runs.
-func isCandidate(r *ledger.Record) (bool, error) {
-	if len(dispatchPaths(r)) > 0 || gascity.HasDispatchHold(r.Labels()) {
-		return false, nil
-	}
-	if r.Description() == "" || !slices.Contains(sweepTypes, r.IssueType()) || slices.Contains(topologyKinds, raw(kindKey, r)) {
-		return false, nil
-	}
-	for _, k := range []stringKey{stepRefKey, stepIDKey, rootBeadKey, takeaway.Text, takeaway.By} {
-		if raw(k, r) != "" {
-			return false, nil
-		}
-	}
-	if kind := raw(taskKindKey, r); slices.Contains(standingKinds, kind) || kind == feedbackPattern || kind == reviewKind {
-		return false, nil
-	}
-	for _, k := range workMarkers {
-		if raw(k, r) != "" {
-			return false, nil
-		}
-	}
-	parents, err := r.Parents()
-	if err != nil {
-		return false, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
-	}
-	return len(parents) == 0, nil
+// marked reports whether the bead carries a mark its filer wrote for a first
+// reaction: hold:mayor, in any spelling Gas City reads as the hold, which
+// files new work into the placement queue, or the finding.scope that
+// patrol-finding.sh writes in the create that files a patrol finding, so a
+// finding whose first sling failed gets its reaction on the next sweep.
+func marked(r *ledger.Record) bool {
+	return gascity.HasHold(r.Labels(), gascity.HoldMayor) || strings.TrimSpace(raw(findingScopeKey, r)) != ""
 }
 
 // The outcome each candidate of a sweep comes to.
@@ -136,9 +92,9 @@ func (e *SweepError) Error() string { return e.Msg }
 // Sweep slings a first reaction at each candidate in the rig's store, highest
 // priority first, and passes each candidate to emit with what it came to. Its
 // one ready read is unassigned beads that are not epics, by priority, and the
-// candidate rule keeps the raw input among them (isCandidate). It then drops
-// every bead a live run works, by waits' run link, and a run map that does not
-// read drops nothing, which it says. Each reaction goes to the rig's proactive
+// candidate rule keeps the beads among them marked for a first reaction
+// (isCandidate). It then drops every bead a live run works, by waits' run
+// link, and a run map that does not read drops nothing, which it says. Each reaction goes to the rig's proactive
 // pool whether or not the pool runs, and a sling gc sling refuses, such as to a
 // pool the city does not configure, fails that candidate alone. A slung run
 // waits for a pool slot at no cost, so the sweep has no cap. It has a deadline,
@@ -147,9 +103,8 @@ func (e *SweepError) Error() string { return e.Msg }
 // in whole seconds as its upper bound, and leaves the rest for the next sweep.
 // With dryRun it slings nothing and passes each candidate as one it would
 // sling, whose refusals its sling would read again. It returns the summary,
-// which counts each skip by its cause. A *SweepError is a ready read or a
-// candidate rule that failed, with nothing slung, and any other error a sweep
-// in no rig.
+// which counts each skip by its cause. A *SweepError is a ready read that
+// failed, with nothing slung, and any other error a sweep in no rig.
 func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept)) (string, error) {
 	start := r.now()
 	if _, err := r.proactiveTarget(); err != nil {
@@ -159,17 +114,14 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 	if err != nil {
 		return "", &SweepError{Msg: fmt.Sprintf("the ready read failed (%v). A failed read is not an empty ready set, so the sweep fails and slings nothing; it reads again once the store answers", err)}
 	}
-	var cands []*ledger.Record
-	for _, rec := range ready {
-		ok, err := isCandidate(rec)
-		if err != nil {
-			return "", &SweepError{Msg: fmt.Sprintf("the candidates could not be filtered (%v), so the sweep fails and slings nothing", err)}
-		}
-		if ok {
-			cands = append(cands, rec)
-		}
+	cands := slices.DeleteFunc(ready, func(rec *ledger.Record) bool { return !isCandidate(rec) })
+	cands, dropped, err := r.dropInFlight(cands)
+	switch {
+	case err != nil:
+		r.say("could not read the live runs (%v), so beads a live workflow drives are not filtered out of this sweep (the sling still refuses them)", err)
+	case dropped > 0:
+		r.say("%d candidate(s) already have a live workflow, so the sweep does not offer them (the sling would refuse them)", dropped)
 	}
-	cands = r.dropInFlight(cands)
 
 	if dryRun {
 		for _, c := range cands {
@@ -234,19 +186,18 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 // bound the sweep's deadline takes each figure as.
 func upper(d time.Duration) int { return int(d/time.Second) + 1 }
 
-// dropInFlight is the candidates no live run works, by the run link's map of
-// the store's live runs. A pour moves a bead's route to its execution route,
-// which is no dispatch path, so the candidate rule cannot see a run, and the
-// sling would refuse the bead. A map that does not read drops nothing, which it
-// says, and the sling still refuses those beads.
-func (r *Reactions) dropInFlight(cands []*ledger.Record) []*ledger.Record {
-	if len(cands) == 0 {
-		return cands
+// dropInFlight is the beads no live run works, by the run link's map of the
+// store's live runs, and how many it dropped. A pour moves a bead's route to
+// its execution route, which is no dispatch path, so a rule over the bead's
+// row cannot see a run. A map that does not read drops nothing, and its error
+// says why.
+func (r *Reactions) dropInFlight(beads []*ledger.Record) ([]*ledger.Record, int, error) {
+	if len(beads) == 0 {
+		return beads, 0, nil
 	}
 	runs, err := waits.LiveRuns(r.Ledger)
 	if err != nil {
-		r.say("could not read the live runs (%v), so beads a live workflow drives are not filtered out of this sweep (the sling still refuses them)", err)
-		return cands
+		return beads, 0, err
 	}
 	worked := map[string]bool{}
 	for _, w := range runs {
@@ -254,11 +205,8 @@ func (r *Reactions) dropInFlight(cands []*ledger.Record) []*ledger.Record {
 			worked[w.Bead] = true
 		}
 	}
-	kept := slices.DeleteFunc(slices.Clone(cands), func(c *ledger.Record) bool { return worked[c.ID] })
-	if n := len(cands) - len(kept); n > 0 {
-		r.say("%d candidate(s) already have a live workflow, so the sweep does not offer them (the sling would refuse them)", n)
-	}
-	return kept
+	kept := slices.DeleteFunc(slices.Clone(beads), func(c *ledger.Record) bool { return worked[c.ID] })
+	return kept, len(beads) - len(kept), nil
 }
 
 // now is the reaction's clock.

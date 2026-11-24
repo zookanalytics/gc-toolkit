@@ -351,7 +351,9 @@ func liveRun(s *fake.Store, bead, root, formula string) {
 
 // A held bead with a live run is dispatched already: the next placement lifts
 // its hold and dispatches nothing more. A first reaction's run is no dispatch,
-// since it triages the bead and works none of it.
+// since it triages the bead and works none of it, so a placement refuses the
+// bead while one is live, with nothing written, and dispatches it once the run
+// has ended. A build's run beside a reaction's is the dispatch all the same.
 func TestPlaceReadsALiveRunAsTheDispatch(t *testing.T) {
 	w := newWorld(t)
 	liveRun(w.store, "tk-new", "tk-r1", "mol-polecat-work")
@@ -365,8 +367,27 @@ func TestPlaceReadsALiveRunAsTheDispatch(t *testing.T) {
 
 	w = newWorld(t)
 	liveRun(w.store, "tk-new", "tk-r2", "mol-first-reaction")
+	before := len(w.store.Writes())
+	_, err = w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"})
+	if !Refused(err) || !strings.Contains(err.Error(), "a first reaction runs on tk-new now (tk-r2)") ||
+		!strings.Contains(err.Error(), "place tk-new then: gctk bead place tk-new --under tk-epic") {
+		t.Fatalf("a bead a first reaction runs on: %v; want it refused, naming the run and the placement to run again", err)
+	}
+	if len(w.store.Writes()) != before || len(w.rt.Slings()) != 0 || !slices.Contains(w.row("tk-new").Labels, "hold:mayor") {
+		t.Errorf("a refused placement wrote %v and slung %v", w.store.Writes()[before:], w.rt.Slings())
+	}
+	root := w.row("tk-r2")
+	root.Status = "closed"
+	w.store.Put(root)
 	if _, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"}); err != nil || len(w.rt.Slings()) != 1 {
-		t.Fatalf("a bead a first reaction runs on: %v, slings %v; want it slung", err, w.rt.Slings())
+		t.Fatalf("once the reaction's run has ended: %v, slings %v; want it slung", err, w.rt.Slings())
+	}
+
+	w = newWorld(t)
+	liveRun(w.store, "tk-new", "tk-r3", "mol-first-reaction")
+	liveRun(w.store, "tk-new", "tk-r4", "mol-polecat-work")
+	if out, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"}); err != nil || !strings.Contains(out.How, "already dispatched (live run tk-r4)") {
+		t.Fatalf("a build's run beside a reaction's: %+v, %v; want the build read as the dispatch", out, err)
 	}
 }
 

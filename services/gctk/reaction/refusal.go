@@ -6,12 +6,14 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -44,28 +46,34 @@ type Refusal struct {
 	Why  string
 }
 
-// The keys the refusals and the sweep's candidate rule read and no domain owns
-// yet, each declared read-only, its definition in lifecycle/lifecycle.toml.
+// The keys the refusals, the sweep's candidate rule and the unmarked list read
+// and no domain owns yet, each declared read-only, its definition in
+// lifecycle/lifecycle.toml.
 var (
 	routedToKey = ledger.ReadOnly("gc.routed_to", ledger.String,
 		"A first reaction takes no bead routed anywhere, which has a dispatch path.")
 	kindKey = ledger.ReadOnly("gc.kind", ledger.String,
-		"A first reaction takes no bead whose kind is workflow, scope or spec, a topology root.")
+		"The unmarked list passes over a bead whose kind is workflow, scope or spec, a topology root.")
 	rootBeadKey = ledger.ReadOnly("gc.root_bead_id", ledger.String,
-		"A first reaction takes no bead that names a root, which is a step.")
+		"The unmarked list passes over a bead that names a root, which is a step.")
 	stepRefKey = ledger.ReadOnly("gc.step_ref", ledger.String,
-		"A first reaction takes no bead that names the step it carries out.")
+		"The unmarked list passes over a bead that names the step it carries out.")
 	stepIDKey = ledger.ReadOnly("gc.step_id", ledger.String,
-		"The id of the formula step a step bead carries out, which Gas City writes at the pour. A first reaction "+
-			"takes no step.")
+		"The id of the formula step a step bead carries out, which Gas City writes at the pour. The unmarked list "+
+			"passes over a step.")
 	taskKindKey = ledger.ReadOnly("task_kind", ledger.String,
-		"A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane.")
+		"A standing kind and a feedback pattern take no first reaction, and the unmarked list passes over them "+
+			"and over a review lane.")
 	workDirKey = ledger.ReadOnly("work_dir", ledger.String,
-		"The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that "+
-			"carries one, as work in flight.")
+		"The worktree a bead's work is built in, which work-setup.sh writes. The unmarked list passes over a bead "+
+			"that carries one, as work in flight.")
 	checkNameKey = ledger.ReadOnly("check_name", ledger.String,
-		"The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as "+
-			"work in flight.")
+		"The check a review lane of the old review path runs. The unmarked list passes over a bead that carries "+
+			"one, as work in flight.")
+	findingScopeKey = ledger.ReadOnly("finding.scope", ledger.String,
+		"Which patrol filed a patrol finding, which patrol-finding.sh writes in the create that files it. It is a "+
+			"mark the first reaction's sweep reads: a finding that carries one and no headline takes a reaction, so "+
+			"a finding whose first sling failed gets one on the next sweep.")
 )
 
 // standingKinds are the task kinds of a standing record, open by design and
@@ -88,9 +96,10 @@ func raw(k stringKey, r *ledger.Record) string {
 
 // Check is the first act of the reaction whose run is run: whether bead takes
 // it. It applies the refusals a sling applies and writes nothing, and passes
-// over the asking run, so that run is no second reaction, and over a gate filed
-// under the reaction's key whose message names the run, which is the run's own,
-// so a reaction re-offered after it filed its gate goes on to finish its exit.
+// over what the asking run wrote itself before it was re-offered, so a worker
+// re-offered part way through an exit goes on to finish it: the run, so it is
+// no second reaction, a gate filed under the reaction's key whose message names
+// the run, and the headline on a held bead that carries the run's card.
 // It returns nil when bead takes the reaction. An error is a read that did not
 // answer, which decides nothing.
 func (r *Reactions) Check(bead, run string) (*Refusal, error) {
@@ -168,7 +177,7 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 	if i < 0 {
 		return nil, fmt.Errorf("could not read %s's own row: its store does not hold it", bead)
 	}
-	if refused := rowRefusal(rows[i]); refused != nil {
+	if refused := rowRefusal(rows[i], run); refused != nil {
 		return refused, nil
 	}
 
@@ -223,8 +232,13 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 // reaction in any state, then its status, its assignee, its dispatch path and
 // its dispatch hold. A dispatch path is a route a pool queue serves or an arm
 // (assets/scripts/dispatch-path.sh), either one not blank, and each is named
-// on its own.
-func rowRefusal(row *ledger.Record) *Refusal {
+// on its own. hold:external refuses a bead, since its next actor is outside
+// the store. hold:mayor files a bead into the placement queue, which a first
+// reaction reads, so it refuses only a bead whose headline shows that a first
+// reaction or a sitting has concluded on it. Under the check, run is the asking
+// reaction's run, and the headline on a bead that carries that run's card is
+// the run's own, written by its exit before the run was re-offered.
+func rowRefusal(row *ledger.Record, run string) *Refusal {
 	kind := raw(taskKindKey, row)
 	switch {
 	case slices.Contains(standingKinds, kind):
@@ -241,17 +255,47 @@ func rowRefusal(row *ledger.Record) *Refusal {
 	if paths := dispatchPaths(row); len(paths) > 0 {
 		return &Refusal{Code: Decided, Why: "it already has a dispatch path (" + strings.Join(paths, ", ") + "), so whoever routed or armed it already decided its dispatch"}
 	}
-	var held []string
-	for _, l := range row.Labels() {
-		if gascity.IsDispatchHold(l) {
-			held = append(held, l)
-		}
+	if outside := gascity.Spellings(row.Labels(), gascity.HoldExternal); len(outside) > 0 {
+		return &Refusal{Code: Decided, Why: "it is held (" + strings.Join(outside, ", ") + ") for an actor outside this store, whose next move it is"}
 	}
-	if len(held) > 0 {
-		return &Refusal{Code: Decided, Why: "it is held (" + strings.Join(held, ", ") + "): hold:mayor keeps it for the operator's placement sitting, and hold:external for an actor outside this store"}
+	if queued := gascity.Spellings(row.Labels(), gascity.HoldMayor); len(queued) > 0 && concluded(row) && !carriesCard(row, run) {
+		return &Refusal{Code: Decided, Why: "it is held for placement (" + strings.Join(queued, ", ") + ") and carries a headline, so a first reaction or a sitting has read it, and it waits for the operator's placement sitting"}
 	}
 	return nil
 }
+
+// concluded reports whether the bead carries a headline, gc.takeaway or
+// gc.takeaway_by, which every exit of a first reaction and every sitting's
+// ruling writes. A blank one concludes nothing.
+func concluded(row *ledger.Record) bool {
+	return strings.TrimSpace(raw(takeaway.Text, row)) != "" || strings.TrimSpace(raw(takeaway.By, row)) != ""
+}
+
+// cardHeading opens the card a first reaction writes in its subject's notes,
+// which names the run that wrote it (agents/proactive/prompt.template.md,
+// "Write the card"): `# First reaction · run <root> · <what the bead is>`.
+const cardHeading = "# First reaction · run "
+
+// carriesCard reports whether the bead's notes hold a card the run wrote: a
+// line that opens with the card's heading and the run's root as a whole word.
+func carriesCard(row *ledger.Record, run string) bool {
+	if run == "" {
+		return false
+	}
+	for _, line := range strings.Split(row.Notes(), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimLeft(line, " \t"), cardHeading+run)
+		if !ok {
+			continue
+		}
+		if next, _ := utf8.DecodeRuneInString(rest); rest == "" || !strings.ContainsRune(idChars, next) {
+			return true
+		}
+	}
+	return false
+}
+
+// idChars are the characters a bead id is made of, as runID reads one.
+const idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
 
 // dispatchPaths names each dispatch path the bead carries, none when it carries
 // neither: its route, and its arm.

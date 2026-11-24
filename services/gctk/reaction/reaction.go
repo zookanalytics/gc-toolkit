@@ -1,8 +1,11 @@
 // Package reaction is gctk's first reaction: the run of mol-first-reaction
-// every new bead gets, which reads the bead once, writes a card on it and takes
-// one of five exits (docs/human-engagement.md). It holds the rule of which bead
-// may take a first reaction, which `gctk reaction check`, `sling` and `sweep`
-// apply the same way, the sweep's candidate rule and its deadline, and
+// that each bead filed into the placement queue, each patrol finding and each
+// operator capture gets, which reads the bead once, writes a card on it and
+// takes one of five exits (docs/human-engagement.md). It holds the rule of
+// which bead may take a first reaction, which `gctk reaction check`, `sling`
+// and `sweep` apply the same way, the sweep's candidate rule, which takes a
+// bead by the mark its filer wrote, and its deadline, the list of beads filed
+// with no mark that `gctk reaction unmarked` prints, and
 // `gctk reaction dispose`, each exit's writes in their order and the rules that
 // decide them: intake's (docs/steering.md), an emergency's confirmation on the
 // default branch, the form each named agent takes its work in, and whether a
@@ -18,7 +21,9 @@
 // A reaction disposes its subject and never closes it. Each exit orders its
 // writes so that the write which dispatches, holds or gates the subject comes
 // last, so a re-run of the same call after an exit stopped part way repeats
-// its earlier writes harmlessly and finishes it.
+// its earlier writes harmlessly and finishes it. A subject that arrived held
+// carries its hold from the start, so there the check that a re-offered
+// reaction runs passes over the headline its own run wrote.
 package reaction
 
 import (

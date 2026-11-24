@@ -43,69 +43,72 @@ func ids(lines []Swept, outcome string) []string {
 	return out
 }
 
-// The candidate rule keeps the raw input among the ready beads and drops each
-// bead that is no input: a standing record, a feedback pattern, a review lane,
-// a route or an arm, a capped one included, a dispatch hold in any case, a
-// topology root, a step of any formula, a reaction's own included, a type the
-// allowlist leaves out, no description, a work marker and a parent. Keys left
-// blank, a step key left empty and the retired placement marker decide
-// nothing.
-func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
-	meta := func(kv ...string) func(*fake.Bead) {
-		return func(b *fake.Bead) {
-			for i := 0; i+1 < len(kv); i += 2 {
-				b.Metadata[kv[i]] = kv[i+1]
-			}
+// arrival is a bead filed into the placement queue, held with hold:mayor and
+// concluded on by no first reaction or sitting, its fields as f sets them.
+func arrival(id string, f func(*fake.Bead)) fake.Bead {
+	return input(id, func(b *fake.Bead) {
+		b.Labels = append(b.Labels, "hold:mayor")
+		if f != nil {
+			f(b)
+		}
+	})
+}
+
+// meta sets each key to its value on a bead.
+func meta(kv ...string) func(*fake.Bead) {
+	return func(b *fake.Bead) {
+		for i := 0; i+1 < len(kv); i += 2 {
+			b.Metadata[kv[i]] = kv[i+1]
 		}
 	}
-	keep := map[string]func(*fake.Bead){
-		"tk-raw":        nil,
-		"tk-blank":      meta("gc.routed_to", " ", "gc.dispatch_when_ready", " "),
-		"tk-step-blank": meta("gc.step_ref", ""),
-		"tk-old-marker": meta("placement", "pending"),
-		"tk-bug":        func(b *fake.Bead) { b.IssueType = "bug" },
-		"tk-feature":    func(b *fake.Bead) { b.IssueType = "feature" },
-		"tk-spike":      func(b *fake.Bead) { b.IssueType = "spike" },
-		"tk-exec-only":  meta("gc.execution_routed_to", "gc-toolkit/gc-toolkit.polecat"),
+}
+
+// The candidate rule takes a bead its filer marked for a first reaction and
+// nothing else: hold:mayor in any spelling, whatever else the bead lacks or
+// carries, and a patrol finding's finding.scope. A bead with no mark is never a
+// candidate, however raw it looks, a withdrawal the landing order files and
+// carries out itself among them, and neither is a marked bead whose headline
+// shows a first reaction or a sitting concluded on it, or whose row the sling
+// refuses: hold:external, a route, an arm, a standing kind or a feedback
+// pattern.
+func TestTheSweepTakesOnlyAMarkedBead(t *testing.T) {
+	finding := meta("finding.key", "doctor-check-x", "finding.scope", "deacon-findings")
+	keep := map[string]fake.Bead{
+		"tk-held":             arrival("tk-held", nil),
+		"tk-held-spelled":     input("tk-held-spelled", func(b *fake.Bead) { b.Labels = []string{" Hold:Mayor "} }),
+		"tk-held-bug":         arrival("tk-held-bug", func(b *fake.Bead) { b.IssueType = "bug" }),
+		"tk-held-chore":       arrival("tk-held-chore", func(b *fake.Bead) { b.IssueType = "chore" }),
+		"tk-held-silent":      arrival("tk-held-silent", func(b *fake.Bead) { b.Description = "" }),
+		"tk-held-member":      arrival("tk-held-member", func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-epic"}} }),
+		"tk-held-branch":      arrival("tk-held-branch", meta("branch", "polecat/tk-held-branch")),
+		"tk-held-blank":       arrival("tk-held-blank", meta("gc.takeaway", " ", "gc.routed_to", " ")),
+		"tk-finding":          input("tk-finding", finding),
+		"tk-finding-unscoped": input("tk-finding-unscoped", meta("finding.key", "doctor-check-y", "finding.scope", "unscoped")),
 	}
-	drop := map[string]func(*fake.Bead){
-		"tk-pattern":       meta("task_kind", feedbackPattern),
-		"tk-review":        meta("task_kind", "review"),
-		"tk-routed":        meta("gc.routed_to", "gc-toolkit/gc-toolkit.polecat"),
-		"tk-armed":         meta("gc.dispatch_when_ready", "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_args", "[]"),
-		"tk-capped":        meta("gc.dispatch_when_ready", "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_fail_count", "3"),
-		"tk-held-bug":      func(b *fake.Bead) { b.IssueType = "bug"; b.Labels = []string{"hold:mayor"} },
-		"tk-held-proposal": func(b *fake.Bead) { b.Labels = []string{"learning", "prompt-update", "hold:mayor"} },
-		"tk-held-external": func(b *fake.Bead) { b.Labels = []string{"Hold:External"} },
-		"tk-workflow":      meta("gc.kind", "workflow"),
-		"tk-scope":         meta("gc.kind", "scope"),
-		"tk-spec-root":     meta("gc.kind", "spec"),
-		"tk-step-validate": meta("gc.step_ref", "mol-validate.rule-convergence", "gc.step_id", "rule-convergence", "gc.root_bead_id", "tk-root-validate"),
-		"tk-step-react":    meta("gc.step_ref", "mol-first-reaction.react", "gc.step_id", "react", "gc.root_bead_id", "tk-root-reaction"),
-		"tk-step-finalize": meta("gc.kind", "workflow-finalize", "gc.root_bead_id", "tk-root-work"),
-		"tk-step-id":       meta("gc.step_id", "react"),
-		"tk-step-ref":      meta("gc.step_ref", "mol-polecat-work.implement"),
-		"tk-decision":      func(b *fake.Bead) { b.IssueType = "decision" },
-		"tk-convoy":        func(b *fake.Bead) { b.IssueType = "convoy" },
-		"tk-silent":        func(b *fake.Bead) { b.Description = "" },
-		"tk-branch":        meta("branch", "polecat/tk-branch"),
-		"tk-merge":         meta("merge_result", "pending"),
-		"tk-workdir":       meta("work_dir", "/tmp/tree"),
-		"tk-pr-url":        meta("pr_url", "https://github.com/zook/repo/pull/1"),
-		"tk-pr-number":     meta("pr_number", "1"),
-		"tk-lane":          meta("check_name", "correctness"),
-		"tk-anchored":      meta("anchor_bead", "tk-anchor"),
-		"tk-member":        func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-epic"}} },
+	drop := map[string]fake.Bead{
+		"tk-raw":            input("tk-raw", nil),
+		"tk-raw-bug":        input("tk-raw-bug", func(b *fake.Bead) { b.IssueType = "bug" }),
+		"tk-review-finding": input("tk-review-finding", meta("finding.key", "correctness:x", "task_kind", "finding", "anchor_bead", "tk-anchor")),
+		"tk-withdrawal":     input("tk-withdrawal", func(b *fake.Bead) { b.Title = "Withdraw the approvals of PR #1600 at its new head" }),
+		"tk-held-read":      arrival("tk-held-read", meta("gc.takeaway", "ready to build once placed", "gc.takeaway_by", "proactive")),
+		"tk-held-read-by":   arrival("tk-held-read-by", meta("gc.takeaway_by", "converse")),
+		"tk-finding-read":   input("tk-finding-read", func(b *fake.Bead) { finding(b); b.Metadata["gc.takeaway"] = "blocked on tk-blocker" }),
+		"tk-held-external":  arrival("tk-held-external", func(b *fake.Bead) { b.Labels = append(b.Labels, "Hold:External") }),
+		"tk-external":       input("tk-external", func(b *fake.Bead) { b.Labels = []string{"hold:external"} }),
+		"tk-held-routed":    arrival("tk-held-routed", meta("gc.routed_to", "gc-toolkit/gc-toolkit.polecat")),
+		"tk-held-armed":     arrival("tk-held-armed", meta("gc.dispatch_when_ready", "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_args", "[]")),
+		"tk-finding-routed": input("tk-finding-routed", func(b *fake.Bead) { finding(b); b.Metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat" }),
+		"tk-held-pattern":   arrival("tk-held-pattern", meta("task_kind", feedbackPattern)),
 	}
 	for _, k := range standingKinds {
-		drop["tk-standing-"+k] = meta("task_kind", k)
+		drop["tk-held-standing-"+k] = arrival("tk-held-standing-"+k, meta("task_kind", k))
 	}
 	w := newWorld(t)
-	for id, edit := range keep {
-		w.ready(input(id, edit))
+	for _, b := range keep {
+		w.ready(b)
 	}
-	for id, edit := range drop {
-		w.ready(input(id, edit))
+	for _, b := range drop {
+		w.ready(b)
 	}
 	lines, summary, err := w.sweep(true, time.Minute)
 	if err != nil {
@@ -127,15 +130,15 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 	}
 }
 
-// A bead that carries a headline, gc.takeaway or gc.takeaway_by, has been
-// triaged: every exit of a first reaction writes one, a blocker a blocked exit
-// filed among the beads it lands on, so no later sweep offers it. Each key
-// drops a bead alone.
+// A headline, gc.takeaway or gc.takeaway_by, shows that a first reaction or a
+// sitting concluded on a bead, since each of their exits writes one, so no
+// later sweep offers it, held or a finding. Each key drops a bead alone.
 func TestTheCandidateRuleDropsAHeadline(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-fresh", nil),
-		input("tk-headline", func(b *fake.Bead) { b.Metadata["gc.takeaway"] = "blocked on tk-blocker" }),
-		input("tk-headline-by", func(b *fake.Bead) { b.Metadata["gc.takeaway_by"] = "proactive" }))
+	w.ready(arrival("tk-fresh", nil),
+		arrival("tk-headline", meta("gc.takeaway", "blocked on tk-blocker")),
+		arrival("tk-headline-by", meta("gc.takeaway_by", "proactive")),
+		input("tk-finding-read", meta("finding.scope", "witness-findings", "gc.takeaway", "close: fixed upstream")))
 	lines, _, err := w.sweep(true, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -145,26 +148,26 @@ func TestTheCandidateRuleDropsAHeadline(t *testing.T) {
 	}
 }
 
-// A sweep slings every candidate nobody has decided on, highest priority
-// first, with no cap, and counts the slings alone. A bead decided since the
-// ready read, which the read's rows do not show, is refused at its sling and
-// counted under its cause.
+// A sweep slings every candidate, highest priority first, with no cap, and
+// counts the slings alone. A bead decided since the ready read, which the
+// read's rows do not show, is refused at its sling and counted under its
+// cause: one routed, and one a sitting read, which left it a headline.
 func TestTheSweepSlingsEveryCandidateWithNoCap(t *testing.T) {
 	w := newWorld(t)
 	for _, id := range []string{"tk-many-1", "tk-many-2", "tk-many-3", "tk-many-4", "tk-many-5"} {
-		w.ready(input(id, func(b *fake.Bead) { b.Priority = 1 }))
+		w.ready(arrival(id, func(b *fake.Bead) { b.Priority = 1 }))
 	}
-	w.ready(input("tk-late-routed", func(b *fake.Bead) { b.Priority = 2 }), input("tk-late-held", func(b *fake.Bead) { b.Priority = 2 }),
-		input("tk-urgent", func(b *fake.Bead) { b.Priority = 0 }))
+	w.ready(arrival("tk-late-routed", func(b *fake.Bead) { b.Priority = 2 }), arrival("tk-late-read", func(b *fake.Bead) { b.Priority = 2 }),
+		arrival("tk-urgent", func(b *fake.Bead) { b.Priority = 0 }))
 	sling, once := w.rt.OnSling, sync.Once{}
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
 		once.Do(func() {
 			routed, _ := w.store.Row("tk-late-routed")
 			routed.Metadata = map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}
 			w.store.Put(routed)
-			held, _ := w.store.Row("tk-late-held")
-			held.Labels = []string{"hold:mayor"}
-			w.store.Put(held)
+			read, _ := w.store.Row("tk-late-read")
+			read.Metadata = map[string]string{"gc.takeaway": "leave held: an epic for it is coming", "gc.takeaway_by": "converse"}
+			w.store.Put(read)
 		})
 		return sling(s)
 	}
@@ -179,7 +182,7 @@ func TestTheSweepSlingsEveryCandidateWithNoCap(t *testing.T) {
 	if want := "slung 6 first reaction(s) (2 already routed, armed, held, assigned or waiting on a person)"; summary != want {
 		t.Errorf("(SWEEP-COUNT) the summary is %q; want %q", summary, want)
 	}
-	if got := ids(lines, Refused); !slices.Equal(got, []string{"tk-late-held", "tk-late-routed"}) {
+	if got := ids(lines, Refused); !slices.Equal(got, []string{"tk-late-read", "tk-late-routed"}) {
 		t.Errorf("(SWEEP-COUNT) the refused lines are %v", got)
 	}
 	for _, l := range lines {
@@ -193,7 +196,7 @@ func TestTheSweepSlingsEveryCandidateWithNoCap(t *testing.T) {
 // summary and in each candidate's line.
 func TestASweepCountsEachSkipByItsCause(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-free", nil), input("tk-talked", nil), input("tk-raced", nil), input("tk-broke", nil))
+	w.ready(arrival("tk-free", nil), arrival("tk-talked", nil), arrival("tk-raced", nil), arrival("tk-broke", nil))
 	w.put(fake.Bead{ID: "tk-conv", Status: "open", IssueType: "task", Assignee: "human", Edges: []gcbd.Edge{{Type: "tracks", ID: "tk-talked"}}})
 	sling := w.rt.OnSling
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
@@ -237,7 +240,7 @@ func TestASweepCountsEachSkipByItsCause(t *testing.T) {
 // spare, and once it has taken five, less than that is left.
 func TestTheSweepStopsBeforeItsDeadline(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-a", nil), input("tk-b", nil), input("tk-c", nil))
+	w.ready(arrival("tk-a", nil), arrival("tk-b", nil), arrival("tk-c", nil))
 	clock := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
 	w.r.Now = func() time.Time { return clock }
 	sling := w.rt.OnSling
@@ -270,7 +273,7 @@ func TestTheSweepStopsBeforeItsDeadline(t *testing.T) {
 // would have fit.
 func TestTheSweepsDeadlineTakesEachFigureAsItsUpperBound(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-a", nil), input("tk-b", nil), input("tk-c", nil))
+	w.ready(arrival("tk-a", nil), arrival("tk-b", nil), arrival("tk-c", nil))
 	clock := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
 	w.r.Now = func() time.Time { return clock }
 	sling := w.rt.OnSling
@@ -323,7 +326,7 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	asked("a pass with no candidate")
 
 	w = newWorld(t)
-	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
+	w.ready(arrival("tk-a", func(b *fake.Bead) { b.Priority = 0 }), arrival("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
 	for i := range w.rt.Roster {
 		w.rt.Roster[i].Suspended = true
 	}
@@ -333,7 +336,7 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	asked("a pool that does not run")
 
 	w = newWorld(t)
-	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
+	w.ready(arrival("tk-a", func(b *fake.Bead) { b.Priority = 0 }), arrival("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
 	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
 		w.add("SLING " + s.Target + " " + s.Bead + " --on " + s.Formula)
 		return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: `gc sling: agent "gc-toolkit/gc-toolkit.proactive" not found in city.toml; did you mean "gc-toolkit/gc-toolkit.po"?`}}
@@ -376,7 +379,7 @@ func TestAReadyReadThatFailsFailsTheSweep(t *testing.T) {
 func TestTheSweepDropsWhatALiveRunWorks(t *testing.T) {
 	w := newWorld(t)
 	for _, id := range []string{"tk-building", "tk-reacting", "tk-built", "tk-retired", "tk-fresh"} {
-		w.ready(input(id, nil))
+		w.ready(arrival(id, nil))
 	}
 	w.run("tk-root-building", "mol-polecat-work", "tk-building", "in_progress")
 	w.run("tk-root-reacting", Formula, "tk-reacting", "in_progress")
@@ -404,7 +407,7 @@ func TestTheSweepsDropAndTheSlingsRefusalAgree(t *testing.T) {
 	w := newWorld(t)
 	all := []string{"tk-building", "tk-built", "tk-fresh", "tk-reacting", "tk-retired"}
 	for _, id := range all {
-		w.ready(input(id, nil))
+		w.ready(arrival(id, nil))
 	}
 	w.run("tk-root-building", "mol-polecat-work", "tk-building", "in_progress")
 	w.run("tk-root-reacting", Formula, "tk-reacting", "in_progress")

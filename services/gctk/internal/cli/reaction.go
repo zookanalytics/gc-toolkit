@@ -22,17 +22,20 @@ import (
 
 func newReactionCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("reaction", "a bead's first reaction: whether it takes one, its sling, the exit it takes, and the acceptance of its recommendation",
-		`A first reaction is the run of mol-first-reaction every new bead gets: it reads
+		`A first reaction is the run of mol-first-reaction that each bead filed into the
+placement queue, each patrol finding and each operator capture gets: it reads
 the bead once, writes a card on it, and takes one of five exits, which dispose
 performs (docs/human-engagement.md). sling starts one on a bead nobody has
-decided on, sweep starts one on each such bead in the rig, check is the
-reaction's own first act, and accept takes the recommendation a recommend exit
-leaves.`,
+decided on, sweep starts one on each bead in the rig its filer marked for one,
+check is the reaction's own first act, accept takes the recommendation a
+recommend exit leaves, and unmarked lists the beads filed with no mark, which
+nothing else claims.`,
 		newReactionCheckCmd(stdout, stderr),
 		newReactionSlingCmd(stdout, stderr),
 		newReactionSweepCmd(stdout, stderr),
 		newReactionDisposeCmd(stdout, stderr),
-		newReactionAcceptCmd(stdout, stderr))
+		newReactionAcceptCmd(stdout, stderr),
+		newReactionUnmarkedCmd(stdout, stderr))
 }
 
 // reactionRefusals is the refusals check and sling apply, in their order, with
@@ -41,8 +44,9 @@ const reactionRefusals = `A first reaction triages a bead nobody has decided on,
 move is someone's already is refused, by the first of these that holds:
 
   6  its kind takes none: a standing record or a feedback pattern
-  5  its status is not open, it is assigned, it is routed or armed, or it
-     carries hold:mayor or hold:external
+  5  its status is not open, it is assigned, it is routed or armed, it
+     carries hold:external, or it carries hold:mayor and a headline, which
+     shows a first reaction or a sitting has concluded on it
   3  an open conversation tracks it
   3  a first reaction already runs on it
   4  a live run of another formula works it
@@ -54,10 +58,12 @@ A read that does not answer decides nothing and exits 1.
 store is the one gc routes the bead to.`
 
 const reactionCheckLong = `The first act of the reaction whose run is <root>: whether <bead> takes it. It
-applies sling's refusals and writes nothing. The asking run is no second
-reaction, and a gate under first-reaction whose message names <root> among its
-words is the run's own, which it filed before it was re-offered, so both are
-passed over.
+applies sling's refusals and writes nothing. It passes over what the run wrote
+itself before it was re-offered, so a worker re-offered part way through an
+exit finishes it: the run, which is no second reaction, a gate under
+first-reaction whose message names <root> among its words, and the headline on
+a held bead whose notes hold the run's card, a line that opens
+"# First reaction · run <root>".
 
 ` + reactionRefusals + ` Under the check that is no refusal either: ask again
 once the store answers.
@@ -164,14 +170,15 @@ func newReactionSlingCmd(stdout, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-const reactionSweepLong = `Slings a first reaction at each bead in the rig's store that nobody has
-decided on, highest priority first. Its one read is bd's ready set, unassigned
-and not an epic. It keeps the raw input among it: a task, bug, feature or spike
-with a description that is no workflow root, scope, spec or step, no standing
-record, feedback pattern or review lane, carries no headline, no work marker
-and no parent, has no route or arm, and carries no hold:mayor or hold:external.
-It drops every bead a live run works, and a run map that does not read drops
-nothing, which it says. Each reaction goes to the rig's proactive pool whether
+const reactionSweepLong = `Slings a first reaction at each bead in the rig's store its filer marked for
+one, highest priority first. Its one read is bd's ready set, unassigned and not
+an epic. It keeps each bead that carries a mark, hold:mayor in any spelling Gas
+City reads as the hold or a patrol finding's finding.scope, carries no
+headline, which would show a first reaction or a sitting has concluded on it,
+and whose own row carries none of sling's refusals. A bead with no mark is
+never slung, whatever else it lacks: gctk reaction unmarked lists it. It drops
+every bead a live run works, and a run map that does not read drops nothing,
+which it says. Each reaction goes to the rig's proactive pool whether
 or not the pool runs, and each sling applies sling's refusals again. A sling gc
 sling refuses, as it refuses a pool the city does not configure, fails that
 candidate alone.
@@ -201,7 +208,7 @@ func newReactionSweepCmd(stdout, stderr io.Writer) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "sweep [--db <path>] [--dry-run]",
-		Short: "sling a first reaction at each ready bead in the rig that nobody has decided on",
+		Short: "sling a first reaction at each ready bead in the rig its filer marked for one",
 		Long:  reactionSweepLong,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -279,10 +286,14 @@ subject open: a reaction disposes a bead and never closes it.
               first-reaction holds the bead.
 
 Intake decides whether a pool route or a --then-route arm is written at all:
-only a member of an epic, PR-finishing work (anchor_bead) or an emergency the
-named check confirms on the default branch's head reaches a pool, and any
-other bead is held with hold:mayor for the operator's placement sitting
-(docs/steering.md). A route goes to its pool whether or not the pool runs, and
+only a member of an epic, PR-finishing work (anchor_bead), a failure's tracker
+(failure_key) or an emergency the named check confirms on the default branch's
+head reaches a pool, and any other bead is held with hold:mayor for the
+operator's placement sitting (docs/steering.md). A subject that arrived held
+stays held unless the emergency is confirmed. A hand-off to a named agent, an
+emergency's arm and the validating closer each lift an arrival's hold before
+they send it on, since Gas City serves a held bead to no hook and fires no arm
+on one. A route goes to its pool whether or not the pool runs, and
 a route gc sling refuses, as it refuses a pool the city does not configure,
 stops the exit at that sling. A hand-off nothing would offer the bead to is
 refused, and so is a hand-off to the po, the deacon, the witness or the keeper.
