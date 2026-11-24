@@ -16,9 +16,10 @@ import (
 
 // `gctk pr compose <bead>` is how the step that opens or updates a PR asks what
 // the PR's title and body should say: the refinery's merge-push step, at each
-// round it publishes a PR or lands on an open one. The
-// pr package composes; this command parses the request, reads the published
-// body it names, and prints the result.
+// round it publishes a PR or lands on an open one. With --edit it brings an
+// open PR's title and body to that composition itself, as a review run's push
+// does. The pr package composes and edits; this command parses the request,
+// reads the published body it names, and prints the result.
 
 const prComposeLong = `Prints the title and body of the PR the bead owns, as the bead says they
 should be. The title is the bead's own, opened with a conventional-commit type
@@ -59,10 +60,29 @@ section the markers let it read), needs-gates, single (one bead's work, so no
 section) or unread (the beads on the branch did not read). title is empty
 when the bead's title has no words.
 
-exit: 0 printed
-      1 usage
+With --edit the PR is open, and the command brings its title and body to the
+composition in place of printing it. It reads the title and body the PR shows,
+composes with that body as the one published, and edits, in one request, the
+title when it differs in more than spacing and the body when a section is
+written, and nothing when neither moved. A bead whose title has no words
+leaves the PR's title as it stands. The PR is the one the bead's record names,
+else the one it records for the refinery to reuse (existing_pr), in the rig's
+own repository, the one the origin of the clone it runs in names
+($GC_RIG_ROOT, else the working directory), and open from the bead's branch.
+It prints one line saying what it edited, and names on stderr each section it
+left as it stands: one the body carries no markers it can read for, as in a
+hand-written body, the summary region when it must be written and no --gates
+gave the gate set it names, and the branch-beads section when its beads did
+not read.
+
+exit: 0 printed; with --edit, the PR shows the composition, edited or already,
+        but for each section named on stderr as left as it stands
+      1 usage, or with --edit a PR outside the rig's own repository
       2 the bead, the store holding it, or the body named did not read:
-        nothing is printed`
+        nothing is printed; with --edit, GitHub did not answer or refused the
+        edit, so the PR may show either text, and a retry is safe
+      3 with --edit, refused: the bead names no PR, or its PR is not open, or
+        not open from the bead's branch; nothing was changed`
 
 // The sections a composition takes, as --sections names them.
 const (
@@ -72,7 +92,7 @@ const (
 
 type prComposeOpts struct {
 	head, target, bodyFile, gates, supersedes, supersededHead, sections string
-	opening                                                             bool
+	opening, edit                                                       bool
 }
 
 func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -92,6 +112,9 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 			if bead == "" {
 				return errors.New("name the bead that owns the PR")
 			}
+			if o.edit {
+				return exit(prComposeEdit(bead, req, stdout, stderr))
+			}
 			return exit(prCompose(bead, o.bodyFile, req, stdout, stderr))
 		},
 	}
@@ -104,6 +127,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&o.supersedes, "supersedes", "", "the number of a PR closed unmerged that this one replaces (with --opening)")
 	f.StringVar(&o.supersededHead, "superseded-head", "", "the head --supersedes closed at")
 	f.StringVar(&o.sections, "sections", sectionSummary+","+sectionBranchBeads, "the body's sections to compose: summary, branch-beads, or both")
+	f.BoolVar(&o.edit, "edit", false, "edit the open PR's title and body to the composition where they differ, reading the body from the PR")
 	return cmd
 }
 
@@ -132,6 +156,9 @@ func (o prComposeOpts) request(c *cobra.Command) (pr.Request, error) {
 		if req.Gates == nil {
 			req.Gates = []pr.Gate{}
 		}
+	}
+	if o.edit && (o.bodyFile != "" || o.opening) {
+		return req, errors.New("--edit reads the body the open PR shows: give it no --body-file and no --opening")
 	}
 	if (o.supersedes == "") != (o.supersededHead == "") {
 		return req, errors.New("--supersedes and --superseded-head name one PR together")
@@ -193,4 +220,67 @@ func prCompose(bead, bodyFile string, req pr.Request, stdout, stderr io.Writer) 
 		return 2
 	}
 	return 0
+}
+
+// prComposeEdit brings the title and body of the bead's open PR to its
+// composition and says what it edited.
+func prComposeEdit(bead string, req pr.Request, stdout, stderr io.Writer) int {
+	l, err := landing("", "", bead)
+	if err != nil {
+		fmt.Fprintf(stderr, "gctk pr compose: the store holding %s did not resolve: %v\n", bead, err)
+		return 2
+	}
+	got, err := l.Edit(bead, "", req)
+	if err != nil {
+		return editFailed(bead, err, stderr)
+	}
+	left := false
+	if c := got.Composition; c != nil {
+		if c.Unread != nil {
+			fmt.Fprintf(stderr, "gctk pr compose: the beads on %s's branch did not read: %v; the branch-beads section is left as it stands\n", bead, c.Unread)
+			left = true
+		}
+		for _, s := range []struct {
+			outcome pr.Outcome
+			name    string
+		}{{c.Summary, "summary region"}, {c.BranchBeads, "branch-beads section"}} {
+			switch s.outcome {
+			case pr.Unmanaged:
+				fmt.Fprintf(stderr, "gctk pr compose: the body of %s carries no %s its markers let it read, so it is left as it stands\n", got.URL, s.name)
+				left = true
+			case pr.NeedsGates:
+				fmt.Fprintf(stderr, "gctk pr compose: the %s of %s must be written, and no --gates gave the gate set it names, so it is left as it stands\n", s.name, got.URL)
+				left = true
+			}
+		}
+	}
+	switch {
+	case got.Title && got.Body:
+		fmt.Fprintf(stdout, "%s: edited the title and the body of %s\n", bead, got.URL)
+	case got.Title:
+		fmt.Fprintf(stdout, "%s: edited the title of %s\n", bead, got.URL)
+	case got.Body:
+		fmt.Fprintf(stdout, "%s: edited the body of %s\n", bead, got.URL)
+	case left:
+		fmt.Fprintf(stdout, "%s: edited nothing on %s\n", bead, got.URL)
+	default:
+		fmt.Fprintf(stdout, "%s: %s shows its composition already\n", bead, got.URL)
+	}
+	return 0
+}
+
+// editFailed says why an edit stopped, and returns its exit.
+func editFailed(bead string, err error, stderr io.Writer) int {
+	var refused *pr.EditRefusal
+	var origin *pr.OriginError
+	switch {
+	case errors.As(err, &refused):
+		fmt.Fprintf(stderr, "gctk pr compose: %v\n", err)
+		return 3
+	case errors.As(err, &origin):
+		fmt.Fprintf(stderr, "gctk pr compose: %s: the PR is left as it stands: %v\n", bead, err)
+		return 1
+	}
+	fmt.Fprintf(stderr, "gctk pr compose: %s: %v\n", bead, err)
+	return 2
 }

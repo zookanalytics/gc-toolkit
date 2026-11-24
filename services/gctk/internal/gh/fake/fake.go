@@ -16,14 +16,16 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 )
 
-// PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid. ReviewDecision is what the net's read and the read
-// of the conversation give. The rest is what the cheap question reads beside
-// what it counts from the rest: its labels, when GitHub last changed it, its
-// base's tip, and its head's check rollup state and the commit statuses there,
-// counted by state.
+// PR is one pull request's state on GitHub. Title and Body are its text, which
+// PullRequestText reads and EditPullRequest sets. Suites holds the check suites
+// at each commit, by its oid. ReviewDecision is what the net's read and the
+// read of the conversation give. The rest is what the cheap question reads
+// beside what it counts from the rest: its labels, when GitHub last changed it,
+// its base's tip, and its head's check rollup state and the commit statuses
+// there, counted by state.
 type PR struct {
 	Facts          gh.PullRequest
+	Title, Body    string
 	Reviews        []gh.Review
 	Suites         map[string][]gh.CheckSuite
 	Threads        []gh.Thread
@@ -147,7 +149,9 @@ type Repo struct {
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
 // "EnqueuePullRequest" with the PR's node id and the head it was pinned to, and
 // a merge's commit headline, "MarkReady" or "ConvertToDraft" with the PR's node
-// id, or "DismissReview" with the review's id and the dismissal's message.
+// id, "DismissReview" with the review's id and the dismissal's message, or
+// "EditPullRequest" with the PR's node id and what it sets, title, body or both,
+// as its message.
 type Ask struct {
 	Method, ID, Head, Headline, Message string
 }
@@ -253,6 +257,44 @@ func (g *GitHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
 	}
 	f := p.Facts
 	return &f, nil
+}
+
+// PullRequestText returns the PR's title and body, with its facts.
+func (g *GitHub) PullRequestText(repo string, number int) (*gh.Text, error) {
+	p, err := g.pr("PullRequestText", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &gh.Text{PullRequest: p.Facts, Title: p.Title, Body: p.Body}, nil
+}
+
+// EditPullRequest records the request and sets each of the PR's title and body
+// it is given, leaving the other as it stands.
+func (g *GitHub) EditPullRequest(id string, title, body *string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var set []string
+	if title != nil {
+		set = append(set, "title")
+	}
+	if body != nil {
+		set = append(set, "body")
+	}
+	g.asks = append(g.asks, Ask{Method: "EditPullRequest", ID: id, Message: strings.Join(set, " and ")})
+	if err := g.Fail["EditPullRequest"]; err != nil {
+		return err
+	}
+	p := g.byID(id)
+	if p == nil {
+		return fmt.Errorf("github: no pull request has the node id %s", id)
+	}
+	if title != nil {
+		p.Title = *title
+	}
+	if body != nil {
+		p.Body = *body
+	}
+	return nil
 }
 
 // Reviews returns the PR's reviews.

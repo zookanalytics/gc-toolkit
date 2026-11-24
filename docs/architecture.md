@@ -75,6 +75,7 @@ flowchart LR
   DISP -->|successor edge, then checked close| LEDGER
   RUN -->|review result| LEDGER
   RUN -->|repair push| BR
+  RUN -->|title + summary| PR
   ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
   ORD -.->|landing order: a PR's re-read in full before its merge| PR
@@ -184,7 +185,9 @@ performer; the full transition table with writers is
 7. **Review.** For each head the refinery validates without a passed review
    result, the landing order pours a review run. The run records the PR's
    review result, which the evaluator reads. While it works, the run is the
-   one worker on the PR's branch. A converse sitting the operator rules edit the
+   one worker on the PR's branch, and it brings the PR's title and summary to
+   what the bead that owns the PR records. A converse sitting the operator
+   rules edit the
    branch with them can push while a run works it. Work that needs the branch
    changed, such as
    a person's comment or a conflict with the target, is filed as an ask, and a

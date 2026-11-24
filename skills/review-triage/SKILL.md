@@ -209,15 +209,24 @@ no findings, so it has no findings block.
 The verdict goes where the formula you run under says. A review run's triage
 writes it as its step's output: the head it judged, each check it picks as one
 `{"check", "head"}`, which the run bonds as a lane at that head, with nothing
-picked the common case, and whether the change is `material`. At the PR's first
-judged head the rig's first check, `correctness`, is picked whatever the diff,
-and the checks an ask the run can take sends back are picked whatever the
-change. At a head that already passed into the run's target, the read says
-there is no change to judge, because its checks ran and their findings were
-ruled: pick only the checks an ask the run can take sends back, and nothing
-when no ask sends one. The rest of this section is a review bead's verdict, whose
-formula's one `signoff.sh` call carries the verdict and the widening together,
-`approve` with these flags:
+picked the common case, and whether the change is `material`. Pick these
+checks whatever the change:
+
+- At the PR's first judged head, the rig's first check, `correctness`.
+- Each check an ask the run can take sends back.
+- Each check the run so far names on a finding fixed in the PR's title or
+  summary. The finding's ruling reads `<check> finding <id>: must-fix in the
+  PR's summary`, or `must-fix by <commit> and in the PR's summary`. A reason
+  the run has not passed reads `<check> finding <id> was fixed in the PR's
+  summary in iteration <n>, and <check> has not run since`.
+
+At a head that already passed into the run's target, the read says there is no
+change to judge. Pick only the checks the list's last two items name there.
+When they name none, pick nothing.
+
+The rest of this section is a review bead's verdict, whose formula's one
+`signoff.sh` call carries the verdict and the widening together, `approve` with
+these flags:
 
 - **`--add-gates`** takes the checks you add, one or several, comma-separated,
   as in `--add-gates demo,arch`. Adding nothing needs no flag: approve on its
