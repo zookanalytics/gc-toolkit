@@ -50,7 +50,7 @@ export STUB_AGENTS="$TMP/agents.json"
 # git: push and ls-remote can be made to fail, and a push, a worktree's removal
 # and a branch's delete are logged, whatever directory -C names. LS_REMOTE_DOWN
 # fails the first read of origin, as an unreachable remote does: git prints why
-# and exits 128.
+# and exits 128. LS_REMOTE_DOWN_AFTER_PUSH fails each read once a push was tried.
 cat > "$BIN/git" <<'SH'
 #!/usr/bin/env bash
 dir=()
@@ -61,6 +61,7 @@ case "${1:-}" in
     [ -z "${PUSH_FAIL:-}" ] || { echo "remote: refused (stub)" >&2; exit 1; } ;;
   ls-remote)
     [ -z "${LS_REMOTE_DOWN:-}" ] || { echo "fatal: unable to access origin (stub)" >&2; exit 128; }
+    [ -z "${LS_REMOTE_DOWN_AFTER_PUSH:-}" ] || ! grep -q '^push ' "$LOG" || { echo "fatal: unable to access origin (stub)" >&2; exit 128; }
     [ -z "${LS_REMOTE_WRONG:-}" ] || { [ ! -e "$LS_REMOTE_WRONG" ] || { printf 'deadbeef\trefs/heads/x\n'; exit 0; }; : > "$LS_REMOTE_WRONG"; } ;;
   branch)
     case "${2:-}" in -D) printf 'release %s\n' "${3:-}" >> "$LOG" ;; esac ;;
@@ -186,6 +187,14 @@ given_back() {
   eq "$(meta gc.routed_to st-submit)" "gc-toolkit/gc-toolkit.polecat" "$1 its route kept"
   [ "$(grep -n '^bd update st-submit --if-status=in_progress ' "$LOG" | head -n 1 | cut -d: -f1)" -lt "$(grep -n '^runtime drain-ack$' "$LOG" | tail -n 1 | cut -d: -f1)" ] 2>/dev/null \
     && ok "$1 before the drain" || bad "$1 before the drain"
+}
+# kept <label> — a stop the next worker would meet the same way stays with this
+# session, which settles it and runs the call again: the step stays in progress
+# under the session, nothing is given back, and nothing drains.
+kept() {
+  eq "$(closed_step) $(field assignee st-submit)" "in_progress sess-me" "$1 the step stays with this session"
+  eq "$(grep -c '^bd update st-submit --if-status=in_progress ' "$LOG" | tr -d ' ')" 0 "$1 nothing is given back"
+  eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "$1 no drain"
 }
 
 echo "# fresh work lands whole"
@@ -503,18 +512,53 @@ done
 echo "# push failures hand nothing off"
 prepare polecat/tk-w "$FRESH"
 go PUSH_FAIL=1
-eq "$RC" 1 "(11) a refused push: stops"
-has "$OUT" "PUSH FAILED" "(11) says so"
-has "$OUT" "Never force-push" "(11) with the merge instruction"
+eq "$RC" 3 "(11) a push origin refused: exit 3"
+has "$OUT" "PUSH REFUSED" "(11) says so"
+has "$OUT" "Never rebase and never force-push" "(11) with the merge instruction"
 eq "$(field assignee)" "" "(11) nothing is handed off"
-given_back "(11)"
-eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(11) the session drains"
+kept "(11)"
+prepare polecat/tk-w "$FRESH"
+go PUSH_FAIL=1 LS_REMOTE_DOWN_AFTER_PUSH=1
+eq "$RC" 1 "(11b) a push whose origin then does not answer: stops"
+has "$OUT" "PUSH FAILED: origin did not answer" "(11b) says so"
+eq "$(field assignee)" "" "(11b) nothing is handed off"
+given_back "(11b)"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(11b) the session drains"
+# Another writer pushes to the branch during the run, so origin holds a commit HEAD
+# lacks. The push is refused, and every worker the step went to would be refused
+# the same way, so it stays with this session, which merges origin's branch in and
+# runs the call again.
+prepare polecat/tk-w "$FRESH"
+MOVER="$TMP/mover-$N"; "$REAL_GIT" clone -q "$CO" "$MOVER" 2>/dev/null
+g "$MOVER" checkout -q -b polecat/tk-w origin/main
+printf 'theirs\n' > "$MOVER/theirs.txt"; g "$MOVER" add theirs.txt; g "$MOVER" commit -qm theirs; g "$MOVER" push -q origin polecat/tk-w
+THEIRS=$(g "$MOVER" rev-parse HEAD)
+go
+eq "$RC" 3 "(11c) a branch that moved under the run: exit 3"
+has "$OUT" "PUSH REFUSED" "(11c) says so"
+has "$OUT" "MERGE it in" "(11c) says to merge origin's branch"
+eq "$(ON_ORIGIN polecat/tk-w)" "$THEIRS" "(11c) origin keeps the other writer's commit"
+eq "$(field assignee)" "" "(11c) nothing is handed off"
+kept "(11c)"
+g "$C" fetch -q origin; g "$C" merge -q --no-edit origin/polecat/tk-w
+MERGED=$(g "$C" rev-parse HEAD)
+go
+eq "$RC" 0 "(11c) once origin's branch is merged in, the call run again hands off"
+eq "$(ON_ORIGIN polecat/tk-w)" "$MERGED" "(11c) origin's branch holds the merge"
+eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(11c) the bead is the refinery's"
 prepare polecat/tk-w "$FRESH"
 go "LS_REMOTE_WRONG=$TMP/ls-seen-$N"
-eq "$RC" 1 "(12) a ref on origin that is not HEAD: stops"
-has "$OUT" "PUSH VERIFICATION FAILED" "(12) says so"
+eq "$RC" 3 "(12) a ref on origin that is not HEAD after the push: exit 3"
+has "$OUT" "BRANCH MOVED" "(12) says so"
+has "$OUT" "MERGE it in" "(12) says to merge origin's branch"
 eq "$(field assignee)" "" "(12) nothing is handed off"
-given_back "(12)"
+kept "(12)"
+prepare polecat/tk-w "$FRESH"
+go LS_REMOTE_DOWN_AFTER_PUSH=1
+eq "$RC" 1 "(12c) origin's branch that does not read after the push: stops"
+has "$OUT" "PUSH VERIFICATION FAILED" "(12c) says so"
+eq "$(field assignee)" "" "(12c) nothing is handed off"
+given_back "(12c)"
 prepare polecat/tk-w "$FRESH"
 go LS_REMOTE_DOWN=1
 eq "$RC" 1 "(12b) a read of origin that does not answer: stops"
@@ -593,7 +637,12 @@ eq "$RC" 1 "(17) an address no agent holds: stops"
 has "$OUT" "REFINERY ADDRESS NAMES NO AGENT" "(17) says so"
 has "$OUT" "gc-toolkit/other.refinery" "(17) names the bound refineries"
 eq "$(field assignee)" "" "(17) nothing is handed off"
-given_back "(17)"
+grep -q '^gate --subject tk-w --key polecat-refinery-address ' "$LOG" && ok "(17) files a gate under its key, since every worker would stop the same way" || bad "(17) files a gate under its key, since every worker would stop the same way"
+has "$(grep '^gate ' "$LOG")" "gc-toolkit/other.refinery" "(17) the gate names the bound refineries"
+grep -q '^await tk-w --key polecat-refinery-address --formula mol-polecat-work$' "$LOG" && ok "(17) the work waits on it" || bad "(17) the work waits on it"
+grep -q '^cancel --step mol-polecat-work.submit-and-exit ' "$LOG" && ok "(17) the run is cancelled" || bad "(17) the run is cancelled"
+eq "$(grep -c '^bd update st-submit --if-status=in_progress ' "$LOG" | tr -d ' ')" 0 "(17) the step is not given back to the pool"
+eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(17) the session drains"
 prepare polecat/tk-w "$FRESH"
 go "STUB_FAIL_ON=agent list"
 eq "$RC" 0 "(18) a roster that cannot be read: hands off unchecked"
@@ -995,8 +1044,8 @@ eq "$(pushed) $(ended)" "0 0" "(53b) nothing is pushed or ended"
 echo "# a sitting's stop ends nothing"
 prepare polecat/tk-w "$SIT_META"; sit_edge
 sit PUSH_FAIL=1
-eq "$RC" 1 "(54) a refused push: stops"
-has "$OUT" "PUSH FAILED" "(54) says so"
+eq "$RC" 3 "(54) a refused push: exit 3"
+has "$OUT" "PUSH REFUSED" "(54) says so"
 eq "$(field assignee) $(edge)" " tk-conv" "(54) the change stays unassigned and held"
 eq "$(ended)" 0 "(54) nothing gates, cancels or drains"
 prepare polecat/tk-w "$SIT_META"; sit_edge

@@ -392,17 +392,31 @@ case $? in
     work_drain
     exit 1 ;;
 esac
+# A push origin answers and refuses stays with this session, because the next
+# worker would meet the same refusal: a branch that moved under the run, or commits
+# a repository rule refuses. Only a push whose origin does not answer goes back to
+# the pool.
 if ! "$SCRIPT_DIR/branch-push.sh" --repo "$PWD" --branch "$CURRENT_BRANCH" --head HEAD "${LEASE[@]}"; then
-  echo "PUSH FAILED: $WORK_ID stays with this run. A branch that moved under you, or a head that does not hold it, means: re-fetch, MERGE origin in, and retry. Never force-push: branches are brought current by merge, never rebase." >&2
+  git ls-remote --exit-code --heads origin "refs/heads/$CURRENT_BRANCH" </dev/null >/dev/null 2>&1
+  case $? in
+    0|2)
+      echo "PUSH REFUSED: the push did not land while origin answers, so $WORK_ID is NOT handed off and the refusal is this session's to settle. Do not drain. When origin/$CURRENT_BRANCH holds commits HEAD lacks, fetch it and MERGE it in. When a repository rule refused the commits, as it refuses an unverified signature, fix them. Then re-run this call. Never rebase and never force-push." >&2
+      exit 3 ;;
+  esac
+  echo "PUSH FAILED: origin did not answer, so $WORK_ID is not handed off. The step goes back to the pool, and the next worker that takes it pushes again." >&2
   work_drain
   exit 1
 fi
 REMOTE_REF=$(git ls-remote origin "refs/heads/$CURRENT_BRANCH" 2>/dev/null | awk '{print $1}')
 LOCAL_HEAD=$(git rev-parse HEAD)
-if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
-  echo "PUSH VERIFICATION FAILED: origin/$CURRENT_BRANCH (${REMOTE_REF:-absent}) != local HEAD ($LOCAL_HEAD). Aborting handoff." >&2
+if [ -z "$REMOTE_REF" ]; then
+  echo "PUSH VERIFICATION FAILED: origin/$CURRENT_BRANCH did not read after the push, so whether it holds HEAD ($LOCAL_HEAD) is unknown and $WORK_ID is not handed off. The step goes back to the pool, and the next worker that takes it pushes again." >&2
   work_drain
   exit 1
+fi
+if [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
+  echo "BRANCH MOVED: origin/$CURRENT_BRANCH is at $REMOTE_REF, not HEAD ($LOCAL_HEAD), so another writer pushed after this run and $WORK_ID is NOT handed off. Do not drain: fetch origin/$CURRENT_BRANCH, MERGE it in, then re-run this call. Never rebase and never force-push." >&2
+  exit 3
 fi
 
 "$SCRIPT_DIR/bring-current-guard.sh" guard --bead "$WORK_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"
@@ -425,7 +439,8 @@ else
 fi
 
 # The refinery's find-work is exact-match on assignee, so a bead sent to an address
-# no agent holds is never read, and nothing reports the strand.
+# no agent holds is never read, and nothing reports the strand. Every worker would
+# stop here the same way, so the run ends on a gate for a person to correct it.
 ROSTER=$(gc agent list --json 2>/dev/null </dev/null | jq -r '.agents[]? | .qualified_name // empty | ., (split("/") | .[-1])' 2>/dev/null) || true
 if [ -z "$ROSTER" ]; then
   echo "roster unreadable: handing off to $REFINERY_TARGET unchecked"
@@ -434,8 +449,9 @@ elif ! grep -qxF "$REFINERY_TARGET" <<< "$ROSTER"; then
   echo "REFINERY ADDRESS NAMES NO AGENT: $REFINERY_TARGET" >&2
   echo "The refinery reads its queue by exact-match assignee, so a bead sent here is never seen and nothing reports it." >&2
   echo "Bound refineries: $BOUND" >&2
-  work_drain
-  exit 1
+  work_stop_with_gate polecat-refinery-address \
+    "Refinery address on $WORK_ID: $REFINERY_TARGET names no agent in the city's roster (bound refineries: ${BOUND:-none}). The branch is pushed, but a bead assigned there is never seen, and every worker this step went to would stop here the same way. Correct the binding prefix the run was poured with, or the refinery's binding. Its run is cancelled." \
+    "refinery address names no agent: $REFINERY_TARGET is not in the roster; the branch is pushed and the work waits on the address being corrected"
 fi
 
 # A summary file of whitespace alone writes no summary, and the retitle still goes.
