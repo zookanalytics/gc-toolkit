@@ -24,7 +24,9 @@
 # description rewritten on the next pass to what that pass read, and recovers
 # as in (d) once back on it; (j) a recovered rig whose gate withdrawal fails
 # keeps its subject open until a later withdrawal succeeds; (k) a rig whose
-# fetch fails is skipped, with nothing touched or filed; (l) no escalation
+# fetch fails is skipped, with nothing touched or filed, and is left with an
+# empty FETCH_HEAD, which doctor/check-pour-text-current reports, while a pass
+# whose fetch works leaves FETCH_HEAD listing what it fetched; (l) no escalation
 # tells a person to run git reset --hard or --keep.
 set -euo pipefail
 
@@ -185,6 +187,8 @@ eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
 eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
 eq "$(open_count mycity)" "0" "HQ root is excluded (not reconciled)"
 eq "$RUN1_OUT" "reconcile-rig-checkouts: 1 advanced, 1 blocked" "the summary line counts the advanced and the blocked rigs"
+eq "$([ -s "$TMP/alpha/.git/FETCH_HEAD" ] && echo listed || echo empty)" "listed" \
+  "a pass whose fetch works leaves the rig's FETCH_HEAD listing what it fetched"
 
 # The divergence is put to a person through human-gate.sh, on the reconcile bead
 # as subject; an advanced or HQ rig files nothing.
@@ -410,8 +414,10 @@ eq "$(open_count lambda)" "0" "a successful withdrawal finally closes the subjec
 
 # --- A rig whose fetch fails. -----------------------------------------------
 # rho's origin is gone, so its pass skips it: nothing moves and nothing is filed.
+# A fetch that worked first fills its FETCH_HEAD, so the pass is what empties it.
 behind_rig rho
 echo local-edit > "$TMP/rho/f.txt"
+git -C "$TMP/rho" fetch -q origin
 git -C "$TMP/rho" remote set-url origin "$TMP/absent.git"
 RHO_HEAD="$(git -C "$TMP/rho" rev-parse HEAD)"
 rigs_json rho
@@ -423,6 +429,8 @@ eq "$(esc_count rho)" "0" "a rig whose fetch fails files no gate"
 eq "$(open_count rho)" "0" "a rig whose fetch fails files no reconcile bead"
 eq "$(retract_count rho)" "0" "a rig whose fetch fails withdraws nothing"
 eq "$RHO_OUT" "reconcile-rig-checkouts: 0 advanced, 0 blocked" "a rig whose fetch fails is counted neither advanced nor blocked"
+eq "$(wc -c < "$TMP/rho/.git/FETCH_HEAD" | tr -d ' ')" "0" \
+  "a rig whose fetch fails is left with an empty FETCH_HEAD, which doctor/check-pour-text-current reports"
 
 # No subject bead or gate message this suite filed tells a person to run a
 # reset that overwrites what is in its way.
