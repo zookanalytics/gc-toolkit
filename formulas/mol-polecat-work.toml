@@ -397,10 +397,9 @@ git log --oneline origin/{{base_branch}}..HEAD
 ```
 Check for bugs, security issues, missing error handling, debug cruft,
 unintended file changes, and each mention of another rig the last command
-lists. Fix what you find. A problem you found outside this bead's work, here or
-while you built, is new work this branch does not fix: file it held for
-placement, as the skill `{{binding_prefix}}work` files new work, so a first
-reaction reads it. On a retry, the previous attempt's
+lists. Fix what you find. File a problem you found outside this bead's work,
+here or while you built, as new work held for placement, through the skill
+`{{binding_prefix}}work`. On a retry, the previous attempt's
 failure reproduces in the checks below: run them and read the failure rather
 than re-deriving from scratch.
 
