@@ -3,7 +3,7 @@
 # that landed (docs/component-model.md §3). A graph.v2 step's description
 # renders once, at pour, from rigs/<rig>, the checkout the runtime executes,
 # and that checkout advances on the reconciler's 15m cooldown
-# (orders/reconcile-rig-checkouts.toml). Two findings: LAGGED, a checkout
+# (orders/reconcile-rig-checkouts.toml). The findings: LAGGED, a checkout
 # behind its remote past the self-heal window; UNFETCHED, the remote-tracking
 # ref itself unrefreshed — the fail-open case: only the reconciler's own fetch
 # advances the ref rev-list compares against, so the behind-count reads 0 the
