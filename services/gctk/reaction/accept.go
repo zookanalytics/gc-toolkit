@@ -233,7 +233,7 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 			return out, stop(4, "could not search for a root of acceptance %s on %s (%v), which proves nothing, so nothing is dispatched or written. Run it again once the store answers: gctk reaction accept %s", out.Token, bead, err, bead)
 		case root != "":
 			out.Root = root
-			if err := r.liftHold(bead, ""); err != nil {
+			if _, err := r.liftHold(bead, ""); err != nil {
 				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
 			}
 			if err := r.markDispatched(bead, formula, out.Token, req.Reason); err != nil {
@@ -313,7 +313,7 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 	// dispatch, which clears the recommendation. The lift comes first, so a run
 	// that stops between the two leaves an acceptance the next Accept finishes,
 	// lift included.
-	if err := r.liftHold(bead, ""); err != nil {
+	if _, err := r.liftHold(bead, ""); err != nil {
 		return out, stop(4, "dispatched %s at %s (acceptance %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", formula, bead, out.Token, err, bead)
 	}
 	if err := r.markDispatched(bead, formula, out.Token, req.Reason); err != nil {
@@ -452,18 +452,19 @@ func (r *Reactions) reopen(why string, gates []string) string {
 }
 
 // liftHold removes every spelling of hold:mayor the bead carries now, with note
-// when one is given, in one write. A bead that carries none is not written.
-func (r *Reactions) liftHold(bead, note string) error {
+// when one is given, in one write, and names the spellings it removed. A bead
+// that carries none is not written.
+func (r *Reactions) liftHold(bead, note string) ([]string, error) {
 	row, err := r.readBead(bead)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if row == nil {
-		return fmt.Errorf("%s does not resolve", bead)
+		return nil, fmt.Errorf("%s does not resolve", bead)
 	}
 	spellings := gascity.Spellings(row.Labels(), "hold:mayor")
 	if len(spellings) == 0 {
-		return nil
+		return nil, nil
 	}
 	w := r.Ledger.Write(bead)
 	for _, s := range spellings {
@@ -472,7 +473,10 @@ func (r *Reactions) liftHold(bead, note string) error {
 	if note != "" {
 		w.Note(note)
 	}
-	return r.Ledger.Commit(w)
+	if err := r.Ledger.Commit(w); err != nil {
+		return nil, err
+	}
+	return spellings, nil
 }
 
 // markDispatched records that Accept dispatched formula, and withdraws the

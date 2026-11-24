@@ -646,35 +646,18 @@ func (r *Reactions) handOver(d *Dispose, who, form string) error {
 	return nil
 }
 
-// lift removes every spelling of hold:mayor the subject carries now, in one
-// write, for the next actor this exit sends it to, which to names. Gas City
-// reads the label trimmed and in any case, and bd removes a label only by its
-// exact text, so the labels are read again here. A subject that carries none
-// is not written. A lift that does not land stops the exit, and a re-run
-// resumes it, since the check a re-offered reaction runs passes over the
-// headline its own run wrote.
+// lift takes the subject out of the placement queue for the next actor this
+// exit sends it to, which to names. A lift that does not land stops the exit,
+// and a re-run resumes it, since the check a re-offered reaction runs passes
+// over the headline its own run wrote.
 func (r *Reactions) lift(d *Dispose, to string) error {
-	rows, err := r.Ledger.Find(ledger.ByID(d.Bead))
+	lifted, err := r.liftHold(d.Bead, "")
 	if err != nil {
-		return fmt.Errorf("the %s exit on %s did not land: its labels could not be read again (%v), so hold:mayor was not lifted for %s, and Gas City serves a held bead to no hook. The headline and the release stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Disposition, d.Bead, err, to)
+		return fmt.Errorf("the %s exit on %s did not land: hold:mayor was not lifted for %s (%v), and Gas City serves a held bead to no hook. The headline and the release stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Disposition, d.Bead, to, err)
 	}
-	var spellings []string
-	for _, row := range rows {
-		if row.ID == d.Bead {
-			spellings = gascity.Spellings(row.Labels(), gascity.HoldMayor)
-		}
+	if len(lifted) > 0 {
+		r.say("lifted hold:mayor from %s for %s", d.Bead, to)
 	}
-	if len(spellings) == 0 {
-		return nil
-	}
-	w := r.Ledger.Write(d.Bead)
-	for _, l := range spellings {
-		w.RemoveLabel(l)
-	}
-	if err := r.Ledger.Commit(w); err != nil {
-		return fmt.Errorf("the %s exit on %s did not land: the write that lifts hold:mayor for %s did not (%v), and Gas City serves a held bead to no hook. The headline and the release stand, so clear the cause and re-run this command: a re-run resumes rather than refusing", d.Disposition, d.Bead, to, err)
-	}
-	r.say("lifted hold:mayor from %s for %s", d.Bead, to)
 	return nil
 }
 

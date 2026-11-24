@@ -185,7 +185,7 @@ func TestAnArrivalsHandOffLiftsItsHold(t *testing.T) {
 	}
 	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--assign", "gc-toolkit.mechanik", "--run", root)
 	wantCode(t, code, 4, err, "(ARRIVALLIFT) a lift the store refuses")
-	errHas(t, err, "the write that lifts hold:mayor for the hand-off to gc-toolkit.mechanik did not (", "(ARRIVALLIFT) naming the write")
+	errHas(t, err, "hold:mayor was not lifted for the hand-off to gc-toolkit.mechanik (", "(ARRIVALLIFT) naming the lift")
 	errHas(t, err, "a re-run resumes rather than refusing", "(ARRIVALLIFT) and the re-run")
 	w.hasnt("SLING ", "(ARRIVALLIFT) no hand-off")
 
