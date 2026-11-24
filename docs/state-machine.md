@@ -670,9 +670,13 @@ The postures, in the precedence the derivation applies:
 The priority function reads the posture too. An `approved` posture on an anchor
 whose PR is open on the pending record, read at the head `pr_head_oid` records,
 ranks the anchor's PR-finishing work at P0, so the pass of `pr-facts.sh` that
-records a posture or a head moving into or out of that rank re-ranks that work.
-`pr_finishing_settled` records the rank all of it settled at, and the posture
-write that moves the rank marks it `unsettled`. The work is settled again while
+records a posture or a head moving into or out of that rank re-ranks the
+anchor's reviews, reworks and validation passes. A review run is PR-finishing
+work too, and the priority pass re-ranks it instead, once a step of it is queued
+for the polecat pool ([steering.md](steering.md#pr-finishing-work)).
+`pr_finishing_settled` records the rank all of the anchor's reviews, reworks and
+validation passes settled at, and the posture write that moves the rank marks
+it `unsettled`. The work is settled again while
 that record differs from the rank the anchor's state, posture and head give, by
 every pass for an anchor with an open PR and by every full pass for one resting
 elsewhere, so a re-rank a failed settle left short is finished on a later pass

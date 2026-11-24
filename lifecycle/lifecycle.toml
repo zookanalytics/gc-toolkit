@@ -1205,12 +1205,15 @@ keys = ["priority_shift"]
 #   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
 #   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
 #   wherever a priority is computed: queue-priority.sh settle, its move and its
-#   reconcile pass. Read only on a bead that follows a parent or an anchor: a
-#   workflow's convoy, root and steps carry no shift, and a bead that follows
-#   nothing has nothing to shift from. Absent or empty reads as 0. A value that
-#   is not a signed integer makes the bead unreadable, and every bead that
-#   follows it, so no priority is computed from it. No pack writer clears it. A
-#   signed integer, stored as a number.
+#   reconcile pass. Read only on a bead that follows a parent or an anchor, a
+#   review run's root among them: a workflow's convoy and steps, and any other
+#   workflow's root, carry no shift, and a bead that follows nothing has nothing
+#   to shift from. Absent or empty reads as 0, and as -1 on a review run's root,
+#   the shift the rest of PR-finishing work is filed with, since the landing
+#   order pours the root with none. A value that is not a signed integer makes
+#   the bead unreadable, and every bead that follows it, so no priority is
+#   computed from it. No pack writer clears it. A signed integer, stored as a
+#   number.
 
 [metadata.supersede]
 # RETIRED. The successor keys a disposition carried before bd's own edges
