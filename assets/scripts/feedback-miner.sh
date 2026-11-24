@@ -5,13 +5,16 @@
 # city, and files the observations the miner's agent condenses.
 #
 # Where a post comes from is decided in this order:
-#   1. A post carrying the city's mark is the city's (gc_city_marked, from
-#      `pr-post.sh feedback-def`, which carries the one definition of the mark).
+#   1. A post under the city's login that carries the city's mark is the
+#      city's (gc_city_marked, from `pr-post.sh feedback-def`, which carries the
+#      one definition of the mark). The mark counts only under that login, as
+#      gc_city_own counts it, so the rules below class a post from any other
+#      login that carries or quotes it.
 #   2. Any other post that is not for review is a notice, not review feedback,
 #      whoever posted it (gc_not_for_review, from the same definitions): it
 #      opens with the no-review mark, or with a prefix the rig declares.
-#   3. An unmarked post from any login other than the one gh posts as is
-#      outside, except a GitHub App account's approval, which is a notice. On
+#   3. A post from any login other than the one gh posts as is outside,
+#      except a GitHub App account's approval, which is a notice. On
 #      a rig that declares no prefix, Vercel's deployment notice is a notice
 #      too: an app's conversation comment whose first non-blank line opens
 #      with Vercel's hidden link reference, `[vc]:`. That keeps the learning
@@ -296,7 +299,7 @@ if [ "$VERB" = fetch-pr ]; then
     | .[]
     | select(has_text)
     | ((.user.login // "") | tostring) as $login
-    | gc_city_marked as $marked
+    | (($login == $self) and gc_city_marked) as $marked
     | (code_review_signed
        or (.gc_stream == "inline" and (.pull_request_review_id as $r | any($signed[]; . == $r)))) as $is_signed
     | (if $marked then "city"

@@ -40,7 +40,7 @@ Any other exit: a read, the fetch or a write did not land, and the call names
 which. Tell the witness, with the line it printed, then drain without closing
 this step, so the next worker runs the check again. A re-run converges.
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: the rebase landing check failed" -m "<the line it printed>"
+gc mail send "${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness" -s "HELP: the rebase landing check failed" -m "<the line it printed>"
 ```
 
 **Exit criteria:** the rebase bead is closed as landed, waits on a new landing

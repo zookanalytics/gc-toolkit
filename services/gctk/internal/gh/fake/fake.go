@@ -145,11 +145,11 @@ type Repo struct {
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
-// "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
-// "MarkReady" or "ConvertToDraft" with the PR's node id, or "DismissReview"
-// with the review's id and the dismissal's message.
+// "EnqueuePullRequest" with the PR's node id and the head it was pinned to, and
+// a merge's commit headline, "MarkReady" or "ConvertToDraft" with the PR's node
+// id, or "DismissReview" with the review's id and the dismissal's message.
 type Ask struct {
-	Method, ID, Head, Message string
+	Method, ID, Head, Headline, Message string
 }
 
 // Asks returns the merge requests made, in order.
@@ -210,8 +210,8 @@ func (g *GitHub) byID(id string) *PR {
 // MergePullRequest records the request and answers it: by OnMerge when set,
 // else by refusing a head that is not the PR's and otherwise merging the PR,
 // with a merge commit named after its head.
-func (g *GitHub) MergePullRequest(id, head string) error {
-	return g.ask("MergePullRequest", id, head, func(p *PR) {
+func (g *GitHub) MergePullRequest(id, head, headline string) error {
+	return g.ask(Ask{Method: "MergePullRequest", ID: id, Head: head, Headline: headline}, func(p *PR) {
 		p.Facts.State, p.Facts.MergedAt = "MERGED", "2026-11-12T08:00:00Z"
 		p.Facts.MergeCommit = "e" + head[1:]
 	})
@@ -220,25 +220,25 @@ func (g *GitHub) MergePullRequest(id, head string) error {
 // EnqueuePullRequest records the request and answers it as MergePullRequest
 // does, adding the PR to the queue where that one merges it.
 func (g *GitHub) EnqueuePullRequest(id, head string) error {
-	return g.ask("EnqueuePullRequest", id, head, func(p *PR) { p.Facts.InMergeQueue = true })
+	return g.ask(Ask{Method: "EnqueuePullRequest", ID: id, Head: head}, func(p *PR) { p.Facts.InMergeQueue = true })
 }
 
-func (g *GitHub) ask(method, id, head string, take func(*PR)) error {
+func (g *GitHub) ask(a Ask, take func(*PR)) error {
 	g.mu.Lock()
-	g.asks = append(g.asks, Ask{Method: method, ID: id, Head: head})
-	err := g.Fail[method]
-	p := g.byID(id)
+	g.asks = append(g.asks, a)
+	err := g.Fail[a.Method]
+	p := g.byID(a.ID)
 	g.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		return fmt.Errorf("github: no pull request has the node id %s", id)
+		return fmt.Errorf("github: no pull request has the node id %s", a.ID)
 	}
 	if g.OnMerge != nil {
-		return g.OnMerge(method, p, head)
+		return g.OnMerge(a.Method, p, a.Head)
 	}
-	if p.Facts.HeadRefOid != head {
+	if p.Facts.HeadRefOid != a.Head {
 		return fmt.Errorf("github: Head branch was modified. Review and try the merge again")
 	}
 	take(p)

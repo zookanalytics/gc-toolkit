@@ -123,12 +123,14 @@ case "$1 ${2:-}" in
     # this list has no reaction agent — the dead zone require_reaction_agent
     # refuses. FAKE_AGENT_LIST_EMPTY models an empty (unreadable) roster and
     # FAKE_AGENT_LIST_INVALID a nonempty-but-unparseable one — both fail open.
+    # FAKE_BINDING is the key the city imports the pack under (default
+    # gc-toolkit), which Gas City puts in each qualified name.
     [ -n "${FAKE_AGENT_LIST_EMPTY:-}" ] && exit 0
     [ -n "${FAKE_AGENT_LIST_INVALID:-}" ] && { printf '%s\n' "$FAKE_AGENT_LIST_INVALID"; exit 0; }
-    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" \
+    jq -n --arg rigs "${FAKE_REACTION_RIGS-gc-toolkit gascity}" --arg b "${FAKE_BINDING:-gc-toolkit}" \
       '{agents: [ ($rigs | split(" ")[] | select(length>0)) as $r
-                  | {qualified_name:($r+"/gc-toolkit.proactive"), suspended:false, pool:{max:2}},
-                    {qualified_name:($r+"/gc-toolkit.converse"),  suspended:false, pool:{max:2}} ]}' ;;
+                  | {qualified_name:($r+"/"+$b+".proactive"), name:"proactive", dir:$r, suspended:false, pool:{max:2}},
+                    {qualified_name:($r+"/"+$b+".converse"),  name:"converse",  dir:$r, suspended:false, pool:{max:2}} ]}' ;;
   "bd show")
     # Answers the origin read-back. $FAKE_ORIGIN is the value already on the
     # bead, so the "never overrule an existing origin" case is a real read of a
@@ -483,6 +485,19 @@ unset FAKE_REACTION_RIGS
 run no "a topic for a served rig" --rig gascity
 eq "$RC" "0" "(DEADZONE control) a rig WITH a reaction agent files as today"
 has "$CALLS" "helm open tk-newsub" "(DEADZONE control) and the conversation is filed"
+
+# A city names the key it imports the pack under, so a reaction agent
+# registered under another key serves its rig, and a rig with none under that
+# key is still a dead zone.
+export FAKE_BINDING=kit
+run no "a topic for a rig served under another import key"
+eq "$RC" "0" "(DEADZONE binding) a rig whose proactive pool runs under another key files"
+has "$CALLS" "helm open tk-newsub" "(DEADZONE binding) and the conversation is filed"
+export FAKE_REACTION_RIGS="rig-x"
+run no "a topic for an agentless rig under another import key"
+eq "$RC" "3" "(DEADZONE binding) a rig with no reaction agent under that key is refused"
+has "$ERR" "rig-x" "(DEADZONE binding) and points at the rig that has one"
+unset FAKE_BINDING FAKE_REACTION_RIGS
 
 # An unreadable roster refuses nothing: a dead zone is a positive finding only,
 # so a roster gc cannot answer must not strand the operator at a refusal.
