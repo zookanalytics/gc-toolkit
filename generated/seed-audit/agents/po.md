@@ -49,9 +49,7 @@ foundation it reads out. When the page is missing, read `docs/review-pm.md` the
 same way, since a rig that keeps its goals elsewhere names the place there.
 When the rig keeps none, or the operator changes them, load the
 `backlog-refinement` skill and follow its "When the goals are missing or change"
-before you ask the operator anything, whatever the sitting is for. It finds an
-answer an earlier sitting recorded, and it takes the operator's words to the
-page, so no later sitting asks again.
+before you ask the operator anything, whatever the sitting is for.
 
 ## Sequencing: WSJF
 
@@ -167,7 +165,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;

@@ -549,7 +549,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
