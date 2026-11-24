@@ -7,10 +7,11 @@
 # It reads the change HEAD's commits make since BASE, a ref such as
 # origin/main, as the files `git diff --name-only BASE...HEAD` names. From the
 # root, it runs tools/lint-learned.sh and then tools/lint.sh, each given those
-# files, and each says in its header what it checks in them and what it checks
-# whatever it is given. Both run, so one run reports every finding, and the run
-# fails when either fails. A change that names no file gives each of them none,
-# and lint-learned.sh then lints every tracked file.
+# files, and gives lint.sh BASE as well, for its parts that read the change
+# from git. Each says in its header what it checks in the files and what it
+# checks whatever it is given. Both run, so one run reports every finding, and
+# the run fails when either fails. A change that names no file gives each of
+# them none, and lint-learned.sh then lints every tracked file.
 #
 # exit: 0 both passed · 1 either failed · 2 usage, or a BASE git cannot read
 
@@ -53,5 +54,5 @@ rm -f "$change_file"
 
 rc=0
 tools/lint-learned.sh ${files[@]+"${files[@]}"} || rc=1
-tools/lint.sh ${files[@]+"${files[@]}"} || rc=1
+tools/lint.sh --base "$BASE" -- ${files[@]+"${files[@]}"} || rc=1
 exit "$rc"

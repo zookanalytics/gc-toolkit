@@ -6,16 +6,21 @@
 #   - it runs tools/lint-learned.sh and then tools/lint.sh from the root, each
 #     given the files the change since BASE names, root-relative and each
 #     whole: a name with a space, one with a non-ASCII character and one with a
-#     tab among them;
+#     tab among them; lint.sh is given BASE too;
 #   - both run whichever fails, and the run exits 1 when either fails, 0 when
 #     both pass;
 #   - a change that names no file gives each of them no file;
 #   - a run from a directory below the root runs them from the root;
 #   - no BASE, an option for one, a second argument and a BASE git cannot read
-#     are usage errors that run neither.
+#     are usage errors that run neither;
+#   - with the real lint.sh, its step-text lint and its warrant list read the
+#     change from the BASE the run names, where that and origin/main part ways,
+#     and where there is no origin/main.
 #
 # Hermetic: runs a copy of lint-change.sh in a throwaway git repository, with
-# stand-ins for tools/lint-learned.sh and tools/lint.sh that log each call.
+# stand-ins for tools/lint-learned.sh and tools/lint.sh that log each call. The
+# last section runs copies of the real lint.sh, lint-step-text.sh and
+# warrants-touched.sh in a repository of its own.
 
 set -u
 
@@ -79,10 +84,10 @@ gitc rm -q docs/gone.md
 gitc add -A
 gitc commit -q -m "change docs"
 files="$(printf '  [%s]\n' "docs/a"$'\t'"b.md" "docs/caf"$'\xc3\xa9'".md" "docs/gone.md" "docs/my file.md" "docs/notes.md")"
-want="$(printf 'lint-learned 5 cwd=%s\n%s\nlint 5 cwd=%s\n%s' "$REPO" "$files" "$REPO" "$files")"
+want="$(printf 'lint-learned 5 cwd=%s\n%s\nlint 8 cwd=%s\n  [--base]\n  [base]\n  [--]\n%s' "$REPO" "$files" "$REPO" "$files")"
 run base
 eq "$RC" 0 "both linters passing passes"
-eq "$CALLS" "$want" "lint-learned.sh runs, then lint.sh, from the root, each given every file the change names, each whole"
+eq "$CALLS" "$want" "lint-learned.sh runs, then lint.sh with the base, from the root, each given every file the change names, each whole"
 
 echo "── one fails, both run ──"
 STUB_LEARNED_RC=1 run base
@@ -107,7 +112,7 @@ echo "── a change that names no file ──"
 gitc checkout -q -b same base
 run base
 eq "$RC" 0 "a change that names no file passes when both pass"
-eq "$CALLS" "$(printf 'lint-learned 0 cwd=%s\nlint 0 cwd=%s' "$REPO" "$REPO")" "…and gives each linter no file"
+eq "$CALLS" "$(printf 'lint-learned 0 cwd=%s\nlint 3 cwd=%s\n  [--base]\n  [base]\n  [--]' "$REPO" "$REPO")" "…and gives each linter no file"
 
 echo "── usage ──"
 for args in "" "--list" "base extra" "no-such-ref"; do
@@ -121,6 +126,52 @@ has "$OUT" "cannot read the change from no-such-ref to HEAD" "a BASE git cannot 
 run --help
 eq "$RC" 0 "--help exits 0"
 has "$OUT" "lint-change.sh BASE" "…printing the usage"
+
+echo "── the base reaches lint.sh's parts that read the change ──"
+# A skill gains a procedure on the branch landed, and topic is cut from landed.
+# Since the older base, topic's change adds the procedure and touches the
+# warrant that covers the skill, and since landed it does neither. The real
+# lint.sh, lint-step-text.sh and warrants-touched.sh run here, and git ignores
+# them, so no shell file or go.mod is tracked and the shell and Go lints have
+# nothing to run. Stand-ins take the place of lint-learned.sh and the shellcheck
+# runner.
+E2E="$TMP/e2e"
+mkdir -p "$E2E/tools" "$E2E/assets/scripts" "$E2E/docs" "$E2E/skills/example"
+for t in lint-change.sh lint.sh lint-step-text.sh warrants-touched.sh; do
+  cp "$SRC/tools/$t" "$E2E/tools/$t"
+done
+printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E/tools/lint-learned.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E/assets/scripts/shellcheck-run.sh"
+chmod +x "$E2E"/tools/*.sh "$E2E/assets/scripts/shellcheck-run.sh"
+printf '# Warrants\n\n## Example warrant\n\n- **Covers.** `skills/example/SKILL.md`\n- **Verified.** 2026-11-24\n' > "$E2E/docs/warrants.md"
+printf '# Example\n' > "$E2E/skills/example/SKILL.md"
+printf '# notes\n' > "$E2E/docs/notes.md"
+e2ec() { git -C "$E2E" -c user.name=lint-change-test -c user.email=lint-change-test@example.invalid -c commit.gpgsign=false "$@"; }
+git -C "$E2E" init -q
+printf 'tools/\nassets/\n' >> "$E2E/.git/info/exclude"
+e2ec add -A
+e2ec commit -q -m base
+e2ec branch older
+e2ec checkout -q -b landed
+printf '# Example\n\n```bash\necho one\necho two\n```\n' > "$E2E/skills/example/SKILL.md"
+e2ec commit -q -am "the skill gains a procedure"
+e2ec update-ref refs/remotes/origin/main landed
+e2ec checkout -q -b topic
+printf '# notes, changed\n' > "$E2E/docs/notes.md"
+e2ec commit -q -am "change the notes"
+run_e2e() { OUT="$(cd "$E2E" && bash tools/lint-change.sh "$@" 2>&1)"; RC=$?; }
+
+run_e2e older
+eq "$RC" 1 "a base before the procedure fails the run"
+has "$OUT" "step and skill text: FAIL — a change adds a procedure" "…because the step-text lint reads the change from it"
+has "$OUT" "warrants: touched, listed above" "…and the warrant list does too"
+run_e2e origin/main
+eq "$RC" 0 "origin/main, after the procedure, passes"
+has "$OUT" "step and skill text: clean" "…with no procedure added since it"
+has "$OUT" "warrants: none touched" "…and no warrant touched"
+e2ec update-ref -d refs/remotes/origin/main
+run_e2e landed
+eq "$RC" 0 "a base that names the commit origin/main named passes with no origin/main"
 
 printf '\nlint-change: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
