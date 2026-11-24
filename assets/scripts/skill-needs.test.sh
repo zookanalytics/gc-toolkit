@@ -1764,10 +1764,10 @@ for sh_ in $shells; do
     # A withdrawal the store refuses, or a subject read that is not its own
     # row alone, prints no success line and exits non-zero, so the sitting
     # answers nothing. A read that does not answer writes nothing at all.
-    for stop in "DP_UPDATE_REFUSE=1|an update the store refuses|" \
-        "DP_SHOW_EMPTY=1|a subject read that answers no row|" \
-        "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,|"; do
-        IFS='|' read -r setting what says <<EOF
+    for stop in "DP_UPDATE_REFUSE=1|an update the store refuses" \
+        "DP_SHOW_EMPTY=1|a subject read that answers no row" \
+        "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,"; do
+        IFS='|' read -r setting what <<EOF
 $stop
 EOF
         dp_seed "$POOLED"
@@ -1778,7 +1778,6 @@ EOF
             0:*|*"carries no arm and no pool route"*) bad "($sh_) dispatch path: $what clears nothing for the answer" "exit $rc, out: $out" ;;
             *) ok "($sh_) dispatch path: $what clears nothing for the answer" ;;
         esac
-        [ -z "$says" ] || has "$out" "$says" "($sh_) dispatch path: …and names what is left"
         case "$setting:$calls" in
             DP_SHOW_*:*"bead disarm"*|DP_SHOW_*:*"bd update"*) bad "($sh_) dispatch path: …$what writes nothing" "calls: $calls" ;;
             DP_SHOW_*) ok "($sh_) dispatch path: …and writes nothing" ;;

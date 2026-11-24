@@ -30,6 +30,10 @@
 #   - --no-retry and --retry 0 report the raw parallel result;
 #   - --retry N bounds the serial attempts;
 #   - the serial run's log, not the parallel one, is what the failure dump shows;
+#   - a run that exits 0 fails when its log holds a shell's report of a command
+#     it could not find, in bash's wording or zsh's, on its serial re-run too,
+#     and the failure dump shows the report however long the log; a line that
+#     only names the words fails nothing;
 #   - --retry rejects a non-integer;
 #   - --seconds FILE empties the file, then gets one line per run of the
 #     parallel wave, quiet or not, naming the run as its report line does with
@@ -251,6 +255,59 @@ reset_state
 run "$FIX/pass.test.sh" "$FIX/flaky.test.sh" "$FIX/afail.test.sh"
 eq "$RC" 1 "one unrecoverable failure fails the suite despite a recovery"
 has "$OUT" "2 passed (1 recovered on serial re-run), 1 failed" "the summary splits recovered from real"
+
+# A file that calls a helper it never defines goes on and exits 0, since it
+# counts only the assertions it makes. Each one ends on a command that succeeds,
+# so only its shell's report of the call can fail it.
+cat > "$FIX/undefined.test.sh" <<'F'
+#!/usr/bin/env bash
+echo "  ok    a check that ran"
+has "x" "x" "a check this file has no helper for"
+echo "  ok    a check after it"
+F
+
+# The report sits above the 25 lines the dump of a long log ends with.
+cat > "$FIX/longundefined.test.sh" <<'F'
+#!/usr/bin/env bash
+for (( i = 1; i <= 250; i++ )); do echo "  ok    check $i"; done
+eq "x" "x" "a check this file has no helper for"
+for (( i = 251; i <= 300; i++ )); do echo "  ok    check $i"; done
+F
+
+cat > "$FIX/zshundefined.test.sh" <<'F'
+#!/usr/bin/env bash
+zsh -fc 'nosuchhelper x'
+echo "  ok    a check after it"
+F
+
+cat > "$FIX/names.test.sh" <<'F'
+#!/usr/bin/env bash
+echo "  ok    a missing gum prints command not found"
+echo "  ok    the message says command not found: and names it"
+F
+
+echo "── missing command: a run whose log reports a command its shell could not find fails ──"
+reset_state
+run "$FIX/undefined.test.sh"
+eq "$RC" 1 "a file that calls a helper it never defines fails the suite, though it exits 0"
+has "$OUT" "FAIL[127]" "…reported with the status the shell gave the call"
+has "$OUT" "failed serially too" "…and its serial re-run fails the same way"
+has "$OUT" "has: command not found" "…and the dump shows the shell's report"
+reset_state
+run "$FIX/longundefined.test.sh"
+eq "$RC" 1 "a long log that reports a missing command fails the suite too"
+has "$OUT" "eq: command not found" "…and the dump's markers show the report its tail leaves out"
+if command -v zsh >/dev/null 2>&1; then
+  reset_state
+  run "$FIX/zshundefined.test.sh"
+  eq "$RC" 1 "zsh's wording of the report fails the run as bash's does"
+  has "$OUT" "command not found: nosuchhelper" "…and the dump shows it"
+else
+  printf '  SKIP  zsh is not installed, so its wording of the report was not run\n'
+fi
+reset_state
+run "$FIX/names.test.sh"
+eq "$RC" 0 "a file whose lines only name the words passes"
 
 # A file with parts declares them in its opening comment block. Each fixture
 # below records the part each run was handed, so the assertions read what the

@@ -146,6 +146,17 @@
 # reports the raw parallel result. A serial re-run keeps the caller's priority,
 # because it runs alone and cannot crowd the host.
 #
+# A run that exits 0 still fails when its log holds a shell's report of a
+# command it could not find: bash ends such a line with "<name>: command not
+# found", and zsh writes "command not found: <name>". A file counts only the
+# assertions it makes, so a call to a helper it never defines, such as one the
+# shared harness (assets/scripts/test-harness.sh) defines, in a file that does
+# not source the harness, checks nothing and leaves the file exiting 0. Such a
+# run is reported FAIL[127], the status the shell gives the call, and re-runs
+# serially like any other failure. The report fails the run wherever it comes
+# from, a script under test included, so a file that runs a missing command on
+# purpose keeps that command's output out of its log.
+#
 # Every file runs with commit and tag signing off, added after any
 # GIT_CONFIG_COUNT entries the caller already exported. A test that commits
 # does so in a throwaway repo, and on a host whose git config signs every
@@ -874,11 +885,19 @@ launch() {
   PID_IDX[$pid]="$idx"; PID_START[$pid]="$SECONDS"
 }
 
+# The line a shell writes for a command it could not find, as bash and zsh word
+# it (the header says why such a run fails).
+MISSING_COMMAND=': command not found(: |$)'
+called_missing_command() { # <run-index>
+  grep -qE -- "$MISSING_COMMAND" "$LOGDIR/$1.log" 2>/dev/null
+}
+
 finish() {
   local pid="$1" rc="$2" idx dur rel status
   idx="${PID_IDX[$pid]}"
   kill -- -"$pid" 2>/dev/null   # reap anything the file left running in its group
   [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
+  [ "$rc" -ne 0 ] || ! called_missing_command "$idx" || rc=127
   dur=$(( SECONDS - PID_START[$pid] ))
   rel="$(label "$idx")"
   if [ "$rc" -eq 0 ]; then
@@ -904,6 +923,7 @@ rerun_serial() {
   wait "$pid"; rc=$?
   kill -- -"$pid" 2>/dev/null   # reap anything the file left in its group
   [ ! -e "$LOGDIR/$pid.hung" ] || rc=124
+  [ "$rc" -ne 0 ] || ! called_missing_command "$idx" || rc=127
   return "$rc"
 }
 
@@ -965,10 +985,11 @@ if [ "$FAIL" -gt 0 ]; then
     lines=$(wc -l <"$log" 2>/dev/null || echo 0)
     if [ "$lines" -gt 200 ]; then
       # A failing assertion can sit anywhere in a long log, so surface the
-      # framework's FAIL markers before the tail — a plain tail of an "ok"-heavy
-      # file hides the one line that matters.
+      # framework's FAIL markers, and any command a shell could not find,
+      # before the tail — a plain tail of an "ok"-heavy file hides the one line
+      # that matters.
       printf '(%s lines; failing markers, then tail)\n' "$lines"
-      grep -nE 'FAIL|not ok|✗' "$log" | head -40
+      grep -nE "FAIL|not ok|✗|$MISSING_COMMAND" "$log" | head -40
       printf '  --- tail ---\n'
       tail -n 25 "$log"
     else
