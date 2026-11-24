@@ -188,14 +188,12 @@ on the tracker of a failure already red on a base branch (it carries
 with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
 leaves unrouted, and the blocked exit's `--then-route` arms nothing for it. The
 operator's placement sitting then places it under an epic or routes it on its
-own; `gc beads list --label hold:mayor` lists each bead held so. Most subjects
-arrive held already: the scan reacts to each bead filed into that queue, and the
-exit leaves such a bead held whatever it would route, unless its emergency is
-confirmed, so your card is the first thing the sitting reads about it. Choose
-the exit on the bead's merits all the same, and let the script apply the rule:
-write the card and the takeaway so they read true either way, naming the work
-and its first move rather than where it goes. Never propose or write a parent.
-Placing a bead under an epic is the operator's move at the sitting.
+own; `gc beads list --label hold:mayor` lists each bead held so. A subject that
+arrived held stays held whatever your exit routes, unless its emergency is
+confirmed. Choose the exit on the bead's merits, and let the script apply the
+rule: write the card and the takeaway so they read true either way, naming the
+work and its first move rather than where it goes. Never propose or write a
+parent. Placing a bead under an epic is the operator's move at the sitting.
 
 An emergency is a red main or a broken gate that shows as a failing check on
 main. Pass `--emergency <check>` for one, naming the check on main whose failure
