@@ -20,9 +20,10 @@ import (
 // Formula is the formula a first reaction is a run of.
 const Formula = "mol-first-reaction"
 
-// proactivePool is the pool, in the caller's rig, a first reaction is slung
-// through (agents/proactive/agent.toml).
-const proactivePool = "gc-toolkit.proactive"
+// proactivePool is the template of the pool, in the caller's rig, a first
+// reaction is slung through (agents/proactive/agent.toml; rigPool names the
+// pool).
+const proactivePool = "proactive"
 
 // The codes of the refusals, which three callers branch on: operator-intake.sh
 // names the cause of each in the conversation it files instead, the reaction's
@@ -122,19 +123,25 @@ func CheckRun(run string) error {
 }
 
 // Sling slings a first reaction on bead through the rig's proactive pool, as
-// `gc sling --rig <rig> <rig>/gc-toolkit.proactive <bead> --on
-// mol-first-reaction`, unless a refusal holds. gc sling refuses a second live
-// run of the formula on a bead, and its refusal is the Reacting refusal. It
-// returns nil once the sling has landed. An error is a read that did not
-// answer, an unset rig or a sling that failed, and nothing is slung.
+// `gc sling --rig <rig> <rig>/<binding>.proactive <bead> --on
+// mol-first-reaction`, unless a refusal holds. The pool's name carries the key
+// the city imports the pack under, which the city's roster names
+// (proactiveTarget). gc sling refuses a second live run of the formula on a
+// bead, and its refusal is the Reacting refusal. It returns nil once the sling
+// has landed. An error is a read that did not answer, an unset rig, a roster
+// that names no one proactive pool in the rig or a sling that failed, and
+// nothing is slung.
 func (r *Reactions) Sling(bead string) (*Refusal, error) {
-	target, err := r.proactiveTarget()
-	if err != nil {
-		return nil, err
+	if r.Rig == "" {
+		return nil, ErrNoRig
 	}
 	refused, err := r.refusal(bead, "")
 	if refused != nil || err != nil {
 		return refused, err
+	}
+	target, err := r.proactiveTarget()
+	if err != nil {
+		return nil, err
 	}
 	res := r.Runtime.Sling(gascity.Sling{Rig: r.Rig, Target: target, Bead: bead, Formula: Formula})
 	switch {
@@ -151,14 +158,22 @@ func (r *Reactions) Sling(bead string) (*Refusal, error) {
 
 // ErrNoRig is a sling or a sweep in no rig, whose proactive pool cannot be
 // named.
-var ErrNoRig = errors.New("cannot rig-qualify the proactive pool: set GC_RIG. The pool is rig-scoped (agents/proactive/agent.toml serves <rig>/" + proactivePool + "), and a bare route matches nobody")
+var ErrNoRig = errors.New("cannot rig-qualify the proactive pool: set GC_RIG. The pool is rig-scoped (agents/proactive/agent.toml serves <rig>/<binding>." + proactivePool + "), and a bare route matches nobody")
 
-// proactiveTarget is the rig's proactive pool, rig-qualified.
+// proactiveTarget is the rig's proactive pool, by the qualified name the
+// city's roster gives it (rigPool), read once for the life of r.
 func (r *Reactions) proactiveTarget() (string, error) {
 	if r.Rig == "" {
 		return "", ErrNoRig
 	}
-	return r.Rig + "/" + proactivePool, nil
+	if r.proactive == "" {
+		target, err := rigPool(r.Runtime, r.Rig, proactivePool)
+		if err != nil {
+			return "", err
+		}
+		r.proactive = target
+	}
+	return r.proactive, nil
 }
 
 // refusal is the first refusal that holds on bead, in their order: the kind,

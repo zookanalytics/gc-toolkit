@@ -301,6 +301,37 @@ func TestAReviewRunIsPouredAttachedToItsBeadThroughTheRuntime(t *testing.T) {
 	}
 }
 
+// The landing order settles a review run's priority through the pack's
+// priority writer: queue-priority.sh settle on the run's root, in the store the
+// order acts on. A settle that did not exit 0 is an error that says why.
+func TestAReviewRunsPriorityIsSettledThroughThePriorityWriter(t *testing.T) {
+	db := filepath.Join(t.TempDir(), ".beads")
+	l, err := landing(db, "rig/gc-toolkit.refinery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := l.Runs.(runs); !ok || r.db != db {
+		t.Fatalf("the landing order settles through %+v, not the runtime in the store at %s", l.Runs, db)
+	}
+	rt := &gcfake.Runtime{}
+	if err := (runs{rt: rt, db: db}).Rank(context.Background(), "tk-root"); err != nil {
+		t.Fatalf("the settle answered %v", err)
+	}
+	want := []gcfake.Call{{Name: "queue-priority.sh", Args: []string{"settle", "tk-root", "--db", db}}}
+	if got := rt.Scripts(); !slices.EqualFunc(got, want, func(a, b gcfake.Call) bool {
+		return a.Name == b.Name && slices.Equal(a.Args, b.Args)
+	}) {
+		t.Fatalf("ran %+v, want %+v", got, want)
+	}
+	rt = &gcfake.Runtime{OnScript: func(gcfake.Call) gascity.Result {
+		return gascity.Result{Code: 1, Output: "queue-priority.sh: settle: could not take the priority lock"}
+	}}
+	if err := (runs{rt: rt, db: db}).Rank(context.Background(), "tk-root"); err == nil ||
+		!strings.Contains(err.Error(), "queue-priority.sh settle tk-root: exit 1") {
+		t.Fatalf("a settle that did not exit 0 answered %v", err)
+	}
+}
+
 // The landing order closes a bead whose PR a ruling retired through the
 // runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
 // bead, the disposition, the note and the run's judgment of the bead, a waiting

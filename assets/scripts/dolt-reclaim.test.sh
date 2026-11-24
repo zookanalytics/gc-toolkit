@@ -74,7 +74,7 @@ case "$sub" in
         *) shift ;;
       esac
     done
-    [ -n "${STUB_COMPACT_SLEEP:-}" ] && sleep "$STUB_COMPACT_SLEEP"
+    [ -n "${STUB_COMPACT_ADVANCE:-}" ] && echo $(( $(cat "$CLOCK_FILE") + STUB_COMPACT_ADVANCE )) > "$CLOCK_FILE"
     if [ -n "${STUB_COMPACT_FAIL_DB:-}" ] && [ "$db" = "$STUB_COMPACT_FAIL_DB" ]; then
       echo "stub: $db is quarantined" >&2
       exit "${STUB_COMPACT_FAIL_RC:-1}"
@@ -91,6 +91,19 @@ export STUB_DOLT_ROOT
 # The city must come from the stubbed `gc service list`, never the ambient
 # session, so every gc call the script makes is the stub's to answer.
 unset GC_CITY_PATH GC_CITY GC_CITY_ROOT GC_RIG 2>/dev/null || true
+
+# --- the test's clock --------------------------------------------------------
+# A run with $TMP/clock first on PATH reads `date +%s` from CLOCK_FILE, which
+# only the compact stub moves, so a slow compact advances the pass's clock
+# instead of sleeping and the budget check reads no tick the host's clock took.
+# Every other date call, and every run without the file, is the real date.
+REAL_DATE="$(command -v date)"
+mkdir -p "$TMP/clock"
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/clock/date" <<CLOCK
+if [ "\$*" = "+%s" ] && [ -f "\${CLOCK_FILE:-}" ]; then cat "\$CLOCK_FILE"; else exec "$REAL_DATE" "\$@"; fi
+CLOCK
+chmod +x "$TMP/clock/date"
+export CLOCK_FILE="$TMP/clock/now"
 
 # --- fixtures ----------------------------------------------------------------
 # make_db <name> <noms_bytes>: a database dir with a noms file of that size.
@@ -120,7 +133,8 @@ reset_case() {
   COMPACT_LOG="$TMP/compact.log"; : > "$COMPACT_LOG"; export COMPACT_LOG
   CITY_LOG="$TMP/city.log"; : > "$CITY_LOG"; export CITY_LOG
   export STUB_HEALTH="" STUB_HEALTH_RC=0 STUB_HEALTH_SLEEP="" STUB_HEALTH_AFTER_COMPACT="" STUB_NO_GC_ONLY=""
-  export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_SLEEP=""
+  export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_ADVANCE=""
+  rm -f "$CLOCK_FILE"
   export STUB_NO_CITY="" STUB_CITY_PATH="/fixture-city"
   unset GC_DOLT_RECLAIM_BUDGET GC_DOLT_RECLAIM_HEALTH_TIMEOUT 2>/dev/null || true
 }
@@ -282,8 +296,9 @@ eq "$(compact_lines)" "1" "  ... and only the real store is reclaimed"
 # --- budget stops STARTING new reclaims, never interrupts a running one ------
 reset_case
 make_db fatA "$OVER"; make_db fatB "$OVER"; write_list fatA fatB
-export GC_DOLT_RECLAIM_BUDGET=1 STUB_COMPACT_SLEEP=2
-run
+export GC_DOLT_RECLAIM_BUDGET=1 STUB_COMPACT_ADVANCE=2
+echo 1000 > "$CLOCK_FILE"
+PATH="$TMP/clock:$PATH" run
 eq "$RC" "0" "a spent budget still exits 0"
 eq "$(compact_lines)" "1" "  ... the first store is reclaimed"
 has "$OUT" "deferred — 1s budget spent" "  ... and the second is deferred to the next pass"

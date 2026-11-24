@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# lint.sh — the rig's one lint entry point: shell static analysis, step text,
-# golangci-lint over the Go code, and the list of the warrants a branch touches.
+# lint.sh — the rig's one lint entry point: shell static analysis, step and
+# skill text, golangci-lint over the Go code, and the list of the warrants a
+# branch touches.
 #
 # Wired as the rig's lint_command, it runs at the polecat's self-review and on
 # every merge. It runs these linters, each at the scope a merge gate can enforce
@@ -16,12 +17,13 @@
 #   runner call per core, so the run lasts about as long as the call that holds
 #   the slowest files.
 #
-#   STEP TEXT — tools/lint-step-text.sh over the files passed on argv, which
-#   checks the formulas among them for a procedure the change adds to step text
-#   (docs/pack-authoring.md, "Step text calls a tested script"). It judges what
-#   the change adds since the merge base of origin/main and HEAD, the change the
-#   refinery's `git diff --name-only origin/main...HEAD` names, so step text
-#   that predates the rule passes until its own rewrite.
+#   STEP AND SKILL TEXT — tools/lint-step-text.sh over the files passed on argv,
+#   which checks the formulas and the skill files among them for a procedure the
+#   change adds to step text or to a skill (docs/pack-authoring.md, "Step text
+#   calls a tested script"). It judges what the change adds since the merge base
+#   of origin/main and HEAD, the change the refinery's
+#   `git diff --name-only origin/main...HEAD` names, so text that predates the
+#   rule passes until its own rewrite.
 #
 #   GO — golangci-lint, `run ./...` in every Go module (each go.mod tree), on
 #   the root's .golangci.yml: errcheck, govet with go vet's analyzers,
@@ -54,11 +56,11 @@
 # shell-lint runner, shellcheck-run.sh, enforces.
 #
 # Usage: lint.sh [FILE ...]
-#   FILE ...  the files a change names; the formulas among them have their step
-#             text checked, and the rest drop out. With no formula given step
-#             text is not linted. The shell lint and golangci-lint cover the
-#             tracked tree and the warrant list reads the branch, whatever files
-#             are given.
+#   FILE ...  the files a change names; the formulas and the skill files among
+#             them have their shell blocks checked, and the rest drop out. With
+#             neither given, no shell block is weighed. The shell lint and
+#             golangci-lint cover the tracked tree and the warrant list reads
+#             the branch, whatever files are given.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
@@ -224,18 +226,18 @@ else
   fi
 fi
 
-# ── Step text: no procedure added to a formula step ─────────────────────────
-# The lint picks the formulas out of the files itself. Its exit 2 says it could
+# ── Step and skill text: no procedure added to a step or a skill ────────────
+# The lint picks the formulas and the skill files out of the files itself. Its exit 2 says it could
 # not read the change, which fails closed like a linter that could not run.
 if "$STEP_TEXT_LINT" "$@"; then
-  summary+=("step text: clean")
+  summary+=("step and skill text: clean")
 else
   rc=$?
   fail=1
   if [ "$rc" -eq 1 ]; then
-    summary+=("step text: FAIL — a formula change adds a procedure to step text")
+    summary+=("step and skill text: FAIL — a change adds a procedure to step text or to a skill")
   else
-    summary+=("step text: FAIL — lint-step-text.sh could not run (exit $rc); fail-closed, treated as a finding")
+    summary+=("step and skill text: FAIL — lint-step-text.sh could not run (exit $rc); fail-closed, treated as a finding")
   fi
 fi
 

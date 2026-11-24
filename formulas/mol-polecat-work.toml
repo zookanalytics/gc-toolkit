@@ -134,10 +134,13 @@ chain bd reports, else the rig default branch)
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-setup.sh" --convoy {{convoy_id}} --base {{base_branch}}
 ```
-The last line it prints is the worktree. Exit 0 or 3: enter it, and stay in it:
+The last line it prints is the worktree. Exit 0 or 3: enter it:
 ```bash
 cd "<the path it printed>"
 ```
+The tree sits outside your home, so a shell that does not keep its directory
+between calls needs that `cd` at the head of each call below that works in the
+tree.
 Exit 3 means it resumed a rejected branch by MERGE and the merge stopped on
 conflicts, which it listed. Exit 1: stop here and do not close this step. The
 script says why, and when the refusal is final it has already recorded what
@@ -524,6 +527,8 @@ so enter it, and commit whatever `git status` shows there.
 ```bash
 cd "<the work bead's metadata.work_dir>"
 ```
+A shell that does not keep its directory between calls needs that `cd` at the
+head of each call below that works in the tree.
 
 **2. Store-only exit: a run whose whole product is store work (TERMINAL).**
 Some work has no diff: the deliverable is a bead filed in another rig's

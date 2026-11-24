@@ -9,9 +9,13 @@
 # and the rig segment a rig-scoped pool must carry, so a caller that builds the
 # route out of GC_RIG alone turns a missing rig into a bare name addressing
 # nobody. A <pool-name> already carrying a '<rig>/' segment is taken as given;
-# a bare one is qualified with GC_RIG when it is set. The store half stays the
-# caller's: only the caller can move where its bead lands, so a route this
-# script cannot reconcile with the caller's store is refused, never repaired.
+# '<binding>.<pool>' is qualified with GC_RIG when it is set. A pool's template
+# alone ('polecat') carries no binding. The binding is the key the city imports
+# the pack under, and only the roster knows it, so resolve-route.sh resolves
+# the template there, to the one identity in GC_RIG's reach. The store half
+# stays the caller's: only the caller can move where its bead lands, so a route
+# this script cannot reconcile with the caller's store is refused, never
+# repaired.
 # Only proof refuses: an unreadable agent set returns the route with a loud
 # UNVERIFIED warning, because a route nobody could check still beats an outage.
 # Callers: rework-child.sh's rework route, refinery-requeue.sh, and
@@ -32,9 +36,12 @@ usage() {
 usage: pool-route.sh <pool-name>
        pool-route.sh --verdict <route>
 
-  <pool-name>  the pool to route to: '<binding>.<pool>', qualified with GC_RIG
-               when that is set, or '<rig>/<binding>.<pool>' taken as given.
-               The validated route is printed; nothing is printed on a refusal
+  <pool-name>  the pool to route to: '<pool>', the template alone, which the
+               roster resolves to the one pool in GC_RIG under whatever binding
+               the city imports the pack under; '<binding>.<pool>', qualified
+               with GC_RIG when that is set; or '<rig>/<binding>.<pool>' taken
+               as given. The validated route is printed; nothing is printed on
+               a refusal
   --verdict    classify a route that already exists, for a caller deciding
                whether a stamp it did not write still addresses someone.
                Prints one of ok, unknown (agent set unreadable), cross-rig,
@@ -109,6 +116,20 @@ esac
 [ "$#" -eq 1 ] || { usage; exit 2; }
 
 NAME="$1"
+# A template alone carries no binding, so the roster names its pool:
+# resolve-route.sh prints the one identity in GC_RIG's reach whose role it is,
+# and says why when it refuses. A roster that did not read (its exit 3) leaves
+# no route to name, because the template without its binding addresses nobody.
+case "$NAME" in
+  */*|*.*) ;;
+  *)
+    ROUTE=$("$_bd_lib_dir/resolve-route.sh" "$NAME"); RESOLVE_RC=$?
+    case "$RESOLVE_RC" in
+      0) printf '%s\n' "$ROUTE"; exit 0 ;;
+      3) warn "the pool '$NAME' names no binding, and the roster that holds it did not read, so there is no route to name" ;;
+    esac
+    exit 1 ;;
+esac
 # Already rig-qualified: the caller named the store as well as the pool. Which
 # of the two it was decides the repair a refusal can honestly suggest.
 case "$NAME" in

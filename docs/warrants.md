@@ -79,8 +79,16 @@ no warrant.
     reads the same record for what gets past it, a forced relaunch and a claimant
     with no poured workflow, so it adds no key and writes nothing to let a run
     through.
-  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases it under an open PR, and waits behind a sibling.
+  - `workspace-setup` cuts the tree at `.gc/worktrees/<rig>/<bead>`, beside the
+    agents' homes, where Gas City's claim cuts a bead's tree. Core's variants cut
+    it in the agent's home, and Gas Town's under
+    `.gc/worktrees/<rig>/artifacts/worktrees/`. A run's steps are claimed by
+    different sessions, so the tree outlives the session that cuts it, and Gas
+    City can remove a closed pool session's home with everything under it. The tree
+    is recorded as `work_dir`, which Gas City's closed-bead reaper reads, where
+    Gas Town's records `artifact_dir`, which no Gas City reader reads. It brings
+    a rejected branch current by merge, where Gas Town's rebases it under an open
+    PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, keys a tracker on a stamp, and has the
     tracker it files sent to the rig's polecat pool. Core's runs each command raw
@@ -100,8 +108,21 @@ no warrant.
     `{{test_command}}` raw and files its tracker with a `gc bd create` that
     routes it nowhere, and its `workspace-setup` is a placeholder each
     variant overrides with a tree of its own. `mol-polecat-commit.toml` and
-    `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
+    `mol-scoped-work.toml` cut theirs with `git worktree add` at
+    `$GC_DIR/worktrees/<bead>`, in the agent's home, and remove them with
     `git worktree remove` once the work is pushed.
+  - `cmd/gc/session_worktree_prune.go`, `pruneAgentHomeWorktreeIfSafe`: once a
+    pool session's bead closes, it removes the session's home with
+    `WorktreeRemove(workerDir, true)`, a forced removal, after gates that read the
+    home itself, its uncommitted work and its unpushed commits, so a tree nested
+    in the home goes with it. `auto_prune_worker_dir` turns it off, and it is on
+    when unset.
+  - `cmd/gc/cmd_hook_worktree.go`: `gc hook --claim --worktree` cuts the claimed
+    bead's tree at `<city>/.gc/worktrees/<rig>/<bead>` through
+    `gc worktree ensure` ([gc hook](https://docs.gascity.com/reference/cli#gc-hook)).
+  - `cmd/gc/bead_worktree_reaper.go`, `scanBorrowVetoReferences`: the reaper keeps
+    a tree that a bead outside the terminal states names in `gc.work_dir` or
+    `work_dir`.
   - `internal/worktree/worktree.go`, the owner `gc worktree` runs: `Cleanup`
     removes a tree only when its HEAD is merged into the base given, and
     `verifyProvenance` requires that base to be the one the tree was made from, so
@@ -117,15 +138,19 @@ no warrant.
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
-  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
-  branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df6d and
+  `workspace-setup`, `self-review` and `submit-and-exit`, cuts its tree at
+  `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
+  `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
+  and deletes its branch.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc31 and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
   by merge and never rebases one
-  ([built-once-target.md](built-once-target.md#merge)).
+  ([built-once-target.md](built-once-target.md#merge)). Its cut of the tree
+  retires once the build a city runs carries `gc hook --claim --worktree` and the
+  formula moves onto the tree the claim cuts.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: the merge and review nouns it holds retire, the
   bring-current guard among them with the old review path (`tk-1tfzr71.122`).
@@ -231,13 +256,21 @@ no warrant.
   `ready`, `list`, `query` or `search`, orders by a parent's priority. Gas City
   and bd copy a priority from another bead only when they create a bead: a
   sling pours its workflow at the priority of the bead it is slung on
-  (`BeadPriorityOverride` in `internal/sling/sling.go`), and `bd swarm` creates
-  its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
-  the copy when the source's priority changes. Neither one's documentation
-  describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
+  (`BeadPriorityOverride` in `internal/sling/sling.go`), a cook attached to a
+  bead makes its whole sub-workflow at that bead's priority and takes none of
+  its own (`newFormulaCookCmd` in `cmd/gc/cmd_formula.go`, whose flags name no
+  priority and whose graph.v2 arm instantiates at the attach bead's priority,
+  as `Attach` in `internal/molecule/molecule.go` does for a v1 formula), a
+  fragment a running workflow adds takes its root's (`InstantiateFragment` in
+  `internal/molecule/molecule.go`), and `bd swarm` creates its molecule at its
+  epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
+  source's priority changes. Neither one's documentation describes a priority
+  that follows another bead's.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 97c0c9b3b11b
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
-  `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
+  `internal/sling/sling.go`, `Attach` and `InstantiateFragment` in
+  `internal/molecule/molecule.go`, `newFormulaCookCmd` in
+  `cmd/gc/cmd_formula.go`), and at `gastownhall/beads` main 786241099046 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -354,9 +387,9 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-22, at `gastownhall/gascity-packs` main 44b9db7168f6,
+- **Verified.** 2026-11-23, at `gastownhall/gascity-packs` main 44b9db7168f6,
   `gastownhall/beads` main 786241099046 and `gastownhall/gascity` main
-  1042f51083f9.
+  ffd9f6b0cb68.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 

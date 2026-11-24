@@ -867,7 +867,7 @@ write that did not land, and a re-run converges on the same gate and arm, so
 run it again. When it fails again, tell the witness, with the line it printed,
 then drain without closing this step, so the next worker runs it again:
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: the rebase landing gate was not filed" -m "<the line it printed>"
+gc mail send "${GC_RIG:+$GC_RIG/}{{binding_prefix}}witness" -s "HELP: the rebase landing gate was not filed" -m "<the line it printed>"
 ```
 
 **5. Close this step, then drain:**
