@@ -41,7 +41,9 @@ const (
 // A ruling of a finding or an ask, by the rule its source carries.
 const (
 	// RulingMustFix: it holds, and the round fixes it. The ruling names the
-	// commit that fixes it.
+	// commit that fixes it, or says the round fixed it in the PR's title or
+	// summary, which the bead that owns the PR records and the round's push
+	// publishes, or both.
 	RulingMustFix = "must-fix"
 	// RulingDeclined: its source's own rule shows it does not hold, or does
 	// not fix it, as a nit is answered and not fixed. The reason says which.
@@ -121,7 +123,8 @@ type Repair struct {
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
 // id, or one ask, named by its bead: the ruling, its reason, the commit that
-// fixes a must-fix finding and the gate a question went to.
+// fixes a must-fix point, whether the round fixed it in the PR's title or
+// summary, and the gate a question went to.
 type Ruling struct {
 	Check   string `json:"check,omitempty"`
 	Finding string `json:"finding,omitempty"`
@@ -129,6 +132,7 @@ type Ruling struct {
 	Ruling  string `json:"ruling"`
 	Reason  string `json:"reason,omitempty"`
 	Commit  string `json:"commit,omitempty"`
+	Summary bool   `json:"summary,omitempty"`
 	Gate    string `json:"gate,omitempty"`
 }
 
