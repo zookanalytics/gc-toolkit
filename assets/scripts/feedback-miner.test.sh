@@ -743,6 +743,52 @@ eq "$(class_of "$(key 17 comment 803)")" "city" "(82u9) and a city post quoting 
 mv "$FIX/prs.ours.keep" "$FIX/prs.ours.jsonl"; bunset tk-anchor17 metadata.pr_provenance_since
 rm -f "$FIX/17.reviews.jsonl" "$FIX/17.inline.jsonl" "$FIX/17.issue.jsonl"
 
+echo "── the city's mark counts only under the city's login ──"
+# PR 18's posts all come from logins other than the city's, after the PR's
+# cutover, and each carries or quotes a mark gc_city_marked reads. Review 1801
+# has an empty body and carries inline comment 1811. The store the section
+# starts from comes back at its end, without PR 18's anchor or what it files.
+cp "$FIX/prs.ours.jsonl" "$FIX/prs.ours.keep"
+cp "$STUB_STORE" "$TMP/store.keep"
+R=$(ago_h 1); pr_node 18 "Marks" "$R" "$R" "$R" >> "$FIX/prs.ours.jsonl"
+anchor tk-anchor18 18
+{
+  review 1801 johnzook User COMMENTED "" "$(ago_h 1)"
+  review 1802 johnzook User COMMENTED "Approve once each reply ends with \`$MARK\`." "$(ago_h 1)"
+} > "$FIX/18.reviews.jsonl"
+inline 1811 johnzook 1801 "**Blocking.** This says the city's mark is \`$MARK\`, but \`gc_city_marked\` also matches \`<!-- gc-writeback -->\`." \
+  "$(ago_h 1)" > "$FIX/18.inline.jsonl"
+{
+  issue 1821 johnzook User "The reminder ends with <!-- gc:sitting:tk-x -->, so it reads as the city's." "$(ago_h 1)" 18
+  issue 1822 "github-actions[bot]" Bot "<!-- gc-toolkit:pr-size -->
+<!-- gc:no-review -->
+## Size
+
+$MARK" "$(ago_h 1)" 18
+  issue 1823 "github-actions[bot]" Bot "Coverage fell by two points.
+
+$MARK" "$(ago_h 1)" 18
+} > "$FIX/18.issue.jsonl"
+fresh_dir marks
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 30 --dir "$W" >/dev/null 2>&1
+eq "$(class_of "$(key 18 comment 1811)")" "outside" \
+   "(82v1) another login's inline comment quoting the city's mark and the write-back's is outside"
+eq "$(field_of "$(key 18 comment 1811)" marked)" "false" "(82v2) the marks it quotes do not count"
+eq "$(class_of "$(key 18 review 1802)")" "outside" "(82v3) so is another login's review body quoting the city's mark"
+eq "$(class_of "$(key 18 comment 1821)")" "outside" "(82v4) and its conversation comment quoting the sitting reminder's"
+eq "$(field_of "$(key 18 comment 1821)" flag)" "false" "(82v5) none of them is flagged"
+eq "$(class_of "$(key 18 comment 1822)")" "notice" \
+   "(82v6) an app's post opening with the no-review mark is a notice, with the city's mark pr-post.sh appends"
+eq "$(class_of "$(key 18 comment 1823)")" "outside" "(82v7) an app's post with the city's mark and no no-review mark is outside"
+OUT=$("$SUT" show --dir "$W" --outside --limit 50)
+has "$OUT" "--- $(key 18 comment 1811)" "(82v8) show --outside offers the quoting post"
+"$SUT" file --dir "$W" >/dev/null 2>&1 <<ROWS_EOF
+{"key": "$(key 18 comment 1811)", "statement": "The spec names one of the city's three marks.", "directive": "diff"}
+ROWS_EOF
+eq "$(meta "$(obs_of "$(key 18 comment 1811)")" obs.category)" "outside-review" "(82v9) and the outside capture files it"
+mv "$FIX/prs.ours.keep" "$FIX/prs.ours.jsonl"; cp "$TMP/store.keep" "$STUB_STORE"
+rm -f "$FIX/18.reviews.jsonl" "$FIX/18.inline.jsonl" "$FIX/18.issue.jsonl"
+
 echo "── sweep, an outside capture day that is not a date, or does not read ──"
 fresh_dir g
 kv_put "not a date"

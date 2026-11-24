@@ -39,13 +39,18 @@ operator now gets the smallest stopgap that stops the harm, and no new test
 suite.
 
 An epic is held to the plan as well. When you file an epic for this repository
-or review one, read its boundaries against the schedule, because a scheduled
-bead can already retire code the epic would change. The epic gives that code no
-new work, so its boundaries name the code as work the epic is not, along with
-the bead that retires it. At a review, boundaries that do not name such code
-are a gap, and the change you propose names it.
+or review one, read the schedule for code the epic's own work would change,
+because a scheduled bead can already retire it. The epic gives that code no new
+work, so its boundaries name the code as work the epic is not, in a clause that
+says how the epic's work would change it and which bead retires it. Retiring
+code the epic's work would not change gets no line, and an epic with none
+carries no line about the schedule. At a review, both are gaps: retiring code
+the epic's work would change that the boundaries leave out, and a line that
+names retiring code without saying how the epic's work would change it. The
+change you propose names the code with its connection, or removes a line that
+has none.
 
-## A change that adds operational surface shows its Gas City search
+## A change that adds operational surface or accommodates Gas City shows its Gas City search
 
 This applies to a change that adds
 [operational surface](docs/review-arch.md#when-the-lens-applies), such as a
@@ -63,6 +68,21 @@ itself: in a commit message, in a spec such as
 by upstream page, or by symbol at a named upstream commit. A fork of Gas City
 and the pack's own pages about Gas City are not evidence, and a commit body that
 only explains the design shows no search.
+
+A change that accommodates a behavior of Gas City, such as avoiding one of its
+routes, mirroring one of its skips or working around one of its faults, shows
+this record whether or not it adds surface. Its record also holds two things,
+gathered before the accommodation is built:
+
+1. The reason Gas City gives for the behavior, cited the same way and tested
+   against this city's own setup and data. Show the measurement: what was
+   counted, how and when, and the result, such as a census of the writes a
+   store took while Gas City skipped it. A fault Gas City gives no reason for
+   is measured by how often it fires here.
+2. Where the behavior is a fault, or its reason does not hold here, the fix at
+   the source, its size, and the bead that carries it, filed where the
+   `gc-toolkit.external-issue` skill sends a problem in software this rig does
+   not own.
 
 The arch check's divergence lens sends back a change without this record.
 [review-arch.md](docs/review-arch.md) holds its method, the evidence it accepts

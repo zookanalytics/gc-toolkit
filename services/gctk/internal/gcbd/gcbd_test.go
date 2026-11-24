@@ -162,10 +162,12 @@ func TestShowReadsThePayloadWhateverGcExitsWith(t *testing.T) {
 	if got := b.Meta("merge_result"); got != "pull_request" {
 		t.Errorf("merge_result = %q, want pull_request", got)
 	}
-	// A gc that cannot run at all is still unreadable.
+	// A gc that cannot run at all is still unreadable. The stub's dir is the
+	// whole PATH, so the lookup cannot pass over the stub to another gc.
 	if err := os.Chmod(filepath.Join(bin, "gc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("PATH", bin)
 	if New().Show("b-1") != nil {
 		t.Error("Show != nil when gc could not be started")
 	}

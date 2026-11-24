@@ -4,15 +4,17 @@
 # renders once, at pour, from rigs/<rig>, the checkout the runtime executes,
 # and that checkout advances on the reconciler's 15m cooldown
 # (orders/reconcile-rig-checkouts.toml). The findings: LAGGED, a checkout
-# behind its remote past the self-heal window; UNFETCHED, the remote-tracking
-# ref itself unrefreshed — the fail-open case: only the reconciler's own fetch
-# advances the ref rev-list compares against, so the behind-count reads 0 the
-# moment the reconciler dies and is reported as a floor. A run poured before
-# its formula last changed is no finding: nothing re-renders a poured run, so
-# every formula change leaves the runs poured before it on their old text, and
-# whether one should be poured again turns on what the change did, which no
-# file history shows. Deliberately never fetches — a doctor check is a read,
-# and fetching would repair the condition it observes. Read-only.
+# behind its remote past the self-heal window; UNFETCHED, a remote-tracking ref
+# not refreshed, because the checkout's last fetch failed or because nothing
+# has fetched there for longer than the threshold. UNFETCHED is the fail-open
+# case: a fetch that failed or never ran leaves the ref where it was, so the
+# behind-count misses what landed since the last fetch that worked, and the
+# check reports it as a floor. A run poured before its formula last changed is
+# no finding: nothing re-renders a poured run, so every formula change leaves
+# the runs poured before it on their old text, and whether one should be
+# poured again turns on what the change did, which no file history shows.
+# Deliberately never fetches — a doctor check is a read, and fetching would
+# repair the condition it observes. Read-only.
 # Exit 0=OK 1=Warning 2=Error. stdout: first line = message, then "  - detail"
 # lines. Live probes are bounded; an UNREADABLE probe warns (1), never passes.
 
@@ -104,7 +106,7 @@ if [ -z "$scopes" ]; then
     exit 1
 fi
 
-checked=0
+checked=0; unfetched=0
 
 # check_currency <label> <checkout> — LAGGED and UNFETCHED for one pack-source
 # checkout.
@@ -127,23 +129,33 @@ check_currency() {
     esac
     checked=$((checked + 1))
 
-    # FETCH_HEAD is rewritten by every `git fetch`, including one that brought
-    # nothing new — its mtime dates the last time this checkout ASKED, which
-    # is the question, not whether the answer changed.
-    fetch_age=""
+    # A `git fetch` run in this checkout, such as the reconciler's, rewrites
+    # .git/FETCH_HEAD. A fetch that worked lists the refs it fetched, even when
+    # nothing was new. git empties the file when the fetch starts, so a fetch
+    # that failed, or one still running, leaves it empty. Its mtime dates the
+    # last fetch, and its size says whether that fetch worked. A fetch in a
+    # linked worktree writes that worktree's own FETCH_HEAD and leaves this one
+    # alone.
+    fetch_age=""; fetch_failed=""
     if fetched=$(mtime_of "$rig_path/.git/FETCH_HEAD"); then
         fetch_age=$(( NOW - fetched ))
+        [ -s "$rig_path/.git/FETCH_HEAD" ] || fetch_failed=1
     fi
+    # Both UNFETCHED arms are the fail-open case, reported even when behind=0,
+    # and especially then.
     if [ -z "$fetch_age" ]; then
         warnings+=("$label: no readable .git/FETCH_HEAD — cannot tell when \`$remote\` was last refreshed, so \"behind=$behind\" is unverifiable")
+    elif [ -n "$fetch_failed" ]; then
+        unfetched=$((unfetched + 1))
+        warnings+=("$label: the last \`git fetch\` in $rig_path, $(mins "$fetch_age")m ago, failed or has not finished, since it left .git/FETCH_HEAD empty. \`$remote\` is only as fresh as the last fetch that worked, so \"behind=$behind\" is a floor, not the lag. \`git -C $rig_path fetch origin\` shows why a fetch fails.")
     elif [ "$fetch_age" -gt "$STALE_AFTER" ]; then
-        # The fail-open case, reported even when behind=0 — and especially then.
+        unfetched=$((unfetched + 1))
         warnings+=("$label: \`$remote\` has not been refreshed for $(mins "$fetch_age")m (threshold $(mins "$STALE_AFTER")m) — reconcile-rig-checkouts is not fetching, so \"behind=$behind\" is a floor, not the lag. The checkout may be arbitrarily far behind what landed.")
     fi
 
     [ "$behind" -gt 0 ] || return 0
     head_short=$(run_bounded git -C "$rig_path" rev-parse --short HEAD 2>/dev/null || echo '?')
-    if [ -z "$fetch_age" ] || [ "$fetch_age" -gt "$STALE_AFTER" ]; then
+    if [ -z "$fetch_age" ] || [ -n "$fetch_failed" ] || [ "$fetch_age" -gt "$STALE_AFTER" ]; then
         errors+=("$label: executing a pack $behind commit(s) behind \`$remote\` at $head_short, and the remote ref is itself stale — the true lag is at least this and cannot be measured from here.")
         return 0
     fi
@@ -197,7 +209,14 @@ if [ "${#errors[@]}" -ne 0 ]; then
     exit 2
 fi
 if [ "${#warnings[@]}" -ne 0 ]; then
-    echo "executed pack looks current across $checked checkout(s), but ${#warnings[@]} probe(s) could not be read (I9)"
+    # The doctor order's record keeps only this first line as the check's
+    # message, so it names an UNFETCHED checkout rather than calling the pack
+    # current.
+    if [ "$unfetched" -ne 0 ]; then
+        echo "executed pack may be behind what landed: $unfetched checkout(s) not refreshed from origin (I9)"
+    else
+        echo "executed pack looks current across $checked checkout(s), but ${#warnings[@]} probe(s) could not be read (I9)"
+    fi
     detail "${warnings[@]}"
     detail ${notes[@]+"${notes[@]}"}
     exit 1

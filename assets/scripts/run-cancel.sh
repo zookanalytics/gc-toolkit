@@ -85,8 +85,9 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
   --dry-run  resolve and report; write nothing and send nothing.
 
 env: GC_SESSION_NAME, GC_SESSION_ID, GC_ALIAS name the session in --step mode.
-     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city, else `gc status`
-     does; GC_HOME holds supervisor.toml and cities.toml.
+     GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT) names the city's path, else
+     `gc status` does, and `gc cities` names the city at that path; GC_HOME
+     holds supervisor.toml.
 
 exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 USAGE
@@ -327,33 +328,37 @@ api_base() {
   esac
   printf 'http://%s:%s' "$bind" "$port"
 }
-# The city the supervisor registered at the city's path in $GC_HOME/cities.toml,
-# else the path's basename, the name the supervisor gives an unnamed city. A
+# The name `gc cities` lists at the city's path: the name the supervisor
+# registered for the city, and the only one its API serves the city under. A
 # session carries the path as GC_CITY_PATH (or GC_CITY, GC_CITY_ROOT). A caller
 # outside one, such as an operator's shell running gc-helm.sh, asks `gc status`,
-# which finds the city the way every other gc command does.
+# which finds the city the way every other gc command does. With no name to
+# give, it says why and returns 1, and no cancel is sent.
 city_name() {
-  local path name
+  local path cities rc=0 name
   path="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
   [ -n "$path" ] || path=$(gc status --json 2>/dev/null </dev/null | scrub | jq -r '.city_path // empty' 2>/dev/null)
   path="${path%/}"
-  [ -n "$path" ] || return 1
-  name=$(awk -v want="$path" '
-    /^\[\[cities\]\]/ { if (p == want && n != "") { print n; exit } p = ""; n = ""; blk = 1; next }
-    /^\[/             { if (p == want && n != "") { print n; exit } blk = 0; next }
-    blk && /^[[:space:]]*path[[:space:]]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); p = v }
-    blk && /^[[:space:]]*name[[:space:]]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); n = v }
-    END { if (p == want && n != "") print n }' "${GC_HOME:-$HOME/.gc}/cities.toml" 2>/dev/null | head -n 1)
-  [ -n "$name" ] || name=$(basename "$path")
+  if [ -z "$path" ]; then
+    echo "$PROG: no city path in the environment (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT all unset) and none from gc status, so there is no city to send the cancel to; run $ROOT is not cancelled" >&2
+    return 1
+  fi
+  cities=$(gc cities --json </dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$PROG: gc cities exited $rc, so the city at $path has no name to send the cancel under; run $ROOT is not cancelled" >&2
+    return 1
+  fi
+  name=$(printf '%s' "$cities" | scrub | jq -r --arg p "$path" 'first(.cities[]? | select(.path == $p) | .name) // empty' 2>/dev/null)
+  if [ -z "$name" ]; then
+    echo "$PROG: gc cities lists no name for a city at $path, and the supervisor serves a city only under the name it registered; run $ROOT is not cancelled" >&2
+    return 1
+  fi
   printf '%s' "$name"
 }
 
 TERMINAL=$ROOT_CLOSED
 if [ "$TERMINAL" = 0 ]; then
-  if ! CITY=$(city_name); then
-    echo "$PROG: no city path in the environment (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT all unset) and none from gc status, so there is no city to send the cancel to; run $ROOT is not cancelled" >&2
-    exit 1
-  fi
+  CITY=$(city_name) || exit 1
   URL="$(api_base)/v0/city/$CITY/runs/$ROOT/cancel"
 
   ATTEMPTS="${GC_RUN_CANCEL_ATTEMPTS:-3}"

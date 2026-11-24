@@ -1227,15 +1227,23 @@ const knock = (to) => new Promise((done) => {
   s.once("connect", () => { s.destroy(); done("reached"); });
   s.once("error", (e) => done(e.code));
 });
-net.createServer((c) => c.end()).listen(Number(port), async () => {
-  console.log("own-v4", await knock({ host: "127.0.0.1", port: Number(port) }));
-  console.log("own-v6", await knock({ host: "::1", port: Number(port) }));
+const own = net.createServer((c) => c.end());
+own.listen(Number(port), async () => {
+  console.log("own-v4", await knock({ host: "127.0.0.1", port: own.address().port }));
+  console.log("own-v6", await knock({ host: "::1", port: own.address().port }));
   console.log("other", await knock({ host: "127.0.0.1", port: Number(other) }));
   console.log("socket", await knock({ path: sock }));
   process.exit(0);
 });
 JS
-    for _ in 1 2 3 4 5 6 7 8; do
+    # The capture is given its port before it starts, because the profile opens
+    # that one port, and its server listens on the port inside the sandbox. So
+    # the port is free between its pick and that listen, and another process on
+    # the host can take it. A capture whose server found its port taken proves
+    # nothing about the profile: it runs again on another port, up to four times
+    # in all, and eight captures whose server listened are checked.
+    runs=0; retaken=0
+    while [ "$runs" -lt 8 ]; do
       port=$("$REAL_NODE" -e 'const s = require("net").createServer(); s.listen(0, "127.0.0.1", () => { process.stdout.write(String(s.address().port)); s.close(); });')
       : >"$CMD_OUT"
       out=$( cd "$WORK" && env -i PATH="$REALSBX:$BIN:$FARM" HOME="$TMPD" TMPDIR="$TMPD" CALLLOG="$CALLLOG" \
@@ -1243,13 +1251,23 @@ JS
           CMD_OUT="$CMD_OUT" FREE_PORT="$port" SS_RIG="$ENGINE" "${CITY_ENV[@]}" \
           bash "$SHOT" page --script "$SCRIPT" --serve-dir "$WORK/app" --output "$WORK/own.png" 2>&1 ); rc=$?
       inside="$(cat "$CMD_OUT")"
+      case "$inside" in *"listen EADDRINUSE"*)
+        if [ "$retaken" -lt 4 ]; then
+          retaken=$((retaken + 1))
+          echo "# ISOLATION: another process took port $port before the capture's server listened on it, so the capture runs again on another port"
+          continue
+        fi ;;
+      esac
+      runs=$((runs + 1))
       eq "$rc" 0 "(ISOLATION) a capture given port $port runs"
       has "own-v4 reached" "$inside" "(ISOLATION) its own server answers on port $port"
       hasnt "own-v6 EPERM" "$inside" "(ISOLATION) and is not refused over IPv6"
       hasnt "other reached" "$inside" "(ISOLATION) and no other loopback service answers"
       hasnt "socket reached" "$inside" "(ISOLATION) and no Unix socket does"
     done
-    outside=$("$REAL_NODE" "$KNOCK" "$port" "$APIPORT" "$API_SOCK" 2>&1)
+    # Outside the sandbox the server takes any free port and holds it from its
+    # listen to its knocks.
+    outside=$("$REAL_NODE" "$KNOCK" 0 "$APIPORT" "$API_SOCK" 2>&1)
     has "other reached" "$outside" "(ISOLATION) outside the sandbox the loopback service answers"
     has "socket reached" "$outside" "(ISOLATION) and so does the Unix socket"
 

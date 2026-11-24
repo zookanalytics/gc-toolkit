@@ -117,10 +117,11 @@ work (see [state-machine.md](state-machine.md), *The merge condition*). So
 `closed` is the one signal the waiting side keys on. The refinery's close means
 *landed and verified*. A disposition's close names the bead that carries the
 work now, or the evidence that it is not needed (state-machine.md,
-*Disposition*). A duplicate's waits move onto its canonical before it closes, so
-they end no earlier than the canonical delivers, and every other disposition
-ends the waits on its bead with its close. A waiting party that watched
-GitHub directly would be reading a different, earlier fact.
+*Disposition*). Under every kind but `not-needed`, the waits on the bead move onto
+its successor before it closes, so they end no earlier than the successor
+delivers, and a `not-needed` close ends them, since nothing carries its work. A
+waiting party that watched GitHub directly would be reading a different,
+earlier fact.
 
 **Fail quiet, in the direction of not acting.** A blocker counts as landed only
 on a positive `closed`. An id that cannot be answered for — a store in another

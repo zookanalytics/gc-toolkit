@@ -3,9 +3,11 @@
 # throwaway git repos plus a stub `gc` on PATH; no live city, Dolt, network.
 # Exercised: every ERROR arm with a positive control each; the fail-open case
 # (a stale remote-tracking ref makes the naive behind-count read 0, so it must
-# warn as a floor, never pass); the self-heal window in both directions; a run
-# poured before its formula last changed, which is no finding; the quiet path;
-# the fail-closed arms (every unreadable probe warns, never passes).
+# warn as a floor, never pass), both when nothing fetched past the threshold
+# and after a real `git fetch` that failed, with a real fetch that worked as
+# its control; the self-heal window in both directions; a run poured before its
+# formula last changed, which is no finding; the quiet path; the fail-closed
+# arms (every unreadable probe warns, never passes).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +52,10 @@ mkrepo() {
     GIT_COMMITTER_DATE="$(iso_at "$formula_age")" GIT_AUTHOR_DATE="$(iso_at "$formula_age")" \
         git -C "$path" commit -q -m "formula" 2>/dev/null
     git -C "$path" update-ref refs/remotes/origin/main HEAD
-    touch "$path/.git/FETCH_HEAD"
+    # Stands in for a fetch that worked, which lists what it fetched. An empty
+    # FETCH_HEAD is a fetch that failed (FAILEDFETCH).
+    printf '%s\t\tbranch '\''main'\'' of origin\n' "$(git -C "$path" rev-parse HEAD)" \
+        > "$path/.git/FETCH_HEAD"
 }
 
 # advance_remote <path> <n> <age> — add n commits to the REMOTE ref only,
@@ -149,6 +154,9 @@ run unfetched
 eq "$RC" "1" "(UNFETCHED) behind=0 with a stale remote ref WARNS instead of passing"
 has "$OUT" "has not been refreshed" "(UNFETCHED) …saying the ref is stale"
 has "$OUT" "a floor" "(UNFETCHED) …and that the behind-count is a floor, not the lag"
+# The doctor order records only the first line, so it must name the checkout.
+has "$(printf '%s\n' "$OUT" | head -n1)" "1 checkout(s) not refreshed from origin" \
+    "(UNFETCHED) …in a first line that names it rather than calling the pack current"
 
 # (FLOOR) behind AND unfetched: the true lag cannot be measured from here.
 E="$TMP/e"; mkrepo "$E" "$OLD"; advance_remote "$E" 3 "$PAST_WINDOW"; age_fetch "$E" "$PAST_WINDOW"
@@ -156,6 +164,50 @@ rigs_json "{\"name\":\"eps\",\"path\":\"$E\",\"hq\":false}"
 run floor
 eq "$RC" "2" "(FLOOR) behind + stale ref is an ERROR"
 has "$OUT" "remote ref is itself stale" "(FLOOR) …and says the number is a lower bound"
+
+# The next three run a real `git fetch`, because what a fetch leaves in
+# FETCH_HEAD is the evidence, and `touch` cannot show what a failed one leaves.
+# fetch_size <path> -> FETCH_HEAD's size in bytes.
+fetch_size() { wc -c < "$1/.git/FETCH_HEAD" | tr -d ' '; }
+
+# (GOODFETCH) the control for FAILEDFETCH: a real fetch that worked, over a
+# FETCH_HEAD aged past the window, leaves the file listing what it fetched.
+J="$TMP/j"; mkrepo "$J" "$OLD"
+git clone -q --bare "$J" "$TMP/j-origin.git" 2>/dev/null
+git -C "$J" remote add origin "$TMP/j-origin.git"; age_fetch "$J" "$PAST_WINDOW"
+FETCH_RC=0; git -C "$J" fetch -q origin 2>/dev/null || FETCH_RC=$?
+eq "$FETCH_RC" "0" "(GOODFETCH) the fixture's fetch worked"
+rigs_json "{\"name\":\"kappa\",\"path\":\"$J\",\"hq\":false}"
+run goodfetch
+eq "$RC" "0" "(GOODFETCH) a checkout whose last fetch worked passes"
+hasnt "$OUT" "not refreshed" "(GOODFETCH) …naming no unrefreshed checkout"
+
+# (FAILEDFETCH) a fetch that keeps failing: a real fetch from an origin that is
+# gone exits 128 and empties FETCH_HEAD with a fresh mtime, so its age alone
+# reads as fresh, and the ref did not move, so behind reads 0.
+K="$TMP/k"; mkrepo "$K" "$OLD"
+git -C "$K" remote add origin "$TMP/absent.git"; age_fetch "$K" "$PAST_WINDOW"
+FETCH_RC=0; git -C "$K" fetch -q origin 2>/dev/null || FETCH_RC=$?
+eq "$FETCH_RC" "128" "(FAILEDFETCH) the fixture's fetch failed"
+eq "$(fetch_size "$K")" "0" "(FAILEDFETCH) …and left FETCH_HEAD empty"
+rigs_json "{\"name\":\"lambda\",\"path\":\"$K\",\"hq\":false}"
+run failedfetch
+eq "$RC" "1" "(FAILEDFETCH) behind=0 after a failed fetch WARNS instead of passing"
+has "$OUT" "failed or has not finished" "(FAILEDFETCH) …saying the last fetch failed"
+has "$OUT" "a floor" "(FAILEDFETCH) …and that the behind-count is a floor, not the lag"
+has "$(printf '%s\n' "$OUT" | head -n1)" "1 checkout(s) not refreshed from origin" \
+    "(FAILEDFETCH) …in a first line that names it rather than calling the pack current"
+
+# (FAILEDFLOOR) behind AND a failed fetch: the count is measured against the
+# ref the last fetch that worked left, so it is a lower bound, not the lag.
+L="$TMP/l"; mkrepo "$L" "$OLD"; advance_remote "$L" 2 "$PAST_WINDOW"
+git -C "$L" remote add origin "$TMP/absent.git"
+git -C "$L" fetch -q origin 2>/dev/null
+eq "$(fetch_size "$L")" "0" "(FAILEDFLOOR) the fixture's failed fetch left FETCH_HEAD empty"
+rigs_json "{\"name\":\"mu\",\"path\":\"$L\",\"hq\":false}"
+run failedfloor
+eq "$RC" "2" "(FAILEDFLOOR) behind + a failed fetch is an ERROR"
+has "$OUT" "remote ref is itself stale" "(FAILEDFLOOR) …and says the number is a lower bound"
 
 # (NOFETCHHEAD) no FETCH_HEAD at all — unreadable, so warn, never pass.
 F="$TMP/f"; mkrepo "$F" "$OLD"; rm -f "$F/.git/FETCH_HEAD"
