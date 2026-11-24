@@ -5,11 +5,12 @@ description: Use when you run the correctness check on a gc-toolkit change, when
 
 # The correctness check on gc-toolkit
 
-gc-toolkit ships bash and jq scripts, shell blocks that agents run from its
-formulas and skills, the Go services `services/gctk` and `services/helm`, and
-the helm web app in `services/helm/web`. Each surface's section opens with what
-the gates run on it, then names the defects that have bitten there and the
-guard for each, so the review looks hardest where no guard reaches.
+gc-toolkit ships the prose its agents act on, bash and jq scripts, shell blocks
+that agents run from its formulas and skills, the Go services `services/gctk`
+and `services/helm`, and the helm web app in `services/helm/web`. Each
+surface's section opens with what the gates run on it, then names the defects
+that have bitten there and the guard for each, so the review looks hardest
+where no guard reaches.
 
 ## Scope
 
@@ -25,23 +26,39 @@ state where a rule that binds only gc-toolkit's own repository lives.
 
 ## Where the gates run
 
+The repository has two test commands, the Makefile's targets, and
+`tools/test.sh` says what each runs. `make test` runs every test: the Go tests,
+`go test ./...` from the root, the helm web app's typecheck, tests and build,
+whose output must match the committed `dist/`, and every `*.test.sh`.
+`make test-affected` runs the tests a change since `origin/main` can affect:
+the Go tests again, the web checks when the change touches `services/helm`,
+and the suites `tools/run-tests.sh --affected origin/main` selects, by the
+rules in that script's header.
 `gc formula show mol-polecat-work --rig gc-toolkit` shows the commands the rig
 declares.
 
 - The polecat's self-review runs `lint_command`: `tools/lint-learned.sh` over
   the files the branch changes, then `tools/lint.sh`, which checks the step text
   of the formulas among them and runs shellcheck and golangci-lint over the
-  whole tracked tree. It runs the suites
-  `tools/run-tests.sh --affected origin/main` selects, by the rules in that
-  script's header, through `gctk rig`, which records the result at the commit
-  it ran at. When that record at the reviewed commit is a pass, the method runs
-  no suite.
+  whole tracked tree. It runs `affected_tests_command`, or `test_command` where
+  the rig declares no affected one, through `gctk rig`, which records the
+  result and the command at the commit it ran at.
 - The refinery runs the same `lint_command` at merge, and no tests.
-- CI runs the whole `*.test.sh` suite and every Go test on Linux and on macOS
-  (`.github/workflows/tests.yml`) and golangci-lint for Linux and for macOS
-  (`.github/workflows/lint.yml`), scans for known vulnerabilities in what the
-  code calls (`.github/workflows/govulncheck.yml`), and runs no web check.
-  Every merge waits on the checks main's ruleset requires.
+- CI runs `make test` on Linux and on macOS (`.github/workflows/tests.yml`), as
+  the checks `test` and `test-macos`, golangci-lint for Linux and for macOS
+  (`.github/workflows/lint.yml`), and scans for known vulnerabilities in what
+  the code calls (`.github/workflows/govulncheck.yml`). Main's ruleset requires
+  `test` and `test-macos`, so every merge waits on every test passing on both
+  platforms.
+
+A review runs no test that a gate already ran at the commit it reviews. The
+review prints the test record with the command it ran, and a pass covers what
+that command runs. `make test` and `make test-affected` run the Go tests, the
+web checks and the suites, as above, so after a pass of either the method runs
+nothing.
+`tools/run-tests.sh` runs only the suites, so after a pass of a command that
+runs it alone, the review runs `make test-affected` plain for the Go tests and
+the web checks, and the suites run again with them.
 
 ## Pack content every rig runs
 
@@ -91,6 +108,34 @@ because such a rule can be worded for any repository and name none.
   only where a rig's own extension opts in still leaves its text in every
   rig's copy, so that is no fix. The pack file keeps text that holds for every
   rig, and the finding names where the rule goes.
+
+## Prose an agent acts on
+
+Agents read and act on skills, agent prompts and the template fragments they
+compose, formula step text, and the docs that bind agents, such as `AGENTS.md`
+and this page. No gate reads whether an agent can act on that text.
+
+- **A sentence that fails a first read blocks.** Read each sentence the change
+  adds or alters as the agent that uses it reads it: once, at that point in its
+  task, knowing what that agent knows, and knowing nothing of the change or its
+  anchor. A sentence in one of the shapes below fails that read. Raise a P1 on
+  each passage that holds such a sentence. This P1 joins the method's list of
+  prose findings that block.
+- **The finding quotes each failing sentence and names its shape.** Its failure
+  scenario names the passage, the agent that reads it, and the action that
+  agent gets wrong or cannot find. Its check reads the quoted sentences, and
+  confirms the finding when each takes the shape the finding names.
+- **These shapes fail a first read.** Each comes with its fix:
+  - One sentence carries more than one condition, an exception or a second
+    actor. The fix gives each its own sentence or list item.
+  - A word is coined where the agent has a word of its own. The fix uses the
+    agent's word.
+  - A term is used before the text says what it is. The fix says what the term
+    is where it first appears.
+  - A sentence changes nothing the agent does, such as one that explains what
+    a message means or why a step exists. The fix cuts it.
+- **Other prose keeps the method's grades.** A clarity problem in a spec, a
+  comment or a page a person reads is graded as the method grades it.
 
 ## Bash and jq scripts
 
@@ -144,8 +189,8 @@ defect only on a line some test executes.
 No shell block in a formula, skill, prompt or doc is shellchecked. The learned
 detectors that read formula and skill text each catch one shape, and a block
 runs in a test only where a suite extracts it, usually by its markers.
-`tools/lint.sh` fails a formula change that adds a procedure to step text, by
-the rule in
+`tools/lint.sh` fails a change that adds a procedure to a formula's step text
+or to a skill, by the rule in
 [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script).
 
 - **The agent's shell.** An agent pastes a step's blocks into its own tool
@@ -210,15 +255,13 @@ each file needing it carries as a copy.
 self-review and at merge: go vet's analyzers, errcheck, ineffassign,
 staticcheck, unused and gofmt's check, as the root's `.golangci.yml` sets them,
 at the release `.golangci-lint-version` names. It type-checks test files and
-runs none of them, and no gate runs `go test`. CI's
-whole suite drives gctk end to end, because each suite whose scripts reach
-`lifecycle.sh` builds gctk from the checkout (`harness_build_gctk`
-in `assets/scripts/test-harness.sh`). `lifecycle.test.sh` names none of gctk's
-`.go` files, so the affected subset leaves them out of a
-gctk change, and no suite it selects for a Go change builds the code that
-changed. No suite builds or runs helm-svc. So on a Go diff the review runs
-`go test ./...` from the repository root, and for gctk the suites of the
-commands it changes.
+runs none of them. Both test commands run `go test ./...` from the root, so CI
+runs every Go test, and so does a self-review whose test command runs either
+one. The shell suites drive gctk end to end, because each suite whose scripts
+reach `lifecycle.sh` builds gctk from the checkout (`harness_build_gctk` in
+`assets/scripts/test-harness.sh`), and the affected subset runs those suites
+for a change to any package gctk is built from. No suite builds or runs
+helm-svc, so its Go tests are all that test helm's Go code.
 
 - **Live at the next build, with no fallback.** The `gctk-build` and
   `helm-build` orders run `assets/scripts/gc-build.sh`, which rebuilds each
@@ -251,16 +294,18 @@ commands it changes.
 
 ## The helm web app
 
-No gate runs the web checks or lints TypeScript. `npm run typecheck`,
-`npm test` and `npm run build` run in no CI job, suite or gate command, and no
-suite the affected subset selects for a path under `services/helm/web` runs
-the app's code. The review runs them in `services/helm/web` after `npm ci`,
-then checks that `git status --porcelain -- dist` prints nothing.
+`make test` runs the app's typecheck, its tests and its build, and fails when
+the build's output differs from the committed `dist/`. `make test-affected`
+runs the same checks for a change under `services/helm`, the app's own files
+or helm's Go code, because the app's tests render the document the rig read
+builds (`src/rigboard/Board.test.tsx` reads the read's golden in
+`internal/rigboard/testdata`). No gate lints TypeScript.
 
 - **The bundle is committed.** helm-svc embeds `dist/` (`web/embed.go`) and
   its builder never runs npm, so a change to the app's runtime code ships only
   with the rebuilt `dist/` in the same diff. A runtime change that ships
-  renames `dist/assets/index-*.js`, and no gate compares `dist/` with `src/`.
+  renames `dist/assets/index-*.js`, and the test commands fail while `dist/`
+  lags `src/`.
 - **The page's types are generated.** The page reads one document per rig, and
   `src/rigboard/document.gen.ts` is generated from its Go types by
   `go test ./internal/rigboard -run TestPageTypesAreCurrent -update`, which

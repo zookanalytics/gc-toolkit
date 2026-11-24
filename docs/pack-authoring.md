@@ -1,6 +1,6 @@
 ---
 name: Pack authoring — gc-toolkit's own conventions
-description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
+description: The conventions gc-toolkit's own formulas, scripts, skills and agents follow where Gas City leaves the choice to the pack — how a step closes and how a run declines, how step text and skills reach a pack script, why each shell block in step text or a skill makes one call, how a landed pack change is confirmed live, how one text names another's step, where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an owner or an address. A pack convention; the Gas City facts beneath it are gascity/packs.md and gascity/agent-types.md.
 ---
 
 # Pack authoring
@@ -16,8 +16,8 @@ convention rests on one of them, it links there.
 **Mandate.** The conventions gc-toolkit's own formulas, scripts, skills and
 agents follow where Gas City leaves the choice to the pack: how a step closes
 and how a run declines, how step text and skills reach a pack script, why each
-shell block in step text makes one call, how a landed pack change is confirmed
-live, the names the pack's artifacts carry, how one text names another's step,
+shell block in step text or a skill makes one call, how a landed pack change is
+confirmed live, the names the pack's artifacts carry, how one text names another's step,
 where a rig-scoped agent runs, the patrol-wisp cycle, and how a scan resolves an
 owner or an address.
 
@@ -146,24 +146,32 @@ directory. No pack text finds the pack through `$GC_RIG_ROOT`,
 `git rev-parse --show-toplevel` or `$GC_CITY_PATH/rigs/<pack>`. The first two
 name whatever the caller stands in, and the third names the pack only in a
 city that clones it as a rig. `assets/scripts/pack-self-location.test.sh`
-holds the pack to this.
+holds the pack to this, and `assets/scripts/pack-script-calls.test.sh` fails a
+formula, prompt, fragment or skill that calls a script the pack does not ship.
 
 ## Step text calls a tested script
 
-Step text holds no procedure. Each shell block in a formula step makes one
-call, to a tested pack script reached as the section above shows or to one
-command such as `gc`, and anything two steps need is one script. No shell block
-in step text is shellchecked, and a block runs in a test only where a suite
-extracts it, while a script carries a test of its own. So the procedure lives
-in the script, and the step passes the call its own facts as arguments.
-Existing step text changes at its own rewrite.
+Step text holds no procedure, and neither does a skill. Each shell block in a
+formula step or a skill makes one call, to a tested pack script reached as the
+section above shows or to one command such as `gc`, and anything two of them
+need is one script. No shell block in step text or a skill is shellchecked, and
+a block runs in a test only where a suite extracts it, while a script carries a
+test of its own. So the procedure lives in the script, and the step or the
+skill passes the call its own facts as arguments. Existing step text and skills
+change at their own rewrite.
 
 A block does more than make one call when it holds control flow (`if`, `elif`,
 `else`, `case`, `for`, `select`, `while`, `until`, a function definition, `&&`
 or `||`) or more than one command. A sequence and a pipeline are more than one
 command, and so is a command substitution that holds more than one. A
 substitution that holds a single command is an argument of the command around
-it. A here-document's body is data when any part of its delimiter is quoted.
+it. A placeholder outside a quote, such as `<the PR's bead>` or
+`<approve|request-changes>`, is one word, since the agent writes a value in its
+place before the block runs. Text between `<` and `>` that holds a `;`, an `&`,
+a parenthesis, a backquote or a `|` that does not join two words is shell, as
+`sort <in.txt | uniq>out.txt` is, so a placeholder outside a quote holds none of
+them. A here-document's body is data when any part of
+its delimiter is quoted.
 Otherwise the shell expands the body, and a substitution in it counts as one
 in an argument does.
 
@@ -180,15 +188,32 @@ do for its caller, and Claude Code carries the shell's directory from one call
 to the next. So a call that removes the directory the agent's shell stands in
 ends in `&& cd <a directory that stays>`.
 
+The gctk-bin block is no procedure either. Text that calls gctk sets `GCTK` in
+that block, whose one line `assets/scripts/gctk-bin.test.sh` holds every copy
+to, so a block that holds the gctk-bin block and one `"$GCTK" <verb>` call makes
+one call. Between the block's markers, an assignment to `GCTK` that runs no
+command counts as no command.
+
 `tools/lint-step-text.sh` holds the rule, and `tools/lint.sh` runs it on the
-files a change names. It reads every TOML string in a formula as Python's
-`tomllib` decodes it, so it needs a Python 3.11 or newer on PATH. It judges
-only what a change adds. It weighs each step by
-the commands and the control flow of the procedures its blocks hold, and fails
-a step the change makes heavier in either count. A new step fails when it holds
-a procedure at all. A block the change leaves alone, or moves without editing
-it, weighs nothing, so a step that only gains single calls passes, and so does
-one that trades a procedure for a call.
+files a change names: formulas, and the Markdown files of a skill, under
+`skills/<name>/` or a sub-pack's or an agent's `<dir>/skills/<name>/`. It skips
+a skill file that is a symlink, because its text is the file it points to, such
+as a prompt fragment. It reads every TOML string in a formula as Python's
+`tomllib` decodes it, so a change that names a formula needs a Python 3.11 or
+newer on PATH.
+
+The lint judges only what a change adds. It weighs each step, and each skill,
+by the commands and the control flow of the procedures its blocks hold, and
+fails a step or a skill the change makes heavier in either count. A skill is
+weighed whole, all its files together, because an agent loads it as one text,
+as it reads a step, and its directory names it as an id names a step, while a
+section's heading is prose a change may reword. A new step or skill fails when
+it holds a procedure at all. A block the change leaves alone, or moves without
+editing it, weighs nothing, so a step or a skill that only gains single calls
+passes, and so does one that trades a procedure for a call. A moved block is
+found within its own formula, and across every skill file the change names, a
+file it deletes included, so a block moved from one skill to another weighs
+nothing.
 
 A step also reaches its agent whole. gc delivers an agent's current step in a
 hook's output, which Claude Code keeps to 10,000 characters and Codex to 10,000
@@ -545,12 +570,22 @@ and both scopes ship in one pack:
 
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| deacon, mechanik | `city` | `gc-toolkit.<role>` — no rig segment, so the deacon is `gc-toolkit.deacon` |
-| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `gc-toolkit/gc-toolkit.<role>`, so the refinery is `gc-toolkit/gc-toolkit.refinery` |
+| deacon, mechanik | `city` | `<binding>.<role>`, with no rig segment, so in a city that imports the pack as gc-toolkit the deacon is `gc-toolkit.deacon` |
+| converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `<rig>/<binding>.<role>`, so in that city the gc-toolkit rig's refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the
 `[[named_session]]` stanzas in `pack.toml` restate it for the singletons. Read
 that field for an agent the table does not name.
+
+The binding is the key the city imports the pack under, so no pack text
+spells it in an agent's name. A formula renders `{{binding_prefix}}`, a prompt or fragment
+`{{ .BindingPrefix }}`, a skill writes `<binding>` for the agent to fill in,
+and an order names its pool bare (`pool = "polecat"`), which Gas City qualifies
+with the rig and the binding of the order's own pack. A script or gctk takes
+the name from the roster, through `resolve-route.sh` below or gctk's
+`rigPool`. `assets/scripts/pack-self-location.test.sh` refuses the binding
+spelled as gc-toolkit in front of one of the pack's agents, in pack text and in
+gctk's Go.
 
 An author who copies a qualifier from the recipe beside the one being written
 is right only when the two agents happen to share a scope. Over-qualifying a
@@ -563,8 +598,10 @@ the identity that is live. It reads `gc agent list`, keeps only the
 candidates a bead in this store can be offered to (the city-scoped ones plus
 `$GC_RIG`'s), and refuses an ambiguous name rather than picking one. An
 unreadable roster is the absence of proof rather than proof of an empty city,
-so there the name comes back unchanged on exit 3 and the caller files
-unverified rather than not at all.
+so there the name comes back unchanged on exit 3, and a caller whose name
+carries its binding files unverified rather than not at all. A bare role
+carries no binding, so it addresses nobody unverified, and `pool-route.sh`
+refuses it there.
 
 The witness resolves the identity of the rig-scoped refinery before it reads
 the refinery's queue. Its recipe is the `refinery-stuck-handoff` block in

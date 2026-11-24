@@ -1,6 +1,6 @@
 ---
 name: Built-once target — the shape gc-toolkit would have if built once, and where its weight is
-description: What gc-toolkit would be if built once on Gas City as shipped, with each subsystem's estimated weight beside what it weighs at the baseline; what the tree carries that has no place in that shape and what retires it; the order the removals land in; and the rules every change follows. Read it before filing or building work in code the deletion plan retires, before writing formula step text, and when reading a PR's size change.
+description: What gc-toolkit would be if built once on Gas City as shipped, with each subsystem's estimated weight beside what it weighs at the baseline; what the tree carries that has no place in that shape and what retires it; the order the removals land in; and the rules every change follows. Read it before filing or building work in code the deletion plan retires, before writing formula step text or a skill's shell blocks, and when reading a PR's size change.
 ---
 
 # Built-once target
@@ -11,7 +11,7 @@ tests. At the baseline it weighs 283.9k: 122.2k of runtime and 161.7k of tests.
 The estimates show where the weight is. They set no limit, since useful code
 grows. [The rules](#the-rules) aim at code written without value to the
 operator: no new work in code the deletion plan retires, no procedures in step
-text, and a computed size change on every PR. The migration epic's members
+text or skills, and a computed size change on every PR. The migration epic's members
 (tk-1tfzr71) carry most of the removals below.
 
 ## Scope
@@ -166,6 +166,11 @@ yet. Each remaining difference names its reason and what ends it:
   keys a failure already on the target by its symptom, where Gas Town searches
   open bugs by title. Two agents title one failure two ways, and the key finds
   the tracker after a retitle. This ends when Gas Town keys its tracker.
+- **A pre-existing failure goes to be fixed when it is filed.**
+  `preexisting-failure.sh` slings each tracker it files to its rig's polecat
+  pool, where Gas Town files the bug unrouted and moves on. Here new work waits
+  for the operator's placement, and a failure on the target is work to fix
+  rather than new work to place. No end is planned.
 - **Human gates in place of mayor mail.** Where a person must act, such as the
   refinery's park or an exception the landing order finds, the pack files a
   human gate on the bead, keyed by the case. Gas Town routes the bead to
@@ -543,10 +548,11 @@ Every change follows these rules.
    [AGENTS.md](../AGENTS.md) says what becomes of a problem found in that
    code. Every session that works in a gc-toolkit worktree loads it, a first
    reaction's included, and the mechanik's prompt points at it.
-2. **Step text holds no procedures.**
+2. **Step text and skills hold no procedures.**
    [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script)
-   states the rule where formulas are written, and `tools/lint-step-text.sh`
-   fails a change that adds a procedure to step text.
+   states the rule where formulas and skills are written, and
+   `tools/lint-step-text.sh` fails a change that adds a procedure to step text
+   or to a skill.
 3. **Every PR shows its size change.** The size line is computed from git, from
    the merge base to the head: the net runtime and test lines, by subsystem. It
    names separately the lines the change adds to code the plan retires, and the

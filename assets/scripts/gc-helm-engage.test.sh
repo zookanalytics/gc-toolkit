@@ -324,10 +324,13 @@ case "$1 ${2:-}" in
     # The import-resolved roster rig_carries_converse reads. Default: gc-toolkit
     # carries converse (base + variants). $NO_CONVERSE drops the converse
     # entries; it keeps a proactive entry to prove the guard is converse-specific.
+    # $STUB_BINDING is the key the city imports the pack under (default gc-toolkit),
+    # which Gas City puts in each qualified name.
     if [ -n "${NO_CONVERSE:-}" ]; then
-      jq -n '{agents:[{qualified_name:"gc-toolkit/gc-toolkit.proactive"}]}'
+      jq -n --arg b "${STUB_BINDING:-gc-toolkit}" '{agents:[{qualified_name:("gc-toolkit/" + $b + ".proactive"), name:"proactive", dir:"gc-toolkit"}]}'
     else
-      jq -n '{agents:[ "gc-toolkit/gc-toolkit.converse","gc-toolkit/gc-toolkit.converse-claude-opus","gc-toolkit/gc-toolkit.converse-claude-fable","gc-toolkit/gc-toolkit.converse-codex-sol","gc-toolkit/gc-toolkit.converse-codex-astra" | {qualified_name:.} ]}'
+      jq -n --arg b "${STUB_BINDING:-gc-toolkit}" '{agents:[ "converse","converse-claude-opus","converse-claude-fable","converse-codex-sol","converse-codex-astra"
+               | {qualified_name:("gc-toolkit/" + $b + "." + .), name:., dir:"gc-toolkit"} ]}'
     fi ;;
   "bd show")
     id="$3"
@@ -2016,6 +2019,13 @@ has "$CALLED" "then WAIT for the operator" "(SKILL) …and, with no opener, fram
 has "$CALLED" "session new converse-claude-opus --alias tk-new" "(SKILL) …then a sitting spawns for the new conversation"
 hasnt "$CALLED" "session nudge" "(SKILL) …and the claude-opus sitting reads the lens from its ask, unkicked"
 has "$OUT" "✓ converse-claude-opus with review-arch on new conversation" "(SKILL) the summary names the skill the sitting was seeded with"
+
+# A city names the key it imports the pack under, so the sitting's agent is the
+# one the roster names under that key, and its roster is read there.
+STUB_BINDING=kit run_fresh tk-subj --skill review-arch --no-input --no-attach
+eq "$RC" 0 "(SKILL-BINDING) --skill in a city that imports the pack under another key exits 0"
+has "$CALLED" "skill list --agent gc-toolkit/kit.converse-claude-opus" "(SKILL-BINDING) …checking the name against that key's sitting"
+has "$CALLED" "look at tk-subj through the gc-toolkit.review-arch" "(SKILL-BINDING) …and resolving it against that sitting's roster"
 
 echo "# a full skill name resolves to exactly that skill"
 run_fresh tk-subj --skill gc-toolkit.review-pm --no-input --no-attach

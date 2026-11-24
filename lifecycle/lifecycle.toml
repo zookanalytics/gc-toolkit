@@ -1205,12 +1205,15 @@ keys = ["priority_shift"]
 #   the create that files a child, through bd-lib.sh's pr_finishing_birth, and
 #   never rewrites it on a child it adopts or re-routes. Read by priority-lib.sh
 #   wherever a priority is computed: queue-priority.sh settle, its move and its
-#   reconcile pass. Read only on a bead that follows a parent or an anchor: a
-#   workflow's convoy, root and steps carry no shift, and a bead that follows
-#   nothing has nothing to shift from. Absent or empty reads as 0. A value that
-#   is not a signed integer makes the bead unreadable, and every bead that
-#   follows it, so no priority is computed from it. No pack writer clears it. A
-#   signed integer, stored as a number.
+#   reconcile pass. Read only on a bead that follows a parent or an anchor, a
+#   review run's root among them: a workflow's convoy and steps, and any other
+#   workflow's root, carry no shift, and a bead that follows nothing has nothing
+#   to shift from. Absent or empty reads as 0, and as -1 on a review run's root,
+#   the shift the rest of PR-finishing work is filed with, since the landing
+#   order pours the root with none. A value that is not a signed integer makes
+#   the bead unreadable, and every bead that follows it, so no priority is
+#   computed from it. No pack writer clears it. A signed integer, stored as a
+#   number.
 
 [metadata.supersede]
 # RETIRED. The successor keys a disposition carried before bd's own edges
@@ -1471,8 +1474,9 @@ keys = ["failure_key"]
 #   statuses for both gates' lookup, then over closed beads when no live tracker
 #   holds it, to follow the most recently closed tracker's chain of
 #   disposition edges to a live bead, and over closed beads for the pre-flight's landed-fix
-#   check. `find` reads no title, so a bug without it is no tracker. Never
-#   cleared, so a retitle or a fold leaves it in place. A string.
+#   check. `find` reads no title, so a bug without it is no tracker. A first
+#   reaction's intake reads it to admit the tracker to a pool. Never cleared,
+#   so a retitle or a fold leaves it in place. A string.
 
 [metadata.seed_audit_reaudit]
 # The seed audit's re-audit: the one bead that re-renders generated/seed-audit on
@@ -1551,6 +1555,24 @@ keys = [
 #   subject is with the refinery, and stamps each marker right after its
 #   own dispatch. Absent means that dispatch has not happened, so a resume runs
 #   it. Not cleared. A string.
+
+[metadata.rig_demo]
+# The paths formulas/mol-rig-demo.toml records on its demo-request bead, the
+# input convoy's one member. Each later step derives the bead again and reads
+# the path from it, so the path outlives the session that recorded it.
+keys = ["demo_script_path", "demo_mp4_path"]
+# demo_script_path — the demo:capture script the capture runs, written by the
+#   prepare-script step once the file exists: the pour's demo_script, or the
+#   path the gc-toolkit.gc-demo-script skill reports for a source_bead. The
+#   capture step reads it, and stops, asking for prepare-script to run again,
+#   when it is absent or names no file. Not cleared. A file path, absolute or
+#   relative to the capture session's working directory.
+# demo_mp4_path — the clip the capture step wrote, under
+#   ${TMPDIR:-/tmp}/rig-demo/<request bead>/, outside the repo tree, written
+#   once rig-demo-capture.sh exits 0. The deliver-and-finalize step reads it to
+#   deliver the clip with demo-deliver.sh or to report where it is, and stops,
+#   asking for capture to run again, when it is absent or names an empty or
+#   missing file. Not cleared. A file path.
 
 [metadata.learning]
 # The feedback-learning loop's beads (docs/feedback-learning.md). obs.* is the

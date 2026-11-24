@@ -1,35 +1,51 @@
 #!/usr/bin/env bash
-# lint-step-text.sh — flags a formula change that adds a procedure to step text.
+# lint-step-text.sh — flags a change that adds a procedure to formula step text
+# or to a skill.
 #
-# A formula step calls a tested script, and anything two steps need is one
-# script (docs/pack-authoring.md, "Step text calls a tested script"). A shell
-# block in step text that does more than make one call is a procedure: it holds
-# control flow (if, elif, else, case, for, select, while, until, a function
-# definition, && or ||), or more than one command. A sequence and a pipeline
-# are more than one command, and so is a command substitution that holds more
-# than one. A substitution holding a single command is an argument of the
-# command around it, so `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one
-# call. A command that only assigns literal values, with no $, backtick, < or >
-# in its text, does nothing but name them, so it is no command, and a formula
-# step's `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"` is one
-# call too. A cd that && runs after a call weighs nothing, and neither does that
-# &&: it moves the agent's own shell once the call exits 0, which no script can
-# do for its caller.
+# A formula step or a skill calls a tested script, and anything two of them
+# need is one script (docs/pack-authoring.md, "Step text calls a tested
+# script"). A shell block in step text or a skill that does more than make one
+# call is a procedure: it holds control flow (if, elif, else, case, for,
+# select, while, until, a function definition, && or ||), or more than one
+# command. A sequence and a pipeline are more than one command, and so is a
+# command substitution that holds more than one. A substitution holding a
+# single command is an argument of the command around it, so
+# `"$(gc <binding> scripts-dir)/foo.sh" --bead X` is one call. A command that
+# only assigns literal values, with no $, backtick, < or > in its text, does
+# nothing but name them, so it is no command, and a formula step's
+# `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/foo.sh"` is one call
+# too. A placeholder outside a quote, such as <the PR's bead> or
+# <approve|request-changes>, is one word, since the agent writes a value in its
+# place, unless it holds shell syntax: a ; or an &, a parenthesis, a backquote,
+# or a | that does not join two words. Then it is shell, as
+# `sort <in.txt | uniq>out.txt` is. A cd that && runs after a call weighs
+# nothing, and neither does that &&: it moves the agent's own shell once the
+# call exits 0, which no script can do for its caller. Between the markers of a
+# gctk-bin block, an assignment to GCTK that runs no command weighs nothing, so
+# the block and one "$GCTK" call are one call.
 #
-# The lint judges only what a change adds, so step text that predates the rule
-# passes until its own rewrite. It weighs each step, named by its id, by the
-# commands and the control flow of the procedures its blocks hold, and fails a
-# step that a change makes heavier in either count. A new step fails when it
-# holds a procedure at all. A block the change leaves alone, or moves without
-# editing it, weighs nothing on either side, so a step that only gains single
-# calls, or trades a procedure for a call, passes.
+# The lint judges only what a change adds, so text that predates the rule
+# passes until its own rewrite. It weighs each formula step, named by its id,
+# and each skill, named by its directory and weighed whole across its files, by
+# the commands and the control flow of the procedures its blocks hold, and
+# fails a step or a skill that a change makes heavier in either count. A new
+# step or skill fails when it holds a procedure at all. A block the change
+# leaves alone, or moves without editing it, weighs nothing on either side, so
+# a step or a skill that only gains single calls, or trades a procedure for a
+# call, passes. A formula's blocks pair within its own file, and a skill's
+# blocks with those of every skill file the change names, so a block moved from
+# one skill to another weighs nothing either.
 #
 # The change runs from the merge base of BASE and HEAD to the working tree,
 # the change `git diff --name-only BASE...HEAD` names for the rig's
 # lint_command. Each FILE that is a formula (formulas/*.toml, or a sub-pack's
-# <dir>/formulas/*.toml) is checked, any other FILE is ignored, and a renamed
-# formula is compared with its old path. A FILE is a path from the top of the
-# repository, as git prints it.
+# <dir>/formulas/*.toml) or a Markdown file of a skill (skills/<name>/...*.md,
+# or a sub-pack's or an agent's <dir>/skills/<name>/...*.md) is checked, any
+# other FILE is ignored, and a renamed file is compared with its old path. A
+# skill file that is a symlink is skipped, since its text is the file it points
+# to, such as a prompt fragment. A skill file the change deletes keeps its old
+# blocks, so a block moved out of it pairs. A FILE is a path from the top of
+# the repository, as git prints it.
 #
 # The agent reads step text as TOML decodes it, and so does the lint. Python's
 # tomllib decodes each string in the file, whatever its kind and wherever it
@@ -37,11 +53,13 @@
 # backslash that ends a line of a multi-line basic string joins the next line
 # to it. The lint finds each string in the file to tie its text to the file's
 # lines. When the strings it finds are not all the strings tomllib reads in the
-# file, it cannot operate. Only a block fenced as bash, sh, shell, zsh, ksh or
-# dash, in any case, holds commands, and a fence of backticks or tildes is read
-# as CommonMark reads it. A here-document's body is data, except where no part
-# of its delimiter is quoted. The shell then expands the body, so a command
-# substitution in it weighs as one in an argument does.
+# file, it cannot operate. A skill is Markdown, read line by line, with a
+# control character other than a tab read as a blank. Only a block fenced as
+# bash, sh, shell, zsh, ksh or dash, in any case, holds commands, and a fence of
+# backticks or tildes is read as CommonMark reads it. A block a TOML string or a
+# skill file leaves open ends where it does. A here-document's body is data,
+# except where no part of its delimiter is quoted. The shell then expands the
+# body, so a command substitution in it weighs as one in an argument does.
 #
 # Usage: lint-step-text.sh [--base REV] [FILE ...]
 #   --base REV  the revision a change is measured from (default: origin/main)
@@ -49,7 +67,8 @@
 # Output: each finding as `<file>:<line>: <message>`, then one summary line.
 # Exit: 0 no finding; 1 a finding; 2 it could not operate (not a repository, a
 #       BASE git cannot read, a file it cannot read or parse, or no Python 3.11
-#       or newer on PATH to decode a formula's TOML).
+#       or newer on PATH to decode a formula's TOML, which a change that names
+#       no formula does not need).
 
 set -uo pipefail
 
@@ -83,15 +102,35 @@ if ! ROOT=$(git rev-parse --show-toplevel 2>/dev/null); then
 fi
 cd "$ROOT" || { echo "$PROG: cannot enter repo root $ROOT" >&2; exit 2; }
 
-formulas=()
+# is_skill_text <path> — whether the path is a Markdown file of a skill.
+is_skill_text() {
+  case "$1" in
+    skills/*/*.md | */skills/*/*.md) return 0 ;;
+  esac
+  return 1
+}
+
+# skill_dir <path> — the directory of the skill a skill file belongs to,
+# <prefix>skills/<name>, which names the skill.
+skill_dir() {
+  local pre rest
+  case "$1" in
+    skills/*) pre=""; rest=${1#skills/} ;;
+    *) pre=${1%%/skills/*}/; rest=${1#"$pre"skills/} ;;
+  esac
+  printf '%sskills/%s\n' "$pre" "${rest%%/*}"
+}
+
+formulas=(); skills=()
 for f in ${files[@]+"${files[@]}"}; do
   f=${f#./}
   case "$f" in
     formulas/*.toml | */formulas/*.toml) [ -f "$f" ] && formulas+=("$f") ;;
+    *) is_skill_text "$f" && [ ! -L "$f" ] && skills+=("$f") ;;
   esac
 done
-if [ "${#formulas[@]}" -eq 0 ]; then
-  echo "$PROG: no formula file given"
+if [ "${#formulas[@]}" -eq 0 ] && [ "${#skills[@]}" -eq 0 ]; then
+  echo "$PROG: no formula or skill file given"
   exit 0
 fi
 if ! BASE_OID=$(git rev-parse -q --verify "$BASE^{commit}"); then
@@ -103,16 +142,18 @@ if ! MERGE_BASE=$(git merge-base "$BASE_OID" HEAD); then
   exit 2
 fi
 
-# A Python whose standard library has tomllib (3.11 and newer) decodes the
-# TOML: python3, or else the newest python3.N on PATH.
+# A Python whose standard library has tomllib (3.11 and newer) decodes a
+# formula's TOML: python3, or else the newest python3.N on PATH.
 PY=""
-for name in python3 $(compgen -c python3. 2>/dev/null | grep -xE 'python3\.[0-9]+' | sort -t. -k2,2nr -u); do
-  cand=$(command -v "$name") || continue
-  "$cand" -I -c 'import tomllib' >/dev/null 2>&1 && { PY=$cand; break; }
-done
-if [ -z "$PY" ]; then
-  echo "$PROG: decoding a formula's TOML needs a Python with tomllib (3.11 or newer), and PATH has none" >&2
-  exit 2
+if [ "${#formulas[@]}" -gt 0 ]; then
+  for name in python3 $(compgen -c python3. 2>/dev/null | grep -xE 'python3\.[0-9]+' | sort -t. -k2,2nr -u); do
+    cand=$(command -v "$name") || continue
+    "$cand" -I -c 'import tomllib' >/dev/null 2>&1 && { PY=$cand; break; }
+  done
+  if [ -z "$PY" ]; then
+    echo "$PROG: decoding a formula's TOML needs a Python with tomllib (3.11 or newer), and PATH has none" >&2
+    exit 2
+  fi
 fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/gctk-lint-step-text.XXXXXX") || exit 2
@@ -261,13 +302,47 @@ sys.stdout.buffer.write(("\n".join(out) + "\n").encode("utf-8", "replace"))
 PYEOF
 ) || { echo "$PROG: could not load its decoder" >&2; exit 2; }
 
-# PARSE_AWK reads what DECODE_PY prints for a formula file and prints, for each
-# shell block in its strings,
+# CONVERT_AWK prints the skill files of one side of the change as the records
+# DECODE_PY prints for a formula, with each skill as a step, named by its
+# directory. It reads a list whose lines are `S<TAB>dir`, a skill on this side,
+# and `F<TAB>dir<TAB>source<TAB>path`, a file of the skill, read from source. It
+# prints `S<FS>step<FS>dir<FS>0` for each skill, where step numbers the skill in
+# the order it first comes, and for each file `T<FS>step`, `R<FS>line<FS>text`
+# for each of its lines and `E`. Its files' lines follow one another in VIRT,
+# and line is a line of VIRT. MAP gets `line<TAB>path` for each file, the line
+# of VIRT its first line takes. A control character other than a tab reads as a
+# blank, as in DECODE_PY.
+CONVERT_AWK=$(cat <<'AWKEOF'
+function step(d) {
+    if (!(d in num)) { num[d] = ++n; print "S\034" n "\034" d "\034" 0 }
+    return num[d]
+}
+BEGIN { FS = "\t" }
+$1 == "S" { step($2); next }
+$1 == "F" {
+    print "T\034" step($2)
+    print (v + 1) "\t" $4 > MAP
+    while ((r = (getline t < $3)) > 0) {
+        sub(/\r$/, "", t)
+        gsub(/[\001-\010\013-\037\177]/, " ", t)
+        print t > VIRT
+        print "R\034" (++v) "\034" t
+    }
+    if (r < 0) { print "cannot read " $4 > "/dev/stderr"; exit 2 }
+    close($3)
+    print "E"
+}
+AWKEOF
+) || { echo "$PROG: could not load its skill reader" >&2; exit 2; }
+
+# PARSE_AWK reads what DECODE_PY prints for a formula file, or CONVERT_AWK for
+# skill files, and prints, for each shell block in its strings or files,
 # `F<FS>open<FS>commands<FS>control<FS>words<FS>text<FS>step`; for each line of
 # a block's code, here-document bodies included, `L<FS>line<FS>open`; and each
 # step's S record as it came. <FS> is \034, open is the line of the block's
-# opening fence, words names its control flow, text is its code with every
-# newline written as \035, and step is the step's place in the file.
+# opening fence, words names its control flow, text is its code and its
+# gctk-bin markers with every newline written as \035, and step is the step's
+# place in the file.
 PARSE_AWK=$(cat <<'AWKEOF'
 function fill(w,   o) { o = ""; while (w-- > 0) o = o "."; return o }
 function blanks(w,   o) { o = ""; while (w-- > 0) o = o " "; return o }
@@ -308,7 +383,8 @@ function heredoc_op(s, i,   j, n, tabs, d, c, q, lit) {
 # it opens. The context stack holds S '', E $'', D "", K ``, C $() <() >(),
 # P a ( inside C, A $(( )) or (( )), Q a ( inside A, Z ${ } and T [[ ]]. With
 # SCAN_BODY set, s is an expanding here-document's body, which the stack opens
-# as H: a D in which " is a plain character.
+# as H: a D in which " is a plain character. A PLACEHOLDER outside a quote, with
+# no shell syntax PLACEHOLDER_SHELL finds in it, is one word.
 function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
     n = length(s); top = 0; out = ""; SN = 0; SHN = 0; subd = 0; at = 0
     if (SCAN_BODY) { st[1] = "H"; top = 1 }
@@ -337,6 +413,8 @@ function scan(s,   n, i, c, nx, k, top, st, w, out, subd, at, j) {
             j = index(substr(s, i), "\n")
             w = j ? j - 1 : n - i + 1
             if (k == "") { out = out blanks(w); i += w; continue }
+        } else if (c == "<" && (k == "" || k == "C" || k == "P" || k == "K") && match(substr(s, i), PLACEHOLDER) && substr(s, i, RLENGTH) !~ PLACEHOLDER_SHELL) {
+            w = RLENGTH
         } else if (c == "'") {
             st[++top] = "S"
         } else if (c == "\"") {
@@ -474,11 +552,22 @@ function analyze(s, depth,   m, n, i, subs, cmd, cf, w, lbl) {
     AC_CMD = cmd; AC_CF = cf; AC_W = w
 }
 function finish() {
-    analyze(buf, 0)
-    fcmd += AC_CMD; fcf += AC_CF; fwords = fwords AC_W
+    if (!(gctkbin && gctk_line(buf))) {
+        analyze(buf, 0)
+        fcmd += AC_CMD; fcf += AC_CF; fwords = fwords AC_W
+    }
     ftext = ftext buf "\n"
     code_lines(blines)
     buf = ""; blines = ""; bsep = ""; bhd = 0
+}
+# Whether command line s is the line a gctk-bin block holds between its
+# markers, which weighs nothing: one assignment to GCTK that runs no command.
+# With its quotes masked, the line holds no blank and no ;, & or |, any of which
+# could join a command to the assignment.
+function gctk_line(s,   t) {
+    scan(s)
+    t = SM; gsub(/^[ \t]+|[ \t]+$/, "", t)
+    return SN == 0 && t ~ /^GCTK=[^ \t;&|]*$/
 }
 # An L record for each of the block's lines not yet recorded.
 function code_lines(lines,   n, i, bl) {
@@ -511,13 +600,16 @@ function fence_close(   t) {
         t = ftext; gsub(/\n/, "\035", t)
         print "F\034" fopen "\034" fcmd "\034" fcf "\034" fwords "\034" t "\034" stepn
     }
-    infence = 0; fshell = 0; hdn = 0; hdi = 0; hbody = ""; buf = ""; blines = ""; bsep = ""; bhd = 0
+    infence = 0; fshell = 0; hdn = 0; hdi = 0; hbody = ""; buf = ""; blines = ""; bsep = ""; bhd = 0; gctkbin = 0
 }
 # One line of a shell block, as the agent reads it. A command whose quote,
 # substitution or continuation is still open runs on into the next line. A line
 # inside a here-document is the body's, and joins the block's text and lines.
 # Once a body whose delimiter is unquoted ends, the shell expands it, so its
-# substitutions are weighed then; a block that closes first ends the body.
+# substitutions are weighed then; a block that closes first ends the body. A
+# comment line that opens a gctk-bin block, or closes one, sets gctkbin and
+# joins the block's text, since it changes what the block weighs, so a block
+# that loses its markers does not pair with its old self as unchanged.
 function shell_line(s, lines,   t, i) {
     if (hdn > hdi) {
         t = s
@@ -534,7 +626,12 @@ function shell_line(s, lines,   t, i) {
         return
     }
     if (buf == "") {
-        if (s ~ /^[ \t]*$/ || s ~ /^[ \t]*#/) return
+        if (s ~ /^[ \t]*$/) return
+        if (s ~ /^[ \t]*#/) {
+            if (s ~ /^[ \t]*# >>> gctk-bin[ \t]*$/) { gctkbin = 1; ftext = ftext s "\n" }
+            else if (s ~ /^[ \t]*# <<< gctk-bin[ \t]*$/) { gctkbin = 0; ftext = ftext s "\n" }
+            return
+        }
         buf = s; blines = lines
     } else {
         buf = buf bsep s; blines = blines " " lines
@@ -568,19 +665,29 @@ function rendered(s, lines,   first, t, c, n, tag) {
         infence = 1; fchar = c; flen = n
         fshell = (tag == "bash" || tag == "sh" || tag == "shell" || tag == "zsh" || tag == "ksh" || tag == "dash")
         fopen = first; fcmd = 0; fcf = 0; fwords = ""; ftext = ""
-        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; hbody = ""; SC_LBL = 0
+        buf = ""; blines = ""; bsep = ""; bhd = 0; hdn = 0; hdi = 0; hbody = ""; SC_LBL = 0; gctkbin = 0
         return
     }
     if (infence && fshell) shell_line(s, lines)
 }
-# Each record DECODE_PY printed: a step, the step the next string sits in, a
-# line of that string, or its end, which closes a block still open in it.
+# Each record DECODE_PY or CONVERT_AWK printed: a step, the step the next
+# string or file sits in, a line of it, or its end, which closes a block still
+# open in it.
 # CASE_IN is a case's own `in` on a line of its own, and CASE_LABEL a pattern
 # label: an optional (, one or more patterns joined by |, and the closing ).
+# PLACEHOLDER is a placeholder: a < and a letter, then the line's text up to the
+# next >, whose last character before it is no blank, so a redirection such as
+# `<in >out` is no placeholder. Nor is a span that holds shell syntax, which
+# PLACEHOLDER_SHELL finds: a ; or an &, a parenthesis, a backquote, or a | beside
+# a blank, another | or the closing >. So `<in.txt | uniq>out.txt` is a pipeline
+# between two redirections, and a | in a placeholder joins two alternatives, as
+# in <approve|request-changes>.
 BEGIN {
     FS = "\034"
     CASE_IN = "^in([ \t\n]|$)"
     CASE_LABEL = "^[(]?[^ \t\n;&|()<>]+([|][^ \t\n;&|()<>]+)*[)]"
+    PLACEHOLDER = "^<[A-Za-z]([^<>\n]*[^<>\n \t])?>"
+    PLACEHOLDER_SHELL = "[;&()`]|[ \t][|]|[|][ \t|>]"
 }
 $1 == "S" { print; next }
 $1 == "T" { stepn = $2 + 0; next }
@@ -648,7 +755,17 @@ AWKEOF
 ) || { echo "$PROG: could not load its judge" >&2; exit 2; }
 
 # REPORT_AWK prints each judged step as a finding and exits 1 on a finding.
+# KIND is step, for a formula's steps, or skill, for the skills. A finding names
+# PATHNAME and the judged line, or, with MAP set, the file and the line of it
+# that the judged line of VIRT is.
 REPORT_AWK=$(cat <<'AWKEOF'
+BEGIN { while (MAP != "" && (getline m < MAP) > 0) { split(m, p, "\t"); nm++; mline[nm] = p[1] + 0; mpath[nm] = p[2] } }
+function place(n,   k) {
+    if (!nm) return PATHNAME ":" n
+    k = nm
+    while (k > 1 && mline[k] > n) k--
+    return mpath[k] ":" (n - mline[k] + 1)
+}
 function plural(n, one, many) { return n " " (n == 1 ? one : many) }
 function words(w,   n, a, i, seen, out) {
     n = split(w, a, " "); out = ""
@@ -659,11 +776,12 @@ function shape(n, c, w) { return plural(n, "command", "commands") (c > 0 ? " and
 function weight(n, c) { return plural(n, "command", "commands") " and " (c > 0 ? plural(c, "control-flow construct", "control-flow constructs") : "no control flow") }
 {
     split($0, f, "\034")
-    where = (f[2] == "" ? "the formula's own text" : "step " f[2])
+    if (KIND == "skill") where = "skill " f[2]
+    else where = (f[2] == "" ? "the formula's own text" : "step " f[2])
     if (f[3] == "new") what = "the new " where " has shell blocks that do more than call a script, with " shape(f[6], f[7], f[8])
     else if (f[4] == 0 && f[5] == 0) what = where " gains shell blocks that do more than call a script, with " shape(f[6], f[7], f[8])
     else what = "in " where ", the shell blocks that do more than call a script grow from " weight(f[4], f[5]) " to " weight(f[6], f[7])
-    print PATHNAME ":" f[1] ": step text gains a procedure: " what ". A step calls one tested script, so move the procedure into a script with its own test and call that (docs/pack-authoring.md#step-text-calls-a-tested-script)"
+    print place(f[1] + 0) ": " KIND " text gains a procedure: " what ". A " KIND "'s shell block makes one call, so move the procedure into a tested script or a gctk verb and call that (docs/pack-authoring.md#step-text-calls-a-tested-script)"
     found++
 }
 END {
@@ -673,14 +791,15 @@ END {
 AWKEOF
 ) || { echo "$PROG: could not load its report" >&2; exit 2; }
 
-# The formulas the change renamed, as `new<TAB>old`, from one rename-aware diff.
+# The files the change renamed, as `R<score><TAB>old<TAB>new`, from one
+# rename-aware diff.
 if ! renames=$(git diff -M --name-status --no-color --diff-filter=R "$MERGE_BASE" --); then
   echo "$PROG: cannot list the renames since $MERGE_BASE" >&2
   exit 2
 fi
 
 found=0; i=0
-for f in "${formulas[@]}"; do
+for f in ${formulas[@]+"${formulas[@]}"}; do
   i=$((i + 1))
   old="$WORK/old.$i"; new_rec="$WORK/new.$i.rec"; old_rec="$WORK/old.$i.rec"
   src=$(printf '%s\n' "$renames" | awk -F'\t' -v p="$f" '$3 == p { print $2; exit }')
@@ -705,17 +824,74 @@ for f in "${formulas[@]}"; do
     || { echo "$PROG: cannot judge $f" >&2; exit 2; }
   [ -s "$WORK/judged.$i" ] || continue
 
-  awk -v PATHNAME="$f" -v COUNTS="$WORK/counts.$i" "$REPORT_AWK" "$WORK/judged.$i"
+  awk -v KIND=step -v PATHNAME="$f" -v COUNTS="$WORK/counts.$i" "$REPORT_AWK" "$WORK/judged.$i"
   rc=$?
   [ "$rc" -le 1 ] && [ -s "$WORK/counts.$i" ] || { echo "$PROG: cannot report on $f" >&2; exit 2; }
   read -r nf < "$WORK/counts.$i"
   found=$((found + nf))
 done
 
-summary="$PROG: ${#formulas[@]} formula file(s)"
+# The skill files are judged together, each side read as one text whose steps
+# are the skills, so a block pairs with its old self in whichever file or skill
+# it now sits. Each file the change names is read from the working tree, and
+# from the merge base under its old path: the path the change renamed it from,
+# or its own. It has no old text when it came into a skill from outside one, or
+# when it is the path another named file was renamed from, whose old text that
+# file reads. A skill is on the old side when its directory is at the merge base.
+if [ "${#skills[@]}" -gt 0 ]; then
+  renamed=(); sources=$'\n'
+  for f in "${skills[@]}"; do
+    src=$(printf '%s\n' "$renames" | awk -F'\t' -v p="$f" '$3 == p { print $2; exit }')
+    renamed+=("$src")
+    [ -z "$src" ] || sources="$sources$src"$'\n'
+  done
+  : > "$WORK/skill.old.list"; : > "$WORK/skill.new.list"
+  i=0
+  for f in "${skills[@]}"; do
+    src=${renamed[i]}; i=$((i + 1))
+    if [ -z "$src" ]; then
+      src=$f
+      case "$sources" in *$'\n'"$f"$'\n'*) src="" ;; esac
+    fi
+    if [ -n "$src" ] && is_skill_text "$src"; then
+      entry=$(git ls-tree "$MERGE_BASE" -- "$src") || { echo "$PROG: cannot list $src at $MERGE_BASE" >&2; exit 2; }
+      case "$entry" in
+        "100644 "* | "100755 "*)
+          git show "$MERGE_BASE:$src" > "$WORK/skill.old.$i" || { echo "$PROG: cannot read $src at $MERGE_BASE" >&2; exit 2; }
+          printf 'F\t%s\t%s\t%s\n' "$(skill_dir "$src")" "$WORK/skill.old.$i" "$src" >> "$WORK/skill.old.list" ;;
+      esac
+    fi
+    [ ! -f "$f" ] || printf 'F\t%s\t%s\t%s\n' "$(skill_dir "$f")" "$f" "$f" >> "$WORK/skill.new.list"
+  done
+  while IFS="$(printf '\t')" read -r _ dir _; do
+    git cat-file -e "$MERGE_BASE:$dir" 2>/dev/null && printf 'S\t%s\n' "$dir" >> "$WORK/skill.old.list"
+  done < "$WORK/skill.new.list"
+
+  for side in old new; do
+    : > "$WORK/skill.$side.virt"; : > "$WORK/skill.$side.map"
+    if ! awk -v VIRT="$WORK/skill.$side.virt" -v MAP="$WORK/skill.$side.map" "$CONVERT_AWK" "$WORK/skill.$side.list" > "$WORK/skill.$side.str" 2> "$WORK/err"; then
+      echo "$PROG: $(head -c 300 "$WORK/err" | tr '\n' ' ')" >&2; exit 2
+    fi
+    awk "$PARSE_AWK" "$WORK/skill.$side.str" > "$WORK/skill.$side.rec" || { echo "$PROG: cannot parse the skill files ($side side)" >&2; exit 2; }
+  done
+  git diff --no-index --no-color --no-ext-diff --histogram -U0 -- "$WORK/skill.old.virt" "$WORK/skill.new.virt" > "$WORK/skill.diff"
+  rc=$?
+  [ "$rc" -le 1 ] || { echo "$PROG: cannot diff the skill files against $MERGE_BASE" >&2; exit 2; }
+  awk -v OLD="$WORK/skill.old.rec" -v NEW="$WORK/skill.new.rec" "$JUDGE_AWK" "$WORK/skill.old.rec" "$WORK/skill.new.rec" "$WORK/skill.diff" > "$WORK/skill.judged" \
+    || { echo "$PROG: cannot judge the skill files" >&2; exit 2; }
+  if [ -s "$WORK/skill.judged" ]; then
+    awk -v KIND=skill -v MAP="$WORK/skill.new.map" -v COUNTS="$WORK/skill.counts" "$REPORT_AWK" "$WORK/skill.judged"
+    rc=$?
+    [ "$rc" -le 1 ] && [ -s "$WORK/skill.counts" ] || { echo "$PROG: cannot report on the skill files" >&2; exit 2; }
+    read -r nf < "$WORK/skill.counts"
+    found=$((found + nf))
+  fi
+fi
+
+summary="$PROG: ${#formulas[@]} formula file(s), ${#skills[@]} skill file(s)"
 if [ "$found" -gt 0 ]; then
-  echo "$summary, $found procedure(s) added to step text"
+  echo "$summary, $found procedure(s) added to step or skill text"
   exit 1
 fi
-echo "$summary, no procedure added to step text"
+echo "$summary, no procedure added to step or skill text"
 exit 0

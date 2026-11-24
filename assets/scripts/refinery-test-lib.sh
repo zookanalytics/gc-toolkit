@@ -75,7 +75,10 @@ rt_init() {
 
 # _rt_stub <name> — a stub <name>.sh that logs its argv to scripts.log, prints
 # STUB_<NAME>_OUT when set, and exits STUB_<NAME>_RC (default 0). pool-route.sh
-# prints rig-a/<pool> unless STUB_POOL_ROUTE_OUT says otherwise.
+# prints rig-a/<pool> for a pool named with its binding, and
+# rig-a/gc-toolkit.<pool> for a template alone, as the roster of a city that
+# imports the pack as gc-toolkit resolves it, unless STUB_POOL_ROUTE_OUT says
+# otherwise.
 _rt_stub() {
   local var
   var=$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')
@@ -83,7 +86,8 @@ _rt_stub() {
 #!/usr/bin/env bash
 echo "$1 \$*" >> "\$LOGS/scripts.log"
 out="\${STUB_${var}_OUT:-}"
-[ "$1" != pool-route ] || [ -n "\$out" ] || out="rig-a/\$1"
+case "\$1" in *.*|*/*) pool="\$1" ;; *) pool="gc-toolkit.\$1" ;; esac
+[ "$1" != pool-route ] || [ -n "\$out" ] || out="rig-a/\$pool"
 [ -z "\$out" ] || printf '%s\n' "\$out"
 exit "\${STUB_${var}_RC:-0}"
 STUB

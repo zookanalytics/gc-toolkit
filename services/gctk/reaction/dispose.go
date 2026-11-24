@@ -57,8 +57,9 @@ var runID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // Validate refuses a call for what it asks, before anything is read or
 // written, and fills in the pool an actionable or a close exit routes to when
-// it names none: the default pool in rig. A recommend's formula is asked of
-// Gas City, because Accept slings that exact name.
+// it names none: the rig's polecat pool, which the city's roster names. A
+// recommend's formula is asked of Gas City, because Accept slings that exact
+// name.
 func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 	if d.Bead == "" {
 		return usage("name the subject: gctk reaction dispose <bead> --disposition <exit> ...")
@@ -116,9 +117,25 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 	if d.Set["emergency"] && strings.TrimSpace(d.Emergency) == "" {
 		return usage("--emergency needs the name of the check that fails on main: a check run's name or a commit status's context")
 	}
-	pool := defaultPool
-	if rig != "" {
-		pool = rig + "/" + defaultPool
+	// route gives an actionable or a close exit that names no --route the rig's
+	// polecat pool, by the qualified name the city's roster gives it (rigPool),
+	// and refuses a route that names no rig. A refusal names the route as what
+	// says, and ends with also.
+	route := func(what, also string) error {
+		if d.Route == "" {
+			if rig == "" {
+				return usage("cannot name %s: set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody%s", what, also)
+			}
+			pool, err := rigPool(rt, rig, defaultPool)
+			if err != nil {
+				return usage("%v; pass --route <rig>/<agent> to name %s", err, what)
+			}
+			d.Route = pool
+		}
+		if !strings.Contains(d.Route, "/") {
+			return usage("cannot rig-qualify %s %q: pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody%s", what, d.Route, also)
+		}
+		return nil
 	}
 	switch d.Disposition {
 	case Actionable:
@@ -131,18 +148,12 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 			}
 			break
 		}
-		if d.Route == "" {
-			d.Route = pool
-		}
-		if !strings.Contains(d.Route, "/") {
-			return usage("cannot rig-qualify the route %q: set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody, and a named agent such as gc-toolkit.mechanik takes --assign", d.Route)
+		if err := route("the route", ", and a named agent such as the mechanik takes --assign"); err != nil {
+			return err
 		}
 	case Close:
-		if d.Route == "" {
-			d.Route = pool
-		}
-		if !strings.Contains(d.Route, "/") {
-			return usage("cannot rig-qualify the closer %q: set GC_RIG or pass --route <rig>/<agent>. gc.routed_to is matched as an exact string, so a bare name routes to nobody", d.Route)
+		if err := route("the closer", ""); err != nil {
+			return err
 		}
 		if slices.Contains(d.WaitingOn, d.Bead) {
 			return usage("--waiting-on %s is the subject itself", d.Bead)
@@ -207,7 +218,7 @@ func handoffForm(who, flag, route, bead string) (string, error) {
 	case is("refinery"):
 		return formAssignee, nil
 	case is("keeper"):
-		return "", usage("%s %s names the keeper, and a first reaction hands no bead to the keeper. Pass %s for the pool that would build %s, %s gc-toolkit.mechanik or a refinery for work that is theirs, or put %s to the operator with --disposition ruling", flag, who, route, bead, flag, bead)
+		return "", usage("%s %s names the keeper, and a first reaction hands no bead to the keeper. Pass %s for the pool that would build %s, %s the mechanik or a refinery for work that is theirs, or put %s to the operator with --disposition ruling", flag, who, route, bead, flag, bead)
 	case is("deacon"), is("witness"):
 		return "", usage("%s %s names an agent that patrols its own wisps and takes no bead, so a bead handed to it is read by nobody. Send it what it must act on as mail (gc mail send %s -s \"<what it must do>\" -m \"<the bead, and what to do about it>\"), and dispose %s another way", flag, who, who, bead)
 	}
@@ -256,8 +267,9 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		return out, fmt.Errorf("%w: %s is %s, and an exit writes only to an open subject, so nothing was written and there is nothing for this reaction to dispose", errNotOpen, d.Bead, status)
 	}
 
-	// Intake: only a member of an epic, PR-finishing work or a confirmed
-	// emergency enters a pool (docs/steering.md). The pool route this exit
+	// Intake: only a member of an epic, PR-finishing work, the tracker of a
+	// failure on a base branch or a confirmed emergency enters a pool
+	// (docs/steering.md). The pool route this exit
 	// would write is the actionable exit's route or the blocked exit's
 	// --then-route. A named agent's own work is no pool route, and the close
 	// exit's closer shrinks the queue rather than adding to it.
@@ -283,12 +295,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 			if err != nil {
 				return out, fmt.Errorf("could not read %s's parent (%v), so intake cannot decide; nothing was written", d.Bead, err)
 			}
-			anchor := raw(anchorKey, subject)
+			anchor, failure := raw(anchorKey, subject), raw(failureKey, subject)
 			switch {
 			case len(parents) > 0:
 				admit, admitWhy = "member", "a member of "+parents[0]
 			case anchor != "":
 				admit, admitWhy = "pr-finishing", "PR-finishing work of "+anchor
+			case failure != "":
+				admit, admitWhy = "tracker", "the tracker of "+failure+", a failure on a base branch"
 			}
 		}
 		if admit != "" {
@@ -301,7 +315,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 			if holdWhy != "" {
 				holdWhy += "; "
 			}
-			holdWhy += d.Bead + " has no parent epic and is not PR-finishing work"
+			holdWhy += d.Bead + " has no parent epic and is not PR-finishing work or a failure's tracker"
 			r.say("intake holds %s for placement instead of %s: %s", d.Bead, poolTarget, holdWhy)
 		}
 	}
@@ -321,7 +335,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	if who != "" {
 		form, _ = handoffForm(who, "", "", d.Bead)
 		if ok, why := r.Assignable(who, d.Bead); !ok {
-			return out, usage("%s cannot be handed this bead: %s. Handing it there would leave %s offered to nobody. Name the agent by its exact qualified name (gc-toolkit.mechanik for a town-repo edit), or route a pool with --route or --then-route", who, why, d.Bead)
+			return out, usage("%s cannot be handed this bead: %s. Handing it there would leave %s offered to nobody. Name the agent by its exact qualified name, as gc agent list prints it (the mechanik takes a town-repo edit), or route a pool with --route or --then-route", who, why, d.Bead)
 		}
 	}
 

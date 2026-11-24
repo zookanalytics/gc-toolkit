@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
-# Hermetic test for lint-step-text.sh — the lint that fails a formula change
-# adding a procedure to step text.
+# Hermetic test for lint-step-text.sh — the lint that fails a change adding a
+# procedure to formula step text or to a skill.
 #
 # The defects it guards against: a single script call read as a procedure (a
 # substitution in an argument, a formula step's call to a pack script, a
 # command that only assigns literal values, the body of a here-document whose
 # delimiter is quoted, a quoted separator, a redirection, a TOML-escaped
-# continuation or quote), a procedure read as a single call (a pipeline, a
+# continuation or quote, the gctk-bin block before a gctk call, a placeholder
+# that names alternatives), a procedure read as a single call (a pipeline, a
 # sequence, a substitution holding a pipeline, && or ||, a substitution an
 # expanding here-document's body runs, an assignment that expands, substitutes
-# or redirects), step text left unread (a TOML string of any kind
-# wherever it sits, an edit inside a here-document's body, a block fenced with
-# tildes, a longer run or a capitalized language, a block a fence line inside
-# it cut short, a block inline code at a line's start hid), step text that
+# or redirects, a command inside the gctk-bin markers, on a line of its own or
+# joined to the assignment, a command after a placeholder that holds an
+# apostrophe, shell syntax between a < and a > read as a placeholder), step
+# text left unread (a TOML string of any kind wherever it sits, an edit inside
+# a here-document's body, a block fenced with tildes, a longer run or a
+# capitalized language, a block a fence line inside it cut short, a block
+# inline code at a line's start hid), skill text left unread (a new skill, a
+# sub-pack's or an agent's skill, a file moved into a skill), text that
 # predates the rule failing because a change touched its file, a moved or
-# trimmed block read as new, and a change it cannot read passing as clean (an
-# unreadable file, a file that is not TOML, no Python to decode it).
+# trimmed block read as new (within a formula, or across a skill's files and
+# between skills, a file the change deletes included), text read that is not
+# the skill's own (a symlinked file, a block a file leaves open running into
+# the next), and a change it cannot read passing as clean (an unreadable file,
+# a file that is not TOML, no Python to decode it).
 #
 # Hermetic: each case runs in a throwaway git repo whose main is the base the
 # change is measured from (refs/remotes/origin/main). A case writes the formula
-# into the working tree and runs the lint on it from the repo's root.
+# or the skill into the working tree and runs the lint on it from the repo's
+# root.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -121,7 +130,7 @@ block() { printf '```bash\n%s\n```' "$1"; }
 # --- Usage and scope. --------------------------------------------------------
 fresh_repo
 run_lint README.md
-expect 0 "no formula among the files: exit 0" "no formula file given"
+expect 0 "no formula or skill among the files: exit 0" "no formula or skill file given"
 
 run_lint "$F"
 expect 0 "an unchanged formula: exit 0" "no procedure added"
@@ -192,6 +201,29 @@ expect 1 "a substitution whose assignment expands a parameter holds two commands
 with_step new "$(block 'B=x gc bd update tk-1 --append-notes y; gc runtime drain-ack')" > "$REPO/$F"
 run_lint "$F"
 expect 1 "an assignment ahead of a command's name is part of that command: exit 1" "with 2 commands\. "
+
+with_step new "$(block "\"\$(gc gc-toolkit scripts-dir)/new.sh\" --check <test|lint|build> --bead <the PR's bead>")" > "$REPO/$F"
+run_lint "$F"
+expect 0 "placeholders, one naming alternatives and one with an apostrophe, are words of one call: exit 0"
+
+# The gctk-bin block sets GCTK to the one tested line, so a block that holds it
+# and one gctk call is one call. Between the markers, only an assignment to
+# GCTK that runs no command weighs nothing.
+GCTK_BLOCK='# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin'
+with_step new "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a step whose block is the gctk-bin block and one gctk call: exit 0"
+
+# GCTK=x only assigns a literal value, so it is no command, and the two are the
+# echo joined to it and the gctk call.
+with_step new "$(block '# >>> gctk-bin
+GCTK=x;echo
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a command joined to the gctk-bin assignment with no blank weighs: exit 1" "with 2 commands\. "
 
 with_step new "$(block 'gc bd show "$X" --json | jq -r .id')" > "$REPO/$F"
 run_lint "$F"
@@ -622,6 +654,325 @@ with_step new "$(block 'a; b')" > "$REPO/packs/sub/formulas/mol-z.toml"
 g add -A
 run_lint packs/sub/formulas/mol-z.toml
 expect 1 "a new sub-pack formula's procedure: exit 1" "the new step new"
+
+# --- Skill text. ---------------------------------------------------------------
+# A skill's Markdown is weighed as step text is, with the skill, named by its
+# directory, as the step: all its files together, and every skill file the
+# change names in one pass, so a block pairs with its old self wherever it now
+# sits. Here main's skill makes one call, whose placeholder names alternatives,
+# and holds one old procedure in its SKILL.md and another in a reference, and a
+# doc page outside any skill holds a third. A sub-pack's skill on main makes one
+# gctk call through the gctk-bin block.
+SK=skills/s/SKILL.md
+MORE=skills/s/references/more.md
+GSK=packs/sub/skills/m/SKILL.md
+OLD_PROC='```bash
+A=$(gc bd show "$B" --json)
+if [ -n "$A" ]; then
+  echo "$A"
+fi
+```'
+MORE_PROC='```bash
+gc bd list --json | jq length
+```'
+
+base_skill() {
+  printf -- '---\nname: s\ndescription: A test skill.\n---\n\n# S\n\n## Call\n\nRun the call:\n'
+  block '"$(gc gc-toolkit scripts-dir)/one.sh" --bead "$X" --verdict <approve|request-changes>'
+  printf '\n\n## Old\n\nThe old procedure:\n%s\n' "$OLD_PROC"
+}
+
+# skill_with_old <text> — the base skill with the old procedure's block replaced.
+skill_with_old() {
+  base_skill | BODY="$1" awk '
+    /^The old procedure:$/ { print; print ENVIRON["BODY"]; skip = 1; next }
+    skip && /^```$/ { skip = 0; next }
+    skip { next }
+    { print }'
+}
+
+# new_skill <dir> <text> — a skill at <dir> whose SKILL.md holds the text from
+# its line 8.
+new_skill() {
+  mkdir -p "$REPO/$1"
+  printf -- '---\nname: %s\ndescription: A new skill.\n---\n\n# New\n\n%s\n' "${1##*/}" "$2" > "$REPO/$1/SKILL.md"
+}
+
+fresh_repo
+mkdir -p "$REPO/skills/s/references" "$REPO/docs" "$REPO/${GSK%/*}"
+base_skill > "$REPO/$SK"
+printf '# More\n\nAnother old procedure:\n%s\n' "$MORE_PROC" > "$REPO/$MORE"
+printf '# Guide\n\n%s\n' "$MORE_PROC" > "$REPO/docs/guide.md"
+printf -- '---\nname: m\ndescription: A sub-pack skill.\n---\n\n# M\n\n%s\n' \
+  "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')" > "$REPO/$GSK"
+g add -A
+g commit -qm skill
+g update-ref refs/remotes/origin/main HEAD
+skill_reset() { g reset -q --hard; g clean -qfd; }
+
+skill_with_old "$OLD_PROC" | cmp -s - "$REPO/$SK" \
+  && ok "the skill fixture's helper rewrites the old procedure in place" \
+  || bad "the skill fixture's helper rewrites the old procedure in place"
+run_lint "$SK"
+expect 0 "an unchanged skill: exit 0" "0 formula file(s), 1 skill file(s), no procedure added"
+
+base_skill | sed 's/^Run the call:$/Run this one call, as written:/' > "$REPO/$SK"
+run_lint "$SK"
+expect 0 "a skill edit that leaves its blocks alone: exit 0" "1 skill file(s), no procedure added"
+
+new_skill skills/t "$(block 'gc bd list --json | jq -r .[].id')"
+run_lint skills/t/SKILL.md
+expect 1 "a new skill whose block is a procedure: exit 1" \
+  "^skills/t/SKILL.md:9: skill text gains a procedure: the new skill skills/t has shell blocks that do more than call a script, with 2 commands\. "
+
+# A control character other than a tab reads as a blank, so none can cut the
+# line it sits in out of the lint's records.
+skill_reset
+new_skill skills/t "$(block "echo a$(printf '\034')b; echo c")"
+run_lint skills/t/SKILL.md
+expect 1 "a control character in a skill's line reads as a blank: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block '"$(gc gc-toolkit scripts-dir)/new.sh" --bead "$X"')"
+run_lint skills/t/SKILL.md
+expect 0 "a new skill whose block is one call: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+new_skill skills/t "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')"
+run_lint skills/t/SKILL.md
+expect 0 "a new skill whose block is the gctk-bin block and one gctk call: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+new_skill skills/t "$(block '# >>> gctk-bin
+GCTK="$(command -v gctk)"
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')"
+run_lint skills/t/SKILL.md
+expect 1 "an assignment between the markers that runs a command weighs: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block '# >>> gctk-bin
+GCTK="${GCTK_BIN:-x}"
+gc bd show "$X"
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')"
+run_lint skills/t/SKILL.md
+expect 1 "any other command between the markers weighs: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block 'GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+"$GCTK" bead takeaway "$X" y')"
+run_lint skills/t/SKILL.md
+expect 1 "the assignment outside a gctk-bin block weighs: exit 1" "with 2 commands\. "
+
+# A command joined to the assignment with no blank weighs, in a sub-pack's
+# skill too, whose gctk-bin blocks gctk-bin.test.sh does not read.
+for join in ';echo' '&&echo' '||echo' '|cat' '&echo'; do
+  skill_reset
+  new_skill packs/sub/skills/g "$(block '# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"'"$join"'
+# <<< gctk-bin
+"$GCTK" bead takeaway "$X" y')"
+  run_lint packs/sub/skills/g/SKILL.md
+  expect 1 "a command joined to the gctk-bin assignment by $join weighs: exit 1" "with 3 commands"
+done
+
+# The markers change what the assignment between them weighs, so they are part
+# of the text a block pairs by, and a block that only loses them is edited.
+skill_reset
+run_lint "$GSK"
+expect 0 "main's sub-pack skill, a gctk-bin block and one gctk call, unchanged: exit 0" "1 skill file(s), no procedure added"
+sed '/gctk-bin/d' "$REPO/$GSK" > "$TMP/gsk.md"
+cat "$TMP/gsk.md" > "$REPO/$GSK"
+run_lint "$GSK"
+expect 1 "a block that only loses its gctk-bin markers weighs the assignment: exit 1" \
+  "^$GSK:[0-9]*: skill text gains a procedure: skill packs/sub/skills/m gains shell blocks that do more than call a script, with 2 commands\. "
+
+skill_reset
+base_skill | awk '{ print } /^  echo "\$A"$/ { print "  gc runtime drain-ack" }' > "$REPO/$SK"
+run_lint "$SK"
+expect 1 "an edit that adds a command to a skill's procedure: exit 1" \
+  "in skill skills/s, the shell blocks that do more than call a script grow from 3 commands and 1 control-flow construct to 4 commands and 1 control-flow construct"
+line=$(grep -n '^  gc runtime drain-ack$' "$REPO/$SK" | cut -d: -f1)
+grep -q "^$SK:$line: skill text gains a procedure" <<< "$OUT" \
+  && ok "the finding names the skill file and the line the change adds" \
+  || bad "the finding names the skill file and the line the change adds (want $SK:$line): $OUT"
+
+skill_reset
+skill_with_old "$(block '"$(gc gc-toolkit scripts-dir)/two.sh" --bead "$B"')" > "$REPO/$SK"
+run_lint "$SK"
+expect 0 "a skill that trades its procedure for a call: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+skill_with_old "" > "$REPO/$SK"
+run_lint "$SK"
+expect 0 "a skill edit that only removes: exit 0" "1 skill file(s), no procedure added"
+
+# A placeholder outside a quote is one word, since the agent writes a value in
+# its place: a | between its alternatives is no pipe, and an apostrophe in it
+# opens no quote.
+skill_reset
+new_skill skills/t "$(block '"$(gc gc-toolkit scripts-dir)/two.sh" --bead "$X" --verdict <approve|request-changes>')"
+run_lint skills/t/SKILL.md
+expect 0 "a new skill whose one call names alternatives in a placeholder: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+new_skill skills/t "$(block "gc bd show <the PR's bead> --json
+gc bd show \"\$Y\"")"
+run_lint skills/t/SKILL.md
+expect 1 "an apostrophe in a placeholder hides no command after it: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block "K=\$(\"\$S/key.sh\" --bead <the PR's bead>)
+gc bd show \"\$K\"")"
+run_lint skills/t/SKILL.md
+expect 1 "an apostrophe in a placeholder inside a substitution hides no command after it: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block 'sort <in.txt | uniq >out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "a redirection is no placeholder, so a pipe between its < and a later > counts: exit 1" "with 2 commands\. "
+
+# Text between a < and a > that holds shell syntax is no placeholder either,
+# with no blank before the >.
+skill_reset
+new_skill skills/t "$(block 'sort <in.txt | uniq>out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "a pipe beside a blank between a < and a > is no placeholder: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(block 'cat <in.txt && echo yes>out.txt')"
+run_lint skills/t/SKILL.md
+expect 1 "an && between a < and a > is no placeholder: exit 1" "with 2 commands and control flow (&&)\. "
+
+for text in 'cat <in.txt; echo yes>out.txt' 'cat <in.txt & echo yes>out.txt' 'cat <in.txt||echo no>out.txt' \
+  'sort <in.txt |uniq>out.txt' 'cat <in.txt|>out.txt' 'cat <in $(a|b)>out' 'cat <in `a|b`>out'; do
+  skill_reset
+  new_skill skills/t "$(block "$text")"
+  run_lint skills/t/SKILL.md
+  expect 1 "shell syntax between a < and a > is no placeholder, in $text: exit 1" "skill text gains a procedure"
+done
+
+# Main's one call names alternatives in a placeholder, so it weighs nothing, and
+# a change that rewrites it into a procedure gains one.
+skill_reset
+base_skill | sed 's#^"\$(gc gc-toolkit scripts-dir)/one.sh" .*$#gc bd show "$X" | jq -r .title#' > "$REPO/$SK"
+grep -qx 'gc bd show "$X" | jq -r .title' "$REPO/$SK" && ok "the rewrite fixture replaces main's one call" \
+  || bad "the rewrite fixture replaces main's one call"
+run_lint "$SK"
+expect 1 "a one call whose placeholder names alternatives, rewritten into a procedure: exit 1" \
+  "skill skills/s gains shell blocks that do more than call a script, with 2 commands\. "
+
+# A skill is weighed whole, so a procedure that leaves one of its files pays
+# for a lighter one that another of its files gains.
+skill_reset
+skill_with_old "" > "$REPO/$SK"
+printf '\n%s\n' "$(block 'gc bd show "$X" | jq -r .title')" >> "$REPO/$MORE"
+run_lint "$SK" "$MORE"
+expect 0 "a skill whose files trade a procedure for a lighter one: exit 0" "2 skill file(s), no procedure added"
+
+run_lint "$MORE"
+expect 1 "the lighter procedure alone, its trade unnamed, weighs: exit 1" \
+  "^$MORE:9: skill text gains a procedure: skill skills/s gains shell blocks that do more than call a script, with 2 commands\. "
+
+skill_reset
+skill_with_old "" | BLOCK="$OLD_PROC" awk '/^Run the call:$/ { print ENVIRON["BLOCK"] } { print }' > "$REPO/$SK"
+[ "$(grep -c '^A=\$(gc bd show' "$REPO/$SK")" = 1 ] && ok "the section-move fixture holds the procedure once" \
+  || bad "the section-move fixture holds the procedure once"
+run_lint "$SK"
+expect 0 "a block moved unedited to another section of its skill: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+skill_with_old "" > "$REPO/$SK"
+printf '\n%s\n' "$OLD_PROC" >> "$REPO/$MORE"
+run_lint "$SK" "$MORE"
+expect 0 "a block moved unedited to another file of its skill: exit 0" "2 skill file(s), no procedure added"
+
+skill_reset
+skill_with_old "" > "$REPO/$SK"
+new_skill skills/u "$OLD_PROC"
+run_lint "$SK" skills/u/SKILL.md
+expect 0 "a block moved unedited to another skill: exit 0" "2 skill file(s), no procedure added"
+
+skill_reset
+g rm -q "$MORE"
+{ base_skill; printf '\n%s\n' "$MORE_PROC"; } > "$REPO/$SK"
+run_lint "$SK" "$MORE"
+expect 0 "a block moved out of a file the change deletes pairs with its old self: exit 0" "2 skill file(s), no procedure added"
+
+# The copy goes into a skill named after the one it came from, so its finding
+# maps a line past the first file's lines back to the file it is in.
+skill_reset
+new_skill skills/u "$OLD_PROC"
+run_lint "$SK" skills/u/SKILL.md
+expect 1 "a procedure copied into another skill weighs on the skill it went into: exit 1" \
+  "^skills/u/SKILL.md:9: skill text gains a procedure: the new skill skills/u has shell blocks that do more than call a script, with 3 commands and control flow (if)\. "
+
+skill_reset
+g mv skills/s skills/s2
+run_lint skills/s2/SKILL.md skills/s2/references/more.md
+expect 0 "a renamed skill is compared with its old paths: exit 0" "2 skill file(s), no procedure added"
+
+# A listing made without rename detection names a renamed file's old path too.
+# The old text is read once, as the renamed file's, so it cannot weigh as an
+# old procedure that a new one is traded against. The skill now holds two
+# copies of one procedure, and the finding may name either.
+skill_reset
+g mv "$MORE" skills/s/references/other.md
+{ base_skill; printf '\n%s\n' "$MORE_PROC"; } > "$REPO/$SK"
+run_lint "$SK" "$MORE" skills/s/references/other.md
+expect 1 "a renamed file's old path, named too, is read once: exit 1" \
+  "^skills/s/[^:]*:[0-9]*: skill text gains a procedure: skill skills/s gains shell blocks that do more than call a script, with 2 commands\. "
+
+skill_reset
+g mv docs/guide.md skills/s/references/guide.md
+run_lint skills/s/references/guide.md
+expect 1 "a file moved into a skill from outside one is new skill text: exit 1" \
+  "skill skills/s gains shell blocks that do more than call a script, with 2 commands\. "
+
+for dir in packs/sub/skills/v agents/a/skills/w; do
+  skill_reset
+  new_skill "$dir" "$MORE_PROC"
+  run_lint "$dir/SKILL.md"
+  expect 1 "a skill under $dir is skill text: exit 1" "^$dir/SKILL.md:9: skill text gains a procedure: the new skill $dir has"
+done
+
+# A skill's reference can be a symlink to a prompt fragment, which is not the
+# skill's own text.
+skill_reset
+mkdir -p "$REPO/template-fragments"
+printf '# Frag\n\n%s\n' "$MORE_PROC" > "$REPO/template-fragments/frag.template.md"
+ln -s ../../../template-fragments/frag.template.md "$REPO/skills/s/references/frag.template.md"
+run_lint skills/s/references/frag.template.md
+expect 0 "a skill file that is a symlink is skipped: exit 0" "no formula or skill file given"
+
+# A block a skill file leaves open ends with the file: it is weighed there, and
+# the next file's text is not its own.
+skill_reset
+new_skill skills/t "$(printf 'Run:\n```bash\necho first; echo second')"
+run_lint skills/t/SKILL.md
+expect 1 "a block a skill file leaves open is weighed: exit 1" "with 2 commands\. "
+
+skill_reset
+new_skill skills/t "$(printf 'Run:\n```bash\n"$S/new.sh" --bead "$X"')"
+printf '# B\n\nfirst; second | third\n```\n' > "$REPO/skills/t/b.md"
+run_lint skills/t/SKILL.md skills/t/b.md
+expect 0 "a block a skill file leaves open ends with the file: exit 0" "2 skill file(s), no procedure added"
+
+skill_reset
+base_skill | sed 's/^Run the call:$/Run this one call, as written:/' > "$REPO/$SK"
+if OUT=$(cd "$REPO" && PATH="$TMP/nopy" "$BASH" "$SUT" "$SK" 2>&1); then rc=0; else rc=$?; fi
+expect 0 "a change that names no formula needs no Python: exit 0" "1 skill file(s), no procedure added"
+
+skill_reset
+chmod 000 "$REPO/$SK"
+if [ -r "$REPO/$SK" ]; then
+  echo "skip - an unreadable skill file (running as a user that reads mode 000)"
+else
+  run_lint "$SK"
+  expect 2 "an unreadable skill file: exit 2" "cannot read $SK"
+fi
+chmod 644 "$REPO/$SK"
 
 # --- A change the lint cannot read fails closed. ---------------------------------
 fresh_repo

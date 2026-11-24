@@ -1406,6 +1406,67 @@ func TestTheMergeIsDecidedOnTheReReadPinnedToTheHeadItJudged(t *testing.T) {
 	meta(t, e.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other})
 }
 
+// The squash lands under the subject the bead composes to when the act reads it
+// last, never under the PR's title as the refinery last published it: a retitle
+// since that publication brings no new head, so no publication carries it to the
+// PR before the merge.
+func TestTheMergeLandsUnderTheSubjectTheBeadComposesToWhenItIsRequested(t *testing.T) {
+	retitle := func(t *testing.T, d *land, title string) {
+		t.Helper()
+		b := d.row(t)
+		b.Title = title
+		d.store.Put(b)
+	}
+	headline := func(t *testing.T, d *land) string {
+		t.Helper()
+		asked := d.github.Asks()
+		if len(asked) != 1 || asked[0].Method != "MergePullRequest" {
+			t.Fatalf("asked %v, want one merge", asks(d.github))
+		}
+		return asked[0].Headline
+	}
+	t.Run("retitled after its last publication", func(t *testing.T) {
+		d := newLand(t)
+		d.refresh(t)
+		retitle(t, d, "refactor(pr): name what the work became")
+		o := d.run(t)
+		is(t, o, pr.ActRequested)
+		want := "refactor(pr): name what the work became (" + bead + ") (#7)"
+		if got := headline(t, d); got != want {
+			t.Fatalf("the merge was asked under %q, want %q", got, want)
+		}
+		if !strings.Contains(o.Detail, want) {
+			t.Fatalf("the outcome %q does not name the subject %q", o.Detail, want)
+		}
+	})
+	// Each read of the bead finds it retitled again, so only the subject of the
+	// title the bead has when the merge is asked for is the one its last read
+	// found.
+	t.Run("retitled while the act reads it", func(t *testing.T) {
+		d := newLand(t)
+		d.refresh(t)
+		reads := 0
+		d.store.OnFind = func(q gcbd.Query) {
+			if slices.Contains(q.IDs, bead) {
+				reads++
+				retitle(t, d, fmt.Sprintf("the work as read %d times", reads))
+			}
+		}
+		var title string
+		d.github.OnMerge = func(string, *ghfake.PR, string) error {
+			title = d.row(t).Title
+			return nil
+		}
+		is(t, d.run(t), pr.ActRequested)
+		if reads < 2 {
+			t.Fatalf("the run read the bead %d times, too few to tell its last read from an earlier one", reads)
+		}
+		if got, want := headline(t, d), "chore: "+title+" ("+bead+") (#7)"; got != want {
+			t.Fatalf("the merge was asked under %q, want %q", got, want)
+		}
+	})
+}
+
 func TestAPushBetweenTheAnswerAndTheRequestIsRefusedAndRequeued(t *testing.T) {
 	d := newLand(t)
 	d.github.OnMerge = func(_ string, p *ghfake.PR, h string) error {

@@ -80,7 +80,7 @@ done
 
 stop() { echo "$PROG: $1; nothing is brought current" >&2; exit 1; }
 halt() { echo "$PROG: $1" >&2; exit 1; }
-POOL="gc-toolkit.polecat"
+POOL="polecat"
 
 refinery_bead "$H" || stop "$H did not read"
 HJ=$BEAD_ROW

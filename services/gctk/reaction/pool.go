@@ -2,6 +2,7 @@ package reaction
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
@@ -12,6 +13,32 @@ import (
 func prefixOf(id string) string {
 	p, _, _ := strings.Cut(id, "-")
 	return p
+}
+
+// rigPool is the qualified name of the pool in rig that runs template: the one
+// agent the city's roster names template there. Gas City names an imported
+// agent <rig>/<binding>.<template>, after the key the city imports the pack
+// under, so only the roster knows the name work for the pool is routed to. A
+// roster that does not read, and a rig with no such agent or several, name no
+// pool.
+func rigPool(rt gascity.Runtime, rig, template string) (string, error) {
+	agents, err := rt.Agents()
+	if err != nil {
+		return "", fmt.Errorf("the city's roster did not read (%v), so the name of rig %s's %s pool, which carries the key the city imports the pack under, is not known", err, rig, template)
+	}
+	var found []string
+	for _, a := range agents {
+		if a.Dir == rig && a.Name == template && !slices.Contains(found, a.QualifiedName) {
+			found = append(found, a.QualifiedName)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return "", fmt.Errorf("the city's roster names no agent %s in rig %s, so the rig has no %s pool", template, rig, template)
+	}
+	return "", fmt.Errorf("the city's roster names %d agents %s in rig %s (%s), so which of them is the %s pool is not known", len(found), template, rig, strings.Join(found, ", "), template)
 }
 
 // Assignable answers whether a bead handed to the named agent who would be
@@ -37,7 +64,7 @@ func (r *Reactions) Assignable(who, bead string) (ok bool, why string) {
 	}
 	switch {
 	case a == nil:
-		return false, fmt.Sprintf("no agent is registered as %s in this city, so a bead handed to it is offered to nobody (a named agent is named by its exact qualified name, such as gc-toolkit.mechanik)", who)
+		return false, fmt.Sprintf("no agent is registered as %s in this city, so a bead handed to it is offered to nobody (a named agent is named by its exact qualified name, as gc agent list prints it)", who)
 	case a.Suspended:
 		return false, fmt.Sprintf("%s is suspended, so a bead handed to it sits unoffered until it resumes", who)
 	}

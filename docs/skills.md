@@ -190,6 +190,10 @@ genuinely-runnable-outside subset: no `gc` CLI, no `$GC_*`, no beads.
   anywhere in the body or `scripts/`.
 - No skill or formula names a pack skill to load by its path.
   `assets/scripts/skill-needs.test.sh` fails on one that does.
+- Each shell block in a skill makes one call, by the rule
+  [pack-authoring.md](pack-authoring.md#step-text-calls-a-tested-script)
+  states for skills and step text, and `tools/lint.sh` fails a change that
+  makes a skill's shell blocks heavier.
 - The same suite scores every description against needs agents recorded in their
   own words, and fails when the skill that answers a need does not score highest.
   It also fails a description over its character limit, one with a sentence

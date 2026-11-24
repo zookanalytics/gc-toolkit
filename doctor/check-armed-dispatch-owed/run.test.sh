@@ -275,7 +275,7 @@ armed_store alpha "$(amr a-6)"
 edges_store alpha "$(e_blk a-6 b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "an arm carrying merge_result is retired by the start, not flagged"
+eq "$RC" "0" "a work arm (the default formula) carrying merge_result is retired by the start, not flagged"
 clear_stores
 
 # --- 7. EXEMPT: closed bead ---------------------------------------------------

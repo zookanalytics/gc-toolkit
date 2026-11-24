@@ -392,9 +392,9 @@ func (h rulingHub) try(at string) {
 	}
 }
 
-func (h rulingHub) MergePullRequest(id, head string) error {
+func (h rulingHub) MergePullRequest(id, head, headline string) error {
 	h.try("merge")
-	return h.Hub.MergePullRequest(id, head)
+	return h.Hub.MergePullRequest(id, head, headline)
 }
 
 // An act holds the record lock from its read of the bead under the lock to its

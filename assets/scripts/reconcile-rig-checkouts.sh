@@ -25,8 +25,12 @@
 # A parked HEAD and a refused fast-forward take the exception path, which never
 # touches the checkout: one idempotent bead per blocked rig records why, and a
 # human gate on it asks someone to act. A rig whose fetch fails is skipped until
-# a pass that can fetch, and doctor/check-pour-text-current reports its
-# remote-tracking ref going stale. When the store cannot be read for a rig's
+# a pass that can fetch. The failed fetch leaves the checkout's .git/FETCH_HEAD
+# empty, which doctor/check-pour-text-current reports as unfetched. The doctor
+# order (orders/doctor-run.toml) records that check every hour, and the helm
+# board's city page shows a check that two runs in a row found failing
+# (services/helm/README.md), so a fetch that keeps failing reaches a person and
+# a single failed pass does not. When the store cannot be read for a rig's
 # bead, the pass warns and leaves the bead to a pass that can, so a failed read
 # never files a second bead and gate beside the one already open.
 #

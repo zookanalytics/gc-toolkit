@@ -10,12 +10,12 @@
 # re-implementation of the awk.
 #
 # Two runs, because the picker classifies two ways. The first leaves
-# GC_CITY_PATH and friends unset, which makes gc_city_name return empty, so
-# no cache is keyed and no roles resolve: that is the no-roles path, where
-# the picker knows nothing about any session's role. The second points
-# GC_HOME and GC_CITY_PATH at throwaway paths, primes the role cache through
-# the script's own `--refresh-cache` against a stubbed `curl`, and renders
-# from it: that is the live path, where the agent template names the role.
+# GC_CITY_PATH and friends unset, so no cache is keyed and no roles resolve:
+# that is the no-roles path, where the picker knows nothing about any
+# session's role. The second points GC_HOME and GC_CITY_PATH at throwaway
+# paths, primes the role cache through the script's own `--refresh-cache`
+# against a stubbed `gc` and `curl`, and renders from it: that is the live
+# path, where the agent template names the role.
 # The SUT is copied to a private dir so its
 # `$(dirname $0)/tmux-keeper-toggle.sh` sibling does not resolve to the live
 # one, and GC_PICKER_CACHE_DIR keeps the cache out of the operator's.
@@ -98,6 +98,14 @@
 #              seconds on an idle city and several on a busy one, so in
 #              front of an operator it is a visible delay that turns into a
 #              timeout under the load that makes the roster worth checking.
+#              Nor does it ask gc for the city's name, which only the fetch
+#              needs.
+#   (REGNAME)  the refresh fetches the city under the name `gc cities` lists
+#              at its path, the one name the supervisor serves it under,
+#              which need not be the path's basename.
+#   (UNLISTED) a city path gc lists no name at gets no fetch, under its
+#              basename or any other name. With no map from before, its menu
+#              says it has no roles.
 #   (FRESH)    a map as young as the last keypress carries no marker.
 #   (STALE)    an old one does, with its age, because the counts and the
 #              folding are that old too.
@@ -153,8 +161,8 @@ export STUB_ACTIVE=""
 # operator's cache would leave a fixture roster behind for their next
 # keypress, and a run that read it would classify against a live city.
 export GC_PICKER_CACHE_DIR="$TMP/cache"
-export CURL_LOG="$TMP/curl.log"
-: > "$CURL_LOG"
+export CURL_LOG="$TMP/curl.log" GC_LOG="$TMP/gc.log"
+: > "$CURL_LOG"; : > "$GC_LOG"
 
 # tmux stub. Serves the fixture roster, the pane list in STUB_PANES (none
 # unless a case sets it) and an empty client_session, and dumps the
@@ -227,21 +235,36 @@ API
 
 # curl stub, not a mocked fetch: the real jq projection is part of what is
 # under test. No STUB_API in the environment exits like a failed connection.
-# Every call is logged, so a run can assert what it did NOT fetch, and
-# STUB_SLOW makes a fetch outlast the keypress that spawned it.
+# Every call is logged with its URL, so a run can assert what it did NOT
+# fetch, and STUB_SLOW makes a fetch outlast the keypress that spawned it.
 cat > "$BIN/curl" <<'STUB'
 #!/usr/bin/env bash
 set -u
-if [ -n "${CURL_LOG:-}" ]; then printf 'call\n' >> "$CURL_LOG"; fi
+if [ -n "${CURL_LOG:-}" ]; then printf 'call %s\n' "${@: -1}" >> "$CURL_LOG"; fi
 if [ -n "${STUB_SLOW:-}" ]; then sleep "$STUB_SLOW"; fi
 if [ ! -f "${STUB_API:-/nonexistent}" ]; then exit 7; fi
 cat "$STUB_API"
 STUB
 chmod +x "$BIN/curl"
 
-# GC_HOME has no cities.toml, so gc_city_name falls through to the basename
-# of GC_CITY_PATH and the API URL resolves without touching the operator's
-# config. curl is stubbed, so the URL itself never leaves the process.
+# gc stub. Answers `cities --json` with STUB_CITIES, which lists the suite's
+# cities under names that are not their paths' basenames, so a fetch under one
+# of those names took it from gc. Every call is logged to GC_LOG.
+cat > "$BIN/gc" <<'STUB'
+#!/usr/bin/env bash
+set -u
+if [ -n "${GC_LOG:-}" ]; then printf '%s\n' "$*" >> "$GC_LOG"; fi
+if [ "$*" != "cities --json" ] || [ -z "${STUB_CITIES:-}" ]; then exit 1; fi
+printf '%s\n' "$STUB_CITIES"
+STUB
+chmod +x "$BIN/gc"
+STUB_CITIES="$(jq -nc --arg t "$TMP/testcity" --arg h "$TMP/hashcity" \
+    '{schema_version: "1", cities: [{name: "town-t", path: $t}, {name: "town-h", path: $h}]}')"
+export STUB_CITIES
+
+# GC_HOME points at a throwaway path, so the picker reads none of the
+# operator's gc config, and the city's name comes from the gc stub. curl is
+# stubbed, so the URL itself never leaves the process.
 picker_env() {
     env -u GC_CITY -u GC_CITY_ROOT -u GC_TMUX_SOCKET -u GC_AGENT \
         GC_HOME="$TMP/gchome" GC_CITY_PATH="$TMP/testcity" "$@"
@@ -256,16 +279,20 @@ prime_cache() {
 
 # Render from the primed cache with the API unreachable, and with the refresh
 # throttle set past any test run so no background fetch fires: what the curl
-# log holds afterwards is exactly what the keypress itself did.
+# and gc logs hold afterwards is exactly what the keypress itself did.
 run_picker_api() {
-    : > "$STUB_MENU"; : > "$CURL_LOG"
+    : > "$STUB_MENU"; : > "$CURL_LOG"; : > "$GC_LOG"
     picker_env GC_PICKER_REFRESH_EVERY=999999 "$SUT" "$@" >/dev/null 2>&1
     cat "$STUB_MENU"
 }
 
+: > "$CURL_LOG"; : > "$GC_LOG"
 prime_cache
-# The cache path is keyed by city inside the script; the suite finds the file
-# it wrote rather than recomputing the key and testing its own arithmetic.
+PRIME_FETCH="$(cat "$CURL_LOG")"
+PRIME_GC="$(cat "$GC_LOG")"
+# The cache path is keyed by the city's path inside the script; the suite
+# finds the file it wrote rather than recomputing the key and testing its own
+# arithmetic.
 ROLES_CACHE="$(set -- "$TMP/cache"/roles-*.cache; printf '%s' "$1")"
 
 MENU="$(run_picker)"
@@ -408,10 +435,28 @@ has "$ALLMENU" 'switch-client -t gc-toolkit--gc-toolkit__polecat-1-pool' \
 # throttled off, so its curl log is the keypress's own record.
 eq "$(wc -l < "$CURL_LOG" | tr -d ' ')" '0' \
     "NOFETCH: rendering the menu makes no supervisor API call"
+hasnt "$(cat "$GC_LOG")" 'cities' \
+    "NOFETCH: ...and does not ask gc for the city's name"
 [ -s "$ROLES_CACHE" ] && ok "REFRESH: --refresh-cache wrote the role map" \
     || bad "REFRESH: --refresh-cache wrote no role map"
 has "$(cat "$ROLES_CACHE")" 'gc-toolkit/gc-toolkit.polecat-codex' \
     "REFRESH: ...projected to <name>\\t<template>\\t<title>"
+eq "$PRIME_GC" 'cities --json' \
+    "REGNAME: the refresh asks gc cities for the city's name"
+eq "$PRIME_FETCH" "call http://127.0.0.1:8372/v0/city/town-t/sessions" \
+    "REGNAME: ...and fetches the city under the name listed at its path, not its basename"
+
+# A city path gc lists no name at, with no map from before: the refresh asks,
+# fetches nothing and writes no map, so the keypress after it renders with no
+# roles.
+: > "$CURL_LOG"; : > "$GC_LOG"; : > "$STUB_MENU"
+picker_env GC_CITY_PATH="$TMP/unlisted" STUB_API="$TMP/api.json" "$SUT" --refresh-cache >/dev/null 2>&1
+eq "$(cat "$GC_LOG")" 'cities --json' "UNLISTED: the refresh asks gc cities for the city's name"
+eq "$(wc -l < "$CURL_LOG" | tr -d ' ')" '0' \
+    "UNLISTED: ...and fetches nothing, under the path's basename or any other name"
+picker_env GC_CITY_PATH="$TMP/unlisted" GC_PICKER_REFRESH_EVERY=999999 "$SUT" >/dev/null 2>&1
+has "$(cat "$STUB_MENU")" ' Sessions ▫ no roles ' \
+    "UNLISTED: ...so, with no map from before, the menu says it has no roles"
 
 hasnt "$APIMENU" '▫' \
     "FRESH: a map as young as the last keypress carries no marker"
@@ -442,7 +487,7 @@ eq "$(cat "$ROLES_CACHE")" "$BEFORE" \
 # the descriptor holds this line open for as long as the fetch runs.
 DETACH_T0=$(date +%s)
 DETACH_OUT="$(picker_env STUB_API="$TMP/api.json" STUB_SLOW=10 \
-    GC_PICKER_REFRESH_EVERY=0 CURL_LOG="" "$SUT" 2>/dev/null)"
+    GC_PICKER_REFRESH_EVERY=0 CURL_LOG="" GC_LOG="" "$SUT" 2>/dev/null)"
 DETACH_ELAPSED=$(( $(date +%s) - DETACH_T0 ))
 [ "$DETACH_ELAPSED" -lt 5 ] \
     && ok "DETACH: a slow refresh does not hold the keypress open" \

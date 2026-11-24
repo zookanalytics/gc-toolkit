@@ -68,7 +68,7 @@ gc bd dep add <bead> <blocker> --type=blocks
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" bead arm <bead> --target <rig>/gc-toolkit.polecat --on mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
+"$GCTK" bead arm <bead> --target <rig>/<binding>.polecat --on mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
 ```
 
 Arm only once the add exits 0. When the prefixes differ, the blocker is in

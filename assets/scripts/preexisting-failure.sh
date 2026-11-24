@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # preexisting-failure.sh — one tracker per failure that is already red on a base
-# branch, so every gate that meets the red confirms that bead instead of filing
-# another.
+# branch, sent to be fixed when it is filed, so every gate that meets the red
+# confirms that bead instead of filing another.
 #   preexisting-failure.sh key --test <test function>
 #   preexisting-failure.sh key --target <repo-relative path>
 #   preexisting-failure.sh key --lint <linter> <repo-relative path>
 #   preexisting-failure.sh find <key> [--closed-after <YYYY-MM-DD>]
 #   preexisting-failure.sh file <key> --message <text> [--summary <text>]
 # Callers: the refinery's merge gate (formulas/mol-refinery-patrol.toml,
-# handle-failures) and a polecat's pre-flight (formulas/mol-polecat-work.toml,
-# preflight-tests).
+# handle-failures, through refinery-pre-existing.sh), a polecat's pre-flight
+# and self-review (formulas/mol-polecat-work.toml), and an agent that finds a
+# failure on a default branch some other way (skills/work/SKILL.md).
 #
 # The key names the failure, never its wording, and `key` is what derives it,
 # so two gates that meet one red reach one key. A failing test function is its
@@ -39,12 +40,20 @@
 # close, whose edge names the evidence for that ruling rather than a bead
 # that carries the failure. A red seen after either is new, and it is filed.
 #
+# A failure red on a base branch is work to fix, so no person places its
+# tracker first (docs/steering.md, the intake rule). `file` slings the tracker
+# it files with no target, and Gas City sends a bead slung so to the
+# default_sling_target of the rig its prefix names, on that agent's default
+# formula. A bead `file` finds instead is not slung again: it was sent when it
+# was filed, or someone holds it, works it or has it wait, and a second sling
+# would step past them.
+#
 # Exit: 0 the store answered: `find` prints the id of the bead that tracks the
 # key, or nothing when none does, and `file` prints the id of the tracker it
 # filed or the bead it found, with a warning when the new tracker could not be
-# read back to confirm its stamp · 1 the store could not be read or written, or
-# the new tracker read back with its stamp missing or wrong, which is never
-# "none" · 2 usage
+# read back to confirm its stamp, or could not be sent · 1 the store could not
+# be read or written, or the new tracker read back with its stamp missing or
+# wrong, which is never "none" · 2 usage
 set -uo pipefail
 
 PROG="preexisting-failure"
@@ -99,10 +108,11 @@ usage: preexisting-failure.sh key --test <test function>
           is none, it is the live bead that the most recently closed tracker's
           chain of disposition edges reaches. --closed-after reads the trackers
           closed since that date instead, and follows no chain.
-  file    files the key's tracker and prints its id: a P1 bug titled
-          `Pre-existing failure: <key>`, with --message as its body and the
-          key stamped as failure_key. When a bead already tracks the key, as
-          find reads it, it files nothing and prints that bead's id instead.
+  file    files the key's tracker, sends it to be fixed and prints its id: a
+          P1 bug titled `Pre-existing failure: <key>`, with --message as its
+          body and the key stamped as failure_key, slung to its rig's default
+          sling target. When a bead already tracks the key, as find reads it,
+          it files and sends nothing and prints that bead's id instead.
           --summary appends a few words to the title after the key.
 U
 }
@@ -331,6 +341,18 @@ find_cmd() {
   exit 0
 }
 
+# send <id> — slings the tracker this call filed, with no target. The sling's
+# own lines go to stderr, because stdout is the tracker's id. A sling that fails
+# leaves the tracker filed, where the next gate's lookup finds it and sends
+# nothing, so the warning names the sling that sends it.
+send() {
+  if gc sling "$1" </dev/null >&2; then
+    warn "sent $1 to be fixed"
+  else
+    warn "filed $1, but its sling failed, as gc says above, so nothing is fixing it yet. Send it: gc sling $1"
+  fi
+}
+
 file_cmd() {
   local key="${1:-}" message="" summary="" id title room body meta out got
   [ $# -gt 0 ] && shift
@@ -363,9 +385,9 @@ file_cmd() {
   id="$FILING"
   if [ -n "$id" ]; then
     if [ -n "$FILING_VIA" ]; then
-      warn "'$key' is tracked by $id, the live bead its closed tracker $FILING_VIA moved the failure to; filed nothing"
+      warn "'$key' is tracked by $id, the live bead its closed tracker $FILING_VIA moved the failure to; filed and sent nothing"
     else
-      warn "'$key' is already tracked as $id; filed nothing"
+      warn "'$key' is already tracked as $id; filed and sent nothing"
     fi
     printf '%s\n' "$id"
     exit 0
@@ -401,18 +423,21 @@ file_cmd() {
   [ -n "$id" ] || { warn "bd create filed nothing for '$key'"; exit 1; }
 
   # A read that fails says nothing about the stamp, and the tracker exists, so
-  # it is retried once and then reported as filed. Only a read that returns the
-  # bead without the key fails the filing: the next gate's lookup cannot find
-  # that bead, and it would file another.
+  # it is retried once and then reported as filed, and sent. Only a read that
+  # returns the bead without the key fails the filing: the next gate's lookup
+  # cannot find that bead, and it would file another and send that one, so
+  # this one is not sent.
   if ! got=$(read_stamp "$id") && ! got=$(read_stamp "$id"); then
     warn "filed $id with failure_key '$key' in its create, but could not read $id back to confirm the stamp. If gc bd show $id lacks it, repair: gc bd update $id --set-metadata \"failure_key=$key\""
+    send "$id"
     printf '%s\n' "$id"
     exit 0
   fi
   if [ "$got" != "$key" ]; then
-    warn "failure_key on $id read back as '$got', expected '$key', so the next gate's lookup cannot find it by its stamp. Repair: gc bd update $id --set-metadata \"failure_key=$key\""
+    warn "failure_key on $id read back as '$got', expected '$key', so the next gate's lookup cannot find it by its stamp, and it was not sent. Repair: gc bd update $id --set-metadata \"failure_key=$key\" && gc sling $id"
     exit 1
   fi
+  send "$id"
   printf '%s\n' "$id"
 }
 
