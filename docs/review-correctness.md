@@ -5,11 +5,12 @@ description: Use when you run the correctness check on a gc-toolkit change, when
 
 # The correctness check on gc-toolkit
 
-gc-toolkit ships bash and jq scripts, shell blocks that agents run from its
-formulas and skills, the Go services `services/gctk` and `services/helm`, and
-the helm web app in `services/helm/web`. Each surface's section opens with what
-the gates run on it, then names the defects that have bitten there and the
-guard for each, so the review looks hardest where no guard reaches.
+gc-toolkit ships the prose its agents act on, bash and jq scripts, shell blocks
+that agents run from its formulas and skills, the Go services `services/gctk`
+and `services/helm`, and the helm web app in `services/helm/web`. Each
+surface's section opens with what the gates run on it, then names the defects
+that have bitten there and the guard for each, so the review looks hardest
+where no guard reaches.
 
 ## Scope
 
@@ -107,6 +108,34 @@ because such a rule can be worded for any repository and name none.
   only where a rig's own extension opts in still leaves its text in every
   rig's copy, so that is no fix. The pack file keeps text that holds for every
   rig, and the finding names where the rule goes.
+
+## Prose an agent acts on
+
+Agents read and act on skills, agent prompts and the template fragments they
+compose, formula step text, and the docs that bind agents, such as `AGENTS.md`
+and this page. No gate reads whether an agent can act on that text.
+
+- **A sentence that fails a first read blocks.** Read each sentence the change
+  adds or alters as the agent that uses it reads it: once, at that point in its
+  task, knowing what that agent knows, and knowing nothing of the change or its
+  anchor. A sentence in one of the shapes below fails that read. Raise a P1 on
+  each passage that holds such a sentence. This P1 joins the method's list of
+  prose findings that block.
+- **The finding quotes each failing sentence and names its shape.** Its failure
+  scenario names the passage, the agent that reads it, and the action that
+  agent gets wrong or cannot find. Its check reads the quoted sentences, and
+  confirms the finding when each takes the shape the finding names.
+- **These shapes fail a first read.** Each comes with its fix:
+  - One sentence carries more than one condition, an exception or a second
+    actor. The fix gives each its own sentence or list item.
+  - A word is coined where the agent has a word of its own. The fix uses the
+    agent's word.
+  - A term is used before the text says what it is. The fix says what the term
+    is where it first appears.
+  - A sentence changes nothing the agent does, such as one that explains what
+    a message means or why a step exists. The fix cuts it.
+- **Other prose keeps the method's grades.** A clarity problem in a spec, a
+  comment or a page a person reads is graded as the method grades it.
 
 ## Bash and jq scripts
 
