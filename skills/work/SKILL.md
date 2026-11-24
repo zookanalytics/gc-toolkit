@@ -429,14 +429,29 @@ closes the bead once each such gate is cleared.
 
 A bead that duplicates another closes at once, whatever state its canonical is
 in, because the canonical carries the work: `--kind duplicate` needs the two in
-one store and a bead that did no work of its own. Before the close, each open
-bead it blocks comes to wait on the canonical too, so none goes ready before the
-canonical has closed or shipped, and a waiter that cannot refuses the close.
-`fixed-upstream` needs the fix closed or shipped. A duplicate close records the
-canonical, so `bd show` names it under DUPLICATE OF.
+one store and a bead that did no work of its own. `fixed-upstream` needs the fix
+closed or shipped. A duplicate close records the canonical, so `bd show` names
+it under DUPLICATE OF.
+
+What waits on the bead goes on waiting for its work. Under every kind but
+`not-needed`, while the successor has neither closed nor shipped, each open
+bead the closing bead blocks comes to wait on the successor before the close, so
+none goes ready before the successor has delivered, and a waiter that cannot
+take that wait refuses the close. Under `not-needed` the waits end with the
+close. A bead a ruling has recorded a PR-close disposition on closes under that
+ruling and gains no wait.
 
 Before you run it:
 
+- Read what waits on the bead:
+  `gc bd dep list <bead> --direction=up --type blocks`. End first the wait of a
+  bead that does not need the work the successor carries:
+  `gc bd dep remove <waiter> <bead>`.
+- A successor in another rig's store holds no wait from this store, so while a
+  bead waits on the closing bead the script refuses the close. Give each waiter
+  that needs the work a human gate that names the successor (the waits skill),
+  then end its wait on the closing bead as above. The refusal prints both
+  commands.
 - Check that no work on the bead is under way: it is unassigned, has no branch
   or PR that a pool still works on, and is not a review, step or workflow bead.
   Check it yourself, because `gc doctor` skips a bead closed this way and
