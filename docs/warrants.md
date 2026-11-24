@@ -905,3 +905,47 @@ no warrant.
   Code's directory, with the judge's decisions on those beads and their links,
   and the list, the kept text and the read of Claude Code's directories
   retire.
+
+## Mail wake
+
+- **Covers.** `orders/mail-notify-on-send.toml`,
+  `orders/mail-notify-on-reply.toml`, `orders/mail-notify-reconcile.toml` and
+  `services/gctk/mail`, the pass they run, with the notify ledger and its lock
+  that the pass keeps under the city's `.gc/runtime/packs/gc-toolkit`.
+- **Stands in for.** A session's turn requested for its unread mail whoever
+  sent it, as `--notify` requests one when the sender asks. The notify ledger
+  stands in for the replay of a keyed `gc session nudge`, which Gas City gives
+  only where its op journal records the nudge.
+- **Evidence.** In `gastownhall/gascity`, only the sender can request the
+  recipient's turn, and a keyed nudge is kept from being sent twice only where
+  the op journal records it:
+  - `gc mail send --notify` and `gc mail reply --notify` request it, one
+    message at a time (`newMailSendCmd` and `newMailReplyCmd` in
+    `cmd/gc/cmd_mail.go`).
+  - The API's send and reply, which the dashboard uses, take no notify option
+    (`humaHandleMailSend` and `humaHandleMailReply` in
+    `internal/api/huma_handlers_mail.go`).
+  - `gc mail check --inject` shows unread mail only in a turn something else
+    starts (`cmdMailCheckWithFormat` in `cmd/gc/cmd_mail.go`).
+  - `gc session nudge --key` answers a rerun under the same key with the first
+    run's outcome only "while the op journal records this command"
+    (`sessionNudgeKeyUsage` in `cmd/gc/cmd_session.go`). With no `[ops]` gate
+    set, the journal records only over a SQLite sessions store, and over a
+    store bd serves it records under no gate until bd's writes take
+    `--if-revision` (`OpsConfig` in `internal/config/ops.go`). A city `gc init`
+    makes keeps its sessions in a SQLite store by default, while an upgrade
+    leaves an older city's sessions in its work ledger ("Your city's storage
+    stays as it was" in `docs/getting-started/upgrading.md`). There a keyed
+    nudge runs unrecorded, and a rerun nudges again (`newCLIOp` in
+    `cmd/gc/op_record.go`).
+  - Issue #1966, a design issue that is open, carries the maintainer ruling of
+    2026-06-28 that coordinator sessions "wake on mail with a debounce", and no
+    code implements it.
+  - The search is
+    [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Retires when.** A Gas City release requests a session's turn for its unread
+  mail whoever sent it, as #1966 rules. The orders and the verb then retire,
+  and each agent they list is woken by Gas City. Before that, once the city
+  keeps its sessions in a store the op journal records, the notify ledger's
+  move onto a keyed nudge is due.
