@@ -146,7 +146,8 @@ directory. No pack text finds the pack through `$GC_RIG_ROOT`,
 `git rev-parse --show-toplevel` or `$GC_CITY_PATH/rigs/<pack>`. The first two
 name whatever the caller stands in, and the third names the pack only in a
 city that clones it as a rig. `assets/scripts/pack-self-location.test.sh`
-holds the pack to this.
+holds the pack to this, and `assets/scripts/pack-script-calls.test.sh` fails a
+formula, prompt, fragment or skill that calls a script the pack does not ship.
 
 ## Step text calls a tested script
 
