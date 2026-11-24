@@ -228,3 +228,74 @@ func TestAnArrivalsCloseLiftsItsHold(t *testing.T) {
 	wantCode(t, code, 0, err, "(CLOSE) a close of a bead that did not arrive held")
 	w.hasnt("--remove-label", "(CLOSE) lifts nothing")
 }
+
+// A subject a placement or an Accept sent on while its first reaction ran
+// carries a dispatch the check took it without: a live run of another
+// formula, a route, an arm or an assignee. The exit then lands the headline
+// alone, since a release would end that run, remove that arm and park the
+// bead, and it writes no hold, route or arm of its own. The reaction's own run
+// is no such dispatch.
+func TestAnExitLeavesADispatchMadeWhileItRan(t *testing.T) {
+	arm := map[string]string{"gc.dispatch_when_ready": "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_args": "[]",
+		"gc.dispatch_when_ready_armed_by": "gc-toolkit/gc-toolkit.mechanik", "gc.dispatch_when_ready_armed_at": "2026-10-01T00:00:00Z"}
+	for name, c := range map[string]struct {
+		sendOn func(*world)
+		sent   string
+	}{
+		"a placement's build": {func(w *world) {
+			w.subject(func(b *fake.Bead) {
+				b.Labels = nil
+				b.Metadata = map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}
+			})
+			w.run("tk-build", "mol-polecat-work", "tk-sub", "in_progress")
+		}, "gc.routed_to=gc-toolkit/gc-toolkit.polecat, live run tk-build"},
+		"a placement's arm": {func(w *world) {
+			w.subject(func(b *fake.Bead) { b.Labels = nil; b.Metadata = arm })
+		}, "an arm to gc-toolkit/gc-toolkit.polecat"},
+		"an Accept's build, hold kept": {func(w *world) {
+			w.run("tk-accepted", "mol-x", "tk-sub", "in_progress")
+		}, "live run tk-accepted"},
+		"an assignee": {func(w *world) {
+			w.subject(func(b *fake.Bead) { b.Assignee = "gc-toolkit.mechanik" })
+		}, "assigned to gc-toolkit.mechanik"},
+	} {
+		w := newWorld(t)
+		held(w)
+		w.run(root, Formula, "tk-sub", "in_progress")
+		c.sendOn(w)
+		code, _, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition", "--takeaway", "ready to build",
+			"--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+		wantCode(t, code, 0, err, "(SENT-ON) "+name)
+		w.has("TAKEAWAY tk-sub ready to build --by proactive", "(SENT-ON) "+name+": the headline lands")
+		w.hasnt("--release", "(SENT-ON) "+name+": nothing is released")
+		w.hasnt("ARM ", "(SENT-ON) "+name+": nothing is armed")
+		w.hasnt("SET-STATE", "(SENT-ON) "+name+": no hold is written")
+		w.hasnt("SLING", "(SENT-ON) "+name+": nothing is routed")
+		w.saidHas("tk-sub was sent on while this reaction ran ("+c.sent+"): its headline landed alone", "(SENT-ON) "+name+": saying what sent it")
+	}
+}
+
+// An exit holds the subject's acceptance lock, which a placement and an
+// Accept hold too, and refuses with nothing read or written while one of them
+// holds it.
+func TestAnExitWaitsForTheAcceptanceLock(t *testing.T) {
+	w := newWorld(t)
+	held(w)
+	unlock, holder, err := LockBead(w.rt, "tk-sub")
+	if err != nil || unlock == nil {
+		t.Fatalf("LockBead = %v, %q; want the lock", err, holder)
+	}
+	before := len(w.writes())
+	code, _, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition", "--takeaway", "ready to build",
+		"--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	if code == 0 || err == nil || !strings.Contains(err.Error(), "holds its acceptance lock") || !strings.Contains(err.Error(), "wrote nothing") {
+		t.Fatalf("an exit while the lock is held: code %d, %v; want it refused, naming the lock", code, err)
+	}
+	if got := w.writes()[before:]; len(got) != 0 {
+		t.Errorf("an exit refused for the lock read or wrote %v", got)
+	}
+	unlock()
+	code, _, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "states a done condition", "--takeaway", "ready to build",
+		"--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(LOCK) once the lock is free")
+}

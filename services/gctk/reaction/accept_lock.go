@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
 // The acceptance lock: one flock(2) per bead, accept-<bead>.lock in the city's
@@ -18,11 +19,14 @@ import (
 // (arm.LockDir), held from an Accept's live read of the bead to its last write,
 // so one Accept's search, sling and record never interleave with another's, and
 // an acceptance is dispatched once even after the work it sent has finished
-// (docs/warrants.md, "Accept's lock"). The bead's id names its store by its
-// prefix, so one file per id is one per store and bead. While the lock is held
-// the file names its holder: the process and when it took the lock. The kernel
-// releases the lock when its holder ends, however it ends, and Go opens the
-// file close-on-exec, so no process the holder starts, gc sling among them,
+// (docs/warrants.md, "Accept's lock"). A placement (gctk bead place) and a
+// first reaction's exit hold the same lock from their own live read to their
+// last write, so an exit never releases a bead a placement is sending on, and a
+// placement never sends one an exit is releasing. The bead's id names its store
+// by its prefix, so one file per id is one per store and bead. While the lock
+// is held the file names its holder: the process and when it took the lock. The
+// kernel releases the lock when its holder ends, however it ends, and Go opens
+// the file close-on-exec, so no process the holder starts, gc sling among them,
 // carries it. The release removes the file, and a call that locked a file
 // removed meanwhile takes the file that replaced it.
 
@@ -30,12 +34,18 @@ import (
 // names its directory, or the file cannot be made.
 var errLockDir = errors.New("no acceptance lock can be taken")
 
-// acceptLock takes the bead's acceptance lock without waiting. It returns the
-// release once it holds the lock, and a nil release with the holder's
-// description when another Accept holds it. An error that is errLockDir says
-// no lock could be taken.
+// acceptLock takes the bead's acceptance lock without waiting, as LockBead
+// does.
 func (r *Reactions) acceptLock(bead string) (func(), string, error) {
-	dir, err := arm.LockDir(r.Runtime)
+	return LockBead(r.Runtime, bead)
+}
+
+// LockBead takes the bead's acceptance lock without waiting. It returns the
+// release once it holds the lock, and a nil release with the holder's
+// description when an Accept, a placement or a first reaction's exit holds it.
+// An error that is errLockDir says no lock could be taken.
+func LockBead(rt gascity.Runtime, bead string) (func(), string, error) {
+	dir, err := arm.LockDir(rt)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %v", errLockDir, err)
 	}

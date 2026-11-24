@@ -9,10 +9,9 @@
 //  1. It reads the bead, its parent and the runs that work it, and refuses
 //     what it does not place with nothing written. A bead with no hold:mayor
 //     that a live run, a route, an arm or an assignee shows dispatched is
-//     placed already. A first reaction triages a held bead and works none of
-//     it, so its run is no dispatch, and a placement waits for it to end:
-//     Gas City starts no second workflow on a bead while one is live, and
-//     the reaction's own exit removes an arm.
+//     placed already. It holds the bead's acceptance lock from this read to
+//     its last write (reaction.LockBead), as a first reaction's exit does, so
+//     the exit never releases a bead this placement is sending on.
 //  2. It clears a route, which gctk bead arm refuses. With a parent it removes
 //     a relates-to link between the bead and the parent, since bd refuses a
 //     parent-child edge beside one, sets the parent, and moves the shift
@@ -20,8 +19,10 @@
 //  3. It settles the bead's priority (queue-priority.sh settle), because a
 //     pour copies the priority once.
 //  4. It dispatches, unless an assignee, a merge_result, a live run or an arm
-//     shows that an earlier dispatch did. A bead a wait holds, its own or a
-//     parent's above it such as a park, is
+//     shows that an earlier dispatch did. A run of mol-first-reaction shows
+//     none, since a first reaction triages the bead and works none of it, and
+//     its exit lands only its headline on a bead sent on while it ran. A bead a
+//     wait holds, its own or a parent's above it such as a park, is
 //     armed, so the wait keeps holding it, and so is one whose holds could not
 //     be read. Any other is slung, and gc sling's exit 3 says a live run of the
 //     formula already works the bead.
@@ -54,6 +55,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	rx "github.com/zookanalytics/gc-toolkit/services/gctk/reaction"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -192,6 +194,15 @@ func (p *Places) Place(req Request) (Placed, error) {
 		again += " --db " + p.DB
 	}
 
+	release, holder, err := rx.LockBead(p.Runtime, req.Bead)
+	switch {
+	case err != nil:
+		return out, fmt.Errorf("could not take %s's acceptance lock (%v), which a placement holds so that a first reaction's exit cannot release %s while it is sent on. Nothing was written", req.Bead, err, req.Bead)
+	case release == nil:
+		return out, refuse("an Accept, a placement or a first reaction's exit on %s holds its acceptance lock (%s), so this placement writes nothing. Place it again once that one has finished: %s", req.Bead, holder, again)
+	}
+	defer release()
+
 	// Step 1: read, and refuse what a placement does not place.
 	row, err := p.read(req.Bead)
 	switch {
@@ -216,13 +227,9 @@ func (p *Places) Place(req Request) (Placed, error) {
 	if m, _, _ := prrecord.Result.Get(row); strings.TrimSpace(m) != "" {
 		shown = append(shown, "merge_result="+m)
 	}
-	var live, reacting []string
+	var live []string
 	for _, r := range runs {
-		switch {
-		case !r.Live:
-		case r.Formula == reaction:
-			reacting = append(reacting, r.Root)
-		default:
+		if r.Live && r.Formula != reaction {
 			live = append(live, r.Root)
 		}
 	}
@@ -255,10 +262,6 @@ func (p *Places) Place(req Request) (Placed, error) {
 	dispatched := strings.Join(shown, ", ")
 	if st := row.Status(); st != "open" && dispatched == "" {
 		return out, refuse("%s is %s, a status set on purpose, and a placement dispatches only an open bead. Return it to open, then place it. Nothing was written", req.Bead, st)
-	}
-	if len(reacting) > 0 && dispatched == "" {
-		return out, refuse("a first reaction runs on %s now (%s). Gas City starts no second workflow on a bead while one is live, so a dispatch now would be refused, and the reaction's exit removes an arm. Its card lands when that run ends, so place %s then: %s. Nothing was written",
-			req.Bead, strings.Join(reacting, " "), req.Bead, again)
 	}
 	parents, err := row.Parents()
 	if err != nil {

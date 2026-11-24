@@ -15,6 +15,8 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	rx "github.com/zookanalytics/gc-toolkit/services/gctk/reaction"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
 const pool = "gc-toolkit/gc-toolkit.polecat"
@@ -48,6 +50,7 @@ func newWorld(t *testing.T) *world {
 		w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " "))
 	}
 	w.rt = &rtfake.Runtime{
+		Root: t.TempDir(),
 		Roster: []gascity.Agent{
 			{QualifiedName: pool, Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},
 			{QualifiedName: "other/gc-toolkit.polecat", Name: "polecat", Dir: "other", Scope: "rig"},
@@ -351,9 +354,9 @@ func liveRun(s *fake.Store, bead, root, formula string) {
 
 // A held bead with a live run is dispatched already: the next placement lifts
 // its hold and dispatches nothing more. A first reaction's run is no dispatch,
-// since it triages the bead and works none of it, so a placement refuses the
-// bead while one is live, with nothing written, and dispatches it once the run
-// has ended. A build's run beside a reaction's is the dispatch all the same.
+// since it triages the bead and works none of it, so a placement dispatches a
+// bead one is live on, and the reaction's exit then lands only its headline.
+// A build's run beside a reaction's is the dispatch all the same.
 func TestPlaceReadsALiveRunAsTheDispatch(t *testing.T) {
 	w := newWorld(t)
 	liveRun(w.store, "tk-new", "tk-r1", "mol-polecat-work")
@@ -367,20 +370,9 @@ func TestPlaceReadsALiveRunAsTheDispatch(t *testing.T) {
 
 	w = newWorld(t)
 	liveRun(w.store, "tk-new", "tk-r2", "mol-first-reaction")
-	before := len(w.store.Writes())
-	_, err = w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"})
-	if !Refused(err) || !strings.Contains(err.Error(), "a first reaction runs on tk-new now (tk-r2)") ||
-		!strings.Contains(err.Error(), "place tk-new then: gctk bead place tk-new --under tk-epic") {
-		t.Fatalf("a bead a first reaction runs on: %v; want it refused, naming the run and the placement to run again", err)
-	}
-	if len(w.store.Writes()) != before || len(w.rt.Slings()) != 0 || !slices.Contains(w.row("tk-new").Labels, "hold:mayor") {
-		t.Errorf("a refused placement wrote %v and slung %v", w.store.Writes()[before:], w.rt.Slings())
-	}
-	root := w.row("tk-r2")
-	root.Status = "closed"
-	w.store.Put(root)
-	if _, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"}); err != nil || len(w.rt.Slings()) != 1 {
-		t.Fatalf("once the reaction's run has ended: %v, slings %v; want it slung", err, w.rt.Slings())
+	if _, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"}); err != nil || len(w.rt.Slings()) != 1 ||
+		slices.Contains(w.row("tk-new").Labels, "hold:mayor") {
+		t.Fatalf("a bead a first reaction runs on: %v, slings %v; want it slung and its hold lifted", err, w.rt.Slings())
 	}
 
 	w = newWorld(t)
@@ -533,5 +525,95 @@ func TestPlaceNamesTheRigsPolecatPool(t *testing.T) {
 	w.rt.RosterErr = fmt.Errorf("gc agent list did not answer")
 	if _, err := w.p.Place(Request{Bead: "tk-new", Standalone: true}); err == nil || len(w.store.Writes()) != 0 {
 		t.Fatalf("Place over an unread roster = %v, writes %v; want nothing written", err, w.store.Writes())
+	}
+}
+
+// A placement holds the bead's acceptance lock from its read to its last
+// write, as a first reaction's exit does, and refuses with nothing written
+// while another holds it, naming the placement to run again.
+func TestPlaceTakesTheAcceptanceLock(t *testing.T) {
+	w := newWorld(t)
+	unlock, holder, err := rx.LockBead(w.rt, "tk-new")
+	if err != nil || unlock == nil {
+		t.Fatalf("LockBead = %v, %q; want the lock", err, holder)
+	}
+	before := len(w.store.Writes())
+	_, err = w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"})
+	if !Refused(err) || !strings.Contains(err.Error(), "holds its acceptance lock") ||
+		!strings.Contains(err.Error(), "gctk bead place tk-new --under tk-epic") {
+		t.Fatalf("a placement while the lock is held: %v; want it refused, naming the lock and the placement to run again", err)
+	}
+	if len(w.store.Writes()) != before || len(w.rt.Slings()) != 0 {
+		t.Errorf("a placement refused for the lock wrote %v and slung %v", w.store.Writes()[before:], w.rt.Slings())
+	}
+	unlock()
+	if _, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"}); err != nil || len(w.rt.Slings()) != 1 {
+		t.Fatalf("once the lock is free: %v, slings %v; want it slung", err, w.rt.Slings())
+	}
+}
+
+// reactionCity is the city a reaction's takeaway reaches in a test.
+type reactionCity struct {
+	*rtfake.Runtime
+	*rtfake.Roster
+}
+
+// A first reaction that starts while a placement sends its subject on never
+// undoes that placement. The placement holds the bead's acceptance lock, so
+// the reaction's exit refuses with nothing written until the placement has
+// finished. The exit then finds the placement's run, lands its headline alone
+// and ends no run.
+func TestAReactionExitLeavesAPlacementThatRacedIt(t *testing.T) {
+	w := newWorld(t)
+	paused, resume := make(chan struct{}), make(chan struct{})
+	script := w.rt.OnScript
+	w.rt.OnScript = func(c rtfake.Call) gascity.Result {
+		if c.Name == "queue-priority.sh" && len(c.Args) > 0 && c.Args[0] == "settle" {
+			close(paused)
+			<-resume
+		}
+		return script(c)
+	}
+	w.rt.OnSling = func(s gascity.Sling) gascity.SlingResult {
+		liveRun(w.store, "tk-new", "tk-build", "mol-polecat-work")
+		return gascity.SlingResult{}
+	}
+	placed := make(chan error, 1)
+	go func() {
+		_, err := w.p.Place(Request{Bead: "tk-new", Under: "tk-epic"})
+		placed <- err
+	}()
+	<-paused
+	liveRun(w.store, "tk-new", "tk-react", "mol-first-reaction")
+	w.store.Put(fake.Bead{ID: "tk-react-step", Status: "in_progress", Assignee: "reaction-session",
+		Metadata: map[string]string{"gc.root_bead_id": "tk-react", "gc.step_ref": "mol-first-reaction.react"}})
+	tk := &takeaway.Takeaways{Ledger: w.p.Ledger, City: reactionCity{w.rt, &rtfake.Roster{}}, Scripts: "/pack/scripts",
+		Self: []string{"reaction-session"}, Now: w.p.Now}
+	tk.Disarm = func(id, reason string) (string, error) { return "", nil }
+	r := &rx.Reactions{Ledger: w.p.Ledger, Runtime: w.rt, Rig: "gc-toolkit", Takeaway: tk.Take}
+	if refused, err := r.Check("tk-new", "tk-react"); err != nil || refused != nil {
+		t.Fatalf("the reaction's check: %v, %v; want it to react", refused, err)
+	}
+	exit := &rx.Dispose{Bead: "tk-new", Disposition: rx.Actionable, Route: pool, Run: "tk-react",
+		Takeaway: "ready for placement", Reason: "ready"}
+	if _, err := r.Dispose(exit); err == nil || !strings.Contains(err.Error(), "holds its acceptance lock") {
+		t.Fatalf("the exit while the placement runs: %v; want it refused for the lock", err)
+	}
+	close(resume)
+	if err := <-placed; err != nil {
+		t.Fatalf("the placement: %v", err)
+	}
+	if _, err := r.Dispose(exit); err != nil {
+		t.Fatalf("the exit once the placement has finished: %v", err)
+	}
+	for _, c := range w.rt.Scripts() {
+		if c.Name == "run-cancel.sh" {
+			t.Fatalf("the exit ended a run: run-cancel.sh %s", strings.Join(c.Args, " "))
+		}
+	}
+	row := w.row("tk-new")
+	if slices.Contains(row.Labels, "hold:mayor") || row.Metadata["gc.takeaway"] != "ready for placement" {
+		t.Errorf("after the exit: labels %v, headline %q; want the placement's lift kept and the headline landed",
+			row.Labels, row.Metadata["gc.takeaway"])
 	}
 }

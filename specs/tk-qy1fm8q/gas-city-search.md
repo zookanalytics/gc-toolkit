@@ -45,23 +45,28 @@ So the list is a gctk verb over the sweep's read, in the reaction package that
 holds the marks, and it starts no work, which a pack script could not keep in
 one rule with the sweep.
 
-## Keep a placement from lifting a hold while a first reaction runs
+## Keep a first reaction's exit from undoing a placement
 
-**Covered: Gas City's source-workflow singleton, which decides the conflict.**
-`gc sling` refuses a graph workflow on a source bead that already has a live
-workflow root, whatever that root's formula, with exit 3
-(`ConflictError` in internal/sourceworkflow/sourceworkflow.go, raised by the
-prelaunch check in internal/sling/sling_core.go, which lists the bead's live
-roots through `ListLiveRoots` with no formula filter). `--force` closes the
-live root first. So `gctk bead place`, which read a first reaction's run as no
-dispatch and slung its formula, met that exit 3 while a reaction ran, read it
-as a live run of its own formula and lifted the hold with nothing sent.
+**Searched: Gas City's per-bead launch lock and its duplicate guard.**
+`gc sling <bead> --on <formula>` launches under a per-bead lock
+(`withGraphV2SourceWorkflowLock` in internal/sling/sling_core.go, over
+`sourceworkflow.WithLock` in internal/sourceworkflow/sourceworkflow.go) and
+refuses only a second live root of the same formula
+(`checkLegacySourceWorkflowConflict` there: "distinct formulas concurrently
+targeting one bead are legitimate", #5432). It passes over a live workflow
+attachment (`checkNoMoleculeChildren` in internal/sling/sling_attachment.go).
+That is `gastownhall/gascity` main d6d5784f9c, and the city's gc build,
+03d08fa593, carries #5432. So a live first reaction never stops a placement's
+build, and the lock is released when the launch returns.
 
-**Not used: `--force`.** It would close the reaction's run under a worker that
-may still be writing its exit, and that exit's takeaway release ends every live
-run beneath the bead that its own session does not hold, the placement's new
-run among them.
+**Not covered: a decision of several writes.** A placement writes from its
+read to its hold's lift, and a first reaction's exit from its read to its
+release, which ends every run under the bead, removes its arm and parks it. An
+exit that read the bead before a placement sent it on would undo that
+placement, and Gas City's lock covers neither sequence.
 
-So `place` reads the runs it already reads and refuses a held bead a live first
-reaction works, with nothing written. Its refusal names the run and the
-placement to run once that run has ended.
+So a placement and an exit hold the bead's acceptance lock, the one
+`gctk reaction accept` holds (docs/warrants.md, "Accept's lock"), each from
+its read to its last write. An exit that finds a dispatch it did not make, a
+live run of another formula, a route, an arm or an assignee, lands its
+headline alone. A placement goes out whether or not a reaction runs.

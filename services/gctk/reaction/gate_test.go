@@ -103,9 +103,12 @@ func TestASupersededGateIsWithdrawnFirst(t *testing.T) {
 	}
 
 	w := newWorld(t)
-	finds := 0
+	reads := 0
 	w.store.OnFind = func(q gcbd.Query) {
-		if finds++; finds == 2 {
+		if !slices.Equal(q.IDs, []string{"tk-sub"}) {
+			return
+		}
+		if reads++; reads == 2 {
 			w.store.FindErr = errors.New("gc bd list exited 1: fake refusal")
 		}
 	}

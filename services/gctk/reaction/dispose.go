@@ -250,6 +250,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	if d.By == "" {
 		d.By = "proactive"
 	}
+	release, holder, err := r.acceptLock(d.Bead)
+	switch {
+	case err != nil:
+		return out, fmt.Errorf("could not take %s's acceptance lock (%v), which an exit holds so that it cannot release %s while a placement sends it on. Nothing was written; re-run this command once the lock can be taken", d.Bead, err, d.Bead)
+	case release == nil:
+		return out, fmt.Errorf("an Accept, a placement or another reaction's exit on %s holds its acceptance lock (%s), so this exit wrote nothing. Re-run this command once that one has finished", d.Bead, holder)
+	}
+	defer release()
 	rows, err := r.Ledger.Find(ledger.ByID(d.Bead).WithClosed())
 	if err != nil {
 		return out, fmt.Errorf("could not read %s (%v). An exit writes only to an open subject, so nothing was written; re-run this command once the store answers", d.Bead, err)
@@ -265,6 +273,23 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	}
 	if status := subject.Status(); status != "" && status != "open" {
 		return out, fmt.Errorf("%w: %s is %s, and an exit writes only to an open subject, so nothing was written and there is nothing for this reaction to dispose", errNotOpen, d.Bead, status)
+	}
+
+	// The check took the subject with no assignee, no dispatch path and no run
+	// of another formula, so one it carries now came while this reaction ran,
+	// from a placement or an Accept. A release would undo that dispatch, since
+	// it ends every run under the bead, removes its arm and parks it, so the
+	// headline lands alone.
+	sent, err := r.sentOn(subject)
+	if err != nil {
+		return out, fmt.Errorf("could not read the runs that work %s (%v), so whether it was sent on while this reaction ran cannot be told. Nothing was written; re-run this command once the store answers", d.Bead, err)
+	}
+	if sent != "" {
+		if _, err := r.Takeaway(takeaway.Request{Bead: d.Bead, Text: d.Takeaway, By: d.By}); err != nil {
+			return out, fmt.Errorf("%s was sent on while this reaction ran (%s), so this exit lands only its headline, and the headline did not land (%v). Nothing else was written; re-run this command", d.Bead, sent, err)
+		}
+		r.say("%s was sent on while this reaction ran (%s): its headline landed alone, and nothing was released, routed, armed or held", d.Bead, sent)
+		return out, nil
 	}
 
 	// A subject that carries hold:mayor arrived in the placement queue, where
@@ -655,6 +680,32 @@ func (r *Reactions) handOver(d *Dispose, who, form string) error {
 	}
 	r.say("handed %s to %s", d.Bead, who)
 	return nil
+}
+
+// sentOn names what sent the subject on while this reaction ran, empty when
+// nothing did: a live run of a formula that no exit pours on its subject, any
+// but a first reaction's and the validating closer's, and, while the subject
+// carries no headline, an assignee or a dispatch path. Once it carries one, an
+// assignee and a dispatch path are this run's own exit run again, which wrote
+// them after its headline.
+func (r *Reactions) sentOn(subject *ledger.Record) (string, error) {
+	var by []string
+	if !concluded(subject) {
+		if a := strings.TrimSpace(subject.Assignee()); a != "" {
+			by = append(by, "assigned to "+a)
+		}
+		by = append(by, dispatchPaths(subject)...)
+	}
+	runs, err := waits.RunsOf(r.Ledger, subject.ID)
+	if err != nil {
+		return "", err
+	}
+	for _, run := range runs {
+		if run.Live && run.Formula != Formula && run.Formula != closer {
+			by = append(by, "live run "+run.Root)
+		}
+	}
+	return strings.Join(by, ", "), nil
 }
 
 // lift takes the subject out of the placement queue for the next actor this

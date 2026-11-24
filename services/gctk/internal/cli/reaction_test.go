@@ -63,7 +63,7 @@ func TestReactionDisposeRefusesUsageBeforeAnyCall(t *testing.T) {
 func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 	dir := t.TempDir()
 	short, long := filepath.Join(dir, "tk", ".beads"), filepath.Join(dir, "tk-x", ".beads")
-	for _, d := range []string{short, long} {
+	for _, d := range []string{short, long, filepath.Join(dir, ".gc")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -73,6 +73,7 @@ func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 		`{"Name":"tk","Prefix":"tk","Path":"`+filepath.Dir(short)+`"},{"Name":"tk-x","Prefix":"tk-x","Path":"`+filepath.Dir(long)+`"}]}}`)
 	t.Setenv("STUB_WHERE", `{"path":"`+filepath.Join(dir, ".beads")+`","prefix":"hq"}`)
 	t.Setenv("GC_RIG", "gc-toolkit")
+	t.Setenv("GC_CITY_PATH", dir)
 	for name, args := range map[string][]string{
 		"a check":   {"reaction", "check", "tk-x-sub", "--run", "tk-root"},
 		"a sling":   {"reaction", "sling", "tk-x-sub"},
@@ -225,11 +226,13 @@ esac
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GCTK_SCRIPTS_DIR", filepath.Join(dir, "scripts"))
 	// The city's root is the town the stub's rig list names as its HQ, which
-	// holds the dispatch locks a release's disarm takes, and never the city
-	// this test runs in.
-	for _, v := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
+	// GC_CITY_PATH names as it does in an agent's session, and never the city
+	// this test runs in. It holds the dispatch locks a release's disarm takes
+	// and the acceptance lock an exit takes.
+	for _, v := range []string{"GC_CITY", "GC_CITY_ROOT"} {
 		t.Setenv(v, "")
 	}
+	t.Setenv("GC_CITY_PATH", town)
 	t.Setenv("STUB_LOG", log)
 	t.Setenv("STUB_DIR", dir)
 	t.Setenv("STUB_RIG", rig)
