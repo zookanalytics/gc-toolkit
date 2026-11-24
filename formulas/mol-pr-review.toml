@@ -164,21 +164,21 @@ the PR's head:
 
 **3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the
-commit in its ruling. A point on the PR's title or summary is fixed in the
-summary `{{pr_bead}}` records, as the bar says, and so is a summary the round's
-commits or questions leave untrue. A point ruled declined, deferred, answered
-or put to a person gets no change. A fix outside the reviewed diff goes to a
-bead of its own, armed to start once the PR lands, which the call prints for
-the ruling's reason:
+commit in its ruling. Fix a point on the PR's title or summary in the summary
+`{{pr_bead}}` records, as the bar says. Record that summary again when the
+round's commits or questions leave it untrue. A point ruled declined, deferred,
+answered or put to a person gets no change. A fix outside the reviewed diff
+goes to a bead of its own, armed to start once the PR lands, which the call
+prints for the ruling's reason:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"`
 A question only a person can answer goes to a gate on `{{pr_bead}}`, which the
 call prints for the ruling:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, and what each answer means>"`
 
-**4. Push the round's fixes**, in every round, one with nothing to push
-included, since the call also brings the PR's title and body to what
-`{{pr_bead}}` records. It returns the PR to draft first, and pushes onto the
-branch only while it is at the head the round judged:
+**4. Push the round's fixes** in every round, a round with nothing to push
+included. The call brings the PR's title and body to what `{{pr_bead}}`
+records. With commits to push, it returns the PR to draft first, and pushes
+onto the branch only while it is at the head the round judged:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" push`
 It prints the head it pushed, and prints it too when an earlier push of these
 commits already landed. Exit 1: the branch on origin moved from the head the
