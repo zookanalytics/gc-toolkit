@@ -14,4 +14,4 @@ scope = "city"
 
 [order.env]
 # The pack's converse templates, the agents under agents/converse-*.
-GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus"
+GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex-astra converse-codex-sol"
