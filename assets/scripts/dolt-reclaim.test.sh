@@ -244,13 +244,32 @@ eq "$RC" "0" "an overloaded server (latency>5000) defers"
 has "$OUT" "latency" "  ... names the latency"
 eq "$(compact_lines)" "0" "  ... and runs no compact"
 
+# --- a probe that proves nothing defers nothing ------------------------------
+# The report's wall time follows host load, not Dolt. A slow report that would
+# say healthy, cut at the probe's bound, is unproven, as is a probe that fails
+# or an answer with no readable latency.
 reset_case
 make_db fat "$OVER"; write_list fat
 export GC_DOLT_RECLAIM_HEALTH_TIMEOUT=1 STUB_HEALTH_SLEEP=2
 run
-eq "$RC" "0" "a health probe that outruns its bound defers"
-has "$OUT" "too slow" "  ... says the plane is too slow"
-eq "$(compact_lines)" "0" "  ... and runs no compact"
+eq "$RC" "0" "a slow health report cut at its bound exits 0"
+eq "$(compact_lines)" "1" "  ... and is not deferred: the store is reclaimed"
+has "$OUT" "1 reclaimed, 0 failed, 0 deferred" "  ... with no deferral"
+has "$OUT" "Dolt health unknown — health probe gave no answer within 1s" "  ... and the log says why the gate could not judge"
+
+reset_case
+make_db fat "$OVER"; write_list fat
+export STUB_HEALTH_RC=3
+run
+eq "$(compact_lines)" "1" "a health probe that fails does not defer the reclaim"
+has "$OUT" "health probe exited 3" "  ... and the log names the failure"
+
+reset_case
+make_db fat "$OVER"; write_list fat
+export STUB_HEALTH='{"server":{"reachable":true}}'
+run
+eq "$(compact_lines)" "1" "an answer with no latency does not defer the reclaim"
+has "$OUT" "no readable server.latency_ms" "  ... and the log says what it lacked"
 
 # --- the plane degrades mid-pass: the next store defers, a GC does not pile on -
 # The guard is re-run before every compact, not only once before the loop: a

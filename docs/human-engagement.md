@@ -749,6 +749,20 @@ templates declare a pool at zero (`min_active_sessions = 0`) with no
 `scale_check` and no work routed to them, so no demand pass counts anything for
 one, and `assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
 
+**Mail starts the sitting's turn.** Mail sent or replied to a sitting, from any
+sender and from the dashboard too, starts the sitting's turn within about 30
+seconds, on the next pass of Gas City's orders lane, and later when that lane
+is busy. The mail-notify-on-send and mail-notify-on-reply orders run
+`gctk mail notify` on each mail event. It nudges the sitting with "You have
+mail from <sender>" unless a notice a sender's `--notify` queued will tell it
+first. The mail-notify-reconcile order runs the same pass every 15 minutes, so
+mail whose event's run failed, or whose event never reached the orders, starts
+the turn within about 15 minutes instead. A sitting that sleeps is woken by the
+nudge. Its prompt starts a turn once it is up, as at every wake, and Gas City's
+prompt hook adds its unread mail to that turn, whichever nudge dispatcher the
+city runs. A sitting that has finished, or is suspended, keeps its mail
+waiting. `gctk mail notify --help` states the rule.
+
 **Recovery resumes the sitting through its alias.** A sitting whose session
 sleeps, or whose runtime stopped, resumes when the operator attaches:
 `wake_mode = "resume"` replays its transcript. Its claim is idempotent for its

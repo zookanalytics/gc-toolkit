@@ -1,6 +1,6 @@
 ---
 name: Gas City pack & formula authoring (platform facts)
-description: What Gas City does with a pack and a formula that its own specs and guides leave unsaid — how a v2 step advances and a run ends, what processes workflow-finalize, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand — each cited and dated. gc-toolkit's own authoring conventions on these are pack-authoring.md.
+description: What Gas City does with a pack and a formula that its own specs and guides leave unsaid — what a step's agent is given, how a v2 step advances and a run ends, what processes workflow-finalize, when a check loop gets a fresh context, how a directory import goes live, how builtin pins resolve, and what a formula body can expand — each cited and dated. gc-toolkit's own authoring conventions on these are pack-authoring.md.
 ---
 
 # Gas City pack & formula authoring
@@ -15,10 +15,11 @@ top of these facts are [pack-authoring.md](../pack-authoring.md).
 ## Scope
 
 **Mandate.** Gas City's behavior when it loads a pack and runs a formula, as
-far as upstream's specs and guides do not state it: how a graph.v2 step
-advances and how a run ends, what processes a workflow's finalize bead, when
-a check loop gets a fresh context, how a pack imported from a directory goes
-live, how builtin pack pins resolve, and what a formula body can expand.
+far as upstream's specs and guides do not state it: what the agent of a step is
+given, how a graph.v2 step advances and how a run ends, what processes a
+workflow's finalize bead, when a check loop gets a fresh context, how a pack
+imported from a directory goes live, how builtin pack pins resolve, and what a
+formula body can expand.
 
 **Boundaries.** The full formats are upstream's specs, linked below and
 indexed by [gascity/README.md](README.md). gc-toolkit's own
@@ -81,6 +82,26 @@ Read these first; this page does not restate them. Coverage checked
   the pack that defines them — pack spec §1.2.12, and
   [multi-agent engineering environment](https://docs.gascity.com/guides/multi-agent-engineering-environment),
   "Turn repeated operations into pack commands".
+
+## A step's agent is given its step bead, not the formula's description
+
+gc gives the agent working a materialized step that step bead's own title and
+description, and nothing else of the formula. The step reminder a hook injects
+renders the agent's in-progress step, or its molecule's entry step, alone. The
+formula's top-level `description` lands on the workflow root, which no agent
+claims, and formula spec v2 lists it as a "Human-readable description", where a
+step's own is the "Step instructions shown to the agent" (§1.2 and §1.3). So a
+formula's description reaches a person who reads the formula, such as through
+`gc formula show`, and no step's agent.
+
+*Evidence:* read on 2026-11-23 at upstream `dfd5200c3e`.
+`formatWispStepReminder` (`cmd/gc/wisp_step_inject.go`) renders the bead
+`resolveActiveWispStep` returns as its title, id and description, and reads
+nothing of the formula or the root. This city's gc, the fork at `96179ad1f6`,
+renders the `step_reminder` of `gc hook --claim --json` through the same
+function (`hookClaimStepReminder`, `cmd/gc/cmd_hook_claim.go`). A
+`mol-polecat-work` root in this city's store carries the formula's description
+and no assignee.
 
 ## A v2 step advances by closing its own step bead, not by `drain-ack`
 

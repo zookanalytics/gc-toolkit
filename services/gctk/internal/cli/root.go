@@ -99,6 +99,7 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 		newDoctorCmd(stdout, stderr),
 		newEpicCmd(stdout, stderr),
 		newLifecycleCmd(stdout, stderr),
+		newMailCmd(stdout, stderr),
 		newMemoryCmd(stdout, stderr),
 		newPRCmd(stdout, stderr),
 		newReactionCmd(stdout, stderr),
