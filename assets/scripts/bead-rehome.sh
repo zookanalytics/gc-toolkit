@@ -15,7 +15,10 @@
 # leaves out two refusals its `bd close` makes, a pinned bead and a bead
 # assigned to anyone but the actor, so the writer reads those off the origin
 # first, and a close any of these holds writes nothing. bd's update sets no close
-# reason, so the disposition's prose rides the close as an appended note.
+# reason, so the disposition's prose rides the close as an appended note. The
+# close also records gc.work_outcome=no-op, the work record Gas City's close
+# gate asks of a plain task bead, unless the origin already records one: under
+# every kind the origin ships nothing under its own id.
 #
 # A caller that judged the origin before it asked for the close can name that
 # judgment, and then the close goes ahead only while the judgment still holds:
@@ -139,8 +142,8 @@
 # merge ends a landed branch. That remote write never gates the disposition:
 # when the branch cannot be ended the close stands, and a warning names the
 # branch and the command that ends it. The bead's notes record the outcome.
-# The writer records no outcome of its own on the origin: the outcome is its
-# closer's word.
+# The writer records no gc.outcome on the origin: a disposition's outcome word
+# is its closer's.
 # Callers: converse dispositions, operator re-homes, pr-facts.sh (a PR closed
 # with a pre-recorded disposition, and that branch's parked rework children),
 # the landing order, gctk pr reconcile (a PR on the pending record closed under
@@ -463,6 +466,12 @@ eval "$ROW_FIELDS"
 CLEAR_MARKER=()
 if [ "$ORIGIN_MARKER" = true ]; then
     CLEAR_MARKER=(--unset-metadata pr_reconcile_pending)
+fi
+# The work record the close carries. A work outcome the origin records already
+# is its own writer's word, and stays.
+WORK_RECORD=()
+if [ -z "$ORIGIN_OUTCOME" ]; then
+    WORK_RECORD=(--set-metadata gc.work_outcome=no-op)
 fi
 
 # The caller's judgment (the header's rule), compared with the origin as this
@@ -862,9 +871,10 @@ if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — edge + note only, the close left as it is"
     else
-        MARKER_PLAN=""
+        MARKER_PLAN=""; RECORD_PLAN=""
         [ "${#CLEAR_MARKER[@]}" -eq 0 ] || MARKER_PLAN=", clearing the landing order's pr_reconcile_pending marker in the same write, under the store's record lock"
-        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\"$MARKER_PLAN"
+        [ "${#WORK_RECORD[@]}" -eq 0 ] || RECORD_PLAN=", recording gc.work_outcome=no-op in the same write"
+        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\"$RECORD_PLAN$MARKER_PLAN"
     fi
     if [ -n "$EDGE_STANDS" ]; then
         EDGE_PLAN="none ($ORIGIN already names $SUCCESSOR)"
@@ -1158,12 +1168,12 @@ else
     # foreign assignee and an open child. It lands only while the origin still
     # has the status and assignee the gates judged, so a claim, an assignment or
     # a status change since that read, a second closer's included, closes nothing
-    # (exit 13). The note rides the same write, and names the beads that came to
-    # wait on the successor.
+    # (exit 13). The note and the work record ride the same write, and the note
+    # names the beads that came to wait on the successor.
     CLOSE_RC=0; CLOSE_ERR=""
     CLOSE_ERR=$(bd_at "$ORIGIN_PATH" update "$ORIGIN" \
         --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" --status=closed \
-        ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
+        ${WORK_RECORD[@]+"${WORK_RECORD[@]}"} ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
         --append-notes "Disposition $(date -u +%Y-%m-%dT%H:%MZ): $REASON.${CARRIED:+ What waited on it waits on $SUCCESSOR now: $CARRIED.}" 2>&1 >/dev/null) || CLOSE_RC=$?
     if [ "$CLOSE_RC" = 13 ]; then
         # A close naming this same successor is what beat this one: the edge is
