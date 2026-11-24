@@ -275,6 +275,95 @@ func TestAnExitLeavesADispatchMadeWhileItRan(t *testing.T) {
 	}
 }
 
+// An exit that stopped after its headline releases the acceptance lock, so a
+// placement can send its subject on before the exit is run again, such as by
+// arming it behind a wait. The re-run then lands the headline alone: under its
+// headline, the one dispatch an exit reads as its own is its hand-off to the
+// named agent it names.
+func TestAReRunLeavesADispatchMadeAfterItsHeadline(t *testing.T) {
+	for name, c := range map[string]struct {
+		sendOn func(*fake.Bead)
+		sent   string
+	}{
+		"a placement's arm": {func(b *fake.Bead) {
+			b.Labels = nil
+			b.Metadata["gc.dispatch_when_ready"] = "gc-toolkit/gc-toolkit.polecat"
+			b.Metadata["gc.dispatch_when_ready_args"] = "[]"
+			b.Metadata["gc.dispatch_when_ready_armed_by"] = "gc-toolkit/gc-toolkit.po"
+			b.Metadata["gc.dispatch_when_ready_armed_at"] = "2026-11-16T11:00:00Z"
+		}, "an arm to gc-toolkit/gc-toolkit.polecat"},
+		"a route to a pool": {func(b *fake.Bead) { b.Labels = nil; b.Metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat" },
+			"gc.routed_to=gc-toolkit/gc-toolkit.polecat"},
+		"another agent's assignee": {func(b *fake.Bead) { b.Labels = nil; b.Assignee = "gc-toolkit/gc-toolkit.refinery" },
+			"assigned to gc-toolkit/gc-toolkit.refinery"},
+	} {
+		w := newWorld(t)
+		held(w)
+		w.store.BeforeUpdate = func(id string, args []string) error {
+			if slices.Contains(args, "--remove-label") {
+				return errors.New("the store refused it")
+			}
+			return nil
+		}
+		args := []string{"tk-sub", "--disposition", "actionable", "--reason", "a city.toml edit", "--takeaway", "city.toml edit for mechanik",
+			"--assign", "gc-toolkit.mechanik", "--run", root}
+		code, _, err := w.dispose(args...)
+		wantCode(t, code, 4, err, "(RERUN) "+name+": a lift the store refuses")
+		// The world's takeaway logs the headline the real one writes.
+		w.subject(func(b *fake.Bead) {
+			b.Metadata = map[string]string{"gc.takeaway": "city.toml edit for mechanik", "gc.takeaway_by": "proactive"}
+		})
+		w.store.BeforeUpdate = nil
+		w.subject(c.sendOn)
+		w.reset()
+		code, _, err = w.dispose(args...)
+		wantCode(t, code, 0, err, "(RERUN) "+name)
+		w.has("TAKEAWAY tk-sub city.toml edit for mechanik --by proactive", "(RERUN) "+name+": the headline lands")
+		w.hasnt("--release", "(RERUN) "+name+": nothing is released")
+		w.hasnt("SLING", "(RERUN) "+name+": no hand-off")
+		w.saidHas("tk-sub was sent on while this reaction ran ("+c.sent+"): its headline landed alone", "(RERUN) "+name+": saying what sent it")
+	}
+}
+
+// A re-run of an exit that stopped after its own hand-off, at a nudge that did
+// not reach the agent, finds the hand-off under its headline and finishes the
+// exit. With no headline, the same hand-off is another actor's, since an exit
+// writes its own after its headline.
+func TestAReRunFinishesItsOwnHandOff(t *testing.T) {
+	for name, c := range map[string]struct {
+		assign string
+		own    func(*fake.Bead)
+		again  string
+	}{
+		"the refinery's assignee": {"gc-toolkit/gc-toolkit.refinery", func(b *fake.Bead) { b.Assignee = "gc-toolkit/gc-toolkit.refinery" },
+			"TAKEAWAY tk-sub t --by proactive --release --assign gc-toolkit/gc-toolkit.refinery --no-wait"},
+		"the mechanik's route": {"gc-toolkit.mechanik", func(b *fake.Bead) { b.Metadata["gc.routed_to"] = "gc-toolkit.mechanik" },
+			"SLING gc-toolkit.mechanik tk-sub --no-formula --no-convoy"},
+	} {
+		args := []string{"tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--assign", c.assign, "--run", root}
+		w := newWorld(t)
+		w.nudgeFails = true
+		code, _, err := w.dispose(args...)
+		wantCode(t, code, 4, err, "(OWNHANDOFF) "+name+": a nudge that did not land")
+		w.subject(func(b *fake.Bead) { b.Metadata = map[string]string{"gc.takeaway": "t", "gc.takeaway_by": "proactive"} })
+		w.subject(c.own)
+		w.nudgeFails = false
+		w.reset()
+		code, _, err = w.dispose(args...)
+		wantCode(t, code, 0, err, "(OWNHANDOFF) "+name)
+		w.has(c.again, "(OWNHANDOFF) "+name+": the hand-off made again")
+		w.has("NUDGE "+c.assign+" tk-sub is ", "(OWNHANDOFF) "+name+": the nudge it owed")
+
+		w = newWorld(t)
+		w.subject(func(b *fake.Bead) { b.Metadata = map[string]string{} })
+		w.subject(c.own)
+		code, _, err = w.dispose(args...)
+		wantCode(t, code, 0, err, "(OWNHANDOFF) "+name+" with no headline")
+		w.hasnt("--release", "(OWNHANDOFF) "+name+" with no headline: nothing is released")
+		w.hasnt("NUDGE", "(OWNHANDOFF) "+name+" with no headline: no nudge")
+	}
+}
+
 // An exit holds the subject's acceptance lock, which a placement and an
 // Accept hold too, and refuses with nothing read or written while one of them
 // holds it.

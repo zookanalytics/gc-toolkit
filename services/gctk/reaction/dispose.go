@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
@@ -275,12 +276,22 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 		return out, fmt.Errorf("%w: %s is %s, and an exit writes only to an open subject, so nothing was written and there is nothing for this reaction to dispose", errNotOpen, d.Bead, status)
 	}
 
+	// The named agent the exit hands the subject to, and the form it takes it in.
+	who, form := d.Assign, ""
+	if who == "" {
+		who = d.ThenAssign
+	}
+	if who != "" {
+		form, _ = handoffForm(who, "", "", d.Bead)
+	}
+
 	// The check took the subject with no assignee, no dispatch path and no run
 	// of another formula, so one it carries now came while this reaction ran,
-	// from a placement or an Accept. A release would undo that dispatch, since
-	// it ends every run under the bead, removes its arm and parks it, so the
-	// headline lands alone.
-	sent, err := r.sentOn(subject)
+	// from a placement or an Accept, unless it is this exit's own hand-off,
+	// which a re-run of an exit that stopped after it finds. A release would
+	// undo that dispatch, since it ends every run under the bead, removes its
+	// arm and parks it, so the headline lands alone.
+	sent, err := r.sentOn(subject, who, form)
 	if err != nil {
 		return out, fmt.Errorf("could not read the runs that work %s (%v), so whether it was sent on while this reaction ran cannot be told. Nothing was written; re-run this command once the store answers", d.Bead, err)
 	}
@@ -365,12 +376,7 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// 781c975d79), and the arm refuses a --then-route whose default formula
 	// does not read. A hand-off is made only to a named agent whose hook would
 	// offer the bead.
-	who, form := d.Assign, ""
-	if who == "" {
-		who = d.ThenAssign
-	}
 	if who != "" {
-		form, _ = handoffForm(who, "", "", d.Bead)
 		if ok, why := r.Assignable(who, d.Bead); !ok {
 			return out, usage("%s cannot be handed this bead: %s. Handing it there would leave %s offered to nobody. Name the agent by its exact qualified name, as gc agent list prints it (the mechanik takes a town-repo edit), or route a pool with --route or --then-route", who, why, d.Bead)
 		}
@@ -684,17 +690,25 @@ func (r *Reactions) handOver(d *Dispose, who, form string) error {
 
 // sentOn names what sent the subject on while this reaction ran, empty when
 // nothing did: a live run of a formula that no exit pours on its subject, any
-// but a first reaction's and the validating closer's, and, while the subject
-// carries no headline, an assignee or a dispatch path. Once it carries one, an
-// assignee and a dispatch path are this run's own exit run again, which wrote
-// them after its headline.
-func (r *Reactions) sentOn(subject *ledger.Record) (string, error) {
+// but a first reaction's and the validating closer's, an assignee, a route and
+// an arm. It passes over this exit's own hand-off to the named agent who, in
+// its form, once the subject carries a headline, since the exit writes it
+// after the headline and a step can still stop the exit after it: the
+// refinery's assignee rides the headline's write, and the nudge follows the
+// mechanik's route. Every other route or arm an exit writes is its last write,
+// so a re-run that finds one has nothing of its own left to finish, and one
+// that another actor wrote is never released.
+func (r *Reactions) sentOn(subject *ledger.Record, who, form string) (string, error) {
+	own := func(in, v string) bool { return form == in && v == who && concluded(subject) }
 	var by []string
-	if !concluded(subject) {
-		if a := strings.TrimSpace(subject.Assignee()); a != "" {
-			by = append(by, "assigned to "+a)
-		}
-		by = append(by, dispatchPaths(subject)...)
+	if a := strings.TrimSpace(subject.Assignee()); a != "" && !own(formAssignee, a) {
+		by = append(by, "assigned to "+a)
+	}
+	if v := strings.TrimSpace(raw(routedToKey, subject)); v != "" && !own(formRoute, v) {
+		by = append(by, routedToKey.Name()+"="+v)
+	}
+	if a := record.Of(subject); a != nil && strings.TrimSpace(a.Target) != "" {
+		by = append(by, "an arm to "+a.Target)
 	}
 	runs, err := waits.RunsOf(r.Ledger, subject.ID)
 	if err != nil {
