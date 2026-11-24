@@ -3,7 +3,8 @@
 scope = "rig"
 provider = "claude"
 wake_mode = "fresh"
-# Per-agent home; per-bead worktrees are created under it by workspace-setup.
+# Per-agent home. workspace-setup cuts each bead's worktree beside the homes, at
+# .gc/worktrees/<rig>/<bead>, so the home's removal never takes one.
 work_dir = ".gc/worktrees/{{.Rig}}/polecats/{{.AgentBase}}"
 # The nudge is the whole instruction a woken pool slot acts on, so it names the
 # task and not just the command that starts it. A nudge naming only a command is

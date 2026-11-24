@@ -322,9 +322,10 @@ cat "$CONV"/../../template-fragments/work-quality-polecats.template.md "$CONV"/.
 
 ## Set up the tree
 
-Work's setup cuts the change's tree under your home, at
-`worktrees/<the change>`, on `polecat/<the change>` fresh from its target, and
-records `work_dir` and `branch` on the change, as it does for a polecat's work.
+Work's setup cuts the change's tree beside the agents' homes, at
+`.gc/worktrees/<rig>/<the change>` in the city, on `polecat/<the change>` fresh
+from its target, and records `work_dir` and `branch` on the change, as it does
+for a polecat's work.
 Under `--held-by` it takes your hold as the proof that you hold the change:
 
 ```bash
