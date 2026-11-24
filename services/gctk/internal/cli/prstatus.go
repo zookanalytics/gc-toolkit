@@ -164,21 +164,25 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 }
 
 // gcbdStore is the [prstatus.Store] gctk reads through. An anchor's row comes
-// from gcbd.Show, which sees the latest write, because converse-signoff.sh
-// reads this status to tell whether a PR still needs an Approve and writes the
-// answer into the headline it records when a conversation ends, where no later
-// read corrects it. Its in-flight set comes from one `gc bd list` per anchor,
-// whose metadata filter matches a key against one value. A level of `blocks`
-// edges comes from one `gc bd show` of every bead in it, whose rows carry each
-// edge's far bead whole.
+// from gcbd.ShowCached, the supervisor's copy, which can trail a fresh write. A
+// row one pass stale decides nothing that lasts here: the command shows where a
+// PR stands, and the landing order derives each PR's labels from the store
+// again at every run and has them written where they differ.
+// converse-signoff.sh words the Approve clause of a sign-off's headline from
+// this status, and no later read corrects a headline, so it runs the command
+// with GC_NO_API=1, under which ShowCached reads the bead as it stands. Its
+// in-flight set comes from one `gc bd list` per anchor, whose metadata filter
+// matches a key against one value. A level of `blocks` edges comes from one
+// `gc bd show` of every bead in it, whose rows carry each edge's far bead
+// whole.
 type gcbdStore struct{ client *gcbd.Client }
 
-// Beads returns the row of each id gcbd.Show reads. One it cannot read is left
-// out, which prstatus.Read reports as an anchor that does not resolve.
+// Beads returns the row of each id gcbd.ShowCached reads. One it cannot read is
+// left out, which prstatus.Read reports as an anchor that does not resolve.
 func (s gcbdStore) Beads(ids []string) (map[string]prstatus.Row, error) {
 	out := make(map[string]prstatus.Row, len(ids))
 	for _, id := range ids {
-		if b := s.client.Show(id); b != nil {
+		if b := s.client.ShowCached(id); b != nil {
 			out[id] = prstatus.Row{ID: id, Metadata: metadataOf(b)}
 		}
 	}
