@@ -114,8 +114,8 @@ done
 # probe starts after them. On a loaded host a gc call costs 5-15s of wall time
 # whatever it reads, so the three gc reads take about one call's time, not
 # three. The roster, the history and gctk's answer go into files, and each is
-# waited on before it is read. Their stdio is redirected, so an early exit never holds the
-# doctor's pipe open behind it.
+# waited on before it is read. Their stdio is redirected, so an early exit never
+# holds the doctor's pipe open behind it.
 probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/null) || {
     echo "cadence liveness undetermined (I10) — cannot stage the registry, roster and history reads"
     detail "mktemp -d failed (e.g. /tmp under disk pressure); nothing was read, so a stopped cadence would not be visible."
@@ -131,8 +131,9 @@ trap 'rm -rf "$probe_dir"' EXIT
 # The history read may take the time left before the check's deadline, which
 # already holds back the budget's reserve for the report. The budget caps any
 # one probe at half so that a wedged probe cannot starve the probes after it,
-# and none comes after this one. On a loaded host the read takes longer than
-# half the budget, and cut there it would leave every order's cadence unjudged.
+# and every other probe starts beside this one. A loaded host can hold the read
+# past half the budget, and cut there it would leave every order's cadence
+# unjudged.
 now=$(budget_now)
 BUDGET_CAP=$BUDGET_TOTAL run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
 # rig-map.sh reads the rig map, and names on stderr why it did not.

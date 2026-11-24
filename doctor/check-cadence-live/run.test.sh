@@ -302,9 +302,9 @@ printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 
 # --- 7g. the history read may take the time left before the deadline -------------------
 # The budget caps a probe at half so a wedged one cannot starve the probes after
-# it, and none comes after the history read. A 24s budget caps a probe at 12s and
-# ends at 19s, after its 5s reserve, so a read that answers after 14s runs past
-# the cap and finishes before the deadline.
+# it, and every other probe starts beside the history read. A 24s budget caps a
+# probe at 12s and ends at 19s, after its 5s reserve, so a read that answers
+# after 14s runs past the cap and finishes before the deadline.
 S=$(date +%s)
 OUT=$(GC_DOCTOR_CHECK_TIMEOUT=24 HIST_DELAY=14 run_check); RC=$?
 E=$(( $(date +%s) - S ))
