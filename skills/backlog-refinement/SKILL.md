@@ -183,10 +183,7 @@ it does.
 ## 6. Apply each ruling
 
 Apply the piece's rulings through your prompt's levers, let each write's exit
-say whether it landed, and only then bring the next piece. `place` refuses a bead
-a first reaction is still working, with nothing written, since that run's card
-lands when it ends: apply that ruling once the run has ended, and tell the
-operator it waits. Each ruling's note
+say whether it landed, and only then bring the next piece. Each ruling's note
 gives the operator's reason in words. When the operator turns down a proposal
 that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
