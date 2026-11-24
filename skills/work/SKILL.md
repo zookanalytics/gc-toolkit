@@ -130,8 +130,11 @@ boundaries too when you can. Write each field from the outcome the epic seeks,
 even when you file the epic from inside a design for its work, so that it would
 still read true if a different design landed. Each closure check tests that
 outcome, and no field names a mechanism of the design, such as its judge, its
-schedule, the limits it sets or the records it keeps. Wherever you report the
-filing, quote each field you wrote and call it your proposal. A Delivery
+schedule, the limits it sets or the records it keeps. The boundaries name the
+work that someone who reads the hypothesis could mistake for the epic's own,
+found from the hypothesis rather than from a list of the other epics
+(`docs/epics.md`, "Belongs and Boundaries"). Wherever you report the filing,
+quote each field you wrote and call it your proposal. A Delivery
 carries an `Aim:` line instead, as above. An area that is only ever improvable
 has no hypothesis to answer, so it is not an epic, and its work is ordinary
 flow (`docs/epics.md`, "Epics are mortal").
@@ -143,7 +146,7 @@ hypothesis, and files nothing. It prints the new epic's id:
 "$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
   --hypothesis "<for whom, what changes, and the signal that shows it worked>" \
   --handle "<three to five words>" \
-  --boundaries "<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --boundaries "<the axis it is cut on, and the work a reader could mistake for its own, with where that lives>" \
   -d "<what the epic is about>"
 ```
 
