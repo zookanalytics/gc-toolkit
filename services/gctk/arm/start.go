@@ -110,11 +110,11 @@ type StartOptions struct {
 // never an empty queue.
 var ErrListing = errors.New("could not list the armed beads")
 
-// StartArmed is one pass over the store's armed beads. It retires the arm on
-// each bead that has closed or whose work another path delivered, then starts
-// each armed bead the pool's own serve rule would serve and nothing bd cannot
-// judge holds, each exactly once, under its dispatch lock. It hands emit one
-// Line per armed bead, and returns the counts.
+// StartArmed is one pass over the store's armed beads. It retires each arm
+// whose dispatch is no longer owed (retireCase), then starts each armed bead
+// the pool's own serve rule would serve and nothing bd cannot judge holds, each
+// exactly once, under its dispatch lock. It hands emit one Line per armed bead,
+// and returns the counts.
 func (a *Arms) StartArmed(opts StartOptions, emit func(Line)) (Summary, error) {
 	began := a.Now()
 	sum := Summary{}
@@ -182,15 +182,25 @@ func (a *Arms) StartArmed(opts StartOptions, emit func(Line)) (Summary, error) {
 	return sum, nil
 }
 
+// closer is the validating closer's formula, which checks a bead once the work
+// it waits on lands and puts a bead that carries a merge_result to a person
+// rather than closing it.
+const closer = "mol-validate-close"
+
 // retireCase is the act that retires an arm on a bead whose dispatch is no
 // longer owed, and whether there is one: the bead has closed, or it carries a
-// merge_result, so another path has delivered its work. Either retires the arm
-// whatever holds the bead.
+// merge_result, so another path has delivered its work and the arm would pour
+// work on it again. Either retires the arm whatever holds the bead. The
+// closer's arm pours no work, so on a bead that carries a merge_result it is
+// still owed, and the start's holds judge it as they judge any other.
 func retireCase(r *ledger.Record) (Act, bool) {
 	if r.Status() == "closed" {
 		return Act{Action: ActRetire, Case: "closed", Why: "the bead closed with a dispatch still armed, so none is owed"}, true
 	}
 	if mr, _, _ := prrecord.Result.Get(r); strings.TrimSpace(mr) != "" {
+		if arm := record.Of(r); arm != nil && arm.Formula() == closer {
+			return Act{}, false
+		}
 		return Act{Action: ActRetire, Case: "delivered",
 			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", strings.TrimSpace(mr))}, true
 	}
