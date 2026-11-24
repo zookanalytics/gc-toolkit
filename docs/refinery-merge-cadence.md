@@ -552,16 +552,17 @@ which has the one-PR update re-read the PR in full
 These two orders and the landing order run at their set intervals, `pr-poll`
 and `pr-reconcile` every minute and `pr-compare` every hour, only while the
 city's order budget lets each clock-driven order start at its own interval.
-Gas City's orders lane runs a pass each `[daemon] patrol_interval`, 30 seconds
-by default, and a pass starts at most `[orders] max_dispatches_per_tick`, 4 by
-default, of the city's cooldown, cron and event orders that are due. A due
-order past the budget waits for a later pass. When all of those orders are due
-together, as after a restart, the lane starts them a budget's worth at a time,
-one pass apart, and an order whose interval is shorter than the time those
-passes take starts later than its interval. A budget at or above the number of
-those orders the city runs starts each of them on the pass that finds it due.
-`gc doctor`'s order-dispatch-floor check warns of each order whose interval is
-shorter than that time, and names the budget that fits. The city's `city.toml`
+Gas City's orders lane runs about one pass each `[daemon] patrol_interval`, 30
+seconds by default, and a pass starts at most
+`[orders] max_dispatches_per_tick`, 4 by default, of the city's cooldown, cron
+and event orders that are due. A due order past the budget waits for a later
+pass. When all of those orders are due together, as after a stop longer than
+their intervals, the lane starts them a budget's worth at a time, one pass
+apart, and an order whose interval is shorter than the time those passes take
+starts later than its interval. `gc doctor`'s order-dispatch-floor check warns
+of each order whose interval is shorter than that time, and names the budget
+that fits. A budget at or above the number of those orders the city runs
+starts each of them on the pass that finds it due. The city's `city.toml`
 holds the old refinery pass, `refinery-reconcile`, at 5 minutes until the
 GitHub intake retires it, because one pass of it takes minutes whatever the
 order budget, and at its own minute it would run nearly back to back.
