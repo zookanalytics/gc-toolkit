@@ -1,14 +1,14 @@
 ---
 name: Gas City search for the first reaction's marks (tk-qy1fm8q)
-description: The primitives searched in Gas City and bd for the surface this build adds, the `gctk reaction unmarked` list and `gctk bead place`'s refusal of a bead a live first reaction works, with what each covers and why each gap is gctk's. Read it when reviewing that surface, as AGENTS.md asks of a change that adds a command or grows one.
+description: The primitives searched in Gas City and bd for the surface this build adds, the `gctk reaction unmarked` list and the acceptance lock `gctk bead place` shares with a first reaction's exit, with what each covers and why each gap is gctk's. Read it when reviewing that surface, as AGENTS.md asks of a change that adds a command or grows one.
 ---
 
 # Gas City search for the first reaction's marks
 
 This build changes which beads take a first reaction: the sweep takes a bead by
 a mark its filer wrote, and the check admits a held bead that carries no
-headline. It adds one gctk verb, `gctk reaction unmarked`, and one refusal in
-`gctk bead place`. It adds no order, no bead key, no bead kind and no lifecycle
+headline. It adds one gctk verb, `gctk reaction unmarked`, and the acceptance
+lock that `gctk bead place` and a first reaction's exit share. It adds no order, no bead key, no bead kind and no lifecycle
 state: `finding.scope` is a key `patrol-finding.sh` already writes, which gctk
 now reads. Each need names the primitive searched, at `gastownhall/gascity`
 main 9285cfb3ed (2026-11-24) and bd v1.3.4, the `github.com/steveyegge/beads`

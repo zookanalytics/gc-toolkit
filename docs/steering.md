@@ -241,10 +241,13 @@ its hold, so `place` runs the writes in one order, each taking its exit:
 1. It refuses a closed bead, PR-finishing work (`anchor_bead`), a bead that
    `hold:external` also holds, a bead whose status is not open, a parent that
    is closed or not in the bead's store, `--standalone` on a bead that has a
-   parent, a bead an arm already sends to another pool or on another formula,
-   and a bead a live first reaction works, until that run ends. A bead with no
-   `hold:mayor` is refused, or reported as already placed when a live run, a
-   route, an arm or an assignee shows its dispatch.
+   parent, and a bead an arm already sends to another pool or on another
+   formula. A bead with no `hold:mayor` is refused, or reported as already
+   placed when a live run, a route, an arm or an assignee shows its dispatch.
+   It holds the bead's acceptance lock from this read to its last write, the
+   lock a first reaction's exit and `gctk reaction accept` hold too. While
+   anything else holds it, `place` writes nothing, and is run again once that
+   one finishes.
 2. It clears any route, since the `--fix` of Gas City's `hold-label-routed-to`
    check writes one and `gctk bead arm` refuses a routed bead. With
    `--under` it removes a relates-to link between the bead and the parent,
@@ -256,7 +259,9 @@ its hold, so `place` runs the writes in one order, each taking its exit:
    bead's rig, on `--on`, or else on that pool's default formula. While a
    blocker holds the bead or a parent above it, such as a park, it arms the
    dispatch (`gctk bead arm`), so the run starts once nothing holds
-   the bead. Otherwise it slings.
+   the bead. Otherwise it slings. A live first reaction does not stop it,
+   since a reaction triages the bead and works none of it: the placement goes
+   out, and an exit the reaction takes after it lands only its headline.
 5. It lifts the hold, with a note saying where the bead went, in one write
    that removes each label spelling the hold, one `--remove-label` each:
    `gc bd update <bead> --remove-label hold:mayor --append-notes "Placed ..."`.
@@ -265,13 +270,14 @@ The dispatch comes before the lift, so a dispatch that fails leaves the bead
 held, in the queue. A run cut off between the two goes on with the hold still
 on its bead, and the next `place` finishes the lift. Running `place` again
 after a stop at any write finishes the placement without a second run: it
-dispatches nothing once an assignee, a `merge_result`, a live run or an arm
-shows a dispatch, and `gc sling` refuses a second live workflow at one bead,
-whatever its formula. That holds while the run is live, or once it has claimed,
-landed or closed the bead, as the hand-off of `mol-polecat-work` does before
-its run ends. A run that ends with none of those, such as one of a formula that only
-reads its bead, leaves nothing `place` reads as the dispatch, so a stop at the
-lift names the lift by hand, which dispatches nothing, rather than a re-run.
+dispatches nothing once an assignee, a `merge_result`, a live run other than a
+first reaction's or an arm shows a dispatch, and `gc sling` refuses a second
+live run of one formula at one bead. That holds while the run is live, or once
+it has claimed, landed or closed the bead, as the hand-off of `mol-polecat-work`
+does before its run ends. A run that ends with none of those, such as one of a
+formula that only reads its bead, leaves nothing `place` reads as the dispatch,
+so a stop at the lift names the lift by hand, which dispatches nothing, rather
+than a re-run.
 
 A hold also lifts these ways:
 
