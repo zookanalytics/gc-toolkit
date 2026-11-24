@@ -270,12 +270,12 @@ The block's last line, for each exit:
 # subject to it in the form it finds its work in, a route for the mechanik
 # and the assignee for the refinery, and nudges the agent when bd reports
 # the bead ready.
-# A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
+# A town-repo edit takes {{ .BindingPrefix }}mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
 # holds what intake does not admit for placement. It refuses the deacon and
 # the witness, which take mail and no bead, and the keeper, which takes no
 # first reaction's bead.
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign {{ .BindingPrefix }}mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
 # and still claimed by the next worker. The blocker must live in the same
@@ -291,9 +291,9 @@ The block's last line, for each exit:
 # agent while it waits, in the same form, and the agent is nudged once the
 # wait lifts, so no dispatch is armed. Omit both only for a bead nobody takes
 # (a decision, a research note).
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/<rig>.polecat
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/{{ .BindingPrefix }}polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/{{ .BindingPrefix }}polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign {{ .BindingPrefix }}mechanik
 
 # close — hand a confident no-op to the validating closer (mol-validate-close
 # on this rig's polecat pool; --route names another). The reason is the
@@ -403,5 +403,5 @@ Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
 witness as `HELP`; everything else is a nudge or a bead note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
+gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
 ```

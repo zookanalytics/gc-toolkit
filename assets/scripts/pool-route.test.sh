@@ -153,10 +153,36 @@ echo "# human is no pool: it is refused as any name no agent carries"
 GC_RIG=gc-toolkit run human
 eq "$RC" 1 "exit 1 with GC_RIG set"
 eq "$OUT" "" "stdout is EMPTY"
-has "$ERR" "route 'gc-toolkit/human' matches no live agent identity" "it is qualified like any bare name, then refused"
+has "$ERR" "'human' matches no live agent identity" "it is resolved like any template, then refused"
 env -u GC_RIG "$SUT" human >"$TMP/out" 2>"$TMP/err"; RC=$?
 eq "$RC" 1 "exit 1 rig-less too"
 eq "$(cat "$TMP/out")" "" "…with stdout EMPTY"
+
+echo "# a pool's template is routed under the binding the city imports the pack under"
+# A city names the import's key, so a pool is <rig>/<binding>.<template> and the
+# template alone is all a pack script knows. Here the city imports the pack as
+# kit, so a route spelled with gc-toolkit would address nobody.
+KIT_AGENTS='{"agents":[{"qualified_name":"rig-k/kit.polecat"},
+  {"qualified_name":"rig-k/kit.polecat-codex"},
+  {"qualified_name":"rig-j/kit.polecat"},
+  {"qualified_name":"kit.mechanik"}]}'
+STUB_AGENTS="$KIT_AGENTS" GC_RIG=rig-k run polecat
+eq "$RC" 0 "exit 0"
+eq "$OUT" "rig-k/kit.polecat" "the route carries the caller's rig and the city's binding"
+STUB_AGENTS="$KIT_AGENTS" GC_RIG=rig-k run refinery
+eq "$RC" 1 "a template no agent in the rig carries is refused"
+eq "$OUT" "" "…with stdout EMPTY"
+STUB_AGENTS="$KIT_AGENTS" env -u GC_RIG "$SUT" polecat >"$TMP/out" 2>"$TMP/err"; RC=$?
+eq "$RC" 1 "a rig-less template names a pool in every rig, so it is refused"
+eq "$(cat "$TMP/out")" "" "…with stdout EMPTY"
+has "$(cat "$TMP/err")" "names several live identities" "…and says which identities it could not choose between"
+STUB_AGENTS='{"agents":[{"qualified_name":"rig-k/kit.polecat"},{"qualified_name":"rig-k/other.polecat"}]}' GC_RIG=rig-k run polecat
+eq "$RC" 1 "two pools of that template in the rig are refused, not chosen between"
+eq "$OUT" "" "…with stdout EMPTY"
+STUB_AGENTS_FAIL=1 GC_RIG=rig-k run polecat
+eq "$RC" 1 "an unreadable roster leaves a template no route: it carries no binding to fall back on"
+eq "$OUT" "" "…with stdout EMPTY, not the template UNVERIFIED"
+has "$ERR" "names no binding, and the roster that holds it did not read" "…and says why"
 
 echo "# usage"
 "$SUT" >/dev/null 2>&1; eq "$?" 2 "no argument is a usage error"

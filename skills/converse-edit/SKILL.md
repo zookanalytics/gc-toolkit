@@ -280,9 +280,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the change's landing settles on the subject, and what to check once it has>" \
   && gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks \
-  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
+  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/<binding>.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
   && gc bd label list "$SUBJECT"
 ```
+
+`<binding>` is the name the city imports the pack under, which gc puts in front
+of this skill's name: `gc-toolkit` in `gc-toolkit.converse-edit`. `gc skill
+list` prints it in this skill's FROM column.
 
 The deferred-dispatch pass sends no arm while `hold:mayor` holds the subject,
 so remove each label it lists that spells `hold:mayor`, in any case, one
