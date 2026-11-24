@@ -28,12 +28,15 @@ the page.
 
 ## Name the PR an edit takes before the bead records it
 
-**Not covered by Gas City.** The one PR key Gas City reads is
-`pr_review.pr_url`, which `externalURL` (`internal/runproj/summary.go`) and the
-dashboard's `resolvePrRef`
-(`internal/api/dashboardspa/web/shared/src/links/relation-index.ts`) read to
-link a run's lane to its PR. It is a link to display, which nothing in Gas City
-writes outside its fixtures and no writer resolves to edit a PR. The pack's
+**Not covered by Gas City.** The PR keys Gas City reads are ones it displays.
+Its run summary (`internal/runproj/summary.go`) titles, labels and links a
+run's lane from the `pr_review.*` keys (`displayTitle`, `externalLabel`,
+`externalURL`). The dashboard's `resolvePrRef`
+(`internal/api/dashboardspa/web/shared/src/links/relation-index.ts`) links a
+bead to its PR from `evidence.pr_url`, `evidence.pr_number`,
+`evidence.artifact_path`, `pr_review.pr_number` and `pr_review.pr_url`. Nothing
+in Gas City writes those keys outside its tests and fixtures, and nothing
+resolves one to edit a PR (`git grep` over the tree). The pack's
 own record is the pending record, which `gctk pr record` writes once the head
 is pushed, under the store's record lock. Writing the PR onto the bead before
 the edit would add a second write to the one publication. So the refinery
