@@ -231,6 +231,8 @@ func TestPRComposeRefuses(t *testing.T) {
 		"no bead":                         {"--target", "main", "--head", "x"},
 		"an edit with a body to read":     {"tk-a", "--target", "main", "--head", "x", "--edit", "--body-file", "-"},
 		"an edit of an opening PR":        {"tk-a", "--target", "main", "--head", "x", "--edit", "--opening"},
+		"a PR named with no edit":         {"tk-a", "--target", "main", "--head", "x", "--pr", "https://github.com/acme/widgets/pull/7"},
+		"an edit of no PR's URL":          {"tk-a", "--target", "main", "--head", "x", "--edit", "--pr", "https://github.com/acme/widgets/issues/7"},
 	} {
 		if _, out, _, code := runCompose(t, args...); code != 1 || out != "" {
 			t.Errorf("%s: exit %d, stdout %q", name, code, out)
@@ -389,6 +391,35 @@ func TestPRComposeEditWithNoGatesNamesTheSummaryItLeft(t *testing.T) {
 	}
 	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
 		t.Fatalf("an edit with no --gates changed the PR:\n%s", raw)
+	}
+}
+
+// --pr names the PR an edit takes when the bead records none yet, as the
+// refinery names a PR it adopts from the bead's branch. Given no --pr, a bead
+// that records no PR is refused with nothing asked of GitHub, and given one,
+// the edit reads and edits the PR it names.
+func TestPRComposeEditTakesThePRItNames(t *testing.T) {
+	hermeticGit(t)
+	old := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
+	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "chore: an old title (tk-a)", old)
+	t.Setenv("STUB_ROWS", "["+composeAnchor+"]")
+	args := []string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--edit"}
+	var out, errb bytes.Buffer
+	if code := Run(args, "", &out, &errb); code != 3 || out.String() != "" || !strings.Contains(errb.String(), "it names no PR") {
+		t.Fatalf("a bead that records no PR, given no --pr: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	if raw, err := os.ReadFile(calls); err == nil {
+		t.Fatalf("GitHub was asked about a PR the bead does not name:\n%s", raw)
+	}
+	out.Reset()
+	errb.Reset()
+	code := Run(append(args, "--pr", "https://github.com/acme/widgets/pull/7"), "", &out, &errb)
+	if code != 0 || out.String() != "tk-a: edited the title and the body of https://github.com/acme/widgets/pull/7\n" {
+		t.Fatalf("an edit of the PR --pr names: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	raw, err := os.ReadFile(calls)
+	if err != nil || !strings.Contains(string(raw), "-F number=7") || !strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("GitHub was not asked to edit PR 7: %v\n%s", err, raw)
 	}
 }
 
