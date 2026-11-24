@@ -129,7 +129,7 @@ func TestARigWithNoOnePoolGetsNoRoute(t *testing.T) {
 
 		w = newWorld(t)
 		c.edit(w, "proactive")
-		w.ready(input("tk-a", nil), input("tk-b", nil))
+		w.ready(arrival("tk-a", nil), arrival("tk-b", nil))
 		_, _, err = w.sweep(false, time.Minute)
 		var swept *SweepError
 		if !errors.As(err, &swept) || len(w.slings()) > 0 {
