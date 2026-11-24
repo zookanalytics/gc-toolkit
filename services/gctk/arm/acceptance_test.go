@@ -240,8 +240,9 @@ func TestStoreAcceptanceWhatHoldsAnArmedBead(t *testing.T) {
 	}
 }
 
-// An arm on a bead that closed, or that carries a merge_result, retires
-// whatever holds the bead, with a note naming the case, and nothing is slung.
+// An arm on a bead that closed, or an arm that pours work on one that carries
+// a merge_result, retires whatever holds the bead, with a note naming the
+// case, and nothing is slung.
 // A dry run reports each retire and writes nothing.
 func TestStoreAcceptanceRetirements(t *testing.T) {
 	a := newAccept(t)
@@ -279,6 +280,32 @@ func TestStoreAcceptanceRetirements(t *testing.T) {
 	}
 	if s := a.slungLines(); len(s) != 0 {
 		t.Errorf("slung %v", s)
+	}
+}
+
+// The validating closer's arm on a bead that carries a merge_result is not
+// retired: it waits on the bead's open blocker, and the pass after the blocker
+// closes slings the closer on the bead.
+func TestStoreAcceptanceTheClosersArmOnAnAnchor(t *testing.T) {
+	a := newAccept(t)
+	anchor, blocker := a.bead("an open PR's anchor"), a.bead("the work that makes it moot")
+	a.s.Edge(anchor, blocker, "blocks", "")
+	a.armed(anchor, "mol-validate-close", "merge_result=pull_request_head_changed")
+
+	lines := a.pass(false, "0")
+	act(t, lines, anchor, arm.ActHold, "blocked", blocker)
+	if !a.isArmed(anchor) || len(a.slungLines()) != 0 {
+		t.Errorf("behind its open blocker: armed %v, slung %v; want it armed and nothing slung", a.isArmed(anchor), a.slungLines())
+	}
+
+	a.s.Run("close", blocker)
+	lines = a.pass(false, "0")
+	act(t, lines, anchor, arm.ActStart, "", "on mol-validate-close")
+	if s := a.slungLines(); len(s) != 1 || !a.slungBead(anchor) || !strings.Contains(s[0], " --on mol-validate-close ") {
+		t.Errorf("slung %v; want the closer on the anchor, once", s)
+	}
+	if a.isArmed(anchor) {
+		t.Error("the anchor kept its arm once the closer was slung")
 	}
 }
 

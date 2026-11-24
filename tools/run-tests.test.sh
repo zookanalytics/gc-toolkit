@@ -86,6 +86,23 @@
 #     too, and a name with a space or a byte git quotes arrives whole;
 #   - a change that names no file runs no suite, not even a tree-wide one: the
 #     run prints one line saying so and exits 0, and --list prints nothing;
+#   - a path a Go program is compiled from reaches the suites that compile it.
+#     A file of a package the program imports, a file such a package embeds
+#     and a Go file the package's directory no longer has each reach the suite
+#     that compiles it inline, the suites calling the library function that
+#     compiles it, or the library's function that calls that one, and the
+#     sibling and the users of a script that compiles it outside a function,
+#     with a here-document in a function's body read as no part of the body.
+#     A change that deletes or moves a program's whole main package reaches
+#     the suites that still compile it by its old path, and one that deletes a
+#     package the program imports, the file an embed pattern of such a package
+#     names, or one of the two files its directory pattern embeds, reaches the
+#     suites that compile the unchanged program. A _test.go file, a file in no
+#     package's directory, and one below the directory of a package that
+#     embeds nothing reach no suite; go.mod reaches every program's; a go that
+#     cannot list the packages, or what a program imports, lets a .go file
+#     reach every such program and nothing else reach any; and --affected
+#     reaches the same suites from a branch's commit;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
 #     belongs, and a PATH beside --affected are usage errors;
 #   - the runner runs no suite, and exits 2, unless its own bash and the first
@@ -1155,6 +1172,251 @@ eq "$RC" 2 "a bash only the caller's directory reaches is refused, since from th
 eq "$OUT" "run-tests: each file starts with the first bash on PATH, and PATH has no bash, so nothing ran" \
   "…with one line saying so"
 eq "$(ls "$STATE")" "" "…and starts no suite"
+
+echo "── 20. a path a Go program is compiled from reaches the suites that compile it ──"
+# A Go module with two programs a library compiles, tool and fake, and a third,
+# server, one suite compiles inline. tool imports lib, which embeds a file from
+# a directory beneath it and a directory of two files, and server imports
+# store. The real go lists the packages, with no toolchain download and no
+# workspace.
+GREPO="$TMP/go-repo"
+mkdir -p "$GREPO/tools"
+cp "$RUNNER" "$GREPO/tools/run-tests.sh"
+gfix() { mkdir -p "$(dirname "$GREPO/$1")"; cat > "$GREPO/$1"; }
+printf 'module example.invalid/fx\n\ngo 1.21\n' | gfix go.mod
+gfix svc/cmd/tool/main.go <<'F'
+package main
+
+import "example.invalid/fx/svc/lib"
+
+func main() { println(lib.Hello()) }
+F
+gfix svc/lib/lib.go <<'F'
+package lib
+
+import "embed"
+
+//go:embed words/greeting.txt
+var greeting string
+
+//go:embed names
+var names embed.FS
+
+func Hello() string { return greeting }
+F
+printf 'hello\n' | gfix svc/lib/words/greeting.txt
+printf 'ann\n' | gfix svc/lib/names/ann.txt
+printf 'bob\n' | gfix svc/lib/names/bob.txt
+gfix svc/lib/lib_test.go <<'F'
+package lib
+
+import "testing"
+
+func TestHello(t *testing.T) {}
+F
+gfix svc/fake/main.go <<'F'
+package main
+
+func main() {}
+F
+gfix other/store/store.go <<'F'
+package store
+
+func Open() {}
+F
+gfix other/cmd/server/main.go <<'F'
+package main
+
+import "example.invalid/fx/other/store"
+
+func main() { store.Open() }
+F
+# A library suites source. build_tool compiles tool after a here-document whose
+# lines would end a body if read as script; harness_up compiles fake through
+# _fake; greet compiles nothing.
+gfix lib/harness.sh <<'F'
+#!/usr/bin/env bash
+greet() { echo hi; }
+build_tool() {
+  cat > "$TMP/note" <<'NOTE'
+}
+NOTE
+  ( cd "$(dirname "${BASH_SOURCE[0]}")/../svc" && go build -o "$TMP/tool" ./cmd/tool )
+}
+_fake() {
+  ( cd "$(dirname "${BASH_SOURCE[0]}")/../svc" && go build -o "$TMP/fake" ./fake )
+}
+harness_up() {
+  _fake
+}
+F
+# A script that compiles tool outside any function, its sibling, and a suite
+# that runs it.
+gfix lib/stub.sh <<'F'
+#!/usr/bin/env bash
+( cd "$(dirname "$0")/../svc" && go build -o "$1/tool" ./cmd/tool )
+F
+gfix lib/stub.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(dirname "$0")/stub.sh" "$TMPDIR"
+F
+gfix t/uses-stub.test.sh <<'F'
+#!/usr/bin/env bash
+bash "$(git rev-parse --show-toplevel)/lib/stub.sh" "$TMPDIR"
+F
+gfix t/inline.test.sh <<'F'
+#!/usr/bin/env bash
+( cd "$(git rev-parse --show-toplevel)/svc" && go build -o ./out/tool ./cmd/tool )
+F
+gfix t/server.test.sh <<'F'
+#!/usr/bin/env bash
+( cd "$(git rev-parse --show-toplevel)/other" && go run ./cmd/server )
+F
+gfix t/builds-tool.test.sh <<'F'
+#!/usr/bin/env bash
+. "$(git rev-parse --show-toplevel)/lib/harness.sh"
+build_tool
+harness_up
+F
+gfix t/harness-only.test.sh <<'F'
+#!/usr/bin/env bash
+. "$(git rev-parse --show-toplevel)/lib/harness.sh"
+harness_up
+F
+gfix t/sources-only.test.sh <<'F'
+#!/usr/bin/env bash
+. "$(git rev-parse --show-toplevel)/lib/harness.sh"
+greet
+F
+gfix t/comment.test.sh <<'F'
+#!/usr/bin/env bash
+# go build ./cmd/tool is what a suite would run here.
+true
+F
+git -C "$GREPO" init -q
+git -C "$GREPO" add -A
+# glist [args...] -> sets RC, OUT and LIST, as alist does, over the Go repo.
+glist() {
+  OUT="$(cd "$GREPO" && GOTOOLCHAIN=local GOWORK=off GOFLAGS='' "$GREPO/tools/run-tests.sh" -j 64 --list "$@" 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+}
+TOOL_SUITES="lib/stub.test.sh t/builds-tool.test.sh t/inline.test.sh t/uses-stub.test.sh "
+if ! command -v go >/dev/null 2>&1; then
+  bad "the Go cases need go on PATH" "no go found"
+else
+  glist svc/lib/lib.go
+  eq "$RC" 0 "--list over a Go file exits 0"
+  eq "$LIST" "$TOOL_SUITES" \
+    "a file of a package tool imports reaches the suite compiling tool inline, the suite calling the function that compiles it, and the sibling and the user of the script compiling it outside a function"
+  hasnt "$LIST" "t/harness-only.test.sh" "…not a suite calling only the library's other compiling function"
+  hasnt "$LIST" "t/sources-only.test.sh" "…nor one that sources the library and calls nothing that compiles"
+  hasnt "$LIST" "t/comment.test.sh" "…nor one whose go build is a comment"
+  glist svc/lib/words/greeting.txt
+  eq "$LIST" "$TOOL_SUITES" "a file a package of tool embeds, below the package's directory, reaches the same suites"
+  glist svc/lib/gone.go
+  eq "$LIST" "$TOOL_SUITES" "so does a Go file the package's directory no longer has"
+  glist svc/lib/lib_test.go
+  eq "$OUT" "" "a _test.go file compiles into no program, so it reaches no suite"
+  glist svc/fake/main.go
+  eq "$LIST" "t/builds-tool.test.sh t/harness-only.test.sh " \
+    "fake's file reaches the suites calling harness_up, the library's caller of the function compiling fake"
+  glist other/store/store.go
+  eq "$LIST" "t/server.test.sh " "a package only server imports reaches the suite that runs server with go run"
+  glist go.mod
+  eq "$LIST" "lib/stub.test.sh t/builds-tool.test.sh t/harness-only.test.sh t/inline.test.sh t/server.test.sh t/uses-stub.test.sh " \
+    "go.mod reaches every program's suites"
+  glist svc/notes.md
+  eq "$OUT" "" "a file in no package's directory reaches no program"
+  glist other/store/notes/readme.md
+  eq "$OUT" "" "…nor does one below the directory of a package that embeds nothing"
+  # A go that fails stands for one that cannot list the packages.
+  mkdir -p "$TMP/failing-go"
+  printf '#!/bin/sh\necho "stub go: cannot list" >&2\nexit 1\n' > "$TMP/failing-go/go"
+  chmod +x "$TMP/failing-go/go"
+  OUT="$(cd "$GREPO" && PATH="$TMP/failing-go:$PATH" "$GREPO/tools/run-tests.sh" -j 64 --list other/store/store.go 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+  eq "$RC" 0 "--list over a Go file with a go that cannot list exits 0"
+  eq "$LIST" "lib/stub.test.sh t/builds-tool.test.sh t/harness-only.test.sh t/inline.test.sh t/server.test.sh t/uses-stub.test.sh " \
+    "…and a .go file then reaches every program's suites"
+  OUT="$(cd "$GREPO" && PATH="$TMP/failing-go:$PATH" "$GREPO/tools/run-tests.sh" -j 64 --list svc/lib/words/greeting.txt 2>&1)"; RC=$?
+  eq "$OUT" "" "…while a file that is not Go source reaches none"
+  # A go that lists the module's programs and fails to list what each imports.
+  mkdir -p "$TMP/deps-go"
+  printf '#!/bin/sh\ncase " $* " in *" -deps "*) echo "stub go: cannot list the imports" >&2; exit 1 ;; esac\nexec %s "$@"\n' \
+    "'$(command -v go)'" > "$TMP/deps-go/go"
+  chmod +x "$TMP/deps-go/go"
+  OUT="$(cd "$GREPO" && PATH="$TMP/deps-go:$PATH" GOTOOLCHAIN=local GOWORK=off GOFLAGS='' "$GREPO/tools/run-tests.sh" -j 64 --list other/store/store.go 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+  eq "$LIST" "lib/stub.test.sh t/builds-tool.test.sh t/harness-only.test.sh t/inline.test.sh t/server.test.sh t/uses-stub.test.sh " \
+    "a go that cannot list a program's imports lets a .go file reach that program's suites"
+  OUT="$(cd "$GREPO" && PATH="$TMP/deps-go:$PATH" GOTOOLCHAIN=local GOWORK=off GOFLAGS='' "$GREPO/tools/run-tests.sh" -j 64 --list svc/lib/words/greeting.txt 2>&1)"; RC=$?
+  eq "$OUT" "" "…and a file that is not Go source reach none of them"
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m base
+  git -C "$GREPO" branch base
+  git -C "$GREPO" checkout -q -b change-lib
+  printf 'package lib\n\nfunc Bye() string { return "bye" }\n' > "$GREPO/svc/lib/bye.go"
+  git -C "$GREPO" add -A
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "add a file to lib"
+  glist --affected base
+  eq "$LIST" "$TOOL_SUITES" "--affected reaches the same suites when the change is a branch's commit"
+  # go no longer lists a package the change deletes whole, so the suites that
+  # still compile it by its path are found by the path alone.
+  git -C "$GREPO" checkout -q -b delete-fake base
+  git -C "$GREPO" rm -q -r svc/fake
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the fake's package"
+  glist --affected base
+  eq "$LIST" "t/builds-tool.test.sh t/harness-only.test.sh " \
+    "a change that deletes fake's whole package reaches the suites that still compile it"
+  git -C "$GREPO" checkout -q -b move-server base
+  git -C "$GREPO" mv other/cmd/server other/cmd/api
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "move the server's package"
+  glist --affected base
+  eq "$LIST" "t/server.test.sh " "…and one that moves server's reaches the suite that still runs it by its old path"
+  # An import or an embed pattern that finds nothing leaves go's answer
+  # incomplete, so it cannot place the path the change deleted.
+  git -C "$GREPO" checkout -q -b delete-store base
+  git -C "$GREPO" rm -q -r other/store
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the package server imports"
+  glist --affected base
+  eq "$LIST" "t/server.test.sh " \
+    "a change that deletes a package server imports reaches the suite that runs server, though server's package and that suite are unchanged"
+  git -C "$GREPO" checkout -q -b delete-greeting base
+  git -C "$GREPO" rm -q svc/lib/words/greeting.txt
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete the file lib embeds"
+  glist --affected base
+  eq "$LIST" "$TOOL_SUITES" "…and one that deletes the file lib's embed pattern names reaches the suites compiling tool"
+  # A directory pattern that still finds a file leaves go's answer whole, and
+  # the file the change deleted is in no list that answer gives.
+  git -C "$GREPO" checkout -q -b delete-ann base
+  git -C "$GREPO" rm -q svc/lib/names/ann.txt
+  git -C "$GREPO" -c user.name=run-tests -c user.email=run-tests@example.invalid commit -q -m "delete one of the files lib's directory pattern embeds"
+  glist --affected base
+  eq "$LIST" "$TOOL_SUITES" \
+    "a change that deletes one of the two files lib's directory pattern embeds reaches the suites compiling tool, though go's answer is whole"
+fi
+
+echo "── 21. two libraries whose compiling functions share a name each reach their own suites ──"
+# Programs a and b both import shared. lib/a.sh and lib/b.sh each define build,
+# which compiles its own program, and a wrapper of its own that calls it.
+TREPO="$TMP/go-twins"
+mkdir -p "$TREPO/tools"
+cp "$RUNNER" "$TREPO/tools/run-tests.sh"
+tfix() { mkdir -p "$(dirname "$TREPO/$1")"; cat > "$TREPO/$1"; }
+printf 'module example.invalid/twins\n\ngo 1.21\n' | tfix go.mod
+printf 'package shared\n\nfunc Value() {}\n' | tfix shared/value.go
+for p in a b; do
+  printf 'package main\n\nimport "example.invalid/twins/shared"\n\nfunc main() { shared.Value() }\n' | tfix "$p/main.go"
+  printf 'build() {\n  go build ./%s\n}\nsetup_%s() {\n  build\n}\n' "$p" "$p" | tfix "lib/$p.sh"
+  printf '#!/usr/bin/env bash\n. lib/%s.sh\nsetup_%s\n' "$p" "$p" | tfix "t/$p.test.sh"
+done
+git -C "$TREPO" init -q
+git -C "$TREPO" add -A
+if command -v go >/dev/null 2>&1; then
+  OUT="$(cd "$TREPO" && GOTOOLCHAIN=local GOWORK=off GOFLAGS='' "$TREPO/tools/run-tests.sh" -j 64 --list shared/value.go 2>&1)"; RC=$?
+  LIST="$(printf '%s\n' "$OUT" | LC_ALL=C sort | tr '\n' ' ')"
+  eq "$LIST" "t/a.test.sh t/b.test.sh " \
+    "a package both programs import reaches the suite of each library's wrapper, though both libraries name their compiling function build"
+fi
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

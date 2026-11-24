@@ -681,20 +681,25 @@ no warrant.
     (`defaultMaxWakeAttempts` and `defaultQuarantineDuration` in
     `cmd/gc/session_types.go`), and a failed pending create also counts toward
     a startup-health episode (`recordStartupHealthFailure` in
-    `cmd/gc/session_lifecycle_parallel.go`). Nothing sends the alert an episode
-    marks pending (`RecordStartupFailure` in `internal/session/startup_health.go`),
-    the doctor check that lists episodes leaves the error out
+    `cmd/gc/session_lifecycle_parallel.go`). An episode that reaches that count
+    records one `session.startup_health_alert` event and one reconciler log line,
+    both without the error (`emitStartupHealthAlert` in
+    `cmd/gc/startup_health_backoff.go`), and nothing in Gas City acts on that
+    event. The doctor check that lists episodes leaves the error out too
     (`startupHealthEpisodesCheck` in `cmd/gc/doctor_startup_health.go`), and
     `session.quarantined` has no emitter (`cmd/gc/cmd_analyze_reliability.go`).
     So the script reports a home it cannot sync through `patrol-finding.sh`, one
     report per home, which the next clean start clears.
   - The search, and each way this script differs from Gas Town's and why, are
-    in two records:
-    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md),
-    and [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
-    for when the script fetches, its retry of the add and its signal traps.
-- **Verified.** 2026-11-08, at `gastownhall/gascity` main 27a4857eabd5 and
-  `gastownhall/gascity-packs` main 2a3b142e3fbd.
+    in its records:
+    [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md);
+    [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
+    for when the script fetches, its retry of the add and its signal traps; and
+    [specs/tk-p0fbvug/gas-city-search.md](../specs/tk-p0fbvug/gas-city-search.md)
+    for the move of a home whose HEAD is a tip the default branch had before a
+    rewrite.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main dfd5200c3ee3 and
+  `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
   the default branch, or Gas Town's agents stop running a script of their own at
   `pre_start`.
@@ -729,7 +734,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The

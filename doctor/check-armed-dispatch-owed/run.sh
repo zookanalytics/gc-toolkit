@@ -3,9 +3,10 @@
 # surfaced. A bead armed with gctk bead arm is started by the deferred-dispatch
 # order's pass, gctk bead start-armed (orders/deferred-dispatch.toml, a 5m
 # cooldown), once nothing holds it. `arm` refuses a non-open bead and the start
-# retires the arm of a closed or already-delivered one, so a healthy arm is
-# short-lived: it waits while something holds it, then dispatches within a
-# cadence of being armed or of the last hold releasing, whichever is later.
+# retires each arm whose dispatch is no longer owed (docs/deferred-dispatch.md),
+# so a healthy arm is short-lived: it waits while something holds it, then
+# dispatches within a cadence of being armed or of the last hold releasing,
+# whichever is later.
 #
 # The check reads each store's arms from the start's dry run, which prints, for
 # every armed bead, what gctk bead holds answers for it and what the next pass
