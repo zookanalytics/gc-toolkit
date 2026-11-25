@@ -13,9 +13,8 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
-// The goldens under testdata are the renders the shell composer produced for
-// each case when this package replaced it. -update rewrites them from the code,
-// for a change that means to move a render.
+// The goldens under testdata pin each case's render. -update rewrites them from
+// the code, for a change that means to move a render.
 var update = flag.Bool("update", false, "rewrite the golden renders under testdata from the code")
 
 func golden(t *testing.T, path, got string) {
@@ -53,10 +52,8 @@ func readCases[T any](t *testing.T, path string) []T {
 // trimming are pinned with the render.
 func TestRegionRendersAsBefore(t *testing.T) {
 	type regionCase struct {
-		Name, Summary, Desc, ID, Branch, Target, Mode, Gates, Head string
-		CheckSet                                                   string `json:"check_set"`
-		SupNum                                                     string `json:"sup_num"`
-		SupHead                                                    string `json:"sup_head"`
+		Name, Summary, Desc, ID, Branch, Target, Gates, Head string
+		CheckSet                                             string `json:"check_set"`
 	}
 	for _, c := range readCases[regionCase](t, "testdata/region-cases.json") {
 		t.Run(c.Name, func(t *testing.T) {
@@ -66,10 +63,7 @@ func TestRegionRendersAsBefore(t *testing.T) {
 			}
 			store := fake.New()
 			store.Put(fake.Bead{ID: c.ID, Title: "t", Status: "open", Description: c.Desc, Metadata: meta})
-			req := Request{Head: c.Head, Target: c.Target, Opening: c.Mode == "open", Gates: gatesOf(c.Gates), Summary: true}
-			if c.SupNum != "" {
-				req.Supersedes = &Superseded{Number: c.SupNum, Head: c.SupHead}
-			}
+			req := Request{Head: c.Head, Target: c.Target, Gates: gatesOf(c.Gates)}
 			got, err := Compose(ledger.New(store), c.ID, req)
 			if err != nil {
 				t.Fatal(err)
@@ -132,9 +126,9 @@ func TestBeadsSectionRendersAsBefore(t *testing.T) {
 	}
 }
 
-// The body edits around the sections: a region written in place, one marked
-// over a body written before the markers existed, and the branch-beads section
-// added or written in place, each beside text people added.
+// The body edits around the sections: a region written in place, and the
+// branch-beads section added or written in place, each beside text people
+// added.
 func TestBodyEditsAsBefore(t *testing.T) {
 	region := textLines("## Summary\n\nNew summary.\n\n## Refinery handoff\n\n- Issue: `tk-a1`\n" +
 		"- Head `abcdef12`; gates `correctness`; see the PR checks for current status.\n")
@@ -156,19 +150,6 @@ func TestBodyEditsAsBefore(t *testing.T) {
 		t.Fatal("splice_region carries one pair of markers")
 	}
 	out("splice_region", splice(body, summaryOpen, summaryClose, region))
-
-	for _, name := range []string{"establish_legacy", "establish_no_bullets"} {
-		got, ok := establish(in(name), region)
-		if !ok {
-			t.Fatalf("%s carries the shape written before the markers", name)
-		}
-		out(name, got)
-	}
-	for _, name := range []string{"establish_refused", "establish_no_handoff"} {
-		if _, ok := establish(in(name), region); ok {
-			t.Errorf("%s does not carry the shape written before the markers, yet a region was marked over it", name)
-		}
-	}
 
 	out("append_beads", appendSection(in("append_beads"), beadsOpen, beadsClose, beads))
 	out("append_empty", appendSection(in("append_empty"), beadsOpen, beadsClose, beads))

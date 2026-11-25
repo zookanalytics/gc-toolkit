@@ -17,4 +17,5 @@ Keep the gadget's tests.
 - Issue: `tk-a1`
 - Source branch: `polecat/tk-a1`
 - Target: `main`
-- Gates `correctness,triage,arch` signed off pre-open at `abcdef12`. For CI status, see the PR checks.
+- Head `abcdef12`; anchor declares no pre-open gate (`check_set=demo`).
+- Draft-stage gates `demo` run against the open PR before it is marked ready for review.

@@ -407,9 +407,9 @@ case "$1 $2" in
     done ;;
   "pr compose")
     case " $* " in *" --edit "*) exec "$(dirname "$0")/gctk-real" "$@" ;; esac
-    owner="$3"; shift 3; head=""; target=""; bodyf=""
+    owner="$3"; shift 3; head=""; target=""
     while [ $# -gt 0 ]; do
-      case "$1" in --head) head="$2"; shift ;; --target) target="$2"; shift ;; --body-file) bodyf="$2"; shift ;; esac
+      case "$1" in --head) head="$2"; shift ;; --target) target="$2"; shift ;; esac
       shift
     done
     # The real command refuses a summary region with no --target as usage.
@@ -420,10 +420,8 @@ case "$1 $2" in
     riders=$(awk -v t="--set merged_target=$branch " '$1 == "lifecycle" && index($0, " --to merged ") && index($0 " ", t) { print $3 }' "$LOGS/scripts.log" | paste -sd, -)
     body="<!-- gc:pr-summary -->composed for $owner at $head<!-- /gc:pr-summary -->${riders:+
 riding: $riders}"
-    outcome=written
-    [ -n "$bodyf" ] && grep -qF "at $head" "$bodyf" && outcome=current
-    jq -n --arg t "feat: $owner (${owner})" --arg b "$body" --arg o "$outcome" \
-      '{title: $t, body: $b, summary: $o, branch_beads: "single", branch_bead_count: 1}' ;;
+    jq -n --arg t "feat: $owner (${owner})" --arg b "$body" \
+      '{title: $t, body: $b, summary: "written", branch_beads: "single", branch_bead_count: 1}' ;;
   "pr draft")
     exit "${STUB_DRAFT_RC:-0}" ;;
   "review ask")

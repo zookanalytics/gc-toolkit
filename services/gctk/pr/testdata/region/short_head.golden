@@ -17,4 +17,4 @@ Keep the gadget's tests.
 - Issue: `tk-a1`
 - Source branch: `polecat/tk-a1`
 - Target: `main`
-- Gates `correctness,triage` signed off pre-open at `abc`. For CI status, see the PR checks.
+- Head `abc`; gates `correctness,triage`; see the PR checks for current status.

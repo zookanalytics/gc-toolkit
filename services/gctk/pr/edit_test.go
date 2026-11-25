@@ -15,10 +15,10 @@ import (
 // world: the bead's PR open from its branch, published by the refinery from
 // the summary the bead held then.
 
-// editRequest is the composition a round's push asks for at head: both
-// sections, with the gates resolved to none, as the refinery publishes.
+// editRequest is the composition a round's push asks for at head, with the
+// gates resolved to none, as the refinery publishes.
 func editRequest() pr.Request {
-	return pr.Request{Head: head, Target: "main", Gates: []pr.Gate{}, Summary: true, BranchBeads: true}
+	return pr.Request{Head: head, Target: "main", Gates: []pr.Gate{}}
 }
 
 // newEditing is the world with the PR's title and body as the refinery
