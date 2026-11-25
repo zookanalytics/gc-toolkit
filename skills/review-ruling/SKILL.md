@@ -58,9 +58,7 @@ next lane need not raise each one in turn.
 
 An ask to bring the branch current, such as a conflict with the target, is
 answered by merging the PR's target into the run's worktree with the call below,
-run there. When the target's history was rewritten after the branch last took
-it, such as by an upstream sync, the call merges from the commit of the target
-the branch took last, so the merge carries only the PR's own change.
+run there.
 
 ```bash
 # >>> gctk-bin
