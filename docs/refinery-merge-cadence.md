@@ -663,7 +663,12 @@ the record, is open or blocked and is assigned to nobody or to the refinery,
 while the saved read shows the PR open with its checks read at its head, an act
 under the record lock decides from the saved read and the store. It reads each
 required check by its newest result at the head: the result in the check suite
-created last that holds one for it, a skip aside.
+created last that holds one for it, a skip aside. A newest result that passed
+stands only while no older suite at the head holds a result the merge's rule
+for required checks reads as failed, one that completed without passing and was
+neither skipped nor cancelled. Such a failure holds the merge though the same
+code passed, so the act reads the check by it, as a failure no code change
+fixes.
 
 - Once every required check passes at the head, it withdraws each red-check
   gate open on the bead, `pr-fix-unmoved.<n>`, `pr-fix-capped.<n>`,
@@ -688,7 +693,8 @@ created last that holds one for it, a skip aside.
   `pr-fix-capped.<n>` in place of a fourth. A deploy's failed check files
   `pr-fix-noncode.<n>`.
 - A required check that timed out, was cancelled, failed to start, wants an
-  action or went stale has the failed jobs of the GitHub Actions run behind it
+  action or went stale, or that a newer run at the head passed after the
+  failure, has the failed jobs of the GitHub Actions run behind the failure
   re-run, once per head and only once that run has finished. The head reads
   re-run once a suite there that holds a required check shows its run at an
   attempt above 1, which GitHub raises in the same suite at a re-run, so no key

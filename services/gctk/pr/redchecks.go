@@ -34,7 +34,11 @@ import (
 // in the newest check suite that holds one for it, a skip aside. A suite keeps
 // a re-run's result in place of the attempt it re-ran, and a head carries a
 // suite for each run of each workflow, such as a draft's skipped run beside the
-// run its ready transition started.
+// run its ready transition started. A newest result that passed stands for the
+// check only while no older suite at the head holds a result the rule for
+// required checks reads as failed (holdsFailed in rules.go). That failure still
+// holds the merge though the same code passed, so the acts take it for a
+// failure no code change fixes and re-run the run that holds it.
 
 // redCap is how many earlier heads may each have drawn a red-check ask before a
 // red head files the pr-fix-capped gate in place of another ask.
@@ -74,37 +78,44 @@ var deployCheck = regexp.MustCompile(`(?i)vercel|netlify|deploy`)
 // finished before GitHub marked it stale.
 var noncodeConclusions = []string{"TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED", "STALE"}
 
-// headCheck is one required check at the saved read's head: its name, its
-// newest result, nil when its every result is a skip, and the suite that holds
-// that result, nil when the read names none.
-type headCheck struct {
-	name   string
-	newest *RequiredRun
-	suite  *SavedSuite
-}
-
-// passing reports whether the check's newest result completed as a success.
-func (h headCheck) passing() bool {
-	return h.newest != nil && h.newest.Status == "COMPLETED" && slices.Contains(passingConclusions, h.newest.Conclusion)
-}
-
-// failed reports whether the check's newest result completed without passing.
-func (h headCheck) failed() bool {
-	return h.newest != nil && h.newest.Status == "COMPLETED" && !slices.Contains(passingConclusions, h.newest.Conclusion)
-}
-
-// noncode reports whether the check's newest result failed for a cause no code
+// headCheck is one required check at the saved read's head: its name, the
+// result the acts read it by, nil when its every result is a skip, the suite
+// that holds that result, nil when the read names none, and whether a newer
+// suite there passed the check, which makes that result a failure no code
 // change fixes.
-func (h headCheck) noncode() bool {
-	return h.failed() && slices.Contains(noncodeConclusions, h.newest.Conclusion)
+type headCheck struct {
+	name        string
+	result      *RequiredRun
+	suite       *SavedSuite
+	passedLater bool
 }
 
-// newestAtHead is each required check the checks part holds a result of, by
-// name, with its newest result: the one in the suite created last, by its
-// creation time and then its id, among those that hold a result for it other
-// than SKIPPED. A result whose suite the part does not list ranks below every
-// listed one.
-func newestAtHead(c *SavedChecks) []headCheck {
+// passing reports whether the check's result completed as a success.
+func (h headCheck) passing() bool {
+	return h.result != nil && h.result.Status == "COMPLETED" && slices.Contains(passingConclusions, h.result.Conclusion)
+}
+
+// failed reports whether the check's result completed without passing.
+func (h headCheck) failed() bool {
+	return h.result != nil && h.result.Status == "COMPLETED" && !slices.Contains(passingConclusions, h.result.Conclusion)
+}
+
+// noncode reports whether the check's result failed for a cause no code change
+// fixes: a conclusion that says so, or a newer suite at the head that passed
+// the check on the same code.
+func (h headCheck) noncode() bool {
+	return h.failed() && (h.passedLater || slices.Contains(noncodeConclusions, h.result.Conclusion))
+}
+
+// resultsAtHead is each required check the checks part holds a result of, by
+// name, with the result the acts read it by. That is its newest result: the
+// one in the suite created last, by its creation time and then its id, among
+// those that hold a result for it other than SKIPPED. A result whose suite the
+// part does not list ranks below every listed one. When the newest result
+// passed and an older suite holds one the rule for required checks reads as
+// failed (holdsFailed), the check is read by the newest such failure, with
+// passedLater set.
+func resultsAtHead(c *SavedChecks) []headCheck {
 	suites := map[int64]*SavedSuite{}
 	for i := range c.Suites {
 		suites[c.Suites[i].ID] = &c.Suites[i]
@@ -120,7 +131,7 @@ func newestAtHead(c *SavedChecks) []headCheck {
 		}
 		return a.ID > b.ID
 	}
-	byName := map[string]*headCheck{}
+	byName, held := map[string]*headCheck{}, map[string]*headCheck{}
 	for i := range c.Runs {
 		r := &c.Runs[i]
 		h := byName[r.Name]
@@ -131,13 +142,21 @@ func newestAtHead(c *SavedChecks) []headCheck {
 		if r.Conclusion == "SKIPPED" {
 			continue
 		}
-		if s := suites[r.Suite]; h.newest == nil || later(s, h.suite) {
-			h.newest, h.suite = r, s
+		s := suites[r.Suite]
+		if h.result == nil || later(s, h.suite) {
+			h.result, h.suite = r, s
+		}
+		if f := held[r.Name]; holdsFailed(*r) && (f == nil || later(s, f.suite)) {
+			held[r.Name] = &headCheck{name: r.Name, result: r, suite: s, passedLater: true}
 		}
 	}
 	var out []headCheck
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
-		out = append(out, *byName[name])
+		h := byName[name]
+		if f := held[name]; f != nil && h.passing() {
+			h = f
+		}
+		out = append(out, *h)
 	}
 	return out
 }
@@ -240,7 +259,7 @@ func decideRed(s redState) redStep {
 	case c.Suites == nil:
 		return s.none("the saved checks hold no check suites yet, which the PR watch's next pass reads")
 	}
-	checks := newestAtHead(c)
+	checks := resultsAtHead(c)
 	green := len(checks) > 0 && !slices.ContainsFunc(checks, func(h headCheck) bool { return !h.passing() })
 	if green {
 		var keys []string
@@ -368,8 +387,8 @@ func (s redState) codeFailure(code []headCheck) redStep {
 	}
 	var logs []string
 	for _, h := range code {
-		if h.newest.URL != "" {
-			logs = append(logs, h.newest.URL)
+		if h.result.URL != "" {
+			logs = append(logs, h.result.URL)
 		}
 	}
 	reason := fmt.Sprintf("Required check(s) failing on PR#%d at head %s: %s.", p.Number, p.Head, checkNames(code))
@@ -381,12 +400,13 @@ func (s redState) codeFailure(code []headCheck) redStep {
 }
 
 // noncodeFailure is the step for required checks that failed at the head for a
-// cause no code change fixes: a re-run of the failed jobs of each GitHub Actions
-// run that holds one, once per head and only once those runs have finished. A
-// head reads re-run once a suite at it that holds a required check shows its
-// run at an attempt above 1, whoever re-ran it. A failure at a head that reads
-// re-run, and one outside any Actions run, files pr-fix-noncode on an approved
-// PR, and an unapproved PR waits for its review.
+// cause no code change fixes, a newer run's pass of the same code among them: a
+// re-run of the failed jobs of each GitHub Actions run that holds one, once per
+// head and only once those runs have finished. A head reads re-run once a suite
+// at it that holds a required check shows its run at an attempt above 1,
+// whoever re-ran it. A failure at a head that reads re-run, and one outside any
+// Actions run, files pr-fix-noncode on an approved PR, and an unapproved PR
+// waits for its review.
 func (s redState) noncodeFailure(failing []headCheck) redStep {
 	p, c := s.pr(), s.o.saved.Checks
 	var runs []int64
@@ -405,6 +425,10 @@ func (s redState) noncodeFailure(failing []headCheck) redStep {
 	_, rerun := reRunBy(c)
 	cause := fmt.Sprintf("PR #%d (%s) has required check(s) %s failing at head %s for a cause no code change fixes",
 		p.Number, p.URL, checkNames(failing), p.Head)
+	if later := slices.DeleteFunc(slices.Clone(failing), func(h headCheck) bool { return !h.passedLater }); len(later) > 0 {
+		cause += fmt.Sprintf(" (%s passed in a newer run at the head, and the merge still waits on the failed result)",
+			checkNames(later))
+	}
 	switch {
 	case len(outside) > 0:
 		return s.gateApproved(cause+fmt.Sprintf(", and %s ran outside any GitHub Actions run, which the city cannot "+
@@ -454,7 +478,7 @@ func (s redState) unreported(checks []headCheck) (SavedSuite, string) {
 		return SavedSuite{}, "no approval stands"
 	case !s.passed:
 		return SavedSuite{}, "no review result passed at the head"
-	case slices.ContainsFunc(checks, func(h headCheck) bool { return h.newest != nil }):
+	case slices.ContainsFunc(checks, func(h headCheck) bool { return h.result != nil }):
 		return SavedSuite{}, "a required check has reported"
 	}
 	for _, x := range c.Suites {

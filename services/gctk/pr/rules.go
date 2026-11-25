@@ -53,6 +53,14 @@ var (
 	silentConclusions  = []string{"SKIPPED", "CANCELLED"}
 )
 
+// holdsFailed reports whether the rule for required checks (checks) reads r as
+// a failed result, which holds the PR: it completed without passing, and is
+// neither skipped nor cancelled.
+func holdsFailed(r RequiredRun) bool {
+	return r.Status == "COMPLETED" && !slices.Contains(passingConclusions, r.Conclusion) &&
+		!slices.Contains(silentConclusions, r.Conclusion)
+}
+
 // checks reads the results of each check run the PR requires at its head, as
 // the check suites there hold them (requiredRuns), by the rule for required
 // checks: each suite holds the check's latest result, a re-run's in place of
@@ -84,7 +92,7 @@ func checks(runs []RequiredRun) []Condition {
 			switch {
 			case r.Status != "COMPLETED":
 				running++
-			case !slices.Contains(passingConclusions, r.Conclusion):
+			case holdsFailed(r):
 				failed++
 				if failure == "" {
 					failure = r.Conclusion

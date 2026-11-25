@@ -206,6 +206,17 @@ func (d *redWorld) stages() []string {
 // unapprove leaves the PR with no review.
 func (d *redWorld) unapprove() { d.pr.Reviews = nil }
 
+// evaluate is the evaluator's answer from the read the PR watch last saved on
+// the bead.
+func (d *redWorld) evaluate(t *testing.T) pr.Answer {
+	t.Helper()
+	ans, err := pr.FromStore(ledger.New(d.store), bead)
+	if err != nil {
+		t.Fatalf("FromStore: %v", err)
+	}
+	return ans
+}
+
 // A required check that failed for a code cause gets one ask for the head,
 // which names the PR, the head, the failing check with its log and the branch
 // to fix, and the review run is poured to take it. A later run at the same
@@ -495,9 +506,11 @@ func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	is(t, f.runRed(t), pr.ActWithdrawn)
 }
 
-// A required check's newest result is the one that stands: a failure in a
-// suite created before one where the check passed asks for nothing, and one in
-// a newer suite asks.
+// A required check is read by its newest result: a failure in a newer suite
+// than a pass asks, and so does one a newer run skipped. A failure in a suite
+// created before one where the check passed still holds the merge, by the rule
+// for required checks, so it is a failure no code change fixes, and the act
+// re-runs the run that holds it.
 func TestTheNewestResultOfACheckIsTheOneActedOn(t *testing.T) {
 	older := gh.CheckSuite{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: 1}
 	newer := gh.CheckSuite{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Run: 102, Attempt: 1}
@@ -506,7 +519,7 @@ func TestTheNewestResultOfACheckIsTheOneActedOn(t *testing.T) {
 		first, then string
 		want        string
 	}{
-		{"a failure a newer run passed", "FAILURE", "SUCCESS", ""},
+		{"a failure a newer run passed", "FAILURE", "SUCCESS", pr.ActRerun},
 		{"a pass a newer run failed", "SUCCESS", "FAILURE", pr.ActAsked},
 		{"a failure a newer run skipped", "FAILURE", "SKIPPED", pr.ActAsked},
 	} {
@@ -520,6 +533,64 @@ func TestTheNewestResultOfACheckIsTheOneActedOn(t *testing.T) {
 				t.Fatalf("the act made %+v, want %q", red, c.want)
 			}
 		})
+	}
+}
+
+// laterPass sets the head's two suites: the tests run, at attempt, where test
+// ended with first, and a newer run where test passed.
+func (d *redWorld) laterPass(t *testing.T, attempt int, first string) {
+	t.Helper()
+	d.pr.Suites[head] = []gh.CheckSuite{
+		{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Run: 102, Attempt: 1,
+			Runs: []gh.CheckRun{check("test", "SUCCESS")}},
+		{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: attempt,
+			Runs: []gh.CheckRun{check("test", first), check("test-macos", "SUCCESS")}},
+	}
+}
+
+// A failure a newer run at the head passed holds the merge as long as its
+// suite holds it, so the act re-runs that suite's run, once for the head, and
+// the merge and the acts read the head green together once the re-run passes:
+// the evaluator holds no failed check, and the red-check gates are withdrawn
+// then and not before. A re-run that fails again asks a person on an approved
+// PR, and names the newer pass.
+func TestAFailureANewerRunPassedIsReRunUntilTheMergeReadsItPassed(t *testing.T) {
+	d := newRed(t)
+	d.laterPass(t, 1, "FAILURE")
+	is(t, d.runRed(t), pr.ActRerun)
+	if got := d.rerunAsks(); !slices.Equal(got, []string{"101"}) {
+		t.Fatalf("the act re-ran %v, want run 101, which holds the failure", got)
+	}
+	d.laterPass(t, 2, "SUCCESS")
+	if red := d.runRed(t); red.Action != "" || len(d.rerunAsks()) != 1 || len(d.gates.list()) != 0 {
+		t.Fatalf("once the re-run passed the act made %+v, re-ran %v and filed %v", red, d.rerunAsks(), d.gates.list())
+	}
+	if ans := d.evaluate(t); slices.ContainsFunc(ans.Conditions, func(c pr.Condition) bool {
+		return c.Kind == pr.KindCheckFailed || c.Kind == pr.KindCheckPending
+	}) {
+		t.Fatalf("once the re-run passed the evaluator still holds the checks: %+v", ans.Conditions)
+	}
+
+	e := newRed(t)
+	e.gateOn(t, "tk-g1", "pr-fix-noncode.7")
+	e.laterPass(t, 1, "FAILURE")
+	if red := e.runRed(t); red.Action != "" || len(e.gates.withdrawals()) != 0 {
+		t.Fatalf("while the older suite holds the failure the act made %+v and withdrew %v", red, e.gates.withdrawals())
+	}
+	if ans := e.evaluate(t); !slices.ContainsFunc(ans.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindCheckFailed }) {
+		t.Fatalf("the evaluator does not hold the failure the act acts on: %+v", ans.Conditions)
+	}
+	e.laterPass(t, 2, "SUCCESS")
+	is(t, e.runRed(t), pr.ActWithdrawn)
+
+	f := newRed(t)
+	f.laterPass(t, 2, "FAILURE")
+	is(t, f.runRed(t), pr.ActGated)
+	if got := f.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(f.rerunAsks()) != 0 {
+		t.Fatalf("a failure that failed again at its re-run filed %v and re-ran %v, want the gate alone", got, f.rerunAsks())
+	}
+	if msg := f.gates.messages[0]; !strings.Contains(msg, "test passed in a newer run at the head") {
+		t.Fatalf("the gate does not name the newer pass: %s", msg)
 	}
 }
 
