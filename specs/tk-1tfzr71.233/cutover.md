@@ -38,7 +38,7 @@ writer below has written `hold:mayor` since.
    ```bash
    git -C "$(gc gc-toolkit scripts-dir)/../.." merge-base --is-ancestor <merge commit> HEAD && echo "pack live"
    GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-   "$GCTK" bead move-placement-hold --help >/dev/null && echo "gctk has the verb"
+   "$GCTK" bead --help | grep -q '^  move-placement-hold ' && echo "gctk has the verb"
    ```
 
    `reconcile-rig-checkouts` fast-forwards the checkout every 15 minutes, and

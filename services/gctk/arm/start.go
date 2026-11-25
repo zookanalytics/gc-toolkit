@@ -244,9 +244,9 @@ func (a *Arms) retire(id string, act Act, dryRun bool) Act {
 // renders for a pool's routed demand, so the arm sends what the pool would
 // serve. Beside it the start holds back what bd cannot judge: a waits-for edge
 // of the bead's own, which gctk bead holds answers unjudged, and a wait edge
-// into another store, which bd never holds a bead on. It also holds a bead that
-// carries one of Gas City's hold labels in any spelling, as Gas City's hook
-// does after bd's exact comparison.
+// into another store, which bd never holds a bead on. It also holds a bead a
+// hold holds, whatever its value and in any spelling (holdLabel), as Gas City
+// drops a held row from a pool's demand, since no bd flag names every hold.
 func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr, readyErr error, ready bool) (Act, bool) {
 	switch status := r.Status(); {
 	case arm != nil && arm.Malformed() != "":

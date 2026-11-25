@@ -18,7 +18,7 @@ import (
 var (
 	hqRig   = gascity.Rig{Name: "city", Path: "/city", Prefix: "hq", HQ: true}
 	toolRig = gascity.Rig{Name: "gc-toolkit", Path: "/rigs/gc-toolkit", Prefix: "tk"}
-	napRig  = gascity.Rig{Name: "sleepy", Path: "/rigs/sleepy", Prefix: "sl", Suspended: true}
+	napRig  = gascity.Rig{Name: "sleepy", Path: "/rigs/sleepy", Prefix: "zz", Suspended: true}
 )
 
 // moveCity is a city of three stores, the last of a suspended rig, and the
@@ -106,7 +106,7 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 		s.Put(b)
 	}
 	c.stores[hqRig.Store()].Put(fake.Bead{ID: "hq-old", Status: "open", Labels: []string{"hold:mayor"}})
-	c.stores[napRig.Store()].Put(fake.Bead{ID: "sl-old", Status: "deferred", Labels: []string{"hold:mayor"}})
+	c.stores[napRig.Store()].Put(fake.Bead{ID: "zz-old", Status: "deferred", Labels: []string{"hold:mayor"}})
 
 	out := c.run(t, false)
 	tk := storeOf(out, "gc-toolkit")
@@ -155,7 +155,7 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 			}
 		}
 	}
-	for rig, id := range map[string]string{"city": "hq-old", "sleepy": "sl-old"} {
+	for rig, id := range map[string]string{"city": "hq-old", "sleepy": "zz-old"} {
 		if got := storeOf(out, rig); !slices.Equal(got.Moved, []string{id}) || got.Unread != "" {
 			t.Errorf("%s moved %v (unread %q), want %s: the HQ and a suspended rig are stores of the city", rig, got.Moved, got.Unread, id)
 		}
