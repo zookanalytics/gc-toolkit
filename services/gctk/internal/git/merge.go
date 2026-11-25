@@ -220,15 +220,17 @@ func CommitTree(dir, tree string, parents []string, message string) (string, err
 
 // Merge merges commit into the checkout dir sits in with message, as
 // `git merge` does, so the merge takes git's own merge base and the
-// repository's settings, signing among them. When git stops on a conflict it
-// leaves its merge state, MERGE_HEAD naming commit, for a person to finish,
-// and conflicted lists the paths it left unmerged. Any other failure is an
-// error carrying git's message.
+// repository's settings, signing among them. It commits the merge whatever a
+// branch's merge options say, since `--no-commit` or `--squash` there would
+// leave a clean merge uncommitted. When git stops on a conflict it leaves its
+// merge state, MERGE_HEAD naming commit, for a person to finish, and
+// conflicted lists the paths it left unmerged. Any other failure is an error
+// carrying git's message.
 func Merge(dir, commit, message string) (conflicted []string, err error) {
 	if !IsObjectID(commit) {
 		return nil, fmt.Errorf("git merge: %q is not a full object name", commit)
 	}
-	cmd := exec.Command("git", "-C", dir, "merge", "--no-edit", "-m", message, commit)
+	cmd := exec.Command("git", "-C", dir, "merge", "--no-edit", "--commit", "--no-squash", "-m", message, commit)
 	var said bytes.Buffer
 	cmd.Stdout = &said
 	cmd.Stderr = &said

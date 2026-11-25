@@ -393,6 +393,28 @@ func TestBringCurrentChecksTheBaseItIsGiven(t *testing.T) {
 	}
 }
 
+func TestBringCurrentCommitsTheMergeWhateverTheBranchsMergeOptions(t *testing.T) {
+	for _, opt := range []string{"--no-commit", "--squash"} {
+		t.Run(opt, func(t *testing.T) {
+			s := newScratch(t)
+			s.oldLineage()
+			s.branch()
+			head := s.ownChange()
+			s.commit(s.up, "u1", map[string]string{"up1.txt": "u1\n"})
+			tip := s.push()
+			s.git(s.work, "config", "branch.pr.mergeOptions", opt)
+
+			cur := bring(t, s.work)
+			if got := s.git(s.work, "rev-parse", "HEAD^@"); got != head+"\n"+tip || cur.Head != s.git(s.work, "rev-parse", "HEAD") {
+				t.Errorf("HEAD's parents are %q and Head is %s, want the merge of %s and the tip committed", got, cur.Head, head)
+			}
+			if exec.Command("git", "-C", s.work, "rev-parse", "-q", "--verify", "MERGE_HEAD").Run() == nil {
+				t.Error("git left its merge state")
+			}
+		})
+	}
+}
+
 func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	s := newScratch(t)
 	old := s.oldLineage()
