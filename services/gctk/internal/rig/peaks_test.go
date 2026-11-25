@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,12 +32,13 @@ func TestPeaksWeighARunByTheLastTenRunsOfItsOwnCommand(t *testing.T) {
 	add(ScopeAffected, "make test-affected", 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20, 7<<20)
 	weight(ScopeFull, "make test", 12<<30, true)
 	weight(ScopeAffected, "make test-affected", 7<<20, true)
+	weight(ScopeFull, "go test ./two", 12<<30, false)
 
 	add(ScopeFull, "make test", 90, 80, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
 	add(ScopeFull, "go test ./one", 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
 	weight(ScopeFull, "make test", 14, true)
 	weight(ScopeFull, "go test ./one", 1, true)
-	weight(ScopeFull, "go test ./two", 12<<30, false)
+	weight(ScopeFull, "go test ./two", 14, false)
 
 	f := filepath.Join(common, "gc-rig-memory", CheckTest+"-"+ScopeFull)
 	b, _ := os.ReadFile(f)
@@ -46,24 +48,43 @@ func TestPeaksWeighARunByTheLastTenRunsOfItsOwnCommand(t *testing.T) {
 	weight(ScopeFull, "make test", 14, true)
 }
 
-func TestPeaksTrimToTheLastRunsTheyKeepAndMakeNoGitDirectory(t *testing.T) {
+// The runs of other commands push a command's own runs out only once
+// peakCommands others have run since, through the trim too.
+func TestPeaksKeepTheLastRunsOfEachOfTheLastCommandsAndMakeNoGitDirectory(t *testing.T) {
 	common := t.TempDir()
 	p := NewPeaks(common)
 	at := time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC)
-	for i := 0; i <= 2*peakKeep; i++ {
-		if err := p.Add(CheckLint, "", "lint", at, int64(i)); err != nil {
-			t.Fatal(err)
+	add := func(command string, peak int64, runs int) {
+		t.Helper()
+		for range runs {
+			if err := p.Add(CheckTest, ScopeFull, command, at, peak); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	b, err := os.ReadFile(filepath.Join(common, "gc-rig-memory", CheckLint))
+	weight := func(command string, want int64, wantOwn bool) {
+		t.Helper()
+		if w, own, err := p.Weight(CheckTest, ScopeFull, command); err != nil || w != want || own != wantOwn {
+			t.Fatalf("Weight(%q) = %d, %v, %v; want %d, %v", command, w, own, err, want, wantOwn)
+		}
+	}
+	add("heavy", 12<<30, 1)
+	add("light", 1<<20, 2*peakRuns*peakCommands)
+	weight("heavy", 12<<30, true)
+	b, err := os.ReadFile(filepath.Join(common, "gc-rig-memory", CheckTest+"-"+ScopeFull))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	want := " " + "100 " + commandKey("lint")
-	if len(lines) != peakKeep || !strings.HasSuffix(lines[peakKeep-1], want) {
-		t.Fatalf("after %d runs the file holds %d lines ending %q; want the last %d", 2*peakKeep+1, len(lines), lines[len(lines)-1], peakKeep)
+	if lines := strings.Split(strings.TrimSpace(string(b)), "\n"); len(lines) != peakRuns+1 {
+		t.Fatalf("after %d runs the file holds %d lines; want the light command's last %d and the heavy one's", 2*peakRuns*peakCommands+1, len(lines), peakRuns)
 	}
+	for i := range peakCommands - 2 {
+		add(fmt.Sprintf("other %d", i), 2<<20, 1)
+	}
+	weight("heavy", 12<<30, true)
+	add("one more", 2<<20, 1)
+	weight("heavy", 2<<20, false)
+
 	gone := filepath.Join(t.TempDir(), "moved-away", ".git")
 	if err := NewPeaks(gone).Add(CheckLint, "", "lint", at, 1); err == nil {
 		t.Fatal("Add into a git directory that is gone succeeded")

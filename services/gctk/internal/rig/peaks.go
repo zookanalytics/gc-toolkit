@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,12 +24,13 @@ import (
 // any kept run of its check and scope used.
 type Peaks struct{ dir string }
 
-// peakRuns is how many of a command's last runs its weight reads. A file
-// keeps the last peakKeep runs of its check and scope: the run that takes it
-// past twice that many trims it back to them.
+// The runs a file keeps are the last peakRuns runs of each of the last
+// peakCommands commands to run, so the runs of other commands push a
+// command's own runs out only once that many others have run since. The run
+// whose line takes a file past twice the most it keeps trims it back to them.
 const (
-	peakRuns = 10
-	peakKeep = 50
+	peakRuns     = 10
+	peakCommands = 50
 )
 
 // NewPeaks is the peaks kept in the git common directory common.
@@ -47,10 +49,10 @@ func commandKey(command string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// Weight is the most memory one of the last peakRuns runs of command used,
-// among the kept runs of check with scope, and own is true. When none of
-// those runs is command's, it is the most any of them used, own is false, and
-// it is zero when none is kept. A line it cannot read is passed over.
+// Weight is the most memory a kept run of command used, among the kept runs
+// of check with scope, and own is true. When none of those runs is command's,
+// it is the most any of them used, own is false, and it is zero when none is
+// kept.
 func (p *Peaks) Weight(check, scope, command string) (weight int64, own bool, err error) {
 	lines, err := p.lines(check, scope)
 	if err != nil {
@@ -58,9 +60,32 @@ func (p *Peaks) Weight(check, scope, command string) (weight int64, own bool, er
 	}
 	key := commandKey(command)
 	var most int64
-	var mine []int64
-	for _, line := range lines {
-		f := strings.Fields(line)
+	for _, r := range kept(lines) {
+		most = max(most, r.peak)
+		if r.command == key {
+			weight, own = max(weight, r.peak), true
+		}
+	}
+	if !own {
+		return most, false, nil
+	}
+	return weight, true, nil
+}
+
+// peakRun is one line of a file of peaks.
+type peakRun struct {
+	line    string
+	peak    int64
+	command string
+}
+
+// kept is the runs a file keeps of lines, in their order. A line it cannot
+// read is left out.
+func kept(lines []string) []peakRun {
+	var runs []peakRun
+	count := map[string]int{}
+	for i := len(lines) - 1; i >= 0; i-- {
+		f := strings.Fields(lines[i])
 		if len(f) != 3 {
 			continue
 		}
@@ -68,18 +93,15 @@ func (p *Peaks) Weight(check, scope, command string) (weight int64, own bool, er
 		if err != nil {
 			continue
 		}
-		most = max(most, n)
-		if f[2] == key {
-			mine = append(mine, n)
+		c, seen := count[f[2]]
+		if (!seen && len(count) == peakCommands) || c == peakRuns {
+			continue
 		}
+		count[f[2]] = c + 1
+		runs = append(runs, peakRun{line: lines[i], peak: n, command: f[2]})
 	}
-	if len(mine) == 0 {
-		return most, false, nil
-	}
-	for _, n := range mine[max(0, len(mine)-peakRuns):] {
-		weight = max(weight, n)
-	}
-	return weight, true, nil
+	slices.Reverse(runs)
+	return runs
 }
 
 func (p *Peaks) lines(check, scope string) ([]string, error) {
@@ -116,14 +138,18 @@ func (p *Peaks) Add(check, scope, command string, at time.Time, peak int64) erro
 		return werr
 	}
 	lines, err := p.lines(check, scope)
-	if err != nil || len(lines) <= 2*peakKeep {
+	if err != nil || len(lines) <= 2*peakRuns*peakCommands {
 		return err
+	}
+	var keep strings.Builder
+	for _, r := range kept(lines) {
+		keep.WriteString(r.line + "\n")
 	}
 	tmp, err := os.CreateTemp(p.dir, filepath.Base(path)+".*")
 	if err != nil {
 		return err
 	}
-	_, werr = tmp.WriteString(strings.Join(lines[len(lines)-peakKeep:], "\n") + "\n")
+	_, werr = tmp.WriteString(keep.String())
 	if cerr := tmp.Close(); werr == nil {
 		werr = cerr
 	}
