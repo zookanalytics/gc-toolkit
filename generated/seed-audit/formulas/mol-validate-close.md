@@ -33,15 +33,14 @@ through the arm its ask wrote, and the run it starts carries that answer out.
    that there is nothing to do: close the subject with `gc.work_outcome=no-op`
    and a note recording what you checked. Any doubt — the premise does not
    hold, there is real work, or the call is the operator's — leaves the bead
-   OPEN, files a human gate on it, and arms this workflow to run on the bead
-   again once the operator answers. That run carries the answer out: it closes
-   the subject when the answer accepts the close, and sends the work on when the
-   answer redirects it. This workflow is authorized to close the SUBJECT, which
-   is the one bead it closes, only on its own confident check or on the
-   operator's answer to its ask, and to send the subject where that answer
-   directs. It never closes a bead that carries a `merge_result` (that is the
-   refinery's, closed on a verified merge); such a bead is put to the operator
-   and takes no arm, because the merge cadence drives it.
+   OPEN and files a human gate on it. The ask arms this workflow to run on the
+   bead again once the operator answers, and that run carries the answer out.
+   An answer that accepts the close closes the subject. An answer that
+   redirects the work sends it on. This workflow is authorized to close the
+   SUBJECT, which is the one bead it closes. It closes it only on its own
+   confident check or on the operator's answer to its ask. It never closes a
+   bead that carries a `merge_result` (that is the refinery's, closed on a
+   verified merge). Such a bead is put to the operator and takes no arm.
 4. **Close your own step beads** through assets/scripts/claim-close.sh.
 
 
