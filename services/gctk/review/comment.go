@@ -3,6 +3,7 @@ package review
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -15,6 +16,23 @@ import (
 // commit, that the PR's summary carries its fix, or that the head carries no
 // change for it. The comment opens with its mark, which names the run and the
 // head, so a retry finds the comment and edits it rather than posting a second.
+//
+// GitHub refuses a comment over 65,536 characters, which no retry of the post
+// gets past, so the comment stays within commentBudget. A comment that would
+// pass it cuts each finding's message, each ask's reason, each ruling's reason
+// and each lane's note to the person, at the loosest of commentCuts under which
+// it fits. Past the tightest, it lists the points in order for as long as they
+// fit and counts the ones it leaves out. An answer cut keeps its opening, which
+// names the commit that fixes the point.
+
+// commentBudget is the most bytes the head's comment takes. A character is
+// never fewer than one byte, and the writer of the city's posts adds the
+// city's mark after the comment.
+const commentBudget = 60000
+
+// commentCuts are the lengths, in characters, the comment cuts its texts to,
+// loosest first, 0 for no cut.
+var commentCuts = []int{0, 1500, 400, 200}
 
 // Mark is the line that opens the comment of the run root at head.
 func Mark(root, head string) string {
@@ -31,23 +49,55 @@ func Comment(run *Run, n int, asks []Ask) string {
 	if it == nil || it.Triage == nil {
 		return ""
 	}
-	round, pushed := it.Rulings(), it.Pushed()
-	var askRulings []Ruling
-	for _, r := range round {
+	c := commenting{run: run, n: n, it: it, asks: asks, round: it.Rulings(), pushed: it.Pushed()}
+	for _, r := range c.round {
 		if r.Ask != "" {
-			askRulings = append(askRulings, r)
+			c.askRulings = append(c.askRulings, r)
 		}
 	}
-	if len(it.Lanes) == 0 && len(askRulings) == 0 {
+	if len(it.Lanes) == 0 && len(c.askRulings) == 0 {
 		return ""
 	}
+	points := len(c.askRulings)
+	for _, ln := range it.Lanes {
+		points += len(ln.Findings)
+	}
+	for _, cut := range commentCuts {
+		if body := c.render(cut, points); len(body) <= commentBudget {
+			return body
+		}
+	}
+	tightest := commentCuts[len(commentCuts)-1]
+	shown := sort.Search(points, func(k int) bool { return len(c.render(tightest, k+1)) > commentBudget })
+	return c.render(tightest, shown)
+}
+
+// commenting is one head's comment as it is rendered: the run, the iteration
+// and its rulings, the head its round pushed, the asks on the bead and the
+// rulings of the asks the round took.
+type commenting struct {
+	run        *Run
+	n          int
+	it         *Iteration
+	asks       []Ask
+	round      []Ruling
+	pushed     string
+	askRulings []Ruling
+}
+
+// render is the comment with each text cut to cut characters, 0 for none,
+// listing the first shown points, each lane's findings in turn and then the
+// asks, and counting the rest.
+func (c commenting) render(cut, shown int) string {
+	it, round, pushed := c.it, c.round, c.pushed
 	head := it.Triage.Head
+	listed := 0
 	var b strings.Builder
-	fmt.Fprintln(&b, Mark(run.Root, head))
+	fmt.Fprintln(&b, Mark(c.run.Root, head))
 	fmt.Fprintf(&b, "**Review at `%s`**: %s\n\n", short(head), summary(it))
 	for _, ln := range it.Lanes {
 		if ln.NeedsYou != "" {
-			fmt.Fprintf(&b, "**Needs you (%s):** %s\n\n", ln.Check, oneLine(ln.NeedsYou))
+			fmt.Fprintf(&b, "**Needs you (%s):** %s\n\n", ln.Check, clip(oneLine(ln.NeedsYou), cut))
 		}
 	}
 	for _, ln := range it.Lanes {
@@ -68,38 +118,77 @@ func Comment(run *Run, n int, asks []Ask) string {
 		fmt.Fprintln(&b)
 	}
 	for _, ln := range it.Lanes {
-		if len(ln.Findings) == 0 {
+		if len(ln.Findings) == 0 || listed >= shown {
 			continue
 		}
 		fmt.Fprintf(&b, "<details><summary>%s: %s, %s</summary>\n\n", ln.Check, ln.Verdict, grades(ln))
 		for _, f := range bySeverity(ln.Findings) {
+			if listed >= shown {
+				break
+			}
+			listed++
 			grade := f.Severity
 			if grade == "" {
 				grade = "ungraded"
 			}
-			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, oneLine(f.Message))
+			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, clip(oneLine(f.Message), cut))
 			r, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
-			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, pushed))
+			fmt.Fprintf(&b, "  - %s\n", answer(clipped(r, cut), ok, pushed))
 		}
 		fmt.Fprintln(&b, "\n</details>")
 		fmt.Fprintln(&b)
 	}
-	if len(askRulings) > 0 {
+	if len(c.askRulings) > 0 && listed < shown {
 		fmt.Fprintln(&b, "**Asks the round took**")
 		fmt.Fprintln(&b)
-		for _, r := range askRulings {
+		for _, r := range c.askRulings {
+			if listed >= shown {
+				break
+			}
+			listed++
 			what := r.Ask
-			for _, a := range asks {
+			for _, a := range c.asks {
 				if a.ID == r.Ask && a.Reason != "" {
-					what = fmt.Sprintf("%s (%s)", oneLine(a.Reason), r.Ask)
+					what = fmt.Sprintf("%s (%s)", clip(oneLine(a.Reason), cut), r.Ask)
 				}
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(r, true, pushed), r))
+			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(clipped(r, cut), true, pushed), r))
 		}
 		fmt.Fprintln(&b)
 	}
-	fmt.Fprintf(&b, "<sub>Review run %s, iteration %d, into %s.</sub>\n", run.Root, n, run.Target)
+	total := len(c.askRulings)
+	for _, ln := range it.Lanes {
+		total += len(ln.Findings)
+	}
+	switch left := total - listed; {
+	case left == 1:
+		fmt.Fprintln(&b, "1 more point is left out here to fit the size GitHub allows a comment.")
+		fmt.Fprintln(&b)
+	case left > 1:
+		fmt.Fprintf(&b, "%d more points are left out here to fit the size GitHub allows a comment.\n\n", left)
+	}
+	fmt.Fprintf(&b, "<sub>Review run %s, iteration %d, into %s.</sub>\n", c.run.Root, c.n, c.run.Target)
 	return b.String()
+}
+
+// clip is s cut to at most n characters, at a word boundary when one falls in
+// the second half, with an ellipsis marking the cut. A cut of 0 leaves s whole.
+func clip(s string, n int) string {
+	rs := []rune(s)
+	if n <= 0 || len(rs) <= n {
+		return s
+	}
+	h := string(rs[:n])
+	if i := strings.LastIndexAny(h, " \t"); i >= 0 && len([]rune(h[:i])) >= n/2 {
+		h = h[:i]
+	}
+	return strings.TrimRight(h, " \t") + "…"
+}
+
+// clipped is r with its reason cut to n characters.
+func clipped(r Ruling, n int) Ruling {
+	r.Reason = clip(oneLine(r.Reason), n)
+	return r
 }
 
 // summary is the comment's first sentence: each lane's verdict, and what the

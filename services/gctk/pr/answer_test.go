@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -42,8 +43,20 @@ func (p *posts) take(verb string) error {
 	return p.fail[verb]
 }
 
+// tooLong is GitHub's refusal of a comment over 65,536 characters, the city's
+// mark included.
+func tooLong(body string) error {
+	if utf8.RuneCountInString(body+"\n\n"+cityMark) > 65536 {
+		return errors.New("gh: Validation Failed: body is too long (maximum is 65536 characters) (HTTP 422)")
+	}
+	return nil
+}
+
 func (p *posts) Comment(_, _ string, _ int, body string) error {
 	if err := p.take("comment"); err != nil || p.lost["comment"] {
+		return err
+	}
+	if err := tooLong(body); err != nil {
 		return err
 	}
 	p.next++
@@ -57,6 +70,9 @@ func (p *posts) Edit(_, _ string, id int64, body string) error {
 	if err := p.take("edit"); err != nil {
 		return err
 	}
+	if err := tooLong(body); err != nil {
+		return err
+	}
 	for i := range p.pr.Comments {
 		if p.pr.Comments[i].ID == id {
 			p.pr.Comments[i].Body = body + "\n\n" + cityMark
@@ -68,6 +84,9 @@ func (p *posts) Edit(_, _ string, id int64, body string) error {
 
 func (p *posts) Reply(_, thread, body string) error {
 	if err := p.take("reply"); err != nil || p.lost["reply"] {
+		return err
+	}
+	if err := tooLong(body); err != nil {
 		return err
 	}
 	for i := range p.pr.Threads {
@@ -390,6 +409,25 @@ func TestAReplyThePRDoesNotShowLeavesThePostUnmarked(t *testing.T) {
 				t.Fatal("the post run again did not reply once, mark the post and resolve its thread")
 			}
 		})
+	}
+}
+
+// A round that rules many posts with long answers still posts the head's
+// comment, within the size GitHub allows, and answers each post.
+func TestManyLongAnswersFitTheHeadsComment(t *testing.T) {
+	d := newRounds(t)
+	var rs []review.Ruling
+	for i := range 40 {
+		id := int64(100 + i)
+		url := fmt.Sprintf("%s#issuecomment-%d", prURL, id)
+		d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: id, NodeID: fmt.Sprintf("IC_%d", id), URL: url,
+			Author: "operator", Body: "a point", ViewerReactions: []string{"EYES"}})
+		ask := d.ask(t, "Conversation comment", url, "2026-11-12T03:00:00Z")
+		rs = append(rs, review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: strings.Repeat("x", 1800)})
+	}
+	d.rule(t, 1, head, "", rs...)
+	if got := d.posted(t); got.Comment != "posted" || len(got.Marked) != 40 {
+		t.Fatalf("the round's post of 40 long answers: comment %q, %d posts marked", got.Comment, len(got.Marked))
 	}
 }
 
