@@ -25,6 +25,7 @@ echo "# identity"
 fresh
 run identity
 eq "$RC" 0 "a set GC_AGENT passes"
+has "$OUT" "polls as" "…and names the identity it polls as"
 GC_AGENT="" run identity
 eq "$RC" 1 "an empty GC_AGENT exits 1"
 has "$(logged scripts)" "patrol-finding --scope refinery-findings --key refinery-empty-identity" "…and files a patrol finding"
@@ -37,6 +38,7 @@ branch_with polecat/b b.txt >/dev/null
 prepared b polecat/b
 run end
 eq "$RC" 0 "end exits 0"
+has "$OUT" "no tree is left under" "…and says no tree is left"
 [ ! -e "$HOME_DIR/worktrees/a" ] && [ ! -e "$HOME_DIR/worktrees/b" ] && rt_ok "every tree under the home is removed" || rt_bad "every tree under the home is removed"
 hasnt "$(logged gc)" "bd " "…and the store is not written"
 fresh
