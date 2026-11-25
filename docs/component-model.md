@@ -246,12 +246,7 @@ never recycles it; static, reads `pack.toml` and the resolved agent prompts),
 store's schema enforces the wisp auxiliary cascade — the constraint both
 removes a deleted wisp's auxiliary rows on the bulk delete path and refuses a
 write naming a wisp that does not exist, so a store without it accumulates
-rows no wisp reaches and reports nothing), and `doctor/check-session-store-scope` (a live
-agent's store environment names its own scope: the running pane process is read
-for the store keys, which must agree with the rig in the session's own
-identity, and the session environment is read for the warm-respawn half, where
-`respawn-pane` takes no env argument and a store key the tmux server holds
-globally reaches the next process unless the session marks it removed), and
+rows no wisp reaches and reports nothing), and
 `doctor/check-blocked-work-armed` (the complement to `check-wait-is-an-edge`: a
 blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
 review/step/workflow bead or a merge anchor — must carry a dispatch path,
