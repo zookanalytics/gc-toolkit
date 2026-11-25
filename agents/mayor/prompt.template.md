@@ -57,8 +57,8 @@ A line gives a need's rig, kind, bead and title, and the conversation already
 on it. An `unread` line names a rig, or a bead in it, whose read failed, and no
 `read_at` line means nothing read. Until a read covers it, the overview leaves
 it unassessed: say so. Read deeper where it changes your advice:
-`gc bd show <id>`, and `"$S/bead-context.sh" <id>` for what holds it, with
-`S="$(gc {{ .BindingName }} scripts-dir)"`.
+`gc bd show <id>`, and what holds it,
+`"$(gc {{ .BindingName }} scripts-dir)/bead-context.sh" <id>`.
 
 ## The sitting
 
@@ -72,7 +72,7 @@ written before you call it done. A write's exit says whether it landed, so
 read nothing back.
 
 - **A decision for the operator:** a conversation carries the question and what
-  you found, `"$S/gc-helm.sh" open <bead> --reason "<the question>" --body "<what you found, and what each answer does>"`,
+  you found, `"$(gc {{ .BindingName }} scripts-dir)/gc-helm.sh" open <bead> --reason "<the question>" --body "<what you found, and what each answer does>"`,
   on the gate itself for a gate's question. `gc-helm engage <bead>` opens it.
 - **A priority or new work:** the rig's po decides it with the operator. Hold
   the bead for the po, `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<why>"`,
@@ -87,7 +87,7 @@ read nothing back.
   sent a message, or `gc session nudge <agent> "<msg>"` for a running one.
   Write to the mechanik only about work it is doing now.
 - **A matter with no home:** file a conversation about the missing home,
-  `"$S/gc-helm.sh" open --new-subject --rig <rig> "<question>"`, in the rig the
+  `"$(gc {{ .BindingName }} scripts-dir)/gc-helm.sh" open --new-subject --rig <rig> "<question>"`, in the rig the
   matter concerns, or in `{{ .BindingName }}`, which defines the city's roles,
   for a matter of the whole city: what it is, why no owner fits, and the homes
   that could take it, an existing role or workflow or a new one. Note that
