@@ -1048,3 +1048,50 @@ func TestRigTheRunGetsWhatTheWaitLeftOfItsTimeout(t *testing.T) {
 		t.Fatalf("a run of 2.4s after a 1s wait, within 3s = %d, want %d timed out; stderr:\n%s", code, rigExitMachine, errs)
 	}
 }
+
+// A setup or build reads whether its checkout is clean once it holds its
+// slots, so what the caller changes there while the run waits is kept.
+func TestRigABuildKeepsWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv(rig.SlotsVar, "1")
+	old := rig.SlotPoll
+	rig.SlotPoll = 20 * time.Millisecond
+	t.Cleanup(func() { rig.SlotPoll = old })
+	l, ok, err := host.Local().Lock(f.slot(0))
+	if err != nil || !ok {
+		t.Fatalf("Lock = %v, %v", ok, err)
+	}
+	type result struct {
+		code int
+		errs string
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out, errb bytes.Buffer
+		code := Run([]string{"rig", "build", "--command", "true"}, "", &out, &errb)
+		done <- result{code, errb.String()}
+	}()
+	queue := filepath.Join(f.repo, ".git", "gate-slots", "queue.lock")
+	for until := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if _, waiting, _ := host.Local().Holder(queue); waiting {
+			break
+		}
+		if time.Now().After(until) {
+			l.Unlock()
+			t.Fatalf("the build never waited for the slot; it ended %+v", <-done)
+		}
+	}
+	f.write("a.txt", "edited while the build waited\n")
+	f.write("draft.txt", "made while the build waited\n")
+	l.Unlock()
+	r := <-done
+	if r.code != 0 || strings.Contains(r.errs, "put back") {
+		t.Fatalf("build = %d, want 0 and nothing put back; stderr:\n%s", r.code, r.errs)
+	}
+	if b, err := os.ReadFile(filepath.Join(f.repo, "a.txt")); err != nil || string(b) != "edited while the build waited\n" {
+		t.Fatalf("a.txt = %q, %v; want the edit made while the build waited", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "draft.txt")); err != nil {
+		t.Fatalf("the file made while the build waited: %v", err)
+	}
+}

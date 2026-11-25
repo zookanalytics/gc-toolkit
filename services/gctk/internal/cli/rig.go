@@ -362,13 +362,15 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	if ok, reason := rig.Parses(o.command); !ok {
 		return machine("%s; the command is %q", reason, o.command)
 	}
-	// A status git cannot read proves nothing clean, so nothing is put back.
-	before, err := co.Dirty()
-	clean := err == nil && before == ""
 	held, runFor, code, ended := rigTake(verb, co, o.timeout, say, machine)
 	if ended {
 		return code
 	}
+	// The checkout is read once the slots are held, as the command starts, so
+	// a change made to it while the run waited is the caller's and is kept. A
+	// status git cannot read proves nothing clean, so nothing is put back.
+	before, err := co.Dirty()
+	clean := err == nil && before == ""
 	say("running %s", o.command)
 	out := rig.Run(co.Top, o.command, runFor, stdout, stderr)
 	held.Release()
