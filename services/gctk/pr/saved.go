@@ -83,15 +83,11 @@ type SavedChecks struct {
 }
 
 // SavedSuite is one check suite at the head: its id, its own status, when
-// GitHub created it, the GitHub Actions run behind it with that run's attempt,
-// both 0 when no Actions run is behind it, and how many check runs it holds,
-// required or not.
+// GitHub created it, and how many check runs it holds, required or not.
 type SavedSuite struct {
 	ID        int64  `json:"id"`
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
-	Run       int64  `json:"run"`
-	Attempt   int    `json:"attempt"`
 	CheckRuns int    `json:"check_runs"`
 }
 

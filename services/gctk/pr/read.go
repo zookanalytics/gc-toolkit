@@ -319,8 +319,7 @@ func requiredRuns(suites []gh.CheckSuite) []RequiredRun {
 func savedSuites(suites []gh.CheckSuite) []SavedSuite {
 	out := []SavedSuite{}
 	for _, s := range suites {
-		out = append(out, SavedSuite{ID: s.ID, Status: s.Status, CreatedAt: s.CreatedAt, Run: s.Run,
-			Attempt: s.Attempt, CheckRuns: len(s.Runs)})
+		out = append(out, SavedSuite{ID: s.ID, Status: s.Status, CreatedAt: s.CreatedAt, CheckRuns: len(s.Runs)})
 	}
 	return out
 }

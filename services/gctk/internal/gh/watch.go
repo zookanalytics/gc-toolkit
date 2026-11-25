@@ -436,13 +436,9 @@ func (p prNode) pullRequest() PullRequest {
 
 // suiteNode is a check suite as the reads ask for it (suiteFields).
 type suiteNode struct {
-	ID          int64  `json:"databaseId"`
-	Status      string `json:"status"`
-	CreatedAt   string `json:"createdAt"`
-	WorkflowRun *struct {
-		ID      int64 `json:"databaseId"`
-		Attempt int   `json:"runAttempt"`
-	} `json:"workflowRun"`
+	ID        int64  `json:"databaseId"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"createdAt"`
 	CheckRuns *struct {
 		PageInfo struct {
 			HasNextPage bool `json:"hasNextPage"`
@@ -468,13 +464,6 @@ func (n suiteNode) suite(oid string) (CheckSuite, error) {
 		return CheckSuite{}, fmt.Errorf("check suite %d at %s names no status or no creation time", n.ID, oid)
 	}
 	s := CheckSuite{ID: n.ID, Status: n.Status, CreatedAt: n.CreatedAt}
-	if w := n.WorkflowRun; w != nil {
-		if w.ID < 1 || w.Attempt < 1 {
-			return CheckSuite{}, fmt.Errorf("check suite %d at %s names its Actions run as %d at attempt %d",
-				n.ID, oid, w.ID, w.Attempt)
-		}
-		s.Run, s.Attempt = w.ID, w.Attempt
-	}
 	for _, r := range n.CheckRuns.Nodes {
 		run := CheckRun{Name: r.Name, Status: r.Status, Required: r.IsRequired}
 		if r.Conclusion != nil {

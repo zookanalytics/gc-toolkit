@@ -157,7 +157,7 @@ func TestPullRequestPartReadsTheChecksAtTheHeadInTheSameRequest(t *testing.T) {
 	c, r := client([2]string{"checkSuites(first:100)", `{"data":{"repository":{"pullRequest":{` + partPR + `,
 		"commits":{"nodes":[{"commit":{"oid":"abc","checkSuites":{"pageInfo":{"hasNextPage":false,"endCursor":"x"},
 			"nodes":[{"databaseId":5,"status":"COMPLETED","createdAt":"2026-11-16T07:00:00Z",
-				"workflowRun":{"databaseId":99,"runAttempt":1},"checkRuns":{"pageInfo":{"hasNextPage":false},
+				"checkRuns":{"pageInfo":{"hasNextPage":false},
 				"nodes":[{"name":"test","status":"COMPLETED","conclusion":"SUCCESS","isRequired":true,
 					"detailsUrl":"https://github.com/acme/widgets/actions/runs/99/job/1"}]}}]}}}]}}}}}`})
 	p, err := c.PullRequestPart("acme/widgets", 7, true)
@@ -167,7 +167,7 @@ func TestPullRequestPartReadsTheChecksAtTheHeadInTheSameRequest(t *testing.T) {
 	if p.HeadRefOid != "abc" || p.MergeStateStatus != "BLOCKED" || p.ChecksAt != "abc" {
 		t.Fatalf("read %+v", p)
 	}
-	want := []gh.CheckSuite{{ID: 5, Status: "COMPLETED", CreatedAt: "2026-11-16T07:00:00Z", Run: 99, Attempt: 1,
+	want := []gh.CheckSuite{{ID: 5, Status: "COMPLETED", CreatedAt: "2026-11-16T07:00:00Z",
 		Runs: []gh.CheckRun{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Required: true,
 			URL: "https://github.com/acme/widgets/actions/runs/99/job/1"}}}}
 	if !reflect.DeepEqual(p.Suites, want) {

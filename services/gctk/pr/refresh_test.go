@@ -974,13 +974,13 @@ func TestTheConversationKeepsItsNewestPostAndUnresolvedThreads(t *testing.T) {
 }
 
 // The checks part keeps each check suite at the head, with its status, its
-// creation time, how many check runs it holds and the Actions run behind it at
-// its attempt, and each required run's result with the suite that holds it and
-// its log, which the landing order's red-check acts read.
+// creation time and how many check runs it holds, and each required run's
+// result with the suite that holds it and its log, which the landing order's
+// red-check acts read.
 func TestTheChecksPartKeepsEachSuiteAndTheSuiteOfEachResult(t *testing.T) {
 	d := newWatched(t)
 	d.pr.Suites[head] = []gh.CheckSuite{
-		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", Run: 101, Attempt: 2, Runs: []gh.CheckRun{
+		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", Runs: []gh.CheckRun{
 			{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", Required: true, URL: "https://ci/101/test"},
 			{Name: "lint", Status: "COMPLETED", Conclusion: "FAILURE"}}},
 		{ID: 2, Status: "QUEUED", CreatedAt: "2026-11-16T08:10:00Z"},
@@ -988,7 +988,7 @@ func TestTheChecksPartKeepsEachSuiteAndTheSuiteOfEachResult(t *testing.T) {
 	d.poll(t)
 	c := d.saved(t, bead).Checks
 	wantSuites := []pr.SavedSuite{
-		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", Run: 101, Attempt: 2, CheckRuns: 2},
+		{ID: 1, Status: "COMPLETED", CreatedAt: "2026-11-16T08:00:00Z", CheckRuns: 2},
 		{ID: 2, Status: "QUEUED", CreatedAt: "2026-11-16T08:10:00Z"},
 	}
 	if !slices.Equal(c.Suites, wantSuites) {

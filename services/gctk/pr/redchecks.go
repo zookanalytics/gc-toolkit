@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -24,29 +23,26 @@ import (
 // for each owned PR from the read the one-PR update saved on its bead and the
 // store (decideRed), as one act among its acts (redPlans), and takes that act
 // under the record lock, deciding it again from the bead it reads there. An act
-// that files work, re-runs a check, restarts one or files a gate is skipped
-// while a hold set by hand or a human gate holds the bead, since bringing the
-// branch current or sending a fix performs one horn of what a person may be
-// deciding. A conversation holds only the PR's merge, so it holds none of
-// these. The withdrawal of a red-check gate is never skipped.
+// that files work or a gate is skipped while a hold set by hand or a human gate
+// holds the bead, since bringing the branch current or sending a fix performs
+// one horn of what a person may be deciding. A conversation holds only the PR's
+// merge, so it holds none of these. The withdrawal of a red-check gate is never
+// skipped.
 //
 // Each act reads a required check by its newest result at the head: the result
 // in the newest check suite that holds one for it, a skip aside. A suite keeps
 // a re-run's result in place of the attempt it re-ran, and a head carries a
 // suite for each run of each workflow, such as a draft's skipped run beside the
-// run its ready transition started. A newest result that passed stands for the
-// check only while no older suite at the head holds a result the rule for
-// required checks reads as failed (holdsFailed in rules.go). That failure still
-// holds the merge though the same code passed, so the acts take it for a
-// failure no code change fixes and re-run the run that holds it.
+// run its ready transition started. The city re-runs no check and restarts
+// none: a failure no code change fixes, and a check that never starts, each
+// file a gate for a person.
 
 // redCap is how many earlier heads may each have drawn a red-check ask before a
 // red head files the pr-fix-capped gate in place of another ask.
 const redCap = 3
 
 // stuckAfter is how long a check suite stays queued with no check runs before
-// the act takes it for one that never starts, and how long the act waits after
-// it restarts the head's checks before it asks a person.
+// the act takes it for one that never starts.
 const stuckAfter = 10 * time.Minute
 
 // The situation keys of the red-check gates, each for one PR, by its number:
@@ -78,44 +74,35 @@ var deployCheck = regexp.MustCompile(`(?i)vercel|netlify|deploy`)
 // finished before GitHub marked it stale.
 var noncodeConclusions = []string{"TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED", "STALE"}
 
-// headCheck is one required check at the saved read's head: its name, the
-// result the acts read it by, nil when its every result is a skip, the suite
-// that holds that result, nil when the read names none, and whether a newer
-// suite there passed the check, which makes that result a failure no code
-// change fixes.
+// headCheck is one required check at the saved read's head: its name, and its
+// newest result, nil when its every result is a skip.
 type headCheck struct {
-	name        string
-	result      *RequiredRun
-	suite       *SavedSuite
-	passedLater bool
+	name   string
+	newest *RequiredRun
 }
 
-// passing reports whether the check's result completed as a success.
+// passing reports whether the check's newest result completed as a success.
 func (h headCheck) passing() bool {
-	return h.result != nil && h.result.Status == "COMPLETED" && slices.Contains(passingConclusions, h.result.Conclusion)
+	return h.newest != nil && h.newest.Status == "COMPLETED" && slices.Contains(passingConclusions, h.newest.Conclusion)
 }
 
-// failed reports whether the check's result completed without passing.
+// failed reports whether the check's newest result completed without passing.
 func (h headCheck) failed() bool {
-	return h.result != nil && h.result.Status == "COMPLETED" && !slices.Contains(passingConclusions, h.result.Conclusion)
+	return h.newest != nil && h.newest.Status == "COMPLETED" && !slices.Contains(passingConclusions, h.newest.Conclusion)
 }
 
-// noncode reports whether the check's result failed for a cause no code change
-// fixes: a conclusion that says so, or a newer suite at the head that passed
-// the check on the same code.
+// noncode reports whether the check's newest result failed for a cause no code
+// change fixes.
 func (h headCheck) noncode() bool {
-	return h.failed() && (h.passedLater || slices.Contains(noncodeConclusions, h.result.Conclusion))
+	return h.failed() && slices.Contains(noncodeConclusions, h.newest.Conclusion)
 }
 
-// resultsAtHead is each required check the checks part holds a result of, by
-// name, with the result the acts read it by. That is its newest result: the
-// one in the suite created last, by its creation time and then its id, among
-// those that hold a result for it other than SKIPPED. A result whose suite the
-// part does not list ranks below every listed one. When the newest result
-// passed and an older suite holds one the rule for required checks reads as
-// failed (holdsFailed), the check is read by the newest such failure, with
-// passedLater set.
-func resultsAtHead(c *SavedChecks) []headCheck {
+// newestAtHead is each required check the checks part holds a result of, by
+// name, with its newest result: the one in the suite created last, by its
+// creation time and then its id, among those that hold a result for it other
+// than SKIPPED. A result whose suite the part does not list ranks below every
+// listed one.
+func newestAtHead(c *SavedChecks) []headCheck {
 	suites := map[int64]*SavedSuite{}
 	for i := range c.Suites {
 		suites[c.Suites[i].ID] = &c.Suites[i]
@@ -131,7 +118,7 @@ func resultsAtHead(c *SavedChecks) []headCheck {
 		}
 		return a.ID > b.ID
 	}
-	byName, held := map[string]*headCheck{}, map[string]*headCheck{}
+	byName, in := map[string]*headCheck{}, map[string]*SavedSuite{}
 	for i := range c.Runs {
 		r := &c.Runs[i]
 		h := byName[r.Name]
@@ -142,21 +129,13 @@ func resultsAtHead(c *SavedChecks) []headCheck {
 		if r.Conclusion == "SKIPPED" {
 			continue
 		}
-		s := suites[r.Suite]
-		if h.result == nil || later(s, h.suite) {
-			h.result, h.suite = r, s
-		}
-		if f := held[r.Name]; holdsFailed(*r) && (f == nil || later(s, f.suite)) {
-			held[r.Name] = &headCheck{name: r.Name, result: r, suite: s, passedLater: true}
+		if x := suites[r.Suite]; h.newest == nil || later(x, in[r.Name]) {
+			h.newest, in[r.Name] = r, x
 		}
 	}
 	var out []headCheck
 	for _, name := range slices.Sorted(maps.Keys(byName)) {
-		h := byName[name]
-		if f := held[name]; f != nil && h.passing() {
-			h = f
-		}
-		out = append(out, *h)
+		out = append(out, *byName[name])
 	}
 	return out
 }
@@ -184,8 +163,8 @@ type redAsk struct {
 var redAskReason = regexp.MustCompile(`^Required check\(s\) failing on PR#([0-9]+) at head ([0-9a-fA-F]{7,64}):`)
 
 // redState is what the acts decide one owned PR on: the bead, the read saved on
-// it, what holds the bead from an act that files work, re-runs or restarts a
-// check or files a gate, empty when nothing does, the open human gates on the
+// it, what holds the bead from an act that files work or a gate, empty when
+// nothing does, the open human gates on the
 // bead under each red-check key, the red-check asks on it, its other open
 // asks, the open beads other than its asks that name its branch, read only for
 // a PR GitHub reads as conflicting, whether the review loop passed at the head
@@ -207,25 +186,15 @@ const (
 	stepWithdraw = "withdraw"
 	stepAsk      = "ask"
 	stepGate     = "gate"
-	stepRerun    = "rerun"
-	stepRestart  = "restart"
 )
 
 // redStep is what the acts owe one PR in a run: one step, with what it acts on,
-// or none, with why. why is the account the outcome gives. A re-run carries the
-// runs it re-runs and, for a refusal, the gate it files on an approved PR in
-// key and message, which name the refusal at %v. A restart carries the suite
-// that never started and the earliest suite's creation at the head, the time
-// after which a return to draft is the act's own.
+// or none, with why. why is the account the outcome gives.
 type redStep struct {
 	kind, why    string
 	keys         []string
 	reason       string
 	key, message string
-	runs         []int64
-	approved     bool
-	suite        SavedSuite
-	pushed       string
 }
 
 func (s redState) none(why string) redStep { return redStep{why: why} }
@@ -259,7 +228,7 @@ func decideRed(s redState) redStep {
 	case c.Suites == nil:
 		return s.none("the saved checks hold no check suites yet, which the PR watch's next pass reads")
 	}
-	checks := resultsAtHead(c)
+	checks := newestAtHead(c)
 	green := len(checks) > 0 && !slices.ContainsFunc(checks, func(h headCheck) bool { return !h.passing() })
 	if green {
 		var keys []string
@@ -277,7 +246,7 @@ func decideRed(s redState) redStep {
 	case s.o.rec.Result != record.Pending || p.Head != s.o.rec.Head:
 		return s.none(fmt.Sprintf("the record is not pending at the PR's head %s, so the refinery's validation comes first", p.Head))
 	case s.held != "":
-		return s.none(s.held + ", so nothing is filed, re-run or restarted")
+		return s.none(s.held + ", so nothing is filed")
 	case p.MergeState == "DIRTY" || p.MergeState == "BEHIND":
 		return s.conflict()
 	case green:
@@ -305,15 +274,12 @@ func decideRed(s redState) redStep {
 		return s.noncodeFailure(noncode)
 	}
 	if suite, why := s.unreported(checks); why == "" {
-		pushed := ""
-		for _, x := range c.Suites {
-			if pushed == "" || after(pushed, x.CreatedAt) {
-				pushed = x.CreatedAt
-			}
-		}
-		return redStep{kind: stepRestart, suite: suite, pushed: pushed,
-			why: fmt.Sprintf("no required check has reported at head %s, and check suite %d has stayed queued with no "+
-				"check runs since %s", p.Head, suite.ID, suite.CreatedAt)}
+		return s.gate(keyUnreported, fmt.Sprintf("PR #%d (%s) is approved and its review passed at head %s, but no "+
+			"required check has reported there: GitHub reads it BLOCKED, and check suite %d has stayed queued with no "+
+			"jobs since %s. Start the checks by hand, such as by returning the PR to draft and marking it ready again, "+
+			"or look at the runners.", p.Number, p.URL, p.Head, suite.ID, suite.CreatedAt),
+			fmt.Sprintf("no required check has reported at head %s, and check suite %d has stayed queued with no "+
+				"check runs since %s", p.Head, suite.ID, suite.CreatedAt))
 	}
 	return s.none("no required check has failed at head " + p.Head)
 }
@@ -387,8 +353,8 @@ func (s redState) codeFailure(code []headCheck) redStep {
 	}
 	var logs []string
 	for _, h := range code {
-		if h.result.URL != "" {
-			logs = append(logs, h.result.URL)
+		if h.newest.URL != "" {
+			logs = append(logs, h.newest.URL)
 		}
 	}
 	reason := fmt.Sprintf("Required check(s) failing on PR#%d at head %s: %s.", p.Number, p.Head, checkNames(code))
@@ -400,71 +366,21 @@ func (s redState) codeFailure(code []headCheck) redStep {
 }
 
 // noncodeFailure is the step for required checks that failed at the head for a
-// cause no code change fixes, a newer run's pass of the same code among them: a
-// re-run of the failed jobs of each GitHub Actions run that holds one, once per
-// head and only once those runs have finished. A head reads re-run once a suite
-// at it that holds a required check shows its run at an attempt above 1,
-// whoever re-ran it. A failure at a head that reads re-run, and one outside any
-// Actions run, files pr-fix-noncode on an approved PR, and an unapproved PR
-// waits for its review.
+// cause no code change fixes: pr-fix-noncode on an approved PR, and nothing on
+// an unapproved one, which waits for its review.
 func (s redState) noncodeFailure(failing []headCheck) redStep {
-	p, c := s.pr(), s.o.saved.Checks
-	var runs []int64
-	var outside, running []string
-	for _, h := range failing {
-		switch {
-		case h.suite == nil || h.suite.Run == 0:
-			outside = append(outside, h.name)
-		case h.suite.Status != "COMPLETED":
-			running = append(running, fmt.Sprintf("%s (run %d)", h.name, h.suite.Run))
-		}
-		if h.suite != nil && h.suite.Run != 0 && !slices.Contains(runs, h.suite.Run) {
-			runs = append(runs, h.suite.Run)
-		}
-	}
-	_, rerun := reRunBy(c)
-	cause := fmt.Sprintf("PR #%d (%s) has required check(s) %s failing at head %s for a cause no code change fixes",
-		p.Number, p.URL, checkNames(failing), p.Head)
-	if later := slices.DeleteFunc(slices.Clone(failing), func(h headCheck) bool { return !h.passedLater }); len(later) > 0 {
-		cause += fmt.Sprintf(" (%s passed in a newer run at the head, and the merge still waits on the failed result)",
-			checkNames(later))
-	}
-	switch {
-	case len(outside) > 0:
-		return s.gateApproved(cause+fmt.Sprintf(", and %s ran outside any GitHub Actions run, which the city cannot "+
-			"re-run. Re-run them where they ran, or fix what runs them.", strings.Join(outside, " ")),
-			strings.Join(outside, " ")+" failed outside any GitHub Actions run")
-	case rerun:
-		return s.gateApproved(cause+". The failed jobs were re-run once at this head already, and the check(s) failed "+
-			"again. Re-run them again or fix the runner.", fmt.Sprintf("head %s was re-run once and %s failed again",
-			p.Head, checkNames(failing)))
-	case len(running) > 0:
-		return s.none(fmt.Sprintf("%s failed for a cause no code change fixes, and the run behind %s has not finished, "+
-			"which GitHub re-runs only once it has", checkNames(failing), strings.Join(running, ", ")))
-	}
-	return redStep{kind: stepRerun, runs: runs, approved: s.approved(), key: keyNoncode,
-		message: cause + ", and GitHub refused the city's re-run of their failed jobs: %v. Re-run them by hand or fix the runner.",
-		why:     fmt.Sprintf("%s failed at head %s for a cause no code change fixes", checkNames(failing), p.Head)}
-}
-
-// reRunBy is the check suite that makes c's head read re-run: one that holds a
-// required check and shows the Actions run behind it at an attempt above 1. ok
-// is false when no suite there does.
-func reRunBy(c *SavedChecks) (x SavedSuite, ok bool) {
-	for _, x := range c.Suites {
-		if x.Attempt > 1 && slices.ContainsFunc(c.Runs, func(r RequiredRun) bool { return r.Suite == x.ID }) {
-			return x, true
-		}
-	}
-	return SavedSuite{}, false
+	p := s.pr()
+	return s.gateApproved(fmt.Sprintf("PR #%d (%s) has required check(s) %s failing at head %s for a cause no code "+
+		"change fixes. Re-run them where they ran, or fix what runs them.", p.Number, p.URL, checkNames(failing), p.Head),
+		fmt.Sprintf("%s failed at head %s for a cause no code change fixes", checkNames(failing), p.Head))
 }
 
 // unreported is the suite at the head that never started, while every
-// condition holds for the act to restart the head's checks, or why it does
-// not: the PR is approved, ready and BLOCKED, its review result passed at the
-// head the refinery validated, no required check has a result there but a
-// skip, and a suite there has stayed queued with no check runs for stuckAfter
-// since GitHub created it. A suite that never starts moves no sign, so the
+// condition holds for the act to ask a person to start the head's checks, or
+// why it does not: the PR is approved, ready and BLOCKED, its review result
+// passed at the head the refinery validated, no required check has a result
+// there but a skip, and a suite there has stayed queued with no check runs for
+// stuckAfter since GitHub created it. A suite that never starts moves no sign, so the
 // saved read still holds it as queued, and its creation is compared with the
 // clock.
 func (s redState) unreported(checks []headCheck) (SavedSuite, string) {
@@ -478,7 +394,7 @@ func (s redState) unreported(checks []headCheck) (SavedSuite, string) {
 		return SavedSuite{}, "no approval stands"
 	case !s.passed:
 		return SavedSuite{}, "no review result passed at the head"
-	case slices.ContainsFunc(checks, func(h headCheck) bool { return h.result != nil }):
+	case slices.ContainsFunc(checks, func(h headCheck) bool { return h.newest != nil }):
 		return SavedSuite{}, "a required check has reported"
 	}
 	for _, x := range c.Suites {
@@ -673,30 +589,11 @@ func gateOrder(a, b *ledger.Record) int {
 // red is the act's turn, which ends stop after it starts: under the record
 // lock it reads the bead again, decides it again, and takes the step it owes
 // (redLocked). A step that does not complete makes it a retry, and the next
-// run decides it again. When GitHub shows a re-run at the head that the saved
-// read lacks, the act has the one-PR update read the PR again once the lock is
-// free (Reread), since a re-run that ends as the attempt before it did moves no
-// sign the PR watch reads and no result the net compares, and the next run
-// decides from the attempt that read saves. A read again that does not save
-// makes it a retry.
+// run decides it again.
 func (u *run) red(t redOf, stop time.Duration) RunOutcome {
 	ctx, cancel := bounded(stop)
 	defer cancel()
-	lags := false
-	out := u.redLocked(ctx, t, &lags)
-	if lags {
-		why := "nothing reads the PR again here"
-		if u.Reread != nil {
-			why = ""
-			if err := u.Reread(ctx, t.url); err != nil {
-				why = "the one-PR update's read of the PR did not save: " + err.Error()
-			}
-		}
-		if why != "" {
-			out.Action = ActRetry
-			out.Detail += "; " + why + ", so the saved read still lacks the re-run, and the next run decides again"
-		}
-	}
+	out := u.redLocked(ctx, t)
 	if ctx.Err() != nil && (out.Action == ActRetry || out.Action == ActFailed) {
 		out.Action = ActRetry
 		out.Detail = fmt.Sprintf("the act was stopped at its %s: %s", stop, out.Detail)
@@ -705,9 +602,8 @@ func (u *run) red(t redOf, stop time.Duration) RunOutcome {
 }
 
 // redLocked is the act made under the record lock, within ctx, whose outcome's
-// detail opens with the act it is (redOf.of). It sets lags when GitHub shows a
-// re-run at the head that the saved read lacks.
-func (u *run) redLocked(ctx context.Context, t redOf, lags *bool) RunOutcome {
+// detail opens with the act it is (redOf.of).
+func (u *run) redLocked(ctx context.Context, t redOf) RunOutcome {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
 	defer func() { u.Ledger = unbound }()
@@ -767,49 +663,6 @@ func (u *run) redLocked(ctx context.Context, t redOf, lags *bool) RunOutcome {
 		return said(ActAsked, fmt.Sprintf("%s ask %s for the PR's review run: %s", how, ask, step.why))
 	case stepGate:
 		return u.redGate(ctx, o, step, said)
-	case stepRerun:
-		// The saved read shows a re-run only once the checks are read again, so
-		// the act reads the head's suites first, and a re-run made since, the
-		// city's own in a run before or a person's, is not asked for again:
-		// GitHub refuses a run still going, and a finished one would be re-run
-		// twice at the head.
-		hub := u.Hub(ctx, o.host)
-		head := o.saved.PR.Head
-		suites, err := hub.CheckSuites(o.repo, head, o.number)
-		if err != nil {
-			return said(ActRetry, fmt.Sprintf("did not read the check suites at head %s before their re-run (%s), and "+
-				"the next run decides again: %v", head, step.why, err))
-		}
-		if x, ok := reRunBy(&SavedChecks{Runs: requiredRuns(suites), Suites: savedSuites(suites)}); ok {
-			*lags = true
-			return said(ActChecked, fmt.Sprintf("owes nothing yet: GitHub shows run %d at attempt %d at head %s, a "+
-				"re-run the saved read lacks, which the one-PR update reads again: %s", x.Run, x.Attempt, head, step.why))
-		}
-		var ran []string
-		for _, run := range step.runs {
-			err := hub.RerunFailedJobs(o.repo, run)
-			switch {
-			case err == nil:
-				ran = append(ran, fmt.Sprint(run))
-				continue
-			case !gh.Refused(err):
-				return said(ActRetry, fmt.Sprintf("asked GitHub to re-run the failed jobs of run %d, which did not answer, "+
-					"and the next run decides again: %v%s", run, err, also(" It re-ran ", ran)))
-			case !step.approved:
-				return said(ActChecked, fmt.Sprintf("asked GitHub to re-run the failed jobs of run %d, which refused: %v. No "+
-					"approval stands, so the PR waits for its review with no gate, and the next run asks for the re-run "+
-					"again%s", run, err, also(". It re-ran ", ran)))
-			}
-			step.kind, step.why = stepGate, fmt.Sprintf("GitHub refused the re-run of run %d: %v", run, err)
-			step.key, step.message = fmt.Sprintf("%s.%d", step.key, o.number), fmt.Sprintf(step.message, err)+
-				" This gate is withdrawn once every required check passes at the PR's head, and one cleared while the "+
-				"PR is still red there is filed again."
-			return u.redGate(ctx, o, step, said)
-		}
-		return said(ActRerun, fmt.Sprintf("re-ran the failed jobs of run(s) %s once at head %s: %s",
-			strings.Join(ran, ", "), o.saved.PR.Head, step.why))
-	case stepRestart:
-		return u.restart(ctx, s, step, said)
 	}
 	return said(ActFailed, "decided a step it does not know, "+step.kind)
 }
@@ -821,58 +674,6 @@ func (u *run) redGate(ctx context.Context, o owned, step redStep, said func(stri
 		return said(ActRetry, fmt.Sprintf("did not file the %s gate (%s), and the next run files it: %v", step.key, step.why, err))
 	}
 	return said(ActGated, fmt.Sprintf("filed the %s gate, so a person is asked: %s", step.key, step.why))
-}
-
-// restart restarts the checks at a head whose suite never started, once per
-// head: it reads when the PR's timeline records it was returned to draft, and
-// a return after the head's earliest suite was created is the act's own, since
-// a writer of the branch returns the PR to draft before it pushes. A writer's
-// return whose push never landed reads as the act's own too, and the ready
-// transition that ended its draft started the workflows again, as the act's
-// would. With none, it returns the PR to draft and marks it ready again, which
-// sends the pull_request event that starts the workflows again. With one, it
-// waits stuckAfter from it for the checks to report, and then files
-// pr-check-unreported.
-func (u *run) restart(ctx context.Context, s redState, step redStep, said func(string, string) RunOutcome) RunOutcome {
-	p := s.pr()
-	hub := u.Hub(ctx, s.o.host)
-	drafted, err := hub.ConvertedToDraft(s.o.repo, s.o.number)
-	if err != nil {
-		return said(ActRetry, fmt.Sprintf("did not read the PR's returns to draft (%s), and the next run reads them: %v", step.why, err))
-	}
-	own := ""
-	for _, at := range drafted {
-		if after(at, step.pushed) && (own == "" || after(at, own)) {
-			own = at
-		}
-	}
-	if own == "" {
-		if err := hub.ConvertToDraft(p.ID); err != nil {
-			return said(ActRetry, fmt.Sprintf("did not return the PR to draft (%s), and the next run decides again: %v", step.why, err))
-		}
-		if err := hub.MarkReady(p.ID); err != nil {
-			return said(ActRetry, fmt.Sprintf("returned the PR to draft, and its ready transition did not land, which the "+
-				"record's next run makes (%s): %v", step.why, err))
-		}
-		return said(ActRestarted, fmt.Sprintf("returned the PR to draft and marked it ready, so its workflows start again: %s", step.why))
-	}
-	at, err := time.Parse(time.RFC3339Nano, own)
-	if err != nil {
-		return said(ActRetry, fmt.Sprintf("read the PR's return to draft at %q, which is no time, and the next run reads it again", own))
-	}
-	if s.now.Before(at.Add(stuckAfter)) {
-		return said(ActChecked, fmt.Sprintf("owes nothing yet: the PR was returned to draft at %s to restart its checks, "+
-			"which have %s from then to report: %s", own, stuckAfter, step.why))
-	}
-	step.key = fmt.Sprintf("%s.%d", keyUnreported, p.Number)
-	step.why = fmt.Sprintf("the checks were restarted at %s and still have not reported: %s", own, step.why)
-	step.message = fmt.Sprintf("PR #%d (%s) is approved and its review passed at head %s, but no required check has "+
-		"reported there: GitHub reads it BLOCKED, and check suite %d has stayed queued with no jobs since %s. The city "+
-		"returned the PR to draft and marked it ready again at %s to restart its checks, and they still have not "+
-		"reported. Start them by hand, such as by returning the PR to draft and marking it ready again, or look at the "+
-		"runners. This gate is withdrawn once every required check passes at the PR's head.", p.Number, p.URL, p.Head,
-		step.suite.ID, step.suite.CreatedAt, own)
-	return u.redGate(ctx, s.o, step, said)
 }
 
 // also is the clause that names what an act did before a step that did not

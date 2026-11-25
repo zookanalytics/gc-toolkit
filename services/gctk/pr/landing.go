@@ -38,10 +38,8 @@ import (
 // (Reread), decides again on what that read saved, and requests the merge
 // pinned to the head it judged. Every other act reads of GitHub only what it
 // changes. A withdrawal reads the reviews it dismisses and their threads, a
-// send-back and a landing fetch the branch they judge, a restart of a head's
-// checks reads the PR's returns to draft, and a re-run of its failed jobs the
-// check suites at the head, before it makes one, and a label write leaves the
-// PR's labels to their writer, which reads them itself. A run requests a
+// send-back and a landing fetch the branch they judge, and a label write leaves
+// the PR's labels to their writer, which reads them itself. A run requests a
 // merge, closes a bead once the merge commit is on the target, hands a changed
 // head to the refinery and sees that the refinery hears of it, keeps the
 // exceptions blocked behind a human gate, marks a draft ready and carries out
@@ -73,9 +71,8 @@ import (
 // merge under the commit headline the act names, the PR's moves between draft
 // and ready, the edit of its title and body, the dismissal of a review, the
 // reaction the take or a round's post leaves on a post, named by its node id,
-// the resolution of a review thread, named by its node id, the request that an
-// account review the PR again, and the re-run of a GitHub Actions run's failed
-// jobs, named by the run's id.
+// the resolution of a review thread, named by its node id, and the request that
+// an account review the PR again.
 type Hub interface {
 	GitHub
 	Conversation(repo string, number int) (*gh.Conversation, error)
@@ -90,7 +87,6 @@ type Hub interface {
 	AddReaction(subject, content string) error
 	ResolveThread(id string) error
 	RequestReview(repo string, number int, login string) error
-	RerunFailedJobs(repo string, run int64) error
 }
 
 // Poster is the writer of the city's posts on a PR, assets/scripts/pr-post.sh,
@@ -202,8 +198,7 @@ func (e *HeldClose) Error() string { return e.Why }
 // the one a hand-over of a changed head assigns, which is also the session Wake
 // wakes. Hub is GitHub on a host, each call stopped when ctx ends. Reread is
 // the one-PR update's read of every part of the PR at url (Watcher.Reread),
-// which a run has make before it requests a merge, and the red-check act once
-// GitHub shows a re-run the saved read lacks, stopped once ctx ends. A run
+// which a run has make before it requests a merge, stopped once ctx ends. A run
 // requests no merge when it is nil, and that act is a retry.
 // RefreshConversation is the one-PR update's read of the conversation of the
 // PR at url (Watcher.RefreshConversation), which a take has make once its
@@ -332,10 +327,8 @@ const (
 	// ActChecked: the record owes no act, and the run wrote nothing on the bead
 	// but what the one-PR update saved: the PR stands as the record says, the
 	// bead holds no saved read of the PR current for it yet, which the PR
-	// watch's next pass saves, GitHub shows a re-run at the PR's head that the
-	// saved read lacks, which the red-check act had the one-PR update read, or
-	// the disposition writer holds a retired PR's close for now, and the next
-	// run hands it over again.
+	// watch's next pass saves, or the disposition writer holds a retired PR's
+	// close for now, and the next run hands it over again.
 	ActChecked = "checked"
 	// ActRequested: the evaluator found the PR ready on the saved read, the
 	// one-PR update re-read the PR in full, the evaluator found it ready on what
@@ -394,15 +387,6 @@ const (
 	// GitHub reads an approved PR conflicting, and the run filed the ask for
 	// the PR's review run, or found the one filed before.
 	ActAsked = "asked"
-	// ActRerun: required checks failed at the PR's head for a cause no code
-	// change fixes, and the run re-ran the failed jobs of each GitHub Actions
-	// run that holds one, once at that head.
-	ActRerun = "rerun"
-	// ActRestarted: no required check reported at the head of an approved PR
-	// whose review passed, behind a check suite that never started, and the run
-	// returned the PR to draft and marked it ready, which starts its workflows
-	// again.
-	ActRestarted = "restarted"
 	// ActGated: a red check is one the city cannot go on with, and the run filed
 	// its human gate on the bead, or found it open.
 	ActGated = "gated"

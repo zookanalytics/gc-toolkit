@@ -1,7 +1,6 @@
 package pr_test
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
@@ -21,11 +21,8 @@ import (
 // record at the head the refinery validated, approved, whose review passed
 // there, and whose required checks ran in one GitHub Actions run.
 
-// The run behind the required checks, and when GitHub created its suite.
-const (
-	testsRun     = 101
-	suiteCreated = "2026-11-12T08:30:00Z"
-)
+// When GitHub created the suite of the required checks.
+const suiteCreated = "2026-11-12T08:30:00Z"
 
 // logOf is where a check's log is read in the tests run.
 func logOf(name string) string {
@@ -45,11 +42,10 @@ func newRed(t *testing.T) *redWorld {
 	d := newCycle(t)
 	d.l.Refinery = boundRefinery
 	at := d.timed()
-	d.github.Now = at.now
 	p := &pours{store: d.store}
 	d.l.Runs = p
 	w := &redWorld{land: d, at: at, runs: p}
-	w.checks(t, "COMPLETED", testsRun, 1, check("test", "SUCCESS"), check("test-macos", "SUCCESS"))
+	w.checks(t, "COMPLETED", check("test", "SUCCESS"), check("test-macos", "SUCCESS"))
 	return w
 }
 
@@ -59,11 +55,10 @@ func check(name, conclusion string) gh.CheckRun {
 	return gh.CheckRun{Name: name, Status: "COMPLETED", Conclusion: conclusion, Required: true, URL: logOf(name)}
 }
 
-// checks sets the one suite at the head: its status, the Actions run behind
-// it, 0 for none, at attempt, and its check runs.
-func (d *redWorld) checks(t *testing.T, status string, run int64, attempt int, runs ...gh.CheckRun) {
+// checks sets the one suite at the head: its status and its check runs.
+func (d *redWorld) checks(t *testing.T, status string, runs ...gh.CheckRun) {
 	t.Helper()
-	d.pr.Suites[head] = []gh.CheckSuite{{ID: 1, Status: status, CreatedAt: suiteCreated, Run: run, Attempt: attempt, Runs: runs}}
+	d.pr.Suites[head] = []gh.CheckSuite{{ID: 1, Status: status, CreatedAt: suiteCreated, Runs: runs}}
 }
 
 // redOutcome splits a run's outcomes into the act's and the rest. A run that
@@ -182,17 +177,6 @@ func (d *redWorld) gateOn(t *testing.T, id, key string) {
 	d.store.List(bead, id)
 }
 
-// rerunAsks is the id of each run the acts asked GitHub to re-run.
-func (d *redWorld) rerunAsks() []string {
-	var out []string
-	for _, a := range d.github.Asks() {
-		if a.Method == "RerunFailedJobs" {
-			out = append(out, a.ID)
-		}
-	}
-	return out
-}
-
 // stages is each move between draft and ready the acts asked GitHub for.
 func (d *redWorld) stages() []string {
 	var out []string
@@ -224,7 +208,7 @@ func (d *redWorld) evaluate(t *testing.T) pr.Answer {
 // head files none beside it.
 func TestACodeFailureFilesOneAskForItsHead(t *testing.T) {
 	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	red := d.runRed(t)
 	is(t, red, pr.ActAsked)
 	want := "Required check(s) failing on PR#7 at head " + head + ": test. Run log(s): " + logOf("test") +
@@ -245,7 +229,7 @@ func TestACodeFailureFilesOneAskForItsHead(t *testing.T) {
 // second ask.
 func TestAHeadStillRedAfterItsAskClosedIsGated(t *testing.T) {
 	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	is(t, d.runRed(t), pr.ActAsked)
 	d.closeAsks(t, "2026-11-12T08:59:00Z")
 	is(t, d.runRed(t), pr.ActGated)
@@ -263,7 +247,7 @@ func TestAHeadStillRedAfterItsAskClosedIsGated(t *testing.T) {
 // head still red.
 func TestAHeadStillRedWaitsWhileAnotherAskIsOpen(t *testing.T) {
 	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	is(t, d.runRed(t), pr.ActAsked)
 	d.store.Put(fake.Bead{ID: "tk-tracker", Title: "Pre-existing failure: TestTheCap", Status: "open", IssueType: "bug"})
 	if _, ok, err := review.FileAsk(ledger.New(d.store), review.AskRequest{Bead: bead, WaitingOn: []string{"tk-tracker"},
@@ -292,7 +276,7 @@ func TestARedHeadAfterThreeAskedHeadsIsGated(t *testing.T) {
 	for i, h := range []string{older, later, rewrite} {
 		d.askedAt(t, "tk-asked"+string(rune('a'+i)), h, "2026-11-12T07:00:00Z")
 	}
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	is(t, d.runRed(t), pr.ActGated)
 	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-capped.7"}) {
 		t.Fatalf("the act filed %v, want the capped gate", got)
@@ -307,7 +291,7 @@ func TestARedHeadAfterTwoAskedHeadsIsAsked(t *testing.T) {
 	d := newRed(t)
 	d.askedAt(t, "tk-askeda", older, "2026-11-12T07:00:00Z")
 	d.askedAt(t, "tk-askedb", later, "2026-11-12T07:00:00Z")
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	is(t, d.runRed(t), pr.ActAsked)
 }
 
@@ -315,195 +299,29 @@ func TestARedHeadAfterTwoAskedHeadsIsAsked(t *testing.T) {
 func TestADeploysFailureIsGated(t *testing.T) {
 	d := newRed(t)
 	d.unapprove()
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "SUCCESS"), check("Vercel Preview Deploy", "FAILURE"))
+	d.checks(t, "COMPLETED", check("test", "SUCCESS"), check("Vercel Preview Deploy", "FAILURE"))
 	is(t, d.runRed(t), pr.ActGated)
 	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(d.redAsks()) != 0 {
 		t.Fatalf("the act filed %v and the asks %q, want the noncode gate alone", got, d.redAsks())
 	}
 }
 
-// A required check that failed for a cause no code change fixes is re-run once
-// for the head, and only once the run that holds it has finished. A second
-// failure at the head files the gate on an approved PR, as does one in a
-// second run at that head whose own attempt is 1, and neither is re-run.
-func TestANoncodeFailureIsReRunOnceForItsHeadAfterItsRunFinished(t *testing.T) {
-	d := newRed(t)
-	d.checks(t, "IN_PROGRESS", testsRun, 1, check("test", "CANCELLED"), gh.CheckRun{Name: "test-macos",
-		Status: "IN_PROGRESS", Required: true})
-	if red := d.runRed(t); red.Action != "" || len(d.rerunAsks()) != 0 {
-		t.Fatalf("a failure in a run still going made %+v and re-ran %v", red, d.rerunAsks())
-	}
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-	is(t, d.runRed(t), pr.ActRerun)
-	if got := d.rerunAsks(); !slices.Equal(got, []string{"101"}) {
-		t.Fatalf("the act re-ran %v, want run 101", got)
-	}
-	if s := d.pr.Suites[head][0]; s.Attempt != 2 {
-		t.Fatalf("the re-run left the suite at attempt %d", s.Attempt)
-	}
-	// The re-run fails again.
-	d.checks(t, "COMPLETED", testsRun, 2, check("test", "TIMED_OUT"), check("test-macos", "SUCCESS"))
-	is(t, d.runRed(t), pr.ActGated)
-	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(d.rerunAsks()) != 1 {
-		t.Fatalf("a second failure at the head filed %v and re-ran %v, want the gate and no second re-run",
-			got, d.rerunAsks())
-	}
-
-	// A second run at the head, at its own attempt 1, fails the same way: the
-	// head reads re-run by the first run's attempt.
-	e := newRed(t)
-	e.pr.Suites[head] = []gh.CheckSuite{
-		{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: 2,
-			Runs: []gh.CheckRun{check("test", "SUCCESS"), check("test-macos", "SUCCESS")}},
-		{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Run: 102, Attempt: 1,
-			Runs: []gh.CheckRun{check("test-macos", "CANCELLED")}},
-	}
-	is(t, e.runRed(t), pr.ActGated)
-	if got := e.rerunAsks(); len(got) != 0 {
-		t.Fatalf("a head read re-run was re-run again: %v", got)
-	}
-}
-
-// Each failure no code change fixes asks a person only on an approved PR: one
-// at a head already re-run, one outside any Actions run and a re-run GitHub
-// refuses. An unapproved PR waits for its review with no gate, and a refused
-// re-run is asked for again at the next run.
+// A required check that failed for a cause no code change fixes asks a person
+// only on an approved PR, through the noncode gate, and files no ask, since the
+// city re-runs no check. An unapproved PR waits for its review with no gate.
 func TestANoncodeFailureIsGatedOnlyOnAnApprovedPR(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		setup func(*redWorld, *testing.T)
-		reran bool
-	}{
-		{"at a head already re-run", func(d *redWorld, t *testing.T) {
-			d.checks(t, "COMPLETED", testsRun, 2, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-		}, false},
-		{"outside any Actions run", func(d *redWorld, t *testing.T) {
-			d.checks(t, "COMPLETED", 0, 0, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
-		}, false},
-		{"whose re-run GitHub refuses", func(d *redWorld, t *testing.T) {
-			d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-			d.github.Fail["RerunFailedJobs"] = errors.New("gh: Unable to retry this workflow run because it was created " +
-				"over a month ago (HTTP 403)")
-		}, true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			d := newRed(t)
-			c.setup(d, t)
-			is(t, d.runRed(t), pr.ActGated)
-			if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) {
-				t.Fatalf("on an approved PR the act filed %v, want the noncode gate", got)
-			}
-			if c.reran != (len(d.rerunAsks()) == 1) {
-				t.Fatalf("the act re-ran %v", d.rerunAsks())
-			}
-
-			e := newRed(t)
-			e.unapprove()
-			c.setup(e, t)
-			red := e.runRed(t)
-			if len(e.gates.list()) != 0 {
-				t.Fatalf("on an unapproved PR the act filed %v", e.gates.list())
-			}
-			if c.reran {
-				is(t, red, pr.ActChecked)
-				if red := e.runRed(t); red.Action != pr.ActChecked || len(e.rerunAsks()) != 2 {
-					t.Fatalf("the next run made %+v and asked for the re-runs %v, want the re-run asked again", red,
-						e.rerunAsks())
-				}
-			} else if red.Action != "" {
-				t.Fatalf("on an unapproved PR the act made %+v", red)
-			}
-		})
-	}
-}
-
-// A re-run the saved read does not show yet, the city's own from a run before
-// or a person's, is not asked for again: GitHub refuses a run still going, and
-// that refusal would ask a person about a re-run already under way, and a
-// re-run that already failed again would be re-run a second time at the head.
-// Once the PR watch reads the re-run, the act owes nothing until it finishes.
-func TestAReRunTheSavedReadLacksIsNotAskedForAgain(t *testing.T) {
 	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-	is(t, d.runRed(t), pr.ActRerun)
-	red, _ := redOutcome(t, d.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActChecked)
-	if got := d.rerunAsks(); len(got) != 1 || len(d.gates.list()) != 0 {
-		t.Fatalf("a run before the PR watch read the re-run asked for the re-runs %v and filed %v, want the one "+
-			"re-run and no gate", got, d.gates.list())
-	}
-	if red := d.runRed(t); red.Action != "" {
-		t.Fatalf("a re-run the saved read shows going made %+v", red)
+	d.checks(t, "COMPLETED", check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
+	is(t, d.runRed(t), pr.ActGated)
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(d.redAsks()) != 0 {
+		t.Fatalf("on an approved PR the act filed %v and the asks %q, want the noncode gate alone", got, d.redAsks())
 	}
 
 	e := newRed(t)
-	e.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-	e.refresh(t)
-	e.checks(t, "QUEUED", testsRun, 2, gh.CheckRun{Name: "test", Status: "QUEUED", Required: true},
-		check("test-macos", "SUCCESS"))
-	red, _ = redOutcome(t, e.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActChecked)
-	if got := e.rerunAsks(); len(got) != 0 || len(e.gates.list()) != 0 {
-		t.Fatalf("a person's re-run the saved read lacks drew the re-runs %v and the gates %v", got, e.gates.list())
-	}
-
-	f := newRed(t)
-	f.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-	is(t, f.runRed(t), pr.ActRerun)
-	f.checks(t, "COMPLETED", testsRun, 2, check("test", "TIMED_OUT"), check("test-macos", "SUCCESS"))
-	red, _ = redOutcome(t, f.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActChecked)
-	if got := f.rerunAsks(); len(got) != 1 {
-		t.Fatalf("a re-run that failed again before the PR watch read it was asked for again: %v", got)
-	}
-	is(t, f.runRed(t), pr.ActGated)
-}
-
-// A re-run that ends as the attempt before it did, between two passes of the
-// PR watch, moves no sign the watch reads and no result the net compares, so
-// only the act's own read of the head shows it. The act has the one-PR update
-// read the PR again, and the next run gates the approved PR on what it saved.
-// A read again that does not save is a retry.
-func TestAReRunThatFailsAsBeforeIsSavedByTheAct(t *testing.T) {
-	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
-	is(t, d.runRed(t), pr.ActRerun)
-	d.checks(t, "COMPLETED", testsRun, 2, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
-	if _, err := d.watch.Refresh(prURL); err != nil {
-		t.Fatalf("the PR watch's update: %v", err)
-	}
-	if _, err := d.watch.Compare(pr.PassOptions{}); err != nil {
-		t.Fatalf("the PR watch's net: %v", err)
-	}
-	red, _ := redOutcome(t, d.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActChecked)
-	red, _ = redOutcome(t, d.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActGated)
-	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(d.rerunAsks()) != 1 {
-		t.Fatalf("a re-run that failed as before filed %v and re-ran %v, want the noncode gate and one re-run",
-			got, d.rerunAsks())
-	}
-
-	e := newRed(t)
-	e.checks(t, "COMPLETED", testsRun, 1, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
-	is(t, e.runRed(t), pr.ActRerun)
-	e.checks(t, "COMPLETED", testsRun, 2, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
-	e.l.Reread = func(context.Context, string) error { return errors.New("gh: error connecting to api.github.com") }
-	red, _ = redOutcome(t, e.reconcile(t, pr.Options{}))
-	is(t, red, pr.ActRetry)
-	if len(e.gates.list()) != 0 || len(e.rerunAsks()) != 1 {
-		t.Fatalf("a read again that did not save filed %v and re-ran %v", e.gates.list(), e.rerunAsks())
-	}
-}
-
-// A re-run GitHub did not answer is a retry, which asks no person.
-func TestAReRunGitHubDidNotAnswerIsARetry(t *testing.T) {
-	d := newRed(t)
-	d.checks(t, "COMPLETED", testsRun, 1, check("test", "CANCELLED"), check("test-macos", "SUCCESS"))
-	d.github.Fail["RerunFailedJobs"] = errors.New("gh: error connecting to api.github.com")
-	is(t, d.runRed(t), pr.ActRetry)
-	if len(d.gates.list()) != 0 {
-		t.Fatalf("an unanswered re-run filed %v", d.gates.list())
+	e.unapprove()
+	e.checks(t, "COMPLETED", check("test", "TIMED_OUT"), check("test-macos", "SUCCESS"))
+	if red := e.runRed(t); red.Action != "" || len(e.gates.list()) != 0 {
+		t.Fatalf("on an unapproved PR the act made %+v and filed %v", red, e.gates.list())
 	}
 }
 
@@ -530,7 +348,7 @@ func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	// While a check still fails, nothing is withdrawn.
 	e := newRed(t)
 	e.gateOn(t, "tk-g1", "pr-fix-unmoved.7")
-	e.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+	e.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	if red := e.runRed(t); red.Action != "" || len(e.gates.withdrawals()) != 0 {
 		t.Fatalf("a red head made %+v and withdrew %v", red, e.gates.withdrawals())
 	}
@@ -544,20 +362,20 @@ func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	is(t, f.runRed(t), pr.ActWithdrawn)
 }
 
-// A required check is read by its newest result: a failure in a newer suite
-// than a pass asks, and so does one a newer run skipped. A failure in a suite
-// created before one where the check passed still holds the merge, by the rule
-// for required checks, so it is a failure no code change fixes, and the act
-// re-runs the run that holds it.
+// A required check's newest result is the one that stands: a failure in a
+// newer suite than a pass asks, and so does one a newer run skipped, while a
+// failure a newer run passed files nothing. That failure still holds the merge
+// by the rule for required checks, so the PR waits for a person, and the board
+// reads it needs-attention.
 func TestTheNewestResultOfACheckIsTheOneActedOn(t *testing.T) {
-	older := gh.CheckSuite{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: 1}
-	newer := gh.CheckSuite{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Run: 102, Attempt: 1}
+	older := gh.CheckSuite{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated}
+	newer := gh.CheckSuite{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z"}
 	for _, c := range []struct {
 		name        string
 		first, then string
 		want        string
 	}{
-		{"a failure a newer run passed", "FAILURE", "SUCCESS", pr.ActRerun},
+		{"a failure a newer run passed", "FAILURE", "SUCCESS", ""},
 		{"a pass a newer run failed", "SUCCESS", "FAILURE", pr.ActAsked},
 		{"a failure a newer run skipped", "FAILURE", "SKIPPED", pr.ActAsked},
 	} {
@@ -570,65 +388,17 @@ func TestTheNewestResultOfACheckIsTheOneActedOn(t *testing.T) {
 			if red := d.runRed(t); red.Action != c.want {
 				t.Fatalf("the act made %+v, want %q", red, c.want)
 			}
+			if c.want != "" {
+				return
+			}
+			ans := d.evaluate(t)
+			if !slices.ContainsFunc(ans.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindCheckFailed }) {
+				t.Fatalf("the evaluator does not hold the older failure: %+v", ans.Conditions)
+			}
+			if got := prstatus.Render(ans, prstatus.Facts{}); got != prstatus.NeedsAttention {
+				t.Fatalf("the board reads the PR %s, want %s", got, prstatus.NeedsAttention)
+			}
 		})
-	}
-}
-
-// laterPass sets the head's two suites: the tests run, at attempt, where test
-// ended with first, and a newer run where test passed.
-func (d *redWorld) laterPass(t *testing.T, attempt int, first string) {
-	t.Helper()
-	d.pr.Suites[head] = []gh.CheckSuite{
-		{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Run: 102, Attempt: 1,
-			Runs: []gh.CheckRun{check("test", "SUCCESS")}},
-		{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: attempt,
-			Runs: []gh.CheckRun{check("test", first), check("test-macos", "SUCCESS")}},
-	}
-}
-
-// A failure a newer run at the head passed holds the merge as long as its
-// suite holds it, so the act re-runs that suite's run, once for the head, and
-// the merge and the acts read the head green together once the re-run passes:
-// the evaluator holds no failed check, and the red-check gates are withdrawn
-// then and not before. A re-run that fails again asks a person on an approved
-// PR, and names the newer pass.
-func TestAFailureANewerRunPassedIsReRunUntilTheMergeReadsItPassed(t *testing.T) {
-	d := newRed(t)
-	d.laterPass(t, 1, "FAILURE")
-	is(t, d.runRed(t), pr.ActRerun)
-	if got := d.rerunAsks(); !slices.Equal(got, []string{"101"}) {
-		t.Fatalf("the act re-ran %v, want run 101, which holds the failure", got)
-	}
-	d.laterPass(t, 2, "SUCCESS")
-	if red := d.runRed(t); red.Action != "" || len(d.rerunAsks()) != 1 || len(d.gates.list()) != 0 {
-		t.Fatalf("once the re-run passed the act made %+v, re-ran %v and filed %v", red, d.rerunAsks(), d.gates.list())
-	}
-	if ans := d.evaluate(t); slices.ContainsFunc(ans.Conditions, func(c pr.Condition) bool {
-		return c.Kind == pr.KindCheckFailed || c.Kind == pr.KindCheckPending
-	}) {
-		t.Fatalf("once the re-run passed the evaluator still holds the checks: %+v", ans.Conditions)
-	}
-
-	e := newRed(t)
-	e.gateOn(t, "tk-g1", "pr-fix-noncode.7")
-	e.laterPass(t, 1, "FAILURE")
-	if red := e.runRed(t); red.Action != "" || len(e.gates.withdrawals()) != 0 {
-		t.Fatalf("while the older suite holds the failure the act made %+v and withdrew %v", red, e.gates.withdrawals())
-	}
-	if ans := e.evaluate(t); !slices.ContainsFunc(ans.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindCheckFailed }) {
-		t.Fatalf("the evaluator does not hold the failure the act acts on: %+v", ans.Conditions)
-	}
-	e.laterPass(t, 2, "SUCCESS")
-	is(t, e.runRed(t), pr.ActWithdrawn)
-
-	f := newRed(t)
-	f.laterPass(t, 2, "FAILURE")
-	is(t, f.runRed(t), pr.ActGated)
-	if got := f.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(f.rerunAsks()) != 0 {
-		t.Fatalf("a failure that failed again at its re-run filed %v and re-ran %v, want the gate alone", got, f.rerunAsks())
-	}
-	if msg := f.gates.messages[0]; !strings.Contains(msg, "test passed in a newer run at the head") {
-		t.Fatalf("the gate does not name the newer pass: %s", msg)
 	}
 }
 
@@ -640,48 +410,27 @@ func (d *redWorld) stuck(t *testing.T, queued string) {
 	d.pr.Facts.MergeStateStatus = "BLOCKED"
 	skipped := gh.CheckRun{Name: "test", Status: "COMPLETED", Conclusion: "SKIPPED", Required: true}
 	d.pr.Suites[head] = []gh.CheckSuite{
-		{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Run: testsRun, Attempt: 1, Runs: []gh.CheckRun{skipped}},
-		{ID: 2, Status: "QUEUED", CreatedAt: queued, Run: 102, Attempt: 1},
+		{ID: 1, Status: "COMPLETED", CreatedAt: suiteCreated, Runs: []gh.CheckRun{skipped}},
+		{ID: 2, Status: "QUEUED", CreatedAt: queued},
 	}
 }
 
 // A required check that never reports, behind a suite that stayed queued with
-// no check runs for ten minutes, has the PR returned to draft and marked ready
-// once for its head, which starts its workflows again. Ten minutes after that
-// with still no report, a person is asked.
-func TestAStuckSuiteIsRestartedOnceAndThenGated(t *testing.T) {
+// no check runs for ten minutes, asks a person through the unreported gate,
+// and the act moves the PR between draft and ready no more. A PR that is not
+// approved, a suite that started its runs, a required check that reported and
+// a draft each file none.
+func TestAStuckSuiteIsGated(t *testing.T) {
 	d := newRed(t)
 	d.stuck(t, "2026-11-12T08:55:00Z")
 	if red := d.runRed(t); red.Action != "" {
 		t.Fatalf("a suite queued for five minutes made %+v", red)
 	}
 	d.at.advance(6 * time.Minute)
-	is(t, d.runRed(t), pr.ActRestarted)
-	if got := d.stages(); !slices.Equal(got, []string{"ConvertToDraft", "MarkReady"}) || d.pr.Facts.IsDraft {
-		t.Fatalf("the restart asked %v and left the PR a draft: %v", got, d.pr.Facts.IsDraft)
-	}
-	d.at.advance(time.Minute)
-	if red := d.runRed(t); red.Action != pr.ActChecked || len(d.stages()) != 2 || len(d.gates.list()) != 0 {
-		t.Fatalf("a minute after the restart the act made %+v, asked %v and filed %v", red, d.stages(), d.gates.list())
-	}
-	d.at.advance(10 * time.Minute)
 	is(t, d.runRed(t), pr.ActGated)
-	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-check-unreported.7"}) || len(d.stages()) != 2 {
-		t.Fatalf("the act filed %v and asked %v, want the unreported gate and no second restart", got, d.stages())
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-check-unreported.7"}) || len(d.stages()) != 0 {
+		t.Fatalf("the act filed %v and asked %v, want the unreported gate alone", got, d.stages())
 	}
-}
-
-// The restart is the act's own once per head: a return to draft before the
-// head's first suite, or in the second GitHub created it, as a writer of the
-// branch makes before it pushes, is the draft cycle's and leaves the restart to
-// make. A PR that is not approved, a
-// suite that started its runs, and a required check that reported each make
-// none.
-func TestTheRestartWaitsOnlyForItsOwnReturnToDraft(t *testing.T) {
-	d := newRed(t)
-	d.stuck(t, "2026-11-12T08:40:00Z")
-	d.pr.Drafted = []string{"2026-11-12T08:29:00Z", suiteCreated}
-	is(t, d.runRed(t), pr.ActRestarted)
 
 	for name, change := range map[string]func(*redWorld){
 		"unapproved": func(d *redWorld) { d.unapprove() },
@@ -697,7 +446,7 @@ func TestTheRestartWaitsOnlyForItsOwnReturnToDraft(t *testing.T) {
 			e := newRed(t)
 			e.stuck(t, "2026-11-12T08:40:00Z")
 			change(e)
-			if red := e.runRed(t); red.Action == pr.ActRestarted || red.Action == pr.ActGated {
+			if red := e.runRed(t); red.Action == pr.ActGated {
 				t.Fatalf("the act made %+v", red)
 			}
 		})
@@ -789,7 +538,7 @@ func TestAHeldOrConflictingPRGetsNoRedCheckAsk(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := newRed(t)
-			d.checks(t, "COMPLETED", testsRun, 1, check("test", "FAILURE"), check("test-macos", "SUCCESS"))
+			d.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 			setup(d, t)
 			if red := d.runRed(t); red.Action != "" || len(d.redAsks()) != 0 {
 				t.Fatalf("the act made %+v and filed %q", red, d.redAsks())
@@ -809,7 +558,7 @@ func TestAChangedHeadGetsOnlyTheWithdrawal(t *testing.T) {
 		delete(b.Metadata, "pr_reconcile_pending")
 	})
 	d.pr.Facts.HeadRefOid = other
-	d.pr.Suites[other] = []gh.CheckSuite{{ID: 3, Status: "COMPLETED", CreatedAt: suiteCreated, Run: 103, Attempt: 1,
+	d.pr.Suites[other] = []gh.CheckSuite{{ID: 3, Status: "COMPLETED", CreatedAt: suiteCreated,
 		Runs: []gh.CheckRun{check("test", "FAILURE")}}}
 	d.refresh(t)
 	red, _ := redOutcome(t, d.reconcile(t, pr.Options{}))

@@ -873,9 +873,7 @@ keys = [
   # threads against. Nothing writes or reads it.
   "pr_unengaged_threads",
   # RETIRED. The head oid at which the old intake last re-ran failed required
-  # checks. Nothing writes or reads it: the attempt numbers of the head's
-  # Actions runs, on the suites in the saved read, say whether the head was
-  # re-run.
+  # checks. Nothing writes or reads it.
   "pr_check_rerun",
   # The provenance cutover, UTC, YYYY-MM-DDTHH:MM:SSZ: an unmarked post under
   # the city's login from before it is the city's own (gc_city_own in

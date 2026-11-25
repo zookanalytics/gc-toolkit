@@ -192,8 +192,7 @@ yet. Each remaining difference names its reason and what ends it:
   intake, `pr-facts.sh`, polled every open PR and copied GitHub's state into
   keys of its own. It files each person's post as an ask on the bead and marks
   it with the city's 👀, files an ask for a required check that failed and for
-  a conflict on an approved PR, re-runs a check that failed for a cause no code
-  fixes, and asks a person where the city cannot go on. The PR's review run
+  a conflict on an approved PR, and asks a person where the city cannot go on. The PR's review run
   works every ask. Gas City's PR monitor would file a repair bead that a second
   worker takes onto the PR's branch, and copy GitHub's facts onto it. It would
   also file one for a check that is not required, since its query reads no

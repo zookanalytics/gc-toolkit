@@ -142,16 +142,11 @@ type Review struct {
 
 // CheckSuite is one check suite at a commit, with the latest result of each of
 // its check runs. Status is the suite's own, QUEUED, IN_PROGRESS, COMPLETED and
-// the like, and CreatedAt when GitHub created it. Run is the database id of the
-// GitHub Actions run behind it and Attempt that run's attempt number, which a
-// re-run of the run raises in the same suite, both 0 for a suite no Actions run
-// is behind, such as another app's.
+// the like, and CreatedAt when GitHub created it.
 type CheckSuite struct {
 	ID        int64
 	Status    string
 	CreatedAt string
-	Run       int64
-	Attempt   int
 	Runs      []CheckRun
 }
 
@@ -269,17 +264,10 @@ const (
       nodes{` + suiteFields + `}}}}}}`
 
 	// A check suite as the reads ask for it: its own status, when it was
-	// created, the Actions run behind it with that run's attempt, and its check
-	// runs read with GitHub's LATEST filter.
-	suiteFields = `databaseId status createdAt workflowRun{databaseId runAttempt}
+	// created, and its check runs read with GitHub's LATEST filter.
+	suiteFields = `databaseId status createdAt
         checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
           nodes{name status conclusion detailsUrl isRequired(pullRequestNumber:$number)}}`
-
-	// The times the PR was returned to draft, from its timeline.
-	draftedQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
-  repository(owner:$owner,name:$name){pullRequest(number:$number){
-    timelineItems(first:100,after:$endCursor,itemTypes:[CONVERT_TO_DRAFT_EVENT]){pageInfo{hasNextPage endCursor}
-      nodes{... on ConvertToDraftEvent{createdAt}}}}}}`
 
 	reviewFields = `fullDatabaseId id url state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}
           reactionGroups{content viewerHasReacted}`
@@ -548,60 +536,6 @@ func (c *Client) CheckSuites(repo, oid string, number int) ([]CheckSuite, error)
 				return err
 			}
 			out = append(out, s)
-		}
-		return nil
-	})
-	return out, err
-}
-
-// RerunFailedJobs asks GitHub to re-run the failed jobs of the GitHub Actions
-// run whose database id is run, in repo (POST
-// repos/<repo>/actions/runs/<run>/rerun-failed-jobs). The re-run keeps the run
-// and its check suite and raises the run's attempt. GitHub re-runs a run only
-// once the whole run has finished. An error is a re-run GitHub refused, or one
-// whose answer did not arrive, which may still take effect; Refused tells the
-// two apart.
-func (c *Client) RerunFailedJobs(repo string, run int64) error {
-	if _, err := prVars(repo, 1); err != nil {
-		return err
-	}
-	if run < 1 {
-		return fmt.Errorf("github: %d is no workflow run's id", run)
-	}
-	_, err := c.call("api", "--hostname", c.host, "-X", "POST",
-		fmt.Sprintf("repos/%s/actions/runs/%d/rerun-failed-jobs", repo, run))
-	return err
-}
-
-// ConvertedToDraft reads when PR number in repo was returned to draft, each
-// time its timeline records, oldest first.
-func (c *Client) ConvertedToDraft(repo string, number int) ([]string, error) {
-	vars, err := prVars(repo, number)
-	if err != nil {
-		return nil, err
-	}
-	out := []string{}
-	err = c.graphql(draftedQuery, vars, true, func(data json.RawMessage) error {
-		var page struct {
-			Repository *struct {
-				PullRequest *struct {
-					Items *connection[struct {
-						CreatedAt string `json:"createdAt"`
-					}] `json:"timelineItems"`
-				} `json:"pullRequest"`
-			} `json:"repository"`
-		}
-		if err := json.Unmarshal(data, &page); err != nil {
-			return err
-		}
-		if page.Repository == nil || page.Repository.PullRequest == nil || page.Repository.PullRequest.Items == nil {
-			return fmt.Errorf("the page holds no timeline of %s#%d", repo, number)
-		}
-		for _, n := range page.Repository.PullRequest.Items.Nodes {
-			if n.CreatedAt == "" {
-				return fmt.Errorf("a return to draft of %s#%d names no time", repo, number)
-			}
-			out = append(out, n.CreatedAt)
 		}
 		return nil
 	})
