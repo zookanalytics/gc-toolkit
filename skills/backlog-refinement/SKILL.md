@@ -10,7 +10,7 @@ A backlog refinement sitting works your rig's queue with the operator: every
 bead in your rig's store that Gas City's `hold:mayor` label holds. Each rig has
 its own po, and another rig's queue is its po's. You sort the queue by the
 outcomes its beads serve, then propose one disposition for each bead, with your
-reasons, and the operator rules. You apply each ruling through its
+reasons. The operator rules on each. You apply each ruling through its
 lever before you bring the next piece, and the write's exit says whether it
 landed. Nothing starts without
 the operator's word, and the queue waits between sittings for as long as the
@@ -115,23 +115,28 @@ Check before you propose:
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
 - **Graduate into a new epic:** read the hypothesis of each open epic section 1
   listed, and check that none covers the outcome. Write the hypothesis from
-  that outcome, saying for whom, what changes and the signal that shows it
-  worked, never from the beads' own fixes, and write the boundaries from the
-  hypothesis (`docs/epics.md`, "The contract an epic carries"). Standing work,
-  such as a set of failures or open bugs that keeps returning, gets one bounded
-  push, whose closure condition names the lines it closes on
+  that outcome, never from the beads' own fixes. It says for whom, what changes
+  and the signal that shows it worked. Write the boundaries from the hypothesis
+  (`docs/epics.md`, "The contract an epic carries"). Standing work, such as a
+  set of failures or open bugs that keeps returning, gets one bounded push.
+  Its closure condition names the lines it closes on
   (`docs/epics.md`, "Epics are mortal").
 - **Place on its own:** name the emergency, or where the operator named the
-  bead. That a defect hurts is not enough, since most real defects do: it goes
-  under the epic its outcome belongs to, or into a theme's new one.
+  bead. That a defect hurts is not enough, since most real defects do. Such a
+  defect goes under the epic its outcome belongs to, or into its theme's new
+  epic.
 - **Wait on a bead:** the bead it waits on is open. One in another rig's store
   takes a human gate in place of the edge, as the `waits` skill says. Work that
   goes on once that bead lands is placed as any other bead, so its row names
   the epic too. Work whose job that landing may end needs no epic, because the
   validating closer checks it then.
-- **Close as not needed:** a bead that waits on nothing, serves no open epic
-  and belongs to no theme worth a push closes, rather than stay held with
-  nothing to release it. If it bites again, it is filed again.
+- **Close as not needed:** a bead closes, rather than stay held with nothing
+  to release it, when each of these holds:
+  - it waits on nothing;
+  - it serves no open epic;
+  - it belongs to no theme worth a push.
+
+  If it bites again, it is filed again.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
@@ -153,9 +158,9 @@ that does not settle it, propose `ask` or say that your confidence is low.
 Order the beads you propose to place by WSJF against the rig's goals, as your
 prompt's "Sequencing: WSJF" says: value, time criticality, and
 risk reduction or opportunity enablement, over job size. Compare them with one
-another and recommend each bead's priority, or its shift under its parent, and
-each proposed epic's priority against the rig's open epics, with the reasoning
-in words. Store no score.
+another and recommend each bead's priority, or its shift under its parent, with
+the reasoning in words. Recommend each proposed epic's priority against the
+rig's open epics the same way. Store no score.
 
 ## 4. A queue too long to read in the sitting
 
@@ -177,8 +182,8 @@ it does.
 - A sorter proposes one disposition and one sentence, so read further on any
   bead the operator asks about.
 - Once every sorter has returned, group all the rows by outcome before you
-  bring anything. A sorter sees only its chunk, so a theme can span chunks:
-  propose each graduation from the whole group, and recheck the dispositions
+  bring anything. A sorter sees only its chunk, so a theme can span chunks.
+  Propose each graduation from the whole group, and recheck the dispositions
   of its beads.
 
 ## 5. Bring it in pieces
@@ -213,19 +218,23 @@ reason in `--note`, with the commit for a fix.
 A bead sent where the rig says goes there by the commands the rig's `AGENTS.md`
 gives.
 
-A graduation runs in this order, each write taking its exit. File the epic in
-your rig's store with the `work` skill's epic writer, `epic.sh`, with the
-fields the operator agreed to and the note that says whose words each field is.
-Set its priority, and park it when the operator rules that its push waits, both
-through your prompt's levers. Only then place each of its beads under it: a
-placement under an epic nothing parks sends the bead at once, and a run that has
-started keeps running when its epic is parked later.
+A graduation runs in this order, each write taking its exit:
+
+1. File the epic in your rig's store with the `work` skill's epic writer,
+   `epic.sh`, with the fields the operator agreed to and the note that says
+   whose words each field is.
+2. Set its priority through your prompt's levers.
+3. Park it through those levers when the ruling says its push waits.
+4. Only then place each of its beads under it. A placement under an epic
+   nothing parks sends the bead at once. Parking the epic later stops no run
+   that has started.
 
 A wait runs through the `waits` skill. Work that goes on once the bead it waits
 on lands takes that skill's edge ("Make a bead wait on other work"), then its
-placement, which arms it while the edge holds it. Work whose job that landing
-may end takes the close brief, the edge and the arm of "Have a bead checked and
-closed once other work lands", then the lift of its hold that section gives.
+placement. The placement arms it while the edge holds it. Work whose job that
+landing may end takes the close brief, the edge and the arm of "Have a bead
+checked and closed once other work lands", then the lift of its hold that
+section gives.
 
 ## 7. Stop when the operator says
 
