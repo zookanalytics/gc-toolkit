@@ -152,13 +152,14 @@ $(cat <<'BLOCK'
 <what needs doing, why, and what done looks like, with each point the operator raised>
 BLOCK
 )" \
-  && "$GCTK" bead note --notify <anchor> "$BRIEF" \
-  && echo "the brief is written, headed ## Rework brief ($NOW)"
+  && echo "the brief is headed ## Rework brief ($NOW)" \
+  && "$GCTK" bead note --notify <anchor> "$BRIEF"
 ```
 
-No closing line means the store refused the brief: send no rework. Otherwise
-the ruling line names the brief, as `converse-iterate-document`'s line names
-its scaffold:
+No `noted <anchor>` line means the store refused the brief: send no rework.
+Exit 3 after that line means the brief landed but whoever works the anchor may
+not have it: send the nudge the message gives. Otherwise the ruling line names
+the brief, as `converse-iterate-document`'s line names its scaffold:
 `--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the

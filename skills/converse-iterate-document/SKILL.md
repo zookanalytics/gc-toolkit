@@ -149,11 +149,13 @@ VERIFY: <each fact nobody has settled, where to read it, and where the document 
 Open questions: none
 BLOCK
 )" \
-  && "$GCTK" bead note --notify "$SUBJECT" "$SCAFFOLD" \
-  && echo "the scaffold is written, dated $TODAY"
+  && echo "the scaffold is dated $TODAY" \
+  && "$GCTK" bead note --notify "$SUBJECT" "$SCAFFOLD"
 ```
 
-No closing line means the store refused the scaffold: send nothing.
+No `noted` line means the store refused the scaffold: send nothing. Exit 3 after
+that line means the scaffold landed but whoever works the subject may not have
+it: send the nudge the message gives.
 
 ## Send one rework
 

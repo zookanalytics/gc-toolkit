@@ -31,7 +31,8 @@ takes the note inside its running turn, with its next tool result. Gas City
 holds it for a Codex session that is running a turn until that turn ends. With
 nobody working the bead, whoever takes it next reads the notes. A note on work
 you are doing yourself takes no flag. Exit 3 means the note landed but someone
-working the bead may not have been told: send the nudge its message gives.
+working the bead may not have been told: send the nudge its message gives, then
+go on with what follows the note.
 
 Never pass `--notes` to a bd write: it replaces the whole field and erases every
 note other writers left there.

@@ -86,7 +86,8 @@ gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
 
 Exit 3 from the check names each reason it refused, such as a PR that is no
 longer on the pending record. Tell the operator, and edit nothing until the
-check passes.
+check passes. Exit 3 after the note's `noted` line means the ruling landed but
+whoever works the PR may not have it: send the nudge the message gives.
 
 A review run, or another writer such as the operator, can push onto the branch
 while you edit it. Your push never overwrites theirs: it stops, and you merge
@@ -235,8 +236,9 @@ Scope: <what the change covers>" --json | jq -er '.id') \
   && echo "filed and held"
 ```
 
-No `filed and held` line means a write did not land: repair what printed
-before the first edit. The `blocks` edge onto the conversation is the hold.
+No `filed and held` line means a write did not land, or, at exit 3 after the
+note's `noted` line, that a nudge did not: repair what printed before the first
+edit. The `blocks` edge onto the conversation is the hold.
 While the conversation is open, bd counts the change blocked, so no pool is
 offered it, and Work's writers take the edge as the proof that this sitting
 holds the change.
