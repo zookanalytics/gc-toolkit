@@ -13,6 +13,13 @@ and no agent patches to wire.
 
 The host needs:
 
+- A `gc` that holds a bead on any `hold:<value>` label whose value is not
+  `cleared`. Intake holds new work for its rig's po with `hold:po`, and
+  upstream Gas City holds a bead on `hold:mayor` and `hold:external` alone, so
+  under it the po's queue would be ordinary work. The keeper's fork of Gas
+  City carries the rule from d62873fce6 (gc-uyshxy), and `gc` and the running
+  supervisor are both built from it
+  ([gas-city-search.md](../specs/tk-1tfzr71.233/gas-city-search.md)).
 - `flock`, on the `PATH` the controller runs orders with. Linux distributions
   ship it in util-linux; on macOS, run `brew install flock`.
 - `timeout` or `gtimeout`, from coreutils. Linux distributions ship it; on
