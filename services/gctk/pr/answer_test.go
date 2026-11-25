@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -570,26 +571,52 @@ func TestAPointTheDefinitionSetsAsideHoldsNoDismissal(t *testing.T) {
 	}
 }
 
+// adapterRequests is a hub whose review requests go through the gh adapter,
+// whose runner fails the test if the adapter asks GitHub.
+type adapterRequests struct {
+	pr.Hub
+	adapter *gh.Client
+}
+
+func (h adapterRequests) RequestReview(repo string, number int, login string) error {
+	return h.adapter.RequestReview(repo, number, login)
+}
+
 // A review request GitHub refuses, as for an account that cannot review the
-// repository, leaves the dismissal to go on, and one that is not answered
-// holds it for the post run again.
+// repository, or one the gh adapter refuses before it asks, as for a bot's
+// login, leaves the dismissal to go on, and one that is not answered holds it
+// for the post run again.
 func TestARefusedReviewRequestStillDismissesTheRequestForChanges(t *testing.T) {
-	setup := func(t *testing.T) *rounds {
+	setup := func(t *testing.T, author string) *rounds {
 		d := newRounds(t)
 		const cr = prURL + "#pullrequestreview-210"
 		d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
-			Author: "visitor", Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z", ViewerReactions: []string{"EYES"}})
+			Author: author, Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z", ViewerReactions: []string{"EYES"}})
 		ask := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
 		d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "The name stands."})
 		return d
 	}
-	d := setup(t)
+	d := setup(t, "visitor")
 	d.github.Fail["RequestReview"] = errors.New("gh: Reviews may only be requested from collaborators. (HTTP 422)")
 	got := d.posted(t)
 	if len(got.Dismissed) != 1 || len(got.Requested) != 0 || len(got.Left) != 1 {
 		t.Fatalf("after a refused review request: dismissed %v, asked %v, left %q", got.Dismissed, got.Requested, got.Left)
 	}
-	e := setup(t)
+	b := setup(t, "reviewer[bot]")
+	adapter := gh.NewWithRunner("github.com", func(args ...string) ([]byte, error) {
+		t.Errorf("the adapter asked GitHub for a bot's review: %q", args)
+		return nil, errors.New("gh: no GitHub here")
+	})
+	hub := b.l.Hub
+	b.l.Hub = func(ctx context.Context, host string) pr.Hub {
+		return adapterRequests{Hub: hub(ctx, host), adapter: adapter}
+	}
+	got = b.posted(t)
+	if len(got.Dismissed) != 1 || len(got.Requested) != 0 || len(got.Left) != 1 {
+		t.Fatalf("after a bot's request for changes was answered: dismissed %v, asked %v, left %q", got.Dismissed,
+			got.Requested, got.Left)
+	}
+	e := setup(t, "visitor")
 	e.github.Fail["RequestReview"] = errors.New("gh: error connecting to api.github.com")
 	if _, err := e.post(t); err == nil || slices.ContainsFunc(e.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" }) {
 		t.Fatalf("a review request with no answer returned %v and dismissed the review", err)

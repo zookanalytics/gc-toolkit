@@ -416,18 +416,24 @@ func (c *Client) ResolveThread(id string) error {
 // dependabot[bot], is not one GitHub takes a review request for.
 var loginShape = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_-]*$`)
 
+// refusal is a request the client refuses before it asks, because GitHub takes
+// no such request. Refused reads it as GitHub's own refusal, since asking again
+// meets it again.
+type refusal struct{ error }
+
 // RequestReview asks the account login to review PR number in repo again,
 // through GitHub's review request (POST
 // repos/<repo>/pulls/<n>/requested_reviewers), which puts the PR back in their
 // queue. An error is a request GitHub refused, such as one for an account that
 // cannot review the repository, or one whose answer did not arrive, which may
-// still take effect; Refused tells the two apart.
+// still take effect; Refused tells the two apart. A login GitHub takes no
+// review request for, such as a bot's, is refused before GitHub is asked.
 func (c *Client) RequestReview(repo string, number int, login string) error {
 	if _, err := prVars(repo, number); err != nil {
 		return err
 	}
 	if !loginShape.MatchString(login) {
-		return fmt.Errorf("github: %q is no login a review can be requested from", login)
+		return refusal{fmt.Errorf("github: %q is no login a review can be requested from", login)}
 	}
 	_, err := c.call("api", "--hostname", c.host, "-X", "POST",
 		fmt.Sprintf("repos/%s/pulls/%d/requested_reviewers", repo, number), "-f", "reviewers[]="+login)
@@ -458,12 +464,17 @@ func (c *Client) DismissReview(repo string, number int, id int64, message string
 var httpStatus = regexp.MustCompile(`\(HTTP ([0-9]{3})\)`)
 
 // Refused reports whether err is GitHub's refusal of a request it answered: an
-// HTTP status from 400 to 499, other than a rate limit. Any other error, such
-// as a connection that failed, a server error or a rate limit, is a request
-// whose answer did not arrive, which a later try may still see taken.
+// HTTP status from 400 to 499, other than a rate limit. A request the client
+// refused before asking, because GitHub takes no such request, is refused too.
+// Any other error, such as a connection that failed, a server error or a rate
+// limit, is a request whose answer did not arrive, which a later try may still
+// see taken.
 func Refused(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.As(err, new(refusal)) {
+		return true
 	}
 	msg := err.Error()
 	m := httpStatus.FindAllStringSubmatch(msg, -1)

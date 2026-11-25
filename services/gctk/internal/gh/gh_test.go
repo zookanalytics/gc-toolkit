@@ -305,7 +305,8 @@ func TestAResolutionNamesTheThreadByItsNodeID(t *testing.T) {
 }
 
 // A review request names the PR and the account by its login, and refuses a
-// login GitHub takes no request for before it asks.
+// login GitHub takes no request for before it asks, which Refused reads as
+// GitHub's refusal.
 func TestAReviewRequestNamesThePRAndTheLogin(t *testing.T) {
 	c, r := client([2]string{"/requested_reviewers", `{"number":7}`})
 	if err := c.RequestReview("acme/widgets", 7, "operator"); err != nil {
@@ -330,6 +331,11 @@ func TestAReviewRequestNamesThePRAndTheLogin(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Fatalf("a refused review request asked GitHub: %+v", r.calls)
+	}
+	for _, login := range []string{"dependabot[bot]", "", "-x"} {
+		if err := c.RequestReview("acme/widgets", 7, login); !gh.Refused(err) {
+			t.Errorf("the review request of %q returned %v, which Refused does not read as a refusal", login, err)
+		}
 	}
 }
 

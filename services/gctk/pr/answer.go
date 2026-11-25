@@ -685,10 +685,12 @@ func (a *answering) settle() {
 
 // dismiss dismisses each person's standing request for changes once every
 // point it raised carries the city's handled mark (pointsOf), after the review
-// request that asks its author to review again. A request for changes stands while it is its author's
-// latest review that approves, requests changes or was dismissed, as the
-// approval rule reads it. A request for changes under the city's own login asks
-// no review, since GitHub takes none of a PR's author.
+// request that asks its author to review again. A request for changes stands
+// while it is its author's latest review that approves, requests changes or was
+// dismissed, as the approval rule reads it. A request for changes under the
+// city's own login asks no review, since GitHub takes none of a PR's author. A
+// review request that is refused, such as one for a bot's login, which the gh
+// adapter refuses before it asks, leaves the dismissal to go on.
 func (a *answering) dismiss() error {
 	latest := map[string]gh.Review{}
 	for _, v := range a.reviews {
@@ -727,7 +729,7 @@ func (a *answering) dismiss() error {
 			case err == nil:
 				a.out.Requested = append(a.out.Requested, login)
 			case gh.Refused(err):
-				a.leave("GitHub refused to ask %s to review again, so %s is dismissed with no review asked: %v", login, v.URL, err)
+				a.leave("the request that %s review again was refused, so %s is dismissed with no review asked: %v", login, v.URL, err)
 			default:
 				a.fail("the request that %s review again did not land, so %s is not dismissed: %v", login, v.URL, err)
 				continue
