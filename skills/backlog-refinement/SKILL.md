@@ -89,7 +89,7 @@ and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
-| place on its own | a defect that hurts the operator or a rig now and is worth building without an epic; say what it hurts | nothing |
+| place on its own | a defect that hurts the operator or a rig now, whose fix adds nothing new for someone to use and is worth building without an epic; say what it hurts, in a line of its own | nothing |
 | leave held | it waits for a later sitting, such as for an epic that does not exist yet | nothing |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
@@ -104,7 +104,13 @@ Check before you propose:
 - **Place or park:** read the epic's description and check that the bead serves
   its hypothesis, not only its area. An area that carries no hypothesis is not an
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
-- **Place on its own:** use it sparingly, and name the harm.
+- **Place on its own:** use it sparingly. Bring each such bead by itself, as one
+  line that names the harm, for the operator's answer to that line alone. It is
+  never part of a set that takes one answer. Work that adds something new for
+  someone to use, such as a command or a screen, is never proposed on its own,
+  even when it answers a harm. Propose instead to leave it held for its epic,
+  with a reason that names the goal not yet written down, or to ask, with the
+  design or product question in the reason.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
@@ -160,7 +166,9 @@ it does.
 
 Apply the piece's rulings through your prompt's levers, let each write's exit
 say whether it landed, and only then bring the next piece. Each ruling's note
-gives the operator's reason in words. When the operator turns down a proposal
+gives the operator's reason in words. The note on a bead placed on its own also
+gives the harm its proposal named, so a later reader sees why it was built
+without an epic. When the operator turns down a proposal
 that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
 
