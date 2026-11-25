@@ -118,15 +118,16 @@ rises, before the session waits, with a message the agent can act on.
 The change touches what that warrant in [warrants.md](../../docs/warrants.md)
 covers: it moves proactive's overlay stanza in `pack.toml` and its row in the
 wiring table of `docs/gh-origin-guard.md`. It was re-read on 2026-11-25 at
-`gastownhall/gascity` main `33a7d167c8b7` and `gastownhall/gascity-packs` main
-`44b9db7168f6`. `docs/reference/trust-boundaries.md` is unchanged since
-`b31d0b119475`, and `docs/reference/config.md` gained only the beads table's
-`migrate_command`, which scopes no write. The one gascity-packs commit since
-`aa55b477d4c2` changes nothing under `github/`. Gas City ships no per-agent write
-scoping, so the trigger has not fired. The Verified line keeps main's stamp of
-2026-11-20, because five open PRs (#1602, #1606, #1624, #1641 and #1701) each
-re-stamp it, and a sixth stamp would conflict with whichever of them lands
-first.
+`gastownhall/gascity` main `1e7e600f2cc7` and `gastownhall/gascity-packs` main
+`44b9db7168f6`, and the warrant's Verified line records that re-read. The three
+gascity commits after `33a7d167c8b7` change no page under `docs/`.
+`docs/reference/trust-boundaries.md` is unchanged since `b31d0b119475`, and
+`docs/reference/config.md` gained only the beads table's `migrate_command`,
+which scopes no write. `Agent`'s `scope` field says where an agent is
+instantiated, and neither `Agent` nor `Rig` has a field that limits where an
+agent writes. The one gascity-packs commit since `aa55b477d4c2` changes nothing
+under `github/`. Gas City ships no per-agent write scoping, so the trigger has
+not fired.
 
 ## What the change leaves
 
