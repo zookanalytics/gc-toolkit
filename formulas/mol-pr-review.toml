@@ -123,11 +123,10 @@ it. Read the change in that worktree with git, and a merge with
 and what was decided.
 
 **3. Judge the head by the method.** It picks the checks the head needs, closed
-over the index, rules whether the change is material, and answers each person's
-post an ask the round can take carries when the post needs only an answer,
-leaving every other ask to rule-and-repair. When the change is material,
-withdraw the approvals given before this head, before you write the output,
-naming the call, what it means for the PR, and where to look:
+over the index, rules whether the change is material, and answers each post
+that needs only an answer. When the change is material, withdraw the approvals
+given before this head, before you write the output, naming the call, what it
+means for the PR, and where to look:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" withdraw --reason "<the call, what it means for the PR, and where to look>"`
 Exit 0 filed it, or found it filed. Exit 2: run it again.
 
@@ -144,13 +143,7 @@ again. When this step closes, each pick bonds one lane.
 
 **5. Post the answers on the PR**, when the output carries rulings:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
-Each post you answered gets its reply where words are owed and the city's 👍,
-where it was made, an inline comment's thread is resolved, and when you picked
-no check and answered every ask the round can take, the head's comment is
-posted too, since rule-and-repair has nothing left. Run again, it posts nothing
-twice. Exit 1: an answer did not land, and exit 2: a read did not answer: run
-it again, and when it still fails, cancel the run, which the landing order
-pours again:
+On exit 1 or 2, run it again. When it fails again, cancel the run:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "triage's answers did not land on the PR"`
 
 **6. Close this step.**
@@ -242,9 +235,8 @@ a comment that links it where its ruling owes words. Each post gets the city's
 whose thread stays open. The gate a ruling's `settles` names is closed with the
 post as its answer, and a person's request for changes is dismissed once every
 point it raised is answered, with its author asked to review again. Run again,
-it posts nothing twice. Exit 1: an answer did not land, and exit 2: a read did
-not answer: run it again, and when it still fails, cancel the run, which the
-landing order pours again:
+it posts nothing twice. On exit 1 or 2, run it again. When it fails again,
+cancel the run:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
 **7. Close this step.** The loop's check judges the round, and records the
