@@ -34,7 +34,8 @@ through the arm its ask wrote, and the run it starts carries that answer out.
    and a note recording what you checked. Any doubt — the premise does not
    hold, there is real work, or the call is the operator's — leaves the bead
    OPEN and files a human gate on it. The ask arms this workflow to run on the
-   bead again once the operator answers, and that run carries the answer out.
+   bead again once the operator has answered and the asking run has ended, and
+   that run carries the answer out.
    An answer that accepts the close closes the subject. An answer that
    redirects the work sends it on. This workflow is authorized to close the
    SUBJECT, which is the one bead it closes. It closes it only on its own

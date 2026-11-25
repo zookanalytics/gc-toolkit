@@ -34,7 +34,8 @@ through the arm its ask wrote, and the run it starts carries that answer out.
    and a note recording what you checked. Any doubt — the premise does not
    hold, there is real work, or the call is the operator's — leaves the bead
    OPEN and files a human gate on it. The ask arms this workflow to run on the
-   bead again once the operator answers, and that run carries the answer out.
+   bead again once the operator has answered and the asking run has ended, and
+   that run carries the answer out.
    An answer that accepts the close closes the subject. An answer that
    redirects the work sends it on. This workflow is authorized to close the
    SUBJECT, which is the one bead it closes. It closes it only on its own
@@ -227,10 +228,7 @@ else
 fi
 # <<< validate-close-ask
 ```
-When the block printed a gate's id, arm the bead:
-`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/await-ruling.sh" <the bead> --key validate-close --formula mol-validate-close`.
-Arm no bead that carries a `merge_result`.
-An arm that did not land exits 1, and running it again converges.
+When the block printed a gate's id, arm the bead on that gate (Arm).
 
 When the ask is for a conversation and the block filed the gate, open the
 conversation on the gate whose id the block printed. It replies to the gate, so
@@ -251,6 +249,11 @@ SENT
 ```bash
 gc sling <the pool> <the bead> --on <the formula>
 ```
+
+**Arm.** Run this call once for each bead the exit names, then once for this
+run's root, the `root_bead_id` your claim returned:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/await-ruling.sh" <the bead> --blocked-by <what it waits on> --formula mol-validate-close`.
+Arm no bead that carries a `merge_result`.
 
 **3. Close THIS step bead, then drain.** Run this after 2a, 2b or 2c completed. This
 is the terminal graph step, so it still closes its own step bead — that is how a

@@ -83,8 +83,9 @@
 #
 # Callers: decline.sh, for work a worker declines until a person rules, and any
 # agent the waits skill sends here for the same; mol-validate-close's ask, for a
-# bead the validating closer puts to the operator, whose re-sling pours the
-# closer again to carry the answer out; and work-gate.sh and
+# bead the validating closer puts to the operator, held with --blocked-by on the
+# gate and on the closer's own run, whose re-sling pours the closer again to
+# carry the answer out; and work-gate.sh and
 # work-setup.sh, the decline arms of mol-polecat-work that wait for what already
 # holds the work bead, a person or a sibling.
 # exit: 0 the work bead waits on the gate and is armed, or is closed and needs
