@@ -236,9 +236,10 @@ Scope: <what the change covers>" --json | jq -er '.id') \
   && echo "filed and held"
 ```
 
-No `filed and held` line means a write did not land, or, at exit 3 after the
-note's `noted` line, that a nudge did not: repair what printed before the first
-edit. The `blocks` edge onto the conversation is the hold.
+No `noted` line means a write did not land: repair what printed before the
+first edit. Exit 3 after that line means the ruling landed but whoever works
+the subject may not have it: send the nudge the message gives. The `blocks`
+edge onto the conversation is the hold.
 While the conversation is open, bd counts the change blocked, so no pool is
 offered it, and Work's writers take the edge as the proof that this sitting
 holds the change.
