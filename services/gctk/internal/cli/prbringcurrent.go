@@ -27,10 +27,13 @@ took it, such as by an upstream sync, that base falls before the old history
 the branch still carries, and a plain merge takes that history for the
 branch's own change: it brings back what the rewrite dropped and conflicts in
 files the branch never touched. So the merge goes from the commit of the
-target the branch took last: of the commits the clone's reflog of
+target the branch took last. Each commit the clone's reflog of
 origin/<target> records the target naming, before or after an update, that
-the target no longer holds, newest first, the first whose merge base with
-HEAD is newer than git's gives it. The merge then takes a commit that
+the target no longer holds and whose merge base with HEAD is newer than git's
+gives a commit HEAD took from the old history. Of several, the one HEAD took
+last is the one its first-parent history took in latest. When that history
+does not order them, as when one merge took in two, the call refuses, and
+--base names the commit. The merge then takes a commit that
 supersedes that base with the target, carrying the target's tree whole, as
 git merge -s ours records a merge. git merges from the base, and git show
 --remerge-diff on the merge shows only what was resolved by hand. The
@@ -52,9 +55,9 @@ exit: 0 merged, or HEAD already held the target
       3 refused, with the checkout as it was: it holds work no commit
         holds, or is in the middle of a merge, cherry-pick, revert, rebase
         or bisect, or HEAD shares no history with the target, or the reflog
-        cannot show the commit of the target the branch took last and no
-        --base names it, or --base names a commit HEAD does not hold or one
-        that does not hold git's merge base
+        or HEAD's history cannot show the commit of the target the branch
+        took last and no --base names it, or --base names a commit HEAD does
+        not hold or one that does not hold git's merge base
       4 git stopped on conflicts and left its merge state: resolve each file
         it lists and git add it, then commit the merge with git commit -F
         <file>, the file holding the message printed and then one paragraph

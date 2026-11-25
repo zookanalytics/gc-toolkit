@@ -446,6 +446,63 @@ func TestBringCurrentRefusesASequenceOrABisectLeftUnfinished(t *testing.T) {
 	}
 }
 
+func TestBringCurrentAfterARollbackGoesFromTheHistoryTheBranchTookLast(t *testing.T) {
+	s := newScratch(t)
+	old := s.oldLineage()
+	s.branch()
+	s.ownChange()
+	// main is rewritten to t2, which adds obsolete.txt, and the branch takes it.
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	t2 := s.commit(s.up, "obsolete", map[string]string{"obsolete.txt": "obsolete\n"})
+	s.push()
+	if took := bring(t, s.work); took.Base != old.x1 || took.Supersede == "" {
+		t.Fatalf("BringCurrent over the first rewrite = %+v, want a merge from %s", took, old.x1)
+	}
+	// main goes back to x1, then is rewritten again to t3, which has no
+	// obsolete.txt. The reflog's newest old commit is x1, which the branch took
+	// before t2.
+	s.git(s.up, "reset", "-q", "--hard", old.x1)
+	s.push()
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	s.commit(s.up, "u3", map[string]string{"up3.txt": "u3\n"})
+	tip := s.push()
+
+	cur := bring(t, s.work)
+	if cur.Base != t2 || cur.Supersede == "" || len(cur.Conflicts) != 0 {
+		t.Fatalf("BringCurrent after the rollback = %+v, want a clean merge from %s, the history the branch took last", cur, t2)
+	}
+	s.onlyOwnChange(tip)
+	if _, held := s.at("HEAD", "obsolete.txt"); held {
+		t.Error("obsolete.txt, which the branch took from t2 and t3 dropped, stayed")
+	}
+}
+
+func TestBringCurrentAsksForTheBaseWhenOneMergeTookTwoHistories(t *testing.T) {
+	s := newScratch(t)
+	c0 := s.commit(s.up, "c0", map[string]string{"shared.txt": shared})
+	s.push()
+	s.branch()
+	s.ownChange()
+	a := s.commit(s.up, "a", map[string]string{"a.txt": "a\n"})
+	s.push()
+	s.git(s.up, "reset", "-q", "--hard", c0)
+	b := s.commit(s.up, "b", map[string]string{"b.txt": "b\n"})
+	s.push()
+	// One merge takes both of main's histories in, so the branch's own history
+	// does not show which it took last.
+	s.git(s.work, "merge", "-q", "--no-edit", a, b)
+	head := s.git(s.work, "rev-parse", "HEAD")
+	s.git(s.up, "reset", "-q", "--hard", c0)
+	s.commit(s.up, "c", map[string]string{"c.txt": "c\n"})
+	s.push()
+
+	_, err := BringCurrent(s.work, "main", "")
+	refusedForBase(t, err)
+	if got := s.git(s.work, "rev-parse", "HEAD"); got != head {
+		t.Errorf("the refusal moved HEAD to %s", got)
+	}
+}
+
 func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	s := newScratch(t)
 	old := s.oldLineage()

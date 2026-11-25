@@ -65,21 +65,23 @@ commit of the target the branch took last, and none finds that commit once a
 branch has taken one rewrite. The verb composes git's own: it reads the clone's
 reflog of the target, the old and the new commit of each update, from the log
 git-update-ref(1) lays out, since `git reflog` prints only the new one. It keeps
-the commits the target no longer holds with one `git rev-list`, and takes the
-newest whose `git merge-base` with HEAD is newer than git's own. It then
-writes, with `git commit-tree`, the commit `git merge -s ours` would record for
-that commit merged into the target, the target's tree with both as parents, and
-runs `git merge` on it. git's merge then goes from the commit the branch took
-last, leaves a conflict in its own merge state, and `git show --remerge-diff`
-on the merge reads only what was resolved by hand. With no rewrite, the verb is
-`git merge` of the target, once the reflog's updates, each starting where the
-one before it ended, reach back to before the target held git's merge base.
-git prunes an update whose commits the ref no longer holds after
-`gc.reflogExpireUnreachable` and leaves a gap where it did (git-reflog(1),
-`--rewrite`), and a clone records nothing from before it was made. Where the
-reflog cannot show the commit, the caller names it with `--base`, because
-`git merge` takes no base from its caller and `git merge-tree --merge-base`,
-which does, writes no merge state.
+the commits the target no longer holds with one `git rev-list`, and takes each
+whose `git merge-base` with HEAD is newer than git's own. Of several, it takes
+the one HEAD's first-parent history (`git rev-list --first-parent`) took in
+latest, since a target that went back to an older history before its next
+rewrite puts that history newest in the reflog. It then writes, with `git
+commit-tree`, the commit `git merge -s ours` would record for that commit merged
+into the target, the target's tree with both as parents, and runs `git merge` on
+it. git's merge then goes from the commit the branch took last, leaves a
+conflict in its own merge state, and `git show --remerge-diff` on the merge
+reads only what was resolved by hand. With no rewrite, the verb is `git merge`
+of the target, once the reflog's updates, each starting where the one before it
+ended, reach back to before the target held git's merge base. git prunes an
+update whose commits the ref no longer holds after `gc.reflogExpireUnreachable`
+and leaves a gap where it did (git-reflog(1), `--rewrite`), and a clone records
+nothing from before it was made. Where the reflog cannot show the commit, the
+caller names it with `--base`, because `git merge` takes no base from its caller
+and `git merge-tree --merge-base`, which does, writes no merge state.
 
 ## Measured
 

@@ -18,8 +18,11 @@ import (
 // So the merge goes from the commit of the target the branch took last. The
 // clone's reflog of origin/<target> records each commit the target named,
 // before and after each update, and those it no longer holds are its old
-// history. Newest first, the first whose merge base with HEAD is newer than
-// git's own base gives that commit. The merge takes a commit that supersedes
+// history. Each whose merge base with HEAD is newer than git's own base gives
+// a commit HEAD took from that history, and the one HEAD took last is the one
+// its first-parent history took in latest, which the reflog's order cannot
+// show once the target has gone back to an older history. The merge takes a
+// commit that supersedes
 // it with the target: the target's tree whole, with the target and that
 // commit as its parents, as `git merge -s ours` records a merge. git's own
 // merge then goes from there, leaves a conflict in its merge state, and
@@ -213,11 +216,12 @@ func given(dir, base, head, tip, def string) (string, error) {
 }
 
 // lastTaken is the commit of the target's old history that head took last,
-// "" when updates show none: of the commits they name, before and after each
-// update, newest first, those tip no longer holds, the merge base with head of
-// the first whose merge base is newer than def, git's merge base of head and
-// tip. A branch that took tip's history after a rewrite has def there, so the
-// commits it took before the rewrite are not newer and it gets none.
+// "" when updates show none. Of the commits they name, before and after each
+// update, those tip no longer holds are the target's old history, and each
+// whose merge base with head is newer than def, git's merge base of head and
+// tip, gives a commit head took from it. A branch that took tip's history
+// after a rewrite has def there, so what it took before the rewrite is not
+// newer. Of several, latest gives the one head took last.
 func lastTaken(dir string, updates []git.RefUpdate, head, tip, def string) (string, error) {
 	var named []string
 	seen := map[string]bool{}
@@ -233,27 +237,92 @@ func lastTaken(dir string, updates []git.RefUpdate, head, tip, def string) (stri
 	if err != nil {
 		return "", err
 	}
-	newer := map[string]bool{}
+	var taken []string
+	judged := map[string]bool{}
 	for _, o := range old {
 		mb, ok, err := git.CommonBase(dir, head, o)
 		if err != nil {
 			return "", err
 		}
-		if !ok || mb == def {
+		if !ok || mb == def || judged[mb] {
 			continue
 		}
-		is, seen := newer[mb]
-		if !seen {
-			if is, err = git.IsAncestor(dir, def, mb); err != nil {
-				return "", err
-			}
-			newer[mb] = is
-		}
-		if is {
-			return mb, nil
+		judged[mb] = true
+		if newer, err := git.IsAncestor(dir, def, mb); err != nil {
+			return "", err
+		} else if newer {
+			taken = append(taken, mb)
 		}
 	}
-	return "", nil
+	switch len(taken) {
+	case 0:
+		return "", nil
+	case 1:
+		return taken[0], nil
+	}
+	return latest(dir, taken, head, def)
+}
+
+// latest is the one of taken, commits head took from the target, that head's
+// first-parent history took in last: the one held by the fewest of its
+// commits newer than def, since each of them holds all that the one before it
+// holds. Of two that one commit took in, the one that holds the other is the
+// later. Taken that this leaves unordered is a refusal.
+func latest(dir string, taken []string, head, def string) (string, error) {
+	line, err := git.FirstParents(dir, head, def)
+	if err != nil {
+		return "", err
+	}
+	best, fewest := "", -1
+	var tied []string
+	for _, c := range taken {
+		n, err := holders(dir, line, c)
+		if err != nil {
+			return "", err
+		}
+		switch {
+		case fewest < 0 || n < fewest:
+			best, fewest, tied = c, n, nil
+		case n == fewest:
+			tied = append(tied, c)
+		}
+	}
+	for _, c := range tied {
+		if later, err := git.IsAncestor(dir, best, c); err != nil {
+			return "", err
+		} else if later {
+			best = c
+			continue
+		}
+		if earlier, err := git.IsAncestor(dir, c, best); err != nil {
+			return "", err
+		} else if !earlier {
+			return "", &CurrentRefusal{Why: fmt.Sprintf("HEAD took %s and %s from histories of the target its own "+
+				"history does not order, so it cannot show which it took last.\nRun it again with --base <commit>, the "+
+				"full object name of the commit of the target the branch took last.", best, c)}
+		}
+	}
+	return best, nil
+}
+
+// holders counts the commits of line, a first-parent history newest first,
+// that hold c. Each holds what the one after it holds, so the count is found
+// by halving.
+func holders(dir string, line []string, c string) (int, error) {
+	lo, hi := 0, len(line)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		holds, err := git.IsAncestor(dir, c, line[mid])
+		if err != nil {
+			return 0, err
+		}
+		if holds {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo, nil
 }
 
 // abbrev is the abbreviation a message names a commit by.

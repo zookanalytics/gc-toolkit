@@ -12,8 +12,9 @@ import (
 
 // The calls a merge into a checkout makes: the operation the checkout is in
 // the middle of, the updates of origin's branch the clone recorded, the
-// commits of that history a commit no longer holds, a best common ancestor
-// that may not exist, a commit written from a tree, and the merge itself.
+// commits of that history a commit no longer holds, a commit's first-parent
+// history, a best common ancestor that may not exist, a commit written from a
+// tree, and the merge itself.
 
 // input runs `git -C dir args...` with stdin on its standard input and returns
 // its stdout. A failure carries git's own stderr.
@@ -148,6 +149,19 @@ func NotHeld(dir string, commits []string, tip string) ([]string, error) {
 		}
 	}
 	return kept, nil
+}
+
+// FirstParents lists head and its first parents, newest first, back to the
+// first that stop holds, which it leaves out.
+func FirstParents(dir, head, stop string) ([]string, error) {
+	if !IsObjectID(head) || !IsObjectID(stop) {
+		return nil, fmt.Errorf("git rev-list: %q and %q must be full object names", head, stop)
+	}
+	out, err := Output(dir, "rev-list", "--first-parent", head, "^"+stop)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
 }
 
 // CommonBase is a best common ancestor of commits a and b, as `git merge-base`
