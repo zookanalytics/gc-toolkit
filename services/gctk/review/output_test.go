@@ -411,6 +411,57 @@ func TestARulingThatSettlesAQuestion(t *testing.T) {
 		Ruling: review.RulingDeclined, Reason: "r", Settles: "tk-q1"}), nil), "only the ruling of an ask")
 }
 
+// A must-fix point the round fixed in the PR's title or summary, which the
+// bead that owns the PR records and the round's push publishes, names that fix
+// in place of a commit, or beside one, whether a lane raised it or an ask
+// carried it. A ruling that changes nothing names no such fix, and a commit
+// that is not a full object name stands for none.
+func TestARepairOutputsFixInThePRsSummary(t *testing.T) {
+	setup := func() (*world, string) {
+		w := newWorld(t)
+		w.output(triage(1, h1, "pm"))
+		w.output(lane(1, "pm", h1, review.VerdictRequestChanges, "PM1"))
+		return w, w.step(1, "rule-and-repair")
+	}
+	for _, r := range []review.Ruling{
+		{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "the summary names the ask it answered", Summary: true},
+		{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "the cost line and its code", Commit: fix, Summary: true},
+	} {
+		w, st := setup()
+		var got review.Repair
+		if err := w.check(st, repair(1, h1, "", r), &got); err != nil {
+			t.Fatalf("a must-fix fixed in the summary, commit %q: %v", r.Commit, err)
+		}
+		if len(got.Rulings) != 1 || !got.Rulings[0].Summary {
+			t.Errorf("the printed rulings lost the fix in the summary: %+v", got.Rulings)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		r    review.Ruling
+		why  string
+	}{
+		{"a decline", review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingDeclined, Reason: "r", Summary: true},
+			"pm finding PM1 is ruled declined, which changes nothing, and says the round fixed it in the PR's summary"},
+		{"a must-fix with neither", review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "r"},
+			"names no commit that fixes it and no fix in the PR's summary"},
+		{"a commit that is no object name", review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "r",
+			Commit: "abc", Summary: true}, `names the commit "abc", which is not a full object name`},
+	} {
+		w, st := setup()
+		mustRefuse(t, w.check(st, repair(1, h1, "", c.r), nil), c.why)
+	}
+
+	w := newWorld(t)
+	w.ask("tk-ask", "")
+	w.output(triage(1, h1))
+	st := w.step(1, "rule-and-repair")
+	if err := w.check(st, repair(1, h1, "", review.Ruling{Ask: "tk-ask", Ruling: review.RulingMustFix,
+		Reason: "the cost line the ruling asked for", Summary: true}), nil); err != nil {
+		t.Errorf("an ask fixed in the summary: %v", err)
+	}
+}
+
 // A finding is its lane's check, compared without case, and its id as the
 // lane wrote it, in the round's output as in the pass rule: two findings whose
 // ids differ only in case are two, each ruled once, and the round that rules

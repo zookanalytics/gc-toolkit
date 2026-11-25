@@ -42,7 +42,9 @@ const (
 // A ruling of a finding or an ask, by the rule its source carries.
 const (
 	// RulingMustFix: it holds, and the round fixes it. The ruling names the
-	// commit that fixes it.
+	// commit that fixes it, or says the round fixed it in the PR's title or
+	// summary, which the bead that owns the PR records and the round's push
+	// publishes, or both.
 	RulingMustFix = "must-fix"
 	// RulingDeclined: its source's own rule shows it does not hold, or does
 	// not fix it, as a nit is answered and not fixed. The reason says which.
@@ -125,14 +127,15 @@ type Repair struct {
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
 // id, or one ask, named by its bead: the ruling, its reason, the commit that
-// fixes a must-fix finding and the gate a question went to. Settles is the gate
-// of a question a person's post settles, which only the ruling of that post's
-// ask names, and Moot says the post makes the question moot rather than
-// answering it. The round's post closes that gate with the post as its answer.
-// Wordless says the post an answered ask carries is owed no words, such as a
-// thank-you or an approval's "looks good": its answer on the PR is the city's
-// 👍 alone, and the head's comment carries the reason. A post made while a
-// question it does not settle stands still gets the reply that says so.
+// fixes a must-fix point, whether the round fixed it in the PR's title or
+// summary, and the gate a question went to. Settles is the gate of a question
+// a person's post settles, which only the ruling of that post's ask names, and
+// Moot says the post makes the question moot rather than answering it. The
+// round's post closes that gate with the post as its answer. Wordless says the
+// post an answered ask carries is owed no words, such as a thank-you or an
+// approval's "looks good": its answer on the PR is the city's 👍 alone, and the
+// head's comment carries the reason. A post made while a question it does not
+// settle stands still gets the reply that says so.
 type Ruling struct {
 	Check    string `json:"check,omitempty"`
 	Finding  string `json:"finding,omitempty"`
@@ -140,6 +143,7 @@ type Ruling struct {
 	Ruling   string `json:"ruling"`
 	Reason   string `json:"reason,omitempty"`
 	Commit   string `json:"commit,omitempty"`
+	Summary  bool   `json:"summary,omitempty"`
 	Gate     string `json:"gate,omitempty"`
 	Settles  string `json:"settles,omitempty"`
 	Moot     bool   `json:"moot,omitempty"`
@@ -153,16 +157,25 @@ const QuestionKey = "review-question-"
 
 // Answer is the ruling's answer as the PR shows it, what the head carries for
 // the point it rules, where pushed is the head the round pushed, "" when it
-// pushed nothing: a must-fix point's commit and the head that carries it, why
-// any other point gets no change, and the gate a question went to.
+// pushed nothing: a must-fix point's commit and the head that carries it, or
+// that the PR's summary carries its fix, why any other point gets no change,
+// and the gate a question went to.
 func (r Ruling) Answer(pushed string) string {
 	reason := oneLine(r.Reason)
 	switch r.Ruling {
 	case RulingMustFix:
-		if pushed != "" {
-			return fmt.Sprintf("Fixed by `%s`, which `%s` carries: %s", short(r.Commit), short(pushed), reason)
+		also := ""
+		if r.Summary {
+			also = ", and in the PR's summary"
 		}
-		return fmt.Sprintf("Fixed by `%s`: %s", short(r.Commit), reason)
+		switch {
+		case r.Commit == "" && r.Summary:
+			return "Fixed in the PR's summary: " + reason
+		case pushed != "":
+			return fmt.Sprintf("Fixed by `%s`, which `%s` carries%s: %s", short(r.Commit), short(pushed), also, reason)
+		default:
+			return fmt.Sprintf("Fixed by `%s`%s: %s", short(r.Commit), also, reason)
+		}
 	case RulingDeclined:
 		return "Declined, and the head carries no change for it: " + reason
 	case RulingDeferred:

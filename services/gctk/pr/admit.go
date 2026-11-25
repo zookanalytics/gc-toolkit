@@ -45,9 +45,12 @@ import (
 // that key instead.
 
 // Runs pours a review run: the formula, as a sub-workflow attached to the
-// bead, with its vars. It returns the run's root.
+// bead, with its vars. It returns the run's root. Rank settles the priority of
+// the run whose root it names, the root's and that of each live step, at the
+// rank the pack's priority function gives the root, and stops once ctx ends.
 type Runs interface {
 	Pour(formula, bead string, vars map[string]string) (string, error)
+	Rank(ctx context.Context, root string) error
 }
 
 // runFailedKey keys the human gate the order files when the last two runs at
@@ -60,8 +63,10 @@ const runFailedKey = "review-run-failed"
 // stopped between the two leaves a run whose steps the pools take and that the
 // order never reads, so the next run pours a second. A pour is a few store
 // calls, which take seconds, so a pour started with this much left ends inside
-// the bound. One that does not, such as a cook the store keeps waiting, holds
-// the record lock until it ends or the order's timeout ends the run.
+// the bound, and what is left after it holds the settle of the run's priority,
+// a few store calls more (rank). One that does not, such as a cook the store
+// keeps waiting, holds the record lock until it ends or the order's timeout
+// ends the run.
 const pourReserve = 10 * time.Second
 
 // admit decides the review run the record s read is owed: the pour, or the
@@ -134,9 +139,29 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 			return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf(
 				"the review run at %s did not pour, and the next run pours it: %v", s.rec.Head, err), c.note)}
 		}
+		u.poured = root
 		return RunOutcome{Bead: s.id, Action: ActPoured, Detail: withNote(fmt.Sprintf(
 			"review run %s poured at %s into %s, attached to the bead: %s", root, s.rec.Head, s.rec.Target, why), c.note)}
 	}), true
+}
+
+// rank settles the priority of the review run the act poured, whose root is
+// root, once the act has freed the record lock, and says what became of it.
+// The pour gives every bead it makes the bead's own priority (the graph.v2 arm
+// of `newFormulaCookCmd` in gascity's `cmd/gc/cmd_formula.go`), while the run
+// ranks apart from the bead, so the run is settled here and not left to the
+// priority pass, which reads only the polecat pool's queue and so never the
+// codex pool's, where the run's triage and lanes queue. The settle stops when
+// ctx, the act's, ends: the reserve an act keeps for a pour leaves it a few
+// seconds, enough for the few store calls a settle makes. One that fails or is
+// stopped leaves the run at the bead's priority until the pass reaches a step
+// of it queued for the polecat pool, so it fails no act.
+func (u *run) rank(ctx context.Context, root string) string {
+	if err := u.Runs.Rank(ctx, root); err != nil {
+		return "; its priority did not settle, so it runs at the bead's priority until the priority pass " +
+			"reaches a step of it queued for the polecat pool: " + err.Error()
+	}
+	return "; its priority settled"
 }
 
 // heldBy names the open human gate on the bead s read, which keeps the order

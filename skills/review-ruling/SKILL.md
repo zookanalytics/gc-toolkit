@@ -8,11 +8,11 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 You rule every finding a lane raised at the head the round judged and every ask
 triage left you, and you make the round's fixes. The step that rules is the
-step that fixes, so a ruling is what you change: a point ruled must-fix gets a
-commit, and a point ruled declined, deferred, answered or put to a person gets
-no change at all. Each point is ruled by the rule its source carries, below,
-and each ruling carries its reason, which the head's comment shows the operator
-as that point's answer.
+step that fixes, so a ruling is what you change. A point ruled must-fix gets a
+commit, a fix in the PR's title or summary, or both. A point ruled declined,
+deferred, answered or put to a person gets no change at all. Each point is
+ruled by the rule its source carries, below, and each ruling carries its
+reason, which the head's comment shows the operator as that point's answer.
 
 Triage answers a person's post that needs only an answer before you read the
 round, and your read lists each ask it answered under triage and leaves it out
@@ -55,7 +55,8 @@ the purpose its row in the check index states.
 Fix each point you rule must-fix with a commit of its own in the run's
 worktree, whose message names the point, and name that commit in its ruling.
 Two points never share a commit, and no point is answered by a fix made for
-another point or by another lane's fix.
+another point or by another lane's fix. A point fixed only in the PR's title
+or summary needs no commit, as the next section says.
 
 For each must-fix point, find the other sites in the change that share its
 cause, and fix them in the same round. Name them in the ruling's reason, so the
@@ -76,6 +77,49 @@ and put it to them as A question only a person can answer says, naming the
 change on the target and the branch's code it meets. A rewrite of code the
 branch edits is no such question: resolve it, and its paragraph of the account
 says what the target changed there and how the branch's edit applies to it.
+
+## A fix in the PR's title or summary
+
+The bead that owns the PR records the PR's title and summary. The round's read
+names that bead beside the PR. The calls below take it as `<pr-bead>`.
+
+Fix a point on the title or the summary on that bead, whether a lane's finding
+or an ask raised it. Rule the point must-fix with `"summary": true` in its
+ruling:
+
+- When the fix changes only the title or the summary, the ruling names no
+  commit.
+- When the fix also changes code, the ruling names that commit too.
+
+Record the summary again whenever the round leaves it untrue:
+
+- when the round rules a point on the title or the summary must-fix;
+- when the round's commits or questions change what the summary states, such
+  as a fix's cost or what stands before the merge.
+
+Read the summary `<pr-bead>` records:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary <pr-bead>
+```
+
+Write it again whole, to the standard the `<binding>.commit-conventions` skill
+holds for a PR's summary, in a file in the repair's part of the run's
+workspace. Record it from that file:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr summary <pr-bead> --file "<the summary file>"
+```
+
+Add `--title "<the subject line>"` to that call when the PR's title changes.
+
+Then push as the step says, even when the round has no commits to push.
 
 ## A fix outside the reviewed diff
 
@@ -193,7 +237,7 @@ each head: answered once the head carries its fix, or once its check ran there.
 ## Each answer says what the head carries
 
 The head's comment is rendered from your rulings, so write each reason as the
-answer the operator reads. A must-fix point's answer is the commit that fixes
-it, which the head the round pushed carries. Any other point's answer says why
-the head carries no change for it. A reason never says a point is fixed that
-the head does not carry the fix for.
+answer the operator reads. A must-fix point's answer names its fix: the commit
+the round pushed, the fix in the PR's title or summary, or both. Any other
+point's answer says why the head carries no change for it. A reason never says
+a point is fixed unless the head or the PR's title or summary carries the fix.

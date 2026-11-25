@@ -637,9 +637,10 @@ condition, so a post made seconds before the merge holds it though no saved
 read holds it yet. The landing order takes each such post as an ask of its own,
 and the PR's review run rules every open ask together. The PR-finishing rank
 reads the saved read too: an anchor whose PR is open on the pending record ranks
-its PR-finishing work at P0 while its saved read, at the head the store holds,
-names an approver and no request for changes, and the priority reconcile
-settles that work at the rank the function reads
+its PR-finishing work, its review run among it, at P0 while its saved read, at
+the head the store holds, names an approver and no request for changes. The
+landing order settles a review run's root once it pours the run, and the
+priority reconcile settles that work at the rank the function reads
 ([steering.md](steering.md#pr-finishing-work)).
 
 On a bead that owns a PR on the pending record, the landing order converts the
@@ -887,7 +888,7 @@ sequenceDiagram
   W->>L: gctk pr refresh — save GitHub's side of the PR on the bead
   O->>L: the evaluator finds the PR ready on the saved read
   O->>G: gctk pr refresh's re-read of the PR in full, saved on the bead
-  O->>G: mergePullRequest, pinned to the head the evaluator judged on that read (expectedHeadOid)
+  O->>G: mergePullRequest, pinned to the head the evaluator judged on that read (expectedHeadOid),<br/>under the subject the bead's title composes to at the request (commitHeadline)
   W->>L: the watch saves the PR merged, with its merge commit
   O->>L: mr_merged + close, once the merge commit is on the fetched target
 ```
@@ -1024,7 +1025,8 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   state its canonical is in, because the canonical carries the work. While the
   canonical has neither closed nor shipped, each open bead the duplicate blocks
   first gains a `blocks` edge onto it, so none goes ready before the canonical
-  delivers (Disposition, below). Converse and operator dispositions use the
+  delivers, as under every kind whose successor carries the work (Disposition,
+  below). Converse and operator dispositions use the
   same writer, and so does a polecat whose work
   bead duplicates another: that close is the one a polecat makes on its work
   bead, before it declines its run. A never-dispatched rework twin, an open
@@ -1189,7 +1191,9 @@ required under every kind, because it is the whole of that distinction. The
 kind's phrase and the successor ride the close as an appended note, as in
 `Disposition <time>: not needed, per <successor> in <store>`, because bd's
 guarded close sets no close reason; when the edge is added after an earlier
-close, a `Disposition recorded` note carries them instead. The read side
+close, a `Disposition recorded` note carries them instead. The close also
+records `gc.work_outcome=no-op`, the work record Gas City's close gate asks of
+a plain task bead, unless the origin records a work outcome already. The read side
 searches every store before concluding a close was false. Consumers: the
 close paths of the `work` skill and the converse-settle skill, the mechanik's prompt,
 which searches every store before it reopens a closed bead, `stand-down.sh` (a
@@ -1204,18 +1208,22 @@ and any patrol judging a closed bead.
 the origin recorded no work, and under `fixed-upstream` that the successor is
 closed or shipped, unless the origin carries the operator's pre-recorded
 PR-close disposition for that kind and successor.
-Under `duplicate` it also keeps the waits on the bead in force. bd's ready rule
-follows a `blocks` edge and never a `duplicates` edge, so before a duplicate of a
-canonical that has neither closed nor shipped closes, each open bead it blocks
-gains a `blocks` edge onto the canonical, each add taking its exit. The
-canonical itself and a
-bead it already blocks need none. A waiter that cannot take the edge refuses the
-close before anything is written: one the canonical already joins by another
-edge type, since bd keeps one edge per pair, and every waiter of a canonical in
-another store, where the edge would hold nothing. A waiter bd refuses the edge,
-for a cycle or a parent chain, refuses the close too, once the edges before it
-are written, and those stay. Every other kind ends the waits on the bead with its
-close.
+Under every kind but `not-needed` it also keeps the waits on the bead in force,
+because the successor carries the bead's work, and bd's ready rule follows a
+`blocks` edge and never a `duplicates` or `supersedes` edge. So before such a
+close, while the successor has neither closed nor shipped, each open bead the
+origin blocks gains a `blocks` edge onto the successor, all in one bulk write
+that bd commits whole or not at all. A `fixed-upstream` close meets this only on
+a ruling that closes it before its fix has landed. The successor itself, a bead
+it already blocks, and a bead a ruling has recorded a PR-close disposition on
+need none: the ruled bead closes under that ruling and waits for nothing more.
+A waiter that cannot take the edge refuses the close before anything is
+written: one the successor already joins by another edge type, since bd keeps
+one edge per pair, and every waiter of a successor in another store, where the
+edge would hold nothing. A write bd refuses, for a cycle or a parent chain,
+refuses the close too. A bead that comes to wait on the origin while it closes
+gains its edge just after the close. Under `not-needed` nothing carries the
+work, and the waits on the bead end with its close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
 kind gets: the origin is not a review bead, a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close

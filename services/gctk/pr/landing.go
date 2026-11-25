@@ -65,23 +65,28 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order, the draft cycle and a review round's post
-// reach it: the reads an act makes of what it changes, such as a withdrawal's of
-// the reviews it dismisses, the conversion's of the PR's posts and threads and a
+// Hub is GitHub as the landing order, the draft cycle and a review round's
+// post and its edit of the PR's text reach it: the reads an act makes of what
+// it changes, such as a withdrawal's of the reviews it dismisses, an edit's of
+// the PR's title and body, the conversion's of the PR's posts and threads and a
 // round's post's of the PR's conversation, a merge request or an enqueue pinned
-// to the head the evaluator judged, the PR's moves between draft and ready, the
-// dismissal of a review, the reaction the take, the conversion or a round's post
-// leaves on a post, named by its node id, the resolution of a review thread,
-// named by its node id, the request that an account review the PR again, and the
-// re-run of a GitHub Actions run's failed jobs, named by the run's id.
+// to the head the evaluator judged, the merge under the commit headline the act
+// names, the PR's moves between draft and ready, the edit of its title and
+// body, the dismissal of a review, the reaction the take, the conversion or a
+// round's post leaves on a post, named by its node id, the resolution of a
+// review thread, named by its node id, the request that an account review the
+// PR again, and the re-run of a GitHub Actions run's failed jobs, named by the
+// run's id.
 type Hub interface {
 	GitHub
 	Conversation(repo string, number int) (*gh.Conversation, error)
 	IssueComments(repo string, number int) ([]gh.IssueComment, error)
-	MergePullRequest(id, head string) error
+	MergePullRequest(id, head, headline string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
+	PullRequestText(repo string, number int) (*gh.Text, error)
+	EditPullRequest(id string, title, body *string) error
 	DismissReview(repo string, number int, id int64, message string) error
 	AddReaction(subject, content string) error
 	ResolveThread(id string) error
@@ -211,9 +216,10 @@ func (e *HeldClose) Error() string { return e.Why }
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
 // it, and Posts is that writer, through which a review round's post posts its
-// comment and its replies. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
-// ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
-// carries none. Wake gives the refinery its turn for each changed head the run
+// comment and its replies. Runs pours a PR's review run and settles its
+// priority, and Dispositions closes a bead whose PR a ruling retired. Audit is
+// the rig's seed audit, nil for a rig whose repository carries none. Wake gives
+// the refinery its turn for each changed head the run
 // hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
@@ -442,8 +448,9 @@ const (
 // does not end, since a cook stopped before it attaches its run leaves a run
 // the order never reads, so an act starts a pour only while pourReserve of its
 // bound is left. The disposition writer a closed retired PR's bead goes to once
-// the act has freed the lock runs past the bound too (Dispositions). A bound
-// of zero is no bound.
+// the act has freed the lock runs past the bound too (Dispositions). The settle
+// of a poured review run's priority runs once the act has freed the lock, in
+// what is left of the act's bound (Runs). A bound of zero is no bound.
 type Options struct {
 	Window time.Duration
 	Stop   time.Duration
@@ -574,10 +581,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 			continue
 		}
 		ctx, cancel := bounded(o.Stop)
-		u.landed, u.disposal, u.rereadDue, u.reread = nil, nil, "", ""
+		u.landed, u.disposal, u.rereadDue, u.reread, u.poured = nil, nil, "", "", ""
 		out := u.one(ctx, id, o.Stop)
 		if u.rereadDue != "" {
 			out = u.rereadAndDecide(ctx, id, u.rereadDue, o.Stop)
+		}
+		if u.poured != "" {
+			out.Detail += u.rank(ctx, u.poured)
 		}
 		cancel()
 		if u.disposal != nil {
@@ -673,9 +683,10 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 // audit's check once the lock is free, disposal the close the act just made
 // owes the disposition writer once the lock is free, rereadDue the PR the act
 // found ready on the saved read, which the one-PR update re-reads once the lock
-// is free, reread the bead whose PR the act has had re-read, and audited names,
-// for each tip of the default branch the run has checked, the bead whose
-// landing checked it.
+// is free, reread the bead whose PR the act has had re-read, poured the root of
+// the review run the act poured, whose priority the act settles once the lock
+// is free, and audited names, for each tip of the default branch the run has
+// checked, the bead whose landing checked it.
 type run struct {
 	Landing
 	feedback  Feedback
@@ -688,6 +699,7 @@ type run struct {
 	disposal  *Disposal
 	rereadDue string
 	reread    string
+	poured    string
 	audited   map[string]string
 }
 
@@ -1663,7 +1675,8 @@ func (u *run) decideAtHead(s state, f seen) plan {
 
 // merge asks GitHub to merge a PR the evaluator found ready on the read the
 // one-PR update saved once it had re-read the PR in full for this act, pinned to
-// the head the answer judged, or to add it to its base's merge queue where the
+// the head the answer judged and under the subject the bead composes to when the
+// act reads it last (Subject), or to add it to its base's merge queue where the
 // base requires one. Whatever GitHub answers, the next run decides the PR again.
 func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedOut) RunOutcome {
 	// The merge request is the one act no guard can take back, so the bead is
@@ -1683,17 +1696,23 @@ func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedO
 		return RunOutcome{Bead: s.id, Action: ActMoved, Detail: withNote(
 			"the bead moved during the act's reads, so no merge was requested; the next run reads it as it stands", c.note)}
 	}
+	// The squash commit's subject is composed from the bead as this read finds
+	// it, not taken from the PR's title, which the refinery sets from the bead
+	// only when it publishes the PR. An enqueue takes no subject.
+	subject := Subject(s.id, now.Title(), now.IssueType(), f.pr.Number)
 	hub := u.Hub(ctx, f.host)
-	method, ask := "merge", hub.MergePullRequest
+	method, ask := "merge", func() error { return hub.MergePullRequest(f.pr.ID, ans.Head, subject) }
+	under := fmt.Sprintf(", under the subject %q", subject)
 	if f.pr.MergeQueueEnabled {
-		method, ask = "enqueue", hub.EnqueuePullRequest
+		method, ask = "enqueue", func() error { return hub.EnqueuePullRequest(f.pr.ID, ans.Head) }
+		under = ""
 	}
-	if err := ask(f.pr.ID, ans.Head); err != nil {
+	if err := ask(); err != nil {
 		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf("the %s request at %s was refused "+
 			"or not answered; the next run decides again: %v", method, ans.Head, err), c.note)}
 	}
 	return RunOutcome{Bead: s.id, Action: ActRequested, Detail: withNote(fmt.Sprintf("ready on the PR's re-read: the "+
-		"%s is requested at %s into %s", method, ans.Head, ans.Target), c.note)}
+		"%s is requested at %s into %s%s", method, ans.Head, ans.Target, under), c.note)}
 }
 
 // withNote is detail with the run's account of the record's withdrawals after

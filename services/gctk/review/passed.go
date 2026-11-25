@@ -20,8 +20,11 @@ import (
 // it nothing: no check picked, and every ask the round can take answered. An
 // ask that something holds counts for nothing, so it spends no attempt, and
 // its own edge holds the PR until a later run takes it. Each finding or ask
-// the run ruled must-fix at an earlier head must name the commit that fixes
-// it. A finding declined by its lane's own rule counts as ruled, and so does a
+// the run ruled must-fix at an earlier head must name the commit that fixes it
+// or a fix in the PR's title or summary. A finding fixed there, which no
+// commit carries and no diff shows, needs its check to have run in a later
+// iteration, so its lane judged the summary the round's push published. A
+// finding declined by its lane's own rule counts as ruled, and so does a
 // question put to a person, so the loop stops there rather than spend its
 // attempts on a question only a person can settle.
 //
@@ -74,7 +77,6 @@ func judge(run *Run, n int, asks []Ask) []string {
 		return append(why, fmt.Sprintf("triage wrote no head in iteration %d", n))
 	}
 	head := it.Triage.Head
-	ran := map[string]bool{}
 	for _, p := range it.Triage.Checks {
 		if p.Head != head {
 			why = append(why, fmt.Sprintf("triage picked %s at %s, not at the head it judged, %s", p.Check, p.Head, head))
@@ -88,10 +90,9 @@ func judge(run *Run, n int, asks []Ask) []string {
 			why = append(why, fmt.Sprintf("the %s lane reviewed %s, not the head triage judged, %s", p.Check, ln.Head, head))
 		case ln.Verdict != VerdictApprove && ln.Verdict != VerdictRequestChanges:
 			why = append(why, fmt.Sprintf("the %s lane's verdict reads %q, not %s or %s", p.Check, ln.Verdict, VerdictApprove, VerdictRequestChanges))
-		default:
-			ran[strings.ToLower(p.Check)] = true
 		}
 	}
+	ran := ranIn(it)
 	rp := it.Repair
 	switch {
 	case rp == nil:
@@ -143,13 +144,48 @@ func judge(run *Run, n int, asks []Ask) []string {
 			continue
 		}
 		for _, r := range earlier.Repair.Rulings {
-			if r.Ruling == RulingMustFix && !git.IsObjectID(r.Commit) {
-				why = append(why, fmt.Sprintf("%s was ruled must-fix at %s, in iteration %d, and names no commit that fixes it",
+			if r.Ruling != RulingMustFix {
+				continue
+			}
+			if !git.IsObjectID(r.Commit) && !r.Summary {
+				why = append(why, fmt.Sprintf("%s was ruled must-fix at %s, in iteration %d, and names no commit that fixes it and no fix in the PR's summary",
 					r.Subject(), earlier.Repair.Head, m))
+			}
+			if r.Summary && r.Ask == "" && !ranSince(run, r.Check, m, n) {
+				why = append(why, fmt.Sprintf("%s was fixed in the PR's summary in iteration %d, and %s has not run since, so no lane has judged the fix",
+					r.Subject(), m, r.Check))
 			}
 		}
 	}
 	return why
+}
+
+// ranIn is each check whose lane wrote its verdict in it at the head its triage
+// judged, as triage picked it there, by its name in lower case.
+func ranIn(it *Iteration) map[string]bool {
+	ran := map[string]bool{}
+	if it == nil || it.Triage == nil || it.Triage.Head == "" {
+		return ran
+	}
+	head := it.Triage.Head
+	for _, p := range it.Triage.Checks {
+		ln, ok := lane(it, p.Check)
+		if ok && p.Head == head && ln.Head == head && (ln.Verdict == VerdictApprove || ln.Verdict == VerdictRequestChanges) {
+			ran[strings.ToLower(p.Check)] = true
+		}
+	}
+	return ran
+}
+
+// ranSince reports whether check ran in an iteration of the run after m, up to
+// n.
+func ranSince(run *Run, check string, m, n int) bool {
+	for k := m + 1; k <= n; k++ {
+		if ranIn(run.Iterations[k])[strings.ToLower(check)] {
+			return true
+		}
+	}
+	return false
 }
 
 // ruled is why one ruling at head does not count as ruled, or as ruled and
@@ -268,6 +304,12 @@ func explainRuling(b *strings.Builder, r Ruling) {
 	}
 	if r.Commit != "" {
 		fmt.Fprintf(b, " by %s", r.Commit)
+	}
+	switch {
+	case r.Summary && r.Commit != "":
+		fmt.Fprint(b, " and in the PR's summary")
+	case r.Summary:
+		fmt.Fprint(b, " in the PR's summary")
 	}
 	if r.Gate != "" {
 		fmt.Fprintf(b, " through %s", r.Gate)

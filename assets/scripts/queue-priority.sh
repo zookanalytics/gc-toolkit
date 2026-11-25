@@ -59,7 +59,9 @@
 # are the creators of PR-finishing work, and each settles a child before it
 # makes the child claimable: rework-child.sh and gate-ensure.sh before they
 # sling it. A rank that moves with the anchor's approval settles at the next
-# reconcile.
+# reconcile. The landing order (gctk pr reconcile) settles the root of each
+# review run it pours once the pour is made, since the pour gives the run's
+# beads the bead's own priority and its steps are claimable from the start.
 # Exit codes: 0 ok; 1 a read, a write or the lock failed; 2 usage,
 # a move refused before anything was written, or a pass that finds no one
 # polecat pool to read.

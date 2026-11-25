@@ -497,11 +497,12 @@ var (
 
 // checkRuling is why one ruling of iteration it's round does not stand: a
 // subject no lane raised and no ask the round can take, a ruling outside the
-// set, a must-fix with no fixing commit, a commit on a ruling that changes no
-// code, a question with no gate, a wordless ruling that is not an ask's answer
-// or that settles a question, and a fix for an ask an earlier round of the run
-// declined, which a later ruling of its own overrules only through an ask that
-// carries it.
+// set, a commit that is not a full object name, a must-fix that names neither
+// a fixing commit nor a fix in the PR's summary, a commit or a fix in the
+// summary on a ruling that changes nothing, a question with no gate, a wordless
+// ruling that is not an ask's answer or that settles a question, and a fix for
+// an ask an earlier round of the run declined, which a later ruling of its own
+// overrules only through an ask that carries it.
 func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string) error {
 	switch {
 	case r.Ask != "" && (r.Check != "" || r.Finding != ""):
@@ -522,10 +523,14 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("%s is ruled %q, which is not a ruling (%s)", r.Subject(), r.Ruling, strings.Join(rulings, ", "))
 	}
 	switch {
-	case r.Ruling == RulingMustFix && !git.IsObjectID(r.Commit):
-		return refuse("%s is ruled must-fix and names no commit that fixes it (a full object name)", r.Subject())
+	case r.Commit != "" && !git.IsObjectID(r.Commit):
+		return refuse("%s names the commit %q, which is not a full object name", r.Subject(), r.Commit)
+	case r.Ruling == RulingMustFix && r.Commit == "" && !r.Summary:
+		return refuse("%s is ruled must-fix and names no commit that fixes it and no fix in the PR's summary", r.Subject())
 	case r.Ruling != RulingMustFix && r.Commit != "":
 		return refuse("%s is ruled %s, which changes no code, and names the commit %s", r.Subject(), r.Ruling, r.Commit)
+	case r.Ruling != RulingMustFix && r.Summary:
+		return refuse("%s is ruled %s, which changes nothing, and says the round fixed it in the PR's summary", r.Subject(), r.Ruling)
 	case r.Ruling == RulingQuestion && strings.TrimSpace(r.Gate) == "":
 		return refuse("%s is put to a person and names no gate", r.Subject())
 	case r.Ruling != RulingQuestion && r.Gate != "":

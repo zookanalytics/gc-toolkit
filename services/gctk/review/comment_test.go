@@ -93,3 +93,43 @@ func TestTheHeadsComment(t *testing.T) {
 		}
 	}
 }
+
+// A point the round fixed in the PR's summary is answered as fixed there, with
+// its commit and the head that carries it when it has one too, and the
+// comment's first sentence counts the fixes in the summary apart from the
+// ones the push carries.
+func TestTheHeadsCommentOnAFixInThePRsSummary(t *testing.T) {
+	w := newWorld(t)
+	w.output(triage(1, h1, "pm", "arch"))
+	w.output(lane(1, "pm", h1, review.VerdictRequestChanges, "PM1"))
+	w.output(lane(1, "arch", h1, review.VerdictRequestChanges, "A1"))
+	w.output(repair(1, h1, h2,
+		review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "it names the answered ask no more", Summary: true},
+		review.Ruling{Check: "arch", Finding: "A1", Ruling: review.RulingMustFix, Reason: "the seam and its account", Commit: fix, Summary: true}))
+	run, err := review.ReadRun(w.ledger(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := review.Comment(run, 1, nil)
+	for _, want := range []string{
+		"pm requested changes, arch requested changes. The round fixed 1 in `" + h2[:12] + "`, fixed 1 in the PR's summary.",
+		"Fixed in the PR's summary: it names the answered ask no more",
+		"Fixed by `" + fix[:12] + "`, which `" + h2[:12] + "` carries, and in the PR's summary: the seam and its account",
+		"| pm | request-changes | 1 P1 | 1 must-fix |",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the comment lacks %q:\n%s", want, got)
+		}
+	}
+
+	w = newWorld(t)
+	w.output(triage(1, h1, "pm"))
+	w.output(lane(1, "pm", h1, review.VerdictRequestChanges, "PM1"))
+	w.output(repair(1, h1, "", review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "r", Summary: true}))
+	if run, err = review.ReadRun(w.ledger(), root); err != nil {
+		t.Fatal(err)
+	}
+	if got := review.Comment(run, 1, nil); !strings.Contains(got, "pm requested changes. The round fixed 1 in the PR's summary.") {
+		t.Errorf("a round that fixed only the summary reads:\n%s", got)
+	}
+}

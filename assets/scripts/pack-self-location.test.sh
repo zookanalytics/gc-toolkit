@@ -20,7 +20,8 @@
 #      formula drops the dot from {{binding_prefix}}, an expansion formula from
 #      {binding_prefix}, the form its template renders, a prompt or fragment
 #      renders {{ .BindingName }}, and a skill writes <binding> for the agent
-#      to fill in.
+#      to fill in. No text, gctk's Go included, spells the binding as
+#      gc-toolkit in front of one of the pack's agents.
 #   3. A formula's resolver line, run under a stub gc, takes the directory gc
 #      names and nothing else: empty when gc refuses the binding or a probe
 #      fails, even with the script sitting in every directory the old lookup
@@ -63,17 +64,19 @@ scanned=$(grep -c . "$TMP/files" || true)
   || bad "scanning pack content found only $scanned files under $DIRS; the scan is not reading the pack"
 
 echo "── 1. no pack text guesses where the pack is ──"
-# scan <label> <ERE> <a line it must flag> <a line it must pass> [<file filter>]
-# reports every non-comment line of pack content the ERE matches. A shell or
-# toml comment is prose about a lookup, not one. The two sample lines prove
-# the ERE flags the form it names and passes the form that replaced it, so a
-# clean scan is the pack being clean, not a pattern that matches nothing.
+# scan <label> <ERE> <a line it must flag> <a line it must pass> [<file filter>
+# [<file list>]] reports every non-comment line the ERE matches in the files of
+# the list, pack content unless it names another, that the filter keeps. A
+# shell, toml or Go comment is prose about a lookup, not one. The two sample
+# lines prove the ERE flags the form it names and passes the form that
+# replaced it, so a clean scan is the pack being clean, not a pattern that
+# matches nothing.
 scan() {
-  local label="$1" re="$2" flag="$3" pass="$4" only="${5:-.}" hits
+  local label="$1" re="$2" flag="$3" pass="$4" only="${5:-.}" list="${6:-$TMP/files}" hits
   printf '%s\n' "$flag" | grep -q -E "$re" || bad "$label: the pattern does not flag its sample" "$flag"
   ! printf '%s\n' "$pass" | grep -q -E "$re" || bad "$label: the pattern flags the replacement" "$pass"
-  hits=$(grep -E "$only" "$TMP/files" | while IFS= read -r f; do
-           grep -n -E "$re" "$ROOT/$f" 2>/dev/null | grep -v -E '^[0-9]+:[[:space:]]*#' | sed "s#^#$f:#"
+  hits=$(grep -E "$only" "$list" | while IFS= read -r f; do
+           grep -n -E "$re" "$ROOT/$f" 2>/dev/null | grep -v -E '^[0-9]+:[[:space:]]*(#|//)' | sed "s#^#$f:#"
          done)
   if [ -z "$hits" ]; then ok "$label"; else bad "$label" "$(printf '%s\n' "$hits" | head -20)"; fi
 }
@@ -166,6 +169,34 @@ wrong=$(grep '^skills/' "$TMP/files" | while IFS= read -r f; do
 done)
 [ -z "$wrong" ] && ok "every skill call writes <binding> for the agent to fill in" \
   || bad "every skill call writes <binding> for the agent to fill in" "$(printf '%s\n' "$wrong" | head -10)"
+
+# Gas City names one of the pack's agents <rig>/<binding>.<template>, or
+# <binding>.<template> for one the city scopes, after the key the city imports
+# the pack under, so no text spells that key as gc-toolkit in front of a
+# template agents/ holds, or in front of converse-, the start of a sitting's.
+# A formula renders {{binding_prefix}}, a prompt or fragment
+# {{ .BindingPrefix }}, a skill writes <binding>, an order names its bare pool,
+# which Gas City qualifies, and a script or gctk takes the name from the roster
+# (resolve-route.sh, or gctk's rigPool). gctk's Go joins the scan because it
+# routes as the scripts do. Left out are test fixtures, the files the deletion
+# plan retires (tools/deletion-plan.tsv), which take no new work, and the
+# keeper's prompt, which renders the keeper's own binding and so cannot name
+# gc-toolkit's.
+TEMPLATES=$(cd "$ROOT/agents" && for d in */; do d=${d%/}; case "$d" in _*) ;; *) printf '%s\n' "$d" ;; esac; done | paste -sd'|' -)
+ADDR_RE="gc-toolkit\\.(converse-?|$TEMPLATES)([^A-Za-z0-9_.-]|\$)"
+awk -F'\t' '!/^#/ && NF >= 2 { print $1 }' "$ROOT/tools/deletion-plan.tsv" > "$TMP/retired"
+{ grep -v -E '\.fixture\.json$|-test-lib\.sh$|/test-harness\.sh$|^packs/gascity-keeper/agents/' "$TMP/files" \
+    | grep -v -x -F -f "$TMP/retired"
+  ( cd "$ROOT" && find services -name '*.go' ! -name '*_test.go' ! -path '*/testdata/*' ! -path '*/fixture/*' )
+} | LC_ALL=C sort > "$TMP/addr-files"
+grep -q -x -F 'services/gctk/reaction/reaction.go' "$TMP/addr-files" && grep -q -x -F 'formulas/mol-design-convoy.toml' "$TMP/addr-files" \
+  && ok "the agent-name scan reads pack text and gctk's Go" \
+  || bad "the agent-name scan reads pack text and gctk's Go" "its list holds neither services/gctk/reaction/reaction.go nor formulas/mol-design-convoy.toml"
+for other in gc-toolkit.converse-edit gc-toolkit.review-arch gc-toolkit.refinery-queue.stuck gc-toolkit.polecatish; do
+  ! printf '%s\n' "$other" | grep -q -E "$ADDR_RE" || bad "the agent-name pattern flags $other, which names no agent"
+done
+scan "no text names one of the pack's agents under the binding gc-toolkit" "$ADDR_RE" \
+  'POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"' 'POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"' . "$TMP/addr-files"
 
 # The gascity-keeper sub-pack's formulas run on gc-toolkit's polecats, so a step
 # reaches the sub-pack's own script under the pack gc names.
@@ -291,6 +322,13 @@ else
   fi
   [ -x "$KIT$PROBE_PATH" ] && ok "a keeper step's path to its own script names a file in the fetched copy" \
     || bad "a keeper step's path to its own script names a file in the fetched copy" "$KIT$PROBE_PATH"
+  # The pack's scripts take a pool's name from the roster, so a pool given by
+  # its template alone is the rig's pool under the key the city imports the
+  # pack under, as the real gc lists it.
+  POOL=$(IN_DIR="$TMP/away" in_city env GC_RIG=probe bash "$KIT/pool-route.sh" polecat 2>"$TMP/pool-route.err")
+  [ "$POOL" = "probe/kit.polecat" ] && ok "a pack script names the rig's polecat pool under the city's binding, from the real gc's roster" \
+    || bad "a pack script names the rig's polecat pool under the city's binding, from the real gc's roster" \
+           "pool-route.sh printed '$POOL': $(head -3 "$TMP/pool-route.err")"
   # gc registers a pack's commands only for a city-level import, so a city
   # that imports the pack only in a rig has no gc kit scripts-dir.
   if IN_CITY="$RIG_ONLY" in_city gc import install >"$TMP/install-rig-only.out" 2>&1; then

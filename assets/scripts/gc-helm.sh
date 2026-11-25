@@ -147,7 +147,7 @@ when it closes, and before the terminal goes to a sitting. `gc-helm attach`
 opens the same form on the conversations to return to. A --model the
 configured variants do not carry is refused before the form opens.
 --skill <name> takes any skill on the sitting's roster (gc skill list --agent
-<rig>/gc-toolkit.converse-<model>), a bare name resolving to its one full
+<rig>/<binding>.converse-<model>), a bare name resolving to its one full
 match (review-arch to gc-toolkit.review-arch). The new conversation's ask
 tells the sitting to load that skill, read the subject through it, and leave
 the skill's final writes, such as a review verdict, to the bead it was written
@@ -2296,17 +2296,23 @@ engage_starter_seed() { sh "$STARTERS_TOOL" seed "$1" "$2" 2>/dev/null || true; 
 engage_lens_brief() { sh "$STARTERS_TOOL" lens "$1" "$2" "${3:-}" 2>/dev/null || true; }
 
 # engage_skill_roster <rig> <model> — the skills a converse-<model> sitting in
-# the rig carries, read from `gc skill list --agent` for the same
-# <rig>/gc-toolkit.converse-<model> address converse-capability.sh reads. That
-# is the agent's effective view, so a skill only the rig imports counts and a
-# skill another rig imports does not. Sets ENGAGE_SKILL_ROSTER (full names, one
-# per line, deduped, since the listing repeats a skill the city and the rig both
-# import) and ENGAGE_SKILL_ROSTER_OK (1 on a readable answer, 0 when gc did not
-# answer or answered malformed). Memoized per rig and model.
+# the rig carries, read from `gc skill list --agent` for the sitting's agent:
+# the one the roster converse-capability.sh reads names converse-<model> in the
+# rig. Its qualified name carries the binding the city imports the pack under.
+# That is the agent's effective view, so a skill only the rig imports counts
+# and a skill another rig imports does not. Sets ENGAGE_SKILL_ROSTER (full names, one per line, deduped,
+# since the listing repeats a skill the city and the rig both import) and
+# ENGAGE_SKILL_ROSTER_OK (1 on a readable answer, 0 when the roster names no one
+# such agent or gc did not answer or answered malformed). Memoized per rig and
+# model.
 engage_skill_roster() {
     [ "${_esr_key:-}" = "$1/$2" ] && return 0
     _esr_key="$1/$2"; ENGAGE_SKILL_ROSTER=""; ENGAGE_SKILL_ROSTER_OK=0
-    _esr_json=$(with_timeout "${GC_ROSTER_TIMEOUT:-15}" gc skill list --agent "$1/gc-toolkit.converse-$2" --json 2>/dev/null | scrub || true)
+    converse_roster
+    _esr_agent=$(printf '%s' "${_CONVERSE_ROSTER:-}" | jq -r --arg r "$1" --arg t "converse-$2" \
+        "$SEAT_NAMES_JQ"' seat_names($t; $r) | if length == 1 then .[0] else empty end' 2>/dev/null || true)
+    [ -n "$_esr_agent" ] || return 0
+    _esr_json=$(with_timeout "${GC_ROSTER_TIMEOUT:-15}" gc skill list --agent "$_esr_agent" --json 2>/dev/null | scrub || true)
     [ -n "$_esr_json" ] || return 0
     if _esr_names=$(printf '%s' "$_esr_json" | jq -r '
             if type == "object" and (.entries | type == "array")

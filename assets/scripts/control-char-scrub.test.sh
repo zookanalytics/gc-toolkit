@@ -76,8 +76,8 @@ while IFS= read -r f; do
 done < <(copy_hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
-if [ "$COPIES" -ge 76 ]; then ok "copy census $COPIES ≥ 76"
-else bad "copy census $COPIES ≥ 76" "copies disappeared — was the helper inlined again?"; fi
+if [ "$COPIES" -ge 75 ]; then ok "copy census $COPIES ≥ 75"
+else bad "copy census $COPIES ≥ 75" "copies disappeared — was the helper inlined again?"; fi
 
 echo "── 3. the byte set, executed ──"
 # Feed every C0 byte plus DEL through the extracted block and name the

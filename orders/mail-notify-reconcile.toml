@@ -1,0 +1,29 @@
+# mail-notify-reconcile — every 15 minutes, run the pass mail-notify-on-send
+# and mail-notify-on-reply run on each mail event, so mail they missed still
+# requests its sitting's turn. The send order's header states what the pass
+# does and how to tune it.
+#
+# An event only starts a pass sooner (docs/gctk-architecture.md, "What an order
+# guarantees"). An exec order's event cursor moves before its run, so a run
+# that fails never sees its event again, an event the bus drops starts no run,
+# and an order sees no event recorded before it loaded. This pass reads the
+# same unread mail and needs no new mail to run. It takes the lock and the
+# ledger the event orders' passes take, so mail one of them already nudged for
+# requests no second turn.
+#
+# Each pass reads the unread mail of every listed agent's unfinished session,
+# so the interval stays long beside the event orders' 30 seconds, and mail an
+# event's run missed waits at most one interval, plus the orders lane's wait,
+# for its turn. A city that changes GCTK_MAIL_NOTIFY_AGENTS changes it for
+# each mail-notify order.
+[order]
+description = "On a cadence, request a turn for each converse sitting that holds unread mail no notice has told it of, so mail an event's run missed still wakes it"
+trigger = "cooldown"
+interval = "15m"
+timeout = "150s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" mail notify --agents \"$GCTK_MAIL_NOTIFY_AGENTS\""
+scope = "city"
+
+[order.env]
+# The pack's converse templates, the agents under agents/converse-*.
+GCTK_MAIL_NOTIFY_AGENTS = "converse-claude-fable converse-claude-opus converse-codex converse-codex-astra converse-codex-sol converse-fable converse-opus"

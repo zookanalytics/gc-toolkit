@@ -354,9 +354,12 @@ Take the case that fits the ruling:
   A gate the sitting did not answer makes the writer exit 5 with nothing
   closed: run it again once that gate clears. When another bead carries the
   work, name that bead as the successor, under `--kind duplicate`, `folded`,
-  `re-homed` or `fixed-upstream`. An open PR, or a branch whose PR is not open
-  yet, does not stop the ruling: an open PR is retired instead (below). An epic
-  ruled close is the `converse-epic-review` skill's to close.
+  `re-homed` or `fixed-upstream`. What waits on the subject then comes to wait
+  on that bead, and the `work` skill's close says what to do first with a bead
+  that does not need that work, or when that bead is in another rig's store.
+  An open PR, or a branch whose PR is not open yet, does not stop the ruling: an
+  open PR is retired instead (below). An epic ruled close is the
+  `converse-epic-review` skill's to close.
 
 **A ruling that reaches an open PR** (`merge_result` `pull_request_pending` or
 `pull_request_head_changed`) says what it does to that
@@ -380,7 +383,11 @@ holds, and any PR that a gate the ruling answers releases. Pass one of these:
   the change the ruling asked for onto its branch yourself (`converse-edit`);
 - `--retire <kind>` when the PR will not land: `not-needed`, with this
   conversation as the evidence, or `duplicate`, `folded`, `re-homed` or
-  `fixed-upstream`, with `--successor <bead>`.
+  `fixed-upstream`, with `--successor <bead>`. Under those four kinds the
+  anchor's close, made once the PR reads closed, moves what waits on the anchor
+  onto the successor. A successor in another rig's store holds no wait from this
+  one, so before the sign-off judge each bead that waits on the anchor, as the
+  `work` skill's close says, or the anchor's close is refused and it stays open.
 
 To retire the subject's PR:
 

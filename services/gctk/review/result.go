@@ -201,9 +201,10 @@ func gates(run *Run) []string {
 // answeredAsks is each ask the round of iteration last answered: ruled
 // declined, deferred or answered there, by triage or by rule-and-repair. Its
 // work record is shipped with the commit of the run's last must-fix ruling of
-// it, when an earlier round fixed it, and no-op otherwise. An ask ruled
-// must-fix there waits for a head that carries the fix to be judged, and a
-// question waits for its answer.
+// it that names one, when an earlier round fixed it by a commit, and no-op
+// otherwise, as for an ask fixed in the PR's summary alone, which put no work
+// on the branch. An ask ruled must-fix there waits for a head that carries the
+// fix to be judged, and a question waits for its answer.
 func answeredAsks(run *Run, last int) []ClosedAsk {
 	var out []ClosedAsk
 	for _, r := range run.Iterations[last].Rulings() {
