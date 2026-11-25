@@ -133,10 +133,10 @@ Exit 0 filed it, or found it filed. Exit 2: run it again.
 **4. Write the output** to `output.json` in triage's part of the workspace, the
 directory the read printed, as one JSON object: `review` reading `triage`, the
 `head` it judged, `checks` with one `{"check": <name>, "head": <head>}` for each
-check picked, `material`, and, when it answers a post, `rulings` with one
-`{"ask": <the ask>, "ruling": "answered", "reason": <the answer>}` for each post
-it answers, with `"wordless": true` on a post owed no words, whose answer is
-the city's 👍 alone. Then check and write it:
+check picked, and `material`. For each post you answer, add to `rulings` one
+`{"ask": <the ask>, "ruling": "answered", "reason": <the answer>}`. On a post
+owed no words, also set `"wordless": true` in its ruling. Then check and write
+it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it
 again. When this step closes, each pick bonds one lane.
@@ -218,10 +218,10 @@ the head the round judged or did not read: run it again.
 each with its `ruling`, its `reason`, the `commit` of a must-fix,
 `"summary": true` on a must-fix fixed in the PR's title or summary, and the
 `gate` of a question, and `pushed`, the head the push printed, when it pushed.
-An answer of a post owed no words reads `"wordless": true`. The ruling of an ask
-whose post settles a question a gate on `{{pr_bead}}` asks also names that gate
-in `settles`, with `moot` reading `true` when the post makes the question moot.
-Then check and write it:
+On the answer of a post owed no words, set `"wordless": true`. When an ask's
+post settles a question that a gate on `{{pr_bead}}` asks, name that gate in the
+ask's ruling as `settles`. When the post makes the question moot, also set
+`"moot": true` in that ruling. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
