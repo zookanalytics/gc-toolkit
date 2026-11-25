@@ -206,20 +206,25 @@ is applied as ruled and not graded again.
 ## A question only a person can answer
 
 Put it to a human gate on the PR's bead with `review-run.sh question`, rule it
-question, and name the gate. Its message is what the person reads on the board,
-so name in it what it asks about: a person's post by the URL its ask's reason
-ends with, and an ask that names no post, such as a conflict, by what its reason
-names. The round goes no further on that point, and the run records no passed
-result while the gate is open. Each question on the PR is such a gate, under a
-`review-question-<slug>` key, and this lists them, each open, or closed with
-the person's answer as its `close_reason`:
+question, and name the gate. Name in the gate's message what the question asks
+about:
+
+- for an ask that carries a person's post, the URL its reason ends with;
+- for an ask that names no post, such as a conflict, what its reason names.
+
+The round goes no further on that point, and the run records no passed result
+while the gate is open.
+
+Each question on the PR is a gate under a `review-question-<slug>` key. List
+them:
 
 ```bash
 gc bd gate list <the bead that owns the PR> --all --json
 ```
 
-The run after the answer rules the question's own ask, the one the gate's
-message names, by that answer.
+A closed gate holds the person's answer in its `close_reason`. When a
+question's gate is closed, rule the question's own ask, the one its message
+names, by that answer.
 
 ## A comment made while a question is open
 
