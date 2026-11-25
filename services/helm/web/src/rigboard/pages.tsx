@@ -52,8 +52,8 @@ export function UnprioritizedPage() {
   const { doc } = useView();
   return (
     <>
-      <Note>New work carries the label hold:mayor until the Product Owner places it in an epic.</Note>
-      {doc.unprioritized.length === 0 && <Note>No open bead in this rig carries hold:mayor.</Note>}
+      <Note>New work carries the label hold:po until the Product Owner places it in an epic. Work held before the label moved to hold:po carries hold:mayor, and waits here too.</Note>
+      {doc.unprioritized.length === 0 && <Note>No open bead in this rig carries hold:po or hold:mayor.</Note>}
       {doc.unprioritized.map((p) => (
         <Heading key={p.priority} openKey={`desk/P${p.priority}`} def depth={0} label={`P${p.priority}`} count={p.ids.length} section>
           {p.ids.map((id) => (

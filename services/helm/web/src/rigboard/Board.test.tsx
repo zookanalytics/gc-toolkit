@@ -686,7 +686,7 @@ describe('the Work queue', () => {
 });
 
 describe('the Unprioritized page', () => {
-  it('groups the beads that carry hold:mayor by priority, in the document’s order', async () => {
+  it('groups the beads that carry the placement hold by priority, in the document’s order', async () => {
     render(<Page />);
     await loaded();
     tab(/Unprioritized/);
