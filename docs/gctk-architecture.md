@@ -539,7 +539,7 @@ and CI runs those tests on every PR.
 | feedback | the pack's one definition of feedback, `pr-post.sh feedback-def` | jq, applying the definition as each shell reader does | answers a test sets |
 | runtime | Gas City | `gc` (sling, config, session, rig, agent, doctor, events and event emit, runtime), the supervisor API (runs, sessions), the settings file Gas City starts each Claude session with, the pack's scripts that ask a person, `human-gate.sh` and `gc-helm.sh`, the one that files a patrol finding, `patrol-finding.sh`, the priority writer, `queue-priority.sh`, the subject resolver, `gc-helm.sh resolve`, the seed audit's, `render-seed-audit.sh` and `seed-audit-reaudit.sh`, the disposition writer, `bead-rehome.sh`, run as the actor a close needs, and the run's end, `run-cancel.sh`, which calls the supervisor's run cancel | recorded responses |
 | claude code | Claude Code | one bounded `claude -p` per ask, run as a city session runs with its hooks off, reading the stream's init record, which then removes each directory the ask made | answers a test sets |
-| host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table and the memory a process tree holds, `lsof` for a port's listeners, a dial for whether a loopback port answers, flock(2) for the locks on the files of the machine's check slots, `/proc/meminfo` or `sysctl` for its memory, and `demo-engine-lib.sh` for a start as a demo capture runs one, inside its sandbox for a rig whose app reads the city | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals, loopback ports, the locks its processes hold and the memory a test gives it, on the fake clock of a `testing/synctest` bubble |
+| host | the machine | `os/exec` and kill(2) for the processes it starts and signals, `ps` for the process table and the memory a process tree holds, `lsof` for a port's listeners, a dial for whether a loopback port answers, the locks on the machine's check slots and the size of its memory, and `demo-engine-lib.sh` for a start as a demo capture runs one, inside its sandbox for a rig whose app reads the city | a machine in memory whose processes are goroutines running the programs a test names, with process groups, signals, loopback ports, the locks its processes hold and the memory a test gives it, on the fake clock of a `testing/synctest` bubble |
 
 The store's rules are the store's own. The store adapter asks the store whether
 a bead is blocked or ready and returns its answer, and computes none itself.
@@ -611,9 +611,8 @@ prefix its create mints an id from. The domains' tests run on the fake.
 
 The host adapter's own tests start real processes, so they pin what its fake
 stands in for: a group that ends whole, a start that leads a session of its own
-with its caller's environment, a port's listeners as `lsof` reads them, a
-lock that flock(1) sees and that no child keeps, and a start through the
-library that runs it as a demo capture does. A domain's tests run on its fake inside a
+with its caller's environment, a port's listeners as `lsof` reads them, and a
+start through the library that runs it as a demo capture does. A domain's tests run on its fake inside a
 `testing/synctest` bubble, so a wait or a grace a rule sets passes on the
 bubble's clock, and no rule's test needs a tool on the machine.
 
