@@ -148,8 +148,9 @@ The pass reads the key's closed trackers from the rig's store for one guard of
 its own: a failed run that started before the failure's tracking last ended
 files nothing, since the run that would show the fix may not have finished.
 Without it, the pass would file a second tracker in the minutes after each fix
-lands. The tracking ends at the latest close along the chain the writer's lookup
-follows (`tracked_by` in the writer): a workflow's tracker closed as the
+lands. The tracking ends at the latest close along the tracker's chain of
+duplicates and supersedes edges in the rig's store, the edges the writer's
+lookup follows (`tracked_by` in the writer): a workflow's tracker closed as the
 duplicate of a test's tracker ends only when that tracker's fix closes it.
 
 ## Why one read of the branch's newest finished push runs

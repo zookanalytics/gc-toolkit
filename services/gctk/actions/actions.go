@@ -36,7 +36,8 @@ const (
 	// said opens each line the writer says of its own, its warn prefix.
 	said = "preexisting-failure: "
 	// chainMax is the most disposition edges a pass follows from a closed
-	// tracker, the writer's own CHAIN_MAX.
+	// tracker. A real chain is a fold or two long, so a longer one is a fault
+	// in the edges.
 	chainMax = 20
 )
 
@@ -366,13 +367,17 @@ func saidOf(res gascity.Result) string {
 
 // settled is when the tracking of key last ended, and the bead whose close
 // ended it: the latest close among the key's most recently closed tracker and
-// the closed beads its chain of duplicates and supersedes edges reaches, the
-// chain the writer's lookup follows to the bead that carries the failure now
-// (tracked_by in assets/scripts/preexisting-failure.sh). A tracker closed as
+// the closed beads its chain of duplicates and supersedes edges reaches. The
+// writer's lookup follows those edges to the bead that carries the failure now
+// (tracked_by in assets/scripts/preexisting-failure.sh), so a tracker closed as
 // the duplicate of the failing test's tracker ends when that tracker's fix
 // closes it. by is empty when no closed bead carries the key. The chain stops
-// at a bead that is not closed, at one the rig's store does not hold, and at
-// one it reached before.
+// at a bead that is not closed, at one it reached before, and at one the rig's
+// store does not hold, which the writer's lookup reads from the store its
+// prefix names, so a fix closed in another rig's store holds no run back. It
+// goes on past a not-needed close, where the writer's lookup stops, to the
+// evidence its edge names, so a run that started before that evidence closed
+// waits for a newer one.
 func (t *tracking) settled(key string) (at time.Time, by string, err error) {
 	if t.ledger == nil {
 		if t.ledger, err = t.pass.Store(t.store); err != nil {
