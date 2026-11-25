@@ -21,9 +21,8 @@
 #   which checks the formulas and the skill files among them for a procedure the
 #   change adds to step text or to a skill (docs/pack-authoring.md, "Step text
 #   calls a tested script"). It judges what the change adds since the merge base
-#   of origin/main and HEAD, the change the refinery's
-#   `git diff --name-only origin/main...HEAD` names, so text that predates the
-#   rule passes until its own rewrite.
+#   of BASE and HEAD, the change `git diff --name-only BASE...HEAD` names, so
+#   text that predates the rule passes until its own rewrite.
 #
 #   GO — golangci-lint, `run ./...` in every Go module (each go.mod tree), on
 #   the root's .golangci.yml: errcheck, govet with go vet's analyzers,
@@ -46,27 +45,46 @@
 #   cannot load.
 #
 #   WARRANTS — tools/warrants-touched.sh prints the docs/warrants.md entries the
-#   branch touches, with their Verified dates, so the author re-verifies them
-#   before the arch review reads them. It is the one part that judges nothing: a
-#   touched warrant fails no lint, because the arch review judges the
-#   re-verification. It reads the branch from git, so it takes no FILE.
+#   change since BASE touches, with their Verified dates, so the author
+#   re-verifies them before the arch review reads them. It is the one part that
+#   judges nothing: a touched warrant fails no lint, because the arch review
+#   judges the re-verification. It reads the change from git, so it takes no
+#   FILE.
 #
 # Fail-closed throughout: a linter that cannot run — no shellcheck, no go, no
 # golangci-lint — is a finding, never a silent pass, the same contract the
 # shell-lint runner, shellcheck-run.sh, enforces.
 #
-# Usage: lint.sh [FILE ...]
-#   FILE ...  the files a change names; the formulas and the skill files among
-#             them have their shell blocks checked, and the rest drop out. With
-#             neither given, no shell block is weighed. The shell lint and
-#             golangci-lint cover the tracked tree and the warrant list reads
-#             the branch, whatever files are given.
+# Usage: lint.sh [--base BASE] [--] [FILE ...]
+#   --base BASE  the revision the change is read from (default: origin/main),
+#                which the step-text lint and the warrant list are each given.
+#   FILE ...     the files a change names; the formulas and the skill files
+#                among them have their shell blocks checked, and the rest drop
+#                out. With neither given, no shell block is weighed. The shell
+#                lint and golangci-lint cover the tracked tree and the warrant
+#                list reads the change, whatever files are given. A FILE after
+#                -- is a file, whatever it begins with.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
 set -uo pipefail
 
 PROG=lint
+
+# ── Arguments ────────────────────────────────────────────────────────────────
+BASE=origin/main
+change_files=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base)
+      [ "$#" -ge 2 ] || { echo "$PROG: --base needs a revision" >&2; exit 2; }
+      BASE=$2; shift 2 ;;
+    --base=*) BASE=${1#--base=}; shift ;;
+    --) shift; change_files+=("$@"); break ;;
+    -*) echo "$PROG: unknown option '$1'" >&2; exit 2 ;;
+    *) change_files+=("$1"); shift ;;
+  esac
+done
 
 # ── Repository root ──────────────────────────────────────────────────────────
 # Both linters are repo-relative: shell paths resolve from the root and
@@ -229,7 +247,7 @@ fi
 # ── Step and skill text: no procedure added to a step or a skill ────────────
 # The lint picks the formulas and the skill files out of the files itself. Its exit 2 says it could
 # not read the change, which fails closed like a linter that could not run.
-if "$STEP_TEXT_LINT" "$@"; then
+if "$STEP_TEXT_LINT" --base "$BASE" -- ${change_files[@]+"${change_files[@]}"}; then
   summary+=("step and skill text: clean")
 else
   rc=$?
@@ -292,7 +310,7 @@ fi
 # Its exit 1 is a list for the author, which fails nothing. Its exit 2 says it
 # could not read the page or the change, which fails closed like a linter that
 # could not run.
-if "$WARRANTS_TOUCHED"; then
+if "$WARRANTS_TOUCHED" --base "$BASE"; then
   summary+=("warrants: none touched")
 else
   rc=$?

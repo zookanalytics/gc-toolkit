@@ -13,9 +13,10 @@
 # unlinted because git quotes its path or because its name reads as an option,
 # the Go lint runs a golangci-lint other than the release .golangci-lint-version
 # names, or runs at all when the pin is missing or names no release, a finding
-# of a linter .golangci.yml enables passes, or a warrant list that could not
+# of a linter .golangci.yml enables passes, a warrant list that could not
 # run reads as nothing touched, or one that ran fails the lint or goes
-# unprinted.
+# unprinted, or the step-text lint or the warrant list reads the change from a
+# base other than the one lint.sh was given.
 #
 # Hermetic but for the last section: a throwaway git repo holds stubs of
 # assets/scripts/shellcheck-run.sh, tools/lint-step-text.sh and
@@ -544,9 +545,9 @@ run_sut subject.sh
 [ "$rc" -eq 0 ] && ok "warrants none: exit 0" || bad "warrants none: expected 0, got $rc"
 grep -q 'warrants: none touched' "$TMP/out" && ok "warrants none: summary says so" \
   || bad "warrants none: summary is silent: $(cat "$TMP/out")"
-grep -qx 'stub-warrants ran::' "$TMP/out" \
-  && ok "warrants: the list reads the branch from git, handed no file" \
-  || bad "warrants: the list did not run bare: $(cat "$TMP/out")"
+grep -qx 'stub-warrants ran:--base origin/main:' "$TMP/out" \
+  && ok "warrants: the list reads the change since origin/main from git, handed no file" \
+  || bad "warrants: the list did not run on the default base alone: $(cat "$TMP/out")"
 
 make_warrants 1
 run_sut subject.sh
@@ -580,8 +581,8 @@ make_warrants 0
 make_wrapper 0; make_go 0; make_step_text 0; : > "$TMP/step.log"
 run_sut subject.sh formulas/mol-x.toml
 [ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
-grep -qx 'stub-step-text ran: subject.sh formulas/mol-x.toml' "$TMP/step.log" \
-  && ok "step text: lint-step-text.sh received every file lint.sh was handed" \
+grep -qx 'stub-step-text ran: --base origin/main -- subject.sh formulas/mol-x.toml' "$TMP/step.log" \
+  && ok "step text: lint-step-text.sh received the default base and every file lint.sh was handed" \
   || bad "step text: lint-step-text.sh did not receive the files: $(cat "$TMP/step.log")"
 grep -q 'step and skill text: clean' "$TMP/out" && ok "step text clean: reported clean" \
   || bad "step text clean: no clean line in the report"
@@ -607,6 +608,40 @@ grep -q 'step-text lint missing' "$TMP/err" \
   && ok "step-text lint missing: error names it" \
   || bad "step-text lint missing: error is silent about it"
 make_step_text 0
+
+# --- X: the base reaches both parts that read the change. -------------------
+make_wrapper 0; make_go 0; make_step_text 0; make_warrants 0
+for base_arg in "--base effort" "--base=effort"; do
+  : > "$TMP/step.log"
+  # shellcheck disable=SC2086  # each case's words are the arguments
+  run_sut $base_arg subject.sh
+  [ "$rc" -eq 0 ] && ok "base ($base_arg): exit 0" || { cat "$TMP/out" "$TMP/err"; bad "base ($base_arg): expected 0, got $rc"; }
+  grep -qx 'stub-step-text ran: --base effort -- subject.sh' "$TMP/step.log" \
+    && ok "base ($base_arg): the step-text lint reads the change from it" \
+    || bad "base ($base_arg): the step-text lint did not get it: $(cat "$TMP/step.log")"
+  grep -qx 'stub-warrants ran:--base effort:' "$TMP/out" \
+    && ok "base ($base_arg): the warrant list reads the change from it" \
+    || bad "base ($base_arg): the warrant list did not get it: $(cat "$TMP/out")"
+done
+
+: > "$TMP/step.log"
+run_sut -- --base
+[ "$rc" -eq 0 ] && ok "after --: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "after --: expected 0, got $rc"; }
+grep -qx 'stub-step-text ran: --base origin/main -- --base' "$TMP/step.log" \
+  && ok "after --: a file named like an option reaches the step-text lint as a file" \
+  || bad "after --: the file did not reach the step-text lint as one: $(cat "$TMP/step.log")"
+
+for usage_args in "--base" "--no-such subject.sh"; do
+  : > "$TMP/step.log"
+  # shellcheck disable=SC2086  # each case's words are the arguments
+  run_sut $usage_args
+  [ "$rc" -eq 2 ] && ok "'lint.sh $usage_args': usage error (exit 2)" || bad "'lint.sh $usage_args': expected 2, got $rc"
+  { [ ! -s "$TMP/step.log" ] && ! grep -q 'stub-warrants ran' "$TMP/out"; } \
+    && ok "'lint.sh $usage_args': neither part that reads the change runs" \
+    || bad "'lint.sh $usage_args': a part ran: $(cat "$TMP/step.log" "$TMP/out")"
+done
+grep -q "unknown option '--no-such'" "$TMP/err" \
+  && ok "an unknown option is named" || bad "an unknown option is not named: $(cat "$TMP/err")"
 
 # --- V: invoked by a relative path from a subdirectory, it lints the tree. ---
 # lint.sh finds the repository root through git and cds to it, so a run from a
