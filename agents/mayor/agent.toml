@@ -5,8 +5,7 @@
 # it reads are the city's. No escalation or fallback of the city's names it, so
 # Gas City's alerts and agents' escalations still go to `human`, where the
 # mayor reads them. Its name is Gas City's default coordinator's, so the mail
-# Gas City's own defaults send to `mayor` reaches its mailbox, and work routed
-# to it would wake it (docs/steering.md, "The queue the po works").
+# Gas City's own defaults send to `mayor` reaches its mailbox.
 scope = "city"
 # Each sitting starts in a new conversation, so no sitting inherits another's
 # context.

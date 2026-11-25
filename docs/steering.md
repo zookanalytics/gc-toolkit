@@ -68,21 +68,17 @@ Every other bead waits for placement. A bead held this way is open and
 unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.
 Gas City keeps a bead carrying the label out of its default work query, the
 hook, pool demand and the route-restore sweeps, so no pool is offered it. The
-label names Gas City's default coordinator, the mayor. In this pack each rig's
-po works it, and the city's mayor seat, whose name the label carries, takes
-none of it.
+label names Gas City's default coordinator, and no code branches on who that
+is. In this pack each rig's po works it, and the city's mayor seat, whose name
+the label carries, takes none of it.
 
 A held bead carries no route. Gas City's hold conventions say a pack that parks
 finished work on a hold usually clears its route, because the next actor is not
 the pool that worked it, and intake holds new work with no route the same way.
-Gas City's `hold-label-routed-to` doctor check wants the route to name the agent
-the label's value names, and Gas City's issue 6069 reports that check as a bug.
-So it warns on every held bead. Its fix would route every held bead to the
-mayor seat, and a ready bead routed there that no hold holds wakes the seat, as
-routed work wakes any on-demand session. So nothing runs that fix: the doctor
-order runs `gc doctor` without `--fix` (`orders/doctor-run.toml`), and the
-deacon's patrol neither files that warning nor runs its fix
-(`formulas/mol-deacon-patrol.toml`).
+Gas City's `hold-label-routed-to` doctor check wants the route to equal the
+label's value, and Gas City's issue 6069 reports that check as a bug. So it
+warns on every held bead, and the deacon's patrol neither files that warning nor
+runs its fix (`formulas/mol-deacon-patrol.toml`).
 
 ## The writers that hold new work
 

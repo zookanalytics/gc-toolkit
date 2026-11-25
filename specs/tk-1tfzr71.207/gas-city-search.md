@@ -8,9 +8,10 @@ description: What Gas City, bd and Gas Town ship for a city's mayor, for working
 The mayor adds a seat (`agents/mayor`), an opener verb (`gc-helm mayor` and
 its row on Engage's People page) and a board element (the waiting count on the
 city page). Upstream was read at `gastownhall/gascity` main 7b8d498424f4 and
-`gastownhall/gascity-packs` main 44b9db7168f6, on 2026-11-22, with the
-installed `gc` (1.4.3, built from 6589a7df45b0) where its behavior matters. The
-rulings it answers are on tk-1tfzr71.190 and tk-1tfzr71.207 (conversations
+`gastownhall/gascity-packs` main 44b9db7168f6, on 2026-11-22. Where the
+city's own runtime matters, the installed `gc` was read too: 1.4.3, built from
+the city's Gas City fork at 13cdf670ca, which the city's supervisor also runs.
+The rulings it answers are on tk-1tfzr71.190 and tk-1tfzr71.207 (conversations
 tk-9wz6v2b, tk-218zv3n and tk-5e70s01).
 
 ## The mayor Gas City and Gas Town ship
@@ -175,27 +176,32 @@ So this mail, which no seat read before, reaches the mayor's mailbox, and the
 mayor lists it with the operator's in a sitting. Gas Town's roles mail `mayor/`
 too, and the city imports no Gas Town role.
 
-**A route to the mayor.** Gas City's `hold-label-routed-to` doctor check wants
-each bead a `hold:<value>` label holds routed to the agent `<value>` names, and
-its fix writes that route, the bound `<binding>.mayor` once a bound agent
-answers to `mayor` (`holdRouteTarget.route` and `Fix` in
+**A route to the mayor.** Upstream Gas City's `hold-label-routed-to` doctor
+check wants each bead a `hold:<value>` label holds routed to the agent `<value>`
+names, and its fix writes that route, the bound `<binding>.mayor` once a bound
+agent answers to `mayor` (`holdRouteTarget.route` and `Fix` in
 `cmd/gc/doctor_hold_label_routed_to.go`, lines 84 and 176, through
-`boundRoutedToAliases` in `cmd/gc/doctor_routed_to_checks.go`, line 197; the
-installed `gc` does the same). Routed metadata is not a named session's own
-demand (`computeNamedSessionDemandOn` in `cmd/gc/build_desired_state.go`, line
-1076), but an on-demand named session's backing template counts ready routed
-work as pool demand, which "wakes the sleeping singleton" (line 1398), and a
-custom `scale_check` still gets a cold probe that wakes it (line 1435). So a
-route naming the mayor would wake it once no hold held the bead. The pack holds
-new work for the po with `hold:mayor` and no route, by the operator's ruling,
-which keeps the label. Nothing writes that route: the doctor order runs
-`gc doctor` without `--fix`, the deacon's patrol runs no fix of this check,
-`gctk bead place` clears any route before it dispatches, and the pack's install
-guide says to name the check a fix is for and never to fix this one
-(`docs/steering.md`, `docs/install.md`). `doctor/accepted.toml` keeps the check
-accepted, with its reason now naming the mayor seat. Nothing in Gas City's
-config keeps routed work from waking the seat, and the label is the
-operator's to keep, so the guard is that no writer routes to it.
+`boundRoutedToAliases` in `cmd/gc/doctor_routed_to_checks.go`, line 197).
+Routed metadata is not a named session's own demand
+(`computeNamedSessionDemandOn` in `cmd/gc/build_desired_state.go`, line 1076),
+but an on-demand named session's backing template counts ready routed work as
+pool demand, which "wakes the sleeping singleton" (line 1398). So on upstream's
+`gc`, a `gc doctor --fix` would route every bead in the po's queue to the
+mayor, and a bead routed there would wake the seat once no hold held it.
+
+The city's `gc` has no such check. Its Gas City fork's commit d62873fce6
+(gc-uyshxy, the fork's pull request #259) makes every `hold:<value>` label a
+hold, whatever its value names, and deletes the check and its fix: the check's
+191 lines and its test's 727, in a change of 138 files, 2,018 lines added and
+1,889 removed. The city's `gc` and its supervisor run the fork's main at
+13cdf670ca, which carries that commit (verified on tk-1tfzr71.234 at
+2026-11-25T01:45Z), and at 2026-11-25T08:31:15Z
+`gc doctor --check hold-label-routed-to` answered that no registered check
+matches. So the mayor needs a `gc` that carries d62873fce6, and the pack adds
+nothing of its own for the route: no step skips a fix, and the seat keeps its
+name. The pack holds new work for the po with `hold:mayor` and no route, by the
+operator's ruling of 2026-11-25 in conversation tk-5e70s01, which keeps the
+label and withdrew its move to `hold:po`.
 
 **`gc sling mayor` and `gc session attach mayor`,** which Gas City's docs
 teach, now reach the seat: the sling hits its `sling_query`, which refuses
