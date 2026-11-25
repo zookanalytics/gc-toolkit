@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Test for lint.sh — the rig's shell, step text and Go lint entry point, which
-# also prints the warrants a branch touches.
+# Test for lint.sh — the rig's lint entry point for shell, step and skill text,
+# Go and the pack, which also prints the warrants a branch touches.
 #
 # The defects it guards against: a linter that could not run reads as a clean
 # pass (fail-closed violated), shell or step-text findings get swallowed into 0,
@@ -13,16 +13,21 @@
 # unlinted because git quotes its path or because its name reads as an option,
 # the Go lint runs a golangci-lint other than the release .golangci-lint-version
 # names, or runs at all when the pin is missing or names no release, a finding
-# of a linter .golangci.yml enables passes, or a warrant list that could not
+# of a linter .golangci.yml enables passes, a warrant list that could not
 # run reads as nothing touched, or one that ran fails the lint or goes
-# unprinted.
+# unprinted, or the step-text lint or the warrant list reads the change from a
+# base other than the one lint.sh was given.
+#
+# For the pack lint, the defects are a gc finding, a missing gc or a failed
+# copy that passes, a report that names the copy's paths, and a gc that lints
+# the checkout or an untracked file, or looks for a city above the copy.
 #
 # Hermetic but for the last section: a throwaway git repo holds stubs of
 # assets/scripts/shellcheck-run.sh, tools/lint-step-text.sh and
 # tools/warrants-touched.sh whose exit codes the test sets, a tracked go.mod and
 # a pin, and lint.sh runs with PATH pointing at a stub bin. So the test decides
-# whether shellcheck and go "ran" and what they returned, and a stub nproc sets
-# how many calls the shell lint makes.
+# whether shellcheck, go and gc "ran" and what they returned, and a stub nproc
+# sets how many calls the shell lint makes.
 # The last section runs the real golangci-lint, at the repository's pin on the
 # repository's config, over a module of its own, so it needs the Go toolchain
 # and, before Go has cached the linter's build, the network.
@@ -102,13 +107,13 @@ EOF
 make_warrants 0
 
 # --- Stub bin: only the externals lint.sh reaches for. -----------------------
-# lint.sh needs git, dirname, mktemp and rm; go is stubbed so its presence and
-# exit code are the test's to set. The stub nproc prints
+# lint.sh needs git, dirname, mktemp, rm, mkdir and tar; go and gc are stubbed
+# so their presence and exit codes are the test's to set. The stub nproc prints
 # STUB_NPROC, and with none set fails as on a host without nproc, which leaves
 # the shell lint one call, since the bin holds no getconf or sysctl. Everything
 # else lint.sh uses is a builtin.
 STUB="$TMP/bin"; mkdir -p "$STUB"
-for t in git dirname mktemp rm; do ln -s "$(command -v "$t")" "$STUB/$t"; done
+for t in git dirname mktemp rm mkdir tar; do ln -s "$(command -v "$t")" "$STUB/$t"; done
 cat > "$STUB/nproc" <<'EOF'
 #!/bin/sh
 [ -n "${STUB_NPROC:-}" ] || exit 1
@@ -127,6 +132,24 @@ exit $1
 EOF
   chmod +x "$STUB/go"
 }
+
+# The stub gc stands in for gc lint. It logs its argv, the directory it ran in,
+# its GC_CEILING_DIRECTORIES and every file and link below that directory. Its
+# finding names a file the way gc does, under the directory's PWD.
+REAL_FIND="$(command -v find)"
+make_gc() {  # $1 = exit code
+  cat > "$STUB/gc" <<EOF
+#!/bin/sh
+echo "stub-gc ran: \$*" >> "$TMP/gc.log"
+printf '%s\n' "\$PWD" > "$TMP/gc-dir.log"
+printf '%s\n' "\${GC_CEILING_DIRECTORIES:-}" > "$TMP/gc-ceiling.log"
+"$REAL_FIND" . -type f -o -type l > "$TMP/gc-files.log"
+[ $1 -eq 0 ] || echo "\$PWD/agents/x/prompt.template.md:3: stub finding" >&2
+exit $1
+EOF
+  chmod +x "$STUB/gc"
+}
+make_gc 0
 
 NPROC=""
 
@@ -538,15 +561,62 @@ git -C "$REPO" rm -q --cached -- go.mod -m/go.mod "$QDIR/go.mod"
 rm -f -- "$REPO/go.mod" "$REPO/-m/go.mod" "$REPO/$QDIR/go.mod"
 rmdir -- "$REPO/-m" "$REPO/$QDIR"
 
+# --- P: gc lint runs in a copy of the tracked files, under its own ceiling. ---
+# An untracked pack.toml, such as a worktree nested in the checkout holds, stays
+# out of the copy, and so does a tracked file the checkout has removed.
+make_wrapper 0; make_go 0; make_gc 0; : > "$TMP/gc.log"
+mkdir -p "$REPO/worktrees/nested"; printf '[pack]\n' > "$REPO/worktrees/nested/pack.toml"
+rm -f "$REPO/s3.sh"
+run_sut subject.sh
+[ "$rc" -eq 0 ] && ok "pack clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "pack clean: expected 0, got $rc"; }
+grep -qxF '  pack: gc lint clean' "$TMP/out" && ok "pack clean: the summary says so" \
+  || bad "pack clean: no clean line: $(cat "$TMP/out")"
+eq "$(cat "$TMP/gc.log")" "stub-gc ran: lint ." "pack: gc lints every pack below the directory it runs in"
+gc_dir="$(cat "$TMP/gc-dir.log")"
+case "$gc_dir" in
+  "$(cd "$LINT_TMP" && pwd)"/*) ok "pack: gc runs in lint.sh's own directory, outside the checkout" ;;
+  *) bad "pack: gc ran in $gc_dir, outside lint.sh's own directory" ;;
+esac
+eq "$(tr -s / < "$TMP/gc-ceiling.log")" "${gc_dir%/*}" "pack: gc looks for a city no higher than the copy's parent"
+eq "$(sort "$TMP/gc-files.log")" "$(git -C "$REPO" ls-files | grep -vx s3.sh | sed 's|^|./|' | sort)" \
+  "pack: the copy holds each tracked file the checkout has, and nothing else"
+rm -rf "$REPO/worktrees"; git -C "$REPO" checkout -q -- s3.sh
+
+# --- P2: a gc finding fails the lint, and the report names the repo path. ----
+make_gc 1
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "pack finding: exit 1" || bad "pack finding: expected 1, got $rc"
+grep -qxF 'agents/x/prompt.template.md:3: stub finding' "$TMP/out" \
+  && ok "pack finding: the report names the file by its repo path" \
+  || bad "pack finding: no finding under the repo path: $(cat "$TMP/out")"
+grep -qxF '  pack: FAIL — gc lint exit 1; the report above names each finding, or why it could not run' "$TMP/out" \
+  && ok "pack finding: the summary names gc's exit" || bad "pack finding: no failure line: $(cat "$TMP/out")"
+
+# --- P3: no gc on PATH -> exit 1, fail-closed. -------------------------------
+rm -f "$STUB/gc"
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "gc missing: exit 1 (fail-closed)" || bad "gc missing: expected 1, got $rc"
+grep -qF "pack: FAIL — 'gc' not on PATH" "$TMP/out" && ok "gc missing: the summary names the missing gc" \
+  || bad "gc missing: the summary is silent: $(cat "$TMP/out")"
+
+# --- P4: a copy that could not be made -> exit 1, fail-closed, no gc run. ----
+make_gc 0; : > "$TMP/gc.log"; rm -f "$STUB/tar"
+run_sut subject.sh
+[ "$rc" -eq 1 ] && ok "no copy: exit 1 (fail-closed)" || bad "no copy: expected 1, got $rc"
+[ ! -s "$TMP/gc.log" ] && ok "no copy: gc never runs" || bad "no copy: gc ran: $(cat "$TMP/gc.log")"
+grep -qF 'pack: FAIL — the tracked files could not be copied for gc lint' "$TMP/out" \
+  && ok "no copy: the summary names it" || bad "no copy: the summary is silent: $(cat "$TMP/out")"
+ln -s "$(command -v tar)" "$STUB/tar"
+
 # --- V: the warrant list prints, and only a list that could not run fails. ---
 make_wrapper 0; make_go 0; make_step_text 0; make_warrants 0
 run_sut subject.sh
 [ "$rc" -eq 0 ] && ok "warrants none: exit 0" || bad "warrants none: expected 0, got $rc"
 grep -q 'warrants: none touched' "$TMP/out" && ok "warrants none: summary says so" \
   || bad "warrants none: summary is silent: $(cat "$TMP/out")"
-grep -qx 'stub-warrants ran::' "$TMP/out" \
-  && ok "warrants: the list reads the branch from git, handed no file" \
-  || bad "warrants: the list did not run bare: $(cat "$TMP/out")"
+grep -qx 'stub-warrants ran:--base origin/main:' "$TMP/out" \
+  && ok "warrants: the list reads the change since origin/main from git, handed no file" \
+  || bad "warrants: the list did not run on the default base alone: $(cat "$TMP/out")"
 
 make_warrants 1
 run_sut subject.sh
@@ -575,20 +645,21 @@ grep -q 'warrant list missing' "$TMP/err" \
 make_warrants 0
 
 # --- W: the step-text lint gets every file, and its verdict is the gate's. ---
-# It picks the formulas out itself, so lint.sh hands it the whole list.
+# It picks the formulas and the skill files out itself, so lint.sh hands it the
+# whole list.
 make_wrapper 0; make_go 0; make_step_text 0; : > "$TMP/step.log"
 run_sut subject.sh formulas/mol-x.toml
 [ "$rc" -eq 0 ] && ok "step text clean: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "step text clean: expected 0, got $rc"; }
-grep -qx 'stub-step-text ran: subject.sh formulas/mol-x.toml' "$TMP/step.log" \
-  && ok "step text: lint-step-text.sh received every file lint.sh was handed" \
+grep -qx 'stub-step-text ran: --base origin/main -- subject.sh formulas/mol-x.toml' "$TMP/step.log" \
+  && ok "step text: lint-step-text.sh received the default base and every file lint.sh was handed" \
   || bad "step text: lint-step-text.sh did not receive the files: $(cat "$TMP/step.log")"
-grep -q 'step text: clean' "$TMP/out" && ok "step text clean: reported clean" \
+grep -q 'step and skill text: clean' "$TMP/out" && ok "step text clean: reported clean" \
   || bad "step text clean: no clean line in the report"
 
 make_step_text 1
 run_sut subject.sh
 [ "$rc" -eq 1 ] && ok "step text finding: exit 1" || bad "step text finding: expected 1, got $rc"
-grep -q 'step text: FAIL — a formula change adds a procedure' "$TMP/out" \
+grep -q 'step and skill text: FAIL — a change adds a procedure' "$TMP/out" \
   && ok "step text finding: report names the finding" \
   || bad "step text finding: report is silent about it"
 
@@ -607,6 +678,40 @@ grep -q 'step-text lint missing' "$TMP/err" \
   || bad "step-text lint missing: error is silent about it"
 make_step_text 0
 
+# --- X: the base reaches both parts that read the change. -------------------
+make_wrapper 0; make_go 0; make_step_text 0; make_warrants 0
+for base_arg in "--base effort" "--base=effort"; do
+  : > "$TMP/step.log"
+  # shellcheck disable=SC2086  # each case's words are the arguments
+  run_sut $base_arg subject.sh
+  [ "$rc" -eq 0 ] && ok "base ($base_arg): exit 0" || { cat "$TMP/out" "$TMP/err"; bad "base ($base_arg): expected 0, got $rc"; }
+  grep -qx 'stub-step-text ran: --base effort -- subject.sh' "$TMP/step.log" \
+    && ok "base ($base_arg): the step-text lint reads the change from it" \
+    || bad "base ($base_arg): the step-text lint did not get it: $(cat "$TMP/step.log")"
+  grep -qx 'stub-warrants ran:--base effort:' "$TMP/out" \
+    && ok "base ($base_arg): the warrant list reads the change from it" \
+    || bad "base ($base_arg): the warrant list did not get it: $(cat "$TMP/out")"
+done
+
+: > "$TMP/step.log"
+run_sut -- --base
+[ "$rc" -eq 0 ] && ok "after --: exit 0" || { cat "$TMP/out" "$TMP/err"; bad "after --: expected 0, got $rc"; }
+grep -qx 'stub-step-text ran: --base origin/main -- --base' "$TMP/step.log" \
+  && ok "after --: a file named like an option reaches the step-text lint as a file" \
+  || bad "after --: the file did not reach the step-text lint as one: $(cat "$TMP/step.log")"
+
+for usage_args in "--base" "--no-such subject.sh"; do
+  : > "$TMP/step.log"
+  # shellcheck disable=SC2086  # each case's words are the arguments
+  run_sut $usage_args
+  [ "$rc" -eq 2 ] && ok "'lint.sh $usage_args': usage error (exit 2)" || bad "'lint.sh $usage_args': expected 2, got $rc"
+  { [ ! -s "$TMP/step.log" ] && ! grep -q 'stub-warrants ran' "$TMP/out"; } \
+    && ok "'lint.sh $usage_args': neither part that reads the change runs" \
+    || bad "'lint.sh $usage_args': a part ran: $(cat "$TMP/step.log" "$TMP/out")"
+done
+grep -q "unknown option '--no-such'" "$TMP/err" \
+  && ok "an unknown option is named" || bad "an unknown option is not named: $(cat "$TMP/err")"
+
 # --- V: invoked by a relative path from a subdirectory, it lints the tree. ---
 # lint.sh finds the repository root through git and cds to it, so a run from a
 # subdirectory by a relative path lints the same tree.
@@ -622,7 +727,8 @@ rm -f "$REPO/tools/lint.sh"
 # config enables, so a config that enables one with no finding below fails
 # here. Each finding sits alone in the module, and the run fails naming its
 # linter. The real go follows the stubs on PATH, and golangci-lint's own calls
-# to go find it there.
+# to go find it there. The stub gc stays ahead of it, so the pack lint passes
+# without a real gc, which a runner on GitHub does not have.
 ROOT_DIR="$(cd "$HERE/.." && pwd)"
 REAL_GO="$(command -v go || true)"
 plant() {  # $1 = a linter or formatter; writes a module file it reports
@@ -650,7 +756,7 @@ else
   done
   git -C "$REAL" add -A
   REAL_PIN="$(cat "$REAL/.golangci-lint-version")"
-  rm -f "$STUB/go"
+  rm -f "$STUB/go"; make_gc 0
   run_real() {
     if ( cd "$REAL" && PATH="$STUB:$(dirname "$REAL_GO"):$PATH" TMPDIR="$LINT_TMP" \
            CGO_CPPFLAGS="" CGO_LDFLAGS="" "$BASH_BIN" "$SUT" ) >"$TMP/out" 2>"$TMP/err"; then rc=0; else rc=$?; fi

@@ -144,6 +144,26 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
+// rebind is the world's city importing the pack under binding: each agent the
+// roster lists carries binding in its qualified name where it carried
+// gc-toolkit.
+func (w *world) rebind(binding string) {
+	for i := range w.rt.Roster {
+		w.rt.Roster[i].QualifiedName = strings.Replace(w.rt.Roster[i].QualifiedName, "gc-toolkit.", binding+".", 1)
+	}
+}
+
+// countOf is how many of reads are what.
+func countOf(reads []string, what string) int {
+	n := 0
+	for _, r := range reads {
+		if r == what {
+			n++
+		}
+	}
+	return n
+}
+
 // configured is whether the city configures an agent at target, one its roster
 // lists.
 func (w *world) configured(target string) bool {

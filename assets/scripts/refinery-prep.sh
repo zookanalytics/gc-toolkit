@@ -44,7 +44,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$HERE/refinery-lib.sh" || { echo "$PROG: cannot source refinery-lib.sh beside this script" >&2; exit 1; }
 
 usage() { echo "usage: $PROG --bead <id> [--pool <name>]" >&2; exit 2; }
-BEAD=""; POOL="gc-toolkit.polecat"
+BEAD=""; POOL="polecat"
 while [ $# -gt 0 ]; do
   case "$1" in
     --bead|--pool)

@@ -1338,8 +1338,12 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
   else
     [ -x "$GCTK" ] \
       || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    # The closer's pool carries the binding the city imports the pack under,
+    # which only the roster knows.
+    CLOSER_POOL=$(GC_RIG="$CLOSER_RIG" "$HERE/resolve-route.sh" polecat) \
+      || stopped "the roster names no one polecat pool in rig $CLOSER_RIG, and resolve-route.sh's message above says why, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
     "$GCTK" bead arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
-        --target "$CLOSER_RIG/gc-toolkit.polecat" --on mol-validate-close \
+        --target "$CLOSER_POOL" --on mol-validate-close \
         --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" \
       || stopped "$SUBJECT's validating closer was not armed, and gctk bead arm's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
   fi

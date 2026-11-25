@@ -3,10 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 )
 
 // composeStub answers the reads a composition makes: `bd where` with
@@ -225,6 +229,10 @@ func TestPRComposeRefuses(t *testing.T) {
 		"a superseded PR, not opening":    {"tk-a", "--target", "main", "--head", "x", "--supersedes", "41", "--superseded-head", "y"},
 		"a superseded PR, a body to edit": {"tk-a", "--target", "main", "--head", "x", "--opening", "--body-file", "-", "--supersedes", "41", "--superseded-head", "y"},
 		"no bead":                         {"--target", "main", "--head", "x"},
+		"an edit with a body to read":     {"tk-a", "--target", "main", "--head", "x", "--edit", "--body-file", "-"},
+		"an edit of an opening PR":        {"tk-a", "--target", "main", "--head", "x", "--edit", "--opening"},
+		"a PR named with no edit":         {"tk-a", "--target", "main", "--head", "x", "--pr", "https://github.com/acme/widgets/pull/7"},
+		"an edit of no PR's URL":          {"tk-a", "--target", "main", "--head", "x", "--edit", "--pr", "https://github.com/acme/widgets/issues/7"},
 	} {
 		if _, out, _, code := runCompose(t, args...); code != 1 || out != "" {
 			t.Errorf("%s: exit %d, stdout %q", name, code, out)
@@ -244,5 +252,187 @@ func TestPRComposeRefuses(t *testing.T) {
 	t.Setenv("STUB_WHERE_FAIL", "1")
 	if _, out, errs, code := runCompose(t, "tk-a", "--target", "main", "--head", "x"); code != 2 || out != "" || !strings.Contains(errs, "the store holding tk-a did not resolve") {
 		t.Errorf("a store that does not resolve: exit %d, %q, %q", code, out, errs)
+	}
+}
+
+// ghTextStub answers the edit's two GitHub calls and logs each to $GH_CALLS:
+// the read of the PR's title and body with $GH_TEXT, and the edit with its
+// answer, or a failure when $GH_EDIT_FAIL is set.
+const ghTextStub = `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_CALLS"
+case "$*" in
+  *updatePullRequest*) [ -z "$GH_EDIT_FAIL" ] || { echo "gh: HTTP 502" >&2; exit 1; }
+    echo '{"data":{"updatePullRequest":{"pullRequest":{"id":"PR_kw1"}}}}' ;;
+  *"title body"*) printf '%s' "$GH_TEXT" ;;
+  *) echo "gh: an unexpected call" >&2; exit 2 ;;
+esac
+`
+
+// stubEdit sets up --edit's world: composeStub's store holding the anchor,
+// which records its PR, ghTextStub answering for that PR, open from the
+// anchor's branch with title and body, and a rig whose origin is origin.
+func stubEdit(t *testing.T, origin, state, title, body string) string {
+	t.Helper()
+	stubCompose(t, "["+strings.Replace(composeAnchor, `"metadata":{`, `"metadata":{"pr_url":"https://github.com/acme/widgets/pull/7",`, 1)+"]")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(ghTextStub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	calls := filepath.Join(t.TempDir(), "gh-calls")
+	t.Setenv("GH_CALLS", calls)
+	t.Setenv("GH_EDIT_FAIL", "")
+	text, err := json.Marshal(map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
+		"id": "PR_kw1", "number": 7, "url": "https://github.com/acme/widgets/pull/7", "state": state, "isDraft": true,
+		"headRefName": "polecat/tk-a", "headRefOid": "abcdef1234567890", "baseRefName": "main", "mergeStateStatus": "CLEAN",
+		"repository": map[string]string{"nameWithOwner": "acme/widgets"}, "mergedAt": nil, "mergeCommit": nil,
+		"isInMergeQueue": false, "isMergeQueueEnabled": false, "title": title, "body": body}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GH_TEXT", string(text))
+	rig := t.TempDir()
+	treeGit(t, rig, "init", "-q")
+	treeGit(t, rig, "remote", "add", "origin", origin)
+	t.Setenv("GC_RIG_ROOT", rig)
+	return calls
+}
+
+func runEdit(t *testing.T) (string, string, int) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--edit"}, "", &out, &errb)
+	return out.String(), errb.String(), code
+}
+
+// --edit reads the PR's title and body, edits both to the anchor's
+// composition in one request, and asks nothing of a PR that shows it already,
+// nor of one whose hand-written body carries no summary region, which it names
+// on stderr in place of saying the PR shows its composition. A closed PR is
+// refused with nothing edited, a PR outside the rig's origin is a usage error
+// with nothing read, and an edit GitHub does not answer exits 2.
+func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
+	hermeticGit(t)
+	const origin = "git@github.com:acme/widgets.git"
+	old := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->\n\nA note a person added."
+	calls := stubEdit(t, origin, "OPEN", "chore: an old title (tk-a)", old)
+	out, errs, code := runEdit(t)
+	if code != 0 || out != "tk-a: edited the title and the body of https://github.com/acme/widgets/pull/7\n" {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	raw, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(raw)
+	for _, want := range []string{"updatePullRequest(input:{pullRequestId:$id,title:$title,body:$body})", "-f id=PR_kw1",
+		"-f title=feat: Add the widget (tk-a)", "Adds the widget.", "A note a person added."} {
+		if !strings.Contains(log, want) {
+			t.Errorf("GitHub was not asked %q:\n%s", want, log)
+		}
+	}
+
+	composedNow, _, _, code := func() (composed, string, string, int) {
+		f := filepath.Join(t.TempDir(), "body")
+		if err := os.WriteFile(f, []byte(old), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return runCompose(t, "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--body-file", f)
+	}()
+	if code != 0 {
+		t.Fatalf("the composition did not print: exit %d", code)
+	}
+	calls = stubEdit(t, origin, "OPEN", composedNow.Title, composedNow.Body)
+	if out, errs, code := runEdit(t); code != 0 || !strings.Contains(out, "shows its composition already") {
+		t.Fatalf("a PR that shows its composition: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("a PR that shows its composition was edited:\n%s", raw)
+	}
+	calls = stubEdit(t, origin, "OPEN", composedNow.Title, "A person wrote this body.")
+	if out, errs, code := runEdit(t); code != 0 || out != "tk-a: edited nothing on https://github.com/acme/widgets/pull/7\n" ||
+		!strings.Contains(errs, "carries no summary region its markers let it read, so it is left as it stands") {
+		t.Fatalf("a hand-written body: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("a hand-written body was edited:\n%s", raw)
+	}
+
+	stubEdit(t, origin, "CLOSED", "chore: an old title (tk-a)", old)
+	if out, errs, code := runEdit(t); code != 3 || out != "" || !strings.Contains(errs, "is closed, not open") {
+		t.Fatalf("a closed PR: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	calls = stubEdit(t, "git@github.com:acme/other.git", "OPEN", "chore: an old title (tk-a)", old)
+	if out, errs, code := runEdit(t); code != 1 || out != "" || !strings.Contains(errs, "not the rig's origin") {
+		t.Fatalf("a PR outside the rig's origin: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+	if raw, err := os.ReadFile(calls); err == nil {
+		t.Fatalf("GitHub was asked about a PR outside the rig's origin:\n%s", raw)
+	}
+	stubEdit(t, origin, "OPEN", "chore: an old title (tk-a)", old)
+	t.Setenv("GH_EDIT_FAIL", "1")
+	if out, errs, code := runEdit(t); code != 2 || out != "" || !strings.Contains(errs, "did not take") {
+		t.Fatalf("an edit GitHub did not answer: exit %d, stdout %q, stderr %q", code, out, errs)
+	}
+}
+
+// An edit given no --gates leaves a summary region that must be written as it
+// stands. It names that region on stderr, edits nothing, and does not say the
+// PR shows its composition.
+func TestPRComposeEditWithNoGatesNamesTheSummaryItLeft(t *testing.T) {
+	hermeticGit(t)
+	stale := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
+	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "feat: Add the widget (tk-a)", stale)
+	var out, errb bytes.Buffer
+	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--edit"}, "", &out, &errb)
+	if code != 0 || out.String() != "tk-a: edited nothing on https://github.com/acme/widgets/pull/7\n" ||
+		!strings.Contains(errb.String(), "the summary region of https://github.com/acme/widgets/pull/7 must be written, and no --gates gave the gate set it names, so it is left as it stands") {
+		t.Fatalf("an edit with no --gates: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("an edit with no --gates changed the PR:\n%s", raw)
+	}
+}
+
+// --pr names the PR an edit takes when the bead records none yet, as the
+// refinery names a PR it adopts from the bead's branch. Given no --pr, a bead
+// that records no PR is refused with nothing asked of GitHub, and given one,
+// the edit reads and edits the PR it names.
+func TestPRComposeEditTakesThePRItNames(t *testing.T) {
+	hermeticGit(t)
+	old := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
+	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "chore: an old title (tk-a)", old)
+	t.Setenv("STUB_ROWS", "["+composeAnchor+"]")
+	args := []string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--edit"}
+	var out, errb bytes.Buffer
+	if code := Run(args, "", &out, &errb); code != 3 || out.String() != "" || !strings.Contains(errb.String(), "it names no PR") {
+		t.Fatalf("a bead that records no PR, given no --pr: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	if raw, err := os.ReadFile(calls); err == nil {
+		t.Fatalf("GitHub was asked about a PR the bead does not name:\n%s", raw)
+	}
+	out.Reset()
+	errb.Reset()
+	code := Run(append(args, "--pr", "https://github.com/acme/widgets/pull/7"), "", &out, &errb)
+	if code != 0 || out.String() != "tk-a: edited the title and the body of https://github.com/acme/widgets/pull/7\n" {
+		t.Fatalf("an edit of the PR --pr names: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	raw, err := os.ReadFile(calls)
+	if err != nil || !strings.Contains(string(raw), "-F number=7") || !strings.Contains(string(raw), "updatePullRequest") {
+		t.Fatalf("GitHub was not asked to edit PR 7: %v\n%s", err, raw)
+	}
+}
+
+// Each way an edit stops has its exit: a refusal 3, a PR outside the rig's own
+// repository 1, and any other error 2.
+func TestAnEditsFailureExits(t *testing.T) {
+	for want, err := range map[int]error{
+		3: &pr.EditRefusal{Bead: "tk-a", Why: "it names no PR"},
+		1: &pr.OriginError{Why: "the PR's repository github.com/acme/other is not the rig's origin"},
+		2: errors.New("gh: error connecting to api.github.com"),
+	} {
+		if got := editFailed("tk-a", err, io.Discard); got != want {
+			t.Errorf("%v exits %d, want %d", err, got, want)
+		}
 	}
 }

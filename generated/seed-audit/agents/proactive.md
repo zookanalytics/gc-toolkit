@@ -291,8 +291,8 @@ The block's last line, for each exit:
 # agent while it waits, in the same form, and the agent is nudged once the
 # wait lifts, so no dispatch is armed. Omit both only for a bead nobody takes
 # (a decision, a research note).
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/<rig>.polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/gc-toolkit.polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/gc-toolkit.polecat
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
 
 # close — hand a confident no-op to the validating closer (mol-validate-close
