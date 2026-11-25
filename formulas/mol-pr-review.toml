@@ -184,10 +184,10 @@ this step applies. Load it from your skill catalog and apply it.
 It makes the run's worktree at the head the round judged and prints each lane's
 verdict and findings, the asks triage answered, each ask triage left this step,
 and each lane's part of the workspace, which holds its evidence. When it says
-triage left rule-and-repair nothing, this step has nothing to rule or to post:
-close it (part 7) with nothing written. A worktree an earlier session of this
-step left is kept as it stands, and the read prints its commits past the head
-and its uncommitted edits: go on from them. Exit 3: the worktree is not at the
+triage left rule-and-repair nothing, close this step (part 7) with nothing
+written. A worktree an earlier session of this step left is kept as it stands,
+and the read prints its commits past the head and its uncommitted edits: go on
+from them. Exit 3: the worktree is not at the
 head or past it, so the run must stop. Cancel it, and the landing order pours
 one at the PR's head:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the run's worktree is not at the head the round judged"`

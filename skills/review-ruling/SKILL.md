@@ -14,11 +14,8 @@ deferred, answered or put to a person gets no change at all. Each point is
 ruled by the rule its source carries, below, and each ruling carries its
 reason, which the head's comment shows the operator as that point's answer.
 
-Triage answers a person's post that needs only an answer before you read the
-round, and your read lists each ask it answered under triage and leaves it out
-of yours: its answer is on the PR, and you do not rule it again. When triage
-left you nothing, no lane and no ask, the read says so, and the step closes
-with nothing written.
+Leave out of your rulings each ask the round's read lists under triage. When
+the read says triage left you nothing, close the step with nothing written.
 
 The method for a lane's own check is not yours to apply again. A lane already
 judged its finding by its method. You decide what the round does about it.
