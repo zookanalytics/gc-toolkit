@@ -2,10 +2,13 @@ package reaction
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 )
 
 // A named agent is assignable only when the roster registers it by that exact
@@ -59,5 +62,85 @@ func TestTheOriginNamesAGitHubRepository(t *testing.T) {
 		if got := githubSlug(url); got != want {
 			t.Errorf("githubSlug(%q) = %q, want %q", url, got, want)
 		}
+	}
+}
+
+// The rig's pools carry the key the city imports the pack under, which only
+// the roster knows, so an exit's default route, its closer and a first
+// reaction's sling each go to the pool the roster names in the rig, under
+// whatever key that is.
+func TestTheRigsPoolsAreTheOnesTheRosterNames(t *testing.T) {
+	w := newWorld(t)
+	w.rebind("kit")
+	code, out, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--run", root)
+	wantCode(t, code, 0, err, "(POOL-BINDING) an actionable exit in a city that imports the pack as kit")
+	w.has("--route gc-toolkit/kit.polecat", "(POOL-BINDING) routes to the rig's polecat pool under that key")
+	if out != "tk-sub disposed as actionable (gc-toolkit/kit.polecat)" {
+		t.Errorf("(POOL-BINDING) the exit reported %q", out)
+	}
+
+	w = newWorld(t)
+	w.rebind("kit")
+	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
+	wantCode(t, code, 0, err, "(POOL-BINDING) a close exit there")
+	w.has("SLING gc-toolkit/kit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(POOL-BINDING) slings the closer to that pool")
+
+	w = newWorld(t)
+	w.rebind("kit")
+	w.put(input("tk-plain", nil))
+	got, said := w.sling("tk-plain")
+	w.wantSling(0, "", got, said, "(POOL-BINDING) a first reaction's sling there")
+	w.has("SLING gc-toolkit/kit.proactive tk-plain --on mol-first-reaction --rig gc-toolkit", "(POOL-BINDING) goes to the proactive pool under that key")
+}
+
+// A rig the roster names no such pool in, or several, and a roster that does
+// not read, name no pool: the exit that needs one is refused before anything is
+// written, a first reaction's sling fails with nothing slung, and a sweep with
+// candidates slings none of them. A sling the bead's own refusal stops reads no
+// roster, and neither does a sweep with no candidate.
+func TestARigWithNoOnePoolGetsNoRoute(t *testing.T) {
+	for name, c := range map[string]struct {
+		edit func(*world, string)
+		why  string
+	}{
+		"no such pool": {func(w *world, tmpl string) {
+			w.rt.Roster = slices.DeleteFunc(w.rt.Roster, func(a gascity.Agent) bool { return a.Name == tmpl })
+		}, "names no agent {t} in rig gc-toolkit"},
+		"two such pools": {func(w *world, tmpl string) {
+			w.rt.Roster = append(w.rt.Roster, gascity.Agent{QualifiedName: "gc-toolkit/other." + tmpl, Name: tmpl, Dir: "gc-toolkit", Scope: "rig"})
+		}, "names 2 agents {t} in rig gc-toolkit (gc-toolkit/gc-toolkit.{t}, gc-toolkit/other.{t})"},
+		"an unreadable roster": {func(w *world, _ string) { w.rt.RosterErr = errors.New("gc agent list did not answer") }, "the city's roster did not read"},
+	} {
+		w := newWorld(t)
+		c.edit(w, "polecat")
+		code, _, err := w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--run", root)
+		wantCode(t, code, 2, err, "(POOL-NONE) "+name+": an actionable exit with no --route")
+		errHas(t, err, strings.ReplaceAll(c.why, "{t}", "polecat"), "(POOL-NONE) "+name+": the refusal says why")
+		errHas(t, err, "pass --route <rig>/<agent>", "(POOL-NONE) "+name+": and names the remedy")
+		if wr := w.writes(); len(wr) > 0 {
+			t.Errorf("(POOL-NONE) %s: the refused exit wrote %v", name, wr)
+		}
+
+		w = newWorld(t)
+		c.edit(w, "proactive")
+		w.put(input("tk-plain", nil))
+		got, said := w.sling("tk-plain")
+		w.wantSling(1, strings.ReplaceAll(c.why, "{t}", "proactive"), got, said, "(POOL-NONE) "+name+": a first reaction's sling")
+
+		w = newWorld(t)
+		c.edit(w, "proactive")
+		w.ready(input("tk-a", nil), input("tk-b", nil))
+		_, _, err = w.sweep(false, time.Minute)
+		var swept *SweepError
+		if !errors.As(err, &swept) || len(w.slings()) > 0 {
+			t.Errorf("(POOL-NONE) %s: a sweep with candidates came to %v, slinging %v; want a sweep error with nothing slung", name, err, w.slings())
+		}
+	}
+
+	w := newWorld(t)
+	w.rt.RosterErr = errors.New("gc agent list did not answer")
+	w.put(input("tk-kind", func(b *fake.Bead) { b.Metadata["task_kind"] = feedbackPattern }))
+	if got, _ := w.sling("tk-kind"); got != 6 || countOf(w.rt.Reads(), "roster") != 0 {
+		t.Errorf("(POOL-NONE) a bead its own kind refuses: exit %d reading %v; want 6 with no roster read", got, w.rt.Reads())
 	}
 }

@@ -110,15 +110,17 @@ func newReactionCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 }
 
 const reactionSlingLong = `Slings a first reaction on <bead>, a run of mol-first-reaction through the
-rig's proactive pool, GC_RIG/gc-toolkit.proactive:
+rig's proactive pool, the agent named proactive that the city's roster places in
+GC_RIG, whose name carries the key the city imports the pack under:
 
-  gc sling --rig <rig> <rig>/gc-toolkit.proactive <bead> --on mol-first-reaction
+  gc sling --rig <rig> <rig>/<binding>.proactive <bead> --on mol-first-reaction
 
 unless a refusal holds. gc sling refuses a second live run of the formula on a
 bead, and that refusal is 3.
 
 ` + reactionRefusals + ` So does an unset GC_RIG, a bead its store does not
-hold, and a sling gc sling refuses for any other cause.
+hold, a roster that names no one proactive pool in the rig, and a sling gc
+sling refuses for any other cause.
 
 exit: 0 slung
       3, 4, 5 or 6 a refusal, nothing slung
@@ -257,11 +259,11 @@ const reactionDisposeLong = `Takes one exit of a first reaction on its subject, 
 subject open: a reaction disposes a bead and never closes it.
 
   actionable  the bead is work: release it to a pool (--route, by default the
-              rig's gc-toolkit.polecat), or hand it to the named agent whose
-              work it is (--assign): the mechanik takes a route and the
-              refinery the assignee, and the agent is nudged once bd reports
-              the bead ready. --emergency <check> claims a red main and names
-              the check failing there.
+              rig's polecat pool, which the city's roster names), or hand it
+              to the named agent whose work it is (--assign): the mechanik
+              takes a route and the refinery the assignee, and the agent is
+              nudged once bd reports the bead ready. --emergency <check>
+              claims a red main and names the check failing there.
   recommend   the action is known and warrants the operator's trigger: a
               human gate under first-reaction holds the bead, and
               --recommended-formula <mol> is what gctk reaction accept runs

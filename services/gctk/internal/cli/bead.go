@@ -20,7 +20,8 @@ import (
 
 // `gctk bead holds <bead>...` answers what holds each bead, through the waits
 // package, from one snapshot of the store (docs/gctk-architecture.md, "The
-// bead holds contract"). `gctk bead arm`, `gctk bead disarm` and `gctk bead
+// bead holds contract"), and `gctk bead stands` where each stands
+// (beadstands.go). `gctk bead arm`, `gctk bead disarm` and `gctk bead
 // start-armed` are the arm's verbs, through the arm package
 // (docs/deferred-dispatch.md), and `gctk bead takeaway` is the takeaway's,
 // through the takeaway package (beadtakeaway.go). None holds a rule: the
@@ -94,12 +95,14 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 	holds.Flags().StringVar(&db, "db", "", "the store to read, a store's .beads directory")
-	return group("bead", "what holds a bead, its arm, its park, its placement and its headline",
-		"A bead's waits, what holds it, read from the store, the arm that starts it by itself once nothing does, "+
+	return group("bead", "what holds a bead, where it stands, its arm, its park, its placement and its headline",
+		"A bead's waits, what holds it, read from the store, where it stands and whose move it is, "+
+			"the arm that starts it by itself once nothing does, "+
 			"the park that holds everything under it that has not started, the placement of a bead held for one, "+
 			"and the headline its handling concluded, written with the release that takes it out of play.",
-		holds, newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr), newBeadStartArmedCmd(stdout, stderr),
-		newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr), newBeadTakeawayCmd(stdout, stderr))
+		holds, newBeadStandsCmd(stdout, stderr), newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr),
+		newBeadStartArmedCmd(stdout, stderr), newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr),
+		newBeadTakeawayCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the
@@ -210,14 +213,17 @@ with "start" added, what the pass did with its arm, or with --dry-run would do:
 
 action is retire, start, sent, hold, ask, leave, withdrawn or fail:
 
-  retire     the bead closed (case closed), or carries a merge_result, so
-             another path delivered its work (case delivered): the arm is
-             cleared and nothing slung, whatever holds the bead
+  retire     the bead closed (case closed), or it carries a merge_result, so
+             another path delivered its work, and the arm would pour work on
+             it again (case delivered): the arm is cleared and nothing slung,
+             whatever holds the bead. The validating closer's arm
+             (mol-validate-close) pours no work, so a merge_result does not
+             retire it
   start      it was slung on formula, and its arm cleared
   sent       its work is sent already, so the arm is cleared and nothing
              slung: an earlier attempt's pour landed, or gc sling's exit 3
-             named a live workflow on it that is not an unfinished pour; roots
-             names them
+             named a live workflow on it that Gas City did not stamp as
+             failed; roots names them
   hold       something holds it, and the arm stays: a wait of its own or of
              an ancestor that has not started (blocked, held), a waits-for edge
              the store cannot judge (unjudged), a wait edge into another store
@@ -225,15 +231,14 @@ action is retire, start, sent, hold, ask, leave, withdrawn or fail:
              a status other than open (status), an epic (epic), or bd's
              readiness (unready)
   ask        a person is asked, and the arm stays: its attempts reached the cap
-             (cap), or Gas City left a pour of it unfinished (unfinished), which
-             roots names
+             (cap)
   leave      left untouched for the next pass: another call holds its dispatch
              lock (locked), or the pass is near its deadline (deadline)
   withdrawn  its arm was removed after the pass listed it, and nothing was sent
   fail       a read, a write, a sling or an ask failed, or its arm does not
              decode (malformed), and the arm stays
 
-The pass retires the arm of each closed or delivered bead first. It selects the
+The pass first retires each arm that is no longer owed (retire). It selects the
 beads to start by bd's ready read with the pool's own serve rule, then holds
 back what bd cannot judge and a hold label in any spelling. It starts each
 under the bead's dispatch lock: it reads the bead once more, pours the arm's
@@ -257,7 +262,7 @@ func newBeadStartArmedCmd(stdout, stderr io.Writer) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "start-armed [--db <path>] [--dry-run]",
-		Short: "start each armed bead nothing holds, once, and retire the arm a closed or delivered bead carries",
+		Short: "start each armed bead nothing holds, once, and retire each arm that is no longer owed",
 		Long:  beadStartArmedLong,
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {

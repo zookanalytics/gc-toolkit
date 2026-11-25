@@ -56,11 +56,12 @@
 # Hermetic regression test: assets/scripts/gc-terminal-attach.test.sh
 set -euo pipefail
 
-# The session attached when the client names none. This is the formerly
-# hardcoded target; the env override exists so another city can set its own and
-# so the test can drive it, and it is NOT client-reachable (ttyd passes the
-# query string as argv, never as environment).
-DEFAULT_SESSION="${GC_TERMINAL_DEFAULT_SESSION:-gc-toolkit.mayor}"
+# The session attached when the client names none: the mayor, by the bare name
+# Gas City resolves to the one mayor the city configures, under whatever key the
+# city imports the pack. The env override exists so another city can set its
+# own and so the test can drive it, and it is NOT client-reachable (ttyd passes
+# the query string as argv, never as environment).
+DEFAULT_SESSION="${GC_TERMINAL_DEFAULT_SESSION:-mayor}"
 
 # Longest name we will even consider. Real session names are far shorter; this
 # only bounds what gets pattern-matched and logged.

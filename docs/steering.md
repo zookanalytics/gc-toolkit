@@ -48,6 +48,12 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is a member of an epic, or of a Delivery under one, which means it has a
   parent-child parent;
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
+- it is the tracker of a failure already red on a base branch, which means it
+  carries `failure_key`. A gate files one when it reproduces a failure on the
+  base, and `preexisting-failure.sh` sends each tracker it files to its rig's
+  polecat pool in the same call, so a failure on main goes to be fixed with no
+  placement, a route the operator directed
+  ([gas-city-search.md](../specs/tk-jmxx0vm/gas-city-search.md#the-need));
 - it is an emergency, a red main or a broken gate, checked rather than asserted;
 - the operator routed it, through a sitting, a hand sling or an Accept;
 - it is the seed audit's re-audit, the one bead `seed-audit-reaudit.sh` slings
@@ -83,18 +89,22 @@ deacon's patrol neither files that warning nor runs its fix
 Each writer that files or disposes new work follows the rule.
 
 - **The first reaction** (`gctk reaction dispose`). It still reacts to every
-  finding, because its card is the triage that backlog refinement reads.
-  Its actionable exit routes a member, PR-finishing work or a confirmed
-  emergency. It releases any other bead with no route, then holds it with
-  `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The blocked
-  exit's `--then-route` arms a dispatch only for a bead the rule admits. Any
-  other bead it holds, and arms nothing, while its wait still lands as a
-  `blocks` edge. The close exit keeps its validating closer,
-  because a close shrinks the queue, whether it slings the closer now or arms it
-  for when the bead that ends its job lands (`--waiting-on`). Work that is a
-  named agent's own (`--assign`, `--then-assign`) is not pool work, so the rule
-  does not read it. Neither flag may name the po, which takes no work by
-  assignment.
+  finding, because its card is the triage that backlog refinement reads. Its
+  actionable exit routes a member, PR-finishing work, a failure's tracker or a
+  confirmed emergency. It releases any other bead with no route, then holds it
+  with `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The
+  blocked exit's `--then-route` arms a dispatch only for a bead the rule admits.
+  Any other bead it holds, and arms nothing, while its wait still lands as a
+  `blocks` edge. The close exit keeps its validating closer, because a close
+  shrinks the queue, whether it slings the closer now or arms it for when the
+  bead that ends its job lands (`--waiting-on`). Work that is a named agent's
+  own (`--assign`, `--then-assign`) is not pool work, so the rule does not read
+  it. Neither flag may name the po, which takes no work by assignment.
+- **The tracker writer** (`assets/scripts/preexisting-failure.sh file`) files
+  each failure's tracker with no hold and sends it with a `gc sling` that names
+  no target, which Gas City routes to the `default_sling_target` of the rig the
+  bead's prefix names, on that agent's default formula. A bead it finds already
+  tracking the failure it sends nowhere, so a failure is sent once.
 - **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
   from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
   `bug-file` block).
@@ -456,11 +466,15 @@ kept within P0 to P4 at each level.
   urgent one, the parent with the lowest P-number.
 - PR-finishing work, a bead carrying `anchor_bead`, follows its anchor. Once
   the anchor's PR is approved, it runs at P0 whatever its shift
-  ([PR-finishing work](#pr-finishing-work)).
+  ([PR-finishing work](#pr-finishing-work)). The root of a PR's review run is
+  PR-finishing work of the bead that owns the PR too, and the run's steps follow
+  the root.
 - A workflow's input convoy, root and steps follow the bead the workflow was
   poured for, at shift 0. They carry no shift of their own. An input convoy
   follows the bead it tracks only when it tracks exactly one; a convoy that
-  tracks several follows none of them.
+  tracks several follows none of them. A review run's root is the exception: it
+  follows the bead that owns the PR in place of its input convoy, at a shift of
+  -1 until a move writes one on it.
 - A bead that follows nothing has its priority set directly. An epic with no
   parent is such a bead, and its priority is where its work starts.
 
@@ -516,7 +530,9 @@ follows something is refused, and the refusal names the shift that lands it
 there: for a member of a P1 epic, P3 is `--shift +2`. A shift on a bead that
 follows nothing is refused, because nothing is there to shift from. Either form
 on a workflow's convoy, root or step is refused, because it takes the priority
-of the bead the workflow was poured for, and the refusal names that bead.
+of the bead the workflow was poured for, and the refusal names that bead. A
+review run's root follows an anchor, so it takes a shift as other PR-finishing
+work does, and a move on one of its steps names the root.
 
 The move writes the bead's own input first. It then writes every bead that
 follows the bead, directly or through others: the members under it, the
@@ -560,9 +576,20 @@ are the scripts that make it claimable:
   verdict or an operator ruling asks for.
 
 Each child carries `anchor_bead` and follows its anchor. A review run and its
-asks are no children. The landing order pours the run onto the anchor itself,
-so the run's steps follow the anchor's own priority through the run's root, at
-shift 0, and an ask is neither routed nor claimed, since only a run takes it.
+asks are no children. An ask is neither routed nor claimed, since only a run
+takes it. The landing order pours the run onto the anchor itself, and the run
+is the anchor's PR-finishing work all the same: its root names the anchor in
+its `pr_bead` var (`gc.var.pr_bead`) and follows the anchor, and the run's
+steps, on every pool, follow the root. So a settle of the anchor writes the
+run's input convoy and leaves the run to its root, and the pass settles a
+queued step of the run with its root. The pour writes no shift on the root, so
+its shift reads -1, the shift each child is filed with, until a move writes
+one. The landing order settles the root once the act that poured it has freed
+the record lock, because the pour gives every bead it makes the anchor's own
+priority. A run whose settle fails runs at that priority until the pass
+reaches a step of it queued for the polecat pool. An approval that comes after
+the pour reaches the run the same way, because the re-rank below settles the
+anchor's reviews, reworks and validation passes and not the run.
 
 **It never has a parent.** Each child is joined to its anchor with a `blocks`
 edge and a membership edge, never a parent-child edge, so no cascade reaches

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -217,7 +218,7 @@ func (w Watcher) clearStrays(o PassOptions, start time.Time, all map[string][]ow
 		search.Err = fmt.Errorf("the rig's origin did not read: %w", err)
 		return
 	}
-	host, repo, ok := originRepo(raw)
+	host, repo, ok := git.RemoteRepository(raw)
 	if !ok {
 		search.Err = fmt.Errorf("the rig's origin %q names no GitHub repository", raw)
 		return

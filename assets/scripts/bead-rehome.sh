@@ -15,7 +15,10 @@
 # leaves out two refusals its `bd close` makes, a pinned bead and a bead
 # assigned to anyone but the actor, so the writer reads those off the origin
 # first, and a close any of these holds writes nothing. bd's update sets no close
-# reason, so the disposition's prose rides the close as an appended note.
+# reason, so the disposition's prose rides the close as an appended note. The
+# close also records gc.work_outcome=no-op, the work record Gas City's close
+# gate asks of a plain task bead, unless the origin already records one: under
+# every kind the origin ships nothing under its own id.
 #
 # A caller that judged the origin before it asked for the close can name that
 # judgment, and then the close goes ahead only while the judgment still holds:
@@ -83,25 +86,34 @@
 #   The judgment kinds re-homed, folded and not-needed are held to (a) only, and
 #   a non-closed merge_result does not bar them, because the judgment is the
 #   caller's (docs/authority-map.md, Close-with-successor).
-# A duplicate's close must not end the waits on it early, and bd's ready rule
-# follows a blocks edge but never a duplicates edge. So before a duplicate of a
-# canonical that has neither closed nor shipped closes, each open bead it blocks
-# gains a blocks edge onto the canonical. One that has it already,
-# and the canonical itself, need none. A waiter that cannot take the edge
-# refuses the close before anything is written: one joined to the canonical by
+# A close must not end the waits on the origin before the work they wait for
+# has landed, and bd's ready rule follows a blocks edge but never a duplicates
+# or supersedes edge. Under every kind but not-needed the successor carries the
+# origin's work, so before such a close, while the successor has neither closed
+# nor shipped, each open bead the origin blocks gains a blocks edge onto the
+# successor. A fixed-upstream close reaches that only on a ruling (b) does not
+# re-judge, since (b) otherwise holds it until its fix has landed. Under
+# not-needed the successor is the evidence, nothing carries the work, and the
+# waits end with the close. The successor itself, a waiter it blocks already,
+# and a waiter a ruling has recorded a PR-close disposition on (pr-dispose.sh)
+# need no edge. The ruled waiter closes under that ruling and waits for nothing
+# more, as an anchor does when scaffolding-sweep.sh carries one of its findings
+# forward just before the anchor's own close. A waiter that cannot take the edge
+# refuses the close before anything is written: one joined to the successor by
 # another edge type, since bd keeps one edge per pair, and any waiter when the
-# canonical is in another store, where the edge holds nothing. A waiter bd
-# refuses the edge, for a cycle or a parent chain, refuses the close too, and the
-# edges added before it stay, true while the origin duplicates the canonical.
+# successor is in another store, where the edge holds nothing. The edges go on
+# in one bulk write, `dep add --file - --no-cycle-check`, which bd commits whole
+# or not at all after one cycle check of the whole graph in memory. A plain add
+# runs a per-edge cycle check that walks the successor's graph in the store, and
+# on a successor with a large graph that walk can outrun the store's read
+# timeout. A write bd refuses, for a cycle or a parent chain, refuses the close.
 # bd's close neither reads nor refuses what waits on the bead, so a bead can come
-# to wait on the duplicate after that read. The read is made again once the close
+# to wait on the origin after that read. The read is made again once the close
 # has landed (carry_late), and a waiter it finds gains its edge then. One whose
 # edge lands after that read waits on a closed bead, which holds nothing, as a
 # wait on any closed bead does.
-# Every other kind ends its waits with the close: fixed-upstream once the fix
-# has landed, the judgment kinds on the caller's judgment.
-# --check evaluates those gates and the duplicate's waits, and exits 0
-# (eligible) or non-zero (refused, with the reason on stderr), writing nothing.
+# --check evaluates those gates and the waits, and exits 0 (eligible) or
+# non-zero (refused, with the reason on stderr), writing nothing.
 #
 # A `blocks` edge from the origin onto its successor is a wait the disposition
 # ends, and bd keeps one edge per pair of beads, so it is dropped just before the
@@ -130,8 +142,8 @@
 # merge ends a landed branch. That remote write never gates the disposition:
 # when the branch cannot be ended the close stands, and a warning names the
 # branch and the command that ends it. The bead's notes record the outcome.
-# The writer records no outcome of its own on the origin: the outcome is its
-# closer's word.
+# The writer records no gc.outcome on the origin: a disposition's outcome word
+# is its closer's.
 # Callers: converse dispositions, operator re-homes, pr-facts.sh (a PR closed
 # with a pre-recorded disposition, and that branch's parked rework children),
 # the landing order, gctk pr reconcile (a PR on the pending record closed under
@@ -201,18 +213,21 @@ and the successor in the same store, and fixed-upstream needs the successor
 closed or shipped, unless the origin carries the operator's pre-recorded
 PR-close disposition for that kind and successor.
 
-A duplicate of a canonical that has neither closed nor shipped first gives
-each open bead blocked by it a blocks edge onto the canonical, so its close
-releases none of them before the canonical delivers. A waiter that cannot take
-that edge refuses the close. A bead that comes to wait on the duplicate after
-that read gains the edge just after the close.
+Under every kind but not-needed, whose successor carries no work, a close
+whose successor has neither closed nor shipped first gives each open bead
+blocked by the origin a blocks edge onto the successor, so the close releases
+none of them before the successor delivers. A bead a ruling has recorded a
+PR-close disposition on (pr-dispose.sh) closes under that ruling and gains no
+edge. A waiter that cannot take that edge refuses the close, and so does any
+waiter when the successor is in another store. A bead that comes to wait on
+the origin after that read gains the edge just after the close.
 
 The edge goes on just before the close, and is read back. The close is bd's
 checked close, applied only while the origin still has the status and assignee
 this run judged: a live blocker, an open human gate, an open child or a change
 since the read refuses it, and then the edge comes back off, and nothing stays
-written but the edges a duplicate's waiters gained, which the refusal names, and
-the gates a retry resolved, as below.
+written but the edges the waiters gained, which the refusal names, and the
+gates a retry resolved, as below.
 
 The close takes the store's record lock (pr-record.lock in the origin store's
 .beads directory) before it reads the origin, waiting up to
@@ -231,7 +246,7 @@ a store this call names none of included. The origin, read under the record
 lock, must still have each one given, or nothing is written (exit 4), and the
 checked close holds that status and assignee.
 
---check evaluates that evidence and a duplicate's waiters, and exits 0
+--check evaluates that evidence and the origin's waiters, and exits 0
 (eligible) or non-zero (refused, reason on stderr) without writing anything.
 With --except-key it also reads what would hold the close.
 
@@ -252,10 +267,10 @@ live blocker and every open child: then nothing is resolved or closed.
 Exit: 0 disposed (or already recorded) · 1 --check refused · 2 a store does not
 resolve · 3 the origin or successor does not exist · 4 the origin is not as the
 caller judged it (--if-status, --if-assignee, --if-ruled), or a write did not
-land: the origin changed since it was judged, or a waiter's edge onto the
-canonical or the origin's own edge did not write or read back, or a write after
-the close did not land, which leaves the close standing · 5 the close is held
-or refused, a waiter that cannot wait on the canonical included · 6 the origin
+land: the origin changed since it was judged, or its own edge did not write
+or read back, or a write after the close did not land, a late waiter's edge
+onto the successor included, which leaves the close standing · 5 the close is
+held or refused, a waiter that cannot wait on the successor included · 6 the origin
 already names another successor, read before any write or beside this run's
 own edge · 7 the evidence refuses the close · 64 usage
 U
@@ -451,6 +466,12 @@ eval "$ROW_FIELDS"
 CLEAR_MARKER=()
 if [ "$ORIGIN_MARKER" = true ]; then
     CLEAR_MARKER=(--unset-metadata pr_reconcile_pending)
+fi
+# The work record the close carries. A work outcome the origin records already
+# is its own writer's word, and stays.
+WORK_RECORD=()
+if [ -z "$ORIGIN_OUTCOME" ]; then
+    WORK_RECORD=(--set-metadata gc.work_outcome=no-op)
 fi
 
 # The caller's judgment (the header's rule), compared with the origin as this
@@ -701,23 +722,23 @@ list_rows() {
     bd_at_json "$ORIGIN_PATH" list --id "${1// /,}" --all --include-gates --include-infra --include-templates --json --limit 0
 }
 
-# carry_plan — the waits a duplicate's close would end before its canonical
-# has delivered, read and not written (the header's rule). It sets CARRY, the
-# beads the origin blocks that need a blocks edge onto the canonical; CARRY_HELD,
-# why one cannot take it, so the close must not run; CARRY_UNREAD, the read that
+# carry_plan — the waits the close would end before its successor has
+# delivered, read and not written (the header's rule). It sets CARRY, the beads
+# the origin blocks that need a blocks edge onto the successor; CARRY_HELD, why
+# one cannot take it, so the close must not run; CARRY_UNREAD, the read that
 # did not answer; and CARRY_NONE, why no wait moves, for the dry run.
 CARRY=""; CARRY_HELD=""; CARRY_UNREAD=""; CARRY_NONE=""
 carry_plan() {
     CARRY=""; CARRY_HELD=""; CARRY_UNREAD=""; CARRY_NONE=""
-    if [ "$KIND" != duplicate ]; then
-        CARRY_NONE="a $KIND close moves no wait"; return 0
+    if [ "$KIND" = not-needed ]; then
+        CARRY_NONE="nothing carries the work of a not-needed close, so a wait on $ORIGIN ends with it"; return 0
     fi
-    local sstatus="$SUCC_STATUS" soutcome="$SUCC_OUTCOME" up_json waiting rows_json w t conflicts=""
+    local sstatus="$SUCC_STATUS" soutcome="$SUCC_OUTCOME" up_json waiting rows_json w t held="" conflicts=""
     if [ "$sstatus" = closed ] || [ "$soutcome" = shipped ]; then
         CARRY_NONE="$SUCCESSOR has closed or shipped, so a wait on $ORIGIN may end with its close"; return 0
     fi
     up_json=$(bd_at_json "$ORIGIN_PATH" dep list "$ORIGIN" --direction=up --type blocks --json)
-    # The canonical's own wait on the duplicate ends with the close: the work it
+    # The successor's own wait on the origin ends with the close: the work it
     # waits for is its own.
     if ! waiting=$(printf '%s' "$up_json" | jq -er --arg s "$SUCCESSOR" '
             if type != "array" then error("not an array") else
@@ -730,61 +751,78 @@ carry_plan() {
     if [ -z "$waiting" ]; then
         CARRY_NONE="no open bead waits on $ORIGIN"; return 0
     fi
-    if [ "$SUCCESSOR_STORE" != "$ORIGIN_STORE" ]; then
-        CARRY_HELD="$ORIGIN blocks $waiting, and its canonical $SUCCESSOR is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close releases them before $SUCCESSOR has delivered. Give each one that must still wait a human gate that names $SUCCESSOR, and end each one's wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN"
-        return 0
-    fi
     rows_json=$(list_rows "$waiting")
     if ! printf '%s' "$rows_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        CARRY_UNREAD="the beads $ORIGIN blocks ($waiting) did not read, so whether each can come to wait on $SUCCESSOR is unknown"
+        CARRY_UNREAD="the beads $ORIGIN blocks ($waiting) did not read, so whether each must come to wait on $SUCCESSOR is unknown"
         return 0
     fi
     for w in $waiting; do
-        # The waiter's own edge onto the canonical, by type, or "?" when its
-        # row is missing from the listing.
+        # What the waiter's row says: "?" when it is missing from the listing,
+        # "ruled" when a ruling recorded a PR-close disposition on it, and
+        # otherwise the type of its own edge onto the successor, or "".
         t=$(printf '%s' "$rows_json" | jq -r --arg w "$w" --arg s "$SUCCESSOR" '
             [ .[] | select(((.id // "") | tostring) == $w) ] as $r
             | if ($r | length) != 1 then "?"
+              elif ((($r[0].metadata // {})["gc.pr_close_disposition_kind"] // "") | tostring)
+                   | IN("re-homed", "folded", "fixed-upstream", "duplicate", "not-needed") then "ruled"
               else [ $r[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring) ] | (.[0] // "")
               end' 2>/dev/null || printf '?')
         case "$t" in
-            '?') CARRY_UNREAD="$ORIGIN blocks $w, whose row did not read, so whether it can come to wait on $SUCCESSOR is unknown"; return 0 ;;
+            '?') CARRY_UNREAD="$ORIGIN blocks $w, whose row did not read, so whether it must come to wait on $SUCCESSOR is unknown"; return 0 ;;
+            ruled) continue ;;
+        esac
+        held="${held:+$held }$w"
+        case "$t" in
             blocks) ;;
             '') CARRY="${CARRY:+$CARRY }$w" ;;
             *) conflicts="${conflicts:+$conflicts, }$w by a '$t' edge" ;;
         esac
     done
+    if [ -z "$held" ]; then
+        CARRY=""; CARRY_NONE="each open bead $ORIGIN blocks closes under a ruling of its own"; return 0
+    fi
+    if [ "$SUCCESSOR_STORE" != "$ORIGIN_STORE" ]; then
+        CARRY=""
+        CARRY_HELD="$ORIGIN blocks $held, and $SUCCESSOR, which carries its work, is in $SUCCESSOR_STORE, where a blocks edge from $ORIGIN_STORE holds nothing, so its close would release them before $SUCCESSOR has delivered. Give each one that needs that work a human gate that names $SUCCESSOR ($HERE/human-gate.sh --subject <bead> --key waits-on.$SUCCESSOR --message \"<bead> waits on $SUCCESSOR in $SUCCESSOR_STORE: clear this once it lands\"), and end each one's wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN"
+        return 0
+    fi
     if [ -n "$conflicts" ]; then
-        CARRY_HELD="$ORIGIN blocks beads already joined to $SUCCESSOR, $conflicts, and bd keeps one edge per pair of beads, so they cannot come to wait on $SUCCESSOR and its close releases them before $SUCCESSOR has delivered. Replace each such edge with a blocks edge (gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $SUCCESSOR, then dep add <bead> $SUCCESSOR --type blocks), or end its wait by hand"
+        CARRY_HELD="$ORIGIN blocks beads already joined to $SUCCESSOR, $conflicts, and bd keeps one edge per pair of beads, so they cannot come to wait on $SUCCESSOR and its close releases them before $SUCCESSOR has delivered. Replace each such edge with a blocks edge (gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $SUCCESSOR, then dep add <bead> $SUCCESSOR --type blocks), or end its wait on $ORIGIN with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN"
     elif [ -z "$CARRY" ]; then
         CARRY_NONE="every open bead $ORIGIN blocks already waits on $SUCCESSOR"
     fi
     return 0
 }
 
-# carry_waits — the writes carry_plan planned. Each bead in $CARRY gains its
-# blocks edge onto the canonical. The close that follows releases those beads
-# and cannot be taken back, so an edge bd refuses stops the disposition before
-# its close. The edges added before it stay: each is true while the origin
-# duplicates the canonical, and a run that closed the origin first needs them.
-# CARRIED names them.
+# carry_edges <ids, space-separated> — each bead gains a blocks edge onto the
+# successor, in the one bulk write the header's rule names. Its exit is bd's.
+carry_edges() {
+    local w
+    for w in $1; do
+        jq -nc --arg f "$w" --arg t "$SUCCESSOR" '{from: $f, to: $t, type: "blocks"}'
+    done | bd_at "$ORIGIN_PATH" dep add --file - --no-cycle-check
+}
+
+# carry_waits — the write carry_plan planned. The close that follows releases
+# the beads in $CARRY and cannot be taken back, so a write bd refuses stops the
+# disposition before its close. Once written, the edges stay even when the close
+# then does not land: each is true while the successor carries the origin's
+# work, and a run that closed the origin first needs them. CARRIED names them.
 CARRIED=""
 carried_left() { # the sentence a refusal after the carry ends on, or nothing
     [ -n "$CARRIED" ] || return 0
-    printf ' %s keep the blocks edge onto %s they gained; if %s turns out not to duplicate %s, remove each with gc bd --db %s/.beads dep remove <bead> %s.' \
+    printf ' %s keep the blocks edge onto %s they gained; if the work of %s does not move to %s after all, remove each with gc bd --db %s/.beads dep remove <bead> %s.' \
         "$CARRIED" "$SUCCESSOR" "$ORIGIN" "$SUCCESSOR" "$ORIGIN_PATH" "$SUCCESSOR"
 }
 carry_waits() {
     CARRIED=""
     [ -n "$CARRY" ] || return 0
-    local w err
-    for w in $CARRY; do
-        if ! err=$(bd_at "$ORIGIN_PATH" dep add "$w" "$SUCCESSOR" --type blocks 2>&1 >/dev/null); then
-            printf '%s\n' "$err" >&2
-            die "$ORIGIN blocks $w, and bd refused $w a blocks edge onto $SUCCESSOR, as printed above, so closing $ORIGIN would release $w before $SUCCESSOR has delivered. Nothing is closed.$(carried_left) Judge the refusal; $RERUN" 5
-        fi
-        CARRIED="${CARRIED:+$CARRIED }$w"
-    done
+    local err
+    if ! err=$(carry_edges "$CARRY" 2>&1 >/dev/null); then
+        printf '%s\n' "$err" >&2
+        die "$ORIGIN blocks $CARRY, and bd refused the blocks edges onto $SUCCESSOR, as printed above, so closing $ORIGIN would release them before $SUCCESSOR has delivered. Nothing is closed. Judge the refusal: a bead that does not need the work $SUCCESSOR carries ends its wait with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN; $RERUN" 5
+    fi
+    CARRIED="$CARRY"
     return 0
 }
 
@@ -833,9 +871,10 @@ if [ -n "$DRY_RUN" ]; then
     if [ "$ORIGIN_STATUS" = "closed" ]; then
         CLOSE_PLAN="already closed — edge + note only, the close left as it is"
     else
-        MARKER_PLAN=""
+        MARKER_PLAN=""; RECORD_PLAN=""
         [ "${#CLEAR_MARKER[@]}" -eq 0 ] || MARKER_PLAN=", clearing the landing order's pr_reconcile_pending marker in the same write, under the store's record lock"
-        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\"$MARKER_PLAN"
+        [ "${#WORK_RECORD[@]}" -eq 0 ] || RECORD_PLAN=", recording gc.work_outcome=no-op in the same write"
+        CLOSE_PLAN="bd's checked close while $ORIGIN is still ${JUDGED_STATUS:-?} and ${JUDGED_ASSIGNEE:-unassigned}, noting \"$REASON\"$RECORD_PLAN$MARKER_PLAN"
     fi
     if [ -n "$EDGE_STANDS" ]; then
         EDGE_PLAN="none ($ORIGIN already names $SUCCESSOR)"
@@ -991,24 +1030,22 @@ settle_edge() {
     return "$rc"
 }
 
-# carry_late — the second read of what waits on a duplicate, once its close has
+# carry_late — the second read of what waits on the origin, once its close has
 # landed (the header's rule). A wait it cannot move is too late to refuse: the close
 # stands, the run ends on exit 4, and the note says so, because a caller that runs
 # this script for its exit status drops its output.
 AFTER_CLOSE_RC=0
 carry_late() {
-    [ "$KIND" = duplicate ] || return 0
-    local w err moved="" why stop
+    local err why stop
     carry_plan
     why="${CARRY_UNREAD:-$CARRY_HELD}"
-    for w in $CARRY; do
-        if err=$(bd_at "$ORIGIN_PATH" dep add "$w" "$SUCCESSOR" --type blocks 2>&1 >/dev/null); then
-            moved="${moved:+$moved }$w"
+    if [ -n "$CARRY" ]; then
+        if err=$(carry_edges "$CARRY" 2>&1 >/dev/null); then
+            printf 'bead-rehome: %s came to wait on %s as it closed, and wait on %s now\n' "$CARRY" "$ORIGIN" "$SUCCESSOR"
         else
-            why="${why:+$why; }bd refused $w a blocks edge onto $SUCCESSOR ($err)"
+            why="${why:+$why; }bd refused $CARRY a blocks edge onto $SUCCESSOR ($(printf '%s' "$err" | tr '\n' ' '))"
         fi
-    done
-    [ -z "$moved" ] || printf 'bead-rehome: %s came to wait on %s as it closed, and wait on %s now\n' "$moved" "$ORIGIN" "$SUCCESSOR"
+    fi
     [ -n "$why" ] || return 0
     stop="$ORIGIN has closed, and what came to wait on it after this run first read its waiters did not all move to $SUCCESSOR, so a bead can go ready before $SUCCESSOR has delivered: $why. What waits on it: gc bd --db $ORIGIN_PATH/.beads dep list $ORIGIN --direction=up --type blocks"
     echo "bead-rehome: WARN $stop" >&2
@@ -1088,8 +1125,8 @@ else
             || die "bd would refuse the close of $ORIGIN: $CLOSE_GUARD. Its own [$EXCEPT_KEY] gates stay open and nothing closes" 5
     fi
 
-    # A duplicate's waiters, read before the first write: one that cannot come to
-    # wait on the canonical holds the close, and so does anything bd's close
+    # The origin's waiters, read before the first write: one that cannot come to
+    # wait on the successor holds the close, and so does anything bd's close
     # would refuse on, so no waiter gains an edge for a close that is refused.
     [ -z "$CARRY_UNREAD" ] || die "$CARRY_UNREAD; nothing written. Re-run this close." 5
     [ -z "$CARRY_HELD" ] || die "$CARRY_HELD, then re-run this close. Nothing written" 5
@@ -1131,12 +1168,12 @@ else
     # foreign assignee and an open child. It lands only while the origin still
     # has the status and assignee the gates judged, so a claim, an assignment or
     # a status change since that read, a second closer's included, closes nothing
-    # (exit 13). The note rides the same write, and names the beads that came to
-    # wait on the canonical.
+    # (exit 13). The note and the work record ride the same write, and the note
+    # names the beads that came to wait on the successor.
     CLOSE_RC=0; CLOSE_ERR=""
     CLOSE_ERR=$(bd_at "$ORIGIN_PATH" update "$ORIGIN" \
         --if-status="$JUDGED_STATUS" --if-assignee="$JUDGED_ASSIGNEE" --status=closed \
-        ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
+        ${WORK_RECORD[@]+"${WORK_RECORD[@]}"} ${CLEAR_MARKER[@]+"${CLEAR_MARKER[@]}"} \
         --append-notes "Disposition $(date -u +%Y-%m-%dT%H:%MZ): $REASON.${CARRIED:+ What waited on it waits on $SUCCESSOR now: $CARRIED.}" 2>&1 >/dev/null) || CLOSE_RC=$?
     if [ "$CLOSE_RC" = 13 ]; then
         # A close naming this same successor is what beat this one: the edge is

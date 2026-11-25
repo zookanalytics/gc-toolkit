@@ -12,8 +12,7 @@
 # What is exercised here:
 #   * the REQUEST: POST /v0/city/<city>/runs/<root>/cancel at the address
 #     $GC_HOME/supervisor.toml gives, carrying the X-GC-Request header gascity
-#     requires on a mutation, for the city cities.toml registers at
-#     $GC_CITY_PATH;
+#     requires on a mutation, for the city `gc cities` names at $GC_CITY_PATH;
 #   * --step resolves the run from the step `gc hook current` names, once that
 #     step shows it is this session's; a --bead is not read, and one that names
 #     another bead is reported; --root takes the run as given;
@@ -37,7 +36,10 @@
 #     a root that still reads live ends nothing and closes nothing; 404 is not
 #     ended; a 5xx or a failed connection is retried and then not ended;
 #   * the CITY: GC_CITY_PATH names it, else `gc status`, so a caller outside a
-#     session (an operator's shell running gc-helm.sh) reaches the same city;
+#     session (an operator's shell running gc-helm.sh) reaches the same city.
+#     Its name is the one `gc cities` lists at that path, never one the script
+#     reads from the registry file or makes from the path, and a path gc names
+#     no city at, or a `gc cities` that fails, sends no request;
 #   * refusals with no request and no write: no identity, a claim that is not
 #     this session's step, a step naming no root, a bead that is not a workflow
 #     root, usage errors;
@@ -85,6 +87,8 @@ mkdir -p "$TMP/bin" "$TMP/home"
 # `convoy delete <root> --force` : closes every live bead whose
 #               gc.root_bead_id is <root>, or exits $FAKE_DELETE_RC.
 # `status`    : answers $FAKE_STATUS, or fails when it is unset.
+# `cities --json`: answers $FAKE_CITIES, or exits $FAKE_CITIES_RC saying why on
+#               stderr, as gc does for a registry it cannot parse.
 # Every invocation is appended verbatim to $GC_LOG.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
 set -u
@@ -100,6 +104,10 @@ fi
 if [ "${1:-}" = "status" ]; then
   [ -n "${FAKE_STATUS:-}" ] || { echo "gc: no city here (stub)" >&2; exit 1; }
   printf '%s\n' "$FAKE_STATUS"; exit 0
+fi
+if [ "$*" = "cities --json" ]; then
+  [ -z "${FAKE_CITIES_RC:-}" ] || { echo "gc cities: parsing registry: simulated (stub)" >&2; exit "$FAKE_CITIES_RC"; }
+  printf '%s\n' "${FAKE_CITIES:?}"; exit 0
 fi
 if [ "${1:-} ${2:-}" = "hook current" ]; then
   [ -n "${FAKE_HOOK_CURRENT:-}" ] || { echo "${FAKE_HOOK_SAYS:-gc hook current: no claim (stub)}" >&2; exit 1; }
@@ -212,15 +220,12 @@ chmod +x "$TMP/bin/curl"
 export PATH="$TMP/bin:$PATH"
 export FAKE_STORE="$TMP/store.json" GC_LOG="$TMP/gc.log" CURL_LOG="$TMP/curl.log" FAKE_CURL_QUEUE="$TMP/queue" HOLDERS_LOG="$TMP/holders.log"
 export GC_HOME="$TMP/home" GC_RUN_CANCEL_BACKOFF=0
-cat > "$GC_HOME/cities.toml" <<'TOML'
-[[cities]]
-  path = "/srv/elsewhere"
-  name = "other"
-
-[[cities]]
-  path = "/srv/town"
-  name = "mycity"
-TOML
+# The cities `gc cities --json` lists, each under a name that is not its path's
+# basename. The registry file beside them names /srv/town otherwise, so every
+# request below that reaches /v0/city/mycity/ took the name from gc, not from
+# the file and not from the path.
+export FAKE_CITIES='{"schema_version":"1","cities":[{"name":"other","path":"/srv/elsewhere"},{"name":"mycity","path":"/srv/town"}]}'
+printf '[[cities]]\n  path = "/srv/town"\n  name = "decoy"\n' > "$GC_HOME/cities.toml"
 export GC_CITY_PATH="/srv/town"
 
 MINE="gc-toolkit__polecat-hq-98h2m"
@@ -265,7 +270,7 @@ reset
 run --step "$STEP" --reason "duplicate dispatch: tk-work already in flight"
 eq "$RC" 0 "--step: a 202 ends the run"
 eq "$(calls)" 1 "--step: exactly one request"
-has "$(cat "$CURL_LOG")" "POST $URL " "--step: POST to the run cancel of the step's root, in the city cities.toml names"
+has "$(cat "$CURL_LOG")" "POST $URL " "--step: POST to the run cancel of the step's root, in the city gc cities names"
 has "$(cat "$CURL_LOG")" "X-GC-Request:" "--step: the request carries gascity's anti-CSRF header"
 has "$OUT" "cancelled run tk-root (4 beads closed): duplicate dispatch" "--step: the result line names the run, the count and the reason"
 NOTE_WRITE="bd update tk-lc --append-notes Declined at $STEP by $MINE: duplicate dispatch: tk-work already in flight. Run tk-root cancelled through gascity (4 beads closed)."
@@ -552,12 +557,28 @@ run --root tk-root --reason r
 has "$(cat "$CURL_LOG")" "POST http://[::1]:8372/" "supervisor.toml: an IPv6 bind is bracketed"
 rm -f "$GC_HOME/supervisor.toml"
 reset
-OUT=$(GC_CITY_PATH=/srv/unlisted/ "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
-has "$(cat "$CURL_LOG")" "/v0/city/unlisted/runs/" "an unregistered city path falls back to its basename"
+OUT=$(GC_CITY_PATH=/srv/town/ "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 0 "a city path with a trailing slash: ended"
+has "$(cat "$CURL_LOG")" "POST $URL " "a trailing slash on the city path still finds the name gc cities lists"
+reset
+OUT=$(GC_CITY_PATH=/srv/unlisted "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 1 "a city path gc cities lists no city at: not ended"
+eq "$(calls)" 0 "an unlisted city path: no request, under its basename or any other name"
+has "$OUT" "gc cities lists no name for a city at /srv/unlisted" "an unlisted city path: says which path gc names nothing at"
+reset
+OUT=$(FAKE_CITIES='{"cities":[{"name":"","path":"/srv/town"}]}' "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 1 "a city gc cities lists with no name: not ended"
+eq "$(calls)" 0 "a city listed with no name: no request"
+reset
+OUT=$(FAKE_CITIES_RC=1 "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
+eq "$RC" 1 "gc cities fails: not ended"
+eq "$(calls)" 0 "gc cities fails: no request"
+has "$OUT" "gc cities exited 1" "gc cities fails: its exit status is reported"
+has "$OUT" "parsing registry: simulated" "gc cities fails: and so are its own words"
 reset
 OUT=$(env -u GC_CITY_PATH FAKE_STATUS='{"city_path":"/srv/town","city_name":"ignored"}' "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
 eq "$RC" 0 "no city path in the environment: gc status names it"
-has "$(cat "$CURL_LOG")" "POST $URL " "gc status's city path is named as cities.toml registers it"
+has "$(cat "$CURL_LOG")" "POST $URL " "gc status's city path is named as gc cities lists it"
 reset
 OUT=$(env -u GC_CITY_PATH "$SCRIPT" --root tk-root --reason r 2>&1); RC=$?
 eq "$RC" 1 "no city path and none from gc status: not ended"

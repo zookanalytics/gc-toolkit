@@ -8,7 +8,8 @@
 # reconcile bead that names what git refused, and is put to a person through
 # human-gate.sh with a declared quiet window, while an advanced or HQ rig is
 # not; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
-# the rig fast-forwards cleanly, and its human gate is withdrawn as moot through
+# the rig fast-forwards cleanly, recording gc.work_outcome=no-op before the
+# close, and its human gate is withdrawn as moot through
 # human-gate.sh --retract in the same pass, with no fresh gate filed; (e) the
 # HQ root is excluded; (f) a rig that blocks again after a clean sync files on
 # a new subject bead; (g) the reset a diverged rig's bead hands a person
@@ -24,7 +25,9 @@
 # description rewritten on the next pass to what that pass read, and recovers
 # as in (d) once back on it; (j) a recovered rig whose gate withdrawal fails
 # keeps its subject open until a later withdrawal succeeds; (k) a rig whose
-# fetch fails is skipped, with nothing touched or filed; (l) no escalation
+# fetch fails is skipped, with nothing touched or filed, and is left with an
+# empty FETCH_HEAD, which doctor/check-pour-text-current reports, while a pass
+# whose fetch works leaves FETCH_HEAD listing what it fetched; (l) no escalation
 # tells a person to run git reset --hard or --keep.
 set -euo pipefail
 
@@ -125,9 +128,15 @@ case "$1" in
         while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
         printf '{"id":"%s"}\n' "$id" ;;
       update)
+        # A work outcome is recorded with the bead's status when it was written.
         id="$1"; shift; key=""
         while [ $# -gt 0 ]; do
-          [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
+          case "$1=${2-}" in
+            --set-metadata=reconcile_rig=*) key="${2#reconcile_rig=}" ;;
+            --set-metadata=gc.work_outcome=*)
+              printf '%s %s\n' "${2#gc.work_outcome=}" "$(awk -F'|' -v i="$id" '$1==i{print $3}' "$FAKE_LEDGER")" \
+                > "$FAKE_LEDGER.$id.work_outcome" ;;
+          esac
           [ "$1" = "--title" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.title"
           [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
           shift
@@ -185,6 +194,8 @@ eq "$(open_count beta)"  "1" "diverged rig files exactly one reconcile bead"
 eq "$(open_count alpha)" "0" "advanced rig files no reconcile bead"
 eq "$(open_count mycity)" "0" "HQ root is excluded (not reconciled)"
 eq "$RUN1_OUT" "reconcile-rig-checkouts: 1 advanced, 1 blocked" "the summary line counts the advanced and the blocked rigs"
+eq "$([ -s "$TMP/alpha/.git/FETCH_HEAD" ] && echo listed || echo empty)" "listed" \
+  "a pass whose fetch works leaves the rig's FETCH_HEAD listing what it fetched"
 
 # The divergence is put to a person through human-gate.sh, on the reconcile bead
 # as subject; an advanced or HQ rig files nothing.
@@ -223,6 +234,8 @@ BETA_BEAD="$(bead_for beta)"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
+eq "$(cat "$TMP/ledger.$BETA_BEAD.work_outcome" 2>/dev/null)" "no-op open" \
+  "…recording gc.work_outcome=no-op while the bead is still open, before its close"
 eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig files no fresh gate"
 eq "$(retract_count beta)" "1" "the recovered rig's gate is withdrawn as moot"
 eq "$(retract_subject beta)" "$BETA_BEAD" "the withdrawal names the reconcile bead as its subject"
@@ -410,8 +423,10 @@ eq "$(open_count lambda)" "0" "a successful withdrawal finally closes the subjec
 
 # --- A rig whose fetch fails. -----------------------------------------------
 # rho's origin is gone, so its pass skips it: nothing moves and nothing is filed.
+# A fetch that worked first fills its FETCH_HEAD, so the pass is what empties it.
 behind_rig rho
 echo local-edit > "$TMP/rho/f.txt"
+git -C "$TMP/rho" fetch -q origin
 git -C "$TMP/rho" remote set-url origin "$TMP/absent.git"
 RHO_HEAD="$(git -C "$TMP/rho" rev-parse HEAD)"
 rigs_json rho
@@ -423,6 +438,8 @@ eq "$(esc_count rho)" "0" "a rig whose fetch fails files no gate"
 eq "$(open_count rho)" "0" "a rig whose fetch fails files no reconcile bead"
 eq "$(retract_count rho)" "0" "a rig whose fetch fails withdraws nothing"
 eq "$RHO_OUT" "reconcile-rig-checkouts: 0 advanced, 0 blocked" "a rig whose fetch fails is counted neither advanced nor blocked"
+eq "$(wc -c < "$TMP/rho/.git/FETCH_HEAD" | tr -d ' ')" "0" \
+  "a rig whose fetch fails is left with an empty FETCH_HEAD, which doctor/check-pour-text-current reports"
 
 # No subject bead or gate message this suite filed tells a person to run a
 # reset that overwrites what is in its way.

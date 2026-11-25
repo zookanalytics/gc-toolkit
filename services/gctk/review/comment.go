@@ -11,9 +11,10 @@ import (
 // judged, carrying each lane's verdict, approvals included, each finding the
 // lane raised and how the round ruled it, and each ask the round took. Each
 // point's answer says what the head carries for it: the commit that fixes it
-// and the head that carries the commit, or that the head carries no change for
-// it. The comment opens with its mark, which names the run and the head, so a
-// retry finds the comment and edits it rather than posting a second.
+// and the head that carries the commit, that the PR's summary carries its fix,
+// or that the head carries no change for it. The comment opens with its mark,
+// which names the run and the head, so a retry finds the comment and edits it
+// rather than posting a second.
 
 // Mark is the line that opens the comment of the run root at head.
 func Mark(root, head string) string {
@@ -101,7 +102,8 @@ func Comment(run *Run, n int, asks []Ask) string {
 }
 
 // summary is the comment's first sentence: each lane's verdict, and what the
-// round did.
+// round did, with the points fixed in the PR's summary alone counted apart
+// from the ones a commit fixes.
 func summary(it *Iteration) string {
 	var lanes []string
 	for _, ln := range it.Lanes {
@@ -116,7 +118,12 @@ func summary(it *Iteration) string {
 		ran = strings.Join(lanes, ", ")
 	}
 	count := map[string]int{}
+	inSummary := 0
 	for _, r := range it.Repair.Rulings {
+		if r.Ruling == RulingMustFix && r.Commit == "" && r.Summary {
+			inSummary++
+			continue
+		}
 		count[r.Ruling]++
 	}
 	var did []string
@@ -127,6 +134,9 @@ func summary(it *Iteration) string {
 		default:
 			did = append(did, fmt.Sprintf("ruled %d must-fix", c))
 		}
+	}
+	if inSummary > 0 {
+		did = append(did, fmt.Sprintf("fixed %d in the PR's summary", inSummary))
 	}
 	for _, k := range []struct{ ruling, word string }{
 		{RulingDeclined, "declined"}, {RulingDeferred, "deferred"}, {RulingAnswered, "answered"}, {RulingQuestion, "put to you"},
@@ -206,11 +216,17 @@ func answer(r Ruling, ok bool, rp *Repair) string {
 	reason := oneLine(r.Reason)
 	switch r.Ruling {
 	case RulingMustFix:
+		also := ""
+		if r.Summary {
+			also = ", and in the PR's summary"
+		}
 		switch {
+		case r.Commit == "" && r.Summary:
+			return "Fixed in the PR's summary: " + reason
 		case rp.Pushed != "":
-			return fmt.Sprintf("Fixed by `%s`, which `%s` carries: %s", short(r.Commit), short(rp.Pushed), reason)
+			return fmt.Sprintf("Fixed by `%s`, which `%s` carries%s: %s", short(r.Commit), short(rp.Pushed), also, reason)
 		default:
-			return fmt.Sprintf("Fixed by `%s`: %s", short(r.Commit), reason)
+			return fmt.Sprintf("Fixed by `%s`%s: %s", short(r.Commit), also, reason)
 		}
 	case RulingDeclined:
 		return "Declined, and the head carries no change for it: " + reason

@@ -1,43 +1,48 @@
 name: tests
 
-# Runs the pack's *.test.sh suite off-host on pull requests to main and on
-# pushes to main, so the suite gates changes without loading the polecat
-# self-review or the pool host, and a regression that lands is still caught.
-# The suite runs twice, on Linux (test) and on macOS (test-macos). The
-# repository is one Go module, and the Go checks vet and test every package of
-# it from the root, with the same commands on Linux (go) and on macOS
-# (go-macos), each beside its platform's suite check. The city's host is
-# macOS, where sed, grep, awk, date, stat, find and the rest of the userland
-# are the BSD tools, and ps, lsof, flock and process groups are the host's, so
-# a construct that passes on Linux and fails under the host's tools fails a
-# macOS check the way it fails on the host.
-# A draft pull request does not run the suite. That saves Actions minutes while
-# a change is still taking follow-up commits. Marking the pull request ready, or
-# pushing to it once ready, runs the suite. The draft flag carries no workflow
-# state; it is only a CI-cost lever here.
-# The suite is hermetic: each test stubs gc/bd and works in its own temp dir,
-# so a runner needs no gc binary and no running city. It needs bash 5, git,
-# jq 1.8 or later, timeout(1), flock(1), a Python with tomllib, a Ruby with
-# Psych, and the Go toolchain the setup-go step installs for the gctk builds
-# that several suites make. Psych is the YAML parser Ruby ships, and
+# Runs every test in the repository off-host on pull requests to main and on
+# pushes to main, so the tests gate changes without loading the pool host, and a
+# regression that lands is still caught. Each job runs the repository's
+# all-tests command, `make test` (tools/test.sh says what it runs): the Go
+# tests, the board web app's checks and every shell suite. It runs twice, on
+# Linux (test) and on macOS (test-macos). The city's host is macOS, where sed,
+# grep, awk, date, stat, find and the rest of the userland are the BSD tools,
+# and ps, lsof, flock and process groups are the host's, so a construct that
+# passes on Linux and fails under the host's tools fails the macOS check the way
+# it fails on the host.
+# docs/review-correctness.md says what each gate runs, these jobs among them, so
+# a change to what a job runs changes that page too.
+# A draft pull request runs no tests. That saves Actions minutes while a change
+# is still taking follow-up commits. Marking the pull request ready, or pushing
+# to it once ready, runs them. The draft flag carries no workflow state; it is
+# only a CI-cost lever here.
+# The tests are hermetic: each stubs gc/bd and works in its own temp dir, so a
+# runner needs no gc binary and no running city. They need bash 5, git, jq 1.8
+# or later, timeout(1), flock(1), lsof, a Python with tomllib, a Ruby with
+# Psych, make, the Go toolchain the setup-go step installs, the Node the
+# setup-node step installs, and on Linux a C compiler, since Go's race detector
+# needs cgo there. Psych is the YAML parser Ruby ships, and
 # action-pins.test.sh reads the workflows with it. The Linux job installs its
 # jq and takes the rest from ubuntu-latest; the macOS job installs what its
 # image lacks.
-# Main's ruleset names the checks that gate a merge by job id, so renaming a
-# job, or giving it a name: or a matrix, changes the check a merge waits on.
+# Main's ruleset names the checks that gate a merge by job id, and every job
+# here is one of them, so adding, removing or renaming a job, or giving it a
+# name: or a matrix, changes the checks a merge waits on.
 # A job the ruleset requires skips only a draft. The city's merge counts no
 # skipped result (services/gctk/pr/rules.go), so a job that a condition of its
 # own skipped at a ready head would hold that pull request's merge.
-# Each job that runs the suite keeps each run's seconds, in its job summary and
-# as the artifact suite-times-<job>, whether the suite passed or failed.
-# pr-size.yml reads them when this workflow completes, for the size comment's
-# section on the suite's time (suite-time.sh). They fail no check.
+# Each job keeps each shell suite run's seconds, in its job summary and as the
+# artifact suite-times-<job>, whether the tests passed or failed. pr-size.yml
+# reads them when a pull request's run of this workflow ends in success or
+# failure, for the size comment's section on the suite's time (suite-time.sh).
+# They fail no check. make test itself adds the Go tests' coverage total to the
+# job summary when they pass, which fails no check either.
 
 on:
   pull_request:
     branches: [main]
     # Specifying types replaces GitHub's default set, so opened/synchronize/
-    # reopened are kept explicitly; ready_for_review runs the suite when a
+    # reopened are kept explicitly; ready_for_review runs the tests when a
     # draft is marked ready.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
@@ -49,7 +54,7 @@ permissions:
 
 jobs:
   test:
-    # A draft pull request skips the suite. A push to main and a manual
+    # A draft pull request skips the tests. A push to main and a manual
     # dispatch carry no pull_request context, so the event-name guard runs
     # them anyway.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -62,19 +67,25 @@ jobs:
       group: ${{ github.workflow }}-test-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # lifecycle.sh execs gctk and has no other implementation, so every
-      # suite whose scripts reach it builds services/gctk from source, and so
-      # does pr-status-label.test.sh; the rest of the suite is shell-only.
+      # The Go tests, and the shell suites whose scripts reach lifecycle.sh,
+      # which execs gctk and has no other implementation, build from source.
       # go.mod names the toolchain version. A build downloads gctk's few
       # modules, cobra and what it needs, so the job keeps no module cache.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+
+      # The web app's checks run under the host's Node major. npm ci installs
+      # its packages from package-lock.json, so the job keeps no npm cache.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          package-manager-cache: false
 
       # The host resolves Homebrew's jq first on PATH, and it is 1.8.2. This
       # image's jq is the one its Ubuntu release ships, so the job installs
@@ -94,19 +105,19 @@ jobs:
           echo "$dir" >> "$GITHUB_PATH"
 
       # A PATH change reaches only the steps after the one that makes it, so
-      # the jq the suite resolves is checked in a step of its own.
+      # the jq the tests resolve is checked in a step of its own.
       - name: Check the runner resolves jq 1.8 or later
         run: bash .github/workflows/check-jq.sh
 
-      # The runner serves this job alone, so the suite takes every core.
+      # The runner serves this job alone, so the shell suites take every core.
       # run-tests.sh defaults to half of them, which leaves a shared host's
       # agents room, and at that count this job runs about twice as long.
-      - name: Run the *.test.sh suite in parallel
-        run: bash tools/run-tests.sh -j "$(getconf _NPROCESSORS_ONLN)" --seconds "$RUNNER_TEMP/suite-times.tsv"
+      - name: Run every test
+        run: make test RUN_TESTS_FLAGS="-j $(getconf _NPROCESSORS_ONLN) --seconds $RUNNER_TEMP/suite-times.tsv"
 
-      # Each run's seconds, kept whether the suite passed or failed. Keeping
+      # Each run's seconds, kept whether the tests passed or failed. Keeping
       # them fails no check: a step here that fails leaves the job's result to
-      # the suite.
+      # the tests.
       - name: Show each run's seconds
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -127,24 +138,32 @@ jobs:
       group: ${{ github.workflow }}-test-macos-${{ github.ref }}
       cancel-in-progress: true
     runs-on: macos-latest
-    # The same suite takes the macOS runner more than twice as long as
+    # The same tests take the macOS runner more than twice as long as
     # ubuntu's, so its limit is higher.
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The same gctk toolchain as test.
+      # The same Go toolchain as test.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
 
+      # The same Node as test.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          package-manager-cache: false
+
       # The image's only bash is /bin/bash 3.2. run-tests.sh needs bash 5, and
       # it runs each suite with the first bash on PATH. Scripts under test
       # bound calls with timeout(1), and refinery-reconcile.sh and gc-helm.sh's
-      # accept take their locks with flock(1); macOS ships neither.
+      # accept take their locks with flock(1); macOS ships neither, and the pr
+      # package's Go lock test runs flock(1) against the record lock.
       # tmux-intake-prompt.test.sh runs tmux-bindings.sh under /bin/sh against
-      # a real tmux server, and skips that case without tmux. The host installs all four from Homebrew.
+      # a real tmux server, and skips that case without tmux. The host
+      # installs each from Homebrew.
       # coreutils links only the GNU names macOS lacks, such as timeout and
       # nproc, and installs the rest under a g prefix, so date, stat, touch
       # and the like stay BSD.
@@ -158,9 +177,12 @@ jobs:
       # This job tests the BSD userland only while the runner resolves the
       # tools the host does. Without a tomllib python3, the suites that read
       # TOML skip and still pass, and without tmux or lsof a case does the
-      # same. A GNU tool ahead of /usr/bin on PATH lets a GNU-only construct
-      # pass, and a jq older than 1.8 rejects programs the host's jq compiles.
-      # Any such drift fails this step by name instead.
+      # same; a Go test that starts a host tool skips without it too, as
+      # gctk's host adapter does without lsof, the pr package's lock test
+      # without flock, and the board's tests that answer from the stub store
+      # without bash or jq. A GNU tool ahead of /usr/bin on PATH lets a
+      # GNU-only construct pass, and a jq older than 1.8 rejects programs the
+      # host's jq compiles. Any such drift fails this step by name instead.
       - name: Check the runner resolves the host's tools
         run: |
           sw_vers
@@ -171,7 +193,7 @@ jobs:
           python3 -c 'import sys, tomllib; print(sys.executable, sys.version.split()[0], "has tomllib")' \
             || { echo "::error::python3 ($(command -v python3)) has no tomllib"; fail=1; }
           bash .github/workflows/check-jq.sh || fail=1
-          for t in go git timeout flock tmux lsof; do
+          for t in go git timeout flock tmux lsof make node npm; do
             p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
             echo "$t: $p"
           done
@@ -187,8 +209,8 @@ jobs:
       # Every core, as in test. Half of this runner's three cores is one job,
       # and the suite's runs, one after another, take longer than
       # timeout-minutes allows.
-      - name: Run the *.test.sh suite in parallel
-        run: bash tools/run-tests.sh -j "$(getconf _NPROCESSORS_ONLN)" --seconds "$RUNNER_TEMP/suite-times.tsv"
+      - name: Run every test
+        run: make test RUN_TESTS_FLAGS="-j $(getconf _NPROCESSORS_ONLN) --seconds $RUNNER_TEMP/suite-times.tsv"
 
       # The same seconds as test keeps.
       - name: Show each run's seconds
@@ -202,69 +224,3 @@ jobs:
           name: suite-times-${{ github.job }}
           path: ${{ runner.temp }}/suite-times.tsv
           if-no-files-found: ignore
-
-  go:
-    # The same draft gate as test.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # A concurrency group of its own, as test's comment says.
-    concurrency:
-      group: ${{ github.workflow }}-go-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The same toolchain as test.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Vet and test every package
-        run: go vet ./... && go test ./...
-
-  go-macos:
-    # The same draft gate as test.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    # A concurrency group of its own, as test's comment says.
-    concurrency:
-      group: ${{ github.workflow }}-go-macos-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The same toolchain as go.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      # macOS ships no flock(1), which the pr package's lock test runs against
-      # the record lock, so the host installs it from Homebrew.
-      - name: Install flock
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-          HOMEBREW_NO_ENV_HINTS: "1"
-        run: brew install flock
-
-      # A Go test that starts a host tool skips when the tool is missing, so a
-      # missing tool fails this step by name instead of a test skipping
-      # quietly: gctk's host adapter skips without lsof, the pr package's lock
-      # test without flock, and the board's tests that answer from the stub
-      # store without bash or jq.
-      - name: Check the runner resolves the tools the Go tests start
-        run: |
-          sw_vers
-          fail=0
-          for t in git flock lsof bash jq; do
-            p="$(command -v "$t")" || { echo "::error::$t is not on PATH"; fail=1; continue; }
-            echo "$t: $p"
-          done
-          exit "$fail"
-
-      - name: Vet and test every package
-        run: go vet ./... && go test ./...

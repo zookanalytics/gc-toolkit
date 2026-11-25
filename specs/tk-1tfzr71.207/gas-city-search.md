@@ -201,7 +201,7 @@ operator's to keep, so the guard is that no writer routes to it.
 teach, now reach the seat: the sling hits its `sling_query`, which refuses
 plain slung work as the po's does, and the attach opens a sitting as
 `gc-helm mayor` does. The pack's `gc-terminal-attach.sh`, the city web
-terminal's attach target, defaults to `gc-toolkit.mayor`, so a city that runs
+terminal's attach target, defaults to the bare `mayor`, so a city that runs
 that terminal opens a mayor sitting when the operator opens the terminal.
 
 ## Listing the mailbox for the mayor

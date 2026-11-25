@@ -26,7 +26,9 @@ Open from your rig's goals, as your prompt's "The rig's goals" reads them. Then
 read each open epic, its Deliveries among them, by the epic read in your
 prompt's "Reads". An epic's frontier names the park that holds it, when one
 does. Its horizon counts the work directly under it, open, closed, advancing
-and stuck, and counts an open Delivery as stuck, because no pool takes an epic.
+and stuck. An open Delivery under it advances while every open member of its own
+advances, and reads stuck on what stops the first that does not, or on itself
+when it holds no open work.
 
 ## 2. Weigh each epic closed or shifted since a sync last weighed it
 

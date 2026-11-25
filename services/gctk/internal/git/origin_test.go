@@ -44,6 +44,34 @@ func TestOriginURLNamesTheClonesOrigin(t *testing.T) {
 	}
 }
 
+// A remote's URL names its host and its repository in each form a remote
+// takes, and names none in any other.
+func TestRemoteRepositoryReadsEachFormARemoteTakes(t *testing.T) {
+	for url, want := range map[string]string{
+		"git@github.com:owner/repo-a.git":             "github.com owner/repo-a",
+		"git@github.com:owner/repo-a":                 "github.com owner/repo-a",
+		"https://github.com/owner/repo-a":             "github.com owner/repo-a",
+		"https://github.com/owner/repo-a.git/":        "github.com owner/repo-a",
+		"https://token@github.com/owner/repo-a.git":   "github.com owner/repo-a",
+		"ssh://git@github.com/owner/repo-a.git":       "github.com owner/repo-a",
+		"ssh://git@git.example.com:2222/owner/repo-a": "git.example.com owner/repo-a",
+		"  https://github.com/owner/repo-a  ":         "github.com owner/repo-a",
+		"https://github.com/owner":                    "",
+		"https://github.com/owner/repo-a/tree/main":   "",
+		"/srv/git/repo-a.git":                         "",
+		"":                                            "",
+	} {
+		host, repo, ok := RemoteRepository(url)
+		got := ""
+		if ok {
+			got = host + " " + repo
+		}
+		if got != want {
+			t.Errorf("RemoteRepository(%q) = %q, want %q", url, got, want)
+		}
+	}
+}
+
 // OriginURLs lists what a fetch from origin and a push to it reach once git
 // rewrites the remote's URLs: a pushurl and a pushInsteadOf move only the
 // push, an insteadOf moves both, and every URL the remote carries is listed.

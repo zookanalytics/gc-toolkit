@@ -15,17 +15,20 @@ through `gc bd` and the supervisor's API.
 | Command | What it does | Documented in |
 |---|---|---|
 | `bead holds` | what holds each bead named, from one read of the store: one status (blocked, held, unjudged or clear) with the waits behind it and whether each is the bead's own or an ancestor's, its own pending waits and when the last landed, why it is in flight, its arm, and its wait edges into another store, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead holds --help`, `internal/cli/bead.go`, `waits` |
+| `bead stands` | where each bead named stands and whose move it is, from one listing of the store: its group in the helm board's words, the rule that placed it, what a person owes when the bead is itself the ask, the beads that rule names, how far the city carries it without a person and the bead that stops it, and where it stands by what it waits on, one JSON object per line, read from the store `--db` names or the one gc routes the first bead to | `gctk bead stands --help`, `internal/cli/beadstands.go`, `standing`, [docs/bead-standing.md](../../docs/bead-standing.md) |
 | `bead arm`, `bead disarm` | arm a bead to start by itself once nothing holds it, on a formula through a pool, or remove its arm, each in one write under the bead's dispatch lock | `gctk bead arm --help`, `gctk bead disarm --help`, `arm` |
-| `bead start-armed` | the deferred-dispatch order's pass: retire the arm of each closed or delivered bead, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
+| `bead start-armed` | the deferred-dispatch order's pass: retire each arm that is no longer owed, and start each armed bead the pool's own serve rule would serve and nothing bd cannot judge holds, exactly once, printing one JSON line per arm; `--dry-run` writes nothing | `gctk bead start-armed --help`, `arm`, [docs/deferred-dispatch.md](../../docs/deferred-dispatch.md) |
 | `bead park`, `bead place` | the operator's steering moves on a bead: a park, which holds everything under it that has not started behind a gate it files, born with its `blocks` edge, or behind a bead that exists, and refuses a bead in flight; and a placement, which gives a bead `hold:mayor` holds its parent or none, settles its priority, slings it or arms it while a wait holds it, and lifts the hold, each write taking its exit | `gctk bead park --help`, `gctk bead place --help`, `internal/cli/bead_steer.go`, `park`, `place`, [docs/steering.md](../../docs/steering.md) |
 | `bead takeaway` | a bead's headline, the one line its handling concluded, with who wrote it, when, and whether anything still waits on it, in one update: each wait a `blocks` edge, or `--no-wait`'s settled mark. With `--release` its arm is removed first, then the same update reopens the bead, guarded on the status and the assignee it read, and assigns it to nobody or to the agent `--assign` names, each run beneath it ends, and `--route` slings it to a pool. The store is the one `--db` names or the one gc routes the bead to | `gctk bead takeaway --help`, `internal/cli/beadtakeaway.go`, `takeaway` |
+| `deployment report` | the production-deploy-report order's pass over one rig: the newest deployments of an environment, Production unless `--environment` names another, read from GitHub in one call for the repository the rig's checkout names as its origin, and one patrol finding in the rig's store for a run of failed ones, filed and noted through `patrol-finding.sh` while they fail and its situation cleared once one succeeds; `--dry-run` writes nothing | `gctk deployment report --help`, `internal/cli/deployment.go`, `deployment` |
 | `doctor run` | the doctor order's run: `gc doctor --json` under a deadline, never with `--fix`, recorded as one `gc-toolkit.doctor.ran` event whose payload names each failing check with the time it first failed and its streak, each check the run did not measure, each the accepted file accepts, and each monitor order's last good run; a run that did not complete carries the previous run's lists and exits 1 | `gctk doctor run --help`, `internal/cli/doctor.go`, `doctor` |
 | `epic create` | filing an epic with its contract, each field in its own key, refused when the epic has no hypothesis and its parent is not an epic | `gctk epic create --help`, `internal/cli/epic.go` |
 | `epic unweighed` | the time it read a rig's epics, which a portfolio sync marks each epic it weighs with, then each close and each latest shift of those epics that no sync has weighed, oldest first, one line each, from one read of the rig's epics, and a read that stops and says so when the store does not answer | `gctk epic unweighed --help`, `internal/cli/epic_unweighed.go`, `epic` |
 | `lifecycle` | the plain write of a bead's `merge_result` outside the pending record, with the work record a landing writes, in one atomic update whose exit decides. It parses its own verbs and flags | `gctk lifecycle`, `internal/cli/lifecycle.go` |
+| `mail notify` | the mail-notify orders' pass: for each session of an agent `--agents` names that can wake, its unread mail from another sender that no notice still queued will tell it of, answered with one wait-idle nudge naming each new message's sender, once for each message, which the pass's ledger keeps while the message stays unread | `gctk mail notify --help`, `internal/cli/mail.go`, `mail` |
 | `memory due`, `memory apply`, `memory settle` | the learning loop's memory intake, which the feedback distiller's steps call: the agent memory notes due for its judge as JSON, oldest first, read from each memory directory Claude Code names for a session in each rig's checkout and the city's root; the judge's decision on each note recorded on its directory's list, a dropped note's text kept before it goes; and each note's wait ended once its fix has landed on the default branch, or with the note due again when it ended with none, with one finding for a place Claude Code names no directory for | `gctk memory --help`, `internal/cli/memory.go`, `memory`, `internal/claudecode` |
 | `distiller start` | the feedback-distiller order's start: the pack's home rig, the one rig whose checkout holds a `pack.toml` naming the gc-toolkit pack, and the polecat pool `gc agent list` places there, and one run of `mol-feedback-distiller` slung to that pool unless a run is open in the rig's store, under a lock that keeps overlapping starts apart; a city with no home rig, a suspended one, or another start holding the lock starts nothing, and a read that fails, a second home rig, a pool that is not one or a lock that cannot be taken starts nothing and exits 1 | `gctk distiller start --help`, `internal/cli/distiller.go`, `distiller` |
-| `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
+| `pr compose` | a PR's title and body as the bead that owns it says they should be: its title with the conventional-commit type a repository's title check requires, and its body's managed summary region and branch-beads section, each read by its markers and kept current while the text people add stays as it is; with `--edit`, the open PR's title and body brought to that composition, each edited only where it differs | `gctk pr compose --help`, `internal/cli/prcompose.go`, `pr` |
 | `pr summary` | the account of what a change does, for its PR: the bead's PR summary and the change's subject line as its title, recorded in one write whose exit decides, or the summary recorded, printed for a reader of the PR's text | `gctk pr summary --help`, `internal/cli/prsummary.go`, `pr` |
 | `pr status` | a PR's status (working, merging, needs-review or needs-attention), the one derivation the `status:` label and the helm board share, and the open human gates that hold it, which `gc-helm engage` offers; for a PR on Gas Town's pending record, the pr domain's evaluator decides it over the store and the GitHub read the one-PR update saved on the PR's bead, so the verb reads no GitHub, and each condition not met follows it | `gctk pr status --help`, `internal/cli/prstatus.go`, `prstatus`, `pr` |
 | `pr record` | the refinery's record of the PR a bead owns as pending until its merge is verified, in Gas Town's two writes under the store's record lock, each guarded on the status and assignee it read, so a bead that a close or a release reached first gets no record | `gctk pr record --help`, `internal/cli/prland.go`, `pr`, `pr/record` |
@@ -88,12 +91,14 @@ pending record, the verb and the rig board ask the pr domain's evaluator over
 the store and the GitHub read the one-PR update saved on the PR's bead, the
 board through its listing (`listing.PRAnswers`), so none of them reads GitHub.
 
-The refinery's merge-push step (`refinery-publish.sh`) takes a PR's title and
-body from `gctk pr compose`, so an opened PR and a later refresh read one
-composer.
+The refinery's merge-push step (`refinery-publish.sh`) opens a PR with the
+title and body `gctk pr compose` composes, and edits a PR it publishes onto to
+that composition with `--edit`, as a review run's push (`review-run.sh push`)
+does, so an opened PR and every later edit read one composer and one
+comparison.
 Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
-binary, or one too old to carry the verb, it opens no PR and edits no body or
-title that pass.
+binary, or one too old to carry the verb or flag it calls, it opens no PR and
+edits no body or title that pass.
 
 `assets/scripts/pr-reconcile.sh`, the landing order's script
 (`orders/pr-reconcile.toml`), names the rig's refinery from the roster and execs
@@ -239,6 +244,13 @@ listing/             one pass's read of a store for the helm board: every live b
                      prstatus's and the pr evaluator's answers from the same rows
 waits/               what holds a bead, from one snapshot: the rule by where the work is, the
                      in-flight test, the run link's copy and the keys it reads, read-only
+standing/            where a bead stands and whose move it is: its group in the helm board's
+                     words, the rule that placed it, its ask and the beads that rule names,
+                     how far the city carries it and where it stands by what it waits on,
+                     from waits', prstatus's and queue's answers, read through the Store a
+                     listing implements
+standing/person/     the rules about one bead: a human gate, a bead only a person clears, and
+                     one that waits on work of its own first
 review/              the review domain: the check index and a rig's guidance at a commit; the
                      shape a review run's steps write, the loop's pass rule over it, the run's
                      result in review_results, and the asks a run works, in review_checks

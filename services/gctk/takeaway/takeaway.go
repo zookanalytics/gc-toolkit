@@ -29,7 +29,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -348,7 +348,7 @@ func (r *take) sortWaits() error {
 		switch {
 		case row == nil:
 			r.routeWaits, r.routeUnread = append(r.routeWaits, w), append(r.routeUnread, w)
-		case row.Status() != "closed" && !prstatus.IsHumanGate(row.IssueType(), row.AwaitType()):
+		case row.Status() != "closed" && !person.IsHumanGate(row.IssueType(), row.AwaitType()):
 			r.routeWaits = append(r.routeWaits, w)
 		}
 	}
@@ -393,7 +393,7 @@ func (r *take) guardDestination() error {
 	}
 	var blockedBy []string
 	for _, p := range pending {
-		if !prstatus.IsHumanGate(p.IssueType, p.AwaitType) {
+		if !person.IsHumanGate(p.IssueType, p.AwaitType) {
 			blockedBy = append(blockedBy, p.ID)
 		}
 	}

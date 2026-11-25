@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
@@ -63,17 +63,21 @@ import (
 // the branch's re-render when the audit is stale, holding no PR for it (the
 // design's call 1).
 
-// Hub is GitHub as the landing order and the draft cycle reach it: the reads an
-// act makes of what it changes, such as a withdrawal's of the reviews it
-// dismisses, a merge request or an enqueue pinned to the head the evaluator
-// judged, the PR's moves between draft and ready, and the dismissal of a
-// review.
+// Hub is GitHub as the landing order, the draft cycle and a review round's
+// edit of the PR's text reach it: the reads an act makes of what it changes,
+// such as a withdrawal's of the reviews it dismisses and an edit's of the PR's
+// title and body, a merge request or an enqueue pinned to the head the
+// evaluator judged, the merge under the commit headline the act names, the
+// PR's moves between draft and ready, the edit of its title and body, and the
+// dismissal of a review.
 type Hub interface {
 	GitHub
-	MergePullRequest(id, head string) error
+	MergePullRequest(id, head, headline string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
 	ConvertToDraft(id string) error
+	PullRequestText(repo string, number int) (*gh.Text, error)
+	EditPullRequest(id string, title, body *string) error
 	DismissReview(repo string, number int, id int64, message string) error
 }
 
@@ -176,10 +180,10 @@ func (e *HeldClose) Error() string { return e.Why }
 // a run requests no merge when it is nil. Feedback loads the definition of
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
-// it. Runs pours a PR's review run, and Dispositions closes a bead whose PR a
-// ruling retired. Audit is the rig's seed audit, nil for a rig whose repository
-// carries none. Wake gives the refinery a turn for a changed head that only
-// conversations and asks hold. Labels keeps the labels of each PR the store's
+// it. Runs pours a PR's review run and settles its priority, and
+// Dispositions closes a bead whose PR a ruling retired. Audit is the rig's seed
+// audit, nil for a rig whose repository carries none. Wake gives the refinery its turn for each changed head the run
+// hands it that it can take. Labels keeps the labels of each PR the store's
 // live beads own equal to the ones the store derives, and a run writes none
 // when it is nil. Wait bounds how long a writer waits for the lock, and Yield
 // is how long a run lets the lock stand free between two acts, so a writer
@@ -370,8 +374,9 @@ const (
 // does not end, since a cook stopped before it attaches its run leaves a run
 // the order never reads, so an act starts a pour only while pourReserve of its
 // bound is left. The disposition writer a closed retired PR's bead goes to once
-// the act has freed the lock runs past the bound too (Dispositions). A bound
-// of zero is no bound.
+// the act has freed the lock runs past the bound too (Dispositions). The settle
+// of a poured review run's priority runs once the act has freed the lock, in
+// what is left of the act's bound (Runs). A bound of zero is no bound.
 type Options struct {
 	Window time.Duration
 	Stop   time.Duration
@@ -454,10 +459,13 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 			continue
 		}
 		ctx, cancel := bounded(o.Stop)
-		u.landed, u.disposal, u.rereadDue, u.reread = nil, nil, "", ""
+		u.landed, u.disposal, u.rereadDue, u.reread, u.poured = nil, nil, "", "", ""
 		out := u.one(ctx, id, o.Stop)
 		if u.rereadDue != "" {
 			out = u.rereadAndDecide(ctx, id, u.rereadDue, o.Stop)
+		}
+		if u.poured != "" {
+			out.Detail += u.rank(ctx, u.poured)
 		}
 		cancel()
 		if u.disposal != nil {
@@ -553,9 +561,10 @@ func (l Landing) read(id string) (*ledger.Record, error) {
 // audit's check once the lock is free, disposal the close the act just made
 // owes the disposition writer once the lock is free, rereadDue the PR the act
 // found ready on the saved read, which the one-PR update re-reads once the lock
-// is free, reread the bead whose PR the act has had re-read, and audited names,
-// for each tip of the default branch the run has checked, the bead whose
-// landing checked it.
+// is free, reread the bead whose PR the act has had re-read, poured the root of
+// the review run the act poured, whose priority the act settles once the lock
+// is free, and audited names, for each tip of the default branch the run has
+// checked, the bead whose landing checked it.
 type run struct {
 	Landing
 	feedback  Feedback
@@ -568,6 +577,7 @@ type run struct {
 	disposal  *Disposal
 	rereadDue string
 	reread    string
+	poured    string
 	audited   map[string]string
 }
 
@@ -1042,7 +1052,8 @@ func (u *run) decideClosed(s state) plan {
 // holds it, the run hands it to the refinery (handOver). A whole record whose
 // second write landed moves to blocked and to nobody, and is decided on.
 // Anything else is a record a dead writer left half written, which goes back
-// to the refinery for its full validation.
+// to the refinery for its full validation, handed over as a changed head is
+// (revalidate).
 func (u *run) decideOpen(s state) plan {
 	switch {
 	case s.rec.Result == record.HeadChanged && withdrawing(s):
@@ -1075,11 +1086,8 @@ func (u *run) decideOpen(s state) plan {
 			return next.act(ctx, c)
 		})
 	}
-	return doing(func(context.Context, carriedOut) RunOutcome {
-		w := u.Ledger.Write(s.id)
-		record.Revalidate(w, "Interrupted PR handoff record is incomplete; full refinery validation is required", u.Refinery)
-		return u.commit(s, w, RunOutcome{Bead: s.id, Action: ActRevalidate,
-			Detail: "the record was half written: the bead goes back to the refinery, and no merge is requested"})
+	return doing(func(ctx context.Context, _ carriedOut) RunOutcome {
+		return u.revalidate(ctx, s)
 	})
 }
 
@@ -1400,10 +1408,10 @@ func (u *run) decideHeadChanged(s state, f seen) plan {
 // place of the one the refinery validated, once the act has carried out the
 // record's withdrawals as c says, and hands the head to the refinery.
 // The bead keeps its marker, assigned to nobody, while a withdrawal is still
-// open or a review run is attached, and until the hand-over has assigned the
-// bead to a refinery that nothing else tells of the head and woken it
-// (handOver). shown, when set, says for the outcome what showed that the head
-// is not the validated one.
+// open or a review run is attached, and, whenever the refinery can take the
+// bead, until the hand-over has assigned the bead to the refinery and woken it
+// (wakeAndSettle). shown, when set, says for the outcome what showed that the
+// head is not the validated one.
 func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carriedOut) RunOutcome {
 	r := s.rec
 	reason := fmt.Sprintf("PR head changed after refinery validation (%s -> %s); quality gates must run again", r.Head, seen)
@@ -1418,15 +1426,17 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	// The requeue keeps the marker, and the bead assigned to nobody, while a
 	// withdrawal or an attached run holds the changed head, and for the
 	// hand-over that assigns the bead to the refinery and wakes it once the
-	// requeue lands, or that reads what holds the bead again when this read
-	// fails. Otherwise its own write hands the head to the refinery.
+	// requeue lands, whenever the refinery can take the bead, or that reads what
+	// holds the bead again when this read fails. Otherwise another wait holds
+	// the bead, and the requeue's own write hands the head to the refinery.
 	watched := c.held || len(s.runs) > 0
 	var holds []hold
+	var takeable bool
 	var unread error
 	if !watched {
-		holds, unread = u.mergeHolds(s)
+		holds, takeable, unread = u.mergeHolds(s)
 	}
-	keep := watched || unread != nil || len(holds) > 0
+	keep := watched || unread != nil || takeable
 	to, done := u.Refinery, RunOutcome{Bead: s.id, Action: ActRequeued, Detail: detail + "; the bead is assigned to the refinery"}
 	if keep {
 		to, done.Detail = "", detail
@@ -1441,7 +1451,7 @@ func (u *run) sendBack(ctx context.Context, s state, seen, shown string, c carri
 	if unread != nil {
 		return u.handOverLater(s, detail, "what holds the bead did not read, so the next run reads it again: "+unread.Error())
 	}
-	return u.wakeAndSettle(ctx, s, holds, ActRequeued, detail)
+	return u.wakeAndSettle(ctx, s, headChanged, holds, ActRequeued, detail)
 }
 
 // decideAtHead decides a PR the saved read shows open at the validated head. A
@@ -1509,7 +1519,8 @@ func (u *run) decideAtHead(s state, f seen) plan {
 
 // merge asks GitHub to merge a PR the evaluator found ready on the read the
 // one-PR update saved once it had re-read the PR in full for this act, pinned to
-// the head the answer judged, or to add it to its base's merge queue where the
+// the head the answer judged and under the subject the bead composes to when the
+// act reads it last (Subject), or to add it to its base's merge queue where the
 // base requires one. Whatever GitHub answers, the next run decides the PR again.
 func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedOut) RunOutcome {
 	// The merge request is the one act no guard can take back, so the bead is
@@ -1529,17 +1540,23 @@ func (u *run) merge(ctx context.Context, s state, f seen, ans Answer, c carriedO
 		return RunOutcome{Bead: s.id, Action: ActMoved, Detail: withNote(
 			"the bead moved during the act's reads, so no merge was requested; the next run reads it as it stands", c.note)}
 	}
+	// The squash commit's subject is composed from the bead as this read finds
+	// it, not taken from the PR's title, which the refinery sets from the bead
+	// only when it publishes the PR. An enqueue takes no subject.
+	subject := Subject(s.id, now.Title(), now.IssueType(), f.pr.Number)
 	hub := u.Hub(ctx, f.host)
-	method, ask := "merge", hub.MergePullRequest
+	method, ask := "merge", func() error { return hub.MergePullRequest(f.pr.ID, ans.Head, subject) }
+	under := fmt.Sprintf(", under the subject %q", subject)
 	if f.pr.MergeQueueEnabled {
-		method, ask = "enqueue", hub.EnqueuePullRequest
+		method, ask = "enqueue", func() error { return hub.EnqueuePullRequest(f.pr.ID, ans.Head) }
+		under = ""
 	}
-	if err := ask(f.pr.ID, ans.Head); err != nil {
+	if err := ask(); err != nil {
 		return RunOutcome{Bead: s.id, Action: ActRetry, Detail: withNote(fmt.Sprintf("the %s request at %s was refused "+
 			"or not answered; the next run decides again: %v", method, ans.Head, err), c.note)}
 	}
 	return RunOutcome{Bead: s.id, Action: ActRequested, Detail: withNote(fmt.Sprintf("ready on the PR's re-read: the "+
-		"%s is requested at %s into %s", method, ans.Head, ans.Target), c.note)}
+		"%s is requested at %s into %s%s", method, ans.Head, ans.Target, under), c.note)}
 }
 
 // withNote is detail with the run's account of the record's withdrawals after
@@ -1786,7 +1803,7 @@ func (l Landing) sameOrigin(host, repo string) error {
 // outsideOrigin says why a PR on host in repo is not in the repository the
 // origin URL raw names, and is empty when it is.
 func outsideOrigin(raw, host, repo string) string {
-	oh, orepo, ok := originRepo(raw)
+	oh, orepo, ok := git.RemoteRepository(raw)
 	if !ok {
 		return fmt.Sprintf("the rig's origin %s names no repository on a host", raw)
 	}
@@ -1794,24 +1811,6 @@ func outsideOrigin(raw, host, repo string) string {
 		return fmt.Sprintf("the PR's repository %s/%s is not the rig's origin %s/%s", host, repo, oh, orepo)
 	}
 	return ""
-}
-
-// originForms are the forms a clone's origin URL takes: https, with or without
-// credentials, scp-like ssh, and ssh.
-var originForms = []*regexp.Regexp{
-	regexp.MustCompile(`^https://(?:[^@/]+@)?([^/]+)/([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^[^@/]+@([^:/]+):([^/]+/[^/]+?)(?:\.git)?/?$`),
-	regexp.MustCompile(`^ssh://(?:[^@/]+@)?([^/:]+)(?::[0-9]+)?/([^/]+/[^/]+?)(?:\.git)?/?$`),
-}
-
-// originRepo reads an origin URL into its host and its repository, owner/name.
-func originRepo(u string) (host, repo string, ok bool) {
-	for _, f := range originForms {
-		if m := f.FindStringSubmatch(strings.TrimSpace(u)); m != nil {
-			return m[1], m[2], true
-		}
-	}
-	return "", "", false
 }
 
 // mergeEvidence reports whether a recorded merge is whole: its commit and its

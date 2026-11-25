@@ -16,14 +16,16 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 )
 
-// PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid. ReviewDecision is what the net's read and the read
-// of the conversation give. The rest is what the cheap question reads beside
-// what it counts from the rest: its labels, when GitHub last changed it, its
-// base's tip, and its head's check rollup state and the commit statuses there,
-// counted by state.
+// PR is one pull request's state on GitHub. Title and Body are its text, which
+// PullRequestText reads and EditPullRequest sets. Suites holds the check suites
+// at each commit, by its oid. ReviewDecision is what the net's read and the
+// read of the conversation give. The rest is what the cheap question reads
+// beside what it counts from the rest: its labels, when GitHub last changed it,
+// its base's tip, and its head's check rollup state and the commit statuses
+// there, counted by state.
 type PR struct {
 	Facts          gh.PullRequest
+	Title, Body    string
 	Reviews        []gh.Review
 	Suites         map[string][]gh.CheckSuite
 	Threads        []gh.Thread
@@ -136,18 +138,22 @@ func (g *GitHub) FullAsked() [][]int {
 	return slices.Clone(g.full)
 }
 
-// Repo is one repository's default branch and the checks at each ref.
+// Repo is one repository's default branch, the checks at each ref, and the
+// deployments of each environment, newest first, by the environment's name.
 type Repo struct {
 	DefaultBranch string
 	Checks        map[string]*gh.HeadChecks
+	Deployments   map[string][]gh.Deployment
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
-// "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
-// "MarkReady" or "ConvertToDraft" with the PR's node id, or "DismissReview"
-// with the review's id and the dismissal's message.
+// "EnqueuePullRequest" with the PR's node id and the head it was pinned to, and
+// a merge's commit headline, "MarkReady" or "ConvertToDraft" with the PR's node
+// id, "DismissReview" with the review's id and the dismissal's message, or
+// "EditPullRequest" with the PR's node id and what it sets, title, body or both,
+// as its message.
 type Ask struct {
-	Method, ID, Head, Message string
+	Method, ID, Head, Headline, Message string
 }
 
 // Asks returns the merge requests made, in order.
@@ -208,8 +214,8 @@ func (g *GitHub) byID(id string) *PR {
 // MergePullRequest records the request and answers it: by OnMerge when set,
 // else by refusing a head that is not the PR's and otherwise merging the PR,
 // with a merge commit named after its head.
-func (g *GitHub) MergePullRequest(id, head string) error {
-	return g.ask("MergePullRequest", id, head, func(p *PR) {
+func (g *GitHub) MergePullRequest(id, head, headline string) error {
+	return g.ask(Ask{Method: "MergePullRequest", ID: id, Head: head, Headline: headline}, func(p *PR) {
 		p.Facts.State, p.Facts.MergedAt = "MERGED", "2026-11-12T08:00:00Z"
 		p.Facts.MergeCommit = "e" + head[1:]
 	})
@@ -218,25 +224,25 @@ func (g *GitHub) MergePullRequest(id, head string) error {
 // EnqueuePullRequest records the request and answers it as MergePullRequest
 // does, adding the PR to the queue where that one merges it.
 func (g *GitHub) EnqueuePullRequest(id, head string) error {
-	return g.ask("EnqueuePullRequest", id, head, func(p *PR) { p.Facts.InMergeQueue = true })
+	return g.ask(Ask{Method: "EnqueuePullRequest", ID: id, Head: head}, func(p *PR) { p.Facts.InMergeQueue = true })
 }
 
-func (g *GitHub) ask(method, id, head string, take func(*PR)) error {
+func (g *GitHub) ask(a Ask, take func(*PR)) error {
 	g.mu.Lock()
-	g.asks = append(g.asks, Ask{Method: method, ID: id, Head: head})
-	err := g.Fail[method]
-	p := g.byID(id)
+	g.asks = append(g.asks, a)
+	err := g.Fail[a.Method]
+	p := g.byID(a.ID)
 	g.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		return fmt.Errorf("github: no pull request has the node id %s", id)
+		return fmt.Errorf("github: no pull request has the node id %s", a.ID)
 	}
 	if g.OnMerge != nil {
-		return g.OnMerge(method, p, head)
+		return g.OnMerge(a.Method, p, a.Head)
 	}
-	if p.Facts.HeadRefOid != head {
+	if p.Facts.HeadRefOid != a.Head {
 		return fmt.Errorf("github: Head branch was modified. Review and try the merge again")
 	}
 	take(p)
@@ -251,6 +257,44 @@ func (g *GitHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
 	}
 	f := p.Facts
 	return &f, nil
+}
+
+// PullRequestText returns the PR's title and body, with its facts.
+func (g *GitHub) PullRequestText(repo string, number int) (*gh.Text, error) {
+	p, err := g.pr("PullRequestText", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &gh.Text{PullRequest: p.Facts, Title: p.Title, Body: p.Body}, nil
+}
+
+// EditPullRequest records the request and sets each of the PR's title and body
+// it is given, leaving the other as it stands.
+func (g *GitHub) EditPullRequest(id string, title, body *string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var set []string
+	if title != nil {
+		set = append(set, "title")
+	}
+	if body != nil {
+		set = append(set, "body")
+	}
+	g.asks = append(g.asks, Ask{Method: "EditPullRequest", ID: id, Message: strings.Join(set, " and ")})
+	if err := g.Fail["EditPullRequest"]; err != nil {
+		return err
+	}
+	p := g.byID(id)
+	if p == nil {
+		return fmt.Errorf("github: no pull request has the node id %s", id)
+	}
+	if title != nil {
+		p.Title = *title
+	}
+	if body != nil {
+		p.Body = *body
+	}
+	return nil
 }
 
 // Reviews returns the PR's reviews.
@@ -551,6 +595,18 @@ func (g *GitHub) HeadChecks(repo, ref string) (*gh.HeadChecks, error) {
 	out := *h
 	out.Runs, out.Statuses = slices.Clone(h.Runs), slices.Clone(h.Statuses)
 	return &out, nil
+}
+
+// Deployments answers the newest n of the deployments Repos holds for
+// environment, as the read's window takes them, failing as
+// Fail["Deployments"] says. An environment it holds none for has none.
+func (g *GitHub) Deployments(repo, environment string, n int) ([]gh.Deployment, error) {
+	r, err := g.repo("Deployments", repo)
+	if err != nil {
+		return nil, err
+	}
+	d := r.Deployments[environment]
+	return slices.Clone(d[:min(n, len(d))]), nil
 }
 
 func (g *GitHub) repo(read, repo string) (*Repo, error) {

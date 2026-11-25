@@ -6,13 +6,17 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // Render returns where a PR on Gas Town's pending record stands, in the status
 // vocabulary, from the evaluator's answer for its anchor and the facts [Read]
 // gathers about the anchor, whose walk names the human gates and the beads a
-// person owes the next move on. A display asks the evaluator over the read the
-// one-PR update saved on the bead ([pr.FromStore]). The precedence is
+// person owes the next move on. The pending record is the record a PR's bead
+// carries from its publication to its merge, whose values
+// services/gctk/pr/record declares and docs/state-machine.md ("The pending
+// record") defines. A display asks the evaluator over the read the one-PR
+// update saved on the bead ([pr.FromStore]). The precedence is
 // Derive's: needs-attention > merging > working > needs-review.
 //
 //   - needs-attention: something only a person clears holds the PR. It is one
@@ -127,6 +131,21 @@ func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 // [Held] does of [Reasons].
 func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f)) }
 
+// RenderOwnAttention reports what [OwnAttention] does, for a PR on Gas Town's
+// pending record: whether [Render] still reads needs-attention once each human
+// gate and each bead a person owes that holds the PR is answered, such as for a
+// failed required check, a hold set by hand, a review thread or a merge state
+// only a person moves. The evaluator names a wait of the bead's own on such a
+// bead as a condition, so the condition is answered with the bead.
+func RenderOwnAttention(a pr.Answer, f Facts) bool {
+	answered := slices.Concat(f.Gates, f.Owed)
+	a.Conditions = slices.DeleteFunc(slices.Clone(a.Conditions), func(c pr.Condition) bool {
+		return c.Kind == pr.KindWait && slices.ContainsFunc(answered, func(b person.Blocker) bool { return b.ID == c.ID })
+	})
+	f.Gates, f.Owed = nil, nil
+	return Render(a, f) == NeedsAttention
+}
+
 // threadsHeld is how many review threads the answer names as waiting on the
 // city's answer, or 0 while something of the city's acts on them: feedback the
 // intake has yet to route, a bead that names the PR's bead as its anchor, or a
@@ -136,7 +155,7 @@ func RenderHeld(a pr.Answer, f Facts) []Hold { return holdsOf(RenderReasons(a, f
 func threadsHeld(a pr.Answer, f Facts) int {
 	persons := slices.Concat(f.Gates, f.Owed, f.Staying)
 	person := func(id string) bool {
-		return slices.ContainsFunc(persons, func(b Blocker) bool { return b.ID == id })
+		return slices.ContainsFunc(persons, func(b person.Blocker) bool { return b.ID == id })
 	}
 	n := 0
 	for _, c := range a.Conditions {

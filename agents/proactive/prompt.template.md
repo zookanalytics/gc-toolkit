@@ -183,15 +183,16 @@ biased toward moving work forward:
 
 **Intake holds new work for placement.** A pool route lands only on a member of
 an epic (a bead with a parent), on PR-finishing work (it carries `anchor_bead`),
-or on an emergency. Any other bead the actionable exit holds with Gas City's
-`hold:mayor` label (`gc bd set-state <id> hold=mayor`) and leaves unrouted, and
-the blocked exit's `--then-route` arms nothing for it. The operator's placement
-sitting then places it under an epic or routes it on its own;
-`gc beads list --label hold:mayor` lists each bead held so. The scan reacts only
-to beads with no parent, so an actionable exit almost always holds its subject
-for placement. Choose the exit on the bead's merits all the same, and let the
-script apply the rule: write the card and the takeaway so they read true either
-way, naming the work and its first move rather than where it goes. Never
+on the tracker of a failure already red on a base branch (it carries
+`failure_key`), or on an emergency. Any other bead the actionable exit holds
+with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
+leaves unrouted, and the blocked exit's `--then-route` arms nothing for it. The
+operator's placement sitting then places it under an epic or routes it on its
+own; `gc beads list --label hold:mayor` lists each bead held so. The scan reacts
+only to beads with no parent, so an actionable exit almost always holds its
+subject for placement. Choose the exit on the bead's merits all the same, and
+let the script apply the rule: write the card and the takeaway so they read true
+either way, naming the work and its first move rather than where it goes. Never
 propose or write a parent. Placing a bead under an epic is the operator's move
 at the sitting.
 
@@ -259,8 +260,8 @@ The block's last line, for each exit:
 # rig's polecat pool by default, which runs mol-polecat-work; --route names
 # another). Your card is the dispatch note the worker reads. Route the ONE
 # bead you reacted to: where several beads share one cause, the card says so
-# and one bead naming the cause is the one routed. A subject that is not a
-# member of an epic is held for placement instead of routed.
+# and one bead naming the cause is the one routed. A subject intake does not
+# admit is held for placement instead of routed.
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable
 # An emergency, a red main or a broken gate: the exit checks main's checks and
 # routes at P0 only when the check it names is failing.
@@ -269,11 +270,12 @@ The block's last line, for each exit:
 # subject to it in the form it finds its work in, a route for the mechanik
 # and the assignee for the refinery, and nudges the agent when bd reports
 # the bead ready.
-# A town-repo edit takes gc-toolkit.mechanik. The exit refuses the po, which
+# A town-repo edit takes {{ .BindingPrefix }}mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
-# holds it for placement. It refuses the deacon and the witness, which take
-# mail and no bead, and the keeper, which takes no first reaction's bead.
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign gc-toolkit.mechanik
+# holds what intake does not admit for placement. It refuses the deacon and
+# the witness, which take mail and no bead, and the keeper, which takes no
+# first reaction's bead.
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign {{ .BindingPrefix }}mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready
 # and still claimed by the next worker. The blocker must live in the same
@@ -281,17 +283,17 @@ The block's last line, for each exit:
 # the subject's with that title is reused. When the bead is plainly work
 # once the wait lifts, ALWAYS --then-route it: that arms the deferred
 # dispatch so the blocker closing sends it to the pool, with nothing left to
-# remember. On a bead that is not a member of an epic the exit arms nothing
-# and holds it for placement instead, so pass --then-route either way. A
+# remember. On a bead intake does not admit the exit arms nothing and holds
+# it for placement instead, so pass --then-route either way. A
 # blocked work bead left unrouted and unheld is the debt
 # doctor/check-blocked-work-armed flags. Waiting work that is a named agent's
 # own takes --then-assign <agent> instead: the subject is handed to the
 # agent while it waits, in the same form, and the agent is nudged once the
 # wait lifts, so no dispatch is armed. Omit both only for a bead nobody takes
 # (a decision, a research note).
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/<rig>.polecat
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/<rig>.polecat
-"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign gc-toolkit.mechanik
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-route <rig>/{{ .BindingPrefix }}polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --blocker "<what has to happen first>" --then-route <rig>/{{ .BindingPrefix }}polecat
+"$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition blocked --waiting-on <blocker-id> --then-assign {{ .BindingPrefix }}mechanik
 
 # close — hand a confident no-op to the validating closer (mol-validate-close
 # on this rig's polecat pool; --route names another). The reason is the
@@ -401,5 +403,5 @@ Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
 witness as `HELP`; everything else is a nudge or a bead note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
+gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
 ```

@@ -215,11 +215,16 @@ alone.
 so each importing rig's pass reads its own store on its own clock. Each pass
 runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
 
-- **retires** the arm on each armed bead that has closed, and on each that
-  carries a `merge_result`, whatever holds the bead. Another path has delivered
-  the work of a bead that carries one, and pouring its formula again would make
-  a redundant workflow and input convoy. The arm is cleared with a note that
-  names the case, and nothing is slung.
+- **retires**, whatever holds the bead, the arm on each armed bead that has
+  closed, and every arm but the validating closer's on each that carries a
+  `merge_result`. Another path has delivered the work of a bead that carries
+  one, and pouring its formula again would make a redundant workflow and input
+  convoy. The arm is cleared with a note that names the case, and nothing is
+  slung. The validating closer's arm pours no work: the closer checks the bead
+  once what it waits on lands, and puts a bead that carries a `merge_result` to
+  a person ([A bead whose job ends when other work
+  lands](#a-bead-whose-job-ends-when-other-work-lands)). So the steps below
+  judge that arm as they judge any other.
 - **selects** the beads to start by the pool's own serve rule: `bd ready` over
   the beads that carry `gc.dispatch_when_ready`, with the flags Gas City
   renders for a pool's routed demand, `--unassigned`, `--exclude-type=epic`
@@ -234,12 +239,13 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
   pool's hook does after bd's exact comparison.
 - **starts** each bead left, under the bead's dispatch lock (below). It reads
   the bead once more, so an arm removed since the pass listed it is not sent, a
-  hold label set since then keeps the arm, and a bead that closed or was
-  delivered since then has its arm retired. It resolves the formula: the one
-  the arm names, else the target's default. After an earlier attempt it first
-  looks for the root that attempt poured (below). It counts the attempt in one
-  write, runs `gc sling <target> <bead> --on <formula> --title "<formula>
-  arm:<bead>@<armed at>"`, and clears the arm once the sling exits 0.
+  hold label set since then keeps the arm, and a bead that closed or came to
+  carry a `merge_result` since then has its arm retired as above. It resolves
+  the formula: the one the arm names, else the target's default. After an
+  earlier attempt it first looks for the root that attempt poured (below). It
+  counts the attempt in one write, runs `gc sling <target> <bead> --on
+  <formula> --title "<formula> arm:<bead>@<armed at>"`, and clears the arm once
+  the sling exits 0.
 - **prints** one JSON line per armed bead: `gctk bead holds`' answer for it,
   with what the pass did with its arm. That is a retire and its case, a start,
   a send already made, a hold and what holds the bead, an arm withdrawn since
@@ -265,8 +271,8 @@ Two records Gas City keeps send each arm once.
   bead, and it names each one. Gas City's launch check refuses a second pour of
   the same formula while the first run is live, so two passes, or a pass and a
   sling a killed pass left running, pour once. An exit 3 that names a workflow
-  which is not an unfinished pour (below) means the work is sent already, so
-  the arm is cleared and nothing is slung.
+  which is not a failed pour (below) means the work is sent already, so the arm
+  is cleared and nothing is slung.
 - The token `arm:<bead>@<armed at>` titles the root each start pours. `gctk
   bead arm` records the arm's time to the nanosecond, and the bead's dispatch
   lock writes its arms one after the other, so each arm's token is its own and
@@ -275,20 +281,21 @@ Two records Gas City keeps send each arm once.
   died after its sling landed and before it cleared the arm would pour again
   once that run had ended. After an earlier attempt, the start searches for the
   token first (`gc bd list --all --include-ephemeral --include-gates
-  --title-contains "arm:<bead>@<armed at>"`). A root it finds that is not an
-  unfinished pour means that attempt landed, whichever formula it poured, so the
+  --title-contains "arm:<bead>@<armed at>"`). A root it finds that is not a
+  failed pour means that attempt landed, whichever formula it poured, so the
   arm is cleared and nothing is slung. A start that succeeds the first time
   searches nothing.
 
-A root is an unfinished pour when it carries `molecule_failed=true`, or when it
-or a bead poured under it still carries the fence `gc.instantiating`, whatever
-their status. Gas City leaves one when a pour fails part way or the sling that
-made it is killed, and while such a root is open, `gc sling` refuses every pour
-of that formula on the bead. So the start never reads one as the work sent.
-When each root an exit 3 names, or each open root the token finds, is an
-unfinished pour, the start keeps the arm and asks a person, naming each root
-and the command that closes it with its steps, `gc convoy delete <root>
---force`. A closed unfinished pour holds nothing back, so the next start slings.
+A root is a failed pour when it carries `molecule_failed=true`, the stamp Gas
+City puts on a pour that failed part way. The start reads the root's own stamp
+alone, and a failed pour is an attempt that failed. After an earlier attempt
+the start slings again past one, open or closed, and when each root an exit 3
+names is a failed pour, it keeps the arm with the attempt counted, as after any
+sling that failed, so the cap on attempts asks a person once they run out
+(below). Any other root is the pour that landed. That includes a root Gas
+City's bead-by-bead pour left still fenced by `gc.instantiating` when the sling
+that made it was killed part way: its dispatch reads as sent, and its work does
+not run.
 
 The retire on a delivered bead covers what neither record sees: the run that
 delivered the work was not poured by the arm, so it carries no token, and once
@@ -359,8 +366,7 @@ attempts. So the start begins no sling once less than one sling's allowance,
 90 seconds, is left before its deadline, 7 minutes after it began, which sits
 below the order's 600-second timeout. Each bead it leaves keeps its arm
 untouched, and the next pass starts it. A sling the timeout does kill is found
-by the next start's token search, which asks a person when that sling left its
-pour unfinished.
+by the next start's token search.
 
 `--dry-run` writes, slings and asks nothing and takes no lock. It prints the
 line a pass would print for each armed bead.
@@ -391,6 +397,11 @@ brief and the arm for its subject when the ruling leaves the subject waiting on
 work the sitting sent, after its headline writes the edge
 (`--waiting-on <work> --close-brief "<brief>"`), and then lifts the subject's
 `hold:mayor`, every spelling of it, so the pass can send the arm.
+
+A bead that waits this way can be a pull request's anchor, which carries a
+`merge_result`. Its arm sends the closer all the same once nothing holds the
+bead, and the closer puts the anchor to a person, because the refinery closes
+an anchor on its merge.
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.

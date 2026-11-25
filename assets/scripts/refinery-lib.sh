@@ -5,10 +5,9 @@
 #
 # The refinery prepares one bead's branch at a time, in a tree of its own: a
 # git worktree at <refinery home>/worktrees/<bead>, where the home is the
-# refinery's own worktree, the directory its session starts in ($GC_DIR). It
-# is the per-bead layout a polecat's tree has under its home, so the home's
-# sync reads it as gc's own (worktree-setup.sh's GC_WRITES) and never as an
-# edit, and nothing the prep does moves the home's own HEAD.
+# refinery's own worktree, the directory its session starts in ($GC_DIR). The
+# home's sync reads worktrees/ as gc's own (worktree-setup.sh's GC_WRITES) and
+# never as an edit, and nothing the prep does moves the home's own HEAD.
 #
 # The prep checks the tree out detached at the commit it read on the bead's
 # branch, and names that branch and that commit in one per-worktree ref,

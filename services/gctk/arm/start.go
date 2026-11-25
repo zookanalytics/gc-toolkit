@@ -110,11 +110,11 @@ type StartOptions struct {
 // never an empty queue.
 var ErrListing = errors.New("could not list the armed beads")
 
-// StartArmed is one pass over the store's armed beads. It retires the arm on
-// each bead that has closed or whose work another path delivered, then starts
-// each armed bead the pool's own serve rule would serve and nothing bd cannot
-// judge holds, each exactly once, under its dispatch lock. It hands emit one
-// Line per armed bead, and returns the counts.
+// StartArmed is one pass over the store's armed beads. It retires each arm
+// whose dispatch is no longer owed (retireCase), then starts each armed bead
+// the pool's own serve rule would serve and nothing bd cannot judge holds, each
+// exactly once, under its dispatch lock. It hands emit one Line per armed bead,
+// and returns the counts.
 func (a *Arms) StartArmed(opts StartOptions, emit func(Line)) (Summary, error) {
 	began := a.Now()
 	sum := Summary{}
@@ -182,15 +182,25 @@ func (a *Arms) StartArmed(opts StartOptions, emit func(Line)) (Summary, error) {
 	return sum, nil
 }
 
+// closer is the validating closer's formula, which checks a bead once the work
+// it waits on lands and puts a bead that carries a merge_result to a person
+// rather than closing it.
+const closer = "mol-validate-close"
+
 // retireCase is the act that retires an arm on a bead whose dispatch is no
 // longer owed, and whether there is one: the bead has closed, or it carries a
-// merge_result, so another path has delivered its work. Either retires the arm
-// whatever holds the bead.
+// merge_result, so another path has delivered its work and the arm would pour
+// work on it again. Either retires the arm whatever holds the bead. The
+// closer's arm pours no work, so on a bead that carries a merge_result it is
+// still owed, and the start's holds judge it as they judge any other.
 func retireCase(r *ledger.Record) (Act, bool) {
 	if r.Status() == "closed" {
 		return Act{Action: ActRetire, Case: "closed", Why: "the bead closed with a dispatch still armed, so none is owed"}, true
 	}
 	if mr, _, _ := prrecord.Result.Get(r); strings.TrimSpace(mr) != "" {
+		if arm := record.Of(r); arm != nil && arm.Formula() == closer {
+			return Act{}, false
+		}
 		return Act{Action: ActRetire, Case: "delivered",
 			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", strings.TrimSpace(mr))}, true
 	}
@@ -337,15 +347,8 @@ func (a *Arms) start(listed *ledger.Record, opts StartOptions) Act {
 		if err != nil {
 			return Act{Action: ActFail, Case: "read", Formula: formula, Why: "the pours of its earlier attempts could not be read, so it stays armed: " + err.Error()}
 		}
-		pours, err := a.pours(roots, token)
-		if err != nil {
-			return Act{Action: ActFail, Case: "read", Formula: formula, Why: err.Error()}
-		}
-		if landed := pours.landed(); len(landed) > 0 {
+		if landed := landed(roots, token); len(landed) > 0 {
 			return a.sent(id, formula, landed, fmt.Sprintf("an earlier attempt's pour %s landed, so the arm retires without a second pour", strings.Join(landed, ", ")), opts.DryRun)
-		}
-		if open := pours.openUnfinished(); len(open) > 0 {
-			return a.askUnfinished(id, formula, pours.only(open), opts.DryRun)
 		}
 	}
 	if arm.Capped() {
@@ -369,7 +372,7 @@ func (a *Arms) start(listed *ledger.Record, opts StartOptions) Act {
 		}
 		return Act{Action: ActStart, Formula: formula, Why: why}
 	case res.Code == 3:
-		return a.liveOnExit3(id, formula, res)
+		return a.liveOnExit3(id, formula, arm.Attempts()+1, res)
 	}
 	return Act{Action: ActFail, Case: "sling", Formula: formula,
 		Why: fmt.Sprintf("gc sling failed (%s), so it stays armed with %d attempt(s) counted", res.Failure(), arm.Attempts()+1)}
@@ -388,11 +391,11 @@ func (a *Arms) retireLocked(id string, act Act, dryRun bool) Act {
 }
 
 // liveOnExit3 reads gc sling's exit 3, which it gives only when a live
-// workflow works the bead already, naming each. One that is not an unfinished
-// pour means the work is sent. When each is an unfinished pour, none of them can
-// finish, and gc sling refuses another pour while it is open, so a person is
-// asked.
-func (a *Arms) liveOnExit3(id, formula string, res gascity.SlingResult) Act {
+// workflow works the bead already, naming each. One that Gas City did not
+// stamp as failed means the work is sent. When each carries the stamp, the
+// attempt failed, so the arm stays with it counted, as after a sling that
+// failed, and the cap on attempts asks a person once they run out.
+func (a *Arms) liveOnExit3(id, formula string, attempts int, res gascity.SlingResult) Act {
 	if len(res.Live) == 0 {
 		return Act{Action: ActFail, Case: "sling", Formula: formula,
 			Why: "gc sling exited 3 and named no live workflow, so it stays armed: " + res.Tail()}
@@ -402,20 +405,21 @@ func (a *Arms) liveOnExit3(id, formula string, res gascity.SlingResult) Act {
 		return Act{Action: ActFail, Case: "read", Formula: formula, Roots: res.Live,
 			Why: "gc sling named live workflows that could not be read, so it stays armed: " + err.Error()}
 	}
-	pours, err := a.pours(rows, "")
-	if err != nil {
-		return Act{Action: ActFail, Case: "read", Formula: formula, Roots: res.Live, Why: err.Error()}
+	held := map[string]bool{}
+	for _, r := range rows {
+		held[r.ID] = true
 	}
 	for _, root := range res.Live {
-		if _, ok := pours[root]; !ok {
+		if !held[root] {
 			return Act{Action: ActFail, Case: "read", Formula: formula, Roots: res.Live,
-				Why: fmt.Sprintf("gc sling named the live workflow %s, which this store does not hold, so whether its pour finished is unknown, and it stays armed", root)}
+				Why: fmt.Sprintf("gc sling named the live workflow %s, which this store does not hold, so whether its pour failed is unknown, and it stays armed", root)}
 		}
 	}
-	if sent := pours.landed(); len(sent) > 0 {
+	if sent := landed(rows, ""); len(sent) > 0 {
 		return a.sent(id, formula, res.Live, fmt.Sprintf("gc sling found %s working it already, so the arm retires without a second pour", strings.Join(sent, ", ")), false)
 	}
-	return a.askUnfinished(id, formula, pours, false)
+	return Act{Action: ActFail, Case: "sling", Formula: formula, Roots: res.Live,
+		Why: fmt.Sprintf("gc sling exited 3 naming only pours Gas City stamped as failed (%s), so the attempt failed, and it stays armed with %d attempt(s) counted", strings.Join(res.Live, ", "), attempts)}
 }
 
 // sent retires the arm on a bead whose work is sent already.
@@ -430,94 +434,29 @@ func (a *Arms) sent(id, formula string, roots []string, why string, dryRun bool)
 	return act
 }
 
-// pour is one workflow root a start read: whether it is still open, whether it
-// is an unfinished pour, and the marks that say so.
-type pour struct {
-	id       string
-	open     bool
-	finished bool
-	why      string
+// FailedPour reports whether Gas City stamped root as a pour that failed part
+// way (molecule_failed=true). The start reads a root its token titles, or one
+// gc sling's exit 3 names, by it, and Accept a root its token titles: a failed
+// pour is an attempt that failed, which is tried again, and any other root is
+// the pour that landed. A stamp on a bead under the root does not show that
+// the root's own pour failed, since Gas City stamps a fanout it pours into a
+// live run when that pour fails.
+func FailedPour(root *ledger.Record) bool {
+	v, _, _ := moleculeFailedKey.Get(root)
+	return strings.TrimSpace(v) == "true"
 }
 
-type pours map[string]pour
-
-// pours reads each root in rows that carries token in its title, every root
-// when token is empty: whether it is open, and whether Gas City left its pour
-// unfinished. A root is an unfinished pour when it carries molecule_failed=true,
-// or when it or a bead poured under it still carries the fence
-// gc.instantiating, whatever their status. A failure stamp on a bead under it
-// does not show that the root's own pour failed, since Gas City stamps a fanout
-// it pours into a live run when that pour fails.
-func (a *Arms) pours(rows []*ledger.Record, token string) (pours, error) {
-	out := pours{}
+// landed is the roots in rows whose pour landed, in id order: each that
+// carries token in its title, every one when token is empty, that Gas City did
+// not stamp as failed.
+func landed(rows []*ledger.Record, token string) []string {
+	var out []string
 	for _, r := range rows {
 		if token != "" && !strings.Contains(r.Title(), token) {
 			continue
 		}
-		p := pour{id: r.ID, open: r.Status() != "closed", finished: true}
-		var marks []string
-		if v, _, _ := moleculeFailedKey.Get(r); strings.TrimSpace(v) == "true" {
-			marks = append(marks, "it carries molecule_failed=true")
-		}
-		if v, _, _ := instantiatingKey.Get(r); strings.TrimSpace(v) != "" {
-			marks = append(marks, "it is still fenced by gc.instantiating")
-		}
-		under, err := a.Ledger.Find(ledger.Matching(rootBeadKey, r.ID).WithClosed())
-		if err != nil {
-			return nil, fmt.Errorf("the beads poured under %s could not be read, so whether its pour finished is unknown, and it stays armed: %v", r.ID, err)
-		}
-		var fenced []string
-		for _, b := range under {
-			if v, _, _ := instantiatingKey.Get(b); strings.TrimSpace(v) != "" {
-				fenced = append(fenced, b.ID)
-			}
-		}
-		if len(fenced) > 0 {
-			marks = append(marks, "gc.instantiating still fences "+strings.Join(fenced, ", ")+" under it")
-		}
-		if len(marks) > 0 {
-			p.finished, p.why = false, strings.Join(marks, ", and ")
-		}
-		out[r.ID] = p
-	}
-	return out, nil
-}
-
-// Unfinished says why Gas City left the pour under root unfinished, as the
-// start reads a pour: root carries molecule_failed=true, or it or a bead poured
-// under it is still fenced by gc.instantiating. It is empty when the pour
-// finished. Accept reads the root its sling poured this way, so the two treat
-// one pour alike while the city's gc can leave one unfinished.
-func Unfinished(l *ledger.Ledger, root *ledger.Record) (string, error) {
-	ps, err := (&Arms{Ledger: l}).pours([]*ledger.Record{root}, "")
-	if err != nil {
-		return "", err
-	}
-	return ps[root.ID].why, nil
-}
-
-// landed is the roots whose pour finished, open or closed, in id order.
-func (ps pours) landed() []string { return ps.select_(func(p pour) bool { return p.finished }) }
-
-// openUnfinished is the open roots whose pour did not finish, in id order.
-func (ps pours) openUnfinished() []string {
-	return ps.select_(func(p pour) bool { return !p.finished && p.open })
-}
-
-// only is the pours ids names.
-func (ps pours) only(ids []string) pours {
-	out := pours{}
-	for _, id := range ids {
-		out[id] = ps[id]
-	}
-	return out
-}
-
-func (ps pours) select_(keep func(pour) bool) []string {
-	var out []string
-	for id, p := range ps {
-		if keep(p) {
-			out = append(out, id)
+		if !FailedPour(r) {
+			out = append(out, r.ID)
 		}
 	}
 	slices.Sort(out)
@@ -526,26 +465,6 @@ func (ps pours) select_(keep func(pour) bool) []string {
 
 // askKey is the key the start asks a person about an arm under.
 func askKey(id string) string { return "deferred-dispatch-sling-failed." + id }
-
-// askUnfinished keeps the arm and asks a person about the pours Gas City left
-// unfinished, naming each root and the command that closes it with its steps.
-// The start ends no Gas City run itself.
-func (a *Arms) askUnfinished(id, formula string, ps pours, dryRun bool) Act {
-	roots := ps.select_(func(pour) bool { return true })
-	var parts, closes []string
-	for _, r := range roots {
-		parts = append(parts, fmt.Sprintf("%s (%s)", r, ps[r].why))
-		closes = append(closes, "gc convoy delete "+r+" --force")
-	}
-	act := Act{Action: ActAsk, Case: "unfinished", Formula: formula, Roots: roots,
-		Why: fmt.Sprintf("Gas City left its pour of %s unfinished: %s, and gc sling refuses another pour of %s while such a root is open, so a person is asked", formula, strings.Join(parts, "; "), formula)}
-	if dryRun {
-		return act
-	}
-	msg := fmt.Sprintf("Deferred dispatch cannot send armed bead %s on %s: Gas City left its pour unfinished, at %s. gc sling refuses another pour of %s on %s while such a root is open, and the start ends no Gas City run itself. Close each root and its steps (%s), then clear this gate, and the next pass sends %s.",
-		id, formula, strings.Join(parts, "; "), formula, id, strings.Join(closes, "; "), id)
-	return a.ask(id, act, "deferred dispatch found an unfinished pour on it", msg)
-}
 
 // askCap keeps the arm and asks a person about a bead whose attempts have
 // reached the cap, instead of slinging it again.

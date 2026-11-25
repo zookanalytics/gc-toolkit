@@ -77,7 +77,7 @@ FORMULA="mol-polecat-work"
 LIVE="open,in_progress,blocked,deferred,hooked,pinned"
 
 usage() { echo "usage: $PROG --bead <id> --reason <text> [--pool <name>]" >&2; exit 2; }
-BEAD=""; REASON=""; POOL="gc-toolkit.polecat"
+BEAD=""; REASON=""; POOL="polecat"
 while [ $# -gt 0 ]; do
   case "$1" in
     --bead|--reason|--pool)
