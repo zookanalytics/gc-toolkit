@@ -145,30 +145,6 @@
     "doc": "The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix."
   },
   {
-    "name": "finding.comment_id",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The id of the post a human finding was raised from, in its own id space."
-  },
-  {
-    "name": "finding.lane",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The lane a finding was raised on: human for a person's post the old path routed. finding.sh writes it on a finding alone, in the create that files it."
-  },
-  {
-    "name": "finding.review_id",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The review a human finding's post belongs to: its own id for a review's message, the review that carried it for an inline comment, and none for a conversation comment."
-  },
-  {
     "name": "fold_target",
     "type": "string",
     "readers": [
@@ -541,30 +517,6 @@
     "doc": "true on the bead of a session Gas City runs as a pool seat, which its work ladder paces (ladderGoverns in cmd/gc/work_ladder_lane.go at gastownhall/gascity c7eb6d2f43). The seat-progress look judges only such a seat."
   },
   {
-    "name": "pr_comment_answered",
-    "type": "string",
-    "owner": "pr",
-    "doc": "How far past pr_comment_watermark the review threads had answered the inline comments when the old path last read them. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_comment_batch",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The batches of inline comments the old path routed, in pr_review_batch's form. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_comment_disposition",
-    "type": "string",
-    "owner": "pr",
-    "doc": "What the old path routed a PR's last batch of posts to: rework:\u003cbead\u003e, the bead that answers it, or human:\u003cgate\u003e. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_comment_watermark",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The highest id of an inline comment the old path routed. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
     "name": "pr_github_read",
     "type": "json",
     "owner": "pr",
@@ -576,18 +528,6 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The head the refinery validated, the one head the bead's PR may merge at. A requeue keeps it."
-  },
-  {
-    "name": "pr_issue_comment_batch",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The batches of conversation comments the old path routed, in pr_review_batch's form. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_issue_comment_watermark",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The highest id of a conversation comment the old path routed. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_last_checked_at",
@@ -624,24 +564,6 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The repository of the PR the record names, owner/name, which matches the rig's origin and is compared without case."
-  },
-  {
-    "name": "pr_review_answered",
-    "type": "string",
-    "owner": "pr",
-    "doc": "How far past pr_review_watermark the review threads had answered the counted reviews' messages when the old path last read them. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_review_batch",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The batches of review messages the old path routed, oldest first, as \u003cdisposition\u003e|\u003cexclusive floor\u003e|\u003cinclusive mark\u003e records joined by ;, each disposition rework:\u003cbead\u003e or human:\u003cgate\u003e. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
-  },
-  {
-    "name": "pr_review_watermark",
-    "type": "string",
-    "owner": "pr",
-    "doc": "The highest id of a review whose message the old path routed, among the comments and requests for changes it counts. Nothing writes it. On a bead that owns a PR on the pending record, the landing order's conversion of the old receipts reads it, marks with the city's EYES each post it reaches that carries neither of the city's marks, and unsets it once the saved read shows the marks."
   },
   {
     "name": "pr_state",

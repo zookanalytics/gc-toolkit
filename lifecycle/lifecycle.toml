@@ -632,9 +632,8 @@ keys = [
   "finding.severity", "finding.category", "finding.failure_scenario", "finding.verification",
   # The GitHub comment databaseId that raised a human finding: an inline review
   # comment, a review body (the review's own id, so it equals finding.review_id),
-  # or a Conversation comment. Nothing files a human finding, and the landing
-  # order's conversion of the old receipts reads it to file an open human
-  # finding's post as its ask.
+  # or a Conversation comment. Nothing files a human finding, and finding.sh
+  # and scaffolding-sweep.sh read it on the findings already filed.
   "finding.comment_id",
   # The answer a HUMAN objection owes its raiser: a declined finding's
   # overrule (set on `set-disposition declined --reply`), a deferred finding's
@@ -685,8 +684,8 @@ keys = [
   "finding.ruling_visit",
   # The databaseId of the GitHub review that raised a human finding: its own id
   # for a review's message, the review that carried it for an inline comment,
-  # and none for a Conversation comment. Nothing writes it, and the landing
-  # order's conversion of the old receipts reads it beside finding.comment_id.
+  # and none for a Conversation comment. Nothing writes it, and finding.sh reads
+  # it beside finding.comment_id.
   "finding.review_id",
   # The review round of the review that raised a human finding, the one
   # finding.review_id names: `<login>@<commit oid>`, the reviewer and the commit
@@ -847,12 +846,9 @@ keys = [
 
 [metadata.pr_posture]
 # The keys the old merge path's GitHub intake kept on a bead that owns a PR.
-# The pr domain declares the three watermarks, the two answered marks, the
-# three batch ledgers and pr_comment_disposition, the old receipts
-# (services/gctk/key-registry.json). Nothing writes them, and the landing
-# order's conversion of the old receipts (gctk pr reconcile) reads them and
-# unsets them on a bead that owns a PR on the pending record, once the city's
-# marks on the PR's posts stand in their place. The one-PR update writes
+# Nothing writes them. The old validation path reads the receipts the intake
+# left: review-dismissal.sh reads the inline comments' watermark and answered
+# mark, and finding.sh reads the batch ledgers. The one-PR update writes
 # pr_provenance_since, and nothing writes or reads any other key of this group.
 keys = [
   # RETIRED. The PR's review posture at a head, `<posture>@<oid>@<since>`.

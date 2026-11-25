@@ -24,17 +24,13 @@ import (
 // back from a person's post made after it: while every gate that holds the bead
 // is such a question and an ask a run can take carries a person's post filed
 // after the newest of them, the order pours the run that rules the post, which
-// can settle a question (specs/tk-1tfzr71.161/design.md, section 3). It pours
-// none on a bead that carries the old receipts, whose conversion files the
-// asks of the old path's open findings and closes the asks its batches went to
-// (convert.go), so a run rules the posts those name once, in the form the
-// conversion leaves them. A conversation on the PR holds its merge and nothing
-// else, so runs are poured while one is open, whether it waits in the
-// operator's queue, a sitting holds it or its sitting stays: the evaluator
-// reads the conversation's blocks edge as a wait of the bead's own, so the PR
-// merges only once the conversation closes. The pour runs under the record
-// lock the run holds for the record, so two runs that overlap pour one review
-// run.
+// can settle a question (specs/tk-1tfzr71.161/design.md, section 3). A
+// conversation on the PR holds its merge and nothing else, so runs are poured
+// while one is open, whether it waits in the operator's queue, a sitting holds
+// it or its sitting stays: the evaluator reads the conversation's blocks edge
+// as a wait of the bead's own, so the PR merges only once the conversation
+// closes. The pour runs under the record lock the run holds for the record, so
+// two runs that overlap pour one review run.
 //
 // The runs attached to a bead are its blocks edges onto roots of the review
 // formula, open or closed, and each root carries the vars it was poured with,
@@ -98,10 +94,6 @@ func (u *run) admit(s state, ans Answer, asks []review.Ask) (plan, bool) {
 	}
 	if len(s.runs) > 0 {
 		return checked("review run " + strings.Join(s.runs, ", ") + " is attached, and the bead waits on it: " + why)
-	}
-	if names := receiptsOn(s.row); len(names) > 0 {
-		return checked("no review run is poured while the bead carries the old receipts (" +
-			strings.Join(names, ", ") + "), which their conversion turns into the city's marks first: " + why)
 	}
 	if by := heldBy(s, asks); by != "" {
 		return checked("no review run is poured while " + by + ": " + why)

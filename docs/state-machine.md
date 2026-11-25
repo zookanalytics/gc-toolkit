@@ -644,15 +644,10 @@ landing order settles a review run's root once it pours the run, and the
 priority reconcile settles that work at the rank the function reads
 ([steering.md](steering.md#pr-finishing-work)).
 
-On a bead that owns a PR on the pending record, the landing order converts the
-old path's receipts, its watermarks, answered marks, batch ledgers and
-`pr_comment_disposition`, into the city's marks on the PR's posts and then
-unsets them, and takes no post on the bead while it carries them
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). The
-old path's other keys, its posture (`pr_posture`, `pr_merge_state`,
-`pr_head_oid`), `pr_finishing_settled` and `pr.conversation` among them, have
-no reader, and `lifecycle/lifecycle.toml` keeps them registered as retired, so
-residue on a bead reads as known.
+The old path's keys, its receipts and its posture (`pr_posture`,
+`pr_merge_state`, `pr_head_oid`), `pr_finishing_settled` and `pr.conversation`
+among them, are registered in `lifecycle/lifecycle.toml`, which names what still
+reads each, so residue on a bead reads as known.
 
 ## The status label (GitHub projection)
 

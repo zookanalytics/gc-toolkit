@@ -16,12 +16,10 @@ import (
 // Feedback is the pack's one definition of feedback, which the feedback
 // adapter's Rule applies and its fake answers: which posts are feedback that
 // the city has not taken, among the inline comments a dismissal has not
-// retired, which review threads wait on the city's answer, and which unresolved
-// threads hold only the city's own posts.
+// retired, and which review threads wait on the city's answer.
 type Feedback interface {
 	Untaken(self, since string, reviews []feedback.Review, inline, conversation []feedback.Comment) (feedback.Untaken, error)
 	Awaiting(self, since string, threads []feedback.Thread) ([]string, error)
-	OwnThreads(self, since string, threads []feedback.Thread) ([]string, error)
 }
 
 // countedReviewStates are the states of a review whose message the intake
@@ -247,12 +245,6 @@ func unrouted(targets []Approval, untaken []Post) []Post {
 // the definition.
 func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string, error) {
 	return rule.Awaiting(self, since, threadsOf(threads))
-}
-
-// ownThreads is the ids of the unresolved review threads that hold only the
-// city's own posts, by the definition.
-func ownThreads(rule Feedback, self, since string, threads []gh.Thread) ([]string, error) {
-	return rule.OwnThreads(self, since, threadsOf(threads))
 }
 
 // threadsOf is threads in the facts the definition weighs a thread by.
