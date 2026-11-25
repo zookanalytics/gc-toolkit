@@ -325,9 +325,9 @@ func TestANoncodeFailureIsGatedOnlyOnAnApprovedPR(t *testing.T) {
 	}
 }
 
-// Once every required check passes at the PR's head, each red-check gate open
-// on the bead is withdrawn, even while a hold set by hand holds the bead, and
-// a gate under another key is left.
+// Once the merge's rule reads every required check passed at the PR's head,
+// each red-check gate open on the bead is withdrawn, even while a hold set by
+// hand holds the bead, and a gate under another key is left.
 func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	d := newRed(t)
 	d.gateOn(t, "tk-g1", "pr-fix-unmoved.7")
@@ -351,6 +351,24 @@ func TestTheRedCheckGatesAreWithdrawnOnceTheChecksPass(t *testing.T) {
 	e.checks(t, "COMPLETED", check("test", "FAILURE"), check("test-macos", "SUCCESS"))
 	if red := e.runRed(t); red.Action != "" || len(e.gates.withdrawals()) != 0 {
 		t.Fatalf("a red head made %+v and withdrew %v", red, e.gates.withdrawals())
+	}
+
+	// While the merge's rule still holds a required check, nothing is withdrawn,
+	// though its newest result passed: an older suite holds a failure of it, or
+	// a run of it still going.
+	for name, older := range map[string]gh.CheckRun{
+		"failed":  check("test", "FAILURE"),
+		"running": {Name: "test", Status: "IN_PROGRESS", Required: true},
+	} {
+		g := newRed(t)
+		g.gateOn(t, "tk-g1", "pr-fix-noncode.7")
+		g.pr.Suites[head] = []gh.CheckSuite{
+			{ID: 2, Status: "COMPLETED", CreatedAt: "2026-11-12T08:40:00Z", Runs: []gh.CheckRun{check("test", "SUCCESS")}},
+			{ID: 1, Status: "IN_PROGRESS", CreatedAt: suiteCreated, Runs: []gh.CheckRun{older, check("test-macos", "SUCCESS")}},
+		}
+		if red := g.runRed(t); red.Action != "" || len(g.gates.withdrawals()) != 0 {
+			t.Fatalf("an older %s result made %+v and withdrew %v", name, red, g.gates.withdrawals())
+		}
 	}
 
 	// A withdrawal that does not land is a retry, and the next run withdraws.

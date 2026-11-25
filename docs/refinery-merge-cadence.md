@@ -629,8 +629,8 @@ created last that holds one for it, a skip aside. The city re-runs no check and
 restarts none, so a check that failed for a cause no code change fixes, or that
 never starts, waits for a person.
 
-- Once every required check passes at the head, it withdraws each red-check
-  gate open on the bead, `pr-fix-unmoved.<n>`, `pr-fix-capped.<n>`,
+- Once the merge's rule for required checks reads every required check passed
+  at the head, it withdraws each red-check gate open on the bead, `pr-fix-unmoved.<n>`, `pr-fix-capped.<n>`,
   `pr-fix-noncode.<n>` and `pr-check-unreported.<n>` for PR number `<n>`, as
   moot (`human-gate.sh --retract`), whatever holds the bead.
 - Every other step waits for the record to be pending at the head the

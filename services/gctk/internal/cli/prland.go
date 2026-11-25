@@ -250,10 +250,10 @@ A red check or a conflict on such a PR becomes an ask on its bead, which its
 review run works, or a human gate where the city cannot go on. While the saved
 read shows the PR open with its checks read at its head, an act under the
 record lock reads each required check by its newest result there, a skip
-aside. Once every required check passes, it withdraws each red-check gate open
-on the bead (pr-fix-unmoved, pr-fix-capped, pr-fix-noncode and
-pr-check-unreported, each keyed .<number>) through human-gate.sh --retract,
-whatever holds the bead. Its other steps wait for the record to be pending at
+aside. Once the merge's rule reads every required check passed, it withdraws
+each red-check gate open on the bead (pr-fix-unmoved, pr-fix-capped,
+pr-fix-noncode and pr-check-unreported, each keyed .<number>) through
+human-gate.sh --retract, whatever holds the bead. Its other steps wait for the record to be pending at
 the head the refinery validated, and for no hold set by hand and no human gate
 to hold the bead; a conversation holds only the merge:
 

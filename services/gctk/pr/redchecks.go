@@ -81,11 +81,6 @@ type headCheck struct {
 	newest *RequiredRun
 }
 
-// passing reports whether the check's newest result completed as a success.
-func (h headCheck) passing() bool {
-	return h.newest != nil && h.newest.Status == "COMPLETED" && slices.Contains(passingConclusions, h.newest.Conclusion)
-}
-
 // failed reports whether the check's newest result completed without passing.
 func (h headCheck) failed() bool {
 	return h.newest != nil && h.newest.Status == "COMPLETED" && !slices.Contains(passingConclusions, h.newest.Conclusion)
@@ -211,8 +206,9 @@ func (s redState) approved() bool {
 
 // decideRed is what the red-check and conflict acts owe the PR s holds, and
 // reads nothing. Checks read at another head than the PR's decide nothing. Once
-// every required check passes at the head, each open red-check gate is
-// withdrawn, whatever holds the bead. Otherwise the record must be pending at
+// the merge's rule for required checks (checks in rules.go) reads every
+// required check passed at the head, each open red-check gate is withdrawn,
+// whatever holds the bead. Otherwise the record must be pending at
 // the head the refinery validated, since a changed head goes to the refinery's
 // validation first, and nothing may hold the bead. A PR GitHub reads DIRTY is
 // the conflict act's: an ask to bring the branch current, on an approved PR
@@ -228,8 +224,8 @@ func decideRed(s redState) redStep {
 	case c.Suites == nil:
 		return s.none("the saved checks hold no check suites yet, which the PR watch's next pass reads")
 	}
-	checks := newestAtHead(c)
-	green := len(checks) > 0 && !slices.ContainsFunc(checks, func(h headCheck) bool { return !h.passing() })
+	newest := newestAtHead(c)
+	green := len(c.Runs) > 0 && len(checks(c.Runs)) == 0
 	if green {
 		var keys []string
 		for _, k := range redKeys(p.Number) {
@@ -253,7 +249,7 @@ func decideRed(s redState) redStep {
 		return s.none("every required check passes at head " + p.Head)
 	}
 	var code, deploy, noncode []headCheck
-	for _, h := range checks {
+	for _, h := range newest {
 		switch {
 		case h.failed() && deployCheck.MatchString(h.name):
 			deploy = append(deploy, h)
@@ -273,7 +269,7 @@ func decideRed(s redState) redStep {
 	case len(noncode) > 0:
 		return s.noncodeFailure(noncode)
 	}
-	if suite, why := s.unreported(checks); why == "" {
+	if suite, why := s.unreported(newest); why == "" {
 		return s.gate(keyUnreported, fmt.Sprintf("PR #%d (%s) is approved and its review passed at head %s, but no "+
 			"required check has reported there: GitHub reads it BLOCKED, and check suite %d has stayed queued with no "+
 			"jobs since %s. Start the checks by hand, such as by returning the PR to draft and marking it ready again, "+
@@ -281,7 +277,7 @@ func decideRed(s redState) redStep {
 			fmt.Sprintf("no required check has reported at head %s, and check suite %d has stayed queued with no "+
 				"check runs since %s", p.Head, suite.ID, suite.CreatedAt))
 	}
-	return s.none("no required check has failed at head " + p.Head)
+	return s.none("no required check's newest result failed at head " + p.Head)
 }
 
 // conflict is the conflict act's step for a PR GitHub reads DIRTY.
