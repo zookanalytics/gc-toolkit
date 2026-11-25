@@ -14,9 +14,12 @@
 # conversation instead, because a gate on the parent would pause the child's
 # work, the very work the doubt is about. A children read that fails or does
 # not parse files the gate, the ordinary ask, and an empty ask files nothing.
-# The block is extracted verbatim from the formula and run against a fake `gc`
-# and stub scripts, in the shells an agent may run it in. No live city, Dolt or
-# network.
+# Once a gate is filed, the step's next call arms the bead through
+# await-ruling.sh to wait on that gate and pour the closer again, so the
+# operator's answer comes back to the closer. The block, and that call with the
+# bead written in, are extracted verbatim from the formula and run against a
+# fake `gc` and stub scripts, in the shells an agent may run them in. No live
+# city, Dolt or network.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,9 +44,18 @@ BLOCK="$(awk '
   f' "$TOML")"
 [ -n "$BLOCK" ] && ok "validate-close-ask block extracted" || bad "validate-close-ask block extraction EMPTY"
 
+# The arm is the one call the step's text gives on its own line after the
+# block, in the form a formula step reaches a pack script by. The agent writes
+# the bead in, and a pour fills the binding, here its default.
+ARM_CALL="$(grep -F 'await-ruling.sh" <the bead>' "$TOML" | sed -n 's/^`\(.*\)`[.]$/\1/p' || true)"
+[ "$(printf '%s\n' "$ARM_CALL" | grep -c . || true)" = 1 ] && ok "the arm call extracted" || bad "the arm call extraction is not one line: '$ARM_CALL'"
+ARM_RUN="$(printf '%s' "$ARM_CALL" | sed -e 's/{{binding_prefix}}/gc-toolkit./' -e 's/<the bead>/tk-sub/')"
+[ -n "$ARM_RUN" ] || ARM_RUN='echo "no arm call in the formula" >&2; exit 97'
+
 # gc: `bd list` logs its argv and answers $FAKE_CHILDREN, or fails with
-# $FAKE_LIST_RC and prints nothing, the way a failed listing does. human-gate.sh
-# and gc-helm.sh record their verb in the ordered log and each argument in
+# $FAKE_LIST_RC and prints nothing, the way a failed listing does.
+# `gc-toolkit scripts-dir` names the stub pack. human-gate.sh, gc-helm.sh and
+# await-ruling.sh record their verb in the ordered log and each argument in
 # brackets where the assertions read them, so an assertion sees where each
 # argument ends, and exit with a code the case controls. human-gate.sh prints
 # the gate's id when it exits 0, as the real one does.
@@ -55,10 +67,13 @@ case "$1 $2" in
     [ "${FAKE_LIST_RC:-0}" = 0 ] || exit "$FAKE_LIST_RC"
     printf '%s\n' "${FAKE_CHILDREN:-[]}"
     exit 0 ;;
+  "gc-toolkit scripts-dir")
+    printf '%s\n' "$FAKE_PACK"
+    exit 0 ;;
 esac
 echo "unexpected gc invocation: $*" >&2; exit 99
 GC
-for v in human-gate:GATE gc-helm:CONVERSE; do
+for v in human-gate:GATE gc-helm:CONVERSE await-ruling:ARM; do
   name="${v%%:*}"; verb="${v#*:}"
   { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"
     printf 'printf %s >> "$FAKE_LOG"\n' "'$verb\\n'"
@@ -80,13 +95,13 @@ Send the work: a polecat fixes the retry path in \`retry.sh\` and keeps \"\$TIME
 
 # run [shell-prelude] [VAR=value...] -> "<rc>|<ordered verb log>". The step's
 # lines above the block set WORK_BEAD_ID, ASK and SCRIPTS, so the run sets them
-# too.
+# too. RUN_TEXT runs in the block's place.
 run() {
   local prelude="${1:-}"; shift || true
   : > "$TMP/log"; rm -f "$TMP/args"/*
-  { printf '%s\n' "$prelude"; printf '%s\n' "$BLOCK"; } > "$TMP/run.sh"
+  { printf '%s\n' "$prelude"; printf '%s\n' "${RUN_TEXT:-$BLOCK}"; } > "$TMP/run.sh"
   local rc=0
-  env PATH="$TMP/bin:$PATH" FAKE_LOG="$TMP/log" FAKE_ARGS="$TMP/args" \
+  env PATH="$TMP/bin:$PATH" FAKE_LOG="$TMP/log" FAKE_ARGS="$TMP/args" FAKE_PACK="$TMP/pack" \
     WORK_BEAD_ID=tk-sub ASK="$ASK_TEXT" SCRIPTS="$TMP/pack" "$@" bash "$TMP/run.sh" > "$TMP/out" 2>&1 || rc=$?
   printf '%s|%s' "$rc" "$(tr '\n' ';' < "$TMP/log")"
 }
@@ -109,6 +124,13 @@ for PRELUDE in '' 'set -e' 'set -euo pipefail'; do
   has "$(args list)" "--include-gates --include-infra --include-templates" \
      "$L: the read counts a gate, an infra bead and a template among the children"
   has "$(args list)" "--json --limit 1" "$L: one child is enough to answer"
+
+  # The arm the step's text gives runs await-ruling.sh from the pack gc names,
+  # on the gate the block filed: the same key, and the closer as the formula its
+  # answer pours.
+  eq "$(RUN_TEXT="$ARM_RUN" run "$PRELUDE")" "0|ARM;" "$L: the arm call runs await-ruling.sh from the pack's scripts"
+  eq "$(args await-ruling)" "[tk-sub][--key][validate-close][--formula][mol-validate-close]" \
+     "$L: the bead waits on its gate under validate-close, armed to pour the closer again once the gate is answered"
 
   # An open child: a gate on the parent would pause the child, so the ask is a
   # conversation on the bead, which holds nothing.

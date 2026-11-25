@@ -16,6 +16,9 @@ code another bead retires, reaches here through the arm its wait carries, once
 that bead has closed. That close is a claim too: the bead it waited on can close
 without the fix it promised.
 
+A bead this workflow put to the operator comes back here once they answer,
+through the arm its ask wrote, and the run it starts carries that answer out.
+
 ## The contract
 
 1. **The subject arrives as the input convoy's single tracked member.** Each
@@ -30,10 +33,15 @@ without the fix it promised.
    that there is nothing to do: close the subject with `gc.work_outcome=no-op`
    and a note recording what you checked. Any doubt — the premise does not
    hold, there is real work, or the call is the operator's — leaves the bead
-   OPEN and files a human gate on it. This workflow is authorized to close the
-   SUBJECT, which is the one bead it closes, and only on its own confident
-   check. It never closes a bead that carries a `merge_result` (that is the
-   refinery's, closed on a verified merge); such a bead is put to the operator.
+   OPEN, files a human gate on it, and arms this workflow to run on the bead
+   again once the operator answers. That run carries the answer out: it closes
+   the subject when the answer accepts the close, and sends the work on when the
+   answer redirects it. This workflow is authorized to close the SUBJECT, which
+   is the one bead it closes, only on its own confident check or on the
+   operator's answer to its ask, and to send the subject where that answer
+   directs. It never closes a bead that carries a `merge_result` (that is the
+   refinery's, closed on a verified merge); such a bead is put to the operator
+   and takes no arm, because the merge cadence drives it.
 4. **Close your own step beads** through assets/scripts/claim-close.sh.
 
 
@@ -42,5 +50,5 @@ Variables:
 
 Steps (3):
   ├── mol-validate-close.load-context: Read the subject and its close brief
-  ├── mol-validate-close.validate-and-resolve: Validate the no-work conclusion, then close or ask the operator [needs: mol-validate-close.load-context]
+  ├── mol-validate-close.validate-and-resolve: Validate the no-work conclusion, then close, ask the operator or carry out their answer [needs: mol-validate-close.load-context]
   └── mol-validate-close.workflow-finalize: Finalize workflow [needs: mol-validate-close.validate-and-resolve]
