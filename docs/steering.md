@@ -216,7 +216,7 @@ can apply one directly.
   outcome. On the operator's agreement, the po files it
   ([epics.md](epics.md#the-contract-an-epic-carries)). When the ruling says its
   push waits, the po parks it. Only then does the po place the beads under it.
-  A placement under an epic nothing parks sends the bead at once.
+  A placement sends at once a bead that nothing holds.
 - **Place it on its own**, with no parent, at its own priority:
   `gctk bead place <bead> --standalone`. It is for an emergency that cannot
   wait for an epic, such as the host going down. It is also for work the

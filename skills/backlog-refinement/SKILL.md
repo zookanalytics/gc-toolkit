@@ -225,9 +225,9 @@ A graduation runs in this order, each write taking its exit:
    whose words each field is.
 2. Set its priority through your prompt's levers.
 3. Park it through those levers when the ruling says its push waits.
-4. Only then place each of its beads under it. A placement under an epic
-   nothing parks sends the bead at once. Parking the epic later stops no run
-   that has started.
+4. Only then place each of its beads under it. A placement sends at once a
+   bead that nothing holds. Parking the epic later stops no run that has
+   started.
 
 A wait runs through the `waits` skill. Work that goes on once the bead it waits
 on lands takes that skill's edge ("Make a bead wait on other work"), then its
