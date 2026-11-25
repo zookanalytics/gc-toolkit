@@ -244,10 +244,10 @@ files an earlier run left that git does not ignore.
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
 verification commands listed there, in code blocks or bullet lists. Run each
 through the gate the same way, such as `rig-checks.sh preflight --test '<test
-command>'`, so its result is recorded at this base. Run what you write this way
-one build at a time and in the foreground, because the builds a check runs at
-once hold their memory together: start no lane in the background with `&`, and
-give a parallel test runner one job.
+command>'`, so its result is recorded at this base. Run them one build at a time
+and in the foreground, because the builds a check runs at once hold their memory
+together: start no lane in the background with `&`, and give a parallel test
+runner one job.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
 Do NOT run install, cleanup, publish, release, `git push`, or any
