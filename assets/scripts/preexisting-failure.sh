@@ -9,8 +9,9 @@
 #   preexisting-failure.sh file <key> --message <text> [--summary <text>]
 # Callers: the refinery's merge gate (formulas/mol-refinery-patrol.toml,
 # handle-failures, through refinery-pre-existing.sh), a polecat's pre-flight
-# and self-review (formulas/mol-polecat-work.toml), and an agent that finds a
-# failure on a default branch some other way (skills/work/SKILL.md).
+# and self-review (formulas/mol-polecat-work.toml), the actions-track order's
+# pass over a rig's default branch (services/gctk/actions), and an agent that
+# finds a failure on a default branch some other way (skills/work/SKILL.md).
 #
 # The key names the failure, never its wording, and `key` is what derives it,
 # so two gates that meet one red reach one key. A failing test function is its

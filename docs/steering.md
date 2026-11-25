@@ -50,8 +50,9 @@ A bead may be routed or armed to a work pool only when one of these holds:
 - it is PR-finishing work of an anchor, which means it carries `anchor_bead`;
 - it is the tracker of a failure already red on a base branch, which means it
   carries `failure_key`. A gate files one when it reproduces a failure on the
-  base, and `preexisting-failure.sh` sends each tracker it files to its rig's
-  polecat pool in the same call, so a failure on main goes to be fixed with no
+  base, the `actions-track` order files one when a workflow that a push to a
+  rig's default branch started fails there, and `preexisting-failure.sh` sends
+  each tracker it files to its rig's polecat pool in the same call, so a failure on main goes to be fixed with no
   placement, a route the operator directed
   ([gas-city-search.md](../specs/tk-jmxx0vm/gas-city-search.md#the-need));
 - it is an emergency, a red main or a broken gate, checked rather than asserted;

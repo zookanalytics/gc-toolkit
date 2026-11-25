@@ -1,0 +1,179 @@
+---
+name: Gas City search for sending a check that fails on a rig's main to be fixed
+description: The search the arch check asks for before the pack adds `gctk actions track` and the actions-track order, which file the tracker of each GitHub Actions workflow whose newest finished push run on a rig's default branch failed. It covers what Gas City, bd and the packs Gas City publishes ship near that need, read at named upstream commits, why the pass files through the pack's tracker of a failure on a base branch, and why it reads the branch's newest finished push runs in one call. Read it when checking whether the pass can move onto a Gas City primitive.
+---
+
+# Gas City search for sending a check that fails on a rig's main to be fixed
+
+A failure on a rig's default branch is work to fix, and the pack already sends
+one to be fixed: `preexisting-failure.sh` files the failure's tracker and slings
+it to the rig's polecat pool ([steering.md](../../docs/steering.md#the-intake-rule)).
+Its callers are agents that ran the failing test themselves. Nothing reads
+GitHub's result for a rig's default branch, except an agent that asks about one
+named check (`checkMain` in `services/gctk/reaction/emergency.go`). So a check
+that fails only in GitHub's CI, or in a rig where no agent has run the tests
+since, is seen by nobody. This change adds `gctk actions track`, the order
+`actions-track` that runs it, and a read of a branch's runs and of a run's jobs
+in gctk's GitHub adapter. The arch check asks what Gas City already ships for
+that need ([review-arch.md](../../docs/review-arch.md#the-checks), check 1). Gas
+City ships no reader of a branch's workflow runs. The record the need asks for
+is one the pack already keeps, its tracker.
+
+## The surface and the need
+
+- `gctk actions track --rig <rig> [--dry-run]` reads the newest 100 finished
+  runs that pushes to the rig's default branch started, of every workflow, in
+  one GitHub read. For each workflow file, the newest run that failed or
+  succeeded decides. For each workflow whose deciding run failed, it files the
+  tracker through `preexisting-failure.sh`. It files nothing while a bead
+  already tracks the failure, and nothing for a run that started before the
+  failure's tracking last ended. It reads the failed run's jobs only for a
+  tracker it files.
+- `orders/actions-track.toml` runs it every five minutes in each rig, and is on
+  as it ships.
+- The GitHub adapter's `BranchRuns` and `RunJobs` read the runs and the jobs.
+
+The need, in the operator's words on 2026-11-25 in conversation tk-w8e75e0:
+"Main has CI. Main checks fail. Main checks fail and nothing fixes them That's
+bad, main should be green. Can the city keep main green. And can we do that
+simply?" The record they asked for, in the same conversation: "For each failure,
+file a bead, with a key unique to that issue", "If it's a known CI failure we
+aren't fixing, that bead gets held. All future failures dedup to the same key,
+all is fine", "Others get worked and ideally fixed."
+
+## Where the search looked
+
+Each was read on 2026-11-25:
+
+- Gas City at `gastownhall/gascity` main `0997336456`: its source, its
+  documentation and its engineering docs.
+- bd at `gastownhall/beads` main `786241099046`.
+- Every pack in `gastownhall/gascity-packs` at main `44b9db7168f6`.
+
+The search covered GitHub Actions runs and jobs, check runs and statuses on a
+default branch, the pull-request monitor, gates, webhooks, keyed problem records
+and per-rig order configuration. It repeats, at these commits, a search made for
+the same need on 2026-11-23.
+
+## What Gas City ships near the need
+
+### No reader of a branch's runs
+
+Gas City's `internal/` and `cmd/` read no GitHub Actions run: no call names
+`actions/runs`, `actions/workflows` or `gh run list`, and its `docs/` and
+`engdocs/` name those only in links to Gas City's own CI runs. Its one GitHub
+monitor, `[[github.pr_monitor]]`, reads open pull requests
+(`pullRequests(... states: OPEN ...)` in `internal/githubmonitor/client.go`),
+and the check rollup it reads is each open pull request's head's. A push run on
+the default branch belongs to no pull request, so the monitor never reads it.
+
+### A gate waits on one run
+
+bd's `gh:run` gate waits on one run: `checkGHRun` in `cmd/bd/gate.go` runs
+`gh run view <id>`, and core's `gate-sweep` order checks open gates. A gate is a
+wait on a run someone named, and each new run on a branch is a run no gate
+names.
+
+### The packs
+
+The `pr-pipeline` pack's `mol-pr-from-issue` stops its own push at a `base-ci`
+step when `gh run list --branch main` shows a failure from the last six hours
+(`pr-pipeline/formulas/mol-pr-from-issue.formula.toml`). It is a check inside
+one formula run, which files nothing and tells no one.
+
+### bd's own repository
+
+bd's repository watches its own main from a workflow of its own
+(`.github/workflows/main-ci-alert.yml`): when a tracked workflow's push run on
+main ends red, it keeps one `ci/main-red` GitHub issue and closes it once no
+workflow is red. It is that repository's own tooling, not a primitive a city
+composes. Its record is a GitHub issue, which nothing in the city reads, and
+each repository would carry its own copy. The pass takes its rule for which
+runs count from it: a push run of the branch in the repository itself, never a
+fork's pull request from the fork's own branch of the same name, which GitHub
+also reports on the branch.
+
+### Webhooks
+
+Gas City's `[[webhook]]` receiver routes a delivery its rule matches to an
+order that declares `trigger = "webhook"`, and a public webhook may fire only a
+formula order (`routeOrder` in `internal/webhooksink/sink.go`). GitHub sends a
+delivery only to a URL it can reach, and an event cuts latency without deciding
+anything
+([gctk-architecture.md](../../docs/gctk-architecture.md#the-rule-that-admits-an-order)).
+So the cooldown order is the pass, and a city that GitHub can reach can run the
+same verb for the rig a `workflow_run` delivery names.
+
+### Which rigs
+
+An `[[orders.overrides]]` entry turns a rig's instance of an order on or off
+(`ApplyOverrides` in `internal/orders/override.go`), and no order field names
+rigs. The pass needs no list. Every rig's default branch has the checks a push
+to it starts, so the order runs in every rig as it ships, and the city's config
+names no rig and no workflow. A scheduled workflow counts once its own file adds
+a push trigger.
+
+### Keyed problem records
+
+The PR monitor keeps one open repair bead per pull request's head
+(`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`). Its key is the pull
+request's repository, number and head (`githubPRRepairDedupeMetadata`), so no
+other reader can file under it. Gas City ships no record of a failure on a base
+branch that each reader of the failure finds by one key.
+
+## Why the pass files through the pack's tracker
+
+The pack already keeps the record the operator asked for.
+`preexisting-failure.sh` files one tracker per failure key, with the key
+stamped in the create. Before it files, it looks for a bead that holds the key
+in every live status, held, worked or waiting. A closed tracker's duplicate or
+successor edge leads it to the live bead that carries the failure now. It slings
+each tracker it files to its rig's polecat pool, which the intake rule admits.
+Every gate that meets a failure on a base branch files through it. A failure
+nobody will fix is held on its bead, and the writer files nothing for it
+again, so the pass builds nothing for holding. A patrol finding, the record the
+deployment report keeps, would be a second record of the same failure under
+another key, with a first reaction in front of the fix. The operator asked of
+that shape, in the same conversation: "how do we have two things that are
+intended to do the same thing?"
+
+A run names its jobs and its steps, not its failing test, so the pass keys a
+workflow's failure by the workflow's file, `key --target .github/workflows/<file>`.
+The tracker's text sends its worker to find the failing test and look up that
+test's tracker. When one exists, the worker closes the workflow's tracker as its
+duplicate, and later failures of the workflow reach that tracker through the
+writer's lookup.
+
+The pass reads the key's closed trackers from the rig's store for one guard of
+its own: a failed run that started before the failure's tracking last ended
+files nothing, since the run that would show the fix may not have finished.
+Without it, the pass would file a second tracker in the minutes after each fix
+lands. The tracking ends at the latest close along the chain the writer's lookup
+follows (`tracked_by` in the writer): a workflow's tracker closed as the
+duplicate of a test's tracker ends only when that tracker's fix closes it.
+
+## Why one read of the branch's newest finished push runs
+
+Read on 2026-11-25:
+
+- **The newest commit usually has no result.** Each job of this repository's
+  `tests.yml` holds a concurrency group with cancel-in-progress on the ref, so a
+  push cancels the test run of the push before it. Of the 33 test runs among the
+  newest 100 finished push runs on main, 28 were cancelled. The newest run of a
+  workflow that failed or succeeded is the newest result there is.
+- **One call reads every workflow.** `GET repos/<repo>/actions/runs` with
+  `branch`, `event=push`, `status=completed` and `per_page=100` answered in 1.1
+  to 3.3 seconds in each of the city's six rig repositories, about 2 MB on this
+  repository's main. Its runs reached back from about a day on this
+  repository's main to over three months on the quietest. A pass that finds
+  nothing failing makes no other call.
+- **The allowance.** Every five minutes in six rigs is 72 calls an hour, against
+  the 5,000 REST calls an hour of the city's login, which used about 3,400 in the
+  hour measured.
+
+## What the first passes file
+
+The same read in each rig on 2026-11-25 found three workflows whose deciding
+run failed, all in one rig, and none in the other five. Each gets a tracker in
+its rig's store on that rig's first pass, sent to its rig's polecat pool to be
+fixed like any other failure on a base branch.
