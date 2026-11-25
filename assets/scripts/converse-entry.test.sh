@@ -398,6 +398,14 @@ stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w closed"
 enter >/dev/null
 is "a restart during that return is still the return" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
 is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+# The return records its hold before it checks the work, so a restart after
+# that hold reads it as standing, and the continue skill finishes the return.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "staying: keep the API (waits on tk-gate)
+holding: settle tk-w against what was agreed" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w's PR reads needs-review in its own right at abc1234"
+enter >/dev/null
+is "a restart after that return recorded its hold reads the hold as standing" "$(line ENTRY | cut -d: -f1)" "ENTRY interrupted"
+is "…which the continue skill takes up" "$(line NEXT=)" "NEXT=converse-continue"
 # A row of what the conversation waits on can run past what a host lets a
 # command's arguments hold, through a long description.
 fresh; hook work ready_assignment tk-c; conv tk-c open "staying: keep the API (waits on tk-gate)" tracks:tk-s blocks:tk-gate; holds tk-c

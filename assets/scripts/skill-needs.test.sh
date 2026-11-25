@@ -45,11 +45,15 @@
 # under a gc that refuses the first step, and fails if anything after it runs.
 # It runs the settle step's arm under a gc that answers a dep add as bd does for
 # a blocker in another store, and fails if the arm runs. It runs the settle
-# step's stay call, and the rework and return calls the settle and
+# step's stay call, and the rework, accept and return calls the settle and
 # continue steps derive from it, through the real sign-off's parser, and fails
-# if the parser refuses one. It runs the stay's claim-back before a fallback
-# hold under a stub gc, and fails unless its line prints only for a
-# conversation claimed under the sitting. It runs the converse prompt's drain
+# if the parser refuses one. It runs the stay's promise and the prs skill's ask
+# through gctk built from this checkout, and fails unless each reaches the
+# store. It runs the stay's claim-back before a fallback hold, and the hold's
+# record, under a stub gc, and fails unless each line prints only for a
+# conversation claimed under the sitting. It runs the stay skill's read of the
+# rig map, and fails unless it tells the city's own store from a rig's. It
+# runs the converse prompt's drain
 # read under a stub gc,
 # and fails unless a list that does not read prints UNREADABLE, never the NONE
 # that drains a sitting that stays. It runs the premise
@@ -481,10 +485,10 @@ have "the settle step files an epic subject's decomposition as its member" \
 have "…and gives that member no --waiting-on" \
     'it gets no `--waiting-on`' "$SETTLE"
 tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-squeezed"
-have "…but a stay's, where the member is the conversation's wait alone" \
-    'A sitting that stays for it names it in the stay'"'"'s `--waiting-on`, where it is the conversation'"'"'s wait alone' "$TMP/settle-squeezed"
-have "…in place of the decomposition's --no-wait" \
-    'A sitting that stays names the member in the stay'"'"'s `--waiting-on`, in place of `--no-wait`' "$TMP/settle-squeezed"
+have "…but a stay promises it, and in the city's own store names it in the stay's --waiting-on, as the conversation's wait alone" \
+    'A sitting that stays for it promises it. In the city'"'"'s own store, where no promise is made, it names the member in the stay'"'"'s `--waiting-on`, where it is the conversation'"'"'s wait alone' "$TMP/settle-squeezed"
+have "…in place of the decomposition's --no-wait there" \
+    'In the city'"'"'s own store, it names the member in the stay'"'"'s `--waiting-on`, in place of `--no-wait`' "$TMP/settle-squeezed"
 # The sign-off arms a subject's validating closer only when nothing else sends
 # the subject on, and refuses a --close-brief anywhere else, so the settle skill
 # gives the brief only where a closer is armed and names each case where none
@@ -548,44 +552,65 @@ have "the settle step takes a subject's recommendation through the sign-off" '--
 have "the continue skill gives the call that opens a conversation" 'gc-helm.sh" open <bead>' "$CONTINUE"
 have "the prs skill gives the PR post calls the return uses" 'pr-post.sh" reply --host github.com' "$PRS_SKILL"
 # A sitting that sends work agrees with the operator whether it ends at its
-# hand-off or stays for the work's return, and says when the stay would come
-# back. A return after the merge comes too late to change the work, so the
-# sitting recommends ending when the stay would come back after the merge, as
-# for new work that opens its own PR, and otherwise recommends staying only
-# where the discussion helps judge the result. Each skill that puts the choice
-# carries the same table of when each stay comes back. One that stays sleeps
-# with its conversation open, and the entry (converse-entry.sh, its own suite)
-# tells its return, and a wake while the work is out, from a fresh sitting.
+# hand-off or stays for the work's return. A stay comes back for one piece of
+# work, before the operator's next decision about it, and always to discuss the
+# result with them, so the sitting says which piece and when, in their terms,
+# and says that trouble on the work and other work it sent bring it no return.
+# Each skill that puts the choice carries the same table of when each stay comes
+# back (specs/tk-ai367om/design.md, section 3), with the rule of the city's own
+# store beside it, where a stay comes back only once its work closes. One that
+# stays sleeps with its conversation open, and the entry (converse-entry.sh, its
+# own suite) tells its return, and a wake while the work is out, from a fresh
+# sitting.
 tr -s '[:space:]' ' ' <"$PROMPT" >"$TMP/prompt-stay"
-have "the prompt says when a stay would come back" \
-    'and say when the stay would come back, in the operator'"'"'s terms.' "$TMP/prompt-stay"
-have "…recommends ending when the stay would come back after the merge, as for new work with its own PR" \
-    'So when the stay would come back after the merge, as it does for new work that opens its own PR, recommend ending at the hand-off, with what was agreed written into the work'"'"'s brief in full, and say why.' "$TMP/prompt-stay"
-have "…and otherwise staying when the discussion helps judge the result" \
-    'Otherwise recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
+have "the prompt says a stay comes back for one piece of work, before the operator's next decision, to discuss the result whatever it finds" \
+    'A stay comes back for one piece of work, before the operator'"'"'s next decision about it, and always to discuss the result with them, whatever it finds.' "$TMP/prompt-stay"
+have "…says which piece and when it would come back, in the operator's terms" \
+    'Say which piece it is for, and when it would come back, in the operator'"'"'s terms: once the city has finished with that work'"'"'s PR and only their part is left, which is after its review and its required checks have passed, or once the work closes.' "$TMP/prompt-stay"
+have "…says trouble on the work does not bring the sitting back" \
+    'Trouble on the work, such as a failed check or a question filed on it, does not bring the sitting back' "$TMP/prompt-stay"
+have "…and that other work the ruling sends brings no return of its own" \
+    'Other work the ruling sends brings no return of its own, so say so.' "$TMP/prompt-stay"
+have "…recommends staying when the discussion helps judge the result" \
+    'Recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
 have "…and ending when the brief and the ordinary checks suffice" \
     'and ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
+have "…and ending in the city's own store, where new work's stay comes back after the merge" \
+    'In the city'"'"'s own store a stay comes back only once its work closes, which for new work that opens its own PR is after the merge, so recommend ending at the hand-off there.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
     'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
+have "…says the return waits for the operator whatever it found, and the PR waits for them" \
+    'and waits for them whatever it found. Until they settle it with you, the work'"'"'s PR does not merge.' "$TMP/prompt-stay"
 have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
 for f in "$HOLD" "$SETTLE" "$STAY"; do
     skill=$(basename "$(dirname "$f")")
-    have "$skill: a stay for a rework of the PR comes back before its merge" \
-        '| A rework of the PR under discussion | When the rework reaches the PR'"'"'s branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR'"'"'s checks review the reworked branch again. |' "$f"
-    have "$skill: …one for new work with its own PR only after that PR merges, so it recommends ending" \
-        '| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work'"'"'s brief in full. Say that a stay would report only after the merge. |' "$f"
-    have "$skill: …and one for work with no PR of its own when that work closes" \
-        '| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |' "$f"
+    have "$skill: a stay for new work with its own PR comes back once the city has finished with that PR" \
+        '| New work that opens its own PR | Once the city has finished with that PR and only the operator'"'"'s part is left, which is after its review and its required checks have passed, or once the work closes. |' "$f"
+    have "$skill: …one for a rework of the PR under discussion once the city has finished with that PR again" \
+        '| A rework of the PR under discussion | Once the rework is done and the city has finished with the PR again. |' "$f"
+    have "$skill: …one for the conversation's own subject once the city has finished with its PR, or it closes" \
+        '| The conversation'"'"'s own subject | Once the city has finished with the subject'"'"'s PR, or once the subject closes. |' "$f"
+    have "$skill: …and one for work with no PR of its own once that work closes" \
+        '| Work that opens no PR of its own | Once the work closes. |' "$f"
+    tr -s '[:space:]' ' ' <"$f" >"$TMP/$skill-stay-table"
+    have "$skill: …with the rule of the city's own store, where a stay comes back once its work closes" \
+        'In the city'"'"'s own store a stay comes back only once its work closes, which for new work that opens its own PR is after the merge' "$TMP/$skill-stay-table"
 done
 tr -s '[:space:]' ' ' <"$HOLD" >"$TMP/hold-stay"
-have "the framing's decision says when a stay would come back" \
-    'It says when a stay would come back, in the operator'"'"'s terms, and recommends ending at the hand-off when that is after the merge' "$TMP/hold-stay"
+have "the framing's decision names the piece a stay is for and when it would come back" \
+    'It names the one piece of work a stay would be for, and says when the stay would come back, in the operator'"'"'s terms, that it comes back to discuss the result whatever it finds, and that other work the ruling sends brings no return of its own' "$TMP/hold-stay"
 tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
 have "the settle skill puts the choice with when a stay would come back" \
     'Put it to them with your recommendation, and say when a stay would come back, in their terms' "$TMP/settle-stay"
-have "…and writes what was agreed into the brief in full for a sitting that ends on new work with its own PR" \
-    'When the sitting ends at the hand-off for new work that opens its own PR, write what was agreed into the create'"'"'s description in full' "$TMP/settle-stay"
+have "…writes what was agreed into the order as a list of items the return can check" \
+    'Write what was agreed into the order as a list of items, each one a thing the result either covers or does not' "$TMP/settle-stay"
+have "…promises the work it sends itself right after the send, before the sign-off" \
+    'When the sitting stays for work it sends itself, promise that work right after its send, before the sign-off' "$TMP/settle-stay"
+have "…and tells the operator before it stays that other work brings no return of its own" \
+    'so before it stays, tell the operator that each other piece of work the ruling sends brings no return of its own' "$TMP/settle-stay"
+have "…and stays for the subject by sending it, promising it, then staying" \
+    'A sitting that stays for the subject sends it first, then promises it, then makes this sign-off its stay' "$TMP/settle-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
     '/converse-entry.sh"' "$PROMPT"
 # A sitting still up when its work closes gets no wake, only Gas City's notice
@@ -605,18 +630,71 @@ have "…and asks for help when its thread does not hold the conversation" \
     'The acknowledgement is refused and your thread does not hold the conversation**, so you cannot tell where it was left. Say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
 lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
     "the entry reads the record; the prompt acts on what it prints"
+# The stay takes one of two forms: its own call sends the work and promises it,
+# or the sitting sends the work, promises it with gctk gate create, then stays.
+# A call that sends nothing refuses with no gate, so a skipped promise stops the
+# stay. The return records the hold first, reads the result at the head the
+# gate closed at and the head the PR has now, checks each agreed item, and
+# posts a summary that closes with one of three lines, then waits for the
+# operator whatever it found.
 have "the stay skill stays through the sign-off" \
-    '--stay "<what the operator agreed, which the return compares the work with, one line>"' "$STAY"
+    '--stay "<what the operator agreed, which the return checks the work against, one line>"' "$STAY"
 tr -s '[:space:]' ' ' <"$STAY" >"$TMP/stay-squeezed"
 have "…and a stay drains nothing" 'A stay closes nothing, so it drains nothing' "$TMP/stay-squeezed"
 have "…and its hand-back says when the sitting comes back" \
-    'says when the sitting comes back, in the table'"'"'s terms, to compare the work with what was agreed' "$TMP/stay-squeezed"
-have "…and more work ruled while it stays puts the choice again, since the return waits for the last of it" \
-    'Put the choice to them again, as Stay (above) says, because the return waits for the last of the work' "$TMP/stay-squeezed"
+    'says when the sitting comes back, in the table'"'"'s terms, to discuss the result against what was agreed' "$TMP/stay-squeezed"
+have "…and the agreement is a list of items the return can check" \
+    'Write what was agreed as a list of items the return can check' "$TMP/stay-squeezed"
+have "…and trouble on the work does not bring the sitting back" \
+    'Trouble on the work does not bring the sitting back' "$TMP/stay-squeezed"
+have "the stay skill gives the stay's first form, whose own call sends the work and promises it" \
+    'The stay'"'"'s own call sends the work.** A ruling that sends the PR under discussion back goes out through the call'"'"'s `--rework`, and one that takes the subject'"'"'s recommendation through its `--accept`.' "$TMP/stay-squeezed"
+have "…and its second, where the sitting sends the work, promises it, then stays" \
+    'You send the work.** New work, the subject you sling, and another PR you send back through the `prs` skill are sent before the sign-off. Once the send is made, promise the work, and then stay.' "$TMP/stay-squeezed"
+have "…with the promise's command, which names the gate's type where the sitting types it" \
+    '"$GCTK" gate create --type gctk:needs-review --await-id <the work'"'"'s bead> --blocks "$CONVERSATION"' "$STAY"
+have "…which a call that sends nothing needs, since it refuses with no open gate" \
+    'A call that sends nothing**, neither `--rework` nor `--accept`, while the conversation waits on no open gate. Its message gives the promise'"'"'s command.' "$TMP/stay-squeezed"
+have "…and the stay says a piece its call sends that it is not for brings no return of its own" \
+    'For each piece the call sends that the stay does not come back for, it prints that the piece brings no return of its own. Say so in the hand-back.' "$TMP/stay-squeezed"
+lacks "…and no stay waits on a convoy" 'convoy' "$STAY" \
+    "a stay waits for one piece of work through its gate"
+# A ruling made on a visit, while the stay's gate is open, adds to the piece the
+# sitting waits for through an ask on it, or sends other work, which gets no
+# gate (specs/tk-ai367om/design.md, section 9).
+have "a ruling on a visit that adds to the piece is an ask on it, whose gate is open already" \
+    'That is an ask on that piece, and its gate is open already, so the stay goes on' "$TMP/stay-squeezed"
+have "…for the PR under discussion, the stay's call again in its rework form, which keeps the gate" \
+    'run the stay'"'"'s call again in its rework form, which files the ask and keeps the gate' "$TMP/stay-squeezed"
+have "…for another PR, the ask the prs skill gives" \
+    'For another PR, such as new work'"'"'s, file the ask on its anchor as the `prs` skill'"'"'s send-back gives, and run nothing else.' "$TMP/stay-squeezed"
+have "…and one that sends other work promises nothing, which brings it no return" \
+    'and promise nothing, because the stay waits for one piece at a time and the promise refuses a second' "$TMP/stay-squeezed"
+have "the return records what the operator owes first" \
+    'Record what the operator owes, first**, as `converse-hold` gives (Record the hold).' "$TMP/stay-squeezed"
+have "…reads the PR at the head the gate closed at and at the head it has now" \
+    'Read the work'"'"'s PR at the head the gate'"'"'s close names and at the head it has now' "$TMP/stay-squeezed"
+have "…and reports on a newer head only once its review and required checks have passed" \
+    'report on the head the PR has now only once its status shows that head'"'"'s review and required checks have passed' "$TMP/stay-squeezed"
+have "…checks the result against each agreed item" 'Check it against what was agreed, item by item.' "$TMP/stay-squeezed"
+have "…posts a summary that closes with one of three lines" \
+    'closes with one of three lines, so the operator can tell at a glance which it is' "$TMP/stay-squeezed"
+have "…the first: every item is covered" \
+    'every item is covered, you see nothing left to discuss, and they can approve when they are comfortable, or raise anything else;' "$TMP/stay-squeezed"
+have "…the second: some items still need the operator's word" \
+    'some items are covered, and it names each one that still needs their word, with the question;' "$TMP/stay-squeezed"
+have "…the third: a departure they have to rule on" \
+    'the work departs from what was agreed in a way they have to rule on.' "$TMP/stay-squeezed"
+have "…and waits for the operator whichever line it closed with" \
+    'Wait for the operator**, whichever line the summary closed with.' "$TMP/stay-squeezed"
 have "the stay skill gives the return its sign-off" \
-    'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`' "$TMP/stay-squeezed"
+    'Sign off with the stay'"'"'s call less `--stay`, with `--no-wait` in place of its waits and brief, and with `--no-rework` in place of a `--rework`, whose ask has closed.' "$TMP/stay-squeezed"
+have "…with --no-rework added when the work has a PR, which the return holds" \
+    'Add `--no-rework` to a call that had none when the work has a PR, because the ruling reaches the PR this return holds and leaves its branch standing.' "$TMP/stay-squeezed"
 have "…which leaves out the --pr-anchor of a rework that picked its PR" \
     'Leave out the `--pr-anchor` that named the PR the rework went to' "$TMP/stay-squeezed"
+have "…or settles, lifts the settled PR's hold, and stays for another piece" \
+    'Lift the hold on the PR they settled (`converse-hold`), then promise the next piece and stay (Stay, above).' "$TMP/stay-squeezed"
 have "…and the return passes and fails nothing" \
     'It works on nothing, takes no check'"'"'s send-back, and passes and fails nothing' "$TMP/stay-squeezed"
 # Context that runs low during a return changes which session finishes the
@@ -630,6 +708,12 @@ have "…which a fresh session takes over only from a hand-over recorded before 
     'Never reset during a return without this hand-over.' "$TMP/stay-squeezed"
 have "…and the return starts from a hand-over an earlier session left" \
     'The conversation'"'"'s notes carry a return hand-over** from an earlier session' "$TMP/stay-squeezed"
+# The return records its hold before it checks the work, so a restart after
+# that reads the hold as standing and loads the continue skill, which sends a
+# return whose check is not finished back to the stay's skill.
+tr -s '[:space:]' ' ' <"$CONTINUE" >"$TMP/continue-stay"
+have "the continue skill sends a restart during a return back to finish it" \
+    'The hold is a return'"'"'s, and its check is not finished**: your thread shows a return under way, or the conversation'"'"'s notes carry a `## Return hand-over` after their newest `holding:` line.' "$TMP/continue-stay"
 # The roles that route work point at the four skills through one fragment, so
 # the pointer is written once: each prompt includes it and keeps no copy of its
 # own. The skill descriptions every agent sees say when to load each skill, so
@@ -1026,28 +1110,31 @@ for sh_ in $shells; do
     fi
 done
 echo "── the stay example, and each call the skills derive from it, passes the sign-off's parser ──"
-# The stay skill gives one stay call and says how its rework form, and the
-# return's call, differ from it. The rework form takes converse-settle's
+# The stay skill gives one stay call and says how its rework and accept forms,
+# and the return's call, differ from it. The rework form takes converse-settle's
 # --pr-anchor when the ruling reaches more than one open PR, and its return
-# leaves that out with the --rework.
+# leaves that out with the --rework. A ruling made on a visit that adds to the
+# PR under discussion runs the rework form again.
 # Each form is built from the example's own arguments the way those skills word
 # it, then run through the real sign-off under a gc that answers nothing. A form
 # the parser takes reaches the conversation read and stops there (exit 1). One
 # it refuses exits 2 before that read.
 have "the stay example's rework form takes --rework --no-wait in place of the wait and its brief" \
     '# --rework --no-wait in place of --waiting-on and --close-brief when the work is the PR'"'"'s rework' "$STAY"
+have "…and its accept form --no-wait --accept" \
+    '# --no-wait --accept in place of --waiting-on and --close-brief when the ruling takes the subject'"'"'s recommendation' "$STAY"
 have "…and converse-settle's sign-off, whose other flags it takes, picks the PR a rework acts on with --pr-anchor" \
     '# --pr-anchor <bead> names the PR --rework or --retire acts on, when it reaches more than one' "$SETTLE"
-have "…and a stay on the subject itself is refused" \
+have "…and in the city's own store a stay on the subject itself is refused" \
     'A stay on the subject itself**, as when the ruling sends the subject or takes its recommendation' "$TMP/stay-squeezed"
 have "the stay example says when it takes no brief" \
     '# no --close-brief for a subject the sign-off arms no closer for, such as an epic or a PR'"'"'s anchor' "$STAY"
 have "…which the sign-off refuses there, naming the case" \
     'such as an epic or the anchor of a PR, where it refuses the brief and names the case' "$TMP/stay-squeezed"
-have "…and a member of the subject is the conversation's wait alone" \
+have "…and there a member of the subject is the conversation's wait alone" \
     'bd refuses the subject'"'"'s edge onto its own member, so the sign-off makes the member the conversation'"'"'s wait alone' "$TMP/stay-squeezed"
 have "…and a recovery takes a brief only when one is held on its work" \
-    'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names.' "$TMP/stay-squeezed"
+    'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names, and that work is then its `--waiting-on`.' "$TMP/stay-squeezed"
 have "…so that sitting ends at the hand-off" \
     'After either of the first two refusals, end at the hand-off' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
@@ -1075,10 +1162,12 @@ else
         drop_args "$SV/stay" --close-brief >"$SV/stay-no-brief"
         { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --rework --no-wait; } >"$SV/rework"
         { cat "$SV/rework"; printf '%s\n' --pr-anchor x; } >"$SV/rework-pick"
-        { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait; } >"$SV/return"
+        { drop_args "$SV/stay" --waiting-on --close-brief; printf '%s\n' --no-wait --accept; } >"$SV/accept"
+        { drop_args "$SV/stay" --stay --waiting-on --close-brief; printf '%s\n' --no-wait --no-rework; } >"$SV/return"
         for f in rework rework-pick; do
             drop_args "$SV/$f" --stay --pr-anchor | sed 's/^--rework$/--no-rework/' >"$SV/$f-return"
         done
+        { drop_args "$SV/accept" --stay; printf '%s\n' --no-rework; } >"$SV/accept-return"
         while IFS='|' read -r form label; do
             args=()
             while IFS= read -r a; do args+=("$a"); done <"$SV/$form"
@@ -1092,11 +1181,13 @@ else
         done <<FORMS
 stay|the stay example's call passes the sign-off's parser
 stay-no-brief|…as does its form with no brief, for a subject the sign-off arms no closer for
-rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief
+rework|…as does its rework form, with --rework --no-wait in place of --waiting-on and --close-brief, which a ruling on a visit runs again
 rework-pick|…and that form with the --pr-anchor that picks its PR when the ruling reaches more than one
-return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief
+accept|…as does its accept form, with --no-wait --accept in place of --waiting-on and --close-brief
+return|…the return's call, the stay's less --stay with --no-wait in place of its waits and brief, and --no-rework for the PR it holds
 rework-return|…the return of a rework stay, with --no-rework in place of its --rework
 rework-pick-return|…and the return of one that picked its PR, which leaves out its --pr-anchor
+accept-return|…and the return of an accept stay, less --stay, with --no-rework for the subject's PR
 FORMS
     done
     # Work can close before the stay's edge onto it is written, and then no
@@ -1125,8 +1216,8 @@ RUNS
     done
 fi
 echo "── a stay that stopped short claims its conversation back before it holds ──"
-# A second stay leaves its conversation open, where a hold would read as a
-# fresh sitting once the earlier work closes, so the fallback claims it back.
+# A stay run again on a visit leaves its conversation open, where a hold would
+# read as a fresh sitting once its gate closes, so the fallback claims it back.
 # Its line prints once the guarded write lands, or once the read after the
 # guard's miss (exit 13) finds the conversation claimed under the sitting, and
 # never when the store refused the write or the conversation moved.
@@ -1163,6 +1254,142 @@ else
 13|closed|rig/rig.tk-v|no|…but not on one a dismiss closed
 13|in_progress|human|no|…nor on one claimed under another
 1|in_progress|rig/rig.tk-v|no|…nor when the store refused the write, whatever a read would say
+CASES
+    done
+fi
+echo "── a hold, a return's among them, is recorded only on the conversation the entry claimed ──"
+# The entry claims the conversation before it reads a return, so the hold's
+# line is one write guarded on that claim (specs/tk-ai367om/design.md, section
+# 5). The block runs as written under a gc that guards an update as bd does:
+# it prints its line on a conversation in progress under the sitting, as an
+# ordinary return and a restart's entry leave it, and writes nothing when the
+# guard does not match, exit 13, or when the store refuses the write.
+have "the hold records its line in one write guarded on the entry's claim" \
+    'gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status in_progress --append-notes "holding: $NEED"' "$HOLD"
+HR="$TMP/hold-record"
+mkdir -p "$HR/bin"
+cat >"$HR/bin/gc" <<'STUB'
+#!/bin/sh
+case "${1:-} ${2:-}" in
+    "bd update")
+        id=$3
+        shift 3
+        want_a=""
+        want_s=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --if-assignee) want_a=$2; shift ;;
+                --if-status) want_s=$2; shift ;;
+            esac
+            shift
+        done
+        [ "$HR_RC" -eq 0 ] || exit "$HR_RC"
+        if [ -n "$want_a$want_s" ]; then
+            { [ "$want_a" = "$HR_ASSIGNEE" ] && [ "$want_s" = "$HR_STATUS" ]; } || exit 13
+        fi
+        printf 'update %s\n' "$id" >>"$HR_LOG" ;;
+esac
+exit 0
+STUB
+chmod +x "$HR/bin/gc"
+fenced_block "$HOLD" '--append-notes "holding: $NEED"' >"$HR/block"
+if [ ! -s "$HR/block" ]; then
+    bad "converse-hold: the hold's record is found" "no fenced bash block holds the hold's record in $HOLD"
+else
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        while IFS='|' read -r rc status assignee want label; do
+            : >"$HR/log"
+            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV PATH="$HR/bin:$PATH" HR_LOG="$HR/log" CONVERSATION=tk-v SUBJECT=tk-s \
+                GC_ALIAS=rig/rig.tk-v HR_RC="$rc" HR_STATUS="$status" HR_ASSIGNEE="$assignee" $run "$HR/block" </dev/null 2>/dev/null)
+            writes=$(tr '\n' ';' <"$HR/log")
+            case "$want:$out:$writes" in
+                yes:"the hold is recorded":"update tk-v;update tk-s;" | no::) ok "($sh_) $label" ;;
+                *) bad "($sh_) $label" "printed: $out, writes: $writes" ;;
+            esac
+        done <<CASES
+0|in_progress|rig/rig.tk-v|yes|a return's hold, on the conversation the entry claimed, records its line
+0|open|rig/rig.tk-v|no|…but writes nothing on one left open to wait, which the sitting has not claimed back
+0|closed|rig/rig.tk-v|no|…nor on one the operator ended meanwhile
+0|in_progress|human|no|…nor on one claimed under another
+1|in_progress|rig/rig.tk-v|no|…nor when the store refused the write
+CASES
+    done
+fi
+echo "── the stay skill's read tells the city's own store from a rig's ──"
+# A stay in the city's own store comes back only once its work closes, so the
+# sitting reads which store its conversation is in before it says when a stay
+# would come back. The read runs as written under a rig map with one rig of
+# each kind.
+RM="$TMP/store-read"
+mkdir -p "$RM/pack"
+cat >"$RM/pack/rig-map.sh" <<'STUB'
+#!/bin/sh
+printf '%s\n' '{"rigs":[{"name":"city","prefix":"lx","hq":true},{"name":"kit","prefix":"tk","hq":false}]}'
+STUB
+chmod +x "$RM/pack/rig-map.sh"
+fenced_block "$STAY" '/rig-map.sh" | jq' >"$RM/block"
+if [ ! -s "$RM/block" ]; then
+    bad "converse-stay: the store's read is found" "no fenced bash block holds the read of the rig map in $STAY"
+else
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        while IFS='|' read -r conv want label; do
+            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV CONV="$RM/pack" CONVERSATION="$conv" $run "$RM/block" </dev/null 2>/dev/null)
+            rc=$?
+            case "$want:$rc:$out" in
+                fails:[1-9]*: | "$want:0:$want") ok "($sh_) $label" ;;
+                *) bad "($sh_) $label" "exit $rc, printed: $out" ;;
+            esac
+        done <<CASES
+lx-c|city|the store's read prints city for a conversation in the city's own store
+tk-c|rig|…rig for one in a rig's store
+zz-c|fails|…and fails, printing nothing, for a prefix no one rig carries
+CASES
+    done
+fi
+echo "── the stay's promise, and a visit's ask on another PR, pass gctk's own parser ──"
+# The sitting types the promise itself, so the stay skill's call runs through
+# gctk built from this checkout, its placeholders filled, under a gc that
+# answers nothing. A call the parser takes reaches the conversation's store,
+# whose read the stub refuses, and one it refuses reads nothing. The prs skill's
+# ask, which a ruling made on a visit files on another PR, runs the same way.
+PG="$TMP/promise"
+mkdir -p "$PG/bin"
+cat >"$PG/bin/gc" <<'STUB'
+#!/bin/sh
+printf 'gc %s\n' "$*" >>"$PG_LOG"
+exit 1
+STUB
+chmod +x "$PG/bin/gc"
+if ! PG_GCTK="$("$REPO/assets/scripts/holds-store.stub.sh" build "$TMP/gctk")"; then
+    bad "gctk builds, so the stay's promise can run through its parser"
+else
+    fenced_block "$STAY" 'gate create --type gctk:needs-review' \
+        | sed -e "s#<the work's bead>#tk-w#g" -e 's#<[^>]*>#x#g' >"$PG/promise"
+    fenced_block "$PRS_SKILL" 'review ask <the anchor of the PR>' \
+        | sed -e 's#<the anchor of the PR>#tk-a#g' -e 's#<the bead the point came from>#tk-v#g' -e 's#<[^>]*>#x#g' >"$PG/ask"
+    for f in promise ask; do
+        [ -s "$PG/$f" ] || bad "the $f's example is found" "no fenced bash block holds it"
+    done
+    for sh_ in $shells; do
+        run=$sh_
+        [ "$sh_" = zsh ] && run="zsh -f"
+        while IFS='|' read -r f label; do
+            [ -s "$PG/$f" ] || continue
+            : >"$PG/log"
+            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV PATH="$PG/bin:$PATH" PG_LOG="$PG/log" GCTK_BIN="$PG_GCTK" GC_NO_API=1 \
+                GC_ALIAS=rig/rig.tk-v CONVERSATION=tk-v $run "$PG/$f" </dev/null 2>&1)
+            if grep -q '^gc bd ' "$PG/log" && ! printf '%s' "$out" | grep -qi 'unknown flag\|usage:\|accepts [0-9]'; then
+                ok "($sh_) $label"
+            else
+                bad "($sh_) $label" "calls: $(tr '\n' ';' <"$PG/log"), printed: $(printf '%s' "$out" | head -3 | tr '\n' ' ')"
+            fi
+        done <<CASES
+promise|the stay skill's promise passes gctk's parser and reaches the store
+ask|…as does the prs skill's ask, which a ruling made on a visit files on another PR
 CASES
     done
 fi
