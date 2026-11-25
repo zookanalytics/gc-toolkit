@@ -30,7 +30,9 @@ import (
 //   - A bead in progress is a claim a session left, which the hook adopts, so it
 //     is taken first, unless something holds it or another bead works its
 //     branch, as below. One it leaves goes back to open, so the wait, and not
-//     the claim, decides when it is taken.
+//     the claim, decides when it is taken. Of several it can take, the ones it
+//     does not take go back to open too, still the refinery's, since a drain
+//     releases to nobody a claim its session did not start.
 //   - A bead something holds waits until its waits land (waits.Holds). A
 //     conversation or an ask on the bead's PR holds its merge and nothing else,
 //     so a bead they hold is taken as if they were not there.
@@ -269,6 +271,12 @@ func (s *Search) Next() (Answer, error) {
 			cmp.Compare(a.r.CreatedAt(), b.r.CreatedAt()), cmp.Compare(a.r.ID, b.r.ID))
 	})
 	ans.Take = item(takeable[0].r)
+	for _, c := range takeable[1:] {
+		if s.reopen(c.r, &ans) {
+			ans.Left = append(ans.Left, Left{ID: c.r.ID, Why: "the search takes one item, and " + takeable[0].r.ID + " comes first",
+				Wrote: "back to open, so the next session takes it"})
+		}
+	}
 	return ans, nil
 }
 

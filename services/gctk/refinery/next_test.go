@@ -379,3 +379,22 @@ func TestNextReadsNothingWithoutAnAnswer(t *testing.T) {
 		t.Fatal("an empty identity answered")
 	}
 }
+
+// Of two claims left in progress that the search can take, it takes one and
+// puts the other back to open, still the refinery's, since a drain releases to
+// nobody a claim its session did not start.
+func TestNextPutsTheClaimsItDoesNotTakeBackToOpen(t *testing.T) {
+	q := newQueue()
+	q.put("tk-a", stamp(0))
+	q.put("tk-b", stamp(9))
+	q.edit("tk-a", func(b *fake.Bead) { b.Status = "in_progress" })
+	q.edit("tk-b", func(b *fake.Bead) { b.Status = "in_progress" })
+	ans := q.next(t)
+	other := map[string]string{"tk-a": "tk-b", "tk-b": "tk-a"}[took(ans)]
+	if other == "" {
+		t.Fatalf("took %q; want one of the two claims", took(ans))
+	}
+	if b, _ := q.s.Row(other); b.Status != "open" || b.Assignee != ref || len(ans.Failures) > 0 {
+		t.Fatalf("%s is %s under %q, failures %v; want it open under the refinery", other, b.Status, b.Assignee, ans.Failures)
+	}
+}
