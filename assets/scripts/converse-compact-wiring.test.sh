@@ -13,10 +13,10 @@
 #       CLAUDE_PROJECT_DIR when GC_DIR is unset, and exits 0 printing nothing
 #       when no steer is staged. Once its own tmux session's environment holds
 #       GC_DRAIN_ACK=1, which every drain-ack of the session sets, it prints
-#       no steer, writes one line to stderr and exits 2, which blocks the
-#       compaction. A read of the flag that fails or answers anything else,
-#       and a hook run outside tmux, print the steer and exit 0, so a sitting
-#       whose drain is not acknowledged is never refused
+#       no steer, writes one line to stderr and exits 2, the hook's refusal
+#       of the compaction. A read of the flag that fails or answers anything
+#       else, and a hook run outside tmux, print the steer and exit 0, so a
+#       sitting whose drain is not acknowledged is never refused
 #   (2t) against a private tmux server, the hook reads the flag of the session
 #       whose pane runs it: it refuses while the flag is set, compacts once
 #       Gas City removes it, ignores another session's flag, and compacts in a

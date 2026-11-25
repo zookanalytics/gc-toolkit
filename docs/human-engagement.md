@@ -799,23 +799,28 @@ which Gas City merges over the city's setting and its built-in default. No
 other agent sets it, so each keeps the advisory. A Codex sitting has the
 advisory off and no summary steer.
 
-**A finished sitting is not compacted.** A sitting's last act is
-`gc runtime drain-ack`, and Gas City holds the stop it asks for while a tab is
-attached (*A sitting ends its own session*, below). A summary of that thread
-carries nothing on, since the sitting runs nothing after its drain-ack, so the
-hook first reads `GC_DRAIN_ACK` from its own session's tmux environment with
-`tmux show-environment -t "$TMUX_PANE" GC_DRAIN_ACK`. That is the read Gas
+**A finished sitting is not compacted until its window fills.** A sitting's last
+act is `gc runtime drain-ack`, and Gas City holds the stop it asks for while a
+tab is attached (*A sitting ends its own session*, below). A summary of that
+thread carries nothing on, since the sitting runs nothing after its drain-ack,
+so the hook first reads `GC_DRAIN_ACK` from its own session's tmux environment
+with `tmux show-environment -t "$TMUX_PANE" GC_DRAIN_ACK`. That is the read Gas
 City's runtime makes of the flag every drain-ack of the session sets, and the
 flag the tab's `done` title reads (*Viewing a sitting holds its stop*, below).
 While it reads `GC_DRAIN_ACK=1`, the hook prints no steer, writes one line to
-stderr, which Claude Code shows when the operator typed `/compact`, and exits 2,
-which blocks the compaction, so the thread stays as it was. Any other answer, or
-a read that fails, as outside tmux, prints the steer and exits 0, so a sitting
-whose drain is not acknowledged is compacted as before. The flag lives as long
-as the tmux session: a stop kills it, and a start makes a new one, so a sitting
-that starts again after a stop, as a stay's wake or an engage does, compacts as
-before. A compaction between a sign-off and its drain-ack is steered, because
-the flag is not set yet.
+stderr, which Claude Code shows when the operator typed `/compact`, and exits 2.
+That blocks a typed `/compact` and the compactions Claude Code starts before the
+context limit, the idle one and the one at the auto-compact window, so the
+thread stays as it was. It does not block the compaction Claude Code makes once
+a request no longer fits the window, which runs despite the hook
+([the search](../specs/tk-kwnt509/gas-city-search.md#refuse-the-compaction-of-a-sitting-that-has-finished)),
+so a finished sitting someone keeps typing into is compacted when its window
+fills. Any other answer, or a read that fails, as outside tmux, prints the steer
+and exits 0, so a sitting whose drain is not acknowledged is compacted as
+before. The flag lives as long as the tmux session: a stop kills it, and a start
+makes a new one, so a sitting that starts again after a stop, as a stay's wake
+or an engage does, compacts as before. A compaction between a sign-off and its
+drain-ack is steered, because the flag is not set yet.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a

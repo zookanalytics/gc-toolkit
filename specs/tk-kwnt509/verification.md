@@ -78,7 +78,7 @@ the entry command. Claude Code then appended its own closing lines, which tell
 the session to pick up the last task, so the steer's instruction to run the
 entry first comes before them.
 
-## A finished sitting is not compacted
+## A finished sitting's compaction is refused
 
 Run on 2026-11-25 with Claude Code 2.1.332 on `claude-haiku-5-5` and tmux 3.8,
 on a private tmux server (`tmux -L kwnt-proof -f /dev/null`). Each session ran
@@ -145,4 +145,7 @@ refusal above shows its read and its exit in a live session. In the refused
 session C the hook ran once on the refused `/compact` and once on the one that
 compacted. Whether Claude Code tries a refused idle compaction again rests on
 the binary: its idle timer is cleared when it fires and is armed again only
-from a new request's saved state (`EVn`, Claude Code 2.1.332).
+from a new request's saved state (`EVn`, Claude Code 2.1.332). A compaction
+at a full window was not staged: there the same binary compacts despite the
+hook, as [the search](gas-city-search.md#refuse-the-compaction-of-a-sitting-that-has-finished)
+records.
