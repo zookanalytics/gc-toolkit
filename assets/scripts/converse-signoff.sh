@@ -21,7 +21,7 @@
 #   2. writes the subject's headline through gctk bead takeaway, and stops
 #      when the takeaway refuses it, then, when the ruling leaves the subject
 #      waiting on work, its close brief and the arm of its validating closer,
-#      and lifts a hold:mayor that would keep that arm from sending it;
+#      and lifts the placement hold that would keep that arm from sending it;
 #   3. resolves each open gate the conversation replies to with
 #      `ruled: <ruling>`, except each one --leave names, and reads each back. bd
 #      resolves a closed gate without changing it and reports success either
@@ -149,10 +149,11 @@
 # brings it back. The brief and the arm are written in the subject's own rig,
 # whose polecat pool runs the closer, after the headline has written those
 # edges, and before any gate is answered. A subject held for placement carries
-# Gas City's hold:mayor, and the deferred-dispatch pass sends no arm while that
-# label holds its bead, so once the arm stands the sign-off lifts every spelling
-# of it there, also before any gate is answered: the ruling places the subject,
-# and its closer is its next actor. A closer already armed is the one the
+# the placement hold, hold:po or its earlier spelling hold:mayor, and the
+# deferred-dispatch pass sends no arm while a hold holds its bead, so once the
+# arm stands the sign-off lifts every spelling of the placement hold there, also
+# before any gate is answered: the ruling places the subject, and its closer is
+# its next actor. Any other hold stays on, and the closer waits for it. A closer already armed is the one the
 # ruling arms, so it is armed no second time. Once its arm has sent it, a
 # ruling made while its run works the subject arms it again, and Gas City
 # refuses that second launch while the run is live. No closer is armed for a
@@ -298,7 +299,7 @@
 #   the conversation left waiting on the work; 1 stopped short — a read
 #   failed, the rework did not file or its record did not land, the PR did not
 #   retire, the headline, the close brief, the closer's arm or the lift of the
-#   subject's hold:mayor did not land, a gate did not close, the
+#   subject's placement hold did not land, a gate did not close, the
 #   recommendation was not taken, or the conversation did not close, hand back
 #   or stay — so do NOT post the sign-off, or report the ruling as carried out;
 #   repair what it names and re-run, which repeats every write it made safely;
@@ -1347,20 +1348,21 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
         --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" \
       || stopped "$SUBJECT's validating closer was not armed, and gctk bead arm's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
   fi
-  # A subject held for placement carries Gas City's hold:mayor, and the
-  # deferred-dispatch pass sends no arm while a hold label holds its bead, so
-  # the closer would never be sent. The ruling places the subject: it waits on
-  # the work, and the closer is its next actor. So once the arm stands, the
-  # sign-off lifts the hold in the subject's own rig, before any gate is
-  # answered, in one write that removes each spelling of hold:mayor the subject
-  # carries, because Gas City reads the label trimmed and in any case and bd
-  # removes a label only by its exact text. The labels are read here, after
+  # A subject held for placement carries the placement hold, hold:po or its
+  # earlier spelling hold:mayor, and the deferred-dispatch pass sends no arm
+  # while a hold label holds its bead, so the closer would never be sent. The
+  # ruling places the subject: it waits on the work, and the closer is its next
+  # actor. So once the arm stands, the sign-off lifts the placement hold in the
+  # subject's own rig, before any gate is answered, in one write that removes
+  # each spelling of it the subject carries (placement_hold_spellings), because
+  # Gas City reads a hold trimmed and in any case and bd removes a label only by
+  # its exact text. Any other hold is another actor's, and stays on. The labels are read here, after
   # the arm, so the lift removes the spellings the subject carries now. A
   # re-run finds the brief and the arm, and lifts a hold an earlier attempt
   # could not.
   HOLD_ROW=$(show_row "$SUBJECT") \
-    && HOLD_SP=$(printf '%s' "$HOLD_ROW" | jq -r "$DISPATCH_PATH_JQ"'dispatch_hold_spellings("hold:mayor")[]' 2>/dev/null) \
-    || stopped "$SUBJECT's labels could not be read to tell whether hold:mayor keeps its validating closer from being sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed"
+    && HOLD_SP=$(printf '%s' "$HOLD_ROW" | jq -r "$DISPATCH_PATH_JQ"'placement_hold_spellings[]' 2>/dev/null) \
+    || stopped "$SUBJECT's labels could not be read to tell whether the placement hold keeps its validating closer from being sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed"
   if [ -n "$HOLD_SP" ]; then
     HOLD_LIFT=()
     while IFS= read -r sp; do
@@ -1369,8 +1371,8 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
 $HOLD_SP
 EOF
     gc bd update "$SUBJECT" --db "$CLOSER_PATH/.beads" "${HOLD_LIFT[@]}" >/dev/null 2>&1 \
-      || stopped "the store refused the write that lifts hold:mayor from $SUBJECT, and the deferred-dispatch pass sends no arm while that label holds it, so its validating closer would never be sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed. A re-run lifts it, and so does this write by hand: gc bd update $SUBJECT --db $(printf '%q' "$CLOSER_PATH/.beads")$(printf ' %q' "${HOLD_LIFT[@]}")"
-    echo "lifted hold:mayor from $SUBJECT, so its validating closer is sent once $CLOSER_WAITS lands"
+      || stopped "the store refused the write that lifts the placement hold from $SUBJECT, and the deferred-dispatch pass sends no arm while that label holds it, so its validating closer would never be sent; the headline, the close brief and the arm are written, no gate was resolved and the conversation is not closed. A re-run lifts it, and so does this write by hand: gc bd update $SUBJECT --db $(printf '%q' "$CLOSER_PATH/.beads")$(printf ' %q' "${HOLD_LIFT[@]}")"
+    echo "lifted the placement hold ($(printf '%s' "$HOLD_SP" | tr '\n' ' ' | sed 's/ $//')) from $SUBJECT, so its validating closer is sent once $CLOSER_WAITS lands"
   fi
   record_action "Arranged the check that closes this once the work it waits on lands."
 fi

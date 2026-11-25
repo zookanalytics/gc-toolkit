@@ -49,9 +49,9 @@
 # for it.
 #
 # So is a held bead (has_dispatch_hold, assets/scripts/dispatch-path.sh): it
-# carries one of Gas City's hold labels, which say its next actor is not a
-# worker. Intake holds new work for the operator's placement sitting with
-# hold:mayor (docs/steering.md), and its dispatch is the route it gets once the
+# carries a hold:<value> label, which says its next actor is not a worker.
+# Intake holds new work for the operator's placement sitting with hold:po
+# (docs/steering.md), and its dispatch is the route it gets once the
 # sitting places it and the hold is lifted. Arming it would start work the
 # operator has not placed, and the deferred-dispatch pass slings no held bead
 # anyway. `bd blocked` prints a bead's labels, so the hold is read on the row the

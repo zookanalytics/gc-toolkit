@@ -16,11 +16,6 @@
 # discovery reads only the directories under doctor/, so this file is no check.
 
 [[accepted]]
-check = "hold-label-routed-to"
-reason = "It warns on every bead that carries a hold:<value> label and no gc.routed_to naming that value, and the pack holds work for placement with hold:mayor, which names no agent. Gas City's issue 6069 (gastownhall/gascity) reports the check as a bug, because a hold label is no route."
-ruling = "The operator's approval of the design for the patrols' move onto orders, PR #1537."
-
-[[accepted]]
 check = "dolt-compact-state"
 for = "3h"
 reason = "It warns on every pending-GC marker, the one the compactor writes on purpose when a writer races its flatten included, and the compactor clears that marker at its next pass, every two hours. Three hours lets that pass run."

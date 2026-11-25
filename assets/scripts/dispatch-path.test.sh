@@ -3,19 +3,23 @@
 # dispatch path and of a dispatch hold. Covers:
 #   (DEF)     the key list is non-empty and unique, names the route and the arm,
 #             and leaves out gc.execution_routed_to, which is provenance; the
-#             hold labels are Gas City's two, lower case
+#             placement hold's values are po and mayor, lower case
 #   (PRED)    has_dispatch_path is true for a bead carrying any listed key, and
 #             false for a blank value, no metadata, provenance alone, an arm's
 #             sibling keys alone, or a near-miss key
-#   (HOLD)    has_dispatch_hold is true for either hold label, trimmed and in
-#             any case, and false for no labels, another label, a near-miss
-#             label, a label that is not in a list, or the retired marker
+#   (HOLD)    has_dispatch_hold is true for any hold:<value> label, trimmed
+#             and in any case, and false for hold:cleared, a hold: with no
+#             value, no labels, another label, a label that only contains the
+#             word, a label that is not in a list, or the retired marker
+#   (SPELLING) placement_hold_spellings names each label that reads as hold:po
+#             or hold:mayor, verbatim, and no other hold
 #   (READERS) every reader of the dispatch path sources this file, applies
 #             $DISPATCH_PATH_JQ and asks has_dispatch_path, and every reader of
 #             the hold sources it and asks has_dispatch_hold
-#   (NO-COPY) no other file in the pack defines the keys, the labels or a
-#             predicate, tests both keys for a value itself, or tests a label
-#             against both hold labels itself
+#   (NO-COPY) no other file in the pack defines the keys, the values or a
+#             predicate, tests both keys for a value itself, tests a label
+#             against both placement labels itself, or tests a label for the
+#             hold: prefix in jq itself
 # A reader with a private test drifts silently: it keeps the keys or labels it
 # copied and misses every one added later. The behavioral half lives beside
 # each reader (doctor/check-blocked-work-armed/run.test.sh,
@@ -75,32 +79,34 @@ for case in '{}' '{"metadata":null}' '{"metadata":{}}' \
     eq "$(pred "$case")" "false" "(PRED) $case has no dispatch path"
 done
 
-echo "# the hold labels"
-eq "$(jq -nc "$DISPATCH_PATH_JQ"'dispatch_hold_labels' 2>/dev/null)" '["hold:mayor","hold:external"]' \
-   "(DEF) dispatch_hold_labels names Gas City's two hold labels, lower case"
+echo "# the placement hold's values"
+eq "$(jq -nc "$DISPATCH_PATH_JQ"'placement_hold_values' 2>/dev/null)" '["po","mayor"]' \
+   "(DEF) placement_hold_values names hold:po and its earlier spelling, lower case"
 
 echo "# the hold predicate"
 held() { printf '%s' "$1" | jq -r "$DISPATCH_PATH_JQ"'has_dispatch_hold' 2>/dev/null; }
-for l in hold:mayor hold:external HOLD:MAYOR Hold:External ' hold:mayor' $'hold:external\t'; do
+for l in hold:po hold:mayor hold:external hold:release-train HOLD:MAYOR Hold:PO ' hold:po' \
+         $'hold:external\t' 'hold: po' 'hold:mayorx'; do
     eq "$(held "$(jq -nc --arg l "$l" '{labels: ["learning", $l]}')")" \
        "true" "(HOLD) a bead labelled '$l' is held"
 done
+eq "$(held '{"labels":["hold:cleared","hold:po"]}')" "true" "(HOLD) hold:cleared beside a hold releases nothing"
 for case in '{}' '{"labels":null}' '{"labels":[]}' '{"labels":["learning","human"]}' \
-            '{"labels":["hold:po"]}' '{"labels":["hold:mayorx"]}' '{"labels":["hold"]}' \
-            '{"labels":"hold:mayor"}' '{"metadata":{"placement":"pending"}}' \
-            '{"metadata":{"hold":"mayor"}}'; do
+            '{"labels":["hold:cleared"]}' '{"labels":["Hold: Cleared "]}' '{"labels":["hold:"]}' \
+            '{"labels":["hold: "]}' '{"labels":["hold"]}' '{"labels":["on-hold","mpr-human-hold"]}' \
+            '{"labels":"hold:po"}' '{"metadata":{"placement":"pending"}}' \
+            '{"metadata":{"hold":"po"}}'; do
     eq "$(held "$case")" "false" "(HOLD) $case is not held"
 done
 
-spellings() { printf '%s' "$1" | jq -c --arg h "$2" "$DISPATCH_PATH_JQ"'dispatch_hold_spellings($h)' 2>/dev/null; }
-eq "$(spellings '{"labels":["learning","hold:mayor"]}' hold:mayor)" '["hold:mayor"]' \
-   "(SPELLING) a lift removes hold:mayor as the bead spells it"
-eq "$(spellings '{"labels":["Hold:Mayor"," hold:mayor","hold:external"]}' hold:mayor)" '["Hold:Mayor"," hold:mayor"]' \
-   "(SPELLING) every spelling Gas City reads as the hold is named, verbatim, and no other hold"
-eq "$(spellings '{"labels":["hold:mayor"]}' hold:external)" '[]' \
-   "(SPELLING) a hold the bead does not carry has no spelling"
-for case in '{}' '{"labels":null}' '{"labels":["hold:mayorx","hold"]}' '{"labels":"hold:mayor"}'; do
-    eq "$(spellings "$case" hold:mayor)" '[]' "(SPELLING) $case spells no hold"
+spellings() { printf '%s' "$1" | jq -c "$DISPATCH_PATH_JQ"'placement_hold_spellings' 2>/dev/null; }
+eq "$(spellings '{"labels":["learning","hold:po"]}')" '["hold:po"]' \
+   "(SPELLING) a lift removes hold:po as the bead spells it"
+eq "$(spellings '{"labels":["Hold:Mayor"," hold:po","hold:external","hold:mayor","hold:release-train"]}')" '["Hold:Mayor"," hold:po","hold:mayor"]' \
+   "(SPELLING) every spelling of hold:po or hold:mayor is named, verbatim, and no other hold"
+for case in '{}' '{"labels":null}' '{"labels":["hold:external","hold:cleared"]}' \
+            '{"labels":["hold:pos","hold:mayorx","hold"]}' '{"labels":"hold:po"}'; do
+    eq "$(spellings "$case")" '[]' "(SPELLING) $case spells no placement hold"
 done
 
 echo "# every reader sources the one definition"
@@ -137,7 +143,8 @@ for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     asks "$r" has_dispatch_hold
 done
-asks doctor/check-po-queue-only/run.sh dispatch_hold_spellings
+asks doctor/check-po-queue-only/run.sh placement_hold_spellings
+asks assets/scripts/converse-signoff.sh placement_hold_spellings
 
 echo "# no private copies"
 # A copy is a jq def of the keys or the predicate, or one file that tests both
@@ -147,7 +154,7 @@ echo "# no private copies"
 # asks a different question. Specs and generated renders are history and output,
 # not readers.
 value_test_re() { printf '%s' "$1"'\\?"\]?\)?[[:space:]]*(//[[:space:]]*\\?"\\?"[[:space:]]*\)?)?[[:space:]]*[!=]=[[:space:]]*\\?"\\?"'; }
-DEF_RE='def[[:space:]]+(dispatch_path_keys|has_dispatch_path|dispatch_hold_labels|has_dispatch_hold)'
+DEF_RE='def[[:space:]]+(dispatch_path_keys|has_dispatch_path|dispatch_hold_value|has_dispatch_hold|placement_hold_values|placement_hold_spellings)'
 ROUTE_RE="$(value_test_re 'gc\.routed_to')"
 ARM_RE="$(value_test_re 'gc\.dispatch_when_ready')"
 eq "$(printf '%s\n' '| select(($m["gc.dispatch_when_ready"] // "") == "")' | grep -cE "$ARM_RE")" \
@@ -156,28 +163,32 @@ eq "$(printf '%s\n' '(if m(\"gc.routed_to\") != \"\" then \"1\" else \"0\" end)'
    "1" "(NO-COPY) the value test matches an escaped test inside a double-quoted program"
 # A label test compares a value with a hold label: `==` or `!=`, or index,
 # contains or inside, then the label, in either quoting. A file that tests only
-# hold:mayor asks a different question, such as whether its own write of the
-# label landed, so a copy of the hold test is a file that tests both labels.
+# one placement label asks a different question, such as whether its own write
+# of the label landed, so a copy of the placement test is a file that tests
+# both, and a copy of the hold test is a jq startswith of the hold: prefix.
 label_test_re() { printf '%s' '([!=]=|index\(|contains\(|inside\()[[:space:]]*\[?[[:space:]]*\\?"'"$1"'\\?"'; }
 MAYOR_RE="$(label_test_re 'hold:mayor')"
-EXTERNAL_RE="$(label_test_re 'hold:external')"
+PO_RE="$(label_test_re 'hold:po')"
+PREFIX_RE='startswith\([[:space:]]*\\?"hold:\\?"'
 eq "$(printf '%s\n' '| select(any(.labels[]?; ascii_downcase == "hold:mayor"))' | grep -cE "$MAYOR_RE")" \
    "1" "(NO-COPY) the label test matches a jq comparison with a hold label"
-eq "$(printf '%s\n' '(.labels | index(\"hold:external\"))' | grep -cE "$EXTERNAL_RE")" \
+eq "$(printf '%s\n' '(.labels | index(\"hold:po\"))' | grep -cE "$PO_RE")" \
    "1" "(NO-COPY) the label test matches an escaped index inside a double-quoted program"
-eq "$(printf '%s\n' 'gc bd create "$TITLE" -t bug --labels hold:mayor --json' | grep -cE "$MAYOR_RE")" \
+eq "$(printf '%s\n' 'gc bd create "$TITLE" -t bug --labels hold:po --json' | grep -cE "$PO_RE")" \
    "0" "(NO-COPY) writing the label is not a test of it"
+eq "$(printf '%s\n' '| select(.labels[]? | ascii_downcase | startswith("hold:"))' | grep -cE "$PREFIX_RE")" \
+   "1" "(NO-COPY) the prefix test matches a jq startswith of hold:"
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         case "$f" in "$LIB"|"$HERE/dispatch-path.test.sh") continue ;; esac
-        if grep -qE "$DEF_RE" "$f" || { grep -qE "$ROUTE_RE" "$f" && grep -qE "$ARM_RE" "$f"; } \
-            || { grep -qE "$MAYOR_RE" "$f" && grep -qE "$EXTERNAL_RE" "$f"; }; then
+        if grep -qE "$DEF_RE|$PREFIX_RE" "$f" || { grep -qE "$ROUTE_RE" "$f" && grep -qE "$ARM_RE" "$f"; } \
+            || { grep -qE "$MAYOR_RE" "$f" && grep -qE "$PO_RE" "$f"; }; then
             COPIES="$COPIES ${f#"$ROOT"/}"
         fi
-    done <<< "$(grep -rlE "$DEF_RE|$ARM_RE|$EXTERNAL_RE" "$ROOT/$d" 2>/dev/null)"
+    done <<< "$(grep -rlE "$DEF_RE|$ARM_RE|$PO_RE|$PREFIX_RE" "$ROOT/$d" 2>/dev/null)"
 done
 eq "${COPIES# }" "" "(NO-COPY) no file outside dispatch-path.sh carries its own dispatch-path or hold test"
 

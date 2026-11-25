@@ -9,13 +9,18 @@
 # leaves, and no queue reads it.
 #
 # It also defines a dispatch hold, the label that says no worker is the bead's
-# next actor. Gas City's two hold labels (DispatchHoldLabels in its package
-# beadmeta) are `hold:mayor` and `hold:external`, and Gas City serves a bead
-# carrying either to no hook, pool or route-restore sweep. Intake holds new
-# work with `hold:mayor` (docs/steering.md). has_dispatch_hold compares a row's
-# labels the way Gas City's HasDispatchHold does, each label trimmed and in any
-# case. Gas City offers that test only in Go and as a query's --exclude-label,
-# and the readers here test JSON rows they have already read.
+# next actor: any hold:<value> whose value is not cleared, and Gas City serves
+# a bead carrying one to no hook, pool or route-restore sweep. has_dispatch_hold
+# reads a row's labels the way the city's gc reads one (ActiveHoldValue in its
+# package beadmeta, rendered in jq as activeHoldLabelJQ in
+# internal/config/workquery.go, at zookanalytics/gascity d62873fce6): the label
+# trimmed, its hold: prefix in any case, and its value trimmed, not empty and
+# not cleared in any case. Gas City offers that test only in Go and inside the
+# work queries it generates, and the readers here test JSON rows they have
+# already read. Intake holds new work for placement with `hold:po`, and
+# `hold:mayor` is the placement hold's earlier spelling, which a bead held before
+# the move to hold:po carries until gctk bead move-placement-hold moves it
+# (docs/steering.md). placement_hold_spellings names both.
 #
 # Sourced (never executed) by the readers that ask whether a bead already has a
 # dispatch path: the doctor checks check-blocked-work-armed, which flags blocked
@@ -35,7 +40,7 @@
 # read no row here either: they ask the arm's record and the runtime adapter's
 # dispatch hold (services/gctk/internal/gascity/hold.go).
 # gctk bead place, gctk reaction accept and gctk bead takeaway, which lift
-# `hold:mayor` when they send a bead on, read no row here: they take its
+# the placement hold when they send a bead on, read no row here: they take its
 # spellings from the runtime adapter (services/gctk/internal/gascity/hold.go).
 # One definition, no copies: a key or a label added here is read by every one
 # of them at once, and dispatch-path.test.sh fails when a reader stops sourcing
@@ -58,22 +63,27 @@ DISPATCH_PATH_JQ='
   def has_dispatch_path:
     (.metadata // {}) as $m
     | any(dispatch_path_keys[]; ($m[.] // "") | tostring | test("[^[:space:]]"));
-  # The labels Gas City reads as a dispatch hold, lower case.
-  def dispatch_hold_labels: [
-    "hold:mayor",              # the next actor is the coordinator; intake holds new work with it
-    "hold:external"            # the next actor or condition is outside this bd instance
-  ];
-  # True when this bead carries a dispatch hold: a label that, trimmed and in
-  # any case, is one of dispatch_hold_labels. Reads .labels only.
-  def has_dispatch_hold:
-    any((.labels // [])[]?;
-        (tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "") | ascii_downcase) as $l
-        | any(dispatch_hold_labels[]; . == $l));
-  # The labels on this bead that spell the dispatch hold $hold, one of
-  # dispatch_hold_labels, as has_dispatch_hold reads them: each label that,
-  # trimmed and in any case, is $hold. bd removes a label by its exact text, so
-  # a write that lifts the hold removes each of these. Reads .labels only.
-  def dispatch_hold_spellings($hold):
+  # The value of the label in scope when it is a dispatch hold, lower case, or
+  # null: the label trimmed, its hold: prefix in any case, and its value
+  # trimmed, not empty and not cleared. hold:cleared is the value
+  # `bd set-state <id> hold=cleared` leaves, and holds nothing.
+  def dispatch_hold_value:
+    (tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $l
+    | if ($l | ascii_downcase | startswith("hold:"))
+      then ($l[5:] | gsub("^[[:space:]]+|[[:space:]]+$"; "") | ascii_downcase)
+           | if . == "" or . == "cleared" then null else . end
+      else null end;
+  # True when this bead carries a dispatch hold, whatever its value. Reads
+  # .labels only.
+  def has_dispatch_hold: any((.labels // [])[]?; dispatch_hold_value != null);
+  # The values of the placement hold, which holds a bead for the po of its rig
+  # to place: po, and mayor, its earlier spelling.
+  def placement_hold_values: ["po", "mayor"];
+  # The labels on this bead that spell the placement hold, as has_dispatch_hold
+  # reads a hold, each as the bead carries it. bd removes a label by its exact
+  # text, so a write that lifts the placement hold removes each of these, and no
+  # other hold. Reads .labels only.
+  def placement_hold_spellings:
     [ (.labels // [])[]? | tostring
-      | select((gsub("^[[:space:]]+|[[:space:]]+$"; "") | ascii_downcase) == $hold) ];
+      | select(dispatch_hold_value as $v | $v != null and any(placement_hold_values[]; . == $v)) ];
 '

@@ -90,9 +90,9 @@ func TestReadAcceptedNamesTheFile(t *testing.T) {
 	}
 }
 
-// The pack's accepted file reads, and holds the two entries the operator's
-// approval of the design accepted: hold-label-routed-to with no bound, and
-// dolt-compact-state for three hours, each with its reason and that ruling.
+// The pack's accepted file reads, and holds the entry the operator's approval
+// of the design accepted: dolt-compact-state for three hours, with its reason
+// and that ruling.
 func TestThePacksAcceptedFile(t *testing.T) {
 	es, err := ReadAccepted("../../../doctor/accepted.toml")
 	if err != nil {
@@ -105,10 +105,7 @@ func TestThePacksAcceptedFile(t *testing.T) {
 			t.Errorf("%s carries reason %q and ruling %q", e.Check, e.Reason, e.Ruling)
 		}
 	}
-	if len(got) != 2 || got["dolt-compact-state"] != "3h" {
-		t.Fatalf("the pack accepts %v", got)
-	}
-	if bound, ok := got["hold-label-routed-to"]; !ok || bound != "" {
+	if len(got) != 1 || got["dolt-compact-state"] != "3h" {
 		t.Fatalf("the pack accepts %v", got)
 	}
 }

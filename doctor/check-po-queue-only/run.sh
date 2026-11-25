@@ -4,9 +4,9 @@
 #
 # The po (agents/po) is the operator's prioritization partner, one for each
 # rig, and it owns little. What a rig's po receives is the queue of new work no
-# epic holds in its rig's store, the beads carrying Gas City's hold:mayor label
-# in any spelling Gas City reads as the hold, which a sitting reads from `gc
-# beads list`. The check judges every rig's queue and every rig's po alike, so
+# epic holds in its rig's store, the beads carrying the placement hold, hold:po
+# or its earlier spelling hold:mayor, in any spelling Gas City reads as a hold,
+# which a sitting reads from `gc beads list`. The check judges every rig's queue and every rig's po alike, so
 # the city's queue is the queues of its rigs. Nothing at a writer keeps
 # anything else away from it: an assignment, a mail and `gc sling <po> --on
 # <formula>` each reach the seat whatever its config says, and any writer can
@@ -39,7 +39,7 @@
 #     neither: the bead waits on another bead to land and is checked then, so
 #     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
 #     mol-first-reaction sends nothing either: a first reaction triages the
-#     bead and works none of it, and its held exit writes hold:mayor seconds
+#     bead and works none of it, and its held exit writes hold:po seconds
 #     before its run ends.
 #
 # The po's addresses are every identity Gas City serves its work under, which
@@ -55,11 +55,11 @@
 #
 # The queue's JSON is an array from the direct read and {"beads": [...],
 # "_cache_age_s": n} through the supervisor API, and the check takes both. The
-# queue is each open bead of that listing on which
-# dispatch_hold_spellings("hold:mayor") finds a spelling, trimmed and in any
-# case, as Gas City's hold reads it. `gc beads list --label` matches a label's
-# exact text, so it would leave out a bead a person labeled `Hold:Mayor`, which
-# Gas City holds all the same. A queued bead lives in the rig store its id's
+# queue is each open bead of that listing on which placement_hold_spellings
+# finds a spelling of hold:po or hold:mayor, trimmed and in any case, as Gas
+# City reads a hold. `gc beads list --label` matches a label's exact text, so it
+# would leave out a bead a person labeled `Hold:PO`, which Gas City holds all
+# the same, and it reads one label where the queue has two. A queued bead lives in the rig store its id's
 # prefix names. A suspended rig's store is not read, because querying it would
 # auto-start an orphan Dolt server.
 #
@@ -265,13 +265,13 @@ STORES_JSON=$(jq -c '[ .rigs[]? | objects | select((.path // "") != "" and ((.pr
 [ "$rigs_ok" = 1 ] && [ -n "$STORES_JSON" ] || STORES_JSON='{}'
 
 # The queue, in either shape `gc beads list` prints it: the beads that carry
-# hold:mayor in some spelling. An unread queue leaves no queued bead to judge,
+# the placement hold in some spelling. An unread queue leaves no queued bead to judge,
 # and says so.
 wait "$queue_pid"; queue_rc=$?
 if [ "$queue_rc" -ne 0 ] || ! jq -c -s "$DISPATCH_PATH_JQ"'if length != 1 then error("not one document") else .[0] end
         | if type == "array" then . elif type == "object" and (.beads | type) == "array" then .beads
           else error("neither queue shape") end
-        | [ .[] | objects | select(dispatch_hold_spellings("hold:mayor") | length > 0) ]' "$WORK/queue.json" > "$WORK/queued.json" 2>/dev/null; then
+        | [ .[] | objects | select(placement_hold_spellings | length > 0) ]' "$WORK/queue.json" > "$WORK/queued.json" 2>/dev/null; then
     err=$(err_of "$WORK/queue.json")
     warnings+=("could not read the po's queue, \`gc beads list --format=json\` (rc=$queue_rc), so no held bead was checked${err:+; stderr: $err}")
     printf '[]' > "$WORK/queued.json"
@@ -391,7 +391,7 @@ scan_store() {
                 case "$kind" in
                     R) findings+=("$label: run $id sends the po work: $rest. The po takes no work from a run, and nothing refuses \`gc sling <po> --on <formula>\`. Cancel the run, assets/scripts/run-cancel.sh --root $id --reason \"<why>\" --db $db, and send the bead it works to the agent whose work it is") ;;
                     B) IFS=$'\037' read -r what how <<< "$rest"
-                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gc bd set-state $id hold=mayor --reason \"<why it waits for placement>\" --db $db") ;;
+                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gc bd set-state $id hold=po --reason \"<why it waits for placement>\" --db $db") ;;
                 esac
             done <<< "$(jq -r -s --argjson qns "$PO_QNS" --argjson addrs "$PO_ADDRS" "$REACH_JQ" "${reads[@]}" 2>/dev/null)"
         fi
@@ -449,7 +449,7 @@ done <<< "$(jq -r --argjson stores "$STORES_JSON" "$DISPATCH_PATH_JQ"'
     .[] | (if (.metadata | type) == "object" then .metadata else {} end) as $m
     | ((.id // "?") | tostring) as $id
     | (($stores[$id | split("-")[0]] // null) | if . == null then "" else " --db " + .db end) as $dbf
-    | "gc bd update \($id)\([dispatch_hold_spellings("hold:mayor")[] | " --remove-label " + .] | add // "")\($dbf)" as $lift
+    | "gc bd update \($id)\([placement_hold_spellings[] | " --remove-label " + .] | add // "")\($dbf)" as $lift
     | (if ($m.anchor_bead | nonblank) then
          "queued bead \($id) carries anchor_bead=\($m.anchor_bead | tostring): it is PR-finishing work of that bead, not new work, and place refuses it. Lift its hold by removing each spelling of it the bead carries, \($lift), and correct the writer that held it"
        else empty end),

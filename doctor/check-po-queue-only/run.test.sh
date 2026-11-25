@@ -20,8 +20,8 @@
 #     bead, a queued bead whose only mark is a branch, and a queued bead whose
 #     run has ended;
 #   - the queue in both shapes `gc beads list` prints, and the queue is each
-#     listed bead carrying hold:mayor in any spelling Gas City reads, and no
-#     other;
+#     listed bead carrying hold:po or its earlier spelling hold:mayor, in any
+#     spelling Gas City reads, and no other, another hold among them;
 #   - a city with no po: only the queue is judged, and no store is searched;
 #   - a suspended rig's store is never read, and its queued beads are named;
 #   - fail-closed: an unreadable agent list, rig list, queue (a failed read and
@@ -175,7 +175,7 @@ store alpha '{"id":"al-r1","status":"open","issue_type":"task","metadata":{"gc.r
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an unheld bead routed to the po is an ERROR"
 has "$OUT" "alpha bead al-r1 (open task): routed to gc-toolkit.po, outside the po's queue" "the finding names the store, the bead and the route"
-has "$OUT" "gc bd set-state al-r1 hold=mayor --reason" "…and names holding it for the po as a remedy"
+has "$OUT" "gc bd set-state al-r1 hold=po --reason" "…and names holding it for the po as a remedy"
 
 # --- 3. a bead assigned to the po's alias ------------------------------------
 reset
@@ -260,8 +260,8 @@ has "$(line_of "$OUT" "hq-wisp-m2")" "A sender of human is any caller with no se
 # --- 9. a queued bead that is not new work -----------------------------------
 reset
 queue '{"id":"al-q1","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"anchor_bead":"al-anchor"}}' \
-      '{"id":"al-q2","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"merge_result":"pending"}}' \
-      '{"id":"al-q3","status":"open","issue_type":"task","labels":["hold:mayor"],"metadata":{"branch":"polecat/al-q3"}}'
+      '{"id":"al-q2","status":"open","issue_type":"task","labels":["hold:po"],"metadata":{"merge_result":"pending"}}' \
+      '{"id":"al-q3","status":"open","issue_type":"task","labels":["hold:po"],"metadata":{"branch":"polecat/al-q3"}}'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a queued bead that is not new work is an ERROR"
 has "$OUT" "queued bead al-q1 carries anchor_bead=al-anchor" "PR-finishing work in the queue is named"
@@ -330,20 +330,26 @@ OUT=$(QUEUE_JSON="$TMP/queue-api.json" run_check); RC=$?
 eq "$RC" "2" "the queue read through the API is judged the same way"
 has "$OUT" "queued bead al-q1 carries anchor_bead=al-anchor" "…its beads are read out of the envelope"
 
-# --- 11b. the queue is each bead hold:mayor holds, in any spelling -----------
+# --- 11b. the queue is each bead the placement hold holds, in any spelling ---
 # The listing is every open bead, and the queue is the ones Gas City holds under
-# hold:mayor however they spell it. al-s1 carries only an upper-case spelling
-# with spaces, and an assignee; al-s2 carries no hold; al-s3 carries only
-# hold:external, which holds it for an actor outside the city, not for the po.
+# hold:po, or its earlier spelling hold:mayor, however they spell it. al-s1
+# carries only an upper-case spelling of hold:mayor with spaces, and an
+# assignee, and al-s4 carries hold:po and an assignee; al-s2 carries no hold;
+# al-s3 carries only hold:external, which holds it for an actor outside the
+# city, and al-s5 only a hold of the pack's own, neither of them for the po.
 reset
 queue '{"id":"al-s1","status":"open","issue_type":"task","assignee":"someone","labels":[" HOLD:Mayor "],"metadata":{}}' \
       '{"id":"al-s2","status":"open","issue_type":"task","assignee":"someone","metadata":{}}' \
-      '{"id":"al-s3","status":"open","issue_type":"task","assignee":"someone","labels":["hold:external"],"metadata":{}}'
+      '{"id":"al-s3","status":"open","issue_type":"task","assignee":"someone","labels":["hold:external"],"metadata":{}}' \
+      '{"id":"al-s4","status":"open","issue_type":"task","assignee":"someone","labels":["hold:po"],"metadata":{}}' \
+      '{"id":"al-s5","status":"open","issue_type":"task","assignee":"someone","labels":["hold:release-train"],"metadata":{}}'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead held under another spelling of hold:mayor is judged as queued"
 has "$OUT" "queued bead al-s1 is assigned to someone" "…so what already sends it is named"
+has "$OUT" "queued bead al-s4 is assigned to someone" "…and so is a bead hold:po holds"
 hasnt "$OUT" "al-s2" "a bead no hold holds is not in the queue"
 hasnt "$OUT" "al-s3" "…nor a bead only hold:external holds"
+hasnt "$OUT" "al-s5" "…nor a bead only a hold of the pack's own holds"
 
 # --- 12. a city with no po ---------------------------------------------------
 reset

@@ -265,22 +265,28 @@ blocked_store alpha "$(barmed a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead already armed (gc.dispatch_when_ready) is not flagged"
 clear_stores
 
-# A held bead carries one of Gas City's hold labels: intake holds new work for
-# the operator's placement sitting with hold:mayor, and its dispatch comes once
+# A held bead carries a hold:<value> label: intake holds new work for the
+# operator's placement sitting with hold:po, and its dispatch comes once
 # the sitting places it and the hold is lifted, so blocked-and-unrouted is not
 # the anti-pattern for it, and the arm remedy would start work the operator has
 # not placed. `bd blocked` prints a bead's labels, so the row it gives is the
 # one judged, and the check reads no other listing (the stub fails one).
 # bheld <id> <label> — a blocked bead carrying that label.
 bheld() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","blocked_by":["x-0"],"labels":["learning","%s"],"metadata":{}}' "$1" "$2"; }
-blocked_store alpha "$(bheld a-1 hold:mayor)"
+blocked_store alpha "$(bheld a-1 hold:po)"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a blocked bead held for placement (hold:mayor) is not flagged"
+eq "$RC" "0" "a blocked bead held for placement (hold:po) is not flagged"
 hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy"
 hasnt "$OUT" "unexpected list" "…judged on the blocked listing's own row"
 clear_stores
 blocked_store alpha "$(bheld a-1 ' Hold:External')"
-eq "$(run_check >/dev/null; echo $?)" "0" "a bead under Gas City's other hold, its label in another case, is not flagged"
+eq "$(run_check >/dev/null; echo $?)" "0" "a bead under another hold, its label in another case, is not flagged"
+clear_stores
+blocked_store alpha "$(bheld a-1 hold:mayor)"
+eq "$(run_check >/dev/null; echo $?)" "0" "a bead held for placement on the earlier spelling, hold:mayor, is not flagged"
+clear_stores
+blocked_store alpha "$(bheld a-1 hold:release-train)"
+eq "$(run_check >/dev/null; echo $?)" "0" "a bead under a hold of the pack's own is not flagged"
 clear_stores
 # The placement marker is retired: a bead that carries it and no hold label
 # holds nothing, so it is work like any other and owes a dispatch path.
@@ -289,8 +295,8 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a blocked bead carrying only the retired placement marker is flagged"
 has "$OUT" "gctk bead arm a-1" "…and draws the arm remedy"
 clear_stores
-blocked_store alpha "$(bheld a-1 hold:po)"
-eq "$(run_check >/dev/null; echo $?)" "1" "a label that only resembles a hold exempts nothing"
+blocked_store alpha "$(bheld a-1 hold:cleared)"
+eq "$(run_check >/dev/null; echo $?)" "1" "hold:cleared, which holds nothing, exempts nothing"
 clear_stores
 
 # --- a raw control byte in one row does not void its listing -----------------

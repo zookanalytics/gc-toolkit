@@ -295,8 +295,8 @@ clear_stores
 
 # --- 7b'. EXEMPT: an arm a hold label holds — the start sends no held bead -----
 # Its own blocker closed long ago, so without the label it is owed; the label
-# is Gas City's hold, in either value and any case, which no sling reads.
-for lbl in hold:mayor ' Hold:External'; do
+# is a hold:<value>, in any case, which no sling reads.
+for lbl in hold:po hold:mayor ' Hold:External' hold:release-train; do
     armed_store alpha "$(alabelled a-7h "$lbl")"
     edges_store alpha "$(e_blk a-7h b-0)"
     blockers_store alpha "$(b_closed b-0 "$OLD")"
@@ -305,11 +305,11 @@ for lbl in hold:mayor ' Hold:External'; do
     hasnt "$OUT" "alpha bead a-7h" "…and is not reported as owed"
     clear_stores
 done
-armed_store alpha "$(alabelled a-7h hold:po)"
+armed_store alpha "$(alabelled a-7h hold:cleared)"
 edges_store alpha "$(e_blk a-7h b-0)"
 blockers_store alpha "$(b_closed b-0 "$OLD")"
 OUT=$(run_check); RC=$?
-has "$OUT" "alpha bead a-7h" "a label that only resembles a hold leaves the arm owed"
+has "$OUT" "alpha bead a-7h" "hold:cleared, which holds nothing, leaves the arm owed"
 clear_stores
 
 # --- 7c. EXEMPT: a capped arm whose own blockers closed long ago — the start

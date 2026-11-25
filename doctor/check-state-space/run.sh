@@ -51,9 +51,9 @@ HEALER_RE='^(check_set_healed|merge_result_healed|reopened_not_landed|anchorless
 # supersedes edge, so a live bead still carrying one is a close that never
 # landed. gc.supersedes, the successor's inert back-pointer, is not among them.
 # placement is intake's retired marker on new work it holds for placement.
-# Intake holds that work with Gas City's hold:mayor label, and the po's queue
-# reads only the label, so a live bead carrying the marker and no hold waits in
-# no queue.
+# Intake holds that work with the hold:po label, and the po's queue reads only
+# the placement hold, so a live bead carrying the marker and no hold waits in no
+# queue.
 RETIRED_KEYS=(
     stall_root escalation_raised_by escalation.recurrences escalation.recurrence_last
     gc.hold_demand gc.pr_visit_summary gc.pr_visit_actions gc.outcome_reason
@@ -85,7 +85,7 @@ retired_consequence() { # <key> <value> <bead>
         gc.superseded_by_store|superseded_by_store|duplicate_of_store)
             printf '%s' "the store half of a retired successor key, read beside it and nowhere else. Settle the bead's successor key first, then clear this one" ;;
         placement)
-            printf '%s' "intake holds new work with Gas City's hold:mayor label and nothing writes this marker, so a retired writer stamped it. The po's queue reads only the label, so a bead carrying the marker and no hold:mayor waits in no queue. Unless a parent, a route, an arm, an assignee or a live run shows it placed, hold it with gc bd set-state $3 hold=mayor --reason \"<why it waits for placement>\", then clear the key" ;;
+            printf '%s' "intake holds new work with the hold:po label and nothing writes this marker, so a retired writer stamped it. The po's queue reads only the placement hold, so a bead carrying the marker and no hold:po waits in no queue. Unless a parent, a route, an arm, an assignee or a live run shows it placed, hold it with gc bd set-state $3 hold=po --reason \"<why it waits for placement>\", then clear the key" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }

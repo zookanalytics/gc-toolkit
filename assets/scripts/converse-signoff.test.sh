@@ -44,8 +44,9 @@
 #             writes the subject's close brief and arms its validating closer
 #             in the subject's own rig, after the headline and before any gate
 #             is answered, on a turn that does not sign off as well; a subject
-#             held for placement has each spelling of hold:mayor lifted in one
-#             write there once the arm stands, still before any gate is
+#             held for placement has each spelling of hold:po and hold:mayor
+#             lifted in one write there once the arm stands, any other hold
+#             kept, still before any gate is
 #             answered, and one that carries none has no label removed; it asks
 #             for the brief before any write, a re-run writes neither again, a
 #             brief, an arm or a lift that does not land, or labels that do not
@@ -1012,17 +1013,18 @@ eq "$(grep -c '^gctk bead arm' "$CALLS")" "$((ARMS + 1))" "(CLOSER-SENT) …once
 eq "$(briefs tk-sub)/$(field tk-conv status)" "1/closed" "(CLOSER-SENT) …keeping the one brief the answer wrote, and closing the conversation"
 
 # A subject held for placement: the deferred-dispatch pass sends no arm while
-# hold:mayor holds it, in any spelling, so the sign-off lifts every spelling
-# once the arm stands.
-closer_case; labelled tk-sub hold:mayor learning Hold:Mayor
+# a hold holds it, so the sign-off lifts every spelling of the placement hold,
+# hold:po and its earlier spelling hold:mayor, once the arm stands, and leaves
+# any other hold on.
+closer_case; labelled tk-sub hold:po learning Hold:Mayor hold:external
 run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 0 "(CLOSER-HOLD) the sign-off on a subject held for placement exits 0"
-eq "$(labels tk-sub)" '["learning"]' "(CLOSER-HOLD) …lifting each spelling of hold:mayor and keeping its other labels"
+eq "$(labels tk-sub)" '["learning","hold:external"]' "(CLOSER-HOLD) …lifting each spelling of the placement hold and keeping its other labels, another hold among them"
 eq "$(grep -c -e '--remove-label' "$CALLS")" 1 "(CLOSER-HOLD) …in one write"
 has "$(grep -e '--remove-label' "$CALLS")" "--db $RIG_A/.beads" "(CLOSER-HOLD) …in its own rig's store"
-has "$OUT" "lifted hold:mayor from tk-sub" "(CLOSER-HOLD) …saying so"
+has "$OUT" "lifted the placement hold (hold:po Hold:Mayor) from tk-sub" "(CLOSER-HOLD) …saying so"
 case "$(calls)" in
-  *"gctk bead arm tk-sub"*"--remove-label hold:mayor --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
+  *"gctk bead arm tk-sub"*"--remove-label hold:po --remove-label Hold:Mayor"*"gate resolve tk-g"*"bd close tk-conv"*) ok "(CLOSER-HOLD) …after the arm and before any gate is answered" ;;
   *) bad "(CLOSER-HOLD) the lift ran out of order: $(calls)" ;;
 esac
 closer_case; labelled tk-sub Hold:Mayor
