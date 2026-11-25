@@ -33,13 +33,15 @@ shows the same value on the PR's row.
 
 | Label | What it means | What you can do |
 |---|---|---|
-| `status: working` | The city is still working on the PR, for example reviewing it or reworking it to answer review comments. | Nothing yet. |
+| `status: working` | The city is still working on the PR, for example reviewing it, reworking it to answer review comments, or answering a comment a person made on it, approved or not. | Nothing yet. |
 | `status: needs-review` | The city has finished with the PR, and it waits for a person to review it. | Review it. Approve it, or comment, and the city works on your comments. |
 | `status: merging` | The PR is approved and nothing known stops it. | Nothing. The city merges it once its required checks pass. |
 | `status: needs-attention` | Something stops the PR that the city will not clear on its own. | Clear what stops it. A `held:` label usually names it. |
 
 When more than one applies, the label shows the first that does, in this
-order: `needs-attention`, `merging`, `working`, `needs-review`.
+order: `needs-attention`, `merging`, `working`, `needs-review`. A person's
+comment on an approved PR stops its merge until the review run that takes the
+comment finishes, so the PR reads `working` until then.
 
 `services/gctk/pr/prstatus` declares the four values as `State`, each with its
 meaning, and `gctk pr status <bead>` prints the one a PR reads. The board also

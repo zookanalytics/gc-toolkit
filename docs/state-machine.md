@@ -664,8 +664,8 @@ carries exactly one value, and setting one removes any other `status:` value.
 
 | Label | Whose move | When |
 |---|---|---|
-| `status: working` | the city's, changing the PR | an unapproved PR with the city's work left on it: live work on the anchor (a rework or fix child, a validation pass, a review, a finding), a draft the landing order has yet to mark ready, or a required check still running. Also a PR the PR watch has yet to read at the head the store holds, and a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out |
-| `status: merging` | the city's, landing the PR | a ready PR, or an approved one with only the city's work left: its required checks may still be running, a merge-in rework or other city work may be in flight, or GitHub has yet to compute its merge state |
+| `status: working` | the city's, changing the PR | an unapproved PR with the city's work left on it: live work on the anchor (a rework or fix child, a validation pass, a review, a finding), a draft the landing order has yet to mark ready, or a required check still running. Also a PR the PR watch has yet to read at the head the store holds, a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out, and a PR, approved or not, that carries a person's post the city works: one the city has not taken, or one whose ask is open |
+| `status: merging` | the city's, landing the PR | a ready PR, or an approved one with only the city's work left and no person's post it works: its required checks may still be running, a merge-in rework or other city work may be in flight, or GitHub has yet to compute its merge state |
 | `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it, such as one marked ready, reworked and handed back, or left comments by a non-blocking review: only an approval is left, or the lift of a request for changes by the account that made it |
 | `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a required check that failed, a PR that is not open or not the one the record names, a merge state on an approved PR that nothing of the city's changes, such as a conflict or a branch behind a base that requires it current, or a failure of the city's own review machinery ([The machine axis](#the-machine-axis)) |
 
@@ -676,7 +676,11 @@ blocking it is the city's to land, whatever work is in flight on the way. A
 conversation whose sitting stays for the work it sent, or a decision a ruling
 left waiting on the work it sent, holds the merge until that work closes, so a
 PR it holds reads `working`, approved or not, until then, and
-`needs-attention` from then until the conversation or the decision closes.
+`needs-attention` from then until the conversation or the decision closes. A
+person's post the city works holds the merge too, from when the PR watch saves
+it as one the city has not taken until the ask the take filed for it closes,
+so a PR that carries one reads `working`, approved or not, until then
+(`prstatus.Render`).
 City work on an unapproved PR comes before the verdict it leads to, and the
 verdict is what remains when neither stands. A hold that only a human can release reads
 `needs-attention` with no rule of its own.
