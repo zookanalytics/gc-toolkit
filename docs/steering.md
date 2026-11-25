@@ -69,8 +69,8 @@ unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.
 Gas City keeps a bead carrying the label out of its default work query, the
 hook, pool demand and the route-restore sweeps, so no pool is offered it. The
 label names Gas City's default coordinator, and no code branches on who that
-is. In this pack each rig's po works it, and the city's mayor seat, whose name
-the label carries, takes none of it.
+is. In this pack each rig's po works it. The city's mayor seat, whose name the
+label carries, takes none of it.
 
 A held bead carries no route. Gas City's hold conventions say a pack that parks
 finished work on a hold usually clears its route, because the next actor is not
