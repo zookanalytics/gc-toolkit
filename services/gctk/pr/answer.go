@@ -38,7 +38,8 @@ import (
 //     owes none, since the head's comment names its commit, and a wordless
 //     answer owes none on any post, unless the post settles a question or was
 //     made while one it does not settle was open. A must-fix point is answered
-//     once the round has pushed its fix;
+//     once its fix is on the PR: the round pushed its commit, or the PR's
+//     summary carries it;
 //   - the city's handled mark on each such post once its words are on the PR,
 //     but on a post put to a person, which waits for the answer;
 //   - the resolve of each thread such a post sits in, once nothing in it is
@@ -408,7 +409,9 @@ func (a *answering) answer() error {
 // due is what the round's post owes the post the ask r rules carries, and
 // false when it owes it nothing here: r rules a lane's finding, or an ask that
 // carries no person's post, which the head's comment answers, or the post is
-// gone, its fix is not on the PR, or the question it settles did not close.
+// gone, its fix's commit is not on the PR, or the question it settles did not
+// close. A fix in the PR's summary alone is on the PR whether or not the round
+// pushed, since the round's push publishes the summary either way.
 func (a *answering) due(r review.Ruling) (due, bool) {
 	if r.Ask == "" {
 		return due{}, false
@@ -428,7 +431,7 @@ func (a *answering) due(r review.Ruling) (due, bool) {
 	case !ok:
 		a.leave("%s: GitHub holds the post %s no longer", r.Ask, url)
 		return due{}, false
-	case r.Ruling == review.RulingMustFix && a.pushed == "":
+	case r.Ruling == review.RulingMustFix && r.Commit != "" && a.pushed == "":
 		a.leave("%s: %s is ruled must-fix, and the round pushed nothing, so its fix is not on the PR", r.Ask, url)
 		return due{}, false
 	}

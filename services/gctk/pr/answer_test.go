@@ -431,8 +431,9 @@ func TestManyLongAnswersFitTheHeadsComment(t *testing.T) {
 	}
 }
 
-// A must-fix point is answered once the round has pushed its fix, so a round
-// that pushed nothing answers it nowhere.
+// A must-fix point is answered once its fix is on the PR, so a round that
+// pushed nothing answers a point a commit fixes nowhere, and answers a point
+// fixed in the PR's summary alone, which the round's push publishes.
 func TestAMustFixPointIsAnsweredOnceItsFixIsOnThePR(t *testing.T) {
 	d := newRounds(t)
 	url := d.person(pr.PostInline)
@@ -441,6 +442,18 @@ func TestAMustFixPointIsAnsweredOnceItsFixIsOnThePR(t *testing.T) {
 	got := d.posted(t)
 	if len(d.cityPosts("gc:answer")) != 0 || d.reacted("PRRC_260", "THUMBS_UP") || len(got.Left) != 1 {
 		t.Fatalf("a must-fix point whose fix the round did not push was answered: left %q", got.Left)
+	}
+	e := newRounds(t)
+	url = e.person(pr.PostInline)
+	ask = e.ask(t, "Inline comment", url, "2026-11-12T03:00:00Z")
+	e.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingMustFix, Reason: "The summary names it now.",
+		Summary: true})
+	got = e.posted(t)
+	replies := e.cityPosts("<!-- gc:answer " + ask + " -->")
+	if len(replies) != 1 || !strings.Contains(replies[0], "Fixed in the PR's summary: The summary names it now.") ||
+		!e.reacted("PRRC_260", "THUMBS_UP") || !e.resolved("T1") || len(got.Left) != 0 {
+		t.Fatalf("a point fixed in the PR's summary alone: replies %q, marked %v, left %q", replies,
+			e.reacted("PRRC_260", "THUMBS_UP"), got.Left)
 	}
 }
 
