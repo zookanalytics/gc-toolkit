@@ -256,10 +256,15 @@ claim still in progress refuses `gc runtime drain-ack`, so give it back first,
 open and still assigned to you: when nothing holds it, Gas City starts a new
 session for it, and what holds a parked bead decides when it is taken. The
 write is guarded on your claim; a refusal means the item is no longer in
-progress under you, which is what the drain needs. Then remove the trees the
-session left under your home, and end the session:
+progress under you, which is what the drain needs:
 ```bash
 gc bd update <the item> --if-status=in_progress --if-assignee="$GC_AGENT" --status=open
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-patrol.sh" end
+```
+Then remove the trees the session left under your home with
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-patrol.sh" end`,
+and end the session:
+```bash
 gc runtime drain-ack
-```"""
+```
+The drain stops the session, so end the turn there. Work a later message
+names is the next session's."""
