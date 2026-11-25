@@ -69,14 +69,33 @@ skill), or leave it for the operator to place.
   takes only work its aim covers, such as a follow-up that finishes one of its
   Stories.
 - **Send it now only when it is one of these:** a member of an epic, work that
-  finishes an open PR and carries `anchor_bead`, an emergency, or work the
-  operator routed in a sitting (a converse session with the operator), by hand
-  or by Accept. An emergency is a check that fails on the default branch's head,
-  confirmed by reading that check. Other critical work runs now only when the
-  operator routes it. File any other bead with Gas City's `hold:mayor` label in
-  its create and no route or arm: the operator decides where it goes.
-  `gc beads list --label hold:mayor` lists each bead filed so that still waits,
-  in every rig.
+  finishes an open PR and carries `anchor_bead`, a failure on the default
+  branch, or work the operator routed in a sitting (a converse session with the
+  operator), by hand or by Accept. A failure on the default branch is one you
+  saw fail at its head, whether a check there shows it or you ran it there
+  yourself, and its tracker is filed and sent in one call (below). Other
+  critical work runs now only when the operator routes it. File any other bead
+  with Gas City's `hold:mayor` label in its create and no route or arm: the
+  operator decides where it goes. `gc beads list --label hold:mayor` lists each
+  bead filed so that still waits, in every rig.
+- **A failure on the default branch is filed as its tracker, and never held.**
+  The tracker writer files one tracker per failure, with no hold, and sends the
+  tracker it files to its rig's polecat pool, so the failure goes to be fixed.
+  Derive the failure's key, then file it, in a checkout of the rig or with
+  `GC_RIG=<rig>` in front of each call:
+
+  ```bash
+  KEY=$("$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>")
+  "$(gc <binding> scripts-dir)/preexisting-failure.sh" file "$KEY" --summary "<a few words>" --message "<where it failed: the branch and commit, the check or the command that ran, and its raw output>"
+  ```
+
+  `key --target <repo-relative path>` keys a failure with no test function,
+  such as a suite file, a package or a build target, and
+  `key --lint <linter> <repo-relative path>` keys a lint finding, one key per
+  flagged file. When a bead already tracks the key, `file` files and sends
+  nothing and prints that bead's id: add what you saw to it with
+  `gc bd comment <that id> "<what you saw, and where>"`. A warning that the
+  sling failed names the sling that sends the tracker: run it.
 
 ### File a Delivery
 
@@ -111,8 +130,11 @@ boundaries too when you can. Write each field from the outcome the epic seeks,
 even when you file the epic from inside a design for its work, so that it would
 still read true if a different design landed. Each closure check tests that
 outcome, and no field names a mechanism of the design, such as its judge, its
-schedule, the limits it sets or the records it keeps. Wherever you report the
-filing, quote each field you wrote and call it your proposal. A Delivery
+schedule, the limits it sets or the records it keeps. The boundaries name the
+work that someone who reads the hypothesis could mistake for the epic's own,
+found from the hypothesis rather than from a list of the other epics
+(`docs/epics.md`, "Belongs and Boundaries"). Wherever you report the filing,
+quote each field you wrote and call it your proposal. A Delivery
 carries an `Aim:` line instead, as above. An area that is only ever improvable
 has no hypothesis to answer, so it is not an epic, and its work is ordinary
 flow (`docs/epics.md`, "Epics are mortal").
@@ -124,7 +146,7 @@ hypothesis, and files nothing. It prints the new epic's id:
 "$(gc <binding> scripts-dir)/epic.sh" create "<title>" \
   --hypothesis "<for whom, what changes, and the signal that shows it worked>" \
   --handle "<three to five words>" \
-  --boundaries "<the axis it is cut on, and the work beside it that it is not, with where that lives>" \
+  --boundaries "<the axis it is cut on, and the work a reader could mistake for its own, with where that lives>" \
   -d "<what the epic is about>"
 ```
 
@@ -410,14 +432,29 @@ closes the bead once each such gate is cleared.
 
 A bead that duplicates another closes at once, whatever state its canonical is
 in, because the canonical carries the work: `--kind duplicate` needs the two in
-one store and a bead that did no work of its own. Before the close, each open
-bead it blocks comes to wait on the canonical too, so none goes ready before the
-canonical has closed or shipped, and a waiter that cannot refuses the close.
-`fixed-upstream` needs the fix closed or shipped. A duplicate close records the
-canonical, so `bd show` names it under DUPLICATE OF.
+one store and a bead that did no work of its own. `fixed-upstream` needs the fix
+closed or shipped. A duplicate close records the canonical, so `bd show` names
+it under DUPLICATE OF.
+
+What waits on the bead goes on waiting for its work. Under every kind but
+`not-needed`, while the successor has neither closed nor shipped, each open
+bead the closing bead blocks comes to wait on the successor before the close, so
+none goes ready before the successor has delivered, and a waiter that cannot
+take that wait refuses the close. Under `not-needed` the waits end with the
+close. A bead a ruling has recorded a PR-close disposition on closes under that
+ruling and gains no wait.
 
 Before you run it:
 
+- Read what waits on the bead:
+  `gc bd dep list <bead> --direction=up --type blocks`. End first the wait of a
+  bead that does not need the work the successor carries:
+  `gc bd dep remove <waiter> <bead>`.
+- A successor in another rig's store holds no wait from this store, so while a
+  bead waits on the closing bead the script refuses the close. Give each waiter
+  that needs the work a human gate that names the successor (the waits skill),
+  then end its wait on the closing bead as above. The refusal prints both
+  commands.
 - Check that no work on the bead is under way: it is unassigned, has no branch
   or PR that a pool still works on, and is not a review, step or workflow bead.
   Check it yourself, because `gc doctor` skips a bead closed this way and

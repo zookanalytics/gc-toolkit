@@ -223,11 +223,19 @@ func TestTable(t *testing.T) {
 	}
 }
 
-// TestAsks holds each kind of ask to the reader that counts it.
+// TestAsks holds each kind of ask to the reader that counts it. A pull request
+// that stands beneath another ask (beneath) is an ask only for a reason of its
+// own, whether its state is derived from its facts or rendered from the
+// evaluator's answer on Gas Town's pending record.
 func TestAsks(t *testing.T) {
 	gate := Bead{ID: "tk-g", Status: "open", IssueType: "gate", AwaitType: "human"}
 	decision := Bead{ID: "tk-d", Status: "open", IssueType: "decision"}
 	sitting := "gc-toolkit/gc-toolkit.tk-c"
+	held := person.Blocker{ID: "tk-g", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human"}
+	gated := &prstatus.Facts{Gates: []person.Blocker{held}}
+	gatedAndFrozen := &prstatus.Facts{Gates: []person.Blocker{held}, MergeHold: "true"}
+	waitsOnTheGate := &pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindWait, ID: "tk-g"}}}
+	failedBesideTheGate := &pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindCheckFailed, Value: "test"}, {Kind: pr.KindWait, ID: "tk-g"}}}
 	cases := []struct {
 		name string
 		b    Bead
@@ -237,7 +245,9 @@ func TestAsks(t *testing.T) {
 		others    map[string]Bead
 		stays     []string
 		pr        *prstatus.Facts
+		answer    *pr.Answer
 		open, all int
+		beneath   bool
 		want      Ask
 	}{
 		{name: "a human gate is a question", b: gate, kind: KindGate, want: AskQuestion},
@@ -266,6 +276,22 @@ func TestAsks(t *testing.T) {
 			pr: &prstatus.Facts{}, want: AskPullRequest},
 		{name: "a pull request the city is changing is no ask", b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork,
 			pr: &prstatus.Facts{InFlightCount: 1}},
+		{name: "a pull request a human gate alone holds is an ask while it stands beneath no other",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: gated, want: AskPullRequest},
+		{name: "…and no ask beneath the gate's, whose answer is the person's move on it",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: gated, beneath: true},
+		{name: "a pull request held by a gate and by a reason of its own is an ask beneath the gate's too",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: gatedAndFrozen, beneath: true, want: AskPullRequest},
+		{name: "a pull request needing review is an ask beneath another ask",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: &prstatus.Facts{}, beneath: true, want: AskPullRequest},
+		{name: "a pull request assigned to a person, beneath the ask of the gate that alone holds it, is assigned to you",
+			b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindWork, pr: gated, beneath: true,
+			want: AskAssignedToYou},
+		{name: "a pull request on the pending record that waits on the gate alone is no ask beneath the gate's",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: gated, answer: waitsOnTheGate, beneath: true},
+		{name: "…and is an ask beneath it with a failed required check of its own",
+			b: Bead{ID: "tk-w", Status: "open"}, kind: KindWork, pr: gated, answer: failedBesideTheGate, beneath: true,
+			want: AskPullRequest},
 		{name: "work in your queue is assigned to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "task", Assignee: "human"}, kind: KindWork,
 			want: AskAssignedToYou},
 		{name: "a bead in your queue that is no task is assigned to you", b: Bead{ID: "tk-w", Status: "open", IssueType: "bug", Assignee: "human"}, kind: KindWork,
@@ -281,7 +307,7 @@ func TestAsks(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := facts{pr: c.pr}
+			f := facts{pr: c.pr, answer: c.answer}
 			r := readingOf(c.b, c.kind, f)
 			for id, o := range c.others {
 				r.beads[id] = o
@@ -291,7 +317,7 @@ func TestAsks(t *testing.T) {
 			for _, id := range c.stays {
 				stays[id] = true
 			}
-			if got := r.askOf(c.b, c.kind, stays, c.open, c.all); got != c.want {
+			if got := r.askOf(c.b, c.kind, stays, c.open, c.all, c.beneath); got != c.want {
 				t.Errorf("askOf = %q, want %q", got, c.want)
 			}
 		})

@@ -21,9 +21,13 @@
 #
 # With --delete-branch, a landing recorded here deletes origin/<branch>, the
 # branch the record names and so the one the prepared head came from. That
-# happens only after the record lands, and never to <target>. A delete that
-# fails changes nothing else: the landing stands, the branch stays on origin,
-# and the exit is still 0.
+# happens only after the record lands, and never to <target>. The delete
+# leases on the commit the prep read on <branch> (refinery-lib.sh), so origin
+# refuses it once the branch has moved, and a commit pushed there after the
+# prep stays on origin. A delete that fails changes nothing else: the landing
+# stands, and the exit is still 0. When origin then holds the branch at a
+# commit other than the prep's read, the bead's notes name that commit, since
+# the landing was prepared without what the branch gained.
 #
 # The fast-forward is checked against origin/<target> fetched first. A prepared
 # head that is neither behind nor ahead of it was prepared on a target that has
@@ -132,7 +136,9 @@ RIG_ROOT=$("$SCRIPTS_DIR/rig-root.sh")
 [ -n "$RIG_ROOT" ] || { echo "cannot resolve the rig root; nothing landed"; exit 1; }
 HOME_DIR=$(refinery_home) || { echo "the refinery's own worktree is unknown; nothing landed"; exit 1; }
 HOLDS=$(refinery_require "$HOME_DIR" "$WORK" "$BRANCH" 2>&1) || { echo "$HOLDS; nothing landed"; exit 1; }
-refinery_held "$HOME_DIR" "$WORK"
+# The check above runs in a subshell, so this read sets PREP_* here. Its
+# PREP_READ is the lease a --delete-branch delete names.
+refinery_held "$HOME_DIR" "$WORK" || { echo "a second read of the tree for $WORK found no prep; nothing landed"; exit 1; }
 PREP_WT="$PREP_TREE"
 
 fetch_target() { git -C "$RIG_ROOT" fetch origin "+refs/heads/${TARGET}:refs/remotes/origin/${TARGET}"; }
@@ -234,8 +240,18 @@ fi
 if [ -n "$DELETE_BRANCH" ]; then
   if [ "$BRANCH" = "$TARGET" ]; then
     echo "keeping origin/$BRANCH: it is the target $WORK landed on"
-  elif ! DELETE_OUT=$(git -C "$RIG_ROOT" push origin --delete "$BRANCH" 2>&1); then
-    echo "$WORK landed and is recorded, but origin/$BRANCH was not deleted, so it stays on origin. The push said: $DELETE_OUT"
+  elif ! DELETE_OUT=$(git -C "$RIG_ROOT" push --force-with-lease="refs/heads/$BRANCH:$PREP_READ" origin ":refs/heads/$BRANCH" 2>&1); then
+    # Where the branch stands is read from origin, not from the push's words:
+    # a lease refused for a branch that is gone reads the same as one that moved.
+    NOW=$(git -C "$RIG_ROOT" ls-remote --heads origin "refs/heads/$BRANCH" 2>/dev/null | awk 'NR == 1 { print $1 }')
+    if [ -n "$NOW" ] && [ "$NOW" != "$PREP_READ" ]; then
+      KEPT="origin/$BRANCH was kept at $NOW: it moved after the refinery read it at $PREP_READ, the commit this landing was prepared from, so what it gained since is not part of the landing at $MERGED_SHA"
+      echo "$WORK landed and is recorded, but $KEPT. The push said: $DELETE_OUT"
+      gc bd update "$WORK" --append-notes "$KEPT." </dev/null >/dev/null 2>&1 \
+        || echo "the note saying so did not land on $WORK"
+    else
+      echo "$WORK landed and is recorded, but origin/$BRANCH was not deleted${NOW:+, so it stays on origin at $NOW}. The push said: $DELETE_OUT"
+    fi
   fi
 fi
 exit 0

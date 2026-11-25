@@ -3,6 +3,7 @@ package gh_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,16 +91,19 @@ func TestAMergedPullRequestNamesItsMergeCommit(t *testing.T) {
 
 // A merge request and an enqueue each name the PR by its node id and pin the
 // request to the head the caller judged, so GitHub refuses either once a push
-// has moved the head.
+// has moved the head. The merge names its commit's headline, and an enqueue,
+// which takes none, names none.
 func TestAMergeRequestIsPinnedToTheHeadItNames(t *testing.T) {
+	const headline = "fix: name the work (tk-1) (#7)"
 	for _, tc := range []struct {
 		name, mutation string
 		do             func(*gh.Client) error
+		headline       bool
 	}{
-		{"merge", "mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH})",
-			func(c *gh.Client) error { return c.MergePullRequest("PR_kw1", "abc") }},
+		{"merge", "mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH,commitHeadline:$headline})",
+			func(c *gh.Client) error { return c.MergePullRequest("PR_kw1", "abc", headline) }, true},
 		{"enqueue", "enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head})",
-			func(c *gh.Client) error { return c.EnqueuePullRequest("PR_kw1", "abc") }},
+			func(c *gh.Client) error { return c.EnqueuePullRequest("PR_kw1", "abc") }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, r := client([2]string{tc.mutation, `{"data":{"x":{}}}`})
@@ -112,18 +116,29 @@ func TestAMergeRequestIsPinnedToTheHeadItNames(t *testing.T) {
 					t.Errorf("the request %q lacks %q", args, want)
 				}
 			}
+			if named := slices.Contains(r.calls[0].args, "headline="+headline); named != tc.headline {
+				t.Errorf("the request %q names the headline %t, want %t", args, named, tc.headline)
+			}
 		})
 	}
 }
 
 func TestAMergeRequestGitHubRefusesIsAnError(t *testing.T) {
 	c, _ := client([2]string{"mergePullRequest", `{"data":null,"errors":[{"message":"Head branch was modified. Review and try the merge again."}]}`})
-	if err := c.MergePullRequest("PR_kw1", "abc"); err == nil || !strings.Contains(err.Error(), "Head branch was modified") {
+	if err := c.MergePullRequest("PR_kw1", "abc", "fix: name the work (tk-1) (#7)"); err == nil || !strings.Contains(err.Error(), "Head branch was modified") {
 		t.Fatalf("a refused merge request read as %v", err)
 	}
-	c, _ = client()
-	if err := c.MergePullRequest("", "abc"); err == nil {
+	c, r := client()
+	if err := c.MergePullRequest("", "abc", "fix: name the work (tk-1) (#7)"); err == nil {
 		t.Fatal("a merge request that names no PR was sent")
+	}
+	for _, headline := range []string{"", " \t"} {
+		if err := c.MergePullRequest("PR_kw1", "abc", headline); err == nil {
+			t.Fatalf("a merge request under the headline %q was sent", headline)
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a request that names no PR or no headline reached gh: %v", r.calls)
 	}
 }
 

@@ -257,7 +257,7 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 |---|---|
 | `question` | is an open human gate, or an open decision that does not wait on work of its own first |
 | `conversation` | is an open conversation its sitting does not stay in, which answers no open human gate and tracks no decision that asks |
-| `pull-request` | carries a pull request that waits on the operator's review or needs the operator's attention |
+| `pull-request` | carries a pull request that waits on the operator's review, or needs the operator's attention for a reason of its own. One that needs it only for a question or another ask that holds it is stuck on the gate or the bead a person owes instead, by `own-wait` or `further-along` |
 | `assigned-to-you` | is any other open bead only a person clears, such as a task in the operator's queue |
 | `ruling` | is an epic with members and none of them open, or a landed Delivery |
 | `own-wait` | is a human gate, or a bead only a person clears, that the stuck bead waits on through a wait of its own |

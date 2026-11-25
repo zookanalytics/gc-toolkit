@@ -56,16 +56,24 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 #                      or other (the bead's row under another bead's id)
 #   STUB_ROW_FAIL_ID   every `list --id` of this id fails, in the shape
 #                      STUB_ROW_SHAPE names: exit, empty or object, as above
+#   STUB_SLING_FAIL    sling exits non-zero, as one whose rig names no
+#                      default sling target does
 # A list --id answers that bead's row, or [] when the store does not hold it, and
 # hides a gate unless --include-gates lifts that, as bd's type suppression does
 # whatever the --id names. A show of an id the store does not hold answers bd's
 # error object at exit 1, and leaves out an edge marked "external", one onto a bead
-# in another rig's store, as bd's show does and its list does not.
+# in another rig's store, as bd's show does and its list does not. A sling that
+# succeeds prints its result on stdout, as gc's does.
 cat > "$BIN/gc" <<'STUB'
 #!/usr/bin/env bash
 set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
+if [ "${1:-}" = "sling" ]; then
+  [ -n "${STUB_SLING_FAIL:-}" ] && { echo 'gc sling: rig "rig-a" has no default_sling_target or default_sling_targets' >&2; exit 1; }
+  echo "Started workflow tk-wf1 (formula \"mol-polecat-work\") → rig-a/polecat"
+  exit 0
+fi
 [ "${1:-}" = "bd" ] || exit 0
 shift
 case "${1:-}" in
@@ -195,6 +203,7 @@ run() {
 }
 creates() { grep -c '^bd create' "$STUB_LOG"; }
 shows() { grep -c '^bd show' "$STUB_LOG"; }
+slings() { grep -c '^sling' "$STUB_LOG"; }
 field() { jq -r --arg id "$1" ".[] | select(.id == \$id) | $2" "$STUB_STORE"; }
 # closed <id> <closed_at> <metadata json> [<close reason>] [<notes>] — a closed
 # bead carrying the close reason and the notes bd shows for it. A "ptr" member
@@ -344,6 +353,15 @@ REGISTERED=$(sed -n '/^# The metadata-key registry/,$p' "$HERE/../../lifecycle/l
 UNREGISTERED=$(field tk-new1 '.metadata | keys[]' | grep -Fxv -f <(printf '%s\n' "$REGISTERED") | tr '\n' ' ') || true
 eq "$UNREGISTERED" "" "every metadata key the filing writes is registered in lifecycle.toml"
 
+echo "# file: the tracker it files goes to be fixed"
+eq "$(grep '^sling' "$STUB_LOG")" "sling tk-new1" "the new tracker is slung once, naming no target and no formula, so its rig's default sling target takes it on that agent's default formula"
+LAST_SHOW=$(grep -n '^bd show' "$STUB_LOG" | tail -n 1 | cut -d: -f1)
+SLING_AT=$(grep -n '^sling' "$STUB_LOG" | cut -d: -f1)
+[ -n "$SLING_AT" ] && [ "$SLING_AT" -gt "${LAST_SHOW:-0}" ] && ok "it is slung once the read-back has confirmed its stamp" || bad "it is slung once the read-back has confirmed its stamp (sling at line ${SLING_AT:-none}, last show at ${LAST_SHOW:-none})"
+has "$ERR" "sent tk-new1 to be fixed" "the filing says the tracker was sent"
+has "$ERR" "Started workflow tk-wf1" "the sling's own result goes to stderr"
+hasnt "$(cat "$STUB_LOG")" "hold" "nothing holds it for placement"
+
 echo "# file: the retitled tracker is still the key's tracker"
 jq -c 'map(if .id == "tk-new1" then .title = "Quote the array reads in gc-helm.sh" else . end)' "$STUB_STORE" > "$STUB_STORE.n" && mv "$STUB_STORE.n" "$STUB_STORE"
 run find "shellcheck assets/scripts/gc-helm.sh"
@@ -352,11 +370,13 @@ eq "$OUT" "tk-new1" "after its fixer retitles it, the lookup still finds it"
 run file "shellcheck assets/scripts/gc-helm.sh" --message "seen again"
 eq "$RC/$OUT/$(creates)" "0/tk-new1/0" "a second filing files nothing and prints the live tracker"
 has "$ERR" "already tracked as tk-new1" "it says the key was already tracked"
+eq "$(slings)" "0" "a tracker the lookup finds is not slung again: it was sent when it was filed"
 
 echo "# file: a live twin found at filing time, a closed one not"
 store "$(bead tk-twin blocked bug 'Renamed by its fixer' '{"failure_key":"TestReconcile"}')"
 run file TestReconcile --message "seen"
 eq "$RC/$OUT/$(creates)" "0/tk-twin/0" "a live twin filed since the caller's lookup is found by its stamp, not duplicated"
+eq "$(slings)" "0" "the live twin it finds is not slung: a sling would step past whatever holds it"
 store "$(bead tk-old blocked bug 'Pre-existing failure: TestReconcile — misses the window')"
 run file TestReconcile --message "seen"
 eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "an unstamped bug titled with the key does not stop the filing"
@@ -364,6 +384,7 @@ eq "$(field tk-new1 '.metadata.failure_key')" "TestReconcile" "the tracker filed
 store "$(bead tk-done closed bug 'Fixed it' '{"failure_key":"TestReconcile"}' 2026-10-09T08:00:00Z)"
 run file TestReconcile --message "red again after the fix landed"
 eq "$RC/$(creates)" "0/1" "a closed tracker with no successor does not suppress the filing: a red that outlives a fix is new"
+eq "$(grep '^sling' "$STUB_LOG")" "sling tk-new1" "the red that outlives a fix is sent to be fixed again"
 
 echo "# find and file: a tracker a fold closed answers through the live bead its failure moved to"
 K="shellcheck assets/scripts/gc-helm.sh"
@@ -376,6 +397,7 @@ hasnt "$(cat "$STUB_LOG")" "--title-contains" "the successor is reached by its e
 run file "$K" --message "seen again"
 eq "$RC/$OUT/$(creates)" "0/tk-batch/0" "a closed twin with a live successor files nothing"
 has "$ERR" "tracked by tk-batch" "the filing says which bead tracks the key"
+eq "$(slings)" "0" "the live bead a fold moved the failure to is not slung: it carries the failure already"
 for st in in_progress blocked deferred hooked pinned; do
   store "$(closed tk-folded 2026-10-09T07:17:10Z "$(ptr "$K" tk-batch)" "$(reason "folded into" tk-batch)")" \
         "$(bead tk-batch "$st" task 'batch: clear the pre-existing shellcheck tracker set')"
@@ -576,18 +598,24 @@ eq "$RC/$(creates)" "2/0" "--message is required"
 echo "# file: fail closed"
 store
 STUB_LIST_FAIL=1 run file TestReconcile --message "log"
-eq "$RC/$(creates)" "1/0" "an unread lookup files nothing"
+eq "$RC/$(creates)/$(slings)" "1/0/0" "an unread lookup files and sends nothing"
 store
 STUB_CREATE_FAIL=1 run file TestReconcile --message "log"
-eq "$RC/$OUT" "1/" "a refused create fails the filing"
+eq "$RC/$OUT/$(slings)" "1//0" "a refused create fails the filing and sends nothing"
 store
 STUB_CREATE_NO_ID=1 run file TestReconcile --message "log"
 eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "a create that answers no id is recovered by its stamp, not re-filed"
 has "$ERR" "returned no id" "the recovery is reported"
+eq "$(grep '^sling' "$STUB_LOG")" "sling tk-new1" "the recovered tracker is sent"
+store
+STUB_SLING_FAIL=1 run file TestReconcile --message "log"
+eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "a sling that fails leaves the tracker filed, and the filing still prints it"
+has "$ERR" "has no default_sling_target" "the warning carries gc's reason"
+has "$ERR" "nothing is fixing it yet. Send it: gc sling tk-new1" "the warning names the sling that sends it"
 store
 STUB_CREATE_DROP_META=1 run file TestReconcile --message "log"
-eq "$RC/$OUT" "1/" "a read-back that shows the stamp missing fails the filing"
-has "$ERR" "--set-metadata \"failure_key=TestReconcile\"" "the failure names the repair"
+eq "$RC/$OUT/$(slings)" "1//0" "a read-back that shows the stamp missing fails the filing, and the bead no lookup finds is not sent"
+has "$ERR" "--set-metadata \"failure_key=TestReconcile\" && gc sling tk-new1" "the failure names the repair, and the sling once the stamp is right"
 store
 STUB_CREATE_META='{"failure_key":"TestOther"}' run file TestReconcile --message "log"
 eq "$RC/$OUT" "1/" "a read-back that shows another key fails the filing"
@@ -603,6 +631,7 @@ for shape in exit empty object other; do
   STUB_SHOW_FAILS=2 STUB_SHOW_SHAPE=$shape run file TestReconcile --message "log"
   eq "$RC/$OUT/$(creates)" "0/tk-new1/1" "two failed reads ($shape) still print the filed tracker"
   has "$ERR" "could not read tk-new1 back" "the unconfirmed stamp is reported ($shape)"
+  eq "$(grep '^sling' "$STUB_LOG")" "sling tk-new1" "the filed tracker is sent though its stamp is unconfirmed ($shape)"
 done
 has "$ERR" "--set-metadata \"failure_key=TestReconcile\"" "the warning names the repair"
 store

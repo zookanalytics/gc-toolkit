@@ -42,7 +42,9 @@
 #   - with --delete-branch, a recorded landing deletes origin/<branch>, whether
 #     it pushed the landing or found it already there, and only after the
 #     transition; a delete origin refuses leaves the landing standing at exit
-#     0; the target is never deleted; and a run that lands nothing, or one
+#     0; a branch that moved after the prep is kept at its new commit, which
+#     the bead's notes name, while a branch still at the prep's read gets no
+#     note; the target is never deleted; and a run that lands nothing, or one
 #     without the flag, deletes nothing;
 #   - the script never drains the session.
 set -uo pipefail
@@ -382,8 +384,24 @@ chmod +x "$D/origin.git/hooks/pre-receive"
 run
 eq "$RC" 0 "delete-refused: exits 0"
 recorded_at delete-refused "$FEATURE"
-has "$OUT" "wb landed and is recorded, but origin/polecat/wb was not deleted, so it stays on origin" "delete-refused: it says the branch stays"
+has "$OUT" "wb landed and is recorded, but origin/polecat/wb was not deleted, so it stays on origin at $FEATURE" "delete-refused: it says the branch stays, at which commit"
 eq "$(on_origin polecat/wb)" yes "delete-refused: origin/polecat/wb stays"
+case "$(cat "$D/gc.log")" in *"--append-notes"*) bad "delete-refused: a branch still at the prep's read gets no note" "$(cat "$D/gc.log")" ;; *) ok "delete-refused: a branch still at the prep's read gets no note" ;; esac
+
+echo "── a branch that moved after the prep is kept, and the bead's notes say so ──"
+setup "$TMP/delete-branch-moved"
+git -C "$D/seed" checkout -q polecat/wb
+LATE=$(commit "$D/seed" "pushed after the prep")
+git -C "$D/seed" push -q "$D/origin.git" polecat/wb
+git -C "$D/seed" checkout -q main
+run
+eq "$RC" 0 "branch-moved: exits 0"
+recorded_at branch-moved "$FEATURE"
+eq "$(git -C "$D/origin.git" rev-parse main)" "$FEATURE" "branch-moved: origin/main holds the prepared head"
+eq "$(git -C "$D/origin.git" rev-parse -q --verify refs/heads/polecat/wb)" "$LATE" "branch-moved: origin/polecat/wb is kept at the commit pushed after the prep"
+has "$OUT" "wb landed and is recorded, but origin/polecat/wb was kept at $LATE" "branch-moved: it says the branch was kept, at which commit"
+has "$(cat "$D/gc.log")" "bd update wb --append-notes origin/polecat/wb was kept at $LATE: it moved after the refinery read it at $FEATURE, the commit this landing was prepared from" \
+  "branch-moved: the bead's notes name the kept commit and the prep's read"
 
 echo "── --delete-branch never deletes the target ──"
 setup "$TMP/delete-target"

@@ -113,7 +113,7 @@ export function ObjectRow({ id, ctx, depth, kids }: ObjectRowProps) {
         hasKids={childIds.length > 0}
         open={kidsOpen}
         onToggle={() => v.flip(kidsKey, true)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         tag={tagOf(row)}
         title={titleOf(row)}
         quiet={closed}
@@ -128,6 +128,15 @@ export function ObjectRow({ id, ctx, depth, kids }: ObjectRowProps) {
       {kidsOpen && childIds.map((c) => <ObjectRow key={c} id={c} ctx={key} depth={depth + 1} />)}
     </>
   );
+}
+
+/** The priority a row reads: a need's is the highest among it and the beads it
+ *  holds, so a question in front of P1 work reads P1, and any other row's is
+ *  its own. Every row that draws a priority reads it here, so a row reads the
+ *  same on every page. */
+function priorityOf(rows: Record<string, Row>, row: Row): number {
+  if (row.ask === undefined) return row.priority;
+  return Math.min(row.priority, ...row.holds.map((h) => rows[h]?.priority ?? row.priority));
 }
 
 /** A need's tag is its kind, in amber while it waits on you, and any other
@@ -189,10 +198,14 @@ function pullRequestStatus(pr: PullRequest): string {
   return facts.join(' · ');
 }
 
+/** A row's pull request: its number, then where it stands and what holds it,
+ *  except on a row that waits on another need, whose signal says what it
+ *  waits on and whose Details keeps the rest. */
 function pullRequestBits(row: Row): ReactNode[] {
   const pr = row.pull_request;
   if (pr === undefined) return [];
-  const status = pullRequestStatus(pr);
+  const waitsOnANeed = row.ask === undefined && row.group === 'Waiting on you';
+  const status = waitsOnANeed ? '' : pullRequestStatus(pr);
   return [
     <span key="pr" className="bit bit--mono">
       {status === '' ? `#${pr.number}` : `#${pr.number} · ${status}`}
@@ -586,7 +599,7 @@ export function EpicBlock({ entry, index }: { entry: EpicEntry; index: number })
         hasKids
         open={open}
         onToggle={() => v.flip(key, false)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         hue={hue.hue}
         title={titleOf(row)}
         signal={{ text: row.signal, note: row.note, ink: signalInk(row) }}
@@ -660,7 +673,7 @@ function DeliveryBlock({ entry, epicKey }: { entry: DeliveryEntry; epicKey: stri
         hasKids
         open={open}
         onToggle={() => v.flip(key, !done)}
-        priority={row.priority}
+        priority={priorityOf(v.doc.rows, row)}
         tag={tagOf(row)}
         title={row.title}
         signal={{ text: row.signal, note: row.note, ink: signalInk(row) }}

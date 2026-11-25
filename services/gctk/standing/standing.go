@@ -138,8 +138,10 @@ type Reading struct {
 
 // Read answers where each bead named stands and how far the city carries it,
 // through one store. It answers too each bead the advance or the frontier of a
-// bead named reads ([Reading.Advance], [Reading.Frontier]), level by level
-// until a level reaches no bead it has not answered. Every read it makes goes
+// bead named reads ([Reading.Advance], [Reading.Frontier]), and each bead whose
+// answer tells whether a pull request it answers stands beneath another ask
+// ([Reading.Beneath]), level by level until a level reaches no bead it has not
+// answered. Every read it makes goes
 // through s, and a read that fails returns its error and no answer. A reader
 // that could not answer for one bead leaves that bead unread, and the rest are
 // answered.
@@ -232,6 +234,7 @@ func Read(ids []string, s Store) (*Reading, error) {
 			return nil, err
 		}
 	}
+	r.answerBeneath()
 	r.advanceAll()
 	return r, nil
 }
@@ -541,6 +544,16 @@ func (p *PR) Reasons() []prstatus.Reason {
 		return prstatus.RenderReasons(*p.answer, p.facts)
 	}
 	return prstatus.Reasons(p.facts)
+}
+
+// ownAttention reports whether the pull request reads needs-attention for a
+// reason of its own, beside the human gates and the beads a person owes that
+// hold it.
+func (p *PR) ownAttention() bool {
+	if p.answer != nil {
+		return prstatus.RenderOwnAttention(*p.answer, p.facts)
+	}
+	return prstatus.OwnAttention(p.facts)
 }
 
 // holdingRoots are the beads prstatus.Holding is asked about: each bead its

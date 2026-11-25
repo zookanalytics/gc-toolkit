@@ -63,6 +63,30 @@ func TestIntakeHoldsAnUnplacedSubject(t *testing.T) {
 	w.has("--release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(INTAKEANCHOR) it is routed")
 	w.hasnt("SET-STATE", "(INTAKEANCHOR) unheld")
 
+	// A tracker, the bead preexisting-failure.sh files for a failure already
+	// red on a base branch, is work to fix, so intake routes it, or arms it
+	// behind its wait, at its own priority.
+	tracker := func(w *world) {
+		w.subject(func(b *fake.Bead) { b.Edges = nil; b.Metadata = map[string]string{"failure_key": "TestReconcile"} })
+	}
+	w = newWorld(t)
+	tracker(w)
+	code, out, err = w.dispose("tk-sub", "--disposition", "actionable", "--reason", "r", "--takeaway", "t", "--route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(INTAKETRACKER) a failure's tracker")
+	w.has("--release --route gc-toolkit/gc-toolkit.polecat --no-wait", "(INTAKETRACKER) it is routed")
+	w.hasnt("SET-STATE", "(INTAKETRACKER) unheld")
+	w.hasnt("--priority", "(INTAKETRACKER) at its own priority, which only an emergency raises")
+	if out != "tk-sub disposed as actionable (gc-toolkit/gc-toolkit.polecat)" {
+		t.Errorf("(INTAKETRACKER) the exit reported %q", out)
+	}
+	w = newWorld(t)
+	tracker(w)
+	code, _, err = w.dispose("tk-sub", "--disposition", "blocked", "--reason", "r", "--takeaway", "t",
+		"--waiting-on", "tk-blk1", "--then-route", "gc-toolkit/gc-toolkit.polecat", "--run", root)
+	wantCode(t, code, 0, err, "(INTAKETRACKER) a failure's tracker behind a wait")
+	w.has("ARM tk-sub --target gc-toolkit/gc-toolkit.polecat", "(INTAKETRACKER) its dispatch is armed for when the wait lifts")
+	w.hasnt("SET-STATE", "(INTAKETRACKER) unheld behind its wait")
+
 	w = newWorld(t)
 	unplaced(w)
 	w.store.StateErr = errors.New("gc bd set-state exited 1: the store refused it")

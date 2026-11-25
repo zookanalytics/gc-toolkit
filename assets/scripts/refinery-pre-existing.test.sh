@@ -8,6 +8,8 @@
 #     is marked on the bead at the prepared head and printed;
 #   - an untracked failure is filed with its key and its evidence, then marked;
 #   - a rework child's mark goes on the anchor it names;
+#   - a failure whose tracker is the bead itself, or the anchor a rework child
+#     lands for, lands nothing, and nothing is marked;
 #   - a lookup that does not answer, a filing that does not land, or a failure
 #     given no evidence lands nothing, and nothing is marked;
 #   - a mark that does not land leaves the landing going ahead;
@@ -67,6 +69,21 @@ prepared ch polecat/a
 PF_FOUND=tk-old run --bead ch --check test --test TestFoo
 eq "$RC" 0 "the path exits 0"
 has "$(logged scripts)" "rig-check-pre-existing --bead an --check test" "the mark goes on the anchor"
+
+echo "# a failure the bead was sent to fix lands nothing"
+fresh
+PF_FOUND=a run --bead a --check test --test TestFoo
+eq "$RC" 1 "a tracker that is the bead itself exits 1"
+eq "$OUT" "" "…prints no tracker"
+hasnt "$(logged scripts)" "rig-check-pre-existing" "…marks nothing"
+has "$ERR" "send it back as a failure its branch caused" "…and says to send the work back"
+fresh
+work ch polecat/a '{"task_kind":"rework","anchor_bead":"an"}'
+rm -rf "$HOME_DIR/worktrees/a"; git -C "$HOME_DIR" worktree prune
+prepared ch polecat/a
+PF_FOUND=an run --bead ch --check test --test TestFoo
+eq "$RC" 1 "a tracker that is the anchor a rework child lands for exits 1"
+hasnt "$(logged scripts)" "rig-check-pre-existing" "…and marks nothing"
 
 echo "# a lookup, a filing or evidence that is missing lands nothing"
 fresh

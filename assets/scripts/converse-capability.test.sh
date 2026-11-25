@@ -5,7 +5,7 @@
 #
 # The regression this pins: a rig that obtains converse by IMPORTING
 # the pack carries no agents/converse-* under its own checkout, yet the roster
-# registers <rig>/gc-toolkit.converse-<model>. A checkout glob refuses every such
+# registers <rig>/<binding>.converse-<model>. A checkout glob refuses every such
 # rig; the roster affirms it. The predicate must agree with the roster — so a rig
 # PRESENT in a readable roster is capable and a rig ABSENT from one is not, while
 # an unreadable/malformed/empty roster fails open (a degraded data plane is not a
@@ -56,12 +56,12 @@ command -v rig_carries_converse >/dev/null 2>&1 \
 
 # A roster registering converse sitting templates for each named rig. Built the
 # way `gc agent list --json` renders it: an object with an .agents array of
-# {qualified_name} entries.
+# {qualified_name, name, dir} entries, the pack imported as gc-toolkit.
 roster_converse_for() {
     jq -n --arg rigs "$*" '{agents:
         [ ($rigs | split(" ")[] | select(length > 0)) as $r
-          | {qualified_name: ($r + "/gc-toolkit.converse-claude-opus")},
-            {qualified_name: ($r + "/gc-toolkit.converse-codex-sol")} ]}'
+          | {qualified_name: ($r + "/gc-toolkit.converse-claude-opus"), name: "converse-claude-opus", dir: $r},
+            {qualified_name: ($r + "/gc-toolkit.converse-codex-sol"), name: "converse-codex-sol", dir: $r} ]}'
 }
 
 # cap <rig> -> "0" capable, "1" not. Runs in a subshell so the predicate's
@@ -87,21 +87,28 @@ is "an HQ/city root absent from the roster is NOT capable" "$(cap mycity)" 1
 
 # --- the match is converse-specific and variant-aware -------------------------
 
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus"}]}'
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus","name":"converse-claude-opus","dir":"gc-toolkit"}]}'
 is "a single sitting template is capable" "$(cap gc-toolkit)" 0
 
 # engage spawns only a converse-<model> template, so a bare gc-toolkit.converse
 # entry offers no sitting to spawn and must not read as capable.
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"}]}'
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse","name":"converse","dir":"gc-toolkit"}]}'
 is "a bare converse entry with no sitting template is NOT capable" "$(cap gc-toolkit)" 1
 
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive"}]}'
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.proactive","name":"proactive","dir":"gc-toolkit"}]}'
 is "a proactive-only rig is NOT converse-capable" "$(cap gc-toolkit)" 1
 
-# The "/" in the key stops one rig name matching another it is a prefix of. The
-# entry is a real sitting template, so only the rig segment can refuse it.
-export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse-claude-opus"}]}'
+# The rig is matched whole, so a rig name that is a prefix of another does not
+# match it. The entry is a real sitting template, so only its rig can refuse it.
+export ROSTER='{"agents":[{"qualified_name":"gc-toolkit-extra/gc-toolkit.converse-claude-opus","name":"converse-claude-opus","dir":"gc-toolkit-extra"}]}'
 is "a rig name that is a prefix of another is NOT matched" "$(cap gc-toolkit)" 1
+
+# A city names the key it imports the pack under, and Gas City puts it in each
+# agent's qualified name, so a sitting template under any key counts.
+export ROSTER='{"agents":[{"qualified_name":"rig-k/kit.converse-claude-opus","name":"converse-claude-opus","dir":"rig-k"}]}'
+is "a sitting template under another import key is capable" "$(cap rig-k)" 0
+export ROSTER='{"agents":[{"qualified_name":"rig-k/kit.proactive","name":"proactive","dir":"rig-k"},{"qualified_name":"kit.mechanik","name":"mechanik","dir":null}]}'
+is "…and a rig with none under that key is NOT capable" "$(cap rig-k)" 1
 
 # --- fail open on an unreadable roster ----------------------------------------
 

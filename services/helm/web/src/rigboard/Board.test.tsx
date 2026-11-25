@@ -375,7 +375,7 @@ describe('the Epics page', () => {
     expect(headings()[0]).toBe(`Needs you${entry.needs.count}`);
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
     expect(kindsOf(strip).map((k) => k.text)).toEqual([
-      '1 pull request',
+      '0 pull requests',
       '0 questions',
       '0 conversations waiting for you',
       '1 in conversation',
@@ -404,21 +404,49 @@ describe('the Needs you page', () => {
   });
 
   it('draws a need the same way on every page', async () => {
+    // The cut's one pull request waits on a conversation alone, so it is listed
+    // beneath that conversation's need. This document gives it a reason of its
+    // own as well, as a failed check would, so it is a need on every page.
+    const own: Document = structuredClone(board);
+    own.rows['tk-yhquh93.10'] = { ...own.rows['tk-yhquh93.10'], ask: 'Pull request', signal: 'needs-attention' };
+    const need = { id: 'tk-yhquh93.10', kind: 'Pull request' as const, holds: [] };
+    own.needs_you.counted.push(need);
+    own.epics.find((e) => e.id === 'tk-yhquh93')!.needs.counted.push(need);
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: own })];
     render(<Page />);
     await loaded();
     tab(/Needs you/);
-    const need = lookOf('tk-yhquh93.10');
-    expect(need.tag).toBe('Pull request');
-    expect(need.background).not.toBe(lookOf('tk-1tfzr71.39').background);
+    const look = lookOf('tk-yhquh93.10');
+    expect(look.tag).toBe('Pull request');
+    expect(look.background).not.toBe(lookOf('tk-1tfzr71.39').background);
     tab(/Work queue/);
-    expect(lookOf('tk-yhquh93.10')).toEqual(need);
+    expect(lookOf('tk-yhquh93.10')).toEqual(look);
     tab(/Epics/);
     fireEvent.click(within(rowOf('tk-yhquh93')).getByRole('button', { name: /Board UI design/ }));
     const lines = rowsOf('tk-yhquh93.10');
     expect(lines.length).toBeGreaterThan(1);
     for (const line of lines) {
-      expect({ tag: text(line.querySelector('.tag')), background: line.style.background }).toEqual(need);
+      expect({ tag: text(line.querySelector('.tag')), background: line.style.background }).toEqual(look);
     }
+  });
+
+  it('gives a need the highest priority among it and the beads it holds, the same on every page', async () => {
+    render(<Page />);
+    await loaded();
+    const priorityOf = (line: HTMLElement) => text(line.querySelector('.priority'));
+    tab(/Needs you/);
+    // The cut's question tk-q4dd6mk is P2 and holds P1 work.
+    expect(board.rows['tk-q4dd6mk'].priority).toBe(2);
+    expect(board.rows['tk-q4dd6mk'].holds.map((h) => board.rows[h].priority)).toContain(1);
+    expect(priorityOf(rowOf('tk-q4dd6mk'))).toBe('P1');
+    expect(priorityOf(rowOf('tk-toahupq'))).toBe(`P${board.rows['tk-toahupq'].priority}`);
+    for (const id of board.rows['tk-q4dd6mk'].holds) {
+      expect(priorityOf(rowOf(id))).toBe(`P${board.rows[id].priority}`);
+    }
+    tab(/Epics/);
+    fireEvent.click(within(rowOf('tk-1tfzr71')).getByRole('button', { name: SIMPLIFY }));
+    expect(rowsOf('tk-q4dd6mk').length).toBeGreaterThan(0);
+    for (const line of rowsOf('tk-q4dd6mk')) expect(priorityOf(line)).toBe('P1');
   });
 
   it('starts the conversation on a question no conversation answers', async () => {
@@ -536,7 +564,7 @@ describe('the Needs you page', () => {
     tab(/Needs you/);
     const strip = screen.getByRole('group', { name: 'Kinds of need' });
     expect(kindsOf(strip)).toEqual([
-      { text: '1 pull request', control: true },
+      { text: '0 pull requests', control: false },
       { text: '4 questions', control: true },
       { text: '0 conversations waiting for you', control: false },
       { text: '1 in conversation', control: true },
@@ -819,7 +847,8 @@ describe('copying', () => {
 });
 
 // The row and its Details draw a pull request in markup of their own, and
-// read its state and what holds it in the same words.
+// read its state and what holds it in the same words, except on a row that
+// waits on another need, which names it by its number alone.
 describe('a pull request', () => {
   /** The row whose own bead id reads id, as search lists it. */
   function found(id: string): HTMLElement {
@@ -855,10 +884,31 @@ describe('a pull request', () => {
   });
 
   it('reads a state with nothing held, and a number alone, the same way in both', async () => {
+    const doc = structuredClone(board);
+    const working = doc.rows['tk-c9dcsbn'];
+    working.pull_request = { ...working.pull_request!, state: 'working' };
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
     render(<Page />);
     await loaded();
     expect(readings('tk-c9dcsbn')).toEqual({ row: '#1464 · working', details: '#1464 working' });
     expect(readings('tk-1hazlo2')).toEqual({ row: '#1256', details: '#1256' });
+  });
+
+  it('reads what it waits on and its number beneath the need that holds it, and the rest in Details', async () => {
+    const doc = structuredClone(board);
+    const held = doc.rows['tk-yhquh93.10'];
+    held.pull_request = { ...held.pull_request!, state: 'needs-attention', held: ['blocked'] };
+    rigReads = [() => json({ read_at: READ_AT, asked: ASKED, board: doc })];
+    render(<Page />);
+    await loaded();
+    tab(/Needs you/);
+    const shown = rowIds();
+    expect(shown.indexOf('tk-yhquh93.10')).toBe(shown.indexOf('tk-2pvj50q') + 1);
+    const line = rowOf('tk-yhquh93.10');
+    expect(text(line.querySelector('.signal'))).toContain('In conversation');
+    expect(text(line.querySelector('.tag'))).toBe('');
+    expect(line.querySelectorAll('.bit--ref')).toHaveLength(0);
+    expect(readings('tk-yhquh93.10')).toEqual({ row: '#1476', details: '#1476 needs-attention · held: blocked' });
   });
 });
 
