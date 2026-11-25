@@ -1,11 +1,10 @@
-package revise
+package note
 
 import (
 	"errors"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
@@ -15,8 +14,8 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
-// city is the Gas City a revision reaches in these tests: the runtime's fake
-// for the nudge, and the roster's for the session list.
+// city is the Gas City a note's notice reaches in these tests: the runtime's
+// fake for the nudge, and the roster's for the session list.
 type city struct {
 	*rtfake.Runtime
 	*rtfake.Roster
@@ -24,16 +23,16 @@ type city struct {
 
 var _ City = city{}
 
-// world is one revision's surroundings: a store holding the work bead tk-a,
-// open and unassigned, with a live graph.v2 run beneath it whose implement
-// step the live Claude session sess-live holds; a session list naming sess-live
-// and the control-dispatcher; and one log of every write and nudge, in order.
+// world is one note's surroundings: a store holding the work bead tk-a, open
+// and unassigned, with a live graph.v2 run beneath it whose implement step the
+// live Claude session sess-live holds; a session list naming sess-live and the
+// control-dispatcher; and one log of every write and nudge, in order.
 type world struct {
 	t      *testing.T
 	store  *fake.Store
 	rt     *rtfake.Runtime
 	roster *rtfake.Roster
-	v      *Revisions
+	n      *Notes
 
 	mu  sync.Mutex
 	log []string
@@ -62,11 +61,10 @@ func newWorld(t *testing.T) *world {
 		}
 		return gascity.Result{Output: "Nudged " + n.Session + "\n"}
 	}}
-	w.v = &Revisions{
+	w.n = &Notes{
 		Ledger: ledger.New(w.store),
 		City:   city{Runtime: w.rt, Roster: w.roster},
 		By:     by,
-		Now:    func() time.Time { return time.Date(2026, 11, 23, 11, 0, 0, 0, time.UTC) },
 	}
 	return w
 }
@@ -116,18 +114,46 @@ func has(t *testing.T, s, sub, what string) {
 	}
 }
 
-// A bead whose work runs on a workflow reads open and unassigned, and the
-// revision still reaches the session holding the run's step: the note lands
-// first, then that session is nudged at once about the bead, with a message
-// that names the bead, says its notes hold the revision and carries it.
-func TestReviseReachesTheSessionHoldingTheRun(t *testing.T) {
+// Without --notify a note is the one write bd's append makes, of the text as
+// its writer wrote it: it reads no bead and no session list, and tells no one,
+// even with a session working the bead.
+func TestNoteWithoutNotifyIsTheAppendAlone(t *testing.T) {
+	w := newWorld(t)
+	text := "holding: the operator's answer on the drawer\n## Current state (2026-11-25)\nDecisions in force: none\n"
+	out, err := w.n.Note(Request{Bead: "tk-a", Text: text})
+	if err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+	if got := w.notes("tk-a"); got != text {
+		t.Errorf("the notes read %q, want the text as written, %q", got, text)
+	}
+	writes := w.store.Writes()
+	if len(writes) != 1 || strings.Join(writes[0].Args, " ") != "--append-notes "+text {
+		t.Errorf("the writes were %+v, want one append of the note and nothing else", writes)
+	}
+	if f, r, n := w.store.Finds(), w.roster.Reads(), w.rt.Nudges(); len(f) != 0 || len(r) != 0 || len(n) != 0 {
+		t.Errorf("a note without --notify read the store %+v and the session list %+v and nudged %+v", f, r, n)
+	}
+	if got := strings.Join(out, "\n"); got != "noted tk-a" {
+		t.Errorf("printed %q, want the one line that says the note landed", got)
+	}
+}
+
+// With --notify, a bead whose work runs on a workflow reads open and
+// unassigned, and the note still reaches the session holding the run's step:
+// the note lands first, as written, then that session is nudged at once about
+// the bead, with a message that names the bead, says its notes hold the note
+// and carries it.
+func TestNotifyReachesTheSessionHoldingTheRun(t *testing.T) {
 	w := newWorld(t)
 	text := "Build the drawer on Base UI's Dialog, pinned, not a native <dialog>."
-	out, err := w.v.Revise(Request{Bead: "tk-a", Text: text})
+	out, err := w.n.Note(Request{Bead: "tk-a", Text: text, Notify: true})
 	if err != nil {
-		t.Fatalf("Revise: %v", err)
+		t.Fatalf("Note: %v", err)
 	}
-	has(t, w.notes("tk-a"), "## Revised in flight (2026-11-23T11:00:00Z, by "+by+")\n"+text, "the note")
+	if got := w.notes("tk-a"); got != text {
+		t.Errorf("the notes read %q, want the text as written, %q", got, text)
+	}
 	if got := strings.Join(w.log, " | "); got != "UPDATE tk-a | NUDGE sess-live about tk-a" {
 		t.Errorf("the writes and nudges ran as %q, want the note and then the nudge", got)
 	}
@@ -140,90 +166,101 @@ func TestReviseReachesTheSessionHoldingTheRun(t *testing.T) {
 		has(t, msg, want, "the nudge")
 	}
 	all := strings.Join(out, "\n")
-	has(t, all, "revised tk-a: the revision is on its notes", "the output")
+	has(t, all, "noted tk-a", "the output")
 	has(t, all, "sent to sess-live: Nudged sess-live", "the output")
 }
 
-// The nudge is one typed line within NudgeMax bytes, whatever the revision's
+// The nudge is one typed line within NudgeMax bytes, whatever the note's
 // length or lines, cut on a character's boundary and marked as cut, while the
-// note keeps the revision whole.
-func TestReviseNudgeIsOneLineWithinTheBound(t *testing.T) {
+// notes keep the note whole.
+func TestNotifyNudgeIsOneLineWithinTheBound(t *testing.T) {
 	w := newWorld(t)
 	text := strings.Repeat("Keep the old endpoint working.\nAdd the new one beside it, ", 30) + "and say where they differ."
-	if _, err := w.v.Revise(Request{Bead: "tk-a", Text: text}); err != nil {
-		t.Fatalf("Revise: %v", err)
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: text, Notify: true}); err != nil {
+		t.Fatalf("Note: %v", err)
 	}
 	has(t, w.notes("tk-a"), text, "the note")
 	msg := w.rt.Nudges()[0].Message
 	if len(msg) > NudgeMax || strings.Contains(msg, "\n") || !strings.HasSuffix(msg, " ...") {
-		t.Errorf("a long revision's nudge is %d bytes, ends %q, and must be one line within %d, marked as cut", len(msg), msg[max(len(msg)-20, 0):], NudgeMax)
+		t.Errorf("a long note's nudge is %d bytes, ends %q, and must be one line within %d, marked as cut", len(msg), msg[max(len(msg)-20, 0):], NudgeMax)
 	}
 
 	w = newWorld(t)
 	wide := strings.Repeat("é", NudgeMax)
-	if _, err := w.v.Revise(Request{Bead: "tk-a", Text: wide}); err != nil {
-		t.Fatalf("Revise: %v", err)
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: wide, Notify: true}); err != nil {
+		t.Fatalf("Note: %v", err)
 	}
 	if msg := w.rt.Nudges()[0].Message; len(msg) > NudgeMax || !utf8.ValidString(msg) {
-		t.Errorf("a revision of two-byte characters made a nudge of %d bytes, valid UTF-8 %v", len(msg), utf8.ValidString(msg))
+		t.Errorf("a note of two-byte characters made a nudge of %d bytes, valid UTF-8 %v", len(msg), utf8.ValidString(msg))
 	}
 }
 
-// A bead no session works, with no assignee and no live run, takes the note
-// alone, and so does one whose only run has ended.
-func TestReviseWithNoSessionWritesTheNoteAlone(t *testing.T) {
+// With --notify, a bead nobody works, with no assignee and no live run, takes
+// the note and says it waits, and so does one whose only run has ended. A
+// closed bead takes the note too, and has no work on it to tell, whoever it
+// names as its assignee.
+func TestNotifyWithNobodyWorkingTheBead(t *testing.T) {
 	w := newWorld(t)
 	w.store.Put(fake.Bead{ID: "tk-b", Title: "not started", Status: "open", IssueType: "task"})
 	w.store.Put(fake.Bead{ID: "tk-c", Title: "its run ended", Status: "open", IssueType: "task"})
 	w.run("tk-c", "tk-root-c", "tk-convoy-c", "closed")
 	w.store.Put(fake.Bead{ID: "tk-root-c-impl", Status: "in_progress", Assignee: "sess-live",
 		Metadata: map[string]string{"gc.root_bead_id": "tk-root-c"}})
-	for _, bead := range []string{"tk-b", "tk-c"} {
-		out, err := w.v.Revise(Request{Bead: bead, Text: "Cover the empty case too."})
+	w.store.Put(fake.Bead{ID: "tk-done", Title: "landed", Status: "closed", IssueType: "task", Assignee: "sess-live"})
+	for bead, want := range map[string]string{
+		"tk-b":    "nobody works tk-b now, so the note waits for whoever picks it up",
+		"tk-c":    "nobody works tk-c now, so the note waits for whoever picks it up",
+		"tk-done": "tk-done is closed, so no work on it runs, and nobody was told",
+	} {
+		out, err := w.n.Note(Request{Bead: bead, Text: "Cover the empty case too.", Notify: true})
 		if err != nil {
-			t.Fatalf("Revise %s: %v", bead, err)
+			t.Fatalf("Note %s: %v", bead, err)
 		}
 		has(t, w.notes(bead), "Cover the empty case too.", bead+"'s note")
-		has(t, strings.Join(out, "\n"), "no session works "+bead+" now", bead+"'s output")
+		has(t, strings.Join(out, "\n"), want, bead+"'s output")
 	}
 	if n := w.rt.Nudges(); len(n) != 0 {
 		t.Errorf("nudged %+v, want none", n)
 	}
 }
 
-// An empty revision, a closed bead and a bead the store does not hold are
-// refused with nothing written and no nudge.
-func TestReviseRefusesWithNothingWritten(t *testing.T) {
+// An empty note is refused with nothing written and no nudge, and a note on a
+// bead the store does not hold fails as bd's own write does, telling no one.
+func TestNoteRefusesWithNothingWritten(t *testing.T) {
 	w := newWorld(t)
-	w.store.Put(fake.Bead{ID: "tk-done", Title: "landed", Status: "closed", IssueType: "task"})
 	for _, req := range []Request{
 		{Bead: "tk-a", Text: " \n "},
-		{Bead: "tk-done", Text: "Change it."},
-		{Bead: "tk-nowhere", Text: "Change it."},
+		{Bead: "tk-a", Text: "", Notify: true},
 	} {
-		_, err := w.v.Revise(req)
-		if !Refused(err) {
+		if _, err := w.n.Note(req); !Refused(err) {
 			t.Errorf("%+v: %v, want a refusal", req, err)
 		}
 	}
 	if len(w.store.Writes()) != 0 || len(w.rt.Nudges()) != 0 {
 		t.Errorf("a refusal wrote %+v and nudged %+v", w.store.Writes(), w.rt.Nudges())
 	}
+	_, err := w.n.Note(Request{Bead: "tk-nowhere", Text: "Change it.", Notify: true})
+	if err == nil || Refused(err) || IsUntold(err) {
+		t.Errorf("a note on a bead the store does not hold answered %v, want a plain failure", err)
+	}
+	if n := w.rt.Nudges(); len(n) != 0 {
+		t.Errorf("nudged %+v about a bead the store does not hold", n)
+	}
 }
 
 // A holder the session list does not name has gone, a session that runs no
 // agent has no reader for a nudge, and a holder that is this session has the
-// revision: none is nudged, and each is said.
-func TestReviseSkipsWhatCannotReadANudge(t *testing.T) {
+// note: none is nudged, and each is said.
+func TestNotifySkipsWhatCannotReadANudge(t *testing.T) {
 	w := newWorld(t)
 	w.store.Put(fake.Bead{ID: "tk-root-gone", Status: "in_progress", Assignee: "sess-gone",
 		Metadata: map[string]string{"gc.root_bead_id": "tk-root"}})
 	w.store.Put(fake.Bead{ID: "tk-root-ralph", Status: "in_progress", Assignee: "sess-ctl",
 		Metadata: map[string]string{"gc.root_bead_id": "tk-root", "gc.kind": "ralph"}})
-	w.v.Self = []string{"rig__polecat-sess-live", "sess-live"}
-	out, err := w.v.Revise(Request{Bead: "tk-a", Text: "Drop the second endpoint."})
+	w.n.Self = []string{"rig__polecat-sess-live", "sess-live"}
+	out, err := w.n.Note(Request{Bead: "tk-a", Text: "Drop the second endpoint.", Notify: true})
 	if err != nil {
-		t.Fatalf("Revise: %v", err)
+		t.Fatalf("Note: %v", err)
 	}
 	if n := w.rt.Nudges(); len(n) != 0 {
 		t.Errorf("nudged %+v, want none", n)
@@ -237,31 +274,31 @@ func TestReviseSkipsWhatCannotReadANudge(t *testing.T) {
 // A bead claimed or assigned itself is worked by its assignee, which the
 // session list names by its alias, and each session is nudged once, however
 // many of the run's members it holds.
-func TestReviseReachesTheAssigneeOnceEach(t *testing.T) {
+func TestNotifyReachesTheAssigneeOnceEach(t *testing.T) {
 	w := newWorld(t)
 	w.store.Put(fake.Bead{ID: "tk-a", Title: "the work", Status: "in_progress", IssueType: "task", Assignee: "rig/gc-toolkit.refinery"})
 	w.store.Put(fake.Bead{ID: "tk-root-setup", Status: "open", Assignee: "sess-live",
 		Metadata: map[string]string{"gc.root_bead_id": "tk-root", "gc.step_ref": "mol-polecat-work.workspace-setup"}})
 	w.roster.SessionList = append(w.roster.SessionList,
 		gascity.Session{ID: "sess-ref", Alias: "rig/gc-toolkit.refinery", Provider: "claude-watch", State: "active"})
-	if _, err := w.v.Revise(Request{Bead: "tk-a", Text: "Land it on the integration branch."}); err != nil {
-		t.Fatalf("Revise: %v", err)
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: "Land it on the integration branch.", Notify: true}); err != nil {
+		t.Fatalf("Note: %v", err)
 	}
 	if got := strings.Join(w.lines("NUDGE "), " | "); got != "NUDGE sess-ref about tk-a | NUDGE sess-live about tk-a" {
 		t.Errorf("nudged %q, want the assignee's session and the run's, once each", got)
 	}
 }
 
-// A revision whose note landed but which may not have reached a session
-// working the bead says so: a nudge that did not land, a session list that did
-// not read, and a read of the bead's runs that failed each leave the note and
-// say what to send by hand.
-func TestReviseSaysWhatDidNotReach(t *testing.T) {
+// A note that landed but whose notice may not have reached a session working
+// the bead says so: a nudge that did not land, a session list that did not
+// read, a read of the bead's runs that failed and a read of the bead that
+// failed each leave the note and say what to send by hand.
+func TestNotifySaysWhatDidNotReach(t *testing.T) {
 	w := newWorld(t)
 	w.nudgeFails = true
-	out, err := w.v.Revise(Request{Bead: "tk-a", Text: "Use the new schema."})
-	if !IsUnsent(err) {
-		t.Fatalf("a failed nudge answered %v, want an unsent revision", err)
+	out, err := w.n.Note(Request{Bead: "tk-a", Text: "Use the new schema.", Notify: true})
+	if !IsUntold(err) {
+		t.Fatalf("a failed nudge answered %v, want an untold note", err)
 	}
 	has(t, err.Error(), "gc session nudge <session> --delivery immediate --reference-bead tk-a", "the error")
 	has(t, strings.Join(out, "\n"), "not sent to sess-live: exit 1", "the output")
@@ -269,8 +306,8 @@ func TestReviseSaysWhatDidNotReach(t *testing.T) {
 
 	w = newWorld(t)
 	w.roster.SessionsErr = errors.New("the supervisor did not answer")
-	if _, err := w.v.Revise(Request{Bead: "tk-a", Text: "Use the new schema."}); !IsUnsent(err) {
-		t.Errorf("an unread session list answered %v, want an unsent revision", err)
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: "Use the new schema.", Notify: true}); !IsUntold(err) {
+		t.Errorf("an unread session list answered %v, want an untold note", err)
 	}
 	if n := w.rt.Nudges(); len(n) != 0 || !strings.Contains(w.notes("tk-a"), "Use the new schema.") {
 		t.Errorf("an unread session list nudged %+v and left notes %q", n, w.notes("tk-a"))
@@ -278,17 +315,26 @@ func TestReviseSaysWhatDidNotReach(t *testing.T) {
 
 	w = newWorld(t)
 	w.store.DependentsErr = errors.New("the store did not answer")
-	if _, err := w.v.Revise(Request{Bead: "tk-a", Text: "Use the new schema."}); !IsUnsent(err) {
-		t.Errorf("an unread run link answered %v, want an unsent revision", err)
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: "Use the new schema.", Notify: true}); !IsUntold(err) {
+		t.Errorf("an unread run link answered %v, want an untold note", err)
+	}
+
+	w = newWorld(t)
+	w.store.OnFind = func(gcbd.Query) { w.store.FindErr = errors.New("the store did not answer") }
+	if _, err := w.n.Note(Request{Bead: "tk-a", Text: "Use the new schema.", Notify: true}); !IsUntold(err) {
+		t.Errorf("an unread bead answered %v, want an untold note", err)
+	}
+	if !strings.Contains(w.notes("tk-a"), "Use the new schema.") {
+		t.Errorf("an unread bead left notes %q, want the note", w.notes("tk-a"))
 	}
 }
 
-// A note that does not land sends nothing, since the nudge points at it.
-func TestReviseSendsNothingWithoutTheNote(t *testing.T) {
+// A note that does not land tells no one, since the nudge points at it.
+func TestNotifySendsNothingWithoutTheNote(t *testing.T) {
 	w := newWorld(t)
 	w.store.UpdateErr = errors.New("the store did not answer")
-	_, err := w.v.Revise(Request{Bead: "tk-a", Text: "Use the new schema."})
-	if err == nil || Refused(err) || IsUnsent(err) {
+	_, err := w.n.Note(Request{Bead: "tk-a", Text: "Use the new schema.", Notify: true})
+	if err == nil || Refused(err) || IsUntold(err) {
 		t.Fatalf("a note that did not land answered %v, want a plain failure", err)
 	}
 	if n := w.rt.Nudges(); len(n) != 0 {
