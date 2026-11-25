@@ -52,9 +52,9 @@ fails. A call that declares another run runs, and its result replaces the
 record. --check needs no command: it reports whatever is recorded at HEAD, and
 calls nothing but git.
 
-A checkout with changes HEAD does not hold is refused: a record certifies a
-commit. A run that moves HEAD or changes a tracked file records nothing, pass
-or fail. Untracked files a run leaves behind do not stop its record, but the
+A checkout with changes HEAD does not hold is refused, as the call starts and
+again once it holds its slots: a record certifies a commit. A run that moves
+HEAD or changes a tracked file records nothing, pass or fail. Untracked files a run leaves behind do not stop its record, but the
 next call refuses them, so a check command leaves none that git does not
 ignore.
 
@@ -306,6 +306,16 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	held, runFor, code, ended := rigTake(check, scope, o.command, co, o.timeout, say, machine)
 	if ended {
 		return code
+	}
+	// A wait for slots can be long, so the checkout is read again once they are
+	// held. A file it gained while the call waited would otherwise read as one
+	// the run left, which does not stop the record.
+	if moved, gained, err := co.Changes(); err != nil || moved+gained != "" {
+		held.Release()
+		if err != nil {
+			return machine("cannot read the checkout once its slots were held: %v", err)
+		}
+		return machine("the checkout changed while this call waited for slots, so no result here certifies %s:\n%s", co.Commit, firstLines(moved+gained, 10))
 	}
 	say("running %s at %s", runLabel(scope, o.command), co.Commit)
 	out := rig.Run(co.Top, o.command, runFor, held.Limit(), stdout, stderr)

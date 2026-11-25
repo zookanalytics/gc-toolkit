@@ -1103,17 +1103,18 @@ func TestRigTheRunGetsWhatTheWaitLeftOfItsTimeout(t *testing.T) {
 	}
 }
 
-// A setup or build reads whether its checkout is clean once it holds its
-// slots, so what the caller changes there while the run waits is kept.
-func TestRigABuildKeepsWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
-	f := newRigFixture(t)
-	t.Setenv(rig.SlotsVar, "1")
+// callWhileWaiting holds the clone's only slot and makes the call args, and
+// once the call waits in line for the slot, runs meanwhile and frees it. It
+// returns the call's exit and what it wrote to stderr.
+func (f *rigFixture) callWhileWaiting(meanwhile func(), args ...string) (int, string) {
+	f.t.Helper()
+	f.t.Setenv(rig.SlotsVar, "1")
 	old := rig.SlotPoll
 	rig.SlotPoll = 20 * time.Millisecond
-	t.Cleanup(func() { rig.SlotPoll = old })
+	f.t.Cleanup(func() { rig.SlotPoll = old })
 	l, ok, err := host.Local().Lock(f.slot(0))
 	if err != nil || !ok {
-		t.Fatalf("Lock = %v, %v", ok, err)
+		f.t.Fatalf("Lock = %v, %v", ok, err)
 	}
 	type result struct {
 		code int
@@ -1122,7 +1123,7 @@ func TestRigABuildKeepsWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		var out, errb bytes.Buffer
-		code := Run([]string{"rig", "build", "--command", "true"}, "", &out, &errb)
+		code := Run(append([]string{"rig"}, args...), "", &out, &errb)
 		done <- result{code, errb.String()}
 	}()
 	queue := filepath.Join(f.repo, ".git", "gate-slots", "queue.lock")
@@ -1132,15 +1133,41 @@ func TestRigABuildKeepsWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
 		}
 		if time.Now().After(until) {
 			l.Unlock()
-			t.Fatalf("the build never waited for the slot; it ended %+v", <-done)
+			f.t.Fatalf("%v never waited for the slot; it ended %+v", args, <-done)
 		}
 	}
-	f.write("a.txt", "edited while the build waited\n")
-	f.write("draft.txt", "made while the build waited\n")
+	meanwhile()
 	l.Unlock()
 	r := <-done
-	if r.code != 0 || strings.Contains(r.errs, "put back") {
-		t.Fatalf("build = %d, want 0 and nothing put back; stderr:\n%s", r.code, r.errs)
+	return r.code, r.errs
+}
+
+// A recorded check reads its checkout again once it holds its slots, so a
+// file the checkout gained while the check waited stops the call, where it
+// would read as one the run left.
+func TestRigARecordedCheckRefusesWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
+	f := newRigFixture(t)
+	code, errs := f.callWhileWaiting(func() { f.write("draft.txt", "made while the check waited\n") },
+		rig.CheckLint, "--command", countCmd("lint"))
+	if code != rigExitMachine || !strings.Contains(errs, "the checkout changed while this call waited for slots, so no result here certifies "+f.head()+":\n?? draft.txt") {
+		t.Fatalf("lint = %d, want %d naming the new file; stderr:\n%s", code, rigExitMachine, errs)
+	}
+	eqRuns(t, f.runs())
+	if r := f.record(rig.CheckLint, f.head()); r != nil {
+		t.Fatalf("a check whose checkout changed while it waited was recorded: %+v", r)
+	}
+}
+
+// A setup or build reads whether its checkout is clean once it holds its
+// slots, so what the caller changes there while the run waits is kept.
+func TestRigABuildKeepsWhatTheCheckoutGainedWhileItWaited(t *testing.T) {
+	f := newRigFixture(t)
+	code, errs := f.callWhileWaiting(func() {
+		f.write("a.txt", "edited while the build waited\n")
+		f.write("draft.txt", "made while the build waited\n")
+	}, "build", "--command", "true")
+	if code != 0 || strings.Contains(errs, "put back") {
+		t.Fatalf("build = %d, want 0 and nothing put back; stderr:\n%s", code, errs)
 	}
 	if b, err := os.ReadFile(filepath.Join(f.repo, "a.txt")); err != nil || string(b) != "edited while the build waited\n" {
 		t.Fatalf("a.txt = %q, %v; want the edit made while the build waited", b, err)
