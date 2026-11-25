@@ -386,6 +386,16 @@ func TestARulingThatSettlesAQuestion(t *testing.T) {
 	if r := got.Rulings[0]; r.Settles != "tk-q1" || !r.Moot {
 		t.Fatalf("the printed output keeps the ruling as %+v", r)
 	}
+	// A gate named with blanks around it is kept as the store names it, so the
+	// round's post finds the gate the check read.
+	w, st = setup()
+	got = review.Repair{}
+	if err := w.check(st, repair(1, h1, "", settles("tk-ask", " tk-q1 ", false), other), &got); err != nil {
+		t.Fatal(err)
+	}
+	if r := got.Rulings[0]; r.Settles != "tk-q1" {
+		t.Fatalf("the printed output keeps the gate it settles as %q", r.Settles)
+	}
 	for _, c := range []struct {
 		name  string
 		rs    []review.Ruling

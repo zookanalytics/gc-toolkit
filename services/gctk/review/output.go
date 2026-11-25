@@ -225,7 +225,9 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 // repairOutput checks rule-and-repair's output: a ruling for every finding a
 // lane raised and every ask the round can take, each standing by checkRuling.
 // A ruling that settles a question rules an ask that carries a person's post
-// on the PR, since the question is answered with that post.
+// on the PR, since the question is answered with that post. The gate a ruling
+// names, in gate or settles, is kept trimmed, so the round's post and the
+// run's record read the gate the check read.
 func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error) {
 	run, n := st.Run, st.Iteration
 	var rp Repair
@@ -233,6 +235,10 @@ func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error
 		return nil, err
 	}
 	rp.Iteration = n
+	for i := range rp.Rulings {
+		r := &rp.Rulings[i]
+		r.Gate, r.Settles = strings.TrimSpace(r.Gate), strings.TrimSpace(r.Settles)
+	}
 	it := run.Iterations[n]
 	if it == nil || it.Triage == nil {
 		return nil, refuse("triage has written nothing in iteration %d, so there is nothing to rule", n)
