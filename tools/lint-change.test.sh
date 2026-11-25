@@ -20,7 +20,7 @@
 # Hermetic: runs a copy of lint-change.sh in a throwaway git repository, with
 # stand-ins for tools/lint-learned.sh and tools/lint.sh that log each call. The
 # last section runs copies of the real lint.sh, lint-step-text.sh and
-# warrants-touched.sh in a repository of its own.
+# warrants-touched.sh in a repository of its own, with a stand-in for gc.
 
 set -u
 
@@ -133,16 +133,19 @@ echo "── the base reaches lint.sh's parts that read the change ──"
 # warrant that covers the skill, and since landed it does neither. The real
 # lint.sh, lint-step-text.sh and warrants-touched.sh run here, and git ignores
 # them, so no shell file or go.mod is tracked and the shell and Go lints have
-# nothing to run. Stand-ins take the place of lint-learned.sh and the shellcheck
-# runner.
+# nothing to run. Stand-ins take the place of lint-learned.sh, the shellcheck
+# runner and gc, because the real gc lint fails on a repository that holds no
+# pack.
 E2E="$TMP/e2e"
-mkdir -p "$E2E/tools" "$E2E/assets/scripts" "$E2E/docs" "$E2E/skills/example"
+E2E_BIN="$TMP/e2e-bin"
+mkdir -p "$E2E/tools" "$E2E/assets/scripts" "$E2E/docs" "$E2E/skills/example" "$E2E_BIN"
 for t in lint-change.sh lint.sh lint-step-text.sh warrants-touched.sh; do
   cp "$SRC/tools/$t" "$E2E/tools/$t"
 done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E/tools/lint-learned.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E/assets/scripts/shellcheck-run.sh"
-chmod +x "$E2E"/tools/*.sh "$E2E/assets/scripts/shellcheck-run.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$E2E_BIN/gc"
+chmod +x "$E2E"/tools/*.sh "$E2E/assets/scripts/shellcheck-run.sh" "$E2E_BIN/gc"
 printf '# Warrants\n\n## Example warrant\n\n- **Covers.** `skills/example/SKILL.md`\n- **Verified.** 2026-11-24\n' > "$E2E/docs/warrants.md"
 printf '# Example\n' > "$E2E/skills/example/SKILL.md"
 printf '# notes\n' > "$E2E/docs/notes.md"
@@ -159,7 +162,7 @@ e2ec update-ref refs/remotes/origin/main landed
 e2ec checkout -q -b topic
 printf '# notes, changed\n' > "$E2E/docs/notes.md"
 e2ec commit -q -am "change the notes"
-run_e2e() { OUT="$(cd "$E2E" && bash tools/lint-change.sh "$@" 2>&1)"; RC=$?; }
+run_e2e() { OUT="$(cd "$E2E" && PATH="$E2E_BIN:$PATH" bash tools/lint-change.sh "$@" 2>&1)"; RC=$?; }
 
 run_e2e older
 eq "$RC" 1 "a base before the procedure fails the run"
