@@ -93,9 +93,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   gate releases it.
 - Priority: `"$S/queue-priority.sh" move <bead> <P0-P4>`, or `--shift <±n>`
   under a parent.
-- Hold: `gc bd --rig gc-toolkit update <bead> --add-label hold:mayor --append-notes "<ruling: reason>"`.
-  The added label leaves any other hold on the bead, such as `hold:external`,
-  which `set-state` would swap out for it.
+- Hold: `gc bd --rig gc-toolkit update <bead> --add-label hold:mayor --append-notes "<ruling: reason>"`,
+  which keeps any other hold, unlike `set-state`.
 - Close: the `work` skill's "Close a bead that needs no work", with the kind and
   the bead the disposition names: `fixed-upstream` or `duplicate` and a closed or
   shipped bead in the same store, `folded` and an open bead that carries the
