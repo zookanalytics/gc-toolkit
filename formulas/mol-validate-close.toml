@@ -35,13 +35,14 @@ through the arm its ask wrote, and the run it starts carries that answer out.
    hold, there is real work, or the call is the operator's — leaves the bead
    OPEN and files a human gate on it. The ask arms this workflow to run on the
    bead again once the operator has answered and the asking run has ended, and
-   that run carries the answer out.
-   An answer that accepts the close closes the subject. An answer that
-   redirects the work sends it on. This workflow is authorized to close the
-   SUBJECT, which is the one bead it closes. It closes it only on its own
-   confident check or on the operator's answer to its ask. It never closes a
-   bead that carries a `merge_result` (that is the refinery's, closed on a
-   verified merge). Such a bead is put to the operator and takes no arm.
+   that run carries the answer out. An answer that accepts the close closes
+   the subject. An answer that redirects the work sends it on. An answer that
+   waits for other work arms this workflow again, to check the subject once
+   that work has closed. This workflow is authorized to close the SUBJECT,
+   which is the one bead it closes. It closes it only on its own confident
+   check or on the operator's answer to its ask. It never closes a bead that
+   carries a `merge_result` (that is the refinery's, closed on a verified
+   merge). Such a bead is put to the operator and takes no arm.
 4. **Close your own step beads** through assets/scripts/claim-close.sh.
 """
 formula = "mol-validate-close"
@@ -149,9 +150,10 @@ yourself against the live bead and its slice:
 - "the operator answered" — load-context found their answer to an earlier ask,
   newer than the brief. Carry out a `ruled:` answer, and never ask it again.
   An answer that accepts the close takes 2a. Before 2a, confirm anything that
-  answer says was done. An answer that redirects the work takes 2c. Put any
-  other `ruled:` answer to the operator (2b), naming it and what carrying it
-  out needs. A `moot:` or `benign:` answer rules nothing.
+  answer says was done. An answer that redirects the work takes 2c. An answer
+  that waits for other work takes 2d. Put a `ruled:` answer you cannot carry
+  out to the operator (2b), naming it and what carrying it out needs. A
+  `moot:` or `benign:` answer rules nothing.
 
 Two beads are never yours to close, however confident the reason reads. A bead
 carrying `metadata.merge_result` is the refinery's, closed on a verified merge —
@@ -250,22 +252,29 @@ SENT
 gc sling <the pool> <the bead> --on <the formula>
 ```
 
+**2d. CARRY OUT A WAIT.** Record the answer as a close brief, then arm the
+bead on each bead the answer waits for (Arm):
+```bash
+gc bd update <the bead> --append-notes "## Close brief (held on <the work>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+$(cat <<'BRIEF'
+<their answer, and what to check once that work lands>
+BRIEF
+)"
+```
+
 **Arm.** Run this call once for each bead the exit names, then once for this
 run's root, the `root_bead_id` your claim returned:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/await-ruling.sh" <the bead> --blocked-by <what it waits on> --formula mol-validate-close`.
 Arm no bead that carries a `merge_result`.
 
-**3. Close THIS step bead, then drain.** Run this after 2a, 2b or 2c completed. This
-is the terminal graph step, so it still closes its own step bead — that is how a
-graph.v2 step advances, and the dispatcher's `workflow-finalize` closes the
-`kind=workflow` root once every step is closed:
+**3. Close THIS step bead, then drain.** Run this after 2a, 2b, 2c or 2d
+completed. This is the terminal graph step, and it still closes its own step
+bead:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step mol-validate-close.validate-and-resolve && gc runtime drain-ack
 ```
 
-**Exit criteria:** the subject is closed as no-op; or it is open with a human
-gate or a conversation filed and the reason recorded; or it is sent as the
-operator's answer directs. A gate on a subject with no `merge_result` is
-armed. This step bead is closed.
+**Exit criteria:** one of 2a, 2b, 2c and 2d is done, the arm it names
+included, and this step bead is closed.
 """
 metadata = { "gc.continuation_group" = "main", "gc.session_affinity" = "require" }
