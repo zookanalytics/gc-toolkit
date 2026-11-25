@@ -23,16 +23,16 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" bead note <bead> "<decision or finding, the reason, what changed>"
 ```
 
-Add `--notify` when your note changes what the work on the bead should do, and
-never check first whether anyone is working the bead, because the command finds
-out. It tells the bead's assignee and whoever holds a step of a live run on the
-bead, because a bead whose workflow runs reads unassigned. A Claude Code session
-takes the note inside its running turn, with its next tool result. Gas City
-holds it for a Codex session that is running a turn until that turn ends. With
-nobody working the bead, whoever takes it next reads the notes. A note on work
-you are doing yourself takes no flag. Exit 3 means the note landed but someone
-working the bead may not have been told: send the nudge its message gives, then
-go on with what follows the note.
+Put `--notify` before the bead when your note changes what the work on the bead
+should do, and never check first whether anyone is working the bead, because the
+command finds out. It tells the bead's assignee and whoever holds a step of a
+live run on the bead, because a bead whose workflow runs reads unassigned. A
+Claude Code session takes the note inside its running turn, with its next tool
+result. Gas City holds it for a Codex session that is running a turn until that
+turn ends. With nobody working the bead, whoever takes it next reads the notes.
+A note on work you are doing yourself takes no flag. Exit 3 means the note
+landed but someone working the bead may not have been told: send the nudge its
+message gives, then go on with what follows the note.
 
 Never pass `--notes` to a bd write: it replaces the whole field and erases every
 note other writers left there.

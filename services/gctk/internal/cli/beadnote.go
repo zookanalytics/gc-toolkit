@@ -17,6 +17,9 @@ const beadNoteLong = `Appends a note to a bead's notes, as written, in the one w
 append makes (gc bd update <bead> --append-notes). It is how an agent puts any
 note on a bead, whether or not anyone is working the bead.
 
+Flags go before the bead. Whatever follows the bead is the note, read as no
+flag even when it starts with a dash, as a Markdown list or frontmatter does.
+
 --notify is for a note that changes what the work on the bead should do. Once
 the note lands, whoever is working the bead now is told of it: the bead's own
 assignee, and whoever holds a member of a live workflow that works the bead,
@@ -52,7 +55,7 @@ func newBeadNoteCmd(stdout, stderr io.Writer) *cobra.Command {
 	var db string
 	var notify bool
 	cmd := &cobra.Command{
-		Use:   "note <bead> <note> [--notify] [--db <path>]",
+		Use:   "note [--notify] [--db <path>] <bead> <note>",
 		Short: "append a note to a bead, and with --notify tell whoever is working the bead now",
 		Long:  beadNoteLong,
 		Args:  cobra.ExactArgs(2),
@@ -62,6 +65,7 @@ func newBeadNoteCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&notify, "notify", false, "tell whoever is working the bead now, for a note that changes what that work should do")
 	cmd.Flags().StringVar(&db, "db", "", "the store, a store's .beads directory")
+	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
