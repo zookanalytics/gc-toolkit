@@ -22,7 +22,7 @@ through are [state-machine.md](state-machine.md). The refinery *agent*'s steps,
 which land, publish, park or send work back, live in
 `formulas/mol-refinery-patrol.toml` and the scripts each step calls, and are not
 driven by either order. The witness patrol's `check-refinery` step watches
-that patrol's queue for a hand-off gone stuck.
+the refinery's queue for a hand-off gone stuck.
 
 ## Mechanism
 

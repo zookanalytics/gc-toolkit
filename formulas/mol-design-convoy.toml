@@ -484,7 +484,7 @@ child in flight and the subject with nobody, so no child can have landed while
 the subject waited on fewer than all of them.
 
 Then the subject is assigned to the rig's refinery, at the address the polecat
-handoff checks against the roster. The refinery's patrol finds its work by the
+handoff checks against the roster. The refinery's search finds its work by the
 beads assigned to it, and the subject waits on its children and its summary
 task, so the assignee is all the hand-off needs: Gas City nudges the refinery
 when the last of them closes, and the refinery takes the subject once nothing

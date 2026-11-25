@@ -145,8 +145,8 @@ default branch's commits as its change.
 1. File the hand-off by the block below. It names the effort's landing bead
    and waits on the outside work by a `blocks` edge. The block assigns it to
    the refinery, as the work skill sends the refinery a bead. It carries no
-   `branch`, because the refinery's patrol takes a bead that carries one as a
-   branch to land.
+   `branch`, because the refinery takes a bead that carries one as a branch to
+   land.
 2. Make the bead that needs the branch current wait on the hand-off by a
    `blocks` edge, and arm it to dispatch when the hand-off closes (the waits
    skill).

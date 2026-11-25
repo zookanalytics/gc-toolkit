@@ -56,7 +56,7 @@
 # Exit: 0 sent back or armed to go back, sent to the review run as an ask, or
 #         the reason reached the child already on the branch
 #       1 the work did not go back; the output says why. The bead stays with
-#         the refinery: its next patrol retries the requeue, and a
+#         the refinery: its next session retries the requeue, and a
 #         refinery-requeue-failed gate the run filed waits for a person
 #       2 usage
 #       3 the bead left the refinery or changed status before the write, so

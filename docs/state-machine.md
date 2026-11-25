@@ -1072,7 +1072,7 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   finds the head pending, with a passed result an earlier run may have left
   there, and nothing asked of it. When the ask does not land, or the open asks
   on the branch do not read, the requeue writes nothing, and the bead stays
-  with the refinery, whose next patrol retries it. A record refused because the
+  with the refinery, whose next session retries it. A record refused because the
   bead changed after the refinery read it leaves the bead as it stands, with
   the ask holding its merge. A record that does not land for any other reason
   also leaves the ask holding the merge, and files a human gate keyed

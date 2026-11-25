@@ -131,9 +131,9 @@ The check runs at every turn's end and before every prompt. The witness and the
 deacon close each patrol cycle at a turn's end, where the check recycles a
 drifted session, or in Gas City's fresh restart onto their next wisp, which
 starts from the current text, so a change reaches them within the cycle it
-lands in. The refinery's turns start from a nudge, and it waits idle between
-them, which is when a change usually lands, so the check before its next prompt
-is the one that reaches it.
+lands in. A refinery session takes one item and ends, and the next session
+starts from the current text, so a change reaches the refinery by its next item
+at the latest.
 
 A session mid-turn keeps the text it has until that turn ends. The hook never
 ends a turn early, for the reason it defers under an attached operator or a
@@ -145,8 +145,9 @@ that turn's end recycles the session, so its next turn runs the new text.
 Under `--prompt`, a drifted session recycles before the prompt reaches the
 model. The hook sends the HANDOFF mail, which carries the prompt's text,
 requests the restart, and then blocks the prompt, so the old text never acts
-on it. The restarted session starts from the current prompt, adopts its wisp,
-reads its inbox and works its queue.
+on it. The restarted session starts from the current prompt and reads its
+inbox. The witness and the deacon adopt their wisps and work their queues, and
+the refinery takes the item it left in progress.
 
 The hook blocks the prompt exactly when a restart is requested, and its
 handoff and its reset can each request one:
@@ -294,6 +295,10 @@ has that context before it re-derives its wisp.
 
 Pour-before-burn cycle-recycle can therefore leave an open wisp behind;
 the startup-discovery fragments handle that case explicitly.
+
+The refinery holds no wisp. Its item is a claim in progress under the
+refinery, and the restarted session's search takes that claim first
+(`gctk refinery next`), so the claim adopts it.
 
 ## Manual escape hatch
 
