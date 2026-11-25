@@ -516,15 +516,16 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	// Intake's hold is the exit's last write, because the check a re-offered
 	// reaction runs first refuses a held bead: a worker cut off before it
 	// lands meets a subject the check passes, and re-runs this exit to the end.
+	// It adds hold:mayor beside any other hold the subject carries, such as one
+	// another writer put on it since that check, which bd's set-state would
+	// swap out (findStateLabel in cmd/bd/state.go, gastownhall/beads), and its
+	// note says why in the same write.
 	if poolTarget != "" && admit == "" {
-		reason := "Held for placement instead of reaching " + poolTarget + ": " + holdWhy + "."
 		w := r.Ledger.Write(d.Bead)
-		w.Note("## Intake (first reaction, " + intakeAt + ")\n" + reason + " The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:mayor lists it.")
+		w.Note("## Intake (first reaction, " + intakeAt + ")\nHeld for placement instead of reaching " + poolTarget + ": " + holdWhy + ". The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:mayor lists it.")
+		w.AddLabel(gascity.HoldMayor)
 		if err := r.Ledger.Commit(w); err != nil {
-			return out, fmt.Errorf("the %s exit on %s did not land. The headline and the release stand, but intake's note saying why it holds %s did not (%v), so the hold:mayor label was not written. Clear the cause and re-run this command", d.Disposition, d.Bead, d.Bead, err)
-		}
-		if err := r.Ledger.SetState(d.Bead, "hold", "mayor", reason); err != nil {
-			return out, fmt.Errorf("the %s exit on %s did not land. The headline, the release and intake's note stand, but the hold:mayor label did not (%v), so %s rests open and unrouted outside the placement sitting's queue. Clear the cause and re-run this command", d.Disposition, d.Bead, err, d.Bead)
+			return out, fmt.Errorf("the %s exit on %s did not land. The headline and the release stand, but its hold:mayor label and intake's note saying why did not (%v), so %s rests open and unrouted outside the placement sitting's queue. Clear the cause and re-run this command", d.Disposition, d.Bead, err, d.Bead)
 		}
 		r.say("intake wrote the hold:mayor label on %s", d.Bead)
 	}

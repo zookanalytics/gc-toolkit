@@ -49,12 +49,6 @@ type Write struct {
 	Args []string
 }
 
-// State is one set-state the store took: the bead, the dimension, its value
-// and the reason.
-type State struct {
-	ID, Dimension, Value, Reason string
-}
-
 // Edge is one edge write the store took: the bead, the bead the edge is onto,
 // and the edge's type.
 type Edge struct {
@@ -79,7 +73,6 @@ type Store struct {
 	ready   map[string]bool
 	writes  []Write
 	creates []Create
-	states  []State
 	added   []Edge
 	// lastWrites is the newest write the store records under each actor,
 	// which SetLastWrite sets.
@@ -89,13 +82,13 @@ type Store struct {
 
 	// RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr and DependentsErr
 	// fail the matching read when set, ReadyErr failing ReadyIDs too.
-	// UpdateErr fails every update, CreateErr every create, StateErr every
-	// set-state and EdgeErr every edge write.
+	// UpdateErr fails every update, CreateErr every create and EdgeErr every
+	// edge write.
 	RowsErr, BlockedErr, FindErr, ReadyErr, LastWritesErr, UpdateErr, CreateErr error
-	StateErr, EdgeErr, DependentsErr                                            error
+	EdgeErr, DependentsErr                                                      error
 
 	// OnWrite, when set, runs after each write the store takes, outside the
-	// store's lock: its kind (update, create, set-state or dep-add), the bead
+	// store's lock: its kind (update, create or dep-add), the bead
 	// it wrote, and its arguments. A test that asks which write came first
 	// across the store and the runtime logs both into one list.
 	OnWrite func(kind, id string, args []string)
@@ -396,7 +389,7 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes, --title, --priority, --remove-label,
+// --assignee, --append-notes, --title, --priority, --add-label, --remove-label,
 // --description and --parent to the row, and records it. An argument that is no
 // flag names another bead the update writes the same way, as bd's update takes
 // each bead it writes, and each is recorded as a write of its own. A bead the
@@ -526,6 +519,10 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--add-label":
+			if !slices.Contains(b.Labels, value) {
+				b.Labels = append(slices.Clone(b.Labels), value)
+			}
 		case "--remove-label":
 			b.Labels = slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return l == value })
 		case "--description":
@@ -589,33 +586,6 @@ func (s *Store) ReadyIDs() ([]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// SetState makes dimension:value the bead's one label for dimension, as bd's
-// set-state does, and records it. A bead the store does not hold refuses it.
-func (s *Store) SetState(id, dimension, value, reason string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.StateErr != nil {
-		return s.StateErr
-	}
-	b, ok := s.rows[id]
-	if !ok {
-		return fmt.Errorf("fake store: no bead %s", id)
-	}
-	labels := slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return strings.HasPrefix(l, dimension+":") })
-	b.Labels = append(labels, dimension+":"+value)
-	s.rows[id] = b
-	s.states = append(s.states, State{ID: id, Dimension: dimension, Value: value, Reason: reason})
-	s.wrote("set-state", id, []string{dimension + "=" + value, "--reason", reason})
-	return nil
-}
-
-// States returns every set-state the store took, in order.
-func (s *Store) States() []State {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.states)
 }
 
 // EdgeWrites returns every edge write the store took, in order.
