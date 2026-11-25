@@ -166,12 +166,12 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   itself, and a fact is stated a second time only where a reader with
   just that name to follow would miss something they need.
   When your change has to edit text that retells a fact another file
-  owns, such as text it made false, fix the text instead of updating the
-  retelling. Rewrite it to state only its own file's facts, or remove the
-  retelling. Where a reader needs a pointer, name the owner. Fix only the
-  retellings your change has to edit. A list a check requires, such as
-  the key registry's owners and readers, is that fact's one home, and it
-  stays.
+  owns, such as text your change made false, fix the text instead of
+  updating the retelling. Rewrite it to state only its own file's facts,
+  or remove the retelling. Where a reader needs a pointer, name the
+  owner. Fix only the retellings your change has to edit. Keep a list a
+  check requires, such as a registry a test compares with the code, and
+  update it.
 
 
 ## Execute immediately
