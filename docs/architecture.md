@@ -561,13 +561,13 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
-- **A stay comes back only when its work closes.** For new work that opens its
-  own PR, that is after the merge, too late to change the work except through
-  another PR, a stay on the conversation's own subject is refused, and a
-  sitting that finds nothing to ask on its return signs off. Nothing wakes the
-  sitting when its PR is ready for approval, or holds a PR's merge for the
-  returned discussion. The effort tk-vrg93t0 builds the stay that
-  [How humans engage](#how-humans-engage) describes.
+- **In the city's own store, a stay comes back only when its work closes.** The
+  landing order reads only the rigs' stores, so nothing resolves a stay's gate
+  in the city's own store, and a stay there waits on its work through an edge.
+  For new work that opens its own PR, that is after the merge, too late to
+  change the work except through another PR, and a stay on the conversation's
+  own subject is refused there. tk-ix11o44 retires it, by resolving the gate
+  there too or by ending every sitting there at its hand-off.
 - **The witness still patrols, and the deacon still runs `gc doctor`.** Until
   the patrols member's second landing, the witness's hourly loop salvages,
   checks pool seats and the refinery's queue in its session, and returns a dead
