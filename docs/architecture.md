@@ -426,10 +426,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   call. The board's one write that gctk does not carry is archiving a mailbox
   message, which Gas City's mail performs. Accept clears a first reaction's
   recommendation gate and nothing else, under the bead's acceptance lock. The
-  po's backlog refinement works the queue, every bead `hold:po` or its earlier
-  spelling `hold:mayor` holds, in any spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
-  works without the board: it spends no state, so it can never be wrong for
-  longer than one render.
+  po's backlog refinement works its queue
+  ([steering.md](steering.md#the-queue-the-po-works)). Everything works without
+  the board: it spends no state, so it can never be wrong for longer than one
+  render.
 
 The discipline throughout is *agents earn every interaction*: prep done before
 the operator arrives, the choice framed, every surface branded so the operator
