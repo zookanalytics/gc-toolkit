@@ -219,8 +219,8 @@ can apply one directly.
   epic the operator rules should wait is parked before its beads are placed.
 - **Place it on its own**, with no parent, at its own priority:
   `gctk bead place <bead> --standalone`. It is for an emergency that cannot
-  wait for an epic, such as the host going down, and for work the operator
-  names to run on its own.
+  wait for an epic, such as the host going down. It is also for work the
+  operator names to run on its own.
 - **Make it wait on a bead**, when it cannot start until another bead lands, or
   that bead's landing may end its job. The waits skill writes the wait, a
   `blocks` edge onto that bead within one store. Work that goes on once that
