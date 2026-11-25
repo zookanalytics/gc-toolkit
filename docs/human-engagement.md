@@ -1633,8 +1633,8 @@ row on Engage's People page or with `gc-helm mayor`, Gas City's attach on
 `<binding>.mayor`. Its sitting starts and ends as a po's does (*A po sitting*,
 above). Only the operator's attach starts it: no escalation or fallback of the
 city's names it, so the mail still goes to `human`, and the board's city page
-shows how many messages wait there. The operator can still open a po, mechanik
-or a conversation directly.
+shows how many messages wait there. Opening a po, mechanik or a conversation
+directly stays the ordinary way in, and the mayor is an optional one.
 
 A sitting reads the operator's mailbox, the mayor's own, where Gas City's own
 defaults send some alerts, and each rig's needs as `helm-svc board --json`
