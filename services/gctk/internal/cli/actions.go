@@ -39,30 +39,37 @@ tracker that sends a workflow failing there to be fixed (actions track).`,
 }
 
 var actionsTrackLong = fmt.Sprintf(`The actions-track order's pass over one rig. It reads, in one GitHub read,
-the newest %d finished runs that a push to the rig's default branch started, of
-every workflow, in the repository the rig's checkout names as its origin, on
-the branch origin's HEAD names there. A run of another branch, of a pull
-request, or of a commit from a fork does not count.
+the newest %d runs that a push to the rig's default branch started, finished or
+not, of every workflow, in the repository the rig's checkout names as its
+origin, on the branch origin's HEAD names there. A run of another branch, of a
+pull request, or of a commit from a fork does not count.
 
 For each workflow, by its file, the newest run that failed, ran out of time,
 could not start or succeeded decides. A run that ended any other way, such as
-one a newer push cancelled, decides nothing.
+one a newer push cancelled, decides nothing, and nor does one that has not
+finished.
 
 A workflow whose deciding run failed is a failure on the default branch, and
 the pack's writer of a tracker of such a failure, %s in the scripts directory
 GCTK_SCRIPTS_DIR names, keeps one bead for it under the key that its key
 --target derives from the workflow's file. When its find names a bead for the
-key, the pass files nothing. When none does, a run that started before the
-key's tracking last ended files nothing either, since a fix may have ended the
-failure it shows: the tracking ended at the latest close among the key's most
-recently closed tracker and the closed beads that tracker's chain of duplicates
-and supersedes edges reaches, read from the rig's store. Otherwise the pass
-reads the failed run's jobs in one more GitHub read and has the writer file the
-tracker: a bug naming the workflow, the run and its link, its commit, the last
-success before it, its failed jobs and steps, the command that prints their
-log, and how to find a tracker the failure already has. The writer files into
-the store gc resolves for this process, which the order's environment makes
-the rig's, and sends each tracker it files to be fixed.
+key, the pass files nothing. When none does, a failed run that the key's
+tracking covered before it last ended files nothing either, since a fix may
+have ended the failure it shows. The tracking ended at the latest close among
+the key's most recently closed tracker and the closed beads that tracker's chain
+of duplicates and supersedes edges reaches, read from the rig's store. A run
+that started before then is covered when that tracker was filed after the run
+was made, or when a newer run of the workflow, made before then, has not
+decided. The newest run made between the filing and the end, such as the run of
+the commit that landed the fix, is not covered, so its failure is filed.
+
+For a failure it files, the pass reads the failed run's jobs in one more GitHub
+read and has the writer file the tracker: a bug naming the workflow, the run
+and its link, its commit, the last success before it, its failed jobs and
+steps, the command that prints their log, and how to find a tracker the failure
+already has. The writer files into the store gc resolves for this process,
+which the order's environment makes the rig's, and sends each tracker it files
+to be fixed.
 
 Each GitHub read ends after %s.
 

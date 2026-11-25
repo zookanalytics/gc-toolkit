@@ -1,6 +1,6 @@
 ---
 name: Gas City search for sending a check that fails on a rig's main to be fixed
-description: The search the arch check asks for before the pack adds `gctk actions track` and the actions-track order, which file the tracker of each GitHub Actions workflow whose newest finished push run on a rig's default branch failed. It covers what Gas City, bd and the packs Gas City publishes ship near that need, read at named upstream commits, why the pass files through the pack's tracker of a failure on a base branch, and why it reads the branch's newest finished push runs in one call. Read it when checking whether the pass can move onto a Gas City primitive.
+description: The search the arch check asks for before the pack adds `gctk actions track` and the actions-track order, which file the tracker of each GitHub Actions workflow whose newest finished push run on a rig's default branch failed. It covers what Gas City, bd and the packs Gas City publishes ship near that need, read at named upstream commits, why the pass files through the pack's tracker of a failure on a base branch, and why it reads the branch's newest push runs in one call. Read it when checking whether the pass can move onto a Gas City primitive.
 ---
 
 # Gas City search for sending a check that fails on a rig's main to be fixed
@@ -21,14 +21,14 @@ is one the pack already keeps, its tracker.
 
 ## The surface and the need
 
-- `gctk actions track --rig <rig> [--dry-run]` reads the newest 100 finished
-  runs that pushes to the rig's default branch started, of every workflow, in
-  one GitHub read. For each workflow file, the newest run that failed or
-  succeeded decides. For each workflow whose deciding run failed, it files the
-  tracker through `preexisting-failure.sh`. It files nothing while a bead
-  already tracks the failure, and nothing for a run that started before the
-  failure's tracking last ended. It reads the failed run's jobs only for a
-  tracker it files.
+- `gctk actions track --rig <rig> [--dry-run]` reads the newest 100 runs that
+  pushes to the rig's default branch started, finished or not, of every
+  workflow, in one GitHub read. For each workflow file, the newest run that
+  failed or succeeded decides. For each workflow whose deciding run failed, it
+  files the tracker through `preexisting-failure.sh`. It files nothing while a
+  bead already tracks the failure, and nothing for a run that the failure's
+  tracking covered before it last ended. It reads the failed run's jobs only
+  for a tracker it files.
 - `orders/actions-track.toml` runs it every five minutes in each rig, and is on
   as it ships.
 - The GitHub adapter's `BranchRuns` and `RunJobs` read the runs and the jobs.
@@ -165,15 +165,29 @@ duplicate, and later failures of the workflow reach that tracker through the
 writer's lookup.
 
 The pass reads the key's closed trackers from the rig's store for one guard of
-its own: a failed run that started before the failure's tracking last ended
-files nothing, since the run that would show the fix may not have finished.
-Without it, the pass would file a second tracker in the minutes after each fix
-lands. The tracking ends at the latest close along the tracker's chain of
-duplicates and supersedes edges in the rig's store, the edges the writer's
-lookup follows (`tracked_by` in the writer): a workflow's tracker closed as the
-duplicate of a test's tracker ends only when that tracker's fix closes it.
+its own: a failed run files nothing when the failure's tracking covered it
+before it last ended. Without it, the pass would file a second tracker in the
+minutes after each fix lands, from a run older than the fix's own. A run that
+started before the tracking ended is covered when the tracker was filed after
+the run was made, or when a newer run of the workflow, made before the tracking
+ended, has not decided. What that leaves is the newest run made between the
+filing and the end, the run of the commit that landed the fix, because a landing
+starts that run before it closes the tracker. Of this repository's twelve newest
+merges, read on 2026-11-25, GitHub made each merge's first run 2 to 4 seconds
+after the merge, and the refinery closed the merged bead 51 seconds to 3 minutes
+after it, so a fast workflow's run can finish before the close: the newest
+merge's `govulncheck.yml` run finished 9 seconds before its bead closed. So when
+the fix's own run fails, the pass files the failure, whether that run finished
+before the close or after it. That is why the read takes the runs that have not
+finished, which decide nothing: a run from before the fix is held back only
+while the fix's run is still to decide.
 
-## Why one read of the branch's newest finished push runs
+The tracking ends at the latest close along the tracker's chain of duplicates
+and supersedes edges in the rig's store, the edges the writer's lookup follows
+(`tracked_by` in the writer): a workflow's tracker closed as the duplicate of a
+test's tracker ends only when that tracker's fix closes it.
+
+## Why one read of the branch's newest push runs
 
 Read on 2026-11-25:
 
@@ -183,11 +197,12 @@ Read on 2026-11-25:
   newest 100 finished push runs on main, 28 were cancelled. The newest run of a
   workflow that failed or succeeded is the newest result there is.
 - **One call reads every workflow.** `GET repos/<repo>/actions/runs` with
-  `branch`, `event=push`, `status=completed` and `per_page=100` answered in 1.1
-  to 3.3 seconds in each of the city's six rig repositories, about 2 MB on this
-  repository's main. Its runs reached back from about a day on this
-  repository's main to over three months on the quietest. A pass that finds
-  nothing failing makes no other call.
+  `branch`, `event=push`, `exclude_pull_requests=true` and `per_page=100`, and
+  no `status`, so that it holds the runs not yet finished, answered in 1.4 to
+  3.5 seconds in each of the city's six rig repositories at 09:59 UTC, 0.4 to
+  2.7 MB, about 2 MB on this repository's main. Its runs reached back from about
+  two days on this repository's main to over three months on the quietest. A
+  pass that finds nothing failing makes no other call.
 - **The allowance.** Every five minutes in six rigs is 72 calls an hour, against
   the 5,000 REST calls an hour of the city's login, which used about 3,400 in the
   hour measured.

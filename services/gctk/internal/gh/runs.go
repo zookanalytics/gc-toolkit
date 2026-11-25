@@ -18,7 +18,7 @@ import (
 // conclusion of its latest attempt, when it was made and when that attempt
 // started, and its page. Conclusion is GitHub's word, such as success, failure,
 // cancelled, skipped, timed_out, startup_failure, neutral, stale or
-// action_required.
+// action_required, and is empty while the attempt has not finished.
 type WorkflowRun struct {
 	ID         int64
 	Number     int
@@ -53,8 +53,8 @@ type Step struct {
 	Conclusion string
 }
 
-// BranchRuns reads the newest n finished runs that a push to branch started in
-// repo, of every workflow, newest first, in one page of GET
+// BranchRuns reads the newest n runs that a push to branch started in repo, of
+// every workflow, finished or not, newest first, in one page of GET
 // repos/<repo>/actions/runs: the read is a window, not a list followed to its
 // end. An answer that carries no list of runs, a run with no id, no workflow
 // file or no time it was made, and one that does not decode fail the read.
@@ -68,8 +68,8 @@ func (c *Client) BranchRuns(repo, branch string, n int) ([]WorkflowRun, error) {
 	if n < 1 || n > 100 {
 		return nil, fmt.Errorf("github: a page of %d runs is not one GitHub serves", n)
 	}
-	q := url.Values{"branch": {branch}, "event": {"push"}, "status": {"completed"},
-		"per_page": {strconv.Itoa(n)}, "exclude_pull_requests": {"true"}}
+	q := url.Values{"branch": {branch}, "event": {"push"}, "per_page": {strconv.Itoa(n)},
+		"exclude_pull_requests": {"true"}}
 	raw, err := c.call("api", "--hostname", c.host, "repos/"+repo+"/actions/runs?"+q.Encode())
 	if err != nil {
 		return nil, err

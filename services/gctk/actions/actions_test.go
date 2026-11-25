@@ -106,17 +106,23 @@ func (c *city) verbs() []string {
 	return out
 }
 
-// tracker is a closed tracker of key that closed h hours after t0, with edges.
-func tracker(id, key string, h int, edges ...gcbd.Edge) fake.Bead {
-	return fake.Bead{ID: id, Status: "closed", ClosedAt: t0.Add(time.Duration(h) * time.Hour).Format(time.RFC3339),
+// tracker is a closed tracker of key, filed f hours and closed h hours after
+// t0, with edges.
+func tracker(id, key string, f, h int, edges ...gcbd.Edge) fake.Bead {
+	return fake.Bead{ID: id, Status: "closed", CreatedAt: hour(f), ClosedAt: hour(h),
 		Metadata: map[string]string{"failure_key": key}, Edges: edges}
 }
 
+// hour is the time h hours after t0, as a bead records one.
+func hour(h int) string { return t0.Add(time.Duration(h) * time.Hour).Format(time.RFC3339) }
+
 // The newest run that failed, ran out of time, could not start or succeeded
-// decides each workflow, and a run that ended any other way decides nothing.
-// A failing workflow carries its newest success older than the failure.
+// decides each workflow, and a run that ended any other way, or has not
+// finished, decides nothing. A workflow carries the run made next after its
+// deciding run, and a failing one its newest success older than the failure.
 func TestTheNewestDecidedRunDecides(t *testing.T) {
 	got := Judge([]gh.WorkflowRun{
+		run(tests, 10, 'j', 10, ""),
 		run(tests, 9, 'i', 9, "cancelled"),
 		run(lint, 8, 'h', 8, "success"),
 		run(tests, 7, 'g', 7, "failure"),
@@ -133,17 +139,21 @@ func TestTheNewestDecidedRunDecides(t *testing.T) {
 		if v.Newest != nil {
 			row += fmt.Sprintf(" #%d", v.Newest.Number)
 		}
+		if v.Next != nil {
+			row += fmt.Sprintf(" next #%d", v.Next.Number)
+		}
 		if v.Good != nil {
 			row += fmt.Sprintf(" after #%d", v.Good.Number)
 		}
 		rows = append(rows, row)
 	}
-	want := []string{".github/workflows/docs.yml=none", lint + "=succeeded #8", tests + "=failing #7 after #3"}
+	want := []string{".github/workflows/docs.yml=none", lint + "=succeeded #8", tests + "=failing #7 next #9 after #3"}
 	if !slices.Equal(rows, want) {
 		t.Errorf("Judge = %q, want %q", rows, want)
 	}
 	for conclusion, state := range map[string]string{"failure": Failing, "timed_out": Failing, "startup_failure": Failing,
-		"success": Succeeded, "cancelled": None, "skipped": None, "neutral": None, "stale": None, "action_required": None} {
+		"success": Succeeded, "cancelled": None, "skipped": None, "neutral": None, "stale": None, "action_required": None,
+		"": None} {
 		if v := Judge([]gh.WorkflowRun{run(tests, 1, 'a', 1, conclusion)}); v[0].State != state {
 			t.Errorf("a run that ended %s is %s, want %s", conclusion, v[0].State, state)
 		}
@@ -212,35 +222,65 @@ func TestAFailingCheckFilesOneTracker(t *testing.T) {
 	}
 }
 
-// A failed run that started before the key's tracker closed files nothing,
-// since a run after the fix may not have finished yet, and its jobs are not
-// read. A failed run that started after the close files.
-func TestARunFromBeforeTheTrackerClosedFilesNothing(t *testing.T) {
-	c := newCity(run(tests, 7, 'b', 7, "failure"))
-	c.store.Put(tracker("ra-1", tests, 8))
-	c.store.Put(tracker("ra-2", tests, 4))
-	c.store.Put(tracker("ra-3", lint, 9))
-	out := c.pass().Run("rig-a", false)
-	w := out.Workflows[0]
-	if out.Failure != "" || w.Did != HeldBack || w.SettledBy != "ra-1" || w.Settled == nil || !w.Settled.Equal(t0.Add(8*time.Hour)) {
-		t.Fatalf("the pass = %+v", out)
-	}
-	if len(c.files()) != 0 || slices.Contains(c.hub.Reads(), "RunJobs") {
-		t.Errorf("a run held back filed %+v and read %q", c.files(), c.hub.Reads())
-	}
-
-	c = newCity(run(tests, 9, 'c', 9, "failure"))
-	c.store.Put(tracker("ra-1", tests, 8))
-	out = c.pass().Run("rig-a", false)
-	if w := out.Workflows[0]; out.Failure != "" || w.Did != Filed || len(c.files()) != 1 {
-		t.Errorf("a run that started after the close = %+v", out)
+// A failed run that started before the key's tracking ended files nothing when
+// the tracking covered it, and its jobs are not read: the key's most recently
+// closed tracker was filed after the run was made, or a newer run of the
+// workflow, made before the tracking ended, has not decided. The newest run
+// made after the filing and before the end files when it failed, as the run of
+// the commit that landed the fix, which starts before the tracker closes, does
+// when the fix did not end the failure. So does a run, or an attempt of one,
+// that started after the end.
+func TestTheTrackingHoldsBackTheRunsItCovered(t *testing.T) {
+	red := run(tests, 7, 'b', 7, "failure")
+	rerun := run(tests, 5, 'a', 5, "failure")
+	rerun.Attempt, rerun.Started = 2, t0.Add(10*time.Hour)
+	for name, tc := range map[string]struct {
+		runs  []gh.WorkflowRun
+		filed int
+		did   string
+	}{
+		"the run the tracker was filed from": {runs: []gh.WorkflowRun{red}, filed: 8, did: HeldBack},
+		"a run before the fix, with the fix's run in progress": {
+			runs: []gh.WorkflowRun{run(tests, 8, 'c', 8, ""), red}, filed: 6, did: HeldBack},
+		"a run before the fix, with the fix's run cancelled": {
+			runs: []gh.WorkflowRun{run(tests, 8, 'c', 8, "cancelled"), red}, filed: 6, did: HeldBack},
+		"the fix's own run, which started before the close and failed": {
+			runs: []gh.WorkflowRun{red, run(tests, 5, 'a', 5, "failure")}, filed: 6, did: Filed},
+		"the fix's own run, with a run made after the close in progress": {
+			runs: []gh.WorkflowRun{run(tests, 10, 'd', 10, ""), red}, filed: 6, did: Filed},
+		"a run that started after the close":      {runs: []gh.WorkflowRun{run(tests, 10, 'd', 10, "failure")}, filed: 1, did: Filed},
+		"an attempt that started after the close": {runs: []gh.WorkflowRun{rerun}, filed: 6, did: Filed},
+	} {
+		c := newCity(tc.runs...)
+		c.store.Put(tracker("ra-1", tests, tc.filed, 9))
+		c.store.Put(tracker("ra-2", tests, 1, 4))
+		c.store.Put(tracker("ra-3", lint, 8, 10))
+		out := c.pass().Run("rig-a", false)
+		w := out.Workflows[0]
+		if out.Failure != "" || w.Did != tc.did {
+			t.Errorf("%s: the pass = %+v", name, out)
+			continue
+		}
+		if tc.did == Filed {
+			if len(c.files()) != 1 {
+				t.Errorf("%s: the writer took %d file calls, want 1", name, len(c.files()))
+			}
+			continue
+		}
+		if w.SettledBy != "ra-1" || w.Settled == nil || !w.Settled.Equal(t0.Add(9*time.Hour)) {
+			t.Errorf("%s: held back by %q at %v, want ra-1's close", name, w.SettledBy, w.Settled)
+		}
+		if len(c.files()) != 0 || slices.Contains(c.hub.Reads(), "RunJobs") {
+			t.Errorf("%s: a run held back filed %+v and read %q", name, c.files(), c.hub.Reads())
+		}
 	}
 }
 
 // A tracker closed as the duplicate of another bead, or superseded by one,
 // ended when that bead closed: the failure moved there, and that bead's fix
-// is what ends it. The chain stops at a bead that is not closed, at one the
-// store does not hold, and at one it reached before.
+// is what ends it, so a run from before that fix, with the fix's run in
+// progress, is held back. The chain stops at a bead that is not closed, at one
+// the store does not hold, and at one it reached before.
 func TestTheTrackingEndsWhereItsChainCloses(t *testing.T) {
 	dup := func(to string) gcbd.Edge { return gcbd.Edge{Type: "duplicates", ID: to} }
 	sup := func(to string) gcbd.Edge { return gcbd.Edge{Type: "supersedes", ID: to} }
@@ -250,26 +290,26 @@ func TestTheTrackingEndsWhereItsChainCloses(t *testing.T) {
 		by    string
 	}{
 		"a duplicate of a bead fixed later": {
-			beads: []fake.Bead{tracker("ra-1", tests, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 8)},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 1, 9)},
 			did:   HeldBack, by: "ra-9"},
 		"two hops": {
-			beads: []fake.Bead{tracker("ra-1", tests, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 4, sup("ra-8")),
-				{ID: "ra-8", Status: "closed", ClosedAt: t0.Add(8 * time.Hour).Format(time.RFC3339)}},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 1, 4, sup("ra-8")),
+				{ID: "ra-8", Status: "closed", ClosedAt: hour(9)}},
 			did: HeldBack, by: "ra-8"},
 		"a successor that is still open": {
-			beads: []fake.Bead{tracker("ra-1", tests, 3, dup("ra-9")), {ID: "ra-9", Status: "open"}},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 3, dup("ra-9")), {ID: "ra-9", Status: "open"}},
 			did:   Filed},
 		"a successor in another store": {
-			beads: []fake.Bead{tracker("ra-1", tests, 3, dup("rb-9"))},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 3, dup("rb-9"))},
 			did:   Filed},
 		"a loop": {
-			beads: []fake.Bead{tracker("ra-1", tests, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 4, dup("ra-1"))},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 3, dup("ra-9")), tracker("ra-9", "TestFoo", 1, 4, dup("ra-1"))},
 			did:   Filed},
 		"a chain from an older tracker": {
-			beads: []fake.Bead{tracker("ra-1", tests, 4), tracker("ra-2", tests, 2, dup("ra-9")), tracker("ra-9", "TestFoo", 8)},
+			beads: []fake.Bead{tracker("ra-1", tests, 1, 4), tracker("ra-2", tests, 1, 2, dup("ra-9")), tracker("ra-9", "TestFoo", 1, 9)},
 			did:   Filed},
 	} {
-		c := newCity(run(tests, 7, 'b', 7, "failure"))
+		c := newCity(run(tests, 8, 'c', 8, ""), run(tests, 7, 'b', 7, "failure"))
 		for _, b := range tc.beads {
 			c.store.Put(b)
 		}
@@ -424,7 +464,7 @@ func TestTheTrackerSaysWhatFailed(t *testing.T) {
 		!strings.Contains(got, "- GitHub lists no failed job in it\n") {
 		t.Errorf("a failure on its last success's commit, with no failed job:\n%s", got)
 	}
-	if got := message(repo, "main", Verdict{Path: tests, State: Failing, Newest: &failedRun}, nil); !strings.Contains(got, "None of its runs among the newest 100 finished push runs on main succeeded before it.") {
+	if got := message(repo, "main", Verdict{Path: tests, State: Failing, Newest: &failedRun}, nil); !strings.Contains(got, "None of its runs among the newest 100 push runs on main succeeded before it.") {
 		t.Errorf("a failure with no success before it:\n%s", got)
 	}
 	many := make([]gh.Job, Listed+1)

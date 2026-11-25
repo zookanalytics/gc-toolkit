@@ -1,13 +1,13 @@
 // Package actions is the GitHub Actions domain: how each workflow stands on a
 // rig's default branch, as the runs a push there started record it, and the
 // tracker that sends a workflow failing there to be fixed. Its verb, `gctk
-// actions track`, reads the branch's newest finished push runs in one GitHub
-// read and, for each workflow whose newest decided run failed, files the
-// failure's tracker through the runtime adapter's preexisting-failure.sh, the
-// pack's writer of one tracker per failure on a base branch, which sends each
-// tracker it files to be fixed. It owns no key on a bead and keeps no state of
-// its own: each pass reads GitHub again, and the tracker's writer keeps the one
-// bead per failure.
+// actions track`, reads the branch's newest push runs in one GitHub read and,
+// for each workflow whose newest decided run failed, files the failure's
+// tracker through the runtime adapter's preexisting-failure.sh, the pack's
+// writer of one tracker per failure on a base branch, which sends each tracker
+// it files to be fixed. It owns no key on a bead and keeps no state of its own:
+// each pass reads GitHub again, and the tracker's writer keeps the one bead per
+// failure.
 package actions
 
 import (
@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	// Window is how many of the branch's newest finished push runs a pass
-	// reads, across every workflow: GitHub's largest page.
+	// Window is how many of the branch's newest push runs a pass reads,
+	// finished or not, across every workflow: GitHub's largest page.
 	Window = 100
 	// Listed is how many of a failed run's failed jobs the tracker lists.
 	Listed = 10
@@ -55,8 +55,10 @@ const (
 const (
 	// Tracked is a key a live bead already tracks, so the pass filed nothing.
 	Tracked = "tracked"
-	// HeldBack is a failed run that started before the key's tracking last
-	// ended, so it shows a failure that a later run may already show fixed.
+	// HeldBack is a failed run that the key's tracking covered before it last
+	// ended, so a later run may already show the failure fixed: the tracker was
+	// filed after the run was made, or a newer run of the workflow, made before
+	// the tracking ended, has not decided.
 	HeldBack = "held back"
 	// Filed is a key the writer answered with its tracker: the one it filed,
 	// or one another caller filed since the pass looked, as Said tells.
@@ -67,8 +69,8 @@ const (
 
 // failureKey is the key the writer stamps on each tracker it files.
 var failureKey = ledger.ReadOnly("failure_key", ledger.String,
-	"gctk actions track reads the closed trackers of a workflow's key, and files nothing for a run that started "+
-		"before the failure's tracking ended.")
+	"gctk actions track reads the closed trackers of a workflow's key, and files nothing for a failed run that "+
+		"the failure's tracking covered before it ended.")
 
 // City is Gas City as a pass reaches it: its rigs, and the pack's scripts.
 type City interface {
@@ -97,12 +99,14 @@ type Pass struct {
 }
 
 // Verdict is how one workflow stands on the branch: its file, the newest run
-// that succeeded or failed, which decides, and, when that run failed, the
-// newest success older than it, nil when the read holds none.
+// that succeeded or failed, which decides, the run of the workflow made next
+// after that one, and, when the deciding run failed, the newest success older
+// than it. Next and Good are nil when the read holds no such run.
 type Verdict struct {
 	Path   string
 	State  string
 	Newest *gh.WorkflowRun
+	Next   *gh.WorkflowRun
 	Good   *gh.WorkflowRun
 }
 
@@ -116,9 +120,10 @@ func failed(conclusion string) bool {
 // newest first, one Verdict per workflow file the runs name, in the order of
 // their paths. A workflow's newest run that failed or succeeded decides. A run
 // that ends any other way, such as one cancelled, skipped or neutral, decides
-// nothing.
+// nothing, and nor does one that has not finished.
 func Judge(runs []gh.WorkflowRun) []Verdict {
 	byPath := map[string]*Verdict{}
+	newer := map[string]*gh.WorkflowRun{}
 	for i := range runs {
 		r := &runs[i]
 		v := byPath[r.Path]
@@ -133,10 +138,11 @@ func Judge(runs []gh.WorkflowRun) []Verdict {
 				v.Good = r
 			}
 		case failed(r.Conclusion):
-			v.State, v.Newest = Failing, r
+			v.State, v.Newest, v.Next = Failing, r, newer[r.Path]
 		case r.Conclusion == "success":
-			v.State, v.Newest = Succeeded, r
+			v.State, v.Newest, v.Next = Succeeded, r, newer[r.Path]
 		}
+		newer[r.Path] = r
 	}
 	out := make([]Verdict, 0, len(byPath))
 	for _, p := range slices.Sorted(maps.Keys(byPath)) {
@@ -277,8 +283,9 @@ type tracking struct {
 }
 
 // track files the tracker of one failing workflow, unless a live bead already
-// tracks its key, or its deciding run started before the key's tracking last
-// ended. The failed run's jobs are read only once a tracker is to be filed.
+// tracks its key, or the key's tracking covered its deciding run before it
+// last ended. The failed run's jobs are read only once a tracker is to be
+// filed.
 func (t *tracking) track(w *Workflow, v Verdict) {
 	key, err := t.answer("key", "--target", v.Path)
 	if err != nil {
@@ -295,13 +302,13 @@ func (t *tracking) track(w *Workflow, v Verdict) {
 		w.Did, w.Tracker = Tracked, id
 		return
 	}
-	at, by, err := t.settled(key)
+	end, err := t.settled(key)
 	if err != nil {
 		w.Failure = fmt.Sprintf("the closed trackers of %s did not read: %v", key, err)
 		return
 	}
-	if by != "" && v.Newest.Started.Before(at) {
-		w.Did, w.Settled, w.SettledBy = HeldBack, &at, by
+	if end.covered(v) {
+		w.Did, w.Settled, w.SettledBy = HeldBack, &end.at, end.by
 		return
 	}
 	jobs, err := t.pass.GitHub.RunJobs(t.repo, v.Newest.ID)
@@ -365,28 +372,50 @@ func saidOf(res gascity.Result) string {
 	return strings.Join(lines, "; ")
 }
 
-// settled is when the tracking of key last ended, and the bead whose close
-// ended it: the latest close among the key's most recently closed tracker and
-// the closed beads its chain of duplicates and supersedes edges reaches. The
-// writer's lookup follows those edges to the bead that carries the failure now
-// (tracked_by in assets/scripts/preexisting-failure.sh), so a tracker closed as
-// the duplicate of the failing test's tracker ends when that tracker's fix
-// closes it. by is empty when no closed bead carries the key. The chain stops
-// at a bead that is not closed, at one it reached before, and at one the rig's
-// store does not hold, which the writer's lookup reads from the store its
-// prefix names, so a fix closed in another rig's store holds no run back. It
-// goes on past a not-needed close, where the writer's lookup stops, to the
-// evidence its edge names, so a run that started before that evidence closed
-// waits for a newer one.
-func (t *tracking) settled(key string) (at time.Time, by string, err error) {
+// ended is how the tracking of a key last ended: when, the bead whose close
+// ended it, empty when no closed bead carries the key, and when the key's most
+// recently closed tracker was filed.
+type ended struct {
+	at, filed time.Time
+	by        string
+}
+
+// covered reports whether the tracking covered the failure of v's deciding run
+// before it ended, so the pass files nothing for it. A run that started after
+// the tracking ended is not covered. One that started before it is covered when
+// the tracker was filed after the run was made, or when the workflow has a
+// newer run, made before the tracking ended, that has not decided and may show
+// the fix. That leaves the newest run made between the filing and the end, such
+// as the run of the commit that landed the fix, which a landing starts before
+// it closes the tracker: when it fails, the fix did not end the failure.
+func (e ended) covered(v Verdict) bool {
+	n := v.Newest
+	return e.by != "" && n.Started.Before(e.at) &&
+		(n.Created.Before(e.filed) || v.Next != nil && v.Next.Created.Before(e.at))
+}
+
+// settled is how the tracking of key last ended: the latest close among the
+// key's most recently closed tracker and the closed beads its chain of
+// duplicates and supersedes edges reaches, the bead whose close that is, and
+// when that tracker was filed. The writer's lookup follows those edges to the
+// bead that carries the failure now (tracked_by in
+// assets/scripts/preexisting-failure.sh), so a tracker closed as the duplicate
+// of the failing test's tracker ends when that tracker's fix closes it. The
+// chain stops at a bead that is not closed, at one it reached before, and at
+// one the rig's store does not hold, which the writer's lookup reads from the
+// store its prefix names, so a fix closed in another rig's store ends no
+// tracking. It goes on past a not-needed close, where the writer's lookup
+// stops, to the evidence its edge names, so the tracking ends when that
+// evidence closed.
+func (t *tracking) settled(key string) (end ended, err error) {
 	if t.ledger == nil {
 		if t.ledger, err = t.pass.Store(t.store); err != nil {
-			return at, by, err
+			return end, err
 		}
 	}
 	rows, err := t.ledger.Find(ledger.Matching(failureKey, key).WithClosed().InStatus("closed"))
 	if err != nil {
-		return at, by, err
+		return end, err
 	}
 	var last *ledger.Record
 	for _, rec := range rows {
@@ -395,41 +424,44 @@ func (t *tracking) settled(key string) (at time.Time, by string, err error) {
 		}
 		closed, err := closedAt(rec)
 		if err != nil {
-			return at, by, err
+			return end, err
 		}
-		if last == nil || closed.After(at) || closed.Equal(at) && rec.ID > last.ID {
-			last, at = rec, closed
+		if last == nil || closed.After(end.at) || closed.Equal(end.at) && rec.ID > last.ID {
+			last, end.at = rec, closed
 		}
 	}
 	if last == nil {
-		return at, by, nil
+		return end, nil
 	}
-	by = last.ID
+	if end.filed, err = filedAt(last); err != nil {
+		return end, err
+	}
+	end.by = last.ID
 	seen := map[string]bool{last.ID: true}
 	for rec, hops := last, 0; hops < chainMax; hops++ {
 		next, err := successor(rec)
 		if err != nil || next == "" || seen[next] {
-			return at, by, err
+			return end, err
 		}
 		seen[next] = true
 		rows, err := t.ledger.Find(ledger.ByID(next).WithClosed())
 		if err != nil {
-			return at, by, err
+			return end, err
 		}
 		i := slices.IndexFunc(rows, func(r *ledger.Record) bool { return r.ID == next })
 		if i < 0 || rows[i].Status() != "closed" {
-			return at, by, nil
+			return end, nil
 		}
 		rec = rows[i]
 		closed, err := closedAt(rec)
 		if err != nil {
-			return at, by, err
+			return end, err
 		}
-		if closed.After(at) {
-			at, by = closed, rec.ID
+		if closed.After(end.at) {
+			end.at, end.by = closed, rec.ID
 		}
 	}
-	return at, by, nil
+	return end, nil
 }
 
 // successor is the bead a closed bead names as its canonical or its successor:
@@ -453,6 +485,15 @@ func closedAt(rec *ledger.Record) (time.Time, error) {
 	at, err := time.Parse(time.RFC3339, rec.ClosedAt())
 	if err != nil {
 		return at, fmt.Errorf("%s names no time it closed: %w", rec.ID, err)
+	}
+	return at, nil
+}
+
+// filedAt is when a bead was filed.
+func filedAt(rec *ledger.Record) (time.Time, error) {
+	at, err := time.Parse(time.RFC3339, rec.CreatedAt())
+	if err != nil {
+		return at, fmt.Errorf("%s names no time it was filed: %w", rec.ID, err)
 	}
 	return at, nil
 }
@@ -483,7 +524,7 @@ func message(repo, branch string, v Verdict, jobs []gh.Job) string {
 		fmt.Fprintf(&b, "Its last success before it was %s at %s, and the changes between their commits are https://github.com/%s/compare/%s...%s\n\n",
 			runName(g), stamp(g.Started), repo, g.Commit, n.Commit)
 	default:
-		fmt.Fprintf(&b, "None of its runs among the newest %d finished push runs on %s succeeded before it.\n\n", Window, branch)
+		fmt.Fprintf(&b, "None of its runs among the newest %d push runs on %s succeeded before it.\n\n", Window, branch)
 	}
 	fmt.Fprintf(&b, "What failed in %s:\n", runName(n))
 	var red []gh.Job

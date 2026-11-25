@@ -143,7 +143,7 @@
       "actions",
       "reaction"
     ],
-    "doc": "gctk actions track reads the closed trackers of a workflow's key, and files nothing for a run that started before the failure's tracking ended. The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix."
+    "doc": "gctk actions track reads the closed trackers of a workflow's key, and files nothing for a failed run that the failure's tracking covered before it ended. The failure a tracker tracks, which assets/scripts/preexisting-failure.sh stamps in the create that files the tracker. Intake admits a tracker to a pool, because a failure on a base branch is work to fix."
   },
   {
     "name": "fold_target",

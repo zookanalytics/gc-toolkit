@@ -7,9 +7,11 @@
 # workflow file, naming the failed run, its commit, its failed jobs and steps
 # and the command that prints their log, which the writer slings to the rig's
 # polecat pool. The writer files nothing while a bead tracks the failure, held
-# or worked, and the pass files nothing for a run that started before the
-# failure's tracking last ended, so a fix that just landed is not reported again
-# from the run it fixed. `gctk actions track --help` states the rule.
+# or worked, and the pass files nothing for a run that the failure's tracking
+# covered before it last ended: the run the tracker was filed from, or one older
+# than a fix's own run that has not decided. So a fix that just landed is not
+# reported again from the run it fixed, and the fix's own run is reported when
+# it fails. `gctk actions track --help` states the rule.
 #
 # Exec, not a formula: a pass reads GitHub and files what it found, with no
 # judgment for an LLM. Rig-scoped, so each pass reads its own rig's repository
@@ -18,11 +20,11 @@
 # workflow counts once its own file adds a push trigger.
 #
 # A pass makes one GitHub read, bounded at 30 seconds, of the branch's newest
-# 100 finished push runs, and a pass that finds nothing failing makes no other
-# call. A tracker it files adds one read of the failed run's jobs, bounded the
-# same, and the writer's filing, whose sling pours the tracker's workflow. The
-# timeout leaves room for several trackers in one pass, as when a rig's first
-# pass finds several checks failing, and stays under the interval, since a
+# 100 push runs, finished or not, and a pass that finds nothing failing makes no
+# other call. A tracker it files adds one read of the failed run's jobs, bounded
+# the same, and the writer's filing, whose sling pours the tracker's workflow.
+# The timeout leaves room for several trackers in one pass, as when a rig's
+# first pass finds several checks failing, and stays under the interval, since a
 # cooldown counts from a run's start.
 [order]
 description = "File the tracker of each GitHub Actions workflow whose newest finished push run on a rig's default branch failed, which sends it to be fixed"

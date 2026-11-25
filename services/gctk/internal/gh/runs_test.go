@@ -6,13 +6,19 @@ import (
 	"time"
 )
 
-// runsPath is the read of the newest 100 finished runs a push to main started.
-const runsPath = "repos/owner/repo-a/actions/runs?branch=main&event=push&exclude_pull_requests=true&per_page=100&status=completed"
+// runsPath is the read of the newest 100 runs a push to main started.
+const runsPath = "repos/owner/repo-a/actions/runs?branch=main&event=push&exclude_pull_requests=true&per_page=100"
 
-// recordedRuns is GitHub's answer for two runs of two workflows, trimmed to
-// the fields the read takes: a run whose second attempt failed, and a run whose
-// answer leaves out its start, its commit and its head repository.
-const recordedRuns = `{"total_count":2,"workflow_runs":[
+// recordedRuns is GitHub's answer for three runs of two workflows, trimmed to
+// the fields the read takes: a run still in progress, a run whose second
+// attempt failed, and a run whose answer leaves out its start, its commit and
+// its head repository.
+const recordedRuns = `{"total_count":3,"workflow_runs":[
+{"id":7013,"name":"Tests","path":".github/workflows/tests.yml","run_number":13,"run_attempt":1,"event":"push",
+ "head_branch":"main","head_sha":"cccccccccccccccccccccccccccccccccccccccc","status":"in_progress","conclusion":null,
+ "created_at":"2026-11-20T07:00:00Z","run_started_at":"2026-11-20T07:00:00Z",
+ "html_url":"https://github.com/owner/repo-a/actions/runs/7013",
+ "head_commit":{"message":"fix: loosen the schema"},"head_repository":{"full_name":"owner/repo-a"}},
 {"id":7012,"name":"Tests","path":".github/workflows/tests.yml","run_number":12,"run_attempt":2,"event":"push",
  "head_branch":"main","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"completed","conclusion":"failure",
  "created_at":"2026-11-20T06:00:00Z","run_started_at":"2026-11-20T06:30:00Z",
@@ -23,10 +29,11 @@ const recordedRuns = `{"total_count":2,"workflow_runs":[
  "created_at":"2026-11-19T06:00:00Z","html_url":"https://github.com/owner/repo-a/actions/runs/7011"}
 ]}`
 
-// The runs are one page of the branch's newest finished push runs across its
-// workflows, each with its workflow's file, its attempt, event, commit and the
-// headline of its message, and a run whose answer leaves out its start started
-// when it was made.
+// The runs are one page of the branch's newest push runs across its
+// workflows, finished or not, each with its workflow's file, its attempt,
+// event, commit and the headline of its message. A run that has not finished
+// has no conclusion, and a run whose answer leaves out its start started when
+// it was made.
 func TestTheRunsAreOnePageOfTheBranchsNewestPushRuns(t *testing.T) {
 	var log []string
 	c := NewWithRunner("github.com", answers(t, map[string]string{runsPath: recordedRuns}, &log))
@@ -37,9 +44,13 @@ func TestTheRunsAreOnePageOfTheBranchsNewestPushRuns(t *testing.T) {
 	if len(log) != 1 || log[0] != "api --hostname github.com "+runsPath {
 		t.Fatalf("the read ran %q, want one GET of %s", log, runsPath)
 	}
-	if len(got) != 2 {
-		t.Fatalf("BranchRuns = %+v, want two", got)
+	if len(got) != 3 {
+		t.Fatalf("BranchRuns = %+v, want three", got)
 	}
+	if r := got[0]; r.ID != 7013 || r.Conclusion != "" || r.Headline != "fix: loosen the schema" {
+		t.Errorf("the run in progress read as %+v", r)
+	}
+	got = got[1:]
 	want := WorkflowRun{ID: 7012, Number: 12, Attempt: 2, Event: "push", Branch: "main",
 		Commit: strings.Repeat("a", 40), HeadRepo: "owner/repo-a", Headline: "fix: tighten the schema", Name: "Tests",
 		Path: ".github/workflows/tests.yml", Conclusion: "failure", Created: time.Date(2026, 11, 20, 6, 0, 0, 0, time.UTC),
