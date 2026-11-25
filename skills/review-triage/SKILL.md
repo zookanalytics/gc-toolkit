@@ -9,9 +9,7 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 You are classifying, not judging. Whether the change is correct is the
 `correctness` check's question, not yours. Yours is narrower:
 **which specialist checks does this diff warrant?** The usual honest answer is
-none. On a review run you also answer a person's post that needs only an
-answer, by the narrow bar below, and leave every other post to the step that
-rules it.
+none.
 
 ## What it reads
 
@@ -193,48 +191,6 @@ act on; on a lift it is the decision above. Never give the approval predating
 the round as the reason for a lift: every round postdates the approval it would
 lift, so that tells the operator nothing.
 
-## A post that needs only an answer
-
-On a review run, each post a person makes on the PR is an ask the run can
-take. The read lists it with the run so far. Its reason names the post's kind
-and author and ends with the post's URL.
-
-Answer a post yourself only when both of these hold:
-
-- It asks for no change to the branch.
-- It asks for no person's decision.
-
-A question about the change, a thank-you and an approval's "looks good" are
-such posts. Leave every other ask to rule-and-repair, such as:
-
-- a post that asks for a change, however small;
-- a post that asks a person to choose;
-- a post whose answer you cannot give from the change and the read;
-- an ask that names no post, such as a red check or a conflict.
-
-While a question a review run put to a person is open on the PR's bead, answer
-no post. Leave to rule-and-repair each ask filed before such a question was
-put, even once the question is closed.
-
-Read a post before you answer it, at the URL its reason ends with,
-`https://github.com/<owner>/<repo>/pull/<number>#<post>`. Take each value the
-call needs from the URL. The URL's last part names the post and the call that
-reads it:
-
-- `#issuecomment-<id>`:
-  `gh api repos/<owner>/<repo>/issues/comments/<id> --jq .body`
-- `#discussion_r<id>`:
-  `gh api repos/<owner>/<repo>/pulls/comments/<id> --jq '.path, .line, .body'`
-- `#pullrequestreview-<id>`:
-  `gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --jq '.state, .body'`
-
-For a PR on another GitHub host, add `--hostname <host>` after `gh api`.
-
-Rule each post you answer `answered`. Write its reason as the answer, to the
-person who made the post. Mark it `wordless` when it is owed no words, as a
-thank-you or a "looks good" is. Answer again, at each head, an ask you answered
-in an earlier round of the run, while it still meets the bar.
-
 ## What blocks
 
 Nothing. Triage never blocks: on a review bead its verdict is always `approve`,
@@ -244,8 +200,7 @@ no findings, so it has no findings block.
 
 - It never judges correctness, and it never files findings about the code. A
   defect you notice while skimming belongs in the `correctness` review, not here;
-  say so in the verdict body and let that check hold it. Leave a post whose
-  answer would need you to judge the change.
+  say so in the verdict body and let that check hold it.
 - It never fixes anything, and it never touches the anchor other than through
   the calls its formula names.
 
@@ -254,8 +209,8 @@ no findings, so it has no findings block.
 The verdict goes where the formula you run under says. A review run's triage
 writes it as its step's output: the head it judged, each check it picks as one
 `{"check", "head"}`, which the run bonds as a lane at that head, with nothing
-picked the common case, whether the change is `material`, and its ruling of
-each post it answers. Pick these checks whatever the change:
+picked the common case, and whether the change is `material`. Pick these
+checks whatever the change:
 
 - At the PR's first judged head, the rig's first check, `correctness`.
 - Each check an ask the run can take sends back.

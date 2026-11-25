@@ -7,15 +7,12 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 # Review ruling
 
 You rule every finding a lane raised at the head the round judged and every ask
-triage left you, and you make the round's fixes. The step that rules is the
+the round can take, and you make the round's fixes. The step that rules is the
 step that fixes, so a ruling is what you change. A point ruled must-fix gets a
 commit, a fix in the PR's title or summary, or both. A point ruled declined,
 deferred, answered or put to a person gets no change at all. Each point is
 ruled by the rule its source carries, below, and each ruling carries its
 reason, which the head's comment shows the operator as that point's answer.
-
-Leave out of your rulings each ask the round's read lists under triage. When
-the read says triage left you nothing, close the step with nothing written.
 
 The method for a lane's own check is not yours to apply again. A lane already
 judged its finding by its method. You decide what the round does about it.
@@ -196,9 +193,7 @@ reason names the grade.
 Each comment is its own ask, whose reason names the post and ends with its URL.
 Read the post at that URL as it stands, and rule it by its grade, as above. The
 round's post answers it where it was made, with the ruling's reason as the
-answer, so write the reason to the person who made the comment. A comment owed
-no words, such as a thank-you, is ruled answered with `wordless`, and its
-answer on the PR is the city's 👍 alone.
+answer, so write the reason to the person who made the comment.
 
 An ask that carries a ruling the operator made, as a sitting's send-back does,
 is applied as ruled and not graded again.

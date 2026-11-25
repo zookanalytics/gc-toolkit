@@ -10,12 +10,12 @@ import (
 // The head's comment is where every lane's verdict at a head reaches the PR,
 // the place the operator decides from: one comment for each head a run
 // judged, carrying each lane's verdict, approvals included, each finding the
-// lane raised and how the round ruled it, and each ask the round took, the
-// asks triage answered among them. Each point's answer says what the head
-// carries for it: the commit that fixes it and the head that carries the
-// commit, that the PR's summary carries its fix, or that the head carries no
-// change for it. The comment opens with its mark, which names the run and the
-// head, so a retry finds the comment and edits it rather than posting a second.
+// lane raised and how the round ruled it, and each ask the round took. Each
+// point's answer says what the head carries for it: the commit that fixes it
+// and the head that carries the commit, that the PR's summary carries its fix,
+// or that the head carries no change for it. The comment opens with its mark,
+// which names the run and the head, so a retry finds the comment and edits it
+// rather than posting a second.
 //
 // GitHub refuses a comment over 65,536 characters, which no retry of the post
 // gets past, so the comment stays within commentBudget. A comment that would
@@ -40,16 +40,15 @@ func Mark(root, head string) string {
 }
 
 // Comment is the comment for iteration n of the run: its head's checks, their
-// findings and the round's rulings, and the asks the round took, triage's and
-// rule-and-repair's, with asks naming the ones on the bead. It is "" when the
-// iteration has nothing to answer: triage has not written, or no lane ran
-// there and the round took no ask.
+// findings and the round's rulings, and the asks the round took, with asks
+// naming the ones on the bead. It is "" when the iteration has nothing to
+// answer: no lane ran there and the round took no ask.
 func Comment(run *Run, n int, asks []Ask) string {
 	it := run.Iterations[n]
-	if it == nil || it.Triage == nil {
+	if it == nil || it.Triage == nil || it.Repair == nil {
 		return ""
 	}
-	c := commenting{run: run, n: n, it: it, asks: asks, round: it.Rulings(), pushed: it.Pushed()}
+	c := commenting{run: run, n: n, it: it, asks: asks, round: it.Repair.Rulings, pushed: it.Repair.Pushed}
 	for _, r := range c.round {
 		if r.Ask != "" {
 			c.askRulings = append(c.askRulings, r)
@@ -209,7 +208,7 @@ func summary(it *Iteration) string {
 	}
 	count := map[string]int{}
 	inSummary := 0
-	for _, r := range it.Rulings() {
+	for _, r := range it.Repair.Rulings {
 		if r.Ruling == RulingMustFix && r.Commit == "" && r.Summary {
 			inSummary++
 			continue
@@ -218,9 +217,9 @@ func summary(it *Iteration) string {
 	}
 	var did []string
 	if c := count[RulingMustFix]; c > 0 {
-		switch pushed := it.Pushed(); {
-		case pushed != "":
-			did = append(did, fmt.Sprintf("fixed %d in `%s`", c, short(pushed)))
+		switch {
+		case it.Repair.Pushed != "":
+			did = append(did, fmt.Sprintf("fixed %d in `%s`", c, short(it.Repair.Pushed)))
 		default:
 			did = append(did, fmt.Sprintf("ruled %d must-fix", c))
 		}

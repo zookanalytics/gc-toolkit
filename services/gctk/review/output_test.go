@@ -3,6 +3,7 @@ package review_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -340,6 +341,21 @@ func (w *world) question(id, key, status string, holds bool) {
 		pr.Edges = append(pr.Edges, gcbd.Edge{ID: id, Type: gcbd.EdgeBlocks, Status: status, IssueType: "gate", AwaitType: "human"})
 		w.store.Put(pr)
 	}
+}
+
+const prURL = "https://github.com/acme/widgets/pull/7"
+
+// postAsk puts an open ask on the PR's bead for a person's post on the PR, as
+// the take files one: of the kind named, at the URL fragment frag, filed at
+// the instant given. The bead names the PR's URL.
+func (w *world) postAsk(id, kind, frag, filed string) {
+	pr, _ := w.store.Row(prBead)
+	pr.Metadata["pr_url"] = prURL
+	pr.Edges = append(pr.Edges, gcbd.Edge{ID: id, Type: gcbd.EdgeBlocks})
+	w.store.Put(pr)
+	w.store.Put(bead{ID: id, Status: "open", IssueType: "task", CreatedAt: filed,
+		Description: fmt.Sprintf("%s by operator on PR #7: %s#%s", kind, prURL, frag),
+		Metadata:    map[string]string{"branch": branch}})
 }
 
 // A ruling of an ask names the gate of a question the ask's post settles, an
