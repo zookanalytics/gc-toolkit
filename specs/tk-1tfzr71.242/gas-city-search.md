@@ -55,6 +55,16 @@ the wisp's pour, its adoption at startup and its burn.
   such a pack. This pack keeps none. The wisp carried no merge state either:
   every refinery script reads the formula, never the wisp, and the
   patrol-summary step's record was never written.
+- **The wisps the change finds.** Read at 2026-11-25T21:47Z with
+  `gc bd --rig <rig> list --type=molecule --include-infra --status=open,in_progress`
+  in each rig: every one of the six refineries held one patrol wisp, two open
+  and four in progress. An open one stays demand once nothing adopts or burns
+  it, and `gc runtime drain-ack` releases only work in progress
+  (`releaseDrainAckClaims`, cmd/gc/session_beads.go), so each session it
+  started would find nothing, drain, and be started again. The search closes
+  a `mol-refinery-patrol` wisp assigned to the refinery, guarded on the status
+  and assignee it read, and takes nothing from it. Nothing pours one now, so
+  the clause goes once no store holds one open.
 
 ## What was searched
 
@@ -70,11 +80,26 @@ the wisp's pour, its adoption at startup and its burn.
   a hand-off's assignment of a ready bead starts a session. The change composes
   it and adds nothing to it.
 - **An explicit wake.** `gc session wake` (`doSessionWake`,
-  cmd/gc/cmd_session_wake.go) records a wake that starts the session at the next
-  pass, whatever the demand. The hand-offs and the landing order keep their wake
-  and nudge as they are. The landing order's wake is the start for a PR's bead
-  held only by a conversation or an ask on its PR, which bd does not read ready
-  and the search takes.
+  cmd/gc/cmd_session_wake.go) records a wake that starts a stopped session at
+  the next pass, whatever the demand. A wake that finds the session running is
+  satisfied by that run, and the pass clears it (`armSatisfiedWake`,
+  cmd/gc/reconcile_arms_heals.go). The hand-offs and the landing order keep
+  their wake and nudge as they are. The landing order's wake is the start for a
+  PR's bead held only by a conversation or an ask on its PR, which bd does not
+  read ready and the search takes.
+- **What that leaves.** A bead held only by a conversation or an ask is no
+  demand, so a session takes it only when a wake starts one for it. When the
+  landing order hands one over while a session works another item, the wake is
+  spent on that session, which takes only its own item. When a gate on one
+  closes while its conversation still holds it, core's cascade nudge stays
+  silent (`still_held`, in the core pack's
+  assets/scripts/cascade-nudge-on-blocker-close.sh) and nothing wakes the
+  refinery. Either way the bead is taken once its hold closes and bd reads it
+  ready, or at the next start for another item, so the new head's checks run
+  then rather than beside the hold. Its merge waits on the hold either way.
+  Measured in the city's event log from 2026-11-18T19:05Z to 2026-11-25T21:43Z,
+  by the queued nudges to a refinery whose text names a merge hold: one such
+  hand-over in the six rigs.
 
 ### Ending a session
 
@@ -205,7 +230,19 @@ refinery departs from that: it keeps no wisp and ends after one item, as
   merge alone. It makes a bead whose branch another open bead writes wait on
   that bead, by a `blocks` edge bd reads, so the bead is no demand until the
   writer closes. It puts a claim it leaves back to open, so the claim is no
-  demand either.
+  demand either, and it closes a patrol wisp left assigned to the refinery
+  ([the wisps the change finds](#the-standing-wisp)).
+- **The edge bd refuses.** bd refuses a `blocks` edge that closes a cycle
+  (`AddDependency` with `HasCycle`, internal/storage/domain/dependency.go, at
+  `steveyegge/beads` v1.3.4, the city's bd). A writer that waits on the bead it
+  writes for is such a case, and an edge onto it would wait for a close that
+  cannot come first. The search makes the bead wait on the live runs that work
+  that writer instead, whose ends end its writing. A writer of that kind that
+  only a session's claim works, with no run, leaves no bead whose close ends
+  the writing, so the search names it on stderr as WARN and the bead stays
+  demand until the claim moves. Gas City's hook strips a row whose
+  `blocked_by` names an open wait (`filterUnreadyHookCandidates`), so such a
+  claim needs its wait added after it was taken.
 - **Added key:** `work_query` in agents/refinery/agent.toml, Gas City's own
   agent key.
 - **Removed:** the standing patrol wisp's lifecycle (its pour, adoption, burn

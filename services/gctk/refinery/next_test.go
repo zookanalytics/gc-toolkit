@@ -180,29 +180,32 @@ func TestNextMakesABeadWaitOnAnotherThatWorksItsBranch(t *testing.T) {
 
 // A bead on the branch that waits on the one the search would take writes its
 // branch only while someone writes it: a live run works it, or a listed
-// session other than this one holds its claim.
+// session other than this one holds its claim. The bead it writes for cannot
+// wait on it, since bd refuses that edge as a cycle, so it waits on the runs
+// that work it, and a claim with no run leaves no bead to wait on.
 func TestNextCountsABeadThatWaitsOnItAsAWriterOnlyWhileSomeoneWritesIt(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		build  func(q *queue)
 		writes bool
+		edge   string
 	}{
-		{"open, armed and run by nobody", func(*queue) {}, false},
+		{"open, armed and run by nobody", func(*queue) {}, false, ""},
 		{"a live run works it", func(q *queue) {
-			q.s.Put(fake.Bead{ID: "root-sib", Status: "in_progress", IssueType: "task",
+			q.s.Put(fake.Bead{ID: "tk-root-sib", Status: "in_progress", IssueType: "task",
 				Metadata: map[string]string{"gc.kind": "workflow", "gc.var.issue": "tk-sib"}})
-		}, true},
+		}, true, "tk-root-sib"},
 		{"its claim is a listed session's", func(q *queue) {
 			q.edit("tk-sib", func(b *fake.Bead) { b.Status, b.Assignee = "in_progress", "tools/gc-toolkit.polecat-2" })
 			q.sessions = []gascity.Session{{Alias: "tools/gc-toolkit.polecat-2"}}
-		}, true},
+		}, true, ""},
 		{"its claim is a session no list names", func(q *queue) {
 			q.edit("tk-sib", func(b *fake.Bead) { b.Status, b.Assignee = "in_progress", "tools/gc-toolkit.polecat-9" })
-		}, false},
+		}, false, ""},
 		{"its claim's session list does not read", func(q *queue) {
 			q.edit("tk-sib", func(b *fake.Bead) { b.Status, b.Assignee = "in_progress", "tools/gc-toolkit.polecat-2" })
 			q.listErr = errors.New("gc session list did not answer")
-		}, true},
+		}, true, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			q := newQueue()
@@ -214,6 +217,18 @@ func TestNextCountsABeadThatWaitsOnItAsAWriterOnlyWhileSomeoneWritesIt(t *testin
 			ans := q.next(t)
 			if (took(ans) == "") != c.writes {
 				t.Fatalf("took %q, left %+v; want tk-sib a writer %v", took(ans), ans.Left, c.writes)
+			}
+			var want []fake.Edge
+			if c.edge != "" {
+				want = []fake.Edge{{ID: "tk-first", Far: c.edge, Type: gcbd.EdgeBlocks}}
+			}
+			if got := q.s.EdgeWrites(); !slices.Equal(got, want) {
+				t.Fatalf("edges written %+v; want %+v", got, want)
+			}
+			row, _ := q.s.Row("tk-first")
+			if failed := len(ans.Failures) > 0; failed != (c.writes && c.edge == "") || (c.edge != "" && demand(row)) {
+				t.Fatalf("failures %v, tk-first demand %v; want a failure only for a claim with no run, and no demand once it waits",
+					ans.Failures, demand(row))
 			}
 		})
 	}
@@ -317,6 +332,37 @@ func TestNoBeadTheSearchLeavesStaysDemand(t *testing.T) {
 	}
 	if len(ans.Left) != 4 {
 		t.Errorf("left %+v; want the held bead, the held claim, and the bead and the claim whose branch another works", ans.Left)
+	}
+}
+
+// A patrol wisp left assigned to the refinery is closed, guarded on what the
+// search read of it, and never taken, so it is no demand; a wisp of another
+// formula is left as it is, and a bead beside them is taken.
+func TestNextClosesAPatrolWispLeftAssignedToTheRefinery(t *testing.T) {
+	q := newQueue()
+	q.s.Put(fake.Bead{ID: "tk-wisp-a", Title: patrolTitle, Status: "open", IssueType: "molecule", Assignee: ref, Ephemeral: true})
+	q.s.Put(fake.Bead{ID: "tk-wisp-b", Title: patrolTitle, Status: "in_progress", IssueType: "molecule", Assignee: ref, Ephemeral: true})
+	q.s.Put(fake.Bead{ID: "tk-wisp-c", Title: "mol-other", Status: "open", IssueType: "molecule", Assignee: ref, Ephemeral: true})
+	q.put("tk-take", stamp(0))
+	ans := q.next(t)
+	if took(ans) != "tk-take" || len(ans.Failures) != 0 {
+		t.Fatalf("took %q, failures %v; want tk-take and none", took(ans), ans.Failures)
+	}
+	for _, c := range []struct{ id, read, now string }{
+		{"tk-wisp-a", "open", "closed"}, {"tk-wisp-b", "in_progress", "closed"}, {"tk-wisp-c", "open", "open"},
+	} {
+		row, _ := q.s.Row(c.id)
+		if row.Status != c.now {
+			t.Errorf("%s reads %s; want %s", c.id, row.Status, c.now)
+		}
+		if c.now == "closed" && !slices.ContainsFunc(q.s.Writes(), func(w fake.Write) bool {
+			return w.ID == c.id && slices.Contains(w.Args, "--if-status="+c.read) && slices.Contains(w.Args, "--if-assignee="+ref)
+		}) {
+			t.Errorf("writes %+v; want %s's close guarded on %s and the refinery", q.s.Writes(), c.id, c.read)
+		}
+	}
+	if !slices.Equal(leftIDs(ans), []string{"tk-wisp-a", "tk-wisp-b"}) {
+		t.Errorf("left %+v; want the two patrol wisps", ans.Left)
 	}
 }
 

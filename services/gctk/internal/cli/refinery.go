@@ -43,10 +43,15 @@ in progress, so the search leaves no such bead as that demand:
     conversation or an ask on its PR holds only the merge, so it is taken
   - a bead with no branch is taken as it is, for the session to read
   - a bead whose branch another open bead works on is made to wait on that
-    bead, by a blocks edge, so it turns ready when that bead closes
+    bead, by a blocks edge, so it turns ready when that bead closes; when that
+    bead waits on it, bd refuses the edge as a cycle, so it waits on the live
+    runs that work that bead instead
+  - a patrol wisp left assigned to the refinery from before a session took one
+    item and ended is closed, since Gas City counts it as demand
 
 Among the rest it takes a rework child handed back before its anchor, then
-the highest priority, then the oldest.
+the highest priority, then the oldest. A write it cannot make is named on
+stderr as WARN, and leaves its bead demand for the next session.
 
 exit: 0 answered, a bead or none · 1 GC_AGENT is empty, or a read did not
       answer, so nothing is taken`
