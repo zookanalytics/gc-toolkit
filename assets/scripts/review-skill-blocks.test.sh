@@ -25,8 +25,9 @@
 # The review-ruling skill's blocks for a red check the PR's target carries file
 # the target's failure as its log reads: a log holding quotes, a command
 # substitution, backticks and variables reaches the tracker's message as one
-# argument, nothing in it runs, and the ask waits on the tracker the filing
-# printed, in bash and in zsh.
+# argument, nothing in it runs, a lint finding's key of two words reaches the
+# filing as one argument, and the ask waits on the tracker the filing printed,
+# in bash and in zsh.
 #
 # The suite finds each skill through the index and names none, so a change to a
 # skill alone selects it only as a tree-wide suite.
@@ -215,7 +216,8 @@ echo "# the ruling's tracker blocks file the target's failure as its log reads"
 # blocks run one after another, as an agent runs them: the key the first prints
 # fills the second, and the tracker the second prints fills the third. The
 # failure's placeholder takes the log wherever the block puts it, as an agent
-# pastes it there.
+# pastes it there. The filing runs once more under a lint finding's key, which
+# `key --lint` prints as two words.
 RB="$TMP/blocks/ruling"; mkdir -p "$RB"
 blocks "$ROOT/skills/review-ruling/SKILL.md" "$RB"
 KEYB=$(grep -l 'preexisting-failure.sh" key' "$RB"/*.sh 2>/dev/null | head -1)
@@ -262,6 +264,8 @@ GS
   eq "$stray" "" "the tracker blocks' placeholders are the ones this case fills"
   printf '%s\0' key --test TestTheCap > "$TMP/key.want"
   printf '%s\0' file TestTheCap --message "$(cat "$LOG")" > "$TMP/tracker.want"
+  LINT_KEY="shellcheck assets/scripts/example.sh"
+  printf '%s\0' file "$LINT_KEY" --message "$(cat "$LOG")" > "$TMP/tracker-lint.want"
   printf '%s\0' review ask tk-anchor1 --source tk-ask1 --waiting-on tk-tracker1 --reason \
     "Bring 'polecat/x' current by merging origin/main in once tk-tracker1 fixes test on 'main'." > "$TMP/ask.want"
   for sh in $SHELLS; do
@@ -284,6 +288,13 @@ GS
     eq "$RC" "0" "($sh) the ask block runs under set -u"
     cmp -s "$TMP/ask.args" "$TMP/ask.want" && ok "($sh) the ask waits on the tracker the filing printed" \
       || bad "($sh) the ask waits on the tracker the filing printed" "got: $(tr '\0' '|' 2>/dev/null < "$TMP/ask.args")"
+    rm -f "$TMP/tracker.args"
+    sed "s|KEY_PRINTED|$LINT_KEY|g" "$RB/file.sh" > "$RB/file-lint.$sh.sh"
+    run "$sh" "$RB/file-lint.$sh.sh" STUB_SCRIPTS="$RS" TRACKER_ARGS="$TMP/tracker.args"
+    cmp -s "$TMP/tracker.args" "$TMP/tracker-lint.want" \
+      && ok "($sh) a lint finding's key, two words, reaches the filing as one argument" \
+      || bad "($sh) a lint finding's key, two words, reaches the filing as one argument" \
+             "got: $(tr '\0' '|' 2>/dev/null < "$TMP/tracker.args")"
   done
 fi
 

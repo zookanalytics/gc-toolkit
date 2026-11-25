@@ -156,14 +156,14 @@ The first call prints the failure's key. Name the failure with one of these:
 - `--lint <the linter> <the repo-relative path>` for a lint finding.
 
 ```bash
-"$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test <the failing test function>
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test "<the failing test function>"
 ```
 
 The second call prints the key's tracker. Put the failure as the target's run
 shows it, with its log, on the lines between the here-document's delimiters:
 
 ```bash
-"$(gc <binding> scripts-dir)/preexisting-failure.sh" file <the key> --message "$(cat <<'TARGET_LOG'
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" file "<the key>" --message "$(cat <<'TARGET_LOG'
 <the failure as the target's run shows it, with its log>
 TARGET_LOG
 )"
