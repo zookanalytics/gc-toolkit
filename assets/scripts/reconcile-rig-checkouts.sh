@@ -99,6 +99,9 @@ resolve_subject() {
     bead=$(open_bead "$name")
     [ -n "$bead" ] || return 0
     if retract_gate "$bead" "reconcile-diverged-$name" "$reading; the stall this gate asked about is resolved."; then
+        # Gas City's close gate asks the close of a plain task for its work
+        # record, and a subject ships nothing.
+        gc bd --rig "$RECONCILE_RIG" update "$bead" --set-metadata gc.work_outcome=no-op >/dev/null 2>&1 || true
         gc bd --rig "$RECONCILE_RIG" close "$bead" --reason "$reading" >/dev/null 2>&1 || true
     fi
 }

@@ -8,7 +8,8 @@
 # reconcile bead that names what git refused, and is put to a person through
 # human-gate.sh with a declared quiet window, while an advanced or HQ rig is
 # not; (c) a re-run does not duplicate that bead; (d) the bead auto-closes once
-# the rig fast-forwards cleanly, and its human gate is withdrawn as moot through
+# the rig fast-forwards cleanly, recording gc.work_outcome=no-op before the
+# close, and its human gate is withdrawn as moot through
 # human-gate.sh --retract in the same pass, with no fresh gate filed; (e) the
 # HQ root is excluded; (f) a rig that blocks again after a clean sync files on
 # a new subject bead; (g) the reset a diverged rig's bead hands a person
@@ -127,9 +128,15 @@ case "$1" in
         while [ $# -gt 0 ]; do [ "$1" = "-d" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"; shift; done
         printf '{"id":"%s"}\n' "$id" ;;
       update)
+        # A work outcome is recorded with the bead's status when it was written.
         id="$1"; shift; key=""
         while [ $# -gt 0 ]; do
-          [ "$1" = "--set-metadata" ] && key="${2#reconcile_rig=}"
+          case "$1=${2-}" in
+            --set-metadata=reconcile_rig=*) key="${2#reconcile_rig=}" ;;
+            --set-metadata=gc.work_outcome=*)
+              printf '%s %s\n' "${2#gc.work_outcome=}" "$(awk -F'|' -v i="$id" '$1==i{print $3}' "$FAKE_LEDGER")" \
+                > "$FAKE_LEDGER.$id.work_outcome" ;;
+          esac
           [ "$1" = "--title" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.title"
           [ "$1" = "--description" ] && printf '%s\n' "$2" > "$FAKE_LEDGER.$id.body"
           shift
@@ -227,6 +234,8 @@ BETA_BEAD="$(bead_for beta)"
 git -C "$TMP/beta" reset --hard -q origin/main
 bash "$SCRIPT" >/dev/null
 eq "$(open_count beta)" "0" "reconcile bead auto-closes after a clean fast-forward"
+eq "$(cat "$TMP/ledger.$BETA_BEAD.work_outcome" 2>/dev/null)" "no-op open" \
+  "…recording gc.work_outcome=no-op while the bead is still open, before its close"
 eq "$(esc_count beta)" "$BETA_ESC_BEFORE" "a recovered rig files no fresh gate"
 eq "$(retract_count beta)" "1" "the recovered rig's gate is withdrawn as moot"
 eq "$(retract_subject beta)" "$BETA_BEAD" "the withdrawal names the reconcile bead as its subject"

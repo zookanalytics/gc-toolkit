@@ -324,7 +324,7 @@ comment on the PR, not a change to its lifecycle.
 ```bash
 OUTCOME="reported (clip at $MP4)"
 [ -n "$DELIVERED" ] && OUTCOME="delivered to $DELIVERED"
-gc bd update "$REQUEST_BEAD" --status=closed --set-metadata gc.outcome=recorded --append-notes "rig-demo: $OUTCOME."
+gc bd update "$REQUEST_BEAD" --status=closed --set-metadata gc.outcome=recorded --set-metadata gc.work_outcome=no-op --append-notes "rig-demo: $OUTCOME."
 ```
 
 **3. Close this step, then drain.** Never close an injected `workflow-finalize`

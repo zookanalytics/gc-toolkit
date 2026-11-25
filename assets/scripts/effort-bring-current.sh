@@ -148,6 +148,9 @@ The conflict is yours to resolve. Ask the operator only when a resolution needs 
 fi
 "$HERE/branch-push.sh" --repo "$REPO_DIR" --branch "$BRANCH" --head "$NEW" --from "$OURS" >&2 \
   || stop "the push of $NEW onto $BRANCH did not land (branch-push.sh says why above); call again to read the branch afresh"
+# Gas City's close gate asks the close of a plain task for its work record,
+# and a hand-off ships no work of its own.
+gc bd update "$H" --set-metadata gc.work_outcome=no-op </dev/null >/dev/null 2>&1 || true
 gc bd close "$H" --reason "Brought $BRANCH current with $TARGET at $(git -C "$REPO_DIR" rev-parse --short "$NEW")" </dev/null >/dev/null \
   || stop "$BRANCH holds $NEW, but $H did not close; call again, which finds nothing left to merge and closes it"
 echo "$PROG: brought $BRANCH current with $TARGET at $NEW and closed $H"

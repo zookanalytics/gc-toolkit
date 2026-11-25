@@ -7,7 +7,17 @@
 #   test.sh affected BASE [RUN-TESTS-OPTION ...]
 #
 # all runs every test in the repository, of three kinds:
-#   - go: every Go package's tests, `go test ./...` from the root;
+#   - go: every Go package's tests, `go test -race -shuffle=on ./...` from the
+#     root. The race detector fails a test whose goroutines touch the same
+#     memory with no order between them. Each package runs its tests in an
+#     order shuffled for the run, and a failing package's output opens with the
+#     seed, `-test.shuffle <seed>`, so `-shuffle=<seed>` on that package runs
+#     the same order again. go caches no result of a shuffled run, so every run
+#     runs every Go test. all also measures the tests' statement coverage, into
+#     a file outside the tree, and when they pass it prints the total after the
+#     line for each kind. In a GitHub Actions job, whose step names its
+#     summary's file in GITHUB_STEP_SUMMARY, it adds the total to that summary.
+#     The figure fails nothing;
 #   - web: the board web app's checks in services/helm/web, after `npm ci`:
 #     its typecheck, its tests, and its build, whose output must match the
 #     committed dist/ file for file;
@@ -16,8 +26,9 @@
 # affected runs the tests the change HEAD's commits make since BASE can affect,
 # BASE being a ref such as origin/main. It reads the change as
 # tools/run-tests.sh --affected does, and runs:
-#   - go: every Go package's tests, as all runs them, since a Go test's reach
-#     is Go's own command over the module to decide;
+#   - go: every Go package's tests, as all runs them but with no coverage
+#     measured, since a Go test's reach is Go's own command over the module to
+#     decide;
 #   - web: the same checks, when the change touches services/helm, the board
 #     the app is the page of. The app's tests render the document helm's read
 #     builds, its golden in internal/rigboard/testdata, so a change to the read
@@ -27,12 +38,13 @@
 #
 # A RUN-TESTS-OPTION goes to tools/run-tests.sh, such as CI's -j and --seconds.
 #
-# Each kind runs whether or not the one before it passed, and the run ends with
-# one line for each kind it ran. go and web run as run-tests.sh runs a suite:
-# with no GC_* or BEADS_* variable of the caller's, and with the test floor,
-# tools/test-floor, at the front of PATH. A city session's environment names
-# its live city and the gc that reaches it, so a test that reached for gc, bd
-# or gh there would reach that city, and the floor refuses the call instead.
+# Each kind runs whether or not the one before it passed. The run then prints
+# one line for each kind it ran, and all's coverage total after them. go and web
+# run as run-tests.sh runs a suite: with no GC_* or BEADS_* variable of the
+# caller's, and with the test floor, tools/test-floor, at the front of PATH. A
+# city session's environment names its live city and the gc that reaches it, so
+# a test that reached for gc, bd or gh there would reach that city, and the
+# floor refuses the call instead.
 #
 # The web build writes to a directory of its own, which is compared with dist/,
 # so a run changes no tracked file. npm ci rewrites services/helm/web's
@@ -101,8 +113,27 @@ hermetic() {
   )
 }
 
+# go_tests [PROFILE] — the go kind's run, measuring statement coverage into
+# PROFILE when one is given.
 go_tests() {
-  cd "$ROOT" && go test ./...
+  cd "$ROOT" && go test -race -shuffle=on ${1:+"-coverprofile=$1"} ./...
+}
+
+# coverage <profile> — prints the total statement coverage go test measured
+# into the profile, and adds it to the job's summary when GITHUB_STEP_SUMMARY
+# names one. The figure fails nothing, so a total it cannot read, or a summary
+# it cannot write, is a line that says so.
+coverage() {
+  local total
+  total="$(cd "$ROOT" && go tool cover -func="$1" | awk '$1 == "total:" { t = $NF } END { print t }')"
+  case "$total" in
+    [0-9]*%) ;;
+    *) printf '%s: no Go coverage total: go tool cover read none from %s\n' "$PROG" "$1"; return 0 ;;
+  esac
+  printf '%s: the Go tests cover %s of statements\n' "$PROG" "$total"
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  printf '### Go coverage\n\nThe Go tests cover %s of statements.\n' "$total" >>"$GITHUB_STEP_SUMMARY" \
+    || printf '%s: could not add the Go coverage to the job summary %s\n' "$PROG" "$GITHUB_STEP_SUMMARY"
 }
 
 web_checks() {
@@ -128,8 +159,19 @@ kind() { # <name> <command>...
   RAN+=("$name")
   "$@" || FAILED+=("$name")
 }
+failed() { case " ${FAILED[*]} " in *" $1 "*) return 0 ;; esac; return 1; }
 
-kind go hermetic go_tests
+# all keeps the coverage profile in a directory of its own, which every exit
+# removes.
+PROFILE=""
+if [ "$MODE" = all ]; then
+  cover_dir="$(mktemp -d "${TMPDIR:-/tmp}/test-cover.XXXXXX")" || {
+    echo "$PROG: mktemp failed" >&2; exit 2; }
+  trap 'rm -rf -- "$cover_dir"' EXIT
+  PROFILE="$cover_dir/go.cover"
+fi
+
+kind go hermetic go_tests "$PROFILE"
 if [ "$WEB" -eq 1 ]; then
   kind web hermetic web_checks
 fi
@@ -141,9 +183,13 @@ fi
 
 printf '\n'
 for name in "${RAN[@]}"; do
-  case " ${FAILED[*]} " in
-    *" $name "*) printf '%s: %s FAIL\n' "$PROG" "$name" ;;
-    *) printf '%s: %s pass\n' "$PROG" "$name" ;;
-  esac
+  if failed "$name"; then
+    printf '%s: %s FAIL\n' "$PROG" "$name"
+  else
+    printf '%s: %s pass\n' "$PROG" "$name"
+  fi
 done
+if [ -n "$PROFILE" ] && ! failed go; then
+  coverage "$PROFILE"
+fi
 [ "${#FAILED[@]}" -eq 0 ]
