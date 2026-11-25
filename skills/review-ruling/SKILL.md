@@ -133,35 +133,37 @@ The PR stays the change the operator reviewed.
 
 ## A red check the target carries
 
-A red-check ask names a required check that fails at the PR's head. The check
-is the branch's to fix, unless the PR's target is the rig's default branch and
-its own head fails the check for the same reason, such as the same test, which
-no change on the branch can fix. The tracker below is the default branch's
-alone: `preexisting-failure.sh file` sends a tracker it files with no target,
-so its fix branches from the rig's default branch and lands there. A failure
-another target carries, such as an effort's integration branch, stays the
-branch's to fix, since the PR's merge carries the fix to that target.
-`gc rig list --json` names each rig's `default_branch`. Read the target's
-checks at its head:
+A red-check ask names a required check that fails at the PR's head. Fix the
+check on the branch, as any must-fix point. The target carries the failure
+when both of these hold:
+
+- The PR's target is the rig's default branch. `gc rig list --json` names each
+  rig's `default_branch`.
+- The target's own head fails the check for the same reason, such as the same
+  test.
+
+Read the target's checks at its head:
 
 ```bash
 gh api "repos/<owner>/<repo>/commits/<target>/check-runs" --jq '.check_runs[] | "\(.name) \(.conclusion) \(.html_url)"'
 ```
 
-When the target carries the failure, send it to its one tracker and leave the
-PR waiting on that tracker. `preexisting-failure.sh key` prints the failure's
-key, derived from its test function (`--test`), its path (`--target`) or its
-lint finding (`--lint`):
+When the target carries the failure, send it to the target's one tracker with
+the three calls below, in order, instead of fixing it.
+
+The first call prints the failure's key. Name the failure with one of these:
+
+- `--test <the test function>` for a failing test;
+- `--target <the repo-relative path>` for a failing suite file, package or
+  build target;
+- `--lint <the linter> <the repo-relative path>` for a lint finding.
 
 ```bash
 "$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test <the failing test function>
 ```
 
-`preexisting-failure.sh file` prints the tracker it finds under that key, or
-the one it files and sends to be fixed. The tracker's message is the failure as
-the target's run shows it, with its log, which goes on the lines between the
-quoted here-document's delimiters, where every character stays as the log has
-it:
+The second call prints the key's tracker. Put the failure as the target's run
+shows it, with its log, on the lines between the here-document's delimiters:
 
 ```bash
 "$(gc <binding> scripts-dir)/preexisting-failure.sh" file <the key> --message "$(cat <<'TARGET_LOG'
@@ -170,7 +172,7 @@ TARGET_LOG
 )"
 ```
 
-The ask then waits on the tracker that call printed:
+The third call files an ask that waits on that tracker:
 
 ```bash
 # >>> gctk-bin
@@ -179,10 +181,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" review ask <the bead that owns the PR> --source <the red-check ask> --waiting-on <the tracker> --reason "Bring '<the PR branch>' current by merging origin/<target> in once <the tracker> fixes <the check> on '<target>'."
 ```
 
-Rule the red-check ask declined, and name the tracker and the new ask in its
-reason. While that ask is open, the landing order asks no person about the
-head staying red, and once the tracker closes, the run that takes the ask
-brings the branch current.
+Rule the red-check ask declined, and name in its reason the tracker and the
+ask the third call filed.
 
 ## A person's comment
 
