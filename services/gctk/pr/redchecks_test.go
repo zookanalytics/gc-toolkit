@@ -457,7 +457,8 @@ func TestAStuckSuiteIsGated(t *testing.T) {
 // approved and nothing holds it, a conversation on the PR included, and none
 // while it is unapproved, a hold or a human gate holds it, another bead works
 // its branch, or GitHub gives it another base or head branch than the record
-// names, whichever act the run takes first. BEHIND asks the same.
+// names, whichever act the run takes first. A branch behind its target is no
+// conflict: GitHub reads it BEHIND, and nothing is filed.
 func TestAConflictIsAskedOnlyOnAnApprovedPRThatNothingHolds(t *testing.T) {
 	conflicts := "PR#7 conflicts with 'main' at head " + head + ". Bring '" + branch + "' current by merging " +
 		"origin/main in, resolve the conflict, and push the merge as a fast-forward."
@@ -472,8 +473,7 @@ func TestAConflictIsAskedOnlyOnAnApprovedPRThatNothingHolds(t *testing.T) {
 		}, conflicts},
 		{"behind a target that requires a current branch", func(d *redWorld, _ *testing.T) {
 			d.pr.Facts.MergeStateStatus = "BEHIND"
-		}, "PR#7 is behind 'main' at head " + head + ", which requires a current branch. Bring '" + branch +
-			"' current by merging origin/main in, and push the merge as a fast-forward."},
+		}, ""},
 		{"unapproved", func(d *redWorld, _ *testing.T) { d.unapprove() }, ""},
 		{"held by a rebase hold", func(d *redWorld, t *testing.T) {
 			d.edit(t, func(b *fake.Bead) { b.Metadata["rebase_hold"] = "true" })

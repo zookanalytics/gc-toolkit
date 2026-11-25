@@ -214,10 +214,10 @@ func (s redState) approved() bool {
 // every required check passes at the head, each open red-check gate is
 // withdrawn, whatever holds the bead. Otherwise the record must be pending at
 // the head the refinery validated, since a changed head goes to the refinery's
-// validation first, and nothing may hold the bead. A PR GitHub reads DIRTY, or
-// BEHIND, which holds its merge as DIRTY does, is the conflict act's: an ask to
-// bring the branch current, on an approved PR whose branch nothing else writes,
-// and nothing on any other, since its checks wait for that merge. Then a code
+// validation first, and nothing may hold the bead. A PR GitHub reads DIRTY is
+// the conflict act's: an ask to bring the branch current, on an approved PR
+// whose branch nothing else writes, and nothing on any other, since its checks
+// wait for that merge. Then a code
 // failure, a deploy's failure, a failure no code change fixes and a required
 // check that never reports, in that order.
 func decideRed(s redState) redStep {
@@ -247,7 +247,7 @@ func decideRed(s redState) redStep {
 		return s.none(fmt.Sprintf("the record is not pending at the PR's head %s, so the refinery's validation comes first", p.Head))
 	case s.held != "":
 		return s.none(s.held + ", so nothing is filed")
-	case p.MergeState == "DIRTY" || p.MergeState == "BEHIND":
+	case p.MergeState == "DIRTY":
 		return s.conflict()
 	case green:
 		return s.none("every required check passes at head " + p.Head)
@@ -284,7 +284,7 @@ func decideRed(s redState) redStep {
 	return s.none("no required check has failed at head " + p.Head)
 }
 
-// conflict is the conflict act's step for a PR GitHub reads DIRTY or BEHIND.
+// conflict is the conflict act's step for a PR GitHub reads DIRTY.
 func (s redState) conflict() redStep {
 	p := s.pr()
 	switch {
@@ -297,10 +297,6 @@ func (s redState) conflict() redStep {
 	}
 	reason := fmt.Sprintf("PR#%d conflicts with '%s' at head %s. Bring '%s' current by merging origin/%s in, resolve the "+
 		"conflict, and push the merge as a fast-forward.", p.Number, p.Base, p.Head, p.HeadBranch, p.Base)
-	if p.MergeState == "BEHIND" {
-		reason = fmt.Sprintf("PR#%d is behind '%s' at head %s, which requires a current branch. Bring '%s' current by "+
-			"merging origin/%s in, and push the merge as a fast-forward.", p.Number, p.Base, p.Head, p.HeadBranch, p.Base)
-	}
 	return redStep{kind: stepAsk, reason: reason, why: fmt.Sprintf("GitHub reads the approved PR %s at head %s", p.MergeState, p.Head)}
 }
 
@@ -552,7 +548,7 @@ func (u *run) redOn(l *ledger.Ledger, r *ledger.Record, o owned) (redState, stri
 		return redState{}, "the review results did not read: " + err.Error()
 	}
 	s.passed = passedAt(results, o.rec.Head, o.rec.Target)
-	if m := saved.PR.MergeState; m == "DIRTY" || m == "BEHIND" {
+	if saved.PR.MergeState == "DIRTY" {
 		rows, err := l.Find(record.OnBranch(o.branch))
 		if err != nil {
 			return redState{}, "the beads on the branch did not read: " + err.Error()

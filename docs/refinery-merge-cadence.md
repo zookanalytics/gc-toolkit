@@ -637,9 +637,9 @@ never starts, waits for a person.
   refinery validated, and for nothing to hold the bead: a merge or rebase hold
   set by hand, or an open human gate. A conversation on the PR holds only its
   merge, so it holds none of them.
-- A PR GitHub reads `DIRTY`, or `BEHIND`, which holds its merge as `DIRTY`
-  does, gets an ask to merge its target in once it is approved and no open
-  bead other than an ask names its branch, such as a rework child. An
+- A PR GitHub reads `DIRTY` gets an ask to merge its target in once it is
+  approved and no open bead other than an ask names its branch, such as a
+  rework child. An
   unapproved one gets nothing, and its label shows the conflict. Its checks
   wait for that merge.
 - A required check that failed for a code cause, whose name is not a deploy's,

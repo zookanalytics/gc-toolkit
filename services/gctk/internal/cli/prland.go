@@ -257,8 +257,8 @@ whatever holds the bead. Its other steps wait for the record to be pending at
 the head the refinery validated, and for no hold set by hand and no human gate
 to hold the bead; a conversation holds only the merge:
 
-  - an approved PR GitHub reads DIRTY or BEHIND, whose branch no open bead but
-    its asks names: an ask to merge its target in, and nothing for its checks
+  - an approved PR GitHub reads DIRTY, whose branch no open bead but its asks
+    names: an ask to merge its target in, and nothing for its checks
   - a required check that failed for a code cause: one ask for the head, then
     pr-fix-unmoved once an ask at the head closed with the head still red, and
     pr-fix-capped once three earlier heads each drew an ask
