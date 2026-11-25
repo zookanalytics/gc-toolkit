@@ -87,19 +87,19 @@ exit: 0 pass · 1 fail · 2 usage
 
 // rigSlotsHelp is what the help of each verb that runs a command says of the
 // machine's slots (internal/rig, slots.go).
-const rigSlotsHelp = `A run holds slots on the machine while its command runs, so that the checks
-every session on it runs at once fit in its memory. A slot stands for 4 GiB,
-and a run takes one for each 4 GiB the last ten runs of the same command line,
-check and scope used at most in this repository. A command with none measured
-takes as many as the most a kept run of its check and scope used here, and
-every slot while none is kept. A run whose processes hold more than all the
-slots stand for at once is stopped. The machine has GCTK_RIG_SLOTS slots, else
-as many as five eighths of its memory holds. They are Gas City's push-gate
-slots, in the city's .gc/gate-slots, so a push's test suites and the checks
-share them. A run that finds too few free waits its turn and says what holds
-them, and --timeout counts the wait with the run. GC_PUSH_GATE_NO_CAP=1 takes
-no slots, and every command runs with it set, because the slots its run holds
-cover what it starts.`
+const rigSlotsHelp = `A run holds slots on the machine while its command runs, and the checks every
+session on it runs share the slots by the memory their commands used before.
+A slot stands for 4 GiB, and a run takes one for each 4 GiB the last ten runs
+of the same command line, check and scope used at most in this repository. A
+command with none measured takes as many as the most a kept run of its check
+and scope used here, and every slot while none is kept. A run whose processes
+hold more than all the slots stand for at once is stopped. The machine has
+GCTK_RIG_SLOTS slots, else as many as five eighths of its memory holds. They
+are Gas City's push-gate slots, in the city's .gc/gate-slots, so a push's test
+suites and the checks share them. A run that finds too few free waits its turn
+and says what holds them, and --timeout counts the wait with the run.
+GC_PUSH_GATE_NO_CAP=1 takes no slots, and every command runs with it set,
+because the slots its run holds cover what it starts.`
 
 // The exit codes rigRecordedLong states.
 const (

@@ -12,10 +12,10 @@ import (
 )
 
 // A run gctk rig makes holds slots on the machine while its command runs, so
-// that the checks every session on the machine runs at once stay inside its
-// memory. A slot stands for SlotSize of memory, and a run takes one for each
-// SlotSize the last runs of its command line, check and scope used at most in
-// the same repository (Peaks).
+// that the checks every session on the machine runs at once share its memory
+// by what their commands used before. A slot stands for SlotSize of memory,
+// and a run takes one for each SlotSize the last runs of its command line,
+// check and scope used at most in the same repository (Peaks).
 //
 // The slots are Gas City's push-gate slots (scripts/push-gate-lock-lib.sh at
 // gastownhall/gascity 33a7d167c8): numbered files slot-<i>.lock in one
