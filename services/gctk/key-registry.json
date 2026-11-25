@@ -6,9 +6,10 @@
       "listing",
       "place",
       "pr",
-      "reaction"
+      "reaction",
+      "refinery"
     ],
-    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
+    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The refinery's search takes a rework child before the anchor it names, and the anchor is no writer of the child's branch. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
   },
   {
     "name": "blocked_reason",
@@ -683,9 +684,10 @@
     "readers": [
       "memory",
       "reaction",
+      "refinery",
       "review"
     ],
-    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane."
+    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. The refinery's search takes a rework child, task_kind rework, before its anchor. A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane."
   },
   {
     "name": "withdraw_head",

@@ -1,7 +1,12 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,9 +21,90 @@ import (
 
 func newRefineryCmd(stdout, stderr io.Writer) *cobra.Command {
 	return group("refinery", "a rig's refinery queue",
-		`A rig's refinery queue: each handoff that has sat there unprepared, held by
-nothing, past the time a handoff takes to turn over (refinery stuck).`,
-		newRefineryStuckCmd(stdout, stderr))
+		`A rig's refinery queue: the one item a refinery session takes next (refinery
+next), and each handoff that has sat there unprepared, held by nothing, past
+the time a handoff takes to turn over (refinery stuck).`,
+		newRefineryNextCmd(stdout, stderr), newRefineryStuckCmd(stdout, stderr))
+}
+
+const refineryNextLong = `The refinery's search, which a refinery session's gc hook --claim runs as
+its work query (agents/refinery/agent.toml). It reads the beads assigned to
+$GC_AGENT in the store gc resolves here, open or in progress, and prints the
+one the session takes next as a JSON array of one row, as gc hook --claim reads
+a work query's row, or [] when it takes none. Each bead it leaves, and why, goes
+to stderr.
+
+Gas City starts a refinery session for a bead assigned to it that is ready or
+in progress, so the search leaves no such bead as that demand:
+
+  - a bead in progress is a claim a session left, taken first; one something
+    holds goes back to open, so the wait decides when it is taken
+  - a bead something holds (gctk bead holds) waits until its waits land, but a
+    conversation or an ask on its PR holds only the merge, so it is taken
+  - a bead with no branch is taken as it is, for the session to read
+  - a bead whose branch another open bead works on is made to wait on that
+    bead, by a blocks edge, so it turns ready when that bead closes
+
+Among the rest it takes a rework child handed back before its anchor, then
+the highest priority, then the oldest.
+
+exit: 0 answered, a bead or none · 1 GC_AGENT is empty, or a read did not
+      answer, so nothing is taken`
+
+func newRefineryNextCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "next",
+		Short: "print the one item a refinery session takes next, as its work query, and make each bead it leaves wait",
+		Long:  refineryNextLong,
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			say := func(format string, a ...any) { fmt.Fprintf(stderr, "gctk refinery next: "+format+"\n", a...) }
+			agent := strings.TrimSpace(os.Getenv("GC_AGENT"))
+			if agent == "" {
+				say("GC_AGENT is empty, and an empty assignee filter is no filter, so nothing is taken")
+				return exit(1)
+			}
+			l, err := ledger.Open("")
+			if err != nil {
+				say("the store did not open, so nothing is taken: %v", err)
+				return exit(1)
+			}
+			var self []string
+			for _, v := range []string{"GC_SESSION_NAME", "GC_SESSION_ID", "GC_AGENT", "GC_ALIAS"} {
+				if s := strings.TrimSpace(os.Getenv(v)); s != "" {
+					self = append(self, s)
+				}
+			}
+			city := gascity.New()
+			search := &refinery.Search{Ledger: l, Refinery: agent, Self: self,
+				Sessions: func() ([]gascity.Session, error) { return city.Sessions(context.Background()) }}
+			ans, err := search.Next()
+			if err != nil {
+				say("%v, so nothing is taken", err)
+				return exit(1)
+			}
+			for _, left := range ans.Left {
+				if left.Wrote != "" {
+					say("left %s: %s; %s", left.ID, left.Why, left.Wrote)
+				} else {
+					say("left %s: %s", left.ID, left.Why)
+				}
+			}
+			for _, f := range ans.Failures {
+				say("WARN %s", f)
+			}
+			rows := []*refinery.Item{}
+			if ans.Take != nil {
+				rows = append(rows, ans.Take)
+			}
+			out, err := json.Marshal(rows)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "%s\n", out)
+			return nil
+		},
+	}
 }
 
 const refineryStuckLong = `The refinery queue's look, which the refinery-queue-detect order runs every 30
