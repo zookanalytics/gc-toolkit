@@ -160,7 +160,7 @@ exit: 0 placed, or placed already
 const beadMovePlacementHoldLong = `Moves the placement queue from hold:mayor, the placement hold's earlier
 spelling, onto hold:po: each live bead the queue holds on hold:mayor, in the
 store of the HQ and of each rig gc rig list --json names, suspended or not
-(docs/steering.md, "Holding new work for placement").
+(docs/steering.md, "The intake rule").
 
   gctk bead move-placement-hold [--dry-run]
 
