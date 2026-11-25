@@ -72,7 +72,10 @@ while the commands `gctk rig` runs, such as `go test`, `go vet` and
 slot, while the runs differ in memory by more than ten times (below). The
 change adds slots above the push gate's two, a run's weight, and `queue.lock`.
 The push gate reads none of them, and a run takes free slots from the top
-down, so a push waits only once the checks fill the machine.
+down, so a push waits only once the checks fill the machine. Its wait ends at
+the push gate's own bound, `PUSH_GATE_MAX_WAIT_SECONDS` (600 s by default),
+and then the pre-push hook refuses the push. A check that holds every slot,
+such as one not yet measured in its repository, can outlast that bound.
 
 ## Measurements
 
@@ -130,3 +133,11 @@ with a warning, and can still exhaust the machine beside the city's other
 work. The four-lane test command above is one. Its cause is in the command
 and in the package's size, not in how runs share the machine, and tk-2a3xy7x
 carries it to where such commands are written.
+
+gctk sets none of Go's own limits on a command, such as `go test -p`,
+`GOMAXPROCS` or `GOMEMLIMIT`. It runs each rig's commands as the rig or its
+caller gives them, whatever language they build, and a run takes its slots
+for what its command used, the command's own parallelism included. A bound
+on how many packages one `go` command builds at once would not shrink the
+four-lane command either, because its lanes are separate `go` commands, and
+a bound inside one does not reach the others.

@@ -20,7 +20,8 @@ import (
 // The slots are Gas City's push-gate slots (scripts/push-gate-lock-lib.sh at
 // gastownhall/gascity 33a7d167c8): numbered files slot-<i>.lock in one
 // directory, each held under flock(2) by one process, which stamps the file
-// "<pid> <time> <label> <host>". A run of the repository's test suites holds
+// "<pid> <time> <label> <host>". A run of Gas City's own test runner
+// (scripts/test-local-parallel), which a push from its repository runs, holds
 // one of the first PUSH_GATE_MAX_CONCURRENT of them, so a push's suites and
 // the checks share the machine's memory. A run takes free slots from the top
 // down, so a push waits only once the checks fill the machine.
@@ -47,10 +48,11 @@ var (
 )
 
 // SlotDir is the directory that holds the machine's slots, found as the push
-// gate finds it: <city>/.gc/gate-slots for the city GC_CITY_PATH, GC_CITY or
-// GC_CITY_ROOT names, the first that holds city.toml or .gc, else for the
-// nearest directory above top that holds city.toml, looking no higher than
-// HOME, else gate-slots in the repository's git common directory, common.
+// gate finds it for a city that has a city.toml: <city>/.gc/gate-slots for the
+// city GC_CITY_PATH, GC_CITY or GC_CITY_ROOT names, the first that holds
+// city.toml or .gc, else for the nearest directory above top that holds
+// city.toml, looking no higher than HOME, else gate-slots in the repository's
+// git common directory, common.
 func SlotDir(getenv func(string) string, top, common string) string {
 	for _, v := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
 		if city := getenv(v); city != "" && (exists(filepath.Join(city, "city.toml")) || exists(filepath.Join(city, ".gc"))) {
@@ -78,10 +80,9 @@ func exists(path string) bool {
 
 // SlotCount is how many slots the machine has: SlotsVar when it is a whole
 // number above zero, else as many as five eighths of mem holds, at least one.
-// The other three eighths are for the city's own work: on the 64 GiB host
-// whose memory ran out, everything outside a check held 27 GiB resident, its
-// agent sessions and its store among them. A SlotsVar that is not such a
-// number is passed over, and note says so.
+// The other three eighths are for the city's own work, its agent sessions and
+// its store among them, which specs/tk-36fz90k/gas-city-search.md measures. A
+// SlotsVar that is not such a number is passed over, and note says so.
 func SlotCount(getenv func(string) string, mem int64) (count int, note string) {
 	if v := getenv(SlotsVar); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
