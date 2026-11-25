@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
 // The calls a merge into a checkout makes: the operation the checkout is in
-// the middle of, the history origin's branch has named, the commits of that
-// history a commit no longer holds, a best common ancestor that may not exist,
-// a commit written from a tree, and the merge itself.
+// the middle of, the updates of origin's branch the clone recorded, the
+// commits of that history a commit no longer holds, a best common ancestor
+// that may not exist, a commit written from a tree, and the merge itself.
 
 // input runs `git -C dir args...` with stdin on its standard input and returns
 // its stdout. A failure carries git's own stderr.
@@ -68,28 +69,48 @@ func InProgress(dir string) (string, error) {
 	return "", nil
 }
 
-// ReflogTips lists the commits refs/remotes/origin/<branch> has named in the
-// clone dir sits in, newest first and each once, as the ref's reflog records
-// them. Every worktree of a clone shares that reflog. A ref with no reflog has
-// named none, and a branch the clone never fetched is an error.
-func ReflogTips(dir, branch string) ([]string, error) {
+// RefUpdate is one update a ref's reflog records: Old, the commit the ref
+// named before it, and New, the commit it named after. Old is all zeros on the
+// update that made the ref.
+type RefUpdate struct{ Old, New string }
+
+// Reflog lists the updates of refs/remotes/origin/<branch> the clone dir sits
+// in recorded, newest first. It reads the ref's log, whose lines
+// git-update-ref(1) lays out under LOGGING, the old object name first and the
+// new one second, since `git reflog` prints only the new one. Every worktree of
+// a clone shares that log, and a ref with no log has recorded no update.
+func Reflog(dir, branch string) ([]RefUpdate, error) {
 	if !ValidBranch(branch) {
 		return nil, fmt.Errorf("git reflog: %q is not a branch name", branch)
 	}
-	out, err := Output(dir, "reflog", "show", "--format=%H", "refs/remotes/origin/"+branch, "--")
+	path, err := Output(dir, "rev-parse", "--path-format=absolute", "--git-path", "logs/refs/remotes/origin/"+branch)
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	var tips []string
-	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); l != "" && !seen[l] {
-			seen[l] = true
-			tips = append(tips, l)
-		}
+	data, err := os.ReadFile(strings.TrimSuffix(path, "\n"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
 	}
-	return tips, nil
+	var updates []RefUpdate
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.SplitN(line, " ", 3)
+		if len(f) != 3 || !IsObjectID(f[0]) || !IsObjectID(f[1]) {
+			return nil, fmt.Errorf("the reflog of origin/%s holds a line that names no update: %q", branch, line)
+		}
+		updates = append(updates, RefUpdate{Old: f[0], New: f[1]})
+	}
+	slices.Reverse(updates)
+	return updates, nil
 }
+
+// IsNull reports whether id is the object name git writes for no object, all
+// zeros.
+func IsNull(id string) bool { return IsObjectID(id) && strings.Trim(id, "0") == "" }
 
 // NotHeld keeps those of commits that tip does not hold, in their order: each
 // that is neither tip nor one of its ancestors. One rev-list reads them all.

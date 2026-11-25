@@ -16,15 +16,21 @@ import (
 // rewrite dropped and conflict in files the branch never touched.
 //
 // So the merge goes from the commit of the target the branch took last. The
-// clone's reflog of origin/<target> records the commits the target has named,
-// and those it no longer holds are its old history. Newest first, the first
-// whose merge base with HEAD is newer than git's own base gives that commit.
-// The merge takes a commit that supersedes it with the target: the target's
-// tree whole, with the target and that commit as its parents, as
-// `git merge -s ours` records a merge. git's own merge then goes from there,
-// leaves a conflict in its merge state, and `git show --remerge-diff` on the
-// merge shows only what was resolved by hand. With no such commit, the target
-// itself is merged.
+// clone's reflog of origin/<target> records each commit the target named,
+// before and after each update, and those it no longer holds are its old
+// history. Newest first, the first whose merge base with HEAD is newer than
+// git's own base gives that commit. The merge takes a commit that supersedes
+// it with the target: the target's tree whole, with the target and that
+// commit as its parents, as `git merge -s ours` records a merge. git's own
+// merge then goes from there, leaves a conflict in its merge state, and
+// `git show --remerge-diff` on the merge shows only what was resolved by hand.
+//
+// With no such commit the target itself is merged, but only once the reflog
+// shows that no commit the branch could have taken is missing from it. git
+// prunes an update whose commits the ref no longer holds after
+// gc.reflogExpireUnreachable, and a clone records nothing from before it was
+// made. Where the reflog cannot show it, the caller names the commit the
+// branch took last, or nothing is merged.
 
 // BroughtCurrent is what bringing a checkout current with its target did.
 type BroughtCurrent struct {
@@ -53,12 +59,15 @@ func (r *CurrentRefusal) Error() string { return r.Why }
 
 // BringCurrent fetches target from origin and merges it into the checkout dir
 // sits in, from the commit of the target the branch took last when the
-// target was rewritten after that. It refuses a checkout that holds work no
-// commit holds, or is in the middle of an operation git stopped, and a HEAD
-// that shares no history with the target. An error is a git call that did not
-// answer or failed, and a merge stopped on a conflict is not one: its
-// Conflicts are left in git's merge state for a person to resolve.
-func BringCurrent(dir, target string) (*BroughtCurrent, error) {
+// target was rewritten after that. base names that commit by its full object
+// name, and "" has the clone's reflog find it. It refuses a checkout that
+// holds work no commit holds, or is in the middle of an operation git stopped,
+// a HEAD that shares no history with the target, a reflog that cannot show
+// the commit when base is "", and a base that HEAD does not hold or that does
+// not hold git's merge base. An error is a git call that did not answer or
+// failed, and a merge stopped on a conflict is not one: its Conflicts are left
+// in git's merge state for a person to resolve.
+func BringCurrent(dir, target, base string) (*BroughtCurrent, error) {
 	co, err := git.Open(dir)
 	if err != nil {
 		return nil, err
@@ -94,11 +103,14 @@ func BringCurrent(dir, target string) (*BroughtCurrent, error) {
 		return nil, &CurrentRefusal{Why: fmt.Sprintf("HEAD shares no history with origin/%s", target)}
 	}
 	cur.Default, cur.Base = def, def
-	from := tip
-	base, err := lastTaken(co.Top, target, co.Commit, tip, def)
-	if err != nil {
+	if base == "" {
+		if base, err = fromReflog(co.Top, target, co.Commit, tip, def); err != nil {
+			return nil, err
+		}
+	} else if base, err = given(co.Top, base, co.Commit, tip, def); err != nil {
 		return nil, err
 	}
+	from := tip
 	if base != "" {
 		tree, err := git.TreeOf(co.Top, tip)
 		if err != nil {
@@ -123,19 +135,101 @@ func BringCurrent(dir, target string) (*BroughtCurrent, error) {
 	return cur, nil
 }
 
-// lastTaken is the commit of the target's old history that head took last,
-// "" when there is none: of the commits the clone's reflog of origin/<target>
-// records and tip no longer holds, newest first, the merge base with head of
-// the first whose merge base is newer than def, git's merge base of head and
-// tip. A branch that took tip's history after a rewrite has def there, so the
-// commits it took before the rewrite are not newer and it gets none. Neither
-// does a branch whose old history has left the reflog.
-func lastTaken(dir, target, head, tip, def string) (string, error) {
-	tips, err := git.ReflogTips(dir, target)
+// fromReflog is the commit of the target's old history that head took last,
+// as the clone's reflog of origin/<target> shows it, and "" when the reflog
+// shows the target was not rewritten after head took it. A reflog that shows
+// neither is a refusal.
+func fromReflog(dir, target, head, tip, def string) (string, error) {
+	updates, err := git.Reflog(dir, target)
 	if err != nil {
 		return "", err
 	}
-	old, err := git.NotHeld(dir, tips, tip)
+	base, err := lastTaken(dir, updates, head, tip, def)
+	if err != nil || base != "" {
+		return base, err
+	}
+	whole, err := reachesBefore(dir, updates, tip, def)
+	if err != nil {
+		return "", err
+	}
+	if !whole {
+		return "", &CurrentRefusal{Why: fmt.Sprintf("the clone's reflog of origin/%[1]s does not reach back to before "+
+			"%[1]s held %[2]s, git's merge base with HEAD. So it cannot show whether %[1]s was rewritten after this "+
+			"branch last took it, and a merge from %[2]s would take any old history of %[1]s the branch still carries "+
+			"for its own change.\nRun it again with --base <commit>, the full object name of the commit of %[1]s the "+
+			"branch took last: the second parent of the branch's newest merge of %[1]s, or the commit the branch was "+
+			"cut from when it never merged %[1]s.", target, def)}
+	}
+	return "", nil
+}
+
+// reachesBefore reports whether updates, the reflog's, hold every commit the
+// target has named since before it held def, git's merge base of HEAD and
+// tip. Read back from the newest, which names tip, while each update starts
+// at the commit the one before it ended at, they must reach the ref's making
+// or a commit that did not hold def yet. git leaves the old name of an update
+// as it was when it prunes the update before it, so a stretch it pruned breaks
+// the chain.
+func reachesBefore(dir string, updates []git.RefUpdate, tip, def string) (bool, error) {
+	if len(updates) == 0 || updates[0].New != tip {
+		return false, nil
+	}
+	k := 0
+	for k+1 < len(updates) && updates[k].Old == updates[k+1].New {
+		k++
+	}
+	start := updates[k].Old
+	if git.IsNull(start) {
+		return true, nil
+	}
+	held, err := git.IsAncestor(dir, def, start)
+	return !held, err
+}
+
+// given checks base, the commit of the target the caller says head took
+// last: head holds it, and it holds def, git's merge base of head and tip. It
+// is "" when tip holds it too, since then the target was not rewritten after
+// it and git's own base is the one to merge from.
+func given(dir, base, head, tip, def string) (string, error) {
+	if !git.IsObjectID(base) || !git.HasCommit(dir, base) {
+		return "", &CurrentRefusal{Why: fmt.Sprintf("--base names %q, which is not the full object name of a commit the clone holds", base)}
+	}
+	if in, err := git.IsAncestor(dir, base, head); err != nil {
+		return "", err
+	} else if !in {
+		return "", &CurrentRefusal{Why: fmt.Sprintf("--base names %s, which HEAD does not hold, so the branch never took it", base)}
+	}
+	if holds, err := git.IsAncestor(dir, def, base); err != nil {
+		return "", err
+	} else if !holds {
+		return "", &CurrentRefusal{Why: fmt.Sprintf("--base names %s, which does not hold %s, the newest commit HEAD shares "+
+			"with the target, so the branch took a later commit of the target than it", base, def)}
+	}
+	held, err := git.IsAncestor(dir, base, tip)
+	if err != nil || held {
+		return "", err
+	}
+	return base, nil
+}
+
+// lastTaken is the commit of the target's old history that head took last,
+// "" when updates show none: of the commits they name, before and after each
+// update, newest first, those tip no longer holds, the merge base with head of
+// the first whose merge base is newer than def, git's merge base of head and
+// tip. A branch that took tip's history after a rewrite has def there, so the
+// commits it took before the rewrite are not newer and it gets none.
+func lastTaken(dir string, updates []git.RefUpdate, head, tip, def string) (string, error) {
+	var named []string
+	seen := map[string]bool{}
+	for _, u := range updates {
+		for _, c := range []string{u.New, u.Old} {
+			if !seen[c] && !git.IsNull(c) {
+				seen[c] = true
+				named = append(named, c)
+			}
+		}
+	}
+	old, err := git.NotHeld(dir, named, tip)
 	if err != nil {
 		return "", err
 	}

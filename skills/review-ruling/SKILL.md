@@ -73,8 +73,9 @@ round's triage reads beside `git show --remerge-diff`: resolve each file, then
 commit with `git commit -F <file>`, the file holding the message the call
 printed, then one paragraph for each file you resolved by hand, naming what
 collided, what you kept or wrote and why, and what a reviewer should check.
-Exit 3 is a worktree the call will not merge into, such as one holding
-uncommitted work, and its line says why.
+Exit 3 is a merge the call will not make, such as into a worktree holding
+uncommitted work, and its line says why. A line that asks for `--base` names
+the commit to find: run the call again with `--base <its full object name>`.
 
 ## A fix in the PR's title or summary
 

@@ -13,7 +13,9 @@ import (
 // conflicts with it. Which base the merge takes is the pr domain's tests'.
 
 // conflictingClone makes a bare origin whose main changes a line the clone's
-// branch changes too, and returns the clone and the origin.
+// branch changes too, and returns the clone and the origin. The clone is made
+// before main is, so its reflog of origin/main reaches back to the ref's
+// making.
 func conflictingClone(t *testing.T) (work, origin string) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
@@ -46,11 +48,12 @@ func conflictingClone(t *testing.T) (work, origin string) {
 	}
 	run(root, "init", "-q", "--bare", origin)
 	run(root, "clone", "-q", origin, up)
+	run(root, "clone", "-q", origin, work)
 	run(up, "symbolic-ref", "HEAD", "refs/heads/main")
 	commit(up, "one\n")
 	run(up, "push", "-q", "origin", "HEAD:main")
-	run(root, "clone", "-q", "--branch", "main", origin, work)
-	run(work, "checkout", "-q", "-b", "pr")
+	run(work, "fetch", "-q", "origin")
+	run(work, "checkout", "-q", "-b", "pr", "origin/main")
 	commit(work, "branch\n")
 	commit(up, "main\n")
 	run(up, "push", "-q", "origin", "HEAD:main")
@@ -68,10 +71,11 @@ func bringCurrentIn(t *testing.T, dir string, args ...string) (stdout, stderr st
 func TestPRBringCurrentUsage(t *testing.T) {
 	work, _ := conflictingClone(t)
 	for name, args := range map[string][]string{
-		"no target":      nil,
-		"a blank target": {"--target", " "},
-		"no branch name": {"--target", "a..b"},
-		"an argument":    {"--target", "main", "extra"},
+		"no target":           nil,
+		"a blank target":      {"--target", " "},
+		"no branch name":      {"--target", "a..b"},
+		"an argument":         {"--target", "main", "extra"},
+		"an abbreviated base": {"--target", "main", "--base", "abc1234"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, code := bringCurrentIn(t, work, args...); code != 1 {
@@ -124,5 +128,25 @@ func TestPRBringCurrentExits(t *testing.T) {
 	}
 	if out, _, code := bringCurrentIn(t, work, "--target", "main"); code != 0 || !strings.Contains(out, "already holds") {
 		t.Fatalf("exit %d on a HEAD that holds the target, want 0\n%s", code, out)
+	}
+}
+
+func TestPRBringCurrentTakesTheBaseTheReflogCannotShow(t *testing.T) {
+	work, _ := conflictingClone(t)
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", work}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("reflog", "expire", "--expire=now", "--all")
+
+	if _, errs, code := bringCurrentIn(t, work, "--target", "main"); code != 3 || !strings.Contains(errs, "--base") {
+		t.Fatalf("exit %d with no reflog of origin/main, want the refusal exit 3 asking for --base\n%s", code, errs)
+	}
+	if out, _, code := bringCurrentIn(t, work, "--target", "main", "--base", git("rev-parse", "HEAD~1")); code != 4 {
+		t.Fatalf("exit %d from the base the branch was cut from, want the merge's conflict exit 4\n%s", code, out)
 	}
 }

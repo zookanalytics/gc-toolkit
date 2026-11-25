@@ -2,12 +2,14 @@ package pr
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The scratch repositories stand in for a PR's branch and its target: a bare
@@ -128,7 +130,7 @@ func (s *scratch) ownChange() string {
 
 func bring(t *testing.T, dir string) *BroughtCurrent {
 	t.Helper()
-	cur, err := BringCurrent(dir, "main")
+	cur, err := BringCurrent(dir, "main", "")
 	if err != nil {
 		t.Fatalf("BringCurrent: %v", err)
 	}
@@ -268,6 +270,129 @@ func TestBringCurrentOverTwoRewritesGoesFromTheFirstLineage(t *testing.T) {
 	}
 }
 
+// onlyOwnChange fails the test unless HEAD differs from tip only in the PR's
+// own files and dropped.txt, which the rewrite dropped, stayed away.
+func (s *scratch) onlyOwnChange(tip string) {
+	s.t.Helper()
+	if got := s.changed(tip, "HEAD"); !slices.Equal(got, []string{"pr.txt", "shared.txt"}) {
+		s.t.Errorf("the merge differs from the tip in %v, want only the PR's own files", got)
+	}
+}
+
+// refusedForBase fails the test unless err is a refusal that asks for --base.
+func refusedForBase(t *testing.T, err error) {
+	t.Helper()
+	var refused *CurrentRefusal
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "--base") {
+		t.Fatalf("BringCurrent: %v, want a refusal that asks for --base", err)
+	}
+}
+
+func TestBringCurrentAsksForTheBaseOnceGitPrunedTheOldHistory(t *testing.T) {
+	s := newScratch(t)
+	c0 := s.commit(s.up, "c0", map[string]string{"shared.txt": shared})
+	s.push()
+	s.commit(s.up, "f1", map[string]string{"fork.txt": "fork v1\n", "shared.txt": edit("a", "a-fork")})
+	x1 := s.commit(s.up, "x1", map[string]string{"dropped.txt": "dropped\n"})
+	s.push()
+	s.branch()
+	head := s.ownChange()
+	s.rewrite(c0, "v2")
+	// git prunes each update that names x1, which main no longer holds, and
+	// keeps the one that made the ref at c0, so the reflog holds a gap.
+	s.git(s.work, "reflog", "expire", "--expire-unreachable=now", "--all")
+	s.commit(s.up, "u2", map[string]string{"up2.txt": "u2\n"})
+	tip := s.push()
+
+	_, err := BringCurrent(s.work, "main", "")
+	refusedForBase(t, err)
+	if got := s.git(s.work, "rev-parse", "HEAD"); got != head {
+		t.Errorf("the refusal moved HEAD to %s", got)
+	}
+
+	cur, err := BringCurrent(s.work, "main", x1)
+	if err != nil || cur.Base != x1 || cur.Supersede == "" || len(cur.Conflicts) != 0 {
+		t.Fatalf("BringCurrent from --base %s = %+v, %v, want a clean merge from it", x1, cur, err)
+	}
+	s.onlyOwnChange(tip)
+	if _, held := s.at("HEAD", "dropped.txt"); held {
+		t.Error("dropped.txt, which the rewrite dropped, came back")
+	}
+}
+
+func TestBringCurrentAsksForTheBaseInACloneMadeAfterTheRewrite(t *testing.T) {
+	s := newScratch(t)
+	old := s.oldLineage()
+	s.branch()
+	s.ownChange()
+	s.git(s.work, "push", "-q", "origin", "pr")
+	tip := s.rewrite(old.c0, "v2")
+	s.work = filepath.Join(t.TempDir(), "fresh")
+	s.git(s.up, "clone", "-q", s.origin, s.work)
+	s.git(s.work, "checkout", "-q", "-b", "pr", "origin/pr")
+
+	_, err := BringCurrent(s.work, "main", "")
+	refusedForBase(t, err)
+
+	cur, err := BringCurrent(s.work, "main", old.x1)
+	if err != nil || cur.Base != old.x1 || cur.Supersede == "" || len(cur.Conflicts) != 0 {
+		t.Fatalf("BringCurrent from --base %s = %+v, %v, want a clean merge from it", old.x1, cur, err)
+	}
+	s.onlyOwnChange(tip)
+}
+
+func TestBringCurrentFindsTheBaseAnUpdateNamesOnlyAsItsOldCommit(t *testing.T) {
+	s := newScratch(t)
+	// The clone named x1 forty days before main was rewritten, and git pruned
+	// that update. The rewrite's own update still names x1 as its old commit.
+	t.Setenv("GIT_COMMITTER_DATE", fmt.Sprintf("@%d +0000", time.Now().Add(-40*24*time.Hour).Unix()))
+	old := s.oldLineage()
+	if err := os.Unsetenv("GIT_COMMITTER_DATE"); err != nil {
+		t.Fatal(err)
+	}
+	s.branch()
+	s.ownChange()
+	tip := s.rewrite(old.c0, "v2")
+	s.git(s.work, "reflog", "expire", "--expire-unreachable=30.days.ago", "--all")
+	if got := s.git(s.work, "reflog", "show", "--format=%H", "refs/remotes/origin/main", "--"); got != tip {
+		t.Fatalf("the reflog's updates name %q, want only the rewrite's %s", got, tip)
+	}
+
+	cur := bring(t, s.work)
+	if cur.Base != old.x1 || cur.Supersede == "" || len(cur.Conflicts) != 0 {
+		t.Fatalf("BringCurrent = %+v, want a clean merge from %s, the rewrite's old commit", cur, old.x1)
+	}
+	s.onlyOwnChange(tip)
+}
+
+func TestBringCurrentChecksTheBaseItIsGiven(t *testing.T) {
+	s := newScratch(t)
+	old := s.oldLineage()
+	s.branch()
+	head := s.ownChange()
+	s.commit(s.up, "u1", map[string]string{"up1.txt": "u1\n"})
+	tip := s.push()
+
+	var refused *CurrentRefusal
+	for name, base := range map[string]string{
+		"no commit the clone holds":            strings.Repeat("1", 40),
+		"a commit HEAD does not hold":          tip,
+		"a commit older than git's merge base": old.f1,
+	} {
+		if _, err := BringCurrent(s.work, "main", base); !errors.As(err, &refused) {
+			t.Errorf("BringCurrent from %s: %v, want a refusal", name, err)
+		}
+	}
+	if got := s.git(s.work, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("a refusal moved HEAD to %s", got)
+	}
+
+	cur, err := BringCurrent(s.work, "main", old.x1)
+	if err != nil || cur.Supersede != "" || cur.Base != old.x1 || len(cur.Conflicts) != 0 {
+		t.Fatalf("BringCurrent from --base %s, which main still holds = %+v, %v, want a plain merge", old.x1, cur, err)
+	}
+}
+
 func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	s := newScratch(t)
 	old := s.oldLineage()
@@ -287,7 +412,7 @@ func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	}
 
 	// A second call refuses the unfinished merge and changes nothing.
-	_, err := BringCurrent(s.work, "main")
+	_, err := BringCurrent(s.work, "main", "")
 	var refused *CurrentRefusal
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "middle of a merge") {
 		t.Fatalf("BringCurrent mid-merge: %v, want a refusal naming the unfinished merge", err)
@@ -348,7 +473,7 @@ func TestBringCurrentRefusesWhatItCouldNotMergeSafely(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.work, "pr.txt"), []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := BringCurrent(s.work, "main")
+	_, err := BringCurrent(s.work, "main", "")
 	var refused *CurrentRefusal
 	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "pr.txt") {
 		t.Fatalf("BringCurrent on uncommitted work: %v, want a refusal that lists it", err)
@@ -360,7 +485,7 @@ func TestBringCurrentRefusesWhatItCouldNotMergeSafely(t *testing.T) {
 
 	s.git(s.work, "checkout", "-q", "--orphan", "lone")
 	s.commit(s.work, "lone", map[string]string{"lone.txt": "lone\n"})
-	if _, err := BringCurrent(s.work, "main"); !errors.As(err, &refused) || !strings.Contains(err.Error(), "no history") {
+	if _, err := BringCurrent(s.work, "main", ""); !errors.As(err, &refused) || !strings.Contains(err.Error(), "no history") {
 		t.Fatalf("BringCurrent on a HEAD with no history in common: %v, want a refusal", err)
 	}
 }

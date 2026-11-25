@@ -28,16 +28,22 @@ the branch still carries, and a plain merge takes that history for the
 branch's own change: it brings back what the rewrite dropped and conflicts in
 files the branch never touched. So the merge goes from the commit of the
 target the branch took last: of the commits the clone's reflog of
-origin/<target> records and the target no longer holds, newest first, the
-first whose merge base with HEAD is newer than git's gives it. The merge then
-takes a commit that supersedes that base with the target, carrying the
-target's tree whole, as git merge -s ours records a merge. git merges from
-the base, and git show --remerge-diff on the merge shows only what was
-resolved by hand. The messages of the superseding commit and the merge name
-the base. With no such commit, the target itself is merged. git keeps a
-reflog entry the ref no longer holds for 30 days by default
-(gc.reflogExpireUnreachable), so a branch brought current later than that
-after a rewrite is merged from git's own base.
+origin/<target> records the target naming, before or after an update, that
+the target no longer holds, newest first, the first whose merge base with
+HEAD is newer than git's gives it. The merge then takes a commit that
+supersedes that base with the target, carrying the target's tree whole, as
+git merge -s ours records a merge. git merges from the base, and git show
+--remerge-diff on the merge shows only what was resolved by hand. The
+messages of the superseding commit and the merge name the base.
+
+With no such commit, the target itself is merged once the reflog shows that
+nothing the branch could have taken is missing from it: read back from its
+newest update, while each starts where the one before it ended, it reaches
+back to before the target held git's merge base. When it does not, as once
+git prunes an update whose commits the ref no longer holds
+(gc.reflogExpireUnreachable, 30 days by default) or in a clone made after the
+branch took the target, the call refuses, and --base names the commit of the
+target the branch took last for it to merge from.
 
 exit: 0 merged, or HEAD already held the target
       1 usage, or not run in a checkout
@@ -45,16 +51,19 @@ exit: 0 merged, or HEAD already held the target
         unless git said it left its merge state
       3 refused, with the checkout as it was: it holds work no commit
         holds, or is in the middle of a merge, cherry-pick, revert or
-        rebase, or HEAD shares no history with the target
+        rebase, or HEAD shares no history with the target, or the reflog
+        cannot show the commit of the target the branch took last and no
+        --base names it, or --base names a commit HEAD does not hold or one
+        that does not hold git's merge base
       4 git stopped on conflicts and left its merge state: resolve each file
         it lists and git add it, then commit the merge with git commit -F
         <file>, the file holding the message printed and then one paragraph
         for each file resolved by hand`
 
 func newPRBringCurrentCmd(stdout, stderr io.Writer) *cobra.Command {
-	var target string
+	var target, base string
 	cmd := &cobra.Command{
-		Use:         "bring-current --target <branch>",
+		Use:         "bring-current --target <branch> [--base <commit>]",
 		Short:       "merge the target into the checkout, from the commit of it the branch took last when it was rewritten",
 		Long:        prBringCurrentLong,
 		Args:        cobra.NoArgs,
@@ -64,6 +73,10 @@ func newPRBringCurrentCmd(stdout, stderr io.Writer) *cobra.Command {
 			if !git.ValidBranch(t) {
 				return errors.New("--target names the branch the PR merges into")
 			}
+			b := strings.TrimSpace(base)
+			if b != "" && !git.IsObjectID(b) {
+				return errors.New("--base names a commit by its full object name")
+			}
 			dir, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("the checkout's directory did not read: %w", err)
@@ -71,15 +84,16 @@ func newPRBringCurrentCmd(stdout, stderr io.Writer) *cobra.Command {
 			if _, ok := git.Toplevel(dir); !ok {
 				return errors.New("run it in the checkout to bring current")
 			}
-			return exit(prBringCurrent(dir, t, stdout, stderr))
+			return exit(prBringCurrent(dir, t, b, stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&target, "target", "", "the branch the PR merges into, as origin names it")
+	cmd.Flags().StringVar(&base, "base", "", "the commit of the target the branch took last, to merge from when the clone's reflog cannot show it")
 	return cmd
 }
 
-func prBringCurrent(dir, target string, stdout, stderr io.Writer) int {
-	cur, err := pr.BringCurrent(dir, target)
+func prBringCurrent(dir, target, base string, stdout, stderr io.Writer) int {
+	cur, err := pr.BringCurrent(dir, target, base)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk pr bring-current: %v\n", err)
 		var refused *pr.CurrentRefusal
