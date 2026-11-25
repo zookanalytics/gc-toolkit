@@ -420,7 +420,7 @@ func rigTake(verb string, co *git.Checkout, timeout time.Duration, say func(stri
 		say("WARN the memory its last runs used could not be read, so it runs alone: %v", err)
 	}
 	n := rig.SlotsFor(weight, count)
-	taking := fmt.Sprintf("takes %d of the machine's %d slots, %s each,", n, count, gib(rig.SlotSize))
+	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", rig.SlotCountText(n), count, gib(rig.SlotSize))
 	switch {
 	case weight == 0:
 		say("%s since no run of this check is measured in this repository, so it runs alone", taking)

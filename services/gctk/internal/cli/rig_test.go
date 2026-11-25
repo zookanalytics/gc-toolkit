@@ -970,7 +970,7 @@ func TestRigARunHoldsSlotsForWhatItsCheckUsedAndGivesThemBack(t *testing.T) {
 	f := newRigFixture(t)
 	t.Setenv(rig.SlotsVar, "4")
 	code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full"))
-	if code != 0 || !strings.Contains(errs, "takes 4 of the machine's 4 slots, 4.0 GiB each, since no run of this check is measured in this repository, so it runs alone") {
+	if code != 0 || !strings.Contains(errs, "takes 4 slots of the machine's 4, 4.0 GiB each, since no run of this check is measured in this repository, so it runs alone") {
 		t.Fatalf("first run = %d, want 0 taking every slot; stderr:\n%s", code, errs)
 	}
 	for i := 0; i < 4; i++ {
@@ -992,7 +992,7 @@ func TestRigARunHoldsSlotsForWhatItsCheckUsedAndGivesThemBack(t *testing.T) {
 	}
 	f.commitChange("two\n")
 	code, _, errs = f.call("test", "--scope", "full", "--command", countCmd("full"))
-	if code != 0 || !strings.Contains(errs, "takes 2 of the machine's 4 slots, 4.0 GiB each, for the 5.0 GiB its last runs here used at most") {
+	if code != 0 || !strings.Contains(errs, "takes 2 slots of the machine's 4, 4.0 GiB each, for the 5.0 GiB its last runs here used at most") {
 		t.Fatalf("run after a 5 GiB one = %d, want 0 taking 2 slots; stderr:\n%s", code, errs)
 	}
 	t.Setenv(rig.NoCapVar, "1")
@@ -1019,7 +1019,7 @@ func TestRigAWaitForSlotsThatRunsOutOfTimeRunsNothing(t *testing.T) {
 			}
 			code, _, errs := f.call(verb, "--command", countCmd(verb), "--timeout", "300ms")
 			if code != rigExitMachine || !strings.Contains(errs, "machine failure") ||
-				!strings.Contains(errs, "for 1 of the machine's 1 slots and ran out of time; 1 held by "+stamp) {
+				!strings.Contains(errs, "for 1 slot of the 1 the machine has and ran out of time; 1 held by "+stamp) {
 				t.Fatalf("%s = %d, want %d naming the slot's holder; stderr:\n%s", verb, code, rigExitMachine, errs)
 			}
 			eqRuns(t, f.runs())
@@ -1044,7 +1044,7 @@ func TestRigTheRunGetsWhatTheWaitLeftOfItsTimeout(t *testing.T) {
 	}
 	time.AfterFunc(time.Second, l.Unlock)
 	code, _, errs := f.call("test", "--scope", "full", "--command", "sleep 2.4", "--timeout", "3s")
-	if code != rigExitMachine || !strings.Contains(errs, "took 1 slots after waiting 1s") || !strings.Contains(errs, "timed out after") {
+	if code != rigExitMachine || !strings.Contains(errs, "took 1 slot after waiting 1s") || !strings.Contains(errs, "timed out after") {
 		t.Fatalf("a run of 2.4s after a 1s wait, within 3s = %d, want %d timed out; stderr:\n%s", code, rigExitMachine, errs)
 	}
 }

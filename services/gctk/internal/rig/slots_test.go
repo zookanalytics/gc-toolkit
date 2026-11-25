@@ -192,7 +192,8 @@ func TestTakeWaitsInLineSayingWhatHoldsTheSlots(t *testing.T) {
 		m.Holds(4242, slotPath(1), "4242 2026-11-25T00:00:00Z gone host")
 		big := take(NewSlots(m.Caller(), slotDir, 3, "run-a host"), 3, time.Time{}, nil, said)
 		synctest.Wait()
-		if !strings.Contains(said.text(), "waiting for 3 of the machine's 3 slots; 1 held by "+stamp) ||
+		if !strings.Contains(said.text(), "waiting for 3 slots of the 3 the machine has; 1 held by "+stamp) ||
+			!strings.Contains(said.text(), "1 held by this run; this run is next in line") ||
 			!strings.Contains(said.text(), "1 held by 4242 2026-11-25T00:00:00Z gone host (that process has ended, so one it started holds the lock)") {
 			t.Fatalf("the wait said %q; want each holder named, the one whose process ended marked", said.text())
 		}
@@ -203,7 +204,7 @@ func TestTakeWaitsInLineSayingWhatHoldsTheSlots(t *testing.T) {
 		small := take(NewSlots(other(t, m), slotDir, 3, "run-c host"), 1, time.Time{}, nil, &lines{})
 		time.Sleep(SlotNote)
 		synctest.Wait()
-		if !strings.Contains(said.text(), "still waiting after 5m0s for 3 of the machine's 3 slots") {
+		if !strings.Contains(said.text(), "still waiting after 5m0s for 3 slots of the 3 the machine has") {
 			t.Errorf("after SlotNote the wait said %q; want that it still waits", said.text())
 		}
 		m.Free(slotPath(1))

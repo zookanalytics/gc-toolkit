@@ -247,20 +247,20 @@ func (s *Slots) Take(n int, until time.Time, stop <-chan os.Signal, say func(str
 	defer poll.Stop()
 	note := time.NewTicker(SlotNote)
 	defer note.Stop()
-	say("waiting for %d of the machine's %d slots; %s", n, s.count, s.holders(held))
+	say("waiting for %s of the %d the machine has; %s", SlotCountText(n), s.count, s.holders(held, queue != nil))
 	for {
 		select {
 		case <-poll.C:
 		case <-note.C:
-			say("still waiting after %s for %d of the machine's %d slots; %s", time.Since(start).Round(time.Second), n, s.count, s.holders(held))
+			say("still waiting after %s for %s of the %d the machine has; %s", time.Since(start).Round(time.Second), SlotCountText(n), s.count, s.holders(held, queue != nil))
 			continue
 		case sig := <-stop:
 			giveBack()
 			return nil, sig, nil
 		case <-expired:
-			why := s.holders(held)
+			why := s.holders(held, queue != nil)
 			giveBack()
-			return nil, nil, &SlotTimeout{msg: fmt.Sprintf("waited %s for %d of the machine's %d slots and ran out of time; %s", time.Since(start).Round(time.Second), n, s.count, why)}
+			return nil, nil, &SlotTimeout{msg: fmt.Sprintf("waited %s for %s of the %d the machine has and ran out of time; %s", time.Since(start).Round(time.Second), SlotCountText(n), s.count, why)}
 		}
 		done, err := turn()
 		if err != nil {
@@ -269,17 +269,18 @@ func (s *Slots) Take(n int, until time.Time, stop <-chan os.Signal, say func(str
 		}
 		if done {
 			held.Waited = time.Since(start)
-			say("took %d slots after waiting %s", n, held.Waited.Round(time.Second))
+			say("took %s after waiting %s", SlotCountText(n), held.Waited.Round(time.Second))
 			return held, nil, nil
 		}
 	}
 }
 
-// holders says what holds the slots and the queue other than this run: each
-// holder's stamp once, with how many slots it holds. A holder whose process
-// has ended is marked, because the lock it stamped is then held by a process
-// it started, which kept the file open and which gctk does not stop.
-func (s *Slots) holders(own *Held) string {
+// holders says what holds the slots, and the queue when this run does not
+// (ownQueue false), other than this run: each holder's stamp once, with how
+// many slots it holds. A holder whose process has ended is marked, because
+// the lock it stamped is then held by a process it started, which kept the
+// file open and which gctk does not stop.
+func (s *Slots) holders(own *Held, ownQueue bool) string {
 	var order []string
 	count := map[string]int{}
 	add := func(line string) {
@@ -301,16 +302,26 @@ func (s *Slots) holders(own *Held) string {
 	for _, line := range order {
 		parts = append(parts, fmt.Sprintf("%d held by %s", count[line], s.describe(line)))
 	}
-	if line, held, err := s.h.Holder(s.queue()); err == nil && held {
-		parts = append(parts, "next in line: "+s.describe(line))
-	}
 	if len(own.locks) > 0 {
 		parts = append(parts, fmt.Sprintf("%d held by this run", len(own.locks)))
+	}
+	if ownQueue {
+		parts = append(parts, "this run is next in line")
+	} else if line, held, err := s.h.Holder(s.queue()); err == nil && held {
+		parts = append(parts, "next in line: "+s.describe(line))
 	}
 	if len(parts) == 0 {
 		return "nothing holds them now"
 	}
 	return strings.Join(parts, "; ")
+}
+
+// SlotCountText is n slots, in words.
+func SlotCountText(n int) string {
+	if n == 1 {
+		return "1 slot"
+	}
+	return fmt.Sprintf("%d slots", n)
 }
 
 // describe gives a stamp, marked when the process it names has ended.
