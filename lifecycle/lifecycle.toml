@@ -1740,11 +1740,17 @@ keys = [
 #   mol-refinery-patrol.toml's rework hand-back close, from the review loop's
 #   check (`gctk review passed --record`) closing an ask an earlier round fixed
 #   and from the gascity-keeper sub-pack's landing check closing a landed
-#   rebase, and `no-op` from
-#   mol-validate-close, work-outcome.sh on every conversation close, the
+#   rebase, and `no-op` from these closes of beads that ship no commit of their
+#   own: bead-rehome.sh's close of a disposed bead, work-outcome.sh's on a
+#   conversation and on the work bead stand-down.sh stops, the refinery's
+#   hand-off close in effort-bring-current.sh, reconcile-rig-checkouts.sh's
+#   close of a rig's reconcile subject, mol-validate-close,
+#   mol-feedback-distiller's pattern close, mol-rig-demo's request close, the
+#   gascity-keeper sub-pack's drift-report and rework closes, the
 #   observation-filing recipes, the review loop's check closing any other ask
-#   the run answered, the landing order's close of a withdrawal it carried out,
-#   and converse by hand. bead-rehome.sh reads it
+#   the run answered, the landing order's close of a withdrawal it carried out
+#   and of a bead a retired PR leaves nothing to do for, and agents by hand.
+#   bead-rehome.sh reads it
 #   to confirm a no-op origin is disposable, `gctk pr compose` drops a no-op row
 #   from a branch's ledger, and each falls back to the legacy bare `work_outcome`
 #   alias. Absent leaves the

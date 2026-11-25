@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lint.sh — the rig's one lint entry point: shell static analysis, step and
-# skill text, golangci-lint over the Go code, and the list of the warrants a
-# branch touches.
+# skill text, golangci-lint over the Go code, gc lint over the pack, and the
+# list of the warrants a branch touches.
 #
 # Wired as the rig's lint_command, it runs at the polecat's self-review and on
 # every merge. It runs these linters, each at the scope a merge gate can enforce
@@ -21,9 +21,8 @@
 #   which checks the formulas and the skill files among them for a procedure the
 #   change adds to step text or to a skill (docs/pack-authoring.md, "Step text
 #   calls a tested script"). It judges what the change adds since the merge base
-#   of origin/main and HEAD, the change the refinery's
-#   `git diff --name-only origin/main...HEAD` names, so text that predates the
-#   rule passes until its own rewrite.
+#   of BASE and HEAD, the change `git diff --name-only BASE...HEAD` names, so
+#   text that predates the rule passes until its own rewrite.
 #
 #   GO — golangci-lint, `run ./...` in every Go module (each go.mod tree), on
 #   the root's .golangci.yml: errcheck, govet with go vet's analyzers,
@@ -45,28 +44,63 @@
 #   the standard library it type-checks, which a linter built with an older Go
 #   cannot load.
 #
+#   PACK — `gc lint .`, the checks the installed gc ships for a pack. Among
+#   them, each pack.toml below the root must load, each prompt template must
+#   render with the fragments it composes, and each bd call in a template is
+#   checked for a flag bd does not know. Whole-tree, whatever files lint.sh is
+#   given, like the shell and Go lint: the pack lints clean, so every merge
+#   runs it. The rules come with gc, so a gc upgrade that adds one fails the
+#   lint until the tree meets it.
+#   It lints a copy of the tracked files, because gc lint reads every file
+#   below it: an untracked fragment would let a prompt that composes it pass,
+#   though the merge lands the prompt without it, and a worktree nested in the
+#   checkout is linted as a pack of its own. The copy sits in lint.sh's own
+#   directory, which GC_CEILING_DIRECTORIES makes the last directory gc
+#   searches for a city. With a city above it, gc also resolves a pack's
+#   fragments from the packs that city composes, so in a checkout inside the
+#   city a prompt that composes a fragment the pack lacks passes.
+#
 #   WARRANTS — tools/warrants-touched.sh prints the docs/warrants.md entries the
-#   branch touches, with their Verified dates, so the author re-verifies them
-#   before the arch review reads them. It is the one part that judges nothing: a
-#   touched warrant fails no lint, because the arch review judges the
-#   re-verification. It reads the branch from git, so it takes no FILE.
+#   change since BASE touches, with their Verified dates, so the author
+#   re-verifies them before the arch review reads them. It is the one part that
+#   judges nothing: a touched warrant fails no lint, because the arch review
+#   judges the re-verification. It reads the change from git, so it takes no
+#   FILE.
 #
 # Fail-closed throughout: a linter that cannot run — no shellcheck, no go, no
-# golangci-lint — is a finding, never a silent pass, the same contract the
-# shell-lint runner, shellcheck-run.sh, enforces.
+# golangci-lint, no gc — is a finding, never a silent pass, the same contract
+# the shell-lint runner, shellcheck-run.sh, enforces.
 #
-# Usage: lint.sh [FILE ...]
-#   FILE ...  the files a change names; the formulas and the skill files among
-#             them have their shell blocks checked, and the rest drop out. With
-#             neither given, no shell block is weighed. The shell lint and
-#             golangci-lint cover the tracked tree and the warrant list reads
-#             the branch, whatever files are given.
+# Usage: lint.sh [--base BASE] [--] [FILE ...]
+#   --base BASE  the revision the change is read from (default: origin/main),
+#                which the step-text lint and the warrant list are each given.
+#   FILE ...     the files a change names; the formulas and the skill files
+#                among them have their shell blocks checked, and the rest drop
+#                out. With neither given, no shell block is weighed. The shell
+#                lint and golangci-lint cover the tracked tree and the warrant
+#                list reads the change, whatever files are given. A FILE after
+#                -- is a file, whatever it begins with.
 #
 # Exit: 0 everything clean; 1 a finding or a linter that could not run; 2 a usage
 #       or repository-enumeration error (lint.sh itself could not operate).
 set -uo pipefail
 
 PROG=lint
+
+# ── Arguments ────────────────────────────────────────────────────────────────
+BASE=origin/main
+change_files=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base)
+      [ "$#" -ge 2 ] || { echo "$PROG: --base needs a revision" >&2; exit 2; }
+      BASE=$2; shift 2 ;;
+    --base=*) BASE=${1#--base=}; shift ;;
+    --) shift; change_files+=("$@"); break ;;
+    -*) echo "$PROG: unknown option '$1'" >&2; exit 2 ;;
+    *) change_files+=("$1"); shift ;;
+  esac
+done
 
 # ── Repository root ──────────────────────────────────────────────────────────
 # Both linters are repo-relative: shell paths resolve from the root and
@@ -99,22 +133,24 @@ fi
 
 # ── The tracked files ────────────────────────────────────────────────────────
 # lint.sh keeps its files in a directory of its own, which every exit removes:
-# the listing of the tracked files, and the output of each shell-lint call.
+# the listing of the tracked files, the output of each shell-lint call, and the
+# copy of the tracked files that gc lint reads.
 if ! lint_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lint.XXXXXX")"; then
   echo "$PROG: cannot make a directory for the lint's files" >&2
   exit 2
 fi
 trap 'rm -rf "$lint_tmp"' EXIT
 
-# The shell lint takes its files, and the Go lint its modules, from this one
-# listing. It is written to a file and read back from it, and both steps are
-# checked. A listing that failed, or one that could not be read, would yield an
-# empty list, which reads like a tree with no shell and no module in it and
-# skips those checks. A `<<<` here-string would hide the failed read
-# (docs/review-correctness.md, Loop input). The listing ends each path with a
-# NUL and names it as it is: git's default listing quotes a path that holds a
-# double quote, a backslash or a control character, and no file is found under
-# the quoted name, so the file would drop out of its check unchecked.
+# The shell lint takes its files, the Go lint its modules and the pack lint its
+# copy from this one listing. It is written to a file and read back from it,
+# and both steps are checked. A listing that failed, or one that could not be
+# read, would yield an empty list, which reads like a tree with no shell and no
+# module in it and skips those checks. A `<<<` here-string would hide the
+# failed read (docs/review-correctness.md, Loop input). The listing ends each
+# path with a NUL and names it as it is: git's default listing quotes a path
+# that holds a double quote, a backslash or a control character, and no file
+# is found under the quoted name, so the file would drop out of its check
+# unchecked.
 if ! git ls-files -z >"$lint_tmp/listing"; then
   echo "$PROG: cannot enumerate tracked files under $ROOT" >&2
   exit 2
@@ -229,7 +265,7 @@ fi
 # ── Step and skill text: no procedure added to a step or a skill ────────────
 # The lint picks the formulas and the skill files out of the files itself. Its exit 2 says it could
 # not read the change, which fails closed like a linter that could not run.
-if "$STEP_TEXT_LINT" "$@"; then
+if "$STEP_TEXT_LINT" --base "$BASE" -- ${change_files[@]+"${change_files[@]}"}; then
   summary+=("step and skill text: clean")
 else
   rc=$?
@@ -288,11 +324,43 @@ else
   done
 fi
 
+# ── Pack: gc lint over a copy of the tracked files ──────────────────────────
+# The copy holds each tracked file the checkout has, and nothing else. tar
+# writes the archive to a file and unpacks it from there: over a pipe, a reader
+# that stops at the archive's end marker can fail the writer, which is still
+# writing the padding after it.
+# gc names each file by the path of the directory it runs in, which it reads
+# from PWD. pack_copy is that path as cd sets it, so taking it off each line
+# leaves the file's repo path.
+pack_files=()
+for f in ${tracked[@]+"${tracked[@]}"}; do
+  if [ -e "$f" ] || [ -L "$f" ]; then pack_files+=("$f"); fi
+done
+if ! command -v gc >/dev/null 2>&1; then
+  fail=1
+  summary+=("pack: FAIL — 'gc' not on PATH; the pack is unlinted; fail-closed, treated as a finding")
+elif ! { mkdir "$lint_tmp/pack" && pack_copy="$(cd "$lint_tmp/pack" && pwd)"; } \
+    || ! printf '%s\0' ${pack_files[@]+"${pack_files[@]}"} >"$lint_tmp/pack-files" \
+    || ! tar --null -T "$lint_tmp/pack-files" -cf "$lint_tmp/pack.tar" \
+    || ! tar -xf "$lint_tmp/pack.tar" -C "$pack_copy"; then
+  fail=1
+  summary+=("pack: FAIL — the tracked files could not be copied for gc lint; the pack is unlinted; fail-closed, treated as a finding")
+elif ( cd "$pack_copy" && GC_CEILING_DIRECTORIES="${pack_copy%/*}" gc lint . ) >"$lint_tmp/pack.out" 2>&1; then
+  summary+=("pack: gc lint clean")
+else
+  rc=$?
+  fail=1
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "${line//"$pack_copy/"/}"
+  done <"$lint_tmp/pack.out"
+  summary+=("pack: FAIL — gc lint exit $rc; the report above names each finding, or why it could not run")
+fi
+
 # ── Warrants: the entries this branch touches ───────────────────────────────
 # Its exit 1 is a list for the author, which fails nothing. Its exit 2 says it
 # could not read the page or the change, which fails closed like a linter that
 # could not run.
-if "$WARRANTS_TOUCHED"; then
+if "$WARRANTS_TOUCHED" --base "$BASE"; then
   summary+=("warrants: none touched")
 else
   rc=$?

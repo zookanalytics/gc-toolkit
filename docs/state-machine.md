@@ -1345,7 +1345,9 @@ required under every kind, because it is the whole of that distinction. The
 kind's phrase and the successor ride the close as an appended note, as in
 `Disposition <time>: not needed, per <successor> in <store>`, because bd's
 guarded close sets no close reason; when the edge is added after an earlier
-close, a `Disposition recorded` note carries them instead. The read side
+close, a `Disposition recorded` note carries them instead. The close also
+records `gc.work_outcome=no-op`, the work record Gas City's close gate asks of
+a plain task bead, unless the origin records a work outcome already. The read side
 searches every store before concluding a close was false. Consumers: the
 close paths of the `work` skill and the converse-settle skill, the mechanik's prompt,
 which searches every store before it reopens a closed bead, `stand-down.sh` (a

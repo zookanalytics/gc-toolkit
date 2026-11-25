@@ -31,8 +31,9 @@
 #       the ruling's own close, and it comes back when the close does not land;
 #   (o) any OTHER blocker is left alone and its refusal still stands;
 #   (q) the successor is required under EVERY kind, `not-needed` included;
-#   (s) a re-home writes no outcome of its own: neither gc.outcome nor
-#       gc.work_outcome;
+#   (s) the close records gc.work_outcome=no-op, the work record of a close
+#       that ships nothing, and no gc.outcome; a work outcome the origin
+#       records already stays, and the dry run names the record it would write;
 #   (x) an open human gate on the origin holds the close at the finalize gate,
 #       which is asked before anything is written;
 #   (y) --except-key reaches that gate, and nothing is excepted without it, and
@@ -222,6 +223,8 @@ notes_with() {
 }
 # nometa <id> — the bead carries no metadata key.
 nometa() { case "$(bfield "$1" metadata)" in ""|"{}") return 0 ;; esac; return 1; }
+# nometa_but <id> <key> — the bead carries no metadata key but <key>.
+nometa_but() { case "$(bfield "$1" metadata | jq -c --arg k "$2" 'del(.[$k])' 2>/dev/null)" in ""|"{}") return 0 ;; esac; return 1; }
 # A bead's whole record, its row and the dep rows naming it, to prove a refused
 # run wrote nothing.
 snap() { brecord "$2"; }
@@ -376,7 +379,8 @@ eq "$(edge alpha al-origin1 al-succ1)" supersedes "the origin's supersedes edge 
 NOTE=$(field alpha notes al-origin1)
 has "$NOTE" "re-homed to al-succ1 in rig:alpha" "the close's note names kind, successor and store"
 has "$NOTE" "operator ruling rb-a3ny" "the close's note carries the note"
-if nometa al-origin1; then ok "no metadata key records the successor"; else bad "no metadata key records the successor ($(bfield al-origin1 metadata))"; fi
+# The close's one key is its work record, case (s).
+if nometa_but al-origin1 gc.work_outcome; then ok "no metadata key records the successor"; else bad "no metadata key records the successor ($(bfield al-origin1 metadata))"; fi
 if nometa al-succ1; then ok "and the successor gains no back-pointer key"; else bad "and the successor gains no back-pointer key ($(bfield al-succ1 metadata))"; fi
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
 has "$(cat "$STUB_GC_LOG")" "--actor test__rehome-hq-0000 " "the actor is passed through for the audit trail"
@@ -593,6 +597,7 @@ eq "$rc" 0 "--dry-run succeeds"
 eq "$(snap alpha al-origin9)" "$BEFORE" "--dry-run writes nothing"
 has "$(cat "$TMP/out")" "dry run" "--dry-run says so"
 has "$(cat "$TMP/out")" "al-origin9 supersedes bt-succ9, in rig:alpha" "--dry-run names the edge it would record"
+has "$(cat "$TMP/out")" "recording gc.work_outcome=no-op in the same write" "--dry-run names the work record the close would carry"
 mkbead alpha open al-origin15
 mkbead alpha open al-succ15
 dep al-origin15 al-succ15 blocks
@@ -601,13 +606,20 @@ eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
 eq "$(edge alpha al-origin15 al-succ15)" blocks "--dry-run does not drop it"
 
-# --- (s) a re-home writes no outcome of its own ---------------------------
+# --- (s) the close records the work record and no outcome word ------------
 mkbead alpha open al-task1
 mkbead beta open bt-tsucc1
 rc=0; run --origin al-task1 --successor bt-tsucc1 --kind re-homed || rc=$?
 eq "$rc" 0 "a re-home succeeds"
 eq "$(field alpha m.gc.outcome al-task1)" "" "the origin gets no gc.outcome"
-eq "$(field alpha m.gc.work_outcome al-task1)" "" "…and no gc.work_outcome"
+eq "$(field alpha m.gc.work_outcome al-task1)" "no-op" "…and gc.work_outcome=no-op, since it ships nothing under its own id"
+mkbead alpha open al-task2; bset al-task2 metadata.gc.work_outcome=shipped
+mkbead beta open bt-tsucc2
+rc=0; run --origin al-task2 --successor bt-tsucc2 --kind re-homed --dry-run || rc=$?
+hasnt "$(cat "$TMP/out")" "gc.work_outcome" "--dry-run plans no work record over one the origin records"
+rc=0; run --origin al-task2 --successor bt-tsucc2 --kind re-homed || rc=$?
+eq "$rc" 0 "a re-home of an origin that records a work outcome succeeds"
+eq "$(field alpha m.gc.work_outcome al-task2)" "shipped" "…and that work outcome stays as it was"
 
 # --- (gate-b) unlanded work: refused under an evidence kind ---------------
 mkbead alpha open al-unlanded

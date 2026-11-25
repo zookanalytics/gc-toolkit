@@ -8,8 +8,9 @@ import (
 // A review run's round fixes the PR's title and summary on the bead that owns
 // the PR, and its push brings the PR's own title and body current with the
 // bead's composition (Edit), so the next round's lanes, which read the PR as
-// published, judge what the bead records. The refinery composes the same text
-// from the same bead when it publishes a head it validated.
+// published, judge what the bead records. The refinery's publication of a head
+// it validated brings an open PR current the same way, and composes the same
+// text for a PR it opens.
 
 // Edited is what Edit found and did: the PR it read, the composition of the
 // PR's title and body, and whether it edited the PR's title and its body, each

@@ -229,7 +229,7 @@ copy, then close.
 filesystem access needed):
 ```bash
 REPORT_FILE=$(gc bd show {{issue}} --json | jq -r '.[0].metadata.report_file')
-gc bd update {{issue}} --append-notes "$(cat "$REPORT_FILE")"
+gc bd update {{issue}} --set-metadata gc.work_outcome=no-op --append-notes "$(cat "$REPORT_FILE")"
 ```
 
 **2. Optionally mail the report:**

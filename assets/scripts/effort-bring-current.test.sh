@@ -7,7 +7,8 @@
 #   - a branch that holds nothing its target lacks is fast-forwarded to it, a
 #     branch with commits of its own takes a merge of the target, and a branch
 #     already current is pushed as it is; each push goes under the lease on the
-#     commit read, and the hand-off closes once it lands;
+#     commit read, and the hand-off closes once it lands, holding
+#     gc.work_outcome=no-op as it closes;
 #   - the merge commit is signed exactly when the repository's commit.gpgSign
 #     says so;
 #   - a merge that conflicts pushes nothing and goes to a polecat, never to a
@@ -66,11 +67,12 @@ run() { OUT=$("$SUT/effort-bring-current.sh" --hand-off ho-1 --landing land-1 2>
 # as blocks:<id>, as `gc bd show` reports a bead's dependencies. It answers
 # task-1's id. The create and a sling log to scripts.log, where the stubbed
 # scripts log, so that one log holds the order of what a conflict sends. A sling
-# then exits as the fixture's does (STUB_SLING_RC). STUB_CREATE_FAIL makes the
-# create write nothing and fail, STUB_CREATE_NOID makes it write the task and
-# answer a warning line before the JSON, which leaves no id to read, and
-# STUB_SHOW_FAIL_AFTER_CREATE makes a show fail once a create has written its
-# task.
+# then exits as the fixture's does (STUB_SLING_RC). A close writes the work
+# outcome the bead holds as it closes to $CREATE/closed-<id>. STUB_CREATE_FAIL
+# makes the create write nothing and fail, STUB_CREATE_NOID makes it write the
+# task and answer a warning line before the JSON, which leaves no id to read,
+# and STUB_SHOW_FAIL_AFTER_CREATE makes a show fail once a create has written
+# its task.
 wrap_gc() {
   CREATE="$TMP/create"; mkdir -p "$CREATE"; export CREATE
   mv "$BIN/gc" "$BIN/gc-fixture"
@@ -104,6 +106,8 @@ case "${1:-} ${2:-}" in
     fi ;;
   "sling "*)
     printf 'sling %s\n' "${*:2}" >> "$LOGS/scripts.log" ;;
+  "bd close")
+    jq -r --arg id "$3" '.[] | select(.id == $id) | .metadata["gc.work_outcome"] // "none"' "$STORE" > "$CREATE/closed-$3" ;;
 esac
 exec "$(dirname "$0")/gc-fixture" "$@"
 GC
@@ -143,6 +147,7 @@ run
 eq "$RC" 0 "the hand-off exits 0"
 eq "$(tip integration/land-1)" "$MAIN" "the branch is fast-forwarded to main"
 eq "$(bstatus ho-1)" "closed" "the hand-off closes"
+eq "$(cat "$CREATE/closed-ho-1" 2>/dev/null)" "no-op" "…holding gc.work_outcome=no-op as it closes, since it ships no work of its own"
 eq "$(git -C "$HOME_DIR" rev-parse HEAD)" "$HOME_HEAD" "the home's HEAD never moves"
 [ ! -e "$HOME_DIR/worktrees" ] && rt_ok "no tree is added" || rt_bad "no tree is added"
 
