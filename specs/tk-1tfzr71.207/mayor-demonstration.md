@@ -1,103 +1,143 @@
 ---
-name: The mayor's sitting, demonstrated on a stubbed city (tk-1tfzr71.207)
-description: A headless run of the mayor's rendered prime against a stubbed city, showing what it does with mail and a gate about one matter, an owned matter, new work for a po, a matter with no home, one of the whole city with no home, and reads that did not answer. Read it before changing the mayor's prompt, to compare a new run with this one.
+name: The mayor's sitting, demonstrated (tk-1tfzr71.207)
+description: A headless mayor sitting in an isolated city on the city's own gc, with its skills, where it dispatches work a ruling authorized, leaves held work to the po, opens a decision's conversation and files a city-wide matter with no home in the rig that holds the pack under another import key; and an earlier run on a stubbed city for an owned matter and reads that did not answer. Read it before changing the mayor's prompt, to compare a new run with these.
 ---
 
-# The mayor's sitting, demonstrated on a stubbed city
+# The mayor's sitting, demonstrated
 
-The rework brief of 2026-11-22 asks for four cases to be shown: mail and a gate
-about the same matter, an already-owned matter, a po placement decision, and an
-item with no suitable home, where the last must end in a discussion of the
-missing home and not in work the mayor does. It also asks that the po keep
-`hold:mayor`, that no obligation be duplicated, and that incomplete reads show.
-This run shows each of them, and a matter of the whole city that concerns no
-one rig.
+The rework brief of 2026-11-23, as the operator amended it on 2026-11-25, asks
+for authorized work to be dispatched through the actual writer in an isolated
+city running the city's Gas City and this pack, with skills available, and for
+three results to be confirmed: the authorized item reaches its execution owner
+once, a held placement item stays the po's, and an item with no home goes to a
+discussion rather than to work the mayor does. The run below shows each, and
+two more: a decision's conversation, and a matter of the whole city filed in
+the rig that holds the pack when the key the city imports the pack under is no
+rig's name.
 
-## How it ran
+## In an isolated city, with skills (2026-11-25)
 
-The mayor's prime, `generated/seed-audit/agents/mayor.md` as this branch
-renders it, was the first message of a headless Claude Code session (Opus 5.5,
-`claude -p` in safe and restricted mode, the Bash tool only, no skills, no
-memory and no MCP), with the operator's two turns after it. Its environment
-named a city `demo` and the mayor's alias `demo.mayor`. Every command the prime
-names resolved to a stub on `PATH`, and nothing touched the live city:
+### How it ran
 
-- `gc dashboard serve`, `gc status --json`, the mail API (a stub `curl`) and
-  `helm-svc board --json` answered from fixtures. `gc mail peek`,
-  `gc bd show` and `gc session list` read the fixtures too.
-- Every write, `gc-helm.sh open`, `gc bd create`, `gc bd update`,
-  `gc bd set-state`, `gc mail archive`, `gc mail reply`, `gc sling` and
-  `gc session nudge`, was logged and answered as a success. A bead it filed and
-  a message it archived were remembered, so a later read showed them. The
-  stubbed `gc-helm.sh open --new-subject` refused a rig the city does not have,
-  as the real one does.
+The city was made with `gc init --no-start --template minimal` and named
+`demo`, with gc init's own mayor removed. It imported this pack at city level
+under the key `kit`, from `rigs/toolkit`, a checkout of this branch at
+0d09c4a31, whose prompt the head carries unchanged. Two rigs imported it under
+the same key: `toolkit`, the pack's checkout, and `app`, a plain repository. So
+the seat is `kit.mayor`, app's pool is `app/kit.polecat`, and no rig is named
+`kit`.
+
+Everything ran on the city's installed `gc` (1.4.3, the city's Gas City fork at
+13cdf670ca) and bd 1.3.4, each store on its own Dolt server. No supervisor ran.
+The fixture had its own `GC_HOME` and directories, `GC_NO_API=1`, logging stand-ins
+for launchctl, systemctl, tmux and gh, and a GitHub token that does not
+authenticate.
+
+The mayor was a headless Claude Code session (`claude -p`, 2.1.332) on
+claude-opus-5-5, the city's claude default, which the mayor takes because it
+names no model. It ran in the mayor's work dir, `.gc/agents/mayor`, with the
+session identity of `kit.mayor`. Its skills were the 38 that Gas City's own
+`gc internal materialize-skills --agent kit.mayor` put there, 7 from core and 31
+from this pack, `kit.work` among them. It had the Bash, Read, Glob, Grep and
+Skill tools, no MCP server, no hooks and no auto memory. Its first message was
+the prime `gc prime --strict kit.mayor` renders in that city, 9,728 characters,
+in which every pack script is called through `gc kit scripts-dir`. The
+operator's two turns followed as resumes of the same session.
+
+The board read was the real one: the fixture's own `helm-svc board --json`,
+built from this branch. With no supervisor there is no mail route, so
+`gc dashboard serve` named a stand-in, and a `curl` wrapper answered the
+prompt's `status=all` read from the fixture's real mail with
+`gc mail inbox <mailbox> --json`. Every other command was Gas City's own, and
+every `gc` call was logged.
 
 The fixtures:
 
-- **The operator's mailbox,** five open messages and a `partial` answer that
-  names the `lab` mail store as timed out: a witness's HELP about the deploy
-  key rotation (dm-1), a refinery's report that ap-9's merge failed twice
-  (dm-2), a converse sitting's note of a CSV export the operator wants, with no
-  bead (dm-3), the deacon's warning that a TLS certificate expires in 9 days and
-  nothing renews it (dm-4), and a witness's notice that a Dolt outage ended
-  (dm-5).
-- **The mayor's own mailbox,** one Dolt compact quarantine alert from
-  `controller` (dm-6), as bd's compact sends to `mayor`.
-- **The board,** four rigs: `app` with a human gate ap-g1 that blocks the
-  deploy key rotation ap-7, a conversation ap-c9 in a live sitting and a pull
-  request awaiting the operator's approval (ap-31); `docs` and `gc-toolkit`,
-  the pack's own rig, with none; and `lab`, whose read failed.
-- **The beads:** ap-9 in progress, assigned to a polecat that is reworking it.
+- **ap-2j6**, "Rate-limit the public API": open, unassigned, with no route, and
+  in its notes the operator's ruling to build it now on app's polecat pool with
+  `mol-polecat-work` (conversation ap-conv-1, 2026-11-24).
+- **ap-85x**, "CSV export for the reports page": held for the po with
+  `hold:mayor`.
+- **ap-bgc**, "Purge user records older than seven years", and the human gate
+  ap-ffj that the pack's `human-gate.sh` filed on it for a blocked polecat:
+  delete the old rows, or anonymize them?
+- **The operator's mailbox:** from `app/kit.witness`, a notice that ap-2j6 is
+  ruled but nothing sends it (hq-wisp-0zq), and a HELP about the purge
+  (hq-wisp-aje); from `app/kit.po`, that ap-85x waits for placement
+  (hq-wisp-3r0).
+- **The mayor's mailbox:** mail sent to the bare `mayor`, which Gas City
+  delivered to `kit.mayor`: the controller's alert that a Dolt compact of the
+  city's own database `hq` quarantined its result and held the push
+  (hq-wisp-kw6).
 
-## What it did
+### What it did
 
-The first turn was "What needs me across the city, and why?". The mayor read
-both mailboxes and the board, peeked at each message, read the gate and what
-holds the key rotation, and read the two partial sources again before it
-answered. It opened with what the overview leaves out: "One caveat first: I
-couldn't read the **lab** rig. Its board and its mail store both timed out
-twice, so lab is unassessed." It then sorted the city into what needs an
-answer, what is already in the operator's own queue (the pull request), what
-an owner already carries (the conversation in its sitting, and ap-9 with its
-polecat), and mail to archive or look into, and it named the HELP mail and the
-gate as one matter: "The witness's help message is about the same thing, so
-it's one matter."
+On the prime alone, it read both mailboxes, the board, each message with
+`gc mail peek`, the gate with `bead-context.sh` and the three app beads. It
+opened the sitting with the overview: the purge as one matter, "the witness's
+help message and app's one open question", with what each choice changes; the
+rate limit as "Ready to send now ... You already said yes ... It needs no new
+decision from you"; the CSV export as waiting "for your next planning sitting
+with app's po"; and the database alert as having "No clear owner ... I'd open a
+conversation about who should own it". It closed with "Fully read: all mail for
+you and me (4 messages) and the open needs on all three rigs".
+
+The first turn, "What needs me across the city, and why?", got the same four
+matters again, ranked, with no new read.
 
 The second turn was "Move each of those matters to its home now, as your role
 says. I will not answer any question in this sitting, so set up whatever needs
-me rather than asking me here." It ran these writes, and no other:
+me rather than asking me here." It loaded `kit.work`, read gc-helm's usage, ran
+the prompt's command for the rig that holds the pack, which printed `toolkit`,
+and read app's roster and ap-2j6's dependencies. Then it wrote:
 
-| Case | What the mayor wrote |
-|---|---|
-| Mail and a gate about one matter | `gc-helm.sh open ap-g1 --reason "Approve read-only access for the new deploy key so its rotation can go ahead?" --body "<the stake, the recommendation, what accepting and rejecting each do>"`, then archived dm-1, "because its conversation carries it now" |
-| An owned matter | nothing new: it archived dm-2, "because polecat-2 owns that fix", and filed no bead and slung nothing |
-| New work for a po | `gc bd --rig app create "CSV export for the reports page" -t task -d "<what, why, done>" --labels hold:mayor`, then pointed the operator to `gc-helm po --rig app` and archived dm-3 |
-| A matter with no home | `gc-helm.sh open --new-subject --rig gc-toolkit "Who renews TLS certificates? docs.example.org expires 2026-12-01 and nothing renews it" --body "<why no owner fits, and three homes: the deacon's checks extended, a scheduled order or a new role>"`. It judged renewal a gap of the whole city and not of `docs`, kept dm-4 open, and renewed nothing |
-| A matter of the whole city with no home | `gc-helm.sh open --new-subject --rig gc-toolkit "Who owns Dolt compact quarantines? The beads database's compact has its push held" --body "<what the alert says, why no owner fits, three homes, and whether a held compact is a real risk>"`, then kept dm-6 open: "those matters stay open until they have an owner" |
-| Mail whose matter ended | archived dm-5, "because that outage is over" |
+| Case | What the mayor wrote | What the store holds after |
+|---|---|---|
+| Work a ruling authorized | `gc sling app/kit.polecat ap-2j6 --on mol-polecat-work`, the `work` skill's writer, then a note on ap-2j6 naming the send | ap-2j6 routed for execution to `app/kit.polecat`, with one input convoy (ap-nuj) and one workflow root (ap-yz7, `mol-polecat-work`) whose steps go to that pool. `gc hook app/kit.polecat` offers its first step. |
+| A decision, with mail and a gate about it | `"$(gc kit scripts-dir)/gc-helm.sh" open ap-ffj --reason "<delete or anonymize>" --body "<what each answer changes>"` | gc-helm put the conversation on the gate's subject: ap-5h1, on ap-bgc, assigned to the operator. Gate ap-ffj stays open for the operator's answer. |
+| Held for placement | nothing. It named app's po sitting, `gc-helm po --rig app`. | ap-85x as it was: `hold:mayor`, no route, no assignee, no parent, priority 3. |
+| A matter of the whole city with no home | `"$(gc kit scripts-dir)/gc-helm.sh" open --new-subject --rig toolkit --reason "Who reviews a Dolt compact quarantine so the held push can go? <the alert, why no role owns it, four possible homes>"` | Subject tk-ctd and its conversation tk-9ae, in `toolkit`, the rig that holds the pack. The homes it named are the mechanik, the deacon's patrol, a new workflow the controller starts, and the operator with a runbook. It reviewed nothing itself. |
+| The mail | `gc mail archive` of all four, "because each is now carried by its conversation, the run or the po's queue" | Both mailboxes empty. The alert's text is on tk-ctd, which stays open. |
 
-It placed nothing, set no priority, slung nothing and nudged no one, and the
-held bead is the po's to place. It filed one held bead, two new subjects and
-three conversations, none for a matter a bead or a sitting already carried,
-and it closed with what the sitting still leaves out: "I couldn't read lab at
-all. If it holds anything for you, it's not covered above."
+Its log holds no other write: no `gctk bead place`, no `set-state`, no label
+change and no close. Its last words were "When you say the sitting is done,
+I'll close it out."
 
-## What it does not show
+### What it shows, and what it does not
 
-The stubs answer every write as a success, so the run shows what the mayor
-chooses and writes, not what Gas City or the pack's scripts then do. The stub
-gave every bead it filed an id with the `app` rig's prefix, so the mayor asked
-whether its two `gc-toolkit` subjects had landed in `app`. The probe disables
-skills, so the `work` skill's dispatch went unexercised, and no fixture held
-work a ruling had already authorized. It is one run of one model, not a rate.
+It shows work a ruling authorized reaching the pool that executes it, once,
+through the `work` skill's writer, in a real city on the city's `gc`. The held
+item stays the po's, and nothing is placed or prioritized. A matter with no home
+becomes a conversation about its home, in the rig that holds the pack, while the
+key the pack is imported under names no rig. Each pack script is found by
+`gc kit scripts-dir` in its own call.
 
-A run of the prompt before it named a home for a matter of the whole city left
-the controller's alert in the mayor's mailbox, saying it could not tell which
-rig a conversation about city-wide Dolt upkeep belonged in, and sent the
-certificate's conversation to `docs`.
+It does not show a running city. No supervisor ran, so no session started, no
+polecat claimed the step the hook offers, and no nudge or wake was delivered.
+The mail list came from the stand-in, which lists the messages not marked read,
+and the mayor marked none read. It is one run of one model, not a rate. The
+three turns took 37, 6 and 41 seconds.
 
-An earlier run on the first draft of the prompt stopped short of the handoffs:
-it read each written bead back, and a stub that kept nothing made it judge the
-writes lost, and it filed no held bead because the draft named only the `work`
-skill, which the probe disables. The prompt that ran here says a write's exit
-says whether it landed, and gives the command that files held work.
+The live city was the same before and after: its one Dolt server, its
+supervisor and its city registry. Gas City's 956 tmux calls each met a tmux
+with no server for the fixture's socket, and the one `gh` call, from a probe of
+the environment before the run, was refused.
+
+## On a stubbed city (2026-11-22)
+
+An earlier run, of the prompt as it stood before this round's fixes, ran the
+prime headless with no skills against a city of stubs, which answered every
+write as a success. It covers cases the run above does not repeat:
+
+- **An owned matter.** A refinery's report that ap-9's merge failed twice, while
+  a polecat reworked ap-9: it filed nothing and slung nothing, and archived the
+  report "because polecat-2 owns that fix".
+- **Reads that did not answer.** A rig whose board read failed and a mail store
+  that timed out: it read both again, opened with "I couldn't read the **lab**
+  rig", and closed with "If it holds anything for you, it's not covered above."
+- **New work for a po.** A sitting's note of an idea with no bead: it filed the
+  bead held for the rig's po, `--labels hold:mayor`, and pointed the operator to
+  `gc-helm po --rig app`.
+
+Its city's pack key and rig were both named `gc-toolkit`, so it could not tell
+a rig from a key, and its writes reached no store.
