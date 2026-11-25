@@ -467,11 +467,9 @@ no warrant.
   takes each post the conversation keeps untaken as its own ask (`takePlans`,
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
-  decides each owned
-  PR's red checks and conflict from its checks, its merge state and its
-  approvals (`redPlans`, `redOn` and `decideRed` in
-  `services/gctk/pr/redchecks.go`), and compares each owned
-  PR's saved labels with the ones the store derives (`labelPlans` in
+  decides each owned PR's red checks and conflict from its checks, its merge
+  state and its approvals (`redPlans`, `redOn` and `decideRed` in
+  `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels with the ones the store derives (`labelPlans` in
   `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
   PR's signs with the ones each part keeps and reads again a conversation part
   that holds no list of untaken posts or a checks part that holds no suites
@@ -484,8 +482,8 @@ no warrant.
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
   head, each with the check suite that holds its result and its log, each check
-  suite there, with its status, its creation time and the attempt of the GitHub
-  Actions run behind it, the standing approvals, each with the commit it was given on, and
+  suite there, with its status, its creation time and how many check runs it
+  holds, the standing approvals, each with the commit it was given on, and
   requests for changes, each post that is feedback the city has not taken,
   with what its ask names it by, the review threads waiting on the city's
   answer and those unresolved, and the PR's labels, in four parts that each
@@ -505,8 +503,8 @@ no warrant.
     entry declares a poll interval and a webhook secret, which no code outside
     the configuration package reads. No Go source there, tests aside, reads a
     pull request's reviews or review threads. The monitor's check rollup gives
-    each check's name, status, conclusion and log, and no check suite, no
-    suite's creation time and no Actions run's attempt.
+    each check's name, status, conclusion and log, and no check suite and no
+    suite's creation time.
   - A webhook rule hands one verified provider event to an order or a
     conversation and keeps no state of its own
     ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
@@ -534,7 +532,7 @@ no warrant.
     [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
     and for the check suites the checks keep, its
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
-- **Verified.** 2026-11-25, at `gastownhall/gascity` main 944ef25f3b2b,
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
