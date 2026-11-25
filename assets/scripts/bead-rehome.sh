@@ -144,11 +144,6 @@
 # branch and the command that ends it. The bead's notes record the outcome.
 # The writer records no gc.outcome on the origin: a disposition's outcome word
 # is its closer's.
-# Callers: converse dispositions, operator re-homes, the landing order, gctk pr
-# reconcile (a PR on the pending record closed under a pre-recorded
-# disposition), stand-down.sh (a person's ruling that work a
-# human gate holds will not go on), scaffolding-sweep.sh (a finding a disposed
-# PR leaves unanswered, closed onto the bug that carries it).
 # Doctrine: docs/state-machine.md "Disposition". Test: bead-rehome.test.sh.
 set -euo pipefail
 
@@ -1218,9 +1213,8 @@ if [ -n "$RETIRED_BRANCH" ]; then
              echo "bead-rehome: WARN the close stands, but branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC); end it with: $END_CMD" >&2
              END_NOTE="Branch $RETIRED_BRANCH is still on the git remote (branch-end exit $END_RC: $(printf '%s' "$END_OUT" | tail -1)). End it with: $END_CMD" ;;
     esac
-    # The bead records what became of its branch. The landing order runs this
-    # script for its exit status and keeps its output only when it fails, so
-    # the note is what a later reader finds. A re-run that reaches the same
+    # The bead records what became of its branch in its notes, since a caller
+    # may keep only this script's exit status. A re-run that reaches the same
     # outcome adds nothing, so the notes are read before the append.
     if [ -n "$END_NOTE" ]; then
         case "$(bead_row "$ORIGIN_PATH" "$ORIGIN" | jq -r '.[0].notes // ""' 2>/dev/null || true)" in

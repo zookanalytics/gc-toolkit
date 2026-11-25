@@ -8,11 +8,10 @@ description: Which pull-request comments the city never reads as review feedback
 The city reads every review, inline comment and conversation comment on a pull
 request that it did not post itself as feedback, whoever wrote it
 ([state-machine.md](state-machine.md#operator-feedback)). Each piece of
-feedback becomes an ask on the bead that owns the pull request: the city marks
-the post 👀, the pull request's review run rules on it and answers it, and the
-merge waits until it is answered. A comment that informs rather than asks, such
-as a deployment notice or a report a workflow posts on every pull request, would
-cost that round each time it appears. Such a comment is not for review, and a
+feedback costs a review round to rule and answer, and holds the merge until it
+is answered. A comment that informs rather than asks, such as a deployment
+notice or a report a workflow posts on every pull request, would cost that
+round each time it appears. Such a comment is not for review, and a
 comment not for review is never feedback, whoever posted it.
 
 ## Scope
@@ -120,10 +119,9 @@ exits 1.
 
 Nothing. It is never feedback, so:
 
-- it is never among the posts the city has not taken, so it holds no merge;
-- the landing order files no ask for it and puts no 👀 on it;
-- no review round answers it, and in a review thread it neither asks the city
-  for an answer nor ends a wait on the reviewer;
+- it holds no merge, and the city neither takes it nor answers it;
+- in a review thread it neither asks the city for an answer nor ends a wait on
+  the reviewer;
 - it is nothing said, so a pull request whose only comments are not for review
   owes the city's answer to nobody;
 - the feedback miner skips it as a notice, and files no observation from it.

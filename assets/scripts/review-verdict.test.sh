@@ -44,8 +44,7 @@ SELF="gc-city-bot"
 verdict() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'review_verdict($self)'; }
 approvals() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'[ standing_approvals($self)[] | .id ]'; }
 # The verdict after a withdrawal dismisses the standing approvals, and then after
-# every CHANGES_REQUESTED is dismissed too, the way a review round dismisses a
-# request for changes once each point it raised is answered.
+# every CHANGES_REQUESTED is dismissed too.
 withdrawn() { printf '%s' "$1" | jq -c --arg self "$SELF" "$REVIEW_VERDICT_DEF"'
   [ standing_approvals($self)[] | .id ] as $ids
   | map(if (.id as $i | any($ids[]; . == $i)) then .state = "DISMISSED" else . end)

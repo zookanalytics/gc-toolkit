@@ -5,10 +5,9 @@
 # `gctk review passed` holds, and, when that iteration ends the loop, the run's
 # result written before the loop closes. An iteration ends the loop when it
 # passes, or when it is the loop's last attempt by the run's max_attempts var
-# and does not pass, which Gas City closes as exhausted. --record writes the
-# result on the bead that owns the PR, closes the asks the run answered, and
-# files the review-loop-exhausted gate at an exhausted loop, running the pack's
-# scripts from this directory.
+# and does not pass, which Gas City closes as exhausted. It runs
+# `gctk review passed --record`, whose --help says what the record writes, with
+# the pack's scripts from this directory.
 #
 # Gas City runs it in the control dispatcher after each iteration closes, with
 # GC_BEAD_ID naming the iteration's bead and GC_ITERATION its number, from 1, a

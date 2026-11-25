@@ -115,9 +115,8 @@ PRIORITY_JQ="$RUN_JQ"'
   # Whether the PR of this anchor is approved, which ranks its PR-finishing work
   # at P0: its merge_result says it owns an open PR, a value of the pending
   # record (pull_request_pending, pull_request_head_changed), and the
-  # conversation the one-PR update saved names an approver and no requester,
-  # the accounts whose approval or request for changes stands as approval() in
-  # services/gctk/pr/rules.go reads the reviews, while the saved PR is at the
+  # conversation the one-PR update saved names an approver and no requester
+  # (approval() in services/gctk/pr/rules.go), while the saved PR is at the
   # head the store holds (observed_pr_head_sha on a changed head, pr_head_sha
   # otherwise).
   def prio_pr_approved:

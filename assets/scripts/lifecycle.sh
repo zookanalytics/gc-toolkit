@@ -27,7 +27,6 @@
 # the executor identity (gc.session_id, gc.session_name).
 # --takeaway writes the triple (text/_at/_by) in the same atomic call, capped at
 # 140 codepoints and refused when it normalizes to nothing.
-# Callers: direct-merge-push.sh (the direct landing) and gate-ensure.sh.
 # Exits: 0 ok; 1 --expect mismatch / bd refusal / usage, or no gctk binary to
 # run; 2 the bead could not be read before the write, or a landed write could
 # not be reported as JSON.

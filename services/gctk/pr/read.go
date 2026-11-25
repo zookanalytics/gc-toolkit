@@ -247,10 +247,9 @@ func (b side) head() string { return storeHead(b.rec) }
 // the saved read (pr_github_read). It does when the bead is on the pending
 // record at that head ([record.Pending]), the saved read is of the PR at that
 // head, open and no draft, and no approval stands there with no request for
-// changes beside it, the approval prio_pr_approved in
-// assets/scripts/priority-lib.sh reads for the rank. A read that is absent,
-// does not decode, or is of another head shows nothing, so the PR waits on the
-// PR watch's next read and on no person yet.
+// changes beside it. A read that is absent, does not decode, or is of another
+// head shows nothing, so the PR waits on the PR watch's next read and on no
+// person yet.
 func AwaitsReview(result, head, saved string) bool {
 	head = strings.TrimSpace(head)
 	if strings.TrimSpace(result) != record.Pending || head == "" || strings.TrimSpace(saved) == "" {

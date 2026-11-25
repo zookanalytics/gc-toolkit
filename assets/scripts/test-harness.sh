@@ -280,14 +280,9 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, review-dismissal.sh, the comments a
-  # dismissal would retire unrouted and how the approval dismissers name what
-  # they act on, dispatch-path.sh, the one definition of a dispatch path and a
-  # label hold, which converse-signoff.sh and the liveness scripts source to ask
-  # how a bead is dispatched, priority-lib.sh, the priority function, which
-  # queue-priority.sh sources, git-lib.sh, the one read of a branch's head on
-  # origin, which gate-ensure.sh and signoff.sh source, and run-lib.sh, the one
-  # reader of a run's link to its bead, are sourced by sibling path the same way.
+  # review-verdict.sh, review-dismissal.sh, dispatch-path.sh, priority-lib.sh,
+  # git-lib.sh and run-lib.sh, the libraries the scripts under test source, are
+  # sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
   [ -f "$here/dispatch-path.sh" ] && cp "$here/dispatch-path.sh" "$d/"

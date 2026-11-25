@@ -689,10 +689,9 @@ resolve_live_subject() {
 
 # _resolve_pr_reference <number> <url-or-empty> — set RESOLVED_SUBJECT to the
 # LIVE anchor that owns this PR, or exit 4 fail-closed. pr_number / pr_url are
-# bare metadata keys (gctk pr record, rework-child.sh). Filtered CLIENT-SIDE:
-# bd list's --metadata-field mangles a numeric value into non-JSON here. A URL
-# additionally pins the repo, so a bare number several repos share is
-# disambiguated by it.
+# bare metadata keys. Filtered CLIENT-SIDE: bd list's --metadata-field mangles a
+# numeric value into non-JSON here. A URL additionally pins the repo, so a bare
+# number several repos share is disambiguated by it.
 # The anchor records its own PR, and so does a bead that works on the PR, such
 # as a rework child, which names the anchor in anchor_bead. So each bead that
 # records the PR stands for its anchor_bead, or for itself when it names none,

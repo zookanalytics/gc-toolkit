@@ -20,17 +20,9 @@
 # the helm board derives the same per-bead state, so a bead's PR labels and its
 # board liveness cannot disagree.
 #
-# Its callers:
-#   - gctk pr reconcile, the landing order, every minute for each PR the rig's
-#     live beads own: it compares the labels the PR watch saved on the PR's bead
-#     with the derivation, and only where they differ calls reconcile on a PR
-#     the saved read shows open, or clear on one it shows merged or closed, with
-#     no --current-labels, so this writer reads the PR's labels.
-#   - gctk pr compare, the net, which calls clear on each PR its search finds
-#     carrying a label of these families that no live bead owns.
-#   - signoff.sh, which calls reconcile after a verdict.
-# A write the landing order or the net makes that does not land records
-# nothing, and their next run finds the same difference.
+# A call with no --current-labels reads the PR's labels itself. A write that
+# does not land records nothing, so a caller that compares again finds the same
+# difference.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo);
 # gh-origin-guard.sh guards agent-typed gh, not a script's own calls.

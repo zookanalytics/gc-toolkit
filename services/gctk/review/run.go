@@ -142,8 +142,7 @@ type Ruling struct {
 }
 
 // QuestionKey opens the key of each human gate a review run puts a question to
-// a person through: review-run.sh question files the gate under
-// review-question-<slug> on the bead that owns the PR.
+// a person through, review-question-<slug>, on the bead that owns the PR.
 const QuestionKey = "review-question-"
 
 // Answer is the ruling's answer as the PR shows it, what the head carries for

@@ -20,8 +20,8 @@
 # edit of one) has to carry the provenance mark assets/scripts/pr-post.sh
 # appends. The definition of feedback tells the city's own posts from a
 # person's by that mark, so an unmarked post under the city's login reads back
-# as feedback, which the landing order takes as an ask the city then answers
-# (docs/gh-origin-guard.md, "Posts carry the city's mark").
+# as a person's feedback (docs/gh-origin-guard.md, "Posts carry the city's
+# mark").
 #
 # What it sees: the command an agent types into Bash. A `gh` call made inside a
 # script the agent runs is invisible here, and the pack's own writers pin
@@ -1102,8 +1102,7 @@ if [ -n "$UNMARKED" ]; then
 The city posts on a pull request under the bot account that backs every
 agent's gh token, so the city tells its own posts from feedback by the
 provenance mark, not by the author. A post without the mark reads back as
-feedback, and the landing order files it as an ask that answers the city's own
-words.
+feedback, so the city would answer its own words.
 
 Post through $PR_POST, which appends the mark:
   comment --repo <host/owner/name> --pr <n> --body-file <path>

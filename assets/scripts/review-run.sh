@@ -42,9 +42,8 @@
 #       landed, at the judged head nothing moved (exit 2, run it again), and at
 #       any other commit the branch moved (exit 1)
 #   review-run.sh post                            [rule-and-repair]
-#       post the round's answers on the PR (gctk pr answer): the head's comment,
-#       or an edit of the one its mark finds, and each person's post an ask the
-#       round ruled carries, answered where it was made
+#       post the round's answers on the PR through `gctk pr answer`, whose
+#       --help says what it posts
 #   review-run.sh defer --title <text> --file <path>   [rule-and-repair]
 #       file a fix outside the reviewed diff as a bead of its own, waiting on the
 #       PR's bead and armed to start once it lands, its target the PR's
