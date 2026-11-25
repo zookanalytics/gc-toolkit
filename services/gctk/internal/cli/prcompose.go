@@ -12,14 +12,15 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
 
-// `gctk pr compose <bead>` is how the step that opens or updates a PR asks what
-// the PR's title and body should say: the refinery's merge-push step, at each
-// round it publishes a PR or lands on an open one. With --edit it brings an
-// open PR's title and body to that composition itself, as a review run's push
-// does. The pr package composes and edits; this command parses the request,
-// reads the published body it names, and prints the result.
+// `gctk pr compose <bead>` is how the refinery's merge-push step asks what the
+// title and body of a PR it opens should say. With --edit it brings an open
+// PR's title and body to that composition itself, as the refinery's merge-push
+// step does on a PR it publishes onto and a review run's push does. The pr
+// package composes and edits; this command parses the request, reads the
+// published body it names, and prints the result.
 
 const prComposeLong = `Prints the title and body of the PR the bead owns, as the bead says they
 should be. The title is the bead's own, opened with a conventional-commit type
@@ -65,10 +66,11 @@ composition in place of printing it. It reads the title and body the PR shows,
 composes with that body as the one published, and edits, in one request, the
 title when it differs in more than spacing and the body when a section is
 written, and nothing when neither moved. A bead whose title has no words
-leaves the PR's title as it stands. The PR is the one the bead's record names,
-else the one it records for the refinery to reuse (existing_pr), in the rig's
-own repository, the one the origin of the clone it runs in names
-($GC_RIG_ROOT, else the working directory), and open from the bead's branch.
+leaves the PR's title as it stands. The PR is the one --pr names, else the one
+the bead's record names, else the one it records for the refinery to reuse
+(existing_pr), in the rig's own repository, the one the origin of the clone it
+runs in names ($GC_RIG_ROOT, else the working directory), and open from the
+bead's branch.
 It prints one line saying what it edited, and names on stderr each section it
 left as it stands: one the body carries no markers it can read for, as in a
 hand-written body, the summary region when it must be written and no --gates
@@ -91,8 +93,8 @@ const (
 )
 
 type prComposeOpts struct {
-	head, target, bodyFile, gates, supersedes, supersededHead, sections string
-	opening, edit                                                       bool
+	head, target, bodyFile, gates, supersedes, supersededHead, sections, pr string
+	opening, edit                                                           bool
 }
 
 func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -113,7 +115,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 				return errors.New("name the bead that owns the PR")
 			}
 			if o.edit {
-				return exit(prComposeEdit(bead, req, stdout, stderr))
+				return exit(prComposeEdit(bead, strings.TrimSpace(o.pr), req, stdout, stderr))
 			}
 			return exit(prCompose(bead, o.bodyFile, req, stdout, stderr))
 		},
@@ -128,6 +130,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&o.supersededHead, "superseded-head", "", "the head --supersedes closed at")
 	f.StringVar(&o.sections, "sections", sectionSummary+","+sectionBranchBeads, "the body's sections to compose: summary, branch-beads, or both")
 	f.BoolVar(&o.edit, "edit", false, "edit the open PR's title and body to the composition where they differ, reading the body from the PR")
+	f.StringVar(&o.pr, "pr", "", "with --edit, the PR's URL, when the bead's record names none yet")
 	return cmd
 }
 
@@ -159,6 +162,14 @@ func (o prComposeOpts) request(c *cobra.Command) (pr.Request, error) {
 	}
 	if o.edit && (o.bodyFile != "" || o.opening) {
 		return req, errors.New("--edit reads the body the open PR shows: give it no --body-file and no --opening")
+	}
+	if url := strings.TrimSpace(o.pr); url != "" {
+		if !o.edit {
+			return req, errors.New("--pr names the open PR --edit edits: give it with --edit")
+		}
+		if _, _, _, ok := record.ParseURL(url); !ok {
+			return req, fmt.Errorf("--pr %q is not a pull request's URL (https://<host>/<owner>/<repo>/pull/<number>)", url)
+		}
 	}
 	if (o.supersedes == "") != (o.supersededHead == "") {
 		return req, errors.New("--supersedes and --superseded-head name one PR together")
@@ -222,15 +233,15 @@ func prCompose(bead, bodyFile string, req pr.Request, stdout, stderr io.Writer) 
 	return 0
 }
 
-// prComposeEdit brings the title and body of the bead's open PR to its
-// composition and says what it edited.
-func prComposeEdit(bead string, req pr.Request, stdout, stderr io.Writer) int {
+// prComposeEdit brings the title and body of the bead's open PR, the one url
+// names when it names one, to its composition and says what it edited.
+func prComposeEdit(bead, url string, req pr.Request, stdout, stderr io.Writer) int {
 	l, err := landing("", "", bead)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk pr compose: the store holding %s did not resolve: %v\n", bead, err)
 		return 2
 	}
-	got, err := l.Edit(bead, "", req)
+	got, err := l.Edit(bead, url, req)
 	if err != nil {
 		return editFailed(bead, err, stderr)
 	}

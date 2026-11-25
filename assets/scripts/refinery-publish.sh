@@ -28,8 +28,9 @@
 # and the next pass tries again.
 #
 # The title and body are composed by `gctk pr compose` from the owner, at the
-# prepared head. On a PR the step takes, it edits the title and body first,
-# then returns the PR to draft (`gctk pr draft`), then pushes the head, so a
+# prepared head. On a PR the step takes, `gctk pr compose --edit` first brings
+# the PR's title and body to that composition, editing only what differs, then
+# the step returns the PR to draft (`gctk pr draft`) and pushes the head, so a
 # review started at that head reads the current body, and the push starts a
 # round of the city's work on a draft. With no PR open, it pushes the head and
 # opens the PR as a draft with them. Every push goes under the lease on the
@@ -38,9 +39,9 @@
 # prepares the branch again. The PR is a draft while the city works on it:
 # `gctk pr draft` converts only a PR that is ready, so a round's later push
 # changes nothing, and the landing order marks the PR ready once the review
-# loop has passed at the head the refinery validated. A PR that did not return
-# to draft is not pushed onto, and the step stops. The step records no
-# opened_as_draft.
+# loop has passed at the head the refinery validated. A PR whose title and body
+# did not take, or that did not return to draft, is not pushed onto, and the
+# step stops. The step records no opened_as_draft.
 #
 # It then writes the owner's pending record with `gctk pr record`, which takes
 # the store's record lock and writes nothing on an owner that closed or left the
@@ -67,7 +68,7 @@ HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=gctk-resolve.sh
 . "$HERE/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 
-PR_FIELDS="number,url,state,headRefName,baseRefName,headRepository,headRepositoryOwner,isCrossRepository,author,title,body"
+PR_FIELDS="number,url,state,headRefName,baseRefName,headRepository,headRepositoryOwner,isCrossRepository,author"
 usage() { echo "usage: $PROG --bead <id>" >&2; exit 2; }
 BEAD=""
 while [ $# -gt 0 ]; do
@@ -111,8 +112,6 @@ take() {
   PR_URL=$(printf '%s' "$1" | jq -r '.url // ""')
   PR_NUMBER=$(printf '%s' "$1" | jq -r '(.number // "") | tostring')
   PR_AUTHOR=$(printf '%s' "$1" | jq -r '(.author.login // "") | tostring')
-  PR_TITLE=$(printf '%s' "$1" | jq -r '.title // ""')
-  PR_BODY=$(printf '%s' "$1" | jq -r '.body // ""')
   local state head base hrepo cross
   state=$(printf '%s' "$1" | jq -r '.state // ""')
   head=$(printf '%s' "$1" | jq -r '.headRefName // ""')
@@ -142,9 +141,8 @@ not_city_opened() {
 }
 
 BODY_FILE=$(mktemp "${TMPDIR:-/tmp}/refinery-publish.XXXXXX") || stop "cannot make a file for the PR's body"
-PUBLISHED=$(mktemp "${TMPDIR:-/tmp}/refinery-publish.XXXXXX") || stop "cannot make a file for the PR's body"
 ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/refinery-publish.XXXXXX") || stop "cannot make a file for gh's errors"
-trap 'rm -f "$BODY_FILE" "$PUBLISHED" "$ERR_FILE"' EXIT
+trap 'rm -f "$BODY_FILE" "$ERR_FILE"' EXIT
 
 # The PR to take: the one the owner records, else the one open on the branch.
 RECORDED=$(owner_meta existing_pr)
@@ -178,15 +176,13 @@ else
   fi
 fi
 
-# compose [--body-file <file>]: the title and body the owner says its PR
-# should carry at the prepared head, its handoff naming TARGET, the base the PR
-# opens into or was read open into, in TITLE and BODY_FILE, and in MOVED
-# whether a section of a published body moved.
+# compose: the title and body the owner says the PR it opens should carry at
+# the prepared head, its handoff naming TARGET, the base the PR opens into, in
+# TITLE and BODY_FILE.
 compose() {
   local out
-  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" --gates '' "$@" </dev/null) || return 1
+  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" --gates '' </dev/null) || return 1
   TITLE=$(printf '%s' "$out" | jq -r '.title // ""')
-  MOVED=$(printf '%s' "$out" | jq -r 'if .summary == "written" or .branch_beads == "written" then "yes" else "" end')
   printf '%s' "$out" | jq -j '.body // ""' > "$BODY_FILE"
   [ -n "$TITLE" ] && [ -s "$BODY_FILE" ]
 }
@@ -202,15 +198,8 @@ push() {
 }
 
 if [ -n "$PR_URL" ]; then
-  printf '%s' "$PR_BODY" > "$PUBLISHED"
-  compose --body-file "$PUBLISHED" || stop "the title and body of PR #$PR_NUMBER did not compose from $OWNER"
-  EDIT=()
-  [ "$(printf '%s' "$TITLE" | tr -s '[:space:]' ' ')" = "$(printf '%s' "$PR_TITLE" | tr -s '[:space:]' ' ')" ] || EDIT+=(--title "$TITLE")
-  [ -z "$MOVED" ] || EDIT+=(--body-file "$BODY_FILE")
-  if [ "${#EDIT[@]}" -gt 0 ]; then
-    gh pr edit "$PR_NUMBER" --repo "$REPO" "${EDIT[@]}" </dev/null >/dev/null \
-      || stop "the title and body of PR #$PR_NUMBER did not take, so the head is not pushed under a stale body"
-  fi
+  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr compose "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --gates '' --edit </dev/null >&2 \
+    || stop "the title and body of PR #$PR_NUMBER did not take, so the head is not pushed under a stale body"
   GC_RIG_ROOT="$HOME_DIR" "$gctk" pr draft "$OWNER" --pr "$PR_URL" </dev/null >&2 \
     || stop "PR #$PR_NUMBER did not return to draft, so the head is not pushed onto it while it is ready"
   push

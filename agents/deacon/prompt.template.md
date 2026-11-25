@@ -73,7 +73,7 @@ WISP=$(printf '%s\n' "$WISP_IDS" | sed -n '1p')
 for extra in $(printf '%s\n' "$WISP_IDS" | sed '1d'); do gc bd mol burn "$extra" --force; done
 # <<< patrol-wisp-reconcile
 if [ -z "$WISP" ]; then
-  WISP=$(gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
+  WISP=$( gc bd mol wisp mol-deacon-patrol --city="$GC_CITY_PATH" --root-only --var binding_prefix='{{ .BindingPrefix }}' --var event_timeout='600' --var doctor_interval='3600' --json | jq -r '.new_epic_id')
   POURED=1
 fi
 gc bd update "$WISP" --assignee="$GC_AGENT" --status=in_progress
