@@ -39,6 +39,18 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"deny\",\"message\":\"No person attends this session, so its PermissionRequest hook refused this permission prompt, and the call did not run. The prompt came from Claude Code, which holds some calls for a person even in bypass permissions mode: a removal whose target it cannot resolve before the command runs, and a command it cannot be sure it reads the way the shell will, such as one with braces or quotes nested inside a ${VAR:-default}, or a bash -c script. Send a call that removes nothing again in plain syntax that bash and zsh both read. Send a removal again only with a literal path or a guarded one, such as \\\"${D:?}\\\"/*, and never through a script, another shell or another tool. If the work needs the call as it was, leave it out and handle it as your instructions say for blocked work.\"}}}'",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

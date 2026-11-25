@@ -35,6 +35,16 @@
 #
 # cycle-recycle and work-context self-gate by role and are safe no-ops
 # elsewhere; the gh guard applies to every role, so it does not.
+#
+# A session no person attends refuses Claude Code's permission prompts, because
+# a prompt there waits for nobody and holds the session's work until someone
+# happens to look. overlays/work-context and overlays/cycle-recycle each
+# register a PermissionRequest hook that answers every prompt with a deny and a
+# message telling the agent what to send instead. That hook gates on nothing,
+# so it reaches every agent that takes those overlays: the pools (polecat,
+# proactive) and the heartbeat roles (refinery, witness, deacon).
+# overlays/gh-origin-guard, which the seats a person attends take, registers
+# none. assets/scripts/permission-request-deny-wiring.test.sh holds both sets.
 
 [pack]
 name = "gc-toolkit"
@@ -51,16 +61,25 @@ session_live = [
 # Deterministic work-bead description delivery: a Claude PostToolUse hook
 # injects the claimed work bead's description right after the claim, so the
 # spec reaches the worker even on a mid-workflow respawn (tk-osf13). Gates
-# itself to claude-provider polecat pools.
+# itself to claude-provider polecat pools. The overlay also refuses permission
+# prompts (OVERLAY WIRING).
 [[patches.agent]]
 name = "polecat"
+overlay_dir = "overlays/work-context"
+
+# The first-reaction pool takes the polecats' overlay for its refusal of
+# permission prompts. The work-context hook gates itself to polecats, so it does
+# nothing here, and the gh guard rides the same overlay.
+[[patches.agent]]
+name = "proactive"
 overlay_dir = "overlays/work-context"
 
 # Deterministic context recycle for the long-running patrol roles: a Claude
 # Stop hook recycles the session past a 200K input-token threshold
 # (docs/cycle-recycle.md). Gates itself to witness | deacon | refinery. The
 # same overlay carries the deacon's patrol-continue Stop hook, which hands back
-# a turn that ends between patrol cycles (docs/patrol-continue.md).
+# a turn that ends between patrol cycles (docs/patrol-continue.md), and refuses
+# permission prompts (OVERLAY WIRING).
 [[patches.agent]]
 name = "refinery"
 overlay_dir = "overlays/cycle-recycle"
@@ -100,10 +119,6 @@ overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
 name = "po"
-overlay_dir = "overlays/gh-origin-guard"
-
-[[patches.agent]]
-name = "proactive"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]

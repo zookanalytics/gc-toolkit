@@ -341,9 +341,9 @@ take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and ru
 
 | Registration | Agents |
 |---|---|
-| `overlays/work-context` | polecat |
+| `overlays/work-context` | polecat, proactive |
 | `overlays/cycle-recycle` | refinery, witness, deacon |
-| `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, converse-opus, converse-fable, mechanik, po, proactive, demo |
+| `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, converse-opus, converse-fable, mechanik, po, demo |
 | the Codex home, by `pre_start` | polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex |
 
 converse-opus, converse-fable and converse-codex are the converse templates
