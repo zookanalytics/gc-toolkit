@@ -1,0 +1,212 @@
+package pr
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
+)
+
+// Bringing a PR's branch current merges its target, as origin holds it, into
+// the checkout of the branch. git merges from its own merge base, the newest
+// commit the two share. When the target's history was rewritten after the
+// branch last took it, such as by an upstream sync, that base falls before the
+// whole of the old history the branch still carries, so the merge would take
+// that history for the branch's own change: it would bring back what the
+// rewrite dropped and conflict in files the branch never touched.
+//
+// So the merge goes from the commit of the target the branch took last. The
+// clone's reflog of origin/<target> records the commits the target has named,
+// and those it no longer holds are its old history. Newest first, the first
+// whose merge base with HEAD is newer than git's own base gives that commit.
+// The merge takes a commit that supersedes it with the target: the target's
+// tree whole, with the target and that commit as its parents, as
+// `git merge -s ours` records a merge. git's own merge then goes from there,
+// leaves a conflict in its merge state, and `git show --remerge-diff` on the
+// merge shows only what was resolved by hand. With no such commit, the target
+// itself is merged.
+
+// BroughtCurrent is what bringing a checkout current with its target did.
+type BroughtCurrent struct {
+	// Target is the branch the checkout is brought current with, and Tip the
+	// commit origin/<Target> names once fetched.
+	Target, Tip string
+	// Held is true when HEAD already held Tip, so nothing was merged.
+	Held bool
+	// Default is git's merge base of HEAD and Tip. Base is the commit the merge
+	// goes from: Default, or the commit of the target's old history the branch
+	// took last, which Supersede, the commit made for the merge, supersedes
+	// with Tip.
+	Default, Base, Supersede string
+	// Message is the merge's message. Head is the checkout's HEAD once git
+	// made the merge, and Conflicts lists the paths git left unmerged when it
+	// stopped instead.
+	Message, Head string
+	Conflicts     []string
+}
+
+// CurrentRefusal is a checkout BringCurrent does not merge into, which it
+// leaves as it was.
+type CurrentRefusal struct{ Why string }
+
+func (r *CurrentRefusal) Error() string { return r.Why }
+
+// BringCurrent fetches target from origin and merges it into the checkout dir
+// sits in, from the commit of the target the branch took last when the
+// target was rewritten after that. It refuses a checkout that holds work no
+// commit holds, or is in the middle of an operation git stopped, and a HEAD
+// that shares no history with the target. An error is a git call that did not
+// answer or failed, and a merge stopped on a conflict is not one: its
+// Conflicts are left in git's merge state for a person to resolve.
+func BringCurrent(dir, target string) (*BroughtCurrent, error) {
+	co, err := git.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	if op, err := git.InProgress(co.Top); err != nil {
+		return nil, err
+	} else if op != "" {
+		return nil, &CurrentRefusal{Why: fmt.Sprintf("the checkout is in the middle of a %s: finish it or abort it first", op)}
+	}
+	if dirty, err := co.Dirty(); err != nil {
+		return nil, err
+	} else if dirty != "" {
+		return nil, &CurrentRefusal{Why: "the checkout holds work no commit holds, which a merge could take in or lose:\n" + dirty}
+	}
+	if err := git.FetchTip(co.Top, target); err != nil {
+		return nil, err
+	}
+	tip, err := git.Tip(co.Top, target)
+	if err != nil {
+		return nil, err
+	}
+	cur := &BroughtCurrent{Target: target, Tip: tip}
+	if cur.Held, err = git.IsAncestor(co.Top, tip, co.Commit); err != nil {
+		return nil, err
+	} else if cur.Held {
+		return cur, nil
+	}
+	def, ok, err := git.CommonBase(co.Top, co.Commit, tip)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, &CurrentRefusal{Why: fmt.Sprintf("HEAD shares no history with origin/%s", target)}
+	}
+	cur.Default, cur.Base = def, def
+	from := tip
+	base, err := lastTaken(co.Top, target, co.Commit, tip, def)
+	if err != nil {
+		return nil, err
+	}
+	if base != "" {
+		tree, err := git.TreeOf(co.Top, tip)
+		if err != nil {
+			return nil, err
+		}
+		if cur.Supersede, err = git.CommitTree(co.Top, tree, []string{tip, base}, supersedeMessage(target, tip, base)); err != nil {
+			return nil, err
+		}
+		cur.Base, from = base, cur.Supersede
+	}
+	cur.Message = cur.mergeMessage()
+	if cur.Conflicts, err = git.Merge(co.Top, from, cur.Message); err != nil {
+		return nil, err
+	} else if len(cur.Conflicts) > 0 {
+		return cur, nil
+	}
+	after, err := git.Open(co.Top)
+	if err != nil {
+		return nil, err
+	}
+	cur.Head = after.Commit
+	return cur, nil
+}
+
+// lastTaken is the commit of the target's old history that head took last,
+// "" when there is none: of the commits the clone's reflog of origin/<target>
+// records and tip no longer holds, newest first, the merge base with head of
+// the first whose merge base is newer than def, git's merge base of head and
+// tip. A branch that took tip's history after a rewrite has def there, so the
+// commits it took before the rewrite are not newer and it gets none. Neither
+// does a branch whose old history has left the reflog.
+func lastTaken(dir, target, head, tip, def string) (string, error) {
+	tips, err := git.ReflogTips(dir, target)
+	if err != nil {
+		return "", err
+	}
+	old, err := git.NotHeld(dir, tips, tip)
+	if err != nil {
+		return "", err
+	}
+	newer := map[string]bool{}
+	for _, o := range old {
+		mb, ok, err := git.CommonBase(dir, head, o)
+		if err != nil {
+			return "", err
+		}
+		if !ok || mb == def {
+			continue
+		}
+		is, seen := newer[mb]
+		if !seen {
+			if is, err = git.IsAncestor(dir, def, mb); err != nil {
+				return "", err
+			}
+			newer[mb] = is
+		}
+		if is {
+			return mb, nil
+		}
+	}
+	return "", nil
+}
+
+// abbrev is the abbreviation a message names a commit by.
+func abbrev(id string) string { return id[:min(len(id), 12)] }
+
+func (c *BroughtCurrent) mergeMessage() string {
+	subject := fmt.Sprintf("Merge origin/%s at %s", c.Target, abbrev(c.Tip))
+	if c.Supersede == "" {
+		return subject + "\n"
+	}
+	return subject + " from " + abbrev(c.Base) + "\n\n" + fill(fmt.Sprintf(
+		"origin/%[1]s was rewritten after this branch last took it, at %[2]s. "+
+			"Merged from git's own merge base, %[3]s, the old history the branch "+
+			"still carries would count as its own change. So this merge takes "+
+			"%[4]s, which supersedes %[2]s with %[5]s and carries its tree, and "+
+			"git merges from %[2]s: the merge changes the branch only by what "+
+			"changed from %[2]s to %[5]s, and git show --remerge-diff on it shows "+
+			"only what was resolved by hand.",
+		c.Target, abbrev(c.Base), abbrev(c.Default), abbrev(c.Supersede), abbrev(c.Tip)))
+}
+
+func supersedeMessage(target, tip, base string) string {
+	return fmt.Sprintf("Supersede %s with origin/%s at %s\n\n", abbrev(base), target, abbrev(tip)) + fill(fmt.Sprintf(
+		"origin/%[1]s no longer holds %[2]s, which this branch took from it "+
+			"before its history was rewritten. This commit carries the tree of "+
+			"%[3]s whole and has %[2]s as its second parent, as git merge -s ours "+
+			"records a merge, so a merge that takes it goes from %[2]s. Its own "+
+			"git show --remerge-diff is the rewrite: read the merge that takes it.",
+		target, abbrev(base), abbrev(tip)))
+}
+
+// fill wraps a paragraph at 72 columns, ending it with a newline.
+func fill(text string) string {
+	var b strings.Builder
+	width := 0
+	for _, w := range strings.Fields(text) {
+		switch {
+		case width == 0:
+		case width+1+len(w) > 72:
+			b.WriteString("\n")
+			width = 0
+		default:
+			b.WriteString(" ")
+			width++
+		}
+		b.WriteString(w)
+		width += len(w)
+	}
+	return b.String() + "\n"
+}
