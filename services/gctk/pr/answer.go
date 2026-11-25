@@ -641,7 +641,10 @@ func (a *answering) readQuestions() error {
 
 // settle closes the gate of each question a post the round ruled settles, or
 // makes moot, with the post's words and its URL as the answer, headed ruled:
-// or moot:. A gate closed already is left with the answer it has.
+// or moot:. A gate closed already is left with the answer it has. bd closes a
+// gate closed already without changing it and exits 0 either way, so the gate
+// is read after the close, and an answer that reached it first is the one the
+// reply names.
 func (a *answering) settle() {
 	for _, r := range a.rp.Rulings {
 		if r.Settles == "" || r.Ask == "" {
@@ -677,8 +680,18 @@ func (a *answering) settle() {
 			a.fail("the gate %s, which %s settles, did not close: %v", q.id, url, err)
 			continue
 		}
-		q.closed, q.reason = true, reason
-		a.out.Settled = append(a.out.Settled, q.id)
+		rows, err := a.l.Ledger.Find(ledger.ByID(q.id).WithClosed())
+		if err == nil && len(rows) == 0 {
+			err = errors.New("the store holds no such bead")
+		}
+		if err != nil {
+			a.fail("the gate %s closed, and the read of whose answer it holds did not answer (%v), so the reply to %s waits for the post run again", q.id, err, url)
+			continue
+		}
+		q.closed, q.reason = true, rows[0].CloseReason()
+		if q.reason == reason {
+			a.out.Settled = append(a.out.Settled, q.id)
+		}
 	}
 }
 

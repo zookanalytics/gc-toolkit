@@ -786,3 +786,30 @@ func TestAHeadsCommentPastTheSizeGitHubAllowsIsPostedCut(t *testing.T) {
 		t.Fatalf("40 long answers posted %d head's comments: %.400q", len(got), got)
 	}
 }
+
+// A person's answer that closes a question's gate on the board just before the
+// post settles it from a comment is the answer the gate keeps, the post does
+// not count the gate as its own, and its reply says the question was settled
+// on the board already.
+func TestAGateAPersonAnsweredFirstKeepsTheirAnswer(t *testing.T) {
+	d := newRounds(t)
+	d.question(t, "tk-q1", "cap", "Choose the cap", "2026-11-12T03:00:00Z")
+	url := d.person(pr.PostConversation)
+	ask := d.ask(t, "Conversation comment", url, "2026-11-12T04:00:00Z")
+	d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingAnswered, Reason: "comment answers", Settles: "tk-q1"})
+	board := "ruled: keep the cap at 3, answered on the board"
+	d.store.BeforeResolve = func(id, _ string) error {
+		b, _ := d.store.Row(id)
+		b.Status, b.CloseReason = "closed", board
+		d.store.Put(b)
+		return nil
+	}
+	got := d.posted(t)
+	if b, _ := d.store.Row("tk-q1"); b.CloseReason != board || slices.Contains(got.Settled, "tk-q1") {
+		t.Errorf("the gate holds %q, and the post counts it among its settled gates: %v", b.CloseReason, got.Settled)
+	}
+	if replies := d.cityPosts("<!-- gc:answer " + ask + " -->"); len(replies) != 1 ||
+		!strings.Contains(replies[0], "settled on the board already: ruled: keep the cap at 3, answered on the board") {
+		t.Errorf("the board's answer won, and the PR reports: %q", replies)
+	}
+}
