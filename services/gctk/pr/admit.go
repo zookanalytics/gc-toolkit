@@ -21,10 +21,12 @@ import (
 // take, and only while nothing else writes the branch and no person is asked:
 // no run is attached, no open bead other than an ask names the branch, and no
 // human gate holds it. A question a review run put to a person holds no run
-// back from a person's post made after it: while every gate that holds the bead
-// is such a question and an ask a run can take carries a person's post filed
-// after the newest of them, the order pours the run that rules the post, which
-// can settle a question (specs/tk-1tfzr71.161/design.md, section 3). A
+// back from a person's post the take filed after it: while every gate that
+// holds the bead is such a question and an ask a run can take carries a
+// person's post, filed after the newest of them, the order pours the run that
+// rules the post, which can settle a question (specs/tk-1tfzr71.161/design.md,
+// section 3). The ask's filing is what counts, not when the post was made,
+// since the run that put the question never read a post taken after it. A
 // conversation on the PR holds its merge and nothing else, so runs are poured
 // while one is open, whether it waits in the operator's queue, a sitting holds
 // it or its sitting stays: the evaluator reads the conversation's blocks edge
@@ -159,7 +161,8 @@ func (u *run) rank(ctx context.Context, root string) string {
 // heldBy names the open human gate on the bead s read, which keeps the order
 // from pouring a run on it, because a gate asks a person and the next run
 // starts from the answer. It is empty when no gate is open on the bead, and
-// when a person's post was made after the questions that hold it (askedSince).
+// when the ask of a person's post was filed after the questions that hold it
+// (askedSince).
 // An open conversation on the PR is no such hold, since it holds the PR's merge
 // and nothing else.
 func heldBy(s state, asks []review.Ask) string {
@@ -177,8 +180,9 @@ func heldBy(s state, asks []review.Ask) string {
 
 // askedSince reports whether every gate in open is a question a review run put
 // to a person, keyed as review-run.sh question keys one (review.QuestionKey),
-// and an ask a run can take carries a person's post filed after the newest of
-// them. That post's run rules it, and the post can settle a question or make it
+// and an ask a run can take carries a person's post and was filed after the
+// newest of them, by the ask's own filing, whenever the post was made. That
+// ask's run rules the post, and the post can settle a question or make it
 // moot. A time that does not read holds the run back.
 func askedSince(s state, open []*ledger.Record, asks []review.Ask) bool {
 	var newest time.Time

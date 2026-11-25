@@ -263,9 +263,9 @@ while a run is attached, while another open bead other than an ask names the
 branch, or while a human gate holds it
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)),
 unless every gate that holds it is a question a review run put to a person
-(`review-question-<key>`) and an ask the run can take carries a person's post
-filed after the newest of them: that run rules the post, which can settle the
-question. A conversation on the PR holds its merge and nothing else, so runs
+(`review-question-<key>`) and an ask the run can take, filed after the newest
+of them, carries a person's post: that run rules the post, which can settle
+the question. A conversation on the PR holds its merge and nothing else, so runs
 are poured while one is open.
 
 The run is a checked loop, and each iteration judges one head: the run's first

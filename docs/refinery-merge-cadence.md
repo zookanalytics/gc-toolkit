@@ -680,10 +680,13 @@ act's bound. A settle that fails or is stopped is said in the act's line and
 fails no act. It pours none while a run is attached to the bead, while another
 open bead names the PR's branch, such as a rework child, or while a human gate
 holds it, unless every gate that holds it is a question a review run put to a
-person (`review-question-<key>`) and an ask the run can take carries a person's
-post filed after the newest of them, whose run can settle the question. A
-conversation on the PR holds its merge and nothing else, so runs are poured
-while one is open, and the evaluator's wait holds the merge until it closes. A run that ended without a result is poured again.
+person (`review-question-<key>`) and an ask the run can take, filed after the
+newest of them, carries a person's post, whose run can settle the question.
+The ask's filing counts, not when the post was made, since the run that put
+the question never read a post taken after it. A conversation on the PR holds
+its merge and nothing else, so runs are poured while one is open, and the
+evaluator's wait holds the merge until it closes. A run that ended without a
+result is poured again.
 When the last two runs at the validated head both ended without one, counting
 only runs that ended after the bead's last `review-run-failed` gate closed, it
 files a human gate keyed `review-run-failed` instead, naming both runs and how
