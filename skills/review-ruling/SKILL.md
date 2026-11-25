@@ -57,12 +57,26 @@ cause, and fix them in the same round. Name them in the ruling's reason, so the
 next lane need not raise each one in turn.
 
 An ask to bring the branch current, such as a conflict with the target, is
-answered by merging the PR's target into the run's worktree. When git needs your
-help with that merge, its message carries the account the next round's triage
-reads beside `git show --remerge-diff`: commit it with `git commit -F <file>`,
-the file holding git's first line, then one paragraph for each file you resolved
-by hand, naming what collided, what you kept or wrote and why, and what a
-reviewer should check.
+answered by merging the PR's target into the run's worktree with the call below,
+run there. When the target's history was rewritten after the branch last took
+it, such as by an upstream sync, the call merges from the commit of the target
+the branch took last, so the merge carries only the PR's own change.
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" pr bring-current --target <the branch the PR merges into>
+```
+
+Exit 4 is a merge git needs your help with, and the call prints the files to
+resolve and the merge's message. That message carries the account the next
+round's triage reads beside `git show --remerge-diff`: resolve each file, then
+commit with `git commit -F <file>`, the file holding the message the call
+printed, then one paragraph for each file you resolved by hand, naming what
+collided, what you kept or wrote and why, and what a reviewer should check.
+Exit 3 is a worktree the call will not merge into, such as one holding
+uncommitted work, and its line says why.
 
 ## A fix in the PR's title or summary
 

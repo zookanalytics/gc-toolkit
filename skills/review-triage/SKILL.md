@@ -117,6 +117,13 @@ anchor beside its own diff evidence, and it reopened this lane. So the anchor's
 reason the review formula prints says so, and your verdict also rules on that
 round, which its write refuses to record without the ruling.
 
+A merge whose subject opens with `Supersede` is the commit
+`gctk pr bring-current` makes when the target's history was rewritten after the
+branch last took it. It carries the target's tree whole and has, as its second
+parent, the commit of the target's old history the branch took last, so the
+merge that takes it merges from there. Its own `git show --remerge-diff` shows
+the rewrite, not work resolved on this branch, so judge the merge that takes it.
+
 On a review bead, read the round first:
 
 ```bash
