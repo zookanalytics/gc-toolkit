@@ -64,14 +64,16 @@ already, and what it left. Its exit decides:
 
 - **0**: every store read and no live bead is left on `hold:mayor`.
 - **1**: a bead is left, on its own line with why and the write a person makes.
-  A route that is `mayor` or ends in `.mayor` is the one Gas City's removed
-  doctor repair wrote from the label, and clearing it is the write. Any other
-  route, and any assignee, is a writer's choice, so the bead is placed or its
-  route cleared by a person's call. A bead that also carries another hold, or
-  `hold:cleared`, or `hold:mayor` in another case, takes the one
-  `gc bd update --add-label hold:po --remove-label ...` the line names, which
-  keeps it held and leaves the other label on. Make each write, then run the
-  move again.
+  A bead with a route or an assignee is placed with `gctk bead place`, or its
+  route or assignee cleared, by a person's call. A route of `mayor`, or a
+  binding's `mayor` with no rig, has the shape Gas City's removed doctor repair
+  wrote from the label, but a writer can choose it too. So read who set it
+  first, with the `gc bd history <bead> --events` its line names, and clear it
+  without placing the bead only when `gc doctor --fix` set it. A bead that
+  also carries another hold, or `hold:cleared`, or `hold:mayor` in another
+  case, takes the one `gc bd update --add-label hold:po --remove-label ...`
+  the line names, which keeps it held and leaves the other label on. Make each
+  write, then run the move again.
 - **3**: a store did not read, and the move has not finished. Run it again once
   the store answers.
 

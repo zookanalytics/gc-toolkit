@@ -98,6 +98,7 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 		{ID: "tk-mine", Status: "open", Labels: []string{"hold:mayor"}, Assignee: "gc-toolkit/gc-toolkit.polecat-1"},
 		{ID: "tk-repair", Status: "open", Labels: []string{"hold:mayor"}, Metadata: map[string]string{"gc.routed_to": "gc-toolkit.mayor"}},
 		{ID: "tk-routed", Status: "open", Labels: []string{"hold:mayor"}, Metadata: map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
+		{ID: "tk-chosen", Status: "open", Labels: []string{"hold:mayor"}, Metadata: map[string]string{"gc.routed_to": "gc-toolkit/core.mayor"}},
 		{ID: "tk-blank", Status: "open", Labels: []string{"hold:mayor"}, Metadata: map[string]string{"gc.routed_to": " "}},
 		{ID: "tk-closed", Status: "closed", Labels: []string{"hold:mayor"}},
 		{ID: "tk-train", Status: "open", Labels: []string{"hold:release-train"}},
@@ -116,13 +117,13 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 	if want := []string{"tk-new"}; !slices.Equal(tk.OnPO, want) {
 		t.Errorf("on hold:po already %v, want %v", tk.OnPO, want)
 	}
-	if want := []string{"tk-case", "tk-cleared", "tk-ext", "tk-mine", "tk-repair", "tk-routed"}; !slices.Equal(leftIDs(tk), want) {
+	if want := []string{"tk-case", "tk-chosen", "tk-cleared", "tk-ext", "tk-mine", "tk-repair", "tk-routed"}; !slices.Equal(leftIDs(tk), want) {
 		t.Errorf("left %v, want %v", leftIDs(tk), want)
 	}
 	for id, want := range map[string][]string{
 		"tk-old": {"learning", "hold:po"}, "tk-both": {"hold:po"}, "tk-blocked": {"hold:po"}, "tk-new": {"hold:po"},
 		"tk-ext": {"hold:external", "hold:mayor"}, "tk-cleared": {"hold:cleared", "hold:mayor"}, "tk-case": {"Hold:Mayor"},
-		"tk-mine": {"hold:mayor"}, "tk-repair": {"hold:mayor"}, "tk-routed": {"hold:mayor"},
+		"tk-mine": {"hold:mayor"}, "tk-repair": {"hold:mayor"}, "tk-routed": {"hold:mayor"}, "tk-chosen": {"hold:mayor"},
 		"tk-closed": {"hold:mayor"}, "tk-train": {"hold:release-train"}, "tk-free": nil,
 	} {
 		if got := c.labels(toolRig.Store(), id); !slices.Equal(got, want) {
@@ -146,14 +147,20 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 		"tk-cleared": {"also carries hold:cleared"},
 		"tk-case":    {"carries hold:mayor as Hold:Mayor", "--add-label hold:po --remove-label 'Hold:Mayor'"},
 		"tk-mine":    {"assigned to gc-toolkit/gc-toolkit.polecat-1", "--assignee ''"},
-		"tk-repair":  {"routed to gc-toolkit.mayor, the route Gas City's doctor repair hold-label-routed-to writes", "gc bd update tk-repair --unset-metadata gc.routed_to"},
-		"tk-routed":  {"routed to gc-toolkit/gc-toolkit.polecat, which a writer chose", "Place it with gctk bead place"},
+		"tk-repair": {"routed to gc-toolkit.mayor, a route Gas City's doctor repair hold-label-routed-to wrote from hold:mayor and a writer can choose as well",
+			"Read who set the route: gc bd history tk-repair --events --db '/rigs/gc-toolkit/.beads'. When gc doctor --fix set it, clear it; otherwise place the bead with gctk bead place",
+			"gc bd update tk-repair --unset-metadata gc.routed_to --db '/rigs/gc-toolkit/.beads'"},
+		"tk-routed": {"routed to gc-toolkit/gc-toolkit.polecat, which a writer chose", "Place it with gctk bead place"},
+		"tk-chosen": {"routed to gc-toolkit/core.mayor, which a writer chose", "Place it with gctk bead place"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(why[id], w) {
 				t.Errorf("%s is left with %q, want it to name %q", id, why[id], w)
 			}
 		}
+	}
+	if strings.Contains(why["tk-chosen"], "doctor") {
+		t.Errorf("tk-chosen is left with %q: a rig-qualified route is no shape the doctor repair wrote", why["tk-chosen"])
 	}
 	for rig, id := range map[string]string{"city": "hq-old", "sleepy": "zz-old"} {
 		if got := storeOf(out, rig); !slices.Equal(got.Moved, []string{id}) || got.Unread != "" {

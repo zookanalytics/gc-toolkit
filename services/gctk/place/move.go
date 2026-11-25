@@ -26,10 +26,11 @@ import (
 // holds on hold:mayor as it stands, and names why and the write a person makes:
 // a bead another hold or hold:cleared also labels, one whose hold:mayor is in
 // another case, one assigned to an agent, and one routed to a pool or an agent,
-// which a held bead never is. It names a route that is hold:mayor's own value,
-// mayor or a binding's mayor, apart, since that is the route Gas City's doctor
-// repair hold-label-routed-to writes from the label, and any other as one a
-// writer chose. It reads no closed bead, so a closed record keeps its labels.
+// which a held bead never is. A route of the shape Gas City's doctor repair
+// hold-label-routed-to wrote from the label is named as one that repair may
+// have written, with the read of who set it, since a writer can choose the same
+// route, and any other route as one a writer chose. It reads no closed bead, so
+// a closed record keeps its labels.
 //
 // A store that does not read is named with why, and a move that leaves a store
 // unread or a bead on hold:mayor has not finished: run it again once the cause
@@ -173,12 +174,13 @@ func left(r *ledger.Record, db string) (why, fix string) {
 			"Place it with gctk bead place, or clear its assignee: gc bd update " + r.ID + " --assignee ''" + at
 	}
 	if route := value(routedToKey, r); route != "" {
+		unroute := "gc bd update " + r.ID + " --unset-metadata gc.routed_to" + at
 		if holdRoute(route) {
-			return "it is routed to " + route + ", the route Gas City's doctor repair hold-label-routed-to writes from hold:mayor, which no placement chose",
-				"Clear the route: gc bd update " + r.ID + " --unset-metadata gc.routed_to" + at
+			return "it is routed to " + route + ", a route Gas City's doctor repair hold-label-routed-to wrote from hold:mayor and a writer can choose as well, so whether it is placed or stays held is a person's call once they read who set the route",
+				"Read who set the route: gc bd history " + r.ID + " --events" + at + ". When gc doctor --fix set it, clear it; otherwise place the bead with gctk bead place, or clear the route: " + unroute
 		}
 		return "it is routed to " + route + ", which a writer chose while hold:mayor holds it, so whether it is placed or stays held is a person's call",
-			"Place it with gctk bead place, or clear the route: gc bd update " + r.ID + " --unset-metadata gc.routed_to" + at
+			"Place it with gctk bead place, or clear the route: " + unroute
 	}
 	var other, spelled []string
 	for _, l := range r.Labels() {
@@ -208,10 +210,12 @@ func left(r *ledger.Record, db string) (why, fix string) {
 	return "it also carries " + strings.Join(other, ", ") + ", and set-state swaps the first hold: label it finds, so it could swap the wrong one", fix + at
 }
 
-// holdRoute reports whether route is the one Gas City's doctor repair
-// hold-label-routed-to writes from hold:mayor: the label's value, mayor, or
-// the binding-qualified route of an agent named mayor.
+// holdRoute reports whether route has the shape Gas City's doctor repair
+// hold-label-routed-to wrote from hold:mayor: the label's value, mayor, or the
+// binding-qualified name of the city's agent or named session called mayor,
+// which carries no rig (doctor_hold_label_routed_to.go and
+// boundRoutedToAliases, gastownhall/gascity 0998eac14bfe). A writer can choose
+// the same route, so the shape does not show who set it.
 func holdRoute(route string) bool {
-	name := route[strings.LastIndex(route, "/")+1:]
-	return name == "mayor" || strings.HasSuffix(name, ".mayor")
+	return !strings.Contains(route, "/") && (route == "mayor" || strings.HasSuffix(route, ".mayor"))
 }

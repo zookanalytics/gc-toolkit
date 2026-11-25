@@ -172,10 +172,11 @@ not written. It moves only a bead whose hold labels are hold:mayor, or
 hold:mayor beside hold:po. Each other bead the queue holds on hold:mayor stays
 as it is, named with why and the write a person makes: one another hold or
 hold:cleared also labels, one whose hold:mayor is in another case, one assigned
-to an agent, and one routed to a pool or an agent, with a route that is
-hold:mayor's own value, mayor or a binding's mayor, named apart as the one Gas
-City's doctor repair hold-label-routed-to writes. No closed bead is read or
-written.
+to an agent, and one routed to a pool or an agent. A route of mayor, or a
+binding's mayor with no rig, has the shape Gas City's doctor repair
+hold-label-routed-to wrote from the label, and a writer can choose it too, so
+its line names gc bd history <bead> --events to read who set it before the
+route is cleared. No closed bead is read or written.
 
 It prints a line for each store: what it moved, or with --dry-run would move,
 what is on hold:po already, and each bead it left, or why the store did not

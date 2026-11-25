@@ -27,7 +27,7 @@ and one city before and after, and the live Dolt servers kept their pids.
 | r1-7gl | `hold:mayor`, `hold:po` | none | a bead on both spellings |
 | r1-ukj | `hold:external`, `hold:mayor` | none | a second hold beside the placement hold |
 | r1-4bg | `hold:release-train` | none | a hold of the pack's own |
-| r1-bun | `hold:mayor` | `r1/fx.mayor` | the route the removed doctor repair writes |
+| r1-bun | `hold:mayor` | `r1/fx.mayor` | a route to an agent named mayor |
 | r1-2cp | `hold:mayor`, closed | none | a closed record |
 | r1-tvd | none | `r1/fx.polecat` | unheld routed work, the control |
 | r1-bj3 | `hold:po` | `r1/fx.polecat` | a route does not beat `hold:po` |
@@ -53,6 +53,13 @@ and one city before and after, and the live Dolt servers kept their pids.
    it with gctk bead place, or clear the route"), and r1-ukj for its
    `hold:external` ("Move its placement hold by hand", naming
    `gc bd update r1-ukj --add-label hold:po --remove-label hold:mayor`).
+   Review changed how a route is named after this run. The doctor repair wrote
+   only `mayor` or a binding's `mayor` with no rig, so a rig-qualified route
+   such as r1-bun's is now named as one a writer chose, the same as r1-p5o's.
+   A route of the repair's shape is named as one it may have written, since a
+   writer can choose it too, with `gc bd history <bead> --events` to read who
+   set it before it is cleared (`TestAMoveTakesTheQueueOntoHoldPO`, tk-repair
+   and tk-chosen).
 4. **The move writes through set-state, and a second run writes nothing.** The
    first run moved the same three and left the same three, exit 1. The second
    moved none, counted four r1 beads and hq-fd6 on `hold:po`, and left the same
