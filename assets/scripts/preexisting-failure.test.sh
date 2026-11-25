@@ -17,7 +17,10 @@
 # no stamp, so a lookup that reads only live trackers files the red again while
 # the batch is still open. The lookup follows the most recently closed
 # tracker's disposition edge to the live bead that carries the failure, and a
-# tracker that was fixed or ruled not needed still lets the next red file.
+# tracker that was fixed or ruled not needed still lets the next red file. The
+# fifth is a RACE: two filers that meet one red at once each read no tracker
+# and file one, so the lookup and the create run under the store's filing lock,
+# and the second filer finds the first one's tracker.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,6 +61,10 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 #                      STUB_ROW_SHAPE names: exit, empty or object, as above
 #   STUB_SLING_FAIL    sling exits non-zero, as one whose rig names no
 #                      default sling target does
+#   STUB_CREATE_DELAY  create waits this many seconds before it files
+#   STUB_WHERE_FAIL    where exits non-zero, naming no store directory
+# A where answers STUB_BEADS as the store's .beads directory. A call made with
+# fd 9 open, the descriptor the filing lock is held on, is logged as "fd9".
 # A list --id answers that bead's row, or [] when the store does not hold it, and
 # hides a gate unless --include-gates lifts that, as bd's type suppression does
 # whatever the --id names. A show of an id the store does not hold answers bd's
@@ -69,6 +76,7 @@ cat > "$BIN/gc" <<'STUB'
 set -u
 STORE="${STUB_STORE:?}"
 printf '%s\n' "$*" >> "${STUB_LOG:?}"
+[ -e /dev/fd/9 ] && printf 'fd9 %s\n' "$*" >> "$STUB_LOG"
 if [ "${1:-}" = "sling" ]; then
   [ -n "${STUB_SLING_FAIL:-}" ] && { echo 'gc sling: rig "rig-a" has no default_sling_target or default_sling_targets' >&2; exit 1; }
   echo "Started workflow tk-wf1 (formula \"mol-polecat-work\") → rig-a/polecat"
@@ -149,8 +157,12 @@ case "${1:-}" in
     else
       printf '%s\n' "$out"
     fi ;;
+  where)
+    [ -n "${STUB_WHERE_FAIL:-}" ] && { echo "bd: no beads database found" >&2; exit 1; }
+    jq -nc --arg p "${STUB_BEADS:?}" '{path: $p, prefix: "tk"}' ;;
   create)
     [ -n "${STUB_CREATE_FAIL:-}" ] && { echo "bd: create refused" >&2; exit 1; }
+    [ -n "${STUB_CREATE_DELAY:-}" ] && sleep "$STUB_CREATE_DELAY"
     shift
     title=""; body=""; design=""; ty="task"; prio=""; meta="{}"
     while [ $# -gt 0 ]; do
@@ -182,7 +194,8 @@ STUB
 chmod +x "$BIN/gc"
 
 export PATH="$BIN:$PATH"
-export STUB_STORE="$TMP/store.json" STUB_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq"
+export STUB_STORE="$TMP/store.json" STUB_LOG="$TMP/gc.log" STUB_SEQ="$TMP/seq" STUB_BEADS="$TMP/beads"
+mkdir -p "$STUB_BEADS"
 
 # bead <id> <status> <type> <title> [<metadata json>] [<closed_at>]
 bead() {
@@ -595,7 +608,21 @@ eq "$RC/$(creates)" "2/0" "a filing with no evidence files nothing"
 run file TestReconcile
 eq "$RC/$(creates)" "2/0" "--message is required"
 
+echo "# file: two filers that meet one red at once file one tracker"
+store
+( STUB_CREATE_DELAY=1 "$SUT" file TestReconcile --message "seen by one gate" >"$TMP/a.out" 2>"$TMP/a.err" ) &
+( STUB_CREATE_DELAY=1 "$SUT" file TestReconcile --message "seen by another" >"$TMP/b.out" 2>"$TMP/b.err" ) &
+wait
+eq "$(creates)/$(slings)" "1/1" "the second filer waits for the filing lock, so one tracker is filed and sent"
+eq "$(cat "$TMP/a.out")/$(cat "$TMP/b.out")" "tk-new1/tk-new1" "both filers print the one tracker"
+has "$(cat "$TMP/a.err" "$TMP/b.err")" "is already tracked as tk-new1; filed and sent nothing" "the second filer says it found the first one's tracker"
+hasnt "$(cat "$STUB_LOG")" "fd9 " "no gc call holds the filing lock's descriptor, so nothing it leaves running holds the lock"
+
 echo "# file: fail closed"
+store
+STUB_WHERE_FAIL=1 run file TestReconcile --message "log"
+eq "$RC/$(creates)/$(slings)" "1/0/0" "a store whose filing lock cannot be taken files and sends nothing"
+has "$ERR" "could not take the store's filing lock (gc bd where named no store directory)" "the refusal names why the lock was not taken"
 store
 STUB_LIST_FAIL=1 run file TestReconcile --message "log"
 eq "$RC/$(creates)/$(slings)" "1/0/0" "an unread lookup files and sends nothing"

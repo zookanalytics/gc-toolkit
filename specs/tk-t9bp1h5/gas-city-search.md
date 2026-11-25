@@ -137,6 +137,26 @@ another key, with a first reaction in front of the fix. The operator asked of
 that shape, in the same conversation: "how do we have two things that are
 intended to do the same thing?"
 
+The writer's lookup and its create are two calls, so two filers that meet one
+red at once could each read no tracker and each file one. The order is a filer
+that runs on its own, and the rule that admits an order asks that its writes
+take one lock shared with every pack writer of what they write
+([gctk-architecture.md](../../docs/gctk-architecture.md#the-rule-that-admits-an-order)).
+Every filer of a tracker files through the writer, so the writer holds that lock
+from its lookup until its create has answered: a flock on
+`preexisting-failure.lock` in the store's own `.beads` directory, as
+`queue-priority.sh` holds the store's priority lock there. bd offers no create
+that refuses a second bead by a key the bead carries. It refuses a create whose
+explicit `--id` already exists (`cmd/bd/create.go` at beads v1.3.4, the version
+`gastownhall/gascity`'s `go.mod` pins at 944ef25f3b), but a key files again once
+its tracker has closed, so an id made from the key would also need the closed
+tracker the same lookup read, and every tracker's id would change form. Neither
+`gc` nor `bd` exposes a lock to a script. The race has not been seen. On
+2026-11-25, each of the city's seven stores answered
+`gc bd list --all --type=bug --title-contains "Pre-existing failure"`, with 66
+trackers stamped with a key since 2026-10-13 among them, and no key had been
+filed a second time while a tracker of it was live.
+
 A run names its jobs and its steps, not its failing test, so the pass keys a
 workflow's failure by the workflow's file, `key --target .github/workflows/<file>`.
 The tracker's text sends its worker to find the failing test and look up that

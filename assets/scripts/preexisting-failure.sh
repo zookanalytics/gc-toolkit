@@ -49,12 +49,20 @@
 # was filed, or someone holds it, works it or has it wait, and a second sling
 # would step past them.
 #
+# Two filers can meet one red at once, such as two gates, or a gate and the
+# actions-track order. So `file` holds the store's filing lock from its lookup
+# until its create has answered: a flock on preexisting-failure.lock in the
+# store's own .beads directory, the one path `gc bd where` names for every
+# caller of that store. The filer that comes second waits for the lock, then
+# finds the tracker the first one filed and sends nothing. The send runs after
+# the lock is let go, so a slow sling holds no other filer.
+#
 # Exit: 0 the store answered: `find` prints the id of the bead that tracks the
 # key, or nothing when none does, and `file` prints the id of the tracker it
 # filed or the bead it found, with a warning when the new tracker could not be
 # read back to confirm its stamp, or could not be sent · 1 the store could not
-# be read or written, or the new tracker read back with its stamp missing or
-# wrong, which is never "none" · 2 usage
+# be read or written, its filing lock could not be taken, or the new tracker
+# read back with its stamp missing or wrong, which is never "none" · 2 usage
 set -uo pipefail
 
 PROG="preexisting-failure"
@@ -77,6 +85,10 @@ CHAIN_MAX=20
 # characters.
 TITLE_MAX=200
 
+# How long `file` waits for the store's filing lock. A filer holds it for one
+# lookup and one create, which take seconds.
+LOCK_WAIT_SECS=60
+
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -89,6 +101,11 @@ scrub() { tr -d '\000-\037'; }
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 warn() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+
+# Every gc call runs with fd 9 closed. `file` holds the filing lock on fd 9, and
+# a process a gc call starts, such as a Dolt server, can outlive this script and
+# would hold the lock against every later filer.
+gc() { command gc "$@" 9>&-; }
 
 usage() {
   cat >&2 <<'U'
@@ -354,6 +371,25 @@ send() {
   fi
 }
 
+# take_filing_lock — take the filing lock of the store gc bd files into, on fd
+# 9, waiting up to LOCK_WAIT_SECS for a filer that holds it. Non-zero when it is
+# not taken, with the cause in LOCK_NOTE. The lock is let go when fd 9 closes,
+# and at the latest when this script exits, however it exits.
+take_filing_lock() {
+  local dir lock
+  LOCK_NOTE=""
+  command -v flock >/dev/null 2>&1 || { LOCK_NOTE="flock is not on PATH"; return 1; }
+  dir=$(bd_json where | jq -r 'if type == "object" then .path // empty else empty end' 2>/dev/null)
+  [ -n "$dir" ] && [ -d "$dir" ] || { LOCK_NOTE="gc bd where named no store directory"; return 1; }
+  lock="$dir/preexisting-failure.lock"
+  ( : >> "$lock" ) 2>/dev/null || { LOCK_NOTE="cannot create $lock"; return 1; }
+  exec 9>>"$lock" || { LOCK_NOTE="cannot open $lock"; return 1; }
+  flock -w "$LOCK_WAIT_SECS" 9 2>/dev/null && return 0
+  exec 9>&-
+  LOCK_NOTE="another filer held $lock for ${LOCK_WAIT_SECS}s"
+  return 1
+}
+
 file_cmd() {
   local key="${1:-}" message="" summary="" id title room body meta out got
   [ $# -gt 0 ] && shift
@@ -378,7 +414,12 @@ file_cmd() {
   # The caller's lookup and this create are not one transaction, so a gate that
   # filed the key in between is found here rather than filed beside. The lookup
   # is the one find makes, so the live bead a fold moved the tracker to is found
-  # here too.
+  # here too. It and the create run under the filing lock, so a filer that met
+  # the same red at the same moment is found here as well.
+  take_filing_lock || {
+    warn "could not take the store's filing lock ($LOCK_NOTE); filing nothing, so the next filer to meet the red files it"
+    exit 1
+  }
   tracked_by "$key" || {
     warn "the lookup for '$key' could not read the store; filing nothing, since an unread store is not proof the tracker is missing"
     exit 1
@@ -422,6 +463,9 @@ file_cmd() {
     [ -z "$id" ] || warn "bd create returned no id, but the tracker exists as $id"
   fi
   [ -n "$id" ] || { warn "bd create filed nothing for '$key'"; exit 1; }
+  # The create carried the stamp, so the next filer's lookup finds this tracker,
+  # and the lock is let go before the read-back and the send.
+  exec 9>&-
 
   # A read that fails says nothing about the stamp, and the tracker exists, so
   # it is retried once and then reported as filed, and sent. Only a read that
