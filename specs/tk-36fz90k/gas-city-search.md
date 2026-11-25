@@ -93,6 +93,11 @@ bound of two checks would still have run the test and the lint check together,
 60 GB of compiles on a 64 GB host. The unit that fills the machine is memory,
 not a count of checks.
 
+Every process under a `gctk rig` check held 67.4 GiB, and every other process
+26.7 GiB, beside 4.2 GiB the kernel had wired. So the slots stand for five
+eighths of the machine's memory by default, 40 GiB here, and leave the rest,
+24 GiB, to the city's own work, which held a little more than that then.
+
 **How runs overlap.** Every record in the six rigs' record stores from
 2026-11-11 to 2026-11-25, 2,783 runs, gives each run's start and end
 (`recorded_at` less `duration_ms`). Across the host, one run was going for 63%

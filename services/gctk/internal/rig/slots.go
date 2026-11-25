@@ -78,10 +78,10 @@ func exists(path string) bool {
 
 // SlotCount is how many slots the machine has: SlotsVar when it is a whole
 // number above zero, else as many as five eighths of mem holds, at least one.
-// The other three eighths are the city's own work: its agent sessions, its
-// store and the system held about that much beside the checks' compiles when
-// the machine last ran out of memory. A SlotsVar that is not such a number is
-// passed over, and note says so.
+// The other three eighths are for the city's own work: on the 64 GiB host
+// whose memory ran out, everything outside a check held 27 GiB resident, its
+// agent sessions and its store among them. A SlotsVar that is not such a
+// number is passed over, and note says so.
 func SlotCount(getenv func(string) string, mem int64) (count int, note string) {
 	if v := getenv(SlotsVar); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
