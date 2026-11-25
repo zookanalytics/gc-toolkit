@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the converse sittings' compaction (tk-kwnt509)
-description: The primitives searched in Gas City and Claude Code for the three needs of a converse sitting that compacts and goes on, steering a Claude sitting's compaction summary, refusing the compaction of a sitting that has finished, and keeping Gas City's handoff advice from every sitting, with what each covers and why the summary steer and the refusal are the pack's own overlay. Read it when reviewing overlays/converse-compact or a converse template's context_advisory, as AGENTS.md asks of a change that adds operational surface.
+description: The primitives searched in Gas City and Claude Code for the three needs of a converse sitting that compacts and goes on, steering a Claude sitting's compaction summary, refusing the compaction of a sitting that has finished, and keeping Gas City's handoff advice from every sitting, with what each covers, why the summary steer and the refusal are the pack's own overlay, and Gas City's reason for the advice tested against the city's sittings. Read it when reviewing overlays/converse-compact or a converse template's context_advisory, as AGENTS.md asks of a change that adds operational surface or accommodates Gas City.
 ---
 
 # Gas City search for the converse sittings' compaction
@@ -14,6 +14,8 @@ primitive searched at `gastownhall/gascity` main 781c975d7921 (2026-11-21),
 Claude Code 2.1.330 and Claude Code's documentation read on 2026-11-21. The
 refusal's need names it at `gastownhall/gascity` main 1e7e600f2cc7
 (2026-11-25), Claude Code 2.1.332 and the documentation read on 2026-11-25.
+The third need's reason was read at `gastownhall/gascity` main 887a253144d4 and
+tested against the city's sittings on 2026-11-25.
 
 ## Steer what a sitting's compaction summary keeps
 
@@ -183,3 +185,82 @@ session that does not resolve, which a live sitting is not. So each converse
 template sets `context_advisory = { enabled = false }`, and every other agent
 keeps the default. [verification.md](verification.md) shows the resolved
 result for every agent.
+
+**Gas City's reason for the advice**, read at main 887a253144d4. The 60% text
+(`builtinContextAdvisoryMessage` in `internal/config/context_advisory.go`) asks
+a session to keep its durable notes current and to "Plan to hand off and reset
+before this climbs into the urgent band — a fresh session from durable notes
+outperforms riding lossy compaction." The 80% text
+(`builtinContextUrgentMessage`) asks it to run its handoff and reset itself,
+because "Repeated compaction degrades awareness — a clean reset beats running
+to compaction". Only the 80% text carries an exemption: "If an operator has
+told you to stay up, honor that and just hold at a clean seam instead of
+resetting." The advice came in c56d24d52b (#3371) because "in unmonitored
+deployments agents run into context compaction by default, losing the
+deliberate wrap-up (durable notes, work-item updates, clean seams) the handoff
+machinery exists to provide". 6cc7756545 (#5464) made it configurable per
+agent because "Different roles want different thresholds and different
+wording; a fleet-wide constant cannot serve them."
+
+**The reason tested against this city's sittings.** Conversation tk-wxmce84
+counted on 2026-11-25 from the saved transcripts of the 479 Claude converse
+sittings between 2026-10-25 and 2026-11-25 and the 38 saved Codex sittings
+between 2026-11-06 and 2026-11-22. Its findings are in tk-kwnt509's notes, in
+the blocks headed "Findings (conversation tk-wxmce84, 2026-11-25T00:41:16Z)"
+and "Findings: the first reply after an hour-mark compaction, against long
+waits that passed without one". Its lists and scripts are in
+`/Users/gc/orch-homes/agent3/.cache/tk-kwnt509/census-2026-11-25/`, whose
+README.txt names each file. The advice's deliveries and the Codex files were
+counted again for this record on 2026-11-25.
+
+- The advice reached 2 of the 479 Claude sittings, 20 times (tk-q4eup9q 16,
+  tk-tu5qn05 4), and the census found neither acting on it. Every delivery was
+  the 60% text, which carries no exemption. The 80% text, the one with the
+  exemption, reached no sitting.
+- 3 of the 20 reported the size from before a compaction. tk-q4eup9q was told
+  "715k/1000k" 50 minutes after a compaction had cut its thread to 26,817
+  tokens.
+- 53 of the 102 compactions of Claude sittings were followed by the operator's
+  message, and no reply to one asked the operator to repeat it or named a
+  wrong bead. Every summary held the conversation's id and the sitting's last
+  message word for word, and 55 of them said that message was not yet posted.
+  The first reply after a wait of 58 minutes or more, on a thread of 200K
+  tokens or more, took a median 591 s and 30 tool calls when the wait held a
+  compaction (51 turns), against 295 s and 11 when it did not (35 turns).
+- None of the 38 Codex sittings holds the advice's text, though 9 of the 27
+  since 2026-11-11 passed 60% of their 258,400-token window.
+- Not counted: a sitting resumed from its record by a fresh session, against
+  the same sitting compacted. The operator ruled the course without that
+  comparison (conversation tk-qdeu6h6, 2026-11-21).
+
+**Whether the reason holds for a sitting.** It is about an unattended agent
+that reaches compaction before its wrap-up is written. A sitting has the
+operator in it, and its record is written as it goes: each hand-back records
+the hold on the conversation and the subject (`converse-hold`), and the
+sign-off records the decision and the subject's current state
+(`converse-settle`). The steer keeps in the summary what the record does not
+hold yet. A reset ends the operator's live conversation in the middle, and the
+operator ruled for compaction with no handoff path (conversation tk-qdeu6h6,
+2026-11-21). The exemption does not cover a sitting, because the operator would
+have to give it in each sitting and it sits only in the 80% text, which no
+sitting reached. So the reason does not hold for a sitting. Gas City's
+per-agent setting is its own provision for a role whose case differs, and the
+switch needs no change at the source.
+
+**Faults the count found in the advice.** Each is Gas City's to fix and is
+filed as an upstream finding. The switch works around neither, and the
+polecats, which keep the advice, meet both.
+
+- After a compaction the advice reports the old size until the session's next
+  request. Read at 887a253144d4: `lastTranscriptUsage`
+  (`cmd/gc/context_inject.go`) keeps the last line whose `message.usage` holds
+  token counts and passes over Claude Code's `compact_boundary` line, whose
+  `compactMetadata` carries `postTokens`. The fix at the source resets the
+  reading at that line, which is one function and a test. Upstream finding
+  tk-zg0mji4.
+- The advice never reaches a Codex session. Read at the same commit: that
+  function parses only Claude's usage shape, and a Codex rollout records
+  `token_count` events instead. The fix at the source reads those events and
+  resolves a Codex model's window, which is one function, the window
+  resolution and their tests. Upstream finding tk-f2zg28j. Until it lands,
+  the switch changes nothing for a Codex sitting.
