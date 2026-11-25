@@ -32,7 +32,7 @@ REPO="$(cd "$HERE/../.." && pwd)"
 # The pools and the heartbeat roles run with nobody at their terminal. The
 # seats are the operator's own, and a demo capture is watched while it runs.
 UNATTENDED="polecat proactive refinery witness deacon"
-ATTENDED="mechanik po demo converse-claude-fable converse-claude-opus converse-fable converse-opus"
+ATTENDED="mechanik po mayor demo converse-claude-fable converse-claude-opus converse-fable converse-opus"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
