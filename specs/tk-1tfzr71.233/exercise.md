@@ -72,8 +72,13 @@ and one city before and after, and the live Dolt servers kept their pids.
    - placed r1-p5o: it cleared the route the bead carried while held, slung it
      (r1-heg) and printed "hold:mayor lifted";
    - refused r1-ukj, exit 2, because `hold:external` would keep it held;
-   - refused r1-4bg, exit 2, because it carries no `hold:po`, naming
-     `gc bd set-state r1-4bg hold=po`.
+   - refused r1-4bg, exit 2, because it carries no `hold:po`. The refusal
+     then named `gc bd set-state r1-4bg hold=po`, which would have swapped its
+     `hold:release-train` out, since set-state swaps a bead's first `hold:`
+     label. Self-review changed it after this run: a bead another hold holds
+     and no placement hold is refused naming that hold, with no set-state
+     (`TestPlaceRefusesWhatItDoesNotPlace`, "another hold and no placement
+     hold").
 7. **The pool is served what was placed.** `gc hook r1/fx.polecat` then served
    r1-tvd and the do-work steps of r1-cly and r1-heg, and nothing still held.
    `gc hook r1/fx.polecat --claim` claimed r1-tvd.

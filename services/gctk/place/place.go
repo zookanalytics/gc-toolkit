@@ -238,12 +238,15 @@ func (p *Places) Place(req Request) (Placed, error) {
 			out.Already, out.How = true, strings.Join(shown, ", ")
 			return out, nil
 		}
+		// bd's set-state swaps the bead's first hold: label for the new one, so
+		// a bead another hold holds is not told to take hold:po that way.
+		if other := otherHold(row.Labels(), nil); other != "" {
+			return out, refuse("%s carries no hold:po, so it is not in the placement queue, and it carries %s, a hold whose next actor is not the Product Owner. Place it once that hold is lifted and the bead is held for placement. Nothing was written", req.Bead, other)
+		}
 		return out, refuse("%s carries no hold:po, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd set-state %s hold=po --reason \"<why it waits for placement>\". Nothing was written", req.Bead, req.Bead)
 	}
-	for _, l := range row.Labels() {
-		if gascity.IsDispatchHold(l) && !slices.Contains(spellings, l) {
-			return out, refuse("%s also carries %s, a hold whose next actor is not the Product Owner, and a placement lifts only the placement hold, so the bead would stay held. Place it once that hold is lifted. Nothing was written", req.Bead, strings.TrimSpace(l))
-		}
+	if other := otherHold(row.Labels(), spellings); other != "" {
+		return out, refuse("%s also carries %s, a hold whose next actor is not the Product Owner, and a placement lifts only the placement hold, so the bead would stay held. Place it once that hold is lifted. Nothing was written", req.Bead, other)
 	}
 	dispatched := strings.Join(shown, ", ")
 	if st := row.Status(); st != "open" && dispatched == "" {
@@ -428,6 +431,17 @@ func (p *Places) lift(bead, note string) error {
 	}
 	w.Note(note)
 	return p.Ledger.Commit(w)
+}
+
+// otherHold is the first hold among labels that is not one of the placement
+// spellings, trimmed, or empty when none is.
+func otherHold(labels, spellings []string) string {
+	for _, l := range labels {
+		if gascity.IsDispatchHold(l) && !slices.Contains(spellings, l) {
+			return strings.TrimSpace(l)
+		}
+	}
+	return ""
 }
 
 // holds is whether nothing holds the bead now, as gctk bead holds answers it,
