@@ -28,16 +28,16 @@
 # call then settles the task and slings it to the pool on mol-polecat-work with
 # --merge direct, because a sling otherwise stamps the rig's default merge
 # strategy over it. The hand-off stays assigned to the refinery while it waits
-# on the task, so Gas City nudges the refinery about it once the task lands. The
-# task lands as a fast-forward of the effort's branch, so the polecat's merge
-# commit reaches the branch as it is. A pull request lands by squash, which
-# would leave the target's commits out of the branch's history, so the hand-off
-# would meet the same conflict each time it came back. A create can write the
-# task and still answer no id, so the call then looks for the task among what
-# the hand-off waits on. A call that stops after it filed the task names the
-# step that did not land, and a call again finds the hand-off waiting on the
-# task and brings nothing current. Once the task lands, nothing is left to
-# merge, and the next call closes the hand-off.
+# on the task, so once the task lands Gas City starts a refinery session that
+# claims it. The task lands as a fast-forward of the effort's branch, so the
+# polecat's merge commit reaches the branch as it is. A pull request lands by
+# squash, which would leave the target's commits out of the branch's history,
+# so the hand-off would meet the same conflict each time it came back. A create
+# can write the task and still answer no id, so the call then looks for the
+# task among what the hand-off waits on. A call that stops after it filed the
+# task names the step that did not land, and a call again finds the hand-off
+# waiting on the task and brings nothing current. Once the task lands, nothing
+# is left to merge, and the next call closes the hand-off.
 #
 # The repository is the refinery's own worktree ($GC_DIR), a worktree of the
 # rig's clone.
