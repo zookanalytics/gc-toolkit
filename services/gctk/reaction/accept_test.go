@@ -17,7 +17,7 @@ import (
 )
 
 // acceptWorld is an acceptance's surroundings: a store holding tk-anc, which
-// carries the recommendation mol-fix and hold:mayor, and its open
+// carries the recommendation mol-fix and hold:po, and its open
 // recommendation gate tk-g1; a city whose root holds the acceptance locks; and
 // one log of every write, disarm and sling across them, in order.
 type acceptWorld struct {
@@ -43,7 +43,7 @@ func newAcceptWorld(t *testing.T) *acceptWorld {
 	t.Helper()
 	w := &acceptWorld{t: t, store: fake.New()}
 	w.store.CloseTime = "2026-11-20T06:00:00Z"
-	w.store.Put(fake.Bead{ID: "tk-anc", Title: "the subject", Status: "open", IssueType: "task", Labels: []string{"hold:mayor"},
+	w.store.Put(fake.Bead{ID: "tk-anc", Title: "the subject", Status: "open", IssueType: "task", Labels: []string{"hold:po"},
 		Metadata: map[string]string{"gc.recommended_formula": "mol-fix"},
 		Edges:    []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-g1", Status: "open"}}})
 	w.store.Put(fake.Bead{ID: "tk-g1", Title: "take mol-fix?", Status: "open", IssueType: "gate", AwaitType: "human",
@@ -150,13 +150,13 @@ func TestAcceptDispatchesTheRecommendationOnce(t *testing.T) {
 		t.Errorf("gc.acceptance = %q, want the token, the formula and an empty vars list", gate.Metadata["gc.acceptance"])
 	}
 	disarm, record, resolve := w.index("DISARM tk-anc"), w.index("UPDATE tk-g1 --set-metadata gc.acceptance="), w.index("GATE-RESOLVE tk-g1 --reason "+answer)
-	sling, lift, mark := w.index("SLING tk-anc --on mol-fix --title mol-fix accept:"+out.Token+" --rig gc-toolkit target="), w.index("UPDATE tk-anc --remove-label hold:mayor"),
+	sling, lift, mark := w.index("SLING tk-anc --on mol-fix --title mol-fix accept:"+out.Token+" --rig gc-toolkit target="), w.index("UPDATE tk-anc --remove-label hold:po"),
 		w.index("UPDATE tk-anc --set-metadata gc.recommended_formula_dispatched=mol-fix --unset-metadata gc.recommended_formula")
 	if disarm != 0 || record < disarm || resolve < record || sling < resolve || lift < sling || mark < lift {
 		t.Errorf("order %v, want the disarm first, then the record, the answer, the sling, the lift and the dispatch's record", w.lines())
 	}
 	anc := w.row("tk-anc")
-	if anc.Metadata["gc.recommended_formula"] != "" || slices.Contains(anc.Labels, "hold:mayor") ||
+	if anc.Metadata["gc.recommended_formula"] != "" || slices.Contains(anc.Labels, "hold:po") ||
 		!strings.Contains(anc.Notes, "Accept dispatched mol-fix (acceptance "+out.Token+"): take it; gc.recommended_formula withdrawn.") {
 		t.Errorf("tk-anc = %+v, want the recommendation withdrawn, the hold lifted and the note", anc)
 	}
@@ -326,7 +326,7 @@ func TestAcceptFinishesAnAcceptanceLeftUnfinished(t *testing.T) {
 	if len(w.store.Resolves()) != 0 {
 		t.Errorf("a finish answered the gate again: %v", w.store.Resolves())
 	}
-	if a := w.row("tk-anc"); a.Metadata["gc.recommended_formula_dispatched"] != "mol-fix" || slices.Contains(a.Labels, "hold:mayor") {
+	if a := w.row("tk-anc"); a.Metadata["gc.recommended_formula_dispatched"] != "mol-fix" || slices.Contains(a.Labels, "hold:po") {
 		t.Errorf("tk-anc = %+v, want the dispatch recorded and the hold lifted", a)
 	}
 }
@@ -489,13 +489,13 @@ func TestAcceptStoppedAfterItsSlingIsFinishedWithoutASecondOne(t *testing.T) {
 		return nil
 	}
 	_, err := w.accept(AcceptRequest{})
-	wantStop(t, err, 4, "the write that lifts its hold:mayor did not land")
-	if !slices.Contains(w.row("tk-anc").Labels, "hold:mayor") {
+	wantStop(t, err, 4, "the write that lifts its placement hold did not land")
+	if !slices.Contains(w.row("tk-anc").Labels, "hold:po") {
 		t.Fatalf("the hold was lifted by a stopped Accept")
 	}
 	w.store.BeforeUpdate = nil
 	out, err := w.accept(AcceptRequest{})
-	if err != nil || out.Root != "tk-root" || len(w.rt.Slings()) != 1 || slices.Contains(w.row("tk-anc").Labels, "hold:mayor") {
+	if err != nil || out.Root != "tk-root" || len(w.rt.Slings()) != 1 || slices.Contains(w.row("tk-anc").Labels, "hold:po") {
 		t.Fatalf("finish = %+v, %v, slings %v; want the lift and the record with one sling in all", out, err, w.rt.Slings())
 	}
 }

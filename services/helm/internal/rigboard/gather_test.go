@@ -305,8 +305,10 @@ func TestReadThatRunsOutStopsItsStoreCalls(t *testing.T) {
 // counts as worked only while a live run works it: tk-ended keeps the route
 // its pour stamped and the branch its run cut, and tk-poured's run has not yet
 // passed load-context, so it reads in flight from the run's start.
-// hold:external waits outside the city, and hold:mayor, in any spelling, waits
-// for the Product Owner on the Unprioritized page.
+// hold:external waits outside the city. hold:po, and hold:mayor, its earlier
+// spelling, in any spelling, wait for the Product Owner on the Unprioritized
+// page, as one queue. A hold of the pack's own, hold:release-train, holds its
+// bead in the queue and off that page.
 // Whether a bead waits comes from the store, through its ready set and waits:
 // tk-behind waits on tk-idle, and tk-c is held through its parent.
 func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
@@ -329,6 +331,8 @@ func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
 			json.RawMessage(`{"id":"tk-poured-cv","title":"convoy","status":"open","priority":2,"issue_type":"convoy",` + tracks("tk-poured-cv", "tk-poured") + `,"created_at":"2026-01-03"}`),
 			json.RawMessage(`{"id":"tk-vendor","title":"waits on a vendor","status":"open","priority":2,"issue_type":"task","labels":[" Hold:External "],"created_at":"2026-01-04"}`),
 			json.RawMessage(`{"id":"tk-desk","title":"a new idea","status":"open","priority":2,"issue_type":"task","labels":["HOLD:MAYOR"],"created_at":"2026-01-05"}`),
+			json.RawMessage(`{"id":"tk-desk-po","title":"a newer idea","status":"open","priority":2,"issue_type":"task","labels":["hold:po"],"created_at":"2026-01-10"}`),
+			json.RawMessage(`{"id":"tk-train","title":"rides the release train","status":"open","priority":2,"issue_type":"task","labels":["hold:release-train"],"metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"created_at":"2026-01-11"}`),
 			json.RawMessage(`{"id":"tk-behind","title":"behind the idle work","status":"open","priority":2,"issue_type":"task","dependencies":[{"issue_id":"tk-behind","depends_on_id":"tk-idle","type":"blocks"}],"created_at":"2026-01-06"}`),
 			json.RawMessage(`{"id":"tk-first","title":"first piece","status":"open","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.mechanik","created_at":"2026-01-07"}`),
 			json.RawMessage(`{"id":"tk-p","title":"parent work","status":"open","priority":2,"issue_type":"task","assignee":"gc-toolkit/gc-toolkit.mechanik","dependencies":[{"issue_id":"tk-p","depends_on_id":"tk-first","type":"blocks"}],"created_at":"2026-01-08"}`),
@@ -344,6 +348,7 @@ func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
 		}
 		return doc
 	}
+	isDesk := func(id string) bool { return id == "tk-desk" || id == "tk-desk-po" }
 	oneAnswer := func(doc Document) {
 		t.Helper()
 		for id, r := range doc.Rows {
@@ -364,12 +369,13 @@ func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
 	}
 	oneAnswer(doc)
 	for id, want := range map[string]string{
-		"tk-ended":  "Not scheduled",
-		"tk-poured": "In flight",
-		"tk-vendor": "Waits outside the city",
-		"tk-desk":   "Waits for the Product Owner",
-		"tk-behind": "Waits on tk-idle",
-		"tk-c":      "Waits on tk-first",
+		"tk-ended":   "Not scheduled",
+		"tk-poured":  "In flight",
+		"tk-vendor":  "Waits outside the city",
+		"tk-desk":    "Waits for the Product Owner",
+		"tk-desk-po": "Waits for the Product Owner",
+		"tk-behind":  "Waits on tk-idle",
+		"tk-c":       "Waits on tk-first",
 	} {
 		if got := doc.Rows[id].Signal; got != want {
 			t.Errorf("%s reads %q, want %q", id, got, want)
@@ -380,9 +386,12 @@ func TestReadListsTheReadyWorkNothingSends(t *testing.T) {
 			t.Errorf("%s is not in the queue %v", id, doc.WorkQueue.Queue)
 		}
 	}
-	if u := doc.Unprioritized; len(u) != 1 || !slices.Equal(u[0].IDs, []string{"tk-desk"}) ||
-		slices.Contains(doc.WorkQueue.Queue, "tk-desk") || slices.Contains(doc.WorkQueue.NotScheduled, "tk-desk") {
-		t.Errorf("unprioritized = %+v and work queue = %+v; want tk-desk on the Unprioritized page alone", u, doc.WorkQueue)
+	if u := doc.Unprioritized; len(u) != 1 || !slices.Equal(u[0].IDs, []string{"tk-desk-po", "tk-desk"}) ||
+		slices.ContainsFunc(doc.WorkQueue.Queue, isDesk) || slices.ContainsFunc(doc.WorkQueue.NotScheduled, isDesk) {
+		t.Errorf("unprioritized = %+v and work queue = %+v; want tk-desk-po and tk-desk on the Unprioritized page alone", u, doc.WorkQueue)
+	}
+	if !slices.Contains(doc.WorkQueue.Queue, "tk-train") || slices.Contains(doc.WorkQueue.NotScheduled, "tk-train") {
+		t.Errorf("work queue = %+v; want tk-train, which its own hold holds, in the queue and not as work nothing sends", doc.WorkQueue)
 	}
 
 	if again := read(); !slices.Equal(again.WorkQueue.NotScheduled, doc.WorkQueue.NotScheduled) {

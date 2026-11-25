@@ -112,16 +112,18 @@ func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 		edit func(*fake.Bead)
 		why  string
 	}{
-		"routed":     {func(b *fake.Bead) { b.Metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat" }, "it already has a dispatch path (gc.routed_to=gc-toolkit/gc-toolkit.polecat)"},
-		"human park": {func(b *fake.Bead) { b.Metadata["gc.routed_to"] = "human" }, "gc.routed_to=human"},
-		"armed":      {func(b *fake.Bead) { b.Metadata = arm }, "it already has a dispatch path (an arm to gc-toolkit/gc-toolkit.polecat)"},
-		"capped arm": {func(b *fake.Bead) { b.Metadata = arm; b.Metadata["gc.dispatch_when_ready_fail_count"] = "3" }, "an arm to gc-toolkit/gc-toolkit.polecat"},
-		"closed":     {func(b *fake.Bead) { b.Status = "closed" }, "its status is closed, and a first reaction takes only an open bead"},
-		"started":    {func(b *fake.Bead) { b.Status = "in_progress" }, "its status is in_progress"},
-		"assigned":   {func(b *fake.Bead) { b.Assignee = "gc-toolkit/gc-toolkit.polecat-3" }, "it is assigned to gc-toolkit/gc-toolkit.polecat-3, whose next move it is"},
-		"held":       {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} }, "it is held (hold:mayor)"},
+		"routed":                       {func(b *fake.Bead) { b.Metadata["gc.routed_to"] = "gc-toolkit/gc-toolkit.polecat" }, "it already has a dispatch path (gc.routed_to=gc-toolkit/gc-toolkit.polecat)"},
+		"human park":                   {func(b *fake.Bead) { b.Metadata["gc.routed_to"] = "human" }, "gc.routed_to=human"},
+		"armed":                        {func(b *fake.Bead) { b.Metadata = arm }, "it already has a dispatch path (an arm to gc-toolkit/gc-toolkit.polecat)"},
+		"capped arm":                   {func(b *fake.Bead) { b.Metadata = arm; b.Metadata["gc.dispatch_when_ready_fail_count"] = "3" }, "an arm to gc-toolkit/gc-toolkit.polecat"},
+		"closed":                       {func(b *fake.Bead) { b.Status = "closed" }, "its status is closed, and a first reaction takes only an open bead"},
+		"started":                      {func(b *fake.Bead) { b.Status = "in_progress" }, "its status is in_progress"},
+		"assigned":                     {func(b *fake.Bead) { b.Assignee = "gc-toolkit/gc-toolkit.polecat-3" }, "it is assigned to gc-toolkit/gc-toolkit.polecat-3, whose next move it is"},
+		"held":                         {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:po"} }, "it is held (hold:po)"},
+		"held on the earlier spelling": {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} }, "it is held (hold:mayor)"},
+		"held on the pack's own value": {func(b *fake.Bead) { b.Labels = []string{"hold:release-train"} }, "it is held (hold:release-train)"},
 		"held outside": {func(b *fake.Bead) { b.Labels = []string{"Hold:External"} },
-			"it is held (Hold:External): hold:mayor keeps it for the operator's placement sitting"},
+			"it is held (Hold:External): a hold names the bead's next actor, such as hold:po for the operator's placement sitting"},
 		"standing and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = standingKinds[0] }, "it is a standing record"},
 	} {
 		w := newWorld(t)

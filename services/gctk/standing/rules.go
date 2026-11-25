@@ -257,8 +257,8 @@ func (r *Reading) answer(ids []string) {
 // beneath another ask or not.
 func (r *Reading) ask(id string, beneath bool) Ask {
 	// Work held for the Product Owner asks nothing of a person, whatever it
-	// would ask, such as a review of its pull request: hold:mayor names the
-	// Product Owner as its next actor.
+	// would ask, such as a review of its pull request: the placement hold names
+	// the Product Owner as its next actor.
 	if r.ForProductOwner(id) {
 		return ""
 	}

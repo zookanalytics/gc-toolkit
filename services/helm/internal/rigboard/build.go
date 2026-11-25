@@ -320,7 +320,8 @@ func (bt *built) isWork(id string) bool {
 }
 
 // forProductOwner reports whether a row is work held for the Product Owner: an
-// open piece of work that carries hold:mayor. The Unprioritized page alone
+// open piece of work that carries the placement hold, hold:po or its earlier
+// spelling hold:mayor. The Unprioritized page alone
 // lists it, so no view lists it and no count counts it, though the work behind
 // it waits on it all the same.
 func (bt *built) forProductOwner(id string) bool { return bt.ix.g.reading.ForProductOwner(id) }
@@ -470,8 +471,8 @@ func (bt *built) findNeeds() {
 
 // counted reports whether a need counts, given every bead it is about. A need
 // parked itself does not. A gate, a decision or a conversation does not when
-// every bead it is about is parked, carries hold:mayor or is a need that does
-// not count, and one about nothing counts. A pull request, or other work that
+// every bead it is about is parked, carries the placement hold or is a need
+// that does not count, and one about nothing counts. A pull request, or other work that
 // is itself a need, counts unless it is parked itself, whatever it holds.
 func (bt *built) counted(id string, about []string) bool {
 	if bt.parked(id) {
@@ -485,8 +486,8 @@ func (bt *built) counted(id string, about []string) bool {
 }
 
 // live reports whether a bead a need is about keeps the need in the count: it
-// is not parked, it carries no hold:mayor, and it is no need that has left the
-// count.
+// is not parked, it carries no placement hold, and it is no need that has left
+// the count.
 func (bt *built) live(id string) bool {
 	counts, need := bt.counts[id]
 	return !bt.parked(id) && !bt.onDesk(id) && (!need || counts)
@@ -507,10 +508,10 @@ func (bt *built) parked(id string) bool {
 }
 
 // onDesk reports whether a bead is the Unprioritized page's: an open bead that
-// carries hold:mayor.
+// carries the placement hold.
 func (bt *built) onDesk(id string) bool {
 	b, ok := bt.ix.beads[id]
-	return ok && isOpen(b) && carriesHoldMayor(b)
+	return ok && isOpen(b) && carriesPlacementHold(b)
 }
 
 // count makes each epic's and Delivery's counts at any depth: the needs that
@@ -739,16 +740,17 @@ func (bt *built) needsYouPage() NeedsYou {
 	return bt.view(needs, func(string) bool { return true })
 }
 
-// carriesHoldMayor reports whether a bead carries hold:mayor, the label that
-// puts it on the Product Owner's desk, in every spelling the work queue's order
-// reads it in (queue.ForProductOwner), so a bead that hold keeps out of the
-// ready work nothing sends is on the Unprioritized page.
-func carriesHoldMayor(b bead) bool { return queue.ForProductOwner(b.Labels) }
+// carriesPlacementHold reports whether a bead carries the placement hold,
+// hold:po or its earlier spelling hold:mayor, the label that puts it on the
+// Product Owner's desk, in every spelling the work queue's order reads it in
+// (queue.ForProductOwner), so a bead that hold keeps out of the ready work
+// nothing sends is on the Unprioritized page.
+func carriesPlacementHold(b bead) bool { return queue.ForProductOwner(b.Labels) }
 
 func (bt *built) unprioritizedPage() []PriorityGroup {
 	by := map[int][]string{}
 	for _, id := range bt.ix.rows {
-		if b := bt.ix.beads[id]; isOpen(b) && carriesHoldMayor(b) {
+		if b := bt.ix.beads[id]; isOpen(b) && carriesPlacementHold(b) {
 			by[b.Priority] = append(by[b.Priority], id)
 		}
 	}

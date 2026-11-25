@@ -212,7 +212,7 @@ func handoffForm(who, flag, route, bead string) (string, error) {
 	is := func(role string) bool { return name == role || strings.HasSuffix(name, "."+role) }
 	switch {
 	case is("po"):
-		return "", usage("%s %s names the po, which takes no work by assignment: its queue is the new work intake holds with hold:mayor. Pass %s for the pool that would build %s, and intake holds it for placement when no epic holds it, or pass %s for the named agent whose work it is", flag, who, route, bead, flag)
+		return "", usage("%s %s names the po, which takes no work by assignment: its queue is the new work intake holds with hold:po. Pass %s for the pool that would build %s, and intake holds it for placement when no epic holds it, or pass %s for the named agent whose work it is", flag, who, route, bead, flag)
 	case is("mechanik"):
 		return formRoute, nil
 	case is("refinery"):
@@ -519,14 +519,14 @@ func (r *Reactions) Dispose(d *Dispose) (Disposed, error) {
 	if poolTarget != "" && admit == "" {
 		reason := "Held for placement instead of reaching " + poolTarget + ": " + holdWhy + "."
 		w := r.Ledger.Write(d.Bead)
-		w.Note("## Intake (first reaction, " + intakeAt + ")\n" + reason + " The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:mayor lists it.")
+		w.Note("## Intake (first reaction, " + intakeAt + ")\n" + reason + " The operator's placement sitting places it under an epic or routes it on its own; gc beads list --label hold:po lists it.")
 		if err := r.Ledger.Commit(w); err != nil {
-			return out, fmt.Errorf("the %s exit on %s did not land. The headline and the release stand, but intake's note saying why it holds %s did not (%v), so the hold:mayor label was not written. Clear the cause and re-run this command", d.Disposition, d.Bead, d.Bead, err)
+			return out, fmt.Errorf("the %s exit on %s did not land. The headline and the release stand, but intake's note saying why it holds %s did not (%v), so the hold:po label was not written. Clear the cause and re-run this command", d.Disposition, d.Bead, d.Bead, err)
 		}
-		if err := r.Ledger.SetState(d.Bead, "hold", "mayor", reason); err != nil {
-			return out, fmt.Errorf("the %s exit on %s did not land. The headline, the release and intake's note stand, but the hold:mayor label did not (%v), so %s rests open and unrouted outside the placement sitting's queue. Clear the cause and re-run this command", d.Disposition, d.Bead, err, d.Bead)
+		if err := r.Ledger.SetState(d.Bead, "hold", "po", reason); err != nil {
+			return out, fmt.Errorf("the %s exit on %s did not land. The headline, the release and intake's note stand, but the hold:po label did not (%v), so %s rests open and unrouted outside the placement sitting's queue. Clear the cause and re-run this command", d.Disposition, d.Bead, err, d.Bead)
 		}
-		r.say("intake wrote the hold:mayor label on %s", d.Bead)
+		r.say("intake wrote the hold:po label on %s", d.Bead)
 	}
 	return out, nil
 }

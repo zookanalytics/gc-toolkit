@@ -177,12 +177,13 @@ func TestARouteIsRigQualifiedAndRidesARelease(t *testing.T) {
 }
 
 // A release that sends a held bead on, to a pool or to a named agent, is a
-// placement, so its write lifts every spelling of hold:mayor and keeps the
-// other labels. A release back to a person keeps the hold (HOLDROUTE,
-// HOLDAGENT, HOLDPARK).
+// placement, so its write lifts every spelling of the placement hold, hold:po
+// and its earlier spelling hold:mayor, and keeps the other labels, a hold of
+// another value among them. A release back to a person keeps the hold
+// (HOLDROUTE, HOLDAGENT, HOLDPARK).
 func TestAReleaseThatSendsTheBeadOnLiftsItsHold(t *testing.T) {
 	held := func(w *world) {
-		w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Labels: []string{"hold:mayor", "Hold:Mayor", "learning"}})
+		w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Labels: []string{"hold:mayor", "Hold:Mayor", "hold:po", "hold:release-train", "learning"}})
 	}
 	w := newWorld(t)
 	held(w)
@@ -190,17 +191,18 @@ func TestAReleaseThatSendsTheBeadOnLiftsItsHold(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("(HOLDROUTE) exits %d (%v)", code, err)
 	}
-	if got := w.row("tk-a").Labels; !slices.Equal(got, []string{"learning"}) {
-		t.Errorf("(HOLDROUTE) the labels are %q, want the hold gone and the rest kept", got)
+	if got := w.row("tk-a").Labels; !slices.Equal(got, []string{"hold:release-train", "learning"}) {
+		t.Errorf("(HOLDROUTE) the labels are %q, want the placement hold gone and the rest kept", got)
 	}
-	has(t, out, "hold:mayor lifted", "(HOLDROUTE) the success line")
+	has(t, out, "hold:mayor and Hold:Mayor and hold:po lifted", "(HOLDROUTE) the success line")
 
 	w = newWorld(t)
 	held(w)
 	if code, _, err := w.take(Request{Bead: "tk-a", Text: "a city.toml edit, mechanik's", Release: true, Assign: "gc-toolkit.mechanik", NoWait: true}); code != 0 {
 		t.Fatalf("(HOLDAGENT) exits %d (%v)", code, err)
 	}
-	has(t, w.update("tk-a"), "--remove-label hold:mayor --remove-label Hold:Mayor", "(HOLDAGENT) the release write")
+	has(t, w.update("tk-a"), "--remove-label hold:mayor --remove-label Hold:Mayor --remove-label hold:po", "(HOLDAGENT) the release write")
+	hasnt(t, w.update("tk-a"), "hold:release-train", "(HOLDAGENT) the release write")
 
 	w = newWorld(t)
 	held(w)

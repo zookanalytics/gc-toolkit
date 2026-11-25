@@ -1,21 +1,46 @@
 package gascity
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
-// HasHold reads one of the holds, in every spelling a dispatch hold reads in,
-// and no other label.
+// A hold is any hold:<value> whose value is not cleared, the label and its
+// value trimmed and the prefix and value in any case, as the gc this city runs
+// reads one (beadmeta.ActiveHoldValue). No other label holds a bead.
+func TestAHoldIsAnyHoldValueButCleared(t *testing.T) {
+	for label, want := range map[string]bool{
+		"hold:po": true, "hold:mayor": true, "hold:external": true, "hold:release-train": true,
+		" Hold:PO ": true, "HOLD:MAYOR": true, "hold: po": true, "hold:mayors": true,
+		"hold:cleared": false, "Hold:Cleared ": false, "hold: cleared": false,
+		"hold:": false, "hold: ": false, "hold": false, "on-hold": false, "mpr-human-hold": false,
+		"xhold:po": false, "human": false, "placement": false, "": false,
+	} {
+		if got := IsDispatchHold(label); got != want {
+			t.Errorf("IsDispatchHold(%q) = %v, want %v", label, got, want)
+		}
+	}
+	if !HasDispatchHold([]string{"learning", "hold:release-train"}) || HasDispatchHold([]string{"human", "hold:cleared"}) || HasDispatchHold(nil) {
+		t.Error("HasDispatchHold misreads a bead's labels")
+	}
+	if !HasDispatchHold([]string{"hold:cleared", "hold:po"}) {
+		t.Error("hold:cleared beside an active hold released the bead")
+	}
+}
+
+// HasHold reads one hold by its value, in every spelling a hold reads in, and
+// no other hold.
 func TestHasHoldReadsOneHoldInAnySpelling(t *testing.T) {
 	for _, c := range []struct {
 		labels []string
 		hold   string
 		want   bool
 	}{
-		{[]string{"learning", " Hold:Mayor "}, HoldMayor, true},
-		{[]string{"HOLD:EXTERNAL"}, HoldExternal, true},
-		{[]string{"hold:external"}, HoldMayor, false},
-		{[]string{"hold:mayor"}, HoldExternal, false},
-		{[]string{"hold:mayor-later", "xhold:mayor"}, HoldMayor, false},
-		{nil, HoldMayor, false},
+		{[]string{"learning", " Hold:External "}, HoldExternal, true},
+		{[]string{"hold: external"}, HoldExternal, true},
+		{[]string{"hold:po"}, HoldExternal, false},
+		{[]string{"hold:external-later", "xhold:external"}, HoldExternal, false},
+		{nil, HoldExternal, false},
 	} {
 		if got := HasHold(c.labels, c.hold); got != c.want {
 			t.Errorf("HasHold(%q, %q) = %v, want %v", c.labels, c.hold, got, c.want)
@@ -23,35 +48,33 @@ func TestHasHoldReadsOneHoldInAnySpelling(t *testing.T) {
 	}
 }
 
-// A dispatch hold is hold:mayor or hold:external, trimmed and in any case, as
-// Gas City's HasDispatchHold reads a label, and the human label is no hold.
-func TestADispatchHoldIsGasCitysHoldLabelInAnyCase(t *testing.T) {
+// The placement hold is hold:po or its earlier spelling hold:mayor, in any
+// spelling a hold reads in, and no other hold.
+func TestThePlacementHoldIsHoldPOOrHoldMayor(t *testing.T) {
 	for label, want := range map[string]bool{
-		"hold:mayor": true, " Hold:External ": true, "HOLD:MAYOR": true,
-		"hold:mayors": false, "human": false, "placement": false, "": false,
+		"hold:po": true, " Hold:PO ": true, "hold: po": true, "hold:mayor": true, "Hold:Mayor": true,
+		"hold:external": false, "hold:release-train": false, "hold:cleared": false, "hold:pos": false,
+		"hold:": false, "po": false, "mayor": false,
 	} {
-		if got := IsDispatchHold(label); got != want {
-			t.Errorf("IsDispatchHold(%q) = %v, want %v", label, got, want)
+		if got := IsPlacementHold(label); got != want {
+			t.Errorf("IsPlacementHold(%q) = %v, want %v", label, got, want)
 		}
 	}
-	if !HasDispatchHold([]string{"learning", "Hold:Mayor"}) || HasDispatchHold([]string{"human", "learning"}) || HasDispatchHold(nil) {
-		t.Error("HasDispatchHold misreads a bead's labels")
-	}
-	labels := DispatchHoldLabels()
-	labels[0] = "changed"
-	if DispatchHoldLabels()[0] != "hold:mayor" {
-		t.Error("a caller's change to the hold labels reached the rule")
+	if !HasPlacementHold([]string{"learning", "hold:mayor"}) || !HasPlacementHold([]string{"hold:po"}) ||
+		HasPlacementHold([]string{"hold:external", "hold:cleared"}) || HasPlacementHold(nil) {
+		t.Error("HasPlacementHold misreads a bead's labels")
 	}
 }
 
-// A hold's spellings are the labels that read as it, each as the bead carries
-// it, so a lift can remove each by its exact text.
-func TestAHoldsSpellingsAreTheLabelsThatReadAsIt(t *testing.T) {
-	got := Spellings([]string{"learning", "hold:mayor", " Hold:Mayor", "hold:external", "hold:mayor"}, "hold:mayor")
-	if len(got) != 2 || got[0] != "hold:mayor" || got[1] != " Hold:Mayor" {
-		t.Fatalf("Spellings = %q, want the two spellings of hold:mayor as written", got)
+// The placement spellings are the labels that read as the placement hold, each
+// as the bead carries it, so a lift removes each by its exact text and leaves
+// every other hold on.
+func TestThePlacementSpellingsAreTheLabelsThatReadAsIt(t *testing.T) {
+	got := PlacementSpellings([]string{"learning", "hold:mayor", " Hold:PO", "hold:external", "hold:po", "hold:mayor", "hold:cleared"})
+	if want := []string{"hold:mayor", " Hold:PO", "hold:po"}; !slices.Equal(got, want) {
+		t.Fatalf("PlacementSpellings = %q, want %q", got, want)
 	}
-	if got := Spellings([]string{"learning"}, "hold:mayor"); got != nil {
-		t.Fatalf("Spellings of a bead with no hold = %q, want none", got)
+	if got := PlacementSpellings([]string{"learning", "hold:external"}); got != nil {
+		t.Fatalf("PlacementSpellings of a bead with no placement hold = %q, want none", got)
 	}
 }

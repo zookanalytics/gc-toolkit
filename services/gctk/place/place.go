@@ -1,15 +1,16 @@
-// Package place is a placement: a bead held for placement, which carries Gas
-// City's hold:mayor label, given its parent or none, its dispatch, and then the
-// lift of its hold (docs/steering.md, "Placing a bead"). `gctk bead place`
+// Package place is a placement: a bead held for placement, which carries the
+// placement hold, hold:po or its earlier spelling hold:mayor, given its parent
+// or none, its dispatch, and then the lift of its hold (docs/steering.md,
+// "Placing a bead"). `gctk bead place`
 // makes it. gc sling reads no hold, so a sling leaves the label on, and no
 // native write both dispatches a bead and lifts its hold. So a placement makes
 // the native writes in one order, each taking its exit, and a run again after
 // a stop at any write finishes the placement:
 //
 //  1. It reads the bead, its parent and the runs that work it, and refuses
-//     what it does not place with nothing written. A bead with no hold:mayor
-//     that a live run, a route, an arm or an assignee shows dispatched is
-//     placed already.
+//     what it does not place with nothing written, a bead another hold holds
+//     among it. A bead with no placement hold that a live run, a route, an arm
+//     or an assignee shows dispatched is placed already.
 //  2. It clears a route, which gctk bead arm refuses. With a parent it removes
 //     a relates-to link between the bead and the parent, since bd refuses a
 //     parent-child edge beside one, sets the parent, and moves the shift
@@ -23,7 +24,8 @@
 //     armed, so the wait keeps holding it, and so is one whose holds could not
 //     be read. Any other is slung, and gc sling's exit 3 says a live run of the
 //     formula already works the bead.
-//  5. It lifts the hold with its note in one write.
+//  5. It lifts the placement hold with its note in one write, each spelling the
+//     bead carries and no other hold.
 //
 // The dispatch comes before the lift, so a dispatch that fails leaves the bead
 // held and in the queue. A run cut off between the two goes on with the hold on
@@ -65,10 +67,6 @@ var (
 		"A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic.")
 )
 
-// hold is the hold a placement lifts: Gas City's hold for a bead whose next
-// actor is the coordinator, which intake holds new work with.
-const hold = "hold:mayor"
-
 // reaction is the formula of a first reaction, whose run is no dispatch.
 const reaction = "mol-first-reaction"
 
@@ -103,11 +101,12 @@ type Request struct {
 
 // Placed is what a placement did: whether the bead was placed already, with
 // nothing written, and in a sentence how it was dispatched, with the priority
-// it settled at.
+// it settled at and the placement hold's spellings it lifted.
 type Placed struct {
 	Already  bool
 	How      string
 	Priority string
+	Lifted   []string
 }
 
 // Refusal is a placement refused for what it asks or for what the bead is,
@@ -223,7 +222,7 @@ func (p *Places) Place(req Request) (Placed, error) {
 	if len(live) > 0 {
 		shown = append(shown, "live run "+strings.Join(live, " "))
 	}
-	spellings := gascity.Spellings(row.Labels(), hold)
+	spellings := gascity.PlacementSpellings(row.Labels())
 	armed := record.Of(row)
 	if armed != nil && strings.TrimSpace(armed.Target) == "" {
 		armed = nil
@@ -239,11 +238,11 @@ func (p *Places) Place(req Request) (Placed, error) {
 			out.Already, out.How = true, strings.Join(shown, ", ")
 			return out, nil
 		}
-		return out, refuse("%s carries no hold:mayor, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd set-state %s hold=mayor --reason \"<why it waits for placement>\". Nothing was written", req.Bead, req.Bead)
+		return out, refuse("%s carries no hold:po, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd set-state %s hold=po --reason \"<why it waits for placement>\". Nothing was written", req.Bead, req.Bead)
 	}
 	for _, l := range row.Labels() {
 		if gascity.IsDispatchHold(l) && !slices.Contains(spellings, l) {
-			return out, refuse("%s also carries %s, Gas City's hold for a next actor outside this city, and a placement lifts only hold:mayor. Place it once that hold is lifted. Nothing was written", req.Bead, strings.TrimSpace(l))
+			return out, refuse("%s also carries %s, a hold whose next actor is not the Product Owner, and a placement lifts only the placement hold, so the bead would stay held. Place it once that hold is lifted. Nothing was written", req.Bead, strings.TrimSpace(l))
 		}
 	}
 	dispatched := strings.Join(shown, ", ")
@@ -399,16 +398,18 @@ func (p *Places) Place(req Request) (Placed, error) {
 	if out.Priority != "" {
 		note += " at " + out.Priority
 	}
-	note += ": " + out.How + ". hold:mayor lifted."
+	note += ": " + out.How + ". " + liftedLabels(spellings) + " lifted."
 	if err := p.lift(req.Bead, note); err != nil {
-		return out, fmt.Errorf("%s is %s%s, but the write that lifts its hold:mayor did not land (%v), so it still waits in the queue, and an arm on it does not fire. Finish with the lift by hand, which dispatches nothing: %s. A run again of the placement reads only a live run, an assignee, a merge_result or an arm as this dispatch, so once a run that leaves none of them has ended, it would dispatch %s again",
-			req.Bead, placedUnder(req), out.How, err, liftCommand(req.Bead, spellings, note, p.dbFlag()), req.Bead)
+		return out, fmt.Errorf("%s is %s%s, but the write that lifts its %s did not land (%v), so it still waits in the queue, and an arm on it does not fire. Finish with the lift by hand, which dispatches nothing: %s. A run again of the placement reads only a live run, an assignee, a merge_result or an arm as this dispatch, so once a run that leaves none of them has ended, it would dispatch %s again",
+			req.Bead, placedUnder(req), out.How, liftedLabels(spellings), err, liftCommand(req.Bead, spellings, note, p.dbFlag()), req.Bead)
 	}
+	out.Lifted = spellings
 	return out, nil
 }
 
-// lift removes every spelling of hold:mayor the bead carries now, with note, in
-// one write. A bead that carries none is not written.
+// lift removes every spelling of the placement hold the bead carries now, with
+// note, in one write, and leaves every other hold on. A bead that carries none
+// is not written.
 func (p *Places) lift(bead, note string) error {
 	row, err := p.read(bead)
 	if err != nil {
@@ -417,7 +418,7 @@ func (p *Places) lift(bead, note string) error {
 	if row == nil {
 		return fmt.Errorf("%s does not resolve", bead)
 	}
-	spellings := gascity.Spellings(row.Labels(), hold)
+	spellings := gascity.PlacementSpellings(row.Labels())
 	if len(spellings) == 0 {
 		return nil
 	}
@@ -605,7 +606,7 @@ func shQuote(text string) string {
 // Line is what a placement says it did, in one line.
 func (out Placed) Line(req Request) string {
 	if out.Already {
-		return "place: " + req.Bead + " carries no hold:mayor and is already placed (" + out.How + "). Nothing was written."
+		return "place: " + req.Bead + " carries no hold:po and is already placed (" + out.How + "). Nothing was written."
 	}
 	s := "place: " + req.Bead + " placed" + under(req)
 	if req.Standalone {
@@ -614,5 +615,18 @@ func (out Placed) Line(req Request) string {
 	if out.Priority != "" {
 		s += " at " + out.Priority
 	}
-	return s + ": " + out.How + "; hold:mayor lifted"
+	return s + ": " + out.How + "; " + liftedLabels(out.Lifted) + " lifted"
+}
+
+// liftedLabels names the placement hold's spellings a lift removes, each
+// trimmed, in the order the bead carries them, or hold:po when it names none.
+func liftedLabels(spellings []string) string {
+	var names []string
+	for _, l := range spellings {
+		names = append(names, strings.TrimSpace(l))
+	}
+	if len(names) == 0 {
+		return gascity.HoldPO
+	}
+	return strings.Join(names, " and ")
 }

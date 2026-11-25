@@ -263,7 +263,7 @@ func rowRefusal(row *ledger.Record) *Refusal {
 		}
 	}
 	if len(held) > 0 {
-		return &Refusal{Code: Decided, Why: "it is held (" + strings.Join(held, ", ") + "): hold:mayor keeps it for the operator's placement sitting, and hold:external for an actor outside this store"}
+		return &Refusal{Code: Decided, Why: "it is held (" + strings.Join(held, ", ") + "): a hold names the bead's next actor, such as hold:po for the operator's placement sitting and hold:external for an actor outside this store"}
 	}
 	return nil
 }

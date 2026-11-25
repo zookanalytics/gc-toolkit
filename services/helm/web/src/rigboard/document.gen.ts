@@ -84,12 +84,13 @@ export interface Document {
   needs_you: NeedsYou;
   /**
    * WorkQueue is the Work queue page: every open piece of work in the rig
-   * that does not carry hold:mayor.
+   * that does not carry the placement hold.
    */
   work_queue: WorkQueue;
   /**
    * Unprioritized is the Unprioritized page: every open bead that carries
-   * hold:mayor, grouped by priority, newest first in each.
+   * the placement hold, hold:po or its earlier spelling hold:mayor, grouped
+   * by priority, newest first in each.
    */
   unprioritized: PriorityGroup[];
 }
@@ -307,8 +308,8 @@ export interface Need {
  * Product Owner. It is parked itself when it, or an epic or Delivery above it,
  * waits on a park, a gate that is no human gate. A gate, a decision or a
  * conversation does not count when every bead it holds or is about is parked,
- * is a need that does not count, or carries hold:mayor, the Unprioritized
- * page's work. A need that is about nothing else counts, and so does a pull
+ * is a need that does not count, or carries the placement hold, the
+ * Unprioritized page's work. A need that is about nothing else counts, and so does a pull
  * request or other work that is itself a need, unless it is parked itself.
  * Count is the needs that count, and it reaches zero only when nothing that
  * counts needs you. Kinds is how many of them are of each kind: Pull request,

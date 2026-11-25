@@ -41,8 +41,8 @@ const reactionRefusals = `A first reaction triages a bead nobody has decided on,
 move is someone's already is refused, by the first of these that holds:
 
   6  its kind takes none: a standing record or a feedback pattern
-  5  its status is not open, it is assigned, it is routed or armed, or it
-     carries hold:mayor or hold:external
+  5  its status is not open, it is assigned, it is routed or armed, or a
+     hold holds it, such as hold:po or hold:external
   3  an open conversation tracks it
   3  a first reaction already runs on it
   4  a live run of another formula works it
@@ -171,7 +171,7 @@ decided on, highest priority first. Its one read is bd's ready set, unassigned
 and not an epic. It keeps the raw input among it: a task, bug, feature or spike
 with a description that is no workflow root, scope, spec or step, no standing
 record, feedback pattern or review lane, carries no headline, no work marker
-and no parent, has no route or arm, and carries no hold:mayor or hold:external.
+and no parent, has no route or arm, and carries no hold.
 It drops every bead a live run works, and a run map that does not read drops
 nothing, which it says. Each reaction goes to the rig's proactive pool whether
 or not the pool runs, and each sling applies sling's refusals again. A sling gc
@@ -283,7 +283,7 @@ subject open: a reaction disposes a bead and never closes it.
 Intake decides whether a pool route or a --then-route arm is written at all:
 only a member of an epic, PR-finishing work (anchor_bead) or an emergency the
 named check confirms on the default branch's head reaches a pool, and any
-other bead is held with hold:mayor for the operator's placement sitting
+other bead is held with hold:po for the operator's placement sitting
 (docs/steering.md). A route goes to its pool whether or not the pool runs, and
 a route gc sling refuses, as it refuses a pool the city does not configure,
 stops the exit at that sling. A hand-off nothing would offer the bead to is
@@ -417,8 +417,8 @@ token, the formula and each --var), answers the gate
 took: bd's resolve exits 0 on a gate already closed, so that read tells this
 answer from one that reached the gate first, and the first stands. It then
 reads that no open human gate blocks the bead, slings the formula titled
-"<formula> accept:<token>" with each --var, lifts the bead's hold:mayor, since
-an Accept is a placement, and records the dispatch, withdrawing the
+"<formula> accept:<token>" with each --var, lifts the bead's placement hold
+(hold:po, or hold:mayor, its earlier spelling), since an Accept is a placement, and records the dispatch, withdrawing the
 recommendation. A gate filed meanwhile, or a sling that poured nothing, opens
 the gate again. A run that stopped after its answer leaves an unfinished
 acceptance, which the next Accept finishes under the same token: it slings

@@ -473,11 +473,13 @@ func TestScheduled(t *testing.T) {
 		{name: "assigned", assignee: "gc-toolkit/gc-toolkit.mechanik", want: true},
 		{name: "an arm that names no target sends nothing", h: waits.Holds{Arm: &waits.Arm{Target: " "}}, want: false},
 		{name: "nothing", routedTo: " ", assignee: "", want: false},
-		{name: "armed and held for the Product Owner", h: armed, labels: []string{"hold:mayor"}, want: false},
+		{name: "armed and held for the Product Owner", h: armed, labels: []string{"hold:po"}, want: false},
+		{name: "armed and held for placement on the earlier spelling", h: armed, labels: []string{"hold:mayor"}, want: false},
 		{name: "routed and held outside the store", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"hold:external"}, want: false},
-		{name: "assigned and held, in any spelling", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"learning", " Hold:Mayor "}, want: false},
-		{name: "worked and held", worked: true, labels: []string{"hold:mayor"}, want: true},
-		{name: "routed, with a label that is no hold", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"learning", "hold:mayor-later"}, want: true},
+		{name: "routed and held on a value of the pack's own", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"hold:release-train"}, want: false},
+		{name: "assigned and held, in any spelling", assignee: "gc-toolkit/gc-toolkit.mechanik", labels: []string{"learning", " Hold:PO "}, want: false},
+		{name: "worked and held", worked: true, labels: []string{"hold:po"}, want: true},
+		{name: "routed, with labels that hold nothing", routedTo: "gc-toolkit/gc-toolkit.polecat", labels: []string{"learning", "hold:cleared", "on-hold", "hold:"}, want: true},
 	} {
 		if got := scheduled(c.h, c.worked, c.routedTo, c.assignee, c.labels); got != c.want {
 			t.Errorf("%s: scheduled = %v, want %v", c.name, got, c.want)
@@ -485,18 +487,24 @@ func TestScheduled(t *testing.T) {
 	}
 }
 
-// The Product Owner's queue holds a bead held hold:mayor in every spelling the
-// order reads a dispatch hold in, and no bead another hold or label holds.
+// The Product Owner's queue holds a bead held hold:po, or hold:mayor, its
+// earlier spelling, in every spelling the order reads a dispatch hold in, so a
+// queue holding both spellings is one queue, and no bead another hold or label
+// holds.
 func TestForProductOwner(t *testing.T) {
 	for _, c := range []struct {
 		labels []string
 		want   bool
 	}{
+		{[]string{"hold:po"}, true},
+		{[]string{"learning", " Hold:PO "}, true},
 		{[]string{"hold:mayor"}, true},
-		{[]string{"learning", " Hold:Mayor "}, true},
 		{[]string{"HOLD:MAYOR"}, true},
+		{[]string{"hold:mayor", "hold:po"}, true},
 		{[]string{"hold:external"}, false},
-		{[]string{"hold:mayor-later", "xhold:mayor"}, false},
+		{[]string{"hold:release-train"}, false},
+		{[]string{"hold:cleared"}, false},
+		{[]string{"hold:po-later", "xhold:po", "hold:mayor-later"}, false},
 		{nil, false},
 	} {
 		if got := ForProductOwner(c.labels); got != c.want {

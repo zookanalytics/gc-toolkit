@@ -33,7 +33,7 @@ func graph() *testRead {
 		{ID: "tk-loose", Title: "parked work", Status: "open", Priority: 3, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, RoutedTo: "gc-toolkit/gc-toolkit.polecat", CreatedAt: "2026-01-07"},
 		{ID: "tk-loose2", Title: "more parked work", Status: "open", Priority: 2, IssueType: "bug", Edges: []listing.Edge{blocks("tk-park")}, CreatedAt: "2026-01-08"},
 		{ID: "tk-desk1", Title: "new idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{" Hold:Mayor "}, CreatedAt: "2026-01-09"},
-		{ID: "tk-desk2", Title: "newer idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{"hold:mayor"}, CreatedAt: "2026-01-10"},
+		{ID: "tk-desk2", Title: "newer idea", Status: "open", Priority: 2, IssueType: "task", Labels: []string{"hold:po"}, CreatedAt: "2026-01-10"},
 		{ID: "tk-q", Title: "which way?", Description: "which way?\nthe whole question", Status: "open", Priority: 1, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-02"},
 		{ID: "tk-park", Title: "parked", Status: "open", Priority: 2, IssueType: "gate", CreatedAt: "2026-01-02"},
 		{ID: "tk-review", Title: "review", Status: "open", IssueType: "task", Anchor: "tk-b.1", CreatedAt: "2026-01-02"},
@@ -404,14 +404,15 @@ func TestWorkWhoseWaitsAreUnread(t *testing.T) {
 	}
 }
 
-// TestWorkForTheProductOwner holds work that carries hold:mayor to the
-// Unprioritized page while the work behind it still waits on it. In graph,
+// TestWorkForTheProductOwner holds work that carries hold:po to the
+// Unprioritized page, beside the desk's tk-desk1, which carries hold:mayor, its
+// earlier spelling, while the work behind it still waits on it. In graph,
 // tk-b.1 is armed and waits on question tk-q, and armed tk-b.2 waits on tk-b.1.
 func TestWorkForTheProductOwner(t *testing.T) {
 	hold := func(g *testRead, id string) {
 		for i := range g.open {
 			if g.open[i].ID == id {
-				g.open[i].Labels = append(g.open[i].Labels, "hold:mayor")
+				g.open[i].Labels = append(g.open[i].Labels, "hold:po")
 			}
 		}
 	}
@@ -1315,7 +1316,7 @@ func TestNeedsThatCount(t *testing.T) {
 	pq := human("tk-pq")
 	pq.Edges = []listing.Edge{blocks("tk-park")}
 	desk, desk2 := task("tk-desk", blocks("tk-qd")), task("tk-desk2", blocks("tk-qf"))
-	desk.Labels, desk2.Labels = []string{"hold:mayor"}, []string{"hold:mayor"}
+	desk.Labels, desk2.Labels = []string{"hold:mayor"}, []string{"hold:po"}
 	g := &testRead{rig: "gc-toolkit",
 		open: []bead{
 			epic("tk-e"), epic("tk-pe", blocks("tk-park")), epic("tk-pf", blocks("tk-park")),

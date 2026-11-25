@@ -214,8 +214,9 @@ type take struct {
 	mergeResult      string
 	// park is a release that reopens the bead: one whose bead still stands.
 	park bool
-	// holds are the spellings of hold:mayor a release that sends the bead on
-	// lifts.
+	// holds are the spellings of the placement hold (hold:po, or hold:mayor,
+	// its earlier spelling) a release that sends the bead on lifts. Any other
+	// hold stays on, and holds the bead where it was sent until it lifts.
 	holds []string
 	// real are the waits that become edges, riders the landed riders that do
 	// not, and routeWaits the waits a route counts as work on a blocker, with
@@ -271,9 +272,9 @@ func (r *take) guardRelease() error {
 			r.bead, r.mergeResult, r.bead, r.t.script("human-gate.sh"), r.bead, r.t.script("pr-dispose.sh"), r.bead)
 	}
 	// Sending a held bead on is a placement, and Gas City serves no bead a hold
-	// label holds, so the release lifts the bead's hold:mayor.
+	// label holds, so the release lifts the bead's placement hold.
 	if r.req.Route != "" || r.req.Assign != "" {
-		r.holds = gascity.Spellings(r.anchor.Labels(), "hold:mayor")
+		r.holds = gascity.PlacementSpellings(r.anchor.Labels())
 	}
 	// A release that parks the bead for a person states its disposition: the
 	// wait as an edge, or the settled mark that says there is none. Only an
@@ -529,7 +530,11 @@ func (r *take) write() (string, error) {
 		}
 		lifted := ""
 		if len(r.holds) > 0 {
-			lifted = "; hold:mayor lifted"
+			var names []string
+			for _, l := range r.holds {
+				names = append(names, strings.TrimSpace(l))
+			}
+			lifted = "; " + strings.Join(names, " and ") + " lifted"
 		}
 		note = " [released" + to + lifted + "]"
 	case r.req.Release:
@@ -541,8 +546,8 @@ func (r *take) write() (string, error) {
 // update is the one update: the headline, its time, its writer and its settled
 // mark, and for a release the park, guarded by the status and the assignee the
 // release read. The park reopens the bead and assigns it to the named agent or
-// to nobody, clears Gas City's route and session pins, and lifts hold:mayor
-// from a bead it sends on.
+// to nobody, clears Gas City's route and session pins, and lifts the placement
+// hold from a bead it sends on.
 func (r *take) update(at string, release bool) *ledger.Write {
 	w := r.t.Ledger.Write(r.bead)
 	textKey.Set(w, r.text)

@@ -491,11 +491,12 @@ func (r *Reading) PullRequest(id string) *PR {
 func (r *Reading) Order() queue.Ordered { return r.order }
 
 // ForProductOwner reports whether a bead is work held for the Product Owner:
-// an open piece of work that carries hold:mayor, Gas City's hold that names the
-// Product Owner as its next actor. Such work asks nothing of a person.
+// an open piece of work that carries the placement hold, hold:po or its earlier
+// spelling hold:mayor, which names the Product Owner as its next actor. Such
+// work asks nothing of a person.
 func (r *Reading) ForProductOwner(id string) bool {
 	b, ok := r.beads[id]
-	return ok && r.kinds[id] == KindWork && isOpen(b) && carriesHoldMayor(b)
+	return ok && r.kinds[id] == KindWork && isOpen(b) && carriesPlacementHold(b)
 }
 
 // Parked is the gate that parks an open bead: the first wait behind its status,
@@ -633,7 +634,7 @@ func conversationEdges(b Bead) []conversation.Edge {
 	return out
 }
 
-// carriesHoldMayor reports whether a bead carries hold:mayor, the label that
-// puts it on the Product Owner's desk, in every spelling the work queue's order
-// reads it in (queue.ForProductOwner).
-func carriesHoldMayor(b Bead) bool { return queue.ForProductOwner(b.Labels) }
+// carriesPlacementHold reports whether a bead carries the placement hold, the
+// label that puts it on the Product Owner's desk, in every spelling the work
+// queue's order reads it in (queue.ForProductOwner).
+func carriesPlacementHold(b Bead) bool { return queue.ForProductOwner(b.Labels) }

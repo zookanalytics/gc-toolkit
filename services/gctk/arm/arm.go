@@ -267,9 +267,9 @@ func holdsNow(r *ledger.Record, h waits.Holds) string {
 }
 
 // holdLabel is the label on a bead that holds it from any pool: Gas City's
-// human label, compared as bd's ready read compares it, or one of its dispatch
-// holds, as the runtime adapter compares them (gascity.IsDispatchHold). It is
-// empty when none does.
+// human label, compared as bd's ready read compares it, or a hold, whatever its
+// value, as the runtime adapter reads one (gascity.IsDispatchHold). It is empty
+// when none does.
 func holdLabel(labels []string) string {
 	for _, l := range labels {
 		if l == humanLabel {
@@ -289,12 +289,14 @@ const humanLabel = "human"
 
 // serveRule is the pool's serve rule over armed beads, the flags Gas City
 // renders for a pool's routed demand (PoolDemandServeRulesForQuery in
-// internal/config/workquery.go): unassigned beads, no epic, and none of its
-// hold labels or its human label.
+// internal/config/workquery.go): unassigned beads, no epic, and not its human
+// label. No flag names every hold, so Gas City drops a held row from that
+// demand with jq, and the start holds a bead a hold holds (holdLabel) before it
+// reads the bead's readiness.
 var serveRule = ledger.ServeRule{
 	Unassigned:    true,
 	ExcludeTypes:  []string{"epic"},
-	ExcludeLabels: append(gascity.DispatchHoldLabels(), humanLabel),
+	ExcludeLabels: []string{humanLabel},
 }
 
 func describeWaits(ws []waits.Wait) string {

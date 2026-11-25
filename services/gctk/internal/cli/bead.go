@@ -102,7 +102,7 @@ func newBeadCmd(stdout, stderr io.Writer) *cobra.Command {
 			"and the headline its handling concluded, written with the release that takes it out of play.",
 		holds, newBeadStandsCmd(stdout, stderr), newBeadArmCmd(stdout, stderr), newBeadDisarmCmd(stdout, stderr),
 		newBeadStartArmedCmd(stdout, stderr), newBeadParkCmd(stdout, stderr), newBeadPlaceCmd(stdout, stderr),
-		newBeadTakeawayCmd(stdout, stderr))
+		newBeadMovePlacementHoldCmd(stdout, stderr), newBeadTakeawayCmd(stdout, stderr))
 }
 
 const beadArmLong = `Arms the bead: it starts by itself once nothing holds it, poured on the

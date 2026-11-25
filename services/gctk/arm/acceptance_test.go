@@ -192,8 +192,11 @@ func TestStoreAcceptanceWhatHoldsAnArmedBead(t *testing.T) {
 	a.s.Run("dep", "add", foreign, "xx-1", "--type", "blocks")
 	human := a.bead("human", "--labels", "human")
 	epic := a.bead("an epic", "--type", "epic")
-	mayor := a.bead("held for the PO", "--labels", "hold:mayor")
-	spelled := a.bead("held in another spelling", "--labels", "Hold:Mayor")
+	po := a.bead("held for the PO", "--labels", "hold:po")
+	mayor := a.bead("held for the PO on the earlier spelling", "--labels", "hold:mayor")
+	spelled := a.bead("held in another spelling", "--labels", "Hold:PO")
+	train := a.bead("held on a value of the pack's own", "--labels", "hold:release-train")
+	cleared := a.bead("its hold released", "--labels", "hold:cleared")
 	assigned := a.bead("assigned", "--assignee", "pa/pa.refinery")
 	deferred := a.bead("deferred")
 	a.s.Run("update", deferred, "--status", "deferred")
@@ -203,7 +206,7 @@ func TestStoreAcceptanceWhatHoldsAnArmedBead(t *testing.T) {
 	a.s.Edge(unstarted, parkedEpic, "parent-child", "")
 	a.s.Edge(inFlight, parkedEpic, "parent-child", "")
 	a.set(inFlight, "branch=polecat/"+inFlight)
-	for _, id := range []string{free, blocked, released, conditional, waits, foreign, human, epic, mayor, spelled, assigned, deferred, unstarted, inFlight} {
+	for _, id := range []string{free, blocked, released, conditional, waits, foreign, human, epic, po, mayor, spelled, train, cleared, assigned, deferred, unstarted, inFlight} {
 		a.armed(id, "mol-x")
 	}
 
@@ -216,16 +219,19 @@ func TestStoreAcceptanceWhatHoldsAnArmedBead(t *testing.T) {
 	act(t, lines, foreign, arm.ActHold, "foreign", "xx-1")
 	act(t, lines, human, arm.ActHold, "label", "human")
 	act(t, lines, epic, arm.ActHold, "epic", "")
+	act(t, lines, po, arm.ActHold, "label", "hold:po")
 	act(t, lines, mayor, arm.ActHold, "label", "hold:mayor")
-	act(t, lines, spelled, arm.ActHold, "label", "Hold:Mayor")
+	act(t, lines, spelled, arm.ActHold, "label", "Hold:PO")
+	act(t, lines, train, arm.ActHold, "label", "hold:release-train")
+	act(t, lines, cleared, arm.ActStart, "", "")
 	act(t, lines, assigned, arm.ActHold, "assigned", "")
 	act(t, lines, deferred, arm.ActHold, "status", "deferred")
 	act(t, lines, unstarted, arm.ActHold, "held", park)
 	act(t, lines, inFlight, arm.ActHold, "unready", "in flight")
-	if got := len(a.slungLines()); got != 2 || !a.slungBead(free) || !a.slungBead(released) {
-		t.Errorf("slung %v; want the free bead and the released one, once each", a.slungLines())
+	if got := len(a.slungLines()); got != 3 || !a.slungBead(free) || !a.slungBead(released) || !a.slungBead(cleared) {
+		t.Errorf("slung %v; want the free bead, the released one and the one whose hold was released, once each", a.slungLines())
 	}
-	for _, id := range []string{free, released} {
+	for _, id := range []string{free, released, cleared} {
 		if a.isArmed(id) {
 			t.Errorf("%s kept its arm after its sling", id)
 		}
@@ -233,7 +239,7 @@ func TestStoreAcceptanceWhatHoldsAnArmedBead(t *testing.T) {
 			t.Errorf("%s's notes = %q", id, notes)
 		}
 	}
-	for _, id := range []string{blocked, conditional, waits, foreign, human, epic, mayor, spelled, assigned, deferred, unstarted, inFlight} {
+	for _, id := range []string{blocked, conditional, waits, foreign, human, epic, po, mayor, spelled, train, assigned, deferred, unstarted, inFlight} {
 		if !a.isArmed(id) {
 			t.Errorf("held %s lost its arm", id)
 		}

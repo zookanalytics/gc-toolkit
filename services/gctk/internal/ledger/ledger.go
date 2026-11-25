@@ -537,7 +537,7 @@ func landed(what, out string, err error) error {
 // SetState sets one state dimension of bead id to value, with reason, as one
 // `gc bd set-state`: bd records the change in an event bead and makes
 // <dimension>:<value> the bead's one label for the dimension. Gas City's hold
-// labels are such states (hold=mayor is the label hold:mayor). The write's exit
+// labels are such states (hold=po is the label hold:po). The write's exit
 // decides whether it landed, and nothing reads it back.
 func (l *Ledger) SetState(id, dimension, value, reason string) error {
 	if err := l.store.SetState(id, dimension, value, reason); err != nil {

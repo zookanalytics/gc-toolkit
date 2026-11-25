@@ -238,8 +238,8 @@ func waiting(h waits.Holds, anchorOf func(id string) string) []string {
 // scheduled reports whether something sends a piece of work anywhere as
 // things stand: a live run works it, or no dispatch hold holds it and it is
 // armed to start by itself, routed to a pool or an agent, or assigned to one.
-// A dispatch hold is one of Gas City's hold labels, as the runtime adapter
-// reads one (gascity.HasDispatchHold). Gas City serves a bead that carries one
+// A dispatch hold is a hold:<value> label, as the runtime adapter reads one
+// (gascity.HasDispatchHold). Gas City serves a bead that carries one
 // to no worker, and the deferred-dispatch pass slings no armed bead while one
 // holds it, so its route, arm or assignee waits for the hold to lift. A live
 // run is work underway, so it counts whatever the bead carries.
@@ -252,10 +252,11 @@ func scheduled(h waits.Holds, worked bool, routedTo, assignee string, labels []s
 }
 
 // ForProductOwner reports whether labels hold a bead for the Product Owner's
-// placement: hold:mayor, in every spelling Gas City reads as that hold. Such a
-// bead waits in the Product Owner's queue, so a reader that lists that queue
-// reads the label as the order does.
-func ForProductOwner(labels []string) bool { return gascity.HasHold(labels, gascity.HoldMayor) }
+// placement: hold:po, or hold:mayor, its earlier spelling, in every spelling
+// Gas City reads as a hold (gascity.HasPlacementHold). Such a bead waits in the
+// Product Owner's queue, so a reader that lists that queue reads the label as
+// the order does.
+func ForProductOwner(labels []string) bool { return gascity.HasPlacementHold(labels) }
 
 // canGo reports whether a status lets a bead go now: open, which bd's ready
 // set admits, or a claim (in_progress, hooked), which is work going already.

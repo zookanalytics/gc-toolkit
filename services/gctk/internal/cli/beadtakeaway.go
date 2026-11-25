@@ -47,8 +47,9 @@ the pending record, which the landing order works.
 
 --route <rig>/<agent> sends the released bead to a pool, through gc sling with
 no formula and no convoy once its run has ended, and --assign <agent> to a
-named agent, as its assignee in the release's update. Either lifts hold:mayor,
-and either is refused on a closed bead and on a bead whose work is on a blocker
+named agent, as its assignee in the release's update. Either lifts the
+placement hold, hold:po or its earlier spelling hold:mayor, and leaves any other
+hold on, and either is refused on a closed bead and on a bead whose work is on a blocker
 that is no human gate, the waits --waiting-on names among them for a route.
 
 --db names the store, a store's .beads directory. Without it the bead's store

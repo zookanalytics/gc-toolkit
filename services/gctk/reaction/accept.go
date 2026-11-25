@@ -40,11 +40,12 @@ import (
 // and the first stands: a sitting's ruling, a filer's withdrawal or a person's
 // resolve, beside which Accept slings nothing and reopens nothing. It then reads
 // that no open human gate blocks the bead, slings the formula titled
-// `<formula> accept:<token>` with each var, lifts the bead's hold:mayor, since an
-// Accept is a placement, and records the dispatch by clearing the
-// recommendation. A gate filed in the meantime, or a sling that landed no pour
-// under the token, reopens the gate from Accept's own answer. A run that
-// stopped after its answer leaves the acceptance unfinished, and the next run
+// `<formula> accept:<token>` with each var, lifts the bead's placement hold
+// (hold:po, or hold:mayor, its earlier spelling), since an Accept is a
+// placement, and records the dispatch by clearing the recommendation. A gate
+// filed in the meantime, or a sling that landed no pour under the token,
+// reopens the gate from Accept's own answer. A run that stopped after its
+// answer leaves the acceptance unfinished, and the next run
 // finishes it under the same token: it records the dispatch when a pour under
 // the token landed, and otherwise reads that no gate blocks the bead and slings
 // the vars the gate records under the token, whoever runs it.
@@ -234,7 +235,7 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 		case root != "":
 			out.Root = root
 			if err := r.liftHold(bead, ""); err != nil {
-				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
+				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the write that lifts its placement hold did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
 			}
 			if err := r.markDispatched(bead, formula, out.Token, req.Reason); err != nil {
 				return out, stop(4, "acceptance %s already dispatched %s at %s (root %s), but the record did not land (%v). The next Accept finishes the record without a second dispatch: gctk reaction accept %s", out.Token, formula, bead, root, err, bead)
@@ -309,12 +310,12 @@ func (r *Reactions) Accept(req AcceptRequest) (Accepted, error) {
 		}
 	}
 
-	// Lift the bead's hold:mayor, since an Accept is a placement, then record the
+	// Lift the bead's placement hold, since an Accept is a placement, then record the
 	// dispatch, which clears the recommendation. The lift comes first, so a run
 	// that stops between the two leaves an acceptance the next Accept finishes,
 	// lift included.
 	if err := r.liftHold(bead, ""); err != nil {
-		return out, stop(4, "dispatched %s at %s (acceptance %s), but the write that lifts its hold:mayor did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", formula, bead, out.Token, err, bead)
+		return out, stop(4, "dispatched %s at %s (acceptance %s), but the write that lifts its placement hold did not land (%v), so the bead still waits in the placement queue. The next Accept finishes the lift and the record without a second dispatch: gctk reaction accept %s", formula, bead, out.Token, err, bead)
 	}
 	if err := r.markDispatched(bead, formula, out.Token, req.Reason); err != nil {
 		return out, stop(4, "dispatched %s at %s (acceptance %s), but the record did not land (%v). The next Accept finishes the record without a second dispatch: gctk reaction accept %s", formula, bead, out.Token, err, bead)
@@ -451,8 +452,9 @@ func (r *Reactions) reopen(why string, gates []string) string {
 	return " The reopen of " + strings.Join(left, " ") + " did not land, so it reads answered while nothing is dispatched. Reopen it by hand: gc bd reopen <id>."
 }
 
-// liftHold removes every spelling of hold:mayor the bead carries now, with note
-// when one is given, in one write. A bead that carries none is not written.
+// liftHold removes every spelling of the placement hold the bead carries now,
+// with note when one is given, in one write, and leaves every other hold on. A
+// bead that carries none is not written.
 func (r *Reactions) liftHold(bead, note string) error {
 	row, err := r.readBead(bead)
 	if err != nil {
@@ -461,7 +463,7 @@ func (r *Reactions) liftHold(bead, note string) error {
 	if row == nil {
 		return fmt.Errorf("%s does not resolve", bead)
 	}
-	spellings := gascity.Spellings(row.Labels(), "hold:mayor")
+	spellings := gascity.PlacementSpellings(row.Labels())
 	if len(spellings) == 0 {
 		return nil
 	}

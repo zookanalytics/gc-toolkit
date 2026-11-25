@@ -43,7 +43,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{t: t, store: fake.New()}
 	w.store.Put(fake.Bead{ID: "tk-epic", Title: "the epic", Status: "open", IssueType: "epic", Priority: 1})
-	w.store.Put(fake.Bead{ID: "tk-new", Title: "new work", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"hold:mayor"}})
+	w.store.Put(fake.Bead{ID: "tk-new", Title: "new work", Status: "open", IssueType: "task", Priority: 2, Labels: []string{"hold:po"}})
 	w.store.OnWrite = func(kind, id string, args []string) {
 		w.add(strings.ToUpper(kind) + " " + id + " " + strings.Join(args, " "))
 	}
@@ -129,11 +129,11 @@ func TestPlaceUnderAnEpic(t *testing.T) {
 		t.Fatalf("Place: %v", err)
 	}
 	got := w.row("tk-new")
-	if parentOf(got) != "tk-epic" || slices.Contains(got.Labels, "hold:mayor") {
+	if parentOf(got) != "tk-epic" || slices.Contains(got.Labels, "hold:po") {
 		t.Errorf("tk-new = %+v, want its parent tk-epic and its hold lifted", got)
 	}
 	parent, settle, sling, lift := w.index("UPDATE tk-new --parent"), w.index("SCRIPT queue-priority.sh settle tk-new"),
-		w.index("SLING "+pool+" tk-new"), w.index("UPDATE tk-new --remove-label hold:mayor")
+		w.index("SLING "+pool+" tk-new"), w.index("UPDATE tk-new --remove-label hold:po")
 	if parent < 0 || settle < parent || sling < settle || lift < sling {
 		t.Errorf("order %v, want the parent, then the settle, then the sling, then the lift", w.lines())
 	}
@@ -144,10 +144,10 @@ func TestPlaceUnderAnEpic(t *testing.T) {
 		t.Errorf("settle %q names no store", w.lines()[settle])
 	}
 	// The lift and its note ride one write.
-	if l := w.lines()[lift]; !strings.Contains(l, "--append-notes Placed at 2026-11-20T06:00:00Z under tk-epic at P2: slung to "+pool+". hold:mayor lifted.") {
+	if l := w.lines()[lift]; !strings.Contains(l, "--append-notes Placed at 2026-11-20T06:00:00Z under tk-epic at P2: slung to "+pool+". hold:po lifted.") {
 		t.Errorf("the lift %q carries no note in the same write", l)
 	}
-	if want := "place: tk-new placed under tk-epic at P2: slung to " + pool + "; hold:mayor lifted"; out.Line(Request{Bead: "tk-new", Under: "tk-epic"}) != want {
+	if want := "place: tk-new placed under tk-epic at P2: slung to " + pool + "; hold:po lifted"; out.Line(Request{Bead: "tk-new", Under: "tk-epic"}) != want {
 		t.Errorf("line = %q, want %q", out.Line(Request{Bead: "tk-new", Under: "tk-epic"}), want)
 	}
 }
@@ -196,15 +196,21 @@ func TestPlaceStandalone(t *testing.T) {
 }
 
 // Gas City reads its hold trimmed and in any case, and bd removes a label by
-// its exact text, so the lift removes each spelling the bead carries.
+// its exact text, so the lift removes each spelling of the placement hold the
+// bead carries, hold:po and its earlier spelling hold:mayor alike, and keeps
+// every other label, hold:cleared among them, which holds nothing.
 func TestPlaceLiftsEverySpellingOfTheHold(t *testing.T) {
 	w := newWorld(t)
-	w.store.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor ", "hold:mayor", "keep"}})
-	if _, err := w.p.Place(Request{Bead: "tk-new", Standalone: true}); err != nil {
+	w.store.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"Hold:Mayor ", "hold:po", "hold:mayor", "hold:cleared", "keep"}})
+	out, err := w.p.Place(Request{Bead: "tk-new", Standalone: true})
+	if err != nil {
 		t.Fatalf("Place: %v", err)
 	}
-	if got := w.row("tk-new").Labels; !slices.Equal(got, []string{"keep"}) {
-		t.Errorf("labels = %v, want each spelling of the hold lifted and the rest kept", got)
+	if got := w.row("tk-new").Labels; !slices.Equal(got, []string{"hold:cleared", "keep"}) {
+		t.Errorf("labels = %v, want each spelling of the placement hold lifted and the rest kept", got)
+	}
+	if line := out.Line(Request{Bead: "tk-new", Standalone: true}); !strings.HasSuffix(line, "; Hold:Mayor and hold:po and hold:mayor lifted") {
+		t.Errorf("line = %q, want it to name each spelling it lifted", line)
 	}
 }
 
@@ -273,10 +279,13 @@ func TestPlaceRefusesWhatItDoesNotPlace(t *testing.T) {
 		}, "PR-finishing work of tk-anc"},
 		{"no hold and no dispatch", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
 			s.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task"})
-		}, "gc bd set-state tk-new hold=mayor"},
+		}, "gc bd set-state tk-new hold=po"},
 		{"hold:external beside", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
 			s.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"hold:mayor", " Hold:External"}})
 		}, "also carries Hold:External"},
+		{"a hold of the pack's own beside", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
+			s.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"hold:po", "hold:release-train"}})
+		}, "also carries hold:release-train"},
 		{"a status set on purpose", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
 			s.Put(fake.Bead{ID: "tk-new", Status: "deferred", IssueType: "task", Labels: []string{"hold:mayor"}})
 		}, "is deferred"},
@@ -413,7 +422,7 @@ func TestPlaceStoppedPartWayKeepsTheHold(t *testing.T) {
 			if err == nil || Refused(err) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "gctk bead place tk-new") {
 				t.Fatalf("Place = %v, want a stop naming %q and the run that finishes it", err, tc.want)
 			}
-			if !slices.Contains(w.row("tk-new").Labels, "hold:mayor") {
+			if !gascity.HasPlacementHold(w.row("tk-new").Labels) {
 				t.Errorf("a stop at %s lifted the hold", tc.name)
 			}
 		})
@@ -431,7 +440,7 @@ func TestPlaceStoppedAtTheLiftNamesTheLiftByHand(t *testing.T) {
 		return nil
 	}
 	_, err := w.p.Place(Request{Bead: "tk-new", Standalone: true})
-	if err == nil || !strings.Contains(err.Error(), "gc bd update tk-new --remove-label 'hold:mayor' --append-notes 'Placed at") || !strings.Contains(err.Error(), "--db /rig/.beads") {
+	if err == nil || !strings.Contains(err.Error(), "gc bd update tk-new --remove-label 'hold:po' --append-notes 'Placed at") || !strings.Contains(err.Error(), "--db /rig/.beads") {
 		t.Fatalf("Place = %v, want the lift by hand named", err)
 	}
 	if len(w.rt.Slings()) != 1 {
