@@ -981,13 +981,13 @@ func TestRigARunHoldsSlotsForWhatItsCheckUsedAndGivesThemBack(t *testing.T) {
 		l.Unlock()
 	}
 	peaks := rig.NewPeaks(filepath.Join(f.repo, ".git"))
-	if w, err := peaks.Weight(rig.CheckTest); err != nil || w <= 0 {
-		t.Fatalf("the run's peak was not kept: %d, %v", w, err)
+	if w, own, err := peaks.Weight(rig.CheckTest, rig.ScopeFull, countCmd("full")); err != nil || w <= 0 || !own {
+		t.Fatalf("the run's peak was not kept: %d, %v, %v", w, own, err)
 	}
 	if code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 || strings.Contains(errs, "takes") {
 		t.Fatalf("a call answered from its record = %d, want 0 and no slots taken; stderr:\n%s", code, errs)
 	}
-	if err := peaks.Add(rig.CheckTest, time.Now(), 5<<30); err != nil {
+	if err := peaks.Add(rig.CheckTest, rig.ScopeFull, countCmd("full"), time.Now(), 5<<30); err != nil {
 		t.Fatal(err)
 	}
 	f.commitChange("two\n")
@@ -1001,6 +1001,30 @@ func TestRigARunHoldsSlotsForWhatItsCheckUsedAndGivesThemBack(t *testing.T) {
 		t.Fatalf("run under %s=1 = %d, want 0 and no slots taken; stderr:\n%s", rig.NoCapVar, code, errs)
 	}
 	eqRuns(t, f.runs(), "full", "full", "full")
+}
+
+// A run is weighed by the runs of its own command line and scope, so the runs
+// of a lighter command never stand in for it, and a command with none measured
+// takes the most a kept run of its check and scope used.
+func TestRigARunIsWeighedByTheRunsOfItsOwnCommandAndScope(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv(rig.SlotsVar, "10")
+	if err := rig.NewPeaks(filepath.Join(f.repo, ".git")).Add(rig.CheckTest, rig.ScopeFull, countCmd("full"), time.Now(), 12<<30); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 11; i++ {
+		if code, _, errs := f.call("test", "--scope", "affected", "--command", countCmd("affected"), "--force"); code != 0 {
+			t.Fatalf("affected run %d = %d; stderr:\n%s", i, code, errs)
+		}
+	}
+	code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full"), "--force")
+	if code != 0 || !strings.Contains(errs, "takes 3 slots of the machine's 10, 4.0 GiB each, for the 12.0 GiB its last runs here used at most") {
+		t.Fatalf("the full run after eleven affected ones = %d, want 0 taking 3 slots; stderr:\n%s", code, errs)
+	}
+	code, _, errs = f.call("test", "--scope", "full", "--command", countCmd("other"), "--force")
+	if code != 0 || !strings.Contains(errs, "takes 3 slots of the machine's 10, 4.0 GiB each, for the 12.0 GiB a kept run of this check here used at most, since no run of this command is measured") {
+		t.Fatalf("a full run of a command never measured = %d, want 0 taking 3 slots; stderr:\n%s", code, errs)
+	}
 }
 
 func TestRigAWaitForSlotsThatRunsOutOfTimeRunsNothing(t *testing.T) {

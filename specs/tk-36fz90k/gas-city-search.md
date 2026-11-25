@@ -13,8 +13,9 @@ The surface the change adds:
 - Every run `gctk rig` makes (test, lint, typecheck, setup and build) holds
   slots on the machine while its command runs, and waits for them when too few
   are free. A slot stands for 4 GiB, and a run takes one for each 4 GiB the last
-  ten runs of its check in the same repository used at most, or every slot
-  while none of them is measured.
+  ten runs of the same command line, check and scope used at most in the same
+  repository. A command with none measured takes as many as the most a kept
+  run of its check and scope used there, and every slot while none is kept.
 - The slots are files in the push gate's directory, `<city>/.gc/gate-slots`:
   `slot-<i>.lock` up to the machine's count, and `queue.lock`, which orders the
   runs that wait.
@@ -23,7 +24,9 @@ The surface the change adds:
   host.
 - `GC_PUSH_GATE_NO_CAP=1` has a run take no slots, and every command a run
   starts gets it.
-- Each repository keeps its runs' peaks in `<git common dir>/gc-rig-memory/<check>`.
+- Each repository keeps its runs' peaks in
+  `<git common dir>/gc-rig-memory/<check>[-<scope>]`, a line a run naming a
+  digest of its command line.
 - The host adapter reads a file's lock, the machine's memory and a process
   tree's resident memory.
 

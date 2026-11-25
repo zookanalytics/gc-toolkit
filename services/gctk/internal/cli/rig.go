@@ -87,14 +87,16 @@ exit: 0 pass · 1 fail · 2 usage
 // machine's slots (internal/rig, slots.go).
 const rigSlotsHelp = `A run holds slots on the machine while its command runs, so that the checks
 every session on it runs at once fit in its memory. A slot stands for 4 GiB,
-and a run takes one for each 4 GiB the last ten runs of its check in this
-repository used at most, or every slot while none of them is measured. The
-machine has GCTK_RIG_SLOTS slots, else as many as five eighths of its memory
-holds. They are Gas City's push-gate slots, in the city's .gc/gate-slots, so a
-push's test suites and the checks share them. A run that finds too few free
-waits its turn and says what holds them, and --timeout counts the wait with
-the run. GC_PUSH_GATE_NO_CAP=1 takes no slots, and every command runs with it
-set, because the slots its run holds cover what it starts.`
+and a run takes one for each 4 GiB the last ten runs of the same command line,
+check and scope used at most in this repository. A command with none measured
+takes as many as the most a kept run of its check and scope used here, and
+every slot while none is kept. The machine has GCTK_RIG_SLOTS slots, else as
+many as five eighths of its memory holds. They are Gas City's push-gate slots,
+in the city's .gc/gate-slots, so a push's test suites and the checks share
+them. A run that finds too few free waits its turn and says what holds them,
+and --timeout counts the wait with the run. GC_PUSH_GATE_NO_CAP=1 takes no
+slots, and every command runs with it set, because the slots its run holds
+cover what it starts.`
 
 // The exit codes rigRecordedLong states.
 const (
@@ -298,14 +300,14 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 	if ok, reason := rig.Parses(o.command); !ok {
 		return machine("%s; the command is %q", reason, o.command)
 	}
-	held, runFor, code, ended := rigTake(check, co, o.timeout, say, machine)
+	held, runFor, code, ended := rigTake(check, scope, o.command, co, o.timeout, say, machine)
 	if ended {
 		return code
 	}
 	say("running %s at %s", runLabel(scope, o.command), co.Commit)
 	out := rig.Run(co.Top, o.command, runFor, stdout, stderr)
 	held.Release()
-	rigKeepPeak(check, co, out, say)
+	rigKeepPeak(check, scope, o.command, co, out, say)
 	switch out.Kind {
 	case rig.Interrupted:
 		say("stopped by signal %d (%s); the command's process group was stopped, and nothing was recorded", int(out.Signal), out.Signal)
@@ -362,7 +364,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	if ok, reason := rig.Parses(o.command); !ok {
 		return machine("%s; the command is %q", reason, o.command)
 	}
-	held, runFor, code, ended := rigTake(verb, co, o.timeout, say, machine)
+	held, runFor, code, ended := rigTake(verb, "", o.command, co, o.timeout, say, machine)
 	if ended {
 		return code
 	}
@@ -374,7 +376,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	say("running %s", o.command)
 	out := rig.Run(co.Top, o.command, runFor, stdout, stderr)
 	held.Release()
-	rigKeepPeak(verb, co, out, say)
+	rigKeepPeak(verb, "", o.command, co, out, say)
 	code = rigExitPass
 	switch out.Kind {
 	case rig.Interrupted:
@@ -394,15 +396,15 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	return code
 }
 
-// rigTake holds the machine's slots for a run of verb in co (internal/rig,
-// slots.go) within timeout, where a zero timeout waits as long as it takes. It
-// returns the slots it holds and what the wait for them left of timeout for
-// the run. When
-// the wait ends the call, it says why and returns the call's exit and true: a
-// machine failure for a wait that ran out of time, and 128 plus the signal
-// for one a signal stopped. A machine whose memory or slot files cannot be
-// read runs the command with no slots, and says so.
-func rigTake(verb string, co *git.Checkout, timeout time.Duration, say func(string, ...any), machine func(string, ...any) int) (*rig.Held, time.Duration, int, bool) {
+// rigTake holds the machine's slots for a run of command as verb with scope in
+// co (internal/rig, slots.go) within timeout, where a zero timeout waits as
+// long as it takes. It returns the slots it holds and what the wait for them
+// left of timeout for the run. When the wait ends the call, it says why and
+// returns the call's exit and true: a machine failure for a wait that ran out
+// of time, and 128 plus the signal for one a signal stopped. A machine whose
+// memory or slot files cannot be read runs the command with no slots, and says
+// so.
+func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duration, say func(string, ...any), machine func(string, ...any) int) (*rig.Held, time.Duration, int, bool) {
 	if os.Getenv(rig.NoCapVar) == "1" {
 		return nil, timeout, 0, false
 	}
@@ -417,19 +419,23 @@ func rigTake(verb string, co *git.Checkout, timeout time.Duration, say func(stri
 	if note != "" {
 		say("WARN %s", note)
 	}
-	weight, err := rig.NewPeaks(co.Common).Weight(verb)
+	weight, own, err := rig.NewPeaks(co.Common).Weight(verb, scope, command)
 	if err != nil {
 		say("WARN the memory its last runs used could not be read, so it runs alone: %v", err)
 	}
 	n := rig.SlotsFor(weight, count)
 	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", rig.SlotCountText(n), count, gib(rig.SlotSize))
+	used := "its last runs here used at most"
+	if !own {
+		used = "a kept run of this check here used at most, since no run of this command is measured"
+	}
 	switch {
 	case weight == 0:
 		say("%s since no run of this check is measured in this repository, so it runs alone", taking)
 	case weight > int64(count)*rig.SlotSize:
-		say("WARN %s for the %s its last runs here used at most, which is more than they stand for, so it runs alone and can still use up the machine's memory beside the city's other work", taking, gib(weight))
+		say("WARN %s for the %s %s, which is more than they stand for, so it runs alone and can still use up the machine's memory beside the city's other work", taking, gib(weight), used)
 	default:
-		say("%s for the %s its last runs here used at most", taking, gib(weight))
+		say("%s for the %s %s", taking, gib(weight), used)
 	}
 	var until time.Time
 	if timeout > 0 {
@@ -498,12 +504,12 @@ func slotLabel(verb string, co *git.Checkout) string {
 }
 
 // rigKeepPeak keeps the memory the run used, which the slots of the next run
-// of verb in this repository are taken for.
-func rigKeepPeak(verb string, co *git.Checkout, out rig.Outcome, say func(string, ...any)) {
+// of command as verb with scope in this repository are taken for.
+func rigKeepPeak(verb, scope, command string, co *git.Checkout, out rig.Outcome, say func(string, ...any)) {
 	if out.Peak <= 0 {
 		return
 	}
-	if err := rig.NewPeaks(co.Common).Add(verb, time.Now(), out.Peak); err != nil {
+	if err := rig.NewPeaks(co.Common).Add(verb, scope, command, time.Now(), out.Peak); err != nil {
 		say("WARN the %s this run used at most was not kept: %v", gib(out.Peak), err)
 	}
 }

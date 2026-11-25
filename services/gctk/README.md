@@ -135,7 +135,7 @@ worktree of the clone shares and which outlives any one of them:
 |---|---|
 | `gc-rig-checks/<check>/commits/<commit>.json` | the check's record for that commit |
 | `gc-rig-checks/test/trees/<tree>.json` | the full-suite test pass every commit with that tree reads |
-| `gc-rig-memory/<check>` | the most memory each of the check's last runs used, one line a run, which sets how many of the machine's slots its next run takes |
+| `gc-rig-memory/<check>[-<scope>]` | the most memory each kept run of the check with that scope used, one line a run naming a digest of its command line, which sets how many of the machine's slots the next run of that command takes |
 
 Every verb that runs a command holds slots on the machine while it runs, in the
 directory Gas City's push gate keeps its slots in, the city's `.gc/gate-slots`.

@@ -14,8 +14,8 @@ import (
 // A run gctk rig makes holds slots on the machine while its command runs, so
 // that the checks every session on the machine runs at once stay inside its
 // memory. A slot stands for SlotSize of memory, and a run takes one for each
-// SlotSize its check used at most in its last runs in the same repository
-// (Peaks).
+// SlotSize the last runs of its command line, check and scope used at most in
+// the same repository (Peaks).
 //
 // The slots are Gas City's push-gate slots (scripts/push-gate-lock-lib.sh at
 // gastownhall/gascity 33a7d167c8): numbered files slot-<i>.lock in one
@@ -99,8 +99,8 @@ func SlotCount(getenv func(string) string, mem int64) (count int, note string) {
 
 // SlotsFor is how many of count slots a run of a check takes that used weight
 // bytes at most: one for each SlotSize it needs, at least one and at most all
-// of them. A weight of zero, a check never measured, takes all of them, so it
-// runs alone until one run of it is measured.
+// of them. A weight of zero, a check and scope with no run measured, takes all
+// of them, so it runs alone until one run of it is measured.
 func SlotsFor(weight int64, count int) int {
 	if weight <= 0 {
 		return count
