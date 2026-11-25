@@ -8,8 +8,9 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 A backlog refinement sitting works your rig's queue with the operator: every
 bead in your rig's store that Gas City's `hold:mayor` label holds. Each rig has
-its own po, and another rig's queue is its po's. You propose one disposition for each bead,
-with your reasons, and the operator rules. You apply each ruling through its
+its own po, and another rig's queue is its po's. You sort the queue by the
+outcomes its beads serve, then propose one disposition for each bead, with your
+reasons, and the operator rules. You apply each ruling through its
 lever before you bring the next piece, and the write's exit says whether it
 landed. Nothing starts without
 the operator's word, and the queue waits between sittings for as long as the
@@ -29,8 +30,8 @@ store and takes the label trimmed and in any case, as Gas City's hold does.
 `--label hold:mayor` matches only the exact text, so it would leave out a bead a
 person labeled `Hold:Mayor`, which no worker is served either.
 
-Read your rig's open epics, with what holds each, since most dispositions name
-one (your prompt's "Reads").
+Read your rig's open epics, with each one's hypothesis and what holds it, since
+the sort and most dispositions name one (your prompt's "Reads").
 
 ### When the goals are missing or change
 
@@ -78,19 +79,27 @@ agree on its words, with
 `gc bd --rig <rig> create "docs: <the change> in the rig's product goals" -t task -d "<their words>" --json`,
 and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 
-## 2. Propose one disposition for each bead
+## 2. Sort by outcome, then propose one disposition for each bead
+
+Read across the whole queue before you rule on any one bead. Group the beads
+that serve one outcome: what their work changes, and for whom, as an epic's
+hypothesis states it, not the code they touch. For each group, name the open
+epic whose hypothesis covers that outcome. A group that no open epic's
+hypothesis covers is a theme. Then propose a disposition for each bead, with
+its group in view.
 
 | Disposition | When | It names |
 |---|---|---|
 | close as fixed | the default branch already has the fix; cite the commit | the bead the commit names, under `fixed-upstream` |
 | close as duplicate | a closed or shipped bead in this bead's store did the same work | that bead, under `duplicate` |
 | fold into another | an open bead carries the same need | that bead, under `folded` |
-| close as not needed | the premise is gone, or the work is not worth doing; say why | the bead the ruling rests on, under `not-needed` |
+| close as not needed | the premise is gone, the work is not worth doing, or it waits on nothing and is not worth an epic's time; say why | the bead the ruling rests on, under `not-needed` |
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
-| place on its own | a defect that hurts the operator or a rig now and is worth building without an epic; say what it hurts | nothing |
-| leave held | it waits for a later sitting, such as for an epic that does not exist yet | nothing |
+| graduate into a new epic | beads share an outcome that no open epic's hypothesis covers, and the rig's goals make it worth a push of its own | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
+| place on its own | an emergency that cannot wait for an epic, such as the host going down, or work the operator names to run on its own; say which | nothing |
+| wait on a bead | it cannot start until another bead lands, or that bead's landing may end its job | the bead it waits on |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
 Check before you propose:
@@ -104,7 +113,25 @@ Check before you propose:
 - **Place or park:** read the epic's description and check that the bead serves
   its hypothesis, not only its area. An area that carries no hypothesis is not an
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
-- **Place on its own:** use it sparingly, and name the harm.
+- **Graduate into a new epic:** read the hypothesis of each open epic section 1
+  listed, and check that none covers the outcome. Write the hypothesis from
+  that outcome, saying for whom, what changes and the signal that shows it
+  worked, never from the beads' own fixes, and write the boundaries from the
+  hypothesis (`docs/epics.md`, "The contract an epic carries"). Standing work,
+  such as a set of failures or open bugs that keeps returning, gets one bounded
+  push, whose closure condition names the lines it closes on
+  (`docs/epics.md`, "Epics are mortal").
+- **Place on its own:** name the emergency, or where the operator named the
+  bead. That a defect hurts is not enough, since most real defects do: it goes
+  under the epic its outcome belongs to, or into a theme's new one.
+- **Wait on a bead:** the bead it waits on is open. One in another rig's store
+  takes a human gate in place of the edge, as the `waits` skill says. Work that
+  goes on once that bead lands is placed as any other bead, so its row names
+  the epic too. Work whose job that landing may end needs no epic, because the
+  validating closer checks it then.
+- **Close as not needed:** a bead that waits on nothing, serves no open epic
+  and belongs to no theme worth a push closes, rather than stay held with
+  nothing to release it. If it bites again, it is filed again.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
@@ -126,8 +153,9 @@ that does not settle it, propose `ask` or say that your confidence is low.
 Order the beads you propose to place by WSJF against the rig's goals, as your
 prompt's "Sequencing: WSJF" says: value, time criticality, and
 risk reduction or opportunity enablement, over job size. Compare them with one
-another and recommend each bead's priority, or its shift under its parent, with
-the reasoning in words. Store no score.
+another and recommend each bead's priority, or its shift under its parent, and
+each proposed epic's priority against the rig's open epics, with the reasoning
+in words. Store no score.
 
 ## 4. A queue too long to read in the sitting
 
@@ -136,15 +164,22 @@ Tell the operator how long the sort will run and that they can step away while
 it does.
 
 - Split the queue into chunks of about 20 beads, and start one sorter per chunk,
-  all at once. Give each its chunk, the open epics with what holds each, the
-  rig's goals as section 1 read them, and sections 2 and 3 of this skill.
+  all at once. Give each its chunk, the open epics with each one's hypothesis
+  and what holds it, the rig's goals as section 1 read them, and sections 2 and
+  3 of this skill.
 - A sorter changes nothing: no bead writes, no slings, no closes, no notes, and
   no edits, fetches or checkouts in any repository. It writes one file, one
-  tab-separated row per bead in its chunk: id, priority, disposition, what it
-  names (or `-`), confidence (`high`, `med` or `low`), a reason of one plain
-  sentence, and a short title. It checks its row count against its chunk.
+  tab-separated row per bead in its chunk: id, priority, the outcome it serves
+  in a few words, the open epic whose hypothesis covers that outcome (or `-`),
+  disposition, what it names (or `-`), confidence (`high`, `med` or `low`), a
+  reason of one plain sentence, and a short title. It checks its row count
+  against its chunk.
 - A sorter proposes one disposition and one sentence, so read further on any
   bead the operator asks about.
+- Once every sorter has returned, group all the rows by outcome before you
+  bring anything. A sorter sees only its chunk, so a theme can span chunks:
+  propose each graduation from the whole group, and recheck the dispositions
+  of its beads.
 
 ## 5. Bring it in pieces
 
@@ -155,6 +190,9 @@ it does.
   your confidence is high.
 - Then bring the rest by disposition and by subject, at most about 25 items a
   piece, with the work to place in its WSJF order.
+- Each epic you propose to graduate is a piece of its own: its handle,
+  hypothesis and boundaries, its priority, the beads it would hold, and, when it
+  is a push on standing work, the lines it closes on.
 
 ## 6. Apply each ruling
 
@@ -175,8 +213,22 @@ reason in `--note`, with the commit for a fix.
 A bead sent where the rig says goes there by the commands the rig's `AGENTS.md`
 gives.
 
+A graduation runs in this order, each write taking its exit. File the epic in
+your rig's store with the `work` skill's epic writer, `epic.sh`, with the
+fields the operator agreed to and the note that says whose words each field is.
+Set its priority, and park it when the operator rules that its push waits, both
+through your prompt's levers. Only then place each of its beads under it: a
+placement under an epic nothing parks sends the bead at once, and a run that has
+started keeps running when its epic is parked later.
+
+A wait runs through the `waits` skill. Work that goes on once the bead it waits
+on lands takes that skill's edge ("Make a bead wait on other work"), then its
+placement, which arms it while the edge holds it. Work whose job that landing
+may end takes the close brief, the edge and the arm of "Have a bead checked and
+closed once other work lands", then the lift of its hold that section gives.
+
 ## 7. Stop when the operator says
 
-Each ruling is on its bead, and what is left stays held, so the next queue read
-shows where the next sitting starts. Run `gc runtime drain-ack` once the operator
-says the sitting is done.
+Each ruling is on its bead, and what the sitting did not reach stays held, so
+the next queue read shows where the next sitting starts. Run
+`gc runtime drain-ack` once the operator says the sitting is done.

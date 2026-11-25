@@ -152,7 +152,18 @@ closes it that way, through `stand-down.sh`, whatever its latest ruling reads.
 There are no standing epics. An area that is only ever "always improvable"
 carries no hypothesis that can be answered, so it is not an epic — filing it as
 one creates a container that never closes, which Shape Up bans as dead weight.
-Such an area is ordinary flow, or a future theme once that layer exists.
+
+A push on such an area is an epic, bounded like any other. Its hypothesis says
+that clearing a named standing set leads to an outcome. For example, clearing
+every failure `gc doctor` reports today leads to a doctor that stays quiet on a
+healthy city, so a finding that fires means something just broke. The operator
+chooses when the push runs, through its priority and its park
+([steering.md](steering.md#a-park)). Its closure condition names the lines it
+closes on: the outcome reached and held for a stated time, or a stated share of
+the set cleared, such as nine in ten of the failures standing when it began. A
+push that reaches either line is ruled closed at its review, accomplished for
+that push ([How an epic closes](#how-an-epic-closes)), and the area's next push
+is a new epic with its own set and lines.
 
 A standing theme or initiative layer above epics, which would legitimately never
 close and would spawn bounded epics, is deliberately deferred. Mechanisms for
@@ -310,7 +321,7 @@ lands goes under its epic. Once closed, a Delivery takes nothing. Later work for
 the same part of the product goes under the epic, and the next review gathers
 it into a Delivery it aims or leaves it there. A part of the product with a
 hypothesis of its own is an epic of its own, and one that is only ever improvable
-is ordinary flow ([Epics are mortal](#epics-are-mortal)).
+is worked in bounded pushes ([Epics are mortal](#epics-are-mortal)).
 
 **The Epic Checkpoint.** It is the same review as any other
 ([Reviewing an epic](#reviewing-an-epic)), with the landed work as its

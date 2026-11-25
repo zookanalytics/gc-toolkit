@@ -136,8 +136,9 @@ found from the hypothesis rather than from a list of the other epics
 (`docs/epics.md`, "Belongs and Boundaries"). Wherever you report the filing,
 quote each field you wrote and call it your proposal. A Delivery
 carries an `Aim:` line instead, as above. An area that is only ever improvable
-has no hypothesis to answer, so it is not an epic, and its work is ordinary
-flow (`docs/epics.md`, "Epics are mortal").
+has no hypothesis to answer, so it is not an epic, but a bounded push on it is:
+its hypothesis says that clearing a named standing set leads to an outcome
+(`docs/epics.md`, "Epics are mortal").
 
 The writer refuses an epic whose parent is not an epic when it has no
 hypothesis, and files nothing. It prints the new epic's id:
@@ -202,12 +203,13 @@ polecat pool is `mol-polecat-work`.
   the work with the label left on and the bead still in the queue. Once the
   operator has placed it, carry that out with `gctk bead place`, under the
   parent, which is the epic, or its open Delivery whose aim covers the bead, or
-  with `--standalone` for no parent. It sets the parent, settles the priority,
-  slings the bead to its rig's polecat pool, or arms it while a park or a
-  blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
-  `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
-  parent. Running it again after a failure finishes the placement without a
-  second run:
+  with `--standalone` for no parent, which is for an emergency that cannot wait
+  for an epic and for work the operator names to run on its own. It sets the
+  parent, settles the priority, slings the bead to its rig's polecat pool, or
+  arms it while a park or a blocker holds it, and then lifts the hold.
+  `--route <rig>/<pool>` and `--on <formula>` send it elsewhere, and
+  `--shift <±n>` ranks it against its parent. Running it again after a failure
+  finishes the placement without a second run:
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
