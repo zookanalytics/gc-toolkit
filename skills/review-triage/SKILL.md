@@ -117,10 +117,17 @@ anchor beside its own diff evidence, and it reopened this lane. So the anchor's
 reason the review formula prints says so, and your verdict also rules on that
 round, which its write refuses to record without the ruling.
 
-A merge whose subject opens with `Supersede` is the commit
-`gctk pr bring-current` makes when the target's history was rewritten after the
-branch last took it. Its own `git show --remerge-diff` shows the rewrite, not
-work resolved on this branch, so judge the merge that takes it.
+`gctk pr bring-current` makes a superseding commit when the target's history
+was rewritten after the branch last took it. A merge is that commit only when
+all of these hold:
+
+- its subject reads `Supersede <base> with origin/<target> at <tip>`;
+- its first parent is `<tip>` and its second is `<base>`;
+- its tree is `<tip>`'s.
+
+Its own `git show --remerge-diff` shows the rewrite, not work resolved on this
+branch, so judge the merge that takes it. Judge any other merge as one resolved
+by hand.
 
 On a review bead, read the round first:
 
