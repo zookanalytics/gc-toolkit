@@ -1,13 +1,15 @@
 ---
 name: backlog-refinement
-description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (the beads labeled hold:mayor) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, use portfolio-sync.
+description: Use when you are the po in a backlog refinement sitting, working the queue of held new work (the beads labeled hold:po) with the operator, such as sorting the queue into proposals, sequencing the work to place, bringing it in pieces and applying each ruling. For a portfolio sync over the epics, use portfolio-sync.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
 # Backlog refinement
 
 A backlog refinement sitting works your rig's queue with the operator: every
-bead in your rig's store that Gas City's `hold:mayor` label holds. Each rig has
+bead in your rig's store that the placement hold holds, `hold:po` or its
+earlier spelling `hold:mayor`, which a bead held before the queue moved to
+`hold:po` carries. Each rig has
 its own po, and another rig's queue is its po's. You propose one disposition for each bead,
 with your reasons, and the operator rules. You apply each ruling through its
 lever before you bring the next piece, and the write's exit says whether it
@@ -25,9 +27,10 @@ Open from your rig's product goals and each doc that page says its goals come
 from, as your prompt's "The rig's goals" reads them from the default branch.
 Then list the queue with each bead's priority, by the queue read in your
 prompt's "Reads", piped through `sort`. That read keeps the beads of your rig's
-store and takes the label trimmed and in any case, as Gas City's hold does.
-`--label hold:mayor` matches only the exact text, so it would leave out a bead a
-person labeled `Hold:Mayor`, which no worker is served either.
+store and takes both spellings trimmed and in any case, as Gas City's hold
+does. `--label hold:po` matches only the exact text, so it would leave out a
+bead held on `hold:mayor`, or one a person labeled `Hold:PO`, which no worker is
+served either.
 
 Read your rig's open epics, with what holds each, since most dispositions name
 one (your prompt's "Reads").
@@ -63,8 +66,8 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
   A list that printed no JSON array did not answer: file nothing, and tell the
   operator their words wait for the store.
 - **Send the request on**, so a normal PR writes the page. A request already
-  routed or in progress is on its way, so send it nothing. While `hold:mayor`
-  holds it, place it, which sends it and lifts the hold, and otherwise sling it
+  routed or in progress is on its way, so send it nothing. While the placement
+  hold holds it, place it, which sends it and lifts the hold, and otherwise sling it
   (`gc sling <rig>/<binding>.polecat <bead>`):
 ```bash
 # >>> gctk-bin

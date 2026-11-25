@@ -79,15 +79,16 @@ gate, below).
 - `<rig>` is the bead's own rig, whose polecat pool runs the closer, and the
   arm needs the bead open with no route. A first reaction writes the brief, the
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
-- A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
-  keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the
-  bead waits on its blocker instead of in the queue. Gas City reads the label in
-  any case, and bd removes a label only by its exact text, so list the bead's
-  labels and remove each one that spells the hold:
+- A bead the placement hold holds, new work in the po's queue, carries
+  `hold:po`, or `hold:mayor`, its earlier spelling, and keeps its arm until the
+  hold lifts. Once the arm lands, lift the hold, and the bead waits on its
+  blocker instead of in the queue. Gas City reads a hold in any case, and bd
+  removes a label only by its exact text, so list the bead's labels and remove
+  each one that spells `hold:po` or `hold:mayor`, and no other hold:
 
   ```bash
   gc bd label list <bead>
-  gc bd update <bead> --remove-label hold:mayor   # and one --remove-label for each other spelling listed, such as Hold:Mayor
+  gc bd update <bead> --remove-label hold:po   # one --remove-label for each spelling listed, such as hold:mayor or Hold:PO
   ```
 - bd keeps one edge type per pair of beads and refuses a second, so a bead that
   already carries another edge type onto the blocker needs that edge removed
@@ -97,7 +98,7 @@ gate, below).
 - A converse sign-off writes the brief and the arm for its subject when the
   ruling leaves the subject waiting on work the sitting sent, after the
   headline writes the edge (`--waiting-on <work> --close-brief "<…>"`, the
-  converse-settle step), and then lifts the subject's `hold:mayor` itself.
+  converse-settle step), and then lifts the subject's placement hold itself.
 
 ## Wait on a person
 

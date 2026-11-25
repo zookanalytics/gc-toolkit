@@ -142,7 +142,7 @@ things: a `review-rubric` amendment, or a change to the method of the review
 that let the miss through, such as the correctness method itself
 (`skills/review-correctness/SKILL.md`). The method change is a
 [fix in code](#fixes-in-code), filed as an engineering bead held for placement
-(`-l hold:mayor` on its create, as the distiller formula's file-and-dispatch
+(`-l hold:po` on its create, as the distiller formula's file-and-dispatch
 step files it). It is never one tactical rule per observation. Judgment 2
 weighs a cluster's recurrence by its distinct `obs.provenance`, as it does any
 pattern's.

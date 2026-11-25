@@ -511,7 +511,7 @@ possibly retirement proposals — file those like any survivor.
 ## 1. File one bead per surviving proposal
 
 A proposal waits for the operator's placement sitting like any finding, so it
-is filed held with Gas City's `hold:mayor` label and routed to no pool
+is filed held with the `hold:po` label and routed to no pool
 (docs/feedback-learning.md, *The promotion path*).
 ```bash
 BODY="## Rule
@@ -541,7 +541,7 @@ BODY="## Rule
 # the polecat that builds it once it is placed: they send its branch through the
 # refinery to the operator's review.
 PROPOSAL_META='{"task_kind":"prompt-update","target":"main","merge_strategy":"mr"}'
-BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -l hold:mayor -d "$BODY" --metadata "$PROPOSAL_META" --json)
+BEAD_JSON=$(gc bd create "prompt-update: <add|retire|harden> — <rule summary>" -t task -l learning -l prompt-update -l hold:po -d "$BODY" --metadata "$PROPOSAL_META" --json)
 BEAD=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
 [ -n "$BEAD" ] && [ "$BEAD" != "null" ] || { CREATE_ERR=$(printf '%s' "$BEAD_JSON" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null); echo "WARN: could not create prompt-update bead for $PATTERN${CREATE_ERR:+ ($CREATE_ERR)}; skipping" >&2; continue; }
 echo "filed prompt-update $BEAD for placement (pattern $PATTERN)"
@@ -560,7 +560,7 @@ gc bd update "$PATTERN" --set-metadata "proposal_bead=$BEAD" --set-metadata "pro
 
 A route-to-engineering cluster gets ONE ordinary work bead, briefed and filed
 as the rubric's Fixes in code says. It waits for placement the same way:
-`-l hold:mayor` on its create, and no route. It carries no
+`-l hold:po` on its create, and no route. It carries no
 task_kind=prompt-update and no bullet-cap accounting. Dedup on the pattern
 bead's `eng_bead` first (skip while it or its PR is live).
 The pattern waits on it and records the outcome, so later runs neither

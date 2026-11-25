@@ -15,7 +15,7 @@ member, and runs the refusals check as its first act
 (`gctk reaction check <subject> --run <root>`). It then gives the
 subject a cheap first reaction: it writes a first-reaction card to the notes,
 headed with its run, and disposes the subject. It routes the subject to the pool
-that does that work or holds it with Gas City's `hold:mayor` label for the
+that does that work or holds it with the `hold:po` label for the
 operator's placement sitting, recommends an action for the operator to trigger,
 holds it on the bead it waits for, routes a confident no-op to a validating
 closer, or puts it to the operator as a human gate. It closes its step and

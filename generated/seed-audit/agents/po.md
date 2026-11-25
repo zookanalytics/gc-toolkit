@@ -66,10 +66,11 @@ it held.
 
 ## Reads
 
-- The queue: `gc beads list --format=json | jq -r '(if type == "array" then . else .beads end)[] | select(.id | startswith("tk-")) | select(any(.labels[]?; test("^[[:space:]]*hold:mayor[[:space:]]*$"; "i"))) | "\(.id)\tP\(.priority // "-")\t\(.title)"'`.
+- The queue: `gc beads list --format=json | jq -r '(if type == "array" then . else .beads end)[] | select(.id | startswith("tk-")) | select(any(.labels[]?; test("^[[:space:]]*hold:[[:space:]]*(po|mayor)[[:space:]]*$"; "i"))) | "\(.id)\tP\(.priority // "-")\t\(.title)"'`.
   It keeps the beads of this rig's store, whose ids carry its prefix, and reads
-  the label trimmed and in any case, as Gas City's hold does, which `--label`
-  does not. A failing store can drop its rows unannounced.
+  `hold:po` and its earlier spelling `hold:mayor` trimmed and in any case, as
+  Gas City's hold does, which `--label` does not. A failing store can drop its
+  rows unannounced.
 - A bead: `gc bd --rig gc-toolkit show <id>`.
 - The epics: `gc bd --rig gc-toolkit list --type epic --status open --json`, and for
   each `"$(gc gc-toolkit scripts-dir)/bead-context.sh" <epic> --frontier --horizon`,
@@ -93,7 +94,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   gate releases it.
 - Priority: `"$S/queue-priority.sh" move <bead> <P0-P4>`, or `--shift <±n>`
   under a parent.
-- Hold: `gc bd --rig gc-toolkit set-state <bead> hold=mayor --reason "<why>"`.
+- Hold: `gc bd --rig gc-toolkit set-state <bead> hold=po --reason "<why>"`.
 - Close: the `work` skill's "Close a bead that needs no work", with the kind and
   the bead the disposition names: `fixed-upstream` or `duplicate` and a closed or
   shipped bead in the same store, `folded` and an open bead that carries the

@@ -210,7 +210,7 @@ Every change is a bead you file in your own rig's store, as you file work for a
 pool (the `work` skill, filing new work): beside the subject, or as its member
 when the subject is an epic. Its target goes in the create: the rig's default
 branch, or the integration branch of an effort the change belongs to. It
-carries no route and no `hold:mayor`, because the operator routed it here. Its
+carries no route and no `hold:po`, because the operator routed it here. Its
 description records the ruling: the operator's words, quoted, with the date and
 this conversation, and the scope of the change, so a reviewer sees where its
 decisions came from. A bead you file carries only what you wrote. The subject
@@ -288,10 +288,11 @@ gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date 
 of this skill's name: `gc-toolkit` in `gc-toolkit.converse-edit`. `gc skill
 list` prints it in this skill's FROM column.
 
-The deferred-dispatch pass sends no arm while `hold:mayor` holds the subject,
-so remove each label it lists that spells `hold:mayor`, in any case, one
-`--remove-label` each, because bd removes a label only by its exact text:
-`gc bd update "$SUBJECT" --remove-label hold:mayor`.
+The deferred-dispatch pass sends no arm while a hold holds the subject, so
+remove each label it lists that spells the placement hold, `hold:po` or its
+earlier spelling `hold:mayor`, in any case, one `--remove-label` each, because
+bd removes a label only by its exact text:
+`gc bd update "$SUBJECT" --remove-label hold:po`. Leave any other hold on.
 
 ## Resume a change a sitting filed
 

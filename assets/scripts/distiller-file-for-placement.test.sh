@@ -3,8 +3,8 @@
 # proposal for the operator's placement sitting, not into the polecat pool.
 #
 # A prompt-update or engineering bead is new work, so it follows the intake rule
-# a finding follows (docs/steering.md): it is filed held with Gas City's
-# hold:mayor label and routed to no pool, and the sitting places it under an epic
+# a finding follows (docs/steering.md): it is filed held with the hold:po
+# label and routed to no pool, and the sitting places it under an epic
 # or routes it on its own. The hold rides the create, so the bead is never in the
 # store without it.
 #
@@ -88,7 +88,7 @@ has "$LOG" "bd create prompt-update:" "the proposal is filed as a prompt-update 
 CREATE_META=$(printf '%s\n' "$LOG" | grep -F 'bd create' | sed 's/^.*--metadata //;s/ --json.*$//')
 printf '%s' "$CREATE_META" | jq -e . >/dev/null 2>&1 \
   && ok "the create's metadata is parseable JSON" || bad "the create's metadata is parseable JSON" "$CREATE_META"
-has "$LOG" "-l hold:mayor" "the create holds it with hold:mayor, which puts it in the sitting's queue"
+has "$LOG" "-l hold:po" "the create holds it with hold:po, which puts it in the sitting's queue"
 eq "$(printf '%s' "$CREATE_META" | jq -r 'has("placement")' 2>/dev/null)" "false" \
   "…and carries no placement marker"
 eq "$(printf '%s' "$CREATE_META" | jq -r '.task_kind // ""' 2>/dev/null)" "prompt-update" "…as a prompt-update"
@@ -116,7 +116,7 @@ STEP_TEXT="$(awk '/^## 1\. File one bead per surviving proposal/ { inb = 1 }
   || bad "sections 1 and 1b of the filing step read" "headings not found in $TOML"
 hasnt "$STEP_TEXT" "gc.routed_to" "no route is stamped on a filed bead"
 hasnt "$STEP_TEXT" "pool-route.sh" "no pool is resolved for one"
-has "$STEP_TEXT" '`-l hold:mayor` on its create' "the engineering bead's create carries the hold too"
+has "$STEP_TEXT" '`-l hold:po` on its create' "the engineering bead's create carries the hold too"
 hasnt "$STEP_TEXT" 'placement=pending' "and the step names no placement marker"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

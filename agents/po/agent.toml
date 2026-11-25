@@ -1,6 +1,6 @@
 # po — the operator's prioritization partner for one rig: a named on-demand
 # session of each rig (stanza in pack.toml) the operator opens for a sitting,
-# backlog refinement over the rig's hold:mayor queue or a portfolio sync over
+# backlog refinement over the rig's hold:po queue or a portfolio sync over
 # the rig's epics. Its shape is Gas Town's mayor's, and
 # docs/built-once-target.md names each difference.
 scope = "rig"
@@ -29,7 +29,7 @@ sleep_after_idle = "1h"
 # sling_query, which refuses it at the caller. A graph.v2 pour, by --on or a
 # default formula, never runs sling_query.
 default_sling_formula = ""
-sling_query = 'echo "the po takes no slung work: send {} to a work pool with gc sling, or hold it for the po with gc bd set-state {} hold=mayor --reason <why>" >&2; exit 1'
+sling_query = 'echo "the po takes no slung work: send {} to a work pool with gc sling, or hold it for the po with gc bd set-state {} hold=po --reason <why>" >&2; exit 1'
 
 [env]
 # A memory file would carry one sitting's context into the next by another

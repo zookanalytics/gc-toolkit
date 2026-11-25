@@ -27,9 +27,9 @@ File a bead for the work. The worker reads its description to learn what to do:
 gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks like>" --json
 ```
 
-Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
+Add `--parent <epic>` when an epic applies, and `--labels hold:po` when the
 bead may not be sent yet (below). A bead that already exists is held with
-`gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
+`gc bd set-state <id> hold=po --reason "<why it waits for placement>"`.
 Filing starts nothing: afterwards, send the bead, make it wait (the waits
 skill), or leave it for the operator to place.
 
@@ -75,9 +75,11 @@ skill), or leave it for the operator to place.
   saw fail at its head, whether a check there shows it or you ran it there
   yourself, and its tracker is filed and sent in one call (below). Other
   critical work runs now only when the operator routes it. File any other bead
-  with Gas City's `hold:mayor` label in its create and no route or arm: the
-  operator decides where it goes. `gc beads list --label hold:mayor` lists each
-  bead filed so that still waits, in every rig.
+  with the `hold:po` label in its create and no route or arm: the operator
+  decides where it goes. `gc beads list --label hold:po` lists each bead filed
+  so that still waits, in every rig, and a bead held before the queue moved to
+  `hold:po` carries `hold:mayor`, which `gc beads list --label hold:mayor`
+  lists.
 - **A failure on the default branch is filed as its tracker, and never held.**
   The tracker writer files one tracker per failure, with no hold, and sends the
   tracker it files to its rig's polecat pool, so the failure goes to be fixed.
@@ -197,14 +199,15 @@ gc sling <rig>/<pool> <bead> --on <formula>
 With no `--on`, the sling runs the pool's `default_sling_formula`, which for a
 polecat pool is `mol-polecat-work`.
 
-- **A held bead is placed, never slung.** A bead carrying `hold:mayor` waits
-  for the operator's placement, and a sling reads no hold, so it would start
-  the work with the label left on and the bead still in the queue. Once the
-  operator has placed it, carry that out with `gctk bead place`, under the
-  parent, which is the epic, or its open Delivery whose aim covers the bead, or
-  with `--standalone` for no parent. It sets the parent, settles the priority,
-  slings the bead to its rig's polecat pool, or arms it while a park or a
-  blocker holds it, and then lifts the hold. `--route <rig>/<pool>` and
+- **A held bead is placed, never slung.** A bead carrying `hold:po`, or
+  `hold:mayor`, its earlier spelling, waits for the operator's placement, and a
+  sling reads no hold, so it would start the work with the label left on and
+  the bead still in the queue. Once the operator has placed it, carry that out
+  with `gctk bead place`, under the parent, which is the epic, or its open
+  Delivery whose aim covers the bead, or with `--standalone` for no parent. It
+  sets the parent, settles the priority, slings the bead to its rig's polecat
+  pool, or arms it while a park or a blocker holds it, and then lifts the
+  placement hold. `--route <rig>/<pool>` and
   `--on <formula>` send it elsewhere, and `--shift <±n>` ranks it against its
   parent. Running it again after a failure finishes the placement without a
   second run:

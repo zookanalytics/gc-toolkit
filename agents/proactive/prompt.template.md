@@ -185,10 +185,10 @@ biased toward moving work forward:
 an epic (a bead with a parent), on PR-finishing work (it carries `anchor_bead`),
 on the tracker of a failure already red on a base branch (it carries
 `failure_key`), or on an emergency. Any other bead the actionable exit holds
-with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
-leaves unrouted, and the blocked exit's `--then-route` arms nothing for it. The
-operator's placement sitting then places it under an epic or routes it on its
-own; `gc beads list --label hold:mayor` lists each bead held so. The scan reacts
+with the `hold:po` label (`gc bd set-state <id> hold=po`) and leaves unrouted,
+and the blocked exit's `--then-route` arms nothing for it. The operator's
+placement sitting then places it under an epic or routes it on its own;
+`gc beads list --label hold:po` lists each bead held so. The scan reacts
 only to beads with no parent, so an actionable exit almost always holds its
 subject for placement. Choose the exit on the bead's merits all the same, and
 let the script apply the rule: write the card and the takeaway so they read true
@@ -327,7 +327,7 @@ The exit's status says what to do next:
   reason.
 - **2** — the call is malformed, and nothing was written. Fix what its message
   names and run the block again.
-- **4** — the exit stopped part way: the route never stamped, the `hold:mayor`
+- **4** — the exit stopped part way: the route never stamped, the `hold:po`
   label, its note or an emergency's P0 never landed, the human gate never
   filed, the wait never became a `blocks` edge, the `--then-route` dispatch or
   the closer's arm never landed, or the closer never slung. A subject in that

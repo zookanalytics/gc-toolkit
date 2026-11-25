@@ -4,7 +4,7 @@
 # run's one step, react, to this pool, and Gas City's default work
 # query offers that step to a worker, which reads the subject, writes a card
 # to its notes, then disposes the subject — route it to a pool (or, when no
-# epic holds it, hold it with Gas City's hold:mayor label for the operator's
+# epic holds it, hold it with the hold:po label for the operator's
 # placement sitting) or assign it to a named agent other than the po, hold it
 # on a `blocks` edge, hand a confident no-op to a validating closer, or put it
 # to the operator as a human gate — and closes its step. NOT a resident loop.
