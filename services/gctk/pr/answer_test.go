@@ -381,6 +381,36 @@ func TestAnAnswerThatDoesNotLandLeavesItsAskOpen(t *testing.T) {
 	}
 }
 
+// A head's comment that does not land stops the post before its later writes:
+// a must-fix point on a post with no thread has its answer in that comment
+// alone, so the post is not marked handled, nor its request for changes
+// dismissed, until the post run again puts the comment on the PR.
+func TestAHeadsCommentThatDoesNotLandHoldsTheLaterWrites(t *testing.T) {
+	d := newRounds(t)
+	const cr = prURL + "#pullrequestreview-210"
+	d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
+		Author: "operator", AuthorCanPush: true, Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z",
+		ViewerReactions: []string{"EYES"}})
+	ask := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
+	d.rule(t, 1, head, later, review.Ruling{Ask: ask, Ruling: review.RulingMustFix, Reason: "Renamed.", Commit: later})
+	d.posts.fail["comment"] = errors.New("pr-post.sh comment: exit 1: gh: error connecting to api.github.com")
+	_, err := d.post(t)
+	var unanswered *pr.Unanswered
+	if !errors.As(err, &unanswered) || d.reacted("PRR_210", "THUMBS_UP") ||
+		slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool {
+			return a.Method == "DismissReview" || a.Method == "RequestReview"
+		}) {
+		t.Fatalf("a head's comment that did not land returned %v, marked the post %v, asked %+v", err,
+			d.reacted("PRR_210", "THUMBS_UP"), d.github.Asks())
+	}
+	delete(d.posts.fail, "comment")
+	if got := d.posted(t); got.Comment != "posted" || !d.reacted("PRR_210", "THUMBS_UP") ||
+		!slices.Equal(got.Dismissed, []string{cr}) {
+		t.Fatalf("the post run again: comment %q, post marked %v, dismissed %v", got.Comment,
+			d.reacted("PRR_210", "THUMBS_UP"), got.Dismissed)
+	}
+}
+
 // A reply the writer answers as posted and the PR's read does not show is not
 // marked: the post returns non-zero, with no mark and no resolve, and the post
 // run again marks the post and resolves its thread once the reply shows.

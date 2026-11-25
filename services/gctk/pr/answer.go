@@ -50,6 +50,10 @@ import (
 //     handled mark, after the review request that asks its author to review
 //     again.
 //
+// A head's comment that does not land stops the post before its later writes,
+// since a must-fix point on a post with no thread has its answer in that
+// comment alone, and the post run again starts from it.
+//
 // A reply opens with a line naming its ask (answerMark), a handled mark is
 // found by the city's own reaction, a resolve by the thread's state and a
 // dismissal by the review's, so the post run again posts nothing twice. Each
@@ -149,7 +153,9 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 		return out, err
 	}
 	if it.Repair != nil || len(run.Left(n, asks)) == 0 {
-		a.comment(body, review.Mark(run.Root, it.Triage.Head))
+		if a.comment(body, review.Mark(run.Root, it.Triage.Head)); len(a.failed) > 0 {
+			return out, &Unanswered{Failed: a.failed}
+		}
 	}
 	if err := a.answer(); err != nil {
 		return out, err
