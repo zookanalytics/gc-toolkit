@@ -23,8 +23,12 @@
 #     bead's blocks edge onto it, or finds one of the same reason, and exits
 #     $STUB_ASK_RC with nothing filed when that is set.
 #     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
-#     landing onto the owner's branch the lifecycle stub logged, and the fake
-#     `gh pr edit` keeps the body it gives PR #<n> as $GH_DIR/edit_<n>.md. The
+#     landing onto the owner's branch the lifecycle stub logged. With --edit it
+#     is the real one's, through $BIN/gctk-real (_rt_gctk_real). The fake gh
+#     answers GitHub's GraphQL as gctk asks it: the read of PR #<n>'s title and
+#     body from $GH_DIR/view_<n>.json, and updatePullRequest, which writes the
+#     title and body it sets back there and logs "<n> <field>..." to
+#     $LOGS/edits.log, or exits $STUB_EDIT_RC when that is not 0. The
 #     store's wait edges are lines of $STUB_HOLDS, "<bead> <what it waits on>":
 #     a blocks edge a create writes is added there, `gc bd dep list` reads
 #     them, and `gctk bead holds` answers from the ones whose far bead the
@@ -33,6 +37,10 @@
 #     prints $STUB_SESSIONS_JSON, and nothing when it is unset, which is a list
 #     that cannot be read. `gctk review` is the real one's, the binary
 #     $RT_GCTK_REAL names, which a suite that reads the check index builds.
+#   - $BIN/gctk-real, the binary $RT_GCTK_REAL names, for a suite that also
+#     names the compiled fake gc (services/gctk/internal/gcbd/fakegc) in
+#     $RT_FAKE_GC: it reads $STORE through that fake gc, first on PATH for it
+#     alone, and GitHub through the fake gh.
 # No live city, store, GitHub or network.
 
 PASS=0; FAIL=0
@@ -60,13 +68,13 @@ rt_init() {
   done
   export GC_QUEUE_PRIORITY_TOOL="$SUT/queue-priority.sh"
   STORE="$TMP/store.json"; echo '[]' > "$STORE"
-  : > "$LOGS/gc.log"; : > "$LOGS/gh.log"; : > "$LOGS/gctk.log"; : > "$LOGS/scripts.log"
+  reset_logs
   export STORE LOGS GH_DIR SUT
   export STUB_LOGIN="gc-city-bot" STUB_SLING_RC=0 STUB_CREATE_RC=0 STUB_EDIT_RC=0 STUB_RECORD_RC=0
   export STUB_NEXT_PR=500 STUB_UPDATE_FAIL="" STUB_VARS="$TMP/vars.json" STUB_HOLDS="$TMP/holds.txt"
   : > "$STUB_HOLDS"
   rt_vars
-  _rt_gc; _rt_gh; _rt_gctk
+  _rt_gc; _rt_gh; _rt_gctk; _rt_gctk_real
   export PATH="$BIN:$PATH"
   export GCTK_BIN="$BIN/gctk"
   rt_repos
@@ -119,10 +127,13 @@ rt_repos() {
   git -C "$SEED" push -q origin main
   git clone -q "$ORIGIN" "$RIG"
   # The rig's origin is a github.com repository by its URL, which git rewrites
-  # to the local bare origin for every fetch and push.
+  # to the local bare origin for every fetch and push. The rewrite is in the
+  # suite's global config, so $BIN/gctk-real, which reads the origin's URL and
+  # reaches no remote, runs without it.
   export REPO_SLUG="zook/rig"
+  git config --file "$TMP/gitconfig" "url.$ORIGIN.insteadOf" "https://github.com/$REPO_SLUG"
+  export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
   git -C "$RIG" remote set-url origin "https://github.com/$REPO_SLUG"
-  git -C "$RIG" config "url.$ORIGIN.insteadOf" "https://github.com/$REPO_SLUG"
   git -C "$RIG" remote set-head origin main >/dev/null 2>&1 || git -C "$RIG" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
   mkdir -p "$TMP/rig-homes"
   git -C "$RIG" worktree add -q -b gc-refinery-home "$HOME_DIR" origin/main
@@ -157,7 +168,7 @@ bstatus()  { jq -r --arg id "$1" '(.[] | select(.id == $id) | .status) // "<abse
 bassignee(){ jq -r --arg id "$1" '(.[] | select(.id == $id) | .assignee) // "<absent>"' "$STORE"; }
 bnotes()   { jq -r --arg id "$1" '(.[] | select(.id == $id) | .notes) // ""' "$STORE"; }
 logged()   { cat "$LOGS/$1.log"; }
-reset_logs() { : > "$LOGS/gc.log"; : > "$LOGS/gh.log"; : > "$LOGS/gctk.log"; : > "$LOGS/scripts.log"; }
+reset_logs() { : > "$LOGS/gc.log"; : > "$LOGS/gh.log"; : > "$LOGS/gctk.log"; : > "$LOGS/scripts.log"; : > "$LOGS/edits.log"; }
 # pr <number> <branch> <author> [<state>] [<base>] [<body>] — a PR the fake gh serves.
 pr() {
   jq -n --argjson n "$1" --arg b "$2" --arg a "$3" --arg s "${4:-OPEN}" --arg t "${5:-main}" --arg body "${6:-}" --arg r "$REPO_SLUG" \
@@ -288,8 +299,41 @@ _rt_gh() {
 cat > "$BIN/gh" <<'GH'
 #!/usr/bin/env bash
 echo "$*" >> "$LOGS/gh.log"
+# graphql <-f|-F key=value>... — GitHub's GraphQL, as gctk's gh adapter asks it.
+graphql() {
+  local q="" n="" id="" title="" body="" set="" f
+  while [ $# -gt 1 ]; do
+    case "$2" in
+      query=*) q="${2#query=}" ;;
+      number=*) n="${2#number=}" ;;
+      id=*) id="${2#id=}" ;;
+      title=*) title="${2#title=}"; set="$set title" ;;
+      body=*) body="${2#body=}"; set="$set body" ;;
+    esac
+    shift 2
+  done
+  case "$q" in
+    *updatePullRequest*)
+      [ "${STUB_EDIT_RC:-0}" = 0 ] || { echo "gh: HTTP 502" >&2; exit "$STUB_EDIT_RC"; }
+      n="${id#PR_}"; f="$GH_DIR/view_$n.json"
+      jq --arg t "$title" --arg b "$body" --arg s "$set" \
+        '(if ($s | contains("title")) then .title = $t else . end) | (if ($s | contains("body")) then .body = $b else . end)' \
+        "$f" > "$f.n" && mv "$f.n" "$f"
+      echo "$n$set" >> "$LOGS/edits.log"
+      printf '{"data":{"updatePullRequest":{"pullRequest":{"id":"%s"}}}}\n' "$id" ;;
+    *)
+      f="$GH_DIR/view_$n.json"
+      [ -f "$f" ] || { echo '{"data":{"repository":{"pullRequest":null}}}'; exit 0; }
+      jq -c --arg r "$REPO_SLUG" '{data: {repository: {pullRequest: {id: ("PR_" + (.number | tostring)), number, url, state,
+        isDraft: (.isDraft // false), headRefName, headRefOid: "", baseRefName, mergeStateStatus: "",
+        repository: {nameWithOwner: $r}, mergedAt: null, mergeCommit: null, isInMergeQueue: false,
+        isMergeQueueEnabled: false, title: (.title // ""), body: (.body // "")}}}}' "$f" ;;
+  esac
+  exit 0
+}
 case "$1 $2" in
   "api --hostname"|"api user")
+    [ "${4:-}" != graphql ] || graphql "${@:5}"
     [ -n "${STUB_LOGIN:-}" ] || { echo "gh: not logged in" >&2; exit 1; }
     echo "$STUB_LOGIN"; exit 0 ;;
   "pr view")
@@ -326,15 +370,6 @@ case "$1 $2" in
         baseRefName: $t, headRepository: {name: ($r | split("/")[1])}, headRepositoryOwner: {login: ($r | split("/")[0])},
         isCrossRepository: false, author: {login: $a}, isDraft: true, title: $title, body: $body}' > "$GH_DIR/view_$n.json"
     echo "https://github.com/$REPO_SLUG/pull/$n"; exit 0 ;;
-  "pr edit")
-    [ "${STUB_EDIT_RC:-0}" = 0 ] || exit "$STUB_EDIT_RC"
-    # The body an edit gives PR #<n> is kept as edit_<n>.md.
-    n="$3"; prev=""
-    for a in "$@"; do
-      [ "$prev" != --body-file ] || cp "$a" "$GH_DIR/edit_$n.md"
-      prev="$a"
-    done
-    exit 0 ;;
 esac
 echo "gh stub: unsupported $*" >&2
 exit 2
@@ -371,6 +406,7 @@ case "$1 $2" in
       fi
     done ;;
   "pr compose")
+    case " $* " in *" --edit "*) exec "$(dirname "$0")/gctk-real" "$@" ;; esac
     owner="$3"; shift 3; head=""; target=""; bodyf=""
     while [ $# -gt 0 ]; do
       case "$1" in --head) head="$2"; shift ;; --target) target="$2"; shift ;; --body-file) bodyf="$2"; shift ;; esac
@@ -435,4 +471,18 @@ riding: $riders}"
 esac
 GCTK
 chmod +x "$BIN/gctk"
+}
+
+# _rt_gctk_real — $BIN/gctk-real. GC_NO_API keeps gctk's reads off a running
+# supervisor's API, which would answer from the live city the suite runs in.
+_rt_gctk_real() {
+cat > "$BIN/gctk-real" <<'REAL'
+#!/usr/bin/env bash
+: "${RT_GCTK_REAL:?the suite builds no gctk}" "${RT_FAKE_GC:?the suite builds no fake gc for gctk to read the store through}"
+d="$(dirname "$STORE")/real-gc"
+mkdir -p "$d/city" && touch "$d/deps.txt" "$d/kv.txt" && { [ -e "$d/gc" ] || ln -s "$RT_FAKE_GC" "$d/gc"; } || exit 2
+PATH="$d:$PATH" GIT_CONFIG_GLOBAL=/dev/null GC_NO_API=1 GC_CITY_PATH="$d/city" \
+  STUB_STORE="$STORE" STUB_DEPS="$d/deps.txt" STUB_KV="$d/kv.txt" STUB_GC_LOG="$d/gc.log" exec "$RT_GCTK_REAL" "$@"
+REAL
+chmod +x "$BIN/gctk-real"
 }

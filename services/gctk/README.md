@@ -91,13 +91,14 @@ pending record, the verb and the rig board ask the pr domain's evaluator over
 the store and the GitHub read the one-PR update saved on the PR's bead, the
 board through its listing (`listing.PRAnswers`), so none of them reads GitHub.
 
-The refinery's merge-push step (`refinery-publish.sh`) takes a PR's title and
-body from `gctk pr compose`, so an opened PR and a later refresh read one
-composer, and a review run's push (`review-run.sh push`) edits the open PR to
-the same composition with `--edit`.
+The refinery's merge-push step (`refinery-publish.sh`) opens a PR with the
+title and body `gctk pr compose` composes, and edits a PR it publishes onto to
+that composition with `--edit`, as a review run's push (`review-run.sh push`)
+does, so an opened PR and every later edit read one composer and one
+comparison.
 Each finds the binary through `gctk-resolve.sh`'s `gctk_path`, and with no
-binary, or one too old to carry the verb, it opens no PR and edits no body or
-title that pass.
+binary, or one too old to carry the verb or flag it calls, it opens no PR and
+edits no body or title that pass.
 
 `assets/scripts/pr-reconcile.sh`, the landing order's script
 (`orders/pr-reconcile.toml`), names the rig's refinery from the roster and execs
