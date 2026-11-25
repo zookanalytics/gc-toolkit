@@ -23,9 +23,9 @@ finds:
 
 Trouble on the work does not bring the sitting back: a required check that
 failed, a review that ran out of attempts, a question filed on the work, or its
-PR closed unmerged. Each reaches the operator as it does today, and the stay
+PR closed unmerged. Each reaches the operator as it would with no stay, and the stay
 waits on until the city has finished with the PR. Other work the ruling sends
-brings no return of its own: it lands as work does today, or, on a PR the
+brings no return of its own: it lands as any work does, or, on a PR the
 conversation already holds, waits for the sitting's next return.
 
 In the city's own store a stay comes back only once its work closes, which for
@@ -76,7 +76,7 @@ resolves it:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" gate create --type gctk:needs-review --await-id <the work's bead> --blocks "$CONVERSATION"
+"$GCTK" gate create --type gctk:needs-review --await-id <work-bead-id> --blocks "$CONVERSATION"
 ```
 
 Exit 0 prints the gate's id, filed now or found open. Exit 4 is a read or a
@@ -338,14 +338,14 @@ Start where the return stands:
 2. **Read the result.** Read the work's PR at the head the gate's close names
    and at the head it has now, with the review's account of each round since
    the head you last read
-   (`"$CONV/converse-pr-conversation.sh" <the work's bead>`), and with the
+   (`"$CONV/converse-pr-conversation.sh" <work-bead-id>`), and with the
    PR's status, read as `converse-hold` reads an open PR's (Post the framing),
    the work's bead as its anchor. The city can start a round after the gate
    closes, such as a repair after a failing check or a merge of the target.
    When the two heads differ, read what changed between them, and report on
    the head the PR has now only once its status shows that head's review and
    required checks have passed. When the work has closed,
-   `gc bd show <the work's bead>` gives how it closed and its PR.
+   `gc bd show <work-bead-id>` gives how it closed and its PR.
 3. **Check it against what was agreed, item by item.** The items are the ones
    written in the work's brief or in the send-back's order, with your thread
    and `AGREED` beside them. The subject's notes and the resolve reasons of the

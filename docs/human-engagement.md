@@ -1516,9 +1516,9 @@ send-back can close before the head the operator approves exists.
 
 Trouble on the work does not bring the sitting back: a required check that
 failed, a review that ran out of attempts, a question filed on the work, or its
-PR closed unmerged. Each reaches the operator as it does today, and the stay
+PR closed unmerged. Each reaches the operator as it would with no stay, and the stay
 waits on until the city has finished with the PR. Other work the sitting sent
-brings no return of its own: it lands as work does today, or, on a PR the
+brings no return of its own: it lands as any work does, or, on a PR the
 conversation already holds, waits for the sitting's next return. The sitting
 tells the operator so before it stays.
 
@@ -1536,10 +1536,10 @@ wait on neither: bd keeps one edge from a bead onto another, and the
 conversation already tracks its subject, and an edge onto the held PR's bead
 would close a cycle through the hold.
 
-**The stay, in two forms.** One promise files the gate, or finds the open one:
-`gctk gate create --type gctk:needs-review --await-id <work-bead-id> --blocks
-<conversation-bead-id>`, bd's own `gate create` with the pack's checks in
-front. It refuses, writing nothing, a conversation not held under the caller's
+**The stay, in two forms.** One promise files the gate, or finds the open one,
+bd's own `gate create` with the pack's checks in front:
+`gctk gate create --type gctk:needs-review --await-id <work-bead-id> --blocks <conversation-bead-id>`.
+It refuses, writing nothing, a conversation not held under the caller's
 alias, a second piece while a gate is open, work that has closed, work in
 another store or in the city's own store, and work that waits on the
 conversation through another bead, which could not move until something the
@@ -1772,8 +1772,8 @@ PR is still open. The stall check reads only the edges that exist when the
 promise is made, so a piece given a wait afterward onto something the
 conversation holds cannot move, and the sitting sleeps until the operator
 visits. A `bd gate create` that stops between its two writes, the gate and the
-conversation's edge onto it, leaves a gate nothing waits on, which the next
-promise replaces and which resolves at its condition with no hold.
+conversation's edge onto it, leaves a gate nothing waits on. The next promise
+files another, and the stray one resolves at its condition with no hold.
 
 **Where it cannot stay.** An edge onto a bead in another store holds nothing,
 so a sitting stays only for work in its conversation's own store, and ends at
@@ -1782,8 +1782,8 @@ the hand-off otherwise.
 **The city's own store.** The landing order is a rig-scoped order
 (`scope = "rig"` in `orders/pr-reconcile.toml`), so it reads each rig's store
 and never the city's own, and nothing there would resolve a gate. There the
-promise refuses, the sign-off files no gate, and a stay is the stay the gate
-replaces. The stay's call makes the conversation wait on its work through bd's
+promise refuses, the sign-off files no gate, and a stay waits on its work
+itself. The stay's call makes the conversation wait on that work through bd's
 `blocks` edge, one onto each `--waiting-on` bead that is no gate and one onto
 the rework `--rework` files, and the sitting comes back once that work closes,
 which for new work that opens its own PR is after the merge. A member of the

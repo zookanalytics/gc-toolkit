@@ -650,7 +650,7 @@ have "the stay skill gives the stay's first form, whose own call sends the work 
 have "…and its second, where the sitting sends the work, promises it, then stays" \
     'You send the work.** New work, the subject you sling, and another PR you send back through the `prs` skill are sent before the sign-off. Once the send is made, promise the work, and then stay.' "$TMP/stay-squeezed"
 have "…with the promise's command, which names the gate's type where the sitting types it" \
-    '"$GCTK" gate create --type gctk:needs-review --await-id <the work'"'"'s bead> --blocks "$CONVERSATION"' "$STAY"
+    '"$GCTK" gate create --type gctk:needs-review --await-id <work-bead-id> --blocks "$CONVERSATION"' "$STAY"
 have "…which a call that sends nothing needs, since it refuses with no open gate" \
     'A call that sends nothing**, neither `--rework` nor `--accept`, while the conversation waits on no open gate. Its message gives the promise'"'"'s command.' "$TMP/stay-squeezed"
 have "…and the stay says a piece its call sends that it is not for brings no return of its own" \
@@ -1340,7 +1340,7 @@ if ! PG_GCTK="$("$REPO/assets/scripts/holds-store.stub.sh" build "$TMP/gctk")"; 
     bad "gctk builds, so the stay's promise can run through its parser"
 else
     fenced_block "$STAY" 'gate create --type gctk:needs-review' \
-        | sed -e "s#<the work's bead>#tk-w#g" -e 's#<[^>]*>#x#g' >"$PG/promise"
+        | sed -e 's#<work-bead-id>#tk-w#g' -e 's#<[^>]*>#x#g' >"$PG/promise"
     fenced_block "$PRS_SKILL" 'review ask <the anchor of the PR>' \
         | sed -e 's#<the anchor of the PR>#tk-a#g' -e 's#<the bead the point came from>#tk-v#g' -e 's#<[^>]*>#x#g' >"$PG/ask"
     for f in promise ask; do
