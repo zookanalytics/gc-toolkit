@@ -302,6 +302,8 @@ func TestNoBeadTheSearchLeavesStaysDemand(t *testing.T) {
 	q.edit("tk-claim", func(b *fake.Bead) { b.Status = "in_progress" })
 	q.waitOn("tk-claim", "tk-unit")
 	q.put("tk-busy", stamp(0), "branch", "polecat/shared")
+	q.put("tk-busy-claim", stamp(0), "branch", "polecat/shared")
+	q.edit("tk-busy-claim", func(b *fake.Bead) { b.Status = "in_progress" })
 	q.s.Put(fake.Bead{ID: "tk-writer", Status: "in_progress", IssueType: "task", Assignee: "tools/gc-toolkit.polecat-1",
 		Metadata: map[string]string{"branch": "polecat/shared"}})
 	ans := q.next(t)
@@ -313,8 +315,8 @@ func TestNoBeadTheSearchLeavesStaysDemand(t *testing.T) {
 			t.Errorf("%s was left (%s) and is still demand: %s with edges %+v", l.ID, l.Why, row.Status, row.Edges)
 		}
 	}
-	if len(ans.Left) != 3 {
-		t.Errorf("left %+v; want the held bead, the held claim and the bead whose branch another works", ans.Left)
+	if len(ans.Left) != 4 {
+		t.Errorf("left %+v; want the held bead, the held claim, and the bead and the claim whose branch another works", ans.Left)
 	}
 }
 

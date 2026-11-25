@@ -26,8 +26,9 @@ import (
 // listing shows, and takes one:
 //
 //   - A bead in progress is a claim a session left, which the hook adopts, so it
-//     is taken first, unless something holds it. A held one goes back to open,
-//     so the wait, and not the claim, decides when it is taken.
+//     is taken first, unless something holds it or another bead works its
+//     branch, as below. One it leaves goes back to open, so the wait, and not
+//     the claim, decides when it is taken.
 //   - A bead something holds waits until its waits land (waits.Holds). A
 //     conversation or an ask on the bead's PR holds its merge and nothing else,
 //     so a bead they hold is taken as if they were not there.
@@ -173,15 +174,8 @@ func (s *Search) Next() (Answer, error) {
 			continue
 		}
 		left := Left{ID: c.r.ID, Why: "something holds it (" + waitsText(c.holds, other) + ")"}
-		if c.r.Status() == "in_progress" {
-			w := l.Write(c.r.ID)
-			w.Status("open")
-			w.Guard("in_progress", s.Refinery)
-			if err := l.Commit(w); err != nil {
-				ans.Failures = append(ans.Failures, fmt.Sprintf("%s, held and in progress, did not go back to open: %v", c.r.ID, err))
-			} else {
-				left.Wrote = "back to open, so what holds it decides when it is taken"
-			}
+		if s.reopen(c.r, &ans) {
+			left.Wrote = "back to open, so what holds it decides when it is taken"
 		}
 		ans.Left = append(ans.Left, left)
 	}
@@ -228,6 +222,12 @@ func (s *Search) Next() (Answer, error) {
 		if len(landed) > 0 {
 			left.Wrote = "waits on " + strings.Join(landed, ", ")
 		}
+		if s.reopen(c.r, &ans) {
+			if left.Wrote != "" {
+				left.Wrote += ", and "
+			}
+			left.Wrote += "back to open"
+		}
 		ans.Left = append(ans.Left, left)
 	}
 	if len(takeable) == 0 {
@@ -239,6 +239,25 @@ func (s *Search) Next() (Answer, error) {
 	})
 	ans.Take = item(takeable[0].r)
 	return ans, nil
+}
+
+// reopen puts r back to open when it is a claim a session left in progress,
+// guarded on that claim, and reports whether it wrote. Gas City counts work in
+// progress under a session as its demand whatever waits on it, so a claim the
+// search leaves stays demand until it is open. A write that fails is recorded
+// on ans.
+func (s *Search) reopen(r *ledger.Record, ans *Answer) bool {
+	if r.Status() != "in_progress" {
+		return false
+	}
+	w := s.Ledger.Write(r.ID)
+	w.Status("open")
+	w.Guard("in_progress", s.Refinery)
+	if err := s.Ledger.Commit(w); err != nil {
+		ans.Failures = append(ans.Failures, fmt.Sprintf("%s, left in progress, did not go back to open: %v", r.ID, err))
+		return false
+	}
+	return true
 }
 
 // conversations reads the beads that hold the candidates and returns the ids
