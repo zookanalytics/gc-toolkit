@@ -51,9 +51,7 @@
 # through gctk built from this checkout, and fails unless each reaches the
 # store. It runs the stay's claim-back before a fallback hold, and the hold's
 # record, under a stub gc, and fails unless each line prints only for a
-# conversation claimed under the sitting. It runs the stay skill's read of the
-# rig map, and fails unless it tells the city's own store from a rig's. It
-# runs the converse prompt's drain
+# conversation claimed under the sitting. It runs the converse prompt's drain
 # read under a stub gc,
 # and fails unless a list that does not read prints UNREADABLE, never the NONE
 # that drains a sitting that stays. It runs the premise
@@ -1317,39 +1315,13 @@ else
 CASES
     done
 fi
-echo "── the stay skill's read tells the city's own store from a rig's ──"
+echo "── the stay skill reads the rig map to tell the city's own store from a rig's ──"
 # A stay in the city's own store comes back only once its work closes, so the
 # sitting reads which store its conversation is in before it says when a stay
-# would come back. The read runs as written under a rig map with one rig of
-# each kind.
-RM="$TMP/store-read"
-mkdir -p "$RM/pack"
-cat >"$RM/pack/rig-map.sh" <<'STUB'
-#!/bin/sh
-printf '%s\n' '{"rigs":[{"name":"city","prefix":"lx","hq":true},{"name":"kit","prefix":"tk","hq":false}]}'
-STUB
-chmod +x "$RM/pack/rig-map.sh"
-fenced_block "$STAY" '/rig-map.sh" | jq' >"$RM/block"
-if [ ! -s "$RM/block" ]; then
-    bad "converse-stay: the store's read is found" "no fenced bash block holds the read of the rig map in $STAY"
-else
-    for sh_ in $shells; do
-        run=$sh_
-        [ "$sh_" = zsh ] && run="zsh -f"
-        while IFS='|' read -r conv want label; do
-            out=$(cd "$TMP/away" && env -u BASH_ENV -u ENV CONV="$RM/pack" CONVERSATION="$conv" $run "$RM/block" </dev/null 2>/dev/null)
-            rc=$?
-            case "$want:$rc:$out" in
-                fails:[1-9]*: | "$want:0:$want") ok "($sh_) $label" ;;
-                *) bad "($sh_) $label" "exit $rc, printed: $out" ;;
-            esac
-        done <<CASES
-lx-c|city|the store's read prints city for a conversation in the city's own store
-tk-c|rig|…rig for one in a rig's store
-zz-c|fails|…and fails, printing nothing, for a prefix no one rig carries
-CASES
-    done
-fi
+# would come back, through the pack's one read of the rig map.
+have "the stay skill reads the rig map through the pack's script" '"$CONV/rig-map.sh"' "$STAY"
+have "…and says how its listing tells the city's own store from a rig's" \
+    'the conversation is in the city'"'"'s own store when the rig whose `prefix` begins its id, before the first `-`, reads `"hq": true`.' "$TMP/stay-squeezed"
 echo "── the stay's promise, and a visit's ask on another PR, pass gctk's own parser ──"
 # The sitting types the promise itself, so the stay skill's call runs through
 # gctk built from this checkout, its placeholders filled, under a gc that

@@ -33,11 +33,12 @@ new work that opens its own PR is after the merge, and a stay on the
 conversation's own subject is refused there, because the landing order does
 not read that store (In the city's own store, below). So recommend ending at
 the hand-off there for new work that opens its own PR, with what was agreed
-written into the work's brief. This read prints `city` for a conversation in
-the city's own store, and `rig` for one in a rig's:
+written into the work's brief. The rig map tells the two stores apart: the
+conversation is in the city's own store when the rig whose `prefix` begins its
+id, before the first `-`, reads `"hq": true`.
 
 ```bash
-"$CONV/rig-map.sh" | jq -er --arg p "${CONVERSATION%%-*}" '[ .rigs[]? | select(.prefix == $p) ] | if length != 1 then error("no one rig carries the prefix \($p)") elif .[0].hq then "city" else "rig" end'
+"$CONV/rig-map.sh"
 ```
 
 ## Stay
@@ -75,8 +76,7 @@ resolves it:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" gate create --type gctk:needs-review --await-id <the work's bead> --blocks "$CONVERSATION" \
-  && echo "the stay comes back for <the work's bead>"
+"$GCTK" gate create --type gctk:needs-review --await-id <the work's bead> --blocks "$CONVERSATION"
 ```
 
 Exit 0 prints the gate's id, filed now or found open. Exit 4 is a read or a
