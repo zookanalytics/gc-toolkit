@@ -120,6 +120,9 @@ because the next sitting primes from the subject. The first lines below are the
 worker's rules, so keep them as they stand:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 TODAY=$(date -u +%Y-%m-%d) \
   && SCAFFOLD="## Current state ($TODAY)
 $(cat <<'BLOCK'
@@ -146,7 +149,7 @@ VERIFY: <each fact nobody has settled, where to read it, and where the document 
 Open questions: none
 BLOCK
 )" \
-  && gc bd update "$SUBJECT" --append-notes "$SCAFFOLD" \
+  && "$GCTK" bead note --notify "$SUBJECT" "$SCAFFOLD" \
   && echo "the scaffold is written, dated $TODAY"
 ```
 

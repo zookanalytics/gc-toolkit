@@ -457,8 +457,8 @@ have() {
     if grep -qF -- "$2" "$3"; then ok "$1"; else bad "$1" "missing: $2"; fi
 }
 have "the action table points asking for work at the skills" '`work`, `waits`, `records`, `prs`' "$PROMPT"
-have "the record step gives the append it runs" 'gc bd update "$SUBJECT" --append-notes "<the decision>.' "$SETTLE"
-have "…and the append of a current-state block" 'gc bd update "$SUBJECT" --append-notes "## Current state' "$SETTLE"
+have "the record step gives the note it writes" '"$GCTK" bead note "$SUBJECT" "<the decision>.' "$SETTLE"
+have "…and the note of a current-state block" '"$GCTK" bead note "$SUBJECT" "## Current state' "$SETTLE"
 have "the settle step gives the create and the sling for routed work" 'gc sling <rig>/<pool> "$WORK" --on <formula>' "$SETTLE"
 have "the settle step gives the subject's parent lookup" 'converse-parent.sh" "$SUBJECT"' "$SETTLE"
 # Where new work is filed has two cases (docs/component-model.md, I1). A
@@ -935,7 +935,22 @@ echo "$n" >"$CHAIN_DIR/count"
 if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
 exit 0
 STUB
-cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/bin/gctk"
+cat >"$CH/bin/gctk" <<'STUB'
+#!/usr/bin/env bash
+# Logs its call, numbered with gc's, and refuses the one numbered CHAIN_FAIL_AT.
+# A bead note adds its note to the notes file a show prints, as gc's
+# --append-notes does.
+n=$(( $(cat "$CHAIN_DIR/count" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$CHAIN_DIR/count"
+{ printf 'writer %s %s' "${0##*/}" "$*" | tr '\n' ' '; echo; } >>"$CHAIN_DIR/log"
+if [ "$n" = "${CHAIN_FAIL_AT:-}" ]; then echo "writer: refused" >&2; exit 1; fi
+if [ "${1:-} ${2:-}" = "bead note" ]; then
+    shift 2
+    [ "${1:-}" = --notify ] && shift
+    printf '%s\n' "$2" >>"$CHAIN_DIR/notes"
+fi
+exit 0
+STUB
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/human-gate.sh"
 cp "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/pack/assets/scripts/finalize-gate.sh"
 chmod +x "$CH/bin/gc" "$CH/pack/assets/scripts/bead-rehome.sh" "$CH/bin/gctk" \
@@ -1173,7 +1188,7 @@ have "the ruling line names the block the worker starts from" 'to the scaffold i
 have "…and the sign-off files the rework" '--no-wait --rework' "$ITERATE"
 have "a self-review that starts fresh finds the block through the worker's notes" "so your work bead's notes name this block" "$ITERATE"
 have "a block on another bead leaves the next sitting its name" "name that bead in the subject's record" "$ITERATE"
-fenced_block "$ITERATE" '--append-notes "$SCAFFOLD"' | fill_block >"$CH/block"
+fenced_block "$ITERATE" 'bead note --notify "$SUBJECT" "$SCAFFOLD"' | fill_block >"$CH/block"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -1245,7 +1260,7 @@ have "a rework's ruling line carries the operator's words or names a brief, neve
 have "…and names the brief written on the PR's anchor" \
     '--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"' "$SETTLE"
 fenced_block "$SETTLE" 'gc sling <rig>/<pool> "$WORK"' | fill_block >"$CH/order-block"
-fenced_block "$SETTLE" '--append-notes "$BRIEF"' | fill_block >"$CH/brief-block"
+fenced_block "$SETTLE" 'bead note --notify <anchor> "$BRIEF"' | fill_block >"$CH/brief-block"
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
@@ -1910,7 +1925,7 @@ have "the release lists what else waits on the park, and says so when nothing do
     'if length == 0 then "nothing else waits on it" else .[] end' "$EPIC_REVIEW"
 have "…and never closes a blocker that is not a park's own gate" \
     "A blocker that is not a park's own gate never closes here" "$EPIC_REVIEW_JOINED"
-fenced_block "$EPIC_REVIEW" '--append-notes "$RECORD"' | fill_block >"$CH/block"
+fenced_block "$EPIC_REVIEW" 'bead note "$EPIC" "$RECORD"' | fill_block >"$CH/block"
 [ -s "$CH/block" ] && ok "the review record's block is found" \
     || bad "the review record's block is found" "no fenced bash block holds its append in $EPIC_REVIEW"
 for sh_ in $shells; do
@@ -1919,7 +1934,7 @@ for sh_ in $shells; do
     rc=$(run_chain "$run" "$CH/block")
     if [ "$rc" -eq 0 ] && head -n 1 "$CH/notes" | grep -qE '^## Epic review, [0-9]{4}-[0-9]{2}-[0-9]{2}$' \
         && grep -qxF 'Ruling: x. x' "$CH/notes" && grep -qxF 'Contract lacked: x' "$CH/notes" \
-        && grep -q '^gc bd update tk-e --append-notes ' "$CH/log"; then
+        && grep -q '^writer gctk bead note tk-e ' "$CH/log"; then
         ok "($sh_) converse-epic-review: the record lands on the epic under its dated heading"
     else
         bad "($sh_) converse-epic-review: the record lands on the epic under its dated heading" "exit $rc, notes: $(head -c 400 "$CH/notes")"

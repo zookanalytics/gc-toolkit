@@ -100,10 +100,10 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   need, or `not-needed` and the bead the ruling rests on.
 
 A write's exit says whether it landed. Note each ruling on its bead with the
-operator's reason in their words:
-`gc bd --rig gc-toolkit update <bead> --append-notes "<ruling: reason>"`.
-When they turn down a proposal that moves no lever, note their reason the same
-way, so the next sitting reads it first.
+operator's reason in their words: `"$GCTK" bead note <bead> "<ruling: reason>"`,
+with `--notify` when it changes what the work on the bead should do (the
+`records` skill). When they turn down a proposal that moves no lever, note their
+reason the same way, so the next sitting reads it first.
 
 ## Anything else that reaches you
 

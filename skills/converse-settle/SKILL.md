@@ -30,18 +30,26 @@ when the stay would come back after the merge:
 
 ## Record
 
-Append the outcome to the subject's notes (the `records` skill). Notes are
-append-only, so never pass `--notes`, which replaces them:
+Put the outcome on the subject's notes with the one note command (the `records`
+skill). When the decision changes what the work on the subject should do, add
+`--notify`, whether or not anyone is working it, because the command finds out
+and tells whoever is:
 
 ```bash
-gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$SUBJECT" "<the decision>. <why>. <what changed>."
 ```
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest current-state block is in force, and the prep primes from it:
 
 ```bash
-gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$SUBJECT" "## Current state ($(date -u +%Y-%m-%d))
 <where things stand>
 Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"
@@ -63,9 +71,10 @@ sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
 
-When the ruling changes what work already sent should do, and that work goes
-on, revise it (the `work` skill, work already sent). A note on its bead alone
-reaches the session doing the work only at its run's next read of the notes.
+A ruling that changes what the work on a bead should do is recorded on that
+bead with the one note command and its `--notify` flag (the `records` skill),
+whether or not that work is running, because the command finds whoever is doing
+it and tells them.
 
 The work you send is yours to get right. What the operator says is direction to
 reason through: take each point up in the course or say why not. A remark is
@@ -118,9 +127,12 @@ lands, in one plain sentence that names no other rig or its beads.
 - **An epic the ruling files**: create it with the `work` skill's epic create,
   then append a note that says whose words each field is:
 
-  ```bash
-  gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
-  ```
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <the new epic> "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
+```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
 as the operator's ruling (`--rework`, below), so the line carries their words
@@ -131,13 +143,16 @@ its `merge_result`. A scaffold is such an order already, because the operator
 ruled each of its lines (`converse-iterate-document`):
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   && BRIEF="## Rework brief ($NOW)
 $(cat <<'BLOCK'
 <what needs doing, why, and what done looks like, with each point the operator raised>
 BLOCK
 )" \
-  && gc bd update <anchor> --append-notes "$BRIEF" \
+  && "$GCTK" bead note --notify <anchor> "$BRIEF" \
   && echo "the brief is written, headed ## Rework brief ($NOW)"
 ```
 

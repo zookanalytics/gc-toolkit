@@ -22,9 +22,12 @@ The conversation's `holding:` line is the record the entry reads after a
 restart, so post no framing until the block below has written that line:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 NEED="<the one decision or input needed, at most 130 characters>"
-gc bd update "$CONVERSATION" --append-notes "holding: $NEED" \
-  && gc bd update "$SUBJECT" --append-notes "Conversation $CONVERSATION holding: $NEED" \
+"$GCTK" bead note "$CONVERSATION" "holding: $NEED" \
+  && "$GCTK" bead note "$SUBJECT" "Conversation $CONVERSATION holding: $NEED" \
   && echo "the hold is recorded"
 ```
 

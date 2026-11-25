@@ -36,7 +36,10 @@ When an open one covers your problem, add what you know to its notes and file
 nothing:
 
 ```bash
-gc bd update <finding> --append-notes "<what you found, where you hit it, and any new evidence>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <finding> "<what you found, where you hit it, and any new evidence>"
 ```
 
 For a closed one, `gc bd show <finding>` gives the close reason, which says
@@ -86,7 +89,10 @@ whether the first create landed is unknown. Note the title on your work bead
 instead:
 
 ```bash
-gc bd update <your work bead> --append-notes "Upstream finding '<its title>' may not be recorded: its create printed no id, and the lookup that would find it failed."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <your work bead> "Upstream finding '<its title>' may not be recorded: its create printed no id, and the lookup that would find it failed."
 ```
 
 Whether a report goes out is the operator's call when they pick the finding

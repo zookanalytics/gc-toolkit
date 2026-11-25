@@ -30,7 +30,8 @@
 # and the capture block with the real capture, sandbox library and workspace
 # scripts, against a fixture city, a stub engine, a stub sandbox-exec that keeps
 # the profile it was handed, and a stub gctk that runs a copy's serve command
-# through the library, as gctk rig serve does.
+# through the library, as gctk rig serve does, and logs a note the step puts on
+# the request bead.
 # Only DEMO_ENGINE_BIN, the library's engine override, names the stub engine,
 # so the surface question and the capture each reach it only through the
 # library. The stub engine types a terminal script's run lines into one bash
@@ -85,8 +86,9 @@ bash -n "$TMP/block.sh" && ok "syntactically valid bash" || bad "failed bash -n"
 cp "$TMP/block.sh" "$TMP/plain.sh"
 
 # --- Fakes. --------------------------------------------------------------------
-# gc: the block reaches `bd update` (the failure note, or the clip path on
-# success), and a `runtime drain-ack` the block made itself would log DRAIN. The
+# gc: the block reaches `bd update` for the clip path on success, and a
+# `runtime drain-ack` the block made itself would log DRAIN. gctk, which
+# GCTK_BIN names, takes the failure note as a `bead note` and logs NOTE. The
 # capture and decline stubs sit in a stub pack, $STUB_PACK, which gc names for
 # `gc gc-toolkit scripts-dir`. Each fake records its verb into one ordered log
 # and its argv into its own file.
@@ -100,6 +102,12 @@ case "$1 $2" in
 esac
 exit 0
 GC
+{ printf '%s\n' "$SHEBANG"; cat; } > "$TMP/bin/gctk-note" <<'GCTK'
+case "$1 $2" in
+  "bead note") printf 'NOTE\n' >> "$FAKE_LOG"; printf '%s\n' "$*" >> "$FAKE_DIR/note.argv" ;;
+esac
+exit 0
+GCTK
 { printf '%s\n' "$SHEBANG"; cat; } > "$TMP/pack/assets/scripts/rig-demo-capture.sh" <<'CAP'
 printf 'CAPTURE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "$FAKE_DIR/capture.argv"
@@ -110,7 +118,7 @@ printf 'DECLINE\n' >> "$FAKE_LOG"
 printf '%s\n' "$*" >> "$FAKE_DIR/decline.argv"
 exit "${FAKE_DECLINE_RC:-0}"
 DECLINE
-chmod +x "$TMP/bin/gc" "$TMP/pack/assets/scripts/"*.sh
+chmod +x "$TMP/bin/gc" "$TMP/bin/gctk-note" "$TMP/pack/assets/scripts/"*.sh
 export PATH="$TMP/bin:$PATH"
 export STUB_PACK="$TMP/pack" GC_RIG_ROOT="" GC_CITY_PATH="" GIT_CEILING_DIRECTORIES="$TMP"
 
@@ -121,12 +129,12 @@ OUT="$TMP/rig-demo/tk-req/demo-rig-walkthrough.mp4"
 # run <strict|plain> <capture exit> prints "<rc>|<ordered verb log>"
 #   FAKE_DECLINE_RC sets the decline stub's exit.
 run() {
-  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/capture.argv"; : > "$TMP/decline.argv"
+  : > "$TMP/log"; : > "$TMP/gc.argv"; : > "$TMP/note.argv"; : > "$TMP/capture.argv"; : > "$TMP/decline.argv"
   local rc=0
   ( cd "$TMP/cwd" &&
     REQUEST_BEAD=tk-req SCRIPT_PATH="$TMP/cwd/walkthrough.md" OUT="$OUT" \
     SERVE_DIR="${RUN_SERVE_DIR-$TMP/cwd/site}" SERVE_CMD="" BASE_URL="" APP_ROOT="$TMP/cwd" \
-    SCRIPTS="$TMP/pack/assets/scripts" \
+    SCRIPTS="$TMP/pack/assets/scripts" GCTK_BIN="$TMP/bin/gctk-note" \
     FAKE_LOG="$TMP/log" FAKE_DIR="$TMP" FAKE_CAPTURE_RC="$2" \
     FAKE_DECLINE_RC="${FAKE_DECLINE_RC:-0}" \
       bash "$TMP/$1.sh" ) > "$TMP/out" 2>&1 || rc=$?
@@ -140,7 +148,7 @@ for MODE in strict plain; do
   has "$(cat "$TMP/gc.argv")" "bd update tk-req --set-metadata demo_mp4_path=$OUT" "$MODE: the clip path lands on the request bead"
 
   echo "# $MODE shell: no clip declines with a gate on the request bead"
-  eq "$(run "$MODE" 1)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: exit 1 notes the failure, declines, and exits 1, leaving the drain to decline.sh"
+  eq "$(run "$MODE" 1)" "1|CAPTURE;NOTE;DECLINE;" "$MODE: exit 1 notes the failure, declines, and exits 1, leaving the drain to decline.sh"
   has "$(cat "$TMP/decline.argv")" "--step mol-rig-demo.capture --reason capture of demo-rig failed: " "$MODE: the decline names the capture step and why it ends"
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed --message " "$MODE: the gate blocks the request bead under the capture key"
   has "$(cat "$TMP/decline.argv")" "produced no MP4" "$MODE: exit 1 is reported as no clip"
@@ -150,13 +158,13 @@ for MODE in strict plain; do
   esac
 
   echo "# $MODE shell: a clip with a failed proof declines the same way"
-  eq "$(run "$MODE" 3)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: exit 3 notes the failure, declines, and exits 1"
+  eq "$(run "$MODE" 3)" "1|CAPTURE;NOTE;DECLINE;" "$MODE: exit 3 notes the failure, declines, and exits 1"
   has "$(cat "$TMP/decline.argv")" "the clip at $OUT recorded at least one step failing its proof" "$MODE: the gate names the failed-proof clip"
-  has "$(cat "$TMP/gc.argv")" "--append-notes rig-demo: capture failed for demo-rig" "$MODE: the request bead's note records the failure"
-  has "$(cat "$TMP/gc.argv")" "failing its proof" "$MODE: and names the failed proof"
+  has "$(cat "$TMP/note.argv")" "bead note tk-req rig-demo: capture failed for demo-rig" "$MODE: the request bead's note records the failure"
+  has "$(cat "$TMP/note.argv")" "failing its proof" "$MODE: and names the failed proof"
 
   echo "# $MODE shell: a decline that does not land still ends the block"
-  eq "$(FAKE_DECLINE_RC=1 run "$MODE" 3)" "1|CAPTURE;UPDATE;DECLINE;" "$MODE: the block exits 1 and does not drain"
+  eq "$(FAKE_DECLINE_RC=1 run "$MODE" 3)" "1|CAPTURE;NOTE;DECLINE;" "$MODE: the block exits 1 and does not drain"
 
   echo "# $MODE shell: with no app target, as a terminal script has, the capture gets the worktree for its shell"
   eq "$(RUN_SERVE_DIR="" run "$MODE" 0)" "0|CAPTURE;UPDATE;" "$MODE: the capture runs and the clip is recorded"
@@ -259,8 +267,9 @@ NPX
 # inside the sandbox, keeps the profile it ran in when sandbox-exec ran it, and
 # reports the copy on 50200 as one it started, its app at FAKE_APP_URL, or at
 # the copy's loopback URL when that is empty, which --check then reports from
-# the copy's checkout. Each report carries that record as sandboxed. lsof names
-# the copy's process as the one listening there, working in that checkout.
+# the copy's checkout. Each report carries that record as sandboxed. A bead note
+# logs NOTE. lsof names the copy's process as the one listening there, working
+# in that checkout.
 mkdir -p "$CITY/.gc/services/gctk/bin"
 { printf '%s\n' "$SHEBANG"; cat; } > "$CITY/.gc/services/gctk/bin/gctk" <<'GCTK'
 printf '%s (in %s)\n' "$*" "$(pwd)" >> "$FAKE_DIR/gctk.argv"
@@ -277,6 +286,7 @@ case "$*" in
     pwd > "$FAKE_DIR/copy-dir"
     printf '{"state":"running","port":50200,"app_url":"%s"%s,"started":true}\n' "${FAKE_APP_URL:-http://127.0.0.1:50200/}" "$(sandboxed)" ;;
   "rig serve --stop") rm -f "$FAKE_DIR/copy-dir"; printf '{"state":"stopped"}\n' ;;
+  "bead note "*) printf 'NOTE\n' >> "$FAKE_LOG" ;;
 esac
 exit 0
 GCTK
@@ -378,7 +388,7 @@ for MODE in strict plain; do
   [ ! -e "$WS/gc-review-tk-req" ] && ok "$MODE: and no workspace is made" || bad "$MODE: and no workspace is made"
 
   echo "# $MODE shell: a rig the city does not list declines with the capture's gate"
-  eq "$(pour "$MODE" "site" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
+  eq "$(pour "$MODE" "site" "" "" "")" "1|NOTE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
   has "$(cat "$TMP/out")" "demo-rig is not in gc rig list" "$MODE: it names the rig"
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead"
   has "$(cat "$TMP/decline.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
@@ -403,14 +413,14 @@ for MODE in strict plain; do
   eq "$(cat "$TMP/decline.argv")" "" "$MODE: and nothing declines"
 
   echo "# $MODE shell: a page script's pour on a rig that declares no ui_serve_command declines with the capture's gate"
-  eq "$(FAKE_UI_SERVE="" pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
+  eq "$(FAKE_UI_SERVE="" pour "$MODE" "" "" "")" "1|NOTE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
   has "$(cat "$TMP/out")" "no server: pass --base-url" "$MODE: the engine refuses a page script with no app"
   has "$(cat "$TMP/engine.argv")" "run $TMP/cwd/walkthrough.md" "$MODE: once the capture hands it the script"
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-capture-failed" "$MODE: the gate blocks the request bead under the capture key"
   has "$(cat "$TMP/decline.argv")" "A script that drives an app is given none when neither the pour nor the rig's ui_serve_command names one" "$MODE: and says nothing named the app"
 
   echo "# $MODE shell: an engine with no surface command names no surface, so a pour that names no app target takes no app"
-  eq "$(FAKE_NO_SURFACE_CMD=1 FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: a page script is then refused by the engine, and the step declines and exits 1"
+  eq "$(FAKE_NO_SURFACE_CMD=1 FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|NOTE;DECLINE;" "$MODE: a page script is then refused by the engine, and the step declines and exits 1"
   has "$(cat "$TMP/out")" "has no surface command, so it cannot name the surface '$TMP/cwd/walkthrough.md' drives" "$MODE: the step's output names the missing command"
   has "$(cat "$TMP/out")" "no server: pass --base-url" "$MODE: and the engine's refusal"
   has "$(cat "$TMP/decline.argv")" "the engine's surface command (sprintshow surface) names no surface for it" "$MODE: the gate names the surface command as a cause"
@@ -423,7 +433,7 @@ for MODE in strict plain; do
   has "$(cat "$TMP/engine.argv")" "--cwd $WT" "$MODE: with its shell in the worktree"
 
   echo "# $MODE shell: a surface the engine names that the pack does not drive takes no app"
-  eq "$(FAKE_SURFACE=watch FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|UPDATE;DECLINE;" "$MODE: the engine refuses the script with no app, and the step declines and exits 1"
+  eq "$(FAKE_SURFACE=watch FAKE_UI_SERVE='npm run dev' pour "$MODE" "" "" "")" "1|NOTE;DECLINE;" "$MODE: the engine refuses the script with no app, and the step declines and exits 1"
   eq "$(cat "$TMP/formula.argv")" "formula show mol-rig-demo --rig demo-rig --json" "$MODE: the rig's vars are read once for it, for the capture's app_reads_city, and not for its command"
 
   echo "# $MODE shell: a terminal script's pour names no app, and its shell starts in the worktree, though the rig declares a command"
@@ -451,14 +461,14 @@ for MODE in strict plain; do
   esac
 
   echo "# $MODE shell: a pour that names two app targets declines before anything is made"
-  eq "$(pour "$MODE" "site" "" "https://preview.example.com")" "1|UPDATE;DECLINE;" "$MODE: it notes the malformed pour, declines, and exits 1"
+  eq "$(pour "$MODE" "site" "" "https://preview.example.com")" "1|NOTE;DECLINE;" "$MODE: it notes the malformed pour, declines, and exits 1"
   has "$(cat "$TMP/decline.argv")" "--subject tk-req --key rig-demo-ambiguous-app-target" "$MODE: the gate blocks the request bead under the app-target key"
   has "$(cat "$TMP/decline.argv")" "got 2 of serve_dir / serve_cmd / base_url" "$MODE: and counts the targets"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"
   [ ! -e "$WS/gc-review-tk-req" ] && ok "$MODE: and no workspace is made" || bad "$MODE: and no workspace is made"
 
   echo "# $MODE shell: a checkout no worktree can be made from does the same"
-  eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|UPDATE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
+  eq "$(pour "$MODE" "" "npm run dev" "" "$TMP/cwd")" "1|NOTE;DECLINE;" "$MODE: it notes the failure, declines, and exits 1"
   has "$(cat "$TMP/out")" "HEAD is not a commit in $TMP/cwd" "$MODE: it names the checkout"
   has "$(cat "$TMP/decline.argv")" "no worktree of demo-rig could be made" "$MODE: and says no worktree could be made"
   eq "$(cat "$TMP/engine.argv")" "" "$MODE: the engine never runs"

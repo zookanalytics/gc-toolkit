@@ -56,7 +56,7 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
   rig's goals for this sitting. Once they agree on the words, put them on the
   request, so the page states them and no later sitting asks again:
   - the request the list found:
-    `gc bd --rig <rig> update <bead> --append-notes "The operator's product goals: <their words>"`;
+    `"$GCTK" bead note <bead> "The operator's product goals: <their words>"`;
   - none, when the list printed `[]`:
     `gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "<their words>" --json`.
 
@@ -165,7 +165,10 @@ that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
 
 ```bash
-gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: <what was proposed>; the operator declined: <their reason>."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <bead> "Backlog refinement: <what was proposed>; the operator declined: <their reason>."
 ```
 
 A close runs the `work` skill's disposition writer, `bead-rehome.sh`, with the

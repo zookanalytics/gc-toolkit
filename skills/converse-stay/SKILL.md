@@ -249,7 +249,10 @@ notes. No line of it may start with `holding:` or `staying:`, because the
 entry reads those lines as the conversation's state:
 
 ```bash
-gc bd update "$CONVERSATION" --append-notes "## Return hand-over ($(date -u +%Y-%m-%dT%H:%M:%SZ))
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$CONVERSATION" "## Return hand-over ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 Agreed: <what the operator agreed, and where it is recorded: AGREED, the subject's notes, the gates' resolve reasons, and what was said only in this thread>
 Returned work: <each WORK bead, its PR, and the exact revision to examine>
 Compared so far: <each match or departure found, with its evidence, and what was already posted on the PR or to the operator>

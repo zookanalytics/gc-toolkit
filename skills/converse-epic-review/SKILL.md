@@ -206,6 +206,9 @@ also says what was mechanical, what took judgment and what the contract lacked.
 The block is written before anything else, and its write's exit decides whether
 it landed:
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 TODAY=$(date -u +%Y-%m-%d) \
   && RECORD="## Epic review, $TODAY
 $(cat <<'BLOCK'
@@ -223,7 +226,7 @@ Judgment: <what took judgment>
 Contract lacked: <what the contract lacked>
 BLOCK
 )" \
-  && gc bd update "$EPIC" --append-notes "$RECORD" \
+  && "$GCTK" bead note "$EPIC" "$RECORD" \
   && echo "the review record is on $EPIC"
 ```
 No closing line means the store refused the record: write nothing more, and say

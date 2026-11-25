@@ -393,8 +393,11 @@ main. Never `--merge direct`.
 ## Communication
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 gc bd show <id>                         # re-read a bead / refresh the slice
-gc bd update <id> --append-notes "..."  # a note (APPEND, never --notes)
+"$GCTK" bead note <id> "..."            # a note, appended (the records skill)
 gc session nudge <addr> "..."           # talk to another agent (ephemeral)
 gc runtime drain-ack                    # end this one-shot session
 ```
