@@ -47,7 +47,9 @@ writer below has written `hold:mayor` since.
 3. **No placement is half-made.** A bead a sitting is placing right now could
    take `hold:po` back in the window between the move's read and its write,
    which is why the move reads each bead again just before its write. Run it
-   while no po sitting is placing, which `gc session list` shows.
+   while no po sitting is placing, which `gc session list` shows. A hold
+   another writer adds meanwhile stays on, because the move's write removes
+   `hold:mayor` by name.
 
 ## The commands
 

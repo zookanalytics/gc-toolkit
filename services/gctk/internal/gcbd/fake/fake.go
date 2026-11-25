@@ -396,8 +396,8 @@ func (s *Store) Blocked() (*gcbd.BlockedSet, error) {
 }
 
 // Update applies one update's --set-metadata, --unset-metadata, --status,
-// --assignee, --append-notes, --title, --priority, --remove-label,
-// --description and --parent to the row, and records it. An argument that is no
+// --assignee, --append-notes, --title, --priority, --add-label,
+// --remove-label, --description and --parent to the row, and records it. An argument that is no
 // flag names another bead the update writes the same way, as bd's update takes
 // each bead it writes, and each is recorded as a write of its own. A bead the
 // store does not hold refuses the write, as bd does. --if-status and
@@ -526,6 +526,10 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			b.Notes += value
 		case "--title":
 			b.Title = value
+		case "--add-label":
+			if !slices.Contains(b.Labels, value) {
+				b.Labels = append(slices.Clone(b.Labels), value)
+			}
 		case "--remove-label":
 			b.Labels = slices.DeleteFunc(slices.Clone(b.Labels), func(l string) bool { return l == value })
 		case "--description":

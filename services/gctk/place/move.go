@@ -13,32 +13,29 @@ import (
 // on hold:mayor, the hold's earlier spelling, onto hold:po, in every store the
 // city's rig list names. `gctk bead move-placement-hold` makes it.
 //
-// Each bead moves through bd's set-state, `gc bd set-state <id> hold=po`, which
-// swaps the first hold: label the bead carries, in label order, for hold:po in
-// one guarded update and files an event bead that records the change, so the
-// bead is held before, during and after the write. A bead carrying hold:po
-// already answers no change, so a second move writes nothing
-// (specs/tk-1tfzr71.233/gas-city-search.md).
+// Each bead moves in one update, `gc bd update <id> --add-label hold:po
+// --remove-label hold:mayor`. bd makes both label changes in the update's own
+// transaction, so the bead is held before, during and after the write, and
+// records each as a label event, which `gc bd history <id> --events` reads. The
+// write names the one label it removes, so every other label the bead carries
+// as the write lands stays on, a hold another writer added after the move read
+// the bead included. A bead on hold:po alone takes no write, so a second move
+// writes nothing (specs/tk-1tfzr71.233/gas-city-search.md).
 //
-// set-state reads the label it swaps by the exact prefix and takes the first,
-// so a move writes only a bead whose hold: labels are hold:mayor, or hold:mayor
-// beside hold:po, which sorts after it. It leaves each other bead the queue
-// holds on hold:mayor as it stands, and names why and the write a person makes:
-// a bead another hold or hold:cleared also labels, one whose hold:mayor is in
-// another case, one assigned to an agent, and one routed to a pool or an agent,
-// which a held bead never is. A route of the shape Gas City's doctor repair
-// hold-label-routed-to wrote from the label is named as one that repair may
-// have written, with the read of who set it, since a writer can choose the same
-// route, and any other route as one a writer chose. It reads no closed bead, so
-// a closed record keeps its labels.
+// A move writes only a bead whose hold: labels are hold:mayor, or hold:mayor
+// beside hold:po. It leaves each other bead the queue holds on hold:mayor as it
+// stands, and names why and the write a person makes: a bead another hold or
+// hold:cleared also labels, one whose hold:mayor is in another case, one
+// assigned to an agent, and one routed to a pool or an agent, which a held bead
+// never is. A route of the shape Gas City's doctor repair hold-label-routed-to
+// wrote from the label is named as one that repair may have written, with the
+// read of who set it, since a writer can choose the same route, and any other
+// route as one a writer chose. It reads no closed bead, so a closed record
+// keeps its labels.
 //
 // A store that does not read is named with why, and a move that leaves a store
 // unread or a bead on hold:mayor has not finished: run it again once the cause
 // is cleared.
-
-// moveReason is the reason each set-state carries, which bd records on the
-// event bead it files.
-const moveReason = "The placement queue moved from hold:mayor to hold:po (gctk bead move-placement-hold)."
 
 // City is Gas City as a move reaches it: its rig list, whose every entry, the
 // HQ and each rig, suspended or not, names one store.
@@ -142,9 +139,10 @@ func (m *Move) store(ctx context.Context, rig gascity.Rig) StoreMove {
 }
 
 // move reads the bead again and, when it still is one the move writes, swaps
-// its hold through set-state. The read again keeps a bead whose hold a
-// placement lifted after the store's read from taking hold:po. It answers the
-// bead it leaves when it writes nothing, and nil once the write landed.
+// its hold in the one update that adds hold:po and removes hold:mayor. The read
+// again keeps a bead whose hold a placement lifted after the store's read from
+// taking hold:po. It answers the bead it leaves when it writes nothing, and nil
+// once the write landed.
 func (m *Move) move(l *ledger.Ledger, id, db string) *Left {
 	again := "Run it again: gctk bead move-placement-hold"
 	rows, err := l.Find(ledger.ByID(id))
@@ -159,8 +157,11 @@ func (m *Move) move(l *ledger.Ledger, id, db string) *Left {
 	if why, fix := left(rows[0], db); why != "" {
 		return &Left{ID: id, Why: why, Fix: fix}
 	}
-	if err := l.SetState(id, "hold", "po", moveReason); err != nil {
-		return &Left{ID: id, Why: "its set-state did not land (" + err.Error() + "), so it keeps hold:mayor", Fix: again}
+	w := l.Write(id)
+	w.AddLabel(gascity.HoldPO)
+	w.RemoveLabel(gascity.HoldMayor)
+	if err := l.Commit(w); err != nil {
+		return &Left{ID: id, Why: "its write did not land (" + err.Error() + "), so it keeps hold:mayor", Fix: again}
 	}
 	return nil
 }
@@ -205,9 +206,9 @@ func left(r *ledger.Record, db string) (why, fix string) {
 		fix += " --remove-label " + shQuote(l)
 	}
 	if !slices.Contains(r.Labels(), gascity.HoldMayor) {
-		return "it carries hold:mayor as " + strings.Join(spelled, ", ") + ", which set-state matches by its exact text, so it would add hold:po beside it", fix + at
+		return "it carries hold:mayor as " + strings.Join(spelled, ", ") + ", and bd removes a label by its exact text, so the move's write would leave it beside hold:po", fix + at
 	}
-	return "it also carries " + strings.Join(other, ", ") + ", and set-state swaps the first hold: label it finds, so it could swap the wrong one", fix + at
+	return "it also carries " + strings.Join(other, ", ") + ", a hold: label another writer put there, so whether it still waits for placement is a person's call", fix + at
 }
 
 // holdRoute reports whether route has the shape Gas City's doctor repair

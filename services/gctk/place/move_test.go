@@ -80,10 +80,10 @@ func leftIDs(s StoreMove) []string {
 }
 
 // A mixed store moves each bead whose placement hold is hold:mayor alone, or
-// hold:mayor beside hold:po, onto hold:po through set-state, and counts a bead
-// on hold:po already. It leaves each other bead the queue holds on hold:mayor
-// as it stands, with why and the write a person makes, and writes no bead that
-// is not in the queue, no closed bead and no other hold.
+// hold:mayor beside hold:po, onto hold:po in one update that names both labels,
+// and counts a bead on hold:po already. It leaves each other bead the queue
+// holds on hold:mayor as it stands, with why and the write a person makes, and
+// writes no bead that is not in the queue, no closed bead and no other hold.
 func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 	c := newMoveCity()
 	s := c.stores[toolRig.Store()]
@@ -130,9 +130,13 @@ func TestAMoveTakesTheQueueOntoHoldPO(t *testing.T) {
 			t.Errorf("%s carries %v, want %v", id, got, want)
 		}
 	}
-	for _, st := range s.States() {
-		if st.Dimension != "hold" || st.Value != "po" || st.Reason != moveReason {
-			t.Errorf("set-state %+v, want hold=po with the move's reason", st)
+	if st := s.States(); len(st) != 0 {
+		t.Errorf("set-states %+v, want none: set-state swaps the first hold: label it reads, not the one the move names", st)
+	}
+	swap := []string{"--add-label", "hold:po", "--remove-label", "hold:mayor"}
+	for _, wr := range s.Writes() {
+		if !slices.Equal(wr.Args, swap) {
+			t.Errorf("the write to %s was %q, want %q", wr.ID, wr.Args, swap)
 		}
 	}
 	if b, _ := s.Row("tk-blocked"); b.Status != "blocked" {
@@ -232,8 +236,8 @@ func TestAStoreThatDoesNotReadIsNamed(t *testing.T) {
 }
 
 // A bead is read again just before its write. One whose hold:mayor a placement
-// lifted after the store's read takes no hold:po, and one whose set-state does
-// not land is left on hold:mayor with why.
+// lifted after the store's read takes no hold:po, and one whose write does not
+// land is left on hold:mayor with why.
 func TestAMoveWritesOnlyWhatItReadsAgain(t *testing.T) {
 	c := newMoveCity()
 	s := c.stores[toolRig.Store()]
@@ -244,7 +248,7 @@ func TestAMoveWritesOnlyWhatItReadsAgain(t *testing.T) {
 		}
 	}
 	out := storeOf(c.run(t, false), "gc-toolkit")
-	if len(s.States()) != 0 || len(out.Moved) != 0 || !slices.Equal(leftIDs(out), []string{"tk-placed"}) ||
+	if len(s.Writes()) != 0 || len(out.Moved) != 0 || !slices.Equal(leftIDs(out), []string{"tk-placed"}) ||
 		!strings.Contains(out.Left[0].Why, "lifted after the store's read") || c.labels(toolRig.Store(), "tk-placed") != nil {
 		t.Errorf("a bead placed under the move = %+v with labels %v, want it left with no hold written", out, c.labels(toolRig.Store(), "tk-placed"))
 	}
@@ -252,10 +256,32 @@ func TestAMoveWritesOnlyWhatItReadsAgain(t *testing.T) {
 	c = newMoveCity()
 	s = c.stores[toolRig.Store()]
 	s.Put(fake.Bead{ID: "tk-old", Status: "open", Labels: []string{"hold:mayor"}})
-	s.StateErr = errors.New("bd refused")
+	s.UpdateErr = errors.New("bd refused")
 	out = storeOf(c.run(t, false), "gc-toolkit")
 	if len(out.Moved) != 0 || !slices.Equal(leftIDs(out), []string{"tk-old"}) || !strings.Contains(out.Left[0].Why, "did not land") || !strings.Contains(out.Left[0].Why, "bd refused") ||
 		!slices.Equal(c.labels(toolRig.Store(), "tk-old"), []string{"hold:mayor"}) {
-		t.Errorf("a refused set-state = %+v, want tk-old left on hold:mayor with why", out)
+		t.Errorf("a refused write = %+v, want tk-old left on hold:mayor with why", out)
+	}
+}
+
+// A hold another writer adds after the move read a bead again, and before its
+// write lands, stays on, and the bead moves: the write removes hold:mayor by
+// name, not the first hold: label the bead carries then.
+func TestAMoveKeepsAHoldAddedBeforeItsWrite(t *testing.T) {
+	c := newMoveCity()
+	s := c.stores[toolRig.Store()]
+	s.Put(fake.Bead{ID: "tk-old", Status: "open", Labels: []string{"hold:mayor"}})
+	s.BeforeUpdate = func(id string, _ []string) error {
+		b, _ := s.Row(id)
+		b.Labels = append(slices.Clone(b.Labels), "hold:external")
+		s.Put(b)
+		return nil
+	}
+	out := storeOf(c.run(t, false), "gc-toolkit")
+	if got := c.labels(toolRig.Store(), "tk-old"); !slices.Equal(got, []string{"hold:external", "hold:po"}) {
+		t.Errorf("tk-old carries %v, want hold:external kept and hold:mayor swapped for hold:po", got)
+	}
+	if !slices.Equal(out.Moved, []string{"tk-old"}) || len(out.Left) != 0 {
+		t.Errorf("the move = %+v, want tk-old moved", out)
 	}
 }

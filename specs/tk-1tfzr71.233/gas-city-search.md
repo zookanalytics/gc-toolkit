@@ -1,6 +1,6 @@
 ---
 name: Gas City search for the placement queue's move to hold:po (tk-1tfzr71.233)
-description: The Gas City and bd primitives searched for each need of moving the placement queue from hold:mayor to hold:po, what each covers, the reason upstream gives for holding only two values and the census that tests it here, and why gctk bead move-placement-hold composes bd's set-state over each store. Read it when reviewing the label, the pack's hold rule or the verb, as AGENTS.md asks of a change that adds surface or accommodates Gas City.
+description: The Gas City and bd primitives searched for each need of moving the placement queue from hold:mayor to hold:po, what each covers, the reason upstream gives for holding only two values and the census that tests it here, and why gctk bead move-placement-hold composes bd's update, not its set-state, over each store. Read it when reviewing the label, the pack's hold rule or the verb, as AGENTS.md asks of a change that adds surface or accommodates Gas City.
 ---
 
 # Gas City search for the placement queue's move to hold:po
@@ -74,26 +74,58 @@ label exactly and cannot name every value, so the fork's
 start's ready read keeps only the human label in its flags and holds a held bead
 by the adapter's rule before it reads readiness.
 
-## Move a held bead's label with no moment unheld
+## Move a held bead's label with no moment unheld, and keep every other hold
 
-**Covered: bd's set-state.** `bd set-state <id> hold=po --reason <text>`
-(`cmd/bd/state.go`, `runSetState`) adds `hold:po` and removes the bead's old
-hold label in one `LabelPatch`, one guarded update, and files a closed `event`
-bead that records the change and its reason. It answers "no change" and writes
-nothing when the value is set already. The conventions page names it the
-sanctioned way to set a hold. The verb's write is this command.
+**Covered: bd's update, adding one label and removing another.**
+`bd update <id> --add-label hold:po --remove-label hold:mayor` carries both in
+one `LabelPatch` (`cmd/bd/update.go`). `issueops.ExecuteUpdate` reads the bead
+in the update's own transaction (`internal/storage/issueops/execution.go`), and
+`issueops.ApplyLabelPatch` (`internal/storage/issueops/aggregate.go`) writes the
+labels the bead carries there, plus `hold:po` and less `hold:mayor`. So the bead
+is held before and after the commit, each other label it carries as the write
+lands stays on, and a bead already on `hold:po` alone takes no change. bd
+records each label it adds or removes as a `label_added` or `label_removed`
+event with its actor (`AddLabelInTx` and `RemoveLabelInTx` in
+`internal/storage/issueops/labels.go`), which `bd history <id> --events` reads.
+The verb's write is this command.
 
-**Not covered: which beads it may write.** `findStateLabel` takes the first
-label that begins with the exact text `hold:`, and bd reads a bead's labels
-`ORDER BY label` (`internal/storage/issueops/labels.go`). So on a bead that also
-carries `hold:cleared` or `hold:external`, set-state would swap that label and
-leave `hold:mayor`, and it does not find `Hold:Mayor` at all. The verb writes a
-bead only when its `hold:` labels are `hold:mayor`, or `hold:mayor` beside
-`hold:po`, which sorts after it, and names every other bead with the
-`gc bd update --add-label hold:po --remove-label ...` write a person makes.
-`bd update` carries its added and removed labels in one `LabelPatch`, which
-`issueops.ApplyLabelPatch` applies as one set, so that write leaves the bead
-held too.
+**Covered for setting a hold, not for this move: bd's set-state.**
+`bd set-state <id> hold=po --reason <text>` (`cmd/bd/state.go`, `runSetState`)
+adds `hold:po` and removes the bead's old hold label in one `LabelPatch`, and
+files a closed `event` bead that records the change and its reason. The
+conventions page names it the sanctioned way to set a hold, "never with a plain
+`bd label add`", because it treats `hold:` as one dimension with one value:
+set-state "removes any existing label in the `hold:` dimension, adds the new
+one, and files an audit event bead". It chooses the label it removes from its
+own read of the bead, before its update: `findStateLabel` takes the first label
+that begins with the exact text `hold:`, and bd reads a bead's labels
+`ORDER BY label` (`internal/storage/issueops/labels.go`). The move sets no hold.
+It changes the spelling of the placement hold on a bead that already carries
+it, and must leave any other hold on, which this city's `gc` reads as a hold of
+its own. A hold another writer adds after the move reads a bead and before
+set-state reads it, such as `hold:external`, sorts before `hold:mayor`, so
+set-state would swap that hold out and leave `hold:mayor`.
+
+**Measured here.** The move's store acceptance case
+(`services/gctk/place/move_acceptance_test.go`) runs it against bd 1.3.4 on a
+scratch store, with a writer that adds `hold:external` to one bead just before
+the move's write. With the move writing through set-state, on 2026-11-25, that
+bead ended on `hold:mayor` and `hold:po`, its history recorded `hold:external`
+removed, and the move reported the bead moved. Through the update it ends on
+`hold:external` and `hold:po`. No live bead carries a second hold label (the
+census above), so the case needs a writer to act during the move. Intake and
+the po's Hold lever set the placement hold with set-state, as the page asks, and
+a hold added before such a write lands would be swapped out the same way.
+tk-uki5019 takes that up once this change lands.
+
+**What the write leaves to a person.** The verb writes a bead only when its
+`hold:` labels are `hold:mayor`, or `hold:mayor` beside `hold:po`. Another hold
+or `hold:cleared` on the bead is a label another writer put there, so whether
+the bead still waits for placement is a person's call. bd removes a label by its
+exact text, so the update would leave `Hold:Mayor` beside `hold:po`. The verb
+names each such bead with the
+`gc bd update --add-label hold:po --remove-label ...` write a person makes,
+which leaves the bead held too.
 
 ## Read every store, and name the one that does not answer
 
@@ -108,10 +140,11 @@ suspended or not.
 
 ## What the verb adds, and when it goes
 
-`gctk bead move-placement-hold` reads each store on its own, writes through
-set-state only the beads set-state swaps correctly, reads each bead again just
-before its write so a bead a placement lifted meanwhile takes no `hold:po`, and
-exits 0 only when every store read and no live bead is left on `hold:mayor`. It
+`gctk bead move-placement-hold` reads each store on its own, swaps `hold:mayor`
+for `hold:po` in one update on each bead whose `hold:` labels are `hold:mayor`,
+or `hold:mayor` beside `hold:po`, reads each bead again just before its write so
+a bead a placement lifted meanwhile takes no `hold:po`, and exits 0 only when
+every store read and no live bead is left on `hold:mayor`. It
 is debt: it exists for the `hold:mayor` labels written before the pack moved,
 and it goes with the pack's reading of `hold:mayor` as the placement hold, once
 the cutover has run and no writer is left that writes it.

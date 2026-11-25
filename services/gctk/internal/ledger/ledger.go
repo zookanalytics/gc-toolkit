@@ -91,13 +91,14 @@ var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
 // the bead, the status it moves the bead to, the agent it assigns the bead to,
-// the labels it removes, the note it appends and the guard it lands under, made
-// in one update.
+// the labels it adds and removes, the note it appends and the guard it lands
+// under, made in one update.
 type Write struct {
 	id          string
 	title       string
 	sets        []string // key=value, in the order set
 	unsets      []string
+	labelsOn    []string
 	labelsOff   []string
 	status      string
 	assignee    *string
@@ -177,6 +178,21 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 	}
 }
 
+// AddLabel adds label to the bead in the same write, by its exact text, as bd
+// adds one. A label is the row's own field, which no key declares, so the act
+// that adds one says what it means.
+//
+// bd applies the labels one update adds and removes as one change, in the
+// update's own transaction and to the labels the bead carries then
+// (issueops.ApplyLabelPatch, beads v1.3.4). So a write that adds one label and
+// removes another changes those two alone, and leaves each other label the bead
+// carries as the write lands, even one added after the act read the bead.
+func (w *Write) AddLabel(label string) {
+	if !slices.Contains(w.labelsOn, label) {
+		w.labelsOn = append(w.labelsOn, label)
+	}
+}
+
 // RemoveLabel removes label from the bead in the same write, by its exact text,
 // as bd removes one. A label is the row's own field, which no key declares, so
 // the act that removes one says what it means.
@@ -226,7 +242,7 @@ func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status
 
 // args is the update's arguments: the guard, the status, the assignee, the
 // title, the priority, the description, the parent, every set, every removal,
-// every label removed, then the note.
+// every label added, every label removed, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -255,6 +271,9 @@ func (w *Write) args() []string {
 	}
 	for _, u := range w.unsets {
 		args = append(args, "--unset-metadata", u)
+	}
+	for _, l := range w.labelsOn {
+		args = append(args, "--add-label", l)
 	}
 	for _, l := range w.labelsOff {
 		args = append(args, "--remove-label", l)
@@ -480,7 +499,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
+	if len(w.sets)+len(w.unsets)+len(w.labelsOn)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
 		w.description == nil && w.parent == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}

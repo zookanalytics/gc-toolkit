@@ -78,10 +78,11 @@ this city's `hold:po` rests on the keeper's fork
 queue moved to `hold:po` carries it, so every reader of the queue reads it
 beside `hold:po`, and each still holds the bead. `gctk bead move-placement-hold`
 moves each live bead the queue holds on `hold:mayor` onto `hold:po`, through
-`gc bd set-state <bead> hold=po`, which swaps the label in one write and files
-its event bead, so the bead is never unheld. It writes only a bead whose `hold:`
-labels are `hold:mayor`, or `hold:mayor` beside `hold:po`, and names each other
-one with the write a person makes, and it reads no closed bead.
+`gc bd update <bead> --add-label hold:po --remove-label hold:mayor`, which swaps
+the label in one write and leaves every other label on, so the bead is never
+unheld and keeps any other hold. It writes only a bead whose `hold:` labels are
+`hold:mayor`, or `hold:mayor` beside `hold:po`, and names each other one with
+the write a person makes, and it reads no closed bead.
 
 A held bead carries no route. Gas City's hold conventions say a pack that parks
 finished work on a hold usually clears its route, because the next actor is not

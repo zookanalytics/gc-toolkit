@@ -66,7 +66,12 @@ and one city before and after, and the live Dolt servers kept their pids.
    three. Each moved bead carries one closed event bead, "State change: hold →
    po", whose description reads "Changed hold from mayor to po" and the move's
    reason. r1-7gl ended on `hold:po` alone, and r1-2cp, closed, kept
-   `hold:mayor`.
+   `hold:mayor`. Review changed the move's write after this run. It is now one
+   `gc bd update <bead> --add-label hold:po --remove-label hold:mayor`, which
+   keeps a hold another writer adds before the write lands, and bd's history
+   records its two label changes in place of an event bead. The move's store
+   acceptance case pins it against bd 1.3.4
+   (`TestStoreAcceptanceAMoveTakesTheQueueOntoHoldPO`).
 5. **The named writes finish the move.** Clearing r1-bun's route and making
    r1-ukj's named update left a third run to move r1-bun and leave r1-p5o, the
    person's call.
