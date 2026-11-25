@@ -195,40 +195,44 @@ lift, so that tells the operator nothing.
 
 ## A post that needs only an answer
 
-On a review run, each post a person makes on the PR is an ask the run can take,
-and the read lists it with the run so far: its reason names the post's kind and
-author and ends with the post's URL. When the post needs only an answer, or
-nothing, you answer it yourself, and rule-and-repair does no work for it.
+On a review run, each post a person makes on the PR is an ask the run can
+take. The read lists it with the run so far. Its reason names the post's kind
+and author and ends with the post's URL.
 
-- **Answer a post only when it asks for no change to the branch and no
-  person's decision**, such as a question about the change, a thank-you or an
-  approval's "looks good". Read it first, at the URL its reason ends with,
-  `https://github.com/<owner>/<repo>/pull/<number>#<post>`, whose last part
-  names the post: `#issuecomment-<id>` reads with
-  `gh api repos/<owner>/<repo>/issues/comments/<id> --jq .body`,
-  `#discussion_r<id>` with
-  `gh api repos/<owner>/<repo>/pulls/comments/<id> --jq '.path, .line, .body'`,
-  and `#pullrequestreview-<id>` with
-  `gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --jq '.state, .body'`,
-  each value taken from the URL. For a PR on another GitHub host, add
-  `--hostname <host>` after `gh api`.
-- **Leave every other post to rule-and-repair**: one that asks for a change,
-  however small, one that asks a person to choose, one whose answer you cannot
-  give from the change and the read, and every ask that names no post, such as
-  a red check or a conflict. Leaving a post costs a ruling session, and a
-  wrong answer costs the person who asked.
-- **While a question the run put to a person is open on the PR's bead, answer
-  no post.** A post may settle the question, which rule-and-repair rules, and
-  an ask filed before such a question was put may be the question's own. The
-  output check refuses both and names the question.
+Answer a post yourself only when both of these hold:
 
-Rule each post you answer `answered`, and write its reason as the answer, to
-the person who made the post: the reason is what the reply says and what the
-head's comment shows. Mark it `wordless` when it is owed no words, as a
-thank-you or a "looks good" is: its answer is then the city's 👍 alone. An ask
-you answered in an earlier round of the run is still open until the run records
-its result, so answer it again at each head while it still meets the bar. The
-formula's post call puts your answers on the PR.
+- It asks for no change to the branch.
+- It asks for no person's decision.
+
+A question about the change, a thank-you and an approval's "looks good" are
+such posts. Leave every other ask to rule-and-repair, such as:
+
+- a post that asks for a change, however small;
+- a post that asks a person to choose;
+- a post whose answer you cannot give from the change and the read;
+- an ask that names no post, such as a red check or a conflict.
+
+While a question the run put to a person is open on the PR's bead, answer no
+post.
+
+Read a post before you answer it, at the URL its reason ends with,
+`https://github.com/<owner>/<repo>/pull/<number>#<post>`. Take each value the
+call needs from the URL. The URL's last part names the post and the call that
+reads it:
+
+- `#issuecomment-<id>`:
+  `gh api repos/<owner>/<repo>/issues/comments/<id> --jq .body`
+- `#discussion_r<id>`:
+  `gh api repos/<owner>/<repo>/pulls/comments/<id> --jq '.path, .line, .body'`
+- `#pullrequestreview-<id>`:
+  `gh api repos/<owner>/<repo>/pulls/<number>/reviews/<id> --jq '.state, .body'`
+
+For a PR on another GitHub host, add `--hostname <host>` after `gh api`.
+
+Rule each post you answer `answered`. Write its reason as the answer, to the
+person who made the post. Mark it `wordless` when it is owed no words, as a
+thank-you or a "looks good" is. Answer again, at each head, an ask you answered
+in an earlier round of the run, while it still meets the bar.
 
 ## What blocks
 
@@ -239,9 +243,8 @@ no findings, so it has no findings block.
 
 - It never judges correctness, and it never files findings about the code. A
   defect you notice while skimming belongs in the `correctness` review, not here;
-  say so in the verdict body and let that check hold it. Answering a question
-  about the change is not judging it: an answer that would need you to judge
-  the change is a post you leave.
+  say so in the verdict body and let that check hold it. Leave a post whose
+  answer would need you to judge the change.
 - It never fixes anything, and it never touches the anchor other than through
   the calls its formula names.
 
