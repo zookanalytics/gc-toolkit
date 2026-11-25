@@ -5,9 +5,8 @@
 # (a stale remote-tracking ref makes the naive behind-count read 0, so it must
 # warn as a floor, never pass), both when nothing fetched past the threshold
 # and after a real `git fetch` that failed, with a real fetch that worked as
-# its control; the self-heal window in both directions; the
-# stale-text scope (in_progress only, liveness cap, cross-rig formula
-# resolution); the query flags themselves; the quiet path; the fail-closed
+# its control; the self-heal window in both directions; a run poured before its
+# formula last changed, which is no finding; the quiet path; the fail-closed
 # arms (every unreadable probe warns, never passes).
 set -uo pipefail
 
@@ -35,12 +34,12 @@ NOW=$(date -u +%s)
 iso_at() { date -u -d "@$(( NOW - $1 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
         || date -u -r "$(( NOW - $1 ))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null; }
 
-# The check's defaults: 15m interval x 3 slack = 45m stale threshold, 24h
-# liveness cap. Fixtures sit unambiguously on one side, never near an edge.
+# The check's defaults: 15m interval x 3 slack = 45m stale threshold.
+# Fixtures sit unambiguously on one side, never near an edge.
 INSIDE_WINDOW=600        # 10m  — a lag the reconciler is still working through
 PAST_WINDOW=7200         # 2h   — a lag that has stopped self-healing
-LIVE=3600                # 1h   — a molecule plausibly still running
-HUSK=172800              # 48h  — long past the liveness cap
+LIVE=3600                # 1h   — a run plausibly still going
+OLD=172800               # 48h  — a formula long since landed
 
 # mkrepo <path> <formula-age> — a checkout whose HEAD equals its remote ref,
 # with one formula committed <formula-age> seconds ago.
@@ -84,36 +83,20 @@ root() {
         "$1" "$2" "$(iso_at "$3")" "$4"
 }
 
-# The stub `gc` serves the rig roster and the bead listing. bd list records
-# its argv so the QUERY case can assert the flags, answers per --db from a
-# fixture file, and APPLIES --status / --has-metadata-key rather than trusting
-# them — the (OPENROOT) case is only meaningful if the filter is what excludes
-# the open root. A store with no fixture answers `[]` (an empty store, which
-# is not an unreadable one).
+# The stub `gc` serves the rig roster and the bead listing. bd records its argv
+# and answers per --db from a fixture file, so a check that listed a store
+# would see the run the (POUREDBEFORE) case puts there.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GCEOF'
 if [ "${1:-}" = "rig" ] && [ "${2:-}" = "list" ]; then
     [ -f "$GC_RIGS_RC" ] && exit "$(cat "$GC_RIGS_RC")"
     cat "$GC_RIGS"; exit 0
 fi
-if [ "${1:-}" = "bd" ] && [ "${2:-}" = "list" ]; then
+if [ "${1:-}" = "bd" ]; then
     printf '%s\n' "$*" >> "$BD_CALLS"
-    db=""; want_status=""; want_key=""; prev=""
-    for a in "$@"; do
-        case "$prev" in
-            --db)               db="$a" ;;
-            --status)           want_status="$a" ;;
-            --has-metadata-key) want_key="$a" ;;
-        esac
-        prev="$a"
-    done
-    key=$(printf '%s' "$db" | tr -c 'A-Za-z0-9' '_')
-    if [ -f "$BD_FIXTURES/$key.rc" ]; then exit "$(cat "$BD_FIXTURES/$key.rc")"; fi
-    if [ -f "$BD_FIXTURES/$key.empty" ]; then exit 0; fi
-    if [ ! -f "$BD_FIXTURES/$key.json" ]; then printf '[]'; exit 0; fi
-    jq -c --arg st "$want_status" --arg k "$want_key" \
-       '[ .[] | select($st == "" or .status == $st)
-              | select($k == "" or (.metadata // {} | has($k))) ]' \
-       < "$BD_FIXTURES/$key.json"
+    db=""; prev=""
+    for a in "$@"; do [ "$prev" = "--db" ] && db="$a"; prev="$a"; done
+    fixture="$BD_FIXTURES/$(printf '%s' "$db" | tr -c 'A-Za-z0-9' '_').json"
+    if [ -f "$fixture" ]; then cat "$fixture"; else printf '[]'; fi
     exit 0
 fi
 exit 0
@@ -139,7 +122,7 @@ echo "── currency: the checkout the runtime executes ──"
 
 # (CURRENT) the healthy city — the quiet control: without it, every arm below
 # could pass while the check flagged a clean city on every run.
-A="$TMP/a"; mkrepo "$A" "$HUSK"
+A="$TMP/a"; mkrepo "$A" "$OLD"
 rigs_json "{\"name\":\"alpha\",\"path\":\"$A\",\"hq\":false}"
 run current
 eq "$RC" "0" "(CURRENT) a checkout at its remote tip exits 0"
@@ -148,7 +131,7 @@ hasnt "$OUT" "behind" "(CURRENT) …naming no lag"
 
 # (LAGGED) behind, past the self-heal window, with a FRESH fetch — the
 # behind-count is trustworthy and the lag is real.
-B="$TMP/b"; mkrepo "$B" "$HUSK"; advance_remote "$B" 2 "$PAST_WINDOW"; touch "$B/.git/FETCH_HEAD"
+B="$TMP/b"; mkrepo "$B" "$OLD"; advance_remote "$B" 2 "$PAST_WINDOW"; touch "$B/.git/FETCH_HEAD"
 rigs_json "{\"name\":\"beta\",\"path\":\"$B\",\"hq\":false}"
 run lagged
 eq "$RC" "2" "(LAGGED) a lag past the self-heal window is an ERROR"
@@ -157,7 +140,7 @@ has "$OUT" "past the" "(LAGGED) …and that it is past the window"
 
 # (LAGWINDOW) behind, but the oldest unmerged commit is INSIDE the window —
 # the reconciler's ordinary duty cycle, not a finding.
-C="$TMP/c"; mkrepo "$C" "$HUSK"; advance_remote "$C" 1 "$INSIDE_WINDOW"; touch "$C/.git/FETCH_HEAD"
+C="$TMP/c"; mkrepo "$C" "$OLD"; advance_remote "$C" 1 "$INSIDE_WINDOW"; touch "$C/.git/FETCH_HEAD"
 rigs_json "{\"name\":\"gamma\",\"path\":\"$C\",\"hq\":false}"
 run lagwindow
 eq "$RC" "0" "(LAGWINDOW) a lag inside the reconciler's window is NOT a finding"
@@ -165,7 +148,7 @@ has "$OUT" "self-healing" "(LAGWINDOW) …and is noted as self-healing"
 
 # (UNFETCHED) the fail-open control: behind reads 0, and that 0 is worthless
 # because the ref it was measured against has not moved either.
-D="$TMP/d"; mkrepo "$D" "$HUSK"; age_fetch "$D" "$PAST_WINDOW"
+D="$TMP/d"; mkrepo "$D" "$OLD"; age_fetch "$D" "$PAST_WINDOW"
 rigs_json "{\"name\":\"delta\",\"path\":\"$D\",\"hq\":false}"
 run unfetched
 eq "$RC" "1" "(UNFETCHED) behind=0 with a stale remote ref WARNS instead of passing"
@@ -176,7 +159,7 @@ has "$(printf '%s\n' "$OUT" | head -n1)" "1 checkout(s) not refreshed from origi
     "(UNFETCHED) …in a first line that names it rather than calling the pack current"
 
 # (FLOOR) behind AND unfetched: the true lag cannot be measured from here.
-E="$TMP/e"; mkrepo "$E" "$HUSK"; advance_remote "$E" 3 "$PAST_WINDOW"; age_fetch "$E" "$PAST_WINDOW"
+E="$TMP/e"; mkrepo "$E" "$OLD"; advance_remote "$E" 3 "$PAST_WINDOW"; age_fetch "$E" "$PAST_WINDOW"
 rigs_json "{\"name\":\"eps\",\"path\":\"$E\",\"hq\":false}"
 run floor
 eq "$RC" "2" "(FLOOR) behind + stale ref is an ERROR"
@@ -189,7 +172,7 @@ fetch_size() { wc -c < "$1/.git/FETCH_HEAD" | tr -d ' '; }
 
 # (GOODFETCH) the control for FAILEDFETCH: a real fetch that worked, over a
 # FETCH_HEAD aged past the window, leaves the file listing what it fetched.
-J="$TMP/j"; mkrepo "$J" "$HUSK"
+J="$TMP/j"; mkrepo "$J" "$OLD"
 git clone -q --bare "$J" "$TMP/j-origin.git" 2>/dev/null
 git -C "$J" remote add origin "$TMP/j-origin.git"; age_fetch "$J" "$PAST_WINDOW"
 FETCH_RC=0; git -C "$J" fetch -q origin 2>/dev/null || FETCH_RC=$?
@@ -202,7 +185,7 @@ hasnt "$OUT" "not refreshed" "(GOODFETCH) …naming no unrefreshed checkout"
 # (FAILEDFETCH) a fetch that keeps failing: a real fetch from an origin that is
 # gone exits 128 and empties FETCH_HEAD with a fresh mtime, so its age alone
 # reads as fresh, and the ref did not move, so behind reads 0.
-K="$TMP/k"; mkrepo "$K" "$HUSK"
+K="$TMP/k"; mkrepo "$K" "$OLD"
 git -C "$K" remote add origin "$TMP/absent.git"; age_fetch "$K" "$PAST_WINDOW"
 FETCH_RC=0; git -C "$K" fetch -q origin 2>/dev/null || FETCH_RC=$?
 eq "$FETCH_RC" "128" "(FAILEDFETCH) the fixture's fetch failed"
@@ -217,7 +200,7 @@ has "$(printf '%s\n' "$OUT" | head -n1)" "1 checkout(s) not refreshed from origi
 
 # (FAILEDFLOOR) behind AND a failed fetch: the count is measured against the
 # ref the last fetch that worked left, so it is a lower bound, not the lag.
-L="$TMP/l"; mkrepo "$L" "$HUSK"; advance_remote "$L" 2 "$PAST_WINDOW"
+L="$TMP/l"; mkrepo "$L" "$OLD"; advance_remote "$L" 2 "$PAST_WINDOW"
 git -C "$L" remote add origin "$TMP/absent.git"
 git -C "$L" fetch -q origin 2>/dev/null
 eq "$(fetch_size "$L")" "0" "(FAILEDFLOOR) the fixture's failed fetch left FETCH_HEAD empty"
@@ -227,7 +210,7 @@ eq "$RC" "2" "(FAILEDFLOOR) behind + a failed fetch is an ERROR"
 has "$OUT" "remote ref is itself stale" "(FAILEDFLOOR) …and says the number is a lower bound"
 
 # (NOFETCHHEAD) no FETCH_HEAD at all — unreadable, so warn, never pass.
-F="$TMP/f"; mkrepo "$F" "$HUSK"; rm -f "$F/.git/FETCH_HEAD"
+F="$TMP/f"; mkrepo "$F" "$OLD"; rm -f "$F/.git/FETCH_HEAD"
 rigs_json "{\"name\":\"zeta\",\"path\":\"$F\",\"hq\":false}"
 run nofetchhead
 eq "$RC" "1" "(NOFETCHHEAD) a missing FETCH_HEAD warns"
@@ -235,7 +218,7 @@ has "$OUT" "unverifiable" "(NOFETCHHEAD) …and says the count is unverifiable"
 
 # (HQ) the HQ rig is excluded from currency by construction (the reconciler
 # selects .hq != true) but must be named, not silently dropped.
-G="$TMP/g"; mkrepo "$G" "$HUSK"; advance_remote "$G" 5 "$PAST_WINDOW"; touch "$G/.git/FETCH_HEAD"
+G="$TMP/g"; mkrepo "$G" "$OLD"; advance_remote "$G" 5 "$PAST_WINDOW"; touch "$G/.git/FETCH_HEAD"
 rigs_json "{\"name\":\"hq\",\"path\":\"$G\",\"hq\":true},{\"name\":\"alpha\",\"path\":\"$A\",\"hq\":false}"
 run hq
 eq "$RC" "0" "(HQ) an HQ rig behind its remote is not a currency finding"
@@ -248,110 +231,22 @@ run notgit
 eq "$RC" "1" "(NOTGIT) a non-checkout rig path warns"
 has "$OUT" "not a git checkout" "(NOTGIT) …saying so"
 
-echo "── stale text: a molecule running superseded step text ──"
+echo "── a run poured before its formula last changed ──"
 
-# (STALETEXT) the invariant itself: the root poured BEFORE its formula last
-# changed, so its step descriptions were rendered from text that is gone.
+# (POUREDBEFORE) nothing re-renders a poured run, so the run finishes on the
+# step text it poured with whatever the change did. That is no finding, and
+# the check lists no bead store to look for it.
 H="$TMP/h"; mkrepo "$H" 1800   # formula last changed 30m ago
 mkdir -p "$H/.beads"
 rigs_json "{\"name\":\"eta\",\"path\":\"$H\",\"hq\":false}"
 printf '[%s]' "$(root mol-old in_progress "$LIVE" "$H/formulas/mol-test.toml")" \
   > "$(fixture_for "$H/.beads").json"
-run staletext
-eq "$RC" "2" "(STALETEXT) a live molecule poured before its formula changed is an ERROR"
-has "$OUT" "mol-old" "(STALETEXT) …naming the root"
-has "$OUT" "AFTER the pour" "(STALETEXT) …and saying the change came after the pour"
-has "$OUT" "I9" "(STALETEXT) …and citing the invariant"
+run pouredbefore
+eq "$RC" "0" "(POUREDBEFORE) a live run poured before its formula last changed reads OK"
+hasnt "$OUT" "mol-old" "(POUREDBEFORE) …and is not named"
+eq "$CALLS" "" "(POUREDBEFORE) …and no bead store is listed"
 
-# (CURRENTTEXT) the same shape with the pour AFTER the change — must be
-# silent, or the arm above fires on every molecule.
-printf '[%s]' "$(root mol-new in_progress 600 "$H/formulas/mol-test.toml")" \
-  > "$(fixture_for "$H/.beads").json"
-run currenttext
-eq "$RC" "0" "(CURRENTTEXT) a molecule poured AFTER the change is not flagged"
-hasnt "$OUT" "mol-new" "(CURRENTTEXT) …and is not named at all"
-
-# (OPENROOT) an `open` root with unambiguously stale text. Live roots are
-# in_progress; open ones are husks (I8's defect, check-step-terminal), and
-# reporting them would bury the real finding.
-printf '[%s]' "$(root mol-husk open "$LIVE" "$H/formulas/mol-test.toml")" \
-  > "$(fixture_for "$H/.beads").json"
-run openroot
-eq "$RC" "0" "(OPENROOT) an open root is out of scope (husk, not a live molecule)"
-hasnt "$OUT" "mol-husk" "(OPENROOT) …and is not named"
-
-# (AGEDOUT) in_progress but past the liveness cap: excluded, and COUNTED, so
-# the scoping is visible rather than silent.
-printf '[%s]' "$(root mol-aged in_progress "$HUSK" "$H/formulas/mol-test.toml")" \
-  > "$(fixture_for "$H/.beads").json"
-run agedout
-eq "$RC" "0" "(AGEDOUT) an in_progress root past the liveness cap is not an error"
-has "$OUT" "excluded as husks" "(AGEDOUT) …but the exclusion is reported, not silent"
-
-# (SUSPENDED) a suspended rig's store is never probed (querying it would
-# auto-start an orphan Dolt server) — noted, and its stale root stays unseen.
-printf '[%s]' "$(root mol-old in_progress "$LIVE" "$H/formulas/mol-test.toml")" \
-  > "$(fixture_for "$H/.beads").json"
-rigs_json "{\"name\":\"eta\",\"path\":\"$H\",\"hq\":false,\"suspended\":true}"
-run suspended
-eq "$RC" "0" "(SUSPENDED) a suspended rig's store is skipped rather than probed"
-has "$OUT" "suspended" "(SUSPENDED) …and the skip is noted, not silent"
-hasnt "$CALLS" "bd list" "(SUSPENDED) …with no bd query issued against it"
-
-# (IMPORTED) the coverage case: the molecule lives in one rig and its formula
-# in ANOTHER scanned checkout (rig-imported packs) — judging only same-rig
-# formulas would skip every imported molecule.
-I="$TMP/i"; mkrepo "$I" "$HUSK"; mkdir -p "$I/.beads"
-rigs_json "{\"name\":\"eta\",\"path\":\"$H\",\"hq\":false},{\"name\":\"iota\",\"path\":\"$I\",\"hq\":false}"
-printf '[]' > "$(fixture_for "$H/.beads").json"
-printf '[%s]' "$(root mol-imported in_progress "$LIVE" "$H/formulas/mol-test.toml")" \
-  > "$(fixture_for "$I/.beads").json"
-run imported
-eq "$RC" "2" "(IMPORTED) a molecule running ANOTHER rig's formula is still judged"
-has "$OUT" "mol-imported" "(IMPORTED) …and named"
-
-# (UNSCANNED) a formula under no scanned checkout — a materialized pack cache.
-# No git history to date it against, so it is unanswerable, not clean.
-mkdir -p "$TMP/packcache/formulas"; printf 'x\n' > "$TMP/packcache/formulas/mol-test.toml"
-printf '[%s]' "$(root mol-cached in_progress "$LIVE" "$TMP/packcache/formulas/mol-test.toml")" \
-  > "$(fixture_for "$I/.beads").json"
-run unscanned
-eq "$RC" "0" "(UNSCANNED) a formula outside every checkout is not an error"
-has "$OUT" "unanswerable" "(UNSCANNED) …but is reported as unanswerable, not as clean"
-
-# (MISSINGFILE) gc.formula_source names a file that is not there.
-printf '[%s]' "$(root mol-gone in_progress "$LIVE" "$I/formulas/nope.toml")" \
-  > "$(fixture_for "$I/.beads").json"
-run missingfile
-eq "$RC" "1" "(MISSINGFILE) an unreadable formula warns"
-has "$OUT" "does not exist" "(MISSINGFILE) …saying so"
-
-echo "── the query, and the fail-closed arms ──"
-
-# (QUERY) the flags that decide what the check can SEE. If any drifts, the
-# check silently stops finding roots and reports a clean city.
-rigs_json "{\"name\":\"eta\",\"path\":\"$H\",\"hq\":false}"
-printf '[]' > "$(fixture_for "$H/.beads").json"
-run query
-has "$CALLS" "--status in_progress"                 "(QUERY) scopes to live roots"
-has "$CALLS" "--has-metadata-key gc.formula_source" "(QUERY) selects molecule roots by their formula source"
-has "$CALLS" "--limit 0"                            "(QUERY) is uncapped, so a windowed listing cannot false-empty it"
-has "$CALLS" "--db $H/.beads"                       "(QUERY) reads the rig's own store"
-
-# (BDFAIL) the store cannot be listed: warn, and say it was NOT checked.
-printf '3' > "$(fixture_for "$H/.beads").rc"
-run bdfail
-eq "$RC" "1" "(BDFAIL) an unreadable bead store warns"
-has "$OUT" "NOT checked" "(BDFAIL) …and says the store was not checked"
-rm -f "$(fixture_for "$H/.beads").rc"
-
-# (BDEMPTY) rc=0 with NO output. An empty store answers `[]`; empty output is
-# a probe that produced nothing, which is not the same thing.
-: > "$(fixture_for "$H/.beads").empty"
-run bdempty
-eq "$RC" "1" "(BDEMPTY) empty output is not an empty store"
-has "$OUT" "returned no output" "(BDEMPTY) …and is reported as unread"
-rm -f "$(fixture_for "$H/.beads").empty"
+echo "── the fail-closed arms ──"
 
 # (RIGFAIL) no roster at all — the check cannot run and must say so, not pass.
 printf '2' > "$TMP/rigs.rc"
