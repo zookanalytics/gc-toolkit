@@ -65,6 +65,8 @@ compaction came while the hold stood. Take the case that fits:
   summary. First take up each turn of the operator's that you have not
   finished, such as a ruling you have not carried out or a question you have
   not answered, whether the thread or the summary shows it, as Each turn says.
+  Work from your thread, or its summary, and from what the entry printed. Read
+  again only what a turn needs that neither holds, and only that part of it.
   Once none is left, wait for the operator: there is nothing else to do.
 - **Your thread does not hold the framing.** Re-open the sitting from the
   record: prepare it again (`converse-prep`), then hold again

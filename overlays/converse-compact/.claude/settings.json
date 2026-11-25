@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/converse-compact.md\"; [ -f \"$S\" ] && cat \"$S\"; exit 0",
+            "command": "if [ -n \"${TMUX:-}\" ] && [ -n \"${TMUX_PANE:-}\" ] && [ \"$(tmux show-environment -t \"$TMUX_PANE\" GC_DRAIN_ACK 2>/dev/null)\" = GC_DRAIN_ACK=1 ]; then echo \"This sitting has ended (its tab reads done), so it is not compacted.\" >&2; exit 2; fi; S=\"${GC_DIR:-${CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/converse-compact.md\"; [ -f \"$S\" ] && cat \"$S\"; exit 0",
             "timeout": 10
           }
         ]

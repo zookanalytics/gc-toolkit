@@ -630,6 +630,8 @@ have "the continue skill picks a sitting up after a compaction as after a restar
     'names this skill when a restart or a compaction came while the hold stood' "$TMP/continue-restart"
 have "…and first takes up each turn of the operator's it has not finished, whether the thread or the summary shows it" \
     'First take up each turn of the operator'"'"'s that you have not finished, such as a ruling you have not carried out or a question you have not answered, whether the thread or the summary shows it' "$TMP/continue-restart"
+have "…and works from its thread or summary and the entry's output, reading again only the part a turn needs that neither holds" \
+    'Work from your thread, or its summary, and from what the entry printed. Read again only what a turn needs that neither holds, and only that part of it.' "$TMP/continue-restart"
 have "…and waits for the operator only once none is left" \
     'Once none is left, wait for the operator: there is nothing else to do.' "$TMP/continue-restart"
 lacks "…and never waits while a turn of the operator's is unfinished" \

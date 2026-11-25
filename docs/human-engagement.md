@@ -773,20 +773,23 @@ overlay, `overlays/converse-compact`, adds a PreCompact hook, whose output
 Claude Code takes as instructions for the summary
 (code.claude.com/docs/en/hooks, PreCompact). It asks the summary to quote word
 for word what the operator said that the record does not hold yet, to state the
-open decision and the recommendation and quote the last hand-back, to copy the
-entry's `CONV`, `CONVERSATION`, `SUBJECT` and `GATES` lines, and to end by
-telling the sitting to run the entry again before anything else, as the prompt
-also tells it. The entry's claim then returns the conversation as an existing
-assignment, so the entry reads a hold that stands as `interrupted`, and the
-sitting first takes up each turn of the operator's that it had not finished,
-such as a ruling the summary quotes, before it waits (`converse-continue`). A
-compaction that comes after the sitting's sign-off and before the steps after it
-have landed leaves the entry no conversation, whether the sign-off closed the
-conversation or handed it back to the operator's queue. So the prompt's `none`
-entry and the steer have the sitting take those steps before it drains: the
-send or the close of the subject that some rulings make after the sign-off, and
-the hand-back, recorded and posted. The hook always exits 0, because exit 2
-would block the compaction.
+open decision and the recommendation with the facts they rest on, each with
+where its source lives, and quote the last hand-back, to copy the entry's
+`CONV`, `CONVERSATION`, `SUBJECT` and `GATES` lines, and to end by telling the
+sitting to run the entry again before anything else, as the prompt also tells
+it, and to work from the summary and what the entry prints. The entry's claim
+then returns the conversation as an existing assignment, so the entry reads a
+hold that stands as `interrupted`, and the sitting first takes up each turn of
+the operator's that it had not finished, such as a ruling the summary quotes,
+before it waits (`converse-continue`). It works from the summary and from what
+the entry printed, and reads again only the part of a bead, a file or a skill
+that a turn needs and neither holds. A compaction that comes after the
+sitting's sign-off and before the steps after it have landed leaves the entry
+no conversation, whether the sign-off closed the conversation or handed it back
+to the operator's queue. So the prompt's `none` entry and the steer have the
+sitting take those steps before it drains: the send or the close of the
+subject that some rulings make after the sign-off, and the hand-back, recorded
+and posted.
 The city's own PreCompact hook still runs `gc handoff --auto`, which mails the
 session a note and requests no restart. No sitting gets Gas City's context
 advisory, which tells a session past 60% of its window to plan a handoff and
@@ -795,6 +798,24 @@ reset itself and past 80% to run `gc session reset` on itself. Every
 which Gas City merges over the city's setting and its built-in default. No
 other agent sets it, so each keeps the advisory. A Codex sitting has the
 advisory off and no summary steer.
+
+**A finished sitting is not compacted.** A sitting's last act is
+`gc runtime drain-ack`, and Gas City holds the stop it asks for while a tab is
+attached (*A sitting ends its own session*, below). A summary of that thread
+carries nothing on, since the sitting runs nothing after its drain-ack, so the
+hook first reads `GC_DRAIN_ACK` from its own session's tmux environment with
+`tmux show-environment -t "$TMUX_PANE" GC_DRAIN_ACK`. That is the read Gas
+City's runtime makes of the flag every drain-ack of the session sets, and the
+flag the tab's `done` title reads (*Viewing a sitting holds its stop*, below).
+While it reads `GC_DRAIN_ACK=1`, the hook prints no steer, writes one line to
+stderr, which Claude Code shows when the operator typed `/compact`, and exits 2,
+which blocks the compaction, so the thread stays as it was. Any other answer, or
+a read that fails, as outside tmux, prints the steer and exits 0, so a sitting
+whose drain is not acknowledged is compacted as before. The flag lives as long
+as the tmux session: a stop kills it, and a start makes a new one, so a sitting
+that starts again after a stop, as a stay's wake or an engage does, compacts as
+before. A compaction between a sign-off and its drain-ack is steered, because
+the flag is not set yet.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a
@@ -810,7 +831,7 @@ values every later call sets and the skill to load next:
 | `interrupted` | A restart or a compaction, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
 | `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
-| `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
+| `none` | No ready work (a `no_work` drain), and no conversation under the alias. | When the sitting's own sign-off ran and the steps after it have not all landed, as a compaction after the sign-off can leave them, those steps first, whether the sign-off closed the conversation or handed it back to the operator's queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted. Then drain. |
 | `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. Gas City refuses the acknowledgement while the session holds a claim it started and has not finished, as a conversation in progress under it is, and tells it to continue. So a sitting refused over its conversation goes on with it, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait. |
 
 A read that fails, a listing that answers no list, a conversation assigned to

@@ -1,6 +1,6 @@
 ---
 name: Verification of the converse sittings' compaction (tk-kwnt509)
-description: What Gas City resolves for every agent's context advisory on main and on this change, and one real compaction of a Claude session carrying the converse-compact overlay, with the summary it produced. Read it when reviewing whether the advisory is off for the sittings alone, or what the PreCompact steer does to a summary.
+description: What Gas City resolves for every agent's context advisory on main and on this change, real compactions of Claude sessions carrying the converse-compact overlay with the summaries they produced, and the hook refusing a typed compaction once the session's tmux environment holds Gas City's drain flag, with the idle compaction that could not be staged. Read it when reviewing whether the advisory is off for the sittings alone, what the PreCompact steer does to a summary, or whether a finished sitting is compacted.
 ---
 
 # Verification of the converse sittings' compaction
@@ -77,3 +77,72 @@ whole, the four entry lines came through as printed, and the summary ended on
 the entry command. Claude Code then appended its own closing lines, which tell
 the session to pick up the last task, so the steer's instruction to run the
 entry first comes before them.
+
+## A finished sitting is not compacted
+
+Run on 2026-11-25 with Claude Code 2.1.332 on `claude-haiku-5-5` and tmux 3.8,
+on a private tmux server (`tmux -L kwnt-proof -f /dev/null`). Each session ran
+interactively in a pane of its own, in a scratch home that held this change's
+`.claude/settings.json` byte for byte and its steer, as Gas City stages the
+overlay, with `GC_DIR` naming the home. The pane's command passed on the
+`TMUX` and `TMUX_PANE` tmux gave it and none of the caller's Gas City
+variables. `--setting-sources project,local` kept the user's settings out, and
+Gas City's own hooks, which it hands a sitting with `--settings`, were not
+loaded. The home's `.claude/settings.local.json` held a second PreCompact hook
+that only appends the hook's input to a log, so each run of the hook is counted
+with its trigger. The flag was written the way Gas City writes it,
+`set-environment -t =<session> GC_DRAIN_ACK 1`, and removed the way
+`gc runtime undrain` removes it, `set-environment -t =<session> -u
+GC_DRAIN_ACK`. The log of each step, the session ids and each session's hook
+log are in `/Users/gc/.cache/tk-kwnt509/refuse-2026-11-25/`.
+
+**A typed `/compact`.** Session C took two turns standing in for a sitting's
+thread: the entry's lines with the hand-back and the fact it rests on, and an
+operator ruling with typos that nothing recorded. With the flag set,
+`/compact` was refused. The hook ran once, with the trigger `manual`, the
+transcript holds no compaction, and Claude Code printed the hook's command and
+its stderr line:
+
+```text
+❯ /compact
+  ⎿  Compaction blocked by PreCompact hook: [<the hook's command>]: This sitting has ended (its tab reads done), so it is not compacted.
+```
+
+With the flag removed, the next `/compact` ran, the hook's second run
+(`manual`, 38,064 tokens before and 5,688 after). Its summary quoted the
+ruling with its typos, the hand-back and the four entry lines, and carried the
+steer's newer parts:
+
+```text
+   - Supporting fact: 41 of 110 long waits were not compacted. Source: tk-subj2 notes, census block of 2026-11-25.
+[...]
+9. Optional Next Step:
+   - Run the converse entry again before anything else, using the same command this session used (not shown in this transcript, so the sitting must reuse the exact command it has). Act on the ENTRY and NEXT lines it prints.
+   - Work from this summary and from what the entry prints. Re-read only what the operator's message needs.
+```
+
+The same summary also listed the steps a sign-off owes, though no sign-off had
+run in the session, which part 4 asks for only when one has.
+
+**The idle compaction could not be staged.** Sessions A and B were built like
+C, except that each first read nine files of the repository's docs, about 550
+KB, before C's two turns. That left threads of 242,569 and 242,617 tokens on
+the one-hour cache, over the idle compaction's threshold, which
+`CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS=100000` lowered to 100,000. A's flag was
+set at 18:54:49Z, after its last turn ended at 18:54:29Z, and B had none.
+Claude Code times an idle compaction at 0.9 of the cache's hour after the last
+activity, about 19:48:30Z here. By 19:54:03Z neither session had run a
+PreCompact hook or compacted, so Claude Code passed over the idle compaction
+before any hook ran, in both, for a reason it records nowhere on the host. On
+the same version a sitting of this city was compacted with the trigger `auto`
+at 2026-11-25T05:32:42Z, at 249,201 tokens, far below a full window, so the
+idle compaction still fires there. The idle path rests on the documentation:
+the `auto` matcher covers idle compaction, and "If compaction was triggered
+proactively before the context limit, Claude Code skips it and the conversation
+continues uncompacted" ([hooks](https://code.claude.com/docs/en/hooks),
+"PreCompact"). The hook runs the same command for every trigger, and the typed
+refusal above shows its read and its exit in a live session. In the refused
+session C the hook ran once on the refused `/compact` and once on the one that
+compacted. Whether Claude Code tries a refused idle compaction again rests on
+the binary: its idle timer is cleared when it fires and is armed again only
+from a new request's saved state (`EVn`, Claude Code 2.1.332).

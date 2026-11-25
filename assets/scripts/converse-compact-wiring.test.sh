@@ -11,7 +11,16 @@
 #   (2) the overlay's PreCompact hook, for every trigger, prints the steer
 #       staged in the home and exits 0, finds the home through
 #       CLAUDE_PROJECT_DIR when GC_DIR is unset, and exits 0 printing nothing
-#       when no steer is staged, since exit 2 would block the compaction
+#       when no steer is staged. Once its own tmux session's environment holds
+#       GC_DRAIN_ACK=1, which every drain-ack of the session sets, it prints
+#       no steer, writes one line to stderr and exits 2, which blocks the
+#       compaction. A read of the flag that fails or answers anything else,
+#       and a hook run outside tmux, print the steer and exit 0, so a sitting
+#       whose drain is not acknowledged is never refused
+#   (2t) against a private tmux server, the hook reads the flag of the session
+#       whose pane runs it: it refuses while the flag is set, compacts once
+#       Gas City removes it, ignores another session's flag, and compacts in a
+#       session started again under the same name, which holds no flag
 #   (3) no other Claude settings file in the repository registers a PreCompact
 #       hook
 #   (4) the steer fits in the 10,000 characters Claude Code keeps of a hook's
@@ -22,9 +31,11 @@
 #       resolves the advisory off on each converse agent and unset on every
 #       other, and gives the overlay to the Claude sittings alone
 #
-# Hermetic but for (6): reads the repository and runs the hook in a temporary
-# directory. (6) points the real gc at a scratch city that is never started,
-# and prints SKIP when no GC_BIN names one, as in CI.
+# Hermetic but for (2t) and (6): reads the repository and runs the hook in a
+# temporary directory, with a stub tmux on PATH for (2). (2t) runs a private
+# tmux server, and prints SKIP where tmux is missing. (6) points the real gc at
+# a scratch city that is never started, and prints SKIP when no GC_BIN names
+# one, as in CI.
 #
 # run-tests-scope: tree
 
@@ -44,7 +55,16 @@ bad() { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 command -v jq >/dev/null 2>&1 || { echo "FATAL: jq required" >&2; exit 1; }
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/converse-compact-wiring.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT
+SOCK="converse-compact-test-$$"
+# kill-server leaves the socket file behind, so the suite removes its own.
+SOCKET_DIR="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
+T() { env -u TMUX -u TMUX_PANE tmux -L "$SOCK" -f /dev/null "$@"; }
+cleanup() {
+    if command -v tmux >/dev/null 2>&1; then T kill-server >/dev/null 2>&1 || true; fi
+    rm -f "$SOCKET_DIR/$SOCK"
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 echo "converse compaction wiring"
 
@@ -93,22 +113,111 @@ MATCHER="$(printf '%s' "$HOOKS" | jq -r '.[0].matcher // "absent"')"
 [ "$MATCHER" = "" ] && ok "…for every trigger, manual and auto (its matcher is empty)" \
     || bad "…for every trigger, manual and auto (its matcher is empty)" "matcher '$MATCHER'"
 
-mkdir -p "$TMP/home/.claude/hooks" "$TMP/empty" "$TMP/away"
+mkdir -p "$TMP/home/.claude/hooks" "$TMP/empty" "$TMP/away" "$TMP/stub"
 cp "$STEER" "$TMP/home/$STEER_REL"
 WANT_OUT="$(cat "$STEER")"
+# A stub tmux that logs how it was asked and answers as the case sets, the way
+# show-environment answers: the variable's line on stdout, or an error on
+# stderr and a non-zero exit.
+cat >"$TMP/stub/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STUB_LOG"
+[ -z "${STUB_OUT:-}" ] || printf '%s\n' "$STUB_OUT"
+[ -z "${STUB_ERR:-}" ] || printf '%s\n' "$STUB_ERR" >&2
+exit "${STUB_RC:-0}"
+STUB
+chmod +x "$TMP/stub/tmux"
+# hook <shell> [VAR=value ...] — run the hook's command under <shell>, from a
+# directory that is not the home, with no tmux session, home or stub answer in
+# its environment but those the arguments name. Its stdout, stderr and exit
+# land in OUT, ERR and RC, and what it asked the stub in ASKED.
+hook() {
+    local sh_="$1"; shift
+    : >"$TMP/stub.log"
+    (cd "$TMP/away" && env -u TMUX -u TMUX_PANE -u GC_DIR -u CLAUDE_PROJECT_DIR \
+        -u STUB_OUT -u STUB_ERR -u STUB_RC STUB_LOG="$TMP/stub.log" "$@" "$sh_" -c "$CMD") >"$TMP/out" 2>"$TMP/err"
+    RC=$?
+    OUT="$(cat "$TMP/out")"; ERR="$(cat "$TMP/err")"; ASKED="$(cat "$TMP/stub.log")"
+}
+steers() { # steers <label> — the hook printed the steer and exited 0
+    if [ "$RC" -eq 0 ] && [ "$OUT" = "$WANT_OUT" ]; then ok "$1"
+    else bad "$1" "rc $RC, $(printf '%s' "$OUT" | wc -c | tr -d ' ') bytes out, stderr '$ERR'"; fi
+}
+refuses() { # refuses <label> — the hook printed no steer, one line on stderr, and exited 2
+    if [ "$RC" -eq 2 ] && [ -z "$OUT" ] && [ -n "$ERR" ] && [ "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')" = 1 ]; then ok "$1"
+    else bad "$1" "rc $RC, $(printf '%s' "$OUT" | wc -c | tr -d ' ') bytes out, stderr '$ERR'"; fi
+}
 shells="sh bash"
 command -v zsh >/dev/null 2>&1 && shells="$shells zsh"
+PANE="TMUX=/tmp/tmux-0/city,1,0"
 for sh_ in $shells; do
-    OUT="$(cd "$TMP/away" && env -u CLAUDE_PROJECT_DIR GC_DIR="$TMP/home" "$sh_" -c "$CMD")"; RC=$?
-    [ "$RC" -eq 0 ] && [ "$OUT" = "$WANT_OUT" ] && ok "($sh_) the hook prints the steer staged in GC_DIR and exits 0" \
-        || bad "($sh_) the hook prints the steer staged in GC_DIR and exits 0" "rc $RC, $(printf '%s' "$OUT" | wc -c) bytes"
-    OUT="$(cd "$TMP/away" && env -u GC_DIR CLAUDE_PROJECT_DIR="$TMP/home" "$sh_" -c "$CMD")"; RC=$?
-    [ "$RC" -eq 0 ] && [ "$OUT" = "$WANT_OUT" ] && ok "($sh_) …finds the home through CLAUDE_PROJECT_DIR when GC_DIR is unset" \
-        || bad "($sh_) …finds the home through CLAUDE_PROJECT_DIR when GC_DIR is unset" "rc $RC, $(printf '%s' "$OUT" | wc -c) bytes"
-    OUT="$(cd "$TMP/away" && env -u CLAUDE_PROJECT_DIR GC_DIR="$TMP/empty" "$sh_" -c "$CMD" 2>&1)"; RC=$?
-    [ "$RC" -eq 0 ] && [ -z "$OUT" ] && ok "($sh_) …and with no steer staged, prints nothing and exits 0, so the compaction goes on" \
-        || bad "($sh_) …and with no steer staged, prints nothing and exits 0, so the compaction goes on" "rc $RC, out '$OUT'"
+    hook "$sh_" GC_DIR="$TMP/home"
+    steers "($sh_) the hook prints the steer staged in GC_DIR and exits 0"
+    hook "$sh_" CLAUDE_PROJECT_DIR="$TMP/home"
+    steers "($sh_) …finds the home through CLAUDE_PROJECT_DIR when GC_DIR is unset"
+    hook "$sh_" GC_DIR="$TMP/empty"
+    [ "$RC" -eq 0 ] && [ -z "$OUT$ERR" ] && ok "($sh_) …and with no steer staged, prints nothing and exits 0, so the compaction goes on" \
+        || bad "($sh_) …and with no steer staged, prints nothing and exits 0, so the compaction goes on" "rc $RC, out '$OUT', stderr '$ERR'"
+    hook "$sh_" GC_DIR="$TMP/home" "$PANE" TMUX_PANE=%7 PATH="$TMP/stub:$PATH" STUB_OUT=GC_DRAIN_ACK=1
+    refuses "($sh_) once its session's environment holds GC_DRAIN_ACK=1, the hook prints no steer, says why on stderr and exits 2"
+    [ "$ASKED" = "show-environment -t %7 GC_DRAIN_ACK" ] && ok "($sh_) …reading the flag of the session whose pane runs it" \
+        || bad "($sh_) …reading the flag of the session whose pane runs it" "asked tmux: '$ASKED'"
+    hook "$sh_" GC_DIR="$TMP/home" "$PANE" TMUX_PANE=%7 PATH="$TMP/stub:$PATH" STUB_ERR="unknown variable: GC_DRAIN_ACK" STUB_RC=1
+    steers "($sh_) …and steers a session whose environment holds no flag"
+    hook "$sh_" GC_DIR="$TMP/home" "$PANE" TMUX_PANE=%7 PATH="$TMP/stub:$PATH" STUB_OUT=-GC_DRAIN_ACK
+    steers "($sh_) …or holds it marked removed"
+    hook "$sh_" GC_DIR="$TMP/home" "$PANE" TMUX_PANE=%7 PATH="$TMP/stub:$PATH" STUB_ERR="no server running" STUB_RC=1
+    steers "($sh_) …or whose read of the flag fails"
+    hook "$sh_" GC_DIR="$TMP/home" TMUX_PANE=%7 PATH="$TMP/stub:$PATH" STUB_OUT=GC_DRAIN_ACK=1
+    if [ "$RC" -eq 0 ] && [ "$OUT" = "$WANT_OUT" ] && [ -z "$ASKED" ]; then
+        ok "($sh_) …and outside tmux it asks no server, so it never reads a pane of another server"
+    else
+        bad "($sh_) …and outside tmux it asks no server, so it never reads a pane of another server" "rc $RC, asked tmux: '$ASKED'"
+    fi
 done
+
+# --- (2t) the hook reads its own session's flag on a tmux server -----------
+# Gas City sets and removes the flag with set-environment on the session, stops
+# a session with kill-session and starts one with new-session. A pane hands
+# TMUX and TMUX_PANE to the agent it runs, and so to the agent's hooks.
+if ! command -v tmux >/dev/null 2>&1; then
+    printf '  SKIP  tmux is not installed, so the hook was not run against a tmux server\n'
+else
+    # start <session> <file> — start <session> with a pane that writes the
+    # TMUX and TMUX_PANE it was given to <file>, and wait for them.
+    start() {
+        T new-session -d -s "$1" -x 80 -y 24 \
+            "printf '%s %s\n' \"\$TMUX\" \"\$TMUX_PANE\" >'$2.tmp' && mv '$2.tmp' '$2'; sleep 600" >/dev/null 2>&1
+        local i=0
+        while [ ! -s "$2" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+    }
+    # in_pane <file> — run the hook as the agent in the pane <file> names runs it.
+    in_pane() {
+        local tmux_ pane_
+        read -r tmux_ pane_ <"$1" 2>/dev/null || { tmux_=""; pane_=""; }
+        hook sh GC_DIR="$TMP/home" TMUX="$tmux_" TMUX_PANE="$pane_"
+    }
+    start sit "$TMP/pane-1"
+    if [ ! -s "$TMP/pane-1" ]; then
+        bad "(2t) a private tmux server runs a pane that names itself" "no TMUX or TMUX_PANE read from the pane"
+    else
+        T set-environment -t =sit GC_DRAIN_ACK 1
+        in_pane "$TMP/pane-1"
+        refuses "(2t) the hook refuses while its own session's environment holds GC_DRAIN_ACK=1"
+        T set-environment -t =sit -u GC_DRAIN_ACK
+        in_pane "$TMP/pane-1"
+        steers "(2t) …and steers once the flag is removed"
+        T new-session -d -s other -x 80 -y 24 'sleep 600' >/dev/null 2>&1
+        T set-environment -t =other GC_DRAIN_ACK 1
+        in_pane "$TMP/pane-1"
+        steers "(2t) …and another session's flag leaves it alone"
+        T set-environment -t =sit GC_DRAIN_ACK 1
+        T kill-session -t =sit
+        start sit "$TMP/pane-2"
+        in_pane "$TMP/pane-2"
+        steers "(2t) a session started again under the same name after a stop holds no flag, so it is compacted"
+    fi
+fi
 
 # --- (3) no other settings file steers a summary ---------------------------
 OTHER_PC=""; READ=0
@@ -140,12 +249,16 @@ asks "the operator's words the record does not hold yet, word for word" \
     'What the operator said that the record does not hold yet. Quote word for word'
 asks "the open decision and the recommendation as they stood" \
     'State the decision that is still open, the recommendation as it last stood'
+asks "the facts the decision rests on, each with where its source lives" \
+    'State the facts the decision rests on, each figure with where its source lives, such as a bead'"'"'s notes, a file or a command, so the sitting can act on a ruling without finding them again.'
 asks "the last hand-back, word for word" \
     'Then quote word for word the hand-back that ended the last message posted to the operator'
 asks "the entry's names for the conversation, the subject and the gates" \
     'Copy the CONV, CONVERSATION, SUBJECT and GATES lines exactly as the converse entry last printed them'
 asks "a last line that sends the sitting through its entry before anything else" \
     'End the summary by telling the sitting to run the converse entry again before anything else'
+asks "…and has it work from the summary and the entry, reading again only what the operator's message needs" \
+    'Tell it also to work from this summary and from what the entry prints, and to read again only what the operator'"'"'s message needs that neither holds.'
 asks "each step still owed after a sign-off, whichever way it left the conversation" \
     'When a sign-off in this session ran and a step after it has not landed, say which steps are still owed, whether the sign-off closed the conversation or handed it back to the operator'"'"'s queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted.'
 asks "…taken before the drain" \
