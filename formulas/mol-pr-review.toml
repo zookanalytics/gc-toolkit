@@ -225,18 +225,10 @@ ask's ruling as `settles`. When the post makes the question moot, also set
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
-**6. Answer them on the PR**: the head's one comment, and each person's post an
-ask the round ruled carries, where it was made:
+**6. Answer them on the PR**, in the head's one comment and at each person's
+post the round ruled:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
-It posts or edits the head's comment. An inline comment gets a reply in its
-thread, which is then resolved, and a review's message or a conversation comment
-a comment that links it where its ruling owes words. Each post gets the city's
-👍 once its words are on the PR, but a question's, whose reply names its gate and
-whose thread stays open. The gate a ruling's `settles` names is closed with the
-post as its answer, and a person's request for changes is dismissed once every
-point it raised is answered, with its author asked to review again. Run again,
-it posts nothing twice. On exit 1 or 2, run it again. When it fails again,
-cancel the run:
+On exit 1 or 2, run it again. When it fails again, cancel the run:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
 **7. Close this step.** The loop's check judges the round, and records the
