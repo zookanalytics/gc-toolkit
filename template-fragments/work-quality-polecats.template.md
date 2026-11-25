@@ -51,11 +51,18 @@
   word. When the thing does not share that meaning, choose a word for what
   it is, and leave a general name to the thing built to fill it.
 
-<!-- rule:tk-v32d2u src:pr:#1384:comment:4470390219, pr:#1384:comment:4470363445, pr:#1386:comment:4470476725, pr:#1386:comment:4470429133, pr:#1386:comment:4470452596, pr:#1400:comment:4476283616, pr:#1400:comment:4476263949 (operator feedback) adopted:2026-11-17 -->
+<!-- rule:tk-v32d2u src:pr:#1384:comment:4470390219, pr:#1384:comment:4470363445, pr:#1386:comment:4470476725, pr:#1386:comment:4470429133, pr:#1386:comment:4470452596, pr:#1400:comment:4476283616, pr:#1400:comment:4476263949 (operator feedback), bead:tk-owx02q1 (operator ruling) adopted:2026-11-17 updated:2026-11-25 -->
 - Write each fact where it applies, and where a reader elsewhere needs
   it, name the file or symbol that owns it instead of retelling it, such
   as another script's cases, the callers a test lists or why a tool is
   installed. A comment says what the code beside it cannot say for
   itself, and a fact is stated a second time only where a reader with
   just that name to follow would miss something they need.
+  When your change has to edit text that retells a fact another file
+  owns, such as text it made false, fix the text instead of updating the
+  retelling. Rewrite it to state only its own file's facts, or remove the
+  retelling. Where a reader needs a pointer, name the owner. Fix only the
+  retellings your change has to edit. A list a check requires, such as
+  the key registry's owners and readers, is that fact's one home, and it
+  stays.
 {{ end }}
