@@ -548,9 +548,11 @@ func (u *run) redPlans(pass *ledger.Ledger) ([]plan, error) {
 // redOn is what the acts decide the bead r, which owns the PR o names, on, read
 // through l, or why they decide nothing: the bead must own the PR on the
 // record, be open or blocked, be assigned to nobody or to the refinery, as any
-// act's bead is, and name its branch, and the saved read must be of its PR and
-// show it open. A read of the store that fails is a why too, which the act
-// reports as a retry. The beads the bead waits on are read closed too while
+// act's bead is, and name its branch, and the saved read must be of its PR,
+// show it open, and give it the bead's branch and the record's target, as the
+// record act's identity check reads them (identityGaps), since a conflict ask
+// names the base it merges. A read of the store that fails is a why too, which
+// the act reports as a retry. The beads the bead waits on are read closed too while
 // the record is pending, for the red-check asks' bounds, and open alone
 // otherwise, since only a withdrawal is owed then.
 func (u *run) redOn(l *ledger.Ledger, r *ledger.Record, o owned) (redState, string) {
@@ -570,6 +572,9 @@ func (u *run) redOn(l *ledger.Ledger, r *ledger.Record, o owned) (redState, stri
 		return redState{}, fmt.Sprintf("the saved read is of %s#%d", saved.PR.Repository, saved.PR.Number)
 	case saved.PR.State != "OPEN":
 		return redState{}, "the saved read shows the PR " + strings.ToLower(saved.PR.State)
+	}
+	if ids := identityGaps(saved.PR.pullRequest(), o.rec.URL, o.number, o.rec.Repo, o.branch, o.rec.Target); len(ids) > 0 {
+		return redState{}, "the PR on GitHub is not the one the record names: " + strings.Join(ids, ", ")
 	}
 	pending := o.rec.Result == record.Pending
 	blockers, err := blockersIn(l, r, pending)

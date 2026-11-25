@@ -537,7 +537,7 @@ no warrant.
     [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
     and for the check suites the checks keep, its
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 944ef25f3b2b,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull

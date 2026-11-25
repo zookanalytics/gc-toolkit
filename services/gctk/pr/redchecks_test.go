@@ -668,8 +668,9 @@ func TestTheRestartWaitsOnlyForItsOwnReturnToDraft(t *testing.T) {
 
 // A PR GitHub reads DIRTY gets an ask to bring its branch current once it is
 // approved and nothing holds it, a conversation on the PR included, and none
-// while it is unapproved, a hold or a human gate holds it, or another bead
-// works its branch. BEHIND asks the same.
+// while it is unapproved, a hold or a human gate holds it, another bead works
+// its branch, or GitHub gives it another base or head branch than the record
+// names, whichever act the run takes first. BEHIND asks the same.
 func TestAConflictIsAskedOnlyOnAnApprovedPRThatNothingHolds(t *testing.T) {
 	conflicts := "PR#7 conflicts with 'main' at head " + head + ". Bring '" + branch + "' current by merging " +
 		"origin/main in, resolve the conflict, and push the merge as a fast-forward."
@@ -695,6 +696,14 @@ func TestAConflictIsAskedOnlyOnAnApprovedPRThatNothingHolds(t *testing.T) {
 			d.store.Put(fake.Bead{ID: "tk-rework", Title: "rework", Status: "open", IssueType: "task",
 				Metadata: map[string]string{"branch": branch, "task_kind": "rework", "gc.routed_to": "rig/polecat"}})
 		}, ""},
+		{"retargeted to another base", func(d *redWorld, _ *testing.T) {
+			d.pr.Facts.BaseRefName = "develop"
+			d.l.Shuffle = redFirst
+		}, ""},
+		{"on another head branch", func(d *redWorld, _ *testing.T) {
+			d.pr.Facts.HeadRefName = "polecat/other"
+			d.l.Shuffle = redFirst
+		}, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := newRed(t)
@@ -713,6 +722,16 @@ func TestAConflictIsAskedOnlyOnAnApprovedPRThatNothingHolds(t *testing.T) {
 				t.Fatalf("the act filed %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// redFirst orders a run's acts with the red-check and conflict act first.
+func redFirst(ids []string) {
+	for i, id := range ids {
+		if id == "red "+bead {
+			ids[0], ids[i] = ids[i], ids[0]
+			return
+		}
 	}
 }
 
