@@ -135,10 +135,9 @@ func TestTheHeadsCommentOnAFixInThePRsSummary(t *testing.T) {
 	}
 }
 
-// A comment past the size GitHub allows is cut to fit: each text at the
-// loosest cut under which the comment fits, each answer keeping the commit
-// that fixes its point, and past the tightest cut the points that do not fit
-// are left out and counted.
+// A comment past the size GitHub allows is cut at the last line that ends
+// within it, keeps its mark first, and says under the mark that it is cut and
+// which call prints it whole. One that fits is whole.
 func TestAHeadsCommentPastTheSizeGitHubAllowsIsCut(t *testing.T) {
 	long := strings.TrimSpace(strings.Repeat("the reason in words ", 90))
 	comment := func(t *testing.T, n int) string {
@@ -162,23 +161,14 @@ func TestAHeadsCommentPastTheSizeGitHubAllowsIsCut(t *testing.T) {
 		}
 		return review.Comment(run, 1, asks)
 	}
-	fixed := "Fixed by `" + fix[:12] + "`, which `" + h2[:12] + "` carries: the reason in words"
-	if got := comment(t, 20); len(got) > 60000 || strings.Count(got, long) != 20 {
-		t.Errorf("a comment that fits holds %d bytes and %d whole reasons", len(got), strings.Count(got, long))
+	if got := comment(t, 20); len(got) > 60000 || strings.Count(got, long) != 20 || strings.Contains(got, "is cut") {
+		t.Errorf("a comment that fits holds %d bytes, %d whole reasons, and says it is cut: %v", len(got),
+			strings.Count(got, long), strings.Contains(got, "is cut"))
 	}
 	got := comment(t, 40)
-	if len(got) > 60000 || strings.Count(got, fixed) != 40 || strings.Contains(got, long) ||
-		strings.Contains(got, "left out") {
-		t.Errorf("40 long answers render %d bytes, %d answers naming their fix, a whole reason %v",
-			len(got), strings.Count(got, fixed), strings.Contains(got, long))
-	}
-	got = comment(t, 400)
-	if len(got) > 60000 || !strings.Contains(got, " more points are left out here to fit the size GitHub allows a comment.") ||
-		!strings.Contains(got, "</sub>") {
-		t.Errorf("400 long answers render %d bytes:\n%s", len(got), got[max(0, len(got)-400):])
-	}
-	shown := strings.Count(got, fixed)
-	if !strings.Contains(got, fmt.Sprintf("%d more points are left out", 400-shown)) || shown == 0 {
-		t.Errorf("the comment shows %d answers and does not count the %d it leaves out", shown, 400-shown)
+	want := review.Mark(root, h1) + "\n**This comment is cut at the size GitHub allows.** `gctk review comment " + root +
+		" --iteration 1` prints it whole.\n\n**Review at "
+	if len(got) > 60000 || !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "\n") {
+		t.Errorf("40 long answers render %d bytes, opening:\n%s", len(got), got[:min(len(got), 400)])
 	}
 }
