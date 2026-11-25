@@ -1027,6 +1027,36 @@ func TestRigARunIsWeighedByTheRunsOfItsOwnCommandAndScope(t *testing.T) {
 	}
 }
 
+// A run whose processes hold more than all the machine's slots stand for is
+// stopped and records nothing, and the next run of its command, weighed by
+// what it held, runs alone. A run under the push gate's bypass holds no slots
+// and has no such limit.
+func TestRigARunThatHoldsMoreThanAllTheSlotsIsStopped(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv(rig.SlotsVar, "2")
+	old := rig.StopGrace
+	oldSample, oldPeriod := rig.Sample, rig.SamplePeriod
+	t.Cleanup(func() { rig.StopGrace, rig.Sample, rig.SamplePeriod = old, oldSample, oldPeriod })
+	rig.StopGrace, rig.SamplePeriod = 300*time.Millisecond, 20*time.Millisecond
+	rig.Sample = func(int) (int64, error) { return 9 << 30, nil }
+
+	code, _, errs := f.call("test", "--scope", "full", "--command", "sleep 30")
+	if code != rigExitMachine || !strings.Contains(errs, "machine failure, nothing recorded: its processes held 9.0 GiB at once, more than the 8.0 GiB all of the machine's slots stand for, so its process group was stopped") {
+		t.Fatalf("a run above all the slots = %d, want %d stopped; stderr:\n%s", code, rigExitMachine, errs)
+	}
+	if r := f.record(rig.CheckTest, f.head()); r != nil {
+		t.Fatalf("a stopped run was recorded: %+v", r)
+	}
+	code, _, errs = f.call("test", "--scope", "full", "--command", "sleep 30")
+	if code != rigExitMachine || !strings.Contains(errs, "WARN takes 2 slots of the machine's 2, 4.0 GiB each, for the 9.0 GiB its last runs here used at most, which is more than they stand for, so it runs alone and is stopped once its processes hold more than the 8.0 GiB they stand for") {
+		t.Fatalf("the next run of the command = %d, want %d, weighed by what it held; stderr:\n%s", code, rigExitMachine, errs)
+	}
+	t.Setenv(rig.NoCapVar, "1")
+	if code, _, errs := f.call("test", "--scope", "full", "--command", "sleep 0.3"); code != 0 {
+		t.Fatalf("a run under %s=1 = %d, want 0 with no limit; stderr:\n%s", rig.NoCapVar, code, errs)
+	}
+}
+
 func TestRigAWaitForSlotsThatRunsOutOfTimeRunsNothing(t *testing.T) {
 	for _, verb := range []string{rig.CheckLint, "build"} {
 		t.Run(verb, func(t *testing.T) {

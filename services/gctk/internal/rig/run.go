@@ -92,7 +92,9 @@ func Parses(command string) (bool, string) {
 // once its group is empty or has been sent SIGKILL. A child the command starts
 // in a group of its own, as a runner under bash's `set -m` does, is the
 // command's to stop. With a timeout above zero, a run still going at the
-// timeout is stopped and is a Machine outcome.
+// timeout is stopped and is a Machine outcome. With a limit above zero, a run
+// whose process tree Sample reads above limit bytes is stopped at that read
+// and is a Machine outcome too.
 //
 // The command's environment is this process's with NoCapVar set to 1, because
 // the slots the run holds cover everything the command starts.
@@ -107,7 +109,7 @@ func Parses(command string) (bool, string) {
 // Run returns only once the command has been waited for, however the run
 // ended, so nothing the command started writes to a stdout or stderr that is
 // not a file after Run returns.
-func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) Outcome {
+func Run(dir, command string, timeout time.Duration, limit int64, stdout, stderr io.Writer) Outcome {
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Dir = dir
 	cmd.Stdin = nil
@@ -137,7 +139,7 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited); waited <- struct{}{} }()
 	var peak sampled
-	peak.watch(cmd.Process.Pid, exited)
+	over := peak.watch(cmd.Process.Pid, exited, limit)
 
 	var expired <-chan time.Time
 	if timeout > 0 {
@@ -146,13 +148,16 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 		expired = t.C
 	}
 	var got os.Signal
-	timedOut := false
+	timedOut, tooBig := false, false
 	select {
 	case <-waited:
 	case got = <-stop:
 		stopGroup(group, waited, stop)
 	case <-expired:
 		timedOut = true
+		got = stopGroup(group, waited, stop)
+	case <-over:
+		tooBig = true
 		got = stopGroup(group, waited, stop)
 	}
 	elapsed := time.Since(start)
@@ -174,6 +179,10 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 		return Outcome{Kind: Machine, Duration: elapsed, Peak: most,
 			Reason: fmt.Sprintf("timed out after %s; its process group was stopped", timeout)}
 	}
+	if tooBig {
+		return Outcome{Kind: Machine, Duration: elapsed, Peak: most,
+			Reason: fmt.Sprintf("its processes held %s at once, more than the %s all of the machine's slots stand for, so its process group was stopped", GiB(most), GiB(limit))}
+	}
 	o := classify(cmd.ProcessState)
 	o.Duration = elapsed
 	o.Peak = most
@@ -187,9 +196,12 @@ type sampled struct {
 	done chan struct{}
 }
 
-// watch reads the tree under pid every SamplePeriod until exited closes.
-func (s *sampled) watch(pid int, exited <-chan struct{}) {
+// watch reads the tree under pid every SamplePeriod until exited closes. With
+// limit above zero, the channel it returns closes at the first read above
+// limit.
+func (s *sampled) watch(pid int, exited <-chan struct{}, limit int64) <-chan struct{} {
 	s.done = make(chan struct{})
+	over := make(chan struct{})
 	go func() {
 		defer close(s.done)
 		t := time.NewTicker(SamplePeriod)
@@ -199,14 +211,21 @@ func (s *sampled) watch(pid int, exited <-chan struct{}) {
 			case <-exited:
 				return
 			case <-t.C:
-				if n, err := Sample(pid); err == nil {
-					s.mu.Lock()
-					s.max = max(s.max, n)
-					s.mu.Unlock()
+				n, err := Sample(pid)
+				if err != nil {
+					continue
+				}
+				s.mu.Lock()
+				passed := limit > 0 && n > limit && s.max <= limit
+				s.max = max(s.max, n)
+				s.mu.Unlock()
+				if passed {
+					close(over)
 				}
 			}
 		}
 	}()
+	return over
 }
 
 // most waits for the watch to end, which it does once the command has

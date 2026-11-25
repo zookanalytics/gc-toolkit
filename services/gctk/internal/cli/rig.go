@@ -63,10 +63,11 @@ ignore.
 exit: 0 pass · 1 fail · 2 usage · 3 nothing recorded (--check)
       4 machine failure, nothing recorded or published: a refused checkout, a
         command bash cannot parse, find or execute (126, 127), a command ended
-        by a signal or still running at the timeout, a wait for slots still
-        going at the timeout, a command that moved HEAD or changed a tracked
-        file, a checkout rig cannot read after the run, or a result the
-        record store did not take. Such a run says nothing about the code.
+        by a signal, still running at the timeout or holding more memory than
+        all the slots stand for, a wait for slots still going at the timeout,
+        a command that moved HEAD or changed a tracked file, a checkout rig
+        cannot read after the run, or a result the record store did not take.
+        Such a run says nothing about the code.
       128+N stopped by signal N`
 
 // rigRunOnlyLong is the help of setup and build, which record nothing.
@@ -80,7 +81,8 @@ after them can run.
 
 exit: 0 pass · 1 fail · 2 usage
       4 machine failure: a command bash cannot parse, find or execute, one
-        still running at the timeout, or a wait for slots still going at it
+        still running at the timeout or holding more memory than all the
+        slots stand for, or a wait for slots still going at the timeout
       128+N stopped by signal N`
 
 // rigSlotsHelp is what the help of each verb that runs a command says of the
@@ -90,12 +92,13 @@ every session on it runs at once fit in its memory. A slot stands for 4 GiB,
 and a run takes one for each 4 GiB the last ten runs of the same command line,
 check and scope used at most in this repository. A command with none measured
 takes as many as the most a kept run of its check and scope used here, and
-every slot while none is kept. The machine has GCTK_RIG_SLOTS slots, else as
-many as five eighths of its memory holds. They are Gas City's push-gate slots,
-in the city's .gc/gate-slots, so a push's test suites and the checks share
-them. A run that finds too few free waits its turn and says what holds them,
-and --timeout counts the wait with the run. GC_PUSH_GATE_NO_CAP=1 takes no
-slots, and every command runs with it set, because the slots its run holds
+every slot while none is kept. A run whose processes hold more than all the
+slots stand for at once is stopped. The machine has GCTK_RIG_SLOTS slots, else
+as many as five eighths of its memory holds. They are Gas City's push-gate
+slots, in the city's .gc/gate-slots, so a push's test suites and the checks
+share them. A run that finds too few free waits its turn and says what holds
+them, and --timeout counts the wait with the run. GC_PUSH_GATE_NO_CAP=1 takes
+no slots, and every command runs with it set, because the slots its run holds
 cover what it starts.`
 
 // The exit codes rigRecordedLong states.
@@ -305,7 +308,7 @@ func rigRecorded(check string, o rigOpts, stdout, stderr io.Writer) int {
 		return code
 	}
 	say("running %s at %s", runLabel(scope, o.command), co.Commit)
-	out := rig.Run(co.Top, o.command, runFor, stdout, stderr)
+	out := rig.Run(co.Top, o.command, runFor, held.Limit(), stdout, stderr)
 	held.Release()
 	rigKeepPeak(check, scope, o.command, co, out, say)
 	switch out.Kind {
@@ -374,7 +377,7 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 	before, err := co.Dirty()
 	clean := err == nil && before == ""
 	say("running %s", o.command)
-	out := rig.Run(co.Top, o.command, runFor, stdout, stderr)
+	out := rig.Run(co.Top, o.command, runFor, held.Limit(), stdout, stderr)
 	held.Release()
 	rigKeepPeak(verb, "", o.command, co, out, say)
 	code = rigExitPass
@@ -424,7 +427,7 @@ func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duratio
 		say("WARN the memory its last runs used could not be read, so it runs alone: %v", err)
 	}
 	n := rig.SlotsFor(weight, count)
-	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", rig.SlotCountText(n), count, gib(rig.SlotSize))
+	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", rig.SlotCountText(n), count, rig.GiB(rig.SlotSize))
 	used := "its last runs here used at most"
 	if !own {
 		used = "a kept run of this check here used at most, since no run of this command is measured"
@@ -433,9 +436,9 @@ func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duratio
 	case weight == 0:
 		say("%s since no run of this check is measured in this repository, so it runs alone", taking)
 	case weight > int64(count)*rig.SlotSize:
-		say("WARN %s for the %s %s, which is more than they stand for, so it runs alone and can still use up the machine's memory beside the city's other work", taking, gib(weight), used)
+		say("WARN %s for the %s %s, which is more than they stand for, so it runs alone and is stopped once its processes hold more than the %s they stand for", taking, rig.GiB(weight), used, rig.GiB(int64(count)*rig.SlotSize))
 	default:
-		say("%s for the %s %s", taking, gib(weight), used)
+		say("%s for the %s %s", taking, rig.GiB(weight), used)
 	}
 	var until time.Time
 	if timeout > 0 {
@@ -510,16 +513,8 @@ func rigKeepPeak(verb, scope, command string, co *git.Checkout, out rig.Outcome,
 		return
 	}
 	if err := rig.NewPeaks(co.Common).Add(verb, scope, command, time.Now(), out.Peak); err != nil {
-		say("WARN the %s this run used at most was not kept: %v", gib(out.Peak), err)
+		say("WARN the %s this run used at most was not kept: %v", rig.GiB(out.Peak), err)
 	}
-}
-
-// gib gives a size in GiB, or in MiB below one GiB.
-func gib(n int64) string {
-	if n < 1<<30 {
-		return fmt.Sprintf("%d MiB", max(1, (n+(1<<20)-1)>>20))
-	}
-	return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 }
 
 // rigPutBack puts back what a run left in a checkout that was clean before

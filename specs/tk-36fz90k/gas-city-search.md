@@ -52,6 +52,16 @@ sessions of a city start on its host, by count or by memory.
 None bounds a process a session starts, and none weighs memory. So the bound
 is gctk's, in the verb every recorded check already goes through.
 
+## A limit on what one run's processes hold
+
+**Searched.** A limit the host's own system puts on the memory a process and
+its children hold. The city's host runs macOS, whose `setrlimit(2)` has none
+that stops a process tree: `RLIMIT_RSS` only makes the kernel prefer to take
+memory from a process past it when memory is tight, `RLIMIT_DATA` bounds
+`sbrk(2)`, which Go's allocator does not use, and each is one process's limit.
+So a run whose process tree holds more than all the slots stand for is stopped
+by gctk, at the reads of the tree each run already makes for its peak.
+
 ## The push gate's slots
 
 **Composed.** Gas City's own repository bounds the runs of its heavy test
@@ -131,11 +141,22 @@ seconds, and never less than its largest process.
 
 ## What is left
 
-A single run that alone uses more than all the slots stand for runs alone,
-with a warning, and can still exhaust the machine beside the city's other
-work. The four-lane test command above is one. Its cause is in the command
-and in the package's size, not in how runs share the machine, and tk-2a3xy7x
-carries it to where such commands are written.
+A run whose processes hold more than all the slots stand for, 40 GiB here, is
+stopped at the first read past them, five seconds apart, as a machine failure
+that records nothing. The four-lane test command above is one, so it fails
+until it builds fewer packages at once. Its cause is in the command and in
+the package's size, not in how runs share the machine, and tk-2a3xy7x carries
+it to where such commands are written.
+
+The slots weigh what a command's past runs used. A run that holds more than
+its own slots stand for, and less than all of them, runs on, so runs that grow
+past what their commands used before can together hold more than the slots
+stand for.
+
+A push's suites hold one slot whatever Gas City's runner fans out to, which
+`scripts/test-local-job-count` sizes at 4 GiB a job from the machine's total
+memory, 15 jobs on this host. gctk neither starts a push's suite nor reads
+what it holds, and gc-khwch0 carries the runner's sizing.
 
 gctk sets none of Go's own limits on a command, such as `go test -p`,
 `GOMAXPROCS` or `GOMEMLIMIT`. It runs each rig's commands as the rig or its

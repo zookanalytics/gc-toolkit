@@ -23,7 +23,7 @@ func shortGrace(t *testing.T) {
 func run(t *testing.T, command string, timeout time.Duration) (Outcome, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	o := Run(t.TempDir(), command, timeout, &out, &errb)
+	o := Run(t.TempDir(), command, timeout, 0, &out, &errb)
 	return o, out.String(), errb.String()
 }
 
@@ -63,7 +63,7 @@ func TestRunClassifiesTheCommandsStatus(t *testing.T) {
 func TestRunRunsInDirWithStdinClosedAndPassesOutputThrough(t *testing.T) {
 	dir := t.TempDir()
 	var out, errb bytes.Buffer
-	o := Run(dir, `pwd -P; echo to-stderr >&2; if read -r line; then echo "read: $line"; else echo "stdin at EOF"; fi`, time.Minute, &out, &errb)
+	o := Run(dir, `pwd -P; echo to-stderr >&2; if read -r line; then echo "read: $line"; else echo "stdin at EOF"; fi`, time.Minute, 0, &out, &errb)
 	if o.Kind != Passed {
 		t.Fatalf("Run = %+v, want a pass", o)
 	}
@@ -86,7 +86,7 @@ func TestRunHandsAFileToTheCommandAsItIs(t *testing.T) {
 	// the run ends when the command does, not when the child does.
 	dir := t.TempDir()
 	start := time.Now()
-	o := Run(dir, "echo hello; sleep 30 & echo $! > child.pid", time.Minute, f, f)
+	o := Run(dir, "echo hello; sleep 30 & echo $! > child.pid", time.Minute, 0, f, f)
 	elapsed := time.Since(start)
 	if raw, err := os.ReadFile(filepath.Join(dir, "child.pid")); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
@@ -108,7 +108,7 @@ func TestRunTimeoutStopsTheWholeGroup(t *testing.T) {
 	pidFile := filepath.Join(dir, "child.pid")
 	start := time.Now()
 	var out bytes.Buffer
-	o := Run(dir, `sleep 30 & echo $! > child.pid; wait`, 300*time.Millisecond, &out, &out)
+	o := Run(dir, `sleep 30 & echo $! > child.pid; wait`, 300*time.Millisecond, 0, &out, &out)
 	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out after 300ms") {
 		t.Fatalf("Run = %+v, want a timeout", o)
 	}
@@ -137,7 +137,7 @@ func TestRunKillsAGroupThatIgnoresSIGTERM(t *testing.T) {
 	shortGrace(t)
 	var out bytes.Buffer
 	start := time.Now()
-	o := Run(t.TempDir(), `trap '' TERM; sleep 30 & wait; sleep 30`, 200*time.Millisecond, &out, &out)
+	o := Run(t.TempDir(), `trap '' TERM; sleep 30 & wait; sleep 30`, 200*time.Millisecond, 0, &out, &out)
 	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out") {
 		t.Fatalf("Run = %+v, want a timeout", o)
 	}
@@ -183,7 +183,7 @@ func TestRunRelaysSIGTERMToTheCommandsGroup(t *testing.T) {
 		}
 	}()
 	var out bytes.Buffer
-	o := Run(dir, `trap 'touch got-term; exit 143' TERM; echo $$ > ready; `+untilStopped, time.Minute, &out, &out)
+	o := Run(dir, `trap 'touch got-term; exit 143' TERM; echo $$ > ready; `+untilStopped, time.Minute, 0, &out, &out)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -229,7 +229,7 @@ func TestRunReturnsFromARelayedSignalOnceTheCommandHasStopped(t *testing.T) {
 	dir := t.TempDir()
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	var out bytes.Buffer
-	o := Run(dir, `trap 'sleep 0.5; echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, &out, &out)
+	o := Run(dir, `trap 'sleep 0.5; echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, 0, &out, &out)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -250,7 +250,7 @@ func TestRunKillsARelayedGroupThatIgnoresSIGTERM(t *testing.T) {
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	start := time.Now()
 	var out bytes.Buffer
-	o := Run(dir, `trap '' TERM; echo $$ > ready; sleep 30 & wait; sleep 30`, time.Minute, &out, &out)
+	o := Run(dir, `trap '' TERM; echo $$ > ready; sleep 30 & wait; sleep 30`, time.Minute, 0, &out, &out)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -326,7 +326,7 @@ func TestRunTimeoutKillsAChildThatOutlivesItsShell(t *testing.T) {
 	f := outputFile(t)
 	const timeout = time.Second
 	start := time.Now()
-	o := Run(dir, outlivesItsShell, timeout, f, f)
+	o := Run(dir, outlivesItsShell, timeout, 0, f, f)
 	elapsed := time.Since(start)
 	if o.Kind != Machine || !strings.Contains(o.Reason, "timed out") {
 		t.Fatalf("Run = %+v, want a timeout", o)
@@ -347,7 +347,7 @@ func TestRunRelayedStopKillsAChildThatOutlivesItsShell(t *testing.T) {
 	sigtermWhenReady(filepath.Join(dir, "child.pid"))
 	f := outputFile(t)
 	start := time.Now()
-	o := Run(dir, outlivesItsShell, time.Minute, f, f)
+	o := Run(dir, outlivesItsShell, time.Minute, 0, f, f)
 	elapsed := time.Since(start)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
@@ -372,7 +372,7 @@ func TestRunStopWaitsForAChildThatIsStillStopping(t *testing.T) {
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	f := outputFile(t)
 	start := time.Now()
-	o := Run(dir, `bash -c 'trap "sleep 0.5; touch stopped; exit 0" TERM; : > ready; `+untilStopped+`' & wait`, time.Minute, f, f)
+	o := Run(dir, `bash -c 'trap "sleep 0.5; touch stopped; exit 0" TERM; : > ready; `+untilStopped+`' & wait`, time.Minute, 0, f, f)
 	elapsed := time.Since(start)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
@@ -416,7 +416,7 @@ func TestRunStopWaitsForTheCommandsOutputToBeDelivered(t *testing.T) {
 	dir := t.TempDir()
 	sigtermWhenReady(filepath.Join(dir, "ready"))
 	w := &slowWriter{delay: 500 * time.Millisecond}
-	o := Run(dir, `trap 'echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, w, w)
+	o := Run(dir, `trap 'echo stopped; exit 143' TERM; : > ready; `+untilStopped, time.Minute, 0, w, w)
 	if o.Kind != Interrupted || o.Signal != syscall.SIGTERM {
 		t.Fatalf("Run = %+v, want Interrupted by SIGTERM", o)
 	}
@@ -469,5 +469,33 @@ func TestRunGivesTheCommandThePushGatesBypass(t *testing.T) {
 	t.Setenv(NoCapVar, "")
 	if o, _, errs := run(t, `[ "$`+NoCapVar+`" = 1 ]`, time.Minute); o.Kind != Passed {
 		t.Fatalf("the command did not see %s=1: %+v %s", NoCapVar, o, errs)
+	}
+}
+
+func TestRunStopsACommandWhoseTreeHoldsMoreThanItsLimit(t *testing.T) {
+	shortGrace(t)
+	oldSample, oldPeriod := Sample, SamplePeriod
+	t.Cleanup(func() { Sample, SamplePeriod = oldSample, oldPeriod })
+	SamplePeriod = 20 * time.Millisecond
+	reads := func(n int64) func(int) (int64, error) { return func(int) (int64, error) { return n, nil } }
+
+	Sample = reads(8 << 30)
+	if o, _, _ := run(t, "sleep 0.3", time.Minute); o.Kind != Passed {
+		t.Fatalf("Run with no limit = %+v; want a pass", o)
+	}
+	var out bytes.Buffer
+	if o := Run(t.TempDir(), "sleep 0.3", time.Minute, 8<<30, &out, &out); o.Kind != Passed {
+		t.Fatalf("Run of a tree that holds its limit and no more = %+v; want a pass", o)
+	}
+
+	Sample = reads(9 << 30)
+	start := time.Now()
+	o := Run(t.TempDir(), "sleep 30", time.Minute, 8<<30, &out, &out)
+	want := "its processes held 9.0 GiB at once, more than the 8.0 GiB all of the machine's slots stand for, so its process group was stopped"
+	if o.Kind != Machine || o.Reason != want || o.Peak != 9<<30 {
+		t.Fatalf("Run of a tree above its limit = %+v; want a machine failure %q with its peak", o, want)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("the stop took %s", took)
 	}
 }

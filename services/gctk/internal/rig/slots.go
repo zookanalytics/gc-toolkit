@@ -135,6 +135,8 @@ func (s *Slots) stamp() string {
 // Held is the slots a run holds. A nil Held holds none.
 type Held struct {
 	locks map[int]host.Lock
+	// all is the memory every slot of the machine stands for.
+	all int64
 	// Waited is how long the take waited for them, and zero for slots it
 	// found free.
 	Waited time.Duration
@@ -146,6 +148,16 @@ func (h *Held) Count() int {
 		return 0
 	}
 	return len(h.locks)
+}
+
+// Limit is the most memory the run's processes may hold at once, the memory
+// every slot of the machine stands for, and zero, no limit, for a run that
+// holds none.
+func (h *Held) Limit() int64 {
+	if h == nil {
+		return 0
+	}
+	return h.all
 }
 
 // Release gives back every slot it holds.
@@ -179,7 +191,7 @@ func (e *SlotTimeout) Error() string { return e.msg }
 // signal. An error of the machine's, such as a slot file it cannot make,
 // gives back what it holds and returns the error.
 func (s *Slots) Take(n int, until time.Time, stop <-chan os.Signal, say func(string, ...any)) (*Held, os.Signal, error) {
-	held := &Held{locks: map[int]host.Lock{}}
+	held := &Held{locks: map[int]host.Lock{}, all: int64(s.count) * SlotSize}
 	if n <= 0 {
 		return held, nil, nil
 	}
@@ -315,6 +327,14 @@ func (s *Slots) holders(own *Held, ownQueue bool) string {
 		return "nothing holds them now"
 	}
 	return strings.Join(parts, "; ")
+}
+
+// GiB gives a size of n bytes in GiB, or in MiB below one GiB.
+func GiB(n int64) string {
+	if n < 1<<30 {
+		return fmt.Sprintf("%d MiB", max(1, (n+(1<<20)-1)>>20))
+	}
+	return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
 }
 
 // SlotCountText is n slots, in words.

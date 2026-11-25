@@ -139,8 +139,9 @@ worktree of the clone shares and which outlives any one of them:
 
 Every verb that runs a command holds slots on the machine while it runs, in the
 directory Gas City's push gate keeps its slots in, the city's `.gc/gate-slots`.
-`gctk rig <check> --help` states how many a run takes and what it does when too
-few are free, and `internal/rig/slots.go` holds the protocol.
+`gctk rig <check> --help` states how many a run takes, what it does when too
+few are free and when its processes hold more than all of them, and
+`internal/rig/slots.go` holds the protocol.
 
 `--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
 a key rig declares through the ledger, in one write that nothing reads back. A record says what a command did at
