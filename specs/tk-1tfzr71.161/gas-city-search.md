@@ -284,6 +284,58 @@ The one-PR update's checks read gains each check suite's status, its creation
 time and its Actions run's attempt, fields on nodes that read already returns,
 so no request is added.
 
+### The monitor's classification, measured in this city
+
+The design's section 4 declines the monitor's classification, in its third
+difference. The monitor's code was read at `gastownhall/gascity` main
+944ef25f3b2b, where `internal/githubmonitor/` is unchanged since 994008c628
+(`git diff --stat`), and each reading was measured in this city on 2026-11-25.
+The census read the 56 open PRs in the city's six rig repositories at
+2026-11-25T08:39:20Z, 12 of them drafts, each through GitHub's GraphQL for its
+`mergeStateStatus`, its `reviewDecision` and each check's
+`isRequired(pullRequestNumber:)` at its head, and ran them through a copy of
+`classifyPullRequest`'s rules. The classifier would mark 43 of the 44 ready
+PRs actionable: 23 `blocked`, 11 `merge_conflict` and 9 `checks_failed`.
+
+- **A PR that waits on a review.** The reason Gas City gives: `StateBlocked`
+  "means GitHub reports a branch-protection/mergeability block", and
+  `FailureKindBlocked` "identifies a GitHub mergeability block without a more
+  specific failed-check or conflict cause" (`internal/githubmonitor/monitor.go`).
+  The reason does not hold here, where the rulesets require an approval: all 23
+  `blocked` PRs read `REVIEW_REQUIRED`, with no failed check and no required
+  check pending, so each waits on a person's review, which no repair moves. The
+  fix at the source reads `reviewDecision` in `pullRequestsQuery` and leaves a
+  `BLOCKED` PR that reads `REVIEW_REQUIRED` unactionable: one query field, one
+  field on `PullRequest`, one case in `classifyPullRequest` and its test.
+- **A check no ruleset requires.** Gas City gives no reason for counting one:
+  `pullRequestsQuery` reads no `isRequired`, and `FailureKindChecksFailed`
+  "identifies failed required or reported checks". It fires on 8 of the 9
+  `checks_failed` PRs, all in one repository, which failed only checks whose
+  `isRequired` is false. In this repository's 200 most recently updated merged
+  PRs (merged 2026-09-21 to 2026-11-25), no head had a check outside the
+  required `test` and `test-macos` that did not pass. The fix at the source
+  reads each check's `isRequired` and counts only required checks in
+  `classifyChecks`. The field takes the PR's number, which a listing query
+  cannot pass for each node, so it needs a second query that aliases one block
+  per PR with its number written in, as gctk's own read does (`fullField` in
+  `services/gctk/internal/gh/full.go`): a second query and its response type in
+  `client.go`, a field on `Check`, one filter, and their tests.
+- **A cancelled check.** Gas City gives no reason for reading one as pending:
+  `checkFailed` lists `CANCELED`, and GitHub's `CheckConclusionState` spells it
+  `CANCELLED`. Here it lasts no longer than one run: of the 1,000 newest
+  `pull_request` runs of this repository's `tests` workflow, which reports both
+  of its required checks (2026-11-01T12:24Z to 2026-11-25T08:34Z), 67 ended
+  cancelled, and each was followed by a later run on the same branch, so a
+  cancelled required check stood at a head only until the next run started.
+  In the census, 12 open PRs carried a cancelled check at their head, none of
+  them a required one. The fix at the source adds `CANCELLED` beside
+  `CANCELED` in `checkFailed`'s list: one word, and a test case.
+
+The upstream finding tk-7doiysd carries the three fixes and these measurements,
+deferred for the operator to send or decline. With all three fixed upstream,
+the city could take the monitor's classification, and the repair would still
+go to the PR's review run, by the first difference's reason.
+
 ## Conflicts (unit 5)
 
 The need: an ask to merge the target into an approved PR that GitHub reads

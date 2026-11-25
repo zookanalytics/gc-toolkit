@@ -528,9 +528,11 @@ that ties each repair bead to the bead that owns its PR
 So the city declares no `[[github.pr_monitor]]`, and the join is not built. The
 city's config declares no monitor and no webhook today.
 
-The two faults in the third row's reason, the missing required flag and the
-cancelled conclusion's spelling, are findings the operator may send upstream.
-This design sends nothing.
+The third row's reasons are measured in this city, each with its fix at the
+source, in the search's record
+([the monitor's classification](gas-city-search.md#the-monitors-classification-measured-in-this-city)),
+and the upstream finding tk-7doiysd carries the three fixes for the operator
+to send or decline. This design sends nothing.
 
 **The acts.** Each is decided from the saved read and the store by the landing
 order, and taken under the record lock within its limits. An act that files
