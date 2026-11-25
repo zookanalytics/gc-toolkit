@@ -473,7 +473,9 @@ no warrant.
   has the update read the conversation again the same way), decides each owned
   PR's red checks and conflict from its checks, its merge state and its
   approvals (`redPlans`, `redOn` and `decideRed` in
-  `services/gctk/pr/redchecks.go`), and compares each owned
+  `services/gctk/pr/redchecks.go`, which has the update read the PR again
+  through `Reread` once GitHub shows a re-run of its checks that the saved
+  read lacks, `red` there), and compares each owned
   PR's saved labels with the ones the store derives (`labelPlans` in
   `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
   PR's signs with the ones each part keeps and reads again a conversation part

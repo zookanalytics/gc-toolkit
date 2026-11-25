@@ -208,11 +208,12 @@ func (e *HeldClose) Error() string { return e.Why }
 // the one a hand-over of a changed head assigns, which is also the session Wake
 // wakes. Hub is GitHub on a host, each call stopped when ctx ends. Reread is
 // the one-PR update's read of every part of the PR at url (Watcher.Reread),
-// which a run has make before it requests a merge, stopped once ctx ends, and
-// a run requests no merge when it is nil. RefreshConversation is the one-PR
-// update's read of the conversation of the PR at url
-// (Watcher.RefreshConversation), which a take has make once its marks have
-// landed, stopped once ctx ends. Feedback loads the definition of
+// which a run has make before it requests a merge, and the red-check act once
+// GitHub shows a re-run the saved read lacks, stopped once ctx ends. A run
+// requests no merge when it is nil, and that act is a retry.
+// RefreshConversation is the one-PR update's read of the conversation of the
+// PR at url (Watcher.RefreshConversation), which a take has make once its
+// marks have landed, stopped once ctx ends. Feedback loads the definition of
 // feedback, once a withdrawal first needs it. Mark reads the
 // city's mark, which a dismissal's message carries, from the writer that owns
 // it, and Posts is that writer, through which a review round's post posts its
@@ -334,11 +335,13 @@ type RunOutcome struct {
 
 // The actions a run reports.
 const (
-	// ActChecked: the record owes no act, and the run wrote nothing on the bead:
-	// the PR stands as the record says, the bead holds no saved read of the PR
-	// current for it yet, which the PR watch's next pass saves, or the
-	// disposition writer holds a retired PR's close for now, and the next run
-	// hands it over again.
+	// ActChecked: the record owes no act, and the run wrote nothing on the bead
+	// but what the one-PR update saved: the PR stands as the record says, the
+	// bead holds no saved read of the PR current for it yet, which the PR
+	// watch's next pass saves, GitHub shows a re-run at the PR's head that the
+	// saved read lacks, which the red-check act had the one-PR update read, or
+	// the disposition writer holds a retired PR's close for now, and the next
+	// run hands it over again.
 	ActChecked = "checked"
 	// ActRequested: the evaluator found the PR ready on the saved read, the
 	// one-PR update re-read the PR in full, the evaluator found it ready on what

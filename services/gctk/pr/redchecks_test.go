@@ -1,6 +1,7 @@
 package pr_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -456,6 +457,43 @@ func TestAReRunTheSavedReadLacksIsNotAskedForAgain(t *testing.T) {
 		t.Fatalf("a re-run that failed again before the PR watch read it was asked for again: %v", got)
 	}
 	is(t, f.runRed(t), pr.ActGated)
+}
+
+// A re-run that ends as the attempt before it did, between two passes of the
+// PR watch, moves no sign the watch reads and no result the net compares, so
+// only the act's own read of the head shows it. The act has the one-PR update
+// read the PR again, and the next run gates the approved PR on what it saved.
+// A read again that does not save is a retry.
+func TestAReRunThatFailsAsBeforeIsSavedByTheAct(t *testing.T) {
+	d := newRed(t)
+	d.checks(t, "COMPLETED", testsRun, 1, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
+	is(t, d.runRed(t), pr.ActRerun)
+	d.checks(t, "COMPLETED", testsRun, 2, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
+	if _, err := d.watch.Refresh(prURL); err != nil {
+		t.Fatalf("the PR watch's update: %v", err)
+	}
+	if _, err := d.watch.Compare(pr.PassOptions{}); err != nil {
+		t.Fatalf("the PR watch's net: %v", err)
+	}
+	red, _ := redOutcome(t, d.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActChecked)
+	red, _ = redOutcome(t, d.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActGated)
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " pr-fix-noncode.7"}) || len(d.rerunAsks()) != 1 {
+		t.Fatalf("a re-run that failed as before filed %v and re-ran %v, want the noncode gate and one re-run",
+			got, d.rerunAsks())
+	}
+
+	e := newRed(t)
+	e.checks(t, "COMPLETED", testsRun, 1, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
+	is(t, e.runRed(t), pr.ActRerun)
+	e.checks(t, "COMPLETED", testsRun, 2, check("test", "STARTUP_FAILURE"), check("test-macos", "SUCCESS"))
+	e.l.Reread = func(context.Context, string) error { return errors.New("gh: error connecting to api.github.com") }
+	red, _ = redOutcome(t, e.reconcile(t, pr.Options{}))
+	is(t, red, pr.ActRetry)
+	if len(e.gates.list()) != 0 || len(e.rerunAsks()) != 1 {
+		t.Fatalf("a read again that did not save filed %v and re-ran %v", e.gates.list(), e.rerunAsks())
+	}
 }
 
 // A re-run GitHub did not answer is a retry, which asks no person.

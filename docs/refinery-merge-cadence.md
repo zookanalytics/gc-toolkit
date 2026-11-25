@@ -698,11 +698,14 @@ fixes.
   re-run, once per head and only once that run has finished. The head reads
   re-run once a suite there that holds a required check shows its run at an
   attempt above 1, which GitHub raises in the same suite at a re-run, so no key
-  records it. The saved read shows a re-run only once the PR watch reads the
-  checks again, so the act reads the check suites at the head from GitHub just
-  before it asks for one, and asks for none while they show the head re-run,
-  whether the city re-ran it in an earlier run or a person did. A failure at a
-  head that reads re-run, a failure outside any
+  records it. The saved read shows a re-run only once the checks are read
+  again, so the act reads the check suites at the head from GitHub just before
+  it asks for one, and asks for none while they show the head re-run, whether
+  the city re-ran it in an earlier run or a person did. When they show a
+  re-run the saved read lacks, the act has the one-PR update read the PR again,
+  because a re-run that ends as the attempt before it did moves no sign the PR
+  watch reads, and the next run decides from what that read saved. A failure
+  at a head that reads re-run, a failure outside any
   Actions run and a re-run GitHub refuses each file `pr-fix-noncode.<n>`, only
   on an approved PR. An unapproved PR waits for its review, and a refused
   re-run is asked for again at the next run.

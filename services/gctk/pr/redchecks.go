@@ -673,11 +673,30 @@ func gateOrder(a, b *ledger.Record) int {
 // red is the act's turn, which ends stop after it starts: under the record
 // lock it reads the bead again, decides it again, and takes the step it owes
 // (redLocked). A step that does not complete makes it a retry, and the next
-// run decides it again.
+// run decides it again. When GitHub shows a re-run at the head that the saved
+// read lacks, the act has the one-PR update read the PR again once the lock is
+// free (Reread), since a re-run that ends as the attempt before it did moves no
+// sign the PR watch reads and no result the net compares, and the next run
+// decides from the attempt that read saves. A read again that does not save
+// makes it a retry.
 func (u *run) red(t redOf, stop time.Duration) RunOutcome {
 	ctx, cancel := bounded(stop)
 	defer cancel()
-	out := u.redLocked(ctx, t)
+	lags := false
+	out := u.redLocked(ctx, t, &lags)
+	if lags {
+		why := "nothing reads the PR again here"
+		if u.Reread != nil {
+			why = ""
+			if err := u.Reread(ctx, t.url); err != nil {
+				why = "the one-PR update's read of the PR did not save: " + err.Error()
+			}
+		}
+		if why != "" {
+			out.Action = ActRetry
+			out.Detail += "; " + why + ", so the saved read still lacks the re-run, and the next run decides again"
+		}
+	}
 	if ctx.Err() != nil && (out.Action == ActRetry || out.Action == ActFailed) {
 		out.Action = ActRetry
 		out.Detail = fmt.Sprintf("the act was stopped at its %s: %s", stop, out.Detail)
@@ -686,8 +705,9 @@ func (u *run) red(t redOf, stop time.Duration) RunOutcome {
 }
 
 // redLocked is the act made under the record lock, within ctx, whose outcome's
-// detail opens with the act it is (redOf.of).
-func (u *run) redLocked(ctx context.Context, t redOf) RunOutcome {
+// detail opens with the act it is (redOf.of). It sets lags when GitHub shows a
+// re-run at the head that the saved read lacks.
+func (u *run) redLocked(ctx context.Context, t redOf, lags *bool) RunOutcome {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
 	defer func() { u.Ledger = unbound }()
@@ -748,11 +768,11 @@ func (u *run) redLocked(ctx context.Context, t redOf) RunOutcome {
 	case stepGate:
 		return u.redGate(ctx, o, step, said)
 	case stepRerun:
-		// The saved read shows a re-run only once the PR watch reads the checks
-		// again, so the act reads the head's suites first, and a re-run made
-		// since, the city's own in a run before or a person's, is not asked for
-		// again: GitHub refuses a run still going, and a finished one would be
-		// re-run twice at the head.
+		// The saved read shows a re-run only once the checks are read again, so
+		// the act reads the head's suites first, and a re-run made since, the
+		// city's own in a run before or a person's, is not asked for again:
+		// GitHub refuses a run still going, and a finished one would be re-run
+		// twice at the head.
 		hub := u.Hub(ctx, o.host)
 		head := o.saved.PR.Head
 		suites, err := hub.CheckSuites(o.repo, head, o.number)
@@ -761,8 +781,9 @@ func (u *run) redLocked(ctx context.Context, t redOf) RunOutcome {
 				"the next run decides again: %v", head, step.why, err))
 		}
 		if x, ok := reRunBy(&SavedChecks{Runs: requiredRuns(suites), Suites: savedSuites(suites)}); ok {
+			*lags = true
 			return said(ActChecked, fmt.Sprintf("owes nothing yet: GitHub shows run %d at attempt %d at head %s, a "+
-				"re-run the PR watch's next read saves: %s", x.Run, x.Attempt, head, step.why))
+				"re-run the saved read lacks, which the one-PR update reads again: %s", x.Run, x.Attempt, head, step.why))
 		}
 		var ran []string
 		for _, run := range step.runs {
