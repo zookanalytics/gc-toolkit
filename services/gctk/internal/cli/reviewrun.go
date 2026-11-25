@@ -164,9 +164,11 @@ correctness finding carries, with a category and a failure_scenario; on a P0
 or P1 a verification opening CONFIRMED or PLAUSIBLE; never a REFUTED
 candidate), an approve that carries a blocking finding (a P0, a P1 or an
 ungraded one) and a request-changes that carries none, a demo verdict with no
-visual decision or one its rules refuse (none only with an approve; a
-fallback, screenshot or video, costlier than the modality delivered), a visual
-on another check's verdict, a ruling of a finding no lane raised or of an ask
+visual decision or one its rules refuse (none only with an approve, and with
+no comment or stop; any other modality with the URL of the PR comment that
+delivered it or what stopped it; a fallback, screenshot or video, costlier
+than the modality delivered, with both), a visual or what a check covered on
+another check's verdict, a ruling of a finding no lane raised or of an ask
 the round cannot take, a finding or an ask left unruled, a must-fix with no
 fixing commit, a commit on a ruling that changes no code, a question with no
 gate, and a fix for an ask an earlier round of the run declined. A correctness

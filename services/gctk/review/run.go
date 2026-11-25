@@ -83,8 +83,11 @@ type Pick struct {
 // Lane is what a lane writes: its check, the head it reviewed, its verdict and
 // its findings, and the verdict's note for the person who approves the merge,
 // "" when the verdict needs nothing from them. A demo lane's verdict also
-// carries its visual decision: none, or the modality delivered, and the
-// costlier modality it stands in for when it is a fallback.
+// carries its visual decision: none, or the modality the verdict rests on, and
+// the costlier modality it stands in for when it is a fallback. Beside a
+// modality it says where the PR carries the visual, the URL of the comment
+// that delivered it, or what stopped the visual the PR does not carry, and it
+// lists what the check covered and could not.
 type Lane struct {
 	Review             string    `json:"review"`
 	Iteration          int       `json:"iteration"`
@@ -95,6 +98,9 @@ type Lane struct {
 	NeedsYou           string    `json:"needs_you,omitempty"`
 	Visual             string    `json:"visual,omitempty"`
 	VisualFallbackFrom string    `json:"visual_fallback_from,omitempty"`
+	VisualComment      string    `json:"visual_comment,omitempty"`
+	VisualStoppedBy    string    `json:"visual_stopped_by,omitempty"`
+	Covered            string    `json:"covered,omitempty"`
 }
 
 // Finding is one finding a lane raised, in the finding contract its check's

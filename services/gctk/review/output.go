@@ -297,19 +297,28 @@ func contract(f *Finding, check string) string {
 // with each modality written lower-case. The demo check records its decision
 // on every verdict: none when the change needs no visual, which leaves the
 // check nothing to block on and so goes with an approve only, else the
-// modality delivered. A fallback names the modality that fits and could not be
-// produced here, screenshot or video, which costs more than the one delivered:
-// repo-artifact, then screenshot, then video. No other check records one.
+// modality the verdict rests on. That modality names where the PR carries it,
+// the URL of the comment that delivered it, or, when the PR does not carry it,
+// what stopped it, so the head's comment never names a visual the PR lacks. A
+// fallback is a visual delivered in place of the modality that fits, which
+// could not be produced here: screenshot or video, costlier than the one
+// delivered, from repo-artifact to screenshot to video. It names its comment
+// and what stopped the one that fits. No other check records a visual or what
+// it covered.
 func visual(ln *Lane) string {
 	ln.Visual = strings.ToLower(strings.TrimSpace(ln.Visual))
 	ln.VisualFallbackFrom = strings.ToLower(strings.TrimSpace(ln.VisualFallbackFrom))
+	ln.VisualComment = strings.TrimSpace(ln.VisualComment)
+	ln.VisualStoppedBy = strings.TrimSpace(ln.VisualStoppedBy)
+	ln.Covered = strings.TrimSpace(ln.Covered)
 	if !strings.EqualFold(ln.Check, "demo") {
-		if ln.Visual != "" || ln.VisualFallbackFrom != "" {
-			return fmt.Sprintf("only the demo check records a visual decision, and this lane is %s", ln.Check)
+		if ln.Visual != "" || ln.VisualFallbackFrom != "" || ln.VisualComment != "" || ln.VisualStoppedBy != "" || ln.Covered != "" {
+			return fmt.Sprintf("only the demo check records a visual decision and what it covered, and this lane is %s", ln.Check)
 		}
 		return ""
 	}
 	cost := map[string]int{"repo-artifact": 1, "screenshot": 2, "video": 3}
+	fallback := ln.VisualFallbackFrom != ""
 	switch {
 	case ln.Visual == "":
 		return "the demo check records its visual decision on every verdict: none, repo-artifact, screenshot or video"
@@ -317,17 +326,35 @@ func visual(ln *Lane) string {
 		return fmt.Sprintf("the visual reads %q, not none, repo-artifact, screenshot or video", ln.Visual)
 	case ln.Visual == "none" && ln.Verdict != VerdictApprove:
 		return "a visual of none says the change needs no visual, which leaves the demo check nothing to block on, so it goes with an approve only"
-	case ln.VisualFallbackFrom == "":
-		return ""
-	case ln.VisualFallbackFrom != "screenshot" && ln.VisualFallbackFrom != "video":
+	case fallback && ln.VisualFallbackFrom != "screenshot" && ln.VisualFallbackFrom != "video":
 		return fmt.Sprintf("the visual fallback reads %q, not screenshot or video, the modality that fits", ln.VisualFallbackFrom)
-	case ln.Visual == "none":
+	case fallback && ln.Visual == "none":
 		return "a fallback names the modality a delivered visual stands in for, and a visual of none delivers none"
-	case cost[ln.Visual] >= cost[ln.VisualFallbackFrom]:
+	case fallback && cost[ln.Visual] >= cost[ln.VisualFallbackFrom]:
 		return fmt.Sprintf("a fallback is cheaper than the modality it stands in for, so %s cannot be a fallback from %s", ln.Visual, ln.VisualFallbackFrom)
+	case ln.Visual == "none" && (ln.VisualComment != "" || ln.VisualStoppedBy != ""):
+		return "a visual of none says the change needs no visual, so no comment carries one and nothing stopped one: drop visual_comment and visual_stopped_by"
+	case ln.Visual == "none":
+		return ""
+	case ln.VisualComment != "" && !prComment.MatchString(ln.VisualComment):
+		return fmt.Sprintf("visual_comment reads %q, not the URL of a pull request's comment, which a delivery prints", ln.VisualComment)
+	case fallback && ln.VisualComment == "":
+		return "a fallback is a visual delivered in place of the one that fits, so it names the comment that carries it, visual_comment"
+	case fallback && ln.VisualStoppedBy == "":
+		return fmt.Sprintf("a fallback says what stopped the %s that fits, visual_stopped_by", ln.VisualFallbackFrom)
+	case ln.VisualComment == "" && ln.VisualStoppedBy == "":
+		return fmt.Sprintf("a visual of %s says where the PR carries it, visual_comment, the URL of the comment its delivery printed, "+
+			"or, when the PR does not carry it, what stopped it, visual_stopped_by", ln.Visual)
+	case !fallback && ln.VisualComment != "" && ln.VisualStoppedBy != "":
+		return "visual_stopped_by says what stopped the modality that fits, and a delivered visual that is no fallback is that modality: " +
+			"name what it could not show in covered"
 	}
 	return ""
 }
+
+// prComment is the URL of a pull request's comment, as GitHub gives it for
+// the comment a delivery posts.
+var prComment = regexp.MustCompile(`^https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[0-9]+#issuecomment-[0-9]+$`)
 
 var (
 	refutedVerification   = regexp.MustCompile(`(?i)^REFUTED([^[:alnum:]]|$)`)
