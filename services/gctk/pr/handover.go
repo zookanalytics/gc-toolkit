@@ -26,7 +26,7 @@ import (
 // assigns the bead to it and clears the marker (revalidate). The refinery can
 // take the bead at its next find-work once nothing holds it but merge holds: a
 // conversation on the PR, or an ask on it, each of which holds the PR's merge
-// and not the refinery's take of the head (refinery-find-work.sh). An
+// and not the refinery's take of the head (gctk refinery next). An
 // assignment alone gives a running refinery no turn: an open bead assigned to
 // a session is demand that wakes it only while the session is stopped and the
 // store reads the bead ready (workBeadHasAwakeDemand, at gastownhall/gascity
@@ -174,7 +174,8 @@ type hold struct {
 // row, read here, says what the wait is. A conversation has the shape
 // conversation.sh gives the scripts, and an ask is review.IsAsk's on the
 // bead's branch with the status open, as refinery-lib.sh's refinery_ask reads
-// one: the two waits refinery-find-work.sh takes a bead past.
+// one: the two waits the refinery's search, gctk refinery next, takes a bead
+// past.
 func (u *run) mergeHolds(s state) (holds []hold, takeable bool, err error) {
 	snap, err := waits.Read(u.Ledger, s.id)
 	if err != nil {

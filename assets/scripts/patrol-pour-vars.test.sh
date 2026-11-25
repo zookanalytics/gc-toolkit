@@ -20,10 +20,6 @@
 #       the next-iteration pour names is read off the current wisp's rendered
 #       root, the surface the agent substitutes from.
 #
-# The refinery's next pour is refinery-patrol.sh's, and refinery-patrol.test.sh
-# holds it to the startup pour's vars. This suite holds the refinery prompt's
-# step read to them.
-#
 # No live city, Dolt or network. A stub `gc` renders each wisp the way bd
 # renders a --root-only wisp: the formula's top-level description, with each
 # declared var's {{name}} replaced by the value passed, or by the declared
@@ -210,18 +206,6 @@ for AGENT in witness deacon; do
   eq "$(printf '%s\n' "$READ" | var_args)" "$(printf '%s\n' "$STARTUP" | var_args)" \
     "$AGENT: the step read passes the startup pour's vars and values"
 done
-
-# The loop leaves the refinery out, since its next pour is refinery-patrol.sh's,
-# but its prompt's step read still passes the startup pour's vars and values.
-echo
-echo "== refinery: step read =="
-PROMPT="$ROOT/agents/refinery/prompt.template.md"
-STARTUP="$(pour_line mol-refinery-patrol < "$PROMPT")"
-READ="$(read_line mol-refinery-patrol < "$PROMPT")"
-eq "$(printf '%s\n' "$STARTUP" | grep -c .)" "1" "refinery: the prompt carries exactly one startup pour"
-eq "$(printf '%s\n' "$READ" | grep -c .)" "1" "refinery: the prompt carries exactly one step read"
-eq "$(printf '%s\n' "$READ" | var_args)" "$(printf '%s\n' "$STARTUP" | var_args)" \
-  "refinery: the step read passes the startup pour's vars and values"
 
 # --- (C) A chain picks up a changed default on its next wisp. ---------------
 # chain <agent> <var=old=new>... — start a chain under the old defaults with

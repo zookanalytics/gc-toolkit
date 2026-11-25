@@ -1,14 +1,11 @@
 description = """
-Refinery patrol loop, on Gas Town's steps. Poured as a root-only wisp:
-
-  gc bd mol wisp mol-refinery-patrol --root-only --var target_branch={{target_branch}} --var rig_name={{rig_name}} --var binding_prefix={{binding_prefix}}
-  gc bd update $WISP --assignee=$GC_AGENT
-
-Each wisp is ONE iteration: take one work bead assigned to you, bring its
-branch current with its target by merge, run the rig's checks, then land it,
-publish its PR or send it back, pour the next wisp and burn this one. Steps are
-not materialized; read each step as you reach it. On a crash, re-derive where
-you were from git and bead state.
+The refinery's steps, on Gas Town's. A refinery session takes ONE item and
+ends: Gas City starts it when an item assigned to the refinery waits, or a wake
+names one. It claims that item, brings its branch current with its target by
+merge, runs the rig's checks, then lands it, publishes its PR or sends it back,
+and ends at end-session. Steps are not materialized; read each step as you
+reach it. A claim a session left in progress is the next session's: find-work
+adopts it, and you re-derive where it was from git and bead state.
 
 Work beads flow directly: a polecat sets `branch` and `target` on its work
 bead and assigns it to you. Every step makes one call to a tested pack script
@@ -33,7 +30,7 @@ description = "Agent identity prefix with trailing dot. Non-empty default on pur
 default = "gc-toolkit."
 
 [vars.rig_name]
-description = "Rig this patrol serves; injected by the pour and forwarded by next-iteration. Declared so the {{rig_name}} token in the pour command resolves."
+description = "The rig this refinery serves, which the prompt's step read passes as it passes every var."
 default = ""
 
 [vars.run_tests]
@@ -99,24 +96,33 @@ Then close this step."""
 
 [[steps]]
 id = "find-work"
-title = "Find the next work bead assigned to you"
+title = "Claim the one item this session takes"
 needs = ["check-inbox"]
 description = """
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-find-work.sh"
+gc hook --claim --json
 ```
-It lists the beads assigned to you, open or in progress, that carry a branch,
-and leaves a bead something holds and a bead whose branch another open bead
-works on; its stderr names each one left. Among the rest it takes a rework child
-handed back before its anchor.
+The claim runs your search, `gctk refinery next`, as your work query: it takes
+one bead assigned to you, a claim a session left in progress first, then a
+rework child handed back before its anchor. It leaves a bead something holds,
+and makes a bead whose branch another open bead works on wait on that bead;
+its stderr names each one left. A bead the claim takes is in progress under
+you, as your claim.
 
-Exit 0: the one line it printed is the bead this iteration acts for. Note it
-and close this step. Exit 3: no work. Write `IDLE: no work, exiting turn.` and
-end the turn; a polecat's hand-off wakes and nudges you, Gas City nudges you
-once the last blocker of a bead assigned to you closes, and the landing order
-wakes and nudges you for each bead it hands you that you can take, a PR's new
-head or a record it found half written. Exit 1: a read did not answer; end
-the turn the same way, and the next patrol retries."""
+- `"action": "work"`: its `bead_id` is your item. Note it and close this step.
+  An item that carries a `branch` (`gc bd show <the item> --json | jq -r
+  '.[0].metadata.branch // empty'`) goes on to rebase. An item with none is no
+  merge: a hand-off to bring an effort's branch current, whose title reads
+  "Bring integration/<landing bead> current once ...", goes to "Bringing an
+  effort's branch current" in your prompt and then to end-session. Anything
+  else assigned to you is not your work: hand it to placement with
+  `gc bd update <the item> --status=open --assignee="" --add-label hold:mayor
+  --append-notes "<why the refinery cannot act on it>"`, then jump to
+  end-session.
+- No `"action": "work"`: nothing waits for you. End the session with
+  `gc runtime drain-ack`; Gas City starts the next one when an item waits.
+- A non-zero exit: the search's read did not answer. End the session with
+  `gc runtime drain-ack`; Gas City starts another while the item waits."""
 
 [[steps]]
 id = "rebase"
@@ -135,11 +141,11 @@ under your own worktree. A branch is never rebased.
   "Conflicts with <target> at <commit>": the bead itself to the pool through
   `gc sling` when it records no open PR, or, when it does, to its PR's review
   run as an ask, or to the rework child already on its branch. Or the bead had
-  left you before the requeue wrote. Jump to next-iteration.
+  left you before the requeue wrote. Jump to end-session.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
-  a human gate. Jump to next-iteration.
-- Exit 1: nothing prepared, and the bead stays with you. End the session with
-  `gc runtime drain-ack`; the next patrol retries."""
+  a human gate. Jump to end-session.
+- Exit 1: nothing prepared, and the bead stays with you. Jump to end-session;
+  the next session retries it."""
 
 [[steps]]
 id = "run-tests"
@@ -155,7 +161,7 @@ longer. Start it:
 Exit 5 means the rig sets no check commands: read the rig's CLAUDE.md and run
 start again with each quality gate it documents as
 `--add <setup|typecheck|lint|build|test> '<command>'`. Exit 1: nothing
-started; end the session with `gc runtime drain-ack`.
+started; jump to end-session.
 
 Then wait for it in the FOREGROUND, as an ordinary tool call with a ten-minute
 timeout, never in the background, and never end your turn while it runs:
@@ -175,8 +181,7 @@ and the log's last line:
 - Anything else (`state=died`, `state=exceeded`, or a wait that exits 1 while
   the gate still runs): start it once more. If it stops short again, file a
   human gate on the bead with `human-gate.sh --subject <the bead> --key
-  refinery-gate-cut-short --message "<the cause>"` and end the session with
-  `gc runtime drain-ack`.
+  refinery-gate-cut-short --message "<the cause>"` and jump to end-session.
 
 Close this step once the gate has finished, pass or fail."""
 
@@ -197,8 +202,7 @@ failure.**
 ```
 It goes back as the bead itself through `gc sling`, unassigned, or, when it
 records an open PR, to its PR's review run as an ask, or to the rework child
-already on its branch. Exit 0 or 3: jump to next-iteration. Exit 1: end the
-session with `gc runtime drain-ack`.
+already on its branch. Exit 0, 3 or 1: jump to end-session.
 
 **Pre-existing on the target:** track each failure once, then land. Run it
 once per failure (each failing test function, each failing target with none,
@@ -214,8 +218,7 @@ Give `--target <repo-relative path>` for a failure with no test function, or
 the output says why. When it names the bead itself or its anchor as the
 failure's tracker, the bead was sent to fix that failure and it still fails:
 send the work back as branch-caused, with that failure as the reason.
-Otherwise no tracker was found or filed: end the session with
-`gc runtime drain-ack`.
+Otherwise no tracker was found or filed: jump to end-session.
 
 **GATE**: no landing unless every check passed or every failure is tracked."""
 
@@ -237,34 +240,26 @@ it. A rework child handed back lands on its anchor's branch and closes.
 - Exit 0: done. Close this step.
 - Exit 4: the bead waits behind a human gate. Close this step.
 - Exit 6: the branch or the target moved after the prep, so nothing landed.
-  Close this step; the next patrol prepares it again.
-- Exit 1: nothing landed, and the bead stays with you. End the session with
-  `gc runtime drain-ack`.
+  Close this step; the next session prepares it again.
+- Exit 1: nothing landed, and the bead stays with you. Jump to end-session.
 
 **GATE**: a `direct` bead closes only on a verified push, and an `mr` bead
 closes only once its merge is verified, never at publication."""
 
 [[steps]]
-id = "patrol-summary"
-title = "Record patrol cycle summary"
+id = "end-session"
+title = "Give back the claim you still hold, and end the session"
 needs = ["merge-push"]
 description = """
-Summarize the cycle for the next session: the bead and branch handled, its
-disposition (landed, published, parked for the cadence, sent back, held behind
-a gate), the checks and their results, the trackers filed or found, and the
-gates filed. If the cycle ended early, say why and what state it left. The
-summary lives in the wisp's closing reason."""
-
-[[steps]]
-id = "next-iteration"
-title = "Pour the next iteration and loop"
-needs = ["patrol-summary"]
-description = """
-Pour the next wisp before burning this one:
+Every path that took an item ends here, once the item's last write is made. A
+claim still in progress refuses `gc runtime drain-ack`, so give it back first,
+open and still assigned to you: when nothing holds it, Gas City starts a new
+session for it, and what holds a parked bead decides when it is taken. The
+write is guarded on your claim; a refusal means the item is no longer in
+progress under you, which is what the drain needs. Then remove the trees the
+session left under your home, and end the session:
 ```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-patrol.sh" next
-```
-Exit 0: close this step and begin the new wisp from the formula's first step
-(`gc formula show mol-refinery-patrol`). Exit 1: the next wisp is not in place
-and this one is kept; end the session with `gc runtime drain-ack`, and the
-startup reconcile takes it up."""
+gc bd update <the item> --if-status=in_progress --if-assignee="$GC_AGENT" --status=open
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-patrol.sh" end
+gc runtime drain-ack
+```"""
