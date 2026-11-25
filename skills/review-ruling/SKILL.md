@@ -147,26 +147,34 @@ gh api "repos/<owner>/<repo>/commits/<target>/check-runs" --jq '.check_runs[] | 
 ```
 
 When the target carries the failure, send it to its one tracker and leave the
-PR waiting on that tracker. `preexisting-failure.sh key` derives the failure's
-key from its test function (`--test`), its path (`--target`) or its lint
-finding (`--lint`), and `file` prints the tracker it finds under that key, or
+PR waiting on that tracker. `preexisting-failure.sh key` prints the failure's
+key, derived from its test function (`--test`), its path (`--target`) or its
+lint finding (`--lint`):
+
+```bash
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" key --test <the failing test function>
+```
+
+`preexisting-failure.sh file` prints the tracker it finds under that key, or
 the one it files and sends to be fixed. The tracker's message is the failure as
 the target's run shows it, with its log, which goes on the lines between the
 quoted here-document's delimiters, where every character stays as the log has
-it. The ask then waits on the tracker:
+it:
 
 ```bash
-SCRIPTS="$(gc <binding> scripts-dir)"
-KEY=$("$SCRIPTS/preexisting-failure.sh" key --test <the failing test function>)
-FAILURE=$(cat <<'TARGET_LOG'
+"$(gc <binding> scripts-dir)/preexisting-failure.sh" file <the key> --message "$(cat <<'TARGET_LOG'
 <the failure as the target's run shows it, with its log>
 TARGET_LOG
-)
-TRACKER=$("$SCRIPTS/preexisting-failure.sh" file "$KEY" --message "$FAILURE")
+)"
+```
+
+The ask then waits on the tracker that call printed:
+
+```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-"$GCTK" review ask <the PR's bead> --source <the red-check ask> --waiting-on "$TRACKER" --reason "Bring '<the PR's branch>' current by merging origin/<target> in once $TRACKER fixes <the check> on '<target>'."
+"$GCTK" review ask <the bead that owns the PR> --source <the red-check ask> --waiting-on <the tracker> --reason "Bring '<the PR branch>' current by merging origin/<target> in once <the tracker> fixes <the check> on '<target>'."
 ```
 
 Rule the red-check ask declined, and name the tracker and the new ask in its

@@ -22,7 +22,7 @@
 #   triage-index-gap      files the observation with that anchor in its title,
 #                         provenance and quote.
 #
-# The review-ruling skill's block for a red check the PR's target carries files
+# The review-ruling skill's blocks for a red check the PR's target carries file
 # the target's failure as its log reads: a log holding quotes, a command
 # substitution, backticks and variables reaches the tracker's message as one
 # argument, nothing in it runs, and the ask waits on the tracker the filing
@@ -210,22 +210,26 @@ for sh in $SHELLS; do
   has "$ARGS" "Triage on tk-anchor1 at $OID." "($sh) its quote names the anchor and the reviewed commit"
 done
 
-echo "# the ruling's tracker block files the target's failure as its log reads"
-# preexisting-failure.sh and gctk stand in to record their arguments, and the
+echo "# the ruling's tracker blocks file the target's failure as its log reads"
+# preexisting-failure.sh and gctk stand in to record their arguments. The three
+# blocks run one after another, as an agent runs them: the key the first prints
+# fills the second, and the tracker the second prints fills the third. The
 # failure's placeholder takes the log wherever the block puts it, as an agent
 # pastes it there.
 RB="$TMP/blocks/ruling"; mkdir -p "$RB"
 blocks "$ROOT/skills/review-ruling/SKILL.md" "$RB"
-TRACK=$(grep -l 'preexisting-failure.sh" file' "$RB"/*.sh 2>/dev/null | head -1)
-if [ -z "$TRACK" ]; then
-  bad "the ruling's tracker block extracts from the skill" "no block files a tracker"
+KEYB=$(grep -l 'preexisting-failure.sh" key' "$RB"/*.sh 2>/dev/null | head -1)
+FILEB=$(grep -l 'preexisting-failure.sh" file' "$RB"/*.sh 2>/dev/null | head -1)
+ASKB=$(grep -l -e '--waiting-on' "$RB"/*.sh 2>/dev/null | head -1)
+if [ -z "$KEYB" ] || [ -z "$FILEB" ] || [ -z "$ASKB" ]; then
+  bad "the ruling's tracker blocks extract from the skill" "key '$KEYB', file '$FILEB', ask '$ASKB'"
 else
-  ok "the ruling's tracker block extracts from the skill"
+  ok "the ruling's tracker blocks extract from the skill"
   RS="$TMP/ruling-pack/assets/scripts"; mkdir -p "$RS"
   cat > "$RS/preexisting-failure.sh" <<'PF'
 #!/usr/bin/env bash
 case "$1" in
-  key) printf 'TestTheCap\n' ;;
+  key) printf '%s\0' "$@" > "$KEY_ARGS"; printf 'TestTheCap\n' ;;
   file) printf '%s\0' "$@" > "$TRACKER_ARGS"; printf 'tk-tracker1\n' ;;
   *) exit 2 ;;
 esac
@@ -239,28 +243,45 @@ GS
   printf '%s\n' '--- FAIL: TestTheCap (0.01s)' \
     "    cap_test.go:12: expected \"two words\", got 'one'; ran \$(touch $TMP/ran-substitution) and \`touch $TMP/ran-backtick\`" \
     '    beside $HOME, ${UNSET_IN_LOG} and a \ backslash' 'FAIL' > "$LOG"
-  sed -e 's|<binding>|kit|g' -e 's|<the failing test function>|TestTheCap|g' -e "s|<the PR's bead>|tk-anchor1|g" \
-      -e 's|<the red-check ask>|tk-ask1|g' -e "s|<the PR's branch>|polecat/x|g" -e 's|<target>|main|g' \
-      -e 's|<the check>|test|g' "$TRACK" > "$RB/tracker.tmpl"
   PH="<the failure as the target's run shows it, with its log>"
-  stray=$(grep -oE '<[a-z][^>]*>' "$RB/tracker.tmpl" | grep -vxF "$PH" | sort -u | paste -sd' ' -)
-  eq "$stray" "" "the tracker block's placeholders are the ones this case fills"
-  PH="$PH" LOGF="$LOG" awk 'BEGIN { ph = ENVIRON["PH"]; while ((getline l < ENVIRON["LOGF"]) > 0) text = text (n++ ? "\n" : "") l }
-    { out = ""; s = $0; while ((i = index(s, ph)) > 0) { out = out substr(s, 1, i - 1) text; s = substr(s, i + length(ph)) }; print out s }' \
-    "$RB/tracker.tmpl" > "$RB/tracker.sh"
+  # tracker_fill <block> <out> [sed args...] : the block with the case's values
+  # and the given ones filled in, and the log in place of its placeholder.
+  tracker_fill() {
+    local b="$1" out="$2"; shift 2
+    sed -e 's|<binding>|kit|g' -e 's|<the failing test function>|TestTheCap|g' -e 's|<the bead that owns the PR>|tk-anchor1|g' \
+        -e 's|<the red-check ask>|tk-ask1|g' -e 's|<the PR branch>|polecat/x|g' -e 's|<target>|main|g' \
+        -e 's|<the check>|test|g' "$@" "$b" > "$out.tmpl"
+    PH="$PH" LOGF="$LOG" awk 'BEGIN { ph = ENVIRON["PH"]; while ((getline l < ENVIRON["LOGF"]) > 0) text = text (n++ ? "\n" : "") l }
+      { out = ""; s = $0; while ((i = index(s, ph)) > 0) { out = out substr(s, 1, i - 1) text; s = substr(s, i + length(ph)) }; print out s }' \
+      "$out.tmpl" > "$out"
+  }
+  tracker_fill "$KEYB" "$RB/key.sh"
+  tracker_fill "$FILEB" "$RB/file.sh" -e 's|<the key>|KEY_PRINTED|g'
+  tracker_fill "$ASKB" "$RB/ask.sh" -e 's|<the tracker>|TRACKER_PRINTED|g'
+  stray=$(cat "$RB/key.sh.tmpl" "$RB/file.sh.tmpl" "$RB/ask.sh.tmpl" | grep -oE '<[a-z][^>]*>' | grep -vxF "$PH" | sort -u | paste -sd' ' -)
+  eq "$stray" "" "the tracker blocks' placeholders are the ones this case fills"
+  printf '%s\0' key --test TestTheCap > "$TMP/key.want"
   printf '%s\0' file TestTheCap --message "$(cat "$LOG")" > "$TMP/tracker.want"
   printf '%s\0' review ask tk-anchor1 --source tk-ask1 --waiting-on tk-tracker1 --reason \
     "Bring 'polecat/x' current by merging origin/main in once tk-tracker1 fixes test on 'main'." > "$TMP/ask.want"
   for sh in $SHELLS; do
-    rm -f "$TMP/tracker.args" "$TMP/ask.args" "$TMP/ran-substitution" "$TMP/ran-backtick"
-    run "$sh" "$RB/tracker.sh" STUB_SCRIPTS="$RS" GCTK_BIN="$TMP/gctk-stub" TRACKER_ARGS="$TMP/tracker.args" ASK_ARGS="$TMP/ask.args"
-    eq "$RC" "0" "($sh) the tracker block runs under set -u"
+    rm -f "$TMP/key.args" "$TMP/tracker.args" "$TMP/ask.args" "$TMP/ran-substitution" "$TMP/ran-backtick"
+    run "$sh" "$RB/key.sh" STUB_SCRIPTS="$RS" KEY_ARGS="$TMP/key.args"
+    eq "$RC" "0" "($sh) the key block runs under set -u"
+    cmp -s "$TMP/key.args" "$TMP/key.want" && ok "($sh) the key block derives the key from the failing test" \
+      || bad "($sh) the key block derives the key from the failing test" "got: $(tr '\0' '|' 2>/dev/null < "$TMP/key.args")"
+    sed "s|KEY_PRINTED|$OUT|g" "$RB/file.sh" > "$RB/file.$sh.sh"
+    run "$sh" "$RB/file.$sh.sh" STUB_SCRIPTS="$RS" TRACKER_ARGS="$TMP/tracker.args"
+    eq "$RC" "0" "($sh) the filing block runs under set -u"
     cmp -s "$TMP/tracker.args" "$TMP/tracker.want" \
-      && ok "($sh) the tracker's message is the target's failure as its log reads, in one argument" \
-      || bad "($sh) the tracker's message is the target's failure as its log reads, in one argument" \
+      && ok "($sh) the tracker's message is the target's failure as its log reads, in one argument, under the key printed" \
+      || bad "($sh) the tracker's message is the target's failure as its log reads, in one argument, under the key printed" \
              "got: $(tr '\0' '|' 2>/dev/null < "$TMP/tracker.args")"
     [ ! -e "$TMP/ran-substitution" ] && [ ! -e "$TMP/ran-backtick" ] && ok "($sh) nothing in the log runs" \
       || bad "($sh) nothing in the log runs" "a command the log holds ran"
+    sed "s|TRACKER_PRINTED|$OUT|g" "$RB/ask.sh" > "$RB/ask.$sh.sh"
+    run "$sh" "$RB/ask.$sh.sh" GCTK_BIN="$TMP/gctk-stub" ASK_ARGS="$TMP/ask.args"
+    eq "$RC" "0" "($sh) the ask block runs under set -u"
     cmp -s "$TMP/ask.args" "$TMP/ask.want" && ok "($sh) the ask waits on the tracker the filing printed" \
       || bad "($sh) the ask waits on the tracker the filing printed" "got: $(tr '\0' '|' 2>/dev/null < "$TMP/ask.args")"
   done
