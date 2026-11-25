@@ -415,6 +415,37 @@ func TestBringCurrentCommitsTheMergeWhateverTheBranchsMergeOptions(t *testing.T)
 	}
 }
 
+func TestBringCurrentRefusesASequenceOrABisectLeftUnfinished(t *testing.T) {
+	s := newScratch(t)
+	s.oldLineage()
+	s.branch()
+	s.git(s.work, "checkout", "-q", "-b", "topic")
+	first := s.commit(s.work, "topic first", map[string]string{"shared.txt": edit("i", "topic")})
+	second := s.commit(s.work, "topic second", map[string]string{"topic.txt": "second\n"})
+	s.git(s.work, "checkout", "-q", "pr")
+	s.commit(s.work, "the PR", map[string]string{"shared.txt": edit("i", "pr")})
+	// The first pick stops on a conflict, and a commit resolves it with the
+	// second pick still to make.
+	if out, err := exec.Command("git", "-C", s.work, "cherry-pick", first, second).CombinedOutput(); err == nil {
+		t.Fatalf("the cherry-pick did not stop on its conflict\n%s", out)
+	}
+	s.git(s.work, "checkout", "--theirs", "shared.txt")
+	s.git(s.work, "add", "shared.txt")
+	s.git(s.work, "commit", "-q", "-m", "first, resolved")
+	s.commit(s.up, "u1", map[string]string{"up1.txt": "u1\n"})
+	s.push()
+
+	var refused *CurrentRefusal
+	if _, err := BringCurrent(s.work, "main", ""); !errors.As(err, &refused) || !strings.Contains(err.Error(), "cherry-pick or revert") {
+		t.Fatalf("BringCurrent with a pick still to make: %v, want a refusal naming the cherry-pick", err)
+	}
+	s.git(s.work, "cherry-pick", "--quit")
+	s.git(s.work, "bisect", "start")
+	if _, err := BringCurrent(s.work, "main", ""); !errors.As(err, &refused) || !strings.Contains(err.Error(), "bisect") {
+		t.Fatalf("BringCurrent mid-bisect: %v, want a refusal naming the bisect", err)
+	}
+}
+
 func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	s := newScratch(t)
 	old := s.oldLineage()

@@ -34,18 +34,22 @@ func input(dir, stdin string, args ...string) (string, error) {
 
 // operations are the files git keeps in a worktree's own git directory while
 // an operation that stops for a person is unfinished, each with the
-// operation's name.
+// operation's name. sequencer/todo holds the picks a cherry-pick or revert of
+// several commits has still to make, after a commit resolved the one it
+// stopped on.
 var operations = []struct{ path, name string }{
 	{"MERGE_HEAD", "merge"},
 	{"CHERRY_PICK_HEAD", "cherry-pick"},
 	{"REVERT_HEAD", "revert"},
+	{"sequencer/todo", "cherry-pick or revert"},
 	{"rebase-merge", "rebase"},
 	{"rebase-apply", "rebase"},
+	{"BISECT_START", "bisect"},
 }
 
 // InProgress names the operation the worktree dir sits in is in the middle
-// of: a merge, a cherry-pick, a revert or a rebase that stopped and was
-// neither finished nor aborted. It is "" when there is none.
+// of: a merge, a cherry-pick, a revert, a rebase or a bisect that was neither
+// finished nor aborted. It is "" when there is none.
 func InProgress(dir string) (string, error) {
 	args := []string{"rev-parse", "--path-format=absolute"}
 	for _, op := range operations {

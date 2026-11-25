@@ -50,8 +50,8 @@ exit: 0 merged, or HEAD already held the target
       2 git did not answer or failed, such as the fetch: nothing was merged,
         unless git said it left its merge state
       3 refused, with the checkout as it was: it holds work no commit
-        holds, or is in the middle of a merge, cherry-pick, revert or
-        rebase, or HEAD shares no history with the target, or the reflog
+        holds, or is in the middle of a merge, cherry-pick, revert, rebase
+        or bisect, or HEAD shares no history with the target, or the reflog
         cannot show the commit of the target the branch took last and no
         --base names it, or --base names a commit HEAD does not hold or one
         that does not hold git's merge base
