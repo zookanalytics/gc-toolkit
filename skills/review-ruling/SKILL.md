@@ -67,13 +67,18 @@ the file holding git's first line, then one paragraph for each file you resolved
 by hand, naming what collided, what you kept or wrote and why, and what a
 reviewer should check.
 
-A conflict goes to a person only when the target deleted code the branch edits,
-or defines a name the branch also adds, because whether the branch still has
-work to do is then the person's call. Abort the merge with `git merge --abort`
-and put it to them as A question only a person can answer says, naming the
-change on the target and the branch's code it meets. A rewrite of code the
-branch edits is no such question: resolve it, and its paragraph of the account
-says what the target changed there and how the branch's edit applies to it.
+Put a conflict to a person in either of these cases:
+
+- The target deleted code the branch edits.
+- The target defines a name the branch also adds.
+
+Abort the merge with `git merge --abort`, and put the conflict to them as A
+question only a person can answer says. Name in the question the change on the
+target and the branch's code it meets.
+
+Resolve every other conflict, such as one where the target rewrote code the
+branch edits. In its paragraph of the merge message, say what the target
+changed there and how the branch's edit applies to it.
 
 ## A fix in the PR's title or summary
 
