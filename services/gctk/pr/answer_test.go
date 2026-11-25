@@ -767,3 +767,22 @@ func TestASettlingCommentWhoseGateDidNotCloseIsAnsweredOnceItCloses(t *testing.T
 		t.Fatal("the post run again did not answer the comment once its gate closed")
 	}
 }
+
+// A head's comment past the size GitHub allows is posted cut, under its mark a
+// line that names the call that prints it whole, so the post lands.
+func TestAHeadsCommentPastTheSizeGitHubAllowsIsPostedCut(t *testing.T) {
+	d := newRounds(t)
+	long := strings.TrimSpace(strings.Repeat("the reason in words ", 90))
+	var rs []review.Ruling
+	for i := range 40 {
+		ask := d.ask(t, "Conversation comment", fmt.Sprintf("%s#issuecomment-%d", prURL, 1000+i), "2026-11-12T04:00:00Z")
+		rs = append(rs, review.Ruling{Ask: ask, Ruling: review.RulingAnswered, Reason: long})
+	}
+	d.rule(t, 1, head, "", rs...)
+	d.posted(t)
+	got := d.cityPosts(review.Mark("tk-run", head))
+	cut := "**This comment is cut at the size GitHub allows.** `gctk review comment tk-run --iteration 1` prints it whole."
+	if len(got) != 1 || !strings.Contains(got[0], cut) || strings.Count(got[0], long) >= 40 {
+		t.Fatalf("40 long answers posted %d head's comments: %.400q", len(got), got)
+	}
+}

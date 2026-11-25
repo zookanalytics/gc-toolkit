@@ -17,7 +17,8 @@ import (
 // rather than posting a second.
 //
 // GitHub refuses a comment over 65,536 characters, which no retry of the post
-// gets past, so a comment longer than commentLimit is cut there (fit).
+// gets past, so the post cuts a comment longer than commentLimit (Fit), and
+// `gctk review comment` prints it whole.
 
 // commentLimit is the most bytes the head's comment takes. A character is
 // never fewer than one byte, and the writer of the city's posts adds the
@@ -29,9 +30,9 @@ func Mark(root, head string) string {
 	return fmt.Sprintf("<!-- gc:review-run %s %s -->", root, head)
 }
 
-// Comment is the comment for iteration n of the run: its head's checks, their
-// findings and the round's rulings, and the asks the round took, with asks
-// naming the ones on the bead. It is "" when the iteration has nothing to
+// Comment is the whole comment for iteration n of the run: its head's checks,
+// their findings and the round's rulings, and the asks the round took, with
+// asks naming the ones on the bead. It is "" when the iteration has nothing to
 // answer: no lane ran there and the round took no ask.
 func Comment(run *Run, n int, asks []Ask) string {
 	it := run.Iterations[n]
@@ -106,13 +107,14 @@ func Comment(run *Run, n int, asks []Ask) string {
 		fmt.Fprintln(&b)
 	}
 	fmt.Fprintf(&b, "<sub>Review run %s, iteration %d, into %s.</sub>\n", run.Root, n, run.Target)
-	return fit(b.String(), run.Root, n)
+	return b.String()
 }
 
-// fit is body, the comment of iteration n of the run root, when it fits within
-// commentLimit. A longer one is cut at the last line that ends within it, under
-// its mark a line that says so and names the call that prints it whole.
-func fit(body, root string, n int) string {
+// Fit is body, the comment of iteration n of the run root, as the post puts it
+// on the PR: whole when it fits within commentLimit, and otherwise cut at the
+// last line that ends within it, under its mark a line that says so and names
+// the call that prints it whole.
+func Fit(body, root string, n int) string {
 	if len(body) <= commentLimit {
 		return body
 	}

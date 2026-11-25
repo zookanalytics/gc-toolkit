@@ -23,8 +23,8 @@ import (
 // loop's check, which records the run's result, has no GitHub login. The post
 // makes each write the round owes on GitHub, in this order:
 //
-//   - the head's one comment (review.Comment), posted, or edited where its mark
-//     finds it;
+//   - the head's one comment (review.Comment), cut to the size GitHub takes
+//     (review.Fit), posted, or edited where its mark finds it;
 //   - the gate of each question that a person's post settles or makes moot,
 //     which the post's ruling names in settles, closed with the post's words
 //     and its URL as the answer, headed ruled: or moot:;
@@ -130,7 +130,7 @@ func (l Landing) AnswerRound(id string, n int) (Answered, error) {
 	if err != nil {
 		return out, err
 	}
-	body := review.Comment(run, n, asks)
+	body := review.Fit(review.Comment(run, n, asks), run.Root, n)
 	if body == "" {
 		return out, nil
 	}

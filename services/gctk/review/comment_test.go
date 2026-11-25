@@ -135,9 +135,10 @@ func TestTheHeadsCommentOnAFixInThePRsSummary(t *testing.T) {
 	}
 }
 
-// A comment past the size GitHub allows is cut at the last line that ends
-// within it, keeps its mark first, and says under the mark that it is cut and
-// which call prints it whole. One that fits is whole.
+// The head's comment is whole however long. The post cuts one past the size
+// GitHub allows (Fit) at the last line that ends within it, keeps its mark
+// first, and says under the mark that it is cut and which call prints it
+// whole. One that fits is posted whole.
 func TestAHeadsCommentPastTheSizeGitHubAllowsIsCut(t *testing.T) {
 	long := strings.TrimSpace(strings.Repeat("the reason in words ", 90))
 	comment := func(t *testing.T, n int) string {
@@ -161,14 +162,21 @@ func TestAHeadsCommentPastTheSizeGitHubAllowsIsCut(t *testing.T) {
 		}
 		return review.Comment(run, 1, asks)
 	}
-	if got := comment(t, 20); len(got) > 60000 || strings.Count(got, long) != 20 || strings.Contains(got, "is cut") {
-		t.Errorf("a comment that fits holds %d bytes, %d whole reasons, and says it is cut: %v", len(got),
-			strings.Count(got, long), strings.Contains(got, "is cut"))
+	short := comment(t, 20)
+	if got := review.Fit(short, root, 1); got != short || len(got) > 60000 || strings.Count(got, long) != 20 {
+		t.Errorf("a comment that fits is posted as %d bytes with %d whole reasons, changed: %v", len(got),
+			strings.Count(got, long), got != short)
 	}
-	got := comment(t, 40)
+	whole := comment(t, 40)
+	if strings.Count(whole, long) != 40 || strings.Contains(whole, "is cut") {
+		t.Errorf("40 long answers render %d whole reasons, and say they are cut: %v", strings.Count(whole, long),
+			strings.Contains(whole, "is cut"))
+	}
+	got := review.Fit(whole, root, 1)
 	want := review.Mark(root, h1) + "\n**This comment is cut at the size GitHub allows.** `gctk review comment " + root +
 		" --iteration 1` prints it whole.\n\n**Review at "
-	if len(got) > 60000 || !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "\n") {
-		t.Errorf("40 long answers render %d bytes, opening:\n%s", len(got), got[:min(len(got), 400)])
+	if len(got) > 60000 || !strings.HasPrefix(got, want) || !strings.HasSuffix(got, "\n") || strings.Count(got, long) >= 40 {
+		t.Errorf("40 long answers are posted as %d bytes with %d whole reasons, opening:\n%s", len(got),
+			strings.Count(got, long), got[:min(len(got), 400)])
 	}
 }

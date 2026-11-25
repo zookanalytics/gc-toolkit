@@ -248,6 +248,8 @@ it, and each ask the round took (services/gctk/review/comment.go). <run> is the
 run's root, or any bead poured under it. It renders --iteration, else the
 latest iteration whose round wrote its rulings, and prints nothing when that
 iteration has nothing to answer: no lane ran there and the round took no ask.
+It prints the comment whole. The round's post cuts one longer than GitHub
+takes, and the cut names this call.
 
 exit: 0 printed, nothing included
       1 usage
