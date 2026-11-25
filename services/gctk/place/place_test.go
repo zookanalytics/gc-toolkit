@@ -273,7 +273,7 @@ func TestPlaceRefusesWhatItDoesNotPlace(t *testing.T) {
 		}, "PR-finishing work of tk-anc"},
 		{"no hold and no dispatch", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
 			s.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task"})
-		}, "gc bd set-state tk-new hold=mayor"},
+		}, "gc bd update tk-new --add-label hold:mayor"},
 		{"hold:external beside", Request{Bead: "tk-new", Standalone: true}, func(s *fake.Store) {
 			s.Put(fake.Bead{ID: "tk-new", Status: "open", IssueType: "task", Labels: []string{"hold:mayor", " Hold:External"}})
 		}, "also carries Hold:External"},

@@ -175,7 +175,7 @@ store alpha '{"id":"al-r1","status":"open","issue_type":"task","metadata":{"gc.r
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "an unheld bead routed to the po is an ERROR"
 has "$OUT" "alpha bead al-r1 (open task): routed to gc-toolkit.po, outside the po's queue" "the finding names the store, the bead and the route"
-has "$OUT" "gc bd set-state al-r1 hold=mayor --reason" "…and names holding it for the po as a remedy"
+has "$OUT" "gc bd update al-r1 --add-label hold:mayor --append-notes" "…and names holding it for the po as a remedy"
 
 # --- 3. a bead assigned to the po's alias ------------------------------------
 reset

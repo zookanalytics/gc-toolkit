@@ -391,7 +391,7 @@ scan_store() {
                 case "$kind" in
                     R) findings+=("$label: run $id sends the po work: $rest. The po takes no work from a run, and nothing refuses \`gc sling <po> --on <formula>\`. Cancel the run, assets/scripts/run-cancel.sh --root $id --reason \"<why>\" --db $db, and send the bead it works to the agent whose work it is") ;;
                     B) IFS=$'\037' read -r what how <<< "$rest"
-                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gc bd set-state $id hold=mayor --reason \"<why it waits for placement>\" --db $db") ;;
+                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gc bd update $id --add-label hold:mayor --append-notes \"<why it waits for placement>\" --db $db, which keeps any other hold it carries") ;;
                 esac
             done <<< "$(jq -r -s --argjson qns "$PO_QNS" --argjson addrs "$PO_ADDRS" "$REACH_JQ" "${reads[@]}" 2>/dev/null)"
         fi

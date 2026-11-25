@@ -87,7 +87,7 @@ Each writer that files or disposes new work follows the rule.
   finding, because its card is the triage that backlog refinement reads. Its
   actionable exit routes a member, PR-finishing work, a failure's tracker or a
   confirmed emergency. It releases any other bead with no route, then holds it
-  with `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The
+  with `gc bd update <bead> --add-label hold:mayor --append-notes "<why>"`. The
   blocked exit's `--then-route` arms a dispatch only for a bead the rule admits.
   Any other bead it holds, and arms nothing, while its wait still lands as a
   `blocks` edge. The close exit keeps its validating closer, because a close
@@ -117,14 +117,22 @@ Each writer that files or disposes new work follows the rule.
   waits on closes, whether or not the rule admits it, because a close shrinks
   the queue.
 - **The po**, in a sitting and only once the operator agrees, holds a bead with
-  `gc bd set-state <bead> hold=mayor --reason "<the operator's reason>"`.
+  `gc bd update <bead> --add-label hold:mayor --append-notes "<the operator's reason>"`.
 
 The witness and the distiller write the label in the create, which is the
-bead's own record of it. The first reaction and the po write it with
-`set-state`, which records the reason in an event bead. The first reaction
-writes it last, after the release and after intake's note, because the check a
-re-offered reaction runs first refuses a held bead. A worker cut off before the
-label lands leaves the bead released under its headline, which no pool is
+bead's own record of it. The first reaction and the po add it to a bead that
+exists with `--add-label`, in the update whose note says why. bd removes no
+label an update does not name (`ApplyLabelPatch` in
+`internal/storage/issueops/aggregate.go`, gastownhall/beads), so a hold another
+writer put on the bead, such as `hold:external`, stays beside `hold:mayor`.
+Gas City's hold conventions set a hold with `set-state`, whose event bead
+records the reason, but set-state swaps the first `hold:` label the bead
+carries, in label order, for the one it sets (`findStateLabel` in
+`cmd/bd/state.go`), so it would remove that hold.
+
+The first reaction writes the hold last, after the release, because the check a
+re-offered reaction runs first refuses a held bead. A worker cut off before that
+update lands leaves the bead released under its headline, which no pool is
 offered and the scan passes over, and the reaction's next worker finishes the
 exit.
 
