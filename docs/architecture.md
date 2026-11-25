@@ -339,9 +339,10 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
     each time ([human-engagement.md](human-engagement.md#a-po-sitting)). Its
     backlog refinement works the rig's queue of new work no epic holds, and its
     portfolio sync works the rig's epics, their parks and their priorities. It owns the queue's writes, and each placement,
-    park and priority move the operator agrees to in a sitting. Here the po
-    works the platform's coordination hold, `hold:mayor`: Gas City's dispatcher
-    reads only its two fixed hold values, whose names are not roles.
+    park and priority move the operator agrees to in a sitting. Its queue is the
+    beads the placement hold holds, `hold:po` or its earlier spelling
+    `hold:mayor`. The city's gc holds a bead on any `hold:<value>` and reads no
+    value as a role, so the label names the po and routes nothing to it.
   - **Mechanik**, the operator's standing conversation, owns how the city works
     and every edit to the town repo.
   - **A converse sitting** holds one bead's conversation, below. The patrols,
@@ -425,8 +426,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   call. The board's one write that gctk does not carry is archiving a mailbox
   message, which Gas City's mail performs. Accept clears a first reaction's
   recommendation gate and nothing else, under the bead's acceptance lock. The
-  po's backlog refinement works the queue, every bead `hold:mayor` holds in any
-  spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
+  po's backlog refinement works the queue, every bead `hold:po` or its earlier
+  spelling `hold:mayor` holds, in any spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
   works without the board: it spends no state, so it can never be wrong for
   longer than one render.
 

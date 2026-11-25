@@ -266,7 +266,7 @@ no warrant.
   epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
   source's priority changes. Neither one's documentation describes a priority
   that follows another bead's.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 97c0c9b3b11b
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 0998eac14bfe
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
   `internal/sling/sling.go`, `Attach` and `InstantiateFragment` in
   `internal/molecule/molecule.go`, `newFormulaCookCmd` in
@@ -767,7 +767,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 0998eac14bfe, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
@@ -814,8 +814,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/beads`
-  main 3a274fbf8f76 and `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 0998eac14bfe, `gastownhall/beads`
+  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 

@@ -918,9 +918,9 @@ subject checked once that work lands. Right after the headline, whose
 appends the sitting's `--close-brief` to the subject's notes and arms the
 subject's validating closer (`mol-validate-close`) in the subject's own rig,
 the waits skill's way of having a bead checked and closed once other work
-lands. A subject held for placement then has its `hold:mayor` lifted, every
-spelling of it, because the deferred-dispatch pass sends no arm while that
-label holds the subject. Each of these writes lands before any gate is
+lands. A subject held for placement then has its placement hold lifted, every
+spelling of `hold:po` and `hold:mayor`, because the deferred-dispatch pass
+sends no arm while a hold holds the subject. Each of these writes lands before any gate is
 answered, and one that does not land stops the sign-off. While the work is
 out, a decision subject is no question of the operator's: the board's row
 reads it as waiting on that work, in Queued, and a pull request it holds reads
@@ -1082,7 +1082,7 @@ refinery.
 
 **The change is a bead the sitting files**, in its own rig's store, with its
 target in the create: the rig's default branch, or the integration branch of an
-effort the change belongs to. It carries no route and no `hold:mayor`, because
+effort the change belongs to. It carries no route and no `hold:po`, because
 the operator routed it in the sitting, and for an epic subject it is the epic's
 member. Its description records the ruling, the operator's words quoted with
 the date and the conversation, and the change's scope, so a reviewer sees where
@@ -1596,7 +1596,7 @@ that holds its claimed conversation without a wait never sleeps again.
 
 Each rig has its own po, the operator's prioritization partner for that rig's
 work: a named session of the rig, which the operator opens for one sitting at a
-time, a backlog refinement over the rig's `hold:mayor` queue or a portfolio
+time, a backlog refinement over the rig's `hold:po` queue or a portfolio
 sync over the rig's epics ([steering.md](steering.md)). A sitting ends when
 the po runs `gc runtime drain-ack`, and the next sitting starts a new
 conversation. The rig's row on Engage's People page opens one from whatever

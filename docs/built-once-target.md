@@ -279,8 +279,8 @@ subsystem owns the converse, first-reaction, mechanik and po prompts, the
 converse skills and the po's refinement skill, the operator's intake and the
 terminal surfaces.
 
-New work no epic holds is owed to nobody. It carries Gas City's `hold:mayor`,
-and its rig's po, a fresh on-demand session chartered as the operator's
+New work no epic holds is owed to nobody. It carries `hold:po`, a hold the
+city's gc honors on any value, and its rig's po, a fresh on-demand session chartered as the operator's
 prioritization partner, works that queue with the operator. A hold is the next
 actor's queue, and a gate is an answer someone owes.
 

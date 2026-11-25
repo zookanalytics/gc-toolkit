@@ -62,6 +62,8 @@ Read these first; this page does not restate them. Coverage checked
   agent should do and never which sessions exist, and are written with
   `bd set-state <bead> hold=<value>` —
   [hold-label conventions](https://github.com/gastownhall/gascity/blob/main/engdocs/contributors/hold-label-conventions.md).
+  The city's fork holds a bead on any `hold:<value>` whose value is not
+  `cleared` (below).
 - **A sling refuses a cross-store route** ("refusing cross-store route"),
   with city-scoped agents the exception —
   [understanding formulas](https://docs.gascity.com/guides/understanding-formulas),
@@ -126,7 +128,12 @@ tiers are in the config reference; what it leaves out:
   "hold:external" --exclude-label "human" --json --limit=20`, with no
   `--sort`, so a worker takes the first row it can claim in the reader's
   canonical order, priority first. `gc ready` documents the same set but
-  applies no exclusion by default; there they are caller flags.
+  applies no exclusion by default; there they are caller flags. On the city's
+  fork the tier keeps `--exclude-label "human"` and drops each row any hold
+  label holds in jq, before it cuts its answer to a window
+  (`PoolDemandServeRulesForQuery` and `excludeActiveHoldsJQClause` in
+  `internal/config/workquery.go`, read at the fork `d62873fce6` on
+  2026-11-25).
 - **Only an ephemeral session, or one whose alias is the target, reads the
   routed tier.** The tier exits unless `$GC_SESSION_ORIGIN` is `ephemeral` or
   empty (the controller's own demand probe runs with no session context), or
@@ -281,9 +288,12 @@ bead — for the tiers that term covers:
   hook drops a held candidate on every path, `gc hook --claim` included;
   Tier 1 falls through to the ready tiers when its candidate is held. The
   assignee-scoped demand and liveness probes stay hold-transparent, so a held
-  bead's owner still counts as existing. Only those label values hold —
-  compared trimmed and case-insensitively — and a label that merely reads as
-  a hold is ordinary work.
+  bead's owner still counts as existing. Upstream, only those label values
+  hold — compared trimmed and case-insensitively — and a label that merely
+  reads as a hold is ordinary work. On the city's fork any `hold:<value>`
+  holds whose value, trimmed, is not empty and not `cleared`, in any case
+  (`beadmeta.ActiveHoldValue`, read at the fork `d62873fce6` on 2026-11-25),
+  so the pack's `hold:po` holds there and is ordinary work upstream.
 - **The label `human`** keeps a bead out of the routed tier's query, which
   excludes it beside the two hold labels.
 

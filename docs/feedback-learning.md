@@ -215,7 +215,7 @@ feedback recurs. `gc bd ready` lists a pattern only while it needs a decision,
 which the distiller makes on its next run.
 Each surviving proposal becomes one `prompt-update` bead carrying the
 exact rule text, the evidence list, and the reasoning. A proposal is new
-work, so the distiller files it held with Gas City's `hold:mayor` label and
+work, so the distiller files it held with the `hold:po` label and
 routed to no pool, and it waits for the operator's placement sitting
 ([steering.md](steering.md)). Once the sitting places it under an epic or
 routes it on its own, a polecat builds it and the refinery opens the PR;

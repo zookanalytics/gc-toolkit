@@ -228,8 +228,10 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
 - **selects** the beads to start by the pool's own serve rule: `bd ready` over
   the beads that carry `gc.dispatch_when_ready`, with the flags Gas City
   renders for a pool's routed demand, `--unassigned`, `--exclude-type=epic`
-  and an `--exclude-label` for each of `hold:mayor`, `hold:external` and
-  `human`. The arm sends what the pool would serve. bd's readiness holds a bead
+  and `--exclude-label human`. No flag names every hold, so Gas City drops a
+  held row from that demand in jq, and the start holds a bead any hold label
+  holds before it reads the bead's readiness. The arm sends what the pool would
+  serve. bd's readiness holds a bead
   on a wait of its own or of any ancestor, so a park on an epic holds an armed
   bead under it whether or not its work has started.
 - **holds back** what bd cannot judge, from `gctk bead holds`' answer for the
@@ -396,7 +398,8 @@ itself when it is given `--waiting-on <blocker>`. A converse sign-off writes the
 brief and the arm for its subject when the ruling leaves the subject waiting on
 work the sitting sent, after its headline writes the edge
 (`--waiting-on <work> --close-brief "<brief>"`), and then lifts the subject's
-`hold:mayor`, every spelling of it, so the pass can send the arm.
+placement hold, every spelling of `hold:po` and `hold:mayor`, so the pass can
+send the arm once no other hold holds the subject.
 
 A bead that waits this way can be a pull request's anchor, which carries a
 `merge_result`. Its arm sends the closer all the same once nothing holds the

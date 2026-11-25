@@ -269,7 +269,7 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 | `gate` | is a gate that is no human gate |
 | `not-scheduled` | is ready work that nothing sends anywhere: the store serves it as ready, no dispatch hold holds it, and no arm, route, assignee or live run moves it |
 | `outside` | is work that waits outside the city: `hold:external` holds it and no live run works it |
-| `for-product-owner` | is work nothing sends that is held for the Product Owner's placement, `hold:mayor` |
+| `for-product-owner` | is work nothing sends that is held for the Product Owner's placement, `hold:po` or its earlier spelling `hold:mayor` |
 | `not-ready` | is any other work nothing sends, which the store does not serve as ready |
 | `unread` | could not be read, has no standing of its own and no bead that speaks for it, waits on itself through the beads it waits on, or is a `waits-for` wait the store cannot judge yet |
 

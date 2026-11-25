@@ -59,8 +59,8 @@ Waiting on you, and the board's Needs you view counts it by its kind.
 | Assigned to you | `assigned-to-you` | Any other bead only you can clear, such as a task in your queue, one assigned to `human`. | Act on it, or open a conversation about it with Discuss, in the row's Details. |
 | Needs a ruling, or landed — waits for its Epic Checkpoint | `ruling` | An epic whose members have all closed, or a Delivery whose Stories have all closed. Each waits for your review of the epic. | Call the epic's review ([epics.md](epics.md#reviewing-an-epic)). Discuss, in the row's Details, opens a conversation about it. |
 
-Work held for the Product Owner, which carries `hold:mayor`, asks nothing of
-you, whatever it would ask, such as a review of its pull request. It waits for
+Work held for the Product Owner, which carries `hold:po` or its earlier
+spelling `hold:mayor`, asks nothing of you, whatever it would ask, such as a review of its pull request. It waits for
 you and the Product Owner to place it
 ([steering.md](steering.md#the-queue-the-po-works)).
 

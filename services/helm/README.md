@@ -302,8 +302,8 @@ fold beneath the rest under Parked or unprioritized, closed until opened. The
 Work queue is the work in the
 order it is expected to land, with the ready work nothing sends anywhere
 after it, folded under Not scheduled. Work that waits on other work stays in
-the queue, and its row names what it waits on. Work that carries hold:mayor
-waits for the Product Owner: the Unprioritized page lists it, and neither view
+the queue, and its row names what it waits on. Work that carries the placement
+hold, hold:po or its earlier spelling hold:mayor, waits for the Product Owner: the Unprioritized page lists it, and neither view
 lists it or counts it.
 The Epics page shows both for each epic and each
 Delivery, over the work each holds nearest, with its closed work folded beneath,
@@ -472,7 +472,7 @@ parked itself when it, or an epic or Delivery above it, waits on a park, which
 the read tells as a wait on a gate that is no human gate, the wait standing
 reads as parked (`Reading.Parked`) and the row as "Held by a gate". A gate, a
 decision or a conversation does not count when every bead it holds or is about
-is parked, is a need that does not count, or carries hold:mayor. A pull request
+is parked, is a need that does not count, or carries the placement hold. A pull request
 or other work that is itself a need counts unless it is parked itself, and a
 need about nothing else counts. A question a sitting
 is talking over counts as in conversation. An epic's or a Delivery's needs
