@@ -244,7 +244,10 @@ files an earlier run left that git does not ignore.
 named "Quality Gates", "CI", "Testing", "Build", or "Lint" and run the
 verification commands listed there, in code blocks or bullet lists. Run each
 through the gate the same way, such as `rig-checks.sh preflight --test '<test
-command>'`, so its result is recorded at this base.
+command>'`, so its result is recorded at this base. Run what you write this way
+one build at a time and in the foreground, because the builds a check runs at
+once hold their memory together: start no lane in the background with `&`, and
+give a parallel test runner one job.
 
 Run ONLY read-only verification commands (typecheck, lint, build, test).
 Do NOT run install, cleanup, publish, release, `git push`, or any
@@ -440,7 +443,10 @@ exit 4 says nothing about the code, and `gctk rig`'s line names why, such as
 untracked files a run left, or a crash; a repeat at one commit is the code's or the
 command's doing. When the rig declares no command and you
 run the repo's own quality gate (CLAUDE.md or AGENTS.md) instead, run it through
-the gate the same way, with `--test '<its test command>'` on the call.
+the gate the same way, with `--test '<its test command>'` on the call. Run it one
+build at a time and in the foreground, because the builds a check runs at once
+hold their memory together: start no lane in the background with `&`, and give a
+parallel test runner one job.
 
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
