@@ -78,9 +78,9 @@ The lift lasts for this sitting, and engage adds the edge again for the next
 sitting. A hold the operator wants to outlast the conversation is a gate of its
 own on the anchor (the `prs` skill, holding its merge).
 
-**A PR a return holds waits for the operator's settlement.** When a stay's work
-is back, the city has already held its PR's merge for the return
-(`converse-stay`). Lift that hold only on the operator's ruling that settles the
+**A PR a return holds waits for the operator's settlement.** In a rig's store,
+when a stay's work is back, the city has already held its PR's merge for the
+return (`converse-stay`). Lift that hold only on the operator's ruling that settles the
 returned work, never because the return found nothing left to ask. A sign-off
 that ends the conversation releases it with the close.
 

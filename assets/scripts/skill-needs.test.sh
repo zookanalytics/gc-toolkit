@@ -577,8 +577,8 @@ have "…and ending in the city's own store, where new work's stay comes back af
     'In the city'"'"'s own store a stay comes back only once its work closes, which for new work that opens its own PR is after the merge, so recommend ending at the hand-off there.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
     'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
-have "…says the return waits for the operator whatever it found, and the PR waits for them" \
-    'and waits for them whatever it found. Until they settle it with you, the work'"'"'s PR does not merge.' "$TMP/prompt-stay"
+have "…says the return waits for the operator whatever it found, and in a rig's store the PR waits for them" \
+    'and waits for them whatever it found. In a rig'"'"'s store, the work'"'"'s PR does not merge until they settle it with you.' "$TMP/prompt-stay"
 have "…and says a sitting that ends promises nothing it cannot keep" \
     'makes no promise of its own to confirm, check, watch or follow up' "$TMP/prompt-stay"
 for f in "$HOLD" "$SETTLE" "$STAY"; do

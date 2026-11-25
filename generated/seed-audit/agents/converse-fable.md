@@ -125,10 +125,10 @@ that action.
      and the session sleeps until it is back (`converse-stay`). The return
      checks the result against each item that was agreed, tells the operator
      which are covered, with its recommendation, and waits for them whatever it
-     found. Until they settle it with you, the work's PR does not merge. The
-     return passes and fails nothing: the work's checks give the verdicts, and
-     the subject closes as it would after a hand-off. A sitting stays only for
-     work in its conversation's own store.
+     found. In a rig's store, the work's PR does not merge until they settle
+     it with you. The return passes and fails nothing: the work's checks give
+     the verdicts, and the subject closes as it would after a hand-off. A
+     sitting stays only for work in its conversation's own store.
 
 ## Actions
 

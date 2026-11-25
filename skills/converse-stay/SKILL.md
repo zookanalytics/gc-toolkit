@@ -178,10 +178,10 @@ and wakes it with its thread when the stay's gate closes. When the gate closes
 while the session is still up, Gas City keeps the session up for the ready
 conversation and sends it a notice that a blocker closed, on which the prompt
 runs the entry. While the work is out, the merge of an open PR this
-conversation holds waits for the return. Once the city has finished with the
-PR the stay is for, the city holds that PR's merge for the return too, before
-it wakes the sitting, so an approval merges nothing until the operator has
-settled the work with the sitting. When the operator wants a held PR to land
+conversation holds waits for the return. In a rig's store, once the city has
+finished with the PR the stay is for, the city holds that PR's merge for the
+return too, before it wakes the sitting, so an approval merges nothing until
+the operator has settled the work with the sitting. When the operator wants a held PR to land
 without the return, lift that hold (`converse-hold`).
 
 ### In the city's own store
