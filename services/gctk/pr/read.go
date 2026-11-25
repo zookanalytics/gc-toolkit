@@ -67,9 +67,8 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
 		"state, draft, head, base, base_tip and updated_at. checks: head; runs, the required check runs at "+
 		"that head as {name, status, conclusion, suite, url}, suite the id of the check suite that holds the "+
-		"result and url its log; and suites, each check suite at that head as {id, status, created_at, run, "+
-		"attempt, check_runs}, run the GitHub Actions run behind it and attempt that run's attempt, both 0 "+
-		"for a suite no Actions run is behind, and check_runs how many check runs it holds; with the signs "+
+		"result and url its log; and suites, each check suite at that head as {id, status, created_at, "+
+		"check_runs}, check_runs how many check runs it holds; with the signs "+
 		"head, rollup, contexts, check_runs and statuses, the last two counts by state. A checks part that "+
 		"holds no suites is read again. conversation: since, the provenance instant the definition "+
 		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+

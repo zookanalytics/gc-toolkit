@@ -594,10 +594,9 @@ while one is open, and the order still reads it.
 
 **A person's post.** Each post the saved read keeps untaken becomes an ask on
 the bead that owns the PR, which the PR's review run rules. For each PR whose
-bead owns it on the record, is open or blocked, is assigned to nobody or to the
-refinery and carries none of the old path's receipts (below), while the saved
-read shows the PR open and applied the definition of feedback from the bead's
-provenance instant, an act under the record lock files the post's ask
+bead owns it on the record, is open or blocked and is assigned to nobody or to
+the refinery, while the saved read shows the PR open and applied the definition
+of feedback from the bead's provenance instant, an act under the record lock files the post's ask
 (`gctk review ask`'s filing), then marks the post `EYES`.
 The ask's reason is one line naming the post: its kind, its author, the PR, an
 inline comment's file and the line it was made on, and its URL, where the run
