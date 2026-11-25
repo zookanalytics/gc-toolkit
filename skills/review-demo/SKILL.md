@@ -423,9 +423,18 @@ The verdict carries its visual on either path, where the formula you run under
 says: the check's two flags, `--visual` and `--visual-fallback-from`, or the
 output's `visual` and `visual_fallback_from`, which the flags below stand for.
 `--visual` carries the decision: `none` when no visual is needed, otherwise the
-modality you picked. A verdict that delivers more than one modality, such as a
-clip of the screens beside a screenshot of each message, names the costliest. A
-fallback adds `--visual-fallback-from <the modality that fits>`.
+modality you picked, whether or not it reached the PR. A verdict that delivers
+more than one modality, such as a clip of the screens beside a screenshot of
+each message, names the costliest. A fallback adds `--visual-fallback-from <the
+modality that fits>`.
+
+On a review run, the output also says where the PR carries the visual.
+`visual_comment` is the URL of the comment that delivered the visual, as the
+delivery printed it. For a warranted visual the PR does not carry,
+`visual_stopped_by` says what stopped it, in one sentence, and leaves
+`visual_comment` out. A fallback gives both: the comment that carries it, and
+what stopped the modality that fits. `covered` holds the list of what the
+check covered, below.
 
 The verdict's write refuses a demo verdict without `--visual`, and refuses
 `none` with `request-changes`, because a check that found no visual needed has
@@ -437,6 +446,14 @@ commit. A fallback is stamped as `visual_fallback_from`, and the line then
 reads, for example, `Visual: repo-artifact (author-committed; fallback from
 video)`. The verdict's write refuses a fallback that is not cheaper than the
 modality it stands in for.
+
+On a review run, the write also refuses a modality other than `none` that
+names neither its comment nor what stopped it, and a fallback without both.
+The head's comment links the modality on its `Visual:` line to the comment that
+delivered it, adds what stopped the modality a fallback stands in for, and
+reads, for a visual the PR does not carry, for example, `Visual: video
+warranted, none delivered: the capture toolchain does not resolve on this
+host`.
 
 The verdict body states the reasons, one sentence each: the need decision; when
 a visual helps, the modality and why it is the cheapest that conveys the change;
@@ -454,7 +471,9 @@ also names the rest, by subject. If the rig names a standard, the verdict names
 it. The verdict also lists each screen and message you checked against it, in
 which states, and each screen, message or state you could not check, with what
 stopped it. The PR shows only the demo, so this list is how a person sees what
-the check covered.
+the check covered. On a review run, the list goes in the output's `covered`,
+which the head's comment shows under the `Visual:` line, and the reasons go in
+`trail.md`.
 
 - **No visual needed.** Approve with `--visual none` and a one-line note. Attach
   nothing.
@@ -468,9 +487,11 @@ the check covered.
   evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
   modality delivered with `--visual` and the one that fits with
-  `--visual-fallback-from`, and say what stopped the one that fits.
+  `--visual-fallback-from`, and say what stopped the one that fits, on a
+  review run in `visual_stopped_by`.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
-  say that a visual is warranted and what stopped it: a surface none of these
+  say that a visual is warranted and what stopped it, on a review run in
+  `visual_stopped_by` with no `visual_comment`: a surface none of these
   captures renders, a surface only live state produces, a required state the
   capture tools cannot reach, a capture toolchain that does not resolve, or no
   running app to capture.

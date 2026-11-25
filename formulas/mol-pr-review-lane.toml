@@ -68,14 +68,16 @@ lane, its `locus` (a file and a symbol or section, never a line number or a
 commit), its `message`, its `severity`, `category` and `failure_scenario` as the
 method grades them, and its `verification`. A decision that is the operator's
 to make goes in `needs_you`, not in a finding. A demo lane delivers its capture
-to the PR:
+to the PR, and keeps the comment URL the call prints for its output:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" deliver --file "<the capture>"`
 
 **4. Write the output** to `output.json` in the lane's part of the workspace:
 `review` reading `lane`, `check` reading `{check}`, `head` reading `{head}`,
 `verdict`, `findings`, `needs_you` when it names a decision, and for a demo
-lane its `visual` and `visual_fallback_from`. The method's trail, the lines its
-verdict section names, goes in `trail.md` beside it, where the round reads it.
+lane its `visual`, `visual_fallback_from`, `visual_comment`, `visual_stopped_by`
+and `covered`, as its method's verdict section says, which the head's comment
+shows. The rest of the method's trail goes in `trail.md` beside it, where the
+round reads it.
 Then check and write it:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/review-run.sh" output --check {check}`
 Exit 3 prints why the output does not stand, such as a correctness approve on a
