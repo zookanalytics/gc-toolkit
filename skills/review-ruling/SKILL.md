@@ -228,14 +228,16 @@ names, by that answer.
 
 ## A comment made while a question is open
 
-A person may comment while a question the run put to them waits on its gate,
-open in that list. When the comment settles the question, or makes it moot,
-name the gate in its ask's ruling as `settles`, with `moot` set when the
-comment makes the question moot rather than answering it, and rule the
-question's own ask by the answer. The round's post closes the gate with the
-comment as its answer and says so in its reply. A comment that settles nothing
-leaves the gate open, and its reply says the question still stands. Rule the
-question's own ask a question again, naming the same gate.
+A person may comment while a question the run put to them is open in that
+list. A comment settles the question when it answers it or makes it moot. When
+the comment settles the question:
+
+- Name the question's gate as `settles` in the ruling of the comment's ask.
+- Set `moot` in that ruling when the comment makes the question moot.
+- Rule the question's own ask by what the comment says.
+
+When the comment settles nothing, rule the question's own ask a question
+again, naming the same gate.
 
 ## A decline stands
 
