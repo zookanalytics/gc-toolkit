@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,6 +62,31 @@ type Host interface {
 	// One that listens on another address only, as a publisher's daemon
 	// listens on the host's network address, is left out.
 	Listeners(port int) ([]int, error)
+
+	// Lock takes the lock on the file at path, making the file, and the
+	// directory it sits in, when they are missing, when no other holder on the
+	// machine has it, and reports false when one does. The lock is flock(2)'s, so a process that runs flock(1)
+	// on the file shares it. This process alone holds it: no child it starts
+	// inherits it, and it is freed when this process ends or Unlock frees it.
+	Lock(path string) (Lock, bool, error)
+	// Holder reads the line the file at path holds and reports whether a
+	// holder has its lock now. A missing file has no holder.
+	Holder(path string) (string, bool, error)
+	// Alive reports whether the process pid is running.
+	Alive(pid int) bool
+	// Memory is the machine's physical memory, in bytes.
+	Memory() (int64, error)
+	// Resident is the memory resident for the process pid and every process
+	// descended from it, in bytes, as the process table reads it at once.
+	Resident(pid int) (int64, error)
+}
+
+// Lock is a lock Host.Lock took.
+type Lock interface {
+	// Stamp writes line into the locked file, in place of what it held.
+	Stamp(line string) error
+	// Unlock frees the lock.
+	Unlock()
 }
 
 // Spec is a process to start.
@@ -444,4 +470,136 @@ func reachedFromLoopback(addr string) bool {
 		return true
 	}
 	return strings.HasPrefix(host, "127.")
+}
+
+// fileLock is a held flock(2) lock on an open file.
+type fileLock struct{ f *os.File }
+
+func (local) Lock(path string) (Lock, bool, error) {
+	if err := os.Mkdir(filepath.Dir(path), 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, false, err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("flock %s: %w", path, err)
+	}
+	return &fileLock{f: f}, true, nil
+}
+
+func (l *fileLock) Stamp(line string) error {
+	if err := l.f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := l.f.WriteAt([]byte(line+"\n"), 0)
+	return err
+}
+
+// Unlock closes the file, which frees its lock.
+func (l *fileLock) Unlock() { _ = l.f.Close() }
+
+// Holder tries the lock for an instant, as the push gate's own probe does,
+// and frees it at once when it was free.
+func (h local) Holder(path string) (string, bool, error) {
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	line, _, _ := strings.Cut(string(b), "\n")
+	l, free, err := h.Lock(path)
+	if err != nil {
+		return line, false, err
+	}
+	if free {
+		l.Unlock()
+	}
+	return line, !free, nil
+}
+
+// Alive asks kill(2) with signal 0, which EPERM answers for a process this
+// one may not signal, and that process runs.
+func (local) Alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// Memory reads MemTotal from /proc/meminfo on linux, and hw.memsize through
+// sysctl(8) elsewhere.
+func (local) Memory() (int64, error) {
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if f := strings.Fields(line); len(f) >= 2 && f[0] == "MemTotal:" {
+				kib, err := strconv.ParseInt(f[1], 10, 64)
+				if err != nil {
+					return 0, fmt.Errorf("/proc/meminfo's MemTotal %q is not a number", f[1])
+				}
+				return kib << 10, nil
+			}
+		}
+		return 0, errors.New("/proc/meminfo names no MemTotal")
+	}
+	out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+	if err != nil {
+		return 0, fmt.Errorf("sysctl did not read hw.memsize: %v", err)
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("sysctl's hw.memsize %q is not a number", strings.TrimSpace(string(out)))
+	}
+	return n, nil
+}
+
+// Resident reads the whole process table in one ps call, whose rss is in
+// KiB, and sums pid's tree by each process's parent.
+func (local) Resident(pid int) (int64, error) {
+	cmd := exec.Command("ps", "-A", "-o", "pid=,ppid=,rss=")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("ps did not read the process table: %v", err)
+	}
+	children := map[int][]int{}
+	rss := map[int]int64{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		p, perr := strconv.Atoi(f[0])
+		parent, qerr := strconv.Atoi(f[1])
+		kib, kerr := strconv.ParseInt(f[2], 10, 64)
+		if perr != nil || qerr != nil || kerr != nil {
+			continue
+		}
+		children[parent] = append(children[parent], p)
+		rss[p] = kib << 10
+	}
+	if _, ok := rss[pid]; !ok {
+		return 0, fmt.Errorf("the process table names no process %d", pid)
+	}
+	var sum int64
+	seen := map[int]bool{}
+	for next := []int{pid}; len(next) > 0; {
+		p := next[len(next)-1]
+		next = next[:len(next)-1]
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		sum += rss[p]
+		next = append(next, children[p]...)
+	}
+	return sum, nil
 }

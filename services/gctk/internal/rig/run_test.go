@@ -437,3 +437,37 @@ func TestParsesTellsASyntaxErrorFromARunnableCommand(t *testing.T) {
 		t.Fatalf("Parses(%q) = (%v, %q), want a syntax error", "echo (", ok, why)
 	}
 }
+
+func TestRunMeasuresTheMostMemoryTheCommandsTreeHeld(t *testing.T) {
+	oldSample, oldPeriod := Sample, SamplePeriod
+	t.Cleanup(func() { Sample, SamplePeriod = oldSample, oldPeriod })
+	SamplePeriod = 20 * time.Millisecond
+	var mu sync.Mutex
+	reads := []int64{3 << 30, 7 << 30, 5 << 30}
+	Sample = func(int) (int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(reads) == 0 {
+			return 0, os.ErrNotExist
+		}
+		n := reads[0]
+		reads = reads[1:]
+		return n, nil
+	}
+	if o, _, _ := run(t, "sleep 0.5", time.Minute); o.Kind != Passed || o.Peak != 7<<30 {
+		t.Fatalf("Run = %+v; want the largest read of the tree, 7 GiB", o)
+	}
+	Sample = func(int) (int64, error) { return 0, os.ErrNotExist }
+	// With no read of the tree, the largest process stands: bash itself, in
+	// bytes whatever unit the kernel counts in.
+	if o, _, _ := run(t, "true", time.Minute); o.Peak < 100<<10 || o.Peak > 1<<30 {
+		t.Fatalf("Run(true).Peak = %d; want bash's own size, between 100 KiB and 1 GiB", o.Peak)
+	}
+}
+
+func TestRunGivesTheCommandThePushGatesBypass(t *testing.T) {
+	t.Setenv(NoCapVar, "")
+	if o, _, errs := run(t, `[ "$`+NoCapVar+`" = 1 ]`, time.Minute); o.Kind != Passed {
+		t.Fatalf("the command did not see %s=1: %+v %s", NoCapVar, o, errs)
+	}
+}

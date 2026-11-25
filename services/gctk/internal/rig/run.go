@@ -7,8 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 )
 
 // Kind is what a run of a check command came to.
@@ -38,7 +42,20 @@ type Outcome struct {
 	Signal syscall.Signal
 	// Duration is the wall time from start to exit.
 	Duration time.Duration
+	// Peak is the most memory the command's processes held at once, in
+	// bytes, as far as the run saw: the largest sum Sample read over the
+	// command's process tree, one read every SamplePeriod, and never less than
+	// the largest single process among the command and those it waited for.
+	Peak int64
 }
+
+// Sample reads the memory resident for a process and its descendants, and
+// SamplePeriod is how often a run reads it. Variables, so a test can stand in
+// for the process table.
+var (
+	Sample       = host.Local().Resident
+	SamplePeriod = 5 * time.Second
+)
 
 // StopGrace is how long a stopped command's process group has between SIGTERM
 // and SIGKILL. A variable so a test can shorten it.
@@ -77,6 +94,9 @@ func Parses(command string) (bool, string) {
 // command's to stop. With a timeout above zero, a run still going at the
 // timeout is stopped and is a Machine outcome.
 //
+// The command's environment is this process's with NoCapVar set to 1, because
+// the slots the run holds cover everything the command starts.
+//
 // Its own group also puts the command out of reach of a signal sent to this
 // process's group, which is how an order runner stops a job that outlives its
 // timeout and how a terminal delivers Ctrl-C. So a SIGTERM or SIGINT that
@@ -93,6 +113,7 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	cmd.Stdin = nil
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = append(os.Environ(), NoCapVar+"=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A writer that is not a file is fed through a pipe, and a child the
 	// command leaves running can hold that pipe open after the command exits.
@@ -113,7 +134,10 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	// The outcome is read from cmd.ProcessState, so Wait's error, which
 	// repeats the exit or reports the output's copy, is not needed.
 	waited := make(chan struct{}, 1)
-	go func() { _ = cmd.Wait(); waited <- struct{}{} }()
+	exited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(exited); waited <- struct{}{} }()
+	var peak sampled
+	peak.watch(cmd.Process.Pid, exited)
 
 	var expired <-chan time.Time
 	if timeout > 0 {
@@ -132,6 +156,7 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 		got = stopGroup(group, waited, stop)
 	}
 	elapsed := time.Since(start)
+	most := max(peak.most(), largestProcess(cmd.ProcessState))
 	// A signal that arrived as the command finished is still this process's to
 	// take.
 	signal.Stop(stop)
@@ -143,15 +168,72 @@ func Run(dir, command string, timeout time.Duration, stdout, stderr io.Writer) O
 	}
 	if got != nil {
 		sig, _ := got.(syscall.Signal)
-		return Outcome{Kind: Interrupted, Signal: sig, Duration: elapsed}
+		return Outcome{Kind: Interrupted, Signal: sig, Duration: elapsed, Peak: most}
 	}
 	if timedOut {
-		return Outcome{Kind: Machine, Duration: elapsed,
+		return Outcome{Kind: Machine, Duration: elapsed, Peak: most,
 			Reason: fmt.Sprintf("timed out after %s; its process group was stopped", timeout)}
 	}
 	o := classify(cmd.ProcessState)
 	o.Duration = elapsed
+	o.Peak = most
 	return o
+}
+
+// sampled is the largest sum Sample read over a command's process tree.
+type sampled struct {
+	mu   sync.Mutex
+	max  int64
+	done chan struct{}
+}
+
+// watch reads the tree under pid every SamplePeriod until exited closes.
+func (s *sampled) watch(pid int, exited <-chan struct{}) {
+	s.done = make(chan struct{})
+	go func() {
+		defer close(s.done)
+		t := time.NewTicker(SamplePeriod)
+		defer t.Stop()
+		for {
+			select {
+			case <-exited:
+				return
+			case <-t.C:
+				if n, err := Sample(pid); err == nil {
+					s.mu.Lock()
+					s.max = max(s.max, n)
+					s.mu.Unlock()
+				}
+			}
+		}
+	}()
+}
+
+// most waits for the watch to end, which it does once the command has
+// exited, and returns the largest read.
+func (s *sampled) most() int64 {
+	<-s.done
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.max
+}
+
+// largestProcess is the largest resident size among the command and the
+// processes it waited for, from the kernel's account of the command, which
+// counts bytes on darwin and KiB on linux.
+func largestProcess(ps *os.ProcessState) int64 {
+	if ps == nil {
+		return 0
+	}
+	ru, ok := ps.SysUsage().(*syscall.Rusage)
+	if !ok {
+		return 0
+	}
+	n := int64(ru.Maxrss)
+	if runtime.GOOS == "linux" {
+		n <<= 10
+	}
+	return n
 }
 
 // groupPoll is how often a stop looks for members left in the command's group

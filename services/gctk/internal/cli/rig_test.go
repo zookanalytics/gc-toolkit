@@ -7,11 +7,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/rig"
 )
 
@@ -70,6 +72,8 @@ func newRigFixture(t *testing.T) *rigFixture {
 		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
 		"STUB_GC_LOG": f.gcLog, "STUB_DIR": f.stub, "COUNT_FILE": f.count,
 		"GC_SESSION_NAME": "test-runner", "CHECK_RC": "0",
+		// The machine's slots are the clone's own, never a live city's.
+		"GC_CITY_PATH": "", "GC_CITY": "", "GC_CITY_ROOT": "", rig.NoCapVar: "", rig.SlotsVar: "",
 	} {
 		t.Setenv(k, v)
 	}
@@ -953,5 +957,94 @@ func TestRigUsageErrors(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := Run([]string{"rig", "--help"}, "", &out, &errb); code != 0 || out.Len() == 0 || errb.Len() != 0 {
 		t.Errorf("--help = %d, stdout %d bytes, stderr %q", code, out.Len(), errb.String())
+	}
+}
+
+// slot is the path of the clone's own slot i, where the fixture's runs take
+// the machine's slots.
+func (f *rigFixture) slot(i int) string {
+	return filepath.Join(f.repo, ".git", "gate-slots", "slot-"+strconv.Itoa(i)+".lock")
+}
+
+func TestRigARunHoldsSlotsForWhatItsCheckUsedAndGivesThemBack(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv(rig.SlotsVar, "4")
+	code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full"))
+	if code != 0 || !strings.Contains(errs, "takes 4 of the machine's 4 slots, 4.0 GiB each, since no run of this check is measured in this repository, so it runs alone") {
+		t.Fatalf("first run = %d, want 0 taking every slot; stderr:\n%s", code, errs)
+	}
+	for i := 0; i < 4; i++ {
+		l, ok, err := host.Local().Lock(f.slot(i))
+		if err != nil || !ok {
+			t.Fatalf("slot-%d after the run: %v, %v; want it given back", i, ok, err)
+		}
+		l.Unlock()
+	}
+	peaks := rig.NewPeaks(filepath.Join(f.repo, ".git"))
+	if w, err := peaks.Weight(rig.CheckTest); err != nil || w <= 0 {
+		t.Fatalf("the run's peak was not kept: %d, %v", w, err)
+	}
+	if code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 || strings.Contains(errs, "takes") {
+		t.Fatalf("a call answered from its record = %d, want 0 and no slots taken; stderr:\n%s", code, errs)
+	}
+	if err := peaks.Add(rig.CheckTest, time.Now(), 5<<30); err != nil {
+		t.Fatal(err)
+	}
+	f.commitChange("two\n")
+	code, _, errs = f.call("test", "--scope", "full", "--command", countCmd("full"))
+	if code != 0 || !strings.Contains(errs, "takes 2 of the machine's 4 slots, 4.0 GiB each, for the 5.0 GiB its last runs here used at most") {
+		t.Fatalf("run after a 5 GiB one = %d, want 0 taking 2 slots; stderr:\n%s", code, errs)
+	}
+	t.Setenv(rig.NoCapVar, "1")
+	f.commitChange("three\n")
+	if code, _, errs := f.call("test", "--scope", "full", "--command", countCmd("full")); code != 0 || strings.Contains(errs, "takes") {
+		t.Fatalf("run under %s=1 = %d, want 0 and no slots taken; stderr:\n%s", rig.NoCapVar, code, errs)
+	}
+	eqRuns(t, f.runs(), "full", "full", "full")
+}
+
+func TestRigAWaitForSlotsThatRunsOutOfTimeRunsNothing(t *testing.T) {
+	for _, verb := range []string{rig.CheckLint, "build"} {
+		t.Run(verb, func(t *testing.T) {
+			f := newRigFixture(t)
+			t.Setenv(rig.SlotsVar, "1")
+			l, ok, err := host.Local().Lock(f.slot(0))
+			if err != nil || !ok {
+				t.Fatalf("Lock = %v, %v", ok, err)
+			}
+			defer l.Unlock()
+			stamp := strconv.Itoa(os.Getpid()) + " 2026-11-25T00:00:00Z other-run host"
+			if err := l.Stamp(stamp); err != nil {
+				t.Fatal(err)
+			}
+			code, _, errs := f.call(verb, "--command", countCmd(verb), "--timeout", "300ms")
+			if code != rigExitMachine || !strings.Contains(errs, "machine failure") ||
+				!strings.Contains(errs, "for 1 of the machine's 1 slots and ran out of time; 1 held by "+stamp) {
+				t.Fatalf("%s = %d, want %d naming the slot's holder; stderr:\n%s", verb, code, rigExitMachine, errs)
+			}
+			eqRuns(t, f.runs())
+			if r := f.record(verb, f.head()); r != nil {
+				t.Fatalf("a run that never started was recorded: %+v", r)
+			}
+		})
+	}
+}
+
+// --timeout bounds the wait and the run together, which the refinery's gate
+// counts on to end each check inside its own bound.
+func TestRigTheRunGetsWhatTheWaitLeftOfItsTimeout(t *testing.T) {
+	f := newRigFixture(t)
+	t.Setenv(rig.SlotsVar, "1")
+	old := rig.SlotPoll
+	rig.SlotPoll = 50 * time.Millisecond
+	t.Cleanup(func() { rig.SlotPoll = old })
+	l, ok, err := host.Local().Lock(f.slot(0))
+	if err != nil || !ok {
+		t.Fatalf("Lock = %v, %v", ok, err)
+	}
+	time.AfterFunc(time.Second, l.Unlock)
+	code, _, errs := f.call("test", "--scope", "full", "--command", "sleep 2.4", "--timeout", "3s")
+	if code != rigExitMachine || !strings.Contains(errs, "took 1 slots after waiting 1s") || !strings.Contains(errs, "timed out after") {
+		t.Fatalf("a run of 2.4s after a 1s wait, within 3s = %d, want %d timed out; stderr:\n%s", code, rigExitMachine, errs)
 	}
 }

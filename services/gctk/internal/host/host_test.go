@@ -524,3 +524,68 @@ func TestSignalRefusesWhatNamesNoOneProcessOrGroup(t *testing.T) {
 		}
 	}
 }
+
+// A slot's lock is flock(2)'s on one open file, so a second open finds it
+// held, flock(1) finds it held, and a child this process starts does not keep
+// it: once this process frees it, it is free whatever the child does.
+func TestLockIsOneHoldersAtATimeAndNoChildKeepsIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "slots", "slot-0.lock")
+	h := Local()
+	l, ok, err := h.Lock(path)
+	if err != nil || !ok {
+		t.Fatalf("first Lock = %v, %v, want it taken, the directory made", ok, err)
+	}
+	if err := l.Stamp("100 2026-11-25T00:00:00Z a-run host"); err != nil {
+		t.Fatal(err)
+	}
+	if _, again, err := h.Lock(path); err != nil || again {
+		t.Fatalf("a second Lock while it is held = %v, %v, want false", again, err)
+	}
+	if line, held, err := h.Holder(path); err != nil || !held || line != "100 2026-11-25T00:00:00Z a-run host" {
+		t.Fatalf("Holder = %q, %v, %v, want the stamp, held", line, held, err)
+	}
+	if _, err := exec.LookPath("flock"); err == nil {
+		if exec.Command("flock", "-n", path, "-c", "true").Run() == nil {
+			t.Fatal("flock(1) took a lock Lock holds")
+		}
+	}
+	child := exec.Command(os.Args[0], "-test.run=^$")
+	child.Env = append(os.Environ(), "GCTK_HOST_TEST_HELPER=sleep")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
+	l.Unlock()
+	if _, held, _ := h.Holder(path); held {
+		t.Fatal("the lock is still held after Unlock, with a child running that this process started while it held it")
+	}
+	if _, err := exec.LookPath("flock"); err == nil {
+		if err := exec.Command("flock", "-n", path, "-c", "true").Run(); err != nil {
+			t.Fatalf("flock(1) could not take the freed lock: %v", err)
+		}
+	}
+}
+
+func TestMemoryAndResidentReadTheMachine(t *testing.T) {
+	h := Local()
+	if mem, err := h.Memory(); err != nil || mem < 1<<28 {
+		t.Fatalf("Memory = %d, %v, want the machine's memory", mem, err)
+	}
+	child := exec.Command(os.Args[0], "-test.run=^$")
+	child.Env = append(os.Environ(), "GCTK_HOST_TEST_HELPER=sleep")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
+	own, err := h.Resident(child.Process.Pid)
+	if err != nil || own <= 0 {
+		t.Fatalf("Resident(child) = %d, %v, want its size", own, err)
+	}
+	tree, err := h.Resident(os.Getpid())
+	if err != nil || tree < own {
+		t.Fatalf("Resident(this process) = %d, %v, want at least its child's %d", tree, err, own)
+	}
+	if !h.Alive(child.Process.Pid) {
+		t.Fatal("Alive says the running child is not running")
+	}
+}

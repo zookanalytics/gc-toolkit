@@ -38,6 +38,12 @@ type Machine struct {
 	Programs func(s host.Spec) Program
 	// FreePortErr, when set, fails FreePort.
 	FreePortErr error
+	// MemoryBytes is the machine's physical memory, which Memory reports, and
+	// MemoryErr, when set, fails Memory.
+	MemoryBytes int64
+	MemoryErr   error
+	// LockErr, when set, fails every Lock and Holder.
+	LockErr error
 
 	mu      sync.Mutex
 	procs   map[int]*Process
@@ -46,6 +52,9 @@ type Machine struct {
 	listens map[int][]int
 	starts  []Start
 	ends    []End
+	locks   map[string]*fileLock
+	files   map[string]string
+	rss     map[int]int64
 	running *sync.WaitGroup
 	caller  *Process
 }
@@ -97,7 +106,8 @@ var (
 // which leads a group of its own.
 func New() *Machine {
 	m := &Machine{procs: map[int]*Process{}, lastPid: 1000, port: 40000, listens: map[int][]int{},
-		running: new(sync.WaitGroup)}
+		running: new(sync.WaitGroup), MemoryBytes: 64 << 30, locks: map[string]*fileLock{},
+		files: map[string]string{}, rss: map[int]int64{}}
 	m.caller = m.add(100, 100, 1, host.Spec{})
 	return m
 }
@@ -411,6 +421,138 @@ func (p *Process) Listeners(port int) ([]int, error) {
 	return slices.Clone(p.m.listens[port]), nil
 }
 
+// Lock takes the lock on path when no process holds it. The process that
+// holds a lock frees it when it ends.
+func (p *Process) Lock(path string) (host.Lock, bool, error) {
+	m := p.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.LockErr != nil {
+		return nil, false, m.LockErr
+	}
+	if _, ok := m.files[path]; !ok {
+		m.files[path] = ""
+	}
+	if _, held := m.locks[path]; held {
+		return nil, false, nil
+	}
+	l := &fileLock{m: m, owner: p.pid, path: path}
+	m.locks[path] = l
+	return l, true, nil
+}
+
+func (p *Process) Holder(path string) (string, bool, error) {
+	m := p.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.LockErr != nil {
+		return "", false, m.LockErr
+	}
+	_, held := m.locks[path]
+	return m.files[path], held, nil
+}
+
+func (p *Process) Alive(pid int) bool {
+	p.m.mu.Lock()
+	defer p.m.mu.Unlock()
+	q, ok := p.m.procs[pid]
+	return ok && !q.ended
+}
+
+func (p *Process) Memory() (int64, error) {
+	p.m.mu.Lock()
+	defer p.m.mu.Unlock()
+	return p.m.MemoryBytes, p.m.MemoryErr
+}
+
+// Resident sums the sizes SetResident gave pid and the running processes
+// descended from it.
+func (p *Process) Resident(pid int) (int64, error) {
+	m := p.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if q, ok := m.procs[pid]; !ok || q.ended {
+		return 0, fmt.Errorf("the process table names no process %d", pid)
+	}
+	var sum int64
+	for next := []int{pid}; len(next) > 0; {
+		pid := next[len(next)-1]
+		next = next[:len(next)-1]
+		sum += m.rss[pid]
+		for _, c := range m.procs {
+			if c.parent == pid && !c.ended {
+				next = append(next, c.pid)
+			}
+		}
+	}
+	return sum, nil
+}
+
+// SetResident gives the process pid a resident size, which Resident counts.
+func (m *Machine) SetResident(pid int, bytes int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rss[pid] = bytes
+}
+
+// File is the line the file at path holds, and whether a process holds its
+// lock.
+func (m *Machine) File(path string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, held := m.locks[path]
+	return m.files[path], held
+}
+
+// Holds takes the lock on path for the process pid, which need not run on
+// the machine, and stamps line into the file, as a holder outside the test's
+// process does. The lock is freed when that process ends or Free frees it. It
+// reports false when the lock is held already.
+func (m *Machine) Holds(pid int, path, line string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, held := m.locks[path]; held {
+		return false
+	}
+	m.locks[path] = &fileLock{m: m, owner: pid, path: path}
+	m.files[path] = line
+	return true
+}
+
+// Free frees the lock on path, whoever holds it.
+func (m *Machine) Free(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.locks, path)
+}
+
+// fileLock is a lock a process holds on a file of the machine.
+type fileLock struct {
+	m     *Machine
+	owner int
+	path  string
+}
+
+func (l *fileLock) Stamp(line string) error {
+	m := l.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.locks[l.path] != l {
+		return fmt.Errorf("%s: the lock is not held", l.path)
+	}
+	m.files[l.path] = line
+	return nil
+}
+
+func (l *fileLock) Unlock() {
+	m := l.m
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.locks[l.path] == l {
+		delete(m.locks, l.path)
+	}
+}
+
 // --- the machine, under its lock -----------------------------------------------
 
 // members returns the running processes of the group, by pid.
@@ -479,6 +621,11 @@ func (m *Machine) end(q *Process, status int) {
 	}
 	for port, pids := range m.listens {
 		m.listens[port] = slices.DeleteFunc(pids, func(pid int) bool { return pid == q.pid })
+	}
+	for path, l := range m.locks {
+		if l.owner == q.pid {
+			delete(m.locks, path)
+		}
 	}
 	for _, c := range m.procs {
 		if c.parent == q.pid && !c.ended {
