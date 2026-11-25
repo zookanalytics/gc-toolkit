@@ -212,8 +212,9 @@ such posts. Leave every other ask to rule-and-repair, such as:
 - a post whose answer you cannot give from the change and the read;
 - an ask that names no post, such as a red check or a conflict.
 
-While a question the run put to a person is open on the PR's bead, answer no
-post.
+While a question a review run put to a person is open on the PR's bead, answer
+no post. Leave to rule-and-repair each ask filed before such a question was
+put, even once the question is closed.
 
 Read a post before you answer it, at the URL its reason ends with,
 `https://github.com/<owner>/<repo>/pull/<number>#<post>`. Take each value the

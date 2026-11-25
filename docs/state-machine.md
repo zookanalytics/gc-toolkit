@@ -517,8 +517,9 @@ gate and leaves its thread open. Triage, the run's first step, answers a post
 that asks for no change to the branch and no person's decision, such as a
 question about the change, a thank-you or an approval's "looks good": a reply
 where words are owed, and the city's 👍 alone where none are. It answers none
-while a question the run put to a person is open on the bead, and the ruling
-step rules every other post. Once every point of a person's request for
+while a question a review run put to a person is open on the bead, nor one
+whose ask was filed before such a question was put. The ruling step rules
+every other post. Once every point of a person's request for
 changes is answered, the round's post dismisses that review and asks its author
 to review again. What makes an item feedback is its provenance, not its author: every
 review, inline comment, and conversation comment that is not the city's own
