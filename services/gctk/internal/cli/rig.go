@@ -506,8 +506,13 @@ func rigKeepPeak(verb string, co *git.Checkout, out rig.Outcome, say func(string
 	}
 }
 
-// gib gives a size in GiB.
-func gib(n int64) string { return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30)) }
+// gib gives a size in GiB, or in MiB below one GiB.
+func gib(n int64) string {
+	if n < 1<<30 {
+		return fmt.Sprintf("%d MiB", max(1, (n+(1<<20)-1)>>20))
+	}
+	return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+}
 
 // rigPutBack puts back what a run left in a checkout that was clean before
 // it, and says what it put back and what it could not.
