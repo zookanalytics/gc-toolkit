@@ -239,9 +239,17 @@ refinery departs from that: it keeps no wisp and ends after one item, as
   cannot come first. The search makes the bead wait on the live runs that work
   that writer instead, whose ends end its writing. A writer of that kind that
   only a session's claim works, with no run, leaves no bead whose close ends
-  the writing, so the search names it on stderr as WARN and the bead stays
-  demand until the claim moves. Gas City's hook strips a row whose
-  `blocked_by` names an open wait (`filterUnreadyHookCandidates`), so such a
+  the writing, so the search defers the bead an hour (`--defer=+1h` on bd's
+  update). bd leaves a deferred bead out of its ready set and returns it to
+  open on its first ready read after the date (`bd defer --help`, the city's
+  bd), and Gas City reads demand from open beads by their raw status and
+  from bd's ready set (the raw-open pass and `Ready()` in
+  cmd/gc/build_desired_state.go, at upstream 887a253144d4), so the bead is no
+  demand until bd wakes it, and the session it then starts looks again. The
+  witness defers its next wisp the same way
+  ([patrol-continue.md](../../docs/patrol-continue.md)). Gas City's hook
+  strips a row whose `blocked_by` names an open wait
+  (`filterUnreadyHookCandidates`), so such a
   claim needs its wait added after it was taken.
 - **Added key:** `work_query` in agents/refinery/agent.toml, Gas City's own
   agent key.

@@ -182,7 +182,8 @@ func TestNextMakesABeadWaitOnAnotherThatWorksItsBranch(t *testing.T) {
 // branch only while someone writes it: a live run works it, or a listed
 // session other than this one holds its claim. The bead it writes for cannot
 // wait on it, since bd refuses that edge as a cycle, so it waits on the runs
-// that work it, and a claim with no run leaves no bead to wait on.
+// that work it, and a claim with no run, which leaves no bead to wait on,
+// defers it, so it is no demand until bd wakes it.
 func TestNextCountsABeadThatWaitsOnItAsAWriterOnlyWhileSomeoneWritesIt(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -226,9 +227,10 @@ func TestNextCountsABeadThatWaitsOnItAsAWriterOnlyWhileSomeoneWritesIt(t *testin
 				t.Fatalf("edges written %+v; want %+v", got, want)
 			}
 			row, _ := q.s.Row("tk-first")
-			if failed := len(ans.Failures) > 0; failed != (c.writes && c.edge == "") || (c.edge != "" && demand(row)) {
-				t.Fatalf("failures %v, tk-first demand %v; want a failure only for a claim with no run, and no demand once it waits",
-					ans.Failures, demand(row))
+			deferred := c.writes && c.edge == ""
+			if len(ans.Failures) > 0 || (c.writes && demand(row)) || (row.Status == "deferred") != deferred {
+				t.Fatalf("failures %v, tk-first %s with demand %v; want no failure, no demand while a bead writes its branch, "+
+					"and a deferral only for a claim with no run", ans.Failures, row.Status, demand(row))
 			}
 		})
 	}

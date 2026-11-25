@@ -46,7 +46,9 @@ import (
 //     that waits on it and that nobody writes now ([Search.writing]). A writer
 //     that waits on the bead cannot be waited on, since bd refuses the edge as
 //     a cycle, so the bead waits on the live runs that work the writer instead,
-//     whose ends end its writing.
+//     whose ends end its writing. A writer only a session's claim works, with no
+//     run, leaves no bead to wait on, so the bead is deferred ([deferFor]) and
+//     is no demand until bd wakes it, when the session it starts looks again.
 //
 // Among the beads it can take, the order is: in progress, then a rework child
 // handed back before its anchor, then the highest priority, then the oldest.
@@ -57,6 +59,12 @@ import (
 // start sessions that take nothing, and the search closes it. Nothing pours one
 // now, so the clause goes once no store holds one open.
 const patrolTitle = "mol-refinery-patrol"
+
+// deferFor is how long the search defers a bead whose branch a session's claim
+// works while that claim waits on the bead. bd leaves a deferred bead out of
+// its ready set, which Gas City reads for demand, and returns it to open on its
+// first ready read after the date.
+const deferFor = "+1h"
 
 // anchorKey and taskKindKey are the keys a rework child carries: the bead
 // that owns the PR it reworks, and its kind.
@@ -238,10 +246,10 @@ func (s *Search) Next() (Answer, error) {
 		}
 		left := Left{ID: c.r.ID, Why: strings.Join(ids, ", ") + " works its branch"}
 		var landed []string
+		claimOnly := false
 		for _, w := range writers {
 			if len(w.waitOn) == 0 {
-				ans.Failures = append(ans.Failures, fmt.Sprintf("%s does not wait on %s, which works its branch through a session's claim "+
-					"while it waits on %s, so no bead's close ends its writing", c.r.ID, w.id, c.r.ID))
+				claimOnly = true
 				continue
 			}
 			for _, on := range w.waitOn {
@@ -254,6 +262,13 @@ func (s *Search) Next() (Answer, error) {
 		}
 		if len(landed) > 0 {
 			left.Wrote = "waits on " + strings.Join(landed, ", ")
+		}
+		if claimOnly && len(landed) == 0 {
+			if s.deferBead(c.r, &ans) {
+				left.Wrote = "deferred " + deferFor + ", when the session it starts looks again"
+			}
+			ans.Left = append(ans.Left, left)
+			continue
 		}
 		if s.reopen(c.r, &ans) {
 			if left.Wrote != "" {
@@ -278,6 +293,21 @@ func (s *Search) Next() (Answer, error) {
 		}
 	}
 	return ans, nil
+}
+
+// deferBead defers r for deferFor, guarded on the status and assignee the
+// search read, and reports whether it wrote. A write that fails is recorded on
+// ans, and r stays demand for the next session.
+func (s *Search) deferBead(r *ledger.Record, ans *Answer) bool {
+	w := s.Ledger.Write(r.ID)
+	w.Defer(deferFor)
+	w.Guard(r.Status(), s.Refinery)
+	if err := s.Ledger.Commit(w); err != nil {
+		ans.Failures = append(ans.Failures, fmt.Sprintf("%s, whose branch a session's claim works while that claim waits on it, "+
+			"was not deferred, so it stays demand: %v", r.ID, err))
+		return false
+	}
+	return true
 }
 
 // closeWisp closes r, a patrol wisp assigned to the refinery, guarded on the

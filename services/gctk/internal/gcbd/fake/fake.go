@@ -517,6 +517,8 @@ func (s *Store) update(id string, args []string) (Bead, error) {
 			if strings.EqualFold(value, "closed") && b.ClosedAt == "" {
 				b.ClosedAt = s.CloseTime
 			}
+		case "--defer":
+			b.Status = "deferred"
 		case "--assignee":
 			b.Assignee = value
 		case "--append-notes":
