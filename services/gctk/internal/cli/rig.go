@@ -410,49 +410,15 @@ func rigRunOnly(verb string, o rigOpts, stdout, stderr io.Writer) int {
 }
 
 // rigTake holds the machine's slots for a run of command as verb with scope in
-// co (internal/rig, slots.go) within timeout, where a zero timeout waits as
-// long as it takes. It returns the slots it holds and what the wait for them
-// left of timeout for the run. When the wait ends the call, it says why and
-// returns the call's exit and true: a machine failure for a wait that ran out
-// of time, and 128 plus the signal for one a signal stopped. A machine whose
-// memory or slot files cannot be read runs the command with no slots, and says
-// so.
+// co (rig.Admit) within timeout, where a zero timeout waits as long as it
+// takes. It returns the slots it holds and what the wait for them left of
+// timeout for the run. When the wait ends the call, it says why and returns
+// the call's exit and true: a machine failure for a wait that ran out of
+// time, and 128 plus the signal for one a signal stopped.
 func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duration, say func(string, ...any), machine func(string, ...any) int) (*rig.Held, time.Duration, int, bool) {
-	if os.Getenv(rig.NoCapVar) == "1" {
-		return nil, timeout, 0, false
-	}
-	start := time.Now()
-	h := host.Local()
-	mem, err := h.Memory()
-	if err != nil {
-		say("WARN runs with no slots, since the machine's memory could not be read: %v", err)
-		return nil, timeout, 0, false
-	}
-	count, note := rig.SlotCount(os.Getenv, mem)
-	if note != "" {
-		say("WARN %s", note)
-	}
-	weight, own, err := rig.NewPeaks(co.Common).Weight(verb, scope, command)
-	if err != nil {
-		say("WARN the memory its last runs used could not be read, so it runs alone: %v", err)
-	}
-	n := rig.SlotsFor(weight, count)
-	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", rig.SlotCountText(n), count, rig.GiB(rig.SlotSize))
-	used := "its last runs here used at most"
-	if !own {
-		used = "a kept run of this check here used at most, since no run of this command is measured"
-	}
-	switch {
-	case weight == 0:
-		say("%s since no run of this check is measured in this repository, so it runs alone", taking)
-	case weight > int64(count)*rig.SlotSize:
-		say("WARN %s for the %s %s, which is more than they stand for, so it runs alone and is stopped once its processes hold more than the %s they stand for", taking, rig.GiB(weight), used, rig.GiB(int64(count)*rig.SlotSize))
-	default:
-		say("%s for the %s %s", taking, rig.GiB(weight), used)
-	}
 	var until time.Time
 	if timeout > 0 {
-		until = start.Add(timeout)
+		until = time.Now().Add(timeout)
 	}
 	stop := make(chan os.Signal, 1)
 	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGINT} {
@@ -460,8 +426,7 @@ func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duratio
 			signal.Notify(stop, s)
 		}
 	}
-	slots := rig.NewSlots(h, rig.SlotDir(os.Getenv, co.Top, co.Common), count, slotLabel(verb, co))
-	held, sig, err := slots.Take(n, until, stop, say)
+	held, sig, err := rig.Admit(host.Local(), os.Getenv, co, verb, scope, command, slotLabel(verb, co), until, stop, say)
 	signal.Stop(stop)
 	if sig == nil {
 		// A signal that came as the slots were taken still stops the call.
@@ -471,25 +436,25 @@ func rigTake(verb, scope, command string, co *git.Checkout, timeout time.Duratio
 		default:
 		}
 	}
-	var timedOut *rig.SlotTimeout
 	switch {
 	case sig != nil:
 		n, _ := sig.(syscall.Signal)
 		say("stopped by signal %d (%s) while it waited for slots, before its command ran", int(n), n)
 		return nil, 0, 128 + int(n), true
-	case errors.As(err, &timedOut):
-		return nil, 0, machine("%v", err), true
 	case err != nil:
-		say("WARN runs with no slots, since the slots could not be taken: %v", err)
-		return nil, timeout, 0, false
+		return nil, 0, machine("%v", err), true
 	}
 	if timeout <= 0 {
 		return held, 0, 0, false
 	}
-	left := timeout - held.Waited
+	var waited time.Duration
+	if held != nil {
+		waited = held.Waited
+	}
+	left := timeout - waited
 	if left <= 0 {
 		held.Release()
-		return nil, 0, machine("its slots came after %s, with none of its --timeout %s left", held.Waited.Round(time.Second), timeout), true
+		return nil, 0, machine("its slots came after %s, with none of its --timeout %s left", waited.Round(time.Second), timeout), true
 	}
 	return held, left, 0, false
 }

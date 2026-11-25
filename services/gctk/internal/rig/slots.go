@@ -1,6 +1,7 @@
 package rig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 )
 
@@ -107,6 +109,58 @@ func SlotsFor(weight int64, count int) int {
 	}
 	n := int((weight + SlotSize - 1) / SlotSize)
 	return max(1, min(n, count))
+}
+
+// Admit holds the machine's slots on h for a run of command as check with
+// scope in co, as many as SlotsFor gives for the memory its last runs in the
+// repository used (Peaks), and says on say how many it takes and why. label
+// is what the run's stamps say it is. getenv reads NoCapVar, SlotsVar and the
+// city SlotDir finds. It waits for the slots as Take does, until until, where
+// a zero until never comes, or a signal on stop, and returns Take's signal or
+// its *SlotTimeout, the one error it returns.
+//
+// A fault of the machine's never stops a run. One whose memory or slot files
+// cannot be read takes no slots, and has no memory limit, as one under the
+// push gate's bypass, NoCapVar set to 1, does: Admit says so and returns a nil
+// Held. One whose last runs cannot be read runs alone.
+func Admit(h host.Host, getenv func(string) string, co *git.Checkout, check, scope, command, label string, until time.Time, stop <-chan os.Signal, say func(string, ...any)) (*Held, os.Signal, error) {
+	if getenv(NoCapVar) == "1" {
+		return nil, nil, nil
+	}
+	mem, err := h.Memory()
+	if err != nil {
+		say("WARN runs with no slots, since the machine's memory could not be read: %v", err)
+		return nil, nil, nil
+	}
+	count, note := SlotCount(getenv, mem)
+	if note != "" {
+		say("WARN %s", note)
+	}
+	weight, own, err := NewPeaks(co.Common).Weight(check, scope, command)
+	if err != nil {
+		say("WARN the memory its last runs used could not be read, so it runs alone: %v", err)
+	}
+	n := SlotsFor(weight, count)
+	taking := fmt.Sprintf("takes %s of the machine's %d, %s each,", SlotCountText(n), count, GiB(SlotSize))
+	used := "its last runs here used at most"
+	if !own {
+		used = "a kept run of this check here used at most, since no run of this command is measured"
+	}
+	switch {
+	case weight == 0:
+		say("%s since no run of this check is measured in this repository, so it runs alone", taking)
+	case weight > int64(count)*SlotSize:
+		say("WARN %s for the %s %s, which is more than they stand for, so it runs alone and is stopped once its processes hold more than the %s they stand for", taking, GiB(weight), used, GiB(int64(count)*SlotSize))
+	default:
+		say("%s for the %s %s", taking, GiB(weight), used)
+	}
+	held, sig, err := NewSlots(h, SlotDir(getenv, co.Top, co.Common), count, label).Take(n, until, stop, say)
+	var timedOut *SlotTimeout
+	if err != nil && !errors.As(err, &timedOut) {
+		say("WARN runs with no slots, since the slots could not be taken: %v", err)
+		return nil, nil, nil
+	}
+	return held, sig, err
 }
 
 // Slots is the machine's slots, as one run takes them.

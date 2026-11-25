@@ -12,6 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/host/fake"
 )
@@ -268,6 +269,46 @@ func TestTakeThatEndsWaitingGivesBackWhatItHolds(t *testing.T) {
 						t.Errorf("%s is still held after the take ended", p)
 					}
 				}
+			})
+		})
+	}
+}
+
+// A fault of the machine's never stops a run: one whose memory or slot files
+// cannot be read runs with no slots, as one under the push gate's bypass
+// does, and one whose last runs cannot be read runs alone.
+func TestAdmitRunsACheckThroughTheMachinesFaults(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		fault func(m *fake.Machine, env map[string]string, common string)
+		slots int
+		said  string
+	}{
+		{"the push gate's bypass", func(_ *fake.Machine, env map[string]string, _ string) { env[NoCapVar] = "1" }, 0, ""},
+		{"memory it cannot read", func(m *fake.Machine, _ map[string]string, _ string) { m.MemoryErr = errors.New("no hw.memsize") }, 0,
+			"WARN runs with no slots, since the machine's memory could not be read: no hw.memsize"},
+		{"slots it cannot take", func(m *fake.Machine, _ map[string]string, _ string) { m.LockErr = errors.New("read-only file system") }, 0,
+			"WARN runs with no slots, since the slots could not be taken: read-only file system"},
+		{"last runs it cannot read", func(_ *fake.Machine, _ map[string]string, common string) {
+			if err := os.MkdirAll(filepath.Join(common, "gc-rig-memory", CheckTest+"-"+ScopeFull), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, 10, "WARN the memory its last runs used could not be read, so it runs alone"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			common := t.TempDir()
+			slotTest(t, func(t *testing.T, m *fake.Machine, said *lines) {
+				env := map[string]string{"HOME": common}
+				c.fault(m, env, common)
+				co := &git.Checkout{Top: common, Common: common}
+				held, sig, err := Admit(m.Caller(), func(k string) string { return env[k] }, co, CheckTest, ScopeFull, "make test", "run-a host", time.Time{}, nil, said.say)
+				if sig != nil || err != nil || held.Count() != c.slots || !strings.Contains(said.text(), c.said) || (c.said == "" && said.text() != "") {
+					t.Fatalf("Admit = %d slots, %v, %v, saying %q; want %d slots, saying %q", held.Count(), sig, err, said.text(), c.slots, c.said)
+				}
+				if c.slots == 0 && held.Limit() != 0 {
+					t.Fatalf("a run with no slots has a limit of %d", held.Limit())
+				}
+				held.Release()
 			})
 		})
 	}
