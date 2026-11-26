@@ -298,8 +298,8 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and
-  `gastownhall/gascity-packs` main aa55b477d4c2. The config reference's
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 76bf54cac085 and
+  `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.
   GitHub's *Managing your personal access tokens* page was read on 2026-11-20.
@@ -943,7 +943,7 @@ no warrant.
     code implements it.
   - The search is
     [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9cff.
 - **Retires when.** A Gas City release requests a session's turn for its unread
   mail whoever sent it, as #1966 rules. The orders and the verb then retire,
   and each agent they list is woken by Gas City. Before that, once the city

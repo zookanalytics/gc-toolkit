@@ -52,7 +52,7 @@ for s in "${POOL_SENTENCES[@]}" "$ATTENDED"; do
 done
 
 for agent in polecat polecat-codex; do
-  render="$RENDERS/$agent.md"
+  render="$RENDERS/$agent.render.md"
   if [ ! -s "$render" ]; then
     bad "$agent has no render at $render"
     continue
@@ -64,9 +64,9 @@ for agent in polecat polecat-codex; do
 done
 
 WITH_RECIPE=""
-for render in "$RENDERS"/*.md; do
+for render in "$RENDERS"/*.render.md; do
   grep -q '^## Feedback observations$' "$render" || continue
-  agent=$(basename "$render" .md)
+  agent=$(basename "$render" .render.md)
   WITH_RECIPE="$WITH_RECIPE $agent"
   carries "$render" "$ATTENDED" && ok "$agent's prompt tells an attended session to capture the operator's own turns" \
     || bad "$agent's prompt carries the capture recipe without: $ATTENDED"
@@ -88,7 +88,7 @@ grep -qF 'references/file-feedback-observations.template.md' "$ROOT/skills/recor
   && ok "the records skill names its reference to the capture recipe" \
   || bad "the records skill no longer names references/file-feedback-observations.template.md"
 CORRECTION="When the operator corrects standing agent behavior, fix the instance, then file one observation before the turn ends (the \`records\` skill)."
-carries "$RENDERS/mechanik.md" "$CORRECTION" && ok "the mechanik's prompt sends an operator correction to the records skill" \
+carries "$RENDERS/mechanik.render.md" "$CORRECTION" && ok "the mechanik's prompt sends an operator correction to the records skill" \
   || bad "the mechanik's prompt lacks: $CORRECTION"
 
 echo

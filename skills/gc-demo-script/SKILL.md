@@ -447,13 +447,17 @@ the caller can fix manually.
 
 ## Phase E: Save and Report
 
-### Step E1: Create output directory
+### Step E1: Choose the output directory
+
+The script is a working file and is never committed. Save it outside every
+checkout, where no rig's ignore rules have to keep it out of a commit. When
+your caller keeps its working files in a directory of its own, such as the
+review workspace of the demo check, use that directory. Otherwise make one, and
+use the absolute path it prints:
 
 ```bash
-mkdir -p .captures/demo-scripts
+mktemp -d "${TMPDIR:-/tmp}/demo-script.XXXXXX"
 ```
-
-Note: `.captures/` is gitignored; generated scripts are local artifacts.
 
 ### Step E2: Derive filename slug
 
@@ -468,7 +472,7 @@ Examples:
 
 ### Step E3: Write the file
 
-Save the validated script to `.captures/demo-scripts/<bead-id>-<slug>.md`
+Save the validated script as `<bead-id>-<slug>.md` in the output directory,
 using the `Write` tool.
 
 ### Step E4: Print summary to caller
@@ -479,7 +483,7 @@ after):
 ```text
 ## Demo Script Generated: <bead-id>
 
-Script: .captures/demo-scripts/<bead-id>-<slug>.md
+Script: <the script's absolute path>
 Bead:   <id> — <title>
 PR:     #<num> (or "none" if no PR)
 Guide:  docs/review-demo.md at <commit> (or "none: generic shape")

@@ -19,3 +19,9 @@
 .claude/skills/
 .gc/
 /scripts/
+
+# The demo engine writes a capture's frames and raw video under .captures/ in
+# the directory the capture runs from, and leaves them there when a step fails
+# its proof or the capture asks to keep them. The demo agent's browser saves its
+# screenshots there too.
+.captures/

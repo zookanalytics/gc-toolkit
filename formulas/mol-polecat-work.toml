@@ -612,7 +612,8 @@ echo of its exit, so that its exit is the hand-off's own.
 ```
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,
-  an uncommitted change or a bring-current audit entry. Finish that and re-run
+  an uncommitted change, a bring-current audit entry, or a push origin refused,
+  such as one onto a branch that moved under the run. Finish that and re-run
   this call. What the bring-current guard holds a round to, and what it reopens,
   is docs/state-machine.md, *Bringing a branch current*.
 - Exit 1: stop. The script says why, and when the refusal is final it has already

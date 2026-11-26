@@ -12,8 +12,9 @@
 # number whichever wc counted it. Three are refusals: --install-hook will not
 # shadow a hand-installed hook, a render fails when an agent the pack owns
 # renders the builtin worker prompt, and a render fails when the throwaway
-# city's path survives the substitution. Another is about names: an agent name
-# two packs share is rendered once per agent, under each one's qualified name.
+# city's path survives the substitution. The rest are about names: an agent name
+# two packs share is rendered once per agent, under each one's qualified name,
+# and no render is named as an instruction file an agent provider loads.
 # Every render runs against a stub `gc` on PATH, so no real `gc`, city or
 # network is involved. The stub most cases share answers from the files of the
 # pack it is asked about, so a render is a function of the tree rendered. The
@@ -60,7 +61,9 @@
 # gc move; and, with no gc on PATH, the render the hook
 # names instead, since the fork point, or since the head a merge brings in where
 # there is no origin/HEAD. For the renderer and sizes: what INDEX.md
-# carries and SOURCES.txt's absence; --sizes with and without a base; the gcq
+# carries and SOURCES.txt's absence; the builtin claude agent's render, beside
+# which no file folds to an instruction file's name; --sizes with and without a
+# base; the gcq
 # wrapper's cwd pin; the hook install's refusal, for a hand-installed hook and
 # for a listing that fails, against a control holding only a sample hook; the
 # builtin-fallback guard, which holds the pack's own agents and not a builtin
@@ -211,9 +214,9 @@ commit "move alpha's prompt, render nothing"
 out=$(check_merge base moved); rc=$?
 eq "$rc" 1 "the unrendered input exits 1"
 has "$out" "would be STALE at the merge of moved into base" "the verdict names both sides"
-has "$out" "agents/alpha.md (the merge changes its render but keeps the copy base commits)" \
+has "$out" "agents/alpha.render.md (the merge changes its render but keeps the copy base commits)" \
     "the file whose render moved is named, with why"
-hasnt "$out" "agents/beta.md" "…and a file whose render did not move is not"
+hasnt "$out" "agents/beta.render.md" "…and a file whose render did not move is not"
 has "$out" "assets/scripts/render-seed-audit.sh --since base && git add generated/seed-audit" "the remedy is spelled out"
 render_since base >/dev/null; commit "render what the branch moves"
 out=$(check_merge base moved); rc=$?
@@ -229,10 +232,10 @@ render; commit "re-audit: adopt the text gc moved"
 gc_moves_again
 out=$(check_merge base readopted); rc=$?
 eq "$rc" 1 "a re-render that gc has moved past exits 1"
-has "$out" "agents/claude.md (the merge commits a copy that is neither base's nor its render)" \
+has "$out" "agents/claude.render.md (the merge commits a copy that is neither base's nor its render)" \
     "…naming the re-render's copy, with why"
 render_since base >/dev/null; commit "render what the branch moves"
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.render.md)" "a line a still newer gc renders" \
     "the remedy renews the re-render to what gc renders now"
 out=$(check_merge base readopted); rc=$?
 eq "$rc" 0 "…and clears the hold"
@@ -259,18 +262,18 @@ mkdir -p "$R/docs"; printf 'a doc\n' > "$R/docs/d.md"
 commit "touch nothing the audit renders"
 out=$(check_merge stale-base bystander --base-stale-out "$TMP/base-stale.txt"); rc=$?
 eq "$rc" 0 "the base's own staleness does not hold the merge"
-eq "$(cat "$TMP/base-stale.txt")" "agents/beta.md" "…and --base-stale-out names the file the base is stale in, alone"
+eq "$(cat "$TMP/base-stale.txt")" "agents/beta.render.md" "…and --base-stale-out names the file the base is stale in, alone"
 has "$out" "the merge of bystander into stale-base makes no render stale" "…which is what the verdict says"
 hasnt "$out" "seed audit is current" "…without calling a tree current that is not"
 has "$out" "stale-base is already stale in these files" "…and the staleness is reported as the base's"
-has "$out" "agents/beta.md" "…naming the stale file"
+has "$out" "agents/beta.render.md" "…naming the stale file"
 eq "$(renders)" 2 "…which took a render of the base as well"
 
 # The landing order checks the default branch this way after a landing on it.
 echo "# a revision checked against itself names each file it is stale in, on one render"
 out=$(check_merge stale-base stale-base --base-stale-out "$TMP/base-stale.txt"); rc=$?
 eq "$rc" 0 "a stale revision checked against itself exits 0"
-eq "$(cat "$TMP/base-stale.txt")" "agents/beta.md" "…and --base-stale-out names each file it is stale in"
+eq "$(cat "$TMP/base-stale.txt")" "agents/beta.render.md" "…and --base-stale-out names each file it is stale in"
 has "$out" "stale-base is already stale in these files" "…reporting them as its own staleness"
 eq "$(renders)" 1 "…on one render, since its tree is the merge result"
 out=$(check_merge base base --base-stale-out "$TMP/base-stale.txt"); rc=$?
@@ -280,11 +283,11 @@ has "$out" "seed audit is current at the merge of base into base" "…and saying
 
 echo "# a hand-edited render is held"
 branch base hand-edit
-printf 'a line no render writes\n' >> "$R/generated/seed-audit/agents/alpha.md"
+printf 'a line no render writes\n' >> "$R/generated/seed-audit/agents/alpha.render.md"
 commit "edit a rendered file by hand"
 out=$(check_merge base hand-edit); rc=$?
 eq "$rc" 1 "a hand-edited render exits 1"
-has "$out" "agents/alpha.md (the merge commits a copy that is neither base's nor its render)" \
+has "$out" "agents/alpha.render.md (the merge commits a copy that is neither base's nor its render)" \
     "…naming the file and why"
 
 echo "# agents added and removed are judged by the same rule"
@@ -295,14 +298,14 @@ printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
 commit "add an agent, render nothing"
 out=$(check_merge base added); rc=$?
 eq "$rc" 1 "an agent added without its render exits 1"
-has "$out" "agents/gamma.md (rendered, but the merge does not commit it)" "…naming the missing render"
+has "$out" "agents/gamma.render.md (rendered, but the merge does not commit it)" "…naming the missing render"
 has "$out" "INDEX.md (the merge changes its render" "…and the index that lists it"
 branch base removed
 git -C "$R" rm -rq agents/beta
 commit "remove an agent, keep its render"
 out=$(check_merge base removed); rc=$?
 eq "$rc" 1 "an agent removed with its render kept exits 1"
-has "$out" "agents/beta.md (committed, but nothing renders it)" "…naming the orphaned render"
+has "$out" "agents/beta.render.md (committed, but nothing renders it)" "…naming the orphaned render"
 
 echo "# a head that changes the renderer is judged by the renderer it ships"
 branch base new-renderer
@@ -347,7 +350,7 @@ out=$(check_merge base no-index); rc=$?
 eq "$rc" 1 "an index deleted beside committed renders exits 1"
 hasnt "$out" "carries no seed audit" "…since renders left behind are an audit, not its absence"
 has "$out" "INDEX.md (rendered, but the merge does not commit it)" "…naming the missing index"
-has "$out" "agents/alpha.md (the merge changes its render but keeps the copy base commits)" \
+has "$out" "agents/alpha.render.md (the merge changes its render but keeps the copy base commits)" \
     "…and the render the head left stale"
 
 branch base stub-beside-render
@@ -409,18 +412,18 @@ gc_moves
 edit_prompt alpha "moved by the change"
 out=$(render_since HEAD); rc=$?
 eq "$rc" 0 "a render since HEAD exits 0"
-has "$(cat "$R/generated/seed-audit/agents/alpha.md")" "moved by the change" "the file the change moves is written as rendered"
-if as_committed HEAD agents/claude.md; then ok "…the file whose text moved with gc is kept as HEAD commits it"
-else bad "…the text that moved with gc was written into claude.md"; fi
-if as_committed HEAD formulas/mol-gc.md; then ok "…a file only gc added is left out, as HEAD has it"
+has "$(cat "$R/generated/seed-audit/agents/alpha.render.md")" "moved by the change" "the file the change moves is written as rendered"
+if as_committed HEAD agents/claude.render.md; then ok "…the file whose text moved with gc is kept as HEAD commits it"
+else bad "…the text that moved with gc was written into claude.render.md"; fi
+if as_committed HEAD formulas/mol-gc.render.md; then ok "…a file only gc added is left out, as HEAD has it"
 else bad "…the formula only gc added was written"; fi
 if as_committed HEAD INDEX.md; then ok "…and so is the index row that would list it"
 else bad "…the index was rewritten for a formula only gc added"; fi
 has "$out" "kept 3 file(s) as HEAD commits them" "…saying what it kept"
-has "$out" "  agents/claude.md" "…by path"
+has "$out" "  agents/claude.render.md" "…by path"
 eq "$(renders)" 2 "…having rendered HEAD as well, since some file differed from it"
 render
-if as_committed HEAD agents/claude.md; then bad "control: a plain render keeps claude.md too, so the case above proves nothing"
+if as_committed HEAD agents/claude.render.md; then bad "control: a plain render keeps claude.render.md too, so the case above proves nothing"
 else ok "control: a plain render writes the text that moved with gc"; fi
 gc_restores
 git -C "$R" reset -q --hard && git -C "$R" clean -qfd
@@ -438,18 +441,18 @@ printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
 out=$(render_since HEAD); rc=$?
 eq "$rc" 0 "a render since HEAD of a change that adds an agent exits 0"
 index=$(cat "$R/generated/seed-audit/INDEX.md")
-has "$index" "agents/gamma.md" "…writing the index as rendered, with the agent the change adds"
-has "$index" "formulas/mol-gc.md" "…and the formula only gc added"
-if [ -f "$R/generated/seed-audit/formulas/mol-gc.md" ]; then ok "…so that formula is written as rendered beside it"
+has "$index" "agents/gamma.render.md" "…writing the index as rendered, with the agent the change adds"
+has "$index" "formulas/mol-gc.render.md" "…and the formula only gc added"
+if [ -f "$R/generated/seed-audit/formulas/mol-gc.render.md" ]; then ok "…so that formula is written as rendered beside it"
 else bad "…but the index lists a formula the render left out"; fi
-if as_committed HEAD agents/claude.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
-else bad "…but the text that moved with gc was written into claude.md"; fi
+if as_committed HEAD agents/claude.render.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
+else bad "…but the text that moved with gc was written into claude.render.md"; fi
 has "$out" "kept 1 file(s) as HEAD commits them" "…keeping that file alone"
 has "$out" "wrote 1 page(s) as rendered to match the index this commit writes" "…and saying which page follows the index"
 commit "add an agent"
 out=$(check_merge base own-index); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
-hasnt "$out" "formulas/mol-gc.md" "…and finds the formula current, not the base's staleness"
+hasnt "$out" "formulas/mol-gc.render.md" "…and finds the formula current, not the base's staleness"
 gc_restores
 
 # The other way round: the default branch re-rendered a formula that gc then
@@ -465,16 +468,16 @@ printf 'name = "gamma"\n' > "$R/agents/gamma/agent.toml"
 printf '# gamma doctrine\n' > "$R/agents/gamma/prompt.template.md"
 out=$(render_since HEAD); rc=$?
 eq "$rc" 0 "a render since HEAD of a change that adds an agent exits 0"
-hasnt "$(cat "$R/generated/seed-audit/INDEX.md")" "formulas/mol-gc.md" "…writing the index as rendered, without the formula gc no longer defines"
-if [ -e "$R/generated/seed-audit/formulas/mol-gc.md" ]; then bad "…but the formula the index no longer lists was put back"
+hasnt "$(cat "$R/generated/seed-audit/INDEX.md")" "formulas/mol-gc.render.md" "…writing the index as rendered, without the formula gc no longer defines"
+if [ -e "$R/generated/seed-audit/formulas/mol-gc.render.md" ]; then bad "…but the formula the index no longer lists was put back"
 else ok "…so that formula goes with it"; fi
-if as_committed HEAD agents/claude.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
-else bad "…but the text that moved with gc was written into claude.md"; fi
+if as_committed HEAD agents/claude.render.md; then ok "…while the file whose text alone moved with gc is kept as HEAD commits it"
+else bad "…but the text that moved with gc was written into claude.render.md"; fi
 has "$out" "wrote 1 page(s) as rendered to match the index this commit writes" "…saying which page follows the index"
 commit "add an agent"
 out=$(check_merge own-index-drop-base own-index-drop); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
-hasnt "$out" "formulas/mol-gc.md" "…and finds the formula's removal current"
+hasnt "$out" "formulas/mol-gc.render.md" "…and finds the formula's removal current"
 
 echo "# --since over a tree that renders as HEAD commits it renders once"
 branch base own-quiet
@@ -490,7 +493,7 @@ branch base own-first
 gc_moves
 out=$(render_since c0); rc=$?
 eq "$rc" 0 "a render since a revision with no audit exits 0"
-has "$(cat "$R/generated/seed-audit/agents/claude.md")" "a line a newer gc renders" "…writing the whole render, gc's text included"
+has "$(cat "$R/generated/seed-audit/agents/claude.render.md")" "a line a newer gc renders" "…writing the whole render, gc's text included"
 eq "$(renders)" 1 "…with no render of a revision that has nothing to keep"
 gc_restores
 git -C "$R" reset -q --hard && git -C "$R" clean -qfd
@@ -514,9 +517,9 @@ git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
 changed=$(git -C "$R" diff --name-only HEAD~1 HEAD)
-has "$changed" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
-hasnt "$changed" "generated/seed-audit/agents/claude.md" "…and not the text that moved with gc"
-hasnt "$changed" "generated/seed-audit/formulas/mol-gc.md" "…nor a file only gc added"
+has "$changed" "generated/seed-audit/agents/alpha.render.md" "…carrying the render its own change moved"
+hasnt "$changed" "generated/seed-audit/agents/claude.render.md" "…and not the text that moved with gc"
+hasnt "$changed" "generated/seed-audit/formulas/mol-gc.render.md" "…nor a file only gc added"
 has "$out" "kept 3 file(s) as HEAD commits them" "…saying what it left for the re-audit"
 git -C "$R" config --unset core.hooksPath
 gc_restores
@@ -536,9 +539,9 @@ git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move beta's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
 changed=$(git -C "$R" diff --name-only HEAD~1 HEAD)
-has "$changed" "generated/seed-audit/agents/beta.md" "…carrying the render its own change moved"
-has "$changed" "generated/seed-audit/agents/alpha.md" "…and renewing the render an earlier commit of its branch left stale"
-hasnt "$changed" "generated/seed-audit/agents/claude.md" "…and still not the text that moved with gc"
+has "$changed" "generated/seed-audit/agents/beta.render.md" "…carrying the render its own change moved"
+has "$changed" "generated/seed-audit/agents/alpha.render.md" "…and renewing the render an earlier commit of its branch left stale"
+hasnt "$changed" "generated/seed-audit/agents/claude.render.md" "…and still not the text that moved with gc"
 has "$out" "as $(git -C "$R" rev-parse base) commits them" "…keeping what it keeps as the fork point commits it"
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
@@ -557,10 +560,10 @@ edit_prompt alpha "moved by a hooked commit after the re-audit"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
-has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
-if as_committed HEAD~1 agents/claude.md; then ok "…and keeping the text the re-audit adopted"
-else bad "…but claude.md went back to the text the fork point commits"; fi
-if as_committed HEAD~1 formulas/mol-gc.md; then ok "…the file the re-audit added"
+has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.render.md" "…carrying the render its own change moved"
+if as_committed HEAD~1 agents/claude.render.md; then ok "…and keeping the text the re-audit adopted"
+else bad "…but claude.render.md went back to the text the fork point commits"; fi
+if as_committed HEAD~1 formulas/mol-gc.render.md; then ok "…the file the re-audit added"
 else bad "…but the file the re-audit added was dropped"; fi
 if as_committed HEAD~1 INDEX.md; then ok "…and the index row that lists it"
 else bad "…but the index went back to the fork point's"; fi
@@ -588,10 +591,10 @@ edit_prompt alpha "moved by a hooked commit after gc moved again"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
-has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.md" "…carrying the render its own change moved"
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+has "$(git -C "$R" diff --name-only HEAD~1 HEAD)" "generated/seed-audit/agents/alpha.render.md" "…carrying the render its own change moved"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.render.md)" "a line a still newer gc renders" \
     "…renewing the text the re-audit adopted to what gc renders now, not the fork point's"
-has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.md 2>&1)" "a still newer gc" "…keeping the file the re-audit added, renewed"
+has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.render.md 2>&1)" "a still newer gc" "…keeping the file the re-audit added, renewed"
 if as_committed HEAD~1 INDEX.md; then ok "…and the index row that lists it"
 else bad "…but the index lost the row the re-audit added"; fi
 has "$out" "renewed 2 file(s) a re-render of this branch adopted" "…saying what it renewed"
@@ -604,7 +607,7 @@ edit_prompt alpha "moved by a hooked commit after gc moved a third time"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt again" 2>&1); rc=$?
 eq "$rc" 0 "a hooked commit after a third move lands"
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a third gc renders" \
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.render.md)" "a line a third gc renders" \
     "…renewing the re-render again, though a hooked commit changed it last"
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
@@ -626,11 +629,11 @@ edit_prompt alpha "moved by a hooked commit after gc added a formula"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
-has "$(git -C "$R" show HEAD:generated/seed-audit/INDEX.md)" "formulas/mol-gc-new.md" \
+has "$(git -C "$R" show HEAD:generated/seed-audit/INDEX.md)" "formulas/mol-gc-new.render.md" \
     "…renewing the index the re-audit adopted, with the formula gc added since"
-if git -C "$R" cat-file -e HEAD:generated/seed-audit/formulas/mol-gc-new.md 2>/dev/null; then ok "…and carrying that formula beside it"
+if git -C "$R" cat-file -e HEAD:generated/seed-audit/formulas/mol-gc-new.render.md 2>/dev/null; then ok "…and carrying that formula beside it"
 else bad "…but the index lists a formula the commit does not carry"; fi
-has "$out" "  formulas/mol-gc-new.md" "…naming it"
+has "$out" "  formulas/mol-gc-new.render.md" "…naming it"
 out=$(check_merge base hooked-readopted-index); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
 has "$out" "seed audit is current at the merge" "…and finds the merge current"
@@ -657,9 +660,9 @@ edit_prompt alpha "moved by a hooked commit"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
-if as_committed base agents/claude.md; then ok "…putting claude.md back as the fork point commits it"
-else bad "…but claude.md kept or renewed the text that rode in"; fi
-if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
+if as_committed base agents/claude.render.md; then ok "…putting claude.render.md back as the fork point commits it"
+else bad "…but claude.render.md kept or renewed the text that rode in"; fi
+if as_committed base formulas/mol-gc.render.md; then ok "…and leaving out the file only gc added"
 else bad "…but the file only gc added stayed"; fi
 if as_committed base INDEX.md; then ok "…with the index row that would list it"
 else bad "…but the index still lists the file it left out"; fi
@@ -688,9 +691,9 @@ edit_prompt alpha "moved by a hooked commit"
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit lands"
-if as_committed base agents/claude.md; then ok "…keeping claude.md as the fork point commits it"
+if as_committed base agents/claude.render.md; then ok "…keeping claude.render.md as the fork point commits it"
 else bad "…but the re-render the branch took back out was renewed"; fi
-if as_committed base formulas/mol-gc.md; then ok "…and leaving out the file only gc added"
+if as_committed base formulas/mol-gc.render.md; then ok "…and leaving out the file only gc added"
 else bad "…but the file only gc added came back"; fi
 hasnt "$out" "renewed" "…renewing nothing"
 git -C "$R" config --unset core.hooksPath
@@ -698,7 +701,7 @@ git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
 
 # A branch changes alpha's prompt, gc then moves alpha's text, and a later
-# commit reverts the change. HEAD's alpha.md differs from the fork point's, but
+# commit reverts the change. HEAD's alpha.render.md differs from the fork point's, but
 # a change to a seed input started it, so it is no adoption: keeping it would
 # commit the reverted change, and rendering it would commit gc's text.
 echo "# a hooked commit that reverts a change puts the page back as the fork point commits it"
@@ -711,15 +714,15 @@ git -C "$R" config core.hooksPath assets/hooks
 edit_prompt alpha "a change the branch later reverts"
 git -C "$R" add -A
 (cd "$R" && PATH="$STUB:$PATH" git commit -q -m "move alpha's prompt" >/dev/null 2>&1)
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.md)" "a change the branch later reverts" "the hooked change renders alpha"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.render.md)" "a change the branch later reverts" "the hooked change renders alpha"
 gc_moves_into alpha
 git -C "$R" checkout -q base -- agents/alpha/prompt.template.md
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q -m "revert alpha's prompt" 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit that reverts the change lands"
-if as_committed base agents/alpha.md; then ok "…putting alpha.md back as the fork point commits it"
-else bad "…but alpha.md kept the reverted change or took gc's text"; fi
-has "$out" "  agents/alpha.md" "…naming it among what it kept"
+if as_committed base agents/alpha.render.md; then ok "…putting alpha.render.md back as the fork point commits it"
+else bad "…but alpha.render.md kept the reverted change or took gc's text"; fi
+has "$out" "  agents/alpha.render.md" "…naming it among what it kept"
 git -C "$R" config --unset core.hooksPath
 git -C "$R" symbolic-ref --delete refs/remotes/origin/HEAD
 gc_restores
@@ -752,10 +755,10 @@ else ok "the merge of the default branch conflicts"; fi
 printf 'the branch and the default branch\n' > "$R/shared.md"; git -C "$R" add shared.md
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit that concludes the merge lands"
-if as_committed hooked-merge-main agents/claude.md; then ok "…keeping the text the default branch's re-audit adopted"
-else bad "…but claude.md is not as the default branch commits it"; fi
-if as_committed hooked-merge-main formulas/mol-gc.md; then ok "…and the file it added"
-else bad "…but mol-gc.md is not as the default branch commits it"; fi
+if as_committed hooked-merge-main agents/claude.render.md; then ok "…keeping the text the default branch's re-audit adopted"
+else bad "…but claude.render.md is not as the default branch commits it"; fi
+if as_committed hooked-merge-main formulas/mol-gc.render.md; then ok "…and the file it added"
+else bad "…but mol-gc.render.md is not as the default branch commits it"; fi
 has "$out" "as $(git -C "$R" rev-parse hooked-merge-main) commits them" "…judged from the fork point the merge leaves"
 out=$(check_merge hooked-merge-main hooked-merge); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
@@ -791,10 +794,10 @@ else ok "the re-audit branch's merge of the default branch conflicts"; fi
 printf 'the branch and the default branch\n' > "$R/shared.md"; git -C "$R" add shared.md
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit that concludes the merge lands"
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.md)" "a line a still newer gc renders" \
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/claude.render.md)" "a line a still newer gc renders" \
     "…renewing the text the re-audit adopted, not the default branch's"
-has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.md 2>&1)" "a still newer gc" "…and the file it added"
-has "$(git -C "$R" show HEAD:generated/seed-audit/agents/beta.md)" "moved on the default branch" "…beside the render the merge brings in"
+has "$(git -C "$R" show HEAD:generated/seed-audit/formulas/mol-gc.render.md 2>&1)" "a still newer gc" "…and the file it added"
+has "$(git -C "$R" show HEAD:generated/seed-audit/agents/beta.render.md)" "moved on the default branch" "…beside the render the merge brings in"
 has "$out" "renewed 2 file(s) a re-render of this branch adopted" "…saying what it renewed"
 out=$(check_merge readopt-merge-main readopt-merge); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
@@ -822,13 +825,13 @@ git -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/heads/readopt-page-main
 git -C "$R" config core.hooksPath assets/hooks
 if git -C "$R" merge -q --no-edit readopt-page-main >/dev/null 2>&1; then bad "the merge was meant to conflict"
 else ok "the re-audit branch's merge of the default branch conflicts"; fi
-has "$(git -C "$R" diff --name-only --diff-filter=U)" "generated/seed-audit/agents/alpha.md" "…in the page both sides changed"
-git -C "$R" checkout -q --ours generated/seed-audit/agents/alpha.md
+has "$(git -C "$R" diff --name-only --diff-filter=U)" "generated/seed-audit/agents/alpha.render.md" "…in the page both sides changed"
+git -C "$R" checkout -q --ours generated/seed-audit/agents/alpha.render.md
 git -C "$R" add -A
 out=$(cd "$R" && PATH="$STUB:$PATH" git commit -q --no-edit 2>&1); rc=$?
 eq "$rc" 0 "the hooked commit that concludes the merge lands"
-alpha=$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.md)
-has "$alpha" "moved on the default branch" "…writing alpha.md with the default branch's change"
+alpha=$(git -C "$R" show HEAD:generated/seed-audit/agents/alpha.render.md)
+has "$alpha" "moved on the default branch" "…writing alpha.render.md with the default branch's change"
 has "$alpha" "a line gc renders into alpha" "…and the text the re-audit adopted"
 out=$(check_merge readopt-page-main readopt-page); rc=$?
 eq "$rc" 0 "…so the merge gate holds nothing"
@@ -892,7 +895,7 @@ two_branches() { # <suffix> <extra-line-writer> — returns 0 when the merge is 
 }
 no_extra() { :; }
 add_size_rows() { local a; for a in alpha beta; do
-    printf '| `%s` | %s |\n' "$a" "$(wc -c < "$1/generated/seed-audit/agents/$a.md" | tr -d ' ')" \
+    printf '| `%s` | %s |\n' "$a" "$(wc -c < "$1/generated/seed-audit/agents/$a.render.md" | tr -d ' ')" \
         >> "$1/generated/seed-audit/INDEX.md"; done; }
 
 if two_branches shape no_extra; then ok "neighbouring agents re-rendered on two branches: the merge is clean"
@@ -908,14 +911,25 @@ else ok "control: the per-agent size rows these two each moved conflict"; fi
 echo "# the index carries composition only, and no manifest is written"
 on base
 idx="$(cat "$R/generated/seed-audit/INDEX.md")"
-has "$idx" '- [`alpha`](agents/alpha.md)' "the index links each agent"
-has "$idx" '| [`mol-x`](formulas/mol-x.md) | `city` |' "…and each formula, with its scope"
+has "$idx" '- [`alpha`](agents/alpha.render.md)' "the index links each agent"
+has "$idx" '| [`mol-x`](formulas/mol-x.render.md) | `city` |' "…and each formula, with its scope"
 hasnt "$idx" '| bytes |' "…but carries no byte column"
 hasnt "$idx" 'est. tokens' "…no token column"
 hasnt "$idx" 'agents: ' "…no count line"
 hasnt "$idx" 'SOURCES.txt' "…and names no manifest"
 if [ -e "$R/generated/seed-audit/SOURCES.txt" ]; then bad "a render writes SOURCES.txt"
 else ok "a render writes no SOURCES.txt"; fi
+
+# A provider loads a file of a fixed name, such as CLAUDE.md, from a directory
+# as instructions, and on a case-insensitive filesystem a render named for the
+# builtin claude agent alone opens under that name. The stub lists that agent,
+# so the tree base commits holds its render.
+echo "# no render's file name is one an agent provider loads as instructions"
+if [ -f "$R/generated/seed-audit/agents/claude.render.md" ]; then ok "the builtin claude agent renders to agents/claude.render.md"
+else bad "the builtin claude agent has no render at agents/claude.render.md"; fi
+folded="$(find "$R/generated/seed-audit" -type f -print | sed 's|.*/||' | tr '[:upper:]' '[:lower:]' \
+    | grep -x -E 'claude\.md|agents\.md|gemini\.md')"
+eq "$folded" "" "…and no file in the tree folds to CLAUDE.md, AGENTS.md or GEMINI.md"
 
 # ----------------------------------------------------------------- the sizes
 echo "# --sizes prints each render's bytes and tokens, and commits nothing"
@@ -1034,7 +1048,7 @@ render_under() { # <TMPDIR> <out>
 printf '# alpha doctrine\ncity: @@CITY@@/city.toml\n' > "$P/agents/alpha/prompt.template.md"
 out=$(render_under "$D" "$TMP/city-plain"); rc=$?
 eq "$rc" 0 "control: a render under a plain TMPDIR succeeds"
-has "$(cat "$TMP/city-plain/agents/alpha.md" 2>/dev/null)" "city: [[CITY-ROOT]]/city.toml" \
+has "$(cat "$TMP/city-plain/agents/alpha.render.md" 2>/dev/null)" "city: [[CITY-ROOT]]/city.toml" \
     "…and substitutes the city's path"
 for spelling in "a trailing slash|$D/" "its physical path|$(cd "$D" && pwd -P)" \
         "a symlink|$TMP/scratch-link"; do
@@ -1140,13 +1154,13 @@ PATH="$NAMES:$PATH" gc prime dog --strict >/dev/null 2>&1; rc=$?
 eq "$rc" 1 "control: the bare name is refused, so a render that primes it fails"
 out=$(render_names); rc=$?
 eq "$rc" 0 "a render that primes each agent by its qualified name succeeds"
-eq "$(cat "$TMP/render-out/agents/fixture.dog.md" 2>/dev/null)" "# fixture dog doctrine" \
+eq "$(cat "$TMP/render-out/agents/fixture.dog.render.md" 2>/dev/null)" "# fixture dog doctrine" \
     "this pack's dog is filed as fixture.dog"
-eq "$(cat "$TMP/render-out/agents/other.dog.md" 2>/dev/null)" "# other dog doctrine" \
+eq "$(cat "$TMP/render-out/agents/other.dog.render.md" 2>/dev/null)" "# other dog doctrine" \
     "…and the other pack's as other.dog"
-eq "$(cd "$TMP/render-out/agents" && printf '%s ' *)" "alpha.md fixture.dog.md other.dog.md " \
+eq "$(cd "$TMP/render-out/agents" && printf '%s ' *)" "alpha.render.md fixture.dog.render.md other.dog.render.md " \
     "…and no file claims the bare name"
-has "$(cat "$TMP/render-out/INDEX.md" 2>/dev/null)" '- [`other.dog`](agents/other.dog.md)' \
+has "$(cat "$TMP/render-out/INDEX.md" 2>/dev/null)" '- [`other.dog`](agents/other.dog.render.md)' \
     "INDEX lists each agent under its qualified name"
 
 echo "# the builtin-fallback guard holds this pack's copy of a shared name, not the other's"
@@ -1187,9 +1201,9 @@ stub_prime r1/other.worker '# other worker in r1'
 stub_prime r2/other.worker '# other worker in r2'
 out=$(render_names); rc=$?
 eq "$rc" 0 "a rig-scoped shared name renders"
-eq "$(cat "$TMP/render-out/agents/fixture.worker.md" 2>/dev/null)" "# fixture worker in r2" \
+eq "$(cat "$TMP/render-out/agents/fixture.worker.render.md" 2>/dev/null)" "# fixture worker in r2" \
     "…this pack's agent from r2, which is declared first though r1 sorts first"
-eq "$(cat "$TMP/render-out/agents/other.worker.md" 2>/dev/null)" "# other worker in r2" \
+eq "$(cat "$TMP/render-out/agents/other.worker.render.md" 2>/dev/null)" "# other worker in r2" \
     "…and the other pack's agent the same way"
 
 echo

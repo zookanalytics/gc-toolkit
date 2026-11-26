@@ -318,11 +318,6 @@ SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
 # a hermetic test can point them at a fixture.
 STARTERS_TOOL="${GC_HELM_STARTERS_TOOL:-$SCRIPT_DIR/gc-helm-engage-starters.sh}"
 ENGAGE_AGENTS_DIR="${GC_HELM_AGENTS_DIR:-$SCRIPT_DIR/../../agents}"
-# The converse templates engage withdraws from its menu and its --model: each
-# stays configured only for the sittings already open on it, because Gas City's
-# reconciler wakes no session whose template is gone, and goes once none is
-# open.
-ENGAGE_WITHDRAWN_MODELS="opus fable codex"
 # Draws the comment that shows a visit on its subject's PR again from the
 # conversation, after a dismiss closes it or a hand-back is recorded on a closed
 # one. Best-effort and self-silencing when the subject has no PR or the visit no
@@ -2046,15 +2041,13 @@ city_root() {
 # engage_list_models — the converse-<model> tokens engage offers, one per line,
 # claude-opus (the work tier) first. Enumerated from the agent dirs the
 # templates live in, so the menu tracks what `gc session new converse-<model>`
-# can resolve, less the templates kept only for the sittings already open on
-# them (ENGAGE_WITHDRAWN_MODELS).
+# can resolve.
 engage_list_models() {
     _elm_all=""
     for _elm_d in "$ENGAGE_AGENTS_DIR"/converse-*; do
         [ -d "$_elm_d" ] || continue
         _elm_m=$(basename "$_elm_d"); _elm_m=${_elm_m#converse-}
         [ -n "$_elm_m" ] || continue
-        case " $ENGAGE_WITHDRAWN_MODELS " in *" $_elm_m "*) continue ;; esac
         _elm_all="$_elm_all $_elm_m"
     done
     # Two passes so claude-opus leads; `if` (not `&&`) keeps a false test from

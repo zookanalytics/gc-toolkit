@@ -1814,7 +1814,7 @@ func says(t *testing.T, o pr.RunOutcome, wants ...string) {
 // stale pages to the writer of the branch's re-render, once, and the bead
 // closes as it does in a rig with no audit.
 func TestALandingThatLeavesTheSeedAuditStaleAsksForItsReRenderOnce(t *testing.T) {
-	d, a := withAudit(t, "agents/claude.md", "formulas/mol-polecat-base.md")
+	d, a := withAudit(t, "agents/claude.render.md", "formulas/mol-polecat-base.render.md")
 	o := d.once(t)
 	is(t, o, pr.ActLanded)
 	b := d.row(t)
@@ -1826,7 +1826,7 @@ func TestALandingThatLeavesTheSeedAuditStaleAsksForItsReRenderOnce(t *testing.T)
 	if !slices.Equal(checks, []string{merged}) {
 		t.Fatalf("checked %v, want the merge on main", checks)
 	}
-	if !slices.Equal(reaudits, []string{"main agents/claude.md,formulas/mol-polecat-base.md"}) {
+	if !slices.Equal(reaudits, []string{"main agents/claude.render.md,formulas/mol-polecat-base.render.md"}) {
 		t.Fatalf("handed off %v, want main's two stale pages once", reaudits)
 	}
 	if want := "The landing order, checking main at " + merged + " after PR #7 landed,"; a.seenBy[0] != want {
@@ -1853,7 +1853,7 @@ func TestALandingThatLeavesTheSeedAuditCurrentAsksForNone(t *testing.T) {
 // carries every merge since this one, so a render a later commit made current
 // asks for nothing.
 func TestTheCheckReadsTheDefaultBranchAtTheTipTheActFetched(t *testing.T) {
-	d, a := withAudit(t, "agents/claude.md")
+	d, a := withAudit(t, "agents/claude.render.md")
 	d.co.tip = other
 	o := d.once(t)
 	checks, reaudits := a.calls()
@@ -1866,7 +1866,7 @@ func TestTheCheckReadsTheDefaultBranchAtTheTipTheActFetched(t *testing.T) {
 // Only the default branch is re-rendered, so a landing on any other, such as an
 // integration branch, checks nothing and says nothing of the audit.
 func TestALandingOnAnotherBranchChecksNoSeedAudit(t *testing.T) {
-	d, a := withAudit(t, "agents/claude.md")
+	d, a := withAudit(t, "agents/claude.render.md")
 	d.co.def = "trunk"
 	o := d.once(t)
 	is(t, o, pr.ActLanded)
@@ -1898,7 +1898,7 @@ func TestASeedAuditCheckThatDoesNotRunHoldsNothing(t *testing.T) {
 			"its re-render was not asked for, so a later landing asks again: seed-audit-reaudit.sh: exit 2", 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			d, a := withAudit(t, "agents/claude.md")
+			d, a := withAudit(t, "agents/claude.render.md")
 			c.set(d, a)
 			o := d.once(t)
 			is(t, o, pr.ActLanded)
@@ -1919,7 +1919,7 @@ func TestASeedAuditCheckThatDoesNotRunHoldsNothing(t *testing.T) {
 // same run finds at the same tip, and a tip a check has answered is not checked
 // again in that run.
 func TestALaterLandingChecksAgainAndATipIsCheckedOnceARun(t *testing.T) {
-	d, a := withAudit(t, "agents/claude.md")
+	d, a := withAudit(t, "agents/claude.render.md")
 	a.failChecks = 1
 	d.refresh(t)
 	d.also(t, "tk-2", "blocked")
@@ -1932,7 +1932,7 @@ func TestALaterLandingChecksAgainAndATipIsCheckedOnceARun(t *testing.T) {
 		is(t, o, pr.ActLanded)
 	}
 	checks, reaudits := a.calls()
-	if !slices.Equal(checks, []string{merged, merged}) || !slices.Equal(reaudits, []string{"main agents/claude.md"}) {
+	if !slices.Equal(checks, []string{merged, merged}) || !slices.Equal(reaudits, []string{"main agents/claude.render.md"}) {
 		t.Fatalf("checked %v and handed off %v, want the failed check run again once, and one hand-off", checks, reaudits)
 	}
 	says(t, out[0], "was not checked, and a later landing checks it")
@@ -1943,7 +1943,7 @@ func TestALaterLandingChecksAgainAndATipIsCheckedOnceARun(t *testing.T) {
 // A landing that completes after the run's window leaves the check to a later
 // landing, so the check cannot carry a run past its time limit.
 func TestALandingPastTheRunsWindowLeavesTheCheckToALaterOne(t *testing.T) {
-	d, a := withAudit(t, "agents/claude.md")
+	d, a := withAudit(t, "agents/claude.render.md")
 	d.refresh(t)
 	c := d.timed()
 	window := 45 * time.Second

@@ -3,16 +3,18 @@
 # procedure to formula step text or to a skill.
 #
 # The defects it guards against: a single script call read as a procedure (a
-# substitution in an argument, the body of a here-document whose delimiter is
-# quoted, a quoted separator, a redirection, a TOML-escaped continuation or
-# quote, the gctk-bin block before a gctk call, a placeholder that names
-# alternatives), a procedure read as a single call (a pipeline, a sequence, a
-# substitution holding a pipeline, && or ||, a substitution an expanding
-# here-document's body runs, a command inside the gctk-bin markers, on a line
-# of its own or joined to the assignment, a command after a placeholder that
-# holds an apostrophe, shell syntax between a < and a > read as a placeholder),
-# step text left unread (a TOML string of any kind wherever it sits, an edit
-# inside a here-document's body, a block fenced with tildes, a longer run or a
+# substitution in an argument, a formula step's call to a pack script, a
+# command that only assigns literal values, the body of a here-document whose
+# delimiter is quoted, a quoted separator, a redirection, a TOML-escaped
+# continuation or quote, the gctk-bin block before a gctk call, a placeholder
+# that names alternatives), a procedure read as a single call (a pipeline, a
+# sequence, a substitution holding a pipeline, && or ||, a substitution an
+# expanding here-document's body runs, an assignment that expands, substitutes
+# or redirects, a command inside the gctk-bin markers, on a line of its own or
+# joined to the assignment, a command after a placeholder that holds an
+# apostrophe, shell syntax between a < and a > read as a placeholder), step
+# text left unread (a TOML string of any kind wherever it sits, an edit inside
+# a here-document's body, a block fenced with tildes, a longer run or a
 # capitalized language, a block a fence line inside it cut short, a block
 # inline code at a line's start hid), skill text left unread (a new skill, a
 # sub-pack's or an agent's skill, a file moved into a skill), text that
@@ -152,6 +154,54 @@ with_step new "$(block '"$(gc gc-toolkit scripts-dir)/new.sh" --bead "$X" 2>&1 >
 run_lint "$F"
 expect 0 "a substitution holding one command and redirections stay one call: exit 0"
 
+# A formula step reaches a pack script by the call docs/pack-authoring.md gives
+# it, whose substitution assigns the binding before it runs gc. A command that
+# only assigns literal values does nothing but name them, so it is no command,
+# and the substitution holds one.
+FORMULA_CALL=$(cat <<'EOT'
+"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/new.sh" --bead "$X"
+EOT
+)
+with_step new "$(block "$FORMULA_CALL")" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a formula step's call to a pack script is one call: exit 0"
+
+with_step new "$(block 'B=x; B+=y
+"$S/new.sh" --bead "$B"')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a command that only assigns literal values is no command: exit 0"
+
+with_step new "$(block '(B=x; "$S/new.sh" --bead "$B")')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a literal assignment that opens a subshell is no command: exit 0"
+
+with_step new "$(block 'B=x   # $Y > z, a comment
+"$S/new.sh" --bead "$B"')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a comment after a literal assignment is no part of it: exit 0"
+
+with_step new "$(block 'B="$Y"; C=x')" > "$REPO/$F"
+run_lint "$F"
+expect 0 "a literal assignment after an expanding one on its line is no command: exit 0"
+
+# An assignment that expands a parameter, substitutes a command or carries a
+# redirection does more than name a value, so it is a command.
+for body in 'B="$Y"; "$S/new.sh" --bead "$B"' 'B=$(gc bd show "$Y" --json); "$S/new.sh" --bead "$B"' \
+  'B=`gc whoami`; "$S/new.sh" --bead "$B"' 'B=x>out.txt; "$S/new.sh" --bead "$B"' \
+  'B=x<in.txt; "$S/new.sh" --bead "$B"'; do
+  with_step new "$(block "$body")" > "$REPO/$F"
+  run_lint "$F"
+  expect 1 "an assignment that does more than name a value is a command: $body" "with 2 commands\. "
+done
+
+with_step new "$(block '"$(b="$Y"; gc "${b%.}" scripts-dir)/new.sh" --bead "$X"')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "a substitution whose assignment expands a parameter holds two commands: exit 1" "with 3 commands\. "
+
+with_step new "$(block 'B=x gc bd update tk-1 --append-notes y; gc runtime drain-ack')" > "$REPO/$F"
+run_lint "$F"
+expect 1 "an assignment ahead of a command's name is part of that command: exit 1" "with 2 commands\. "
+
 with_step new "$(block "\"\$(gc gc-toolkit scripts-dir)/new.sh\" --check <test|lint|build> --bead <the PR's bead>")" > "$REPO/$F"
 run_lint "$F"
 expect 0 "placeholders, one naming alternatives and one with an apostrophe, are words of one call: exit 0"
@@ -166,12 +216,14 @@ with_step new "$(block "$GCTK_BLOCK"$'\n''"$GCTK" bead takeaway "$X" y')" > "$RE
 run_lint "$F"
 expect 0 "a step whose block is the gctk-bin block and one gctk call: exit 0"
 
+# GCTK=x only assigns a literal value, so it is no command, and the two are the
+# echo joined to it and the gctk call.
 with_step new "$(block '# >>> gctk-bin
 GCTK=x;echo
 # <<< gctk-bin
 "$GCTK" bead takeaway "$X" y')" > "$REPO/$F"
 run_lint "$F"
-expect 1 "a command joined to the gctk-bin assignment with no blank weighs: exit 1" "with 3 commands\. "
+expect 1 "a command joined to the gctk-bin assignment with no blank weighs: exit 1" "with 2 commands\. "
 
 with_step new "$(block 'gc bd show "$X" --json | jq -r .id')" > "$REPO/$F"
 run_lint "$F"
@@ -521,6 +573,11 @@ expect 0 "an edit that only removes: exit 0"
 step_two_with '"$GC_RIG_ROOT/assets/scripts/two.sh" --bead "$B"' > "$REPO/$F"
 run_lint "$F"
 expect 0 "a step that trades its procedure for a call: exit 0"
+
+base_formula | BODY=$(block "$FORMULA_CALL") awk '{ print } /^fi$/ { getline; print; print "Then call:"; print ENVIRON["BODY"] }' > "$REPO/$F"
+grep -q '^Then call:$' "$REPO/$F" && ok "the gained-call fixture adds a block to step two" || bad "the gained-call fixture adds a block to step two"
+run_lint "$F"
+expect 0 "a step that gains a formula step's call to a pack script, beside its procedure: exit 0"
 
 base_formula | sed 's#^"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X"$#"$GC_RIG_ROOT/assets/scripts/one.sh" --bead "$X"; gc runtime drain-ack#' > "$REPO/$F"
 run_lint "$F"

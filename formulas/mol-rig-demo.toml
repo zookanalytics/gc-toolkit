@@ -156,10 +156,9 @@ shows is the HEAD of the `{{rig_name}}` checkout that `gc rig list` names, so th
 skill reads the rig's demo guide at that commit, from inside the checkout:
 `"$GCTK" review guidance demo --at "$(git rev-parse HEAD)"`. The
 skill reads the bead tree, categorizes the diff, and writes a validated
-demo:capture script to
-`.captures/demo-scripts/<bead>-<slug>.md` (gitignored); use the path it reports
-as `SCRIPT_PATH`. Follow the skill as written — it is the method, not a script
-to call.
+demo:capture script outside every checkout; use the absolute path it reports as
+`SCRIPT_PATH`. Follow the skill as written — it is the method, not a script to
+call.
 
 If neither is set, this is a malformed pour. Decline it with a human gate on the
 request bead, then exit 1:

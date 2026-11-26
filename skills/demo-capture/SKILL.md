@@ -149,6 +149,13 @@ reports it. So the command:
 - is up within ten minutes, as long as a start waits before it stops the copy,
   then runs until it is stopped, and ends within a minute of that, removing
   what it made outside the checkout, such as its simulator device;
+- keeps the app in the process group it starts in, because the copy is up only
+  while every process listening on `$PORT` is in that group, the one its stop
+  ends. `npm run` keeps the group, but `pnpm run` and `pnpm exec` start what
+  they run in a group of its own, and a start stops such a copy at once. So a
+  pnpm rig runs the app's program itself, as
+  `cd web && pnpm install --frozen-lockfile && node_modules/.bin/next dev --port $PORT`
+  does;
 - runs a program the repository keeps, so a run starts the app of the commit
   it runs from, as a rig's test command runs the tests of its commit. The rig
   declares one command for all its branches, so it names an entry point every
@@ -215,8 +222,7 @@ Two capture modes come from one script:
 The MP4 lands at `demos/<script-name>.mp4` by default (`-o` to override). Other
 flags: `--no-narrate`, `--music <file>`, `--keep` (keep the `.captures/<run>/`
 working dir), `--headed`. Write the output to a path outside the pack's tracked
-tree — a demo MP4 is an artifact, not a committed file, and the engine warns
-when the output path is not covered by an LFS filter.
+tree — a demo MP4 is an artifact, not a committed file.
 
 ## One-call capture and the rig-demo mol
 
@@ -290,10 +296,9 @@ the clip are working files, and neither is committed.
    section for a page and its "Terminal demos" section for a terminal, and the
    guide's `## Worked examples` show it on this rig's app.
 4. **Lint it** as [Lint before you capture](#lint-before-you-capture) says, and
-   fix what it reports. Its warning that no LFS filter covers the MP4 does not
-   apply, because the clip is never committed. The linter cannot check a name
-   the app defines, such as the scenario a start path arms, so check each one
-   against the source the guide names.
+   fix what it reports. The linter cannot check a name the app defines, such as
+   the scenario a start path arms, so check each one against the source the
+   guide names.
 5. **Capture it** from the worktree's root, writing the clip outside the
    worktree. A page script takes the rig's
    [start command](#the-rigs-start-command), read into `SERVE` as that section

@@ -39,10 +39,10 @@
 # specs/tk-yhwfv.3/seed-audit.md records the table and how to re-run it.
 #
 # WHOSE TEXT IT IS. Rendering every agent the synthetic city configures means
-# the tree also holds prompts this pack does not author. claude.md, codex.md
-# and gemini.md come from the `builtin:` providers, and their startup protocol
-# is the core pack's shared claim-protocol fragment; dog.md comes from the bd
-# example pack. In the gascity repo those two sources are
+# the tree also holds prompts this pack does not author. The claude, codex and
+# gemini renders come from the `builtin:` providers, and their startup protocol
+# is the core pack's shared claim-protocol fragment; the dog render comes from
+# the bd example pack. In the gascity repo those two sources are
 # internal/bootstrap/packs/core/template-fragments/claim-protocol.template.md
 # and examples/bd/dolt/agents/dog/prompt.template.md. A render is a mirror of
 # what the running binary emits, so prose that reads wrong in one of these
@@ -205,6 +205,15 @@ render_failed() { # <what was rendered> <out> <rc>
 AUDIT="generated/seed-audit"
 same() { if [ -f "$1" ] && [ -f "$2" ]; then cmp -s "$1" "$2"; else [ ! -f "$1" ] && [ ! -f "$2" ]; fi; }
 files_under() { [ -d "$1" ] && ( cd "$1" && find . -type f -print ) | sed 's|^\./||'; }
+
+# A render's file is the name of its agent or formula followed by this suffix.
+# An agent provider loads a file of a fixed name, such as CLAUDE.md, from a
+# directory as instructions, and the builtin claude agent is named for its
+# provider, as that provider's file is. On a case-insensitive filesystem a
+# render named claude.md opens as CLAUDE.md, and Claude Code hands it to a
+# session that reads any file beside it. With the suffix, no name a pack gives
+# an agent or a formula makes a render's file name one a provider loads.
+RENDER_SUFFIX=".render.md"
 
 if [ "$MODE" = "sizes" ] && [ -n "$SIZES_BASE" ]; then
     git -C "$ROOT" rev-parse --verify --quiet "$SIZES_BASE^{commit}" >/dev/null 2>&1 \
@@ -655,7 +664,7 @@ mapfile -t RIGS < <(awk '
 # gc that refuses it fails the render under --strict, and a gc that does not
 # renders whichever agent comes first in config order. So each of those agents
 # is primed by its qualified name and filed under its binding-qualified name
-# (gc-toolkit.<name>.md beside bd.<name>.md). A city-scoped agent's qualified
+# (gc-toolkit.<name> beside bd.<name>). A city-scoped agent's qualified
 # name is that identity; a rig-scoped one is primed through its copy in the
 # first rig declared, the copy an unshared name would render.
 #
@@ -830,12 +839,12 @@ mkdir -p "$STAGE/agents" "$STAGE/formulas"
 running=0
 for entry in "${AGENT_RENDERS[@]}"; do
     IFS=$'\t' read -r stem prime owned <<< "$entry"
-    render_one agent "$prime" "$STAGE/agents/$stem.md" "$owned" &
+    render_one agent "$prime" "$STAGE/agents/$stem$RENDER_SUFFIX" "$owned" &
     running=$((running + 1))
     if [ "$running" -ge "$JOBS" ]; then wait -n 2>/dev/null || true; running=$((running - 1)); fi
 done
 for f in "${FORMULAS[@]}"; do
-    render_one formula "$f" "$STAGE/formulas/$f.md" &
+    render_one formula "$f" "$STAGE/formulas/$f$RENDER_SUFFIX" &
     running=$((running + 1))
     if [ "$running" -ge "$JOBS" ]; then wait -n 2>/dev/null || true; running=$((running - 1)); fi
 done
@@ -930,8 +939,11 @@ Every file under `agents/` is the complete standing prompt one agent receives
 at spawn. Every file under `formulas/` is one compiled formula recipe. Together
 they are the part of the seed this repo controls.
 
-An agent file is named for the agent, or for its binding-qualified name
-(`<binding>.<name>`) where agents from different packs share one name.
+Each file is named for its agent or formula and ends in `.render.md`, and an
+agent's file takes its binding-qualified name (`<binding>.<name>`) where agents
+from different packs share one name. The suffix keeps a render from being read
+as an instruction file an agent provider loads: on a case-insensitive
+filesystem, `claude.md` would open as `CLAUDE.md`.
 
 ## Scope
 
@@ -959,7 +971,7 @@ when one is named, and are not committed:
 EOF
 
     for a in "${AGENTS[@]}"; do
-        printf -- '- [`%s`](agents/%s.md)\n' "$a" "$a"
+        printf -- '- [`%s`](agents/%s%s)\n' "$a" "$a" "$RENDER_SUFFIX"
     done
 
     cat <<'EOF'
@@ -978,8 +990,8 @@ EOF
 
     for f in "${FORMULAS[@]}"; do
         sc="city"
-        [ -f "$STAGE/formulas/$f.md.scope" ] && sc="$(cat "$STAGE/formulas/$f.md.scope")"
-        printf '| [`%s`](formulas/%s.md) | `%s` |\n' "$f" "$f" "$sc"
+        [ -f "$STAGE/formulas/$f$RENDER_SUFFIX.scope" ] && sc="$(cat "$STAGE/formulas/$f$RENDER_SUFFIX.scope")"
+        printf '| [`%s`](formulas/%s%s) | `%s` |\n' "$f" "$f" "$RENDER_SUFFIX" "$sc"
     done
 
     cat <<'EOF'
@@ -1032,8 +1044,8 @@ signed() { # <n> — grouped, with its sign spelled out and zero left bare
     elif [ "$1" -lt 0 ]; then printf -- '-%s\n' "$(commas "${1#-}")"
     else printf '0\n'; fi
 }
-names_in() { local f; for f in "$1"/*.md; do [ -f "$f" ] && basename "$f" .md; done; }
-total_bytes() { local f t=0; for f in "$1"/*.md; do [ -f "$f" ] && t=$((t + $(bytes_of "$f"))); done; printf '%s\n' "$t"; }
+names_in() { local f; for f in "$1"/*"$RENDER_SUFFIX"; do [ -f "$f" ] && basename "$f" "$RENDER_SUFFIX"; done; }
+total_bytes() { local f t=0; for f in "$1"/*"$RENDER_SUFFIX"; do [ -f "$f" ] && t=$((t + $(bytes_of "$f"))); done; printf '%s\n' "$t"; }
 
 # Said on stdout after a render and never committed: a total is a repo-global
 # line, the kind that collides two otherwise unrelated pull requests.
@@ -1059,14 +1071,14 @@ size_table() { # <agents|formulas> <column label> <render> [<base render>]
     fi
     while IFS= read -r n; do
         b1=0; b0=0; mark=""
-        [ -f "$cur/$n.md" ] && b1="$(bytes_of "$cur/$n.md")"
+        [ -f "$cur/$n$RENDER_SUFFIX" ] && b1="$(bytes_of "$cur/$n$RENDER_SUFFIX")"
         t1=$((t1 + b1))
         if [ -z "$base" ]; then
             printf '| `%s` | %s | %s |\n' "$n" "$(commas "$b1")" "$(commas "$(est_tokens "$b1")")"
             continue
         fi
-        if [ -f "$base/$n.md" ]; then b0="$(bytes_of "$base/$n.md")"; else mark=" (added)"; fi
-        [ -f "$cur/$n.md" ] || mark=" (removed)"
+        if [ -f "$base/$n$RENDER_SUFFIX" ]; then b0="$(bytes_of "$base/$n$RENDER_SUFFIX")"; else mark=" (added)"; fi
+        [ -f "$cur/$n$RENDER_SUFFIX" ] || mark=" (removed)"
         t0=$((t0 + b0))
         printf '| `%s`%s | %s | %s | %s | %s |\n' "$n" "$mark" \
             "$(commas "$b1")" "$(commas "$(est_tokens "$b1")")" \

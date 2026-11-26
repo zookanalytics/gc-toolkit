@@ -221,10 +221,10 @@ func TestStoreOfNamesTheLongestPrefix(t *testing.T) {
 // derives from the city's name.
 func TestStoreOfDerivesTheCitysPrefix(t *testing.T) {
 	routeStub(t)
-	t.Setenv("STUB_CONFIG", `{"city_path":"/town","config":{"Workspace":{"Name":"loomington","Prefix":""},"Rigs":[]}}`)
+	t.Setenv("STUB_CONFIG", `{"city_path":"/town","config":{"Workspace":{"Name":"metropolis","Prefix":""},"Rigs":[]}}`)
 	c := &Client{bin: "gc"}
-	if got, ok, err := c.StoreOf("lo-1"); err != nil || !ok || got != "/town/.beads" {
-		t.Errorf("StoreOf(lo-1) = %q, %v, %v; want the city's store, /town/.beads", got, ok, err)
+	if got, ok, err := c.StoreOf("me-1"); err != nil || !ok || got != "/town/.beads" {
+		t.Errorf("StoreOf(me-1) = %q, %v, %v; want the city's store, /town/.beads", got, ok, err)
 	}
 }
 

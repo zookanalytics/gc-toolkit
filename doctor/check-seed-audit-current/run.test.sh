@@ -29,8 +29,8 @@ exit 1
 R
 chmod +x "$P/assets/scripts/render-seed-audit.sh"
 printf '# seed audit\n' > "$P/generated/seed-audit/INDEX.md"
-printf 'p\n' > "$P/generated/seed-audit/agents/worker.md"
-printf 'f\n' > "$P/generated/seed-audit/formulas/mol-x.md"
+printf 'p\n' > "$P/generated/seed-audit/agents/worker.render.md"
+printf 'f\n' > "$P/generated/seed-audit/formulas/mol-x.render.md"
 # core.hooksPath resolves local-then-global, so an operator with a global one
 # set would answer case 5's unset read; /dev/null pins the fixture to local.
 run_check() { GC_PACK_DIR="$P" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$CHECK" 2>&1; }

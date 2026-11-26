@@ -28,8 +28,12 @@ runs it.
 The copy is up once it answers on that port as its own, or once the command
 prints the URL of the app it brought up on a line of its standard output, as
 ios-simulator://<device UDID>/<bundle id> names an iOS app on a simulator. A
-demo capture points its engine at the copy's app_url, and a sitting gives the
-operator the copy's address, so both reach the UI through one path.
+process the command started that listens on the port from a process group of
+its own, as pnpm run and pnpm exec start what they run, is not the copy's own,
+since --stop ends only the copy's group, so a start stops that copy at once
+with reason not-answering. A demo capture points its engine at the copy's
+app_url, and a sitting gives the operator the copy's address, so both reach the
+UI through one path.
 
 A checkout has at most one copy. A start for a checkout whose copy runs starts
 no other: it reports that copy once it is up, so a start is safe to repeat. A
@@ -85,7 +89,8 @@ lines of the log of a copy that failed or ended, go to stderr.
   not-answering  1     --check: the copy runs and is not up, or a start or a
                        stop of the checkout is under way and the copy's
                        leader is not running; a start waits for the copy to
-                       be up, and stops it when it is not
+                       be up, and stops it when it is not, or at once when
+                       it cannot be
   died           1     --check: the copy's leader has ended
   none           3     --check: no copy of the checkout runs
   none, stopped  0     --stop: no copy runs, or its process group has ended

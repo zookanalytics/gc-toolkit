@@ -657,12 +657,10 @@ export TMPDIR="$TMP"
 
 # A fixture agents dir, so the converse-<model> list engage globs is hermetic —
 # independent of the repo's live agents/. A bare `converse` is present to prove
-# it is EXCLUDED from the model list, and so are the templates engage withdraws
-# (converse-opus, converse-fable and converse-codex), to prove it offers none.
+# it is EXCLUDED from the model list.
 mkdir -p "$TMP/agents/converse-claude-opus" "$TMP/agents/converse-claude-fable" \
          "$TMP/agents/converse-codex-sol" "$TMP/agents/converse-codex-astra" \
-         "$TMP/agents/converse" "$TMP/agents/converse-opus" \
-         "$TMP/agents/converse-fable" "$TMP/agents/converse-codex"
+         "$TMP/agents/converse"
 export GC_HELM_AGENTS_DIR="$TMP/agents"
 
 # The subject rig's checkout. Converse CAPABILITY comes from the resolved roster
@@ -803,14 +801,6 @@ has "$CALLED" "session new converse-codex-astra --alias tk-conv" "(MODELFLAG) --
 reset; run_engage tk-conv --model claude-fable --no-attach
 has "$CALLED" "session new converse-claude-fable --alias tk-conv" "(MODELFLAG) --model claude-fable spawns converse-claude-fable"
 
-echo "# a template engage withdraws is still configured, and engage spawns no sitting on it"
-for withdrawn in opus fable codex; do
-  reset; run_engage tk-conv --model "$withdrawn" --no-attach
-  eq "$RC" 2 "(MODEL-WITHDRAWN) --model $withdrawn exits 2 though agents/converse-$withdrawn exists"
-  hasnt "$CALLED" "session new" "(MODEL-WITHDRAWN) …and spawns nothing on converse-$withdrawn"
-  has "$OUT" "must be one of: claude-opus claude-fable codex-astra codex-sol (got '$withdrawn')" "(MODEL-WITHDRAWN) …naming the variants engage offers"
-done
-
 echo "# engage supplies the subject's rig context so a bare template resolves"
 reset
 set +e
@@ -905,8 +895,8 @@ reset; SUBJ_META='{"merge_result":"pull_request_pending"}' run_engage tk-conv --
 eq "$RC" 0 "(PR-HOLD) engaging a queued conversation on an open PR's anchor exits 0"
 has "$CALLED" "bd dep bd dep add tk-subj tk-conv --type blocks" \
     "(PR-HOLD) …holding the PR's merge through the anchor's blocks edge onto the conversation"
-HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1)
-SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1)
+HOLD_AT=$(printf '%s\n' "$CALLED" | grep -n '^bd dep bd dep add tk-subj tk-conv --type blocks' | head -1 | cut -d: -f1 || true)
+SPAWN_AT=$(printf '%s\n' "$CALLED" | grep -n '^session new ' | head -1 | cut -d: -f1 || true)
 [ -n "$HOLD_AT" ] && [ -n "$SPAWN_AT" ] && [ "$HOLD_AT" -lt "$SPAWN_AT" ] \
     && ok "(PR-HOLD) …before the sitting starts" \
     || bad "(PR-HOLD) …before the sitting starts (hold at ${HOLD_AT:-none}, spawn at ${SPAWN_AT:-none})"
@@ -1806,8 +1796,7 @@ echo
 echo "# the model set is the configured converse-* variants; bare 'converse' is excluded"
 # --model validates against the globbed variants (claude-opus, claude-fable,
 # codex-astra and codex-sol from the fixture agents dir, claude-opus first);
-# the bare 'converse' pool template is not an engage variant, and the templates
-# engage withdraws are not offered.
+# the bare 'converse' pool template is not an engage variant.
 run_fresh tk-conv --model converse --no-attach
 eq "$RC" 2 "(IA-MODEL-SET) --model converse (the bare pool template) is not a variant, exit 2"
 hasnt "$CALLED" "session new" "(IA-MODEL-SET) …and nothing spawned"
@@ -1924,7 +1913,7 @@ echo "# --new-subject whose post-create gate aborts still files the subject's on
 run_fresh "topic after a bad model" --new-subject --rig gc-toolkit --model bogus --no-input --no-attach
 eq "$RC" 2 "(NEWSUBJ-ABORT) a post-create --model abort exits 2"
 has "$(cat "$STATE_DIR/newsubj.metadata")" '"gc.origin":"operator"' "(NEWSUBJ-ABORT) the subject was already created (the abort is post-create)"
-CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1)"
+CONV_CREATE="$(printf '%s\n' "$CALLED" | grep '^bd create' | grep -- '--deps tracks:' | head -n1 || true)"
 has "$CONV_CREATE" "topic after a bad model" "(NEWSUBJ-ABORT) …so the backstop files the subject's one conversation, carrying its opener"
 eq "$(cat "$STATE_DIR/tk-newsubj.assignee" 2>/dev/null)" "" "(NEWSUBJ-ABORT) …and hands the subject to it"
 has "$OUT" "waiting in the operator's queue" "(NEWSUBJ-ABORT) …and tells the operator it waits in their queue to engage"
@@ -1942,7 +1931,7 @@ case "$(cat "$STATE_DIR/newsubj.description")" in
   *) bad "(NEWSUBJ-LONG) the subject's description should open with the question unchanged (got: $(head -c 120 "$STATE_DIR/newsubj.description"))" ;;
 esac
 eq "$(cat "$STATE_DIR/tk-new.description")" "$LONG_Q" "(NEWSUBJ-LONG) …and the conversation's ask is the question, unchanged"
-NS_TITLE="$(cat "$STATE_DIR/newsubj.title")"
+NS_TITLE="$(cat "$STATE_DIR/newsubj.title" 2>/dev/null || true)"
 case "$NS_TITLE" in
   "Why does the refinery hold siblings for a full pass when only one changed? Context: - the merge queue"*"…") ok "(NEWSUBJ-LONG) the title is the question's opening on one line, cut with an ellipsis" ;;
   *) bad "(NEWSUBJ-LONG) the title should be the opening on one line (got: $NS_TITLE)" ;;

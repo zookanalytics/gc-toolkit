@@ -298,6 +298,7 @@ the startup-discovery fragments handle that case explicitly.
 ## Manual escape hatch
 
 If a patrol agent needs to bail mid-task before the hook's turn-boundary
-check fires, `gc runtime request-restart` is the manual route (these
-sessions are `mode = "always"`, so the controller respawns them). The
-automatic state-capturing recycle is the hook's job, not the agent's.
+check fires, `gc runtime request-restart` is the manual route: the
+controller stops the session and starts it again fresh, a named or pinned
+session included. The automatic state-capturing recycle is the hook's job,
+not the agent's.

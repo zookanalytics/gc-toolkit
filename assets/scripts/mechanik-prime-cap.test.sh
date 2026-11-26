@@ -30,7 +30,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 PROMPT="agents/mechanik/prompt.template.md"
-RENDER="generated/seed-audit/agents/mechanik.md"
+RENDER="generated/seed-audit/agents/mechanik.render.md"
 FRAGMENTS=(template-fragments/ask-for-work.template.md template-fragments/operator-profile.template.md template-fragments/learned-conventions-mechanik.template.md)
 STANDARDS=(template-fragments/work-quality-base.template.md template-fragments/work-quality-system.template.md template-fragments/memory-notes.template.md)
 CAP=10000
