@@ -103,7 +103,7 @@ func runs(words []*syntax.Word, depth int) string {
 	case patternKillers[name]:
 		return name
 	case shells[name]:
-		if script, ok := dashC(words[1:]); ok {
+		if script, ok := dashC(name, words[1:]); ok {
 			return scriptKills(script, depth+1)
 		}
 	case name == "env":
@@ -131,19 +131,44 @@ func commandName(words []*syntax.Word) (string, bool) {
 	return path.Base(s), true
 }
 
-// dashC is the script a shell's -c option is given: the word after the first
-// cluster of short options that holds c.
-func dashC(args []*syntax.Word) (string, bool) {
-	for i, w := range args {
-		s, ok := literal(w)
-		if ok && len(s) > 1 && s[0] == '-' && s[1] != '-' && strings.ContainsRune(s[1:], 'c') {
-			if i+1 < len(args) {
-				return scriptText(args[i+1]), true
+// dashC is the script a shell runs by its -c option: the first operand after
+// the shell's options, when one of its option words sets c. An o in an option
+// word takes the next word as its value, as an O does for bash and as
+// --rcfile and --init-file do. A - or -- ends the options, and so does a word
+// the guard cannot read. Without a c, the first operand is a script file, and
+// the words after it are its own arguments.
+func dashC(shell string, args []*syntax.Word) (string, bool) {
+	valued := "o"
+	if shell == "bash" {
+		valued = "oO"
+	}
+	c, i := false, 0
+	for ; i < len(args); i++ {
+		s, ok := literal(args[i])
+		if ok && (s == "-" || s == "--") {
+			i++
+			break
+		}
+		if !ok || len(s) < 2 || (s[0] != '-' && s[0] != '+') {
+			break
+		}
+		if strings.HasPrefix(s, "--") {
+			if s == "--rcfile" || s == "--init-file" {
+				i++
 			}
-			return "", false
+			continue
+		}
+		c = c || (s[0] == '-' && strings.ContainsRune(s, 'c'))
+		for _, r := range s[1:] {
+			if strings.ContainsRune(valued, r) {
+				i++
+			}
 		}
 	}
-	return "", false
+	if !c || i >= len(args) {
+		return "", false
+	}
+	return scriptText(args[i]), true
 }
 
 // envSplitKills names the pattern killer an env call runs through a string
