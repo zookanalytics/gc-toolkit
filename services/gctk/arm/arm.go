@@ -88,6 +88,11 @@ func mergeResultOf(r *ledger.Record) string {
 	return strings.TrimSpace(mr)
 }
 
+// checkPRPath is the path for an anchor whose record keeps it at a status the
+// start never sends.
+const checkPRPath = "To have the PR checked once the work it waits for lands, hold its merge on a human gate that names that work " +
+	"(the waits skill, \"Have a bead checked and closed once other work lands\")"
+
 // Arm records the arm, under the bead's dispatch lock, in one write that
 // carries its note. It refuses a closed bead, one already armed for another
 // target or formula, one already dispatched (in progress, or routed), one at a
@@ -124,9 +129,7 @@ func (a *Arms) Arm(req Request) (string, error) {
 	if status != "open" {
 		if mr := mergeResultOf(r); mr != "" {
 			return "", refuse("%s owns a pull request (merge_result=%s), whose record keeps it at status %s, and the start sends an open bead alone, "+
-				"so this arm could never fire. Leave its status to the record. To have the PR checked once the work it waits for lands, "+
-				"hold its merge on a human gate that names that work (the waits skill, \"Have a bead checked and closed once other work lands\")",
-				req.ID, mr, status)
+				"so this arm could never fire. Leave its status to the record. %s", req.ID, mr, status, checkPRPath)
 		}
 		return "", refuse("%s is at status %s, and the start sends an open bead alone, so this arm could never fire. Return it to open, then arm it", req.ID, status)
 	}

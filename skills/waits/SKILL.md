@@ -81,15 +81,12 @@ gate, below).
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
 - A pull request's anchor at status `blocked`, whose PR is pending, takes no
   arm. Leave its status as its PR's record keeps it. Hold its merge instead, on
-  a human gate whose message names the blocker (the `prs` skill, "Hold its
+  a human gate whose message names the blocker (the prs skill, "Hold its
   merge"):
 
   ```bash
   "$(gc <binding> scripts-dir)/human-gate.sh" --subject <bead> --key "moot-once-<blocker>" --message "Once <blocker> lands, this PR may be moot: retire it, or clear this gate to let it merge"
   ```
-
-  An anchor at status `open`, such as one whose PR head changed, takes the arm
-  above.
 - A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
   keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the
   bead waits on its blocker instead of in the queue. Gas City reads the label in

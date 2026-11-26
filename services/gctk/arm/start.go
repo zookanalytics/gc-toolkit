@@ -245,16 +245,15 @@ func (a *Arms) retire(id string, act Act, dryRun bool) Act {
 // of the bead's own, which gctk bead holds answers unjudged, and a wait edge
 // into another store, which bd never holds a bead on. It also holds a bead that
 // carries one of Gas City's hold labels in any spelling, as Gas City's hook
-// does after bd's exact comparison. A pull request's anchor at a status other
-// than open is held for its record, which sets that status.
+// does after bd's exact comparison.
 func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr, readyErr error, ready bool) (Act, bool) {
 	switch status := r.Status(); {
 	case arm != nil && arm.Malformed() != "":
 		return Act{Action: ActFail, Case: "malformed", Why: "its arm does not decode, so nothing is slung: " + arm.Malformed()}, true
 	case status != "open" && mergeResultOf(r) != "":
-		return Act{Action: ActHold, Case: "record",
+		return Act{Action: ActHold, Case: "status",
 			Why: fmt.Sprintf("it owns a pull request (merge_result=%s), whose record keeps it at status %s, and the start sends an open bead alone: "+
-				"the arm waits until the record returns it to open", mergeResultOf(r), status)}, true
+				"leave its status to the record, and disarm it. %s", mergeResultOf(r), status, checkPRPath)}, true
 	case status != "open":
 		return Act{Action: ActHold, Case: "status",
 			Why: fmt.Sprintf("it is at status %s, and the start sends an open bead alone: return it to open, or disarm it", status)}, true

@@ -32,9 +32,7 @@
 #     stranded too, because the start sends no malformed arm and counts no
 #     attempt on it. The start names each on every pass, but nothing surfaces it
 #     to a person. A hold does not excuse it: releasing the hold would not
-#     dispatch it either. A pull request's anchor at another status is not
-#     stranded: its PR's record sets that status, and the start holds the arm
-#     until the record returns the anchor to open or it closes.
+#     dispatch it either.
 #
 # An arm whose attempts reached the cap is NOT flagged: the start asks a person
 # about it, so it is not silent.
@@ -264,7 +262,7 @@ scan_store() {
         [ -n "$cid" ] || continue
         case "$act/$kase" in
             hold/status)
-                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Return it to open, or disarm it: gctk bead disarm $cid --reason \"<why>\"") ;;
+                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. To disarm it: gctk bead disarm $cid --reason \"<why>\"") ;;
             fail/malformed)
                 findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Disarm it (gctk bead disarm $cid --reason \"<why>\"), then arm it again (gctk bead arm) if the dispatch is still wanted") ;;
             hold/unjudged)

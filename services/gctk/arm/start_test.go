@@ -281,8 +281,8 @@ func TestStartHoldsWhatHoldsTheBead(t *testing.T) {
 	act(t, lines, "human", arm.ActHold, "label", "human")
 	act(t, lines, "assigned", arm.ActHold, "assigned", "rig/mechanik")
 	act(t, lines, "deferred", arm.ActHold, "status", "status deferred")
-	act(t, lines, "pending", arm.ActHold, "record", "until the record returns it to open")
-	if why := lines["pending"].Start.Why; strings.Contains(why, "return it to open") {
+	act(t, lines, "pending", arm.ActHold, "status", "leave its status to the record")
+	if why := lines["pending"].Start.Why; strings.Contains(why, "to open") {
 		t.Errorf("pending: why = %q; a PR's anchor keeps the status its record gives it", why)
 	}
 	act(t, lines, "an-epic", arm.ActHold, "epic", "an epic")
