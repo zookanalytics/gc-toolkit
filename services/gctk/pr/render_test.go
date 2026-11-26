@@ -100,6 +100,17 @@ func TestTitleRendersAsBefore(t *testing.T) {
 	}
 }
 
+// A squash's subject is the PR's title, then its number, and a title with no
+// words gives no subject, rather than the number alone.
+func TestSubjectIsTheTitleThenThePRsNumber(t *testing.T) {
+	if got, want := Subject("tk-a1", "name  the change", "bug", 7), "fix: name the change (tk-a1) (#7)"; got != want {
+		t.Errorf("Subject = %q, want %q", got, want)
+	}
+	if got := Subject("tk-a1", " \t", "bug", 7); got != "" {
+		t.Errorf("a title with no words has the subject %q", got)
+	}
+}
+
 func TestBeadsSectionRendersAsBefore(t *testing.T) {
 	type row struct {
 		ID, Title string

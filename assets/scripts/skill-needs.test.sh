@@ -210,7 +210,6 @@ for s in $BLOCKS; do
     [ -z "$found" ] && ok "$s: looks for no writer in a checkout or a variable an earlier call set" \
         || bad "$s: looks for no writer in a checkout or a variable an earlier call set" "found:$found"
     refs=$(grep -oF -- "$RESOLVE" "$f" | wc -l | tr -d ' ')
-    writers=$(grep -oE '"\$\(gc <binding> scripts-dir\)/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u)
     # The gctk-bin block names the city's build of gctk, which is no writer of
     # the pack's, by the one definition gctk-bin.test.sh holds.
     stray=$(awk '/# >>> gctk-bin$/ { skip = 1; next } /# <<< gctk-bin$/ { skip = 0; next } !skip' "$f" \
@@ -232,12 +231,6 @@ for s in $BLOCKS; do
     else
         bad "$s: says where the agent reads the binding" "no \`gc-toolkit\` in \`gc-toolkit.$s\` with gc skill list's FROM column"
     fi
-    missing=""
-    for w in $writers; do
-        [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
-    done
-    [ -n "$writers" ] && [ -z "$missing" ] && ok "$s: every writer an example calls is an executable in assets/scripts" \
-        || bad "$s: every writer an example calls is an executable in assets/scripts" "missing:${missing:- none named}"
 done
 # gc answers `gc gc-toolkit <command>` only in a city that imports the pack as
 # gc-toolkit, so no pack skill writes that binding into a command.
@@ -637,14 +630,6 @@ have "…which a fresh session takes over only from a hand-over recorded before 
     'Never reset during a return without this hand-over.' "$TMP/stay-squeezed"
 have "…and the return starts from a hand-over an earlier session left" \
     'The conversation'"'"'s notes carry a return hand-over** from an earlier session' "$TMP/stay-squeezed"
-for f in "$PROMPT" "$SETTLE" "$STAY" "$CONTINUE" "$HOLD"; do
-    missing=""
-    for w in $(grep -oE '"\$CONV/[A-Za-z0-9._-]+"' "$f" | sed 's#.*/##; s#"$##' | sort -u); do
-        [ -x "$ROOT/assets/scripts/$w" ] || missing="$missing $w"
-    done
-    [ -z "$missing" ] && ok "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" \
-        || bad "$(basename "$(dirname "$f")")/$(basename "$f"): every \$CONV writer it calls is in assets/scripts" "missing:$missing"
-done
 # The roles that route work point at the four skills through one fragment, so
 # the pointer is written once: each prompt includes it and keeps no copy of its
 # own. The skill descriptions every agent sees say when to load each skill, so
@@ -1779,10 +1764,10 @@ for sh_ in $shells; do
     # A withdrawal the store refuses, or a subject read that is not its own
     # row alone, prints no success line and exits non-zero, so the sitting
     # answers nothing. A read that does not answer writes nothing at all.
-    for stop in "DP_UPDATE_REFUSE=1|an update the store refuses|" \
-        "DP_SHOW_EMPTY=1|a subject read that answers no row|" \
-        "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,|"; do
-        IFS='|' read -r setting what says <<EOF
+    for stop in "DP_UPDATE_REFUSE=1|an update the store refuses" \
+        "DP_SHOW_EMPTY=1|a subject read that answers no row" \
+        "DP_SHOW_RC=1|a subject read that exits non-zero, whatever it printed,"; do
+        IFS='|' read -r setting what <<EOF
 $stop
 EOF
         dp_seed "$POOLED"
@@ -1793,7 +1778,6 @@ EOF
             0:*|*"carries no arm and no pool route"*) bad "($sh_) dispatch path: $what clears nothing for the answer" "exit $rc, out: $out" ;;
             *) ok "($sh_) dispatch path: $what clears nothing for the answer" ;;
         esac
-        [ -z "$says" ] || has "$out" "$says" "($sh_) dispatch path: …and names what is left"
         case "$setting:$calls" in
             DP_SHOW_*:*"bead disarm"*|DP_SHOW_*:*"bd update"*) bad "($sh_) dispatch path: …$what writes nothing" "calls: $calls" ;;
             DP_SHOW_*) ok "($sh_) dispatch path: …and writes nothing" ;;

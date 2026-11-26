@@ -268,9 +268,12 @@ cd "<the path it printed>"
 
 ## Directory discipline
 
-`workspace-setup` creates a per-bead git worktree and records it in
-`metadata.work_dir`. Once created, **stay in it**: all edits, installs,
-commits, and pushes happen there. NEVER edit files in the shared rig
+`workspace-setup` creates a per-bead git worktree beside the agents' homes and
+records it in `metadata.work_dir`. Once created, **work in it**: all edits,
+installs, commits, and pushes happen there. It sits outside your home, so a
+shell that does not keep its directory between calls needs a `cd` into it at
+the head of each call that works in it, and an edit names its file by the full
+path under it, never by your home's copy. NEVER edit files in the shared rig
 checkout (`[[CITY-ROOT]]/rigs/gc-toolkit`) — that stomps the canonical repo and breaks the
 recovery metadata that points at your worktree.
 

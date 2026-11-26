@@ -34,7 +34,12 @@
 # anchor. An anchor already disposed (its duplicates or supersedes edge names a
 # successor) is a no-op; an anchor past that state (abandoned, merged, an
 # exception of the pending record) is refused, with bead-rehome.sh named as the
-# direct verb for it.
+# direct verb for it. bead-rehome.sh closes the bead without reading its PR, and
+# at an exception the landing order no longer reads the PR, which can still be
+# open. So at an exception the refusal frees the lock and asks GitHub about each
+# PR the record names. While one reads open, the refusal names its close,
+# gh pr close <url>, in place of the direct verb. When GitHub cannot say, the
+# refusal says why.
 #
 #   pr-dispose.sh --anchor <bead-id> --successor <bead-id> \
 #                 --kind re-homed|folded|fixed-upstream|duplicate|not-needed \
@@ -180,7 +185,38 @@ CLOSER=""
 case "$A_MR" in
   pull_request_pending|pull_request_head_changed) [ "$A_STATUS" = closed ] || CLOSER="the landing order" ;;
 esac
+# The record stops following a bead's PR at an exception, and its pr_state then
+# holds the exception's word, so only GitHub says whether that PR is still open.
+# record.Exception, in services/gctk/pr/record, names these values, and
+# pr-dispose.test.sh holds this copy to it.
+RECORD_EXCEPTIONS="pull_request_reconcile_invalid pull_request_closed_unmerged pull_request_merged_unvalidated_head pull_request_merge_evidence_contradiction pull_request_legacy_closed_unverified pull_request_merged_close_refused"
+PR_URL_RE='^https://[^/]+/[^/]+/[^/]+/pull/[0-9]+$'
 if [ -z "$CLOSER" ]; then
+  case " $RECORD_EXCEPTIONS " in
+    *" ${A_MR:-none} "*)
+      # Nothing is written past this point, so the lock goes free before GitHub
+      # is read.
+      exec 9>&-
+      READ_PRS=" "
+      for pr_key in pr_url existing_pr; do
+        pr=$(printf '%s' "$AJSON" | jq -r --arg k "$pr_key" '(.[0].metadata[$k] // "") | tostring' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [ -n "$pr" ] || continue
+        case "$READ_PRS" in *" $pr "*) continue ;; esac
+        READ_PRS="$READ_PRS$pr "
+        [[ $pr =~ $PR_URL_RE ]] \
+          || die "$ANCHOR is at $A_MR, and its $pr_key reads '$pr', which is not a PR's URL, so GitHub cannot say whether that PR is still open. Correct $pr_key, then run this again" 1
+        PR_STATE=$(gh pr view "$pr" --json state </dev/null 2>/dev/null | scrub | jq -r '.state // ""' 2>/dev/null) || PR_STATE=""
+        case "$PR_STATE" in
+          CLOSED|MERGED) ;;
+          OPEN)
+            die "$ANCHOR is at $A_MR, where the landing order no longer reads its PR, and its PR $pr is still open, which disposing of $ANCHOR directly would leave open behind the closed bead. Close it first, then run this again: gh pr close $pr. At an exception, closing the PR by hand files no gate" 1 ;;
+          *)
+            die "$ANCHOR is at $A_MR, and GitHub did not say whether its PR $pr is still open: gh pr view $pr --json state did not answer. Run this again once it does" 1 ;;
+        esac
+      done
+      [ "$READ_PRS" != " " ] \
+        || die "$ANCHOR is at $A_MR, and neither pr_url nor existing_pr names its PR, so GitHub cannot say whether that PR is still open. Set pr_url to the PR's URL, then run this again" 1 ;;
+  esac
   die "$ANCHOR is status='$A_STATUS' merge_result='${A_MR:-unset}', not an anchor whose open PR a closer consummates: not closed at pull_request_pending or pull_request_head_changed. Dispose an anchor past that state directly: bead-rehome.sh --origin $ANCHOR --successor $SUCCESSOR --kind $KIND" 1
 fi
 # The PR repository AND number both come from the anchor's own pr_url. A bare

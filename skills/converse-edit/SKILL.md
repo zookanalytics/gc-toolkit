@@ -280,9 +280,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the change's landing settles on the subject, and what to check once it has>" \
   && gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks \
-  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/gc-toolkit.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
+  && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/<binding>.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
   && gc bd label list "$SUBJECT"
 ```
+
+`<binding>` is the name the city imports the pack under, which gc puts in front
+of this skill's name: `gc-toolkit` in `gc-toolkit.converse-edit`. `gc skill
+list` prints it in this skill's FROM column.
 
 The deferred-dispatch pass sends no arm while `hold:mayor` holds the subject,
 so remove each label it lists that spells `hold:mayor`, in any case, one
@@ -322,9 +326,10 @@ cat "$CONV"/../../template-fragments/work-quality-polecats.template.md "$CONV"/.
 
 ## Set up the tree
 
-Work's setup cuts the change's tree under your home, at
-`worktrees/<the change>`, on `polecat/<the change>` fresh from its target, and
-records `work_dir` and `branch` on the change, as it does for a polecat's work.
+Work's setup cuts the change's tree beside the agents' homes, at
+`.gc/worktrees/<rig>/<the change>` in the city, on `polecat/<the change>` fresh
+from its target, and records `work_dir` and `branch` on the change, as it does
+for a polecat's work.
 Under `--held-by` it takes your hold as the proof that you hold the change:
 
 ```bash
