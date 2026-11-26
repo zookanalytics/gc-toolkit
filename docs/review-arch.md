@@ -168,10 +168,12 @@ is built from the Covers lines, so check 4 still judges the diff against them.
 
 The check reads each command, verb, flag or mode a change adds from the seat of
 its caller, the agent or the code that calls it, whether the change adds it to
-gctk or to a script. Read it where its caller meets it: the skill, prompt,
-formula step or usage text that teaches it, and the commands beside it there.
-List every other command the caller could run for what it means to do, the
-native ones among them. Then answer two questions:
+gctk or to a script. A caller knows a command only as it is taught: by the
+skill, prompt, formula step or usage text where the caller meets it, and the
+other commands taught there for what the caller means to do, the native ones
+among them. Read that teaching and list those other commands. Then answer two
+questions, the first from the teaching rather than from what the command alone
+can do:
 
 1. What must the caller know to choose it over those and to use it correctly?
 2. Could the command find that out itself?
@@ -187,9 +189,10 @@ for what the caller alone knows
 
 Read
 [the rule that no verb parallels a native act](gctk-architecture.md#writes-stay-native-and-pack-logic-reacts)
-from the same seat. A verb that carries an act in one state, beside the native
-call agents use for the same act in the others, parallels that call however its
-mechanism differs, because its caller chooses between the two by the state.
+from the same seat. When the teaching sends a caller to a verb in some states of
+an act and to the native call in the others, the verb parallels that call
+however its mechanism differs, and even where the verb could carry the act in
+every state, because its caller chooses between the two by the state.
 
 The verdict body adds a line for each command, verb, flag or mode the change
 adds:
