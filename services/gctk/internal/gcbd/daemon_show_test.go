@@ -56,10 +56,10 @@ func daemonServing(t *testing.T, beadJSON string) (*httptest.Server, *string) {
 	return srv, &gotPath
 }
 
-// A healthy daemon read returns the daemon's bead and never forks `gc bd` —
-// the whole point of the change. The stub's distinct value and the fork marker
-// prove the daemon answered and the subprocess stayed untouched.
-func TestShowReadsViaDaemonWithoutForkingBd(t *testing.T) {
+// A healthy daemon read returns the daemon's bead and never forks `gc bd`,
+// which is what the cached read is for. The stub's distinct value and the fork
+// marker prove the daemon answered and the subprocess stayed untouched.
+func TestShowCachedReadsViaDaemonWithoutForkingBd(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "forks")
 	srv, gotPath := daemonServing(t,
 		`{"id":"b-1","status":"open","assignee":"someone","metadata":{"merge_result":"pull_request"}}`)
@@ -69,9 +69,9 @@ func TestShowReadsViaDaemonWithoutForkingBd(t *testing.T) {
 		baseURL: srv.URL,
 		city:    "testcity",
 	}
-	b := c.Show("b-1")
+	b := c.ShowCached("b-1")
 	if b == nil {
-		t.Fatal("Show via daemon = nil")
+		t.Fatal("ShowCached via daemon = nil")
 	}
 	if got := b.Meta("merge_result"); got != "pull_request" {
 		t.Errorf("merge_result = %q, want pull_request (the daemon's value, not the stub's)", got)
@@ -88,15 +88,15 @@ func TestShowReadsViaDaemonWithoutForkingBd(t *testing.T) {
 }
 
 // Every way the daemon can fail to answer a trusted bead falls through to the
-// `gc bd` read, so the daemon only ever makes a read faster, never changes its
-// answer. The stub's from_bd value proves the fallback arm ran.
-func TestShowFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
+// `gc bd` read, so whether a bead exists is always `gc bd`'s answer. The stub's
+// from_bd value proves the fallback arm ran.
+func TestShowCachedFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 	const bdPayload = `[{"id":"b-1","metadata":{"merge_result":"from_bd"}}]`
 	assertFellBack := func(t *testing.T, c *Client) {
 		t.Helper()
-		b := c.Show("b-1")
+		b := c.ShowCached("b-1")
 		if b == nil || b.Meta("merge_result") != "from_bd" {
-			t.Fatalf("Show = %+v, want the bd fallback value from_bd", b)
+			t.Fatalf("ShowCached = %+v, want the bd fallback value from_bd", b)
 		}
 	}
 
@@ -132,10 +132,10 @@ func TestShowFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 	})
 }
 
-// ShowDirect is the authoritative read: it forks `gc bd` and never consults the
+// Show is the authoritative read: it forks `gc bd` and never consults the
 // daemon, even a healthy one, so a read that decides a write observes the latest
 // write and carries notes the daemon payload omits.
-func TestShowDirectBypassesDaemon(t *testing.T) {
+func TestShowBypassesDaemon(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "forks")
 	srv, _ := daemonServing(t, `{"id":"b-1","metadata":{"merge_result":"from_daemon"}}`)
 	c := &Client{
@@ -144,21 +144,21 @@ func TestShowDirectBypassesDaemon(t *testing.T) {
 		baseURL: srv.URL,
 		city:    "c",
 	}
-	b := c.ShowDirect("b-1")
+	b := c.Show("b-1")
 	if b == nil || b.Meta("merge_result") != "from_bd" {
-		t.Fatalf("ShowDirect = %+v, want the bd value from_bd, never the daemon's", b)
+		t.Fatalf("Show = %+v, want the bd value from_bd, never the daemon's", b)
 	}
 	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		t.Error("ShowDirect did not fork gc bd; the authoritative read must never come from the daemon cache")
+		t.Error("Show did not fork gc bd; the authoritative read must never come from the daemon cache")
 	}
 }
 
 // With no daemon configured — the default from New() under GC_NO_API, or any
-// city-less session — Show reads straight through the subprocess.
-func TestShowWithoutDaemonConfigUsesBd(t *testing.T) {
+// city-less session — ShowCached reads straight through the subprocess.
+func TestShowCachedWithoutDaemonConfigUsesBd(t *testing.T) {
 	c := &Client{bin: gcShowStub(t, `[{"id":"b-1","metadata":{"merge_result":"from_bd"}}]`, "")}
-	b := c.Show("b-1")
+	b := c.ShowCached("b-1")
 	if b == nil || b.Meta("merge_result") != "from_bd" {
-		t.Fatalf("Show with no daemon config = %+v, want from_bd", b)
+		t.Fatalf("ShowCached with no daemon config = %+v, want from_bd", b)
 	}
 }
