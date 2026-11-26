@@ -78,10 +78,11 @@
 #       none goes ready before the canonical delivers. A closed waiter, the
 #       canonical, a waiter it already blocks, a delivered canonical, a
 #       not-needed close and the repair path move none. A waiter that cannot
-#       take the edge (another edge type, a canonical in another store, a read
-#       that fails) and a blocker of the duplicate refuse the close before
-#       anything is written, and a write bd refuses refuses it with no edge
-#       written;
+#       take the edge (another edge type, a canonical in another store) refuses
+#       the close until a person acts (exit 7), and a waiter read that fails
+#       and a blocker of the duplicate hold it (exit 5), each before anything
+#       is written, and a write bd refuses refuses it with no edge written
+#       (exit 7);
 #   (as) the edge goes on before the close and is read back, so two callers
 #       cannot both leave a successor: a caller that finds a first one's edge,
 #       with the first paused before or after its close or the bead reopened
@@ -108,8 +109,8 @@
 #       disposition on closes under that ruling and gains no edge, so the anchor
 #       whose finding scaffolding-sweep.sh carries forward stays free to close.
 #       A successor in another store, where no edge from here holds, refuses the
-#       close while a bead waits on the origin, and names the gate that holds a
-#       waiter and the wait to end;
+#       close while a bead waits on the origin (exit 7), and names the gate that
+#       holds a waiter and the wait to end;
 #   (ax) the close takes the store's record lock, the flock on pr-record.lock in
 #       the origin store's .beads directory that gctk's two writers of a PR's
 #       pending record take: it waits while another writer holds it, reads the
@@ -777,7 +778,7 @@ dep al-waiter5 al-wdup5 blocks
 dep al-waiter6 al-wdup5 blocks; dep al-waiter6 al-wcanon5 related
 BD=$(snap alpha al-wdup5); B5=$(snap alpha al-waiter5); B6=$(snap alpha al-waiter6)
 rc=0; run --origin al-wdup5 --successor al-wcanon5 --kind duplicate || rc=$?
-eq "$rc" 5 "a waiter joined to the canonical by another edge type refuses the close"
+eq "$rc" 7 "a waiter joined to the canonical by another edge type refuses the close until a person acts (exit 7)"
 eq "$(snap alpha al-wdup5)|$(snap alpha al-waiter5)|$(snap alpha al-waiter6)" "$BD|$B5|$B6" "…before anything is written"
 has "$(cat "$TMP/err")" "al-waiter6 by a 'related' edge" "…and the refusal names the waiter and its edge"
 rc=0; run --origin al-wdup5 --successor al-wcanon5 --kind duplicate --check || rc=$?
@@ -789,7 +790,7 @@ bset al-wdup6 metadata.merge_result=pull_request metadata.gc.pr_close_dispositio
 dep al-waiter7 al-wdup6 blocks
 BD=$(snap alpha al-wdup6); B7=$(snap alpha al-waiter7)
 rc=0; run --origin al-wdup6 --successor bt-wcanon6 --kind duplicate || rc=$?
-eq "$rc" 5 "a ruled duplicate onto another store's canonical refuses while a bead waits on it"
+eq "$rc" 7 "a ruled duplicate onto another store's canonical refuses while a bead waits on it (exit 7)"
 eq "$(snap alpha al-wdup6)|$(snap alpha al-waiter7)" "$BD|$B7" "…and writes nothing"
 has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
 has "$(cat "$TMP/err")" "dep remove <bead> al-wdup6, then re-run" "…and it names the wait to end before a re-run"
@@ -832,7 +833,7 @@ mkbead alpha open al-waiterB
 dep al-waiterA al-wdup9 blocks
 dep al-waiterB al-wdup9 blocks
 rc=0; STUB_DEP_ADD_FAIL=al-waiterB run --origin al-wdup9 --successor al-wcanon9 --kind duplicate || rc=$?
-eq "$rc" 5 "a waiter bd refuses the edge refuses the close"
+eq "$rc" 7 "a waiter bd refuses the edge refuses the close until a person acts (exit 7)"
 eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "…the duplicate stays open with no edge"
 eq "$(edge alpha al-waiterA al-wcanon9)/$(edge alpha al-waiterB al-wcanon9)" "/" "…and neither waiter gains an edge"
 has "$(cat "$TMP/err")" "simulated refusal for al-waiterB" "…bd's refusal is printed"
@@ -1467,7 +1468,7 @@ mkbead alpha open al-zx; mkbead beta open bt-zx-s; mkbead alpha open al-zx-w
 dep al-zx-w al-zx blocks
 BO=$(snap alpha al-zx); BW=$(snap alpha al-zx-w)
 rc=0; run --origin al-zx --successor bt-zx-s --kind re-homed || rc=$?
-eq "$rc" 5 "(az) a re-home into another store refuses while a bead waits on it"
+eq "$rc" 7 "(az) a re-home into another store refuses while a bead waits on it (exit 7)"
 eq "$(snap alpha al-zx)|$(snap alpha al-zx-w)" "$BO|$BW" "…and writes nothing"
 has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
 has "$(cat "$TMP/err")" "human-gate.sh --subject <bead> --key waits-on.bt-zx-s" "…it names the gate that holds a waiter that needs the work"
