@@ -304,11 +304,9 @@ by design, so count no quote from one as the operator's voice.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans, so its proposal reaches the
-operator stating the block. Self-sourced clusters have been promoted and
-operator-vetoed before. The block puts the operator's endorsement ahead of
-the build. The operator's veto stops the re-promote. A cluster of operator
-corrections over several separate events is the opposite case and promotes,
-because the corrections are the external check.
+operator stating the block. A cluster of operator corrections over several
+separate events is the opposite case and promotes, because the corrections
+are the external check.
 
 ### Gate 2 — remedy class: exhortations and structural fixes are not bullets
 
