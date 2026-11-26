@@ -41,13 +41,14 @@ var (
 	textKey = ledger.Declare("gc.takeaway", ledger.String,
 		"A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, "+
 			"which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off "+
-			"leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged. "+
-			"Absent, nothing has concluded on the bead.")
+			"leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged, and "+
+			"its check refuses a held bead that carries one. Absent, nothing has concluded on the bead.")
 	atKey = ledger.Declare("gc.takeaway_at", ledger.String,
 		"When the bead's headline was written, RFC 3339 UTC to the second, in the update that writes it.")
 	byKey = ledger.Declare("gc.takeaway_by", ledger.String,
 		"Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The "+
-			"first reaction's sweep passes over a bead that carries one, as one already triaged.")
+			"first reaction's sweep passes over a bead that carries one, as one already triaged, and its check "+
+			"refuses a held bead that carries one.")
 	settledKey = ledger.Declare("gc.takeaway_settled", ledger.String,
 		"1 when the writer of the bead's headline said nothing waits on the bead, and empty when it named a "+
 			"wait or said neither, written with every headline so no earlier headline's answer stands for a "+

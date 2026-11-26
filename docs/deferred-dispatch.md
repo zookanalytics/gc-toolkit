@@ -106,8 +106,8 @@ a bead's dispatch is already decided sources that file:
 `doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
 `assets/scripts/stand-down.sh`. The first reaction asks the same of the arm's
 record in gctk. So an arm also keeps the bead out of the proactive sweep.
-`gctk reaction sweep` looks for raw input to react to, and it drops a bead that
-has a dispatch path. Otherwise a sweep that ran between a blocker closing and
+`gctk reaction sweep` takes a bead its filer marked for a first reaction, and
+it drops one that has a dispatch path. Otherwise a sweep that ran between a blocker closing and
 the deferred-dispatch order's next pass would sling a first reaction at a bead
 the arm is about to dispatch. `operator-intake.sh` and `patrol-finding.sh` skip
 the sweep and name a bead to `gctk reaction sling` directly, so the sling

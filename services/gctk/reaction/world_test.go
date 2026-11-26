@@ -70,6 +70,7 @@ func newWorld(t *testing.T) *world {
 	}
 	w.store.OnFind = func(q gcbd.Query) { w.add("FIND " + strings.Join(q.IDs, " ")) }
 	w.rt = &rtfake.Runtime{
+		Root:     t.TempDir(),
 		Resolves: []string{"mol-x", "mol-polecat-work"},
 		Roster: []gascity.Agent{
 			{QualifiedName: "gc-toolkit/gc-toolkit.polecat", Name: "polecat", Dir: "gc-toolkit", Scope: "rig"},

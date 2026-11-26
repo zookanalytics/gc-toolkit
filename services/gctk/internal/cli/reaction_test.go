@@ -63,7 +63,7 @@ func TestReactionDisposeRefusesUsageBeforeAnyCall(t *testing.T) {
 func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 	dir := t.TempDir()
 	short, long := filepath.Join(dir, "tk", ".beads"), filepath.Join(dir, "tk-x", ".beads")
-	for _, d := range []string{short, long} {
+	for _, d := range []string{short, long, filepath.Join(dir, ".gc")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -73,6 +73,7 @@ func TestReactionVerbsReadTheStoreGcRoutesTheSubjectTo(t *testing.T) {
 		`{"Name":"tk","Prefix":"tk","Path":"`+filepath.Dir(short)+`"},{"Name":"tk-x","Prefix":"tk-x","Path":"`+filepath.Dir(long)+`"}]}}`)
 	t.Setenv("STUB_WHERE", `{"path":"`+filepath.Join(dir, ".beads")+`","prefix":"hq"}`)
 	t.Setenv("GC_RIG", "gc-toolkit")
+	t.Setenv("GC_CITY_PATH", dir)
 	for name, args := range map[string][]string{
 		"a check":   {"reaction", "check", "tk-x-sub", "--run", "tk-root"},
 		"a sling":   {"reaction", "sling", "tk-x-sub"},
@@ -225,11 +226,13 @@ esac
 	t.Setenv("PATH", filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GCTK_SCRIPTS_DIR", filepath.Join(dir, "scripts"))
 	// The city's root is the town the stub's rig list names as its HQ, which
-	// holds the dispatch locks a release's disarm takes, and never the city
-	// this test runs in.
-	for _, v := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
+	// GC_CITY_PATH names as it does in an agent's session, and never the city
+	// this test runs in. It holds the dispatch locks a release's disarm takes
+	// and the acceptance lock an exit takes.
+	for _, v := range []string{"GC_CITY", "GC_CITY_ROOT"} {
 		t.Setenv(v, "")
 	}
+	t.Setenv("GC_CITY_PATH", town)
 	t.Setenv("STUB_LOG", log)
 	t.Setenv("STUB_DIR", dir)
 	t.Setenv("STUB_RIG", rig)
@@ -310,10 +313,12 @@ func TestReactionCheckReadsABlockedSetLargerThanArgMax(t *testing.T) {
 	}
 }
 
-// The sweep's dry run, over the same city, lists the subject as a candidate it
-// would sling, from one read of the ready set by priority, and slings nothing.
+// The sweep's dry run, over the same city with its subject held for placement,
+// lists the subject as a candidate it would sling, from one read of the ready
+// set by priority, and slings nothing.
 func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 	log, _ := stubCity(t, bigBlocked(argMax(t)))
+	withSubject(t, log, `["hold:mayor"]`, `{}`)
 	var out, errb bytes.Buffer
 	if code := Run([]string{"reaction", "sweep", "--dry-run"}, "test", &out, &errb); code != 0 {
 		t.Fatalf("the dry run exited %d: %s", code, errb.String())
@@ -332,9 +337,11 @@ func TestReactionSweepDryRunListsTheSubject(t *testing.T) {
 // No command reads the city's rig list, however many questions it asks: the
 // dispose slings its closer with no question about the pool first, the sling's
 // subject is in the store gc resolves here, and the order gives the sweep its
-// store. Each makes one ready read at most.
+// store. Each makes one ready read at most. The subject is held for placement,
+// so the sweep takes it and the dispose lifts its hold for the closer.
 func TestReactionVerbsReadNoRigList(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
+	withSubject(t, log, `["hold:mayor"]`, `{}`)
 	for name, c := range map[string]struct {
 		args  []string
 		sling string
@@ -385,7 +392,15 @@ func TestReactionSlingPassesGcSlingsRefusalThrough(t *testing.T) {
 // bd prints it, each value typed as bd stores it, and empties the log.
 func withMetadata(t *testing.T, log, metadata string) {
 	t.Helper()
-	subject := `[{"id":"tk-sub","title":"the subject","status":"open","issue_type":"task","priority":2,"description":"a raw input bead","metadata":` + metadata + `}]`
+	withSubject(t, log, `[]`, metadata)
+}
+
+// withSubject makes the stub city's subject carry labels, a JSON array, and
+// metadata, a JSON object as bd prints it, each value typed as bd stores it,
+// and empties the log.
+func withSubject(t *testing.T, log, labels, metadata string) {
+	t.Helper()
+	subject := `[{"id":"tk-sub","title":"the subject","status":"open","issue_type":"task","priority":2,"description":"a raw input bead","labels":` + labels + `,"metadata":` + metadata + `}]`
 	if err := os.WriteFile(filepath.Join(filepath.Dir(log), "subject.json"), []byte(subject), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -436,37 +451,62 @@ func TestReactionCheckReadsAFalseRouteAsNone(t *testing.T) {
 	}
 }
 
-// The sweep reads the keys that set a bead apart from raw input as the scripts
+// The sweep and the unmarked list read the keys they decide by as the scripts
 // read them, `(.metadata[k] // "")`, over values bd stored typed: false and null
-// hold no value, so a ready bead whose keys hold only those is a candidate, and
-// any other value, true, a number and the string "false" among them, passes the
-// bead over.
+// hold no value, and any other value, true, a number and the string "false"
+// among them, is one. A held bead whose route and headline keys hold no value
+// is the sweep's candidate, and one of them set passes it over. An unheld bead
+// is the sweep's candidate only while its finding.scope holds a value, and the
+// unmarked list's only while none of its mark, route and machinery keys does.
 func TestReactionSweepReadsTypedKeysAsTheScriptsDo(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
-	keys := []string{"gc.routed_to", "gc.step_ref", "gc.step_id", "gc.root_bead_id", "gc.takeaway", "gc.takeaway_by",
-		"branch", "merge_result", "work_dir", "pr_url", "pr_number", "check_name", "anchor_bead"}
-	listed := func(metadata string) bool {
+	run := func(labels, metadata string, args ...string) bool {
 		t.Helper()
-		withMetadata(t, log, metadata)
+		withSubject(t, log, labels, metadata)
 		var out, errb bytes.Buffer
-		if code := Run([]string{"reaction", "sweep", "--dry-run", "--db", store}, "test", &out, &errb); code != 0 {
-			t.Fatalf("the dry run over %s exited %d: %s", metadata, code, errb.String())
+		if code := Run(args, "test", &out, &errb); code != 0 {
+			t.Fatalf("%v over %s exited %d: %s", args, metadata, code, errb.String())
 		}
-		return strings.Contains(out.String(), `"id":"tk-sub"`)
+		return strings.Contains(out.String(), "tk-sub")
 	}
-	for _, unset := range []string{"false", "null"} {
+	swept := func(labels, metadata string) bool {
+		return run(labels, metadata, "reaction", "sweep", "--dry-run", "--db", store)
+	}
+	unmarked := func(metadata string) bool { return run(`[]`, metadata, "reaction", "unmarked") }
+	typed := func(keys []string, value string) string {
 		fields := make([]string, len(keys))
 		for i, k := range keys {
-			fields[i] = strconv.Quote(k) + ":" + unset
+			fields[i] = strconv.Quote(k) + ":" + value
 		}
-		if !listed("{" + strings.Join(fields, ",") + "}") {
-			t.Errorf("a bead whose keys all hold %s was passed over", unset)
+		return "{" + strings.Join(fields, ",") + "}"
+	}
+	held := `["hold:mayor"]`
+	sweepKeys := []string{"gc.routed_to", "gc.takeaway", "gc.takeaway_by"}
+	listKeys := []string{"gc.routed_to", "finding.scope", "gc.step_ref", "gc.step_id", "gc.root_bead_id",
+		"branch", "merge_result", "work_dir", "pr_url", "pr_number", "check_name", "anchor_bead"}
+	for _, unset := range []string{"false", "null"} {
+		if !swept(held, typed(sweepKeys, unset)) {
+			t.Errorf("a held bead whose keys all hold %s was passed over by the sweep", unset)
+		}
+		if swept(`[]`, typed([]string{"finding.scope"}, unset)) {
+			t.Errorf("an unheld bead whose finding.scope holds %s was swept", unset)
+		}
+		if !unmarked(typed(listKeys, unset)) {
+			t.Errorf("a bead whose keys all hold %s was not listed as unmarked", unset)
 		}
 	}
-	for _, k := range keys {
-		for _, set := range []string{"true", "0", `"false"`} {
-			if listed("{" + strconv.Quote(k) + ":" + set + "}") {
-				t.Errorf("a bead whose %s holds %s was listed", k, set)
+	for _, set := range []string{"true", "0", `"false"`} {
+		for _, k := range sweepKeys {
+			if swept(held, "{"+strconv.Quote(k)+":"+set+"}") {
+				t.Errorf("a held bead whose %s holds %s was swept", k, set)
+			}
+		}
+		if !swept(`[]`, "{"+strconv.Quote("finding.scope")+":"+set+"}") {
+			t.Errorf("an unheld bead whose finding.scope holds %s was passed over by the sweep", set)
+		}
+		for _, k := range listKeys {
+			if unmarked("{" + strconv.Quote(k) + ":" + set + "}") {
+				t.Errorf("a bead whose %s holds %s was listed as unmarked", k, set)
 			}
 		}
 	}

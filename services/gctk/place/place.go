@@ -9,7 +9,9 @@
 //  1. It reads the bead, its parent and the runs that work it, and refuses
 //     what it does not place with nothing written. A bead with no hold:mayor
 //     that a live run, a route, an arm or an assignee shows dispatched is
-//     placed already.
+//     placed already. It holds the bead's acceptance lock from this read to
+//     its last write (reaction.LockBead), as a first reaction's exit does, so
+//     the exit never releases a bead this placement is sending on.
 //  2. It clears a route, which gctk bead arm refuses. With a parent it removes
 //     a relates-to link between the bead and the parent, since bd refuses a
 //     parent-child edge beside one, sets the parent, and moves the shift
@@ -18,8 +20,9 @@
 //     pour copies the priority once.
 //  4. It dispatches, unless an assignee, a merge_result, a live run or an arm
 //     shows that an earlier dispatch did. A run of mol-first-reaction shows
-//     none, since a first reaction triages the bead and works none of it. A
-//     bead a wait holds, its own or a parent's above it such as a park, is
+//     none, since a first reaction triages the bead and works none of it, and
+//     its exit lands only its headline on a bead sent on while it ran. A bead a
+//     wait holds, its own or a parent's above it such as a park, is
 //     armed, so the wait keeps holding it, and so is one whose holds could not
 //     be read. Any other is slung, and gc sling's exit 3 says a live run of the
 //     formula already works the bead.
@@ -52,6 +55,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	rx "github.com/zookanalytics/gc-toolkit/services/gctk/reaction"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -189,6 +193,15 @@ func (p *Places) Place(req Request) (Placed, error) {
 	if p.DB != "" {
 		again += " --db " + p.DB
 	}
+
+	release, holder, err := rx.LockBead(p.Runtime, req.Bead)
+	switch {
+	case err != nil:
+		return out, fmt.Errorf("could not take %s's acceptance lock (%v), which a placement holds so that a first reaction's exit cannot release %s while it is sent on. Nothing was written", req.Bead, err, req.Bead)
+	case release == nil:
+		return out, refuse("an Accept, a placement or a first reaction's exit on %s holds its acceptance lock (%s), so this placement writes nothing. Place it again once that one has finished: %s", req.Bead, holder, again)
+	}
+	defer release()
 
 	// Step 1: read, and refuse what a placement does not place.
 	row, err := p.read(req.Bead)

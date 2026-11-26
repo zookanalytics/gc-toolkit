@@ -33,7 +33,8 @@ supersession banner before citing the rest of it.
 "Proactive" is deliberately NOT a resident loop (the operator deferred that). A
 reaction is a run slung per subject — by `gctk reaction sling`
 (the operator's intake, `operator-intake.sh`, and a patrol finding at filing)
-or the scan order's `gctk reaction sweep` over movable-forward beads — and the
+or the scan order's `gctk reaction sweep` over each bead filed into the
+placement queue and each patrol finding no reaction has concluded on — and the
 pour routes its step here. This pool is where those reactions execute. It is a
 sibling of the impl polecat pool (same worktree/refinery machinery) with three
 deliberate differences, all from the design's budget + security commitments:
@@ -82,8 +83,9 @@ the subject records that a reaction landed: the run is the record while it
 runs, `gc sling` refuses a second, and the state the exit wrote and its
 headline keep the subject out of the scan afterwards. A worker that dies
 before it closes its step leaves the step to the next, whose check passes only
-while the exit has not dispatched the subject; that worker finds the card its run
-wrote and re-runs the same exit. The card in the subject's notes records which
+while the exit has not dispatched the subject, and passes over the headline its
+run wrote on a held subject that carries the run's card; that worker finds the
+card its run wrote and re-runs the same exit. The card in the subject's notes records which
 disposition was chosen and why, so a wrong call is visible rather than silent.
 The card shape (Understanding · Found · Proposal · Decision needed · Disposition)
 is the same one a converse session opens with when the operator picks the row

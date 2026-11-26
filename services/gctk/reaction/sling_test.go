@@ -103,8 +103,9 @@ func TestTheStandingKindsAreTheOnesTheScriptsDefine(t *testing.T) {
 
 // A bead whose next move is decided already is refused with 5: a status other
 // than open, an assignee, a route, the human park route among them, an arm, a
-// capped one included, and a dispatch hold in any case, named as the bead
-// spells it. The kind is read first.
+// capped one included, hold:external in any case, and hold:mayor on a bead
+// that carries a headline, each hold named as the bead spells it. The kind is
+// read first.
 func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 	arm := map[string]string{"gc.dispatch_when_ready": "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_args": "[]",
 		"gc.dispatch_when_ready_armed_by": "gc-toolkit/gc-toolkit.mechanik", "gc.dispatch_when_ready_armed_at": "2026-10-01T00:00:00Z"}
@@ -119,9 +120,17 @@ func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 		"closed":     {func(b *fake.Bead) { b.Status = "closed" }, "its status is closed, and a first reaction takes only an open bead"},
 		"started":    {func(b *fake.Bead) { b.Status = "in_progress" }, "its status is in_progress"},
 		"assigned":   {func(b *fake.Bead) { b.Assignee = "gc-toolkit/gc-toolkit.polecat-3" }, "it is assigned to gc-toolkit/gc-toolkit.polecat-3, whose next move it is"},
-		"held":       {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} }, "it is held (hold:mayor)"},
+		"held and read": {func(b *fake.Bead) {
+			b.Labels = []string{"learning", " Hold:Mayor"}
+			b.Metadata["gc.takeaway"] = "ready to build once placed"
+		},
+			"it is held for placement ( Hold:Mayor) and carries a headline, so a first reaction or a sitting has read it"},
+		"held and read by": {func(b *fake.Bead) { b.Labels = []string{"hold:mayor"}; b.Metadata["gc.takeaway_by"] = "converse" },
+			"it is held for placement (hold:mayor) and carries a headline"},
 		"held outside": {func(b *fake.Bead) { b.Labels = []string{"Hold:External"} },
-			"it is held (Hold:External): hold:mayor keeps it for the operator's placement sitting"},
+			"it is held (Hold:External) for an actor outside this store, whose next move it is"},
+		"held both ways": {func(b *fake.Bead) { b.Labels = []string{"hold:mayor", "hold:external"} },
+			"it is held (hold:external) for an actor outside this store"},
 		"standing and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = standingKinds[0] }, "it is a standing record"},
 	} {
 		w := newWorld(t)
@@ -136,14 +145,22 @@ func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 }
 
 // What decides nothing about a bead's next move is no refusal: dispatch-path
-// keys left blank, the execution route a pour leaves, a wait on open work, and
-// the retired placement marker.
+// keys left blank, the execution route a pour leaves, a wait on open work, the
+// retired placement marker, and hold:mayor on a bead no first reaction or
+// sitting has concluded on, in any spelling and beside a blank headline, since
+// the placement queue is what a first reaction reads.
 func TestWhatDecidesNothingIsNoRefusal(t *testing.T) {
 	for name, edit := range map[string]func(*fake.Bead){
 		"blank keys":         func(b *fake.Bead) { b.Metadata["gc.routed_to"] = " "; b.Metadata["gc.dispatch_when_ready"] = " " },
 		"an execution route": func(b *fake.Bead) { b.Metadata["gc.execution_routed_to"] = "gc-toolkit/gc-toolkit.polecat" },
 		"a wait on work":     func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "tk-work", Status: "open"}} },
 		"the old marker":     func(b *fake.Bead) { b.Metadata["placement"] = "pending" },
+		"held, unread":       func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} },
+		"held, any spelling": func(b *fake.Bead) { b.Labels = []string{" HOLD:MAYOR "} },
+		"held, blank headline": func(b *fake.Bead) {
+			b.Labels = []string{"hold:mayor"}
+			b.Metadata["gc.takeaway"], b.Metadata["gc.takeaway_by"] = " ", ""
+		},
 	} {
 		w := newWorld(t)
 		w.put(fake.Bead{ID: "tk-work", Title: "open work", Status: "open", IssueType: "task"}, input("tk-free", edit))
@@ -454,4 +471,39 @@ func TestTheCheckPassesOverItsOwnRunsGate(t *testing.T) {
 	})
 	code, said = w.check("tk-own", "tk-root-reacting")
 	w.wantSling(1, "the gate tk-g-own did not read", code, said, "(HOLDS-READS) a gate row the listing leaves out")
+}
+
+// A held bead that carries a headline is refused, except to the run whose card
+// is on it: that run's exit wrote the headline before the run was re-offered,
+// so its check passes and the worker finishes the exit. The card is a line that
+// opens with its heading and the run's root as a whole word, so another run's
+// card, a run whose root only begins with the asking run's, and the same words
+// inside a line are no card of the run. A sling names no run, so it refuses the
+// bead whatever card it carries.
+func TestTheCheckPassesOverItsOwnRunsHeadline(t *testing.T) {
+	read := func(id, notes string) fake.Bead {
+		return input(id, func(b *fake.Bead) {
+			b.Labels = []string{"hold:mayor"}
+			b.Metadata["gc.takeaway"], b.Metadata["gc.takeaway_by"] = "ready to build once placed", "proactive"
+			b.Notes = notes
+		})
+	}
+	w := newWorld(t)
+	w.put(read("tk-own", "an earlier note\n# First reaction · run tk-root-r · a bug in the sweep\n## Understanding\nit is a bug"),
+		read("tk-bare", "# First reaction · run tk-root-r"),
+		read("tk-other", "# First reaction · run tk-root-elsewhere · a bug in the sweep"),
+		read("tk-longer", "# First reaction · run tk-root-r2 · a bug in the sweep"),
+		read("tk-quoted", "the sitting quoted # First reaction · run tk-root-r · a bug in the sweep"),
+		read("tk-none", ""))
+	w.run("tk-root-r", Formula, "tk-own", "in_progress")
+	for _, b := range []string{"tk-own", "tk-bare"} {
+		code, said := w.check(b, "tk-root-r")
+		w.wantSling(0, "", code, said, "(CHECK-OWN-HEADLINE) "+b)
+	}
+	for _, b := range []string{"tk-other", "tk-longer", "tk-quoted", "tk-none"} {
+		code, said := w.check(b, "tk-root-r")
+		w.wantSling(Decided, "it is held for placement (hold:mayor) and carries a headline", code, said, "(CHECK-OTHER-HEADLINE) "+b)
+	}
+	code, said := w.sling("tk-own")
+	w.wantSling(Decided, "carries a headline", code, said, "(CHECK-OWN-HEADLINE) a sling")
 }

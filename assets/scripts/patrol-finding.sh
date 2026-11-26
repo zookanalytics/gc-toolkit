@@ -103,8 +103,8 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
   --rig       the rig whose store this lands in (default: $GC_RIG, else
               gc-toolkit). It also rig-qualifies the proactive pool
   --no-react  file the bead and stop. The next
-              `gctk reaction sweep` reacts to it, as it does to every
-              ready bead nobody has decided on
+              `gctk reaction sweep` reacts to it, since it takes a finding
+              by its finding.scope until a headline shows one concluded
   --cleared   the situation has ended. Set situation=cleared, with --message
               as the reason, on the bead a recurrence would land on, or else
               on one held at blocked with nothing left to wait on, and file no
@@ -597,8 +597,8 @@ fi
 # edge, handed to a validating closer, or put to the operator as a human gate.
 # It goes to the rig's proactive pool whether or not that pool runs, and waits
 # there until it does. A reaction that cannot be slung, such as one gc sling
-# refuses, is not a failure of the filing: the finding is a ready bead nobody
-# has decided on, which the next `gctk reaction sweep` reacts to, just later.
+# refuses, is not a failure of the filing: the next `gctk reaction sweep` takes
+# the finding by its finding.scope, which rode the create, just later.
 [ -n "$NO_REACT" ] && exit 0
 if [ ! -x "$GCTK" ]; then
   warn "cannot find gctk (looked at $GCTK); $BEAD waits for the next sweep"

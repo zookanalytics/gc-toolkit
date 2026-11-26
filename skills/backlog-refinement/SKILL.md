@@ -32,6 +32,21 @@ person labeled `Hold:Mayor`, which no worker is served either.
 Read your rig's open epics, with what holds each, since most dispositions name
 one (your prompt's "Reads").
 
+Then list the beads filed with no mark, which sit in no queue and get no first
+reaction: the open beads in your rig's store that no hold, patrol finding,
+owner, route, arm, wait or run claims. The list starts no work:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" reaction unmarked --rig <rig>
+```
+
+It prints one line a bead, its id, its priority and its title, or one line
+saying there are none. An exit other than 0 is a list that did not read, not an
+empty one.
+
 ### When the goals are missing or change
 
 A rig whose default branch carries no `docs/product-goals.md`, and whose
@@ -111,8 +126,15 @@ that does not settle it, propose `ask` or say that your confidence is low.
 
 - One bead, without its long notes:
   `gc bd --rig <rig> show <id> --json | jq -r '(if type == "array" then .[0] else . end) | .title, .status, .description, ((.notes // "") | .[0:1500])'`
-- A first reaction's card in the notes (Understanding, Found, Proposal,
-  Disposition) is a strong lead. Check it, because it can be stale.
+- A queued bead a first reaction has read carries its card in its notes,
+  headed `# First reaction · run <root>`, with its Understanding, Found,
+  Proposal, Decision needed and Disposition. Read it first and start from its
+  proposal, but check it, because it can be stale. A sweep reacts only to a
+  bead that carries no headline and that nothing blocks. So a bead with no
+  card, no headline and no open blocker gets its card on the next sweep. One
+  with an open blocker gets none until that blocker closes: read it yourself.
+  One that carries a headline and no card gets none, because the headline is
+  its read: start from the headline.
 - Code, on the rig's default branch only, in the rig's checkout:
   `git -C <checkout> show origin/<branch>:<path>`,
   `git -C <checkout> log origin/<branch> -- <path>` and
@@ -150,9 +172,17 @@ it does.
 
 - Each piece fits one screen, says what its items are in plain words, and carries
   a recommendation for each item.
-- The first piece is the clear ones, as lists the operator can accept in a word
-  or pull items from: the closes and the beads sent where the rig says, where
-  your confidence is high.
+- The first piece is the beads filed with no mark (section 1), with what each is
+  and whether you would hold it as new work, close it or send it where the rig
+  says. Hold each one the operator agrees is new work, with
+  `gc bd --rig <rig> set-state <bead> hold=mayor --reason "<the operator's reason>"`.
+  A held bead with no headline and no open blocker gets a first reaction on the
+  next sweep, so it reaches a later sitting with a card. A bead that carries a
+  headline gets no first reaction once held, because that headline is its read:
+  bring the headline with the bead when you propose its placement.
+- Then the clear ones, as lists the operator can accept in a word or pull items
+  from: the closes and the beads sent where the rig says, where your confidence
+  is high.
 - Then bring the rest by disposition and by subject, at most about 25 items a
   piece, with the work to place in its WSJF order.
 

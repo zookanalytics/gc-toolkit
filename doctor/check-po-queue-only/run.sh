@@ -39,8 +39,8 @@
 #     neither: the bead waits on another bead to land and is checked then, so
 #     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
 #     mol-first-reaction sends nothing either: a first reaction triages the
-#     bead and works none of it, and its held exit writes hold:mayor seconds
-#     before its run ends.
+#     bead and works none of it, and the sweep slings one at each bead that
+#     arrives in the queue.
 #
 # The po's addresses are every identity Gas City serves its work under, which
 # its session.AssigneeIdentities names: the session bead's id, its runtime

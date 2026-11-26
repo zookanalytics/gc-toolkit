@@ -142,7 +142,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc31 and
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9c and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -317,10 +317,13 @@ no warrant.
 - **Covers.** The acceptance lock of `gctk reaction accept`,
   `services/gctk/reaction/accept_lock.go`: one `flock` file per bead,
   `accept-<bead>.lock`, under the city's `.gc/runtime/packs/gc-toolkit`, held
-  from Accept's live read to its last write.
+  from Accept's live read to its last write. A placement (`gctk bead place`)
+  and a first reaction's exit (`gctk reaction dispose`) hold it the same way,
+  through `LockBead`.
 - **Stands in for.** A launch that pours once per acceptance across a finished
   run: a `gc sling` that refuses a second root under a caller's key whatever
-  the first root's status.
+  the first root's status. For a placement and an exit, a lock a caller holds
+  on a bead across the several writes of one decision.
 - **Evidence.** In `gastownhall/gascity`, a graph.v2 `gc sling <bead> --on
   <formula>` launches under a per-bead lock and refuses a second launch of the
   formula at the bead, exiting 3, only while a root an earlier launch poured is
@@ -330,10 +333,15 @@ no warrant.
   `internal/sling/sling_attachment.go`). Once that root has closed, the next
   launch pours again. No `gc sling` flag checks an earlier root by its title or
   by a key, and `--scope-kind` with `--scope-ref` names a logical workflow
-  scope, not a caller's key (`cmd/gc/cmd_sling.go`).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194.
+  scope, not a caller's key (`cmd/gc/cmd_sling.go`). Gas City's per-bead lock,
+  `sourceworkflow.WithLock` in `internal/sourceworkflow/sourceworkflow.go`, is
+  taken inside one command, such as one launch, and released when it returns,
+  so a placement's writes from its read to its hold's lift, and an exit's from
+  its read to its release, run outside it.
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9c.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
-  key whatever the first root's status.
+  key whatever the first root's status, and a caller can hold a bead's lock
+  across several writes.
 
 ## Main lands only through a PR
 
@@ -767,7 +775,7 @@ no warrant.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
     blocked bead runs before its blockers close, and #8832, native execution
     admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9c, with
   #7163, #8832 and PR #8834 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
   bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
@@ -845,7 +853,7 @@ no warrant.
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921.
+- **Verified.** 2026-11-24, at `gastownhall/gascity` main d6d5784f9c.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
 
