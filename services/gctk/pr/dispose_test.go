@@ -232,6 +232,37 @@ func TestARefusedDispositionCloseAsksAPerson(t *testing.T) {
 	is(t, d.once(t), pr.ActDisposed)
 }
 
+// The gate a refused close filed names the refusal the latest run met, so a
+// person who cleared one obstruction reads the one that refuses the close now,
+// and a gate a person is assigned keeps the text they took it on.
+func TestARefusedCloseGateNamesTheLatestRefusal(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	r.refused = "bead-rehome.sh: successor tk-conv does not exist"
+	is(t, d.once(t), pr.ActExcepted)
+	// The gate as human-gate.sh files it: the message is its description, and it
+	// holds the bead.
+	const gate = "tk-gate"
+	d.store.Put(fake.Bead{ID: gate, Title: "PR #7 closed under a ruling", Status: "open", IssueType: "gate",
+		AwaitType: "human", AwaitID: "pr-dispose-failed.7", Description: d.gates.messages[0]})
+	d.edit(t, func(b *fake.Bead) {
+		b.Edges = append(b.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: gate, Status: "open", IssueType: "gate", AwaitType: "human"})
+	})
+	r.refused = "bead-rehome.sh: tk-w waits on the bead, and tk-conv is in another store"
+	is(t, d.once(t), pr.ActExcepted)
+	g, _ := d.store.Row(gate)
+	if !strings.Contains(g.Description, r.refused) || strings.Contains(g.Description, "does not exist") {
+		t.Fatalf("after the refusal changed, the gate says %q", g.Description)
+	}
+	g.Assignee = "human"
+	d.store.Put(g)
+	r.refused = "bead-rehome.sh: bd refused the edge from tk-w onto tk-conv: it would make a cycle"
+	is(t, d.once(t), pr.ActExcepted)
+	if kept, _ := d.store.Row(gate); kept.Description != g.Description {
+		t.Fatalf("a gate a person is assigned now says %q", kept.Description)
+	}
+}
+
 // A writer that did not answer is a failed record, which fails the run.
 func TestADispositionWriterThatDidNotAnswerFailsTheRun(t *testing.T) {
 	d, r := retired(t)

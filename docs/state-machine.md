@@ -1464,7 +1464,9 @@ anchor refuses while the successor is in another store, is put to a person.
 The run files one human gate under `pr-dispose-failed.<num>` that names the
 refusal, and every later run tries the close again and names that key to
 `bead-rehome.sh`, which withdraws the gate just before the close once nothing
-refuses it. A
+refuses it. When a later run's close is refused for a different obstruction
+than the one the gate names, the run rewrites the description of each such
+gate no person is assigned to name the new one. A
 changed head the refinery is already validating can reach the refinery's
 publication before that close, and the publication finds the PR closed and
 parks the anchor behind `refinery-invalid-existing-pr`, which a stand-down

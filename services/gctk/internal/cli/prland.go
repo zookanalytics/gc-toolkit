@@ -196,8 +196,10 @@ bead that waits on the bead refuses when the successor is in another store, is
 reported as excepted: the run files a human gate on the bead under
 pr-dispose-failed.<number>, which names the script's refusal, and the next run
 hands the close over again, naming that key, so the script withdraws the gate
-just before the close once the person has acted. A retired PR that merged all
-the same lands as any other.
+just before the close once the person has acted. A later run the script
+refuses for another reason writes that reason on the gate in place of the
+first, unless a person is assigned the gate. A retired PR that merged all the
+same lands as any other.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch

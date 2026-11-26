@@ -15,6 +15,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // The landing order and the publication it reads (specs/tk-1tfzr71.66/design.md,
@@ -1383,23 +1384,60 @@ func (u *run) dispose(x Disposal, out RunOutcome, stop time.Duration) RunOutcome
 }
 
 // askOnRefusal files the human gate that asks a person to act on a refused
-// close, under the disposal's key. The gate already open under that key is
-// found and nothing is filed again, and a gate that does not file leaves the
-// next run to file it.
+// close, under the disposal's key, naming the refusal this run met. Once a
+// person clears one obstruction, the writer can refuse the close for another,
+// and the gate already open under the key is found and nothing is filed again,
+// so that gate takes this run's message (refreshGates). A gate that does not
+// file, or a message that does not take, leaves the next run to file or write
+// it.
 func (u *run) askOnRefusal(x Disposal, out RunOutcome, why string, stop time.Duration) RunOutcome {
 	ctx, cancel := bounded(stop)
 	defer cancel()
 	d := x.Disposition
 	message := fmt.Sprintf("PR #%d closed under a ruling, but %s stays open: its close is refused until you act\n\n"+
 		"The ruling's disposition, %s onto %s, did not close %s. The disposition writer says: %s\n\n"+
-		"Do what it says, and the landing order's next run closes %s and withdraws this gate.",
+		"Do what it says, and the landing order's next run closes %s and withdraws this gate. "+
+		"If the writer then refuses the close for another reason, the run writes that reason here in place of this one.",
 		x.Number, x.Bead, d.Kind, d.Successor, x.Bead, why, x.Bead)
+	refused := out.Detail + ", which refuses its close until a person acts"
 	if err := u.Gates.File(ctx, x.Bead, x.GateKey(), message); err != nil {
-		return RunOutcome{Bead: x.Bead, Action: ActRetry, Detail: out.Detail + ", which refuses its close until a person acts, " +
-			"and the human gate that asks them did not file; the next run files it: " + err.Error()}
+		return RunOutcome{Bead: x.Bead, Action: ActRetry,
+			Detail: refused + ", and the human gate that asks them did not file; the next run files it: " + err.Error()}
 	}
-	return RunOutcome{Bead: x.Bead, Action: ActExcepted, Detail: out.Detail + ", which refuses its close until a person acts, " +
-		"so the human gate " + x.GateKey() + " asks them: " + why}
+	if err := refreshGates(u.Ledger.Within(ctx), x.Bead, x.GateKey(), message); err != nil {
+		return RunOutcome{Bead: x.Bead, Action: ActRetry, Detail: refused + ", and the human gate " + x.GateKey() +
+			" did not take this run's refusal, so it can still name an earlier one; the next run writes it: " + err.Error()}
+	}
+	return RunOutcome{Bead: x.Bead, Action: ActExcepted, Detail: refused + ", so the human gate " + x.GateKey() + " asks them: " + why}
+}
+
+// refreshGates gives each open human gate under key that holds bead, and that
+// no person is assigned, message as its description where it holds another,
+// as human-gate.sh made the message the description of the gate it filed. A
+// gate a person is assigned keeps the text they took it on, and a gate that
+// closed or was assigned since the read is left as it is.
+func refreshGates(l *ledger.Ledger, bead, key, message string) error {
+	rows, err := l.Find(ledger.ByID(bead))
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	gates, err := blockersIn(l, rows[0], false)
+	if err != nil {
+		return err
+	}
+	for _, g := range gates {
+		if !person.IsHumanGate(g.IssueType(), g.AwaitType()) || g.AwaitID() != key || g.Assignee() != "" ||
+			g.Description() == message {
+			continue
+		}
+		w := l.Write(g.ID)
+		w.Guard(g.Status(), "")
+		w.Description(message)
+		if err := l.Commit(w); err != nil && !errors.Is(err, ledger.ErrGuard) {
+			return fmt.Errorf("the gate %s did not take it: %w", g.ID, err)
+		}
+	}
+	return nil
 }
 
 // decideHeadChanged decides a PR the saved read shows open at a head other
