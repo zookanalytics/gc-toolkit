@@ -696,6 +696,14 @@ change's content* (a bug, a wrong approach) is not an observation — it
 is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
 
+A change to how agents work that you would suggest, but should not make
+on your own, is filed the same way from any session, and never kept in
+your memory. Its `## Statement` says what you saw, in the work or in a
+message, that led to it, its `## Proposed norm` carries the suggestion,
+and its provenance names the bead you were working on. The distiller
+judges it with every other observation, and nothing changes how an agent
+works until the operator approves the change.
+
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, and `"obs.source": "operator"` plus
 `"obs.endorsed": "operator"` in its metadata.

@@ -94,7 +94,11 @@ Four producers file the same bead contract:
    city sends. It captures only from durable sources: a PR review or
    comment, a rework's rejection reason, and a bead's notes. A session the
    operator attends, mechanik or a converse sitting, also captures the
-   operator's own turns.
+   operator's own turns. Any agent also files one, from any session, for a
+   change to how agents work that it would suggest but should not make on
+   its own: the statement says what it saw that led there, and the proposed
+   norm carries the suggestion, which binds no agent unless the loop proposes
+   it and the operator approves it.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments, with
    `obs.source=miner`, in two captures:
@@ -189,12 +193,10 @@ that opened one before can still write to it.
 Where what an agent learns goes is guidance every Claude role that keeps
 memory carries in its prompt (`template-fragments/memory-notes.template.md`).
 Its memory holds what should change the next agent's behavior, an observation
-holds a correction to how agents work, new work held for placement holds a
-change the agent thinks would help but should not adopt on its own, and a
-bead's notes hold the state of its open work. Such a change reaches the
-operator outside the loop. They approve it by placing it in the po's backlog
-refinement, or turn it down there, before it steers any agent
-([steering.md](steering.md#the-queue-the-po-works)).
+holds a correction to how agents work or a change to it the agent would
+suggest but should not make on its own, and a bead's notes hold the state of
+its open work. A suggestion stays out of memory, which would steer the next
+agent before the operator approves it.
 
 ## The promotion path
 
