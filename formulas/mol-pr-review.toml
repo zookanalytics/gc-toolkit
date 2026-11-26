@@ -177,9 +177,9 @@ the run's worktree with a commit of its own, its siblings with it, and name the
 commit in its ruling. Fix a point on the PR's title or summary in the summary
 `{{pr_bead}}` records, as the bar says. Record that summary again when the
 round's commits or questions leave it untrue. A point ruled declined, deferred,
-answered or put to a person gets no change. A fix outside the reviewed diff
-goes to a bead of its own, armed to start once the PR lands, which the call
-prints for the ruling's reason:
+answered or put to a person gets no change. A deferred point goes to a bead of
+its own, armed to start once the PR lands, which the call prints for the
+ruling's reason:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"`
 A question only a person can answer goes to a gate on `{{pr_bead}}`, which the
 call prints for the ruling:

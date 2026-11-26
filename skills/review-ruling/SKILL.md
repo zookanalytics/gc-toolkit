@@ -107,13 +107,31 @@ Add `--title "<the subject line>"` to that call when the PR's title changes.
 
 Then push as the step says, even when the round has no commits to push.
 
+## A requirement the change promises
+
+The change promises what the PR's bead asks for, which `gc bd show <pr-bead>`
+prints, and what the PR's summary says it does. A point that shows the change
+falls short of a requirement it promises is must-fix, whatever grade its source
+gives it, and never deferred: the round makes its fix wherever its code sits,
+in code the PR does not touch too. Until it does, the PR is not the change its
+bead asks for, and a summary that discloses the gap beside a bead filed for the
+rest does not make it one. Where the summary alone claims more than the PR's
+bead asks for, the fix can instead make the summary say what the change does.
+
+When the round cannot make the fix, such as one in software the rig does not
+own, or the only fix in reach is heavier than the gap warrants, put the point
+to the operator as a question (A question only a person can answer, below):
+does the PR wait until it meets the requirement, or does the requirement leave
+what the change promises? The round never narrows the promise on its own.
+
 ## A fix outside the reviewed diff
 
-A fix that reaches outside the diff the operator reviews, such as code the PR
-does not touch, goes to a bead of its own: `review-run.sh defer` files it
-waiting on the PR's bead, armed to start once the PR lands, with the PR's
-target as its own. Rule the point deferred, and name the bead in the reason.
-The PR stays the change the operator reviewed.
+Beyond what the change promises, a fix that reaches outside the diff the
+operator reviews, such as code the PR does not touch, goes to a bead of its
+own: `review-run.sh defer` files it waiting on the PR's bead, armed to start
+once the PR lands, with the PR's target as its own. Rule the point deferred,
+and name the bead in the reason. The PR stays the change the operator
+reviewed.
 
 ## A person's comment
 
