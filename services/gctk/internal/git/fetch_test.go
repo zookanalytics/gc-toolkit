@@ -21,26 +21,32 @@ import (
 // which a SIGKILL never runs.
 
 // fakeFetch puts an executable `git` at the front of PATH, in a fresh directory
-// it returns, which for a fetch sets trap first, then writes its pid to git.pid,
-// so a test that waits for git.pid signals a git whose handler is in place, and
-// then runs script. Every process the script starts leads or joins git's own
-// group, and the cleanup kills whatever of that group is still running.
-func fakeFetch(t *testing.T, trap, script string) string {
+// it returns, which for a fetch runs setup first, then writes its pid to
+// git.pid, so a test that waits for git.pid signals a git whose handler is in
+// place, and then runs script. setup sets the handler, and starts before it any
+// child that must not take it on. Every process the fake starts leads or joins
+// git's own group, and the cleanup kills whatever of that group is still
+// running.
+func fakeFetch(t *testing.T, setup, script string) string {
 	t.Helper()
 	dir := t.TempDir()
-	body := "#!/bin/sh\ncase \"$1\" in check-ref-format) exit 0 ;; esac\n" + trap + "\necho $$ > '" +
+	body := "#!/bin/sh\ncase \"$1\" in check-ref-format) exit 0 ;; esac\n" + setup + "\necho $$ > '" +
 		filepath.Join(dir, "git.pid") + "'\n" + script
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Cleanup(func() {
-		raw, err := os.ReadFile(filepath.Join(dir, "git.pid"))
-		if pid, _ := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
-		}
-	})
+	t.Cleanup(func() { killFake(dir) })
 	return dir
+}
+
+// killFake kills whatever is still running of the group of the fake git that
+// fakeFetch put in dir, once that git has written its pid.
+func killFake(dir string) {
+	raw, err := os.ReadFile(filepath.Join(dir, "git.pid"))
+	if pid, _ := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+	}
 }
 
 // appears reports whether path exists within d.
@@ -63,17 +69,20 @@ func shortGrace(t *testing.T, grace time.Duration) {
 	t.Cleanup(func() { fetchStopGrace = g })
 }
 
-// holdsALock is a fetch whose SIGTERM handler records the signal and removes a
-// lock file in dir, as git's handler removes the locks it holds, and which then
-// takes the lock and runs on in a child that holds its stderr, as git's ssh
-// does. It writes git.ready in dir once that child runs, so a test that waits
-// for git.ready signals a group that holds every process the fetch starts: a
-// child forked after a signal to its group never gets it, and one that held
-// stderr would keep the fetch waiting on its pipe.
-func holdsALock(dir string) (trap, script string) {
+// holdsALock is a fetch that runs on in a child that holds its stderr, as git's
+// ssh does, and whose SIGTERM handler records the signal and removes a lock
+// file in dir, as git's handler removes the locks it holds. The child starts
+// before the handler is set. A child the shell starts after setting it can lose
+// a SIGTERM that lands while it starts, and then holds the fetch's stderr until
+// it ends, while one started first ends on the group's SIGTERM whenever it
+// lands. The fetch writes git.ready in dir once it holds the lock, so a test
+// that waits for git.ready signals a group that holds every process the fetch
+// starts: a child forked after a signal to its group never gets it, and one
+// that held stderr would keep the fetch waiting on its pipe.
+func holdsALock(dir string) (setup, script string) {
 	lock, term, ready := filepath.Join(dir, "main.lock"), filepath.Join(dir, "git.term"), filepath.Join(dir, "git.ready")
-	return "trap 'touch \"" + term + "\"; rm -f \"" + lock + "\"; exit 143' TERM",
-		"touch '" + lock + "'\nsleep 30 &\ntouch '" + ready + "'\nwait $!\n"
+	return "sleep 30 &\ntrap 'touch \"" + term + "\"; rm -f \"" + lock + "\"; exit 143' TERM",
+		"touch '" + lock + "'\n: > '" + ready + "'\nwait $!\n"
 }
 
 // fetchBound is the bound the tests stop a fetch at, long enough for a loaded
@@ -82,8 +91,8 @@ const fetchBound = 2 * time.Second
 
 func TestAFetchStoppedAtItsBoundGetsASIGTERMAndLeavesNoLock(t *testing.T) {
 	marks := t.TempDir()
-	trap, script := holdsALock(marks)
-	dir := fakeFetch(t, trap, script)
+	setup, script := holdsALock(marks)
+	dir := fakeFetch(t, setup, script)
 	shortGrace(t, 30*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), fetchBound)
 	defer cancel()
@@ -160,8 +169,8 @@ func TestAStopSignalReachesGitsGroupAndEndsTheFetch(t *testing.T) {
 	// process's group does not reach it. The fetch passes it on and returns
 	// Interrupted, for the caller to end the process with.
 	marks := t.TempDir()
-	trap, script := holdsALock(marks)
-	dir := fakeFetch(t, trap, script)
+	setup, script := holdsALock(marks)
+	dir := fakeFetch(t, setup, script)
 	shortGrace(t, 30*time.Second)
 	// The test's own relay, so a fetch that does not take the signal fails this
 	// test rather than ending the test binary.
@@ -169,8 +178,22 @@ func TestAStopSignalReachesGitsGroupAndEndsTheFetch(t *testing.T) {
 	signal.Notify(held, syscall.SIGTERM)
 	t.Cleanup(func() { signal.Stop(held) })
 
-	done := make(chan error, 1)
-	go func() { done <- FetchBranch(context.Background(), dir, "main") }()
+	var fetchErr error
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		fetchErr = FetchBranch(context.Background(), dir, "main")
+	}()
+	// The fetch reads the grace that shortGrace's cleanup puts back, so a test
+	// that fails before the fetch ends stops it and waits for it first.
+	t.Cleanup(func() {
+		select {
+		case <-ended:
+		default:
+			killFake(dir)
+			<-ended
+		}
+	})
 	if !appears(filepath.Join(marks, "git.ready"), 5*time.Second) {
 		t.Fatal("the fake git never started its fetch")
 	}
@@ -178,10 +201,10 @@ func TestAStopSignalReachesGitsGroupAndEndsTheFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case err := <-done:
+	case <-ended:
 		var stopped *Interrupted
-		if !errors.As(err, &stopped) || stopped.Signal != syscall.SIGTERM {
-			t.Errorf("a fetch this process's SIGTERM stopped returned %v, want Interrupted by SIGTERM", err)
+		if !errors.As(fetchErr, &stopped) || stopped.Signal != syscall.SIGTERM {
+			t.Errorf("a fetch this process's SIGTERM stopped returned %v, want Interrupted by SIGTERM", fetchErr)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the fetch did not end on the SIGTERM this process received")
