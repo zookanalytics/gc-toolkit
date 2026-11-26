@@ -332,8 +332,10 @@ func (ls *Listing) Beads(ids []string) (map[string]prstatus.Row, error) {
 }
 
 // Anchored implements prstatus.Store over the listing's live beads, which are
-// every bead the store holds at a status other than closed. A closed status
-// is refused, because the listing holds no closed bead.
+// every bead the store holds at a status other than closed, kept to the ones
+// bd's listing shows unless asked ([ledger.Record.ListedByDefault]), as `gc bd
+// list` reads the set for `gctk pr status`. A closed status is refused,
+// because the listing holds no closed bead.
 func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
 	if slices.Contains(statuses, "closed") {
 		return nil, errors.New("listing: the beads anchored at closed are not listed, since a listing holds live beads alone")
@@ -341,7 +343,7 @@ func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]prsta
 	out := map[string][]prstatus.Row{}
 	for _, r := range ls.live {
 		a := text(anchorKey, r)
-		if a == "" || !slices.Contains(ids, a) || !slices.Contains(statuses, r.Status()) {
+		if a == "" || !slices.Contains(ids, a) || !slices.Contains(statuses, r.Status()) || !r.ListedByDefault() {
 			continue
 		}
 		out[a] = append(out[a], prstatus.Row{ID: r.ID, Metadata: r.Rendered()})
@@ -418,5 +420,6 @@ func blocksOf(r *ledger.Record) ([]string, error) {
 // blockerOf is r in the fields prstatus reads of a blocker.
 func blockerOf(r *ledger.Record) person.Blocker {
 	return person.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
-		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Metadata: r.Rendered()}
+		AwaitType: r.AwaitType(), AwaitID: r.AwaitID(), Assignee: r.Assignee(), ClosedAt: r.ClosedAt(),
+		Metadata: r.Rendered()}
 }

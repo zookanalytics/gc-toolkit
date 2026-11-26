@@ -849,11 +849,12 @@ resolution.
 
 `prstatus.RenderHeld` is the rule, over the evaluator's answer and the facts
 `prstatus.Read` gathers for every reader: the anchor's own row, its in-flight
-set, every bead carrying the anchor's `anchor_bead`, any `task_kind`, at a live
-status (`prstatus.InFlightStatuses`), and the gates and the beads a person owes
-that its walk reaches. `gctk pr status` and the rig board each hand
-`prstatus.Read` their own adapter onto the store, and neither gathers or
-decides any of it.
+set, every bead bd's listing shows that carries the anchor's `anchor_bead`, any
+`task_kind`, at a live status (`prstatus.InFlightStatuses`), and the gates and
+the beads a person owes that its walk reaches. `gctk pr status` hands
+`prstatus.Read` its own adapter onto the store, and the rig board and the
+landing order hand it the listing they read the store through, and none of
+them gathers or decides any of it.
 
 `prstatus.Holding` is the one reader of what holds a PR through its edges, the
 human gates and the beads a person owes the next move on, and `prstatus.Read`
