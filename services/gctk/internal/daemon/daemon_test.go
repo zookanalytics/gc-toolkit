@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,44 +75,64 @@ func TestBaseURL(t *testing.T) {
 	})
 }
 
+// listing is a supervisor whose GET /v0/cities answers status and body, and
+// which answers any other path 404.
+func listing(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v0/cities" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 func TestCity(t *testing.T) {
-	// A city path alone resolves the rest; clear the others so the chain is
-	// deterministic regardless of the ambient session.
-	clearCityEnv := func(t *testing.T) {
-		t.Setenv("GC_CITY", "")
-		t.Setenv("GC_CITY_ROOT", "")
+	city := func(t *testing.T, srv *httptest.Server, path, wantName, wantWhy string) {
+		t.Helper()
+		name, why := City(srv.Client(), srv.URL, path)
+		if name != wantName || why != wantWhy {
+			t.Fatalf("City(%q) = (%q, %q), want (%q, %q)", path, name, why, wantName, wantWhy)
+		}
 	}
 
-	t.Run("basename when city.toml declares no workspace name", func(t *testing.T) {
-		clearCityEnv(t)
-		dir := filepath.Join(t.TempDir(), "mycity")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("GC_CITY_PATH", dir)
-		got, ok := City()
-		if !ok || got != "mycity" {
-			t.Fatalf("City() = (%q, %v), want (mycity, true)", got, ok)
-		}
-	})
-
-	t.Run("workspace name wins over basename", func(t *testing.T) {
-		clearCityEnv(t)
+	t.Run("the name listed at the path, not city.toml's name or the basename", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "dirname")
-		writeFile(t, filepath.Join(dir, "city.toml"), "[workspace]\nprovider = \"claude\"\nname = \"realname\"\n")
-		t.Setenv("GC_CITY_PATH", dir)
-		got, ok := City()
-		if !ok || got != "realname" {
-			t.Fatalf("City() = (%q, %v), want (realname, true)", got, ok)
-		}
+		writeFile(t, filepath.Join(dir, "city.toml"), "[workspace]\nname = \"tomlname\"\n")
+		srv := listing(t, http.StatusOK, fmt.Sprintf(
+			`{"items":[{"name":"dirname","path":"/elsewhere/dirname","running":true},{"name":"registered","path":%q,"running":true}],"total":2}`, dir))
+		city(t, srv, dir, "registered", "")
 	})
 
-	t.Run("no city path yields not-ok", func(t *testing.T) {
-		clearCityEnv(t)
-		t.Setenv("GC_CITY_PATH", "")
-		if name, ok := City(); ok {
-			t.Errorf("City() = (%q, true) with no city path; want not-ok", name)
-		}
+	t.Run("a trailing separator on either path still matches", func(t *testing.T) {
+		srv := listing(t, http.StatusOK, `{"items":[{"name":"registered","path":"/cities/one/"}],"total":1}`)
+		city(t, srv, "/cities/one", "registered", "")
+		city(t, srv, "/cities/one/", "registered", "")
+	})
+
+	t.Run("no city listed at the path", func(t *testing.T) {
+		srv := listing(t, http.StatusOK, `{"items":[{"name":"other","path":"/cities/other"},{"name":"","path":"/cities/one"}],"total":2}`)
+		city(t, srv, "/cities/one", "", "city-unlisted")
+	})
+
+	t.Run("a listing that answers another status", func(t *testing.T) {
+		srv := listing(t, http.StatusServiceUnavailable, `{"items":[{"name":"registered","path":"/cities/one"}]}`)
+		city(t, srv, "/cities/one", "", "city-status-503")
+	})
+
+	t.Run("a listing that does not decode", func(t *testing.T) {
+		srv := listing(t, http.StatusOK, `not json`)
+		city(t, srv, "/cities/one", "", "city-decode")
+	})
+
+	t.Run("a supervisor that does not answer", func(t *testing.T) {
+		srv := listing(t, http.StatusOK, `{"items":[]}`)
+		srv.Close()
+		city(t, srv, "/cities/one", "", "city-transport")
 	})
 }
 

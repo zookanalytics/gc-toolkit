@@ -32,7 +32,7 @@ echo '[]'
 // them from the supervisor.
 func TestInNamesTheStoreOnEveryCall(t *testing.T) {
 	log := pinStub(t)
-	c := (&Client{bin: "gc", baseURL: "http://supervisor", city: "city"}).In("/rig/.beads")
+	c := (&Client{bin: "gc", baseURL: "http://supervisor", city: knownCity("city")}).In("/rig/.beads")
 	if c.daemonConfigured() {
 		t.Error("a pinned client still reads the supervisor's bead route, which answers from another store")
 	}
