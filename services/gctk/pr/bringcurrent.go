@@ -21,10 +21,14 @@ import (
 // history. Each whose merge base with HEAD is newer than git's own base gives
 // a commit HEAD took from that history, and the one HEAD took last is the one
 // its first-parent history took in latest, which the reflog's order cannot
-// show once the target has gone back to an older history. The merge takes a
-// commit that supersedes
-// it with the target: the target's tree whole, with the target and that
-// commit as its parents, as `git merge -s ours` records a merge. git's own
+// show once the target has gone back to an older history. HEAD's history must
+// show it took nothing later: no merge after that commit took in a commit it
+// does not hold, other than one that superseded an older history with it. A
+// later commit of the target that git pruned from the reflog, or that the
+// clone never fetched, shows there, and then the caller names the commit the
+// branch took last, or nothing is merged. The merge takes a commit that
+// supersedes it with the target: the target's tree whole, with the target and
+// that commit as its parents, as `git merge -s ours` records a merge. git's own
 // merge then goes from there, leaves a conflict in its merge state, and
 // `git show --remerge-diff` on the merge shows only what was resolved by hand.
 //
@@ -141,15 +145,22 @@ func BringCurrent(dir, target, base string) (*BroughtCurrent, error) {
 // fromReflog is the commit of the target's old history that head took last,
 // as the clone's reflog of origin/<target> shows it, and "" when the reflog
 // shows the target was not rewritten after head took it. A reflog that shows
-// neither is a refusal.
+// neither is a refusal, and so is a commit head's history shows it took a
+// later one after.
 func fromReflog(dir, target, head, tip, def string) (string, error) {
 	updates, err := git.Reflog(dir, target)
 	if err != nil {
 		return "", err
 	}
 	base, err := lastTaken(dir, updates, head, tip, def)
-	if err != nil || base != "" {
-		return base, err
+	if err != nil {
+		return "", err
+	}
+	if base != "" {
+		if err := shownLast(dir, target, base, head, def); err != nil {
+			return "", err
+		}
+		return base, nil
 	}
 	whole, err := reachesBefore(dir, updates, tip, def)
 	if err != nil {
@@ -164,6 +175,61 @@ func fromReflog(dir, target, head, tip, def string) (string, error) {
 			"cut from when it never merged %[1]s.", target, def)}
 	}
 	return "", nil
+}
+
+// shownLast refuses base, the commit of the target's old history the reflog
+// gives as the one head took last, unless head's own history shows it: each
+// merge of head's first-parent history newer than def, git's merge base of head
+// and the tip, that holds base took in only what base holds, or base through a
+// commit that supersedes, which has base as its first parent and base's tree.
+// A merge that took in more took a later commit of the target, which the
+// reflog does not name.
+func shownLast(dir, target, base, head, def string) error {
+	merges, err := git.Merges(dir, head, def)
+	if err != nil {
+		return err
+	}
+	for _, m := range merges {
+		if holds, err := git.IsAncestor(dir, base, m.Commit); err != nil {
+			return err
+		} else if !holds {
+			break
+		}
+		for _, p := range m.TookIn {
+			ok, err := takesNoMore(dir, p, base)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &CurrentRefusal{Why: fmt.Sprintf("the clone's reflog of origin/%[1]s gives %[2]s as the commit of %[1]s "+
+					"this branch took last, but HEAD's merge %[3]s took in %[4]s, which %[2]s does not hold. So the branch "+
+					"took a later commit of %[1]s, which git pruned from the reflog or the clone never fetched, and a "+
+					"merge from %[2]s would take what the branch took with it for its own change.\nRun it again with "+
+					"--base <commit>, the full object name of the commit of %[1]s the branch took last: the second parent "+
+					"of the branch's newest merge of %[1]s.", target, base, m.Commit, p)}
+			}
+		}
+	}
+	return nil
+}
+
+// takesNoMore reports whether p, a commit a merge took in, holds nothing base
+// does not: base holds it, or it supersedes base, with base as its first
+// parent and base's tree.
+func takesNoMore(dir, p, base string) (bool, error) {
+	if held, err := git.IsAncestor(dir, p, base); err != nil || held {
+		return held, err
+	}
+	parents, err := git.Parents(dir, p)
+	if err != nil || len(parents) == 0 || parents[0] != base {
+		return false, err
+	}
+	pt, err := git.TreeOf(dir, p)
+	if err != nil {
+		return false, err
+	}
+	bt, err := git.TreeOf(dir, base)
+	return err == nil && pt == bt, err
 }
 
 // reachesBefore reports whether updates, the reflog's, hold every commit the

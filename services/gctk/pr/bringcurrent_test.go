@@ -503,6 +503,85 @@ func TestBringCurrentAsksForTheBaseWhenOneMergeTookTwoHistories(t *testing.T) {
 	}
 }
 
+// refusedThenTold fails the test unless BringCurrent refuses and leaves HEAD
+// as it was, then, given the second parent of the branch's newest merge of
+// main, as the refusal says, merges to the PR's own change without
+// obsolete.txt, which the branch took and tip dropped.
+func (s *scratch) refusedThenTold(tip string) {
+	s.t.Helper()
+	head := s.git(s.work, "rev-parse", "HEAD")
+	_, err := BringCurrent(s.work, "main", "")
+	refusedForBase(s.t, err)
+	if got := s.git(s.work, "rev-parse", "HEAD"); got != head {
+		s.t.Fatalf("the refusal moved HEAD to %s", got)
+	}
+	cur, err := BringCurrent(s.work, "main", s.git(s.work, "rev-parse", "HEAD^2"))
+	if err != nil || cur.Supersede == "" || len(cur.Conflicts) != 0 {
+		s.t.Fatalf("BringCurrent from the newest merge's second parent = %+v, %v, want a clean merge from it", cur, err)
+	}
+	s.onlyOwnChange(tip)
+	if _, held := s.at("HEAD", "obsolete.txt"); held {
+		s.t.Error("obsolete.txt, which the branch took and the tip dropped, stayed")
+	}
+}
+
+func TestBringCurrentAsksForTheBaseWhenGitPrunedTheCommitTheBranchTookLast(t *testing.T) {
+	s := newScratch(t)
+	// Forty days ago the branch took t2 over a rewrite, and main went back to
+	// x1. git prunes those updates, so the reflog keeps only today's rewrite,
+	// whose old commit is x1, which the branch took before t2.
+	t.Setenv("GIT_COMMITTER_DATE", fmt.Sprintf("@%d +0000", time.Now().Add(-40*24*time.Hour).Unix()))
+	old := s.oldLineage()
+	s.branch()
+	s.ownChange()
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	s.commit(s.up, "obsolete", map[string]string{"obsolete.txt": "obsolete\n"})
+	s.push()
+	if took := bring(t, s.work); took.Base != old.x1 || took.Supersede == "" {
+		t.Fatalf("BringCurrent over the first rewrite = %+v, want a merge from %s", took, old.x1)
+	}
+	s.git(s.up, "reset", "-q", "--hard", old.x1)
+	s.push()
+	if err := os.Unsetenv("GIT_COMMITTER_DATE"); err != nil {
+		t.Fatal(err)
+	}
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	s.commit(s.up, "u3", map[string]string{"up3.txt": "u3\n"})
+	tip := s.push()
+	s.git(s.work, "reflog", "expire", "--expire-unreachable=30.days.ago", "--all")
+	if got := s.git(s.work, "reflog", "show", "--format=%H", "refs/remotes/origin/main", "--"); got != tip {
+		t.Fatalf("the reflog's updates name %q, want only the rewrite's %s", got, tip)
+	}
+
+	s.refusedThenTold(tip)
+}
+
+func TestBringCurrentAsksForTheBaseWhenTheBranchTookACommitTheCloneNeverFetched(t *testing.T) {
+	s := newScratch(t)
+	old := s.oldLineage()
+	s.branch()
+	s.ownChange()
+	s.git(s.work, "push", "-q", "origin", "pr")
+	// main is rewritten to t2, another clone takes it into the branch, and main
+	// is rewritten again before this clone fetches, so its reflog never names t2.
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	s.commit(s.up, "obsolete", map[string]string{"obsolete.txt": "obsolete\n"})
+	s.git(s.up, "push", "-q", "--force", "origin", "HEAD:main")
+	other := filepath.Join(t.TempDir(), "other")
+	s.git(s.up, "clone", "-q", s.origin, other)
+	s.git(other, "checkout", "-q", "-b", "pr", "origin/pr")
+	if _, err := BringCurrent(other, "main", old.x1); err != nil {
+		t.Fatalf("BringCurrent in the other clone: %v", err)
+	}
+	s.git(other, "push", "-q", "origin", "pr")
+	s.git(s.up, "reset", "-q", "--hard", old.c0)
+	s.commit(s.up, "u3", map[string]string{"up3.txt": "u3\n"})
+	tip := s.push()
+	s.git(s.work, "merge", "-q", "--ff-only", "origin/pr")
+
+	s.refusedThenTold(tip)
+}
+
 func TestBringCurrentLeavesAConflictInGitsMergeState(t *testing.T) {
 	s := newScratch(t)
 	old := s.oldLineage()

@@ -164,6 +164,48 @@ func FirstParents(dir, head, stop string) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
+// MergeCommit is a merge of a first-parent history: the commit, and the
+// parents after its first, which it took in.
+type MergeCommit struct {
+	Commit string
+	TookIn []string
+}
+
+// Merges lists the merges among head and its first parents, newest first,
+// back to the first that stop holds, which it leaves out.
+func Merges(dir, head, stop string) ([]MergeCommit, error) {
+	if !IsObjectID(head) || !IsObjectID(stop) {
+		return nil, fmt.Errorf("git rev-list: %q and %q must be full object names", head, stop)
+	}
+	out, err := Output(dir, "rev-list", "--first-parent", "--merges", "--parents", head, "^"+stop)
+	if err != nil {
+		return nil, err
+	}
+	var merges []MergeCommit
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); len(f) > 2 {
+			merges = append(merges, MergeCommit{Commit: f[0], TookIn: f[2:]})
+		}
+	}
+	return merges, nil
+}
+
+// Parents lists commit's parents, in their order.
+func Parents(dir, commit string) ([]string, error) {
+	if !IsObjectID(commit) {
+		return nil, fmt.Errorf("git rev-list: %q is not a full object name", commit)
+	}
+	out, err := Output(dir, "rev-list", "--parents", "-n", "1", commit)
+	if err != nil {
+		return nil, err
+	}
+	f := strings.Fields(out)
+	if len(f) == 0 || f[0] != commit {
+		return nil, fmt.Errorf("git rev-list --parents %s answered %q", commit, strings.TrimSpace(out))
+	}
+	return f[1:], nil
+}
+
 // CommonBase is a best common ancestor of commits a and b, as `git merge-base`
 // answers, and ok is false when the two share no history.
 func CommonBase(dir, a, b string) (base string, ok bool, err error) {
