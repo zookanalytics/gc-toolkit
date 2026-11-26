@@ -252,9 +252,9 @@ QREMOVE="$(extract "$ROOT/formulas/mol-review-quorum-signoff.toml" quorum-review
 for v in GATHER REMOVE QREMOVE; do
     if [ -n "${!v}" ]; then ok "the formula's $v lines extract"; else bad "the formula's $v lines extract (markers missing)"; fi
 done
-# The pack gc names holds the scripts the gather calls and the libs they source.
+# The pack gc names holds the scripts the gather calls.
 PACK="$TMP/pack"; mkdir -p "$PACK/assets/scripts"
-cp "$SUT" "$HERE/review-evidence.sh" "$HERE/bd-lib.sh" "$HERE/rig-check-lib.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
+cp "$SUT" "$HERE/review-evidence.sh" "$HERE/rig-root.sh" "$PACK/assets/scripts/"
 # The gather reads the rig's guidance through gctk, built from this checkout.
 harness_build_gctk
 [ -n "$GCTK_BUILT" ] || { echo "gctk did not build: $GCTK_BUILD_ERR" >&2; exit 1; }

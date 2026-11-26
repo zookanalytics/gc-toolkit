@@ -47,16 +47,21 @@
 #
 # ## Why resolution is bd-only
 #
-# Every bead lookup here goes through `bd`, never `gc` (and `gc bd` is `gc` for
-# this purpose). `bd` talks to the bead store directly; `gc` subcommands first
-# load the full city config including the pack import closure, which in the
-# condition env can be cold — then the `gc` call dies before doing anything
+# Every bead lookup this script makes goes through `bd`, never `gc` (and `gc bd`
+# is `gc` for this purpose). `bd` talks to the bead store directly; `gc`
+# subcommands first load the full city config including the pack import
+# closure, which in the condition env can be cold — then the `gc` call dies
+# before doing anything
 # ("... locked but not cached ...; run 'gc import install'"). A resolution that
 # dies goes blind to an already-green gate AND suppresses the exhaustion note
 # below (which is gated on a resolved $ISSUE), so the loop burns its whole
 # budget and ends with nothing on the work bead to say so. Keeping resolution on
 # `bd` keeps both working in a minimal env. Each `bd` call carries a `# raw-bd:`
-# marker, which the raw-bd-invocation lint reads.
+# marker, which the raw-bd-invocation lint reads. Whether a pre-existing mark
+# holds a fail is gctk's question (step 5), which reads the store through `gc`,
+# as the review loop's condition does through `gctk review passed`. A fail it
+# cannot judge fails the check with gctk's reason, and resolution and the
+# exhaustion note still answer.
 #
 # ## Why this script notes the LAST failing attempt on the work bead
 #
@@ -282,30 +287,29 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # declares no command for has no command to match, and the iteration may run
 # the repo's own gate in its place, so any run's record answers for it.
 #
-# A recorded fail passes only when the work bead's
-# rig_check_pre_existing.<check> holds that very record at this HEAD: the
-# iteration found the same failure red on the base and carried by a tracker
-# (rig-check-pre-existing.sh). A run with another command or scope replaces the
-# record, and its fail needs a judgment of its own. rig-check-lib.sh holds the
-# one definition of that judgment.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || fail "could not resolve this script's directory"
-# shellcheck source=rig-check-lib.sh
-. "$HERE/rig-check-lib.sh" || fail "cannot source rig-check-lib.sh beside this script"
+# A recorded fail passes only while the work bead's pre-existing mark holds it:
+# the iteration found the same failure red on the base, carried by a tracker,
+# and marked that very record at this HEAD. `gctk rig pre-existing` answers
+# whether the mark holds, which it does only for the record it judged, so a run
+# with another command or scope needs a judgment of its own, and only while a
+# tracker it names is open.
 FAILED=""
 UNRECORDED=""
-# judged <check> <record> : a fail at HEAD fails the check unless the work
-# bead's pre-existing mark for it holds <record> and names a tracker.
+# judged <check> : a fail at HEAD fails the check unless the work bead's
+# pre-existing mark for it holds there. An answer gctk could not give is a read
+# this script could not make.
 judged() {
-	local pre
-	pre=$(printf '%s' "$ISSUE_JSON" | jq -r --arg k "rig_check_pre_existing.$1" --arg c "$HEAD_SHA" --arg rec "$2" \
-		"$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
-	case "$pre" in
-	"tracked by "*) note "$1: the fail at $HEAD_SHA is pre-existing, $pre" ;;
-	"another run")
+	local why rc
+	why=$(cd "$WORKTREE" && "$GCTK" rig pre-existing "$1" --bead "$ISSUE" 2>"$RIG_ERR")
+	rc=$?
+	cat "$RIG_ERR" >&2
+	case "$rc" in
+	0) note "$1: the fail at $HEAD_SHA is $why" ;;
+	1)
 		FAILED="$FAILED $1"
-		note "$1: the pre-existing mark at $HEAD_SHA judged another run's fail, so this one needs a judgment of its own"
+		[ -z "$why" ] || note "$1: $why"
 		;;
-	*) FAILED="$FAILED $1" ;;
+	*) fail "$1: gctk rig pre-existing $1 exited $rc, so nothing shows the fail at $HEAD_SHA is pre-existing${why:+: $why}" ;;
 	esac
 }
 # declared <var> : what the pour rendered into the step for {{<var>}}, empty for
@@ -366,7 +370,7 @@ for CHECK in test lint typecheck; do
 		UNRECORDED="$UNRECORDED $CHECK"
 		continue
 	fi
-	[ "$RC" = 0 ] || judged "$CHECK" "$REC"
+	[ "$RC" = 0 ] || judged "$CHECK"
 done
 
 # --- 6. setup and build must have passed at THIS HEAD ------------------------
@@ -392,7 +396,7 @@ else
 	for CHECK in setup build; do
 		case "$(printf '%s' "$NOTE" | jq -r --arg k "$CHECK" '.[$k] // ""' 2>/dev/null)" in
 		pass | none) ;;
-		fail) judged "$CHECK" "$NOTE" ;;
+		fail) judged "$CHECK" ;;
 		*) FAILED="$FAILED $CHECK" ;;
 		esac
 	done

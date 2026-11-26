@@ -9,8 +9,7 @@
 #   - a SUT dir holding copies of the scripts under test and the libraries
 #     they source, beside stubs for the scripts they call but no suite here
 #     proves (human-gate.sh, patrol-finding.sh, pool-route.sh, lifecycle.sh,
-#     preexisting-failure.sh, rig-check-pre-existing.sh, stand-down.sh), each
-#     logging its argv;
+#     preexisting-failure.sh, stand-down.sh), each logging its argv;
 #   - fake gc, gh and gctk on PATH, over a JSON bead store ($STORE). The fake
 #     `gctk bead arm` records the arm's target on the bead as
 #     gc.dispatch_when_ready, or writes nothing when $STUB_ARM_RC is set to a
@@ -22,6 +21,8 @@
 #     The fake `gctk review ask` files an ask on the bead's branch, with the
 #     bead's blocks edge onto it, or finds one of the same reason, and exits
 #     $STUB_ASK_RC with nothing filed when that is set.
+#     The fake `gctk rig pre-existing` logs its call and the directory it ran
+#     in, and exits $STUB_MARK_RC, 0 when unset.
 #     The fake `gctk pr compose` names, as riding the owner's PR, each bead whose
 #     landing onto the owner's branch the lifecycle stub logged. With --edit it
 #     is the real one's, through $BIN/gctk-real (_rt_gctk_real). The fake gh
@@ -63,7 +64,7 @@ rt_init() {
   for f in bd-lib.sh refinery-lib.sh gctk-resolve.sh branch-push.sh pr-post.sh work-lib.sh run-lib.sh conversation.sh "$@"; do
     cp "$here/$f" "$SUT/"; chmod +x "$SUT/$f"
   done
-  for f in human-gate patrol-finding lifecycle preexisting-failure rig-check-pre-existing stand-down pool-route queue-priority; do
+  for f in human-gate patrol-finding lifecycle preexisting-failure stand-down pool-route queue-priority; do
     [ -e "$SUT/$f.sh" ] || _rt_stub "$f"
   done
   export GC_QUEUE_PRIORITY_TOOL="$SUT/queue-priority.sh"
@@ -458,6 +459,9 @@ riding: $riders}"
     jq --arg id "$bead" --arg u "$url" --arg h "$head" --arg t "$target" \
       'map(if .id == $id then .status = "blocked" | .assignee = "" | .metadata += {merge_result: "pull_request_pending", pr_url: $u, pr_head_sha: $h, merged_target: $t, pr_reconcile_pending: "true", existing_pr: $u} else . end)' \
       "$STORE" > "$STORE.n" && mv "$STORE.n" "$STORE" ;;
+  "rig pre-existing")
+    echo "rig pre-existing ran in $PWD" >> "$LOGS/gctk.log"
+    exit "${STUB_MARK_RC:-0}" ;;
   rig\ *)
     check="$2"; shift 2; cmd=""
     while [ $# -gt 0 ]; do case "$1" in --command) cmd="$2"; shift ;; esac; shift; done
