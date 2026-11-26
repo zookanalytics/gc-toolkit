@@ -33,10 +33,11 @@ could find this out itself. Four runs named the operator's pair: the caller
 picks `revise` or bd's note append by whether the work runs. One put it this
 way: "So the caller must know whether the bead's work runs and who holds it,
 which is the state the doc's caller's-seat rule names as one a caller must not
-track. The command already finds it out itself." The other five named a second
-choice in the same teaching. The work skill sends a change to a bead whose work
-already has an open PR as an ask on the PR, so the caller picks `revise` or an
-ask by whether the work has an open PR, or has reached the refinery. The command
+track. The command already finds it out itself: with no session working the
+bead it writes the note alone." The other five named a second choice in the
+same teaching. The work skill sends a change to a bead whose work already has
+an open PR as an ask on the PR, so the caller picks `revise` or an ask by
+whether the work has an open PR, or has reached the refinery. The command
 could read that state from the bead's pending record.
 
 Two of those five took the choice between `revise` and the note append to be
