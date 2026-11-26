@@ -170,9 +170,10 @@ The check reads each command, verb, flag or mode a change adds from the seat of
 its caller, the agent or the code that calls it, whether the change adds it to
 gctk or to a script. Read it where its caller meets it: the skill, prompt,
 formula step or usage text that teaches it, and the commands beside it there.
-Then answer two questions:
+List every other command the caller could run for what it means to do, the
+native ones among them. Then answer two questions:
 
-1. What must the caller know to choose it and to use it correctly?
+1. What must the caller know to choose it over those and to use it correctly?
 2. Could the command find that out itself?
 
 A caller knows what it means to do. When it must also know something else to
@@ -194,5 +195,5 @@ The verdict body adds a line for each command, verb, flag or mode the change
 adds:
 
 ```
-Caller: <the command, verb, flag or mode>: <what its caller must know to choose it and use it>; <what of that the command could find out itself, or none>
+Caller: <the command, verb, flag or mode>: <the other commands for the same act>; <what its caller must know to choose it over those and use it>; <what of that the command could find out itself, or none>
 ```

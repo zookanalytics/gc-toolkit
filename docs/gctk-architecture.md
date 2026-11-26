@@ -90,9 +90,10 @@ registry that enumerates its consumers.
   [the rule that admits it](#the-rule-that-admits-an-order).
 
 Each verb, and each flag or mode on it, is designed from its caller's seat. The
-plan that adds one answers two questions: what must the caller know to choose it
-and to use it correctly, and could the command find that out itself? What the
-command could find out is the command's to find. The caller chooses by what it
+plan that adds one lists every other command its caller could run for the same
+act, native ones among them, and answers two questions: what must the caller
+know to choose it over those and to use it correctly, and could the command find
+that out itself? What the command could find out is the command's to find. The caller chooses by what it
 means to do, and a flag or mode carries only what the caller alone knows, such
 as the parent a placement puts a bead under. A design whose caller must track a
 state the command could read, such as whether a bead's work is running or who
