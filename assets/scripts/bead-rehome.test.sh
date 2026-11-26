@@ -836,7 +836,7 @@ rc=0; STUB_DEP_ADD_FAIL=al-waiterB run --origin al-wdup9 --successor al-wcanon9 
 eq "$rc" 7 "a waiter bd refuses the edge refuses the close until a person acts (exit 7)"
 eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "…the duplicate stays open with no edge"
 eq "$(edge alpha al-waiterA al-wcanon9)/$(edge alpha al-waiterB al-wcanon9)" "/" "…and neither waiter gains an edge"
-has "$(cat "$TMP/err")" "simulated refusal for al-waiterB" "…bd's refusal is printed"
+has "$(tail -n 1 "$TMP/err")" "simulated refusal for al-waiterB" "…bd's refusal is in the refusal's own line"
 has "$(cat "$TMP/err")" "dep remove <bead> al-wdup9; re-run this call" "…and the refusal names the wait to end before a re-run"
 # --check and the dry run name the waits that would move, and write nothing.
 mkbead alpha open al-wdup11
