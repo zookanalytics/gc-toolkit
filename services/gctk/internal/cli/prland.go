@@ -191,7 +191,13 @@ the lock and still records the ruling the act read, so a release or a second
 ruling that lands once the lock is free leaves the bead to the next run, which
 reads it again. A close the script holds for now, such as one the ruling's
 open conversation holds, is reported as checked, and the next run hands it
-over again. A retired PR that merged all the same lands as any other.
+over again. A close the script refuses until a person acts, such as one a
+bead that waits on the bead refuses when the successor is in another store, is
+reported as excepted: the run files a human gate on the bead under
+pr-dispose-failed.<number>, which names the script's refusal, and the next run
+hands the close over again, naming that key, so the script withdraws the gate
+just before the close once the person has acted. A retired PR that merged all
+the same lands as any other.
 
 The review run is mol-pr-review, poured with gc formula cook --attach onto the
 bead under the record lock, with the record's PR bead, head, target and branch
@@ -586,8 +592,12 @@ func (r runs) Rank(ctx context.Context, root string) error {
 // the ruling the run read there. The script's exit 4 (the bead is not as the
 // run judged it, or a write did not land, as when the bead moved since the
 // script's own read) and exit 5 (the close is held, as by an open wait) are a
-// close held for now. Any other failure, or a script that did not run, is an
-// error carrying why.
+// close held for now. Its exit 3 (the successor does not exist), exit 6 (the
+// bead names another successor) and exit 7 (the close is refused until a person
+// acts, as for a waiter that cannot wait on the successor) are a close refused.
+// Each call names the key the run files a refusal's gate under, so the script
+// withdraws that gate just before a close it no longer refuses. Any other
+// failure, or a script that did not run, is an error carrying why.
 type dispositions struct{ rt gascity.Runtime }
 
 func (d dispositions) Close(x pr.Disposal) error {
@@ -596,13 +606,15 @@ func (d dispositions) Close(x pr.Disposal) error {
 	if r.Store != "" {
 		args = append(args, "--successor-store", r.Store)
 	}
-	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled")
+	args = append(args, "--if-status", x.Status, "--if-assignee", x.Assignee, "--if-ruled", "--except-key", x.GateKey())
 	res := d.rt.Script("bead-rehome.sh", args...)
 	switch {
 	case res.Err == nil && res.Code == 0:
 		return nil
 	case res.Err == nil && (res.Code == 4 || res.Code == 5):
 		return &pr.HeldClose{Why: "bead-rehome.sh: " + res.Failure()}
+	case res.Err == nil && (res.Code == 3 || res.Code == 6 || res.Code == 7):
+		return &pr.RefusedClose{Why: "bead-rehome.sh: " + res.Failure()}
 	}
 	return fmt.Errorf("bead-rehome.sh: %s", res.Failure())
 }

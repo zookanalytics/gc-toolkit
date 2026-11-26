@@ -1459,6 +1459,11 @@ read under the lock still finds them, and an assignment or a second ruling
 that lands once the lock is free leaves the anchor to the next run, which reads it
 again. A close `bead-rehome.sh` holds, such as one the ruling's open
 conversation holds, is tried again by the next run, with no gate filed. A
+close it refuses until a person acts, such as one a bead that waits on the
+anchor refuses while the successor is in another store, files one human gate
+under `pr-dispose-failed.<num>` that names the refusal. Every later run tries
+the close again and names that key to `bead-rehome.sh`, which withdraws the
+gate just before the close once nothing refuses it. A
 changed head the refinery is already validating can reach the refinery's
 publication before that close, and the publication finds the PR closed and
 parks the anchor behind `refinery-invalid-existing-pr`, which a stand-down

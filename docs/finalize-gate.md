@@ -122,9 +122,9 @@ below exists to see a gate filed after the first check.
   else would hold the close, writing nothing, which is how `stand-down.sh` learns
   before it answers any gate whether the close can follow. Before it asks, it
   takes each gate under its key that its ruling answers back from a person
-  assigned it. `pr-facts.sh` names its own `pr-dispose-failed.<num>` key when
-  it retries a pre-recorded PR-close disposition. The retry then closes in three
-  steps:
+  assigned it. `pr-facts.sh` and the landing order name the
+  `pr-dispose-failed.<num>` key their refusals file under when they retry a
+  pre-recorded PR-close disposition. The retry then closes in three steps:
   1. It reads what would hold the close: the gate, and the bead's live blockers
      and open children, which an unforced `bd close` refuses on. Anything but
      the bead's own gates under the key that no person is assigned holds the

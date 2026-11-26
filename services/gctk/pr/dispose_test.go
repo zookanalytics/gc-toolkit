@@ -25,19 +25,21 @@ import (
 const conversation = "tk-conv"
 
 // rehome is the disposition writer as a test sets it. It records each close it
-// is asked for, holds one while held says why, fails one while err is set,
+// is asked for, holds one while held says why, refuses one while refused says
+// why, fails one while err is set,
 // holds one whose bead no longer has the status, the assignee or the ruling the
 // run judged, as bead-rehome.sh's --if-status, --if-assignee and --if-ruled
 // do, and otherwise closes the bead and clears the marker, as bead-rehome.sh's
 // close does.
 type rehome struct {
-	mu    sync.Mutex
-	store *fake.Store
-	calls []string
-	notes []string
-	got   []pr.Disposal
-	held  string
-	err   error
+	mu      sync.Mutex
+	store   *fake.Store
+	calls   []string
+	notes   []string
+	got     []pr.Disposal
+	held    string
+	refused string
+	err     error
 }
 
 func (r *rehome) Close(x pr.Disposal) error {
@@ -52,6 +54,8 @@ func (r *rehome) Close(x pr.Disposal) error {
 		return r.err
 	case r.held != "":
 		return &pr.HeldClose{Why: r.held}
+	case r.refused != "":
+		return &pr.RefusedClose{Why: r.refused}
 	}
 	row, ok := r.store.Row(x.Bead)
 	if !ok {
@@ -191,6 +195,9 @@ func TestAHeldDispositionCloseIsTriedAgainByTheNextRun(t *testing.T) {
 		t.Fatalf("a held close left the bead %s", b.Status)
 	}
 	meta(t, b, map[string]string{"pr_state": "closed", "pr_reconcile_pending": "true", "merge_result": record.Pending})
+	if g := d.gates.list(); len(g) != 0 {
+		t.Fatalf("a held close filed gates %v", g)
+	}
 	r.held = ""
 	is(t, d.once(t), pr.ActDisposed)
 	if n := len(r.asked()); n != 2 {
@@ -198,11 +205,38 @@ func TestAHeldDispositionCloseIsTriedAgainByTheNextRun(t *testing.T) {
 	}
 }
 
+// A close the writer refuses until a person acts files the human gate that
+// asks them, under the PR's own key, which each later hand-off names to the
+// writer, and the next run hands the close over again, which the writer takes
+// once the person has acted.
+func TestARefusedDispositionCloseAsksAPerson(t *testing.T) {
+	d, r := retired(t)
+	d.pr.Facts.State = "CLOSED"
+	r.refused = "bead-rehome.sh: tk-w waits on the bead, and tk-conv is in another store"
+	o := d.once(t)
+	is(t, o, pr.ActExcepted)
+	if !strings.Contains(o.Detail, r.refused) {
+		t.Fatalf("the refused close says %q", o.Detail)
+	}
+	if g := d.gates.list(); !slices.Equal(g, []string{bead + " pr-dispose-failed.7"}) {
+		t.Fatalf("a refused close filed gates %v", g)
+	}
+	if m := d.gates.messages[0]; !strings.Contains(m, r.refused) || !strings.Contains(m, "PR #7") {
+		t.Fatalf("the gate asks %q", m)
+	}
+	if k := r.disposals()[0].GateKey(); k != "pr-dispose-failed.7" {
+		t.Fatalf("the writer was handed the gate key %q", k)
+	}
+	meta(t, d.row(t), map[string]string{"pr_state": "closed", "pr_reconcile_pending": "true", "merge_result": record.Pending})
+	r.refused = ""
+	is(t, d.once(t), pr.ActDisposed)
+}
+
 // A writer that did not answer is a failed record, which fails the run.
 func TestADispositionWriterThatDidNotAnswerFailsTheRun(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
-	r.err = errors.New("bead-rehome.sh: exit 3: successor tk-conv does not exist")
+	r.err = errors.New("bead-rehome.sh: exit 2: the store of tk-conv does not resolve")
 	d.refresh(t)
 	var out []pr.RunOutcome
 	err := d.l.Reconcile(pr.Options{}, func(o pr.RunOutcome) { out = append(out, o) })
@@ -210,20 +244,21 @@ func TestADispositionWriterThatDidNotAnswerFailsTheRun(t *testing.T) {
 		t.Fatalf("Reconcile: %v, outcomes %+v", err, out)
 	}
 	is(t, out[0], pr.ActFailed)
-	if !strings.Contains(out[0].Detail, "does not exist") {
+	if !strings.Contains(out[0].Detail, "does not resolve") {
 		t.Fatalf("the failure says %q", out[0].Detail)
 	}
 }
 
 // The writer is handed the run's judgment of the bead under the record lock:
-// the status and assignee it read there, and the ruling it read.
+// the status and assignee it read there, and the ruling it read, with the PR's
+// number, which names the gate a refusal files.
 func TestTheDispositionWriterIsHandedTheRunsJudgment(t *testing.T) {
 	d, r := retired(t)
 	d.pr.Facts.State = "CLOSED"
 	is(t, d.once(t), pr.ActDisposed)
 	want := pr.Disposal{Bead: bead, Status: "blocked", Assignee: "",
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: conversation},
-		Note:        "PR #7 closed under the disposition a ruling recorded before the close"}
+		Note:        "PR #7 closed under the disposition a ruling recorded before the close", Number: 7}
 	if got := r.disposals(); len(got) != 1 || got[0] != want {
 		t.Fatalf("the writer was handed %+v, want %+v", got, want)
 	}
