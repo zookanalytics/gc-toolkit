@@ -82,7 +82,11 @@ no warrant.
   - `workspace-setup` cuts the tree at `.gc/worktrees/<rig>/<bead>`, beside the
     agents' homes, where Gas City's claim cuts a bead's tree. Core's variants cut
     it in the agent's home, and Gas Town's under
-    `.gc/worktrees/<rig>/artifacts/worktrees/`. A run's steps are claimed by
+    `.gc/worktrees/<rig>/artifacts/worktrees/`. The claim's own tree is the
+    claimed bead's, on a branch of Gas City's naming made from the rig's
+    `default_branch`. This formula's claims take its steps, and one tree on the
+    work bead's branch and base serves five of them and the sessions that claim
+    them. A run's steps are claimed by
     different sessions, so the tree outlives the session that cuts it, and Gas
     City can remove a closed pool session's home with everything under it. The tree
     is recorded as `work_dir`, which Gas City's closed-bead reaper reads, where
@@ -120,6 +124,12 @@ no warrant.
   - `cmd/gc/cmd_hook_worktree.go`: `gc hook --claim --worktree` cuts the claimed
     bead's tree at `<city>/.gc/worktrees/<rig>/<bead>` through
     `gc worktree ensure` ([gc hook](https://docs.gascity.com/reference/cli#gc-hook)).
+    `hookClaimWorktreeProvisioner.provision` keys the tree, its branch
+    `gc/<rig>/<bead>` and its receipt on the claimed bead, makes the branch from
+    the rig's `default_branch` and refuses a rig that sets none, and
+    `verifyGitState` in `internal/worktree/worktree.go` wants HEAD on exactly
+    that branch. The search is
+    [specs/tk-1nio71o/gas-city-search.md](../specs/tk-1nio71o/gas-city-search.md).
   - `cmd/gc/bead_worktree_reaper.go`, `scanBorrowVetoReferences`: the reaper keeps
     a tree that a bead outside the terminal states names in `gc.work_dir` or
     `work_dir`.
@@ -142,15 +152,17 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc31 and
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
   by merge and never rebases one
   ([built-once-target.md](built-once-target.md#merge)). Its cut of the tree
-  retires once the build a city runs carries `gc hook --claim --worktree` and the
-  formula moves onto the tree the claim cuts.
+  retires once a claim's tree is keyed on the work a workflow's steps share, on
+  the branch and base that work names, as gc-jfqa5v asks of Gas City and
+  gastownhall/gascity#6442 and #8963 would serve. The formula then moves onto
+  the tree the claim cuts.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: the merge and review nouns it holds retire, the
   bring-current guard among them with the old review path (`tk-1tfzr71.122`).
