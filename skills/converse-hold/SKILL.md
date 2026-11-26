@@ -19,9 +19,7 @@ sentence, so what does not fit goes in the notes.
 ## 1. Record the hold
 
 The conversation's `holding:` line is the record the entry reads after a
-restart, so post no framing until the block below has written that line. The
-entry claimed the conversation for this sitting, on a return as on any other
-entry, so the line's write is guarded on that claim:
+restart, so post no framing until the block below has written that line:
 
 ```bash
 NEED="<the one decision or input needed, at most 130 characters>"

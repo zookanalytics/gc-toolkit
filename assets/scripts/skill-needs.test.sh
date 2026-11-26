@@ -672,8 +672,8 @@ have "…and one that sends other work promises nothing, which brings it no retu
     'and promise nothing, because the stay waits for one piece at a time and the promise refuses a second' "$TMP/stay-squeezed"
 have "the return records what the operator owes first" \
     'Record what the operator owes, first**, as `converse-hold` gives (Record the hold).' "$TMP/stay-squeezed"
-have "…reads the PR at the head the gate closed at and at the head it has now" \
-    'Read the work'"'"'s PR at the head the gate'"'"'s close names and at the head it has now' "$TMP/stay-squeezed"
+have "…reads the PR at the head the entry's returned line names and at the head it has now" \
+    'Read the work'"'"'s PR at the head the entry'"'"'s `returned` line names and at the head it has now' "$TMP/stay-squeezed"
 have "…and reports on a newer head only once its review and required checks have passed" \
     'Report on the head the PR has now only once its status shows that head'"'"'s review and required checks have passed' "$TMP/stay-squeezed"
 have "…and a return for work that closed checks it except when the PR merged at a head already discussed, in a step of its own" \

@@ -193,9 +193,8 @@ runs the entry. While the work is out, the merge of an open PR this
 conversation holds waits for the return. In a rig's store, the city also
 holds the merge of the PR the stay is for, from when it has finished with that
 PR, so an approval merges nothing until the operator has settled the work with
-the sitting. That hold is on before the city wakes the sitting. When the
-operator wants a held PR to land without the return, lift that hold
-(`converse-hold`).
+the sitting. When the operator wants a held PR to land without the return,
+lift that hold (`converse-hold`).
 
 ### In the city's own store
 
@@ -247,11 +246,10 @@ stay (above). Take the case that fits:
   that piece, and its gate is open already, so the stay goes on, and comes back
   once the city has finished with the PR again. For the PR under discussion,
   run the stay's call again in its rework form, which files the ask and keeps
-  the gate. While the conversation's first rework is open, the sign-off
-  refuses a second. Then tell the operator that the point waits for the
-  return. For another PR, such as new work's, file the ask on its anchor as the
-  `prs` skill's send-back gives, and run nothing else. Work that has no PR yet
-  takes no ask: tell the operator the point waits for the return.
+  the gate. Then tell the operator that the point waits for the return. For
+  another PR, such as new work's, file the ask on its anchor as the `prs`
+  skill's send-back gives, and run nothing else. Work that has no PR yet takes
+  no ask: tell the operator the point waits for the return.
 - **The operator rules other work.** Send it as `converse-settle` gives (Send
   the work), and promise nothing, because the stay waits for one piece at a
   time and the promise refuses a second. Tell the operator that this work
@@ -325,16 +323,13 @@ Record no hold until the line prints, and say in the thread what stopped it.
 ## The return
 
 The entry says `returned` once the work is back, and prints `WORK`, the work
-the stay came back for, and `AGREED`. Its line says why the gate closed: the
-work's PR read `needs-review` or `merging` in its own right at a head it names,
-or the work closed. In the city's own store, it reads `returned` once the work
-has closed.
+the stay came back for, and `AGREED`. In the city's own store, it reads
+`returned` once the work has closed.
 
 The return discusses the result with the operator. It works on nothing, takes
 no check's send-back, and passes and fails nothing, because the return is not
 one of the work's checks. The subject closes as it would after a hand-off, such
-as through the validating closer the stay armed. In a rig's store, the work's
-PR, when it has one, is held until the operator settles it with you.
+as through the validating closer the stay armed.
 
 Start where the return stands:
 
@@ -346,20 +341,16 @@ Start where the return stands:
 - **Otherwise**, start at step 1.
 
 1. **Record what the operator owes, first**, as `converse-hold` gives (Record
-   the hold). The entry has claimed the conversation, so the hold's record
-   lands only while this sitting holds it. Its `holding:` line is what a
-   restart reads from then on.
-2. **Read the result.** Read the work's PR at the head the gate's close names
-   and at the head it has now, with the review's account of each round since
-   the head you last read
+   the hold).
+2. **Read the result.** Read the work's PR at the head the entry's `returned`
+   line names and at the head it has now, with the review's account of each
+   round since the head you last read
    (`"$CONV/converse-pr-conversation.sh" <work-bead-id>`), and with the
    PR's status, read as `converse-hold` reads an open PR's (Post the framing),
-   the work's bead as its anchor. The city can start a round after the gate
-   closes, such as a repair after a failing check or a merge of the target.
-   When the two heads differ, read what changed between them. Report on the
-   head the PR has now only once its status shows that head's review and
-   required checks have passed. When the work has closed,
-   `gc bd show <work-bead-id>` gives how it closed and its PR.
+   the work's bead as its anchor. When the two heads differ, read what changed
+   between them. Report on the head the PR has now only once its status shows
+   that head's review and required checks have passed. When the work has
+   closed, `gc bd show <work-bead-id>` gives how it closed and its PR.
 3. **Check it against what was agreed, item by item.** The items are the ones
    written in the work's brief or in the send-back's order, with your thread
    and `AGREED` beside them. The subject's notes and the resolve reasons of the
@@ -382,7 +373,7 @@ Start where the return stands:
 5. **Wait for the operator**, whichever line the summary closed with. The PR's
    merge stays held until they settle.
 
-When the gate closed because the work closed, merged or with no PR:
+When the entry's `returned` line says the work closed:
 
 1. Read how it closed.
 2. Check it against what was agreed, as above. Skip this check when the PR

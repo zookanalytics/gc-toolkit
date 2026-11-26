@@ -318,8 +318,7 @@ Take the case that fits the ruling:
   the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`. Never send a
   formula the subject recommends this way: the next case takes it. A sitting
   that stays for the subject sends it first, then promises it, then makes this
-  sign-off its stay (`converse-stay`). The subject's work starts once that
-  sign-off has answered the gates that hold the subject.
+  sign-off its stay (`converse-stay`).
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
