@@ -102,6 +102,16 @@ func TestACallActsInTheStoreGcPicks(t *testing.T) {
 	}
 }
 
+func TestChildrenReadsTheStoreOfTheBeadItNames(t *testing.T) {
+	f := rigFixture(t)
+	if r := f.gc(writeFlag, "row", "al-c", "parent=al-1"); r.status != 0 {
+		t.Fatalf("a fixture write of alpha's child: %+v", r)
+	}
+	if got := ids(t, f.gc("bd", "children", "al-1", "--json")); got != "al-c" {
+		t.Errorf("children al-1 = %q, want the child alpha's store holds", got)
+	}
+}
+
 func TestSlingAndWorkflowActInTheBeadsStore(t *testing.T) {
 	f := rigFixture(t)
 	if r := f.gc("sling", "--rig", "beta", "beta/pool", "x-1", "--on", "mol-x"); r.status != 0 || !strings.Contains(f.file("beta/.beads/beads.json"), `{"id":"x-1","metadata":{"gc.execution_routed_to":"beta/pool"}`) {
