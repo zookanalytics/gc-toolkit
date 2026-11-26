@@ -44,9 +44,13 @@ feedback *says*, not how loud it is.
   corrective feedback about standing behavior — a mis-capture,
   diff-content review, noise — is discarded with a one-line stated
   reason; discarded observations are stamped consumed like any judged
-  observation. Outside review feedback is the exception: it is read as
-  a set ([below](#outside-review-feedback-is-read-as-a-set)), never
-  discarded as diff review.
+  observation. Two kinds are never discarded this way. Outside review
+  feedback is read as a set
+  ([below](#outside-review-feedback-is-read-as-a-set)), never discarded
+  as diff review. An agent's suggestion, a change to how agents work
+  that it proposes from what it saw, is evidence like any self-reported
+  observation: merge it with its repeats, weigh it by judgment 2 for
+  recurrence and shared cause, and send it where judgment 3 says.
 
 ### 2. Has the pattern earned generalization?
 
