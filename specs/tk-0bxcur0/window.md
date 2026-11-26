@@ -21,18 +21,21 @@ City's compactor order is turned off, so compaction runs only in the window.
 Each window takes the city down for about five minutes. Every running agent
 session stops, and each picks its work up again from its bead when it starts.
 
-| Option | What stops | What the stores do |
-|---|---|---|
-| **Weekly window, Dolt's auto-GC left on (recommended)** | The city, about five minutes once a week | This rig's store gains about 5.3 GiB between windows, so it reaches about 7.6 to 7.9 GiB before each one. Dolt's auto-GC keeps trimming each store's journal with sessions connected, as Gas City ships it. |
-| Daily window, auto-GC off | The city, about five minutes every day | No GC ever runs with a session connected, which is what Gas City's own config note asks of a city that keeps mail and wisps in `dolt_ignore`d tables. The HQ store's journal then grows untrimmed between windows, by 4 to 8 GB a day. |
-| No window | Nothing | This rig's store keeps growing about 0.76 GiB a day and passes 20 GB, the size Gas City's bloat runbook lists as a symptom, in about three weeks. The compactor order keeps failing every two hours. |
+| Option | What stops | Mail and wisps | What the stores do |
+|---|---|---|---|
+| **Weekly window, Dolt's auto-GC left on (recommended)** | The city, about five minutes once a week | Auto-GC keeps collecting each store's journal with sessions connected, as Gas City ships it, and Gas City's own config note warns that it can lose them. Whether it has lost any here is not established. | This rig's store gains about 5.3 GiB between windows, so it reaches about 7.6 to 7.9 GiB before each one. Auto-GC keeps each store's journal trimmed. |
+| Daily window, auto-GC off | The city, about five minutes every day | No GC ever runs with a session connected, which is what Gas City's own config note asks of a city that keeps them in `dolt_ignore`d tables. | The HQ store's journal grows untrimmed between windows, by 4 to 8 GB a day. |
+| No window | Nothing | As in the weekly window, auto-GC stays on. | This rig's store keeps growing about 0.76 GiB a day and passes 20 GB, the size Gas City's bloat runbook lists as a symptom, in about three weeks. The compactor order keeps failing every two hours. |
+
+The weekly window is recommended because it stops the city once a week, not
+every day, and auto-GC keeps the journals trimmed between windows. What it
+keeps is the risk Gas City's note warns of, which the daily window removes.
 
 The ruling this bead carries says nothing collects these stores until a
 window is approved. Dolt's auto-GC is the exception: it is Gas City's default,
 it collects each store's journal with sessions connected today, and this
-change leaves it as it is. Gas City's note says auto-GC can lose `dolt_ignore`d
-data. That is recorded upstream as tk-2h0yvep, and the daily option is the
-choice that stops it here.
+change leaves it as it is. The hazard Gas City's note names is recorded
+upstream as tk-2h0yvep.
 
 The operator approves the window in this PR. Merging it approves the
 recommended option. To take another, say so on the PR, and this page changes to
