@@ -138,12 +138,16 @@ func (g *GitHub) FullAsked() [][]int {
 	return slices.Clone(g.full)
 }
 
-// Repo is one repository's default branch, the checks at each ref, and the
-// deployments of each environment, newest first, by the environment's name.
+// Repo is one repository's default branch, the checks at each ref, the
+// deployments of each environment, newest first, by the environment's name,
+// its workflow runs, newest first, and the jobs of each run's latest attempt,
+// by the run's id.
 type Repo struct {
 	DefaultBranch string
 	Checks        map[string]*gh.HeadChecks
 	Deployments   map[string][]gh.Deployment
+	Runs          []gh.WorkflowRun
+	Jobs          map[int64][]gh.Job
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
@@ -607,6 +611,28 @@ func (g *GitHub) Deployments(repo, environment string, n int) ([]gh.Deployment, 
 	}
 	d := r.Deployments[environment]
 	return slices.Clone(d[:min(n, len(d))]), nil
+}
+
+// BranchRuns answers the newest n of the runs Repos holds, as the read's window
+// takes them, whatever branch it names and whatever event started them, so a
+// test can hand its code the runs GitHub's filters would let through, failing
+// as Fail["BranchRuns"] says.
+func (g *GitHub) BranchRuns(repo, branch string, n int) ([]gh.WorkflowRun, error) {
+	r, err := g.repo("BranchRuns", repo)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(r.Runs[:min(n, len(r.Runs))]), nil
+}
+
+// RunJobs answers the jobs Repos holds for run, failing as Fail["RunJobs"]
+// says. A run it holds no jobs for has none.
+func (g *GitHub) RunJobs(repo string, run int64) ([]gh.Job, error) {
+	r, err := g.repo("RunJobs", repo)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(r.Jobs[run]), nil
 }
 
 func (g *GitHub) repo(read, repo string) (*Repo, error) {

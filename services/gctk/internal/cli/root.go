@@ -93,6 +93,7 @@ form gctk <noun> <verb>, called by an agent, a hook or an order
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.AddCommand(
+		newActionsCmd(stdout, stderr),
 		newBeadCmd(stdout, stderr),
 		newDeploymentCmd(stdout, stderr),
 		newDistillerCmd(stdout, stderr),

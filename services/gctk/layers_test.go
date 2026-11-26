@@ -58,6 +58,7 @@ var pkgLayer = map[string]struct {
 	"internal/ledger":          {layer: theLedger},
 	"internal/lifecycle":       {layer: domain},
 	"internal/rig":             {layer: domain},
+	"actions":                  {layer: domain},
 	"arm":                      {layer: domain},
 	"arm/record":               {layer: domain},
 	"conversation":             {layer: domain},
