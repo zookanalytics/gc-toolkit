@@ -437,10 +437,12 @@ lands on the question rather than re-orienting.
 ## How lessons compound
 
 The feedback workflow ([feedback-learning.md](feedback-learning.md)) turns
-corrective feedback into standing behavior, so attention is never spent twice:
+corrective feedback and agents' own suggestions for how agents work into
+standing behavior, so attention is never spent twice:
 
 1. **Capture.** Working agents self-report observation beads when a turn
-   brings corrective feedback; the `feedback-miner` order sweeps merged PRs'
+   brings corrective feedback, and file their own suggestions as observations
+   too; the `feedback-miner` order sweeps merged PRs'
    review comments, recording every review post from outside the city and
    what self-report missed in the city's own; "learn this: …" is the
    operator fast path. Agents' memory notes are a second intake: a note
