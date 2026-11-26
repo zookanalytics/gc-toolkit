@@ -18,6 +18,11 @@
 #   * the run is the one this session executes: the root that `gc hook
 #     current`'s step names, which run-lib.sh is asked about, so a second live
 #     run over the convoy holds nothing;
+#   * --done with no --convoy, on the bead a claim with no poured run has
+#     handed back: the brief and the arm, with no hold, refused while a live
+#     run works the bead or the runs that work it do not read, and armed on the
+#     pool the session claims from ($GC_TEMPLATE) once the hand-back has
+#     cleared the bead's route;
 #   * every --done precondition refuses before anything is written: a claimed,
 #     routed or closed bead, no rig-qualified pool, no claimed step, a step that
 #     names no root, a run that has ended, works another bead or is poured over
@@ -345,6 +350,41 @@ reset
 run --bead tk-gone --base main --convoy tk-cv --done "$BRIEF"
 eq "$RC|$(writes)" "1|0" "an unknown bead: exit 1, nothing written"
 
+# ── 5b. --done with no --convoy: the bead a claim with no poured run handed back
+NORUN_ARGS=(--bead tk-work --base main --done "$BRIEF")
+reset; printf '[%s]\n' "${LIVE_RUN/\"live\":true/\"live\":false}" > "$RUN_LIB_STUB_RUNS"
+run "${NORUN_ARGS[@]}"
+eq "$RC" 0 "no --convoy, no live run: exit 0"
+has "$OUT" "mol-validate-close is armed on $POOL with no run to hold it" "no --convoy: names the closer and the pool"
+has "$(notes)" "## Close brief (store-only exit, " "no --convoy: the brief lands as a close brief section"
+has "$(notes)" "$BRIEF" "no --convoy: the brief lands verbatim"
+eq "$(grep -c '^tk-work|' "$FAKE_DEPS" | tr -d ' ')" 0 "no --convoy: no edge holds the bead"
+eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "no --convoy: the closer is armed on the pool"
+eq "$(meta tk-work gc.dispatch_when_ready_args)" '["--on","mol-validate-close"]' "no --convoy: the arm pours mol-validate-close"
+hasnt "$(cat "$GC_LOG")" "hook current" "no --convoy: no claimed step is read"
+eq "$(cat "$RUN_LIB_STUB_LOG")" "runs store_read tk-work" "no --convoy: run-lib.sh is asked which runs work the bead"
+reset; printf '[]\n' > "$RUN_LIB_STUB_RUNS"
+run "${NORUN_ARGS[@]}"
+run "${NORUN_ARGS[@]}"
+eq "$RC|$(meta tk-work gc.dispatch_when_ready)" "0|$POOL" "no --convoy, a re-run: exit 0, and the arm stays"
+
+# The hand-back cleared the route a plain sling left, and the pool is the one
+# the session claims from.
+NO_ROUTE='.metadata |= (del(.["gc.execution_routed_to"]) | .["gc.routed_to"] = "")'
+reset; printf '[]\n' > "$RUN_LIB_STUB_RUNS"; set_work "$NO_ROUTE"
+OUT=$(GC_TEMPLATE="gc-toolkit/gc-toolkit.polecat-codex" "$SCRIPT" "${NORUN_ARGS[@]}" 2>&1); RC=$?
+eq "$RC|$(meta tk-work gc.dispatch_when_ready)" "0|gc-toolkit/gc-toolkit.polecat-codex" "no route left: the closer is armed on the pool GC_TEMPLATE names"
+reset; printf '[]\n' > "$RUN_LIB_STUB_RUNS"; set_work "$NO_ROUTE"
+run "${NORUN_ARGS[@]}"; refused "no route left and no GC_TEMPLATE" "names no rig-qualified pool"
+
+reset
+run "${NORUN_ARGS[@]}"; refused "no --convoy, a live run works the bead" "the live run rooted at tk-root works tk-work"
+reset
+OUT=$(RUN_LIB_STUB_FAIL=runs "$SCRIPT" "${NORUN_ARGS[@]}" 2>&1); RC=$?
+refused "no --convoy, a run read that fails" "could not read the runs that work tk-work"
+reset; printf '[]\n' > "$RUN_LIB_STUB_RUNS"; set_work '.status = "in_progress" | .assignee = "sess-me"'
+run "${NORUN_ARGS[@]}"; refused "no --convoy, a claim not yet handed back" "is status 'in_progress', assignee 'sess-me'"
+
 # ── 6. a write that does not land stops what follows it ──────────────────────
 reset
 OUT=$(FAKE_UPD_FAIL=tk-work "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
@@ -379,7 +419,6 @@ usage_case() { # <label> <args...>
 }
 usage_case "no --bead" --base main
 usage_case "no --base" --bead tk-work
-usage_case "--done without --convoy" --bead tk-work --base main --done "$BRIEF"
 usage_case "an unsubstituted convoy" --bead tk-work --base main --convoy '{{convoy_id}}' --done "$BRIEF"
 usage_case "an unsubstituted base" --bead tk-work --base '{{base_branch}}'
 usage_case "a bead outside the id charset" --bead 'tk work' --base main
