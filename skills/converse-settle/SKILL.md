@@ -64,8 +64,8 @@ When the ruling needs work, file the work and send it before the sign-off, then
 name it in the sign-off's `--waiting-on`, with a `--close-brief` when the
 sign-off arms the subject's validating closer (Sign off, below). The `work`
 skill says which bead carries the work and how to choose its formula. Write
-what was agreed into the order as a list of items, each one a thing the result
-either covers or does not, because the order is all the work carries of the
+what was agreed into the order as a list of items. Each item is a thing the
+result either covers or does not. The order is all the work carries of the
 discussion, and a sitting that stays checks the result against those items
 when it comes back.
 
@@ -106,7 +106,7 @@ lands, in one plain sentence that names no other rig or its beads.
 
 When the sitting stays for work it sends itself, promise that work right after
 its send, before the sign-off (`converse-stay`, Stay). The stay comes back for
-that one piece, so before it stays, tell the operator that each other piece of
+that one piece. Before it stays, tell the operator that each other piece of
 work the ruling sends brings no return of its own.
 
 - **Beside the subject, not under it.** Work the subject waits on is a

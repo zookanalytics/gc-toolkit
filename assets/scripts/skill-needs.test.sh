@@ -572,7 +572,7 @@ have "…and that other work the ruling sends brings no return of its own" \
 have "…recommends staying when the discussion helps judge the result" \
     'Recommend staying when the discussion will help judge the result' "$TMP/prompt-stay"
 have "…and ending when the brief and the ordinary checks suffice" \
-    'and ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
+    'Recommend ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
 have "…and ending in the city's own store, where new work's stay comes back after the merge" \
     'In the city'"'"'s own store a stay comes back only once its work closes. For new work that opens its own PR, that is after the merge, so recommend ending at the hand-off there.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
@@ -604,11 +604,11 @@ tr -s '[:space:]' ' ' <"$SETTLE" >"$TMP/settle-stay"
 have "the settle skill puts the choice with when a stay would come back" \
     'Put it to them with your recommendation, and say when a stay would come back, in their terms' "$TMP/settle-stay"
 have "…writes what was agreed into the order as a list of items the return can check" \
-    'Write what was agreed into the order as a list of items, each one a thing the result either covers or does not' "$TMP/settle-stay"
+    'Write what was agreed into the order as a list of items. Each item is a thing the result either covers or does not.' "$TMP/settle-stay"
 have "…promises the work it sends itself right after the send, before the sign-off" \
     'When the sitting stays for work it sends itself, promise that work right after its send, before the sign-off' "$TMP/settle-stay"
 have "…and tells the operator before it stays that other work brings no return of its own" \
-    'so before it stays, tell the operator that each other piece of work the ruling sends brings no return of its own' "$TMP/settle-stay"
+    'Before it stays, tell the operator that each other piece of work the ruling sends brings no return of its own' "$TMP/settle-stay"
 have "…and stays for the subject by sending it, promising it, then staying" \
     'A sitting that stays for the subject sends it first, then promises it, then makes this sign-off its stay' "$TMP/settle-stay"
 have "the prompt enters through converse-entry.sh, which tells each entry apart" \
@@ -648,7 +648,7 @@ have "…and the agreement is a list of items the return can check" \
 have "…and trouble on the work does not bring the sitting back" \
     'Trouble on the work does not bring the sitting back' "$TMP/stay-squeezed"
 have "the stay skill gives the stay's first form, whose own call sends the work and promises it" \
-    'The stay'"'"'s own call sends the work.** A ruling that sends the PR under discussion back goes out through the call'"'"'s `--rework`, and one that takes the subject'"'"'s recommendation through its `--accept`.' "$TMP/stay-squeezed"
+    'The stay'"'"'s own call sends the work.** A ruling that sends the PR under discussion back goes out through the call'"'"'s `--rework`. A ruling that takes the subject'"'"'s recommendation goes out through its `--accept`.' "$TMP/stay-squeezed"
 have "…and its second, where the sitting sends the work, promises it, then stays" \
     'You send the work.** New work, the subject you sling, and another PR you send back through the `prs` skill are sent before the sign-off. Once the send is made, promise the work, and then stay.' "$TMP/stay-squeezed"
 have "…with the promise's command, which names the gate's type where the sitting types it" \

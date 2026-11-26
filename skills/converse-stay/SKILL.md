@@ -43,15 +43,24 @@ the rig whose `prefix` begins its id, before the first `-`, reads
 
 ## Stay
 
-Stay only once the operator has agreed to it, after you have told them, in
-their terms, which piece of work the stay is for, when it would come back
-(above), that it comes back to discuss the result whatever it finds, and what
-each other piece of work the ruling sends does instead (the prompt's End or
-stay).
+Before you stay, tell the operator, in their terms:
 
-Write what was agreed as a list of items the return can check, each one a
-thing the result either covers or does not, in the work's brief or, for a
-send-back, in the order its ruling sends (`converse-settle`, Send the work).
+- which piece of work the stay is for;
+- when it would come back (above);
+- that it comes back to discuss the result whatever it finds;
+- what each other piece of work the ruling sends does instead (the prompt's
+  End or stay).
+
+Stay only once the operator has agreed to it.
+
+Write what was agreed as a list of items the return can check. Each item is a
+thing the result either covers or does not. Put the list where the work
+carries it:
+
+- For a send-back, in the order its ruling sends (`converse-settle`, Send the
+  work).
+- For any other work, in the work's brief.
+
 The stay's `--stay` takes one line that sums those items up, which the entry
 prints as `AGREED`.
 
@@ -61,9 +70,10 @@ releases, and settle the subject's dispatch path. The stay then takes one of
 two forms:
 
 - **The stay's own call sends the work.** A ruling that sends the PR under
-  discussion back goes out through the call's `--rework`, and one that takes
-  the subject's recommendation through its `--accept`. Once that send has
-  landed, the call promises the work itself: the PR's bead, or the subject.
+  discussion back goes out through the call's `--rework`. A ruling that takes
+  the subject's recommendation goes out through its `--accept`. Once that send
+  has landed, the call promises the work itself: the PR's bead, or the
+  subject.
 - **You send the work.** New work, the subject you sling, and another PR you
   send back through the `prs` skill are sent before the sign-off. Once the send
   is made, promise the work, and then stay. The stay's call finds the promise
@@ -91,8 +101,10 @@ write that did not land: run it again. Exit 2 writes nothing and says why:
 - **The work is in another store** than the conversation's, where a gate holds
   nothing. End at the hand-off.
 - **The work cannot move until something the conversation holds has landed.**
-  Tell the operator: it moves once they settle that, which lifts its hold
-  (`converse-hold`), or the sitting ends at the hand-off.
+  Tell the operator, and carry out the way on they choose:
+  - They settle what the conversation holds, which lifts its hold
+    (`converse-hold`). The work can then move, so promise it again.
+  - The sitting ends at the hand-off.
 - **The conversation is not held under this sitting's alias.** Run it from the
   sitting that holds the conversation.
 
@@ -234,16 +246,16 @@ stay (above). Take the case that fits:
   that piece, and its gate is open already, so the stay goes on, and comes back
   once the city has finished with the PR again. For the PR under discussion,
   run the stay's call again in its rework form, which files the ask and keeps
-  the gate. The sign-off refuses a second rework while the conversation's
-  first is open, and then the point waits for the return. For another PR, such
-  as new work's, file the ask on its anchor as the `prs` skill's send-back
-  gives, and run nothing else. Work that has no PR yet takes no ask: tell the
-  operator the point waits for the return.
+  the gate. While the conversation's first rework is open, the sign-off
+  refuses a second. Then tell the operator that the point waits for the
+  return. For another PR, such as new work's, file the ask on its anchor as the
+  `prs` skill's send-back gives, and run nothing else. Work that has no PR yet
+  takes no ask: tell the operator the point waits for the return.
 - **The operator rules other work.** Send it as `converse-settle` gives (Send
   the work), and promise nothing, because the stay waits for one piece at a
   time and the promise refuses a second. Tell the operator that this work
-  brings no return of its own, and that work on a PR this conversation holds
-  stays held until the sitting is back.
+  brings no return of its own. For work on a PR this conversation holds, tell
+  them too that it stays held until the sitting is back.
 - **The operator ends the stay.** Sign off without `--stay`
   (`converse-settle`), which closes the conversation and releases what it
   holds. The stay's gate then resolves with nothing waiting on it.
@@ -253,8 +265,8 @@ stay (above). Take the case that fits:
 The entry says `interrupted` and names this skill when a stay stopped short:
 before its sign-off finished, before the sign-off left the conversation to
 wait, or after you promised the work and before the stay's call ran. The
-recovery is the stay's call, run again with the same ruling, but only when you
-can give the whole call. Take the case that fits:
+recovery is the stay's call, run again with the same ruling. Run it only when
+you can give the whole call. Take the case that fits:
 
 - **Your thread holds the call.** Run it again with the same ruling, and act on
   the entry it runs, as after any stay.
