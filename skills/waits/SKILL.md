@@ -91,8 +91,8 @@ gate, below).
   Give the check this close brief, in place of the one above:
 
   ```bash
-  gc bd update <check> --append-notes "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
-  The claim: PR <number> (<bead>) still has work its target lacks once <blocker> has closed. <what <blocker>'s landing does to the PR, and what to check in the PR once it has> This claim is the reverse of a held bead's. A landing that does the PR's work is no reason to close this check: it makes the PR moot, and the claim fails. Closing this check releases the PR's merge, so close it only when the claim holds, as it does when <blocker> closed without landing. When the claim fails, or you cannot tell, put the PR to a person, with what you found and the course you recommend, such as retiring it."
+  gc bd update <check> --append-notes "## Close brief (check of PR <number>, held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+  The claim: PR <number> (<bead>) still has work its target lacks once <blocker> has closed. <what <blocker>'s landing does to the PR, and what to check in the PR once it has> Closing this check releases the PR's merge, so close it only when the claim holds, as it does when <blocker> closed without landing. When the claim fails, or you cannot tell, put the PR to a person, with what you found and the course you recommend, such as retiring it."
   ```
 
   Then give the check the edge and the arm above, with the check in place of
