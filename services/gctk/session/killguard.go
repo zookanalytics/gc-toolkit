@@ -24,7 +24,10 @@ var wrappers = map[string]bool{
 	"setsid": true, "sudo": true, "timeout": true, "xargs": true,
 }
 
-// shells run the script their -c option is given.
+// shells run the script their -c option is given. Which of a shell's words that
+// is depends on how the shell reads its options and their values, which differs
+// from shell to shell, so every word a shell is given is read as a script it may
+// run.
 var shells = map[string]bool{"bash": true, "dash": true, "ksh": true, "sh": true, "zsh": true}
 
 // maxScriptDepth bounds how deeply scripts given to a shell or to eval, and
@@ -93,8 +96,8 @@ func callKills(words []*syntax.Word, depth int) string {
 }
 
 // runs names the pattern killer that the command words names runs: the
-// command itself, or a call in the script it is given as a shell or as eval,
-// or in the string it splits as env.
+// command itself, or a call in a script it is given as a shell or as eval, or
+// in the string it splits as env.
 func runs(words []*syntax.Word, depth int) string {
 	name, ok := commandName(words)
 	switch {
@@ -103,8 +106,10 @@ func runs(words []*syntax.Word, depth int) string {
 	case patternKillers[name]:
 		return name
 	case shells[name]:
-		if script, ok := dashC(name, words[1:]); ok {
-			return scriptKills(script, depth+1)
+		for _, w := range words[1:] {
+			if killer := scriptKills(scriptText(w), depth+1); killer != "" {
+				return killer
+			}
 		}
 	case name == "env":
 		return envSplitKills(words, depth)
@@ -129,46 +134,6 @@ func commandName(words []*syntax.Word) (string, bool) {
 		return "", false
 	}
 	return path.Base(s), true
-}
-
-// dashC is the script a shell runs by its -c option: the first operand after
-// the shell's options, when one of its option words sets c. An o in an option
-// word takes the next word as its value, as an O does for bash and as
-// --rcfile and --init-file do. A - or -- ends the options, and so does a word
-// the guard cannot read. Without a c, the first operand is a script file, and
-// the words after it are its own arguments.
-func dashC(shell string, args []*syntax.Word) (string, bool) {
-	valued := "o"
-	if shell == "bash" {
-		valued = "oO"
-	}
-	c, i := false, 0
-	for ; i < len(args); i++ {
-		s, ok := literal(args[i])
-		if ok && (s == "-" || s == "--") {
-			i++
-			break
-		}
-		if !ok || len(s) < 2 || (s[0] != '-' && s[0] != '+') {
-			break
-		}
-		if strings.HasPrefix(s, "--") {
-			if s == "--rcfile" || s == "--init-file" {
-				i++
-			}
-			continue
-		}
-		c = c || (s[0] == '-' && strings.ContainsRune(s, 'c'))
-		for _, r := range s[1:] {
-			if strings.ContainsRune(valued, r) {
-				i++
-			}
-		}
-	}
-	if !c || i >= len(args) {
-		return "", false
-	}
-	return scriptText(args[i]), true
 }
 
 // envSplitKills names the pattern killer an env call runs through a string
