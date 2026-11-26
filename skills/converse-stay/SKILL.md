@@ -164,11 +164,12 @@ It refuses these stays, each before any write:
   operator's queue, and a call from a session under another alias than the
   sitting's.
 
-After its send has landed, the call stops short when the promise of what it
-sent is refused, as for a PR that cannot move until something the conversation
-holds has landed. What the ruling sends is sent, and each gate it answers is
-answered. Say so to the operator. Once what the message names is settled, the
-same call promises the work and stays.
+The call can stop short after its send has landed. What the ruling sends is
+then sent, and each gate it answers is answered. Only the promise of the work
+it sent is missing. `gctk gate create` refused it, and the call prints why.
+Say so to the operator, and take that refusal's case from the list above. Once
+what the refusal names is settled, run the same call again. It promises the
+work and stays.
 
 For each piece the call sends that the stay does not come back for, it prints
 that the piece brings no return of its own. Say so in the hand-back.
