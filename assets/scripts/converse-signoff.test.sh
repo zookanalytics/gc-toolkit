@@ -2102,6 +2102,50 @@ case "$(calls)" in
   *"converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry once #78 lands --waiting-on tk-pr2"*"gctk gate create --type gctk:needs-review --await-id tk-anc"*) ok "(STAY-REWORK-WAITS) …filing the gate only after the ask and its wait" ;;
   *) bad "(STAY-REWORK-WAITS) the gate was not filed after the ask and its wait: $(calls)" ;;
 esac
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --check arch --no-wait
+eq "$RC" 2 "(CHECK-NEEDS-REWORK) --check without --rework is refused"
+# A ruling that sends the PR back once another PR lands names that PR's anchor
+# as the rework's wait, which the writer passes on as the ask's own wait. It is
+# no wait of the subject's, so the headline does not carry it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "sent back once #78 lands" --ruled yes --ruling "fix the retry once #78 lands" --rework --check arch --rework-waiting-on tk-pr2 --no-wait
+eq "$RC" 0 "(REWORK-WAITS) a ruling whose rework waits on another PR signs off, exit 0"
+has "$(cat "$CALLS")" "converse-rework --anchor tk-anc --ruling-bead tk-conv --ruling fix the retry once #78 lands --check arch --waiting-on tk-pr2" "(REWORK-WAITS) …passing that PR's anchor on as the ask's wait"
+TAKEAWAY=$(grep '^gctk bead takeaway tk-anc ' "$CALLS")
+has "$TAKEAWAY" "--no-wait" "(REWORK-WAITS) …writing the subject's headline with the wait the sitting stated"
+hasnt "$TAKEAWAY" "tk-pr2" "(REWORK-WAITS) …and without the bead the rework waits on"
+open_pr; bead tk-pr2
+run_signoff --conversation tk-conv --outcome "x" --ruled yes --ruling "fix the retry" --no-rework --rework-waiting-on tk-pr2 --no-wait
+eq "$RC $(writes)" "2 0" "(REWORK-WAITS-NEEDS-REWORK) --rework-waiting-on without --rework is refused, with nothing written"
+# An attempt that filed the ask and stopped before its headline leaves a re-run
+# the ask, open, or closed once a run has worked it. A re-run that names a wait
+# the ask does not carry stops with nothing written, and one whose ask carries
+# it signs off.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework
+: > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) a re-run naming a wait the open ask of its earlier attempt lacks stops, with nothing written"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, is open and does not wait on tk-pr2" "(REWORK-WAITS-RERUN) …naming the ask and the wait it lacks"
+setf tk-ask status closed; : > "$CALLS"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(writes)" "1 0" "(REWORK-WAITS-RERUN) …and so does one whose ask has closed"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, closed without waiting on tk-pr2" "(REWORK-WAITS-RERUN) …saying a run may have worked it before that work landed"
+eq "$(field tk-conv status) $(merge_held tk-anc)" "in_progress held" "(REWORK-WAITS-RERUN) …leaving the conversation open and the merge held"
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+setf tk-ask status closed
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on tk-pr2
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-RERUN) …while a re-run whose ask waited on that bead signs off"
+has "$OUT" "tk-ask, the rework an earlier attempt of this ruling filed on tk-anc, has closed, so the rework has nothing left to do" "(REWORK-WAITS-RERUN) …taking the ask that ran as the ruling's rework"
+# gctk review ask trims a wait's id, so the sign-off passes each wait on
+# trimmed and compares the trimmed id with the ask's edges: a re-run that names
+# the wait with the same spaces around it finds the ask that waits on it.
+open_pr; setm tk-anc merge_result pull_request_pending; bead tk-pr2
+REWORK_ASK=1 REWORK_CHILD=tk-ask TAKEAWAY_FAIL=1 run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+has "$(cat "$CALLS")" "--waiting-on tk-pr2" "(REWORK-WAITS-TRIM) a wait named with spaces around it is passed on trimmed"
+REWORK_ASK=1 REWORK_CHILD=tk-ask run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --rework-waiting-on " tk-pr2 "
+eq "$RC $(field tk-conv status)" "0 closed" "(REWORK-WAITS-TRIM) …and a re-run naming it the same way finds the ask that waits on it and signs off"
 # A rework on a PR that cannot move until something the conversation holds has
 # landed: the verb refuses the gate once the ask is filed, so the stay stops
 # short with the rework sent, and the same call, run again once that is
