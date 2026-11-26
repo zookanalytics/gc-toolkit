@@ -180,12 +180,17 @@ it through `gctk rig`, in the run's worktree. The round owes the tests the PR's
 change can affect:
 `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig test --scope affected --command '<the command>'`
 Run any other check the same way, such as `rig lint`. A check's command is the
-rig's own where it declares one: the rig default that
-`gc formula show mol-polecat-work --rig "$GC_RIG"` prints for
-`affected_tests_command`, `lint_command` or `typecheck_command`. Otherwise write
-one for what the PR's change touches, and keep it to one build at a time: start
-no lane in the background with `&`, and give a parallel test runner one job. A
-round with no commit checks nothing.
+rig's own where it declares one, as the rig default that
+`gc formula show mol-polecat-work --rig "$GC_RIG"` prints for its var:
+- The tests run `affected_tests_command`.
+- Where the rig declares no `affected_tests_command`, the tests run its
+  `test_command`, with `--scope full`.
+- `rig lint` runs `lint_command`, and `rig typecheck` runs `typecheck_command`.
+
+Where the rig declares no command for a check, write one for what the PR's
+change touches, and keep it to one build at a time: start no lane in the
+background with `&`, and give a parallel test runner one job. A round with no
+commit checks nothing.
 
 Fix a point on the PR's title or summary in the summary
 `{{pr_bead}}` records, as the bar says. Record that summary again when the
