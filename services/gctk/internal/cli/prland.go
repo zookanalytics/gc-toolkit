@@ -592,9 +592,10 @@ func (r runs) Rank(ctx context.Context, root string) error {
 // the ruling the run read there. The script's exit 4 (the bead is not as the
 // run judged it, or a write did not land, as when the bead moved since the
 // script's own read) and exit 5 (the close is held, as by an open wait) are a
-// close held for now. Its exit 3 (the successor does not exist), exit 6 (the
-// bead names another successor) and exit 7 (the close is refused until a person
-// acts, as for a waiter that cannot wait on the successor) are a close refused.
+// close held for now. Its exit 3 (the bead or the successor does not exist),
+// exit 6 (the bead names another successor) and exit 7 (the close is refused
+// until a person acts, as for a waiter that cannot wait on the successor) are a
+// close refused.
 // Each call names the key the run files a refusal's gate under, so the script
 // withdraws that gate just before a close it no longer refuses. Any other
 // failure, or a script that did not run, is an error carrying why.

@@ -181,8 +181,9 @@ func (e *HeldClose) Error() string { return e.Why }
 
 // RefusedClose is a disposition's close the writer refuses until a person
 // acts, saying why: a bead that waits on the bead and cannot come to wait on
-// the successor, a successor that does not exist, a successor the bead
-// already names other than the ruling's, or evidence that refuses the close.
+// the successor, the bead or the successor missing from its store, a successor
+// the bead already names other than the ruling's, or evidence that refuses the
+// close.
 // No later run gets past it alone, so the run asks a person (dispose).
 type RefusedClose struct{ Why string }
 
