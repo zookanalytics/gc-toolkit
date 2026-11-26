@@ -474,15 +474,21 @@ func (c *City) Nudge(session, message string) Result {
 	return c.run(c.bin, "session", "nudge", session, message)
 }
 
-// NudgeNow runs the nudge with immediate delivery, about bead: the message
-// reaches a running turn where the session's runtime can steer, and the next
-// idle boundary otherwise, and a nudge about the same bead still queued for the
-// session is replaced rather than stacked. --delivery is gc session nudge's in
-// docs/reference/cli.md, at gastownhall/gascity bfe7a19cc2, and
-// --reference-bead the city's build carries from its fork (zookanalytics/gascity
-// 51055e7d3f). Its standard input reads nothing.
+// NudgeNow runs the nudge with immediate delivery: the message reaches a
+// running turn where the session's runtime can steer, and the next idle
+// boundary otherwise (--delivery, gc session nudge in docs/reference/cli.md, at
+// gastownhall/gascity bfe7a19cc2). Given a bead, it also passes
+// --reference-bead, which the city's build carries from its fork
+// (zookanalytics/gascity 51055e7d3f), so a nudge about the same bead still
+// queued for the session is replaced rather than stacked. Gas City as shipped
+// has no such flag, so a caller that must run on it passes no bead. Its
+// standard input reads nothing.
 func (c *City) NudgeNow(session, message, bead string) Result {
-	return c.run(c.bin, "session", "nudge", "--delivery", "immediate", "--reference-bead", bead, session, message)
+	args := []string{"session", "nudge", "--delivery", "immediate"}
+	if bead != "" {
+		args = append(args, "--reference-bead", bead)
+	}
+	return c.run(c.bin, append(args, session, message)...)
 }
 
 // Script runs the script from the directory GCTK_SCRIPTS_DIR names, which the

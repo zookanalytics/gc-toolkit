@@ -55,7 +55,10 @@ func newWorld(t *testing.T) *world {
 		{ID: "sess-ctl", SessionName: "rig__control-dispatcher-sess-ctl", Alias: "rig/core.control-dispatcher", State: "active"},
 	}}
 	w.rt = &rtfake.Runtime{OnNudge: func(n rtfake.Nudge) gascity.Result {
-		w.add("NUDGE " + n.Session + " about " + n.Bead)
+		w.add("NUDGE " + n.Session)
+		if n.Bead != "" {
+			t.Errorf("the nudge to %s named the bead %s, which only the city's fork of Gas City takes (--reference-bead)", n.Session, n.Bead)
+		}
 		if w.nudgeFails {
 			return gascity.Result{Code: 1, Output: "gc session nudge: fake refusal"}
 		}
@@ -154,7 +157,7 @@ func TestNotifyReachesTheSessionHoldingTheRun(t *testing.T) {
 	if got := w.notes("tk-a"); got != text {
 		t.Errorf("the notes read %q, want the text as written, %q", got, text)
 	}
-	if got := strings.Join(w.log, " | "); got != "UPDATE tk-a | NUDGE sess-live about tk-a" {
+	if got := strings.Join(w.log, " | "); got != "UPDATE tk-a | NUDGE sess-live" {
 		t.Errorf("the writes and nudges ran as %q, want the note and then the nudge", got)
 	}
 	nudges := w.rt.Nudges()
@@ -284,7 +287,7 @@ func TestNotifyReachesTheAssigneeOnceEach(t *testing.T) {
 	if _, err := w.n.Note(Request{Bead: "tk-a", Text: "Land it on the integration branch.", Notify: true}); err != nil {
 		t.Fatalf("Note: %v", err)
 	}
-	if got := strings.Join(w.lines("NUDGE "), " | "); got != "NUDGE sess-ref about tk-a | NUDGE sess-live about tk-a" {
+	if got := strings.Join(w.lines("NUDGE "), " | "); got != "NUDGE sess-ref | NUDGE sess-live" {
 		t.Errorf("nudged %q, want the assignee's session and the run's, once each", got)
 	}
 }
@@ -300,7 +303,7 @@ func TestNotifySaysWhatDidNotReach(t *testing.T) {
 	if !IsUntold(err) {
 		t.Fatalf("a failed nudge answered %v, want an untold note", err)
 	}
-	has(t, err.Error(), "gc session nudge <session> --delivery immediate --reference-bead tk-a", "the error")
+	has(t, err.Error(), "gc session nudge --delivery immediate <session> \"<what the note changes, and that tk-a's notes hold it>\"", "the error")
 	has(t, strings.Join(out, "\n"), "not sent to sess-live: exit 1", "the output")
 	has(t, w.notes("tk-a"), "Use the new schema.", "the note")
 

@@ -214,17 +214,22 @@ func TestARigListThatNeverAnswersEndsAtItsBound(t *testing.T) {
 
 // A sling with no formula routes the bead to the target's own name and files
 // no convoy, a sling with no title passes none, and a nudge and a formula's
-// show each run as one call.
+// show each run as one call. An immediate nudge with no bead passes only the
+// flags Gas City ships, and one about a bead adds the fork's --reference-bead.
 func TestTheSlingNudgeAndFormulaCalls(t *testing.T) {
 	c, log := rosterCity(t, nil)
 	c.Sling(Sling{Rig: "rig", Target: "gc-toolkit.mechanik", Bead: "tk-1", NoFormula: true})
 	c.Sling(Sling{Target: "rig/gc-toolkit.polecat", Bead: "tk-1", Formula: "mol-validate-close"})
 	c.Nudge("gc-toolkit.mechanik", "tk-1 is routed to you and ready")
+	c.NudgeNow("rig__polecat-hq-1", "a note on tk-1 changes your work", "")
+	c.NudgeNow("rig__polecat-hq-1", "give tk-1 back", "tk-1")
 	c.ShowFormula("mol-polecat-work")
 	want := []string{
 		"sling --rig rig gc-toolkit.mechanik tk-1 --no-formula --no-convoy",
 		"sling rig/gc-toolkit.polecat tk-1 --on mol-validate-close",
 		"session nudge gc-toolkit.mechanik tk-1 is routed to you and ready",
+		"session nudge --delivery immediate rig__polecat-hq-1 a note on tk-1 changes your work",
+		"session nudge --delivery immediate --reference-bead tk-1 rig__polecat-hq-1 give tk-1 back",
 		"formula show mol-polecat-work",
 	}
 	if got := rosterCalls(t, log); strings.Join(got, "\n") != strings.Join(want, "\n") {

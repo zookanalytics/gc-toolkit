@@ -87,7 +87,14 @@ implement steps.
   which Gas City's API schema defines as delivery "into the running turn, where
   the runtime can steer" (`docs/reference/schema/openapi.json`), and falls back
   to the turn's boundary on a runtime that cannot. Its wait-idle and queue modes
-  deliver at the boundary. The command composes the immediate mode.
+  deliver at the boundary. The command composes the immediate mode as
+  `gc session nudge --delivery immediate <session> <message>`, with only flags
+  `newSessionNudgeCmd` registers upstream: `--delivery`, `--json` and `--key`,
+  at 887a253144 and again on 2026-11-26 at main d38ec7842f. The city's build
+  also carries `--reference-bead` from its fork, which collapses repeated
+  queued nudges about one bead. Gas City as shipped has no such flag, so the
+  command does not pass it, and the nudge it prints to send by hand does not
+  either.
 - **`gc session submit --intent interrupt_now`** interrupts the running turn and
   then delivers the message. It cuts short the tool call the work is running,
   and the work is meant to go on, so it is not the act.

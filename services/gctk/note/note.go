@@ -42,7 +42,8 @@ type Request struct {
 }
 
 // City is Gas City as a note's notice reaches it: the session list that names
-// the sessions working the bead, and the immediate nudge that tells each one.
+// the sessions working the bead, and the immediate nudge that tells each one. A
+// note's nudge names no bead, so it passes only the flags Gas City ships.
 type City interface {
 	NudgeNow(session, message, bead string) gascity.Result
 	Sessions(ctx context.Context) ([]gascity.Session, error)
@@ -113,7 +114,7 @@ func (n *Notes) Note(req Request) ([]string, error) {
 // notify tells each session working the bead of the note that landed on it,
 // adding a line to lines for each session it decided on.
 func (n *Notes) notify(bead, text string, lines []string) ([]string, error) {
-	byHand := fmt.Sprintf("gc session nudge <session> --delivery immediate --reference-bead %s \"<what the note changes, and that %s's notes hold it>\"", bead, bead)
+	byHand := fmt.Sprintf("gc session nudge --delivery immediate <session> \"<what the note changes, and that %s's notes hold it>\"", bead)
 	row, err := n.read(bead)
 	if err == nil && row == nil {
 		err = errors.New("the store does not hold it")
@@ -155,7 +156,7 @@ func (n *Notes) notify(bead, text string, lines []string) ([]string, error) {
 			case s.Provider == "":
 				lines = append(lines, "skipped "+id+": it runs no agent to read a nudge")
 			default:
-				res := n.City.NudgeNow(id, n.message(bead, text), bead)
+				res := n.City.NudgeNow(id, n.message(bead, text), "")
 				if f := res.Failure(); f != "" {
 					failed = append(failed, id)
 					lines = append(lines, "not sent to "+id+": "+f)
