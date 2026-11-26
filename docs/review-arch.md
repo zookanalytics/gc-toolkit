@@ -167,32 +167,36 @@ is built from the Covers lines, so check 4 still judges the diff against them.
 ## The caller's seat
 
 The check reads each command, verb, flag or mode a change adds from the seat of
-its caller, the agent or the code that calls it, whether the change adds it to
-gctk or to a script. A caller knows a command only as it is taught: by the
-skill, prompt, formula step or usage text where the caller meets it, and the
-other commands taught there for what the caller means to do, the native ones
-among them. Read that teaching and list those other commands. Then answer two
-questions, the first from the teaching rather than from what the command alone
-can do:
+its caller, the agent or the code that calls it. It reads a command added to a
+script the same way as one added to gctk.
+
+A caller knows a command only as it is taught. Its teaching is the skill,
+prompt, formula step or usage text where the caller meets the command. Read
+that teaching, and list the other commands it teaches for what the caller means
+to do, the native ones among them. Then answer two questions:
 
 1. What must the caller know to choose it over those and to use it correctly?
+   Answer from the teaching, not from what the command alone can do.
 2. Could the command find that out itself?
 
-A caller knows what it means to do. When it must also know something else to
-choose or use the command correctly, such as whether a bead's work is running
-or who holds it, and the command could find that out itself, the change earns
-`request-changes`. The finding names what the caller must know, the choice it
-decides and how the command could find it out. The design it asks for takes
-what the caller means to do, finds out the rest, and keeps a flag or mode only
-for what the caller alone knows
-([gctk-architecture.md](gctk-architecture.md#the-surface)).
+The change earns `request-changes` when both of these hold:
+
+- To choose or use the command correctly, the caller must know more than what
+  it means to do, such as whether a bead's work is running or who holds it.
+- The command could find that out itself.
+
+The finding names what the caller must know, the choice it decides and how the
+command could find it out. The design it asks for takes what the caller means
+to do and finds out the rest. Its flags and modes carry only what the caller
+alone knows ([gctk-architecture.md](gctk-architecture.md#the-surface)).
 
 Read
 [the rule that no verb parallels a native act](gctk-architecture.md#writes-stay-native-and-pack-logic-reacts)
-from the same seat. When the teaching sends a caller to a verb in some states of
-an act and to the native call in the others, the verb parallels that call
-however its mechanism differs, and even where the verb could carry the act in
-every state, because its caller chooses between the two by the state.
+from the same seat. A teaching may send a caller to a verb in some states of an
+act and to the native call in the others. That caller chooses between the two
+by the state, so the verb parallels the native call. A verb whose mechanism
+differs from the native call's is a parallel all the same. The verb is a
+parallel even when it could carry the act in every state.
 
 The verdict body adds a line for each command, verb, flag or mode the change
 adds:

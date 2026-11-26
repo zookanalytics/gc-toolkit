@@ -56,15 +56,15 @@ The board's UX is the Helm UX epic's. Gas City's own behavior is in
 ## Writes stay native, and pack logic reacts
 
 - **No verb parallels a native act.** An act is what its caller means to do,
-  such as telling a bead something, never the mechanism that carries it out,
-  such as a nudge to the session working the bead. An agent writes through the
-  native surface, such as `gc bd update --priority`, and never chooses between
-  that and a gctk verb for the same act. A gctk verb exists where the native
-  surface cannot express the act, such as a raise relative to what a bead
-  follows, or an arm that names the formula its start pours. Where the native
-  surface carries an act in some states and not in others, the verb carries it
-  in all of them, and agents are documented onto the verb alone, so none
-  chooses between the two by the state.
+  such as telling a bead something. It is never the mechanism that carries the
+  act out, such as a nudge to the session working the bead. An agent writes
+  through the native surface, such as `gc bd update --priority`, and never
+  chooses between that and a gctk verb for the same act. A gctk verb exists
+  where the native surface cannot express the act, such as a raise relative to
+  what a bead follows, or an arm that names the formula its start pours. Where
+  the native surface carries an act in some states only, the verb carries it in
+  every state. Agents are taught the verb alone, so none chooses between the two
+  by the state.
 - **Pack logic that follows a native write reacts through an order.** The
   order recomputes from durable state on its cadence, under
   [the rule that admits it](#the-rule-that-admits-an-order).
@@ -91,14 +91,17 @@ registry that enumerates its consumers.
 
 Each verb, and each flag or mode on it, is designed from its caller's seat. The
 plan that adds one lists every other command its caller could run for the same
-act, native ones among them, and answers two questions: what must the caller
-know to choose it over those and to use it correctly, and could the command find
-that out itself? What the command could find out is the command's to find. The
-caller chooses by what it means to do, and a flag or mode carries only what the
-caller alone knows, such as the parent a placement puts a bead under. A design
-whose caller must track a state the command could read, such as whether a bead's
-work is running or who holds it, is reshaped, and the arch check sends back a
-change that ships one ([review-arch.md](review-arch.md#the-callers-seat)).
+act, native ones among them. Then it answers two questions:
+
+1. What must the caller know to choose it over those and to use it correctly?
+2. Could the command find that out itself?
+
+What the command could find out is the command's to find, such as whether a
+bead's work is running or who holds it. A design that leaves any of that to its
+caller is reshaped. The arch check sends back a change that ships one
+([review-arch.md](review-arch.md#the-callers-seat)). The caller chooses by what
+it means to do. A flag or mode carries only what the caller alone knows, such as
+the parent a placement puts a bead under.
 
 Nothing callable is internal. A consumer outside these classes cannot be
 enumerated, so nothing could hold its verb to the bar. The Go packages,
