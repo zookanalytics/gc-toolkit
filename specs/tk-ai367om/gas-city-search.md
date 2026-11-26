@@ -113,7 +113,9 @@ wait (the design's section 13).
     (tk-u41ko5k's notes). It is filed as gc-qxq03t.
 
   A gate in the store meets none of these, because a session's start and its
-  restart change neither the conversation nor its gate.
+  restart change neither the conversation nor its gate. Gas City's reason for
+  each, and how often each would have cost a stay in this city, are in the
+  next section.
 - **A `blocks` edge onto the work.** It clears only when the work closes, which
   for a PR is after the merge. It also meets the hold's cycle and the subject's
   one edge (one gate and no convoy, below).
@@ -135,6 +137,117 @@ wait (the design's section 13).
   and no await type (`services/helm/internal/source/supervisor.go`), so there
   a waiting conversation reads as parked. The design keeps that limit.
   A key would remove it, and so would the API carrying a bead's await type.
+
+## The session wait's three behaviors, tested in this city
+
+The stay's gate stands in for Gas City's session wait because of the three
+behaviors above. This section gives Gas City's reason for each, read upstream,
+and how often each would have cost a stay here, counted on 2026-11-26. The gate
+did not run in the city then, since this branch had not landed, so every stay
+counted waited on its work through an edge.
+
+**What was counted, and how.** The city's event log, `.gc/events.jsonl` in the
+city with its archives, records every write to a bead, each event carrying the
+bead's status, assignee and metadata. On 2026-11-26 it reached from
+2026-11-18T23:45Z to 2026-11-26T01:17Z. A script replayed it in sequence and
+followed two kinds of bead:
+
+- the session bead of every converse sitting, a session whose template is a
+  converse agent's: its continuation epoch, its state and sleep reason, and its
+  `wake_requested_at`;
+- every conversation that stayed and was opened since 2026-11-11, one whose
+  notes hold a `staying:` line, in every store: 18 conversations in gc-toolkit's
+  and 2 in signal-loom's, and none in the city's own.
+
+A stay is out while its conversation reads open under its sitting's alias. In
+the window, 18 such spans lasted more than two minutes, from 40 minutes to 54
+hours. Each shorter span is an engage binding a conversation before its claim.
+The city's store gave the epoch of every converse session it keeps: 1,262
+sessions, of which 107 sittings were created since 2026-11-12.
+
+**An attach that starts a sleeping session cancels its waits.**
+
+- *Gas City's reason.* None is given. A wake cancels the session's waits as it
+  clears what keeps the session from starting (`wakeSessionFromBead`, which
+  `Store.WakeSession` calls, in `internal/session/wait_store.go` at upstream
+  main 77143ecd18), as it has since the waits' first commit, 204c85b138. The
+  waits' design names what cancels a wait, which is an operator's cancel, the
+  session's close and a stale continuation epoch, and says that ordinary sleep
+  and wake cycles do not affect a wait (`docs/design/session-waits.md` at
+  48e1f45833). It gives no reason for a wake to cancel one. An attach took the
+  wake's path only with upstream #9011 (64ba02c022, 2026-11-09), whose text says
+  nothing of session waits. Before it, an attach resumed a stopped session in
+  its own process (`Manager.Attach`), and the manager cancelled waits only on a
+  close and a prune (`CloseDetailed` and `PruneDetailed` in
+  `internal/session/manager.go` at 64ba02c022's parent). The operator agreed on
+  2026-11-18 that the attach's cancel is a bug (gc-gspdoo's notes).
+- *Here.* A wake writes `wake_request=explicit` and a new `wake_requested_at` on
+  the session bead (`RequestExplicitWakePatch`), so each new `wake_requested_at`
+  is one wake that cancelled the session's waits. An attach to a stopped session
+  makes such a wake, and so does `gc session wake`. Two converse sittings were
+  woken that way in the window, and one of them during its stay. The sitting of
+  conversation tk-5e70s01 slept at the end of its idle window, and the wake
+  started it at 2026-11-24T23:01Z, 43 hours into a stay that returned at
+  2026-11-25T10:13Z. A promise on the session wait would have been cancelled for
+  1 of the 18 stays.
+- *The fix at the source.* An option of the wake that the attach path sets,
+  under which `wakeSessionFromBead` keeps the waits: a field of `WakeOpts`, and
+  its use in `cmd/gc/cmd_session_wake.go` and `cmd/gc/cmd_session.go`. By this
+  reading of the code it is a few dozen lines with its test, and nothing of it
+  is built. gc-gspdoo carries it, held for the operator since the stay stopped
+  needing it.
+
+**A fresh restart cancels each wait registered before it.**
+
+- *Gas City's reason.* A session's conversation is its bead scoped by its
+  continuation epoch, which a fresh restart advances, and a wait belongs to the
+  conversation it was registered in. The waits' design gives the rule as "This
+  prevents a wait armed for one conversation from delivering into a different
+  one" (`docs/design/session-waits.md`, Continuation epoch binding, at
+  48e1f45833). Upstream main keeps it (`WaitInfo.ContinuationStale` in
+  `internal/session/waits.go`, and SESSION-HISTORY-CONVERSATION-EPOCH in
+  `internal/session/REQUIREMENTS.md`, at 77143ecd18). It carries a wait over
+  only when the wait was registered while the restart was pending
+  (SESSION-RECON-022).
+- *Here.* None of the 107 sittings has restarted fresh: the session bead of each
+  reads `continuation_epoch` 1, and its alias names its conversation. The 136
+  converse sessions that did, at epochs 2 to 13, were all created in August and
+  September, by the converse pool agent, whose sessions carried no alias or a
+  pool slot's. A sitting now holds one conversation for its whole life, the one
+  its alias names, and its entry reads that conversation's record on every start
+  (`converse-entry.sh`). So a fresh restart opens a new conversation in Gas
+  City's sense for the same task, and the promise belongs to the task. The
+  reason holds for a note meant for the thread that registered it. It does not
+  hold for a sitting's promise.
+- *The fix at the source.* An option of the wait that `ContinuationStale`
+  honors, so that a wait marked as the task's outlives a fresh restart: a field
+  the wait's create stamps, a flag on `gc session wait` and one more condition
+  in `ContinuationStale`, a few dozen lines with its test by the same reading.
+  gc-lwa1vp carries it, held for the operator. Without it, a sitting could
+  register its waits again while each restart is pending, which Gas City carries
+  over today.
+
+**A ready wait does not wake a session that slept at the end of its idle
+window.**
+
+- *Gas City's reason.* None is given. The idle latch lets a wake through only by
+  `wakeDemandOverridesSleepSuppression` (`cmd/gc/session_reconciler.go`, at
+  77143ecd18). Its comment gives a reason for each demand it lets through, such
+  as a terminal attached to the session or routed demand on an alias's holder,
+  and gives none for leaving a ready wait out. Unit 1's probe showed the latch
+  keep a session asleep under a ready wait, on the city's gc in a scratch city
+  (tk-u41ko5k's notes, 2026-11-17).
+- *Here.* One of the 18 stays had its sitting asleep at the end of its idle
+  window while its work was out: tk-5e70s01's, from 2026-11-24T21:07Z until the
+  wake above. Its work came back while the sitting was awake. The other 17
+  sittings stayed awake through their stays.
+- *The fix at the source.* A ready wait among the demands
+  `wakeDemandOverridesSleepSuppression` lets through: one condition and its
+  test. gc-qxq03t carries it, held for the operator.
+
+So in that week a promise on the session wait would have been cancelled for one
+stay of 18, by an explicit wake. No restart cancelled one, and the idle latch
+kept no sitting from a return. The gate meets none of the three.
 
 ## Filing it: `gctk gate create`
 

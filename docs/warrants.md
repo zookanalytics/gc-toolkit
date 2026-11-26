@@ -965,14 +965,22 @@ no warrant.
 - **Evidence.**
   - The session wait cannot hold the promise. An attach that starts a sleeping
     session cancels its waits (`Store.WakeSession` calls
-    `cancelWaitsAndCollectNudgeIDs`, in `internal/session/wait_store.go`). A
-    fresh restart cancels each wait registered before it as
-    continuation-stale (`WaitInfo.ContinuationStale` in
-    `internal/session/waits.go`). A ready wait does not wake a session that
-    slept at the end of its idle window, since the idle latch lets through an
+    `cancelWaitsAndCollectNudgeIDs` through `wakeSessionFromBead`, in
+    `internal/session/wait_store.go`), and upstream gives no reason for it:
+    the waits' design says ordinary sleep and wake cycles leave a wait alone
+    (`docs/design/session-waits.md` at 48e1f45833). A fresh restart cancels
+    each wait registered before it as continuation-stale
+    (`WaitInfo.ContinuationStale` in `internal/session/waits.go`), so that a
+    wait armed for one conversation never reaches another, the thread a
+    restart opens. A sitting's promise belongs to its task, which its alias
+    keeps through a restart. A ready wait does not wake a session that slept
+    at the end of its idle window, since the idle latch lets through an
     attach, assigned work, an explicit wake, routed demand, pool demand on a
     non-interactive session and the min-active floor, and no ready wait
-    (`wakeDemandOverridesSleepSuppression` in `cmd/gc/session_reconciler.go`).
+    (`wakeDemandOverridesSleepSuppression` in `cmd/gc/session_reconciler.go`),
+    with no reason given for leaving it out. How often each would have cost a
+    stay in this city, and the fix at the source for each, are in the search
+    below.
   - No gate resolves when a PR is left with only a person's part. bd's own
     check evaluates `gh:run`, `gh:pr`, `timer` and `bead` gates, a `gh:pr` gate
     only at the PR's merge (`evaluateGates` and `checkGHPR` in
@@ -983,7 +991,7 @@ no warrant.
     whose await id names the work and whose blocked bead is the conversation,
     which Gas City reads as ready work once the gate closes. The search is
     [specs/tk-ai367om/gas-city-search.md](../specs/tk-ai367om/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff and
   `steveyegge/beads` v1.3.4, the bd the city runs.
 - **Retires when.** Gas City's session wait keeps its promise through an
   attach and a fresh restart, and wakes a session that slept at the end of its
