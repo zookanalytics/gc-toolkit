@@ -88,14 +88,16 @@ gate, below).
   gc bd create "Check PR <number> once <blocker> lands" -t task -d "<bead>'s PR may be moot once <blocker> lands. This check holds the PR's merge until it has been checked." --json
   ```
 
-  Give the check the close brief, the edge and the arm above, with the check in
-  place of `<bead>`. Its brief says what `<blocker>`'s landing should do to the
-  PR, what to check in the PR once it has, and that closing the check releases
-  the PR's merge. The closer then closes the check only when the PR still has
-  work to land, and puts a PR the landing made moot to a person, with what it
-  found and the course it recommends. Last, make the anchor wait on the check,
-  which holds the PR's merge until the check closes (the prs skill, "Hold its
-  merge"):
+  Give the check this close brief, in place of the one above:
+
+  ```bash
+  gc bd update <check> --append-notes "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+  The claim: PR <number> (<bead>) still has work its target lacks once <blocker> has closed. <what <blocker>'s landing does to the PR, and what to check in the PR once it has> This claim is the reverse of a held bead's. A landing that does the PR's work is no reason to close this check: it makes the PR moot, and the claim fails. Closing this check releases the PR's merge, so close it only when the claim holds, as it does when <blocker> closed without landing. When the claim fails, or you cannot tell, put the PR to a person, with what you found and the course you recommend, such as retiring it."
+  ```
+
+  Then give the check the edge and the arm above, with the check in place of
+  `<bead>`. Last, make the anchor wait on the check, which holds the PR's merge
+  until the check closes (the prs skill, "Hold its merge"):
 
   ```bash
   gc bd dep add <bead> <check> --type=blocks
