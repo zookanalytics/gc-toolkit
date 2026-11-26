@@ -136,15 +136,11 @@ reset_case() {
   export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_FAIL_MSG="" STUB_COMPACT_ADVANCE=""
   rm -f "$CLOCK_FILE"
   export STUB_NO_CITY="" STUB_CITY_PATH="/fixture-city"
-  unset GC_DOLT_RECLAIM_BUDGET GC_DOLT_RECLAIM_HEALTH_TIMEOUT GC_ORDER_OUTCOME_FILE 2>/dev/null || true
+  unset GC_DOLT_RECLAIM_BUDGET GC_DOLT_RECLAIM_HEALTH_TIMEOUT 2>/dev/null || true
 }
 BASH_BIN="$(command -v bash)"
 run() { OUT=$("$SUT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 compact_lines() { awk 'END { print NR + 0 }' "$COMPACT_LOG" 2>/dev/null || echo 0; }
-# The order runner's outcome file, empty as the runner hands it over.
-# declared prints the outcome and the stores it held, or nothing.
-with_outcome_file() { export GC_ORDER_OUTCOME_FILE="$TMP/outcome.json"; : > "$GC_ORDER_OUTCOME_FILE"; }
-declared() { jq -r '"\(.outcome) \([.scopes[].scope] | join(","))"' "$GC_ORDER_OUTCOME_FILE" 2>/dev/null; }
 # Every logged compact must carry --gc-only; a line without it is a bare flatten.
 every_compact_is_gc_only() {
   [ ! -s "$COMPACT_LOG" ] && return 0
@@ -198,10 +194,8 @@ has "$OUT" "b: " "  ... (both of them)"
 # --- one store over: the reclaim is --gc-only --only-db ----------------------
 reset_case
 make_db a "$UNDER"; make_db fat "$OVER"; write_list a fat
-with_outcome_file
 run
 eq "$RC" "0" "a reclaimable store exits 0"
-eq "$(declared)" "" "  ... and declares nothing held back to the order runner"
 eq "$(compact_lines)" "1" "  ... runs exactly one compact"
 has "$(cat "$COMPACT_LOG")" "--gc-only" "  ... with --gc-only"
 has "$(cat "$COMPACT_LOG")" "--only-db fat" "  ... scoped to the over-threshold store"
@@ -236,13 +230,11 @@ eq "$(compact_lines)" "0" "  ... and mutates nothing"
 reset_case
 make_db fat "$OVER"; write_list fat
 export STUB_HEALTH='{"server":{"reachable":false}}'
-with_outcome_file
 run
 eq "$RC" "0" "an unreachable server defers, exit 0"
 has "$OUT" "deferred" "  ... says deferred"
 has "$OUT" "unreachable" "  ... names the reason"
 eq "$(compact_lines)" "0" "  ... and runs no compact"
-eq "$(declared)" "skipped fat" "  ... and declares the run skipped, holding the store back"
 
 reset_case
 make_db fat "$OVER"; write_list fat
@@ -285,10 +277,8 @@ has "$OUT" "no readable server.latency_ms" "  ... and the log says what it lacke
 reset_case
 make_db fat1 "$OVER"; make_db fat2 "$OVER"; write_list fat1 fat2
 export STUB_HEALTH_AFTER_COMPACT='{"server":{"reachable":false}}'
-with_outcome_file
 run
 eq "$RC" "0" "a plane that degrades mid-pass still exits 0"
-eq "$(declared)" "partial fat2" "  ... and declares the run partial, holding back the store it deferred"
 eq "$(compact_lines)" "1" "  ... the first store is reclaimed before it degrades"
 has "$OUT" "fat1 reclaimed" "  ... names the store it reclaimed"
 has "$OUT" "fat2 deferred" "  ... and defers the next instead of piling a GC on a degraded plane"
@@ -312,13 +302,10 @@ has "$OUT" "0 reclaimed, 1 failed" "  ... and counts it in the summary"
 reset_case
 make_db fat "$OVER"; write_list fat
 export STUB_COMPACT_FAIL_DB=fat STUB_COMPACT_FAIL_MSG="compact: db=fat 4 live session(s) connected — skipping DOLT_GC to protect dolt_ignore'd tables; re-run with --force to override"
-with_outcome_file
 run
 eq "$RC" "0" "a store compact skipped for its connected sessions exits 0"
 has "$OUT" "fat deferred — sessions are connected" "  ... and is deferred, not failed"
 has "$OUT" "0 reclaimed, 0 failed, 1 deferred" "  ... and the summary counts the deferral"
-eq "$(declared)" "skipped fat" "  ... and the run is declared skipped, holding the store back"
-has "$(cat "$GC_ORDER_OUTCOME_FILE")" "sessions are connected" "  ... for its sessions"
 has "$ERR" "4 live session(s) connected" "  ... and compact's own line still reaches the log"
 hasnt "$(cat "$COMPACT_LOG")" "--force" "  ... and the pass never forces the GC"
 

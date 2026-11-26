@@ -118,14 +118,6 @@ deferred or none was over it. It is 1 when a reclaim was attempted and failed,
 such as on a quarantined store or one that needs an operator, and 2 when the
 pass could not run at all.
 
-A run that exits 0 reads as completed, so a run that deferred a store also
-declares it to Gas City's order runner, in the file the runner names in
-`GC_ORDER_OUTCOME_FILE` (the contract is core's
-`assets/scripts/order_outcome.sh`). After the run's `order.completed`, the
-runner records an `order.skipped` event naming each store held back and why. It
-is `skipped` when no store was reclaimed and `partial` when some were. A hand
-run has no such file and declares nothing.
-
 `assets/scripts/dolt-reclaim.test.sh` is the regression suite, hermetic against
 a stubbed `gc` and fixture stores in a tempdir — no city, no real Dolt. Its
 load-bearing assertion is that a reclaim is only ever `--gc-only --only-db`, and
