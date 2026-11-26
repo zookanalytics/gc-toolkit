@@ -964,11 +964,14 @@ no warrant.
   sitting back to its conversation once the work it sent comes back.
 - **Evidence.**
   - The session wait cannot hold the promise. An attach that starts a sleeping
-    session cancels its waits (`Store.WakeSession` calls
-    `cancelWaitsAndCollectNudgeIDs` through `wakeSessionFromBead`, in
-    `internal/session/wait_store.go`), and upstream gives no reason for it:
-    the waits' design says ordinary sleep and wake cycles leave a wait alone
-    (`docs/design/session-waits.md` at 48e1f45833). A fresh restart cancels
+    session cancels its waits. While the city's controller runs, such an
+    attach makes the wake `gc session wake` makes
+    (`attachOnceControllerStarts` in `cmd/gc/cmd_session.go`), and that wake
+    is the operator's override: it clears every blocker and cancels the
+    session's open waits (`EvWake` in `internal/session/disposition.go`, and
+    `wakeSessionFromBead`, which `Store.WakeSession` calls, in
+    `internal/session/wait_store.go`). A visit to a staying sitting that
+    sleeps is such an attach, and asks for no override. A fresh restart cancels
     each wait registered before it as continuation-stale
     (`WaitInfo.ContinuationStale` in `internal/session/waits.go`), so that a
     wait armed for one conversation never reaches another, the thread a

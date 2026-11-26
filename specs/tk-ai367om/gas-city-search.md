@@ -96,10 +96,11 @@ wait (the design's section 13).
 - **Gas City's session wait**, an earlier revision's promise
   (`gc session wait <session> --on-beads <ids> --note <text>`). These
   behaviors of it keep it from holding a sitting's promise:
-  - An attach that starts a sleeping session cancels the session's waits:
-    `Store.WakeSession` calls `cancelWaitsAndCollectNudgeIDs` as it starts the
-    session (`internal/session/wait_store.go`). It is filed in the Gas City rig
-    as gc-gspdoo, which records it as a regression from upstream #9011.
+  - An attach that starts a sleeping session cancels the session's waits: it
+    makes the operator's wake, and `Store.WakeSession` calls
+    `cancelWaitsAndCollectNudgeIDs` as it records that wake
+    (`internal/session/wait_store.go`). It is filed in the Gas City rig as
+    gc-gspdoo, which records it as a regression from upstream #9011.
   - A fresh restart cancels each wait registered before it, as
     `continuation-stale` (`WaitInfo.ContinuationStale` in
     `internal/session/waits.go`, and its `CancelWait` call in
@@ -167,28 +168,53 @@ sessions, of which 107 sittings were created since 2026-11-12.
 
 **An attach that starts a sleeping session cancels its waits.**
 
-- *Gas City's reason.* None is given. A wake cancels the session's waits as it
-  clears what keeps the session from starting (`wakeSessionFromBead`, which
-  `Store.WakeSession` calls, in `internal/session/wait_store.go` at upstream
-  main 77143ecd18), as it has since the waits' first commit, 204c85b138. The
-  waits' design names what cancels a wait, which is an operator's cancel, the
-  session's close and a stale continuation epoch, and says that ordinary sleep
-  and wake cycles do not affect a wait (`docs/design/session-waits.md` at
-  48e1f45833). It gives no reason for a wake to cancel one. An attach took the
-  wake's path only with upstream #9011 (64ba02c022, 2026-11-09), whose text says
-  nothing of session waits. Before it, an attach resumed a stopped session in
-  its own process (`Manager.Attach`), and the manager cancelled waits only on a
-  close and a prune (`CloseDetailed` and `PruneDetailed` in
-  `internal/session/manager.go` at 64ba02c022's parent). The operator agreed on
-  2026-11-18 that the attach's cancel is a bug (gc-gspdoo's notes).
-- *Here.* A wake writes `wake_request=explicit` and a new `wake_requested_at` on
-  the session bead (`RequestExplicitWakePatch`), so each new `wake_requested_at`
-  is one wake that cancelled the session's waits. An attach to a stopped session
-  makes such a wake, and so does `gc session wake`. Two converse sittings were
-  woken that way in the window, and one of them during its stay. The sitting of
-  conversation tk-5e70s01 slept at the end of its idle window, and the wake
-  started it at 2026-11-24T23:01Z, 43 hours into a stay that returned at
-  2026-11-25T10:13Z. A promise on the session wait would have been cancelled for
+- *Gas City's reason.* The cancel is the operator's wake, an override of
+  whatever keeps a session asleep. `gc session wake` "clears every blocker, an
+  operator suspend included" (`EvWake` in `internal/session/disposition.go`),
+  and `Store.WakeSession`, which it calls, "clears hold/quarantine state and
+  cancels open waits for a session" (`internal/session/wait_store.go`, whose
+  `wakeSessionFromBead` calls the wake "the disposition's Wake cell: every
+  blocker goes"), both at upstream main 77143ecd18. The wake has cancelled
+  waits since the waits' first commit, 204c85b138. The waits' design gives
+  that override to `gc session wake` and keeps the attach apart from it. The
+  manual wake clears `held_until`, `quarantined_until`, `wait_hold` and
+  `sleep_intent`, and "Manual attach does not override `wait_hold` by itself;
+  the operator must wake the session first" (`docs/design/session-waits.md`,
+  Interaction with standing wake reasons, at 48e1f45833).
+- *The attach that uses it.* An attach has made the same wake only since
+  upstream #9011 (64ba02c022, 2026-11-09), and its reason is the start, not the
+  waits: "A viewer never owns a runtime's lifetime". While the city's
+  controller runs, an attach to a session whose runtime does not run records
+  the wake `gc session wake` records, and attaches once the controller has
+  started the session (`sessionAttach.run` and `attachOnceControllerStarts` in
+  `cmd/gc/cmd_session.go`, at 77143ecd18). Before it, an attach resumed a
+  stopped session in its own process (`Manager.Attach`), and the manager
+  cancelled waits only on a close and a prune (`CloseDetailed` and
+  `PruneDetailed` in `internal/session/manager.go` at 64ba02c022's parent). The
+  operator agreed on 2026-11-18 that the attach's cancel is a bug (gc-gspdoo's
+  notes).
+- *Why the override does not fit a sitting's visit.* A visit to a sitting is
+  an attach. The pack's way back into a sitting that sleeps is engage, which
+  attaches to it (`assets/scripts/gc-helm-engage.sh`), and no pack code runs
+  `gc session wake` on a sitting: it wakes only the validate and review pools
+  (`assets/scripts/gate-ensure.sh`). An operator who opens a staying sitting
+  comes to talk with it, and the stay goes on through the visit
+  (`skills/converse-stay/SKILL.md`, While the work is out). A visit that finds
+  the sitting asleep would carry an override the operator did not ask for, and
+  a promise on the session wait would go with it.
+- *Here.* Every wake through this path writes `wake_request=explicit` and a new
+  `wake_requested_at` on the session bead (`RequestExplicitWakePatch`),
+  whichever command made it, so each new `wake_requested_at` counts one explicit
+  wake. An attach also records an `attach` operation in the event log, with the
+  time it started. An attach that woke a stopped session attaches through the
+  session's runtime name, such as `s-lx-wisp-1xrd9`, once the controller has
+  started it. Two converse sittings had an explicit wake in the window, and each
+  was an attach's: an attach on the woken session's runtime started 21 seconds
+  after one wake and 7 seconds after the other. One of the two came during a
+  stay. The sitting of conversation tk-5e70s01 slept at the end of its idle
+  window at 2026-11-24T21:07Z. An attach woke it at 2026-11-24T23:01Z, 43 hours
+  into a stay that returned at 2026-11-25T10:13Z, and stayed attached for 18
+  hours. A promise on the session wait would have been cancelled by a visit for
   1 of the 18 stays.
 - *The fix at the source.* An option of the wake that the attach path sets,
   under which `wakeSessionFromBead` keeps the waits: a field of `WakeOpts`, and
@@ -246,8 +272,8 @@ window.**
   test. gc-qxq03t carries it, held for the operator.
 
 So in that week a promise on the session wait would have been cancelled for one
-stay of 18, by an explicit wake. No restart cancelled one, and the idle latch
-kept no sitting from a return. The gate meets none of the three.
+stay of 18, by an attach's wake on a visit. No restart cancelled one, and the
+idle latch kept no sitting from a return. The gate meets none of the three.
 
 ## Filing it: `gctk gate create`
 
