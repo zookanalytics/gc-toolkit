@@ -1,6 +1,6 @@
 ---
 name: gctk architecture — the CLI, its callers, the ledger and the adapters
-description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that names a verb, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the contract of `bead holds`, which answers what holds a bead, the contract of `bead stands`, which answers where a bead stands and whose move it is, and the rules a domain move follows. Read it before moving logic into gctk, adding or naming a verb or an order, declaring a metadata key, or deciding what holds a bead or whose move it is.
+description: The shape gctk is built to. Its CLI is a product, and every verb on it is called by an agent, a hook or an order and defends the feature it adds over the native call it wraps, or names the debt it contains and what retires it. The page covers that bar, the surface and its caller classes, the rule that names a verb, the rule that admits an order and what an order guarantees, the code that parallels Gas City's, the ledger, the adapters, how commands, orders, doctor checks and the board compose the domains, the contract of `bead holds`, which answers what holds a bead, the contract of `bead stands`, which answers where a bead stands and whose move it is, and the rules a domain move follows. Read it before moving logic into gctk, adding or naming a verb or an order, adding a flag or a mode to a verb, declaring a metadata key, or deciding what holds a bead or whose move it is.
 ---
 
 # gctk architecture
@@ -55,11 +55,16 @@ The board's UX is the Helm UX epic's. Gas City's own behavior is in
 
 ## Writes stay native, and pack logic reacts
 
-- **No verb parallels a native act.** An agent writes through the native
-  surface, such as `gc bd update --priority`, and never chooses between that
-  and a gctk verb for the same act. A gctk verb exists where the native surface
-  cannot express the act, such as a raise relative to what a bead follows, or
-  an arm that names the formula its start pours.
+- **No verb parallels a native act.** An act is what its caller means to do,
+  such as telling a bead something, never the mechanism that carries it out,
+  such as a nudge to the session working the bead. An agent writes through the
+  native surface, such as `gc bd update --priority`, and never chooses between
+  that and a gctk verb for the same act. A gctk verb exists where the native
+  surface cannot express the act, such as a raise relative to what a bead
+  follows, or an arm that names the formula its start pours. Where the native
+  surface carries an act in some states and not in others, the verb carries it
+  in all of them, and agents are documented onto the verb alone, so none
+  chooses between the two by the state.
 - **Pack logic that follows a native write reacts through an order.** The
   order recomputes from durable state on its cadence, under
   [the rule that admits it](#the-rule-that-admits-an-order).
@@ -83,6 +88,16 @@ registry that enumerates its consumers.
 - **Order.** Code the city runs on a schedule, an event or a condition. The
   registry is the orders set, and every order meets
   [the rule that admits it](#the-rule-that-admits-an-order).
+
+Each verb, and each flag or mode on it, is designed from its caller's seat. The
+plan that adds one answers two questions: what must the caller know to choose it
+and to use it correctly, and could the command find that out itself? What the
+command could find out is the command's to find. The caller chooses by what it
+means to do, and a flag or mode carries only what the caller alone knows, such
+as the parent a placement puts a bead under. A design whose caller must track a
+state the command could read, such as whether a bead's work is running or who
+holds it, is reshaped, and the arch check sends back a change that ships one
+([review-arch.md](review-arch.md#the-callers-seat)).
 
 Nothing callable is internal. A consumer outside these classes cannot be
 enumerated, so nothing could hold its verb to the bar. The Go packages,
