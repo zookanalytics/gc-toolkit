@@ -387,9 +387,9 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-23, at `gastownhall/gascity-packs` main 44b9db7168f6,
+- **Verified.** 2026-11-26, at `gastownhall/gascity-packs` main 44b9db7168f6,
   `gastownhall/beads` main 786241099046 and `gastownhall/gascity` main
-  ffd9f6b0cb68.
+  74819cdc9d36.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
@@ -613,7 +613,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 74819cdc9d36, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
