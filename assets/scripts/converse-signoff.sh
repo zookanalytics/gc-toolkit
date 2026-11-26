@@ -1014,13 +1014,16 @@ fi
 # makes no call and exits non-zero too, so every PR left standing reads as one
 # whose status did not read: the sign-off exists to get a ruling's writes down,
 # and an unbounded call ahead of them could hold them. Prints nothing when the
-# status does not read.
+# status does not read. The headline keeps the clause this status words, and no
+# later read corrects it, so the call runs with GC_NO_API=1. That turns off
+# gctk's read of the supervisor's copy of the PR's bead, which can trail a fresh
+# write, and the status comes from the bead as it stands.
 pr_status() {
   local t
   [ -x "$GCTK" ] || return 1
   for t in timeout gtimeout; do
     command -v "$t" >/dev/null 2>&1 || continue
-    "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
+    GC_NO_API=1 "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
       select((.status | type) == "string" and .status != "")
       | [.status,
           (.conditions | if type != "array" then "untold"
