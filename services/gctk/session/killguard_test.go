@@ -50,6 +50,10 @@ func TestPatternKill(t *testing.T) {
 		{"in a -c script inside a -c script", `bash -c "sh -c 'pkill -f x'"`, "pkill"},
 		{"in an eval", `eval "pkill -f x"`, "pkill"},
 		{"in an eval of several words", `eval pkill -f x`, "pkill"},
+		{"an ANSI-C quoted name", `$'pkill' -f x`, "pkill"},
+		{"an ANSI-C quoted name with an escape", `$'\x70kill' -f x`, "pkill"},
+		{"on a later line of an ANSI-C quoted -c script", `bash -c $'echo starting\npkill -f x'`, "pkill"},
+		{"on a later line of an ANSI-C quoted eval", `eval $'true\nkillall x'`, "killall"},
 
 		// A kill by what the caller recorded.
 		{"kill by pid", `kill 12345`, ""},
@@ -71,6 +75,8 @@ func TestPatternKill(t *testing.T) {
 		{"a manual page", `man pkill`, ""},
 		{"a which", `which killall`, ""},
 		{"an argument of a -c script", `bash -c 'echo pkill'`, ""},
+		{"an ANSI-C quoted argument", `echo $'pkill -f x'`, ""},
+		{"a backslash and n in a single-quoted -c script", `bash -c 'echo starting\npkill -f x'`, ""},
 		{"a process listing", `ps -axo pid,pgid,command | grep -F -- /work/tree`, ""},
 		{"a pgrep by worktree", `pgrep -f "/work/tree/"`, ""},
 

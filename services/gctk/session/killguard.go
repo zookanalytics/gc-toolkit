@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -187,7 +188,7 @@ func wordText(w *syntax.Word, opaque string) (string, bool) {
 		case *syntax.Lit:
 			b.WriteString(unescape(p.Value, escapedOutsideQuotes))
 		case *syntax.SglQuoted:
-			b.WriteString(p.Value)
+			b.WriteString(sglQuoted(p))
 		case *syntax.DblQuoted:
 			for _, inner := range p.Parts {
 				lit, ok := inner.(*syntax.Lit)
@@ -206,6 +207,20 @@ func wordText(w *syntax.Word, opaque string) (string, bool) {
 		}
 	}
 	return b.String(), true
+}
+
+// sglQuoted is the text a single-quoted part gives. A '...' part gives its text
+// as typed. A $'...' part gives its text with its backslash escapes decoded,
+// such as \n, \t and \x70, up to a decoded NUL byte, as the library's own
+// expander reads it. The decode takes a config of its own, because Format with
+// none writes to one the package shares.
+func sglQuoted(p *syntax.SglQuoted) string {
+	if !p.Dollar {
+		return p.Value
+	}
+	s, _, _ := expand.Format(&expand.Config{}, p.Value, nil)
+	s, _, _ = strings.Cut(s, "\x00")
+	return s
 }
 
 // escapedOutsideQuotes says a backslash outside quotes escapes any character.

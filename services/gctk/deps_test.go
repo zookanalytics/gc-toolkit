@@ -15,8 +15,9 @@ import (
 // library and gctk itself: cobra, the modules cobra requires that gctk's build
 // compiles, go-toml, which requires none and reads the name and prefix a city's
 // .gc/site.toml binds, x/sys, whose unix package gctk memory and its Claude
-// Code adapter call, and mvdan.cc/sh, whose syntax package, which imports only
-// the standard library, reads the shell command the kill guard judges. gctk
+// Code adapter call, and mvdan.cc/sh, whose syntax and expand packages, which
+// import only the standard library and the module's own packages, read the
+// shell command the kill guard judges. gctk
 // shares the repository's one Go module with the board, whose go.mod also
 // requires the board's own modules, such as bubbletea, lipgloss and tygo, so
 // this list is what keeps the board's dependencies out of gctk: a build of gctk

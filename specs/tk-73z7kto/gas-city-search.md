@@ -66,8 +66,10 @@ the gh origin guard does not also run the kill guard, once and in one spelling.
 "by an embedded POSIX interpreter (mvdan.cc/sh)", and its `go.mod` requires
 v3.13.1. The guard parses the typed command with the library's `syntax` package
 at that version, so a `pkill` in a commit message, a here-document's body or a
-grep's pattern is text and not a call. The `syntax` package imports only the
-standard library and the module's own `fileutil` package.
+grep's pattern is text and not a call. It decodes a `$'...'` string with the
+`expand` package's `Format`, as the library's own expander does, so a script
+such as `bash -c $'echo start\npkill -f x'` is read as bash runs it. The two
+packages import only the standard library and the module's own packages.
 
 ## Where the logic lives
 
