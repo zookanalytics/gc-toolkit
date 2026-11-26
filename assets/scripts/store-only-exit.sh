@@ -5,7 +5,7 @@
 # the bead's validating closer.
 #
 #   store-only-exit.sh --bead <work-bead> --base <branch>
-#                      [--convoy <input-convoy> --done "<close brief>"]
+#                      [--convoy <input-convoy>] [--done "<close brief>"]
 #
 # A run whose whole product is store work, such as a bead filed in another
 # rig's store or a record written into this one, has no branch for the refinery
@@ -28,32 +28,41 @@
 #   * the brief is appended to the bead's notes as a
 #     `## Close brief (store-only exit, <time>)` section, the claim the closer
 #     tests, before the closer is armed;
-#   * a `blocks` edge holds the bead on the root of the run this session
-#     executes, so the closer pours once this run ends and never beside it as
-#     a second live run on the bead. Gas City records the step a session
+#   * with --convoy, a `blocks` edge holds the bead on the root of the run this
+#     session executes, so the closer pours once this run ends and never beside
+#     it as a second live run on the bead. Gas City records the step a session
 #     claimed, `gc hook current` reads it back, and the step names its run's
 #     root in gc.root_bead_id; run-lib.sh confirms that run is live and works
 #     the bead over --convoy;
+#   * without --convoy nothing holds the closer, so the bead must be one no
+#     live run works. That is the bead of a claim with no poured run once the
+#     claim has handed it back: no run root can hold its closer, and nothing
+#     works the bead after the hand-back;
 #   * `gctk bead arm` arms mol-validate-close on the pool this run executes on
-#     (gc.execution_routed_to, else gc.routed_to), and the deferred-dispatch
-#     order slings it once nothing holds the bead.
+#     (gc.execution_routed_to, else gc.routed_to, else $GC_TEMPLATE, the pool
+#     the session claims from, which is all a claim with no poured run has left
+#     once its hand-back clears the route), and the deferred-dispatch order
+#     slings it once nothing holds the bead.
 # The arm refuses a claimed or routed bead, and the start never slings over an
 # assignee, so --done needs the bead open, unassigned and unrouted, the shape
-# Gas City leaves the bead a graph.v2 run works.
+# Gas City leaves the bead a graph.v2 run works in, and the shape hand-back.sh
+# leaves the bead of a claim with no poured run in.
 #
 # Everything is read and checked before anything is written, the run's root
 # being in the bead's store among it, since bd stores an edge onto another
 # store's bead without finding it and the edge holds nothing. Each write takes
-# its exit. The first one refused exits 1, and the step drains without
-# recording the exit or handing the bead back, so the step stays claimed and
-# the worker that takes it next re-takes the exit. A re-run converges: bd takes
-# an edge already in place as a no-op, a second arm rewrites the first, and the
-# notes gain a second copy of the brief.
+# its exit. The first one refused exits 1. A poured run's step then drains
+# without recording the exit or handing the bead back, so the step stays
+# claimed and the worker that takes it next re-takes the exit. A re-run
+# converges: bd takes an edge already in place as a no-op, a second arm
+# rewrites the first, and the notes gain a second copy of the brief.
 #
 # Callers: work-submit.sh --store-only, which mol-polecat-work's
-# submit-and-exit step runs.
-# exit: 0 nothing to land, and with --done the closer is held and armed ·
-#       1 refused, or a write did not land · 2 usage
+# submit-and-exit step runs, and which a claim with no poured run runs with
+# --bead. For such a claim it runs this script once without --done, to check,
+# and again with --done once it has handed the bead back.
+# exit: 0 nothing to land, and with --done the closer is armed, held on the
+#       run's root with --convoy · 1 refused, or a write did not land · 2 usage
 set -uo pipefail
 
 PROG="store-only-exit"
@@ -70,20 +79,23 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'USAGE'
 usage: store-only-exit.sh --bead <work-bead> --base <branch>
-                          [--convoy <input-convoy> --done "<close brief>"]
+                          [--convoy <input-convoy>] [--done "<close brief>"]
 
-  --bead     the work bead the run was poured for
+  --bead     the work bead the run was poured for, or that a claim with no
+             poured run holds
   --base     the branch the run's worktree was cut from
   --convoy   the run's input convoy; the run this session executes, whose
              root holds the validating closer until the run ends, must be
-             poured over it. Required with --done
+             poured over it. Without it, nothing holds the closer, which only
+             a bead no live run works may take, such as the one a claim with
+             no poured run has handed back
   --done     the close brief, when the record the run wrote finishes the bead:
              what the record shows, why that meets what the bead asks for, and
              anything that argues for keeping it open. Empty means the record
              does not finish the bead, and nothing is handed off.
 
-exit: 0 nothing to land, and with --done the closer is held and armed ·
-      1 refused, or a write did not land · 2 usage
+exit: 0 nothing to land, and with --done the closer is armed, held on the
+      run's root with --convoy · 1 refused, or a write did not land · 2 usage
 USAGE
 }
 
@@ -114,9 +126,6 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$BEAD" ] || [ -z "$BASE" ]; then
   echo "$PROG: --bead and --base are required" >&2; usage; exit 2
-fi
-if [ -n "$DONE" ] && [ -z "$CONVOY" ]; then
-  echo "$PROG: --done needs --convoy, the input convoy of the run whose root holds the closer" >&2; usage; exit 2
 fi
 case "$BEAD$BASE$CONVOY" in
   *'{{'*|*'}}'*)
@@ -154,6 +163,7 @@ STATUS=$(row_field '.[0].status // ""')
 ASSIGNEE=$(row_field '.[0].assignee // ""')
 ROUTED=$(row_field '.[0].metadata["gc.routed_to"] // ""')
 POOL=$(row_field '.[0].metadata as $m | [ $m["gc.execution_routed_to"], $m["gc.routed_to"] ] | map(select(. != null and . != "")) | .[0] // ""')
+[ -n "$POOL" ] || POOL="${GC_TEMPLATE:-}"
 WORK_DIR=$(row_field '.[0].metadata.work_dir // ""')
 
 # ── Nothing to land ──────────────────────────────────────────────────────────
@@ -180,40 +190,53 @@ fi
 
 # ── The validating closer: checked before anything is written ──────────────
 if [ "$STATUS" != open ] || [ -n "$ASSIGNEE" ] || [ -n "$ROUTED" ]; then
-  echo "$PROG: $BEAD is status '$STATUS', assignee '$ASSIGNEE', gc.routed_to '$ROUTED'. Its validating closer is armed only on an open, unassigned and unrouted bead, the shape a graph.v2 run leaves its work bead in, so nothing was written" >&2
+  echo "$PROG: $BEAD is status '$STATUS', assignee '$ASSIGNEE', gc.routed_to '$ROUTED'. Its validating closer is armed only on an open, unassigned and unrouted bead, the shape a graph.v2 run leaves its work bead in and a claim with no poured run leaves its bead in once it hands it back, so nothing was written" >&2
   exit 1
 fi
 case "$POOL" in
   */*) ;;
   *)
-    echo "$PROG: $BEAD names no rig-qualified pool its run executes on (gc.execution_routed_to and gc.routed_to gave '$POOL'), so there is no pool to arm its validating closer on; nothing was written" >&2
+    echo "$PROG: $BEAD names no rig-qualified pool its run executes on (gc.execution_routed_to, gc.routed_to and GC_TEMPLATE gave '$POOL'), so there is no pool to arm its validating closer on; nothing was written" >&2
     exit 1 ;;
 esac
 [ -x "$GCTK" ] || { echo "$PROG: no gctk binary at '$GCTK' to arm the validating closer with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is); nothing was written" >&2; exit 1; }
-STEP=$(gc hook current --id-only </dev/null 2>/dev/null) || STEP=""
-case "$STEP" in
-  ''|*[!A-Za-z0-9._-]*)
-    echo "$PROG: gc hook current names no step this session claimed, so no run root can hold its validating closer; nothing was written" >&2
-    exit 1 ;;
-esac
-ROOT=$(row_meta "$(bd_json show "$STEP")" gc.root_bead_id)
-case "$ROOT" in
-  ''|*[!A-Za-z0-9._-]*)
-    echo "$PROG: $STEP, the step this session claimed, names no run root in gc.root_bead_id; nothing was written" >&2
-    exit 1 ;;
-esac
-if ! RUNS=$(run_lib subject store_read "$ROOT"); then
-  echo "$PROG: could not read the run rooted at $ROOT; nothing was written" >&2
-  exit 1
-fi
-if ! printf '%s' "$RUNS" | jq -e --arg r "$ROOT" --arg b "$BEAD" --arg c "$CONVOY" '
-    [ .[] | select(.root == $r) ] | length == 1 and (.[0] | .live and .bead == $b and .convoy == $c)' >/dev/null 2>&1; then
-  echo "$PROG: the run rooted at $ROOT, which this session executes, is not a live run over $CONVOY that works $BEAD, so it cannot hold its validating closer; nothing was written" >&2
-  exit 1
-fi
-if ! bd_same_store "$BEAD" "$ROOT"; then
-  echo "$PROG: the run's root $ROOT is in another store than $BEAD, so a blocks edge onto it would hold nothing; nothing was written" >&2
-  exit 1
+ROOT=""
+if [ -n "$CONVOY" ]; then
+  STEP=$(gc hook current --id-only </dev/null 2>/dev/null) || STEP=""
+  case "$STEP" in
+    ''|*[!A-Za-z0-9._-]*)
+      echo "$PROG: gc hook current names no step this session claimed, so no run root can hold its validating closer; nothing was written" >&2
+      exit 1 ;;
+  esac
+  ROOT=$(row_meta "$(bd_json show "$STEP")" gc.root_bead_id)
+  case "$ROOT" in
+    ''|*[!A-Za-z0-9._-]*)
+      echo "$PROG: $STEP, the step this session claimed, names no run root in gc.root_bead_id; nothing was written" >&2
+      exit 1 ;;
+  esac
+  if ! RUNS=$(run_lib subject store_read "$ROOT"); then
+    echo "$PROG: could not read the run rooted at $ROOT; nothing was written" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$RUNS" | jq -e --arg r "$ROOT" --arg b "$BEAD" --arg c "$CONVOY" '
+      [ .[] | select(.root == $r) ] | length == 1 and (.[0] | .live and .bead == $b and .convoy == $c)' >/dev/null 2>&1; then
+    echo "$PROG: the run rooted at $ROOT, which this session executes, is not a live run over $CONVOY that works $BEAD, so it cannot hold its validating closer; nothing was written" >&2
+    exit 1
+  fi
+  if ! bd_same_store "$BEAD" "$ROOT"; then
+    echo "$PROG: the run's root $ROOT is in another store than $BEAD, so a blocks edge onto it would hold nothing; nothing was written" >&2
+    exit 1
+  fi
+else
+  if ! RUNS=$(run_lib runs store_read "$BEAD") \
+    || ! LIVE=$(printf '%s' "$RUNS" | jq -r '[ .[] | select(.live) | .root ] | join(", ")' 2>/dev/null); then
+    echo "$PROG: could not read the runs that work $BEAD; nothing was written" >&2
+    exit 1
+  fi
+  if [ -n "$LIVE" ]; then
+    echo "$PROG: the live run rooted at $LIVE works $BEAD, so its validating closer must be held on that run's root, which --convoy names; nothing was written" >&2
+    exit 1
+  fi
 fi
 
 # ── The brief, the hold, the arm ─────────────────────────────────────────────
@@ -224,7 +247,7 @@ $DONE" </dev/null >/dev/null 2>&1; then
 fi
 
 # `dep add <bead> <blocker>` reads "<bead> is blocked by <blocker>".
-if ! gc bd dep add "$BEAD" "$ROOT" --type=blocks </dev/null >/dev/null 2>&1; then
+if [ -n "$ROOT" ] && ! gc bd dep add "$BEAD" "$ROOT" --type=blocks </dev/null >/dev/null 2>&1; then
   echo "$PROG: the store refused the blocks edge from $BEAD onto its run's root $ROOT, so its validating closer was not armed" >&2
   exit 1
 fi
@@ -234,5 +257,9 @@ if ! ARM_OUT=$("$GCTK" bead arm "$BEAD" --target "$POOL" --on "$CLOSER" \
   echo "$PROG: the validating closer was not armed on $BEAD: $ARM_OUT" >&2
   exit 1
 fi
-echo "$PROG: $BEAD has nothing to land, and $CLOSER is armed on $POOL, held on run $ROOT, so it re-checks the record once this run ends"
+if [ -n "$ROOT" ]; then
+  echo "$PROG: $BEAD has nothing to land, and $CLOSER is armed on $POOL, held on run $ROOT, so it re-checks the record once this run ends"
+else
+  echo "$PROG: $BEAD has nothing to land, and $CLOSER is armed on $POOL with no run to hold it, so it re-checks the record once the deferred-dispatch order slings it"
+fi
 exit 0
