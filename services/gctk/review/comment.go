@@ -252,8 +252,9 @@ func answer(r Ruling, ok bool, rp *Repair) string {
 // delivered and what stopped it. A repo-artifact reads author-committed, since
 // a committed visual is what an author recorded and not a capture of the
 // reviewed commit, and a fallback names the modality it stands in for and what
-// stopped that one. A verdict that names neither a comment nor a stop gets its
-// modality alone.
+// stopped that one. A visual with neither a comment nor a stop, which a lane
+// output stored before the write required one can hold, reads that its
+// delivery is not recorded, so the line claims no delivery its record lacks.
 func visualLine(ln Lane) string {
 	if ln.VisualComment == "" && ln.VisualStoppedBy != "" {
 		return fmt.Sprintf("%s warranted, none delivered: %s", ln.Visual, oneLine(ln.VisualStoppedBy))
@@ -272,6 +273,9 @@ func visualLine(ln Lane) string {
 			note += ": " + oneLine(ln.VisualStoppedBy)
 		}
 		notes = append(notes, note)
+	}
+	if ln.Visual != "none" && ln.VisualComment == "" {
+		notes = append(notes, "delivery not recorded")
 	}
 	if len(notes) == 0 {
 		return modality
