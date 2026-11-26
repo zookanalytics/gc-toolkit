@@ -78,8 +78,7 @@ files the observation with every field, and says how to set its provenance,
 category and directive.
 
 A change to how agents work that you would suggest but should not make on your
-own is an observation too, filed the same way and kept out of your memory. The
-reference says what it holds.
+own is an observation too, filed the same way and kept out of your memory.
 
 Feedback about one change's content, such as a bug or a wrong approach, is
 review, not an observation.
