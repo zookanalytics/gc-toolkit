@@ -30,10 +30,9 @@ when the stay would come back after the merge:
 
 ## Record
 
-Put the outcome on the subject's notes with the one note command (the `records`
-skill). When the decision changes what the work on the subject should do, add
-`--notify`, whether or not anyone is working it, because the command finds out
-and tells whoever is:
+Put the outcome on the subject's notes (the `records` skill). Put `--notify`
+before `"$SUBJECT"` when the decision changes what the work on the subject
+should do:
 
 ```bash
 # >>> gctk-bin
@@ -71,10 +70,9 @@ sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
 
-A ruling that changes what the work on a bead should do is recorded on that
-bead with the one note command and its `--notify` flag (the `records` skill),
-whether or not that work is running, because the command finds whoever is doing
-it and tells them.
+Record a ruling that changes what the work on a bead should do as a note on
+that bead, with `--notify` (the `records` skill). Add the flag whether or not
+that work is running.
 
 The work you send is yours to get right. What the operator says is direction to
 reason through: take each point up in the course or say why not. A remark is
@@ -157,9 +155,9 @@ BLOCK
 ```
 
 No `noted <anchor>` line means the store refused the brief: send no rework.
-Exit 3 after that line means the brief landed but whoever works the anchor may
-not have it: send the nudge the message gives. Otherwise the ruling line names
-the brief, as `converse-iterate-document`'s line names its scaffold:
+Exit 3 after that line means the brief landed and a nudge may not have: send
+the nudge the message gives. Once the brief has landed, the ruling line names
+it, as `converse-iterate-document`'s line names its scaffold:
 `--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the

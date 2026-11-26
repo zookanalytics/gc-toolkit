@@ -154,8 +154,8 @@ BLOCK
 ```
 
 No `noted` line means the store refused the scaffold: send nothing. Exit 3 after
-that line means the scaffold landed but whoever works the subject may not have
-it: send the nudge the message gives.
+that line means the scaffold landed and a nudge may not have: send the nudge the
+message gives.
 
 ## Send one rework
 
