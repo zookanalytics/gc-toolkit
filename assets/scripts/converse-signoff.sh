@@ -1260,9 +1260,12 @@ if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
     [ "${STAY_PIECE%%-*}" = "${CONVERSATION%%-*}" ] \
       || die "--stay would file its gate on $STAY_PIECE, which this ruling sends, and $STAY_PIECE is in another store than conversation $CONVERSATION, where a gate holds the conversation for nothing; nothing was written. A sitting whose work is in another rig ends at the hand-off: sign off without --stay"
   elif [ -z "$STAY_KEPT" ]; then
-    BACK=$(printf '%s' "$CONV_WAITS" | jq -r --argjson conv "$CONV_ROW" "$STAY_GATE_JQ"'
-      [ .[] | select(back_unstayed($conv)) ] | sort_by((.closed_at // "") | tostring) | last // empty
-      | "\(.id // "") \(.await_id // "")\t\(.close_reason // "")"' 2>/dev/null)
+    # The row goes to jq on stdin, beside those beads, because its description
+    # and notes can run past what the host lets one argument hold.
+    BACK=$(printf '%s\n%s\n' "$CONV_WAITS" "$CONV_ROW" | jq -sr "$STAY_GATE_JQ"'.[1] as $conv
+      | [ .[0][] | select(back_unstayed($conv)) ] | sort_by((.closed_at // "") | tostring) | last // empty
+      | "\(.id // "") \(.await_id // "")\t\(.close_reason // "")"' 2>/dev/null) \
+      || stopped "the beads conversation $CONVERSATION waits on could not be read against its record, to tell whether a gate the sitting filed has brought its work back; nothing was written"
     if [ -n "$BACK" ]; then
       BACK_WHY="${BACK#*$'\t'}"; BACK="${BACK%%$'\t'*}"
       die "--stay comes back for the work the sitting sent through the gate that holds conversation $CONVERSATION, and its gate ${BACK%% *} on ${BACK#* } has closed since the sitting filed it, with no stay waiting on it (${BACK_WHY:-no reason given}), so ${BACK#* } is back: carry out its return instead of staying; nothing was written"

@@ -477,6 +477,17 @@ has "…and why" "$(line ENTRY)" "(tk-w's PR reads needs-review in its own right
 is "…which the stay's skill carries out" "$(line NEXT=)" "NEXT=converse-stay"
 is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
 is "…with nothing agreed on record" "$(line AGREED=)" "AGREED="
+# The conversation's own row can run past what a host lets a command's
+# arguments hold, through a long description.
+fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; holds tk-c
+stay_gate tk-gate tk-w closed 2026-11-20T10:00:00Z "tk-w closed"
+jq -c --rawfile d <(head -c 1100000 /dev/zero | tr '\0' x) '.description = $d' "$FIXDIR/row-tk-c.json" >"$FIXDIR/tmp" \
+  && mv "$FIXDIR/tmp" "$FIXDIR/row-tk-c.json"
+enter >/dev/null
+is "a conversation whose row runs past the argument limit still finds the gate that came back" "$(line ENTRY | cut -d: -f1)" "ENTRY returned"
+has "…naming the gate" "$(line ENTRY)" "the gate tk-gate"
+is "…for the gate's work" "$(line WORK=)" "WORK=tk-w"
+is "…exiting 0" "$(rc)" 0
 # One that closed before the last hand-back was the work of a return already
 # made, and a conversation that waits on work rather than a gate is no stay.
 fresh; hook work existing_assignment tk-c; conv tk-c in_progress "" tracks:tk-s blocks:tk-gate; handback tk-c "tk-s — the return"; holds tk-c

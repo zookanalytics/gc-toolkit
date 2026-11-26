@@ -314,7 +314,10 @@ came_back() {
   local c=$1 row=$2 deps gates why
   printf '%s' "$row" | jq -e 'any(.dependencies[]?; (.type // "") == "blocks")' >/dev/null 2>&1 || return 1
   deps=$(waits_of "$c") || unreadable "the beads conversation $c waits on did not read, to tell whether a gate the sitting filed has brought its work back"
-  gates=$(printf '%s' "$deps" | jq -c --argjson conv "$row" "$STAY_GATE_JQ"'[ .[] | select(back_unstayed($conv)) ] | sort_by((.closed_at // "") | tostring) | if length > 0 then [ last ] else [] end')
+  # The row goes to jq on stdin, beside those beads, because its description
+  # and notes can run past what the host lets one argument hold.
+  gates=$(printf '%s\n%s\n' "$deps" "$row" | jq -sec "$STAY_GATE_JQ"'.[1] as $conv | [ .[0][] | select(back_unstayed($conv)) ] | sort_by((.closed_at // "") | tostring) | if length > 0 then [ last ] else [] end' 2>/dev/null) \
+    || unreadable "the beads conversation $c waits on did not read against its record, to tell whether a gate the sitting filed has brought its work back"
   [ "$gates" != "[]" ] || return 1
   why=$(printf '%s' "$gates" | jq -r '.[0].close_reason // ""')
   gate_entry "returned: the gate $(printf '%s' "$gates" | ids_of) the sitting filed for $(printf '%s' "$gates" | jq -r '.[0].await_id // ""') closed before it stayed${why:+ ($why)}, so that work is back with conversation $c, and its return is owed." "$row" "$gates"

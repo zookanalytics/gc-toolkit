@@ -2046,6 +2046,14 @@ eq "$RC" 2 "(STAY-BACK) a stay that sends nothing, whose gate the sitting filed 
 has "$OUT" "its gate tk-promise on tk-work has closed since the sitting filed it, with no stay waiting on it (tk-work's PR reads needs-review in its own right at abc1234)" "(STAY-BACK) …naming the gate, its work and why it closed"
 has "$OUT" "so tk-work is back: carry out its return instead of staying" "(STAY-BACK) …and that the work is back"
 eq "$(writes)" 0 "(STAY-BACK) …writing nothing"
+# The conversation's own row can run past what a host lets a command's
+# arguments hold, through a long description.
+closer_case; promised tk-promise tk-work closed 2026-11-20T10:00:00Z "tk-work closed"
+jq -c --rawfile d <(head -c 1100000 /dev/zero | tr '\0' x) 'map(if .id == "tk-conv" then .description = $d else . end)' "$STUB_STORE" >"$STUB_STORE.tmp" \
+  && mv "$STUB_STORE.tmp" "$STUB_STORE"
+run_signoff --conversation tk-conv --outcome x "${STAYING[@]}"
+eq "$RC/$(writes)" "2/0" "(STAY-BACK-LONG) a stay whose conversation's row runs past the argument limit exits 2, writing nothing"
+has "$OUT" "so tk-work is back: carry out its return instead of staying" "(STAY-BACK-LONG) …and still finds that the work is back"
 # A gate an earlier stay named, or one that closed before the last hand-back,
 # came back through a return already made, so no work is back.
 closer_case; promised tk-promise tk-work closed 2026-11-20T10:00:00Z "tk-work closed"
