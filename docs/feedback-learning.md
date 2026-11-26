@@ -257,9 +257,11 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   conventions-list mechanism: agreeing a behavior matters is not agreeing
   that a static bullet every agent pays for is how to secure it, so an
   endorsed cluster still faces the carrier choice and Gate 3. A blocked
-  pattern is *surfaced* to the operator (held with the block stated), never
-  adopted; it promotes later on corroboration or an explicit `learn this`
-  endorsement.
+  pattern is *surfaced* to the operator, never adopted on its own: once
+  nothing else holds it back, its proposal is filed held for placement like
+  any other, with the block stated, so their placing it is the endorsement
+  and their closing it turns the pattern down until evidence from an event it
+  had not seen reopens it.
   `obs.source` records who filed an observation, not whose words it carries,
   so an operator correction captured by the agent it corrected reads `self`.
   The distiller checks the voice behind each `self` observation before it

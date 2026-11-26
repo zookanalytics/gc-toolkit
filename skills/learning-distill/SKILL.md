@@ -279,9 +279,12 @@ Know which case you are in before you read the rollup's number.
 the blocked all-self cluster and for the promotable all-operator one alike,
 and cannot tell them apart on its own. It counts over distinct events too,
 so one correction captured by both self-report and the miner is one voice,
-not two. A blocked pattern is **surfaced, not adopted**: hold it on its
-pattern bead with the block stated and do not file the `prompt-update` bead.
-It promotes later on corroboration or endorsement.
+not two. A blocked pattern is **surfaced, not adopted**: once this gate is
+all that holds it back, file its proposal held for placement like any other,
+with the block stated in its reasoning, and the pattern waits on it. The
+operator's placing it is the endorsement, and their closing it turns the
+pattern down as a veto does, so it is surfaced again only on evidence from an
+event it had not seen when they ruled.
 `obs.source` records who filed an observation, and the capture recipe files
 every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
@@ -296,11 +299,12 @@ another agent's `gc session nudge`. A pool session has no one at its terminal
 by design, so count no quote from one as the operator's voice.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
-**blocked**, however many events it spans. Self-sourced clusters have been
-promoted and operator-vetoed before; that block is what stops the
-re-promote. A cluster of operator corrections over several separate events
-is the opposite case and promotes, because the corrections are the external
-check.
+**blocked**, however many events it spans, so its proposal reaches the
+operator stating the block. Self-sourced clusters have been promoted and
+operator-vetoed before; the block puts the operator's endorsement ahead of
+the build, and their veto stops the re-promote. A cluster of operator
+corrections over several separate events is the opposite case and promotes,
+because the corrections are the external check.
 
 ### Gate 2 — remedy class: exhortations and structural fixes are not bullets
 
@@ -502,15 +506,15 @@ of three states. The distiller formula gives the command for each.
   passed with no recurrence among the observations judged and none left
   unjudged. The close reason says which, so the recurrence bar below can tell
   an adopted rule from a dismissal.
-- **Waiting on its follow-up.** A promote, a retirement proposal or a
-  route-to-engineering outcome waits on the bead filed for it, and a contest
-  waits on its gate. Once the operator answers a contention gate, act on the
-  ruling its close reason records: a scope-narrowing or a retirement is a
-  proposal the pattern then waits on, and a dismissal closes it.
-- **Deferred while it gathers evidence.** A hold or a surface is deferred for
-  the formula's window, with the block it is held on and the recurrence that
-  would change the call. When the window ends with no new evidence, dismiss
-  it, but only when no observation or memory note is left unjudged, because
+- **Waiting on its follow-up.** A promote, a surface, a retirement proposal
+  or a route-to-engineering outcome waits on the bead filed for it, and a
+  contest waits on its gate. Once the operator answers a contention gate, act
+  on the ruling its close reason records: a scope-narrowing or a retirement is
+  a proposal the pattern then waits on, and a dismissal closes it.
+- **Deferred while it gathers evidence.** A hold is deferred for the
+  formula's window, with the block it is held on and the recurrence that would
+  change the call. When the window ends with no new evidence, dismiss it, but
+  only when no observation or memory note is left unjudged, because
   any of them may be its recurrence. A run that leaves some unjudged, a gated
   run with observations pending, a run whose due notes outnumber what it
   judged, or a run in which `gctk memory due` could not read a memory
@@ -597,9 +601,9 @@ write.
   directory's key, its name and the hash you read. A note is one occurrence
   in its writer's voice, and a note that cites an event an observation already
   carries counts with that event once.
-- A pattern backed only by notes meets Gate 1, so notes alone never promote a
-  rule into a paid carrier. A structural fix and a wording fix go to a bead,
-  which that gate does not guard.
+- A pattern backed only by notes meets Gate 1, so notes alone reach a paid
+  carrier only through a surfaced proposal the operator places. A structural
+  fix and a wording fix go to a bead, which that gate does not guard.
 - A ruling a note gives as the operator's is checked against the source the
   note names, as you check the voice behind a self-reported observation. It is
   the operator's voice only when that source holds their words. Otherwise the

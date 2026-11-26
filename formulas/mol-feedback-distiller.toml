@@ -392,8 +392,9 @@ Count over distinct `obs.provenance`, as the rubric counts.
 One outcome per cluster: **promote** (ADD/UPDATE/SUPERSEDE, reasoning
 written down — the D3 reviewer judges from the PR alone), **hold** (say
 what recurrence would change the call), **contest** (becomes a human gate in
-file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — hold
-awaiting corroboration or operator endorsement), or **route-to-engineering**
+file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — its
+proposal is filed held for placement with the block stated, and the
+operator's placing it is the endorsement), or **route-to-engineering**
 (the rubric's Fixes in code: file-and-dispatch files its bead). §7 turns each
 outcome into the pattern's state.
 
@@ -453,7 +454,7 @@ gc bd dep add "$PATTERN" "<the open follow-up>" --type=blocks
 ```
 **Deferred.** For {{pattern_defer_days}} days, with the block it is held on:
 ```bash
-gc bd update "$PATTERN" --set-metadata "promotion_hold=<the block, such as gate1-single-source-self>"
+gc bd update "$PATTERN" --set-metadata "promotion_hold=<the block, such as gate1-single-event-operator>"
 ```
 ```bash
 gc bd defer "$PATTERN" --until "+{{pattern_defer_days}}d" --reason "<the recurrence that would change the call>"
@@ -621,7 +622,7 @@ gc bd ready --metadata-field task_kind=feedback-pattern --brief --json --limit 0
 
 ```bash
 SC="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" && [ -x "$SC" ] || SC=""
-echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held/surfaced H, G human gate(s), discarded D, stamped S observation(s)."
+echo "distiller complete (DISTILL_RUN=${DISTILL_RUN:-open}): filed F prompt-update(s), E engineering bead(s), held H, G human gate(s), discarded D, stamped S observation(s)."
 # The loop's success metric, in the log of the run that moved it.
 REPO="${REPO:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 RECUR="$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/learning-recurrence.sh" && [ -x "$RECUR" ] || RECUR=""

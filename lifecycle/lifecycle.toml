@@ -1585,7 +1585,7 @@ keys = [
 #   that touches the pattern overwrites them. Two counts and two RFC 3339 UTC
 #   timestamps.
 # promotion_hold — the block a deferred pattern is held on, as a slug such as
-#   `gate1-single-source-self`, written by the distiller when it defers the
+#   `gate1-single-event-operator`, written by the distiller when it defers the
 #   pattern (judge-and-cluster §7) and read by the run that judges it next.
 #   Absent on a pattern never held. Not cleared, so it names the last hold, and
 #   the pattern's status says whether it is held now. A slug.
