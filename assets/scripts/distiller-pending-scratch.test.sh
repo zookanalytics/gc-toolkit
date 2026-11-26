@@ -9,6 +9,11 @@
 # Both are asserted here, because either one alone is satisfiable by a wrong
 # fix.
 #
+# A store whose observations cannot join the set aborts the block as an
+# unreadable listing does, because the set it would hand on is short or gone.
+# The set lost partway through the stores and a listing whose entries cannot be
+# read as beads both reach that arm.
+#
 # The block is extracted verbatim between the distiller-pending-scratch
 # markers and EXECUTED against stubs, so what passes is the shipped formula
 # text and not a paraphrase of it.
@@ -71,6 +76,14 @@ for a in "$@"; do
   [ "$prev" = "--rig" ] && rig="$a"
   prev="$a"
 done
+# STUB_LOSE_SET_AT=<store> removes the pending set just before that store is
+# listed, as anything that deletes scratch can. Of the block's temps, the set
+# is the only one that holds a JSON array at that point.
+if [ "$rig" = "${STUB_LOSE_SET_AT:-}" ]; then
+  for t in "$TMPDIR"/gctk-feedback-distiller.*; do
+    jq -e 'type == "array"' "$t" >/dev/null 2>&1 && rm -f "$t"
+  done
+fi
 f="$STUB_STORE_DIR/$rig.json"
 if [ -f "$f" ]; then cat "$f"; else printf 'no such store: %s\n' "$rig" >&2; exit 1; fi
 STUB
@@ -118,6 +131,7 @@ run_block() {
     STUB_SC="$SANDBOX/pack/assets/scripts/claim-close.sh" \
     STUB_CLOSE_LOG="$SANDBOX/close-$label.log" \
     STUB_MEMORY_LOG="$SANDBOX/memory-$label.log" STUB_MEMORY="${STUB_MEMORY:-}" GCTK_BIN="$SANDBOX/gctk" \
+    STUB_LOSE_SET_AT="${STUB_LOSE_SET_AT:-}" \
     GC_PACK_DIR="$SANDBOX/pack" GC_RIG_ROOT="" GC_CITY_PATH="" \
       bash "$SANDBOX/run-$label.sh"
   ) > "$SANDBOX/out-$label.txt" 2>&1
@@ -179,6 +193,29 @@ else
 fi
 eq "$(grep -c -- '--outcome fail' "$SANDBOX/close-nomem.log" || true)" "0" \
   "and the step does not fail"
+
+echo "── a set lost partway through the stores aborts the block ──"
+STUB_LOSE_SET_AT=r-beta run_block lost
+eq "$(grep -c 'FAIL-SAFE: the observations of store r-beta did not reach the pending set' "$SANDBOX/out-lost.txt" || true)" "1" \
+  "the fail-safe names the store that could not join the set"
+eq "$(grep -c -- '--outcome fail' "$SANDBOX/close-lost.log" || true)" "1" \
+  "and the step closes --outcome fail"
+eq "$(count_leftovers lost)" "0" \
+  "and no gctk-feedback-distiller.* temp is left behind"
+eq "$(find "$SANDBOX/cwd-lost" -mindepth 1 | grep -c . || true)" "0" \
+  "and nothing is written into the cwd"
+
+echo "── a listing whose entries are not beads aborts the block ──"
+# It is an array, so it passes the listing check, and only the merge can find
+# that it holds no beads.
+printf '%s\n' '[42]' > "$SANDBOX/stores/r-beta.json"
+run_block short
+eq "$(grep -c 'FAIL-SAFE: the observations of store r-beta did not reach the pending set' "$SANDBOX/out-short.txt" || true)" "1" \
+  "the fail-safe names the store whose entries could not be read"
+eq "$(grep -c -- '--outcome fail' "$SANDBOX/close-short.log" || true)" "1" \
+  "and the step closes --outcome fail rather than handing on a short set"
+eq "$(count_leftovers short)" "0" \
+  "and no gctk-feedback-distiller.* temp is left behind"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
