@@ -172,8 +172,7 @@ done
 seed; unset FAKE_HOOK_CURRENT
 run --step mol-polecat-work.implement
 eq "$RC" 1 "no current claim exits 1"
-has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: session has no current claim (stub)), so mol-polecat-work.implement is not closed" \
-  "and says why, in gc's own words"
+has "$OUT" "names no bead this session claimed" "and says why"
 if grep -q 'bd update' "$GC_LOG"; then bad "no current claim writes nothing"; else ok "no current claim writes nothing"; fi
 
 seed; export FAKE_HOOK_CURRENT=live-impl FAKE_SHOW_FAIL=1

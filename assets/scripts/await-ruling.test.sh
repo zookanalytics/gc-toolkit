@@ -646,7 +646,7 @@ eq "$(meta tk-work gc.dispatch_when_ready)" "$POOL" "as the decline arms call it
 # follows and the cancel after it are stubs that record their turn, and the gate is
 # already open.
 mkdir -p "$TMP/pack"
-cp "$HERE/decline.sh" "$HERE/bd-lib.sh" "$TMP/pack/"
+cp "$HERE/decline.sh" "$TMP/pack/decline.sh"
 for v in human-gate:GATE run-cancel:CANCEL; do
   printf '#!/usr/bin/env bash\nprintf "%s\\n" >> "$FAKE_TRACE"\n' "${v#*:}" > "$TMP/pack/${v%%:*}.sh"
 done

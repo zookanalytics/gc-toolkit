@@ -182,7 +182,7 @@ chmod +x "$TMP/rec-psc"
 export PATH="$TMP/bin:$PATH"
 export STORE="$TMP/store" CALLS="$TMP/calls" READS="$TMP/reads" RA_PATH="$TMP/ra"
 export GC_SITTING_COMMENT_TOOL="$TMP/rec-psc" REC_PSC_LOG="$TMP/psc.log"
-unset GC_HELM_FIXTURE GC_RIG BEADS_DIR GC_SESSION_ID GC_SESSION_NAME GC_ALIAS GC_AGENT 2>/dev/null || true
+unset GC_HELM_FIXTURE GC_RIG BEADS_DIR GC_SESSION_ID GC_SESSION_NAME GC_ALIAS 2>/dev/null || true
 export TMPDIR="$TMP"
 
 # --- fixtures -----------------------------------------------------------------

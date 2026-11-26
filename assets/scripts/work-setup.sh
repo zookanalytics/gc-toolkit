@@ -160,8 +160,8 @@ fi
 if [ "$MODE" = stop ]; then
   # A run's step declines its run, and a claim on the work bead itself has no
   # run to end, so it drains.
-  if ! claimed_bead; then
-    echo "$PROG: $CLAIMED_WHY, so this session cannot tell a run's step from a claim on $WORK_ID itself. NOT stopping, since nothing asks the question yet, and the merge stays in progress. Re-run --stop-merge once gc hook current names this session's claim." >&2
+  if ! CLAIMED=$(gc hook current --id-only </dev/null) || [ -z "$CLAIMED" ]; then
+    echo "$PROG: this session's claim did not read, so it cannot tell a run's step from a claim on $WORK_ID itself. NOT stopping, since nothing asks the question yet, and the merge stays in progress. Re-run --stop-merge once gc hook current names this session's claim." >&2
     exit 1
   fi
   BCA="$SCRIPT_DIR/bring-current-audit.sh"
@@ -176,7 +176,7 @@ if [ "$MODE" = stop ]; then
   ANCHOR=$("$BCA" anchor --bead "$WORK_ID") \
     && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
     || { echo "$PROG: the wait did not land on $WORK_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
-  if [ "$CLAIMED_ID" != "$WORK_ID" ]; then
+  if [ "$CLAIMED" != "$WORK_ID" ]; then
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "bringing the branch current needs a decision only a person can make; the bring-current-question gate on the anchor asks it"
     exit $?
   fi

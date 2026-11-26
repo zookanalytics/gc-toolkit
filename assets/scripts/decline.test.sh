@@ -23,7 +23,7 @@ no()  { case "$1" in *"$2"*) bad "$3 (found '$2' in: $1)" ;; *) ok "$3" ;; esac;
 
 unset "${!GC_@}" "${!BEADS_@}" 2>/dev/null || true
 PACK="$TMP/pack"; mkdir -p "$PACK" "$TMP/bin"
-cp "$HERE/decline.sh" "$HERE/bd-lib.sh" "$PACK/"
+cp "$HERE/decline.sh" "$PACK/"
 for pair in human-gate.sh:GATE:GATE_RC await-ruling.sh:AWAIT:AWAIT_RC run-cancel.sh:CANCEL:CANCEL_RC; do
   IFS=: read -r name word rc <<<"$pair"
   cat > "$PACK/$name" <<STUB
@@ -94,9 +94,9 @@ for how in plain gated; do
   FAKE_HOOK_SAYS="gc hook current: open session store: connection refused" run "$@"
   eq "$RC" 1 "$how: a claim that does not read exits 1"
   eq "$TRACE" "" "$how: …and asks, waits, cancels and drains nothing"
-  has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: open session store: connection refused)" \
-    "$how: …quoting gc's exit status and its own words"
-  has "$OUT" "Nothing was written, and NOT cancelling or draining" "$how: …and saying so"
+  has "$OUT" "gc hook current: open session store: connection refused" "$how: …with gc's own words on its stderr"
+  has "$OUT" "this session's claim did not read, so what it holds is not known. Nothing was written, and NOT cancelling or draining" \
+    "$how: …and saying so"
 done
 
 for bad_args in "" "--step mol.x" "--reason why" "--step mol.x --reason why --subject tk-w" \
@@ -237,8 +237,7 @@ FAKE_CURRENT=tk-other run_claim "$HELD" --step mol.x --reason why
 eq "$TRACE" "" "gc hook current names a bead that does not read: a step, never handed back"
 FAKE_CURRENT="" run_claim "$HELD" --step mol.x --reason why
 eq "$RC|$TRACE" "1|" "gc hook current names nothing: the decline stops, and nothing is handed back"
-has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
-  "…in gc's own words"
+has "$OUT" "gc hook current: session sess-me has no current claim" "…with gc's own words on its stderr"
 eq "$(now status)|$(now assignee)" "in_progress|sess-me" "…so the claim stays with this session"
 
 echo

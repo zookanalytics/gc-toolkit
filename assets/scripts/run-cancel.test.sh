@@ -15,9 +15,8 @@
 #     requires on a mutation, for the city cities.toml registers at
 #     $GC_CITY_PATH;
 #   * --step resolves the run from the step `gc hook current` names, once that
-#     step shows it is this session's under any name it goes by, GC_AGENT
-#     included; a --bead is not read, and one that names another bead is
-#     reported; --root takes the run as given;
+#     step shows it is this session's; a --bead is not read, and one that names
+#     another bead is reported; --root takes the run as given;
 #   * a CLAIM NOT READ: gc hook current exits 1 both for no claim and for a read
 #     that failed, so either is a run not ended, reported with gc's exit status
 #     and its own words, with no request and no write;
@@ -307,13 +306,6 @@ eq "$RC" 0 "a step held under this session's alias: the run is cancelled"
 has "$(writes)" "bd update tk-lc --if-status=in_progress --if-assignee=$HICKS --status=open" "…and the step goes back to not started under a guard on the alias it is held by"
 eq "$(holders)|$(bassignee tk-lc)" "[]|$HICKS" "…so no started step names this session when the cancel is sent, and the alias stays its assignee"
 
-# A step held under GC_AGENT is this session's, as claim-close.sh reads it.
-reset
-jq -c 'map(if .id == "tk-lc" then .assignee = "agent-name" else . end)' "$FAKE_STORE" > "$FAKE_STORE.n" && mv "$FAKE_STORE.n" "$FAKE_STORE"
-OUT=$(GC_AGENT=agent-name "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
-eq "$RC" 0 "a step held under GC_AGENT: the run is cancelled"
-has "$(writes)" "bd update tk-lc --if-status=in_progress --if-assignee=agent-name --status=open" "…and the step goes back to not started under a guard on that name"
-
 reset '503 {"status":503,"detail":"run cancel failed: store busy"}'
 run --step "$STEP" --reason r
 eq "$RC" 1 "--step, a cancel that does not land after the step went back to not started: not ended"
@@ -355,7 +347,7 @@ hasnt "$OUT" "NOTE: --bead" "…and nothing is reported"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT=tk-rootA "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 2 "claim: a current claim that is not this step is refused"
-has "$OUT" "this session's current claim is tk-rootA (not a formula step), not $STEP" "…naming the claim it read"
+has "$OUT" "gc hook current names tk-rootA, which is not this session's bead for that step" "…naming the claim it read"
 eq "$(calls)|$(writes)" "0|" "…with no request and no write"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT='' "$SCRIPT" --step "$STEP" --bead tk-b --reason r 2>&1); RC=$?

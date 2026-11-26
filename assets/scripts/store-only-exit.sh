@@ -190,11 +190,10 @@ case "$POOL" in
     exit 1 ;;
 esac
 [ -x "$GCTK" ] || { echo "$PROG: no gctk binary at '$GCTK' to arm the validating closer with (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is); nothing was written" >&2; exit 1; }
-if ! claimed_bead; then
-  echo "$PROG: $CLAIMED_WHY, so no run root can hold its validating closer; nothing was written" >&2
+if ! STEP=$(gc hook current --id-only </dev/null) || [ -z "$STEP" ]; then
+  echo "$PROG: this session's claim did not read, so no run root can hold its validating closer; nothing was written" >&2
   exit 1
 fi
-STEP="$CLAIMED_ID"
 case "$STEP" in
   *[!A-Za-z0-9._-]*)
     echo "$PROG: gc hook current names '$STEP', which is not a bead id, so no run root can hold its validating closer; nothing was written" >&2

@@ -84,8 +84,8 @@ row open '{}'
 run HOOK_CURRENT=
 eq "$RC|$(printf '%s\n' "$OUT" | tail -n 1)" "0|$T" "a claim that does not read: the tree is still entered"
 case "$(cat "$LOG")" in *"gc.var.issue"*) bad "…and no root is stamped" ;; *) ok "…and no root is stamped" ;; esac
-has "$(cat "$TMP/err")" "NOTE: gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
-  "…and it says why, in gc's own words"
+has "$(cat "$TMP/err")" "gc hook current: session sess-me has no current claim" "…with gc's own words on its stderr"
+has "$(cat "$TMP/err")" "NOTE: this session's claim did not read, so no run root records gc.var.issue=tk-w" "…and a note of why"
 
 row closed '{}'
 run

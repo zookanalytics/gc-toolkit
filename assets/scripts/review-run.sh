@@ -64,9 +64,6 @@ set -uo pipefail
 
 PROG=review-run
 HERE="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# bd-lib.sh defines a die of its own, so it is sourced before this script's.
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
 
 usage() {
     sed -n '/^# Usage/,/^# Prints/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2
@@ -103,8 +100,9 @@ export GCTK_SCRIPTS_DIR="$HERE"
 
 # The step this session holds, and the run's facts for it. A claim that does
 # not read is a read that did not answer.
-claimed_bead || die 2 "$CLAIMED_WHY, so the step this session holds is not known"
-ID="$CLAIMED_ID"
+if ! ID=$(gc hook current --id-only </dev/null) || [ -z "$ID" ]; then
+    die 2 "this session's claim did not read, so the step it holds is not known; nothing was read or written"
+fi
 step_facts() {
     local out rc
     out=$("$gctk" review step "$ID" --json 2>&1); rc=$?

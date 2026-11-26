@@ -43,9 +43,9 @@ unset "${!GC_@}" "${!BEADS_@}" GCTK_SCRIPTS_DIR 2>/dev/null || true
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # The scripts directory: the script under test and review-workspace.sh with the
-# libs they source, and a stub for every other script it calls, each logging.
+# lib it sources, and a stub for every other script it calls, each logging.
 SD="$TMP/scripts"; mkdir -p "$SD"
-cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$HERE/bd-lib.sh" "$SD/"
+cp "$HERE/review-run.sh" "$HERE/review-workspace.sh" "$HERE/gctk-resolve.sh" "$SD/"
 LOG="$TMP/calls.log"; export LOG
 for s in decline.sh human-gate.sh pr-post.sh demo-deliver.sh review-evidence.sh finding.sh; do
     { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$SD/$s" <<'STUB'
@@ -159,8 +159,8 @@ STUB_RC_BD_SHOW=1 STUB_STANDS_OUT="x" run triage
 eq "$RC/$(called decline.sh)" "2/0" "a step whose ref does not read cancels nothing"
 STUB_HOOK_SAYS="gc hook current: open session store: connection refused" STUB_STANDS_OUT="x" run triage
 eq "$RC/$(called decline.sh)" "2/0" "a claim that does not read is a read that did not answer, and cancels nothing"
-has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: open session store: connection refused)" \
-    "and quotes gc's own words"
+has "$OUT" "gc hook current: open session store: connection refused" "and gc's own words reach its stderr"
+has "$OUT" "this session's claim did not read, so the step it holds is not known" "…above its own"
 run triage
 eq "$RC" 0 "triage's read goes on for a run that stands"
 has "$OUT" "The run's workspace: $WS" "and prints the run's workspace"

@@ -332,8 +332,8 @@ TOOL_ENV=STUB_HOOK_CURRENT= tool --stop-merge --bead tk-w --path shared.txt --co
 eq "$RC" "1" "(16c) a claim that does not read stops the stop"
 eq "$(grep -cE '^(bca ask|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16c) before it asks, and nothing waits, cancels or drains"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16c) the merge stays open"
-has "$(cat "$TMP/err")" "gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-me has no current claim" \
-  "(16c) and it quotes gc's own words"
+has "$(cat "$TMP/err")" "gc hook current: session sess-me has no current claim" "(16c) with gc's own words on its stderr"
+has "$(cat "$TMP/err")" "this session's claim did not read, so it cannot tell a run's step from a claim on tk-w itself" "(16c) and saying why it stops"
 hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16c) and the notes record no stop, as a bead with no molecule's would"
 for held in tk-step tk-w; do
   clone polecat/w2
@@ -618,7 +618,7 @@ for case in edge hook no-hook holder refinery pending head-changed run route tar
   case "$case" in
     edge)     deps=""; want="no blocks edge onto tk-conv" ;;
     hook)     envs=(STUB_HOOK_CURRENT=tk-other); want="gc hook current names tk-other, not tk-conv" ;;
-    no-hook)  envs=(STUB_HOOK_CURRENT=); want="gc hook current exited 1 without naming a claim (it said: gc hook current: session sess-sit has no current claim (nothing claimed through gc hook --claim)), where it must name tk-conv" ;;
+    no-hook)  envs=(STUB_HOOK_CURRENT=); want="gc hook current names no bead, not tk-conv" ;;
     holder)   who=sess-other; want="assigned to sess-other" ;;
     refinery) who=gc-toolkit/gc-toolkit.refinery; want="assigned to gc-toolkit/gc-toolkit.refinery" ;;
     pending)  members+=",$(kv merge_result pull_request_pending)"; want="its PR waits on the pending record (pull_request_pending)" ;;
