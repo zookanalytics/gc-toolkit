@@ -868,12 +868,13 @@ which walks a rig's PRs together, as on its label and at engage, which walk it
 alone. A walk is bounded, and one that passes its bound reads as a read that did
 not answer, for that bead alone.
 
-A read that does not answer changes no label. When gctk is unavailable, or the
-anchor, its in-flight set, its blockers or the walk from them do not read,
-`pr-status-label.sh` exits 2 and leaves both families as they are. Otherwise it writes both from one
-derivation in one edit: the `status:` value and a `held:` label for each held
-value, with every other label under either prefix taken off. A `held:` label
-comes off on the first derivation after its condition clears.
+A read that does not answer changes no label. The landing order writes no
+label for a PR whose derivation did not read, and when gctk is unavailable, or
+the anchor, its in-flight set, its blockers or the walk from them do not read,
+`pr-status-label.sh` exits 2 and leaves both families as they are. Otherwise
+each writes both from one derivation: the `status:` value and a `held:` label
+for each held value, with every other label under either prefix taken off. A
+`held:` label comes off on the first derivation after its condition clears.
 
 The labels come off when the PR merges or closes, where GitHub's own Merged or
 Closed state takes over. The landing order takes them off a PR a live bead owns
@@ -922,15 +923,20 @@ phase signal, not a merge signal: the refinery opens every PR as a draft, and
 the landing order marks it ready once a review result has passed at the head
 the refinery validated
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)).
-`assets/scripts/pr-status-label.sh` is the single writer of both families, and
-every call that derives one writes the other. The landing order keeps them by
-comparison for every PR the rig's live beads own: each run compares the labels
-of the writer's that the PR watch saved on the PR's bead with the ones the
-store derives, and has the writer write them only where they differ,
-`reconcile` on an open PR and `clear` on one that merged or closed. A change on
-the store's side reaches the labels at its next run, and a label a person
-changes on GitHub once the PR watch has saved it. Other callers derive them as
-they act. `signoff.sh` re-derives them on each of the city's own verdicts. A
+Every call that derives one family writes the other. The landing order keeps
+them by comparison for every PR the rig's live beads own: each run compares the
+city's labels that the PR watch saved on the PR's bead with the ones the store
+derives over the run's listing, and where they differ it writes the labels it
+derived, reading the PR's labels first and changing only those that differ:
+the derived labels on an open PR, and none on one that merged or closed. The
+labels it writes are as old as the listing, which the run reads as it starts,
+so a write lands within the run's 45 seconds and the act's 30 of the read it
+derives from. A change on the store's side reaches the labels at the next run,
+and a label a person changes on GitHub once the PR watch has saved it. The
+old path's callers derive them as they act, through
+`assets/scripts/pr-status-label.sh`, which derives them with
+`gctk pr status` and writes them in one edit. `signoff.sh` re-derives them on
+each of the city's own verdicts. A
 human's review moves them in the merge cadence's posture and
 feedback arms, in the pass that records the review. The posture arm re-derives
 the labels for an anchor whose posture value it changes: an approval, a comment,

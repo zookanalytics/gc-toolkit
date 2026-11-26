@@ -550,7 +550,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main ebb5ae59d6a1,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull

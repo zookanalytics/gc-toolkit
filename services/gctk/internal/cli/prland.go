@@ -213,17 +213,18 @@ re-read included. A record that owes no act gets no write.
 
 It keeps each PR's status: and held: labels equal to what the store derives,
 for every PR the store's live beads own, on the pending record or not. For
-each owned PR whose bead holds a read of it, it compares the labels of the
-writer's that the read saved with the ones the store derives, as gctk pr
-status derives them: the PR's status and held values while it is open, and
-none once it merged or closed. Where they differ, it has the labels' one
-writer, pr-status-label.sh, write them, reconcile on a PR the saved read shows
-open and clear on one it shows merged or closed, handing it no labels, so the
-writer reads the PR's labels itself, and reads nothing of the PR first. A
-label write takes its place among the acts in the shuffled order, under the
-same 45 and 30 seconds, and writes nothing on the bead, so one that does not
-land, or one a saved read out of date made wrong, leaves the difference for a
-later run, which writes it again.
+each owned PR whose bead holds a read of it, it compares the city's labels
+that the read saved with the ones the store derives over the run's listing,
+as gctk pr status derives them: the PR's status and held values while it is
+open, and none once it merged or closed. Where they differ, it writes the
+labels it derived, and reads nothing of the store to do it: it reads the PR's
+labels, adds each derived label the PR lacks, first having the repository
+hold every label the city names, and takes off each of the city's labels it
+did not derive, leaving every other label. A label write takes its place among the
+acts in the shuffled order, under the same 45 and 30 seconds, and writes
+nothing on the bead, so one that does not land, or one a saved read out of
+date made wrong, leaves the difference for a later run, which writes it
+again.
 
 A PR that lands on the rig's default branch has that branch's seed audit
 checked at its tip as the act fetched it, once the lock is free and inside the
@@ -249,8 +250,8 @@ exit: 0 each record and each PR's labels the run took up were decided, and
       2 the listing did not answer, or a record or a PR's labels could not be
         decided or its act did not complete: a store read or write failed, a
         call GitHub refused or did not answer, a merge's re-read did not save,
-        a fetch failed, a review run the record is owed did not pour, the
-        labels' writer did not exit 0, or the act was stopped`
+        a fetch failed, a review run the record is owed did not pour, a
+        label write did not land, or the act was stopped`
 
 func newPRRecordCmd(stdout, stderr io.Writer) *cobra.Command {
 	var url, head, target, refinery, db string
@@ -365,8 +366,8 @@ func prReconcile(refinery, db string, stdout, stderr io.Writer) int {
 // and the runtime adapter for human gates, for the city's mark, which
 // `pr-post.sh mark` prints, for a review run's pour, which runs in the clone,
 // so gc resolves the rig's store there, for the disposition writer, which runs
-// as the refinery, for the refinery's wake, for the labels' writer, and, where
-// the clone carries one, for the seed audit, whose scripts run in the clone.
+// as the refinery, for the refinery's wake, and, where the clone carries one,
+// for the seed audit, whose scripts run in the clone.
 func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route(ids...)
@@ -417,7 +418,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Dispositions: dispositions{rt: rt.As(refinery)},
 		Audit:        audit,
 		Wake:         wakes{rt: rt},
-		Labels:       prLabels{rt: rt},
+		Labels:       prLabels{},
 		Wait:         recordLockWait,
 	}, nil
 }

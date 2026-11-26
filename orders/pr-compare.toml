@@ -23,11 +23,11 @@
 # It then clears the city's labels off the PRs no live bead owns, such as one
 # whose bead closed, which no bead holds for the landing order to find (design,
 # section 9): it searches the rig's own repository, the one its checkout's origin
-# names, for the PRs that carry a status: or held: label pr-status-label.sh
-# names, 100 a page, reads on until it has found 20 PRs no live bead owns or
-# the results end, and has pr-status-label.sh clear each, so it clears about 20
-# such PRs an hour. A clear that does not land fails the pass, and the next
-# pass's search finds the PR again.
+# names, for the PRs that carry a status: or held: label the city names, 100 a
+# page, reads on until it has found 20 PRs no live bead owns or the results
+# end, and takes the city's labels off each, so it clears about 20 such PRs an
+# hour. A clear that does not land fails the pass, and the next pass's search
+# finds the PR again.
 # What it costs: a request of up to 9 PRs costs 1 GitHub point and one of 10
 # costs 2, plus 1 for each page past a list's first, and each update 1 or 2
 # more. A request of 10 PRs took about 2 seconds. Each page of the search

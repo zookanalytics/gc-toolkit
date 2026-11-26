@@ -27,11 +27,12 @@
 # Each run also keeps the status: and held: labels of every PR the rig's live
 # beads own, on the pending record or not, equal to what the store derives
 # (specs/tk-1tfzr71.149/design.md, section 9): it compares the labels the
-# one-PR update saved on the PR's bead with the ones gctk pr status derives,
-# none once the saved read shows the PR merged or closed, and where they differ
-# it has pr-status-label.sh, which reads the PR's labels itself, write them,
-# reading nothing of the PR first. A label write is an act like the others, and
-# one that does not land records nothing, so the next run writes it again.
+# one-PR update saved on the PR's bead with the ones gctk pr status derives
+# over the run's listing, none once the saved read shows the PR merged or
+# closed, and where they differ it writes the labels it derived, reading the
+# PR's labels first and changing only those that differ. A label write is an
+# act like the others, and one that does not land records nothing, so the next
+# run writes it again.
 #
 # Exec, not a formula: a run reads records and writes guarded updates, with no
 # judgment for an LLM. Rig-scoped, each run against its own rig's store, with

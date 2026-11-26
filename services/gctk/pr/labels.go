@@ -1,7 +1,6 @@
 package pr
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
@@ -17,17 +17,18 @@ import (
 // The PRs' status: and held: labels, kept by comparison
 // (specs/tk-1tfzr71.149/design.md, section 9). A label is a view of the saved
 // read and the store. The landing order compares the labels the one-PR update
-// saved on each owned PR's bead with the ones the store derives, and where they
-// differ, it has the labels' one writer write them, which reads the PR's labels
-// itself: the derived labels on a PR the saved read shows open, and none on one
-// it shows merged or closed. The net searches the rig's repository for the
-// city's labels on PRs no live bead owns, and has the writer clear them.
-// Nothing records a write that does not land, or one a saved read out of date
-// made wrong: the difference stays, and a later run writes it again.
+// saved on each owned PR's bead with the ones the store derives over its pass,
+// and where they differ, it writes the labels it derived, reading the PR's
+// labels first: the derived labels on a PR the saved read shows open, and none
+// on one it shows merged or closed. The net searches the rig's repository for
+// the city's labels on PRs no live bead owns, and takes them off. Nothing
+// records a write that does not land, or one a saved read out of date made
+// wrong: the difference stays, and a later run writes it again.
 
-// Labels is the PRs' labels as the store derives them and their one writer
-// keeps them (assets/scripts/pr-status-label.sh). The derivation is prstatus's,
-// which imports this package, so the caller hands it over.
+// Labels is the city's labels as their writer is handed them: the ones the
+// store derives for each PR, which labels it keeps, and every label it names,
+// with its colour and description. The derivation and the names are
+// prstatus's, which imports this package, so the caller hands them over.
 type Labels interface {
 	// Derive returns the labels the store derives for the open PR each bead
 	// named owns, read through pass, and the error of each bead it could not
@@ -36,16 +37,109 @@ type Labels interface {
 	// Kept reports whether the writer keeps the label named, which it takes off
 	// a PR when it derives none of that name.
 	Kept(name string) bool
-	// Names returns every label the writer names.
-	Names() []string
-	// Reconcile has the writer derive the labels of the open PR bead owns,
-	// number in repo, owner/name, on host, and write them where they differ
-	// from current, the labels the PR shows, or from the labels it reads itself
-	// when current is empty. It stops once ctx ends.
-	Reconcile(ctx context.Context, bead, host, repo string, number int, current []string) error
-	// Clear has the writer take every label it keeps off the PR, from current as
-	// Reconcile reads it. It stops once ctx ends.
-	Clear(ctx context.Context, host, repo string, number int, current []string) error
+	// Defined returns every label the writer names, as a repository holds it
+	// once the writer has made it.
+	Defined() []gh.Label
+}
+
+// Labeling is GitHub as the labels' writer reaches it: the labels a PR
+// carries, the labels its repository holds, a label's creation and the edit of
+// its description, and the labels added to a PR or taken off it.
+type Labeling interface {
+	PullRequestLabels(repo string, number int) ([]string, error)
+	RepoLabels(repo string) ([]gh.Label, error)
+	CreateLabel(repo string, l gh.Label) error
+	EditLabel(repo string, l gh.Label) error
+	AddLabels(repo string, number int, names []string) error
+	RemoveLabel(repo string, number int, name string) error
+}
+
+// putLabels brings the labels labels keeps on PR number in repo to want,
+// through hub, and returns what it changed, empty when it changed nothing: it
+// reads the labels the PR carries, adds each of want the PR lacks, in want's
+// order, then takes off each label it keeps that want does not name, leaving
+// every other label. Before an add it has the repository hold every label
+// labels names, with its colour and description (ensureLabels). A read or a
+// write that does not land returns an error naming it, and what the write had
+// changed by then stands for the next write to read.
+func putLabels(hub Labeling, labels Labels, repo string, number int, want []string) (string, error) {
+	carried, err := hub.PullRequestLabels(repo, number)
+	if err != nil {
+		return "", fmt.Errorf("the PR's labels did not read: %w", err)
+	}
+	var shows, add, remove []string
+	for _, n := range carried {
+		if labels.Kept(n) && !slices.Contains(shows, n) {
+			shows = append(shows, n)
+		}
+	}
+	for _, n := range want {
+		if !slices.Contains(shows, n) && !slices.Contains(add, n) {
+			add = append(add, n)
+		}
+	}
+	for _, n := range shows {
+		if !slices.Contains(want, n) {
+			remove = append(remove, n)
+		}
+	}
+	var did []string
+	if len(add) > 0 {
+		made := ensureLabels(hub, labels, repo)
+		if err := hub.AddLabels(repo, number, add); err != nil {
+			if made != nil {
+				err = fmt.Errorf("%w, after the labels it names were not all made: %w", err, made)
+			}
+			return "", fmt.Errorf("adding %s did not land: %w", shown(add), err)
+		}
+		did = append(did, "added "+shown(add))
+	}
+	for i, n := range remove {
+		if err := hub.RemoveLabel(repo, number, n); err != nil {
+			had := slices.Clone(did)
+			if i > 0 {
+				had = append(had, "taken off "+shown(remove[:i]))
+			}
+			if len(had) > 0 {
+				err = fmt.Errorf("%w, once it had %s", err, strings.Join(had, " and "))
+			}
+			return "", fmt.Errorf("taking %s off did not land: %w", n, err)
+		}
+	}
+	if len(remove) > 0 {
+		did = append(did, "took off "+shown(remove))
+	}
+	return strings.Join(did, " and "), nil
+}
+
+// ensureLabels has repo hold every label labels names, as it names it: it
+// creates each label repo lacks, and corrects the description of each whose
+// description differs. It returns what did not land, which stops nothing: the
+// add it comes before goes ahead, and carries it in its error when the add
+// does not land either.
+func ensureLabels(hub Labeling, labels Labels, repo string) error {
+	have, err := hub.RepoLabels(repo)
+	if err != nil {
+		return fmt.Errorf("the repository's labels did not read, so none was made: %w", err)
+	}
+	var failed []string
+	for _, d := range labels.Defined() {
+		i := slices.IndexFunc(have, func(l gh.Label) bool { return l.Name == d.Name })
+		switch {
+		case i < 0:
+			if err := hub.CreateLabel(repo, d); err != nil {
+				failed = append(failed, fmt.Sprintf("%s was not made: %v", d.Name, err))
+			}
+		case have[i].Description != d.Description:
+			if err := hub.EditLabel(repo, d); err != nil {
+				failed = append(failed, fmt.Sprintf("the description of %s was not corrected: %v", d.Name, err))
+			}
+		}
+	}
+	if len(failed) > 0 {
+		return errors.New(strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 // StrayClears is the most PRs no live bead owns whose labels a pass of the net
@@ -154,28 +248,16 @@ func shown(labels []string) string {
 	return strings.Join(labels, ", ")
 }
 
-// writeLabels makes the write w owes through the labels' writer, which reads
-// the PR's labels itself, stopped at stop: the labels the store derives on a PR
-// the saved read shows open, and none on one it shows merged or closed. It
-// reads nothing of the PR first. A write that does not land records nothing, so
-// the next run finds the same difference and writes it again.
+// writeLabels makes the write w owes through GitHub, stopped at stop: the
+// labels the store derived over the run's pass on a PR the saved read shows
+// open, and none on one it shows merged or closed. It reads the PR's labels
+// first and changes only those that differ (putLabels), and reads nothing of
+// the store. A write that does not land records nothing, so the next run finds
+// the same difference and writes it again.
 func (u *run) writeLabels(w labelWrite, stop time.Duration) RunOutcome {
-	ctx, cancel := context.Background(), context.CancelFunc(func() {})
-	if stop > 0 {
-		ctx, cancel = context.WithTimeout(ctx, stop)
-	}
+	ctx, cancel := bounded(stop)
 	defer cancel()
-	var err error
-	var done string
-	if w.ended != "" {
-		err = u.Labels.Clear(ctx, w.host, w.repo, w.number, nil)
-		done = fmt.Sprintf("%s is %s and showed %s, so the labels' writer took them off",
-			w.url, strings.ToLower(w.ended), shown(w.have))
-	} else {
-		err = u.Labels.Reconcile(ctx, w.bead, w.host, w.repo, w.number, nil)
-		done = fmt.Sprintf("%s showed %s where the store derives %s, so the labels' writer wrote them",
-			w.url, shown(w.have), shown(w.want))
-	}
+	did, err := putLabels(u.Hub(ctx, w.host), u.Labels, w.repo, w.number, w.want)
 	if err != nil {
 		why := err.Error()
 		if ctx.Err() != nil {
@@ -184,7 +266,15 @@ func (u *run) writeLabels(w labelWrite, stop time.Duration) RunOutcome {
 		return RunOutcome{Bead: w.bead, Action: ActRetry, Detail: fmt.Sprintf("the labels of %s did not land, and "+
 			"nothing records it, so the next run compares them again: %s", w.url, why)}
 	}
-	return RunOutcome{Bead: w.bead, Action: ActLabeled, Detail: done}
+	if did == "" {
+		did = "found the PR already showing them"
+	}
+	if w.ended != "" {
+		return RunOutcome{Bead: w.bead, Action: ActLabeled, Detail: fmt.Sprintf(
+			"%s is %s and showed %s, so the run took them off: it %s", w.url, strings.ToLower(w.ended), shown(w.have), did)}
+	}
+	return RunOutcome{Bead: w.bead, Action: ActLabeled, Detail: fmt.Sprintf(
+		"%s showed %s where the store derives %s, so the run wrote them: it %s", w.url, shown(w.have), shown(w.want), did)}
 }
 
 // Search is what a pass of the net's search for the city's labels did in the
@@ -198,9 +288,10 @@ type Search struct {
 
 // clearStrays searches the rig's repository, the one its clone's origin names,
 // for PRs that carry a label the writer names, a page at a time, until it has
-// found StrayClears PRs that no live bead owns or the results end, and has the
-// writer clear each, in a shuffled order, so one whose clear is slow or keeps
-// failing holds no other back, starting none past o.Window, which start began.
+// found StrayClears PRs that no live bead owns or the results end, and takes
+// the labels it keeps off each (putLabels), in a shuffled order, so one whose
+// clear is slow or keeps failing holds no other back, starting none past
+// o.Window, which start began.
 // A page that holds only owned PRs never hides the ones behind it. all is the
 // owners the pass listed. A clear that does not land is reported failed, and
 // the next pass's search finds the PR again. Only the rig's own repository is
@@ -232,7 +323,10 @@ func (w Watcher) clearStrays(o PassOptions, start time.Time, all map[string][]ow
 		}
 	}
 	hub := w.GitHub(host)
-	names := w.Labels.Names()
+	var names []string
+	for _, l := range w.Labels.Defined() {
+		names = append(names, l.Name)
+	}
 	var strays []int
 	for after := ""; len(strays) < StrayClears; {
 		page, err := hub.Labeled(repo, names, after)
@@ -265,7 +359,7 @@ func (w Watcher) clearStrays(o PassOptions, start time.Time, all map[string][]ow
 			report.Late = append(report.Late, url)
 			continue
 		}
-		if err := w.Labels.Clear(context.Background(), host, repo, numbers[url], nil); err != nil {
+		if _, err := putLabels(hub, w.Labels, repo, numbers[url], nil); err != nil {
 			report.Failed[url] = fmt.Errorf("no live bead owns it, and its labels did not come off: %w", err)
 			continue
 		}

@@ -21,25 +21,20 @@ import (
 
 // The labels' cases (specs/tk-1tfzr71.149/design.md, section 9). The landing
 // order compares the labels the one-PR update saved with the ones the store
-// derives, and has the writer write only where they differ. The net clears the
-// city's labels off the PRs no live bead owns. Each starts from the watched
-// world, whose PR the cheap question has read, with its bead on the old path
-// so the run owes the record no act and every outcome is a label's.
+// derives over its pass, and writes those it derived only where they differ.
+// The net clears the city's labels off the PRs no live bead owns. Each starts
+// from the watched world, whose PR the cheap question has read, with its bead
+// on the old path so the run owes the record no act and every outcome is a
+// label's.
 
-// labelWriter is the labels' writer as a test sets it: the labels the store
-// derives for each bead, a derivation that fails, writes that fail while fail
-// counts down, and writes that wait until they are stopped. A write it makes
-// edits the PR's labels on GitHub as the writer does, so the PR watch's next
-// pass saves what it wrote.
+// labelWriter is what the labels' writer is given, as a test sets it: the
+// labels the store derives for each bead, a derivation that fails, and the
+// labels it names, which the world's repository holds.
 type labelWriter struct {
 	mu        sync.Mutex
-	github    *ghfake.GitHub
 	derived   map[string][]string
 	deriveErr error
-	fail      int
-	block     bool
 	derives   [][]string
-	writes    []string
 }
 
 func ours(name string) bool {
@@ -63,60 +58,48 @@ func (l *labelWriter) Derive(_ *ledger.Ledger, beads []string) (map[string][]str
 
 func (*labelWriter) Kept(name string) bool { return ours(name) }
 
-func (*labelWriter) Names() []string {
-	return []string{"status: working", "status: merging", "status: needs-review", "held: gate"}
+func (*labelWriter) Defined() []gh.Label { return slices.Clone(defined) }
+
+// defined is every label the writer names in these cases.
+var defined = []gh.Label{
+	{Name: "status: working", Color: "1D76DB", Description: "the city works it"},
+	{Name: "status: merging", Color: "1D76DB", Description: "the city lands it"},
+	{Name: "status: needs-review", Color: "1D76DB", Description: "a person reviews it"},
+	{Name: "status: needs-attention", Color: "1D76DB", Description: "a person clears it"},
+	{Name: "held: gate", Color: "D93F0B", Description: "a gate holds it"},
 }
 
-func (l *labelWriter) Reconcile(ctx context.Context, bead, host, repo string, number int, current []string) error {
-	return l.write(ctx, fmt.Sprintf("reconcile %s %s/%s#%d [%s]", bead, host, repo, number, strings.Join(current, ",")),
-		repo, number, l.wanted(bead))
-}
-
-func (l *labelWriter) Clear(ctx context.Context, host, repo string, number int, current []string) error {
-	return l.write(ctx, fmt.Sprintf("clear %s/%s#%d [%s]", host, repo, number, strings.Join(current, ",")),
-		repo, number, nil)
-}
-
-func (l *labelWriter) wanted(bead string) []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.derived[bead]
-}
-
-func (l *labelWriter) write(ctx context.Context, call, repo string, number int, want []string) error {
-	l.mu.Lock()
-	l.writes = append(l.writes, call)
-	fail := l.fail > 0
-	if fail {
-		l.fail--
+// holding has GitHub's repository hold labels.
+func holding(g *ghfake.GitHub, labels []gh.Label) {
+	if g.Repos == nil {
+		g.Repos = map[string]*ghfake.Repo{}
 	}
-	block := l.block
-	l.mu.Unlock()
-	if block {
-		<-ctx.Done()
-		return fmt.Errorf("pr-status-label.sh was stopped: %w", ctx.Err())
+	if g.Repos[repo] == nil {
+		g.Repos[repo] = &ghfake.Repo{}
 	}
-	if fail {
-		return errors.New("pr-status-label.sh: exit 2: could not write the PR's labels")
-	}
-	p := l.github.PRs[strings.ToLower(repo)+fmt.Sprintf("#%d", number)]
-	if p == nil {
-		return fmt.Errorf("github: %s holds no pull request %d", repo, number)
-	}
-	labels := slices.DeleteFunc(slices.Clone(p.Labels), ours)
-	p.Labels = append(labels, want...)
-	return nil
+	g.Repos[repo].Labels = slices.Clone(labels)
 }
 
-func (l *labelWriter) made() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return slices.Clone(l.writes)
+// labelAsks is each label request made of GitHub, in order, as its method, the
+// PR or repository it names, and the labels it names.
+func labelAsks(g *ghfake.GitHub) []string {
+	var out []string
+	for _, a := range g.Asks() {
+		switch a.Method {
+		case "CreateLabel", "EditLabel", "AddLabels", "RemoveLabel":
+			out = append(out, a.Method+" "+a.ID+" "+a.Message)
+		}
+	}
+	return out
 }
+
+// labelRead reports whether read is one a label write makes of GitHub.
+func labelRead(read string) bool { return read == "PullRequestLabels" || read == "RepoLabels" }
 
 // labeled is the watched world with its bead on the old path, the labels'
 // writer, and a landing order that keeps the labels, once a pass of the cheap
-// question has saved the PR's read.
+// question has saved the PR's read. The repository holds every label the
+// writer names.
 type labeled struct {
 	*watched
 	lw *labelWriter
@@ -127,10 +110,11 @@ func newLabeled(t *testing.T, shows []string) *labeled {
 	t.Helper()
 	d := newWatched(t)
 	d.pr.Labels = shows
+	holding(d.github, defined)
 	md := maps.Clone(d.md)
 	md["merge_result"] = "pull_request"
 	d.store.Put(fake.Bead{ID: bead, Title: "the work", Status: "open", Metadata: md})
-	lw := &labelWriter{github: d.github, derived: map[string][]string{bead: {"status: merging"}}}
+	lw := &labelWriter{derived: map[string][]string{bead: {"status: merging"}}}
 	d.w.Labels, d.w.Origin = lw, func() (string, error) { return origin, nil }
 	x := &labeled{watched: d, lw: lw, l: pr.Landing{
 		Ledger:   ledger.New(d.store),
@@ -153,8 +137,9 @@ func newLabeled(t *testing.T, shows []string) *labeled {
 
 // run runs the landing order once and returns its outcomes, failing unless it
 // returns an error exactly when an act did not complete. It fails too if the
-// run wrote the store or read GitHub, since a label write writes nothing on the
-// bead and reads nothing of the PR, whose labels its writer reads itself.
+// run wrote the store or read GitHub beyond a label write's reads of the
+// labels, since a label write writes nothing on the bead, and reads the PR's
+// labels and, before an add, the repository's, and nothing else.
 func (d *labeled) run(t *testing.T, o pr.Options) []pr.RunOutcome {
 	t.Helper()
 	reads, writes := len(d.github.Reads()), len(d.store.Writes())
@@ -164,7 +149,7 @@ func (d *labeled) run(t *testing.T, o pr.Options) []pr.RunOutcome {
 	if (err != nil) != owed {
 		t.Fatalf("Reconcile returned %v over the outcomes %+v", err, out)
 	}
-	if got := d.github.Reads()[reads:]; len(got) != 0 {
+	if got := slices.DeleteFunc(slices.Clone(d.github.Reads()[reads:]), labelRead); len(got) != 0 {
 		t.Fatalf("the run read GitHub %v over the outcomes %+v", got, out)
 	}
 	if got := d.store.Writes()[writes:]; len(got) != 0 {
@@ -185,50 +170,152 @@ func one(t *testing.T, out []pr.RunOutcome, action string) pr.RunOutcome {
 
 // The landing order writes the labels the store derives where the ones the PR
 // shows differ: it adds a derived label the PR lacks, and takes off a label of
-// the writer's that the store no longer derives, leaving every other label.
-// It reads nothing of the PR and hands the writer no labels, so the writer
-// reads them itself. Once the PR watch saves what the writer wrote, the next
-// run finds nothing to write.
+// the writer's that the store no longer derives, leaving every other label. It
+// reads the PR's labels first, and once the PR watch saves what it wrote, the
+// next run finds nothing to write.
 func TestTheLandingOrderWritesTheLabelsTheStoreDerives(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		shows, derive []string
-		write         string
+		asks          []string
+		did           string
 		after         []string
 	}{
 		{"a derived label added", nil, []string{"status: needs-review"},
-			"reconcile tk-1 github.com/acme/widgets#7 []", []string{"status: needs-review"}},
+			[]string{"AddLabels acme/widgets#7 status: needs-review"}, "added status: needs-review",
+			[]string{"status: needs-review"}},
 		{"a stale label taken off", []string{"bug", "held: gate", "status: working"}, []string{"status: working"},
-			"reconcile tk-1 github.com/acme/widgets#7 []", []string{"bug", "status: working"}},
+			[]string{"RemoveLabel acme/widgets#7 held: gate"}, "took off held: gate",
+			[]string{"bug", "status: working"}},
+		{"one swapped for another", []string{"status: working", "bug"}, []string{"status: needs-attention", "held: gate"},
+			[]string{"AddLabels acme/widgets#7 status: needs-attention, held: gate", "RemoveLabel acme/widgets#7 status: working"},
+			"added status: needs-attention, held: gate and took off status: working",
+			[]string{"bug", "held: gate", "status: needs-attention"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newLabeled(t, tc.shows)
 			d.lw.derived[bead] = tc.derive
 			o := one(t, d.run(t, pr.Options{}), pr.ActLabeled)
-			if !strings.Contains(o.Detail, "where the store derives "+strings.Join(tc.derive, ", ")) {
-				t.Errorf("the outcome says %q", o.Detail)
+			if want := "where the store derives " + strings.Join(tc.derive, ", ") + ", so the run wrote them: it " + tc.did; !strings.Contains(o.Detail, want) {
+				t.Errorf("the outcome says %q, want it to say %q", o.Detail, want)
 			}
-			if got := d.lw.made(); !slices.Equal(got, []string{tc.write}) {
-				t.Fatalf("the writer was asked %q, want %q", got, tc.write)
+			if got := labelAsks(d.github); !slices.Equal(got, tc.asks) {
+				t.Fatalf("the run asked GitHub %q, want %q", got, tc.asks)
 			}
 			if got := slices.Sorted(slices.Values(d.pr.Labels)); !slices.Equal(got, tc.after) {
 				t.Fatalf("the PR shows %q, want %q", got, tc.after)
 			}
 			updated(t, d.poll(t), "labels")
-			if out := d.run(t, pr.Options{}); len(out) != 0 || len(d.lw.made()) != 1 {
-				t.Fatalf("the next run reported %+v and wrote %q", out, d.lw.made())
+			if out := d.run(t, pr.Options{}); len(out) != 0 || len(labelAsks(d.github)) != len(tc.asks) {
+				t.Fatalf("the next run reported %+v and asked %q", out, labelAsks(d.github))
 			}
 		})
 	}
 }
 
-// Labels the PR shows that equal the ones the store derives, other labels
-// aside, owe no write, and the run reports nothing of them.
+// A label write reads the PR's labels and the repository's labels on GitHub,
+// and nothing of the store: the labels it writes are the ones the run derived
+// over its pass, so it lands with every read of the store failing.
+func TestALabelWriteReadsNothingOfTheStore(t *testing.T) {
+	d := newLabeled(t, []string{"status: working"})
+	finds := -1
+	d.l.Hub = func(context.Context, string) pr.Hub {
+		finds = len(d.store.Finds())
+		d.store.FindErr, d.store.RowsErr = errors.New("no read of the store"), errors.New("no read of the store")
+		return d.github
+	}
+	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	if got := len(d.store.Finds()); finds < 0 || got != finds {
+		t.Fatalf("the store took %d finds before the write and %d after it", finds, got)
+	}
+	if got := len(d.lw.derives); got != 1 {
+		t.Fatalf("the run derived the labels %d times, want once, over its pass", got)
+	}
+	if !slices.Equal(d.pr.Labels, []string{"status: merging"}) {
+		t.Fatalf("the PR shows %q", d.pr.Labels)
+	}
+}
+
+// The PR's labels are read at the write, so a write the saved read made owes
+// changes only what GitHub shows: a label the PR gained since the saved read is
+// not added again, and the run says it found the PR already showing the labels.
+func TestALabelWriteChangesOnlyWhatThePRShows(t *testing.T) {
+	d := newLabeled(t, []string{"status: working"})
+	d.pr.Labels = []string{"status: merging", "bug"}
+	o := one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	if !strings.Contains(o.Detail, "found the PR already showing them") {
+		t.Errorf("the outcome says %q", o.Detail)
+	}
+	if got := labelAsks(d.github); len(got) != 0 {
+		t.Fatalf("the run asked GitHub %q of a PR that already shows the labels", got)
+	}
+}
+
+// Before an add, the repository is made to hold every label the writer names:
+// one it lacks is made with its colour and description, and one whose
+// description differs has it corrected. A write that only takes labels off
+// reads nothing of the repository.
+func TestAnAddFirstHasTheRepositoryHoldTheLabels(t *testing.T) {
+	d := newLabeled(t, []string{"status: working"})
+	stale := slices.Clone(defined[1:4])
+	stale[0].Description = "an old description"
+	holding(d.github, stale)
+	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	want := []string{"CreateLabel acme/widgets status: working", "EditLabel acme/widgets status: merging",
+		"CreateLabel acme/widgets held: gate", "AddLabels acme/widgets#7 status: merging",
+		"RemoveLabel acme/widgets#7 status: working"}
+	if got := labelAsks(d.github); !slices.Equal(got, want) {
+		t.Fatalf("the run asked GitHub %q, want %q", got, want)
+	}
+	if got := d.github.Repos[repo].Labels; !slices.Equal(slices.SortedFunc(slices.Values(got), byName),
+		slices.SortedFunc(slices.Values(defined), byName)) {
+		t.Fatalf("the repository holds %+v, want %+v", got, defined)
+	}
+	d = newLabeled(t, []string{"held: gate", "status: merging"})
+	holding(d.github, nil)
+	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	if got := labelAsks(d.github); !slices.Equal(got, []string{"RemoveLabel acme/widgets#7 held: gate"}) ||
+		slices.Contains(d.github.Reads(), "RepoLabels") {
+		t.Fatalf("a write that only takes a label off asked GitHub %q and read %q", got, d.github.Reads())
+	}
+}
+
+func byName(a, b gh.Label) int { return strings.Compare(a.Name, b.Name) }
+
+// A repository whose labels do not read, or a label that is not made, stops no
+// add: the add says whether a label it needs is missing, and when it does not
+// land, its error says what was not made.
+func TestALabelThatIsNotMadeStopsNoAdd(t *testing.T) {
+	d := newLabeled(t, []string{"status: working"})
+	d.github.Fail["RepoLabels"] = errors.New("gh: HTTP 502")
+	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
+	if !slices.Equal(d.pr.Labels, []string{"status: merging"}) {
+		t.Fatalf("the PR shows %q", d.pr.Labels)
+	}
+	d = newLabeled(t, []string{"status: working"})
+	holding(d.github, nil)
+	d.github.Fail["CreateLabel"] = errors.New("gh: Must have push access (HTTP 403)")
+	d.github.Fail["AddLabels"] = errors.New("gh: Label does not exist (HTTP 422)")
+	o := one(t, d.run(t, pr.Options{}), pr.ActRetry)
+	for _, want := range []string{"adding status: merging did not land: gh: Label does not exist (HTTP 422)",
+		"status: merging was not made: gh: Must have push access (HTTP 403)"} {
+		if !strings.Contains(o.Detail, want) {
+			t.Errorf("the outcome says %q, want it to say %q", o.Detail, want)
+		}
+	}
+	if !slices.Equal(d.pr.Labels, []string{"status: working"}) {
+		t.Fatalf("the PR shows %q after an add that did not land", d.pr.Labels)
+	}
+}
+
+// Labels that equal the derived ones owe no write, other labels aside, and the
+// run reports nothing of them and asks GitHub nothing.
 func TestLabelsThatEqualTheDerivedOnesOweNoWrite(t *testing.T) {
 	d := newLabeled(t, []string{"held: gate", "bug", "status: needs-attention"})
 	d.lw.derived[bead] = []string{"status: needs-attention", "held: gate"}
-	if out := d.run(t, pr.Options{}); len(out) != 0 || len(d.lw.made()) != 0 {
-		t.Fatalf("the run reported %+v and wrote %q", out, d.lw.made())
+	reads := len(d.github.Reads())
+	if out := d.run(t, pr.Options{}); len(out) != 0 || len(labelAsks(d.github)) != 0 || len(d.github.Reads()) != reads {
+		t.Fatalf("the run reported %+v, asked %q and read %q", out, labelAsks(d.github), d.github.Reads()[reads:])
 	}
 	if got := d.lw.derives; len(got) != 1 || !slices.Equal(got[0], []string{bead}) {
 		t.Fatalf("the run derived %q, want the open PR's bead once", got)
@@ -245,11 +332,11 @@ func TestTheLandingOrderClearsAPRThatMergedOrClosed(t *testing.T) {
 			d.pr.Facts.State = state
 			updated(t, d.poll(t), "pr")
 			o := one(t, d.run(t, pr.Options{}), pr.ActLabeled)
-			if want := "is " + strings.ToLower(state) + " and showed status: merging"; !strings.Contains(o.Detail, want) {
+			if want := "is " + strings.ToLower(state) + " and showed status: merging, so the run took them off: it took off status: merging"; !strings.Contains(o.Detail, want) {
 				t.Errorf("the outcome says %q, want it to say %q", o.Detail, want)
 			}
-			if got := d.lw.made(); !slices.Equal(got, []string{"clear github.com/acme/widgets#7 []"}) {
-				t.Fatalf("the writer was asked %q", got)
+			if got := labelAsks(d.github); !slices.Equal(got, []string{"RemoveLabel acme/widgets#7 status: merging"}) {
+				t.Fatalf("the run asked GitHub %q", got)
 			}
 			if len(d.lw.derives) != 0 {
 				t.Fatalf("the run derived %q for a PR that is %s", d.lw.derives, state)
@@ -261,10 +348,10 @@ func TestTheLandingOrderClearsAPRThatMergedOrClosed(t *testing.T) {
 	}
 }
 
-// The run writes a PR's labels on the saved read, with no read of the PR: one
-// the saved read gives closed has the city's labels cleared, though GitHub has
-// it open again, and once the watch saves it open, the next run writes the
-// labels the store derives.
+// The run decides a PR's label write on the saved read, with no read of the PR
+// but its labels: one the saved read gives closed has the city's labels
+// cleared, though GitHub has it open again, and once the watch saves it open,
+// the next run writes the labels the store derives.
 func TestALabelWriteIsDecidedOnTheSavedRead(t *testing.T) {
 	d := newLabeled(t, []string{"status: merging", "bug"})
 	d.pr.Facts.State = "CLOSED"
@@ -274,15 +361,15 @@ func TestALabelWriteIsDecidedOnTheSavedRead(t *testing.T) {
 	if !strings.Contains(o.Detail, "is closed") {
 		t.Errorf("the outcome says %q", o.Detail)
 	}
-	if got := d.lw.made(); !slices.Equal(got, []string{"clear github.com/acme/widgets#7 []"}) {
-		t.Fatalf("the writer was asked %q, want the labels cleared on the saved read", got)
+	if got := labelAsks(d.github); !slices.Equal(got, []string{"RemoveLabel acme/widgets#7 status: merging"}) {
+		t.Fatalf("the run asked GitHub %q, want the labels cleared on the saved read", got)
 	}
 	if rep := d.poll(t); len(rep.Failed) != 0 {
 		t.Fatalf("the pass failed %v", rep.Failed)
 	}
 	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
-	if got := d.lw.made(); len(got) != 2 || got[1] != "reconcile tk-1 github.com/acme/widgets#7 []" {
-		t.Fatalf("the writer was asked %q, want the derived labels written once the watch saved the PR open", got)
+	if got := labelAsks(d.github); len(got) != 2 || got[1] != "AddLabels acme/widgets#7 status: merging" {
+		t.Fatalf("the run asked GitHub %q, want the derived labels written once the watch saved the PR open", got)
 	}
 }
 
@@ -291,9 +378,9 @@ func TestALabelWriteIsDecidedOnTheSavedRead(t *testing.T) {
 // difference and makes the write.
 func TestALabelWriteThatFailsIsMadeByTheNextRun(t *testing.T) {
 	d := newLabeled(t, []string{"status: working"})
-	d.lw.fail = 1
+	d.github.Fail["AddLabels"] = errors.New("gh: HTTP 502")
 	o := one(t, d.run(t, pr.Options{}), pr.ActRetry)
-	if !strings.Contains(o.Detail, "nothing records it") || !strings.Contains(o.Detail, "could not write") {
+	if !strings.Contains(o.Detail, "nothing records it") || !strings.Contains(o.Detail, "adding status: merging did not land: gh: HTTP 502") {
 		t.Errorf("the outcome says %q", o.Detail)
 	}
 	if before := d.row(t, bead).Metadata; slices.ContainsFunc(slices.Collect(maps.Keys(before)), func(k string) bool {
@@ -301,30 +388,58 @@ func TestALabelWriteThatFailsIsMadeByTheNextRun(t *testing.T) {
 	}) {
 		t.Fatalf("the bead carries a label key after the failed write: %v", before)
 	}
+	delete(d.github.Fail, "AddLabels")
 	one(t, d.run(t, pr.Options{}), pr.ActLabeled)
-	if got := d.lw.made(); len(got) != 2 || got[0] != got[1] {
-		t.Fatalf("the writer was asked %q, want the same write twice", got)
+	want := []string{"AddLabels acme/widgets#7 status: merging", "AddLabels acme/widgets#7 status: merging",
+		"RemoveLabel acme/widgets#7 status: working"}
+	if got := labelAsks(d.github); !slices.Equal(got, want) {
+		t.Fatalf("the runs asked GitHub %q, want %q", got, want)
 	}
 	if !slices.Equal(d.pr.Labels, []string{"status: merging"}) {
 		t.Fatalf("the PR shows %q", d.pr.Labels)
 	}
 }
 
+// A removal that does not land after the add did says what the write had
+// changed, which stands for the next run to read.
+func TestALabelRemovalThatFailsSaysWhatLanded(t *testing.T) {
+	d := newLabeled(t, []string{"status: working"})
+	d.github.Fail["RemoveLabel"] = errors.New("gh: HTTP 502")
+	o := one(t, d.run(t, pr.Options{}), pr.ActRetry)
+	if want := "taking status: working off did not land: gh: HTTP 502, once it had added status: merging"; !strings.Contains(o.Detail, want) {
+		t.Errorf("the outcome says %q, want it to say %q", o.Detail, want)
+	}
+	if got := slices.Sorted(slices.Values(d.pr.Labels)); !slices.Equal(got, []string{"status: merging", "status: working"}) {
+		t.Fatalf("the PR shows %q", got)
+	}
+}
+
+// stalled is GitHub whose read of a PR's labels waits until its act is stopped.
+type stalled struct {
+	pr.Hub
+	ctx context.Context
+}
+
+func (s stalled) PullRequestLabels(string, int) ([]string, error) {
+	<-s.ctx.Done()
+	return nil, fmt.Errorf("gh: the call was stopped: %w", s.ctx.Err())
+}
+
 // A label write is an act like the record's: it stops at the run's bound, and
 // a run past its window starts none, leaving it to the next run.
 func TestALabelWriteKeepsTheRunsBounds(t *testing.T) {
 	d := newLabeled(t, []string{"status: working"})
-	d.lw.block = true
+	d.l.Hub = func(ctx context.Context, _ string) pr.Hub { return stalled{Hub: d.github, ctx: ctx} }
 	o := one(t, d.run(t, pr.Options{Stop: 50 * time.Millisecond}), pr.ActRetry)
 	if !strings.Contains(o.Detail, "stopped at its 50ms") {
 		t.Errorf("the stopped write says %q", o.Detail)
 	}
-	d.lw.block = false
+	d.l.Hub = func(context.Context, string) pr.Hub { return d.github }
 	now := time.Date(2026, 11, 16, 11, 0, 0, 0, time.UTC)
 	d.l.Now = func() time.Time { now = now.Add(time.Minute); return now }
 	o = one(t, d.run(t, pr.Options{Window: 45 * time.Second}), pr.ActLeft)
-	if !strings.Contains(o.Detail, "compares the labels of "+prURL) || len(d.lw.made()) != 1 {
-		t.Fatalf("the run past its window said %q and wrote %q", o.Detail, d.lw.made())
+	if !strings.Contains(o.Detail, "compares the labels of "+prURL) || len(labelAsks(d.github)) != 0 {
+		t.Fatalf("the run past its window said %q and asked %q", o.Detail, labelAsks(d.github))
 	}
 }
 
@@ -334,8 +449,8 @@ func TestALabelDerivationThatFailsWritesNothing(t *testing.T) {
 	d := newLabeled(t, []string{"status: working"})
 	d.lw.deriveErr = errors.New("the blocks edges of tk-1 did not read")
 	o := one(t, d.run(t, pr.Options{}), pr.ActRetry)
-	if !strings.Contains(o.Detail, "did not read") || len(d.lw.made()) != 0 {
-		t.Fatalf("the run said %q and wrote %q", o.Detail, d.lw.made())
+	if !strings.Contains(o.Detail, "did not read") || len(labelAsks(d.github)) != 0 {
+		t.Fatalf("the run said %q and asked %q", o.Detail, labelAsks(d.github))
 	}
 }
 
@@ -352,8 +467,8 @@ func TestNoLabelWriteWithoutOneBeadsReadOfThePR(t *testing.T) {
 	}
 	d = newLabeled(t, []string{"status: working"})
 	d.store.Put(fake.Bead{ID: "tk-twin", Title: "more work", Status: "open", Metadata: maps.Clone(d.row(t, bead).Metadata)})
-	if out := d.run(t, pr.Options{}); len(out) != 0 || len(d.lw.made()) != 0 {
-		t.Fatalf("a PR two beads own had %+v and writes %q", out, d.lw.made())
+	if out := d.run(t, pr.Options{}); len(out) != 0 || len(labelAsks(d.github)) != 0 {
+		t.Fatalf("a PR two beads own had %+v and asks %q", out, labelAsks(d.github))
 	}
 }
 
@@ -362,8 +477,7 @@ func TestNoLabelWriteWithoutOneBeadsReadOfThePR(t *testing.T) {
 // comparison finds its saved labels differ from none and clears them.
 func TestTheLandingOrderClearsTheLabelsOfAPRItLands(t *testing.T) {
 	d := newLand(t)
-	lw := &labelWriter{github: d.github}
-	d.l.Labels = lw
+	d.l.Labels = &labelWriter{}
 	d.pr.Labels = []string{"status: merging"}
 	d.pr.Facts.State, d.pr.Facts.MergedAt, d.pr.Facts.MergeCommit = "MERGED", "2026-11-12T08:00:00Z", merged
 	d.refresh(t)
@@ -375,8 +489,8 @@ func TestTheLandingOrderClearsTheLabelsOfAPRItLands(t *testing.T) {
 	if !actions[pr.ActLanded] || !actions[pr.ActLabeled] || len(out) != 2 {
 		t.Fatalf("the run's outcomes %+v, want the landing and the labels' clear", out)
 	}
-	if got := lw.made(); !slices.Equal(got, []string{"clear github.com/acme/widgets#7 []"}) {
-		t.Fatalf("the writer was asked %q", got)
+	if got := labelAsks(d.github); !slices.Equal(got, []string{"RemoveLabel acme/widgets#7 status: merging"}) {
+		t.Fatalf("the run asked GitHub %q", got)
 	}
 }
 
@@ -421,8 +535,12 @@ func TestTheNetClearsTheLabelsOfPRsNoLiveBeadOwns(t *testing.T) {
 	if s := rep.Search; s == nil || s.Repository != "github.com/acme/widgets" || s.Pages != 2 || s.Found != 2 || s.Err != nil {
 		t.Fatalf("the search reported %+v", rep.Search)
 	}
-	if got := d.lw.made(); !slices.Equal(got, []string{"clear github.com/acme/widgets#3 []", "clear github.com/acme/widgets#2 []"}) {
-		t.Fatalf("the writer was asked %q, want each clear to read the PR's labels itself", got)
+	if got := labelAsks(d.github); !slices.Equal(got, []string{"RemoveLabel acme/widgets#3 status: working",
+		"RemoveLabel acme/widgets#2 held: gate"}) {
+		t.Fatalf("the net asked GitHub %q, want the city's labels each PR shows taken off", got)
+	}
+	if got := slices.DeleteFunc(slices.Clone(d.github.Reads()), func(r string) bool { return r != "PullRequestLabels" }); len(got) != 2 {
+		t.Fatalf("the net read %d PRs' labels, want each PR it cleared read once", len(got))
 	}
 	for n, want := range map[int][]string{2: {"bug"}, 3: nil, 5: {"bug"}, 7: {"status: merging"}, 8: {"status: working"}} {
 		if got := d.github.PRs[fmt.Sprintf("acme/widgets#%d", n)].Labels; !slices.Equal(got, want) {
@@ -442,7 +560,8 @@ func TestTheNetClearsAtMostTwentyAPass(t *testing.T) {
 	}
 	d.strays([]string{"status: needs-review"}, many...)
 	d.github.LabeledPage = 10
-	d.lw.fail = 1
+	once := &flaky{Watch: d.github, fails: 1}
+	d.w.GitHub = func(string) pr.Watch { return once }
 	rep := d.compare(t)
 	if len(rep.Cleared) != pr.StrayClears-1 || len(rep.Failed) != 1 || rep.Search.Found != pr.StrayClears {
 		t.Fatalf("the first pass found %d, cleared %d and failed %v", rep.Search.Found, len(rep.Cleared), rep.Failed)
@@ -469,7 +588,7 @@ func TestASearchThatFailsClearsNothing(t *testing.T) {
 	d := newLabeled(t, []string{"status: merging"})
 	d.strays([]string{"status: working"}, 3)
 	d.github.Fail["Labeled"] = errors.New("github: HTTP 502")
-	if rep := d.compare(t); rep.Search.Err == nil || len(rep.Cleared) != 0 || len(d.lw.made()) != 0 {
+	if rep := d.compare(t); rep.Search.Err == nil || len(rep.Cleared) != 0 || len(labelAsks(d.github)) != 0 {
 		t.Fatalf("a failed search reported %+v and cleared %q", rep.Search, rep.Cleared)
 	}
 	delete(d.github.Fail, "Labeled")
@@ -488,28 +607,42 @@ func TestTheNetStartsNoClearPastItsWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(rep.Late, urls(3, 2)) || len(rep.Cleared) != 0 || len(d.lw.made()) != 0 {
-		t.Fatalf("a pass past its window left %q, cleared %q and wrote %q", rep.Late, rep.Cleared, d.lw.made())
+	if !slices.Equal(rep.Late, urls(3, 2)) || len(rep.Cleared) != 0 || len(labelAsks(d.github)) != 0 {
+		t.Fatalf("a pass past its window left %q, cleared %q and asked %q", rep.Late, rep.Cleared, labelAsks(d.github))
 	}
 	if rep = d.compare(t); !slices.Equal(rep.Cleared, urls(3, 2)) {
 		t.Fatalf("the next pass cleared %q", rep.Cleared)
 	}
 }
 
-// slowClear is the labels' writer with a clear of one PR that fails once
-// elapse has moved the clock past the pass's window.
+// flaky is GitHub whose removal of a label fails while fails counts down.
+type flaky struct {
+	pr.Watch
+	fails int
+}
+
+func (f *flaky) RemoveLabel(repo string, number int, name string) error {
+	if f.fails > 0 {
+		f.fails--
+		return errors.New("gh: HTTP 502")
+	}
+	return f.Watch.RemoveLabel(repo, number, name)
+}
+
+// slowClear is GitHub with a read of one PR's labels that fails once elapse
+// has moved the clock past the pass's window.
 type slowClear struct {
-	pr.Labels
+	pr.Watch
 	number int
 	elapse func()
 }
 
-func (s slowClear) Clear(ctx context.Context, host, repo string, number int, current []string) error {
+func (s slowClear) PullRequestLabels(repo string, number int) ([]string, error) {
 	if number == s.number {
 		s.elapse()
-		return errors.New("pr-status-label.sh: exit 2: could not write the PR's labels")
+		return nil, errors.New("gh: HTTP 502")
 	}
-	return s.Labels.Clear(ctx, host, repo, number, current)
+	return s.Watch.PullRequestLabels(repo, number)
 }
 
 // A PR whose clear keeps failing after taking the net's whole window holds no
@@ -518,7 +651,8 @@ func (s slowClear) Clear(ctx context.Context, host, repo string, number int, cur
 func TestAStrayWhoseClearKeepsFailingSlowlyHoldsNoOtherBack(t *testing.T) {
 	d := newLabeled(t, []string{"status: merging"})
 	d.strays([]string{"status: working"}, 3, 2)
-	d.w.Labels = slowClear{Labels: d.lw, number: 3, elapse: func() { d.clock = d.clock.Add(3*time.Minute + time.Second) }}
+	slow := slowClear{Watch: d.github, number: 3, elapse: func() { d.clock = d.clock.Add(3*time.Minute + time.Second) }}
+	d.w.GitHub = func(string) pr.Watch { return slow }
 	src := rand.New(rand.NewPCG(1, 2))
 	d.w.Shuffle = func(ids []string) { src.Shuffle(len(ids), func(i, j int) { ids[i], ids[j] = ids[j], ids[i] }) }
 	passes := 0

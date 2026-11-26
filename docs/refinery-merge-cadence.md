@@ -666,16 +666,15 @@ pass.
 PRs the beads own ([The landing order](#the-landing-order)), and nothing holds
 a PR no live bead owns for it, such as one whose bead closed. So each pass of
 the net searches the rig's own repository, the one its clone's origin names,
-for the PRs that carry a `status:` or `held:` label the labels' writer names:
+for the PRs that carry a `status:` or `held:` label the city names:
 `search(type: ISSUE)` over `repo:<owner>/<name> is:pr label:"status:
 working",...`, 100 PRs a page for 1 point. It reads on a page at a time until
 it has found 20 PRs that no live bead owns or the results end, so a page that
-holds only owned PRs hides none behind it, and has the writer,
-`pr-status-label.sh clear`, take the city's labels off each. It takes them in a
-shuffled order, so a PR whose clear is slow or keeps failing holds no other
-back, and starts none past its 3 minutes. The writer reads each PR's labels
-itself first. A clear that does not land fails the pass, and the next pass's
-search finds the PR again. At 20 a pass and a pass an hour, the net clears
+holds only owned PRs hides none behind it, and takes the city's labels off
+each, reading the PR's labels first. It takes them in a shuffled order, so a
+PR whose clear is slow or keeps failing holds no other back, and starts none
+past its 3 minutes. A clear that does not land fails the pass, and the next
+pass's search finds the PR again. At 20 a pass and a pass an hour, the net clears
 about 20 such PRs an hour in a rig's repository, so the 586 PRs in gc-toolkit's
 that carried the city's labels with no live bead owning them on 2026-11-20 take
 about 30 hours to clear, each removal showing in that PR's timeline.
@@ -967,13 +966,14 @@ run.
 what the store derives, for every PR the rig's live beads own
 ([state-machine.md](state-machine.md#the-status-label-github-projection)). For
 each owned PR whose bead holds the PR watch's read of it, it compares the labels
-of the writer's that the read saved with the ones the store derives, as `gctk
-pr status` derives them over the run's own listing: the PR's status and held
+the city names that the read saved with the ones the store derives, as `gctk
+pr status` derives them, over the run's own listing: the PR's status and held
 values while it is open, and none once it merged or closed. Where they differ,
-it has the labels' one writer, `pr-status-label.sh`, write them, reading
-nothing of the PR first, `reconcile` on a PR the saved read shows open and
-`clear` on one it shows merged or closed, handing it no labels, so the writer
-reads the PR's labels itself. A label is a view of the saved read and the
+it writes the labels it derived, and derives nothing again and reads nothing
+of the store to do it. It reads the PR's labels, adds each derived label the
+PR lacks, first having the repository hold every label the city names with
+its colour and description, and takes off each of the city's labels it did not
+derive, leaving every other label. A label is a view of the saved read and the
 store, so one a saved read out of date made wrong is put right once the watch
 saves the PR. A label write is an act among the others: it takes its
 place in the shuffled order, starts inside the 45 seconds, stops at 30, takes
