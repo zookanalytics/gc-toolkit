@@ -174,12 +174,10 @@ the PR's head:
 
 **3. Rule every finding and every ask, by the bar.** Fix each must-fix point in
 the run's worktree with a commit of its own, its siblings with it, and name the
-commit in its ruling. Run the round's builds and tests one at a time, starting
-one only once the one before it has ended, because builds that run at once hold
-their memory together. Once the round's last commit is in, check it through
-`gctk rig`, the gate a work run's checks run through, which records each check
-at that commit, where a review of the new head reads it. The round owes the
-tests the PR's change can affect:
+commit in its ruling. Run the round's builds and tests one at a time: start one
+only once the one before it has ended. Once the round's last commit is in, check
+it through `gctk rig`, in the run's worktree. The round owes the tests the PR's
+change can affect:
 `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk" rig test --scope affected --command '<the command>'`
 Run any other check the same way, such as `rig lint`. A check's command is the
 rig's own where it declares one: the rig default that
