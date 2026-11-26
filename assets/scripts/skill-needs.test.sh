@@ -574,7 +574,7 @@ have "…recommends staying when the discussion helps judge the result" \
 have "…and ending when the brief and the ordinary checks suffice" \
     'and ending when the brief and the work'"'"'s ordinary checks suffice.' "$TMP/prompt-stay"
 have "…and ending in the city's own store, where new work's stay comes back after the merge" \
-    'In the city'"'"'s own store a stay comes back only once its work closes, which for new work that opens its own PR is after the merge, so recommend ending at the hand-off there.' "$TMP/prompt-stay"
+    'In the city'"'"'s own store a stay comes back only once its work closes. For new work that opens its own PR, that is after the merge, so recommend ending at the hand-off there.' "$TMP/prompt-stay"
 have "…puts the choice to the operator, so they need not know to ask" \
     'Put the choice to the operator with your recommendation, so they need not know to ask, and never stay without their agreement.' "$TMP/prompt-stay"
 have "…says the return waits for the operator whatever it found, and in a rig's store the PR waits for them" \
@@ -593,7 +593,9 @@ for f in "$HOLD" "$SETTLE" "$STAY"; do
         '| Work that opens no PR of its own | Once the work closes. |' "$f"
     tr -s '[:space:]' ' ' <"$f" >"$TMP/$skill-stay-table"
     have "$skill: …with the rule of the city's own store, where a stay comes back once its work closes" \
-        'In the city'"'"'s own store a stay comes back only once its work closes, which for new work that opens its own PR is after the merge' "$TMP/$skill-stay-table"
+        'In the city'"'"'s own store a stay comes back only once its work closes' "$TMP/$skill-stay-table"
+    have "$skill: …which for new work that opens its own PR is after the merge, so it recommends ending there" \
+        'For new work that opens its own PR, that is after the merge, so recommend ending at the hand-off there' "$TMP/$skill-stay-table"
 done
 tr -s '[:space:]' ' ' <"$HOLD" >"$TMP/hold-stay"
 have "the framing's decision names the piece a stay is for and when it would come back" \
@@ -1322,6 +1324,8 @@ echo "── the stay skill reads the rig map to tell the city's own store from 
 have "the stay skill reads the rig map through the pack's script" '"$CONV/rig-map.sh"' "$STAY"
 have "…and says how its listing tells the city's own store from a rig's" \
     'the conversation is in the city'"'"'s own store when the rig whose `prefix` begins its id, before the first `-`, reads `"hq": true`.' "$TMP/stay-squeezed"
+have "…and says, in a sentence of its own, that a stay there on the conversation's own subject is refused" \
+    'A stay on the conversation'"'"'s own subject is refused there.' "$TMP/stay-squeezed"
 echo "── the stay's promise, and a visit's ask on another PR, pass gctk's own parser ──"
 # The sitting types the promise itself, so the stay skill's call runs through
 # gctk built from this checkout, its placeholders filled, under a gc that

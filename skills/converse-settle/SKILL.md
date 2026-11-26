@@ -29,9 +29,9 @@ work, to discuss the result with the operator whatever it finds:
 | The conversation's own subject | Once the city has finished with the subject's PR, or once the subject closes. |
 | Work that opens no PR of its own | Once the work closes. |
 
-In the city's own store a stay comes back only once its work closes, which for
-new work that opens its own PR is after the merge, so recommend ending at the
-hand-off there (`converse-stay` gives the read that tells the stores apart).
+In the city's own store a stay comes back only once its work closes. For new
+work that opens its own PR, that is after the merge, so recommend ending at the
+hand-off there. `converse-stay` gives the read that tells the stores apart.
 
 ## Record
 

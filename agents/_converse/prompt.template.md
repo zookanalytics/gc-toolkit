@@ -107,8 +107,8 @@ that action.
    own, so say so. Recommend staying when the discussion will help judge the
    result, because what was agreed holds more than the work's brief carries,
    and ending when the brief and the work's ordinary checks suffice. In the
-   city's own store a stay comes back only once its work closes, which for new
-   work that opens its own PR is after the merge, so recommend ending at the
+   city's own store a stay comes back only once its work closes. For new work
+   that opens its own PR, that is after the merge, so recommend ending at the
    hand-off there. Put the choice to the operator with your recommendation, so
    they need not know to ask, and never stay without their agreement.
    - **End**: the sign-off closes the conversation (`converse-settle`). The

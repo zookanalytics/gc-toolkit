@@ -23,19 +23,19 @@ finds:
 
 Trouble on the work does not bring the sitting back: a required check that
 failed, a review that ran out of attempts, a question filed on the work, or its
-PR closed unmerged. Each reaches the operator as it would with no stay, and the stay
-waits on until the city has finished with the PR. Other work the ruling sends
-brings no return of its own: it lands as any work does, or, on a PR the
-conversation already holds, waits for the sitting's next return.
+PR closed unmerged. Each reaches the operator as it would with no stay, and the
+stay waits on until the city has finished with the PR. Other work the ruling
+sends brings no return of its own, and lands as any work does. Work on a PR the
+conversation already holds waits for the sitting's next return.
 
-In the city's own store a stay comes back only once its work closes, which for
-new work that opens its own PR is after the merge, and a stay on the
-conversation's own subject is refused there, because the landing order does
-not read that store (In the city's own store, below). So recommend ending at
-the hand-off there for new work that opens its own PR, with what was agreed
-written into the work's brief. The rig map tells the two stores apart: the
-conversation is in the city's own store when the rig whose `prefix` begins its
-id, before the first `-`, reads `"hq": true`.
+In the city's own store a stay comes back only once its work closes, because
+the landing order does not read that store (In the city's own store, below).
+For new work that opens its own PR, that is after the merge, so recommend
+ending at the hand-off there, with what was agreed written into the work's
+brief. A stay on the conversation's own subject is refused there. The rig map
+tells the two stores apart: the conversation is in the city's own store when
+the rig whose `prefix` begins its id, before the first `-`, reads
+`"hq": true`.
 
 ```bash
 "$CONV/rig-map.sh"
@@ -178,11 +178,12 @@ and wakes it with its thread when the stay's gate closes. When the gate closes
 while the session is still up, Gas City keeps the session up for the ready
 conversation and sends it a notice that a blocker closed, on which the prompt
 runs the entry. While the work is out, the merge of an open PR this
-conversation holds waits for the return. In a rig's store, once the city has
-finished with the PR the stay is for, the city holds that PR's merge for the
-return too, before it wakes the sitting, so an approval merges nothing until
-the operator has settled the work with the sitting. When the operator wants a held PR to land
-without the return, lift that hold (`converse-hold`).
+conversation holds waits for the return. In a rig's store, the city also
+holds the merge of the PR the stay is for, from when it has finished with that
+PR, so an approval merges nothing until the operator has settled the work with
+the sitting. That hold is on before the city wakes the sitting. When the
+operator wants a held PR to land without the return, lift that hold
+(`converse-hold`).
 
 ### In the city's own store
 
