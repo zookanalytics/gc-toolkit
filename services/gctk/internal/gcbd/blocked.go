@@ -381,9 +381,11 @@ func (c *Client) strictArray(args ...string) (json.RawMessage, error) {
 }
 
 // failure is what a read that exited non-zero said. bd, asked for --json,
-// prints its error as a JSON object on stdout, while gc's stderr can open with
-// its notice of the store it answers from, so the object's error comes first,
-// and the first line of stderr, where gc itself reports a failure, comes next.
+// prints its error as a JSON object on stdout, so the object's error comes
+// first. Otherwise the first line of stderr says it, once gc's notice of the
+// store a read answers from is passed over: gc prints that notice ahead of each
+// read bdScopeDisclosureVerbs names, whether the read then fails or not
+// (cmd/gc/cmd_bd.go at gastownhall/gascity 77143ecd18).
 func failure(stdout []byte, stderr string) string {
 	var reply struct {
 		Error string `json:"error"`
@@ -391,16 +393,16 @@ func failure(stdout []byte, stderr string) string {
 	if json.Unmarshal(Scrub(stdout), &reply) == nil && reply.Error != "" {
 		return reply.Error
 	}
-	if s := firstLine(stderr); s != "" {
-		return s
+	for _, line := range strings.Split(stderr, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !storeNotice(line) {
+			return line
+		}
 	}
 	return "it printed no error"
 }
 
-func firstLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
+// storeNotice reports whether line is gc's notice of the store a read answers
+// from, such as `gc bd: answering from the rig "gc-toolkit" store`.
+func storeNotice(line string) bool {
+	return strings.HasPrefix(line, "gc bd: answering from the ") && strings.HasSuffix(line, " store")
 }
