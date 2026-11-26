@@ -294,20 +294,21 @@
 #     call's first write, and as `staying: <text> (waits on <ids>)` once all
 #     but the wait has landed, so a <text> that itself ends in
 #     "(waits on ...)" is refused. It is refused on a conversation no sitting
-#     holds.
+#     holds, and from a call under another alias ($GC_ALIAS) than the
+#     sitting's that holds it, before any write.
 #     In a rig's store the stay waits on one gctk:needs-review gate on the
 #     conversation, which the second line names. It keeps an open one the
-#     sitting filed. Otherwise it files one, under the sitting's own alias
-#     ($GC_ALIAS), on the PR --rework sends back, or else on the subject
-#     --accept dispatches, once every other write of the call has landed. It
-#     is refused before any write when the call sends neither and the
+#     sitting filed. Otherwise it files one, under the sitting's own alias,
+#     on the PR --rework sends back, or else on the subject --accept
+#     dispatches, once every other write of the call has landed. It is
+#     refused before any write when the call sends neither and the
 #     conversation has no open gate, naming the command that files one, and
 #     saying the work is back when a gate the sitting filed has closed with no
-#     stay waiting on it; when the piece it would file for is in another
-#     store; and when the call runs under another alias than the holder's. A
-#     gate the verb refuses once the send has landed, as for a piece that
-#     cannot move until something the conversation holds has landed, stops the
-#     call, and the same call finishes the stay once that is settled. Each
+#     stay waiting on it; and when the piece it would file for is in another
+#     store. A gate the verb refuses once the send has landed, as for a piece
+#     that cannot move until something the conversation holds has landed,
+#     stops the call, and the same call finishes the stay once that is
+#     settled. Each
 #     --waiting-on bead is the subject's wait alone, and may be the PR whose
 #     merge the conversation holds.
 #     In the city's own store the stay waits on each --waiting-on bead that is
@@ -1204,18 +1205,20 @@ take_recommendation() {
 
 # What a sitting that stays waits on, read now. A stay keeps the conversation
 # for the sitting that holds it, so one in the operator's queue has none to
-# stay.
+# stay. Its writes answer the conversation's gates and leave it open under its
+# holder, so a call under any other alias is refused before the first of them,
+# whether or not the stay files its own gate.
 #
 # In a rig's store it waits on one gctk:needs-review gate, read among the beads
 # the conversation waits on. An open one is the gate the sitting filed for work
 # it sent itself, and the stay keeps it. Otherwise the stay files one in step 5
 # on the piece its own call sends: the PR --rework sends back, or else the
 # subject --accept dispatches. gctk gate create refuses a piece in another store
-# than the conversation's and a caller under another alias than its holder's,
-# so both are refused here, before a send lands under a stay that cannot file
-# its gate. A call that sends neither has nothing to come back for, and is
-# refused with the command that files the gate, or, when a gate the sitting
-# filed has closed with no stay waiting on it, with word that its work is back.
+# than the conversation's, so it is refused here, before a send lands under a
+# stay that cannot file its gate. A call that sends neither has nothing to come
+# back for, and is refused with the command that files the gate, or, when a
+# gate the sitting filed has closed with no stay waiting on it, with word that
+# its work is back.
 #
 # In the city's own store it waits on each --waiting-on bead that is no gate,
 # read now, and on the rework step 1 files. An edge from the conversation onto a
@@ -1235,6 +1238,8 @@ if [ -n "$STAY" ]; then
   if [ "$HOLDER" = human ] || { [ "$CONV_STATUS" != in_progress ] && [ "$CONV_STATUS" != open ]; }; then
     die "--stay keeps conversation $CONVERSATION open for the sitting that holds it, and it reads ${CONV_STATUS:-of no status} under ${HOLDER:-no one}; nothing was written"
   fi
+  [ "${GC_ALIAS:-}" = "$HOLDER" ] \
+    || die "--stay keeps conversation $CONVERSATION open for the sitting that holds it ($HOLDER), and this call runs under ${GC_ALIAS:-no alias}; nothing was written. Run it from that sitting"
 fi
 if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
   CONV_WAITS=$(gc bd dep list "$CONVERSATION" --type blocks --json 2>/dev/null | grep -av '^gc bd:' | scrub \
@@ -1254,8 +1259,6 @@ if [ -n "$STAY" ] && [ -z "$STAY_CITY" ]; then
     STAY_FOR="$STAY_PIECE"
     [ "${STAY_PIECE%%-*}" = "${CONVERSATION%%-*}" ] \
       || die "--stay would file its gate on $STAY_PIECE, which this ruling sends, and $STAY_PIECE is in another store than conversation $CONVERSATION, where a gate holds the conversation for nothing; nothing was written. A sitting whose work is in another rig ends at the hand-off: sign off without --stay"
-    [ "${GC_ALIAS:-}" = "$HOLDER" ] \
-      || die "--stay files its gate on $STAY_PIECE under the alias of the sitting that holds conversation $CONVERSATION ($HOLDER), and this call runs under ${GC_ALIAS:-no alias}, which gctk gate create refuses; nothing was written. Run it from that sitting"
   elif [ -z "$STAY_KEPT" ]; then
     BACK=$(printf '%s' "$CONV_WAITS" | jq -r --argjson conv "$CONV_ROW" "$STAY_GATE_JQ"'
       [ .[] | select(back_unstayed($conv)) ] | sort_by((.closed_at // "") | tostring) | last // empty

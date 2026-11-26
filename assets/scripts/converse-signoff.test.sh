@@ -118,43 +118,45 @@
 #             the stay as its first write, runs the sign-off's writes, then
 #             leaves the conversation open under its sitting, waiting on one
 #             gctk:needs-review gate: the open one the sitting filed for work
-#             it sent, kept with none filed beside it, or else the one the call
-#             files through gctk gate create on the piece it sends, the PR its
-#             --rework sends back or the subject its --accept dispatches, after
-#             the ask, the headline's edges, the gate answers and Accept; a
-#             staying: line names that gate, then the guarded status write,
-#             with no edge onto the work, the ask or a --waiting-on bead, and
-#             no close or PR comment; a stay on work that opens no PR, on the
-#             subject and on the PR whose merge the conversation holds is
-#             taken; a call that sends nothing on a conversation with no open
-#             gate is refused before any write, naming the command that files
-#             the gate, and saying the work is back when a gate the sitting
-#             filed has closed with no stay naming it and after the last
-#             hand-back; a piece in another store, or a caller under another
-#             alias, is refused before any write; a gate the verb refuses or
-#             fails after the send stops the call with its first line newest,
-#             and so does a refused line or status write, and the same call
-#             run again finishes the stay, keeping the gate it finds open; a
-#             rework stay run again once its rework has closed files no second
-#             rework, and once the PR has closed names the PR with no gate; a
-#             wait on the subject itself is refused; a stay's --waiting-on on
-#             the epic's own member reaches the headline as an ending
-#             sign-off's does; the return closes the conversation; and the
-#             refusals of a stay in every store, beside --answer, with no
-#             ruling, of more than one line, ending as the line that names
-#             what it waits on, and in the operator's queue, and a store or
-#             waits that do not read, write nothing
+#             it sent, kept with none filed beside it, or else the one the
+#             call files through gctk gate create on the piece it sends, the
+#             PR its --rework sends back or the subject its --accept
+#             dispatches, after the ask, the headline's edges, the gate
+#             answers and Accept; a staying: line names that gate, then the
+#             guarded status write, with no edge onto the work, the ask or a
+#             --waiting-on bead, and no close or PR comment; a stay on work
+#             that opens no PR, on the subject and on the PR whose merge the
+#             conversation holds is taken; a call that sends nothing on a
+#             conversation with no open gate is refused before any write,
+#             naming the command that files the gate, and saying the work is
+#             back when a gate the sitting filed has closed with no stay
+#             naming it and after the last hand-back; a piece in another store
+#             is refused before any write, and so is a caller under another
+#             alias, whether or not the stay keeps a gate its sitting filed; a
+#             gate the verb refuses or fails after the send stops the call
+#             with its first line newest, and so does a refused line or status
+#             write, and the same call run again finishes the stay, keeping
+#             the gate it finds open; a rework stay run again once its rework
+#             has closed files no second rework, and once the PR has closed
+#             names the PR with no gate; a wait on the subject itself is
+#             refused; a stay's --waiting-on on the epic's own member reaches
+#             the headline as an ending sign-off's does; the return closes the
+#             conversation; and the refusals of a stay in every store, beside
+#             --answer, with no ruling, of more than one line, ending as the
+#             line that names what it waits on, and in the operator's queue,
+#             and a store or waits that do not read, write nothing
 #   (CITY-STAY*) in the city's own store, which the landing order does not
 #             read, the stay waits on its work through an edge, as before the
 #             gate, and files no gate: the line names the work and the
 #             conversation waits on each bead of it, the rework the call files
 #             included, read back as this conversation's; re-runs, a second
 #             stay and stops at a gate or an edge as before; and the stays it
-#             refuses before any write: with no work, beside --accept with no
-#             work, on the subject, on its own conversation, on work in
-#             another store, on a gate alone, on work that waits on the
-#             conversation, at any depth and through any kind of bead; and a
-#             member of the subject is the conversation's wait alone
+#             refuses before any write: from a caller under another alias,
+#             with no work, beside --accept with no work, on the subject, on
+#             its own conversation, on work in another store, on a gate alone,
+#             on work that waits on the conversation, at any depth and through
+#             any kind of bead; and a member of the subject is the
+#             conversation's wait alone
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
@@ -2193,6 +2195,14 @@ open_pr
 GC_ALIAS=gc-toolkit/gc-toolkit.mechanik run_signoff --conversation tk-conv --outcome x --ruled yes --ruling "fix the retry" --rework --no-wait --stay "x"
 eq "$RC/$(writes)" "2/0" "(STAY-ALIAS) a stay that would file its gate under another alias than the holder's exits 2, writing nothing"
 has "$OUT" "this call runs under gc-toolkit/gc-toolkit.mechanik" "(STAY-ALIAS) …naming the alias it runs under"
+# A stay that keeps the gate its sitting filed files none, and is refused
+# under another alias all the same, before it answers a gate or leaves the
+# conversation open under its holder.
+closer_case; promised tk-promise tk-work
+GC_ALIAS=gc-toolkit/gc-toolkit.mechanik run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${STAYING[@]}"
+eq "$RC/$(writes)" "2/0" "(STAY-ALIAS-KEPT) a stay on a gate its sitting filed, run under another alias than the holder's, exits 2, writing nothing"
+has "$OUT" "this call runs under gc-toolkit/gc-toolkit.mechanik" "(STAY-ALIAS-KEPT) …naming the alias it runs under"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(STAY-ALIAS-KEPT) …so the gate stays owed and the conversation stays claimed by its sitting"
 
 # A ruling that takes the subject's recommendation dispatches the subject, and
 # the stay files its gate on the subject once Accept has dispatched it.
@@ -2387,13 +2397,19 @@ echo "# in the city's own store a stay waits on its work through an edge, and fi
 # The landing order reads no store but a rig's, so nothing there would resolve
 # a gate. The city's own store carries the prefix hq, and its subject here is
 # assigned, so its assignee sends it on once its wait clears and no validating
-# closer is armed, which no pool there would run.
+# closer is armed, which no pool there would run. Its sitting runs the sign-off
+# under the alias its conversation is assigned to.
+export GC_ALIAS=gc-toolkit/gc-toolkit.hq-conv
 city_case() {
     fresh; bead hq-sub task open gc-toolkit.mechanik; gate hq-g first-reaction; edge hq-sub blocks hq-g
     conv hq-conv hq-sub; edge hq-conv replies-to hq-g
     bead hq-work
 }
 CITY_STAYING=(--ruled yes --ruling "build the fix" --waiting-on hq-work --stay "the dialog keeps what is typed")
+city_case
+GC_ALIAS=gc-toolkit/gc-toolkit.mechanik run_signoff --conversation hq-conv --outcome "staying — waits on hq-work" "${CITY_STAYING[@]}"
+eq "$RC/$(writes)" "2/0" "(CITY-STAY-ALIAS) a stay in the city's own store, run under another alias than the holder's, exits 2, writing nothing"
+eq "$(field hq-g status)/$(field hq-conv status)" "open/in_progress" "(CITY-STAY-ALIAS) …so the gate stays owed and the conversation stays claimed by its sitting"
 city_case
 run_signoff --conversation hq-conv --outcome "staying — waits on hq-work" "${CITY_STAYING[@]}"
 eq "$RC" 0 "(CITY-STAY) a stay in the city's own store exits 0"
@@ -2585,6 +2601,7 @@ has "$OUT" "could not be read to tell whether it is a member of hq-epic" "(CITY-
 
 # The ending sign-off is left as it was: its wait on the epic's own member
 # reaches the headline, whose edge bd refuses, and it stops there.
+export GC_ALIAS=gc-toolkit/gc-toolkit.tk-conv
 member_case
 run_signoff --conversation tk-conv --outcome "decomposed — the first unit is building" --ruled yes --ruling "file the parser as the first unit" --waiting-on tk-mem
 eq "$RC" 1 "(MEMBER-ENDING) an ending sign-off that waits on the epic's own member stops"
