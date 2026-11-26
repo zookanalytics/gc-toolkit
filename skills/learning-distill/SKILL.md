@@ -639,11 +639,17 @@ that work closes with nothing landed, the note comes back due, and
 `gc-toolkit.work` closes one that needs no work, as an upstream finding is,
 has no close reason, and the disposition note its close appends says why.
 
-A veto is a close with nothing landed: a prompt-update the pattern spawned
-whose PR closed unmerged, as load-and-gate's vetoed-PR sweep reads it. The
-veto has settled the rule the note states, so do not keep the note for that
-rule: judge what else it holds as you judge any due note, and drop it when
-nothing else in it is worth keeping.
+A veto is a close with nothing landed on a prompt-update the pattern
+spawned:
+
+- Its PR closed unmerged, as load-and-gate's vetoed-PR sweep reads it.
+- The operator closed it as not needed before any PR. Its disposition note
+  gives their reason.
+
+When `memory_prior` says the pattern's follow-ups closed, read how each one
+closed. The veto has settled the rule the note states, so do not keep the
+note for that rule: judge what else it holds as you judge any due note, and
+drop it when nothing else in it is worth keeping.
 
 ### Decision lines
 
