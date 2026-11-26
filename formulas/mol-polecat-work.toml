@@ -445,15 +445,19 @@ the gate the same way, with `--test '<its test command>'` on the call.
 **4. A failure your diff did not cause.** A red check that fails the same way on
 `origin/{{base_branch}}` is pre-existing and does not hold the loop. Find or
 file its tracker with `preexisting-failure.sh`, as preflight-tests does for a
-failure on the base, then mark its record at this HEAD on the work bead, in the
-worktree; the exit condition takes the mark in place of a passing record while
-that record stands and a tracker the mark names is open:
+failure on the base. Then mark its record at this HEAD on the work bead, running
+the call from the worktree:
 ```bash
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 "$GCTK" rig pre-existing "<test, lint, typecheck, setup or build: the red check>" --bead "<the work bead>" --commit "<git rev-parse HEAD>" --tracker "<the tracker id of each failure in it, space-separated>"
 ```
+The exit condition takes the mark in place of a passing record while both of
+these hold:
+- the record the mark names is still the record at this HEAD;
+- a tracker the mark names is open.
+
 Mark only a failure you reproduced on the base, and never one whose tracker is
 your own work bead: that failure is the work you were sent to fix, so it holds
 the loop until it passes. A run with another command or scope replaces the
@@ -484,10 +488,16 @@ Never close the work bead, and never close the `self-review` control bead: the
 orchestrator closes the control when the loop converges or its last attempt
 fails.
 
-**Exit criteria (for the loop, not for you):** the records of the test, lint and
-typecheck runs above and the note of setup and build at HEAD pass, or name a
-failure whose pre-existing mark on the work bead holds at that HEAD, and this
-iteration bead is closed, or the last attempt, still red, is declined.
+**Exit criteria (for the loop, not for you):** the loop ends in either of two
+ways.
+- It converges when both of these hold:
+  - each check passes at HEAD;
+  - this iteration bead is closed.
+- It stops when step 5 declines the last attempt.
+
+The checks are the records of the test, lint and typecheck runs above, and the
+note of setup and build. A failing check counts as passing while its
+pre-existing mark on the work bead holds at HEAD.
 Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
