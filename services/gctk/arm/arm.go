@@ -20,6 +20,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -80,14 +81,21 @@ func refuse(format string, args ...any) error {
 // request is, rather than a read, a lock or a write that failed.
 func Refused(err error) bool { return errors.Is(err, errRefused) }
 
+// mergeResultOf is the result a pull request's record keeps on r, its anchor,
+// and empty on a bead that owns no pull request.
+func mergeResultOf(r *ledger.Record) string {
+	mr, _, _ := prrecord.Result.Get(r)
+	return strings.TrimSpace(mr)
+}
+
 // Arm records the arm, under the bead's dispatch lock, in one write that
 // carries its note. It refuses a closed bead, one already armed for another
 // target or formula, one already dispatched (in progress, or routed), one at a
-// status other than open, a target that names no formula to pour, and a bead
-// with a wait edge into another store, which nothing in the store holds the
-// bead on. An arm already on the bead for the same target and formula is a
-// success that writes nothing. It returns what it did, and a sentence on what
-// holds the bead now.
+// status other than open, which for a PR's anchor is its record's, a target
+// that names no formula to pour, and a bead with a wait edge into another
+// store, which nothing in the store holds the bead on. An arm already on the
+// bead for the same target and formula is a success that writes nothing. It
+// returns what it did, and a sentence on what holds the bead now.
 func (a *Arms) Arm(req Request) (string, error) {
 	req.ID, req.Target, req.Formula = strings.TrimSpace(req.ID), strings.TrimSpace(req.Target), strings.TrimSpace(req.Formula)
 	if req.Target == "" {
@@ -114,6 +122,12 @@ func (a *Arms) Arm(req Request) (string, error) {
 		return "", refuse("%s is dispatched already (status %s, routed to %q). Disarm and arm again only if you mean to dispatch it again", req.ID, status, routed)
 	}
 	if status != "open" {
+		if mr := mergeResultOf(r); mr != "" {
+			return "", refuse("%s owns a pull request (merge_result=%s), whose record keeps it at status %s, and the start sends an open bead alone, "+
+				"so this arm could never fire. Leave its status to the record. To have the PR checked once the work it waits for lands, "+
+				"hold its merge on a human gate that names that work (the waits skill, \"Have a bead checked and closed once other work lands\")",
+				req.ID, mr, status)
+		}
 		return "", refuse("%s is at status %s, and the start sends an open bead alone, so this arm could never fire. Return it to open, then arm it", req.ID, status)
 	}
 	formula, err := a.formulaFor(req.ID, req.Target, req.Formula)
