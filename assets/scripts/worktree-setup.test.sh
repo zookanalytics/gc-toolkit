@@ -67,9 +67,12 @@
 #       fails, the home stays, and the report names the fix;
 #   (y) a detached home whose per-target branch another worktree holds moves
 #       to the tip detached;
-#   (z) after a rewrite of the default branch, a home on the old history fails
-#       its start, the move its report names lets the next start through, and
-#       that start records the clear under the report's key;
+#   (z) after a rewrite of the default branch, a home whose HEAD is the old
+#       tip, on its own branch or detached, moves to the new tip detached with
+#       no report and records the clear, its branch left on the old history.
+#       A home holding a commit of its own on the old history fails its start,
+#       the move its report names lets the next start through, and that start
+#       records the clear under the report's key;
 #   (aa) a report that does not land still fails the start, and the run says
 #        so;
 #   (ab) a HEAD that names no commit fails the start;
@@ -86,7 +89,10 @@
 #   (ae) a TERM during the add restores the home's files and ends the run
 #        with no further add;
 #   (af) a home written to for a while after the first add, as a build's
-#        writes take time, is added on the next attempt, after the pause.
+#        writes take time, is added on the next attempt, after the pause;
+#   (ag) a HEAD the tip lacks fails the start when origin/main's reflog does
+#        not record it as a tip: a pushed branch's commit, which a remote
+#        branch holds, and an old tip whose entries git has expired.
 
 set -euo pipefail
 
@@ -613,30 +619,46 @@ eq "$(head_of "$W"):$(branch_of "$W")" "$(tip):DETACHED" "(y) the home moves to 
 eq "$ERR" ""                                 "(y) silently"
 
 # --- (z) after a rewrite of the default branch, as a fork's rebase makes, a
-#         home on the old history fails its start, and the move its report
-#         names lets the next start through. That start records the clear
-#         under the report's key, and leaves the home detached at the new tip,
-#         its branch still on the old history. Its own remote, since the
-#         rewrite force-pushes main. ------------------------------------------
+#         home whose HEAD is the old tip starts with no report and records the
+#         clear, on its own branch or detached. Either way it moves to the new
+#         tip detached, its branch still on the old history. A clone writes
+#         origin/main no reflog, so the fetch of the rewrite is its first
+#         entry, and the old tip is that entry's old value. A home holding a
+#         commit of its own on the old history fails its start, the move its
+#         report names lets the next start through, and that start records
+#         the clear under the report's key. Its own remote, since the rewrite
+#         force-pushes main. --------------------------------------------------
 ZS="$TMP/zsrc"; git init -q -b main "$ZS"
 echo seed > "$ZS/README.md"; git -C "$ZS" add -A; git -C "$ZS" commit -qm init
 echo old > "$ZS/old.txt"; git -C "$ZS" add -A; git -C "$ZS" commit -qm old
 git clone -q --bare "$ZS" "$TMP/z.git"
 ZR="$TMP/zrig"; git clone -q "$TMP/z.git" "$ZR"
-P="$TMP/z"; mkdir -p "$P"; W="$P/agentZ"
-eq "$(rc_of "$ZR" "$W" agentZ)" "0"          "(z) the home is made"
+P="$TMP/z"; mkdir -p "$P"; W="$P/agentZ"; WD="$P/agentZD"; WC="$P/agentZC"
+eq "$(rc_of "$ZR" "$W" agentZ):$(rc_of "$ZR" "$WD" agentZD):$(rc_of "$ZR" "$WC" agentZC)" "0:0:0" \
+    "(z) the homes are made"
 BR=$(branch_of "$W"); OLD=$(head_of "$W")
+git -C "$WD" checkout -q --detach
+git -C "$WC" checkout -q --detach
+echo mine > "$WC/mine.txt"; git -C "$WC" add mine.txt; git -C "$WC" commit -qm mine
+MINE=$(head_of "$WC")
 git -C "$ZS" commit -q --amend -m rewritten; git -C "$ZS" push -q -f "$TMP/z.git" main
 NEW=$(git -C "$TMP/z.git" rev-parse main)
-ERR=$(sync_in "$ZR" "$W" agentZ)
-has "$ERR" "exit 1"                          "(z) a home on the old history fails its start"
-eq "$(head_of "$W")" "$OLD"                  "(z) and stays where it is"
-has "$ERR" "git -C '$W' checkout --detach origin/HEAD" "(z) its report names the move"
-git -C "$W" checkout -q --detach origin/HEAD
-eq "$(sync_in "$ZR" "$W" agentZ)" ""         "(z) after that move, the next start goes through"
-eq "$(head_of "$W"):$(branch_of "$W")" "$NEW:DETACHED" "(z) with the home detached at the new tip"
+eq "$(sync_in "$ZR" "$W" agentZ)" ""         "(z) a home on its branch at the old tip starts, printing nothing"
+eq "$(head_of "$W"):$(branch_of "$W")" "$NEW:DETACHED" "(z) at the new tip, detached"
 eq "$(git -C "$ZR" rev-parse "refs/heads/$BR")" "$OLD" "(z) and its branch still on the old history"
-eq "$(calls "$W" agentZ report):$(calls "$W" agentZ cleared)" "1:1" \
+eq "$(sync_in "$ZR" "$WD" agentZD)" ""       "(z) a detached home at the old tip starts the same way"
+eq "$(head_of "$WD"):$(branch_of "$WD")" "$NEW:DETACHED" "(z) at the new tip, detached"
+eq "$(calls "$W" agentZ report):$(calls "$W" agentZ cleared):$(calls "$WD" agentZD report):$(calls "$WD" agentZD cleared)" \
+    "0:1:0:1" "(z) neither is reported, and each records its clear"
+ERR=$(sync_in "$ZR" "$WC" agentZC)
+has "$ERR" "exit 1"                          "(z) a home with a commit of its own on the old history fails its start"
+eq "$(head_of "$WC")" "$MINE"                "(z) and stays where it is"
+has "$ERR" "commits origin/main lacks on its HEAD (2, newest $(git -C "$WC" rev-parse --short HEAD))" \
+    "(z) its report counts its commit and the old tip"
+has "$ERR" "git -C '$WC' checkout --detach origin/HEAD" "(z) and names the move"
+git -C "$WC" checkout -q --detach origin/HEAD
+eq "$(sync_in "$ZR" "$WC" agentZC)" ""       "(z) after that move, the next start goes through"
+eq "$(calls "$WC" agentZC report):$(calls "$WC" agentZC cleared)" "1:1" \
     "(z) one report, and its clear under the same key"
 
 # --- (aa) a report that does not land still fails the start, and the run's
@@ -790,6 +812,37 @@ eq "$(last_line "$ERR")" "exit 0"            "(af) a home written to for a while
 eq "$([ -f "$W/.git" ] && echo linked || echo no)" "linked" "(af) as a linked worktree"
 eq "$(cat "$W/.claude/settings.json")" "burst" "(af) holding what the build wrote last"
 eq "$(stages "$P")" ""                       "(af) no stage dir is left"
+
+# --- (ag) a HEAD the tip lacks fails the start unless origin/main's reflog
+#          records it as a tip: a commit on a pushed branch, which origin/main
+#          never had, though a remote branch holds it, and an old tip once git
+#          has expired the entries that record it. Its own remote, since its
+#          main is rewritten. ------------------------------------------------
+GS="$TMP/agsrc"; git init -q -b main "$GS"
+echo seed > "$GS/README.md"; git -C "$GS" add -A; git -C "$GS" commit -qm init
+echo old > "$GS/old.txt"; git -C "$GS" add -A; git -C "$GS" commit -qm old
+git clone -q --bare "$GS" "$TMP/ag.git"
+GR="$TMP/agrig"; git clone -q "$TMP/ag.git" "$GR"
+P="$TMP/ag"; mkdir -p "$P"; W="$P/agentAG"; WE="$P/agentAGE"
+eq "$(rc_of "$GR" "$W" agentAG):$(rc_of "$GR" "$WE" agentAGE)" "0:0" "(ag) the homes are made"
+git -C "$GS" switch -q -c feature
+echo f > "$GS/f.txt"; git -C "$GS" add -A; git -C "$GS" commit -qm feature
+git -C "$GS" push -q "$TMP/ag.git" feature; git -C "$GS" switch -q main
+git -C "$GR" fetch -q origin
+git -C "$W" checkout -q --detach origin/feature
+FEATURE=$(head_of "$W")
+ERR=$(sync_in "$GR" "$W" agentAG)
+has "$ERR" "exit 1"                          "(ag) a home on a pushed branch's commit fails its start"
+eq "$(head_of "$W")" "$FEATURE"              "(ag) and stays where it is"
+has "$ERR" "commits origin/main lacks on its HEAD (1, newest" "(ag) its report names the commit"
+OLD=$(head_of "$WE")
+git -C "$GS" commit -q --amend -m rewritten; git -C "$GS" push -q -f "$TMP/ag.git" main
+git -C "$GR" fetch -q origin
+git -C "$GR" reflog expire --expire-unreachable=now --all
+ERR=$(sync_in "$GR" "$WE" agentAGE)
+has "$ERR" "exit 1"                          "(ag) a home at an old tip the reflog no longer records fails its start"
+eq "$(head_of "$WE")" "$OLD"                 "(ag) and stays where it is"
+has "$ERR" "git -C '$WE' checkout --detach origin/HEAD" "(ag) its report names the move"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

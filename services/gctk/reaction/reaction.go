@@ -70,9 +70,9 @@ const (
 // the call and closes the subject or asks the operator.
 const closer = "mol-validate-close"
 
-// defaultPool is the pool, in the caller's rig, an actionable or a close exit
-// routes to when it names none.
-const defaultPool = "gc-toolkit.polecat"
+// defaultPool is the template of the pool, in the caller's rig, an actionable
+// or a close exit routes to when it names none (rigPool names the pool).
+const defaultPool = "polecat"
 
 // GitHubWait bounds each GitHub read an emergency's check makes, so a stalled
 // connection cannot hold the reaction and its pool slot.
@@ -113,6 +113,10 @@ type Reactions struct {
 	Now func() time.Time
 	// Log takes each line the exit says as it goes, nil for none.
 	Log func(string)
+
+	// proactive is the rig's proactive pool once the roster has named it, so a
+	// sweep reads the roster once for all its slings.
+	proactive string
 }
 
 func (r *Reactions) say(format string, args ...any) {

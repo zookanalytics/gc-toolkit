@@ -11,8 +11,10 @@
 # user; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
 # writing nothing for an output gctk refuses; triage's withdrawal; the push
-# returning the PR to draft before it pushes, with a lease on the head the
-# round judged, pushing nothing when the draft does not answer or the branch
+# bringing the PR's title and body current with its bead at the head it
+# pushes, or at the judged head when it has nothing to push, returning the PR
+# to draft before that, pushing with a lease on the head the round judged,
+# pushing nothing when the draft or the edit does not answer or the branch
 # moved, and weighing a failed push by the branch on origin (landed, unmoved
 # and to run again, moved, or not read); the post of the head's comment, or
 # the edit of the one its mark finds, and nothing when there is nothing to
@@ -105,6 +107,10 @@ case "$1 $2" in
         printf 'the rig guidance for %s, read in %s\n' "$3" "$PWD" ;;
     "pr draft") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-draft"
         exit "${STUB_RC_DRAFT:-0}" ;;
+    "pr compose") [ -z "${STUB_ORIGIN:-}" ] || git -C "$STUB_ORIGIN" rev-parse polecat/tk-pr > "$STUB_ORIGIN.at-edit"
+        printf 'pr-compose-cwd %s\n' "$PWD" >> "$LOG"
+        [ -z "${STUB_RC_COMPOSE:-}" ] || { echo "gctk pr compose: tk-pr: gh: HTTP 502" >&2; exit "$STUB_RC_COMPOSE"; }
+        echo "tk-pr: edited the body of https://github.com/o/r/pull/7" ;;
     "bead holds") if [ -n "${STUB_HOLDS:-}" ]; then printf '%s\n' "$STUB_HOLDS"
                   else printf '{"id":"%s","status":"blocked","arm":null}\n' "$3"; fi ;;
     "bead arm") exit "${STUB_RC_ARM:-0}" ;;
@@ -201,16 +207,32 @@ eq "$(git -C "$WT" rev-parse HEAD)" "$HEAD1" "at the head the round judged"
 run push
 eq "$RC" 0 "a worktree at the head pushes nothing"
 eq "$(called 'pr draft')" 0 "and drafts nothing"
+has "$(cat "$LOG")" "gctk pr compose tk-pr --head $HEAD1 --target main --gates  --edit" \
+    "and brings the PR's title and body current with its bead at the head the round judged"
+has "$(cat "$LOG")" "pr-compose-cwd $WT" "from the run's worktree, whose origin names the rig's repository"
+has "$OUT" "tk-pr: edited the body" "and prints what it edited"
+STUB_RC_COMPOSE=2 run push
+eq "$RC" 2 "an edit that does not answer, with nothing to push, exits 2 to run again"
+STUB_RC_COMPOSE=3 run push
+eq "$RC" 3 "an edit gctk refuses stops the push (exit 3)"
 gw() { git -C "$WT" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false "$@"; }
 echo fix > "$WT/f"; gw commit -q -am fix; FIX="$(gw rev-parse HEAD)"
 STUB_RC_DRAFT=2 run push
 eq "$RC" 2 "a draft that does not answer pushes nothing"
 eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$HEAD1" "and the branch stays at the head"
+eq "$(called 'pr compose')" 0 "and edits nothing on the PR that may still be ready"
+STUB_RC_COMPOSE=2 run push
+eq "$RC" 2 "an edit of the PR's title and body that does not answer pushes nothing"
+eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$HEAD1" "and the branch stays at the head"
 STUB_ORIGIN="$TMP/origin.git" run push
 eq "$RC" 0 "the repair's commits push"
 eq "$(cat "$TMP/origin.git.at-draft")" "$HEAD1" "after the PR returned to draft, while the branch was still at the head"
+has "$(cat "$LOG")" "gctk pr compose tk-pr --head $FIX --target main --gates  --edit" \
+    "and after the PR's title and body were brought current at the head it pushes"
+eq "$(cat "$TMP/origin.git.at-edit")" "$HEAD1" "…while the branch was still at the head"
+eq "$(grep -n -E '^gctk pr (draft|compose)' "$LOG" | cut -d' ' -f3 | tr '\n' ' ')" "draft compose " "…which comes after the draft"
 eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$FIX" "onto the PR's branch"
-has "$OUT" "$FIX" "and prints the head it pushed"
+eq "$(printf '%s\n' "$OUT" | tail -n 1)" "$FIX" "and prints the head it pushed, last"
 # The branch moved past the head the round judged: the lease refuses.
 facts review-loop.iteration.2.rule-and-repair repair 2
 gw reset -q --hard "$HEAD1"; echo other > "$WT/f"; gw commit -q -am other

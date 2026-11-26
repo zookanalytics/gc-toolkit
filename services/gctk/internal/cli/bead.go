@@ -213,9 +213,12 @@ with "start" added, what the pass did with its arm, or with --dry-run would do:
 
 action is retire, start, sent, hold, ask, leave, withdrawn or fail:
 
-  retire     the bead closed (case closed), or carries a merge_result, so
-             another path delivered its work (case delivered): the arm is
-             cleared and nothing slung, whatever holds the bead
+  retire     the bead closed (case closed), or it carries a merge_result, so
+             another path delivered its work, and the arm would pour work on
+             it again (case delivered): the arm is cleared and nothing slung,
+             whatever holds the bead. The validating closer's arm
+             (mol-validate-close) pours no work, so a merge_result does not
+             retire it
   start      it was slung on formula, and its arm cleared
   sent       its work is sent already, so the arm is cleared and nothing
              slung: an earlier attempt's pour landed, or gc sling's exit 3
@@ -235,7 +238,7 @@ action is retire, start, sent, hold, ask, leave, withdrawn or fail:
   fail       a read, a write, a sling or an ask failed, or its arm does not
              decode (malformed), and the arm stays
 
-The pass retires the arm of each closed or delivered bead first. It selects the
+The pass first retires each arm that is no longer owed (retire). It selects the
 beads to start by bd's ready read with the pool's own serve rule, then holds
 back what bd cannot judge and a hold label in any spelling. It starts each
 under the bead's dispatch lock: it reads the bead once more, pours the arm's
@@ -259,7 +262,7 @@ func newBeadStartArmedCmd(stdout, stderr io.Writer) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "start-armed [--db <path>] [--dry-run]",
-		Short: "start each armed bead nothing holds, once, and retire the arm a closed or delivered bead carries",
+		Short: "start each armed bead nothing holds, once, and retire each arm that is no longer owed",
 		Long:  beadStartArmedLong,
 		Args:  cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {

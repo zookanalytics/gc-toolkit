@@ -215,11 +215,16 @@ alone.
 so each importing rig's pass reads its own store on its own clock. Each pass
 runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
 
-- **retires** the arm on each armed bead that has closed, and on each that
-  carries a `merge_result`, whatever holds the bead. Another path has delivered
-  the work of a bead that carries one, and pouring its formula again would make
-  a redundant workflow and input convoy. The arm is cleared with a note that
-  names the case, and nothing is slung.
+- **retires**, whatever holds the bead, the arm on each armed bead that has
+  closed, and every arm but the validating closer's on each that carries a
+  `merge_result`. Another path has delivered the work of a bead that carries
+  one, and pouring its formula again would make a redundant workflow and input
+  convoy. The arm is cleared with a note that names the case, and nothing is
+  slung. The validating closer's arm pours no work: the closer checks the bead
+  once what it waits on lands, and puts a bead that carries a `merge_result` to
+  a person ([A bead whose job ends when other work
+  lands](#a-bead-whose-job-ends-when-other-work-lands)). So the steps below
+  judge that arm as they judge any other.
 - **selects** the beads to start by the pool's own serve rule: `bd ready` over
   the beads that carry `gc.dispatch_when_ready`, with the flags Gas City
   renders for a pool's routed demand, `--unassigned`, `--exclude-type=epic`
@@ -234,12 +239,13 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
   pool's hook does after bd's exact comparison.
 - **starts** each bead left, under the bead's dispatch lock (below). It reads
   the bead once more, so an arm removed since the pass listed it is not sent, a
-  hold label set since then keeps the arm, and a bead that closed or was
-  delivered since then has its arm retired. It resolves the formula: the one
-  the arm names, else the target's default. After an earlier attempt it first
-  looks for the root that attempt poured (below). It counts the attempt in one
-  write, runs `gc sling <target> <bead> --on <formula> --title "<formula>
-  arm:<bead>@<armed at>"`, and clears the arm once the sling exits 0.
+  hold label set since then keeps the arm, and a bead that closed or came to
+  carry a `merge_result` since then has its arm retired as above. It resolves
+  the formula: the one the arm names, else the target's default. After an
+  earlier attempt it first looks for the root that attempt poured (below). It
+  counts the attempt in one write, runs `gc sling <target> <bead> --on
+  <formula> --title "<formula> arm:<bead>@<armed at>"`, and clears the arm once
+  the sling exits 0.
 - **prints** one JSON line per armed bead: `gctk bead holds`' answer for it,
   with what the pass did with its arm. That is a retire and its case, a start,
   a send already made, a hold and what holds the bead, an arm withdrawn since
@@ -391,6 +397,11 @@ brief and the arm for its subject when the ruling leaves the subject waiting on
 work the sitting sent, after its headline writes the edge
 (`--waiting-on <work> --close-brief "<brief>"`), and then lifts the subject's
 `hold:mayor`, every spelling of it, so the pass can send the arm.
+
+A bead that waits this way can be a pull request's anchor, which carries a
+`merge_result`. Its arm sends the closer all the same once nothing holds the
+bead, and the closer puts the anchor to a person, because the refinery closes
+an anchor on its merge.
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.

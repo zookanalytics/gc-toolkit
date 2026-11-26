@@ -309,10 +309,12 @@ func TestASweepsDeadlineReadsAsAnOrdersTimeout(t *testing.T) {
 // read.
 func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	w := newWorld(t)
-	asked := func(what string) {
+	// The roster is read only to name the pool, once for a whole sweep, and
+	// never to ask whether the pool runs.
+	asked := func(what string, want int) {
 		t.Helper()
-		if slices.Contains(w.rt.Reads(), "roster") {
-			t.Errorf("(SWEEP-NOASK) %s: the reads were %v", what, w.rt.Reads())
+		if n := countOf(w.rt.Reads(), "roster"); n != want {
+			t.Errorf("(SWEEP-NOASK) %s: the roster was read %d times (%v); want %d", what, n, w.rt.Reads(), want)
 		}
 	}
 	for _, dryRun := range []bool{false, true} {
@@ -320,7 +322,7 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 			t.Errorf("(SWEEP-NOCANDIDATE) dry run %v: %v, %q, %v", dryRun, lines, summary, err)
 		}
 	}
-	asked("a pass with no candidate")
+	asked("a pass with no candidate", 0)
 
 	w = newWorld(t)
 	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
@@ -330,7 +332,7 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 	if _, summary, err := w.sweep(false, time.Minute); err != nil || summary != "slung 2 first reaction(s)" || !slices.Equal(w.slings(), []string{"tk-a", "tk-b"}) {
 		t.Errorf("(SWEEP-STOPPED) a pool that does not run: %q, %v, slinging %v; want both slung to it", summary, err, w.slings())
 	}
-	asked("a pool that does not run")
+	asked("a pool that does not run", 1)
 
 	w = newWorld(t)
 	w.ready(input("tk-a", func(b *fake.Bead) { b.Priority = 0 }), input("tk-b", func(b *fake.Bead) { b.Priority = 1 }))
@@ -347,7 +349,7 @@ func TestTheSweepSlingsToItsPoolWhetherOrNotItRuns(t *testing.T) {
 			t.Errorf("(SWEEP-REFUSED) %s's line is %+v; want it failed with gc sling's reason", l.ID, l)
 		}
 	}
-	asked("a pool the city does not configure")
+	asked("a pool the city does not configure", 1)
 
 	w = newWorld(t)
 	w.r.Rig = ""

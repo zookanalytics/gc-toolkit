@@ -2,7 +2,6 @@ package reaction
 
 import (
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
@@ -47,8 +46,8 @@ func TestCloseHandsTheSubjectToItsCloser(t *testing.T) {
 	code, _, err = w.dispose("tk-sub", "--disposition", "close", "--reason", "r", "--takeaway", "t", "--run", root)
 	wantCode(t, code, 0, err, "(CLOSE) a closer pool that does not run")
 	w.has("SLING gc-toolkit/gc-toolkit.polecat tk-sub --on mol-validate-close --rig gc-toolkit", "(CLOSE) the closer is slung to it all the same")
-	if slices.Contains(w.rt.Reads(), "roster") {
-		t.Errorf("(CLOSE) the exit asked about the pool: the reads were %v", w.rt.Reads())
+	if n := countOf(w.rt.Reads(), "roster"); n != 1 {
+		t.Errorf("(CLOSE) the exit read the roster %d times (%v); want once, to name the pool, and never to ask whether it runs", n, w.rt.Reads())
 	}
 
 	w = newWorld(t)

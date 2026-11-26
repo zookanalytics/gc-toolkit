@@ -80,6 +80,7 @@ if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --
         || echo "")
     if [ -z "$IN_PROGRESS_SHA" ]; then
         gc bd update {{issue}} \
+            --set-metadata gc.work_outcome=no-op \
             --set-metadata classification=infeasible \
             --set-metadata infeasible_reason="mid-rebase state present but in-progress commit unidentifiable"
         gc bd close {{issue}} --reason "infeasible: mid-rebase state unreadable"
@@ -92,6 +93,7 @@ if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --
         ${TARGET_SHA}*) : ;;  # match — proceed
         *)
             gc bd update {{issue}} \
+                --set-metadata gc.work_outcome=no-op \
                 --set-metadata classification=infeasible \
                 --set-metadata infeasible_reason="mid-rebase commit $IN_PROGRESS_SHA != assigned $TARGET_SHA"
             gc bd close {{issue}} --reason "infeasible: mid-rebase commit drift"
@@ -102,6 +104,7 @@ if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --
     esac
 else
     gc bd update {{issue}} \
+        --set-metadata gc.work_outcome=no-op \
         --set-metadata classification=infeasible \
         --set-metadata infeasible_reason="shared worktree is not mid-rebase"
     gc bd close {{issue}} --reason "infeasible: shared worktree not mid-rebase"
@@ -197,6 +200,7 @@ rebase worktree. See {{issue}} for context and metadata.classification."
 
 FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD | jq -R . | jq -s .)
 gc bd update {{issue}} \
+    --set-metadata gc.work_outcome=no-op \
     --set-metadata classification=mechanical \
     --set-metadata files_changed="$FILES_CHANGED" \
     --append-notes "Mechanical rework of $TARGET_SHA. Files: $(printf '%s' "$FILES_CHANGED" | jq -r '. | join(", ")')"
@@ -217,6 +221,7 @@ Do NOT commit. Reset so the index is clean; the parent will
 git reset --hard HEAD
 
 gc bd update {{issue}} \
+    --set-metadata gc.work_outcome=no-op \
     --set-metadata classification=dropped-absorbed \
     --append-notes "Upstream already provides this behavior or supersedes the commit. Recommended action: git rebase --skip. Rationale: <one to three sentences>."
 ```
@@ -237,6 +242,7 @@ See {{issue}} for context and metadata.judgment_summary."
 
 FILES_CHANGED=$(git diff --name-only HEAD~1 HEAD | jq -R . | jq -s .)
 gc bd update {{issue}} \
+    --set-metadata gc.work_outcome=no-op \
     --set-metadata classification=judgment-required \
     --set-metadata files_changed="$FILES_CHANGED" \
     --set-metadata judgment_summary="<one to three sentences describing the design call you made and the alternatives considered>" \
@@ -251,6 +257,7 @@ your reason surfaced:
 
 ```bash
 gc bd update {{issue}} \
+    --set-metadata gc.work_outcome=no-op \
     --set-metadata classification=infeasible \
     --set-metadata infeasible_reason="<concise one-liner: missing dep / scope too broad / context exhausted / operator input needed>" \
     --append-notes "Infeasible: <full explanation with what's blocking and what the operator should consider>."

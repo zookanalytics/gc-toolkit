@@ -29,7 +29,7 @@ if [ -e "$STATE/stall.after-subject" ] && grep -q '"tk-subj1"' "$STATE/rows.json
 arg() { want=$1; shift; prev=; for a; do [ "$prev" = "$want" ] && { printf '%s' "$a"; return; }; prev=$a; done; }
 case "$1 ${2:-}" in
 "rig list") cat "$STATE/rigs.json" ;;
-"agent list") echo '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus"}]}' ;;
+"agent list") echo '{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse-claude-opus","name":"converse-claude-opus","dir":"gc-toolkit"}]}' ;;
 "bd create")
 	deps=$(arg --deps "$@")
 	if [ -z "$deps" ]; then id=tk-subj1; else id=tk-conv$(( $(jq '[.[] | select(.id | startswith("tk-conv"))] | length' "$STATE/rows.json") + 1 )); fi
