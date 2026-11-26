@@ -20,8 +20,10 @@ import (
 // checks. test, lint and typecheck run the command their caller passes and
 // record the result against the commit it ran at (internal/rig). setup and
 // build run the command their caller passes and record nothing: setup leaves
-// environment state behind, and a build makes itself current. serve runs a
-// copy of the rig's UI (rig_serve.go).
+// environment state behind, and a build makes itself current. pre-existing
+// marks a recorded fail pre-existing on a bead and answers whether the mark
+// holds (rig_preexisting.go). serve runs a copy of the rig's UI
+// (rig_serve.go).
 //
 // gctk reads no formula var and works out no diff. The caller passes the
 // command, a test caller declares which of the two test runs it is, and a
@@ -108,13 +110,16 @@ func newRigCmd(stdout, stderr io.Writer) *cobra.Command {
 		rigVerb(rig.CheckTypecheck, "run the rig's typecheck command and record the result at the commit", rigRecordedLong, stdout, stderr),
 		rigVerb("setup", "run the rig's setup command, recording nothing", rigRunOnlyLong, stdout, stderr),
 		rigVerb("build", "run the rig's build command, recording nothing", rigRunOnlyLong, stdout, stderr),
+		newRigPreExistingCmd(stdout, stderr),
 		newRigServeCmd(stdout, stderr),
 	}
 	return group("rig", "actions on the rig an agent works in",
 		`Actions on the rig an agent works in. Its first are the checks: test, lint and
 typecheck run the command their caller passes and record the result against
-the commit it ran at, and setup and build run theirs and record nothing. serve
-runs a copy of the rig's UI from a checkout, for a demo capture or a person.
+the commit it ran at, and setup and build run theirs and record nothing.
+pre-existing marks a recorded fail on a bead as red on the target too, carried
+by a tracker, and answers whether that mark holds. serve runs a copy of the
+rig's UI from a checkout, for a demo capture or a person.
 
 gctk reads no formula var and works out no diff. The caller passes the command,
 a test caller declares which of the two test runs it is, and a caller whose rig

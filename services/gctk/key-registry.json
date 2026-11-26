@@ -678,6 +678,44 @@
     "doc": "The published copy of a recorded check's result, which `gctk rig \u003ccheck\u003e --publish-bead \u003cbead\u003e` writes on the bead its caller names: the record the call answered with, as one JSON object of check, result, scope (absent on a lint or typecheck run), commit, tree, exit_code, duration_ms, runner, recorded_at and command. gctk writes it only once the record store holds the result it copies, after recording a result or answering from a record. No pack path reads it: the record under the rig clone's git common directory answers a later call. Absent means no call published that check to the bead. Never cleared: the next publish replaces it. Its commit is the one the check ran at: the head the call answered for, or, for a full-suite test pass answered through the tree, an earlier commit with the same tree."
   },
   {
+    "name": "rig_check_pre_existing.build",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "A caller's judgment that one recorded fail of a check is pre-existing: the same failure is red on the target, carried by the tracker beads it names. One JSON object of commit, the full sha the judgment is about; record, the fail it judged, which for test, lint and typecheck is the record `gctk rig \u003ccheck\u003e --check` reads at that commit and for setup and build the bead's self_review_setup_build note naming the check failed there; and trackers, the tracker bead ids. `gctk rig pre-existing \u003ccheck\u003e --commit` writes it, on the work bead in mol-polecat-work's self-review and on the anchor in the refinery's handle-failures, and refuses a tracker that is not open. A write for the same record adds its trackers, and one for another record replaces the value. `gctk rig pre-existing \u003ccheck\u003e` answers whether it holds: only at its commit, for the fail recorded there, and while a tracker it names is open. assets/scripts/self-review-check.sh asks it of the work bead, so the self-review loop converges past the fail, and assets/scripts/review-evidence.sh of the anchor, so a correctness review runs no suite for it. Absent means no caller judged a fail pre-existing. Never cleared."
+  },
+  {
+    "name": "rig_check_pre_existing.lint",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "A caller's judgment that one recorded fail of a check is pre-existing: the same failure is red on the target, carried by the tracker beads it names. One JSON object of commit, the full sha the judgment is about; record, the fail it judged, which for test, lint and typecheck is the record `gctk rig \u003ccheck\u003e --check` reads at that commit and for setup and build the bead's self_review_setup_build note naming the check failed there; and trackers, the tracker bead ids. `gctk rig pre-existing \u003ccheck\u003e --commit` writes it, on the work bead in mol-polecat-work's self-review and on the anchor in the refinery's handle-failures, and refuses a tracker that is not open. A write for the same record adds its trackers, and one for another record replaces the value. `gctk rig pre-existing \u003ccheck\u003e` answers whether it holds: only at its commit, for the fail recorded there, and while a tracker it names is open. assets/scripts/self-review-check.sh asks it of the work bead, so the self-review loop converges past the fail, and assets/scripts/review-evidence.sh of the anchor, so a correctness review runs no suite for it. Absent means no caller judged a fail pre-existing. Never cleared."
+  },
+  {
+    "name": "rig_check_pre_existing.setup",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "A caller's judgment that one recorded fail of a check is pre-existing: the same failure is red on the target, carried by the tracker beads it names. One JSON object of commit, the full sha the judgment is about; record, the fail it judged, which for test, lint and typecheck is the record `gctk rig \u003ccheck\u003e --check` reads at that commit and for setup and build the bead's self_review_setup_build note naming the check failed there; and trackers, the tracker bead ids. `gctk rig pre-existing \u003ccheck\u003e --commit` writes it, on the work bead in mol-polecat-work's self-review and on the anchor in the refinery's handle-failures, and refuses a tracker that is not open. A write for the same record adds its trackers, and one for another record replaces the value. `gctk rig pre-existing \u003ccheck\u003e` answers whether it holds: only at its commit, for the fail recorded there, and while a tracker it names is open. assets/scripts/self-review-check.sh asks it of the work bead, so the self-review loop converges past the fail, and assets/scripts/review-evidence.sh of the anchor, so a correctness review runs no suite for it. Absent means no caller judged a fail pre-existing. Never cleared."
+  },
+  {
+    "name": "rig_check_pre_existing.test",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "A caller's judgment that one recorded fail of a check is pre-existing: the same failure is red on the target, carried by the tracker beads it names. One JSON object of commit, the full sha the judgment is about; record, the fail it judged, which for test, lint and typecheck is the record `gctk rig \u003ccheck\u003e --check` reads at that commit and for setup and build the bead's self_review_setup_build note naming the check failed there; and trackers, the tracker bead ids. `gctk rig pre-existing \u003ccheck\u003e --commit` writes it, on the work bead in mol-polecat-work's self-review and on the anchor in the refinery's handle-failures, and refuses a tracker that is not open. A write for the same record adds its trackers, and one for another record replaces the value. `gctk rig pre-existing \u003ccheck\u003e` answers whether it holds: only at its commit, for the fail recorded there, and while a tracker it names is open. assets/scripts/self-review-check.sh asks it of the work bead, so the self-review loop converges past the fail, and assets/scripts/review-evidence.sh of the anchor, so a correctness review runs no suite for it. Absent means no caller judged a fail pre-existing. Never cleared."
+  },
+  {
+    "name": "rig_check_pre_existing.typecheck",
+    "type": "json",
+    "owner": "internal/rig",
+    "doc": "A caller's judgment that one recorded fail of a check is pre-existing: the same failure is red on the target, carried by the tracker beads it names. One JSON object of commit, the full sha the judgment is about; record, the fail it judged, which for test, lint and typecheck is the record `gctk rig \u003ccheck\u003e --check` reads at that commit and for setup and build the bead's self_review_setup_build note naming the check failed there; and trackers, the tracker bead ids. `gctk rig pre-existing \u003ccheck\u003e --commit` writes it, on the work bead in mol-polecat-work's self-review and on the anchor in the refinery's handle-failures, and refuses a tracker that is not open. A write for the same record adds its trackers, and one for another record replaces the value. `gctk rig pre-existing \u003ccheck\u003e` answers whether it holds: only at its commit, for the fail recorded there, and while a tracker it names is open. assets/scripts/self-review-check.sh asks it of the work bead, so the self-review loop converges past the fail, and assets/scripts/review-evidence.sh of the anchor, so a correctness review runs no suite for it. Absent means no caller judged a fail pre-existing. Never cleared."
+  },
+  {
+    "name": "self_review_setup_build",
+    "type": "json",
+    "readers": [
+      "internal/rig"
+    ],
+    "doc": "What setup and build did at the commit a self-review iteration ran them at, which assets/scripts/rig-checks.sh writes on the work bead: commit, setup and build, each pass, fail or none, and the commands they ran. A pre-existing mark of setup or build holds this note as the fail it judged."
+  },
+  {
     "name": "task_kind",
     "type": "string",
     "readers": [
