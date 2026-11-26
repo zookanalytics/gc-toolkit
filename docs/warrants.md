@@ -550,7 +550,7 @@ no warrant.
     and the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
     read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -613,7 +613,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
