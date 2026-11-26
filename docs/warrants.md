@@ -170,9 +170,10 @@ no warrant.
   - Scheduled `gc dolt compact` skips a store below the commit-count threshold
     (`docs/runbooks/dolt-compact.md`). A store stranded below it is reclaimed
     only by an operator, either with `gc dolt compact --gc-only --only-db`
-    against the live server or with the offline `dolt gc` procedure
+    against the live server, which skips a store any session is connected to,
+    or with the offline `dolt gc` procedure, which stops the city first
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 44246e7f5.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 

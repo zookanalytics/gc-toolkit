@@ -27,6 +27,13 @@
 # `gc dolt compact` has no `--gc-only`, this pass refuses rather than fall back
 # to the flatten.
 #
+# Gas City's compact runs no full GC on a store any session is connected to,
+# because the GC can lose what sessions write meanwhile to the store's
+# dolt_ignore'd tables, such as mail and wisps, and it counts that skip as a
+# failed database. This pass reads the skip as a deferral, not a failure, and
+# never passes --force, so a store the city's sessions keep connected waits for
+# a pass that finds none connected.
+#
 # The order's interval is the only cooldown: the script holds no state, so a
 # store that stays over the line is reclaimed once per interval and no more. A
 # reclaim never starts while the data plane is unreachable or overloaded — a
@@ -55,9 +62,12 @@
 #                                     may run; a probe still running then
 #                                     proves nothing and defers nothing
 #                                     (default 90)
-# Exit: 0 reclaimed, or nothing over the line · 1 a reclaim was attempted and
-#       failed · 2 usage, or the pass could not run at all (no gc, no --gc-only,
-#       no database list).
+#      GC_ORDER_OUTCOME_FILE          set by Gas City's order runner: where a
+#                                     run declares the stores it deferred
+# Exit: 0 no reclaim failed: each store over the line was reclaimed or
+#       deferred, or none was over it · 1 a reclaim was attempted and failed ·
+#       2 usage, or the pass could not run at all (no gc, no --gc-only, no
+#       database list).
 # Caller: the dolt-reclaim exec order. See docs/dolt-reclaim.md.
 set -euo pipefail
 
@@ -213,9 +223,41 @@ gate_holds() {
     return 1
 }
 
+# A run that exits 0 reads as completed. Gas City's exec order runner hands each
+# run a file in GC_ORDER_OUTCOME_FILE, the run declares there the stores it held
+# back, and the runner records them as an order.skipped event. Core's
+# assets/scripts/order_outcome.sh holds the contract. A hand run has no file.
+succeeded=0; failed=0; deferred=0; HELD="[]"
+hold() {
+    deferred=$(( deferred + 1 ))
+    HELD="$(jq -c --arg scope "$1" --arg reason "$2" '. + [{scope: $scope, reason: $reason}]' <<< "$HELD")"
+}
+declare_held() {
+    [ -n "${GC_ORDER_OUTCOME_FILE:-}" ] && [ "$HELD" != "[]" ] || return 0
+    jq -n -c --arg outcome "$1" --arg reason "$2" --argjson scopes "$HELD" \
+        '{outcome: $outcome, reason: $reason, scopes: $scopes}' > "$GC_ORDER_OUTCOME_FILE"
+}
+
 if [ "$DRY_RUN" -eq 0 ] && gate_holds; then
+    while IFS=$'\t' read -r name _; do
+        [ -z "$name" ] || hold "$name" "the Dolt data plane is degraded"
+    done <<< "$OVER"
+    declare_held skipped "the Dolt data plane is degraded"
     exit 0
 fi
+
+# Returns 0 when compact's stderr ($2) carries the line its live-session gate
+# prints as it skips the full GC on store $1 because sessions are connected.
+# A probe that failed is not that line, so it stays a failure.
+skipped_for_sessions() {
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            "compact: db=$1 "[0-9]*" live session(s) connected"*"skipping DOLT_GC"*) return 0 ;;
+        esac
+    done <<< "$2"
+    return 1
+}
 
 # Reclaim each over-threshold store. The budget stops the pass from STARTING a
 # new reclaim once it is spent; a reclaim already running is never interrupted,
@@ -223,7 +265,6 @@ fi
 START="$(date +%s)"
 over_budget() { [ "$BUDGET" -gt 0 ] && [ "$(( $(date +%s) - START ))" -ge "$BUDGET" ]; }
 
-succeeded=0; failed=0; deferred=0
 freed_kb=0
 while IFS=$'\t' read -r name noms kb; do
     [ -n "$name" ] || continue
@@ -233,7 +274,7 @@ while IFS=$'\t' read -r name noms kb; do
     fi
     if over_budget; then
         echo "$PROG: $name deferred — ${BUDGET}s budget spent; the next pass takes it"
-        deferred=$(( deferred + 1 ))
+        hold "$name" "the pass's ${BUDGET}s budget was spent"
         continue
     fi
     # Re-check the data plane before every compact, not only once before the
@@ -242,18 +283,24 @@ while IFS=$'\t' read -r name noms kb; do
     # plane. Defer this store to the next pass; a later store still proceeds if
     # the plane has recovered by its turn.
     if gate_holds "$name"; then
-        deferred=$(( deferred + 1 ))
+        hold "$name" "the Dolt data plane is degraded"
         continue
     fi
     before="$(noms_kb "$noms")"; before="${before:-$kb}"
     rc=0
-    "$GC" dolt compact --gc-only --only-db "$name" || rc=$?
+    # Compact's stdout goes straight out through fd 3. Its stderr is held so the
+    # live-session skip can be read, then printed after it.
+    { compact_err="$("$GC" dolt compact --gc-only --only-db "$name" 2>&1 >&3 3>&-)" || rc=$?; } 3>&1
+    [ -z "$compact_err" ] || printf '%s\n' "$compact_err" >&2
     after="$(noms_kb "$noms")"; after="${after:-$before}"
     if [ "$rc" -eq 0 ]; then
         succeeded=$(( succeeded + 1 ))
         delta=$(( before - after )); [ "$delta" -ge 0 ] || delta=0
         freed_kb=$(( freed_kb + delta ))
         echo "$PROG: $name reclaimed $(gib "$delta") GiB ($(gib "$before") -> $(gib "$after") GiB)"
+    elif skipped_for_sessions "$name" "$compact_err"; then
+        hold "$name" "sessions are connected, so compact ran no full GC"
+        echo "$PROG: $name deferred — sessions are connected, so compact ran no full GC; the next pass tries again"
     else
         failed=$(( failed + 1 ))
         echo "$PROG: $name FAILED — 'gc dolt compact --gc-only --only-db $name' exited $rc ($(gib "$before") GiB, unchanged); it may be quarantined or need an operator" >&2
@@ -267,4 +314,9 @@ fi
 printf '%s: freed %s GiB — %d reclaimed, %d failed, %d deferred\n' \
     "$PROG" "$(gib "$freed_kb")" "$succeeded" "$failed" "$deferred"
 
-[ "$failed" -eq 0 ]
+[ "$failed" -eq 0 ] || exit 1
+if [ "$succeeded" -eq 0 ]; then
+    declare_held skipped "no store over the line was reclaimed"
+else
+    declare_held partial "some stores over the line were held back"
+fi
