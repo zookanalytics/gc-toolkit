@@ -89,7 +89,7 @@ and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
-| place on its own | a defect that hurts the operator or a rig now, whose fix adds nothing new for someone to use and is worth building without an epic; say what it hurts, in a line of its own | nothing |
+| place on its own | a defect that hurts the operator or a rig now. Its fix adds nothing new for someone to use. It is worth building without an epic. Say what it hurts, in a line of its own | nothing |
 | leave held | it waits for a later sitting, such as for an epic that does not exist yet | nothing |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
