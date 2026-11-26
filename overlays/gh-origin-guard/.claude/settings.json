@@ -8,6 +8,11 @@
             "type": "command",
             "command": "export PATH=\"$HOME/go/bin:$HOME/.local/bin:$PATH\"; for C in \"${GC_RIG_ROOT:-}\" \"${GC_CITY_PATH:-}/rigs/gc-toolkit\"; do S=\"$C/assets/scripts/gh-origin-guard.sh\"; [ -x \"$S\" ] && exec sh \"$S\"; done; exit 0",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "G=\"${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}\"; [ -x \"$G\" ] && \"$G\" session kill-guard; exit 0",
+            "timeout": 10
           }
         ]
       }

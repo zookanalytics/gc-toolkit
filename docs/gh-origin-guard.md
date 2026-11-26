@@ -279,11 +279,12 @@ registered there.
 
 `assets/scripts/gh-origin-guard-codex.sh` makes that registration. It copies the
 `PreToolUse` group for `Bash` out of `overlays/gh-origin-guard/.claude/settings.json`
-verbatim, so Codex runs the command every Claude overlay runs. Every
+verbatim, so Codex runs the commands every Claude overlay runs, the kill guard's
+(`gctk session kill-guard`) among them. Every
 codex-provider agent runs it as `pre_start`, so a Codex session starts only once
 the guard is registered, and a registration that cannot be made fails the start.
-It keeps everything else in the file, replaces a guard registration in an older
-form, and leaves a current one untouched. A file that is not a hooks document is
+It keeps everything else in the file, replaces either guard's registration in an
+older form, and leaves a current one untouched. A file that is not a hooks document is
 refused rather than overwritten.
 
 Codex runs a hook from the Codex home only once the hook is trusted. A new or

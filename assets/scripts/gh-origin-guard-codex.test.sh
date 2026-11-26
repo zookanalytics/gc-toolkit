@@ -21,7 +21,8 @@
 #   (3) other events and other PreToolUse groups are kept, in order, and the
 #       guard's group is appended after them
 #   (4) a guard handler in an older form is replaced, not duplicated: a group
-#       left empty is dropped, and a group shared with another handler keeps it
+#       left empty is dropped, and a group shared with another handler keeps it.
+#       The kill guard's handler, which the same group carries, is replaced too
 #   (5) a current group followed by others is left where it stands; two copies
 #       collapse to one
 #   (6) a file that is not exactly one hooks document (not JSON, empty, blank,
@@ -139,6 +140,21 @@ jq -e --argjson g "$GROUP" '
     and .hooks.PreToolUse[1] == $g' "$H/hooks.json" >/dev/null 2>&1 \
     && ok "drops an emptied group, keeps a shared one's other handler" \
     || bad "drops an emptied group, keeps a shared one's other handler" "$(jq -c . "$H/hooks.json")"
+
+H="$SANDBOX/stale-kill"
+mkdir -p "$H"
+cat > "$H/hooks.json" <<'JSON'
+{"hooks": {"PreToolUse": [
+  {"matcher": "Bash", "hooks": [
+    {"type": "command", "command": "sh /old/assets/scripts/gh-origin-guard.sh"},
+    {"type": "command", "command": "/old/bin/gctk session kill-guard"}]}
+]}}
+JSON
+install_into "$H"
+kills="$(grep -o 'session kill-guard' "$H/hooks.json" | wc -l | tr -d ' ')"
+{ [ "$RC" -eq 0 ] && [ "$kills" = 1 ] && ! grep -Fq /old/bin/gctk "$H/hooks.json"; } \
+    && ok "replaces a kill-guard handler in an older form, leaving one" \
+    || bad "replaces a kill-guard handler in an older form, leaving one" "rc=$RC, $kills kill-guard handlers: $(cat "$H/hooks.json")"
 
 # --- (5) where a current group stands -----------------------------------
 H="$SANDBOX/placed"
