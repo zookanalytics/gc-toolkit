@@ -27,8 +27,8 @@ var wrappers = map[string]bool{
 // shells run the script their -c option is given.
 var shells = map[string]bool{"bash": true, "dash": true, "ksh": true, "sh": true, "zsh": true}
 
-// maxScriptDepth bounds how deeply scripts given to a shell or to eval, inside
-// one another, are read.
+// maxScriptDepth bounds how deeply scripts given to a shell or to eval, and
+// strings env splits, inside one another, are read.
 const maxScriptDepth = 4
 
 // PatternKill names the pattern killer, pkill or killall, that a typed shell
@@ -74,7 +74,8 @@ func scriptKills(script string, depth int) string {
 
 // callKills names the pattern killer a simple command runs, itself or through
 // a wrapper. A wrapper's options take values whose count each wrapper decides,
-// so every later word is read as the command it may run.
+// so every later word is read as the command it may run. So is the wrapper
+// itself, since env runs a command from a string it splits.
 func callKills(words []*syntax.Word, depth int) string {
 	name, ok := commandName(words)
 	if !ok || !wrappers[name] {
@@ -83,7 +84,7 @@ func callKills(words []*syntax.Word, depth int) string {
 	if name == "command" && looksUp(words[1:]) {
 		return ""
 	}
-	for i := 1; i < len(words); i++ {
+	for i := range words {
 		if killer := runs(words[i:], depth); killer != "" {
 			return killer
 		}
@@ -92,7 +93,8 @@ func callKills(words []*syntax.Word, depth int) string {
 }
 
 // runs names the pattern killer that the command words names runs: the
-// command itself, or a call in the script it is given as a shell or as eval.
+// command itself, or a call in the script it is given as a shell or as eval,
+// or in the string it splits as env.
 func runs(words []*syntax.Word, depth int) string {
 	name, ok := commandName(words)
 	switch {
@@ -104,6 +106,8 @@ func runs(words []*syntax.Word, depth int) string {
 		if script, ok := dashC(words[1:]); ok {
 			return scriptKills(script, depth+1)
 		}
+	case name == "env":
+		return envSplitKills(words, depth)
 	case name == "eval":
 		parts := make([]string, 0, len(words)-1)
 		for _, w := range words[1:] {
@@ -140,6 +144,130 @@ func dashC(args []*syntax.Word) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// envSplitKills names the pattern killer an env call runs through a string
+// its -S option is given. env splits that string into more of its own
+// arguments, so the call is read again with the string's words in its place.
+func envSplitKills(words []*syntax.Word, depth int) string {
+	if depth >= maxScriptDepth {
+		return ""
+	}
+	for i := 1; i < len(words); i++ {
+		split, next, ok := splitString(words, i)
+		if !ok {
+			continue
+		}
+		call := append([]*syntax.Word{words[0]}, envSplit(split)...)
+		if killer := callKills(append(call, words[next:]...), depth+1); killer != "" {
+			return killer
+		}
+	}
+	return ""
+}
+
+// splitString is the string words[i] gives env to split, and the index of the
+// word after it, when words[i] is an option that gives one: a cluster of short
+// options that holds S, or --split-string or a prefix of it, which GNU env
+// takes. The string is the rest of the option's own word, or else the next
+// word.
+func splitString(words []*syntax.Word, i int) (string, int, bool) {
+	opt := scriptText(words[i])
+	switch {
+	case strings.HasPrefix(opt, "--"):
+		name, value, attached := strings.Cut(opt[2:], "=")
+		if name == "" || !strings.HasPrefix("split-string", name) {
+			return "", 0, false
+		}
+		if attached {
+			return value, i + 1, true
+		}
+	case strings.HasPrefix(opt, "-") && strings.Contains(opt, "S"):
+		if _, value, _ := strings.Cut(opt, "S"); value != "" {
+			return value, i + 1, true
+		}
+	default:
+		return "", 0, false
+	}
+	if i+1 < len(words) {
+		return scriptText(words[i+1]), i + 2, true
+	}
+	return "", 0, false
+}
+
+// envSplit is the words env makes of a string its -S option is given, by the
+// rules env(1) gives: split at white space outside quotes and at \_ outside
+// double quotes, with quotes removed and backslash escapes resolved, up to a #
+// that starts a word or a \c. GNU env splits at any white space and macOS's at
+// a space or a tab, so this splits as GNU does. A ${NAME} part stands as an
+// expansion, whose value is known only as the call runs. An escape env refuses,
+// such as \p, stands for its character.
+func envSplit(s string) []*syntax.Word {
+	var (
+		words  []*syntax.Word
+		lit    strings.Builder
+		sep    = true
+		sq, dq bool
+	)
+	flush := func() {
+		if lit.Len() > 0 {
+			w := words[len(words)-1]
+			w.Parts = append(w.Parts, &syntax.SglQuoted{Value: lit.String()})
+			lit.Reset()
+		}
+	}
+	begin := func() {
+		if sep {
+			if len(words) > 0 {
+				flush()
+			}
+			words = append(words, &syntax.Word{})
+			sep = false
+		}
+	}
+	put := func(b byte) { begin(); lit.WriteByte(b) }
+scan:
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\'' && !dq:
+			sq = !sq
+			begin()
+		case c == '"' && !sq:
+			dq = !dq
+			begin()
+		case strings.IndexByte(" \t\n\v\f\r", c) >= 0 && !sq && !dq:
+			sep = true
+		case c == '#' && sep:
+			break scan
+		case c == '\\' && i+1 < len(s) && (!sq || s[i+1] == '\\' || s[i+1] == '\''):
+			i++
+			switch e := s[i]; {
+			case e == '_' && !dq:
+				sep = true
+			case e == '_':
+				put(' ')
+			case e == 'c':
+				break scan
+			case strings.IndexByte("fnrtv", e) >= 0:
+				put("\f\n\r\t\v"[strings.IndexByte("fnrtv", e)])
+			default:
+				put(e)
+			}
+		case c == '$' && !sq && strings.HasPrefix(s[i:], "${") && strings.IndexByte(s[i:], '}') > 2:
+			end := strings.IndexByte(s[i:], '}')
+			begin()
+			flush()
+			w := words[len(words)-1]
+			w.Parts = append(w.Parts, &syntax.ParamExp{Param: &syntax.Lit{Value: s[i+2 : i+end]}})
+			i += end
+		default:
+			put(c)
+		}
+	}
+	if len(words) > 0 {
+		flush()
+	}
+	return words
 }
 
 // scriptText is the script a word gives a shell or eval: its text, with each

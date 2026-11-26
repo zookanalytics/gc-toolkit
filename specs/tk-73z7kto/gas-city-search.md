@@ -71,6 +71,14 @@ grep's pattern is text and not a call. It decodes a `$'...'` string with the
 such as `bash -c $'echo start\npkill -f x'` is read as bash runs it. The two
 packages import only the standard library and the module's own packages.
 
+**Not covered: the string `env -S` splits.** env splits the string its `-S`
+option is given into more of its own arguments, by rules of its own that env(1)
+gives, such as `\_` between two words and a `#` that starts a comment. The
+library splits a string only by the shell's rules (`shell.Fields`, with brace
+and tilde expansion), so the guard splits it by env's rules itself and reads the
+call again with the string's words in its place. `env -S 'pkill -f x'` runs
+`pkill`, and the guard refuses it.
+
 ## Where the logic lives
 
 The rule is logic, so it is Go in gctk (AGENTS.md, "New pack code is written in
