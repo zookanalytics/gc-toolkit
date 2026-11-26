@@ -405,10 +405,9 @@ One outcome per cluster: **promote** (ADD/UPDATE/SUPERSEDE, reasoning
 written down — the D3 reviewer judges from the PR alone), **hold** (say
 what recurrence would change the call), **contest** (becomes a human gate in
 file-and-dispatch), **discard with reason**, **surface** (Gate 1 block — its
-proposal is filed held for placement with the block stated, and the
-operator's placing it is the endorsement), or **route-to-engineering**
-(the rubric's Fixes in code: file-and-dispatch files its bead). §7 turns each
-outcome into the pattern's state.
+proposal is filed held for placement with the block stated), or
+**route-to-engineering** (the rubric's Fixes in code: file-and-dispatch files
+its bead). §7 turns each outcome into the pattern's state.
 
 ## 5. Retirement pass over adopted rules — EVERY run (gated runs included)
 

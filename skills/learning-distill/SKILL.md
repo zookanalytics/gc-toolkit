@@ -279,12 +279,16 @@ Know which case you are in before you read the rollup's number.
 the blocked all-self cluster and for the promotable all-operator one alike,
 and cannot tell them apart on its own. It counts over distinct events too,
 so one correction captured by both self-report and the miner is one voice,
-not two. A blocked pattern is **surfaced, not adopted**: once this gate is
+not two. A blocked pattern is **surfaced, not adopted**. Once this gate is
 all that holds it back, file its proposal held for placement like any other,
-with the block stated in its reasoning, and the pattern waits on it. The
-operator's placing it is the endorsement, and their closing it turns the
-pattern down as a veto does, so it is surfaced again only on evidence from an
-event it had not seen when they ruled.
+with the block stated in its reasoning. The pattern waits on that proposal.
+The operator rules on it in placement:
+
+- Placing it is the endorsement.
+- Closing it as not needed is a veto.
+- A vetoed pattern is surfaced again only on evidence from an event it had
+  not seen when the operator ruled.
+
 `obs.source` records who filed an observation, and the capture recipe files
 every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
@@ -301,8 +305,8 @@ by design, so count no quote from one as the operator's voice.
 *Worked example.* Every observation `obs.source=self`, no endorsement →
 **blocked**, however many events it spans, so its proposal reaches the
 operator stating the block. Self-sourced clusters have been promoted and
-operator-vetoed before; the block puts the operator's endorsement ahead of
-the build, and their veto stops the re-promote. A cluster of operator
+operator-vetoed before. The block puts the operator's endorsement ahead of
+the build. The operator's veto stops the re-promote. A cluster of operator
 corrections over several separate events is the opposite case and promotes,
 because the corrections are the external check.
 
