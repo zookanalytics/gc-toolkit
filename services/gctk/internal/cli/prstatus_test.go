@@ -3,6 +3,10 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,6 +207,51 @@ func TestPRStatusDerive(t *testing.T) {
 			if strings.Contains(calls, stray) {
 				t.Errorf("the derive made a visit read (%q); calls:\n%s", stray, calls)
 			}
+		}
+	})
+}
+
+// The anchor's row is the supervisor's copy while the supervisor answers, and
+// the bead as it stands under GC_NO_API=1, which converse-signoff.sh sets on its
+// call. The copy still carries a merge_hold the bead no longer does, so the
+// status tells the two reads apart. The fake supervisor lists the city at its
+// path and serves the anchor only at that city's bead path, where any other
+// path misses and falls back to the store.
+func TestPRStatusAnchorRowIsTheSupervisorsCopy(t *testing.T) {
+	stubGC(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, `[]`)
+	city := filepath.Join(t.TempDir(), "testcity")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/cities":
+			fmt.Fprintf(w, `{"items":[{"name":"testcity","path":%q}],"total":1}`, city)
+		case "/v0/city/testcity/bead/tk-a":
+			fmt.Fprint(w, `{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "supervisor.toml"), []byte("[supervisor]\nport = "+u.Port()+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_HOME", home)
+	t.Setenv("GC_CITY_PATH", city)
+
+	t.Run("while the supervisor answers, its copy", func(t *testing.T) {
+		t.Setenv("GC_NO_API", "")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0), the copy's merge_hold", out, code, "needs-attention\n")
+		}
+	})
+	t.Run("under GC_NO_API=1, the bead as it stands", func(t *testing.T) {
+		t.Setenv("GC_NO_API", "1")
+		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
+			t.Fatalf("derive = (%q, %d), want (%q, 0), the store's row with no hold", out, code, "needs-review\n")
 		}
 	})
 }
