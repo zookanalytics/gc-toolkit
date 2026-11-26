@@ -12,7 +12,6 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -197,12 +196,12 @@ func retireCase(r *ledger.Record) (Act, bool) {
 	if r.Status() == "closed" {
 		return Act{Action: ActRetire, Case: "closed", Why: "the bead closed with a dispatch still armed, so none is owed"}, true
 	}
-	if mr, _, _ := prrecord.Result.Get(r); strings.TrimSpace(mr) != "" {
+	if mr := mergeResultOf(r); mr != "" {
 		if arm := record.Of(r); arm != nil && arm.Formula() == closer {
 			return Act{}, false
 		}
 		return Act{Action: ActRetire, Case: "delivered",
-			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", strings.TrimSpace(mr))}, true
+			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", mr)}, true
 	}
 	return Act{}, false
 }
@@ -246,11 +245,16 @@ func (a *Arms) retire(id string, act Act, dryRun bool) Act {
 // of the bead's own, which gctk bead holds answers unjudged, and a wait edge
 // into another store, which bd never holds a bead on. It also holds a bead that
 // carries one of Gas City's hold labels in any spelling, as Gas City's hook
-// does after bd's exact comparison.
+// does after bd's exact comparison. A pull request's anchor at a status other
+// than open is held for its record, which sets that status.
 func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr, readyErr error, ready bool) (Act, bool) {
 	switch status := r.Status(); {
 	case arm != nil && arm.Malformed() != "":
 		return Act{Action: ActFail, Case: "malformed", Why: "its arm does not decode, so nothing is slung: " + arm.Malformed()}, true
+	case status != "open" && mergeResultOf(r) != "":
+		return Act{Action: ActHold, Case: "record",
+			Why: fmt.Sprintf("it owns a pull request (merge_result=%s), whose record keeps it at status %s, and the start sends an open bead alone: "+
+				"the arm waits until the record returns it to open", mergeResultOf(r), status)}, true
 	case status != "open":
 		return Act{Action: ActHold, Case: "status",
 			Why: fmt.Sprintf("it is at status %s, and the start sends an open bead alone: return it to open, or disarm it", status)}, true

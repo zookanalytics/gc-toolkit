@@ -32,7 +32,9 @@
 #     stranded too, because the start sends no malformed arm and counts no
 #     attempt on it. The start names each on every pass, but nothing surfaces it
 #     to a person. A hold does not excuse it: releasing the hold would not
-#     dispatch it either.
+#     dispatch it either. A pull request's anchor at another status is not
+#     stranded: its PR's record sets that status, and the start holds the arm
+#     until the record returns the anchor to open or it closes.
 #
 # An arm whose attempts reached the cap is NOT flagged: the start asks a person
 # about it, so it is not silent.

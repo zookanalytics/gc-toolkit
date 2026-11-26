@@ -252,7 +252,9 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
   the pass listed it, a question to a person, a bead left for the next pass,
   or a failure. A bead at a status other than
   `open` is held, and its line says so on every pass, because no wait landing
-  dispatches it.
+  dispatches it. A pull request's anchor at such a status is held for its PR's
+  record, which sets that status and returns it to open when the PR's head
+  changes.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or by
 the prerequisite landing, needs no re-arm: the first pass after it dispatches
@@ -338,7 +340,8 @@ dispatch unmade, so it reads each arm from the start's dry run and flags one
 the next pass would start, or one nothing holds whose formula the start cannot
 resolve, that has stayed armed past the order's window. It also flags one armed
 at a status other than `open`, or one whose record does not decode, which the
-start never sends.
+start never sends. A pull request's anchor at another status is not flagged,
+because the start holds its arm for the PR's record.
 
 ## The dispatch lock and the time bound
 

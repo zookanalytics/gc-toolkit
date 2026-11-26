@@ -11,6 +11,7 @@
 # exemptions (still waiting on its own open blocker; dispatchable only
 # recently, within the order's window; armed only recently, after its blockers
 # closed; delivered via merge_result; closed; assigned; held by a hold label;
+# a closer's arm on a pending PR's anchor, which the start holds for the record;
 # capped at the configured sling-failure cap, which the start asks a person
 # about; a wait edge into another store, which the start holds), the
 # fail-closed probes (an unreadable armed listing, one that is not a JSON array,
@@ -170,6 +171,7 @@ armed_store() { local n="$1"; shift; local IFS=,; ARMED[$n]="$*"; put_store "$n"
 aarmed()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
 astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
+apending() { printf '{"id":"%s","status":"blocked","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":%s,"gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z","merge_result":"pull_request_pending"}}' "$1" "$(jq -cn '["--on","mol-validate-close"] | tojson')"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
 # amalformed <id> [armed_at] — an open arm whose sling arguments are no JSON
 # array, a record the start reports as malformed.
@@ -250,6 +252,15 @@ eq "$RC" "1" "an arm at a non-open status warns (exit 1)"
 has "$OUT" "it is at status blocked" "the finding names the stranding status"
 has "$OUT" "alpha bead a-2" "the stranded finding names the rig and bead"
 has "$OUT" "Return it to open, or disarm it: gctk bead disarm a-2 --reason" "the stranded finding names gctk's disarm"
+clear_stores
+
+# --- 2b. EXEMPT: a closer's arm on a pending PR's anchor ----------------------
+# The PR's record keeps its anchor at status blocked, and the start holds the
+# arm until the record returns it to open, so nothing asks for a reopen.
+armed_store alpha "$(apending a-2p)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a closer's arm on a pending PR's anchor is held for its record, not stranded (exit 0)"
+has "$OUT" "OK:" "the quiet headline is printed"
 clear_stores
 
 # --- 3. EXEMPT: still waiting on its OWN open blocker ------------------------
