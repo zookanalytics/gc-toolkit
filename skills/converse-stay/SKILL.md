@@ -355,8 +355,8 @@ Start where the return stands:
    PR's status, read as `converse-hold` reads an open PR's (Post the framing),
    the work's bead as its anchor. The city can start a round after the gate
    closes, such as a repair after a failing check or a merge of the target.
-   When the two heads differ, read what changed between them, and report on
-   the head the PR has now only once its status shows that head's review and
+   When the two heads differ, read what changed between them. Report on the
+   head the PR has now only once its status shows that head's review and
    required checks have passed. When the work has closed,
    `gc bd show <work-bead-id>` gives how it closed and its PR.
 3. **Check it against what was agreed, item by item.** The items are the ones
@@ -381,9 +381,12 @@ Start where the return stands:
 5. **Wait for the operator**, whichever line the summary closed with. The PR's
    merge stays held until they settle.
 
-When the gate closed because the work closed, merged or with no PR, read how it
-closed, check it as above unless the PR merged at a head you already discussed,
-and wait for the operator, as on any return.
+When the gate closed because the work closed, merged or with no PR:
+
+1. Read how it closed.
+2. Check it against what was agreed, as above. Skip this check when the PR
+   merged at a head you already discussed.
+3. Wait for the operator, as on any return.
 
 Then carry out what the operator rules:
 
@@ -412,8 +415,8 @@ Then carry out what the operator rules:
   then promise the PR, then run the stay's call. The hold from this return
   stays on the PR, so an approval given earlier merges nothing.
 - **They want something else changed.** That is new work or a send-back
-  (`converse-settle`, Send the work), and the stay for it, when they want one,
-  is a stay of its own.
+  (`converse-settle`, Send the work). When they want a stay for it, that is a
+  stay of its own.
 
 ### When your context runs low during the return
 
@@ -425,7 +428,7 @@ open with its waits as they are.
 - **Compact and go on.** Claude Code and Codex compact a thread on their own as
   it nears its limit, and the session keeps its conversation through the
   compaction. After a compaction, run the entry again. Before the return's
-  hold it prints `AGREED` and `WORK`, and after it, it reads the hold as
+  hold, it prints `AGREED` and `WORK`. After the hold, it reads the hold as
   standing. Carry the return on from where your summary and what you already
   posted show it stopped.
 - **Hand the return to a fresh session** when compaction cannot carry it, or

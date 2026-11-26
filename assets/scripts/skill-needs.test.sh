@@ -675,7 +675,9 @@ have "the return records what the operator owes first" \
 have "…reads the PR at the head the gate closed at and at the head it has now" \
     'Read the work'"'"'s PR at the head the gate'"'"'s close names and at the head it has now' "$TMP/stay-squeezed"
 have "…and reports on a newer head only once its review and required checks have passed" \
-    'report on the head the PR has now only once its status shows that head'"'"'s review and required checks have passed' "$TMP/stay-squeezed"
+    'Report on the head the PR has now only once its status shows that head'"'"'s review and required checks have passed' "$TMP/stay-squeezed"
+have "…and a return for work that closed checks it except when the PR merged at a head already discussed, in a step of its own" \
+    '2. Check it against what was agreed, as above. Skip this check when the PR merged at a head you already discussed. 3. Wait for the operator, as on any return.' "$TMP/stay-squeezed"
 have "…checks the result against each agreed item" 'Check it against what was agreed, item by item.' "$TMP/stay-squeezed"
 have "…posts a summary that closes with one of three lines" \
     'closes with one of three lines, so the operator can tell at a glance which it is' "$TMP/stay-squeezed"
