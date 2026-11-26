@@ -202,9 +202,11 @@ const (
 
 	// A merge request pinned to the head the caller judged: GitHub merges, or
 	// adds the PR to its base's merge queue, only while the PR's head is that
-	// commit (expectedHeadOid). The merge squashes.
-	mergeMutation = `mutation($id:ID!,$head:GitObjectID!){
-  mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH}){pullRequest{number}}}`
+	// commit (expectedHeadOid). The merge squashes, and the headline the caller
+	// gives is its commit's first line (commitHeadline). An enqueue takes no
+	// headline.
+	mergeMutation = `mutation($id:ID!,$head:GitObjectID!,$headline:String!){
+  mergePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head,mergeMethod:SQUASH,commitHeadline:$headline}){pullRequest{number}}}`
 
 	enqueueMutation = `mutation($id:ID!,$head:GitObjectID!){
   enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$head}){mergeQueueEntry{id}}}`
@@ -279,11 +281,16 @@ func (c *Client) PullRequest(repo string, number int) (*PullRequest, error) {
 }
 
 // MergePullRequest asks GitHub to squash-merge the PR whose node id is id, only
-// while its head is head. An error is a request GitHub refused, such as one a
-// push since the caller's read made stale, or one whose answer did not arrive,
-// which may still take effect: the caller reads the PR again to learn which.
-func (c *Client) MergePullRequest(id, head string) error {
-	return c.mutate(mergeMutation, id, head)
+// while its head is head, with headline as the merge commit's first line.
+// GitHub writes a headline it is given as it stands, without the PR number its
+// own default adds. An error is a request GitHub refused, such as one a push
+// since the caller's read made stale, or one whose answer did not arrive, which
+// may still take effect: the caller reads the PR again to learn which.
+func (c *Client) MergePullRequest(id, head, headline string) error {
+	if strings.TrimSpace(headline) == "" {
+		return errors.New("github: a merge request names no commit headline")
+	}
+	return c.mutate(mergeMutation, id, head, "-f", "headline="+headline)
 }
 
 // EnqueuePullRequest asks GitHub to add the PR whose node id is id to its base's
@@ -292,15 +299,16 @@ func (c *Client) EnqueuePullRequest(id, head string) error {
 	return c.mutate(enqueueMutation, id, head)
 }
 
-// mutate runs a request that names a PR by its node id and pins it to head.
-func (c *Client) mutate(query, id, head string) error {
+// mutate runs a request that names a PR by its node id and pins it to head,
+// with vars, the request's other variables, after them.
+func (c *Client) mutate(query, id, head string, vars ...string) error {
 	if id == "" {
 		return errors.New("github: a merge request names no pull request")
 	}
 	if head == "" {
 		return errors.New("github: a merge request names no head to pin it to")
 	}
-	return c.graphql(query, []string{"-f", "id=" + id, "-f", "head=" + head}, false,
+	return c.graphql(query, append([]string{"-f", "id=" + id, "-f", "head=" + head}, vars...), false,
 		func(json.RawMessage) error { return nil })
 }
 

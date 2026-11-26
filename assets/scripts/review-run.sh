@@ -33,9 +33,12 @@
 #   review-run.sh withdraw --reason <text>        [triage]
 #       withdraw the approvals a material head leaves behind (gctk pr withdraw)
 #   review-run.sh push                            [rule-and-repair]
-#       return the PR to draft (gctk pr draft), then push the repair's commits
-#       onto the PR's branch with a lease on the head the round judged. A push
-#       that fails is weighed by the branch on origin: at the repair's head it
+#       bring the PR's title and body to what the PR's bead records (gctk pr
+#       compose --edit), at the head the round judged when there is nothing to
+#       push; else return the PR to draft (gctk pr draft), bring its title and
+#       body current at the repair's head, then push the repair's commits onto
+#       the PR's branch with a lease on the head the round judged. A push that
+#       fails is weighed by the branch on origin: at the repair's head it
 #       landed, at the judged head nothing moved (exit 2, run it again), and at
 #       any other commit the branch moved (exit 1)
 #   review-run.sh post                            [rule-and-repair]
@@ -298,13 +301,29 @@ cmd_withdraw() {
     "$gctk" pr withdraw "$PR_BEAD" --head "$HEAD" --reason "$REASON"
 }
 
+# publish <worktree> <head> — bring the PR's title and body to the composition
+# of what the PR's bead records at the head, as the refinery publishes them, so
+# the next round's lanes read on the PR the summary this round left there.
+publish() {
+    local rc
+    (cd "$1" && "$gctk" pr compose "$PR_BEAD" --head "$2" --target "$TARGET" --gates '' --edit); rc=$?
+    case "$rc" in
+        0) ;;
+        3) die 3 "gctk pr compose refused to edit the PR, so nothing is pushed" ;;
+        *) die 2 "the PR's title and body did not take (gctk pr compose --edit exited $rc), so nothing is pushed: run it again" ;;
+    esac
+}
+
 cmd_push() {
     load; owns rule-and-repair
     local wt new
     wt="$WS/repair/wt"
     [ -d "$wt" ] || die 3 "the run has no worktree at $wt; review-run.sh repair makes it"
     new=$(git -C "$wt" rev-parse HEAD) || die 2 "the run's worktree does not read"
-    if [ "$new" = "$HEAD" ]; then echo "$PROG: nothing to push: the worktree is at the head the round judged"; return 0; fi
+    if [ "$new" = "$HEAD" ]; then
+        publish "$wt" "$HEAD"
+        echo "$PROG: nothing to push: the worktree is at the head the round judged"; return 0
+    fi
     git -C "$wt" merge-base --is-ancestor "$HEAD" "$new" || die 3 "$new does not descend from $HEAD, so the push is no fast-forward"
     local rc
     (cd "$wt" && "$gctk" pr draft "$PR_BEAD"); rc=$?
@@ -313,6 +332,7 @@ cmd_push() {
         3) die 3 "gctk pr draft refused, so nothing is pushed" ;;
         *) die 2 "the PR may still be ready, so nothing is pushed" ;;
     esac
+    publish "$wt" "$new"
     if ! git -C "$wt" push --quiet --force-with-lease="refs/heads/$BRANCH:$HEAD" origin "HEAD:refs/heads/$BRANCH"; then
         # git exits non-zero both for a lease the branch no longer matches and
         # for a push that never reached origin, so the branch on origin says

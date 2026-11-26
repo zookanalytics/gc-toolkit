@@ -106,6 +106,7 @@ msg_has()  { grep -qF -- "$1" < <(tmux -L "$SOCKET" show-messages 2>/dev/null); 
 SESSIONS='{"sessions":[
  {"id":"hq-conv1","session_name":"s-hq-conv1","alias":"gc-toolkit/gc-toolkit.tk-conv1","template":"gc-toolkit/gc-toolkit.converse-claude-opus","rig":"gc-toolkit","state":"active","closed":false,"attached":true},
  {"id":"hq-base1","session_name":"s-hq-base1","alias":"other/gc-toolkit.tk-vis2","template":"other/gc-toolkit.converse","rig":"other","closed":false},
+ {"id":"hq-kit1","session_name":"s-hq-kit1","alias":"rig-k/kit.tk-vis4","template":"rig-k/kit.converse-claude-opus","rig":"rig-k","closed":false},
  {"id":"hq-noal1","session_name":"s-hq-noal1","template":"gc-toolkit/gc-toolkit.converse-claude-fable","rig":"gc-toolkit","closed":false},
  {"id":"hq-pole1","session_name":"gc-toolkit__polecat-hq-pole1","alias":"gc-toolkit/gc-toolkit.polecat-1","template":"gc-toolkit/gc-toolkit.polecat","rig":"gc-toolkit","closed":false},
  {"id":"hq-near1","session_name":"s-hq-near1","alias":"gc-toolkit/gc-toolkit.tk-vis3","template":"gc-toolkit/gc-toolkit.conversely","rig":"gc-toolkit","closed":false},
@@ -210,6 +211,10 @@ echo "# the base converse template, under another rig, is a converse sitting too
 run s-hq-base1
 has "$HELM" "GC_SESSION_ID=hq-base1" "(CONVERSE) the base converse agent is accepted"
 has "$HELM" "GC_RIG=other" "(CONVERSE) …with the rig its record names"
+
+echo "# a converse template under another import key is a converse sitting too"
+run s-hq-kit1
+has "$HELM" "GC_SESSION_ID=hq-kit1" "(CONVERSE) a sitting in a city that imports the pack under another key is accepted"
 
 echo "# the job's ambient identity never reaches dismiss"
 GC_SESSION_NAME=intruder GC_SESSION_ID=intruder GC_ALIAS=intruder GC_RIG=wrong BEADS_DIR=/wrong/.beads GC_INSTANCE_TOKEN=intruder-token run s-hq-noal1

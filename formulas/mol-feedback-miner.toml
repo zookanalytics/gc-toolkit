@@ -6,8 +6,8 @@ learning system's cold-capture surface, and it makes two captures:
 
 - **The outside capture.** Every review post from outside the city becomes one
   condensed observation, `obs.category=outside-review`, whether or not it is
-  about standing behavior. A post is outside when it carries no city mark and
-  another login posted it, or when it is Claude Code's `/code-review` output
+  about standing behavior. A post is outside when another login posted it,
+  whatever mark it carries, or when it is Claude Code's `/code-review` output
   posted under the city's own login. The distiller reads these observations as
   a set, for what the city's review missed (the gc-toolkit.learning-distill
   skill).

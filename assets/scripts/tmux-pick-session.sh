@@ -100,8 +100,9 @@ menu_text() {
 }
 
 # Supervisor API discovery. The port honors ~/.gc/supervisor.toml (default
-# 8372). The city name is the [[cities]] entry in ~/.gc/cities.toml whose path
-# matches the city path, else that path's basename.
+# 8372). The city name is the one `gc cities` lists at the city path: the name
+# the supervisor registered for the city, and the only one its API serves the
+# city under. A path gc lists no name at has no name, and so no API call.
 gc_api_base() {
     port=8372
     cfg="${GC_HOME:-$HOME/.gc}/supervisor.toml"
@@ -112,36 +113,9 @@ gc_api_base() {
     printf 'http://127.0.0.1:%s' "$port"
 }
 gc_city_name() {
-    cfg="${GC_HOME:-$HOME/.gc}/cities.toml"
-    city_path="${EXPLICIT_CITY_PATH:-${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}}"
-    # No cwd walk-up: a copy of gc's findCity in sh would diverge from it. No
-    # city path means no name, and so no API call.
-    [ -z "$city_path" ] && return
-    city_path="${city_path%/}"
-    if [ -f "$cfg" ]; then
-        name=$(awk -v want="$city_path" '
-            BEGIN { in_block=0; p=""; n=""; found=0 }
-            /^\[\[cities\]\]/ {
-                if (in_block && p == want && n != "") { print n; found=1; exit }
-                in_block=1; p=""; n=""; next
-            }
-            /^\[/ {
-                if (in_block && p == want && n != "") { print n; found=1; exit }
-                in_block=0; next
-            }
-            in_block && /^[[:space:]]*path[[:space:]]*=[[:space:]]*"[^"]*"/ {
-                v=$0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); p=v
-            }
-            in_block && /^[[:space:]]*name[[:space:]]*=[[:space:]]*"[^"]*"/ {
-                v=$0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); n=v
-            }
-            END {
-                if (!found && in_block && p == want && n != "") print n
-            }
-        ' "$cfg")
-        [ -n "$name" ] && { printf '%s' "$name"; return; }
-    fi
-    basename "$city_path"
+    gc cities --json 2>/dev/null </dev/null \
+        | jq -r --arg p "$CITY_PATH" 'first(.cities[]? | select(.path == $p) | .name) // empty' 2>/dev/null \
+        || true
 }
 
 # --- Role cache ----------------------------------------------------------
@@ -165,9 +139,11 @@ cache_mtime() {
     stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
 }
 
-# Cache location, keyed by city so one city's roster cannot answer another's.
-# GC_PICKER_CACHE_DIR overrides the directory; the default is per-uid and
-# 0700, because the cached rows carry session titles.
+# Cache location, keyed by the city's path so one city's roster cannot answer
+# another's. The keypress has the path without asking anything, where the
+# city's name would cost it a gc call. GC_PICKER_CACHE_DIR overrides the
+# directory; the default is per-uid and 0700, because the cached rows carry
+# session titles.
 roles_cache_init() {
     if [ -n "${GC_PICKER_CACHE_DIR:-}" ]; then
         ROLES_CACHE_DIR="$GC_PICKER_CACHE_DIR"
@@ -177,7 +153,7 @@ roles_cache_init() {
         ROLES_CACHE_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gc-picker-$uid"
         ROLES_CACHE_PRIVATE=1
     fi
-    safe_city=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+    safe_city=$(printf '%s' "${1##*/}" | tr -c 'A-Za-z0-9._-' '_')
     city_key=$(printf '%s\n' "$1" | cksum | awk '{print $1}')
     ROLES_CACHE="$ROLES_CACHE_DIR/roles-$safe_city-$city_key.cache"
     # The throttle counts attempts, not successes. Counting successes means a
@@ -195,13 +171,17 @@ roles_cache_refresh() {
         chmod 700 "$ROLES_CACHE_DIR" 2>/dev/null || true
     fi
     : > "$ROLES_STAMP" 2>/dev/null || true
+    # Only the fetch needs the city's name, so it is asked for here, where
+    # nothing waits on the answer.
+    city_name=$(gc_city_name)
+    [ -n "$city_name" ] || return 0
     # A longer bound than the keypress could ever have afforded. Raising it
     # was not an option while the fetch blocked the menu — it only traded a
     # wrong grouping for a hanging key — but nothing waits on this one, and
     # a busy supervisor outruns three seconds often enough that the shorter
     # bound would leave the map to age untouched.
     facts=$(curl -sf --max-time 15 \
-        "$(gc_api_base)/v0/city/$CITY_NAME/sessions" 2>/dev/null \
+        "$(gc_api_base)/v0/city/$city_name/sessions" 2>/dev/null \
         | jq -r '.items[]? | select(.session_name != null)
                  | "\(.session_name)\t\(.template // "")\t\(.title // "")"' 2>/dev/null \
         || true)
@@ -214,19 +194,22 @@ roles_cache_refresh() {
     fi
 }
 
-CITY_NAME=$(gc_city_name)
+# The city this picker belongs to. No cwd walk-up: a copy of gc's findCity in
+# sh would diverge from it. No city path means no role cache and no API call.
+CITY_PATH="${EXPLICIT_CITY_PATH:-${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}}"
+CITY_PATH="${CITY_PATH%/}"
 FACTS=""
 ROLES_AGE=""
-if [ -n "$CITY_NAME" ]; then
-    roles_cache_init "$CITY_NAME"
+if [ -n "$CITY_PATH" ]; then
+    roles_cache_init "$CITY_PATH"
 fi
 if [ "$REFRESH_ONLY" -eq 1 ]; then
-    if [ -n "$CITY_NAME" ]; then
+    if [ -n "$CITY_PATH" ]; then
         roles_cache_refresh
     fi
     exit 0
 fi
-if [ -n "$CITY_NAME" ]; then
+if [ -n "$CITY_PATH" ]; then
     now=$(date +%s 2>/dev/null || printf '0')
     mtime=$(cache_mtime "$ROLES_CACHE")
     if is_number "$now" && is_number "$mtime" && [ "$mtime" -gt 0 ]; then

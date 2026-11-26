@@ -9,16 +9,25 @@
 #   work-setup.sh --stop-merge --convoy <id>|--bead <id> --path <file> --collided "<text>"
 #                 --question "<text>" [--step <ref>] [--formula <f>]
 #
-# The worktree is the one metadata.work_dir records while it is on disk, else a
-# new one scoped to the bead and registered in the rig's checkout, whatever repo
-# this session's directory sits in. metadata.branch is authoritative when set: it
-# is fetched and fast-forwarded, and divergence stops the run rather than making a
-# different branch. Without one, polecat/<bead> is cut from the freshly fetched
-# base, since a stale local base causes spurious conflicts at the refinery. Which
-# tree the run entered is recorded on every path, because self-review and
-# submit-and-exit find the tree there. gc.work_branch is recorded too: the claim
-# stamps it from the pool slot's base checkout, and the close gate checks
-# gc.work_commit is reachable on it.
+# The worktree is the one metadata.work_dir records while it is a checkout on
+# disk, holding its .git, else a new one scoped to the bead and registered in the
+# rig's checkout, whatever repo this session's directory sits in. A new tree goes
+# at $GC_CITY_PATH/.gc/worktrees/$GC_RIG/<bead>, beside the agents' homes, where
+# Gas City's own claim cuts a bead's tree. A run's steps are claimed by different
+# sessions, so the tree outlives the session that cuts it, and Gas City can
+# remove a closed pool session's home with everything under it. work_dir is
+# recorded before the tree is cut, because every run cuts the bead's tree at that
+# one path, and a tree cut but never recorded would stop each later run's cut. A
+# recorded directory with no .git is cut again, never entered: no rig checkout
+# holds it, so git run there would act on whatever repository holds the city.
+#
+# metadata.branch is authoritative when set: it is fetched and fast-forwarded, and
+# divergence stops the run rather than making a different branch. Without one,
+# polecat/<bead> is cut from the freshly fetched base, since a stale local base
+# causes spurious conflicts at the refinery. Which tree the run entered is
+# recorded on every path, because self-review and submit-and-exit find the tree
+# there. gc.work_branch is recorded too: the claim stamps it from the pool slot's
+# base checkout, and the close gate checks gc.work_commit is reachable on it.
 #
 # A branch another worktree has checked out stops the checkout, which is the one
 # check two runs cannot race past. When a bead that records that tree is in flight,
@@ -282,22 +291,26 @@ checkout() { # <git checkout args...>
 WORKTREE=$(work_meta work_dir)
 BRANCH=$(work_meta branch)
 CREATED_TREE=""
-if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
+if [ -n "$WORKTREE" ] && [ -e "$WORKTREE/.git" ]; then
   if [ -n "$BRANCH" ]; then
     read_tree_records "$WORKTREE"
     [ -z "$SIBLING" ] || wait_on_sibling "$WORKTREE"
   fi
   cd "$WORKTREE" || exit 1
 else
-  WORKTREE="${GC_DIR:-$PWD}/worktrees/$WORK_ID"
+  if [ -z "${GC_CITY_PATH:-}" ] || [ -z "${GC_RIG:-}" ]; then
+    echo "$PROG: cannot name the tree, which goes under \$GC_CITY_PATH/.gc/worktrees/\$GC_RIG: GC_CITY_PATH='${GC_CITY_PATH:-}' GC_RIG='${GC_RIG:-}'" >&2
+    exit 1
+  fi
+  WORKTREE="$GC_CITY_PATH/.gc/worktrees/$GC_RIG/$WORK_ID"
   RR="$SCRIPT_DIR/rig-root.sh"
   [ -x "$RR" ] || { echo "$PROG: rig-root.sh not found in the pack" >&2; exit 1; }
   RIG_ROOT=$("$RR")
   [ -n "$RIG_ROOT" ] || { echo "$PROG: cannot resolve the rig root" >&2; exit 1; }
+  gc bd update "$WORK_ID" --set-metadata work_dir="$WORKTREE" </dev/null >/dev/null || exit 1
   git -C "$RIG_ROOT" worktree add "$WORKTREE" --detach "origin/$BASE" >&2 || exit 1
   CREATED_TREE="$WORKTREE"
   cd "$WORKTREE" || exit 1
-  gc bd update "$WORK_ID" --set-metadata work_dir="$WORKTREE" </dev/null >/dev/null || exit 1
 fi
 
 RECORD_BRANCH=()

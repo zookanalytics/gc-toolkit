@@ -67,6 +67,16 @@ and `gc doctor` verification of the structural checks.
 
 ## Developing this pack
 
+The repository's commands, run from its root:
+
+- `make test` runs every test, and prints the Go tests' coverage.
+- `make test-affected` runs the tests the change since `origin/main` can affect.
+- `make build` compiles every Go package.
+- `make lint` runs the repository's lint over the change since `origin/main`.
+
+The [Makefile](Makefile) says what each one runs, and `BASE=<ref>` reads the
+change against another ref.
+
 Run `assets/scripts/render-seed-audit.sh --install-hook` once per clone. It
 wires `assets/hooks/pre-commit`, which regenerates `generated/seed-audit/` —
 the rendered standing prompt of every agent and compiled recipe of every

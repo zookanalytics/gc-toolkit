@@ -45,15 +45,17 @@ converse_roster() {
 
 # rig_carries_converse <rig-name> — 0 iff the resolved roster registers a
 # converse-<model> sitting template for the rig, the only kind of converse
-# agent gc-helm engage can spawn. Fail open: an unreadable/malformed/empty
-# roster returns 0 (serviceable). The "/" in the key stops one rig name
-# matching another it is a prefix of.
+# agent gc-helm engage can spawn: an agent whose dir is the rig and whose name
+# is converse-<model>. Its qualified name also carries the binding the city
+# imports the pack under, which the match leaves to the roster. Fail open: an
+# unreadable/malformed/empty roster returns 0 (serviceable).
 rig_carries_converse() {
     _rcc_rig="${1:-}"
     converse_roster
     [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
     printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$_rcc_rig" \
-        '[ .agents[]? | (.qualified_name // "")
-           | select(startswith($r + "/gc-toolkit.converse-")) ] | length > 0' \
+        '[ .agents[]? | objects
+           | select(((.dir // "") | tostring) == $r
+                    and ((.name // "") | tostring | startswith("converse-"))) ] | length > 0' \
         >/dev/null 2>&1
 }
