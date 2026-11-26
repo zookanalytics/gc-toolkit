@@ -733,6 +733,42 @@ else
 fi
 reset
 
+# --- 26. a bead a dispatch hold label holds is not judged on its markers ----
+# A dispatch hold label (has_dispatch_hold, assets/scripts/dispatch-path.sh)
+# keeps the bead from every hook, pool and route, so the label holds it and its
+# markers are not judged, whether the wait its headline names has landed or it
+# never had a wait edge. Under a label that is no dispatch hold the same bead is
+# judged, and a wait edge into another store is judged on a held bead too.
+held_row() { # <labels-json> <dependencies-json> — one open bead whose headline names a wait
+  store '[{"id":"aa-101","status":"open","labels":'"$1"',"metadata":{"gc.takeaway":"waits on aa-909"},
+           "dependencies":'"$2"'}]'
+  showq '[{"id":"aa-909","status":"closed","metadata":{}}]'
+}
+LANDED='[{"issue_id":"aa-101","depends_on_id":"aa-909","type":"blocks"}]'
+for labels in '["hold:mayor"]' '["hold:external"]'; do
+  held_row "$labels" "$LANDED"
+  OUT=$(run_check); RC=$?
+  eq "$RC" "0" "a bead labeled $labels whose headline's wait has landed is not a finding"
+done
+held_row '["hold:mayor"]' '[]'
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "a bead held for placement with a headline and no wait edge is not a finding"
+held_row '["learning"]' "$LANDED"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "the same bead under a label that is no dispatch hold is a finding once its wait lands"
+has "$OUT" "alpha bead aa-101 (open): held by gc.takeaway=waits on aa-909, and aa-909 is closed" "and it is named with the wait that landed"
+held_row '["learning"]' '[]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "and with no wait edge at all"
+has "$OUT" "alpha bead aa-101 (open): held by gc.takeaway=waits on aa-909, and carries no wait edge" "and it is named as unedged"
+held_row '["hold:mayor"]' '[{"issue_id":"aa-101","depends_on_id":"bb-501","type":"blocks"}]'
+bstore '[{"id":"bb-501","status":"open","metadata":{}}]'
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a held bead's wait edge into another store is still a finding"
+has "$OUT" "alpha bead aa-101: its wait edge onto bb-501 (blocks) points into another store, and holds nothing" "and the edge is named"
+hasnt "$OUT" "held by gc.takeaway" "while the headline beside it is not judged"
+reset
+
 echo
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

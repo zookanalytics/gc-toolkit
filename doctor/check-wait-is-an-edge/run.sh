@@ -28,6 +28,15 @@
 # afterwards from the sentence it left. The key is structural and the marker
 # still stands beside it, so nothing here is a blanked hold.
 #
+# A bead that carries one of Gas City's dispatch hold labels is not judged on
+# its markers: Gas City serves it to no hook, pool or route, so the label holds
+# it, and the label says no worker is its next actor. Intake holds new work for
+# the operator's placement sitting with hold:mayor (docs/steering.md), and the
+# headline of a first reaction that held a bead behind other work still names
+# that wait once it lands. The labels are has_dispatch_hold's, from the one
+# definition in assets/scripts/dispatch-path.sh. Such a bead's wait edge into
+# another store is still judged, since that edge holds nothing either way.
+#
 # Whether a held bead still waits is its own pending waits, as `gctk bead holds`
 # answers them (docs/gctk-architecture.md, "The bead holds contract"): a wait of
 # the store's blocked rule onto a bead in the same store that is neither closed
@@ -199,6 +208,16 @@ detail_capped() { # <cap> <item...> — at most <cap> items, then the rest as a 
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
+# What counts as a dispatch hold, from the one definition the readers that
+# leave a held bead alone share. Exposes $DISPATCH_PATH_JQ. An unsourceable one
+# warns: without it, a bead Gas City's hold label holds cannot be told from a
+# bead held by its marker alone.
+# shellcheck source=../../assets/scripts/dispatch-path.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/dispatch-path.sh" || {
+    echo "cannot determine whether every hold is recorded as an edge (I1)"
+    detail "assets/scripts/dispatch-path.sh could not be sourced from this pack, so a bead Gas City's hold label holds cannot be told from a bead held by its marker alone."
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # One pass over a store's live listing. Emits, for each live bead carrying a
@@ -242,6 +261,9 @@ def unsettled($m; $k; $st): ($settled[$k] // null) as $p
 # no forward edge to file at all. Declared like the markers: an empty $twtype
 # (the declaration dropped it) disables this arm and every bead is scanned.
 | select($twtype == "" or ($b.issue_type | txt) != $twtype)
+# A bead carrying a dispatch hold is held by its label, not by its markers (the
+# header says why).
+| select(($b | has_dispatch_hold) | not)
 | ( [ $m | to_entries[]
       | .key as $k | (.value | txt) as $v
       | select(($mkeys | index($k)) != null and ($v | length) > 0 and unsettled($m; $k; $st))
@@ -327,7 +349,7 @@ while IFS=$'\037' read -r rig_name rig_path hq suspended; do
         --argjson mkeys "$MKEYS_JSON" \
         --argjson settled "$SETTLED_JSON" \
         --arg twtype "$terminal_wait_type" \
-        "$WAIT_JQ" 2>/dev/null); rows_rc=$?
+        "$DISPATCH_PATH_JQ$WAIT_JQ" 2>/dev/null); rows_rc=$?
     if [ "$rows_rc" -ne 0 ]; then
         warnings+=("$label: could not read hold markers off the live listing — this store was NOT checked")
         continue

@@ -21,7 +21,8 @@
 # each reader (doctor/check-blocked-work-armed/run.test.sh,
 # doctor/check-step-terminal/run.test.sh,
 # doctor/check-armed-dispatch-owed/run.test.sh,
-# doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
+# doctor/check-po-queue-only/run.test.sh,
+# doctor/check-wait-is-an-edge/run.test.sh, liveness-classify.test.sh,
 # liveness-recheck.test.sh).
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
@@ -130,11 +131,13 @@ for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.s
     sources "$r"; asks "$r" has_dispatch_path
 done
 for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
-         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
+         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh \
+         doctor/check-wait-is-an-edge/run.sh; do
     sources "$r"
 done
 for r in doctor/check-blocked-work-armed/run.sh assets/scripts/liveness-classify.sh \
-         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
+         assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh \
+         doctor/check-wait-is-an-edge/run.sh; do
     asks "$r" has_dispatch_hold
 done
 asks doctor/check-po-queue-only/run.sh dispatch_hold_spellings

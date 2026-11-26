@@ -24,10 +24,11 @@
 # The readers that leave a held bead alone source it too:
 # check-blocked-work-armed, which owes one no arm; check-po-queue-only, which
 # reads a bead routed or assigned to the po as reaching it only when no hold
-# holds it, since a held bead reaches no seat; and the liveness classifier
-# (liveness-classify.sh, which liveness-sweep.sh and its precheck compose) and
-# the re-check a liveness gate's message carries (liveness-recheck.sh), which
-# name the hold as a wait.
+# holds it, since a held bead reaches no seat; check-wait-is-an-edge, which
+# judges no hold marker on one, since the label holds it; and the liveness
+# classifier (liveness-classify.sh, which liveness-sweep.sh and its precheck
+# compose) and the re-check a liveness gate's message carries
+# (liveness-recheck.sh), which name the hold as a wait.
 # The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
 # it selects armed beads by Gas City's own serve rule and holds one carrying a
 # hold label in any case, as Gas City's hook does, and check-armed-dispatch-owed
