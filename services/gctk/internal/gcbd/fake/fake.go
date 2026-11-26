@@ -129,7 +129,7 @@ type Store struct {
 
 	// GateErr fails every gate create before it writes. GateEdgeless has a gate
 	// create file its gate and write no edge onto it, then fail, as a create
-	// that stops between bd's two writes does.
+	// that stops after bd writes the gate and before it writes the edge does.
 	GateErr      error
 	GateEdgeless bool
 

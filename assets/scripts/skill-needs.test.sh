@@ -630,12 +630,12 @@ have "…and asks for help when its thread does not hold the conversation" \
     'The acknowledgement is refused and your thread does not hold the conversation**, so you cannot tell where it was left. Say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
 lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
     "the entry reads the record; the prompt acts on what it prints"
-# The stay takes one of two forms: its own call sends the work and promises it,
+# The stay takes one of its forms: its own call sends the work and promises it,
 # or the sitting sends the work, promises it with gctk gate create, then stays.
 # A call that sends nothing refuses with no gate, so a skipped promise stops the
 # stay. The return records the hold first, reads the result at the head the
 # gate closed at and the head the PR has now, checks each agreed item, and
-# posts a summary that closes with one of three lines, then waits for the
+# posts a summary that closes with one of its closing lines, then waits for the
 # operator whatever it found.
 have "the stay skill stays through the sign-off" \
     '--stay "<what the operator agreed, which the return checks the work against, one line>"' "$STAY"
@@ -679,8 +679,8 @@ have "…and reports on a newer head only once its review and required checks ha
 have "…and a return for work that closed checks it except when the PR merged at a head already discussed, in a step of its own" \
     '2. Check it against what was agreed, as above. Skip this check when the PR merged at a head you already discussed. 3. Wait for the operator, as on any return.' "$TMP/stay-squeezed"
 have "…checks the result against each agreed item" 'Check it against what was agreed, item by item.' "$TMP/stay-squeezed"
-have "…posts a summary that closes with one of three lines" \
-    'closes with one of three lines, so the operator can tell at a glance which it is' "$TMP/stay-squeezed"
+have "…posts a summary that closes with one of its closing lines" \
+    'closes with one of these lines, so the operator can tell at a glance which it is' "$TMP/stay-squeezed"
 have "…the first: every item is covered" \
     'every item is covered, you see nothing left to discuss, and they can approve when they are comfortable, or raise anything else;' "$TMP/stay-squeezed"
 have "…the second: some items still need the operator's word" \
@@ -1138,7 +1138,7 @@ have "…and there a member of the subject is the conversation's wait alone" \
 have "…and a recovery takes a brief only when one is held on its work" \
     'The subject'"'"'s latest close brief is its `--close-brief` when the brief'"'"'s heading holds it on work that `WORK` names, and that work is then its `--waiting-on`.' "$TMP/stay-squeezed"
 have "…so that sitting ends at the hand-off" \
-    'After either of the first two refusals, end at the hand-off' "$TMP/stay-squeezed"
+    'After a refusal of work in another store or of the subject itself, end at the hand-off' "$TMP/stay-squeezed"
 SV="$TMP/stay-forms"
 mkdir -p "$SV/bin" "$SV/pack"
 printf '#!/bin/sh\nexit 1\n' >"$SV/bin/gc"

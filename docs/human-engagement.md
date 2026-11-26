@@ -1536,7 +1536,7 @@ wait on neither: bd keeps one edge from a bead onto another, and the
 conversation already tracks its subject, and an edge onto the held PR's bead
 would close a cycle through the hold.
 
-**The stay, in two forms.** One promise files the gate, or finds the open one,
+**The forms of a stay.** One promise files the gate, or finds the open one,
 bd's own `gate create` with the pack's checks in front:
 `gctk gate create --type gctk:needs-review --await-id <work-bead-id> --blocks <conversation-bead-id>`.
 It refuses, writing nothing, a conversation not held under the caller's
@@ -1690,7 +1690,7 @@ its idle window.
    them.
 4. It posts a short summary with its recommendation, on the PR and in its
    hand-back: what was discussed, each agreed item with whether it is covered
-   and how the sitting checked it, and one of three closing lines. Every item
+   and how the sitting checked it, and one of these closing lines: every item
    is covered and the operator can approve when they are comfortable; or some
    items still need their word, each named with its question; or the work
    departs from what was agreed in a way they have to rule on. The summary is
@@ -1771,8 +1771,8 @@ approval. A promise made late resolves on the next pass, with the hold when the
 PR is still open. The stall check reads only the edges that exist when the
 promise is made, so a piece given a wait afterward onto something the
 conversation holds cannot move, and the sitting sleeps until the operator
-visits. A `bd gate create` that stops between its two writes, the gate and the
-conversation's edge onto it, leaves a gate nothing waits on. The next promise
+visits. A `bd gate create` that stops after it writes the gate and before it writes
+the conversation's edge onto it leaves a gate nothing waits on. The next promise
 files another, and the stray one resolves at its condition with no hold.
 
 **Where it cannot stay.** An edge onto a bead in another store holds nothing,

@@ -109,8 +109,9 @@ func TestCreateFindsTheOpenGateForTheSameWork(t *testing.T) {
 	}
 }
 
-// A create that stopped between bd's two writes leaves a gate nothing waits
-// on, and the next run files a gate that holds the conversation.
+// A create that stopped after bd wrote the gate and before it wrote the edge
+// leaves a gate nothing waits on, and the next run files a gate that holds the
+// conversation.
 func TestCreateAfterAStoppedCreateFilesAFreshGate(t *testing.T) {
 	s := newStore()
 	s.GateEdgeless = true

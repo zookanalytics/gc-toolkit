@@ -67,7 +67,7 @@ prints as `AGREED`.
 First run the end up to its sign-off (`converse-settle`): record the outcome,
 send the work, reply to the gates the ruling settles and name what each answer
 releases, and settle the subject's dispatch path. The stay then takes one of
-two forms:
+these forms:
 
 - **The stay's own call sends the work.** A ruling that sends the PR under
   discussion back goes out through the call's `--rework`. A ruling that takes
@@ -152,7 +152,7 @@ The sign-off with `--stay` writes in this order:
    `staying: <what was agreed> (waits on <the gate>)`, and leaves the
    conversation open under this sitting.
 
-It refuses three stays, each before any write:
+It refuses these stays, each before any write:
 
 - **A call that sends nothing**, neither `--rework` nor `--accept`, while the
   conversation waits on no open gate. Its message gives the promise's command.
@@ -212,7 +212,7 @@ subject's edge onto its own member, so the sign-off makes the member the
 conversation's wait alone: the subject's headline leaves it out, and says
 `--no-wait` when nothing else is left, and no closer is armed on it.
 
-The sign-off refuses three stays there, each before any write:
+The sign-off refuses these stays there, each before any write:
 
 - **A stay on work in another store** than the conversation's, where the wait
   would hold nothing.
@@ -222,10 +222,11 @@ The sign-off refuses three stays there, each before any write:
 - **A stay for the landing of the PR whose merge this conversation holds**, or
   for work that waits on that PR, directly or through other beads.
 
-After either of the first two refusals, end at the hand-off
-(`converse-settle`), and tell the operator why the sitting does not stay. After
-the third, lift the hold (`converse-hold`) and run the stay again when the
-operator wants that PR to land first, and otherwise end at the hand-off.
+After a refusal of work in another store or of the subject itself, end at the
+hand-off (`converse-settle`), and tell the operator why the sitting does not
+stay. After a refusal over the PR whose merge this conversation holds, lift the
+hold (`converse-hold`) and run the stay again when the operator wants that PR
+to land first, and otherwise end at the hand-off.
 
 ## While the work is out
 
@@ -367,7 +368,7 @@ Start where the return stands:
    `pr-post.sh`, as the `prs` skill gives the call, and in a hand-back. Work
    with no PR takes the hand-back alone. The summary names what was discussed,
    lists each agreed item with whether the result covers it and how you
-   checked, and closes with one of three lines, so the operator can tell at a
+   checked, and closes with one of these lines, so the operator can tell at a
    glance which it is:
    - every item is covered, you see nothing left to discuss, and they can
      approve when they are comfortable, or raise anything else;

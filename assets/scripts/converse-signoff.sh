@@ -1318,8 +1318,8 @@ fi
 # waits on until its sends have landed. Taken as this call's own, an earlier
 # stay's line would leave a call that stops before step 5 reading as that
 # stay's wait or return. So any other call records itself again, and step 5
-# names what it waits on again, which on a re-run of a stay that had named it
-# repeats two lines of the same record.
+# names what it waits on again, so a re-run of a stay that had named it
+# writes those lines into the same record again.
 if [ -n "$STAY" ]; then
   STAY_MARK="staying: $STAY"
   NEWEST_MARK=$(printf '%s' "$CONV_ROW" | jq -r '[ (.notes // "") | split("\n")[] | select(startswith("holding:") or startswith("staying:")) ] | last // ""')
