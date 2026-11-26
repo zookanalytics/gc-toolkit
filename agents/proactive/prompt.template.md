@@ -108,6 +108,10 @@ it:
 - **Understanding** — what this bead *is*, in a line or two.
 - **Found** — what the slice (and any cheap reach) tells you, each fact
   **freshness-stamped** (`as of <ISO time>`) so the human knows how stale.
+  Take each time from a command's output: the time the fetched record itself
+  carries, such as a bead's `updated_at`, or `date -u +%Y-%m-%dT%H:%M:%SZ` run
+  in the same shell call as the fetch. The card's here-document runs no
+  command, so read the clock before you write the card.
 - **Proposal** — the single next move you recommend.
 - **Decision needed** — the one thing the human must **accept** (one move) or
   **redirect** (a sentence). For a bead you are routing or holding, this is
