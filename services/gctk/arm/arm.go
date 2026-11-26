@@ -90,7 +90,7 @@ func mergeResultOf(r *ledger.Record) string {
 
 // checkPRPath is the path for an anchor whose record keeps it at a status the
 // start never sends.
-const checkPRPath = "To have the PR checked once the work it waits for lands, hold its merge on a human gate that names that work " +
+const checkPRPath = "To have the PR checked once the work it waits for lands, arm a check that waits for that work, and hold the PR's merge on the check " +
 	"(the waits skill, \"Have a bead checked and closed once other work lands\")"
 
 // Arm records the arm, under the bead's dispatch lock, in one write that

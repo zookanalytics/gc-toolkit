@@ -80,12 +80,25 @@ gate, below).
   arm needs the bead open with no route. A first reaction writes the brief, the
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
 - A pull request's anchor at status `blocked`, whose PR is pending, takes no
-  arm. Leave its status as its PR's record keeps it. Hold its merge instead, on
-  a human gate whose message names the blocker (the prs skill, "Hold its
+  arm. Leave its status as its PR's record keeps it, and have a check stand in
+  for it. File the check in the anchor's store (the work skill, "File new
+  work"):
+
+  ```bash
+  gc bd create "Check PR <number> once <blocker> lands" -t task -d "<bead>'s PR may be moot once <blocker> lands. This check holds the PR's merge until it has been checked." --json
+  ```
+
+  Give the check the close brief, the edge and the arm above, with the check in
+  place of `<bead>`. Its brief says what `<blocker>`'s landing should do to the
+  PR, what to check in the PR once it has, and that closing the check releases
+  the PR's merge. The closer then closes the check only when the PR still has
+  work to land, and puts a PR the landing made moot to a person, with what it
+  found and the course it recommends. Last, make the anchor wait on the check,
+  which holds the PR's merge until the check closes (the prs skill, "Hold its
   merge"):
 
   ```bash
-  "$(gc <binding> scripts-dir)/human-gate.sh" --subject <bead> --key "moot-once-<blocker>" --message "Once <blocker> lands, this PR may be moot: retire it, or clear this gate to let it merge"
+  gc bd dep add <bead> <check> --type=blocks
   ```
 - A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
   keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the

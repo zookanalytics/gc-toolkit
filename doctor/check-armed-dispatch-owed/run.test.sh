@@ -262,7 +262,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "a closer's arm on a pending PR's anchor warns (exit 1)"
 has "$OUT" "alpha bead a-2p: armed for dispatch, and it owns a pull request (merge_result=pull_request_pending), whose record keeps it at status blocked" "the stranded finding names the anchor's record and status"
 has "$OUT" "leave its status to the record, and disarm it" "the finding leaves the anchor's status to its record"
-has "$OUT" "hold its merge on a human gate" "the finding names the gate that holds the PR for the check"
+has "$OUT" "hold the PR's merge on the check" "the finding names the check that holds the PR's merge"
 has "$OUT" "To disarm it: gctk bead disarm a-2p --reason" "the finding names gctk's disarm"
 hasnt "$OUT" "to open" "nothing asks for the anchor to be returned to open"
 clear_stores

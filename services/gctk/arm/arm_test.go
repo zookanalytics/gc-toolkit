@@ -199,7 +199,7 @@ func TestArmRefusals(t *testing.T) {
 		{"a bead in progress", arm.Request{ID: "claimed", Target: pool, Reason: "r"}, "dispatched already"},
 		{"a routed bead", arm.Request{ID: "routed", Target: pool, Reason: "r"}, "dispatched already"},
 		{"a bead at another status", arm.Request{ID: "deferred", Target: pool, Reason: "r"}, "status deferred"},
-		{"a pending PR's anchor", arm.Request{ID: "pending", Target: pool, Formula: "mol-validate-close", Reason: "r"}, "hold its merge on a human gate"},
+		{"a pending PR's anchor", arm.Request{ID: "pending", Target: pool, Formula: "mol-validate-close", Reason: "r"}, "hold the PR's merge on the check"},
 		{"a target with no formula to pour", arm.Request{ID: "plain", Target: "rig/rig.raw", Reason: "r"}, "--no-formula --no-convoy"},
 		{"a target the config does not name", arm.Request{ID: "plain", Target: "rig/rig.none", Reason: "r"}, "name one with --on"},
 		{"a wait edge into another store", arm.Request{ID: "foreign", Target: pool, Reason: "r"}, "xx-1"},
