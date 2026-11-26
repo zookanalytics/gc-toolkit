@@ -486,8 +486,8 @@ fails.
 
 **Exit criteria (for the loop, not for you):** the records of the test, lint and
 typecheck runs above and the note of setup and build at HEAD pass, or name a
-failure the work bead marks pre-existing at that HEAD, and this iteration bead
-is closed, or the last attempt, still red, is declined.
+failure whose pre-existing mark on the work bead holds at that HEAD, and this
+iteration bead is closed, or the last attempt, still red, is declined.
 Any iteration that leaves the tree closer to that has done its job."""
 
 [steps.check]
