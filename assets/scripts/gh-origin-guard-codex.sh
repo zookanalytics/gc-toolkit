@@ -11,7 +11,8 @@
 #
 # Codex sends a shell call in the payload shape Claude does and reads the same
 # deny object back, so the registration is the gh-origin-guard overlay's own
-# PreToolUse group for Bash, copied verbatim: one command for both providers.
+# PreToolUse group for Bash, copied verbatim: the commands every Claude overlay
+# runs. The group also runs the kill guard, `gctk session kill-guard`.
 #
 # Every codex-provider agent runs this as pre_start. It is idempotent: a
 # registration already in the current form is left alone, so the trust Codex
@@ -51,15 +52,15 @@ if [ -e "$FILE" ]; then
     CURRENT=$(cat -- "$FILE") || fail "cannot read $FILE"
 fi
 
-# Our handlers are the ones naming gh-origin-guard.sh. When they amount to the
-# current group, standing alone, the document is left as it is. Otherwise they
-# are removed wherever they stand, a group left empty is dropped, and the
-# current group is appended after everything else. A file that is not exactly
-# one hooks document, an empty file among them, stops the transform, and is not
-# overwritten: it may be the operator's, and Codex cannot load hooks from it
-# either.
+# Our handlers are the ones naming gh-origin-guard.sh or the kill guard's verb.
+# When they amount to the current group, standing alone, the document is left
+# as it is. Otherwise they are removed wherever they stand, a group left empty
+# is dropped, and the current group is appended after everything else. A file
+# that is not exactly one hooks document, an empty file among them, stops the
+# transform, and is not overwritten: it may be the operator's, and Codex cannot
+# load hooks from it either.
 NEXT=$(printf '%s' "$CURRENT" | jq -s --argjson g "$GROUP" '
-    def ours: (.command // "") | contains("gh-origin-guard.sh");
+    def ours: (.command // "") | (contains("gh-origin-guard.sh") or contains("session kill-guard"));
     if length != 1 then error("not one document") else .[0] end
     | if type != "object" or ((.hooks // {}) | type) != "object"
          or ((.hooks.PreToolUse // []) | type) != "array"
@@ -83,4 +84,4 @@ if ! printf '%s\n' "$NEXT" > "$TMP" || ! mv -f -- "$TMP" "$FILE"; then
     rm -f -- "$TMP"
     fail "cannot write $FILE"
 fi
-printf 'gh-origin-guard-codex: registered the gh origin guard in %s\n' "$FILE"
+printf 'gh-origin-guard-codex: registered the gh origin guard and the kill guard in %s\n' "$FILE"

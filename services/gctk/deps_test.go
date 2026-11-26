@@ -14,19 +14,22 @@ import (
 // gctkModules are the modules gctk's code may import besides the standard
 // library and gctk itself: cobra, the modules cobra requires that gctk's build
 // compiles, go-toml, which requires none and reads the name and prefix a city's
-// .gc/site.toml binds, and x/sys, whose unix package gctk memory and its Claude
-// Code adapter call. gctk shares the repository's one Go module with the board,
-// whose go.mod also requires the board's own modules, such as bubbletea,
-// lipgloss and tygo, so this list is what keeps the board's dependencies out of
-// gctk: a build of gctk alone downloads cobra, pflag, go-toml and x/sys and
-// nothing else. A module gctk starts to import is added here in the change that
-// imports it.
+// .gc/site.toml binds, x/sys, whose unix package gctk memory and its Claude
+// Code adapter call, and mvdan.cc/sh, whose syntax and expand packages, which
+// import only the standard library and the module's own packages, read the
+// shell command the kill guard judges. gctk
+// shares the repository's one Go module with the board, whose go.mod also
+// requires the board's own modules, such as bubbletea, lipgloss and tygo, so
+// this list is what keeps the board's dependencies out of gctk: a build of gctk
+// alone downloads cobra, pflag, go-toml, x/sys and mvdan.cc/sh and nothing else.
+// A module gctk starts to import is added here in the change that imports it.
 var gctkModules = []string{
 	"github.com/spf13/cobra",
 	"github.com/spf13/pflag",
 	"github.com/inconshreveable/mousetrap",
 	"github.com/pelletier/go-toml/v2",
 	"golang.org/x/sys",
+	"mvdan.cc/sh/v3",
 }
 
 func TestImportsStayInsideGctksModules(t *testing.T) {

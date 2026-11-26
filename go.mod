@@ -12,6 +12,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
+	mvdan.cc/sh/v3 v3.13.1
 )
 
 require (
@@ -25,7 +26,6 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
