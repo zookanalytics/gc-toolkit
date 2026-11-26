@@ -47,13 +47,18 @@ and then `compact: 1 database(s) failed gc-only reclaim`, and exits 1.
   (`ExecOutcomeFileEnv` and `DecodeExecOutcome` in
   `internal/orders/exec_outcome.go`). A run that exits 0 declares there what
   did not run, "a safety gate that held a step back" among the cases core's
-  `internal/bootstrap/packs/core/assets/scripts/order_outcome.sh` names, and the
-  controller records it as an `order.skipped` event (`recordOrderOutcome` in
-  `cmd/gc/order_outcome.go`). The pass declares each store it held back there,
-  for any of its reasons, so a run that reclaimed nothing is not recorded as
-  completed. compact declares its own disk holds the same way
-  (`write_order_outcome` in its `run.sh`). The doctor's repeated-failure check
-  counts only `order.failed` (`consecutiveOrderFailures` in
+  `internal/bootstrap/packs/core/assets/scripts/order_outcome.sh` names. The
+  controller records the run's `order.completed` and then an `order.skipped`
+  event for the declaration (`recordOrderOutcome` in `cmd/gc/order_outcome.go`,
+  called from `cmd/gc/order_dispatch.go`). The pass declares each store it held
+  back there, for any of its reasons, so a run that reclaimed nothing is
+  recorded with what it held back and why, not as a bare completion. compact
+  declares its own disk holds the same way (`write_order_outcome` in its
+  `run.sh`). With `--gc-only` it runs no disk pre-flight and exits before that
+  write (`main` in its `run.sh`), so the compact the pass runs never writes the
+  file it inherits, and the pass is the file's only writer. The doctor's
+  repeated-failure check counts only `order.failed`, and a completion ends a
+  streak (`consecutiveOrderFailures` in
   `internal/doctor/checks_order_outcome.go`), so a declared skip does not trip
   it.
 - **A GC Gas City runs with the writers stopped, on a schedule.** None. The

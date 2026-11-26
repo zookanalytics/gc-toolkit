@@ -23,7 +23,7 @@ session stops, and each picks its work up again from its bead when it starts.
 
 | Option | What stops | What the stores do |
 |---|---|---|
-| **Weekly window, Dolt's auto-GC left on (recommended)** | The city, about five minutes once a week | This rig's store grows up to about 5.3 GiB between windows. Dolt's auto-GC keeps trimming each store's journal with sessions connected, as Gas City ships it. |
+| **Weekly window, Dolt's auto-GC left on (recommended)** | The city, about five minutes once a week | This rig's store gains about 5.3 GiB between windows, so it reaches about 7.6 to 7.9 GiB before each one. Dolt's auto-GC keeps trimming each store's journal with sessions connected, as Gas City ships it. |
 | Daily window, auto-GC off | The city, about five minutes every day | No GC ever runs with a session connected, which is what Gas City's own config note asks of a city that keeps mail and wisps in `dolt_ignore`d tables. The HQ store's journal then grows untrimmed between windows, by 4 to 8 GB a day. |
 | No window | Nothing | This rig's store keeps growing about 0.76 GiB a day and passes 20 GB, the size Gas City's bloat runbook lists as a symptom, in about three weeks. The compactor order keeps failing every two hours. |
 
@@ -80,7 +80,7 @@ while none ran.
 | Store | Size | In `oldgen` | Growth with no full GC |
 |---|---|---|---|
 | This rig's store (tk) | 4.17 GiB | 4.06 GiB | 0.76 GiB a day |
-| The HQ store (lx) | 3.43 GiB | 0.06 GiB | Little: its `oldgen` is 0.06 GiB in all. Its size follows its journal through the day. |
+| The HQ store | 3.43 GiB | 0.06 GiB | Little: its `oldgen` is 0.06 GiB in all. Its size follows its journal through the day. |
 | The other five stores | 0.15 to 0.79 GiB each | | All under the 2 GiB line |
 
 **This rig's store.** Its last full GC wrote a 2,349 MiB `oldgen` file at

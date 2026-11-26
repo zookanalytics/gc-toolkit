@@ -121,10 +121,10 @@ pass could not run at all.
 A run that exits 0 reads as completed, so a run that deferred a store also
 declares it to Gas City's order runner, in the file the runner names in
 `GC_ORDER_OUTCOME_FILE` (the contract is core's
-`assets/scripts/order_outcome.sh`). The runner records the run as an
-`order.skipped` event naming each store held back and why. It is `skipped` when
-no store was reclaimed and `partial` when some were. A hand run has no such file
-and declares nothing.
+`assets/scripts/order_outcome.sh`). After the run's `order.completed`, the
+runner records an `order.skipped` event naming each store held back and why. It
+is `skipped` when no store was reclaimed and `partial` when some were. A hand
+run has no such file and declares nothing.
 
 `assets/scripts/dolt-reclaim.test.sh` is the regression suite, hermetic against
 a stubbed `gc` and fixture stores in a tempdir — no city, no real Dolt. Its
