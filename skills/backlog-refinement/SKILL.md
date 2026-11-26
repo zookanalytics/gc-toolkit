@@ -107,10 +107,11 @@ Check before you propose:
 - **Place on its own:** use it sparingly. Bring each such bead by itself, as one
   line that names the harm, for the operator's answer to that line alone. It is
   never part of a set that takes one answer. Work that adds something new for
-  someone to use, such as a command or a screen, is never proposed on its own,
-  even when it answers a harm. Propose instead to leave it held for its epic,
-  with a reason that names the goal not yet written down, or to ask, with the
-  design or product question in the reason.
+  someone to use, such as a command or a screen, is never proposed on its own.
+  That holds even when it answers a harm. Propose one of these for it instead:
+  - leave it held for its epic, with a reason that names the goal not yet
+    written down;
+  - ask, with the design or product question in the reason.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
