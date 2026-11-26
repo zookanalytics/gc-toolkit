@@ -208,16 +208,19 @@ require_reaction_agent() {
     converse_roster
     [ -n "${_CONVERSE_ROSTER:-}" ] || return 0
     # Serviceable when a proactive pool is registered for the rig, in any cap or
-    # suspension state. (Converse was handled by the shared predicate above.)
+    # suspension state: an agent whose dir is the rig and whose name is
+    # proactive, under whatever binding the city imports the pack under.
+    # (Converse was handled by the shared predicate above.)
     if printf '%s' "$_CONVERSE_ROSTER" | jq -e --arg r "$1" \
-            '[ .agents[]? | (.qualified_name // "")
-               | select(. == ($r + "/gc-toolkit.proactive")) ] | length > 0' >/dev/null 2>&1; then
+            '[ .agents[]? | objects
+               | select(((.dir // "") | tostring) == $r and ((.name // "") | tostring) == "proactive") ]
+             | length > 0' >/dev/null 2>&1; then
         return 0
     fi
     _rra_alt=$(printf '%s' "$_CONVERSE_ROSTER" | jq -r '
-        [ .agents[]? | (.qualified_name // "")
-          | select(test("/gc-toolkit[.](proactive|converse)"))
-          | split("/")[0] ] | unique | join(", ")' 2>/dev/null || true)
+        [ .agents[]? | objects
+          | select(((.name // "") | tostring) as $n | $n == "proactive" or ($n | startswith("converse-")))
+          | (.dir // "") | tostring | select(. != "") ] | unique | join(", ")' 2>/dev/null || true)
     die "rig '$1' has no reaction agent: neither a proactive pool nor a converse is registered there, so an operator topic filed into it would park on the board with no session able to engage it. Re-run against a rig that has one${_rra_alt:+ (e.g. $_rra_alt)}. Nothing filed." 3
 }
 

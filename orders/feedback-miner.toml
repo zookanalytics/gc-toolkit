@@ -3,9 +3,10 @@
 # outside the city, and one per corrective-feedback hit in the city's own posts
 # (obs.source=miner), deduped on (obs.provenance, obs.category).
 # Observations, and one finding when a city post lacks its mark — judging is
-# the distiller's. Rig-scoped with a BARE pool so the wisp lands in, and is
-# claimed from, each importing rig's own polecat store; no home-rig gate on
-# purpose (D5) — a rig without gh/GitHub/auth no-ops in the formula's
+# the distiller's. Rig-scoped with a BARE pool, which Gas City qualifies with
+# the rig and the binding the city imports the pack under, so the wisp lands in,
+# and is claimed from, each importing rig's own polecat store; no home-rig gate
+# on purpose (D5) — a rig without gh/GitHub/auth no-ops in the formula's
 # load-context step.
 #
 # Each run costs a polecat session in every rig, so the sweep runs every two
@@ -17,5 +18,5 @@ description = "learning: mine this rig's merged/closed PR review threads for out
 formula = "mol-feedback-miner"
 trigger = "cooldown"
 interval = "48h"
-pool = "gc-toolkit.polecat"
+pool = "polecat"
 scope = "rig"

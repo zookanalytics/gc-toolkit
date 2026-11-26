@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Hermetic test for refinery-publish.sh, the refinery's mr step on the new
 # path. Runs the real script against real git repositories (refinery-test-lib.sh)
-# with a fake gc, gh and gctk. Proves:
+# with a fake gc, gh and gctk, and the real gctk for the edit of an open PR's
+# title and body (gctk pr compose --edit). Proves:
 #   - with no PR open, the head is pushed under the lease and the PR opens as a
 #     draft with the composed title and body, then is recorded pending;
 #   - a PR open on the branch that the city's account opened and the bead never
-#     recorded is adopted: its title and body are edited, it is returned to
-#     draft, the head is pushed, and it is recorded, with no second PR;
+#     recorded is adopted: its title is edited, it is returned to draft, the
+#     head is pushed, and it is recorded, with no second PR;
+#   - the edit of a PR's title and body edits only what moved: a body whose
+#     summary names an earlier head is edited alone when the title differs only
+#     in spacing, and a PR that shows the composition at the prepared head gets
+#     no edit, while its publication goes on;
 #   - a PR the bead records is returned to draft before the head is pushed onto
 #     it, and a PR that did not return to draft is not pushed onto, while a PR
 #     the step opens opens as a draft and needs no return;
@@ -22,8 +27,8 @@
 #   - the body names the base the PR opens into: the rig's default branch for a
 #     bead that records no target, and a retargeted bead's new target over its
 #     older merged_target;
-#   - an edit that does not take pushes nothing, so the head never moves under
-#     a stale body;
+#   - an edit that does not take pushes nothing and returns nothing to draft,
+#     so the head never moves under a stale body;
 #   - a branch someone pushed to after the prep is refused, never overwritten,
 #     and nothing is opened or recorded;
 #   - a bead closed or released before its record keeps that state, and the PR
@@ -46,7 +51,20 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-publish-test.XXXXXX")"
 TMP="$(cd "$TMP" && pwd -P)"
-trap 'rm -rf "$TMP"' EXIT
+# The edit is the real gctk's, built from this checkout once, with the compiled
+# fake gc it reads the store through, beside the directory each case empties.
+RT_GCTK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gctk-refinery-publish-bin.XXXXXX")"
+trap 'rm -rf "$TMP" "$RT_GCTK_DIR"' EXIT
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$RT_GCTK_DIR/gctk" ./cmd/gctk ) >"$RT_GCTK_DIR/build.log" 2>&1 \
+  || { echo "gctk did not build: $(tail -3 "$RT_GCTK_DIR/build.log")" >&2; exit 1; }
+export RT_GCTK_REAL="$RT_GCTK_DIR/gctk"
+if [ -n "${RUN_TESTS_FAKE_GC:-}" ] && [ -x "$RUN_TESTS_FAKE_GC" ]; then
+  export RT_FAKE_GC="$RUN_TESTS_FAKE_GC"
+else
+  ( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$RT_GCTK_DIR/fake-gc" ./internal/gcbd/fakegc ) >"$RT_GCTK_DIR/build.log" 2>&1 \
+    || { echo "the fake gc did not build: $(tail -3 "$RT_GCTK_DIR/build.log")" >&2; exit 1; }
+  export RT_FAKE_GC="$RT_GCTK_DIR/fake-gc"
+fi
 # shellcheck source=refinery-test-lib.sh
 . "$HERE/refinery-test-lib.sh"
 
@@ -56,6 +74,16 @@ fresh() {
   rt_init refinery-publish.sh
 }
 run() { OUT=$("$SUT/refinery-publish.sh" "$@" 2>&1); RC=$?; }
+# page <n> <bead> <head> — PR #<n> shows the title and body the real gctk
+# composes for <bead> at <head>, into main.
+page() {
+  local out f="$GH_DIR/view_$1.json"
+  out=$("$BIN/gctk-real" pr compose "$2" --head "$3" --target main --gates '') || { rt_bad "page: $2's PR did not compose"; return 1; }
+  jq --argjson c "$out" '.title = $c.title | .body = $c.body' "$f" > "$f.n" && mv "$f.n" "$f"
+}
+# titled <n> <title> — PR #<n>'s title is <title>.
+titled() { jq --arg t "$2" '.title = $t' "$GH_DIR/view_$1.json" > "$GH_DIR/view_$1.json.n" && mv "$GH_DIR/view_$1.json.n" "$GH_DIR/view_$1.json"; }
+shows() { jq -r ".$2" "$GH_DIR/view_$1.json"; }
 
 echo "# with no PR open, the head is pushed and a draft PR opens and is recorded"
 fresh
@@ -70,7 +98,7 @@ has "$(logged gh)" "pr create --repo zook/rig --base main --head polecat/a --dra
 eq "$(meta a merge_result)" "pull_request_pending" "the bead records its PR as pending"
 eq "$(meta a pr_head_sha)" "$HEAD_A" "…at the head the refinery validated"
 eq "$(bstatus a) $(bassignee a)" "blocked " "…and is blocked on it, assigned to nobody, since the refinery's work on it ends"
-hasnt "$(logged gh)" "pr edit" "a new PR needs no edit"
+hasnt "$(logged gctk)" "--edit" "a new PR needs no edit"
 hasnt "$(logged gctk)" "pr draft" "a PR that opens as a draft needs no return to draft"
 
 echo "# a PR the city's account opened and the bead never recorded is adopted"
@@ -80,14 +108,55 @@ work b polecat/b
 prepared b polecat/b
 HEAD_B=$(git -C "$HOME_DIR/worktrees/b" rev-parse HEAD)
 pr 41 polecat/b gc-city-bot
+page 41 b "$HEAD_B"
+TITLE_B=$(shows 41 title)
+titled 41 "old title 41"
 run --bead b
 eq "$RC" 0 "the publication exits 0"
 has "$OUT" "adopting PR #41" "it says it adopts the open PR"
 hasnt "$(logged gh)" "pr create" "no second PR opens"
-has "$(logged gh)" "pr edit 41 --repo zook/rig --title feat: b (b) --body-file" "the PR's title and body are edited"
+has "$(logged gctk)" "pr compose b --pr https://github.com/zook/rig/pull/41 --head $HEAD_B --target main --gates  --edit" \
+  "gctk edits the PR the bead does not record, which --pr names"
+eq "$(logged edits)" "41 title" "the PR's title is edited, and its body, which shows the composition, is not"
+eq "$(shows 41 title)" "$TITLE_B" "…to the composed title"
 has "$(logged gctk)" "pr draft b --pr https://github.com/zook/rig/pull/41" "the adopted PR is returned to draft"
+eq "$(grep -E '^pr (compose|draft) b ' "$LOGS/gctk.log" | cut -d' ' -f2 | tr '\n' ' ')" "compose draft " "…after the edit"
 eq "$(tip polecat/b)" "$HEAD_B" "the prepared head is pushed"
 eq "$(meta b pr_url)" "https://github.com/zook/rig/pull/41" "the bead records the adopted PR"
+
+echo "# only what moved is edited: a summary that names an earlier head, under a title that differs only in spacing"
+fresh
+BEFORE=$(branch_with polecat/s s.txt)
+work s polecat/s '{"merge_result":"pull_request_head_changed","pr_url":"https://github.com/zook/rig/pull/61","pr_number":"61"}'
+main_with s-later.txt >/dev/null
+prepared s polecat/s
+HEAD_S=$(git -C "$HOME_DIR/worktrees/s" rev-parse HEAD)
+pr 61 polecat/s gc-city-bot
+page 61 s "$BEFORE"
+SPACED=$(shows 61 title | sed 's/ /  /g')
+titled 61 "$SPACED"
+run --bead s
+eq "$RC" 0 "the publication exits 0"
+eq "$(logged edits)" "61 body" "the body is edited alone"
+has "$(shows 61 body)" "${HEAD_S:0:8}" "…to the summary at the prepared head"
+hasnt "$(shows 61 body)" "${BEFORE:0:8}" "…in place of the earlier head's"
+eq "$(shows 61 title)" "$SPACED" "the title, the same in its words, stays as it stands"
+
+echo "# a PR that shows the composition at the prepared head gets no edit, and its publication goes on"
+fresh
+branch_with polecat/n n.txt >/dev/null
+work n polecat/n '{"merge_result":"pull_request_head_changed","pr_url":"https://github.com/zook/rig/pull/62","pr_number":"62"}'
+prepared n polecat/n
+HEAD_N=$(git -C "$HOME_DIR/worktrees/n" rev-parse HEAD)
+pr 62 polecat/n gc-city-bot
+page 62 n "$HEAD_N"
+run --bead n
+eq "$RC" 0 "the publication exits 0"
+has "$(logged gctk)" "pr compose n --pr https://github.com/zook/rig/pull/62 --head $HEAD_N --target main --gates  --edit" "gctk is asked for the edit"
+eq "$(logged edits)" "" "…and edits nothing"
+has "$OUT" "shows its composition already" "…saying the PR shows its composition"
+eq "$(tip polecat/n)" "$HEAD_N" "the head is pushed"
+eq "$(meta n merge_result)" "pull_request_pending" "…and the PR recorded pending"
 
 echo "# a recorded PR returns to draft before the push, and one that does not is not pushed onto"
 fresh
@@ -136,7 +205,7 @@ has "$(logged scripts)" "opened by someone-else" "…naming the account that ope
 eq "$(meta c merge_result)" "blocked" "the bead records blocked"
 eq "$(bassignee c)" "$GC_AGENT" "…and stays with the refinery, held by its gate"
 hasnt "$(logged gh)" "pr create" "no second PR opens"
-hasnt "$(logged gh)" "pr edit" "nothing on the PR is edited"
+eq "$(logged edits)" "" "nothing on the PR is edited"
 eq "$(tip polecat/c)" "$BEFORE" "nothing is pushed onto its branch"
 hasnt "$(logged gctk)" "pr record" "no record is written"
 fresh
@@ -147,7 +216,7 @@ pr 43 polecat/c someone-else
 STUB_HUMAN_GATE_RC=1 run --bead c
 eq "$RC" 1 "a park whose gate does not file stops (exit 1)"
 eq "$(meta c merge_result)" "<absent>" "…and parks nothing"
-hasnt "$(logged gh)" "pr edit" "…edits nothing on the PR"
+eq "$(logged edits)" "" "…edits nothing on the PR"
 eq "$(tip polecat/c)" "$BEFORE" "…pushes nothing"
 hasnt "$(logged gctk)" "pr record" "…and records nothing"
 
@@ -221,11 +290,14 @@ echo "# an edit that does not take pushes nothing"
 fresh
 BEFORE=$(branch_with polecat/e e.txt)
 work e polecat/e
+main_with e-later.txt >/dev/null
 prepared e polecat/e
 pr 46 polecat/e gc-city-bot
 STUB_EDIT_RC=1 run --bead e
 eq "$RC" 1 "the publication stops (exit 1)"
+has "$OUT" "the title and body of PR #46 did not take" "…and says why"
 eq "$(tip polecat/e)" "$BEFORE" "the head is not pushed under a stale body"
+hasnt "$(logged gctk)" "pr draft" "the PR is not returned to draft"
 hasnt "$(logged gctk)" "pr record" "nothing is recorded"
 
 echo "# a branch someone pushed to after the prep is refused, never overwritten"

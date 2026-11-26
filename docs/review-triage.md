@@ -22,12 +22,15 @@ check's own method and, where this rig keeps one, by this rig's guidance for it.
 ## When `arch` is mandatory
 
 On this rig the arch check applies the divergence lens, which holds new pack
-surface to what Gas City ships ([review-arch.md](review-arch.md)). The lens runs
-in no other check, so add `arch` when the diff does any of these:
+surface, and pack code that accommodates a behavior of Gas City, to what Gas
+City ships ([review-arch.md](review-arch.md)). The lens runs in no other check,
+so add `arch` when the diff does any of these:
 
 - It adds operational surface of a kind
   [review-arch.md](review-arch.md#when-the-lens-applies) lists.
 - It grows existing operational surface with a new verb, mode or key.
+- It accommodates a behavior of Gas City, whether or not it adds surface, as
+  [review-arch.md](review-arch.md#when-the-lens-applies) describes.
 - It touches a path or key that an entry in [warrants.md](warrants.md) covers.
   `tools/warrants-touched.sh --base origin/<the review's base>`, run in the
   review's worktree, lists those entries.

@@ -57,14 +57,28 @@ exits rather than fall back to the flatten.
 A reclaim never starts while the data plane is unreachable or overloaded,
 judged off the same `server.reachable` and 5000ms latency the deacon patrol's
 Dolt-health step reads. A full GC is heavy, and piling one onto a server that
-is already struggling is the amplifier this brake removes.
+is already struggling is the amplifier this brake removes. The gate runs before
+the pass and again before each store, because a full GC can slow the server it
+just ran on.
+
+The gate reads those two fields of the `gc dolt health --json` report and never
+the time the report takes. That time follows host load and the `gc` calls the
+report makes, while the report caps each Dolt call, so a server too slow to
+answer its ping already reads as unreachable. The probe's bound
+(`GC_DOLT_RECLAIM_HEALTH_TIMEOUT`, default 90s) only guards against a hang, and
+it is long enough for the report on a server the probe cannot reach to finish.
+A probe cut at the bound, a probe that fails, and an answer with no readable
+latency prove nothing about Dolt. The reclaim goes ahead, and the log says the
+health was unknown and why.
 
 A budget (`GC_DOLT_RECLAIM_BUDGET`, default 1200s) stops the pass from starting
 a new reclaim once it is spent, and the deferred stores are the next pass's to
 take. A reclaim already running is never interrupted: a GC killed mid-rewrite
 is what leaves a store quarantined, so the budget gates starts, not a running
-GC. The order's `timeout` (1800s) sits a store's GC above the budget, so the
-last reclaim the budget allowed to start still finishes before the hard kill.
+GC. The budget does not count the health probe before the pass or the one
+before the last reclaim. The order's `timeout` (1800s) sits those two probes
+and a store's GC above the budget, so the last reclaim the budget allowed to
+start still finishes before the hard kill.
 
 ## Resolving the city
 
@@ -87,8 +101,8 @@ assets/scripts/dolt-reclaim.sh             # reclaim, one line per store plus a 
 
 `GC_DOLT_RECLAIM_THRESHOLD_MIB` (default 2048) sets the per-database line,
 `GC_DOLT_RECLAIM_BUDGET` (default 1200s, 0 disables) bounds the pass, and
-`GC_DOLT_RECLAIM_HEALTH_TIMEOUT` (default 20s) bounds the pre-reclaim health
-probe. Every run prints the size of every store, not only the ones reclaimed,
+`GC_DOLT_RECLAIM_HEALTH_TIMEOUT` (default 90s) bounds the health probe before
+each reclaim. Every run prints the size of every store, not only the ones reclaimed,
 so a store climbing toward the line stays visible in the order log. The exit is
 0 when a reclaim ran or nothing was over the line, 1 when a reclaim was
 attempted and failed — a quarantined store, or one that needs an operator — and
