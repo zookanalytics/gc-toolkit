@@ -87,7 +87,7 @@ it held.
 
 ## Levers, on the operator's agreement
 
-With the pack's scripts and gctk named:
+Start each call below with these lines:
 ```bash
 S="$(gc {{ .BindingName }} scripts-dir)"
 # >>> gctk-bin

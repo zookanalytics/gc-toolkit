@@ -56,7 +56,12 @@ gc bd --rig <rig> list --all --type=bug --title-contains "docs/product-goals.md:
   rig's goals for this sitting. Once they agree on the words, put them on the
   request, so the page states them and no later sitting asks again:
   - the request the list found:
-    `"$GCTK" bead note <bead> "The operator's product goals: <their words>"`;
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <bead> "The operator's product goals: <their words>"
+```
   - none, when the list printed `[]`:
     `gc bd --rig <rig> create "State the operator's product goals (docs/product-goals.md: missing)" -t bug -d "<their words>" --json`.
 
