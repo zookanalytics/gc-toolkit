@@ -246,7 +246,7 @@ identity, and the session environment is read for the warm-respawn half, where
 globally reaches the next process unless the session marks it removed), and
 `doctor/check-blocked-work-armed` (the complement to `check-wait-is-an-edge`: a
 blocked, unassigned, plainly-work bead — an allowlisted work issue_type, not a
-review/step/workflow bead or a merge anchor — must carry a dispatch path,
+step or workflow bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
 liveness check, a bead carrying a hold label is exempt because its dispatch

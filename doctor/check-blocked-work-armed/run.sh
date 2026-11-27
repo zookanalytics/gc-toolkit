@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
-# LIVE, unassigned bead that is plainly work (not a review, step or workflow-
+# LIVE, unassigned bead that is plainly work (not a step or workflow-
 # topology bead, not a standing record or a feedback pattern, and not a merge
 # anchor) and
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
@@ -231,7 +231,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         continue
     }
     # The predicate, entirely on the listing's own fields: plainly work
-    # (unassigned; not review/standing/feedback-pattern/step/workflow-topology;
+    # (unassigned; not standing/feedback-pattern/step/workflow-topology;
     # not a merge anchor; an allowlisted work issue_type, which a gate is not),
     # carrying no dispatch path (has_dispatch_path: no route and no arm), AND
     # not held (has_dispatch_hold: no hold label).
@@ -240,7 +240,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
         | select(($b.assignee // "") == "")
-        | select(($m["task_kind"] // "") != "review")
         | select(($b | is_standing_kind) | not)
         | select(($m["task_kind"] // "") != "feedback-pattern")
         | select(($m["gc.step_ref"] // "") == "")

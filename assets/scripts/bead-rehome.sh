@@ -70,8 +70,8 @@
 # edge puts the edge on.
 #
 # The close is gated on EVIDENCE the script re-establishes itself:
-#   (a) EVERY kind: the origin is not a review, step or workflow bead, and it is
-#       not in_progress under another actor.
+#   (a) EVERY kind: the origin is not a step or workflow bead, and it is not
+#       in_progress under another actor.
 #   (b) fixed-upstream and duplicate also: the origin did no work
 #       (gc.work_outcome=no-op, accepted even beside a work-product key a
 #       rebase or rework twin leaves behind, or no work_outcome and none of

@@ -101,8 +101,8 @@ while [ "$#" -gt 0 ]; do
         *) echo "$PROG: unknown argument: $1" >&2; usage ;;
     esac
 done
-# A review bead and a run's root name a workspace the same way; a part belongs
-# to a run's workspace alone.
+# A demo's request bead and a run's root name a workspace the same way; a part
+# belongs to a run's workspace alone.
 if [ -n "$ROOT" ]; then
     [ -z "$BEAD" ] || usage
     BEAD="$ROOT"

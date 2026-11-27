@@ -2,8 +2,8 @@
 # doctor/check-one-anchor-per-pr — I4: every PR has exactly one owning anchor.
 # Groups OPEN ANCHORS city-wide (all stores) by their pr_url metadata: only
 # merge_result-carrying beads count (the refinery's record stamps pr_url and
-# merge_result on the anchor; review beads and rework children carry pr_url with
-# NO merge_result), and task_kind=review is excluded outright. A blocked bead
+# merge_result on the anchor; a rework child carries pr_url with NO
+# merge_result). A blocked bead
 # counts when its merge_result is an open PR's: Gas Town's pending record keeps
 # a bead blocked at pull_request_pending while its PR waits on the merge, and
 # blocks the bead at an exception once its PR is no longer open. Two or
@@ -113,7 +113,6 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         .[]? | (.metadata // {}) as $m
         | (($m.pr_url // "") | tostring | gsub("[[:cntrl:]]"; " ")) as $u
         | select($u != "")
-        | select((($m.task_kind // "") | tostring) != "review")
         | (($m.merge_result // "") | tostring) as $mr
         | select(if ((.status // "open") | tostring) == "blocked"
                  then ($mr == "pull_request_pending" or $mr == "pull_request_head_changed")
