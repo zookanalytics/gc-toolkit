@@ -93,13 +93,13 @@ its group in view.
 | close as fixed | the default branch already has the fix; cite the commit | the bead the commit names, under `fixed-upstream` |
 | close as duplicate | a closed or shipped bead in this bead's store did the same work | that bead, under `duplicate` |
 | fold into another | an open bead carries the same need | that bead, under `folded` |
-| close as not needed | the premise is gone, the work is not worth doing, or it waits on nothing and is not worth an epic's time; say why | the bead the ruling rests on, under `not-needed` |
+| close as not needed | the premise is gone, the work is not worth doing, or it waits on nothing, is not worth an epic's time, and something would file it again if it mattered; say why | the bead the ruling rests on, under `not-needed` |
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
 | graduate into a new epic | beads share an outcome that no open epic's hypothesis covers, and the rig's goals make it worth a push of its own | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
 | place on its own | an emergency that cannot wait for an epic, such as the host going down, or work the operator names to run on its own; say which | nothing |
-| wait on a bead | it cannot start until another bead lands, or that bead's landing may end its job | the bead it waits on |
+| wait on a bead | it cannot start until another bead lands, or that bead's landing may end its job, or it cannot go until the operator answers or acts | the bead it waits on, or what the operator owes |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
 Check before you propose:
@@ -130,13 +130,32 @@ Check before you propose:
   goes on once that bead lands is placed as any other bead, so its row names
   the epic too. Work whose job that landing may end needs no epic, because the
   validating closer checks it then.
-- **Close as not needed:** a bead closes, rather than stay held with nothing
-  to release it, when each of these holds:
-  - it waits on nothing;
-  - it serves no open epic;
-  - it belongs to no theme worth a push.
 
-  If it bites again, it is filed again.
+  A bead that waits on the operator was ruled on already, and waits for
+  something only they can give, such as a decision, an approval or a path. It
+  waits on a human gate that says what they owe, and it is placed as any other
+  bead, so its row names the epic too. A question to put to the operator in
+  the sitting is an `ask` instead.
+- **Close as not needed:** a bead that waits on nothing closes, rather than
+  stay held with nothing to release it, when each of these holds:
+  - it serves no open epic;
+  - it belongs to no theme worth a push;
+  - something would file it again if it mattered.
+
+  Ask of it: would anything file this again if it mattered? A defect would,
+  because the check, the patrol or the failing run that found it finds it
+  again. That is why a defect closed this way is filed again if it bites.
+
+  An idea that serves the rig's goals, and that nothing would file again, is
+  not proposed for closing for want of a release. That covers a product idea
+  of the operator's, an opportunity an agent noticed once and a risk that bites
+  only once. It stays held, with a note of one line that gives the question
+  that would decide it: what would make it worth doing, and what we would look
+  at to know. Once the operator agrees, write the note:
+  `gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: kept as an idea. What would decide it: <the question>."`
+
+  Work that serves none of the rig's goals is still proposed for closing, idea
+  or not.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
@@ -234,7 +253,11 @@ on lands takes that skill's edge ("Make a bead wait on other work"), then its
 placement. The placement arms it while the edge holds it. Work whose job that
 landing may end takes the close brief, the edge and the arm of "Have a bead
 checked and closed once other work lands", then the lift of its hold that
-section gives.
+section gives. A bead that waits on the operator takes the human gate of "Wait
+on a person", whose message says what they owe, then its placement. The
+placement arms it while the gate holds it and lifts its hold, so it leaves the
+queue and shows on the operator's board as something they owe. It starts once
+they clear the gate.
 
 ## 7. Stop when the operator says
 

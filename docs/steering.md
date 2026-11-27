@@ -202,7 +202,7 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 The sitting reads the queue by outcome before it rules on any bead. It groups
 the beads that serve one outcome and names, for each group, the open epic whose
 hypothesis covers it. Then it does one of these things with each bead, so that
-each bead it rules on leaves the queue placed, waiting on what releases it, or
+the work it rules on leaves the queue placed, waiting on what releases it, or
 closed. The po applies each once the operator agrees to it, and the operator
 can apply one directly.
 
@@ -226,10 +226,19 @@ can apply one directly.
   the wait, a `blocks` edge onto that bead within one store. Work that goes on
   once that bead lands is then placed. `place` arms it while the edge holds it.
   Work whose job may end there is armed to its validating closer, and its hold
-  is lifted. The closer checks it once that bead closes.
+  is lifted. The closer checks it once that bead closes. A bead already ruled
+  on that cannot go until the operator answers or acts waits on a human gate
+  that says what they owe, which the waits skill files too. It is then placed
+  as any other bead. `place` arms it while the gate holds it and lifts its
+  hold, so it leaves the queue for the operator's board. It starts once the
+  operator clears the gate.
 - **Close it**, when the work is not wanted. Work that waits on nothing and is
-  not worth an epic's time closes too. Work closed that way is filed again when
-  it bites. Nothing reads the label on a closed bead.
+  not worth an epic's time closes too, when something would file it again if
+  it mattered. A defect is such work, because the check, the patrol or the
+  failing run that found it finds it again, so it is filed again when it
+  bites. Nothing reads the label on a closed bead. An idea that serves the
+  rig's goals, and that nothing would file again, is not closed for want of a
+  release. It stays held, with a note of the question that would decide it.
 
 ```
 gctk bead place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]
