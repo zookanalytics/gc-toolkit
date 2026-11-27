@@ -438,6 +438,14 @@ worktree.
   sweep, a timer or a guard must still ship, the change names the cause it
   leaves in place and why that cause cannot be fixed where it arises.
 
+<!-- rule:tk-egpzeu1 src:bead:tk-fe0bpvr, bead:tk-gy4953q, bead:tk-z4zwmn1, bead:tk-fylba9q, bead:tk-ervm0x1, bead:tk-lycdroy (operator) adopted:2026-11-27 -->
+- Before you propose work for a failure, such as a fix, a guard, a design or
+  a held item, say from the record where the failure comes from and how
+  often it happens, and size the work to that. A failure that needs a rare
+  precondition earns a sentence where the behavior is documented, not work
+  of its own, and a fault that one rig or one source causes is bounded where
+  it arises, not in machinery every rig runs.
+
 <!-- rule:tk-xgaeo src:audit:tk-awa7hv, pr:#465:comment:3854303400, pr:#665:comment:3942910142, pr:#858:comment:4115868945, pr:#1030:comment:4222590330 (operator feedback) adopted:2026-08-26 updated:2026-10-09 -->
 - Documentation states what is true now, in the present tense. No "replaces
   the old X", no proposed-amendment section, no rule justified by the history
