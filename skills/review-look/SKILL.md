@@ -51,25 +51,25 @@ Weigh each cause against what the read shows. More than one can hold.
 
 ## Going on, or stopping
 
-Send the review on when both of these hold:
+The read's `rule:` line names which of three rounds this is.
 
-- Its must-fix findings are falling, or new rules explain their rise.
-- The causes you found are ones its next rounds remove.
+**The run's last round by its bound.** Stop the review.
 
-Stop it when it will not converge on its current path. That is the case when
-any of these holds:
-
-- The count stays level or rises, for reasons new rules do not explain.
-- The same point keeps coming back.
-- The trouble points to the PR's approach.
-
-At the run's last round by its bound, stop the review.
-
-When the rule forces a question at this round, read the rules list first:
+**A round where the rule forces a question.** Read the rules list first.
 
 - When its commits explain the counts, name them in your output's `rules`.
   Only then can the review go on.
 - When they do not, stop the review.
+
+**Any other round.** The count alone stops nothing here, even where the
+account calls it level. Stop the review when any of these holds:
+
+- The same point keeps coming back.
+- A cause you found is one its next rounds will not remove, such as a lane that
+  asks for work outside the PR's purpose.
+- The trouble points to the PR's approach.
+
+When none of them holds, send the review on.
 
 In your reading, say plainly whether you read the trouble as pointing to the
 PR's approach being wrong overall.
