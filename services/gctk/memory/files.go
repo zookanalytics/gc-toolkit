@@ -355,6 +355,35 @@ func unlink(state, dir string) (gone map[string]bool, left, failures []string) {
 	return absent(dir, taken), left, failures
 }
 
+// linksLeftIn names each link to a note the intake removed, whose name holds no
+// file, that dir's index and collection notes keep where a prune leaves it, by
+// file and line as each file stands, and what it could not read. It writes
+// nothing.
+func linksLeftIn(state, dir string) (left, failures []string) {
+	taken, err := removedNames(state)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("the notes removed from %s did not read: %v", dir, err)}
+	}
+	gone := absent(dir, taken)
+	names, err := hubs(dir)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("cannot list %s: %v", dir, err)}
+	}
+	for _, name := range names {
+		file := filepath.Join(dir, name)
+		b, err := os.ReadFile(file)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			failures = append(failures, fmt.Sprintf("%s did not read: %v", file, err))
+			continue
+		}
+		left = append(left, linksLeft(file, string(b), name == indexName, func(n string) bool { return gone[n] })...)
+	}
+	return left, failures
+}
+
 // removedNames is each name under which state keeps the text of a unit the
 // intake removed.
 func removedNames(state string) (map[string]bool, error) {
@@ -439,15 +468,21 @@ func prune(state, dir string, taken map[string]bool) (left, failures []string) {
 	return left, failures
 }
 
-// linksLeft names each link to a note gone names that text, file's, keeps: in
-// the index any, and in a collection note any outside an entry with text of
-// its own, whose links stay as written, as a note's do.
+// linksLeft names each link to a note gone names that text, file's, keeps
+// outside its pointer lines, whose pointers to such a note a prune takes out:
+// in the index any, and in a collection note any outside an entry with text of
+// its own, whose links stay as written, as a note's do. Its lines are numbered
+// as text holds them.
 func linksLeft(file, text string, index bool, gone func(string) bool) []string {
 	ls := lines(text)
 	var out []string
 	for i := 0; i < len(ls); i++ {
-		if !index && strings.HasPrefix(ls[i], "- ") {
-			if e := entryEnd(ls, i); !pointerLine(ls, i, e) {
+		if strings.HasPrefix(ls[i], "- ") {
+			e := entryEnd(ls, i)
+			if pointerLine(ls, i, e) {
+				continue
+			}
+			if !index {
 				i = e
 				continue
 			}

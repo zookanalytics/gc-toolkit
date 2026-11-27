@@ -647,8 +647,12 @@ func TestASettleTakesOutThePointersOfEachNoteRemoved(t *testing.T) {
 	if len(s.Failed) != 1 || !said(s.Failed, left) {
 		t.Errorf("failed %q; want the link the index's paragraph keeps named, and nothing else", s.Failed)
 	}
-	if calls := c.findingCalls(linksKey); len(calls) != 1 || !strings.Contains(strings.Join(calls[0], "\x00"), ":\n- "+left) {
-		t.Errorf("finding calls %q; want one finding that names %s", calls, left)
+	calls := c.findingCalls(linksKey)
+	if len(calls) != 1 || !strings.Contains(strings.Join(calls[0], "\x00"), ":\n- "+left) {
+		t.Fatalf("finding calls %q; want one finding that names %s", calls, left)
+	}
+	if msg := []rune(calls[0][slices.Index(calls[0], "--message")+1]); !strings.Contains(string(msg[:min(len(msg), 200)]), linksCommand) {
+		t.Errorf("the finding begins %q; want the 200 characters a recurrence keeps to name %s", string(msg[:min(len(msg), 200)]), linksCommand)
 	}
 	if got := read(t, index); got != "## Judgment\n- **Verify:** **[Kept](kept.md)** k\n- **[TOPICS](index-topics.md)** more\n"+
 		"A rule of its own, as [A](gone-a.md) says.\n" {
@@ -679,6 +683,43 @@ func TestASettleTakesOutThePointersOfEachNoteRemoved(t *testing.T) {
 	}
 	if calls := c.findingCalls(linksKey); len(calls) != 3 || !slices.Contains(calls[2], "--cleared") {
 		t.Errorf("finding calls %q; want the finding cleared once the line is edited", calls)
+	}
+}
+
+// Links names each link to a removed note that a settle leaves, numbered as
+// each file stands, as the settle names it, and leaves out a pointer the next
+// settle takes out, a link inside an entry's own text and a link to a note that
+// has a file. It writes nothing.
+func TestLinksNamesEachLinkASettleLeaves(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	for _, n := range []string{"gone-a.md", "gone-b.md"} {
+		write(t, filepath.Join(c.state(m), removedDir, n+"@"+sum(n)), n)
+	}
+	write(t, filepath.Join(m, "kept.md"), "A kept lesson.\n")
+	index, topics := filepath.Join(m, indexName), filepath.Join(m, "hub-topics.md")
+	indexText := "- [A](gone-a.md) a · [Kept](kept.md) k\nA rule of its own, as [B](gone-b.md) says, and [Kept](kept.md).\n"
+	topicsText := "Gathered from [A](gone-a.md).\n- [B](gone-b.md) b\n- (no file) A fact of its own, after [[gone-a]].\n"
+	write(t, index, indexText)
+	write(t, topics, topicsText)
+	l, err := c.in.Links()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{index + ":2 links gone-b.md, ", topics + ":1 links gone-a.md, "}
+	if len(l.Left) != 2 || len(l.Failed) > 0 || !strings.HasPrefix(l.Left[0], want[0]) || !strings.HasPrefix(l.Left[1], want[1]) {
+		t.Fatalf("links left %q, failed %q; want %q", l.Left, l.Failed, want)
+	}
+	if read(t, index) != indexText || read(t, topics) != topicsText {
+		t.Error("Links wrote a file")
+	}
+	if s := c.settle(); !slices.Equal(s.Failed, l.Left) {
+		t.Errorf("a settle named %q; want what Links named", s.Failed)
+	}
+	write(t, index, "- [Kept](kept.md) k\n")
+	write(t, topics, "- (no file) A fact of its own, after [[gone-a]].\n")
+	if l, err := c.in.Links(); err != nil || len(l.Left)+len(l.Failed) > 0 {
+		t.Errorf("once the lines are edited, links left %q, failed %q, %v", l.Left, l.Failed, err)
 	}
 }
 

@@ -118,17 +118,21 @@ func (in *Intake) report(ps Places, s *Settled) {
 
 // reportLinks files one finding that names each link to a removed note that
 // the settle left, through patrol-finding.sh, and clears that finding once a
-// settle reads the links of every place it learned and leaves none.
+// settle reads the links of every place it learned and leaves none. A
+// recurrence whose text changed keeps only the head of that text, so the
+// finding begins with the command that names the links as they stand.
 func (in *Intake) reportLinks(left []string, read bool, s *Settled) {
 	args := []string{"--scope", findingScope, "--key", linksKey}
 	switch {
 	case len(left) > 0:
 		args = append(args, "--title", "Memory intake leaves links to the notes it removed",
-			"--message", "The learning loop's memory intake takes each pointer to a note it removed out of a memory "+
-				"directory's index and collection notes. Each link below sits in a line it takes no pointer out of, "+
-				"so a session that reads the line takes its text for a live lesson, though the judge let its note go. "+
-				"Edit each line to take out the link and the text about its note, or rewrite the line as a list item "+
-				"of one line that begins with the link, which the next settle takes out:\n- "+strings.Join(left, "\n- "),
+			"--message", "The learning loop's memory intake leaves links to notes it removed, and `"+linksCommand+
+				"` names each one it leaves now, by file and line. The intake takes each pointer to a note it removed "+
+				"out of a memory directory's index and collection notes, and each link it leaves sits in a line it "+
+				"takes no pointer out of, so a session that reads the line takes its text for a live lesson, though "+
+				"the judge let its note go. Edit each line to take out the link and the text about its note, or "+
+				"rewrite the line as a list item of one line that begins with the link, which the next settle takes "+
+				"out. The command exits 0 once none is left. This settle left:\n- "+strings.Join(left, "\n- "),
 			"--type", "bug", "--priority", "3")
 		if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
 			s.Failed = append(s.Failed, "the finding "+linksKey+" did not record: "+f)
@@ -139,6 +143,33 @@ func (in *Intake) reportLinks(left []string, read bool, s *Settled) {
 			s.Failed = append(s.Failed, "the finding "+linksKey+" was not cleared: "+f)
 		}
 	}
+}
+
+// linksCommand is how a session runs Links.
+const linksCommand = `"$GC_CITY_PATH/.gc/services/gctk/bin/gctk" memory links`
+
+// Linked is what Links read: each link to a removed note that a memory
+// directory keeps where a settle leaves it, and what it could not read.
+type Linked struct {
+	Places       Places
+	Left, Failed []string
+}
+
+// Links names each link to a removed note that the index or a collection note
+// of every place keeps in a line a settle takes no pointer out of, by file and
+// line as each file stands, as a settle names it. It takes no lock and writes
+// nothing. An error is a city whose places did not read.
+func (in *Intake) Links() (Linked, error) {
+	ps, err := in.Places()
+	if err != nil {
+		return Linked{}, err
+	}
+	l := Linked{Places: ps}
+	for _, p := range ps.Read {
+		left, failures := linksLeftIn(ps.state(p), p.Dir)
+		l.Left, l.Failed = append(l.Left, left...), append(l.Failed, failures...)
+	}
+	return l, nil
 }
 
 // decide reads every bead a unit waits on, from one read of each store, and

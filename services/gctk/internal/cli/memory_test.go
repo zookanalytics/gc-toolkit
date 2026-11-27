@@ -139,6 +139,35 @@ func TestMemoryApplyRecordsTheDecisions(t *testing.T) {
 	}
 }
 
+// links prints each link to a removed note that a settle leaves, by file and
+// line, and exits 1 while one stays and 0 once none does.
+func TestMemoryLinksNamesEachLinkLeft(t *testing.T) {
+	mem, _, _ := memoryCity(t)
+	if code, out, errs := runMemory("links"); code != 0 || out != "" || errs != "" {
+		t.Errorf("links with none = %d, %q, %q", code, out, errs)
+	}
+	_, out, _ := runMemory("due")
+	var due []map[string]string
+	if err := json.Unmarshal([]byte(out), &due); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "decisions")
+	if err := os.WriteFile(file, []byte(due[1]["memory_ref"]+" drop\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := runMemory("apply", file); code != 0 {
+		t.Fatalf("apply = %d, %q", code, errs)
+	}
+	index := filepath.Join(mem, "MEMORY.md")
+	if err := os.WriteFile(index, []byte("A rule of its own, as [B](b.md) says.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errs := runMemory("links")
+	if code != 1 || errs != "" || out != index+":1 links b.md, a note the intake removed, in a line it takes no pointer out of; the link stays until the line is edited\n" {
+		t.Errorf("links = %d, %q, %q", code, out, errs)
+	}
+}
+
 // settle says what it ended and each place, and exits 3 for a place it cannot
 // learn, after settling the rest.
 func TestMemorySettleSaysWhatItEnded(t *testing.T) {

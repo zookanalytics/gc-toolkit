@@ -206,8 +206,11 @@ note outside an entry with text of its own, is a failure the run names by file
 and line, and each run names it again until someone edits that line. Settle
 files these links as the patrol finding `memory-intake.links`, which names each
 one, and clears it once a settle reads the links of every memory directory it
-learns and leaves none. A link in a note's own text, or in an entry's, stays as
-written. A note `gctk memory` removes, and the text each of its edits replaces,
+learns and leaves none. `gctk memory links` names each such link by file and
+line as the files stand, writes nothing, and exits 0 once none is left. The
+finding's text begins with that command, because a recurrence of a patrol
+finding whose text changed keeps only the head of the new text. A link in a
+note's own text, or in an entry's, stays as written. A note `gctk memory` removes, and the text each of its edits replaces,
 stay as files in the memory directory's hidden `.memory-intake` folder, since an
 agent that opened one before can still write to it.
 
