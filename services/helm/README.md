@@ -552,7 +552,7 @@ the operator's mailbox. `web/src/cityboard/` draws it at the address `?city`,
 with the board's one row structure (`Line`).
 
 **What it reads.** The newest `gc-toolkit.doctor.ran` event in the city's event
-log, which the doctor order records each hour (`gctk doctor run`), read from the
+log, which the doctor order records every four hours (`gctk doctor run`), read from the
 supervisor's `GET /v0/city/{city}/events?type=gc-toolkit.doctor.ran&limit=1`
 (`source.EventLog`). The route answers the newest match first, and the read names
 no window, so a doctor that has stopped still shows its last run. Its payload is
@@ -568,7 +568,7 @@ lists none.
 **What it shows.** `internal/cityboard` decides it, and the page lays it out:
 
 - when doctor last ran, and whether that run completed. A run that started more
-  than two hours before the read is late, twice the order's cadence. It is the
+  than eight hours before the read is late, twice the order's cadence. It is the
   one lateness rule the board holds, because doctor cannot report that it
   stopped;
 - each failing check that two runs in a row measured failing and the operator

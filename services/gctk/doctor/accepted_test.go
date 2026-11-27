@@ -115,7 +115,7 @@ func TestThePacksAcceptedFile(t *testing.T) {
 
 // The doctor order kills its run at its timeout, so the doctor's deadline and
 // the run's three calls to the event log end inside it. The order runs the
-// verb with the pack's accepted file, once for the city, every hour.
+// verb with the pack's accepted file, once for the city, every four hours.
 func TestTheOrder(t *testing.T) {
 	raw, err := os.ReadFile("../../../orders/doctor-run.toml")
 	if err != nil {
@@ -134,7 +134,7 @@ func TestTheOrder(t *testing.T) {
 	}
 	for _, want := range []string{
 		`exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" doctor run --accepted \"$PACK_DIR/doctor/accepted.toml\""`,
-		`scope = "city"`, `trigger = "cooldown"`, `interval = "1h"`,
+		`scope = "city"`, `trigger = "cooldown"`, `interval = "4h"`,
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("orders/doctor-run.toml does not carry %s", want)

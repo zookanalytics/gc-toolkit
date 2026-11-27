@@ -25,8 +25,8 @@ import (
 const ShowAfter = 2
 
 // LateAfter is how long after a run started the page marks it late, twice the
-// doctor order's hourly cadence.
-const LateAfter = 2 * time.Hour
+// doctor order's four-hour cadence.
+const LateAfter = 8 * time.Hour
 
 // Event is one event of the city's log as the supervisor's events route serves
 // it (WireEvent in internal/api/convoy_event_stream.go at gastownhall/gascity
