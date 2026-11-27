@@ -302,6 +302,28 @@ func TestInStartsEveryCommandInItsDirectory(t *testing.T) {
 	}
 }
 
+// A sling names its formula with --on, pours the target's default when it names
+// none, and pours nothing only when NoFormula asks for the route alone.
+func TestSlingPoursItsFormulaOrTheTargetsDefault(t *testing.T) {
+	base := t.TempDir()
+	log := filepath.Join(base, "argv")
+	stub := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + log + "'\n"
+	if err := os.WriteFile(filepath.Join(base, "gc"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &City{bin: filepath.Join(base, "gc")}
+	c.Sling(Sling{Target: "rig/rig.polecat", Bead: "tk-1", Formula: "mol-polecat-work"})
+	c.Sling(Sling{Target: "rig/rig.polecat", Bead: "tk-1"})
+	c.Sling(Sling{Target: "rig/rig.mechanik", Bead: "tk-1", NoFormula: true})
+	raw, _ := os.ReadFile(log)
+	want := "sling rig/rig.polecat tk-1 --on mol-polecat-work\n" +
+		"sling rig/rig.polecat tk-1\n" +
+		"sling rig/rig.mechanik tk-1 --no-formula --no-convoy\n"
+	if string(raw) != want {
+		t.Fatalf("the slings ran %q, want %q", raw, want)
+	}
+}
+
 // A city As an actor runs every command with BEADS_ACTOR naming that actor,
 // and keeps the directory its commands start in. The city it came from runs
 // as the process does.

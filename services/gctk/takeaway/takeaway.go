@@ -510,11 +510,13 @@ func (r *take) write() (string, error) {
 		return "", fmt.Errorf("a --waiting-on edge on %s did not land, as the lines above say. The headline%s stands", r.bead, r.released())
 	}
 	// The bead is released and its run has ended, so a route sends it to the
-	// pool now, through a sling that pours nothing and files no convoy.
+	// pool now. The plain sling pours the pool's default formula and files the
+	// convoy its steps read, so the pool takes the work as a started run and
+	// never as the bead itself.
 	if r.req.Route != "" {
-		res := t.City.Sling(gascity.Sling{Target: r.req.Route, Bead: r.bead, NoFormula: true})
+		res := t.City.Sling(gascity.Sling{Target: r.req.Route, Bead: r.bead})
 		if f := res.Failure(); f != "" {
-			return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not route it to %s (%s), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling %s %s --no-formula --no-convoy", r.bead, r.req.Route, f, r.req.Route, r.bead)
+			return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not send it to %s (%s), so it rests open, unassigned and routed to no pool. Send it once the cause is fixed: gc sling %s %s", r.bead, r.req.Route, f, r.req.Route, r.bead)
 		}
 	}
 	note := ""

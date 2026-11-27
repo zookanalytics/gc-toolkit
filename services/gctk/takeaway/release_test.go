@@ -134,10 +134,10 @@ func TestAReleaseLeavesThisSessionsOwnRun(t *testing.T) {
 	}
 }
 
-// A route sends the released bead to its pool through a sling that pours
-// nothing and files no convoy, once the release has landed and the run beneath
-// it has ended. The release write itself clears the route, and says where the
-// bead went (ROUTE, ROUTEONE, ROUTECLR).
+// A route sends the released bead to its pool through a plain sling, which
+// pours the pool's default formula, once the release has landed and the run
+// beneath it has ended. The release write itself clears the route, and says
+// where the bead went (ROUTE, ROUTEONE, ROUTECLR).
 func TestARouteSlingsTheBeadOnceItsRunHasEnded(t *testing.T) {
 	w := newWorld(t)
 	code, out, err := w.take(Request{Bead: "tk-a", Text: "actionable — routed to the polecat pool", By: "proactive", Release: true, Route: pool})
@@ -145,7 +145,7 @@ func TestARouteSlingsTheBeadOnceItsRunHasEnded(t *testing.T) {
 		t.Fatalf("a release to a pool exits %d (%v)", code, err)
 	}
 	has(t, w.update("tk-a"), "--set-metadata gc.routed_to= ", "(ROUTE) the release write clears the route")
-	if got := w.lines("SLING "); !slices.Equal(got, []string{"SLING " + pool + " tk-a --no-formula --no-convoy"}) {
+	if got := w.lines("SLING "); !slices.Equal(got, []string{"SLING " + pool + " tk-a"}) {
 		t.Errorf("(ROUTE) the slings are %q", got)
 	}
 	w.before("DISARM tk-a", "UPDATE tk-a", "the disarm comes first")

@@ -231,7 +231,7 @@ func (w *world) takeaway(req takeaway.Request) (string, error) {
 	}
 	w.released(req)
 	if req.Route != "" && !w.configured(req.Route) {
-		return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not route it to %s (exit 1: %s), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling %s %s --no-formula --no-convoy",
+		return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not send it to %s (exit 1: %s), so it rests open, unassigned and routed to no pool. Send it once the cause is fixed: gc sling %s %s",
 			req.Bead, req.Route, w.unconfigured(req.Route), req.Route, req.Bead)
 	}
 	return "takeaway set on " + req.Bead, nil
