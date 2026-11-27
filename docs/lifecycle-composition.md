@@ -65,8 +65,8 @@ mechanically identical rows if the only difference between them is prose. The
 board cannot tell them apart, so it shows both as wanting nothing, forever.
 
 The mechanism: `gctk bead takeaway <bead> "<text>" --waiting-on <work-bead>`,
-repeatable, writes a `blocks` edge beside the takeaway string
-(`services/gctk/takeaway`). The prose still gets written — it is
+repeatable, writes a `blocks` edge beside the takeaway it appends to the
+bead's notes (`services/gctk/takeaway`). The prose still gets written — it is
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
@@ -147,7 +147,7 @@ The intended shape is `tk-2cyxo` (in flight):
   idempotent; the actor cannot depend on anyone opening a board.
 - **Scoped to operator-origin subjects** — the set where a human has a standing
   expectation of an answer.
-- **Nothing left to un-mute.** A takeaway no longer suppresses the liveness
+- **Nothing left to un-mute.** A takeaway does not suppress the liveness
   sweep's stall reporting (`assets/scripts/liveness-sweep.sh`): the wait it names
   does, through the edge that records it, so a subject whose waiting set has
   fully closed already returns as an unnamed wait. What the push adds is where

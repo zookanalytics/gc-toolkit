@@ -220,7 +220,7 @@ dance by hand. It returns, and nothing outside this:
 - **Subject core** — status, priority, type, task_kind, assignee; the live and
   provenance routes; the anchor state (merge_result, pr_number, branch,
   merged_target) when the bead carries a merge_result; the first_reaction fields;
-  gc.origin; and the distilled gc.takeaway headline with its settled flag.
+  and gc.origin.
 - **Context edges**, shown but never gating — the parent, the relates-to edges,
   the beads that track it, its conversations among them, the beads that wait
   on it by a `blocks` or an `until` edge, and a count per class.

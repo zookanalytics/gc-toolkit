@@ -1282,7 +1282,7 @@ under the key, and each gate Accept would answer there.
 
 ## How a parked subject comes back
 
-A sitting that reaches a conclusion leaves its subject with a `gc.takeaway`,
+A sitting that reaches a conclusion leaves a takeaway in its subject's notes,
 a one-line headline of what was settled or what is being waited for. A
 takeaway exempts nothing anywhere in the liveness family —
 `liveness-sweep.sh`, its precheck and `liveness-recheck.sh`. The wait it names
@@ -1317,9 +1317,9 @@ containment carries the wait. Routed work already filed as a child stays where
 it is, and the sweep reads it there.
 
 **Where prose alone is correct.** `gctk bead takeaway` writes prose with no
-edge where nothing waits, and each such call passes `--no-wait`, which stamps
-`gc.takeaway_settled`: `lifecycle/lifecycle.toml` `[holds]` reads a takeaway
-as a hold unless its writer stamped that key beside it.
+edge where nothing waits, and each such call passes `--no-wait`, which says
+so: a release that parks a bead names its wait or passes `--no-wait`, and is
+refused with neither.
 
 - **A settled sitting.** The takeaway records what the sitting concluded.
   Nothing is owed and nothing is waiting, so there is no bead to point an edge
@@ -1336,8 +1336,8 @@ as a hold unless its writer stamped that key beside it.
 
 Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with
-neither the edge nor the flag is a subject parked on a sentence, and
-`doctor/check-wait-is-an-edge` reports it. No agent in the pack writes a
+neither the edge nor the flag parks its subject on a sentence, which holds
+nothing. No agent in the pack writes a
 `triage.hold`; the liveness sweep's disposition menu offers a human gate in its
 place.
 
