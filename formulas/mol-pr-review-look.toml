@@ -87,11 +87,9 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 
 On exit 1 or 2, run it again. When it fails again, go on to close this step.
 
-**6. Close this step.** A look that sends the review on closes it plainly, and
-the loop's check judges the round:
+**6. Close this step.** For a continue, close it plainly:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
-A look that stops the review closes it failed, which ends the loop at this
-round:
+For a stop, close it failed:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop --outcome fail`
 
 **Exit criteria:** the whole review read, the look recorded and posted, this

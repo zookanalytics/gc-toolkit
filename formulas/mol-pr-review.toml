@@ -232,9 +232,7 @@ post the round ruled:
 On exit 1 or 2, run it again. When it fails again, cancel the run:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
-**7. Close this step.** A fresh look follows when the run's account calls for
-one, which the output check printed as `look`. Then the loop's check judges the
-round, and records the run's result when the round ends the loop.
+**7. Close this step.**
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** every finding and ask ruled, the round's fixes pushed and
