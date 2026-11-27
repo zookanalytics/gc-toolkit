@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when the operator explicitly asks to hand off, reset, wrap up, recycle a session, get fresh context, or restart a coordination agent (mechanik, deacon, witness). Not on your own judgment that a handoff would be useful.
+description: Use when the operator explicitly asks to hand off, reset, wrap up, recycle a session, get fresh context, or restart a coordination agent (mechanik, witness). Not on your own judgment that a handoff would be useful.
 ---
 
 # Handoff
@@ -14,9 +14,9 @@ description: Use when the operator explicitly asks to hand off, reset, wrap up, 
 This skill has one shape. Confirm you are in it by reading `$GC_TEMPLATE`:
 
 - **Canonical path** — controller-restartable named sessions: the
-  always-on coordination agents in this city (mechanik, deacon).
-  Their `mode = "always"` declaration lets the controller stop and restart
-  them cleanly when `gc handoff` fires. The transcript is replaced;
+  always-on coordination agent in this city, the mechanik.
+  Its `mode = "always"` declaration lets the controller stop and restart
+  it cleanly when `gc handoff` fires. The transcript is replaced;
   durable state (beads, mail, work) survives.
 
 If `$GC_TEMPLATE` falls outside that shape — a `mode = "on_demand"`
@@ -44,7 +44,7 @@ and the next-life agent reads that mail on its first action. Anything
 ## When the operator asks for it
 
 Recognize as triggers: "handoff", "fresh context" / "reset context" /
-"clean slate", "wrap this up and reset", "restart [mechanik/deacon] with a
+"clean slate", "wrap this up and reset", "restart [mechanik] with a
 clean transcript". Ambiguous phrasings ("let's wrap up" alone) get
 clarified first: *"Do you want a handoff (fresh transcript) or just a
 summary in place?"*

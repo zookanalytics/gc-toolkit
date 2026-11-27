@@ -272,9 +272,9 @@ The block's last line, for each exit:
 # the bead ready.
 # A town-repo edit takes {{ .BindingPrefix }}mechanik. The exit refuses the po, which
 # takes no work by assignment: work no epic holds is routed, and the exit
-# holds what intake does not admit for placement. It refuses the deacon and
-# the witness, which take mail and no bead, and the keeper, which takes no
-# first reaction's bead.
+# holds what intake does not admit for placement. It refuses the witness,
+# which takes mail and no bead, and the keeper, which takes no first
+# reaction's bead.
 "$GCTK" reaction dispose "$SUBJECT" --run "$ROOT" --by proactive --takeaway "$TAKEAWAY" --reason "$REASON" --disposition actionable --assign {{ .BindingPrefix }}mechanik
 
 # blocked — the wait is an EDGE, never prose: an unheld bead is still ready

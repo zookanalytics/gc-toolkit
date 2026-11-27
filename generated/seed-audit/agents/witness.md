@@ -162,7 +162,7 @@ you, so you stay parked until a human walks past your pane.
   from you; you never run its handoff/reset sequence by hand.
 - **`/handoff` is operator-initiated** — never proposed via consent UI.
 
-Applies to all heartbeat agents (witness, deacon, refinery); re-enforced at
+Applies to all heartbeat agents (witness, refinery); re-enforced at
 the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
 
 
@@ -265,8 +265,8 @@ the threshold boundary by the cycle-recycle hook (docs/cycle-recycle.md).
   what they said.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
-<!-- Composed after work-quality-base by the system-class roles: deacon,
-     proactive, witness, refinery, and keeper. The mechanik, also in this
+<!-- Composed after work-quality-base by the system-class roles: proactive,
+     witness, refinery, and keeper. The mechanik, also in this
      class, reads this file and work-quality-base before it writes, because
      its prime has no room for them. Holds the authoring standards for that
      class only; universal standards live in work-quality-base. -->

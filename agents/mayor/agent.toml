@@ -11,7 +11,7 @@ scope = "city"
 # context.
 wake_mode = "fresh"
 # The mayor changes no repo, so it works from an agent home of the city,
-# as mechanik and the deacon do.
+# as the mechanik does.
 work_dir = ".gc/agents/mayor"
 # One sitting at a time.
 max_active_sessions = 1

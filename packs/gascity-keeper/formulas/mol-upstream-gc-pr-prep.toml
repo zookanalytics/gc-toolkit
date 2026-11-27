@@ -268,8 +268,8 @@ would leak city-internal context into upstream history:
   context).
 - Rig names (`gc rig list` entries) and city references ("this city",
   the city's own name).
-- Internal agent handles — `polecat`, `refinery`, `witness`, `deacon`,
-  `converse`, `mechanik`, `keeper`, and any older handle that survives in
+- Internal agent handles — `polecat`, `refinery`, `witness`, `converse`,
+  `mechanik`, `keeper`, and any older handle that survives in
   history. Replace with neutral wording ("the city's keeper agent" →
   "tooling"); generalize rig names (`gc-toolkit pack` → "downstream pack");
   drop `Tracking: tk-abc123`-style lines entirely.

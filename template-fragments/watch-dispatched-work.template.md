@@ -8,7 +8,7 @@ workflow its members claim:
 gc sling <rig>/<pool> <bead> --on <formula>
 ```
 
-A **named agent** (mechanik, deacon, witness, refinery, keeper) takes its work
+A **named agent** (mechanik, witness, refinery, keeper) takes its work
 in the form it finds it by, at the name `gc agent list` prints. The mechanik
 claims through its hook, so it takes a route, and a nudge when the bead is
 ready now, because a route alone gives a running agent no turn:
@@ -19,9 +19,8 @@ gc session nudge <qualified-name> "<bead> is routed to you and ready"
 ```
 
 The refinery and the keeper list the beads assigned to them, so they take the
-assignee in place of the route. The deacon patrols its own wisps and the
-witness runs only for its mail, so each takes mail. The `work` skill gives each
-agent's command.
+assignee in place of the route. The witness runs only for its mail, so it
+takes mail. The `work` skill gives each agent's command.
 
 `<binding>` is the name the city imports the gc-toolkit pack under, which gc puts
 in front of its skills: `gc-toolkit` in `gc-toolkit.work`. A script called through
