@@ -364,22 +364,22 @@ func TestSettleFilesAFindingForAPlaceItCannotLearn(t *testing.T) {
 	if len(got.Places.Unknown) != 1 || got.Places.Unknown[0].Name != "none" || !said(got.Said, "ok: "+m+", 1 notes and 0 entries") {
 		t.Errorf("unknown %+v, said %q", got.Places.Unknown, got.Said)
 	}
-	calls := c.rt.Scripts()
-	if len(calls) != 1 || calls[0].Name != "patrol-finding.sh" {
-		t.Fatalf("scripts %+v; want one finding", calls)
+	calls := c.findingCalls(placesKey)
+	if len(calls) != 1 {
+		t.Fatalf("scripts %+v; want one finding", c.rt.Scripts())
 	}
-	args := strings.Join(calls[0].Args, "\x00")
+	args := strings.Join(calls[0], "\x00")
 	for _, want := range []string{"--scope\x00memory-intake", "--key\x00memory-intake.places",
 		"--title\x00Memory intake cannot learn where Claude Code keeps the memory of none",
 		"- none: Claude Code 2.1.326 named no memory directory", "--type\x00bug"} {
 		if !strings.Contains(args, want) {
-			t.Errorf("the finding's args %q lack %q", calls[0].Args, want)
+			t.Errorf("the finding's args %q lack %q", calls[0], want)
 		}
 	}
 	c.claude.Dirs[c.checkout("none")] = m
 	c.settle()
-	if calls := c.rt.Scripts(); len(calls) != 2 || !strings.Contains(strings.Join(calls[1].Args, " "), "--key memory-intake.places --cleared") {
-		t.Errorf("scripts %+v; want the finding cleared", calls)
+	if calls := c.findingCalls(placesKey); len(calls) != 2 || !strings.Contains(strings.Join(calls[1], " "), "--key memory-intake.places --cleared") {
+		t.Errorf("scripts %+v; want the finding cleared", c.rt.Scripts())
 	}
 	c.rt.OnScript = func(gfake.Call) gascity.Result { return gascity.Result{Code: 1, Output: "could not file"} }
 	if got := c.settle(); !said(got.Failed, "the finding memory-intake.places was not cleared: exit 1: could not file") {

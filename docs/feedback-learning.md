@@ -203,11 +203,13 @@ code span is text.
 
 A link to a removed note that a run leaves in the index, or in a collection
 note outside an entry with text of its own, is a failure the run names by file
-and line, and each run names it again until someone edits that line. A link in
-a note's own text, or in an entry's, stays as written. A note `gctk memory`
-removes, and the text each of its edits replaces, stay as files in the memory
-directory's hidden `.memory-intake` folder, since an agent that opened one
-before can still write to it.
+and line, and each run names it again until someone edits that line. Settle
+files these links as the patrol finding `memory-intake.links`, which names each
+one, and clears it once a settle reads the links of every memory directory it
+learns and leaves none. A link in a note's own text, or in an entry's, stays as
+written. A note `gctk memory` removes, and the text each of its edits replaces,
+stay as files in the memory directory's hidden `.memory-intake` folder, since an
+agent that opened one before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
 memory carries in its prompt (`template-fragments/memory-notes.template.md`),

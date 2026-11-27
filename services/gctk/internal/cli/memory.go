@@ -145,9 +145,9 @@ out and leaves the use lines. A drop keeps the unit's text under its
 directory's state and removes it. Each apply and settle then takes out of the
 index and the collection notes every pointer to a note removed while its name
 holds no file, and names on stderr, by file and line, each link to one that it
-leaves (docs/feedback-learning.md, "The memory intake"). A decision acts only
-on the text its ref names, so one whose unit changed since due listed it is
-refused and stays due.
+leaves, which the next settle files as a finding (docs/feedback-learning.md,
+"The memory intake"). A decision acts only on the text its ref names, so one
+whose unit changed since due listed it is refused and stays due.
 
 exit: 0 each decision recorded, removed or refused as changed
       1 a decision could not be read or done, or a link to a removed note
@@ -204,7 +204,10 @@ each place and what it ended.
 
 A place whose memory directory Claude Code does not name is one patrol finding,
 memory-intake.places, filed through the pack's patrol-finding.sh in the scripts
-directory GCTK_SCRIPTS_DIR names, and cleared once every place is learned.
+directory GCTK_SCRIPTS_DIR names, and cleared once every place is learned. The
+links to removed notes that it leaves go in another, memory-intake.links, which
+names each by file and line and is cleared once a settle reads the links of
+every place it learned and leaves none.
 
 exit: 0 done
       1 something could not be read or written, or a link to a removed note

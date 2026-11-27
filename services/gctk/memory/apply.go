@@ -75,9 +75,9 @@ type Applied struct {
 // the pointers to each note removed, by this run or an earlier one, come out of
 // the index and the collection notes while its name holds no file, and each
 // link to such a note that the run leaves is a failure that names its file and
-// line. A decision acts only on the text the ref names, and one whose unit
-// changed since it was listed is refused and stays due. An error is a city
-// whose places did not read.
+// line, which the next settle files as a finding. A decision acts only on the
+// text the ref names, and one whose unit changed since it was listed is refused
+// and stays due. An error is a city whose places did not read.
 func (in *Intake) Apply(decisions string) (Applied, error) {
 	var a Applied
 	today := in.today()
@@ -224,8 +224,8 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 		}
 		a.Said = append(a.Said, "recorded "+d.ref+": due again on "+d.arg+asked+withdrawn)
 	}
-	gone, failures := unlink(state, p.Dir)
-	a.Failed = append(a.Failed, failures...)
+	gone, left, failures := unlink(state, p.Dir)
+	a.Failed = append(append(a.Failed, failures...), left...)
 	rows = withoutFiles(rows, gone)
 	if err := writeList(state, rows); err != nil {
 		a.Failed = append(a.Failed, err.Error())

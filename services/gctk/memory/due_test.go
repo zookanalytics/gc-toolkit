@@ -3,6 +3,7 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -646,6 +647,9 @@ func TestASettleTakesOutThePointersOfEachNoteRemoved(t *testing.T) {
 	if len(s.Failed) != 1 || !said(s.Failed, left) {
 		t.Errorf("failed %q; want the link the index's paragraph keeps named, and nothing else", s.Failed)
 	}
+	if calls := c.findingCalls(linksKey); len(calls) != 1 || !strings.Contains(strings.Join(calls[0], "\x00"), ":\n- "+left) {
+		t.Errorf("finding calls %q; want one finding that names %s", calls, left)
+	}
 	if got := read(t, index); got != "## Judgment\n- **Verify:** **[Kept](kept.md)** k\n- **[TOPICS](index-topics.md)** more\n"+
 		"A rule of its own, as [A](gone-a.md) says.\n" {
 		t.Errorf("the index reads %q", got)
@@ -659,9 +663,22 @@ func TestASettleTakesOutThePointersOfEachNoteRemoved(t *testing.T) {
 	if s := c.settle(); !said(s.Failed, left) {
 		t.Errorf("failed %q on the next run; want the link named again", s.Failed)
 	}
+	release, err := c.in.lock(c.state(m), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.in.LockWait = 100 * time.Millisecond
+	c.settle()
+	release()
+	if calls := c.findingCalls(linksKey); len(calls) != 2 {
+		t.Errorf("finding calls %q; want a run that did not read the links to leave the finding as it stands", calls)
+	}
 	write(t, index, "## Judgment\n- **Verify:** **[Kept](kept.md)** k\n")
 	if s := c.settle(); len(s.Failed) > 0 {
 		t.Errorf("failed %q once the line is edited", s.Failed)
+	}
+	if calls := c.findingCalls(linksKey); len(calls) != 3 || !slices.Contains(calls[2], "--cleared") {
+		t.Errorf("finding calls %q; want the finding cleared once the line is edited", calls)
 	}
 }
 

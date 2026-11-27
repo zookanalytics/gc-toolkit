@@ -814,7 +814,7 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-27, at `gastownhall/gascity` main 5bece41c7705, `gastownhall/beads`
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 8b7aeb534600, `gastownhall/beads`
   main 0c9c8e697843 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
@@ -895,7 +895,7 @@ no warrant.
     user ("Enable or disable auto memory").
   - The search is
     [specs/tk-zlot608.8/gas-city-search.md](../specs/tk-zlot608.8/gas-city-search.md).
-- **Verified.** 2026-11-27, at `gastownhall/gascity` main 5bece41c7705 and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 8b7aeb534600 and
   `gastownhall/beads` main 0c9c8e697843, with the Memory Beads proposal at its
   Revision 4. Claude Code's memory page as read on 2026-11-27.
 - **Retires when.** bd ships memory as a kind of bead with links to work (the

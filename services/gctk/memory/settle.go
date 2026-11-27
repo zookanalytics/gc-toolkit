@@ -48,8 +48,9 @@ const landingDepth = 3
 // fix landed makes its unit due at once, as old as the day it ended, with why.
 // A row whose unit is gone from its directory leaves the list, and the
 // pointers to each note removed come out as an apply takes them out. A place
-// whose memory directory it cannot learn is one patrol finding. An error is a
-// city whose places did not read.
+// whose memory directory it cannot learn is one patrol finding, and a link to
+// a removed note that it leaves is another. An error is a city whose places did
+// not read.
 func (in *Intake) Settle() (Settled, error) {
 	ps, err := in.Places()
 	if err != nil {
@@ -70,28 +71,34 @@ func (in *Intake) Settle() (Settled, error) {
 		}
 	}
 	outcomes := in.decide(ps, ids, &s)
+	var left []string
+	read := true
 	for _, p := range ps.Read {
-		in.settleIn(ps, p, outcomes, &s)
+		l, ok := in.settleIn(ps, p, outcomes, &s)
+		left, read = append(left, l...), read && ok
 	}
 	in.report(ps, &s)
+	in.reportLinks(left, read, &s)
 	return s, nil
 }
 
-// The patrol finding a settle keeps for the places it cannot learn.
+// The patrol findings a settle keeps: one for the places it cannot learn, and
+// one for the links to removed notes it leaves.
 const (
 	findingScope = "memory-intake"
-	findingKey   = "memory-intake.places"
+	placesKey    = "memory-intake.places"
+	linksKey     = "memory-intake.links"
 )
 
 // report files one finding that names each place whose memory directory the
 // intake could not learn, through patrol-finding.sh, which updates the live
 // finding of its key, and clears that finding once every place is learned.
 func (in *Intake) report(ps Places, s *Settled) {
-	args := []string{"--scope", findingScope, "--key", findingKey}
+	args := []string{"--scope", findingScope, "--key", placesKey}
 	if len(ps.Unknown) == 0 {
 		args = append(args, "--cleared", "--message", "The memory intake learns every place's memory directory again.")
 		if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
-			s.Failed = append(s.Failed, "the finding "+findingKey+" was not cleared: "+f)
+			s.Failed = append(s.Failed, "the finding "+placesKey+" was not cleared: "+f)
 		}
 		return
 	}
@@ -105,7 +112,32 @@ func (in *Intake) report(ps Places, s *Settled) {
 			"city's root keep memory, and reads and removes nothing where it cannot learn that:\n"+strings.Join(why, "\n"),
 		"--type", "bug", "--priority", "3")
 	if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
-		s.Failed = append(s.Failed, "the finding "+findingKey+" did not record: "+f)
+		s.Failed = append(s.Failed, "the finding "+placesKey+" did not record: "+f)
+	}
+}
+
+// reportLinks files one finding that names each link to a removed note that
+// the settle left, through patrol-finding.sh, and clears that finding once a
+// settle reads the links of every place it learned and leaves none.
+func (in *Intake) reportLinks(left []string, read bool, s *Settled) {
+	args := []string{"--scope", findingScope, "--key", linksKey}
+	switch {
+	case len(left) > 0:
+		args = append(args, "--title", "Memory intake leaves links to the notes it removed",
+			"--message", "The learning loop's memory intake takes each pointer to a note it removed out of a memory "+
+				"directory's index and collection notes. Each link below sits in a line it takes no pointer out of, "+
+				"so a session that reads the line takes its text for a live lesson, though the judge let its note go. "+
+				"Edit each line to take out the link and the text about its note, or rewrite the line as a list item "+
+				"of one line that begins with the link, which the next settle takes out:\n- "+strings.Join(left, "\n- "),
+			"--type", "bug", "--priority", "3")
+		if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
+			s.Failed = append(s.Failed, "the finding "+linksKey+" did not record: "+f)
+		}
+	case read:
+		args = append(args, "--cleared", "--message", "The memory intake leaves no link to a note it removed.")
+		if f := in.Runtime.Script("patrol-finding.sh", args...).Failure(); f != "" {
+			s.Failed = append(s.Failed, "the finding "+linksKey+" was not cleared: "+f)
+		}
 	}
 }
 
@@ -334,24 +366,25 @@ func closedDay(r *ledger.Record, today string) string {
 // settleIn applies the decided waits to one place under its lock: it removes
 // each unit whose fix landed and is unchanged since it was judged, makes each
 // unit whose wait ended due, takes out the pointers to each note removed, and
-// drops the rows whose unit is gone.
-func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *Settled) {
+// drops the rows whose unit is gone. It returns each link to a removed note
+// that it left, and whether it read the links of the place.
+func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *Settled) ([]string, bool) {
 	state := ps.state(p)
 	release, err := in.lock(state, p.Dir)
 	if err != nil {
 		s.Failed = append(s.Failed, err.Error())
-		return
+		return nil, false
 	}
 	defer release()
 	units, err := scan(p.Dir)
 	if err != nil {
 		s.Failed = append(s.Failed, err.Error()+"; nothing there is removed, and its list stays as it is")
-		return
+		return nil, false
 	}
 	rows, err := readList(state)
 	if err != nil {
 		s.Failed = append(s.Failed, err.Error())
-		return
+		return nil, false
 	}
 	present := map[string]Unit{}
 	notes, entries := 0, 0
@@ -384,13 +417,14 @@ func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *S
 		}
 		keep = append(keep, r)
 	}
-	gone, failures := unlink(state, p.Dir)
-	s.Failed = append(s.Failed, failures...)
+	gone, left, failures := unlink(state, p.Dir)
+	s.Failed = append(append(s.Failed, failures...), left...)
 	keep = withoutFiles(keep, gone)
 	if err := writeList(state, keep); err != nil {
 		s.Failed = append(s.Failed, err.Error())
 	}
 	s.Said = append(s.Said, fmt.Sprintf("%s: %s, %d notes and %d entries", p.names(), p.Dir, notes, entries))
+	return left, len(failures) == 0
 }
 
 // leave removes a unit whose fix landed, and reports whether it went.

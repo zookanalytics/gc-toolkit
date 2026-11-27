@@ -341,18 +341,18 @@ func pruneLinks(text string, gone func(string) bool) string {
 
 // unlink takes out of the index and every collection note each pointer to a
 // note the intake removed, on this run or an earlier one, while its name holds
-// no file, and names each link to such a note that it leaves. It reads which
-// notes it removed from the text it kept of each, so a run that stops before
-// its pointers come out leaves them to the next, and a link it leaves is named
-// again on each run until its line changes. It returns the notes removed whose
-// names hold no file, and what it could not do.
-func unlink(state, dir string) (map[string]bool, []string) {
+// no file. It reads which notes it removed from the text it kept of each, so a
+// run that stops before its pointers come out leaves them to the next. It
+// returns the notes removed whose names hold no file, each link to one that it
+// leaves, by file and line, which each run names again until its line changes,
+// and what it could not do.
+func unlink(state, dir string) (gone map[string]bool, left, failures []string) {
 	taken, err := removedNames(state)
 	if err != nil {
-		return nil, []string{fmt.Sprintf("the notes removed from %s did not read, so no link to one was taken out, and the next run tries again: %v", dir, err)}
+		return nil, nil, []string{fmt.Sprintf("the notes removed from %s did not read, so no link to one was taken out, and the next run tries again: %v", dir, err)}
 	}
-	failures := prune(state, dir, taken)
-	return absent(dir, taken), failures
+	left, failures = prune(state, dir, taken)
+	return absent(dir, taken), left, failures
 }
 
 // removedNames is each name under which state keeps the text of a unit the
@@ -389,10 +389,10 @@ func absent(dir string, names map[string]bool) map[string]bool {
 // prune takes the pointers to each note in taken whose name holds no file out
 // of the index and every collection note, and removes, with its text kept, a
 // collection note that this leaves with no list item, whose own pointers then
-// go in turn, until a pass removes no collection note. It then names each link
-// to such a note that the last pass left. taken gains the collection notes it
-// removes.
-func prune(state, dir string, taken map[string]bool) []string {
+// go in turn, until a pass removes no collection note. It returns each link to
+// such a note that the last pass left, and what it could not do. taken gains
+// the collection notes it removes.
+func prune(state, dir string, taken map[string]bool) (left, failures []string) {
 	gone := func(name string) bool {
 		if !taken[name] {
 			return false
@@ -400,12 +400,12 @@ func prune(state, dir string, taken map[string]bool) []string {
 		_, err := os.Lstat(filepath.Join(dir, name))
 		return errors.Is(err, fs.ErrNotExist)
 	}
-	var failures, names []string
+	var names []string
 	var final map[string]string
 	for more := true; more; {
 		var err error
 		if names, err = hubs(dir); err != nil {
-			return append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out, and the next run tries again: %v", dir, err))
+			return nil, append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out, and the next run tries again: %v", dir, err))
 		}
 		more, final = false, map[string]string{}
 		for _, name := range names {
@@ -433,10 +433,10 @@ func prune(state, dir string, taken map[string]bool) []string {
 	}
 	for _, name := range names {
 		if text, ok := final[name]; ok {
-			failures = append(failures, linksLeft(filepath.Join(dir, name), text, name == indexName, gone)...)
+			left = append(left, linksLeft(filepath.Join(dir, name), text, name == indexName, gone)...)
 		}
 	}
-	return failures
+	return left, failures
 }
 
 // linksLeft names each link to a note gone names that text, file's, keeps: in

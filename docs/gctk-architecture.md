@@ -206,9 +206,10 @@ What each noun owns:
   removed, under the pack's state directory and keyed by the SHA-256 of the
   directory's real path. It owns no key on a bead: it reads the distiller's
   `task_kind`, `proposal_bead` and `eng_bead` read-only, and a landing through
-  the pr record's reading face. Its one bead write is the patrol finding
+  the pr record's reading face. Its bead writes are the patrol findings
   `memory-intake.places`, for the places Claude Code names no memory directory
-  for, which it files and clears through the runtime adapter's
+  for, and `memory-intake.links`, for the links to removed notes a settle
+  leaves, which it files and clears through the runtime adapter's
   `patrol-finding.sh`.
 - **`distiller`:** the start's lock, `distiller-start.lock` in the city's
   `.gc/runtime/packs/gc-toolkit`, which each start holds from its read of the
