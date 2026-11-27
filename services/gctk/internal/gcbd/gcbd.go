@@ -11,11 +11,13 @@
 // supervisor's pooled, process-lifetime Dolt connection over HTTP and falls
 // back to forking `gc bd show` only when that daemon is unreachable, so a read
 // on the healthy path neither forks nor opens its own Dolt connection. Its
-// answer can lag a fresh write and carries no notes, so a caller takes the
-// cache by name, only where a read one pass stale decides nothing that
-// matters. Writes (Update) and every forked read shell out to `gc` exactly as
-// the shell scripts do, which keeps the observability, the stub surface and
-// the permissions surface of those paths identical across the port: the same
+// answer can lag a fresh write, and its row, Gas City's, leaves out or recasts
+// some of what `gc bd show` carries ([Client.ShowCached] names what), so a
+// caller takes the cache by name, only where a read one pass stale decides
+// nothing that matters and needs none of what the row leaves out or recasts.
+// Writes (Update) and every forked read shell out to `gc` exactly as the shell
+// scripts do, which keeps the observability, the stub surface and the
+// permissions surface of those paths identical across the port: the same
 // invocations appear in the same logs, and the same test stubs serve them.
 //
 // The accessors mirror the jq expressions the scripts used, including their
@@ -592,13 +594,19 @@ func (c *Client) Show(id string) *Bead { return c.showViaExec(id) }
 // ShowCached reads one bead through the supervisor API when the daemon read
 // path is on: a GET against the daemon's pooled Dolt connection, which neither
 // forks nor opens a connection of its own. The daemon's cache can lag a fresh
-// write and its bead payload omits notes, so its answer can differ from
-// Show's, and a caller takes it by name, only where a read one pass stale
-// decides nothing that matters. Only a 200 that decodes to a bead is trusted;
-// a non-200 (including a 404 miss), a transport failure, or an undecodable
-// body falls through to `gc bd show`, so whether a bead exists is always
-// `gc bd`'s answer. When the daemon read path is off the read is Show's. A
-// bead that cannot be read returns nil, as Show's does.
+// write, and its bead payload is Gas City's row rather than bd's. It carries
+// no notes, no close time, and no await type or await id, the fields that
+// tell a human gate from another gate. Its status is open, in_progress or
+// closed, with every other bd status, such as blocked or deferred, read as
+// open. Each metadata value is a string, so a stored false reads "false"
+// (specs/tk-ivqez0f/gas-city-search.md). So its answer can differ from Show's,
+// and a caller takes it by name, only where a read one pass stale decides
+// nothing that matters and needs none of what the payload leaves out or
+// recasts. Only a 200 that decodes to a bead is trusted; a non-200 (including
+// a 404 miss), a transport failure, or an undecodable body falls through to
+// `gc bd show`, so whether a bead exists is always `gc bd`'s answer. When the
+// daemon read path is off the read is Show's. A bead that cannot be read
+// returns nil, as Show's does.
 func (c *Client) ShowCached(id string) *Bead {
 	if !c.daemonConfigured() {
 		return c.showViaExec(id)
