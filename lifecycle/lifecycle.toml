@@ -1277,7 +1277,8 @@ keys = [
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
 # assets/scripts/patrol-finding.sh (the deacon's patrol, the witness and the
-# seat-progress report file through it). finding.key and finding.about together are the dedup identity. A report
+# seat-progress report file through it). finding.key and finding.about
+# together are the dedup identity. A report
 # whose key and subject both match a live bead records a recurrence on that
 # bead, unless that bead is held at blocked with nothing open left to wait on.
 # A report that names no subject matches only a bead with no finding.about. An

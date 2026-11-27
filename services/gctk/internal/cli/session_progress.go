@@ -47,8 +47,8 @@ With --act, which the seat-progress-report order passes when the look's event
 fires, it reads the same way, records no event, and files the patrol finding
 no-progress.<session> about each stalled seat's claim, in the claim's rig,
 through the pack's patrol-finding.sh in the directory GCTK_SCRIPTS_DIR names.
-The writer files nothing while a finding is open under the key, so a second
-run for one event changes nothing.
+While a finding is open under the key, the writer files no second one, and a
+later run counts one more occurrence on it.
 
 ` + lookHelpEnd + "\n\n" + actHelpEnd
 

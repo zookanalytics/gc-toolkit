@@ -82,7 +82,7 @@ func (r *Report) Run(ctx context.Context) Acted {
 
 // GateArgs are the writer's arguments for one stuck handoff.
 func GateArgs(s Stuck) []string {
-	message := fmt.Sprintf("The refinery handoff %s has sat assigned to %s, unprepared and held by nothing, since %s, past the %s a handoff takes to turn over. It is not draining on its own, so inspect the bead and the refinery's session.",
-		s.Bead, s.Refinery, s.Since.UTC().Format(time.RFC3339), Bound)
+	message := fmt.Sprintf("The refinery handoff %s has sat assigned to %s, unprepared and held by nothing, since %s, past the %d hours a handoff takes to turn over. It is not draining on its own, so inspect the bead and the refinery's session.",
+		s.Bead, s.Refinery, s.Since.UTC().Format(time.RFC3339), int(Bound/time.Hour))
 	return []string{"--subject", s.Bead, "--key", GateKey, "--quiet-window", QuietWindow, "--message", message}
 }

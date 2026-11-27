@@ -166,6 +166,23 @@ func TestTheActFailsForAFilingThatFailsAndFilesNothingUnread(t *testing.T) {
 	}
 }
 
+// A later run for a seat still stalled since the same time composes the same
+// message, so the writer counts an occurrence and notes no changed text. The
+// title says how long, and it is not the text the writer compares.
+func TestALaterRunForTheSameStallComposesTheSameMessage(t *testing.T) {
+	s := Stalled{Rig: "tools", Bead: "tk-1", Session: "hq-1", Identity: "hq-1", Since: ago(3 * time.Hour), From: FromWrite}
+	first, later := FindingArgs(s, t0), FindingArgs(s, t0.Add(90*time.Minute))
+	if first[len(first)-1] != later[len(later)-1] {
+		t.Errorf("the message moved between runs:\n%s\n%s", first[len(first)-1], later[len(later)-1])
+	}
+	if !strings.Contains(first[len(first)-1], "printed in the 90 seconds before the seat-progress look read it") {
+		t.Errorf("message %s", first[len(first)-1])
+	}
+	if first[10] == later[10] {
+		t.Errorf("the title %q does not say how long", first[10])
+	}
+}
+
 // The finding says what its silence is counted from.
 func TestTheFindingNamesWhatItsSilenceRunsFrom(t *testing.T) {
 	for from, want := range map[string]string{

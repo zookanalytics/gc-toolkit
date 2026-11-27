@@ -157,9 +157,9 @@ defect only on a line some test executes.
   `if !` or `|| exit`. The repository keeps a status with `x=$(cmd) || rc=$?`.
   shellcheck reports `local x=$(cmd)` (SC2155), and not
   `if ! x=$(cmd); then rc=$?` or an `rc=$?` after `x=$(cmd) || true`, which
-  lose the status the same way. Suites source some blocks under `bash -eu`, as
-  `crash-loop-window.test.sh` does, so a block or function that ends on a false
-  `[ … ] && x=1` fails there.
+  lose the status the same way. Suites run some blocks under `bash -e`, as
+  `dolt-backup-manifest-check.test.sh` does with `bash -euo pipefail`, so a
+  block or function that ends on a false `[ … ] && x=1` fails there.
 - **Unreadable is not empty.** A read whose emptiness decides anything checks
   its exit status, and an unreadable answer holds or fails closed
   (`doctor/check-armed-dispatch-owed/run.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).

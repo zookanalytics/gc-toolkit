@@ -4,9 +4,9 @@
 # (specs/tk-1tfzr71.158/design.md, section 2). Gas City tells an exec order
 # nothing of the event that fired it, so the verb reads again through the
 # look's reader and records no event. Its finding's writer, patrol-finding.sh,
-# files nothing while a finding is open under the key, so a second run for one
-# event changes nothing. GCTK_SCRIPTS_DIR names the pack's scripts. The verb's
-# 90-second read deadline ends inside the 120s timeout, as
+# files no second finding while one is open under the key, and a later run
+# counts one more occurrence on it. GCTK_SCRIPTS_DIR names the pack's scripts.
+# The verb's 90-second read deadline ends inside the 120s timeout, as
 # services/gctk/session's test holds.
 [order]
 description = "File the no-progress finding for each pool seat the seat-progress look found stalled, after reading the seat again"

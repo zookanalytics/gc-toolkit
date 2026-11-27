@@ -41,7 +41,7 @@ func TestTheActGatesEachStuckHandoffAndRecordsNoEvent(t *testing.T) {
 		t.Errorf("args %q", calls[0].Args)
 	}
 	message := calls[0].Args[len(want)]
-	for _, part := range []string{"The refinery handoff tk-1 has sat assigned to " + ref, "since " + stamp(5*time.Hour), "past the 4h0m0s"} {
+	for _, part := range []string{"The refinery handoff tk-1 has sat assigned to " + ref, "since " + stamp(5*time.Hour), "past the 4 hours a handoff takes"} {
 		if !strings.Contains(message, part) {
 			t.Errorf("message lacks %q: %s", part, message)
 		}

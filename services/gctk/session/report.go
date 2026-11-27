@@ -11,8 +11,9 @@ import (
 
 const (
 	// FindingScript is the writer of the act's finding, in the pack's scripts
-	// directory. It files nothing while a finding is open under the key, so a
-	// second run for one event changes nothing.
+	// directory. While a finding is open under the key and about the claim, it
+	// files no second one and counts an occurrence on that one, and it notes
+	// the text only when the text changed.
 	FindingScript = "patrol-finding.sh"
 	// FindingScope is the scope the finding is filed and deduplicated in.
 	FindingScope = "witness-findings"
@@ -82,14 +83,16 @@ func (r *Report) Run(ctx context.Context) Acted {
 // FindingArgs are the writer's arguments for one stalled seat the look read at
 // read: the finding goes to the claim's rig, keyed by the seat's session and
 // about its claim, and it is filed beside another live finding whose subject
-// it shares.
+// it shares. The message holds nothing that moves while the seat stays
+// stalled, such as the time the look read, because the writer notes each
+// change of text on the finding.
 func FindingArgs(s Stalled, read time.Time) []string {
 	label := cmp.Or(s.Agent, s.Session)
 	hours := int(read.Sub(s.Since) / time.Hour)
 	title := fmt.Sprintf("%s prints but has written nothing for %d hours, holding %s", label, hours, s.Bead)
-	message := fmt.Sprintf("The pool seat %s (%s) holds %s, and its pane printed in the %s before the seat-progress look read it at %s, but %s. Gas City's work ladder takes no step on a pool seat whose pane keeps printing.\n\n"+
+	message := fmt.Sprintf("The pool seat %s (%s) holds %s, and its pane printed in the %d seconds before the seat-progress look read it, but %s. Gas City's work ladder takes no step on a pool seat whose pane keeps printing.\n\n"+
 		"`gc session peek %s` shows what it prints. Neither the look nor its report ends a session, so restarting the seat is a person's decision. `gc session kill %s` ends its runtime without discarding its work, and a pool seat holding started work restarts in place with its claims.",
-		s.Session, label, s.Bead, Printing, read.Format(time.RFC3339), silence(s), s.Session, s.Session)
+		s.Session, label, s.Bead, int(Printing/time.Second), silence(s), s.Session, s.Session)
 	return []string{"--rig", s.Rig, "--scope", FindingScope, "--key", FindingKey + s.Session, "--about", s.Bead, "--distinct",
 		"--title", title, "--message", message}
 }
