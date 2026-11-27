@@ -9,8 +9,8 @@
 # in zsh: <worktree> is a checkout of the fixture's commit in a scratch rig
 # repository, and `gc <binding> scripts-dir` answers a directory holding the
 # pack's scripts. What reaches past the scratch repository is stubbed: gc's
-# store, gh and bring-current-audit.sh's read of the store. Every placeholder a
-# block uses is a key of the record, <worktree> or <binding>.
+# store and gh. Every placeholder a block uses is a value a review run's lane
+# is told, <worktree> or <binding>.
 #
 # Beyond running, the triage blocks are held to what they do:
 #   triage-index-read     lists the pack's checks with the rig's own laid over
@@ -18,9 +18,6 @@
 #                         with no index lists the pack's alone; a commit the
 #                         checkout cannot read, an empty commit and a scripts
 #                         dir gc cannot print fail loudly.
-#   triage-round-read     reads the round of the anchor the record names.
-#   triage-index-gap      files the observation with that anchor in its title,
-#                         provenance and quote.
 #
 # The review-ruling skill's blocks for a red check the PR's target carries file
 # the target's failure as its log reads: a log holding quotes, a command
@@ -73,7 +70,7 @@ git -C "$RIG" init -q -b main
 printf 'base\n' > "$RIG/README"; git -C "$RIG" add README; git -C "$RIG" commit -q -m base
 git -C "$RIG" checkout -q -b polecat/x
 mkdir -p "$RIG/web"; printf 'page\n' > "$RIG/web/page.html"; printf 'PNG\n' > "$RIG/web/page.png"
-printf '[checks.correctness]\npurpose = "p"\nphase = "pre-open"\n[checks.ux]\npurpose = "p2"\nphase = "pre-open"\n' > "$RIG/review-checks.toml"
+printf '[checks.correctness]\npurpose = "p"\n[checks.ux]\npurpose = "p2"\n' > "$RIG/review-checks.toml"
 git -C "$RIG" add -A; git -C "$RIG" commit -q -m "the change"
 OID=$(git -C "$RIG" rev-parse HEAD)
 git -C "$RIG" rm -q review-checks.toml; git -C "$RIG" commit -q -m "no index"
@@ -87,15 +84,11 @@ WT="$TMP/wt"
 
 # --- the stubs ------------------------------------------------------------------
 # scripts-dir answers a pack laid out as the installed one is, its scripts and
-# its index linked from this checkout, with bring-current-audit.sh standing in
-# to log how it was called. gc answers `kit scripts-dir`, the anchor's
-# `bd show`, `bd list` with no match, and `bd create` with an id.
+# its index linked from this checkout. gc answers `kit scripts-dir`, the
+# anchor's `bd show`, `bd list` with no match, and `bd create` with an id.
 SCRIPTS="$TMP/pack/assets/scripts"; mkdir -p "$SCRIPTS"
 for s in "$ROOT"/assets/scripts/*; do ln -s "$s" "$SCRIPTS/$(basename "$s")"; done
 ln -s "$ROOT/review-checks.toml" "$TMP/pack/review-checks.toml"
-rm -f "$SCRIPTS/bring-current-audit.sh"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$AUDIT_LOG"\n' > "$SCRIPTS/bring-current-audit.sh"
-chmod +x "$SCRIPTS/bring-current-audit.sh"
 BIN="$TMP/bin"; mkdir -p "$BIN"
 cat > "$BIN/gc" <<'GC'
 #!/usr/bin/env bash
@@ -113,16 +106,14 @@ esac
 GC
 printf '#!/usr/bin/env bash\nprintf "gh %%s\\n" "$*" >> "$STUB_LOG"\nexit 1\n' > "$BIN/gh"
 chmod +x "$BIN/gc" "$BIN/gh"
-export STUB_LOG="$TMP/stub.log" STUB_CREATE="$TMP/create.args" AUDIT_LOG="$TMP/audit.log"
+export STUB_LOG="$TMP/stub.log" STUB_CREATE="$TMP/create.args"
 
-# The values a review is told, and <worktree> and <binding>, as the agent fills
-# them in from the step text.
-ALLOWED="review_bead check anchor_bead review_branch review_base reviewed_oid review_pr_url review_pr_number review_context worktree binding"
+# The values a review run's lane is told, and <worktree> and <binding>, as the
+# agent fills them in from the step text.
+ALLOWED="check head target pr_bead pr_url worktree binding"
 fill() { # <check> <oid> : the block on stdin, its placeholders filled in
-  sed -e 's|<review_bead>|tk-review1|g' -e "s|<check>|$1|g" -e 's|<anchor_bead>|tk-anchor1|g' \
-      -e 's|<review_branch>|polecat/x|g' -e 's|<review_base>|main|g' -e "s|<reviewed_oid>|$2|g" \
-      -e 's|<review_pr_url>||g' -e 's|<review_pr_number>||g' -e 's|<review_context>|a lane short of green|g' \
-      -e "s|<worktree>|$WT|g" -e 's|<binding>|kit|g'
+  sed -e "s|<check>|$1|g" -e "s|<head>|$2|g" -e 's|<target>|main|g' -e 's|<pr_bead>|tk-anchor1|g' \
+      -e 's|<pr_url>||g' -e "s|<worktree>|$WT|g" -e 's|<binding>|kit|g'
 }
 # blocks <skill> <dir> : each ```bash block of the skill, one file per block, named
 # by its marker when it has one and by its position otherwise.
@@ -166,7 +157,7 @@ done <<< "$NAMES"
 
 echo "# the triage blocks, run as written"
 TB="$TMP/blocks/triage"
-for m in triage-index-read triage-round-read triage-index-gap; do
+for m in triage-index-read; do
   awk -v m="$m" '$0 == "# <<< " m {f = 0} f {print} $0 == "# >>> " m {f = 1}' "$ROOT/skills/review-triage/SKILL.md" > "$TB/$m.tmpl"
   [ -s "$TB/$m.tmpl" ] && ok "$m extracts from the skill" || bad "$m extracts from the skill" "no '# >>> $m' block"
 done
@@ -178,7 +169,7 @@ for sh in $SHELLS; do
   eq "$RC" "0" "($sh) the index read exits 0"
   eq "$(printf '%s\n' "$OUT" | cut -f1 | tr '\n' ' ')" "${PACK_NAMES}ux " \
      "($sh) the check index lists the pack's checks and the rig's own, from a checkout that holds no pack"
-  has "$(printf '%s\n' "$OUT" | grep '^correctness')" "	p	pre-open" "($sh) …the rig's row laid over the pack's correctness"
+  eq "$(printf '%s\n' "$OUT" | grep '^correctness')" "correctness	p" "($sh) …the rig's row laid over the pack's correctness"
   grep -qx 'kit scripts-dir' "$STUB_LOG" && ok "($sh) the pack's index is found through gc <binding> scripts-dir" \
     || bad "($sh) the pack's index is found through gc <binding> scripts-dir" "gc calls: $(tr '\n' ';' < "$STUB_LOG")"
   triage "$sh" triage-index-read "$NO_INDEX"
@@ -192,23 +183,6 @@ for sh in $SHELLS; do
   triage "$sh" triage-index-read "$OID" STUB_SCRIPTS=""
   [ "$RC" -ne 0 ] && [ -n "$ERR" ] && ok "($sh) a scripts dir gc cannot print fails loudly" \
     || bad "($sh) a scripts dir gc cannot print fails loudly" "rc=$RC stderr='$ERR'"
-  : > "$AUDIT_LOG"
-  triage "$sh" triage-round-read "$OID"
-  eq "$RC" "0" "($sh) the round read exits 0"
-  eq "$(tr '\n' ';' < "$AUDIT_LOG")" "render --anchor tk-anchor1 --as comment;show --anchor tk-anchor1;" \
-     "($sh) the pack's bring-current-audit.sh reads the round of the anchor the record names"
-  rm -f "$STUB_CREATE"
-  triage "$sh" triage-index-gap "$OID"
-  eq "$RC" "0" "($sh) the index-gap observation is filed"
-  ARGS=$(cat "$STUB_CREATE" 2>/dev/null)
-  has "$(printf '%s\n' "$ARGS" | head -1)" "(bead:tk-anchor1)" "($sh) its title names the anchor"
-  META=$(printf '%s\n' "$ARGS" | awk 'p {print; exit} $0 == "--metadata" {p = 1}')
-  PROV=$(printf '%s' "$META" | jq -r '.["obs.provenance"] // empty' 2>/dev/null)
-  case "$PROV" in
-    bead:tk-anchor1:turn:????-??-??) ok "($sh) its provenance is the anchor's turn ($PROV)" ;;
-    *) bad "($sh) its provenance is the anchor's turn" "got '$PROV'" ;;
-  esac
-  has "$ARGS" "Triage on tk-anchor1 at $OID." "($sh) its quote names the anchor and the reviewed commit"
 done
 
 echo "# the ruling's tracker blocks file the target's failure as its log reads"

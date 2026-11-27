@@ -146,9 +146,10 @@ whole call. Take the case that fits:
     work, the stay gave none, because the sign-off armed the subject no
     closer.
   - `WORK`, which the entry prints once the sign-off has finished, names its
-    work for `--waiting-on`. A bead in `WORK` whose `source_ruling_bead` is
-    this conversation is the ruling's rework, so the call takes `--rework` for
-    it, in the rework form the stay example's comment gives.
+    work for `--waiting-on`. A bead in `WORK` that is the ask the ruling
+    filed, discovered from this conversation, is the ruling's rework, so the
+    call takes `--rework` for it, in the rework form the stay example's comment
+    gives.
 - **The record does not give the whole call**, as when `WORK` is empty. Hold
   instead (`converse-hold`, after the claim-back below), and tell the operator
   that the stay stopped short and what it had done.

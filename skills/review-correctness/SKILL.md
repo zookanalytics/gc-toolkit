@@ -1,6 +1,6 @@
 ---
 name: review-correctness
-description: Use when you hold a review bead whose check is correctness, or when asked whether a change is correct and safe to merge.
+description: Use when you hold a review run's correctness lane, or when asked whether a change is correct and safe to merge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -119,10 +119,7 @@ finding, raised under the angle that names its cause.
   it accounts for the whole diff you read, and its title names what the diff
   does, by the skill `gc-toolkit.commit-conventions`. A summary that does not
   state what the whole diff does is a finding, and so is a title that misnames
-  it. A false one blocks, and one that is true but merely weak is a P2. Where
-  no PR page exists yet, read the summary and the title the review formula
-  printed from the anchor, and a finding on either takes
-  `anchor <id> / PR summary` or `anchor <id> / title` as its locus.
+  it. A false one blocks, and one that is true but merely weak is a P2.
 - **Work-quality standards** — hold the diff's output (code, comments,
   docs) to the "Standards for what you produce" entries of the work-quality
   fragments, which this skill carries in its `references/` directory as
