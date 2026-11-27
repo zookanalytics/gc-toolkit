@@ -3,9 +3,10 @@
 // "The adapters"). Every reader of feedback applies that definition, the
 // intake among them, so no reader carries the rule of its own: this adapter
 // runs it through jq, as each shell reader does, and holds none of it. It
-// answers which posts are feedback (gc_feedback), which inline comments a
-// dismissal has not retired (live_comments) and which review threads wait on
-// the city's answer (gc_thread_awaits_answer).
+// answers which posts are feedback (gc_feedback) that the city has not taken,
+// since they carry neither of its marks (gc_city_taken and gc_city_handled),
+// among the inline comments a dismissal has not retired (live_comments), and
+// which review threads wait on the city's answer (gc_thread_awaits_answer).
 //
 // The definition is loaded once, from the pack's scripts directory, in the
 // rig's checkout, whose default branch declares the posts that are not for
@@ -29,13 +30,15 @@ type Rule struct {
 	def string
 }
 
-// Review is a review, in the facts the definition weighs one by.
+// Review is a review, in the facts the definition weighs one by. Reactions are
+// the reactions the account the city posts as left on it.
 type Review struct {
 	ID          int64
 	Author      string
 	Body        string
 	State       string
 	SubmittedAt string
+	Reactions   []string
 }
 
 // Comment is an inline comment or a conversation comment. Review is the review
@@ -96,46 +99,72 @@ func Load(scripts, checkout string) (*Rule, error) {
 	return &Rule{def: def}, nil
 }
 
-// Reviews returns the ids of the reviews that are feedback.
-func (r *Rule) Reviews(self, since string, reviews []Review) ([]int64, error) {
-	rows := make([]map[string]any, 0, len(reviews))
-	for _, v := range reviews {
-		rows = append(rows, map[string]any{"id": v.ID, "user": login(v.Author), "body": v.Body,
-			"state": v.State, "submitted_at": nullable(v.SubmittedAt)})
-	}
-	return r.ids(self, since, `[ .[] | select(gc_feedback($self; $since)) | .id ]`, rows)
+// Untaken is the posts that are feedback and that the city has not taken, by
+// their ids in each id space: the reviews, the inline comments and the
+// conversation comments.
+type Untaken struct {
+	Reviews, Inline, Conversation []int64
 }
 
-// Comments returns the ids of the inline comments that no dismissal retired and
-// that are feedback, each dated by the review that carried it.
-func (r *Rule) Comments(self, since string, comments []Comment) ([]int64, error) {
-	revs := []map[string]any{}
+// Untaken returns the posts among reviews, inline and conversation, a PR's
+// reviews, inline comments and conversation comments, that are feedback and
+// carry neither of the city's marks, in one application of the definition. An
+// inline comment a dismissal retired is no feedback, and each inline comment is
+// dated by the review that carried it.
+func (r *Rule) Untaken(self, since string, reviews []Review, inline, conversation []Comment) (Untaken, error) {
+	revRows := make([]map[string]any, 0, len(reviews))
+	for _, v := range reviews {
+		revRows = append(revRows, map[string]any{"id": v.ID, "user": login(v.Author), "body": v.Body,
+			"state": v.State, "submitted_at": nullable(v.SubmittedAt), "reactionGroups": groups(v.Reactions)})
+	}
+	carriers := []map[string]any{}
 	seen := map[int64]bool{}
-	rows := make([]map[string]any, 0, len(comments))
-	for _, c := range comments {
-		row := map[string]any{"id": c.ID, "user": login(c.Author), "body": c.Body, "created_at": nullable(c.CreatedAt)}
+	inlineRows := make([]map[string]any, 0, len(inline))
+	for _, c := range inline {
+		row := map[string]any{"id": c.ID, "user": login(c.Author), "body": c.Body, "created_at": nullable(c.CreatedAt),
+			"reactionGroups": groups(c.Reactions)}
 		if c.Review != nil {
 			row["pull_request_review_id"] = c.Review.ID
 			if !seen[c.Review.ID] {
 				seen[c.Review.ID] = true
-				revs = append(revs, map[string]any{"id": c.Review.ID, "state": c.Review.State,
+				carriers = append(carriers, map[string]any{"id": c.Review.ID, "state": c.Review.State,
 					"submitted_at": nullable(c.Review.SubmittedAt)})
 			}
 		}
-		rows = append(rows, row)
+		inlineRows = append(inlineRows, row)
 	}
-	return r.ids(self, since, `(input) as $revs | input
-  | [ live_comments($revs)[] | select(gc_feedback($self; $since)) | .id ]`, revs, rows)
+	convoRows := make([]map[string]any, 0, len(conversation))
+	for _, c := range conversation {
+		convoRows = append(convoRows, map[string]any{"id": c.ID, "user": login(c.Author), "body": c.Body,
+			"created_at": nullable(c.CreatedAt), "reactionGroups": groups(c.Reactions)})
+	}
+	out, err := r.run(self, since, `def gc_untaken: select(gc_feedback($self; $since)
+    and ((gc_city_taken or gc_city_handled) | not)) | .id;
+  (input) as $reviews | (input) as $revs | (input) as $inline | (input) as $convo
+  | { reviews: [ $reviews[] | gc_untaken ], inline: [ $inline | live_comments($revs)[] | gc_untaken ],
+      conversation: [ $convo[] | gc_untaken ] }`, revRows, carriers, inlineRows, convoRows)
+	if err != nil {
+		return Untaken{}, err
+	}
+	var got struct {
+		Reviews      []int64 `json:"reviews"`
+		Inline       []int64 `json:"inline"`
+		Conversation []int64 `json:"conversation"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		return Untaken{}, fmt.Errorf("feedback: the untaken posts did not decode: %w", err)
+	}
+	return Untaken{Reviews: got.Reviews, Inline: got.Inline, Conversation: got.Conversation}, nil
 }
 
-// IssueComments returns the ids of the conversation comments that are feedback.
-func (r *Rule) IssueComments(self, since string, comments []Comment) ([]int64, error) {
-	rows := make([]map[string]any, 0, len(comments))
-	for _, c := range comments {
-		rows = append(rows, map[string]any{"id": c.ID, "user": login(c.Author), "body": c.Body,
-			"created_at": nullable(c.CreatedAt)})
+// groups is reactions, the ones the account the city posts as left on a post,
+// as the reactionGroups a GraphQL read gives, which the city's marks read.
+func groups(reactions []string) []map[string]any {
+	out := []map[string]any{}
+	for _, x := range reactions {
+		out = append(out, map[string]any{"content": x, "viewerHasReacted": true})
 	}
-	return r.ids(self, since, `[ .[] | select(gc_feedback($self; $since)) | .id ]`, rows)
+	return out
 }
 
 // Awaiting returns the ids of the review threads that wait on the city's
@@ -145,12 +174,8 @@ func (r *Rule) Awaiting(self, since string, threads []Thread) ([]string, error) 
 	for _, t := range threads {
 		posts := make([]map[string]any, 0, len(t.Comments))
 		for _, c := range t.Comments {
-			groups := []map[string]any{}
-			for _, x := range c.Reactions {
-				groups = append(groups, map[string]any{"content": x, "viewerHasReacted": true})
-			}
 			post := map[string]any{"author": login(c.Author), "body": c.Body, "createdAt": nullable(c.CreatedAt),
-				"pullRequestReview": nil, "reactionGroups": groups}
+				"pullRequestReview": nil, "reactionGroups": groups(c.Reactions)}
 			if c.Review != nil {
 				post["pullRequestReview"] = map[string]any{"state": c.Review.State, "submittedAt": nullable(c.Review.SubmittedAt)}
 			}
@@ -166,19 +191,6 @@ func (r *Rule) Awaiting(self, since string, threads []Thread) ([]string, error) 
 	var ids []string
 	if err := json.Unmarshal(out, &ids); err != nil {
 		return nil, fmt.Errorf("feedback: the threads' answer did not decode: %w", err)
-	}
-	return ids, nil
-}
-
-// ids runs program over inputs and reads the ids it prints.
-func (r *Rule) ids(self, since, program string, inputs ...any) ([]int64, error) {
-	out, err := r.run(self, since, program, inputs...)
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	if err := json.Unmarshal(out, &ids); err != nil {
-		return nil, fmt.Errorf("feedback: the answer did not decode: %w", err)
 	}
 	return ids, nil
 }

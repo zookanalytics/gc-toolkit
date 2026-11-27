@@ -147,7 +147,6 @@ reviewed commit composes. A composer that prints, such as
 `gctk review comment <run>`, which renders a review run's comment for a head, or
 `bring-current-audit.sh render --as comment`, reads its beads from the city's
 store, so run it with `gc` stubbed on fixture data, as for a report. A composer
-that posts, such as `review-run.sh post`, which posts a review run's comment for
-a head, or the old path's `signoff.sh`, writes to GitHub when it runs, so never
-run it on a live bead. Build its markdown with `gh` stubbed, as its test suite
-does.
+that posts, such as `review-run.sh post` or the old path's `signoff.sh`, writes
+to GitHub when it runs, so never run it on a live bead. Build its markdown as
+its test suite does.

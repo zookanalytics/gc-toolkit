@@ -15,24 +15,33 @@ import (
 // or that the head carries no change for it. The comment opens with its mark,
 // which names the run and the head, so a retry finds the comment and edits it
 // rather than posting a second.
+//
+// GitHub refuses a comment over 65,536 characters, which no retry of the post
+// gets past, so the post cuts a comment longer than commentLimit (Fit), and
+// `gctk review comment` prints it whole.
+
+// commentLimit is the most bytes the head's comment takes. A character is
+// never fewer than one byte, and the writer of the city's posts adds the
+// city's mark after the comment.
+const commentLimit = 60000
 
 // Mark is the line that opens the comment of the run root at head.
 func Mark(root, head string) string {
 	return fmt.Sprintf("<!-- gc:review-run %s %s -->", root, head)
 }
 
-// Comment is the comment for iteration n of the run: its head's checks, their
-// findings and the round's rulings, and the asks the round took, with asks
-// naming the ones on the bead. It is "" when the iteration has nothing to
+// Comment is the whole comment for iteration n of the run: its head's checks,
+// their findings and the round's rulings, and the asks the round took, with
+// asks naming the ones on the bead. It is "" when the iteration has nothing to
 // answer: no lane ran there and the round took no ask.
 func Comment(run *Run, n int, asks []Ask) string {
 	it := run.Iterations[n]
 	if it == nil || it.Triage == nil || it.Repair == nil {
 		return ""
 	}
-	rp := it.Repair
+	round, pushed := it.Repair.Rulings, it.Repair.Pushed
 	var askRulings []Ruling
-	for _, r := range rp.Rulings {
+	for _, r := range round {
 		if r.Ask != "" {
 			askRulings = append(askRulings, r)
 		}
@@ -62,7 +71,7 @@ func Comment(run *Run, n int, asks []Ask) string {
 			if g == "" {
 				g = "none"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ln.Check, ln.Verdict, g, tally(ln, rp))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", ln.Check, ln.Verdict, g, tally(ln, round))
 		}
 		fmt.Fprintln(&b)
 	}
@@ -77,8 +86,8 @@ func Comment(run *Run, n int, asks []Ask) string {
 				grade = "ungraded"
 			}
 			fmt.Fprintf(&b, "- **%s** (%s, `%s`): %s\n", f.ID, grade, f.Locus, oneLine(f.Message))
-			r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
-			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, rp))
+			r, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
+			fmt.Fprintf(&b, "  - %s\n", answer(r, ok, pushed))
 		}
 		fmt.Fprintln(&b, "\n</details>")
 		fmt.Fprintln(&b)
@@ -93,12 +102,30 @@ func Comment(run *Run, n int, asks []Ask) string {
 					what = fmt.Sprintf("%s (%s)", oneLine(a.Reason), r.Ask)
 				}
 			}
-			fmt.Fprintf(&b, "- %s: %s\n", what, answer(r, true, rp))
+			fmt.Fprintf(&b, "- %s: %s\n", what, settles(answer(r, true, pushed), r))
 		}
 		fmt.Fprintln(&b)
 	}
 	fmt.Fprintf(&b, "<sub>Review run %s, iteration %d, into %s.</sub>\n", run.Root, n, run.Target)
 	return b.String()
+}
+
+// Fit is body, the comment of iteration n of the run root, as the post puts it
+// on the PR: whole when it fits within commentLimit, and otherwise cut at the
+// last line that ends within it, under its mark a line that says so and names
+// the call that prints it whole.
+func Fit(body, root string, n int) string {
+	if len(body) <= commentLimit {
+		return body
+	}
+	mark, rest, _ := strings.Cut(body, "\n")
+	note := fmt.Sprintf("**This comment is cut at the size GitHub allows.** `gctk review comment %s --iteration %d` "+
+		"prints it whole.\n\n", root, n)
+	rest = strings.ToValidUTF8(rest[:commentLimit-len(mark)-1-len(note)], "")
+	if i := strings.LastIndexByte(rest, '\n'); i >= 0 {
+		rest = rest[:i+1]
+	}
+	return mark + "\n" + note + rest
 }
 
 // summary is the comment's first sentence: each lane's verdict, and what the
@@ -186,13 +213,13 @@ func grades(ln Lane) string {
 }
 
 // tally is a lane's findings by how the round ruled them.
-func tally(ln Lane, rp *Repair) string {
+func tally(ln Lane, round []Ruling) string {
 	if len(ln.Findings) == 0 {
 		return "none"
 	}
 	count := map[string]int{}
 	for _, f := range ln.Findings {
-		r, ok := rulingOf(rp, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
+		r, ok := rulingOf(round, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
 		if !ok {
 			count["unruled"]++
 			continue
@@ -208,39 +235,35 @@ func tally(ln Lane, rp *Repair) string {
 	return strings.Join(out, ", ")
 }
 
-// answer is one point's answer: its ruling, and what the head carries for it.
-func answer(r Ruling, ok bool, rp *Repair) string {
+// answer is one point's answer: its ruling, and what the head carries for it,
+// where pushed is the head the round pushed.
+func answer(r Ruling, ok bool, pushed string) string {
 	if !ok {
 		return "Not ruled."
 	}
-	reason := oneLine(r.Reason)
-	switch r.Ruling {
-	case RulingMustFix:
-		also := ""
-		if r.Summary {
-			also = ", and in the PR's summary"
-		}
-		switch {
-		case r.Commit == "" && r.Summary:
-			return "Fixed in the PR's summary: " + reason
-		case rp.Pushed != "":
-			return fmt.Sprintf("Fixed by `%s`, which `%s` carries%s: %s", short(r.Commit), short(rp.Pushed), also, reason)
-		default:
-			return fmt.Sprintf("Fixed by `%s`%s: %s", short(r.Commit), also, reason)
-		}
-	case RulingDeclined:
-		return "Declined, and the head carries no change for it: " + reason
-	case RulingDeferred:
-		return "Deferred to work of its own once this PR lands: " + reason
-	case RulingAnswered:
-		return "Answered: " + reason
-	case RulingQuestion:
-		if r.Gate == "" {
-			return "A question for you: " + reason
-		}
-		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
+	return r.Answer(pushed)
+}
+
+// settles is an ask's answer with what its ruling says of the question the
+// ask's post settles, the answer as it is when the post settles none.
+func settles(answer string, r Ruling) string {
+	switch {
+	case r.Settles == "":
+		return answer
+	case r.Moot:
+		return fmt.Sprintf("%s The post makes the question at %s moot.", Punctuated(answer), r.Settles)
 	}
-	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
+	return fmt.Sprintf("%s The post settles the question at %s.", Punctuated(answer), r.Settles)
+}
+
+// Punctuated is s with a full stop at its end when it ends with no mark that
+// ends a sentence, so a sentence can follow it.
+func Punctuated(s string) string {
+	s = strings.TrimRight(s, " ")
+	if s == "" || strings.ContainsAny(s[len(s)-1:], ".!?") {
+		return s
+	}
+	return s + "."
 }
 
 // visualLine says what kind of visual a demo verdict rests on: its modality,

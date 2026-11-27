@@ -168,14 +168,33 @@ func (d *land) timed() *clock {
 	return c
 }
 
-// gates records each gate filed, fails a filing when err is set, and while
-// stall is set answers no filing until the act's context ends.
+// gates records each gate filed and each key withdrawn, fails a filing when err
+// is set and a withdrawal when withdrawErr is, and while stall is set answers
+// no filing until the act's context ends.
 type gates struct {
-	mu       sync.Mutex
-	filed    []string
-	messages []string
-	err      error
-	stall    bool
+	mu          sync.Mutex
+	filed       []string
+	messages    []string
+	withdrawn   []string
+	err         error
+	withdrawErr error
+	stall       bool
+}
+
+func (g *gates) Withdraw(_ context.Context, subject, key, message string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.withdrawErr != nil {
+		return g.withdrawErr
+	}
+	g.withdrawn = append(g.withdrawn, subject+" "+key+" "+message)
+	return nil
+}
+
+func (g *gates) withdrawals() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.withdrawn)
 }
 
 func (g *gates) File(ctx context.Context, subject, key, message string) error {
@@ -249,7 +268,8 @@ func (a *audit) calls() (checks, reaudits []string) {
 // land is one bead on the pending record, blocked and assigned to nobody,
 // whose PR the evaluator reads ready, with the landing order's sources and the
 // PR watch's one-PR update, which saves GitHub's side on the bead. reads and
-// writes mark where the last run's GitHub reads and store writes start.
+// writes mark where the last run's GitHub reads and store writes start, and
+// asked where a case's requests of GitHub start.
 type land struct {
 	*world
 	co     *checkout
@@ -261,6 +281,7 @@ type land struct {
 	tick   int
 	reads  int
 	writes int
+	asked  int
 }
 
 func newLand(t *testing.T) *land {
@@ -285,6 +306,10 @@ func newLand(t *testing.T) *land {
 		Hub:      func(context.Context, string) pr.Hub { return w.github },
 		Reread: func(_ context.Context, url string) error {
 			_, err := d.watch.Reread(url)
+			return err
+		},
+		RefreshConversation: func(_ context.Context, url string) error {
+			_, err := d.watch.RefreshConversation(url)
 			return err
 		},
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },

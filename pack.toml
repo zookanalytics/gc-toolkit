@@ -1,7 +1,7 @@
 # gc-toolkit — primary pack for a Gas City city. Native roster, no pack imports.
 #
 # Every agent this pack runs ships under agents/<name>/ (polecat, refinery,
-# witness, deacon, mechanik, po, polecat-codex, proactive, the
+# witness, deacon, mechanik, po, mayor, polecat-codex, proactive, the
 # converse-claude-opus, converse-claude-fable, converse-codex-sol and
 # converse-codex-astra sittings, and the converse-opus, converse-fable and
 # converse-codex templates kept for the sittings already open on them). There is
@@ -103,6 +103,10 @@ name = "po"
 overlay_dir = "overlays/gh-origin-guard"
 
 [[patches.agent]]
+name = "mayor"
+overlay_dir = "overlays/gh-origin-guard"
+
+[[patches.agent]]
 name = "proactive"
 overlay_dir = "overlays/gh-origin-guard"
 
@@ -120,6 +124,13 @@ mode = "always"
 [[named_session]]
 template = "po"
 scope = "rig"
+mode = "on_demand"
+
+# The city's mayor runs the same way, opened by `gc-helm mayor`
+# (agents/mayor/agent.toml).
+[[named_session]]
+template = "mayor"
+scope = "city"
 mode = "on_demand"
 
 [[named_session]]

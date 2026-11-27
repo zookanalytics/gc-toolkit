@@ -436,45 +436,13 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8,
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
   branch's rules. The axis then moves onto that record.
-
-## Owed status label clear
-
-- **Covers.** The `status_label_clear_owed` key, in the
-  `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
-  writer: `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
-  "retry the status: label clears that terminal records still owe" section of
-  `assets/scripts/pr-facts.sh`.
-- **Stands in for.** A retry of a failed write to an outside service, kept
-  until a later pass lands it.
-- **Evidence.**
-  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
-    dispatch failure" in `engdocs/architecture/orders.md`), and
-    `[steps.retry]` retries a formula step's attempt within its run (section
-    3.2 of `docs/reference/specs/formula-spec-v2.md`). Gas City keeps no
-    outbox or retry queue that a pack can hand a write to an outside
-    service. Its usage facts retry a failed write with a marker of their
-    own: a fact whose sink fails leaves the session bead's
-    `usage_compute_emitted_at` marker unset for the next reconcile tick
-    (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
-  - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
-    marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
-    the `oversight-rig` pack's `delivered` label.
-  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
-  `gastownhall/gascity-packs` main 44b9db7168f6.
-- **Retires when.** Gas City ships a retry that a pack can hand a failed write
-  to an outside service, such as an outbox that a later pass drains, or its
-  writer retires, since the landing order makes the clears it retries by
-  comparing the labels the PR watch saved for a PR with the ones the store
-  derives, and the net by searching for the city's labels on PRs no live bead
-  owns, and neither records anything.
 
 ## Saved GitHub read
 
@@ -496,22 +464,30 @@ no warrant.
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
   what the one-PR update saves once it has re-read the PR in full
   (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
-  and compares each owned PR's saved labels with the ones the store derives
-  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
-  itself, which compares a PR's signs with the ones each part keeps (`moved` in
-  `services/gctk/pr/saved.go`) and the net's full read with each part's facts
-  (`differs` there).
+  takes each post the conversation keeps untaken as its own ask (`takePlans`,
+  `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
+  read the conversation again through `RefreshConversation` in `refresh.go`),
+  decides each owned PR's red checks and conflict from its checks, its merge
+  state and its approvals (`redPlans`, `redOn` and `decideRed` in
+  `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels with the ones the store derives (`labelPlans` in
+  `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
+  PR's signs with the ones each part keeps and reads again a conversation part
+  that holds no list of untaken posts or a checks part that holds no suites
+  (`moved` in `services/gctk/pr/saved.go`), and the net's full read with each
+  part's facts (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, from which the landing order finds and does its work, and
   against which a pass of the PR watch tells
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
-  head, the standing approvals, each with the commit it was given on, and
-  requests for changes, the newest feedback in each comment space, the review
-  threads waiting on the city's answer and those unresolved, and the PR's
-  labels, in four parts that each keep the instant their read was sent and the
-  cheap signs read with it.
+  head, each with the check suite that holds its result and its log, each check
+  suite there, with its status, its creation time and how many check runs it
+  holds, the standing approvals, each with the commit it was given on, and
+  requests for changes, each post that is feedback the city has not taken,
+  with what its ask names it by, the review threads waiting on the city's
+  answer and those unresolved, and the PR's labels, in four parts that each
+  keep the instant their read was sent and the cheap signs read with it.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
     open PR's number, title, URL, author, draft flag, merge state, base and head
@@ -526,7 +502,9 @@ no warrant.
     [GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
     entry declares a poll interval and a webhook secret, which no code outside
     the configuration package reads. No Go source there, tests aside, reads a
-    pull request's reviews or review threads.
+    pull request's reviews or review threads. The monitor's check rollup gives
+    each check's name, status, conclusion and log, and no check suite and no
+    suite's creation time.
   - A webhook rule hands one verified provider event to an order or a
     conversation and keeps no state of its own
     ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
@@ -547,10 +525,14 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md),
-    and the search for the parts, their signs and their one writer is
+    the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
-    read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+    read at `gastownhall/gascity` main 9a4b1e718, and the search for the
+    untaken posts the conversation keeps is
+    [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
+    and for the check suites the checks keep, its
+    [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -571,10 +553,12 @@ no warrant.
   `services/gctk/pr/landing.go` calls on each act that decides the record of a
   PR no ruling retired, on the act's own read of the PR's reviews and the
   history the rig's clone holds once the act fetches the PR's branch. It
-  dismisses an approval only once the act's own read of the PR's review
-  threads shows no feedback on it that the intake has not routed, and closes a
-  withdrawal once its read of the reviews after the dismissals shows none
-  standing on a commit without the head. Once a ruling has retired the PR and
+  dismisses an approval only once the act's own reads of the PR's reviews and
+  review threads show neither the approval's message nor an inline comment it
+  carries as feedback the city has not taken (`unrouted` in
+  `services/gctk/pr/feedback.go`), and closes a withdrawal once its read of the
+  reviews after the dismissals shows none standing on a commit without the
+  head. Once a ruling has retired the PR and
   the read the PR watch saved shows it closed, `decideRetired` in
   `landing.go` closes each withdrawal still open, since no approval it
   withdraws can merge a closed PR. Its reader for the review run:
@@ -592,7 +576,7 @@ no warrant.
     `internal/githubmonitor/client.go`). A search of the repository for a
     dismissal finds a session's startup dialogs, mail and a dashboard note,
     and no review.
-  - A dismissal can wait on routing, and GitHub can refuse it or not answer,
+  - A dismissal can wait on the take, and GitHub can refuse it or not answer,
     so the withdrawal must last until a later pass carries it out. Gas City
     keeps no such wait for a write to an outside service: a failed order is not
     retried ("No retry on dispatch failure" in
@@ -613,7 +597,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -667,7 +651,7 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
   main 44b9db7168f6, and `gastownhall/beads` v1.3.4 (7ef2fd05eb0c), the bd
   the city runs.
@@ -814,8 +798,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/beads`
-  main 3a274fbf8f76 and `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
+  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
@@ -845,7 +829,7 @@ no warrant.
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
 
