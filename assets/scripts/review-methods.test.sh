@@ -77,9 +77,9 @@
 #     patterns already filed from the file of its first instance, so one
 #     pattern keeps one bead and another that starts in the same file keeps its
 #     own. This repo's own docs/review-arch.md and docs/review-triage.md, read
-#     the way a review reads them at its commit, carry the divergence lens and
-#     the changes that make arch mandatory, and the pack's arch skill carries
-#     none of that lens.
+#     the way a review reads them at its commit, carry the divergence lens, the
+#     reading of each new command from its caller's seat and the changes that
+#     make arch mandatory, and the pack's arch skill carries none of that lens.
 #   - The demo method says a demo shows a reviewer what the change does,
 #     briefly, the way a sprint demo does, and that the check posts only the
 #     visuals such a demo needs. The check itself looks at every place the
@@ -327,6 +327,7 @@ done
 hasF "$TMP/own.arch" "The lens holds new surface to Gas City's own documentation instead." "this repo's arch guidance holds new surface to Gas City's own docs, not the pack's account of Gas City"
 hasF "$TMP/own.arch" 'A converter is a finding on sight.' "…makes a converter between a pack noun and a Gas City noun a finding"
 hasF "$TMP/own.arch" 'neither are tests or the fixtures they use' "…and leaves tests out of operational surface"
+hasF "$TMP/own.arch" '2. Could the command find that out itself?' "…and asks of each new command whether it could find out what its caller must know"
 hasF "$TMP/own.triage" '## When `arch` is mandatory' "this repo's triage guidance says when the arch check is mandatory"
 hasF "$TMP/own.triage" 'does not make `arch` mandatory' "…and that a diff of tests alone does not make it so"
 hasF "$TMP/own.triage" '## When `pm` is mandatory' "…says when the pm check is mandatory"

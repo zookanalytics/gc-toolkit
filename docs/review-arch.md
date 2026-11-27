@@ -1,6 +1,6 @@
 ---
 name: The arch check on gc-toolkit
-description: The method extension the arch check appends on gc-toolkit reviews. It adds the divergence lens, which holds new pack surface, and pack code that accommodates a behavior of Gas City, to what Gas City ships, with when the lens applies, its checks and how they reach the verdict, what counts as evidence of what Gas City ships, and where the pack records its warrants.
+description: Use when you run the arch check on a gc-toolkit change, or when you want to know what that check asks of new pack surface, of pack code that accommodates a behavior of Gas City, or of a new command's fit to its caller.
 ---
 
 # The arch check on gc-toolkit
@@ -13,20 +13,23 @@ surface is held to them. The pack's architecture docs describe the pack as it
 is, divergence included, so a change can fit them and still rebuild what Gas
 City ships. The lens holds new surface to Gas City's own documentation instead.
 It holds a change that accommodates a behavior of Gas City to that behavior's
-reason, tested in this city, and to the fix at its source.
+reason, tested in this city, and to the fix at its source. The check also reads
+each command a change adds from [its caller's seat](#the-callers-seat).
 
 ## Scope
 
-**Mandate.** The divergence lens the arch check applies to a gc-toolkit change:
-when it applies, its checks and how they reach the verdict, what counts as
-evidence of what Gas City ships, and where the pack records its warrants.
+**Mandate.** What the arch check adds on a gc-toolkit change: the divergence
+lens, with when it applies, its checks and how they reach the verdict, what
+counts as evidence of what Gas City ships and where the pack records its
+warrants, and the reading of each new command from its caller's seat.
 
 **Boundaries.** The arch check's method and its verdict are pack content, in
 `skills/review-arch/SKILL.md`, and every rig's arch review applies them. The
 rule and the tests that decide what belongs in the pack are
 [foundation.md](foundation.md#boundaries). The warrants in force are
-[warrants.md](warrants.md). When triage adds the arch check on this rig is
-[review-triage.md](review-triage.md).
+[warrants.md](warrants.md). What a gctk verb owes its caller is
+[gctk-architecture.md](gctk-architecture.md#the-surface). When triage adds the
+arch check on this rig is [review-triage.md](review-triage.md).
 
 ## When the lens applies
 
@@ -160,3 +163,44 @@ each one covers, and how an entry is kept true.
 `tools/warrants-touched.sh --base origin/<base>`, run in the review's worktree,
 lists the warrants a branch touches, the list its author saw at self-review. It
 is built from the Covers lines, so check 4 still judges the diff against them.
+
+## The caller's seat
+
+The check reads each command, verb, flag or mode a change adds from the seat of
+its caller, the agent or the code that calls it. It reads a command added to a
+script the same way as one added to gctk.
+
+A caller knows a command only as it is taught. Its teaching is the skill,
+prompt, formula step or usage text where the caller meets the command. Read
+that teaching, and list the other commands it teaches for what the caller means
+to do, the native ones among them. Then answer two questions:
+
+1. What must the caller know to choose it over those and to use it correctly?
+   Answer from the teaching, not from what the command alone can do.
+2. Could the command find that out itself?
+
+The change earns `request-changes` when both of these hold:
+
+- To choose or use the command correctly, the caller must know more than what
+  it means to do, such as whether a bead's work is running or who holds it.
+- The command could find that out itself.
+
+The finding names what the caller must know, the choice it decides and how the
+command could find it out. The design it asks for takes what the caller means
+to do and finds out the rest. Its flags and modes carry only what the caller
+alone knows ([gctk-architecture.md](gctk-architecture.md#the-surface)).
+
+Read
+[the rule that no verb parallels a native act](gctk-architecture.md#writes-stay-native-and-pack-logic-reacts)
+from the same seat. A teaching may send a caller to a verb in some states of an
+act and to the native call in the others. That caller chooses between the two
+by the state, so the verb parallels the native call. A verb whose mechanism
+differs from the native call's is a parallel all the same. The verb is a
+parallel even when it could carry the act in every state.
+
+The verdict body adds a line for each command, verb, flag or mode the change
+adds:
+
+```
+Caller: <the command, verb, flag or mode>: <the other commands for the same act>; <what its caller must know to choose it over those and use it>; <what of that the command could find out itself, or none>
+```
