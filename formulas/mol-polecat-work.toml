@@ -150,10 +150,8 @@ releases the work, cancelled the run and drained.
 **2. Conflicts: resolve, write the account, then commit.** You are the only
 party that knows what collided and why you chose what you chose, so you write
 it down as you resolve. This applies to any merge of the base you run in this
-bead. For each file git could not merge, resolve it and stage it. A review
-run's triage reads the merge commit itself: its message, and the hunks you
-resolved, which `git show --remerge-diff` shows. Replace the file
-`git rev-parse --git-path MERGE_MSG` names with git's first line, then one
+bead. For each file git could not merge, resolve it and stage it. Replace the
+file `git rev-parse --git-path MERGE_MSG` names with git's first line, then one
 paragraph for each file you resolved, and for each edit beyond what the merge
 needed, such as a test repair a conflict forced: name its file, what collided,
 what you kept or wrote and why, and what a reviewer should check. The commit

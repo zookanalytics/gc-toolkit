@@ -355,7 +355,6 @@ branch and fix the stated reason. Bring it current by merging the base in;
 never rebase it and never force-push it. When the merge conflicts, write the
 merge commit's message as you resolve it: for each conflicted file, what
 collided, what you decided and why, and what a reviewer should check. A
-review run's triage reads that message beside the hunks you resolved. A
 conflict you cannot resolve without guessing is a question for a person:
 push nothing and ask. The formula's workspace-setup step carries the
 exact blocks.
