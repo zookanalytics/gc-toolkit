@@ -48,8 +48,9 @@ const (
 	// RulingDeclined: its source's own rule shows it does not hold, or does
 	// not fix it, as a nit is answered and not fixed. The reason says which.
 	RulingDeclined = "declined"
-	// RulingDeferred: it holds and reaches outside the reviewed diff, so it goes
-	// to a bead of its own, armed to start once the PR lands.
+	// RulingDeferred: it holds, and its fix reaches outside the reviewed diff
+	// for something the change did not promise, so it goes to a bead of its
+	// own, armed to start once the PR lands.
 	RulingDeferred = "deferred"
 	// RulingAnswered: nothing is left to change, because the head already
 	// carries its answer, such as an ask whose fix an earlier head carries or

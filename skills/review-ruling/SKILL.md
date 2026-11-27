@@ -107,13 +107,41 @@ Add `--title "<the subject line>"` to that call when the PR's title changes.
 
 Then push as the step says, even when the round has no commits to push.
 
+## A requirement the change promises
+
+The change promises what the PR's bead asks for, which `gc bd show <pr-bead>`
+prints, and what the PR's summary says it does. A point that shows the change
+falls short of a requirement it promises is must-fix, whatever grade its source
+gives it, and never deferred: the round makes its fix wherever its code sits,
+in code the PR does not touch too. A summary that discloses the gap beside a
+bead filed for the rest does not meet the requirement. Where the summary alone
+claims more than the PR's bead asks for, the fix can instead make the summary
+say what the change does.
+
+Put the point to the operator as a question instead (A question only a person
+can answer, below) in either of these cases:
+
+- The round cannot make the fix, such as a fix in software the rig does not
+  own.
+- The only fix in reach is heavier than the gap warrants.
+
+The question asks whether the PR waits until it meets the requirement or the
+requirement leaves what the change promises. The round never narrows the
+promise on its own.
+
 ## A fix outside the reviewed diff
 
-A fix that reaches outside the diff the operator reviews, such as code the PR
-does not touch, goes to a bead of its own: `review-run.sh defer` files it
-waiting on the PR's bead, armed to start once the PR lands, with the PR's
-target as its own. Rule the point deferred, and name the bead in the reason.
-The PR stays the change the operator reviewed.
+A fix goes to a bead of its own when both of these hold:
+
+- It reaches outside the diff the operator reviews, such as code the PR does
+  not touch.
+- It fixes something the change does not promise (A requirement the change
+  promises, above).
+
+`review-run.sh defer` files that bead waiting on the PR's bead, armed to start
+once the PR lands, with the PR's target as its own. Rule the point deferred,
+and name the bead in the reason. The PR stays the change the operator
+reviewed.
 
 ## A person's comment
 
