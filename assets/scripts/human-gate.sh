@@ -15,9 +15,7 @@
 #   - it titles the gate with the message's first line, capped;
 #   - it makes the gate's description the message it was given;
 #   - it stops when the gate it filed is in another store than the bead,
-#     where the gate would hold nothing;
-#   - it records a gate the deacon files in the deacon's incident ledger
-#     (gc-deacon-ledger.sh).
+#     where the gate would hold nothing.
 #
 # The gate lands in the store of the bead it blocks, because `gc bd gate create`
 # runs in the store that owns the bead named after --blocks, and a bead that
@@ -250,26 +248,6 @@ if ! bd_same_store "$GATE" "$SUBJECT"; then
   warn "gate $GATE was filed in another store than $SUBJECT, so it holds nothing; withdraw it (gc bd gate resolve $GATE --reason \"moot: filed in another store than $SUBJECT\") and file again from the rig that owns $SUBJECT"
   exit 1
 fi
-
-# The deacon's shift record. Filing a gate is a non-routine action, and this is
-# the only place that holds the gate id it points at, so the entry is written
-# here rather than asked for at each call site. Gated to the deacon because the
-# ledger records what the deacon did: every other caller files about its own
-# work. A dedup or quiet-window exit above writes nothing, because the situation
-# reached the ledger on the pass that filed it. A ledger failure is reported and
-# never changes this exit: the gate is filed either way.
-# >>> deacon-ledger-append
-LEDGER_ROLE="${GC_AGENT:-}"; LEDGER_ROLE="${LEDGER_ROLE##*/}"; LEDGER_ROLE="${LEDGER_ROLE##*.}"
-if [ "$LEDGER_ROLE" = deacon ]; then
-  LEDGER_SH="$_bd_lib_dir/gc-deacon-ledger.sh"
-  if [ -x "$LEDGER_SH" ]; then
-    "$LEDGER_SH" append escalation "$KEY: $TITLE" "bead:$GATE" >/dev/null \
-      || warn "gate $GATE is filed, but its ledger entry was not written"
-  else
-    warn "no executable gc-deacon-ledger.sh beside this script; gate $GATE is filed but absent from the ledger"
-  fi
-fi
-# <<< deacon-ledger-append
 
 warn "filed gate $GATE on $SUBJECT [$KEY]"
 printf '%s\n' "$GATE"

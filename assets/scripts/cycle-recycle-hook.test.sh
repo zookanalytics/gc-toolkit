@@ -54,10 +54,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 # report from cmd/gc/cmd_handoff.go. A handoff that succeeds reports by default
 # what the on-demand refinery's does, that it sent the mail and requested no
 # restart, and a failed one reports nothing. GC_HANDOFF_REPORT replaces the
-# report. RESTART_REPORT is an always-mode session's, which Gas City prints once
-# the restart is requested and keeps when the handoff then exits 1 because it
-# cannot signal the controller. The tmux stub answers the hook's attachment
-# query with TMUX_ATTACHED.
+# report. The tmux stub answers the hook's attachment query with TMUX_ATTACHED.
 mkdir -p "$SANDBOX/home/go/bin"
 cat > "$SANDBOX/home/go/bin/gc" <<'STUB'
 #!/bin/sh
@@ -79,7 +76,6 @@ case "$1 $2" in
 esac
 exit 0
 STUB
-RESTART_REPORT="Handoff: sent mail gm-1, requesting restart..."
 cat > "$SANDBOX/home/go/bin/tmux" <<'STUB'
 #!/bin/sh
 printf '%s\n' "${TMUX_ATTACHED:-0}"
@@ -217,8 +213,8 @@ echo "cycle-recycle hook: pack drift"
 # it does not: hook settings reach a live session through Claude Code's
 # settings watcher, so a change to them is no drift.
 PACK="$SANDBOX/city/rigs/gc-toolkit"
-WATCHED="agents/refinery/prompt.template.md agents/deacon/prompt.template.md agents/witness/prompt.template.md
-formulas/mol-refinery-patrol.toml formulas/mol-deacon-patrol.toml
+WATCHED="agents/refinery/prompt.template.md agents/witness/prompt.template.md
+formulas/mol-refinery-patrol.toml
 template-fragments/human-gate-withdraw.template.md template-fragments/scratch-reclaim.template.md"
 UNWATCHED="docs/notes.md overlays/cycle-recycle/.claude/settings.json"
 epoch_stamp() { date -d "@$1" '+%Y%m%d%H%M.%S' 2>/dev/null || date -r "$1" '+%Y%m%d%H%M.%S'; }
@@ -339,27 +335,6 @@ GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
 eq "$(drift_verdict)" "recycled" "with the handoff and the reset both failed, no report names a mail to archive"
 eq "$OUT" "" "and the prompt goes through, since neither requested a restart"
 
-# The deacon's and the witness's handoff requests the restart itself before it
-# returns, so a failed reset leaves that restart standing. A prompt let through
-# would be killed mid-command when the restart lands.
-age "$PACK/formulas/mol-deacon-patrol.toml" 60
-DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift --prompt
-eq "$(drift_verdict)" "recycled" "a drifted deacon recycles before the prompt, its handoff requesting the restart"
-eq "$(blocked)" "block" "and a failed reset still blocks, since the handoff's restart stands"
-says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
-eq "$says" "yes" "with the block reason saying the HANDOFF carries the prompt"
-
-DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_HANDOFF_RC=1 GC_RESET_RC=1 run_drift --prompt
-eq "$(blocked)" "block" "a handoff that requested the restart and then could not signal the controller still blocks"
-says=$(case "$(block_reason)" in *"HANDOFF mail carries this prompt"*) echo yes ;; *) echo no ;; esac)
-eq "$says" "yes" "and its report shows the HANDOFF was sent"
-
-DRIFT_AGENT=gc-toolkit.deacon GC_HANDOFF_REPORT="$RESTART_REPORT" GC_RESET_RC=1 run_drift
-eq "$OUT$RC" "0" "at a turn's end the same failed reset prints nothing and exits 0"
-stands=$(case "$ERR" in *"the restart gc handoff requested stands"*) echo yes ;; *) echo no ;; esac)
-eq "$stands" "yes" "and says the restart the handoff requested stands"
-age "$PACK/formulas/mol-deacon-patrol.toml" 7200
-
 TMUX_UNDER_TEST=/tmp/tmux-test,1,0 TMUX_ATTACHED=1 run_drift --prompt
 eq "$(drift_verdict)" "none" "with an operator attached the recycle defers"
 eq "$OUT" "" "and the prompt goes through"
@@ -382,8 +357,8 @@ age_pack
 age "$PACK/formulas/mol-refinery-patrol.toml" 60
 DRIFT_TRANSCRIPT="$NOSTART_T" run_drift
 eq "$(drift_verdict)" "none" "a transcript with no timestamped record has no start to compare"
-DRIFT_AGENT=gc-toolkit.deacon run_drift
-eq "$(drift_verdict)" "none" "the refinery's formula is not the deacon's: a deacon does not recycle"
+DRIFT_AGENT=gc-toolkit.witness run_drift
+eq "$(drift_verdict)" "none" "the refinery's formula is not the witness's: the witness does not recycle"
 DRIFT_AGENT=alpha/gc-toolkit.polecat-1 run_drift
 eq "$(drift_verdict)" "none" "a polecat is never recycled"
 # A rig checkout that is itself the pack is read before the city's copy.
@@ -398,11 +373,6 @@ eq "$(drift_verdict)" "none" "a GC_RIG_ROOT that carries the role's prompt is th
 age "$RIGPACK/formulas/mol-refinery-patrol.toml" 60
 DRIFT_RIG_ROOT="$RIGPACK" run_drift
 eq "$(drift_verdict)" "recycled" "and a change there recycles"
-age_pack
-
-age "$PACK/formulas/mol-deacon-patrol.toml" 60
-DRIFT_AGENT=gc-toolkit.deacon run_drift
-eq "$(drift_verdict)" "recycled" "the deacon recycles when its own formula changed"
 age_pack
 
 # The witness runs no formula, so the pack that carries its prompt is the one

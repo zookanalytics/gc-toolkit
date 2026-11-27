@@ -3,7 +3,7 @@
 # no network. Covers: a marooned bug and a pool-routed task are flagged; every
 # legitimate HQ resident is exempt (infra type, a bead an open human gate
 # blocks, which another gate does not exempt, a conversation,
-# deacon-ledger label, debt label, gc-doctor title, an assigned bead, a bead
+# debt label, gc-doctor title, an assigned bead, a bead
 # routed to a city-scoped agent, a standing subject); the
 # machinery types bd's ready-work query excludes (step, convoy,
 # startup-health-episode) are exempt while a marooned spec is still flagged; the
@@ -101,7 +101,6 @@ B_HUMAN='{"id":"m-human","status":"open","issue_type":"task","title":"operator d
 B_CONV='{"id":"ok-conv","status":"open","issue_type":"task","title":"about an operator pick","assignee":"human","dependencies":[{"issue_id":"ok-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
 B_GATE='{"id":"ok-gate","status":"open","issue_type":"gate","await_type":"human","await_id":"operator-pick","title":"operator pick"}'
 B_UNASSIGNED_CONV='{"id":"m-conv","status":"open","issue_type":"task","title":"a conversation someone unassigned by hand","dependencies":[{"issue_id":"m-conv","depends_on_id":"tk-pick","type":"tracks"}]}'
-B_LEDGER='{"id":"ok-ledger","status":"open","issue_type":"task","title":"deacon ledger 2026-09-29","labels":["deacon-ledger"]}'
 B_DEBT='{"id":"ok-debt","status":"open","issue_type":"task","title":"gc doctor: 2 new findings (dolt-drift)","labels":["debt"]}'
 B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doctor: agent-token-telemetry"}'
 B_ASSIGNED='{"id":"ok-assigned","status":"open","issue_type":"bug","title":"already being worked","assignee":"gc-toolkit/gc-toolkit.polecat"}'
@@ -135,14 +134,13 @@ has "$OUT" "m-human" "the finding names the bead"
 has "$OUT" "routed to human" "the finding names the route"
 
 # --- 3. every legitimate HQ resident is exempt ------------------------------
-store "$B_SESSION" "$B_CONV" "$B_GATE" "$B_LEDGER" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
+store "$B_SESSION" "$B_CONV" "$B_GATE" "$B_DEBT" "$B_DOCTOR" "$B_ASSIGNED"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "session/conversation/gate/ledger/debt/doctor/assigned are all legitimate HQ contents"
+eq "$RC" "0" "session/conversation/gate/debt/doctor/assigned are all legitimate HQ contents"
 has "$OUT" "OK:" "the pass message is the OK line"
 hasnt "$OUT" "ok-sess" "an infra session type is not flagged"
 hasnt "$OUT" "ok-conv" "a conversation in the operator's queue is assigned, so it is not flagged"
 hasnt "$OUT" "ok-gate" "a human gate is a gate, an infra type, so it is not flagged"
-hasnt "$OUT" "ok-ledger" "a deacon-ledger daily digest is not flagged"
 hasnt "$OUT" "ok-debt" "a debt-labelled advisory is not flagged"
 hasnt "$OUT" "ok-doctor" "a gc-doctor-titled advisory with no label is not flagged"
 hasnt "$OUT" "ok-assigned" "an already-assigned bead is not flagged"
@@ -267,10 +265,10 @@ has "$OUT" "ok-dogroute" "the exemption is scope-driven, not a hardcoded 'dog' n
 # --- 11. with the agent list down, a label still exempts ---------------------
 # CITY_ROUTES cannot resolve without the roster, and a label exemption reads no
 # route.
-store "$B_LEDGER"
+store "$B_DEBT"
 OUT=$(AGENTS_RC=1 WANT_CITY_PATH="$CITY" run_check); RC=$?
-eq "$RC" "0" "a deacon-ledger digest is exempt by label even when the agent list is unreadable"
-has "$OUT" "OK:" "the roster-down ledger store reports the OK line"
+eq "$RC" "0" "a debt-labelled advisory is exempt by label even when the agent list is unreadable"
+has "$OUT" "OK:" "the roster-down debt store reports the OK line"
 
 # --- 12. machinery types mirrored from bd's ready-work exclusions are exempt,
 #         but spec (real rig work) is still caught --------------------------

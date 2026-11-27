@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # doctor/check-hq-marooned-work — no rig-workable bead sits unclaimed in the HQ
-# (city) store where no worker will reach it. A city-scoped role (deacon,
-# mechanik, po) runs with GC_RIG unset, so a bare `bd create` resolves to the HQ
+# (city) store where no worker will reach it. A city-scoped role (mechanik,
+# mayor, po) runs with GC_RIG unset, so a bare `bd create` resolves to the HQ
 # store instead of a rig store. Rig pools never read the HQ store, so rig work
 # filed there is marooned by construction: invisible to every rig queue, surfaced
 # by nothing. A city-scoped pool DOES read the HQ store, so a bead routed to one
@@ -15,9 +15,8 @@
 # a city-scoped agent (resolved from `gc agent list`) is reachable there; a
 # standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
 # held-by-design escalation host, not work; a bead an open human gate blocks
-# waits on a person's answer, which the board shows; a `deacon-ledger` label is
-# a daily digest; a `debt` label or a `gc doctor:` title is a doctor/tech-debt
-# advisory record. An assigned bead is already claimed, and that covers a
+# waits on a person's answer, which the board shows; a `debt` label or a
+# `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is already claimed, and that covers a
 # conversation, which is always assigned: to `human` in the operator's queue or
 # to its sitting's alias. A human gate is a gate, an infra type. What remains is
 # rig work no worker can reach.
@@ -221,7 +220,6 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     | select($as == "")                               # unassigned — not already claimed
     | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
     | select(($b | is_standing_kind) | not)           # not a held-by-design standing record
-    | select(($labels | index("deacon-ledger")) == null)  # not a daily digest
     | select(($labels | index("debt")) == null)       # not a parked tech-debt / advisory record
     | select(($title | test("^gc doctor:")) == false) # not a doctor advisory record
     | [ ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),

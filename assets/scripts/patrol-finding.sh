@@ -34,9 +34,9 @@
 set -uo pipefail
 
 PROG="patrol-finding"
-# The rig whose store a finding lands in when the caller names none. The
-# deacon is city-scoped, so GC_RIG arrives unset there and an unpinned
-# `gc bd` would read whichever store the cwd walks up to.
+# The rig whose store a finding lands in when the caller names none. A
+# city-scoped caller arrives with GC_RIG unset, and an unpinned `gc bd` would
+# read whichever store the cwd walks up to.
 DEFAULT_RIG="${GC_FINDING_DEFAULT_RIG:-gc-toolkit}"
 
 # `bd create` refuses a title over 500 bytes, and a finding line can run long.
@@ -63,15 +63,7 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
   --key       names the SITUATION, not the wording: one live bead per key,
               narrowed to --about when that is given. [A-Za-z0-9._-] only.
               Two findings that need separate work need separate keys, so
-              encode what distinguishes them (`dolt-backup-<db>`). A doctor
-              check's key is derived: use --check, not --key. `doctor-<check>`
-              is reserved for that derivation (`doctor-sweep-failed`, a
-              whole-sweep failure, is the one hand-typed doctor key)
-  --check     a doctor check name — the sweep payload's `.name`, e.g.
-              `gc-toolkit:check-step-terminal`. Derives the key `doctor-<check>`
-              with the `<rig>:` prefix stripped, so every rendering of one
-              check's name dedups to one bead. Mutually exclusive with --key;
-              give exactly one
+              encode what distinguishes them (`refinery-empty-identity`)
   --title     the board label for the bead; cut at a word boundary past 200
   --message   the finding, verbatim — it becomes the bead body, and it is
               what the first reaction reads. A recurrence whose text changed
@@ -80,7 +72,7 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               narrows the dedup to that bead. A wisp (`*-wisp-*`) is dropped
               with a warning: its pass burns it, so the key alone is the
               identity
-  --scope     which patrol filed it (deacon-findings, witness-findings);
+  --scope     which patrol filed it (witness-findings, refinery-findings);
               recorded as finding.scope
   --distinct  file a new bead although a live finding in this scope shares
               its key (about another bead) or its subject (under another
@@ -106,12 +98,11 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
 U
 }
 
-KEY=""; CHECK=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
+KEY=""; TITLE=""; MESSAGE=""; ABOUT=""; SCOPE=""; TYPE="bug"
 PRIORITY=""; RIG_ARG=""; DISTINCT=""; NO_REACT=""; CLEARED=""; DRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)      KEY="${2:-}";      shift 2 || { usage; exit 2; } ;;
-    --check)    CHECK="${2:-}";    shift 2 || { usage; exit 2; } ;;
     --title)    TITLE="${2:-}";    shift 2 || { usage; exit 2; } ;;
     --message)  MESSAGE="${2:-}";  shift 2 || { usage; exit 2; } ;;
     --about)    ABOUT="${2:-}";    shift 2 || { usage; exit 2; } ;;
@@ -127,20 +118,8 @@ while [ $# -gt 0 ]; do
     *) warn "unknown argument '$1'"; usage; exit 2 ;;
   esac
 done
-# --check derives the key from a doctor check's name so the caller never hand-types
-# it. The doctor JSON names a check `<rig>:<check>`; dedup is exact-match on the key,
-# so a key that varies with how the `<rig>:` prefix is rendered splits one check
-# across several beads. Stripping the prefix yields one key, `doctor-<check>`, for
-# every rendering of the name.
-if [ -n "$CHECK" ]; then
-  if [ -n "$KEY" ]; then
-    warn "--key and --check are mutually exclusive; --check derives the key"
-    usage; exit 2
-  fi
-  KEY="doctor-${CHECK##*:}"
-fi
 if [ -z "$KEY" ] || [ -z "$MESSAGE" ] || { [ -z "$TITLE" ] && [ -z "$CLEARED" ]; }; then
-  warn "--key (or --check) and --message are required, and so is --title unless --cleared is given"; usage; exit 2
+  warn "--key and --message are required, and so is --title unless --cleared is given"; usage; exit 2
 fi
 # A '=' or metacharacter in the key breaks the exact-match dedup read.
 case "$KEY" in
@@ -162,24 +141,6 @@ if [ -n "$RIG_ARG" ]; then
 elif [ -z "${GC_RIG:-}" ]; then
   export GC_RIG="$DEFAULT_RIG"
   warn "GC_RIG unset; filing in the '$DEFAULT_RIG' store (--rig names another)"
-fi
-
-# A doctor finding's key is DERIVED, not hand-typed: --check turns a check's
-# name into the one canonical key doctor-<check>, the <rig>: prefix stripped
-# (above). A hand-typed --key that renders the name any other way splits one
-# check across beads — a '.' where the derivation writes a '-'
-# (doctor.<check>), or the <rig> that --check strips left embedded
-# (doctor-<rig>-<check>, doctor-<rig>.<check>). Refuse the renderings a
-# derivation never emits and name --check; the guard reads $GC_RIG, so it must
-# follow its resolution. doctor-sweep-failed is the one hand-typed doctor key:
-# a whole-sweep failure names no check to derive from.
-if [ -z "$CHECK" ]; then
-  case "$KEY" in
-    doctor-sweep-failed) : ;;
-    doctor.* | doctor-"$GC_RIG"-* | doctor-"$GC_RIG".*)
-      warn "'$KEY' is a hand-typed doctor key in a drifted rendering; a doctor check's key comes from --check <name> (yields doctor-<check>). doctor-sweep-failed is the only hand-typed doctor key."
-      exit 2 ;;
-  esac
 fi
 
 # derive_title <text> — one-line board label; an over-long title is cut at a

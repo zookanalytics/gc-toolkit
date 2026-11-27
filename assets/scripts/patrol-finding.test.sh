@@ -115,13 +115,13 @@ echo "# patrol-finding.sh"
 
 # ── 1. the first filing ──────────────────────────────────────────────
 reset
-OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
-        --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" 2>&1)
+OUT=$("$SUT" --key seat-stalled --scope witness-findings \
+        --title "seat stalled" --message "state=failed elapsed=612 check=cadence" 2>&1)
 RC=$?
 eq "$RC" "0" "(first) exit 0"
 eq "$(beads)" "1" "(first) exactly one bead filed"
-eq "$(meta new-1 'finding.key')" "doctor-sweep-failed" "(first) finding.key rode the create"
-eq "$(meta new-1 'finding.scope')" "deacon-findings" "(first) finding.scope recorded"
+eq "$(meta new-1 'finding.key')" "seat-stalled" "(first) finding.key rode the create"
+eq "$(meta new-1 'finding.scope')" "witness-findings" "(first) finding.scope recorded"
 eq "$(meta new-1 'finding.occurrences')" "1" "(first) occurrences starts at 1"
 eq "$(meta new-1 'gc.proactive')" "<absent>" "(first) no scan opt-in is stamped: the scan reads every ready bead"
 eq "$(btype new-1)" "bug" "(first) default type is bug"
@@ -135,8 +135,8 @@ eq "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(first) slings the first reacti
 hasnt "$(cat "$STUB_GC_LOG")" "visit:" "(first) no visit is filed on this path"
 
 # ── 2. the same finding, again — the case a human gate's dedup cannot hold ─
-OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
-        --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" 2>&1)
+OUT=$("$SUT" --key seat-stalled --scope witness-findings \
+        --title "seat stalled" --message "state=failed elapsed=612 check=cadence" 2>&1)
 eq "$(beads)" "1" "(recur/same) still exactly one bead — no duplicate"
 eq "$(meta new-1 'finding.occurrences')" "2" "(recur/same) occurrence counted"
 eq "$(notes new-1)" "" "(recur/same) unchanged text appends no note"
@@ -146,15 +146,15 @@ eq "$(grep -c 'sling new-1' "$STUB_PROACTIVE_LOG")" "1" "(recur/same) does not r
 
 # Twelve more ticks, as the measured day had.
 for _ in $(seq 1 12); do
-  "$SUT" --key doctor-sweep-failed --scope deacon-findings \
-    --title "doctor sweep failed" --message "state=failed elapsed=612 check=cadence" >/dev/null 2>&1
+  "$SUT" --key seat-stalled --scope witness-findings \
+    --title "seat stalled" --message "state=failed elapsed=612 check=cadence" >/dev/null 2>&1
 done
 eq "$(beads)" "1" "(recur/x14) fourteen ticks of one situation are one bead"
 eq "$(meta new-1 'finding.occurrences')" "14" "(recur/x14) all fourteen counted on it"
 
 # ── 3. the same finding, changed text ────────────────────────────────
-OUT=$("$SUT" --key doctor-sweep-failed --scope deacon-findings \
-        --title "doctor sweep failed" --message "state=exceeded elapsed=1801 check=cadence" 2>&1)
+OUT=$("$SUT" --key seat-stalled --scope witness-findings \
+        --title "seat stalled" --message "state=exceeded elapsed=1801 check=cadence" 2>&1)
 eq "$(beads)" "1" "(recur/changed) still one bead"
 eq "$(meta new-1 'finding.occurrences')" "15" "(recur/changed) occurrence counted"
 has "$(notes new-1)" "state=exceeded elapsed=1801" "(recur/changed) the new text is appended as a note"
@@ -239,8 +239,8 @@ has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-1" "(empty id) the recovered bead 
 # create runs. Regression: the fail-OPEN probe filed new-1 and exited 0.
 reset
 export STUB_LIST_FAIL=1
-OUT=$("$SUT" --key doctor-unreadable --scope deacon-findings \
-        --title "doctor sweep failed" --message "state=failed elapsed=612" 2>&1); RC=$?
+OUT=$("$SUT" --key doctor-unreadable --scope witness-findings \
+        --title "seat stalled" --message "state=failed elapsed=612" 2>&1); RC=$?
 eq "$RC" "1" "(list fails) fails closed — not exit 0 — on an unreadable dedup probe"
 eq "$(beads)" "0" "(list fails) files NOTHING; no duplicate while the store is unreadable"
 hasnt "$OUT" "filed new-" "(list fails) reports no filed bead"
@@ -314,71 +314,6 @@ has "$OUT" "key=doctor-dry" "(dry-run) prints what it would file"
 OUT=$("$SUT" --key doctor-dry --title "dry" --message "dry fired" --distinct --dry-run 2>&1)
 has "$OUT" " distinct" "(dry-run) and names --distinct when it is given"
 eq "$(beads)" "0" "(dry-run) --distinct still files nothing"
-
-# ── 15. --check derives the doctor key from the check name ───────────
-# The doctor JSON names a check `<rig>:<check>`, and dedup is exact-match on the
-# key, so the key must not vary with how the `<rig>:` prefix is rendered. --check
-# strips the prefix, resolving every rendering of one check to one key.
-reset
-"$SUT" --check "gc-toolkit:check-step-terminal" --scope deacon-findings \
-  --title "doctor gc-toolkit:check-step-terminal: I8 holds" --message "step-terminal I8" >/dev/null 2>&1
-eq "$(meta new-1 'finding.key')" "doctor-check-step-terminal" "(check) the <rig>: prefix is stripped to one canonical key"
-
-# A bare check name (no `<rig>:` prefix) passes through unchanged.
-reset
-"$SUT" --check "fork-rate" --title "doctor fork-rate: high" --message "240 forks/s" >/dev/null 2>&1
-eq "$(meta new-1 'finding.key')" "doctor-fork-rate" "(check) a prefix-less name yields doctor-<name>"
-
-# One check is one bead: the derived key is stable, so a recurrence lands on the
-# open bead instead of filing another.
-reset
-"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
-"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
-eq "$(beads)" "1" "(check) one check is one bead across recurrences"
-eq "$(meta new-1 'finding.occurrences')" "2" "(check) the recurrence counted on it"
-
-# --key and --check name the same slot; giving both is ambiguous and refused.
-reset
-OUT=$("$SUT" --key doctor-x --check "gc-toolkit:check-x" --title t --message m 2>&1); RC=$?
-eq "$RC" "2" "(check) --key and --check together are refused"
-has "$OUT" "mutually exclusive" "(check) says why"
-eq "$(beads)" "0" "(check) nothing filed on the ambiguous call"
-
-# ── The doctor-<check> namespace is derived, never hand-typed ─────────
-# --check derives doctor-<check> with the <rig>: prefix stripped; a hand-typed
-# --key in a rendering the derivation never emits (a '.' after "doctor", or the
-# rig name embedded) splits one check across beads. patrol-finding.sh refuses
-# those renderings and names --check.
-reset
-OUT=$("$SUT" --key doctor.pool-idle-routed-work --scope deacon-findings --title t --message m 2>&1); RC=$?
-eq "$RC" "2" "(doctor-key) a hand-typed dot-form doctor key is refused"
-has "$OUT" "--check" "(doctor-key) the refusal names --check"
-eq "$(beads)" "0" "(doctor-key) nothing filed on the refused dot-form call"
-
-reset
-OUT=$("$SUT" --key doctor-gc-toolkit-check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
-eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dash) doctor key is refused"
-
-reset
-OUT=$("$SUT" --key doctor-gc-toolkit.check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
-eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dot) doctor key is refused"
-
-# The whole-sweep failure names no check, so its key is the one hand-typed
-# doctor key the guard lets through.
-reset
-"$SUT" --key doctor-sweep-failed --scope deacon-findings --title t --message m >/dev/null 2>&1
-eq "$(beads)" "1" "(doctor-key) the doctor-sweep-failed sentinel is allowed"
-
-# The canonical path is untouched: --check still derives and files doctor-<check>.
-reset
-"$SUT" --check "gc-toolkit:pool-idle-routed-work" --scope deacon-findings --title t --message m >/dev/null 2>&1
-eq "$(beads)" "1" "(doctor-key) --check still files the canonical bead"
-eq "$(meta new-1 'finding.key')" "doctor-pool-idle-routed-work" "(doctor-key) --check yields doctor-<check>, prefix stripped"
-
-# A non-doctor key that merely contains the rig name is not in the namespace.
-reset
-"$SUT" --key dolt-backup-gc-toolkit --scope deacon-findings --title t --message m >/dev/null 2>&1
-eq "$(beads)" "1" "(doctor-key) a non-doctor key is unaffected"
 
 # ── 16. a bead held at blocked still tracks its finding ──────────────
 # The finding's bead is parked at blocked behind the fix it waits on, and an
@@ -561,7 +496,7 @@ has "$(cat "$STUB_PROACTIVE_LOG")" "sling new-2" "(sibling/--distinct) and sling
 # Only a live finding in the same scope is a sibling, and only one that shares
 # a half: another patrol's finding, a closed one, or one that shares neither key
 # nor subject files as before.
-OUT=$("$SUT" --scope deacon-findings --key dolt-gate-lag --about tk-gate \
+OUT=$("$SUT" --scope refinery-findings --key dolt-gate-lag --about tk-gate \
         --title "dolt lag" --message "lag" 2>&1); RC=$?
 eq "$RC" "0" "(sibling/scope) another scope's finding on the subject is no sibling"
 eq "$(beads)" "3" "(sibling/scope) it files"
@@ -578,8 +513,8 @@ eq "$(beads)" "5" "(sibling/closed) it files"
 
 # Findings with no subject share only a key, so distinct keys stay distinct.
 reset
-"$SUT" --scope deacon-findings --key dolt-server-unreachable --title a --message a >/dev/null 2>&1
-OUT=$("$SUT" --scope deacon-findings --key dolt-orphan-dbs --title b --message b 2>&1); RC=$?
+"$SUT" --scope witness-findings --key dolt-server-unreachable --title a --message a >/dev/null 2>&1
+OUT=$("$SUT" --scope witness-findings --key dolt-orphan-dbs --title b --message b 2>&1); RC=$?
 eq "$RC" "0" "(sibling/no subject) two keys with no subject are two findings"
 eq "$(beads)" "2" "(sibling/no subject) both file"
 
@@ -654,12 +589,12 @@ longest_line() { printf '%s\n' "$1" | LC_ALL=C awk '{ if (length($0) > m) m = le
 filler() { head -c "$1" < /dev/zero | tr '\0' 'x' > "$TMP/filler"; printf '%s' "$TMP/filler"; }
 
 reset
-"$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+"$SUT" --key doctor-nudge-unconfirmed --scope witness-findings \
   --title "doctor nudge-unconfirmed" --message "$(doctor_msg 300)" >/dev/null 2>&1
 has "$(body new-1)" "pool-299" "(bounded) the first text is the body, verbatim"
 has "$(body new-1)" "until the notes reach 65536 bytes" "(bounded) the body names the notes cap"
 for n in $(seq 301 312); do
-  OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+  OUT=$("$SUT" --key doctor-nudge-unconfirmed --scope witness-findings \
           --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
 done
 NOTES=$(notes new-1)
@@ -678,12 +613,12 @@ has "$OUT" "a one-line note of the changed text" "(bounded) says what it noted"
 # the cap. One marker line says the text is no longer noted, and nothing
 # follows it.
 reset
-"$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+"$SUT" --key doctor-nudge-unconfirmed --scope witness-findings \
   --title "doctor nudge-unconfirmed" --message "$(doctor_msg 10)" >/dev/null 2>&1
 set_notes new-1 "$(filler 64000)"
 for n in $(seq 11 18); do
   D_BEFORE=$(meta new-1 'finding.digest')
-  OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --scope deacon-findings \
+  OUT=$("$SUT" --key doctor-nudge-unconfirmed --scope witness-findings \
           --title "doctor nudge-unconfirmed" --message "$(doctor_msg "$n")" 2>&1)
 done
 NB=$(notes_bytes new-1)
@@ -700,10 +635,10 @@ hasnt "$(cat "$STUB_GC_LOG")" " --notes " "(cap) --notes would erase the other w
 # twice (about 240 each), but not for a line and the marker. The line is held
 # back so the marker that says why still fits, and the marker goes in once.
 reset
-"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+"$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
 set_notes new-1 "$(filler 65036)"
-"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" >/dev/null 2>&1
-"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 12)" >/dev/null 2>&1
+"$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 11)" >/dev/null 2>&1
+"$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 12)" >/dev/null 2>&1
 eq "$(grep -c 'and their text is not noted' <<< "$(notes new-1)")" "1" "(cap/reserve) the marker goes in where a line alone would have fit"
 hasnt "$(notes new-1)" ", digest " "(cap/reserve) and no line goes in ahead of it"
 NB=$(notes_bytes new-1)
@@ -711,9 +646,9 @@ if [ "$NB" -le 65536 ]; then ok "(cap/reserve) the notes stay under the cap ($NB
 
 # Notes already past the cap get nothing at all, not even the marker.
 reset
-"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+"$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
 set_notes new-1 "$(filler 100000)"
-OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1); RC=$?
+OUT=$("$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1); RC=$?
 eq "$RC" "0" "(past cap) exit 0"
 eq "$(notes_bytes new-1)" "100000" "(past cap) notes past the cap are left as they are"
 eq "$(meta new-1 'finding.occurrences')" "2" "(past cap) the recurrence is counted"
@@ -722,9 +657,9 @@ has "$OUT" "not noted" "(past cap) says the text was not noted"
 # Less room than the marker takes, as another writer's note can leave: nothing
 # goes in, not even the marker, and the notes stay under the cap.
 reset
-"$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
+"$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 10)" >/dev/null 2>&1
 set_notes new-1 "$(filler 65436)"
-OUT=$("$SUT" --check gc-toolkit:nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1)
+OUT=$("$SUT" --key doctor-nudge-unconfirmed --title t --message "$(doctor_msg 11)" 2>&1)
 eq "$(notes_bytes new-1)" "65436" "(no room) 100 bytes of room leave the notes as they are"
 has "$OUT" "not noted, because the notes are at their 65536-byte cap" "(no room) says the cap held the text back"
 
