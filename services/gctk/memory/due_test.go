@@ -1,9 +1,9 @@
 package memory
 
 import (
-	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -558,21 +558,18 @@ func stuckPointer(t *testing.T) (*city, string, string) {
 		exists(filepath.Join(m, "n.md")) || !strings.Contains(read(t, index), "(n.md)") {
 		t.Fatalf("failed %q; want n.md removed and its pointer left for the next run", a.Failed)
 	}
-	if got := read(t, filepath.Join(c.state(m), goneFile)); got != "\"n.md\"\n" {
-		t.Fatalf("recorded %q for the next run; want n.md", got)
-	}
 	return c, m, index
 }
 
 // A pointer the index kept changing too fast to take out goes on the next run,
-// a settle or an apply, which then records nothing more for it.
+// a settle or an apply, which reads n.md's removal from the text it kept.
 func TestAPointerThatDidNotComeOutGoesOnTheNextRun(t *testing.T) {
 	for verb, next := range map[string]func(*city) []string{
 		"settle": func(c *city) []string { return c.settle().Failed },
 		"apply":  func(c *city) []string { return c.apply(refOf(c.due(), "o.md") + " next 2026-12-01").Failed },
 	} {
 		t.Run(verb, func(t *testing.T) {
-			c, m, index := stuckPointer(t)
+			c, _, index := stuckPointer(t)
 			if failed := next(c); len(failed) > 0 {
 				t.Fatal(failed)
 			}
@@ -580,16 +577,13 @@ func TestAPointerThatDidNotComeOutGoesOnTheNextRun(t *testing.T) {
 			if got := read(t, index); got != want {
 				t.Errorf("the index reads %q, want %q", got, want)
 			}
-			if exists(filepath.Join(c.state(m), goneFile)) {
-				t.Error("n.md is still recorded once its pointer is out")
-			}
 		})
 	}
 }
 
 // A drop killed at either step of its note's removal leaves the next run the
-// note's name: a settle then takes out the pointer to a note that moved, keeps
-// the pointer to one that stays, and records the name no more.
+// note's kept text: a settle then takes out the pointer to a note that moved,
+// and keeps the pointer to one that stays.
 func TestADropKilledAtAnyStepLeavesItsPointerToTheNextRun(t *testing.T) {
 	for step, want := range map[string]string{
 		"move":  "- [N](n.md) — the lesson\n- [O](o.md) — another\n",
@@ -610,15 +604,12 @@ func TestADropKilledAtAnyStepLeavesItsPointerToTheNextRun(t *testing.T) {
 			if got := read(t, index); got != want {
 				t.Errorf("the index reads %q, want %q", got, want)
 			}
-			if exists(filepath.Join(c.state(m), goneFile)) {
-				t.Error("n.md is still recorded once the settle is done")
-			}
 		})
 	}
 }
 
 // A note saved under the name of one whose pointer is left for the next run
-// keeps that pointer and the judge's decision on it, and is recorded no more.
+// keeps that pointer and the judge's decision on it.
 func TestAPointerLeftForTheNextRunStaysForANoteSavedUnderItsName(t *testing.T) {
 	c, m, index := stuckPointer(t)
 	write(t, filepath.Join(m, "n.md"), "n lesson, saved again.\n")
@@ -631,25 +622,104 @@ func TestAPointerLeftForTheNextRunStaysForANoteSavedUnderItsName(t *testing.T) {
 	if ds := c.due(); dueOf(ds, "n.md") != "" {
 		t.Errorf("due %s; want the decision on the new save kept", names(ds))
 	}
-	if exists(filepath.Join(c.state(m), goneFile)) {
-		t.Error("n.md is still recorded though its name holds a note")
+}
+
+// A settle takes the pointers to every note an earlier run removed out of the
+// index and out of a collection note named index-*.md, reading the removals
+// from the text it kept, with no record of what came out. It names each link
+// to one that it leaves in the index, by file and line, on each run until the
+// line changes, and leaves a link inside an entry's own text as written.
+func TestASettleTakesOutThePointersOfEachNoteRemoved(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	for _, n := range []string{"gone-a.md", "gone-b.md", "index-gone.md"} {
+		write(t, filepath.Join(c.state(m), removedDir, n+"@"+sum(n)), n)
+	}
+	write(t, filepath.Join(m, "kept.md"), "A kept lesson.\n")
+	index, topics := filepath.Join(m, indexName), filepath.Join(m, "index-topics.md")
+	write(t, index, "## Judgment\n- **Verify:** [A](gone-a.md) a · **[Kept](kept.md)** k\n"+
+		"- **[FULL INDEX](index-gone.md)** doctrine\n- **[TOPICS](index-topics.md)** more · [B](gone-b.md) b\n"+
+		"A rule of its own, as [A](gone-a.md) says.\n")
+	write(t, topics, "---\nname: index-topics\n---\n- [B](gone-b.md) b · [Kept](kept.md) k\n"+
+		"- (no file) A fact of its own, after [[gone-a]].\n"+useLine+"\n")
+	left := filepath.Join(m, indexName) + ":4 links gone-a.md"
+	s := c.settle()
+	if len(s.Failed) != 1 || !said(s.Failed, left) {
+		t.Errorf("failed %q; want the link the index's paragraph keeps named, and nothing else", s.Failed)
+	}
+	calls := c.findingCalls(linksKey)
+	if len(calls) != 1 || !strings.Contains(strings.Join(calls[0], "\x00"), ":\n- "+left) {
+		t.Fatalf("finding calls %q; want one finding that names %s", calls, left)
+	}
+	if msg := []rune(calls[0][slices.Index(calls[0], "--message")+1]); !strings.Contains(string(msg[:min(len(msg), 200)]), linksCommand) {
+		t.Errorf("the finding begins %q; want the 200 characters a recurrence keeps to name %s", string(msg[:min(len(msg), 200)]), linksCommand)
+	}
+	if got := read(t, index); got != "## Judgment\n- **Verify:** **[Kept](kept.md)** k\n- **[TOPICS](index-topics.md)** more\n"+
+		"A rule of its own, as [A](gone-a.md) says.\n" {
+		t.Errorf("the index reads %q", got)
+	}
+	if got := read(t, topics); got != "---\nname: index-topics\n---\n- [Kept](kept.md) k\n- (no file) A fact of its own, after [[gone-a]].\n" {
+		t.Errorf("index-topics.md reads %q", got)
+	}
+	if ds := c.due(); entryRef(ds, "A fact of its own") == "" || refOf(ds, "index-topics.md") != "" {
+		t.Errorf("due %s; want index-topics.md's entry due as an entry", names(ds))
+	}
+	if s := c.settle(); !said(s.Failed, left) {
+		t.Errorf("failed %q on the next run; want the link named again", s.Failed)
+	}
+	release, err := c.in.lock(c.state(m), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.in.LockWait = 100 * time.Millisecond
+	c.settle()
+	release()
+	if calls := c.findingCalls(linksKey); len(calls) != 2 {
+		t.Errorf("finding calls %q; want a run that did not read the links to leave the finding as it stands", calls)
+	}
+	write(t, index, "## Judgment\n- **Verify:** **[Kept](kept.md)** k\n")
+	if s := c.settle(); len(s.Failed) > 0 {
+		t.Errorf("failed %q once the line is edited", s.Failed)
+	}
+	if calls := c.findingCalls(linksKey); len(calls) != 3 || !slices.Contains(calls[2], "--cleared") {
+		t.Errorf("finding calls %q; want the finding cleared once the line is edited", calls)
 	}
 }
 
-// The notes recorded for the next run read back as written, whatever their
-// names hold.
-func TestTheNotesLeftForTheNextRunReadBack(t *testing.T) {
-	state := t.TempDir()
-	want := map[string]bool{"a lesson.md": true, "hub-x\ny.md": true, `say "it".md`: true}
-	if err := writeGone(state, want); err != nil {
+// Links names each link to a removed note that a settle leaves, numbered as
+// each file stands, as the settle names it, and leaves out a pointer the next
+// settle takes out, a link inside an entry's own text and a link to a note that
+// has a file. It writes nothing.
+func TestLinksNamesEachLinkASettleLeaves(t *testing.T) {
+	c := newCity(t)
+	m := c.rig("r", "tk")
+	for _, n := range []string{"gone-a.md", "gone-b.md"} {
+		write(t, filepath.Join(c.state(m), removedDir, n+"@"+sum(n)), n)
+	}
+	write(t, filepath.Join(m, "kept.md"), "A kept lesson.\n")
+	index, topics := filepath.Join(m, indexName), filepath.Join(m, "hub-topics.md")
+	indexText := "- [A](gone-a.md) a · [Kept](kept.md) k\nA rule of its own, as [B](gone-b.md) says, and [Kept](kept.md).\n"
+	topicsText := "Gathered from [A](gone-a.md).\n- [B](gone-b.md) b\n- (no file) A fact of its own, after [[gone-a]].\n"
+	write(t, index, indexText)
+	write(t, topics, topicsText)
+	l, err := c.in.Links()
+	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := readGone(state)
-	if err != nil || !maps.Equal(got, want) {
-		t.Errorf("read %v, %v; want %v", got, err, want)
+	want := []string{index + ":2 links gone-b.md, ", topics + ":1 links gone-a.md, "}
+	if len(l.Left) != 2 || len(l.Failed) > 0 || !strings.HasPrefix(l.Left[0], want[0]) || !strings.HasPrefix(l.Left[1], want[1]) {
+		t.Fatalf("links left %q, failed %q; want %q", l.Left, l.Failed, want)
 	}
-	if err := writeGone(state, nil); err != nil || exists(filepath.Join(state, goneFile)) {
-		t.Errorf("an empty record left its file: %v", err)
+	if read(t, index) != indexText || read(t, topics) != topicsText {
+		t.Error("Links wrote a file")
+	}
+	if s := c.settle(); !slices.Equal(s.Failed, l.Left) {
+		t.Errorf("a settle named %q; want what Links named", s.Failed)
+	}
+	write(t, index, "- [Kept](kept.md) k\n")
+	write(t, topics, "- (no file) A fact of its own, after [[gone-a]].\n")
+	if l, err := c.in.Links(); err != nil || len(l.Left)+len(l.Failed) > 0 {
+		t.Errorf("once the lines are edited, links left %q, failed %q, %v", l.Left, l.Failed, err)
 	}
 }
 

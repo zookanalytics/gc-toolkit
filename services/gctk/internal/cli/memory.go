@@ -41,10 +41,12 @@ asks Claude Code where a session started in each rig's checkout and in the
 city's root keeps its memory, and keeps one list per memory directory under
 <city>/.gc/runtime/packs/gc-toolkit/memory-intake/<SHA-256 of its real path>/.
 The feedback distiller runs settle first, lists the due notes with due, and
-records its judge's decisions with apply (the learning-distill skill).`,
+records its judge's decisions with apply (the learning-distill skill). links
+names the links to removed notes that a settle leaves, for whoever edits them.`,
 		newMemoryDueCmd(stdout, stderr),
 		newMemoryApplyCmd(stdout, stderr),
 		newMemorySettleCmd(stdout, stderr),
+		newMemoryLinksCmd(stdout, stderr),
 	)
 }
 
@@ -142,14 +144,16 @@ func newMemoryApplyCmd(stdout, stderr io.Writer) *cobra.Command {
 ask-use, for a whole note, adds the line that asks its users to record the days
 they use it, one dated line a day, and a decision without it takes that line
 out and leaves the use lines. A drop keeps the unit's text under its
-directory's state, removes it, and takes the pointers to a removed note out of
-the index and the collection notes while its name holds no file. A pointer
-that does not come out goes on the next apply or settle. A decision acts only
-on the text its ref names, so one whose unit changed since due listed it is
-refused and stays due.
+directory's state and removes it. Each apply and settle then takes out of the
+index and the collection notes every pointer to a note removed while its name
+holds no file, and names on stderr, by file and line, each link to one that it
+leaves, which the next settle files as a finding (docs/feedback-learning.md,
+"The memory intake"). A decision acts only on the text its ref names, so one
+whose unit changed since due listed it is refused and stays due.
 
 exit: 0 each decision recorded, removed or refused as changed
-      1 a decision could not be read or done, as stderr says
+      1 a decision could not be read or done, or a link to a removed note
+        stays, as stderr says
       2 usage`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -197,15 +201,20 @@ removed with its text kept, for a feedback pattern once a follow-up has landed
 and none is on its way, and a merge into an integration branch counts once the
 effort's landing bead has. A unit whose wait ended with no fix landed is due at
 once, as old as the day it ended. A row whose unit is gone leaves the list,
-and a pointer to a removed note that an earlier run could not take out goes.
-It prints each place and what it ended.
+and the pointers to the notes removed come out as apply's help says. It prints
+each place and what it ended.
 
 A place whose memory directory Claude Code does not name is one patrol finding,
 memory-intake.places, filed through the pack's patrol-finding.sh in the scripts
-directory GCTK_SCRIPTS_DIR names, and cleared once every place is learned.
+directory GCTK_SCRIPTS_DIR names, and cleared once every place is learned. The
+links to removed notes that it leaves go in another, memory-intake.links, which
+names each by file and line and is cleared once a settle reads the links of
+every place it learned and leaves none. Its text begins with the links verb,
+which names them as the files stand.
 
 exit: 0 done
-      1 something could not be read or written, as stderr says
+      1 something could not be read or written, or a link to a removed note
+        stays, as stderr says
       3 a place whose memory directory it could not learn; the rest settled`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -235,6 +244,51 @@ func memorySettle(in *memory.Intake, stdout, stderr io.Writer) int {
 	case unknown(s.Places, "gctk memory settle", stderr):
 		return memoryExitUnknown
 	case len(s.Failed) > 0:
+		return memoryExitFailed
+	}
+	return memoryExitDone
+}
+
+func newMemoryLinksCmd(stdout, stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
+		Use:   "links",
+		Short: "each link to a removed memory note that a settle leaves, by file and line",
+		Long: `Prints, one a line, each link to a note the intake removed, whose name holds
+no file, that a memory directory's index or one of its collection notes keeps
+in a line settle takes no pointer out of, by file and line as the file stands.
+The link stays until someone edits its line, as apply's help says. It reads
+every memory directory it learns, takes no lock and writes nothing. The patrol
+finding memory-intake.links, which settle files for these links, begins with
+this command, because a recurrence of a finding keeps only the head of its new
+text.
+
+exit: 0 no link to a removed note stays
+      1 a link to a removed note stays, or something could not be read, as
+        stderr says
+      3 a place whose memory directory it could not learn; the rest read`,
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return exit(memoryLinks(newIntake(), stdout, stderr))
+		},
+	}
+}
+
+func memoryLinks(in *memory.Intake, stdout, stderr io.Writer) int {
+	l, err := in.Links()
+	if err != nil {
+		fmt.Fprintf(stderr, "gctk memory links: no memory directory was placed: %v\n", err)
+		return memoryExitFailed
+	}
+	for _, left := range l.Left {
+		fmt.Fprintln(stdout, left)
+	}
+	for _, f := range l.Failed {
+		fmt.Fprintln(stderr, "gctk memory links: "+f)
+	}
+	switch {
+	case unknown(l.Places, "gctk memory links", stderr):
+		return memoryExitUnknown
+	case len(l.Left)+len(l.Failed) > 0:
 		return memoryExitFailed
 	}
 	return memoryExitDone

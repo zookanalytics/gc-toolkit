@@ -5,8 +5,9 @@
 // list kept per directory, and ends a note's wait once what it waits on is
 // done. The judging is the distiller's, by the learning-distill skill.
 //
-// A unit is a whole note, or an entry of a collection note (hub-*.md) that
-// carries text of its own. The index, MEMORY.md, is never judged.
+// A unit is a whole note, or an entry of a collection note (hub-*.md or
+// index-*.md) that carries text of its own. The index, MEMORY.md, is never
+// judged.
 package memory
 
 import (
@@ -43,11 +44,25 @@ const (
 	Entry = "entry"
 )
 
-// The files a directory holds that the intake reads by name.
-const (
-	indexName = "MEMORY.md"
-	hubPrefix = "hub-"
-)
+// indexName is the index, which loads into every session.
+const indexName = "MEMORY.md"
+
+// collectionPrefixes begin the name of each collection note: a note that
+// gathers pointers to other notes, and entries with text of their own.
+var collectionPrefixes = []string{"hub-", "index-"}
+
+// collection reports whether name is a collection note's.
+func collection(name string) bool {
+	if !strings.HasSuffix(name, ".md") {
+		return false
+	}
+	for _, p := range collectionPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // stateDir is the intake's state under the city's root: one directory per
 // memory directory, named for the SHA-256 of its real path.

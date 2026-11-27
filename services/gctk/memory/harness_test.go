@@ -326,6 +326,18 @@ func said(lines []string, text string) bool {
 	return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, text) })
 }
 
+// findingCalls is the args of each call that filed or cleared the patrol
+// finding of key.
+func (c *city) findingCalls(key string) [][]string {
+	var out [][]string
+	for _, call := range c.rt.Scripts() {
+		if call.Name == "patrol-finding.sh" && slices.Contains(call.Args, key) {
+			out = append(out, call.Args)
+		}
+	}
+	return out
+}
+
 // pattern is an open feedback pattern.
 func openPattern(id string) fake.Bead {
 	return fake.Bead{ID: id, Status: "open", Metadata: map[string]string{"task_kind": pattern}}

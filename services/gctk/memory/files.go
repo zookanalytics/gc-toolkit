@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -214,8 +213,8 @@ const (
 )
 
 // removeNote removes a note, or a collection note left with no entries, while
-// it holds the text whose hash is full, once that text is kept and its name is
-// recorded for its pointers to come out.
+// it holds the text whose hash is full, once that text is kept, which records
+// its name for its pointers to come out.
 func removeNote(state, dir, name, full string) (removal, string, error) {
 	file := filepath.Join(dir, name)
 	raw, err := os.ReadFile(file)
@@ -230,12 +229,6 @@ func removeNote(state, dir, name, full string) (removal, string, error) {
 	kept, made, err := keep(state, name, full, string(raw))
 	if err != nil {
 		return failed, "", fmt.Errorf("its text was not kept: %w", err)
-	}
-	if err := recordGone(state, name); err != nil {
-		if made {
-			_ = os.Remove(kept)
-		}
-		return failed, "", fmt.Errorf("its name was not recorded for its pointers to come out: %w", err)
 	}
 	r, err := take(file, full)
 	if r != removed {
@@ -318,66 +311,103 @@ func joinedLike(text string, ls []string) string {
 	return out
 }
 
-// pruneLinks is text without each pointer to a note in gone: a list item of one
-// line that begins with a link, which can hold several pointers joined by
-// " · ". A pointer goes with the text that follows it, and a line left with
-// none goes. An item with lines under it stays whole.
-func pruneLinks(text string, gone map[string]bool) string {
+// pruneLinks is text, the index's or a collection note's, without each pointer
+// to a note gone names in each pointer line, and without the line that asks a
+// note's users to record its uses, which no collection note takes. An item
+// with lines under it stays whole.
+func pruneLinks(text string, gone func(string) bool) string {
 	ls := lines(text)
 	var out []string
 	for i := 0; i < len(ls); i++ {
-		if !strings.HasPrefix(ls[i], "- ") {
+		switch {
+		case strings.HasPrefix(ls[i], useMark):
+			continue
+		case !strings.HasPrefix(ls[i], "- "):
 			out = append(out, ls[i])
 			continue
 		}
 		e := entryEnd(ls, i)
-		if !pointer(ls, i, e) {
+		if !pointerLine(ls, i, e) {
 			out = append(out, ls[i:e+1]...)
 			i = e
 			continue
 		}
-		var kept []string
-		keepSeg := true
-		for _, seg := range strings.Split(ls[i][2:], " · ") {
-			if linkStart(seg) {
-				keepSeg = !gone[target(seg)]
-			}
-			if keepSeg {
-				kept = append(kept, seg)
-			}
-		}
-		if len(kept) > 0 {
-			out = append(out, "- "+strings.Join(kept, " · "))
+		if item, keep := pruneItem(ls[i][2:], gone); keep {
+			out = append(out, "- "+item)
 		}
 	}
 	return joinedLike(text, out)
 }
 
-// unlink takes out the pointers to each note in gone, and keeps the names
-// under state while a pointer did not come out, so the next run reads them
-// into its gone and tries again. gone ends holding those of its notes, and of
-// the collection notes prune removed, whose names hold no file. It returns
-// what it could not do.
-func unlink(state, dir string, gone map[string]bool) []string {
-	var failures []string
-	if len(gone) > 0 {
-		failures = prune(state, dir, gone)
+// unlink takes out of the index and every collection note each pointer to a
+// note the intake removed, on this run or an earlier one, while its name holds
+// no file. It reads which notes it removed from the text it kept of each, so a
+// run that stops before its pointers come out leaves them to the next. It
+// returns the notes removed whose names hold no file, each link to one that it
+// leaves, by file and line, which each run names again until its line changes,
+// and what it could not do.
+func unlink(state, dir string) (gone map[string]bool, left, failures []string) {
+	taken, err := removedNames(state)
+	if err != nil {
+		return nil, nil, []string{fmt.Sprintf("the notes removed from %s did not read, so no link to one was taken out, and the next run tries again: %v", dir, err)}
 	}
-	left := absent(dir, gone)
-	maps.DeleteFunc(gone, func(name string, _ bool) bool { return !left[name] })
-	if len(failures) == 0 {
-		clear(left)
-	}
-	if err := writeGone(state, left); err != nil {
-		failures = append(failures, err.Error())
-	}
-	return failures
+	left, failures = prune(state, dir, taken)
+	return absent(dir, taken), left, failures
 }
 
-// absent is each note in gone whose name holds no file in dir.
-func absent(dir string, gone map[string]bool) map[string]bool {
+// linksLeftIn names each link to a note the intake removed, whose name holds no
+// file, that dir's index and collection notes keep where a prune leaves it, by
+// file and line as each file stands, and what it could not read. It writes
+// nothing.
+func linksLeftIn(state, dir string) (left, failures []string) {
+	taken, err := removedNames(state)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("the notes removed from %s did not read: %v", dir, err)}
+	}
+	gone := absent(dir, taken)
+	names, err := hubs(dir)
+	if err != nil {
+		return nil, []string{fmt.Sprintf("cannot list %s: %v", dir, err)}
+	}
+	for _, name := range names {
+		file := filepath.Join(dir, name)
+		b, err := os.ReadFile(file)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
+			failures = append(failures, fmt.Sprintf("%s did not read: %v", file, err))
+			continue
+		}
+		left = append(left, linksLeft(file, string(b), name == indexName, func(n string) bool { return gone[n] })...)
+	}
+	return left, failures
+}
+
+// removedNames is each name under which state keeps the text of a unit the
+// intake removed.
+func removedNames(state string) (map[string]bool, error) {
+	entries, err := os.ReadDir(filepath.Join(state, removedDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]bool{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]bool{}
-	for name := range gone {
+	for _, e := range entries {
+		i := strings.LastIndex(e.Name(), "@")
+		if hash := e.Name()[i+1:]; i > 0 && len(hash) == 64 && strings.Trim(hash, "0123456789abcdef") == "" {
+			out[e.Name()[:i]] = true
+		}
+	}
+	return out, nil
+}
+
+// absent is each note in names whose name holds no file in dir.
+func absent(dir string, names map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for name := range names {
 		if _, err := os.Lstat(filepath.Join(dir, name)); errors.Is(err, fs.ErrNotExist) {
 			out[name] = true
 		}
@@ -385,42 +415,87 @@ func absent(dir string, gone map[string]bool) map[string]bool {
 	return out
 }
 
-// prune takes the pointers to each note in gone whose name holds no file out
+// prune takes the pointers to each note in taken whose name holds no file out
 // of the index and every collection note, and removes, with its text kept, a
 // collection note that this leaves with no list item, whose own pointers then
-// go in turn, until a pass removes no collection note. gone gains the
-// collection notes it removes.
-func prune(state, dir string, gone map[string]bool) []string {
-	var failures []string
-	for more := true; more; {
-		names, err := hubs(dir)
-		if err != nil {
-			return append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out, and the next run tries again: %v", dir, err))
+// go in turn, until a pass removes no collection note. It returns each link to
+// such a note that the last pass left, and what it could not do. taken gains
+// the collection notes it removes.
+func prune(state, dir string, taken map[string]bool) (left, failures []string) {
+	gone := func(name string) bool {
+		if !taken[name] {
+			return false
 		}
-		more = false
+		_, err := os.Lstat(filepath.Join(dir, name))
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	var names []string
+	var final map[string]string
+	for more := true; more; {
+		var err error
+		if names, err = hubs(dir); err != nil {
+			return nil, append(failures, fmt.Sprintf("cannot list %s, so the links to the notes removed were not taken out, and the next run tries again: %v", dir, err))
+		}
+		more, final = false, map[string]string{}
 		for _, name := range names {
 			file := filepath.Join(dir, name)
 			had := false
 			written, wrote, err := rewrite(file, func(text string) (string, error) {
 				had = hasEntries(text)
-				return pruneLinks(text, absent(dir, gone)), nil
+				return pruneLinks(text, gone), nil
 			})
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("the links in %s were not taken out, and the next run tries again: %v", file, err))
 				continue
 			}
+			final[name] = written
 			if !wrote || name == indexName || !had || hasEntries(written) {
 				continue
 			}
 			switch r, _, err := removeNote(state, dir, name, sum(written)); r {
 			case removed:
-				gone[name], more = true, true
+				taken[name], more = true, true
 			case failed:
 				failures = append(failures, fmt.Sprintf("%s has no entries left and stays: %v", file, err))
 			}
 		}
 	}
-	return failures
+	for _, name := range names {
+		if text, ok := final[name]; ok {
+			left = append(left, linksLeft(filepath.Join(dir, name), text, name == indexName, gone)...)
+		}
+	}
+	return left, failures
+}
+
+// linksLeft names each link to a note gone names that text, file's, keeps
+// outside its pointer lines, whose pointers to such a note a prune takes out:
+// in the index any, and in a collection note any outside an entry with text of
+// its own, whose links stay as written, as a note's do. Its lines are numbered
+// as text holds them.
+func linksLeft(file, text string, index bool, gone func(string) bool) []string {
+	ls := lines(text)
+	var out []string
+	for i := 0; i < len(ls); i++ {
+		if strings.HasPrefix(ls[i], "- ") {
+			e := entryEnd(ls, i)
+			if pointerLine(ls, i, e) {
+				continue
+			}
+			if !index {
+				i = e
+				continue
+			}
+		}
+		named := map[string]bool{}
+		for _, name := range linkNames(ls[i]) {
+			if gone(name) && !named[name] {
+				named[name] = true
+				out = append(out, fmt.Sprintf("%s:%d links %s, a note the intake removed, in a line it takes no pointer out of; the link stays until the line is edited", file, i+1, name))
+			}
+		}
+	}
+	return out
 }
 
 // target is the note a link names in its directory, "" for a link elsewhere. A

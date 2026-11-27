@@ -71,12 +71,13 @@ type Applied struct {
 
 // Apply records the judge's decisions, one a line: a unit waits on a bead, is
 // due again on a day, with ask-use asking a note's users to record the days
-// they use it, or is dropped. A drop keeps the unit's text and removes it, then
-// takes the pointers to a removed note out of the index and the collection
-// notes while its name holds no file, those of an earlier run's removals that
-// did not come out with them. A decision acts only on the text the ref names,
-// and one whose unit changed since it was listed is refused and stays due. An
-// error is a city whose places did not read.
+// they use it, or is dropped. A drop keeps the unit's text and removes it. Then
+// the pointers to each note removed, by this run or an earlier one, come out of
+// the index and the collection notes while its name holds no file, and each
+// link to such a note that the run leaves is a failure that names its file and
+// line, which the next settle files as a finding. A decision acts only on the
+// text the ref names, and one whose unit changed since it was listed is refused
+// and stays due. An error is a city whose places did not read.
 func (in *Intake) Apply(decisions string) (Applied, error) {
 	var a Applied
 	today := in.today()
@@ -189,11 +190,6 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 		a.Failed = append(a.Failed, err.Error())
 		return
 	}
-	gone, err := readGone(state)
-	if err != nil {
-		a.Failed = append(a.Failed, err.Error())
-		return
-	}
 	now := in.now().Format(time.RFC3339)
 	for _, d := range ds {
 		u, ok := unitFor(units, d)
@@ -202,7 +198,7 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 			continue
 		}
 		if d.verb == Drop {
-			if in.drop(state, p.Dir, u, d, gone, a) {
+			if in.drop(state, p.Dir, u, d, a) {
 				rows = without(rows, u.key())
 			}
 			continue
@@ -228,7 +224,8 @@ func (in *Intake) applyIn(ps Places, p Place, ds []decision, a *Applied) {
 		}
 		a.Said = append(a.Said, "recorded "+d.ref+": due again on "+d.arg+asked+withdrawn)
 	}
-	a.Failed = append(a.Failed, unlink(state, p.Dir, gone)...)
+	gone, left, failures := unlink(state, p.Dir)
+	a.Failed = append(append(a.Failed, failures...), left...)
 	rows = withoutFiles(rows, gone)
 	if err := writeList(state, rows); err != nil {
 		a.Failed = append(a.Failed, err.Error())
@@ -246,12 +243,11 @@ func unitFor(units []Unit, d decision) (Unit, bool) {
 }
 
 // drop removes u, its text kept, and reports whether it went.
-func (in *Intake) drop(state, dir string, u Unit, d decision, gone map[string]bool, a *Applied) bool {
+func (in *Intake) drop(state, dir string, u Unit, d decision, a *Applied) bool {
 	if u.Kind == Note {
 		r, kept, err := removeNote(state, dir, u.Name, u.Full)
 		switch r {
 		case removed:
-			gone[u.Name] = true
 			a.Said = append(a.Said, "removed "+d.ref+", its text kept at "+kept)
 			return true
 		case stays:
@@ -266,7 +262,6 @@ func (in *Intake) drop(state, dir string, u Unit, d decision, gone map[string]bo
 	case removed:
 		a.Said = append(a.Said, "removed "+d.ref+", its text kept at "+kept)
 		if hubGone {
-			gone[u.Name] = true
 			a.Said = append(a.Said, "removed "+u.Name+", which has no entries left")
 		}
 		if err != nil {

@@ -40,12 +40,16 @@ func TestBodyHashReadsWhatTheWriterWrote(t *testing.T) {
 }
 
 // An entry is a top-level item with the indented lines under it, a blank line
-// belonging only when an indented line follows; a one-line item that begins
-// with a link is a pointer.
+// belonging only when an indented line follows. A pointer line, one line that
+// after an optional label in bold or italics ending in a colon begins with a
+// link, which emphasis can wrap, is not an entry.
 func TestEntryTexts(t *testing.T) {
-	text := "Intro.\n\n- [[a]] (A): pointer\n- [B](b.md) — pointer\n- (no file) one line\n- [C](c.md) — with\n  a line under it\n\n- second\n\n  under a blank line\n\n- third\nNot indented.\n"
-	want := []string{"- (no file) one line\n", "- [C](c.md) — with\n  a line under it\n",
-		"- second\n\n  under a blank line\n", "- third\n"}
+	text := "Intro.\n\n- [[a]] (A): pointer\n- [B](b.md) — pointer\n- **[D](d.md)** — pointer\n" +
+		"- **Label:** [E](e.md) — pointer\n- *Label*: _[F](f.md)_ — pointer\n- **Label:** text, no link\n" +
+		"- **Bold** [G](g.md) — no colon\n- (no file) one line\n- [C](c.md) — with\n  a line under it\n\n" +
+		"- second\n\n  under a blank line\n\n- third\nNot indented.\n"
+	want := []string{"- **Label:** text, no link\n", "- **Bold** [G](g.md) — no colon\n", "- (no file) one line\n",
+		"- [C](c.md) — with\n  a line under it\n", "- second\n\n  under a blank line\n", "- third\n"}
 	if got := entryTexts(text); !slices.Equal(got, want) {
 		t.Errorf("entries %q\nwant %q", got, want)
 	}
@@ -59,8 +63,53 @@ func TestPruneLinks(t *testing.T) {
 		"- [Gone](gone.md) — g\n  with a line under it\n- text first · [Gone](gone.md) — g\n"
 	want := "# Index\n- [A](a.md) — a · [B](<b.md#h>) — b\n- [Out](../gone.md) — elsewhere\n" +
 		"- [Web](https://x/gone.md) — url\n- [Gone](gone.md) — g\n  with a line under it\n- text first · [Gone](gone.md) — g\n"
-	if got := pruneLinks(text, map[string]bool{"gone.md": true}); got != want {
+	if got := pruneLinks(text, func(name string) bool { return name == "gone.md" }); got != want {
 		t.Errorf("pruned\n%s\nwant\n%s", got, want)
+	}
+}
+
+// Each shape of pointer a city's index holds comes out with the text that
+// describes its note, the parentheses in that text and their links included: a
+// link emphasis wraps, one after a label, one after text in its line, and one
+// inside parentheses. The label and the line's other pointers stay, a line left
+// with no pointer goes, and a link in a code span is text. The lines keep the
+// shapes of the index of a city's root, in words of their own.
+func TestPruneLinksTakesEachShapeOfPointer(t *testing.T) {
+	gone := func(name string) bool { return strings.HasPrefix(name, "gone-") }
+	for name, c := range map[string]struct{ line, want string }{
+		"bold around its link": {"- **[GRAPH NOT METADATA](gone-graph.md)** relationships are edges", ""},
+		"after a label": {
+			"- **Verify:** [value](gone-value.md) closed≠merged · **[STATUS = its last read](status.md)** re-read it · " +
+				"[deployed≠RUNNING](gone-running.md) restart it",
+			"- **Verify:** **[STATUS = its last read](status.md)** re-read it"},
+		"a label left with none": {"- **Spend:** [BALANCE, not a gate](gone-balance.md)", ""},
+		"after text in its line": {
+			"- **[FULL INDEX](index-a.md)** doctrine. Hot: [converge](gone-converge.md) · [prefer upstream](upstream.md)",
+			"- **[FULL INDEX](index-a.md)** doctrine. Hot: [prefer upstream](upstream.md)"},
+		"its line's first": {
+			"- **[FULL INDEX](gone-index.md)** doctrine. Hot: [converge](gone-converge.md) · [prefer upstream](upstream.md)",
+			"- [prefer upstream](upstream.md)"},
+		"bold, after text": {
+			"- **[STEER BY EPIC](steer.md)** priority drives work; PARK = an edge (cascades; deferred does NOT); " +
+				"**[`park <b> \"<why>\"` files a gate](gone-park.md)**, thin epic + park",
+			"- **[STEER BY EPIC](steer.md)** priority drives work; PARK = an edge (cascades; deferred does NOT)"},
+		"inside parentheses": {
+			"- **Act:** [CEREMONY](ceremony.md) push ⇒ POLECAT (rigs only; [town = DIRECT PUSH](gone-direct.md)); " +
+				"effort → refinery (op 11-09) · [no close](close.md) argue none",
+			"- **Act:** [CEREMONY](ceremony.md) push ⇒ POLECAT (rigs only); effort → refinery (op 11-09) · " +
+				"[no close](close.md) argue none"},
+		"alone inside parentheses": {"- [A](a.md) the lesson ([B](gone-b.md)) · [C](c.md)", "- [A](a.md) the lesson · [C](c.md)"},
+		"parentheses in its text":  {"- [[gone-a]] (A, after [[b]]): the lesson · [C](c.md) c", "- [C](c.md) c"},
+		"italics and wiki links":   {"- *[[gone-a]]* (A) · _[B](gone-b.md)_ b · [[c]] (C)", "- [[c]] (C)"},
+		"in a code span":           {"- [A](a.md) writes `[B](gone-b.md)`", "- [A](a.md) writes `[B](gone-b.md)`"},
+	} {
+		want := c.want
+		if want != "" {
+			want += "\n"
+		}
+		if got := pruneLinks(c.line+"\n", gone); got != want {
+			t.Errorf("%s: pruned to %q\nwant %q", name, got, want)
+		}
 	}
 }
 

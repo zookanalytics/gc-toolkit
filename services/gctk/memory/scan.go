@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -49,7 +48,7 @@ func scan(dir string) ([]Unit, error) {
 			return nil, fmt.Errorf("cannot read every note in %s: %w", dir, err)
 		}
 		text := string(raw)
-		if !strings.HasPrefix(name, hubPrefix) {
+		if !collection(name) {
 			units = append(units, Unit{Kind: Note, Name: name, Hash: bodyHash(text), Full: sum(text), Mtime: info.ModTime()})
 			continue
 		}
@@ -111,17 +110,9 @@ func bodyHash(text string) string {
 
 func fence(l string) bool { return strings.TrimRight(l, " \t\r") == "---" }
 
-// An entry is a top-level list item with the indented lines under it, and a
-// blank line belongs to it only when an indented line follows. An entry of one
-// line that begins with a link is a pointer to a note, not a unit.
-var (
-	wikiLink = regexp.MustCompile(`^\[\[[^]]+\]\]`)
-	mdLink   = regexp.MustCompile(`^\[[^]]*\]\([^)]+\)`)
-)
-
-func linkStart(s string) bool { return wikiLink.MatchString(s) || mdLink.MatchString(s) }
-
-// entryEnd is the last line of the entry that begins at ls[i].
+// entryEnd is the last line of the entry that begins at ls[i]. An entry is a
+// top-level list item with the indented lines under it, and a blank line
+// belongs to it only when an indented line follows.
 func entryEnd(ls []string, i int) int {
 	e := i
 	for k := i + 1; k < len(ls); k++ {
@@ -136,10 +127,9 @@ func entryEnd(ls []string, i int) int {
 	return e
 }
 
-func pointer(ls []string, i, e int) bool { return e == i && linkStart(ls[i][2:]) }
-
 // entryTexts is the text of each entry of a collection note that is not a
-// pointer, in the order the note holds them.
+// pointer line, which points at notes and is not a unit, in the order the note
+// holds them.
 func entryTexts(text string) []string {
 	ls := lines(text)
 	var out []string
@@ -148,7 +138,7 @@ func entryTexts(text string) []string {
 			continue
 		}
 		e := entryEnd(ls, i)
-		if !pointer(ls, i, e) {
+		if !pointerLine(ls, i, e) {
 			out = append(out, joined(ls[i:e+1]))
 		}
 		i = e

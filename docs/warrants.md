@@ -814,8 +814,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/beads`
-  main 3a274fbf8f76 and `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, `gastownhall/beads`
+  main 0c9c8e697843 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
@@ -854,9 +854,8 @@ no warrant.
 - **Covers.** `services/gctk/memory`, and the state it keeps for each memory
   directory under the city's `.gc/runtime/packs/gc-toolkit/memory-intake`: the
   list of the notes the distiller kept, each with the bead it waits on or the
-  date it is next due, the text of each note it removed, and the names of the
-  removed notes whose pointers did not all come out. It also covers the folder
-  in each memory directory that holds each file the intake displaced.
+  date it is next due, and the text of each note it removed. It also covers the
+  folder in each memory directory that holds each file the intake displaced.
 - **Stands in for.** Agent memory kept as beads. A memory that is a bead has
   its versions, its writer and its links to work in the ledger, and bd keeps
   the text of one that is deleted. Claude Code keeps memory as files, so the
@@ -896,9 +895,9 @@ no warrant.
     user ("Enable or disable auto memory").
   - The search is
     [specs/tk-zlot608.8/gas-city-search.md](../specs/tk-zlot608.8/gas-city-search.md).
-- **Verified.** 2026-11-19, at `gastownhall/gascity` main f5302d1dcfd5 and
-  `gastownhall/beads` main 3a274fbf8f76, with the Memory Beads proposal at its
-  Revision 4. Claude Code's memory page as read on 2026-11-19.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
+  `gastownhall/beads` main 0c9c8e697843, with the Memory Beads proposal at its
+  Revision 4. Claude Code's memory page as read on 2026-11-27.
 - **Retires when.** bd ships memory as a kind of bead with links to work (the
   Memory Beads proposal, `gastownhall/beads` issue #5877). The move is then
   the city's Claude agents keeping their memory there in place of Claude
