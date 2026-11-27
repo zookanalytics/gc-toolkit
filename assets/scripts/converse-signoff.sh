@@ -736,14 +736,12 @@ fi
 # once. A stop after the ask is filed and before its record lands leaves the
 # record without it, and the re-run sends the ruling to converse-rework.sh
 # again, which finds that ask by its source and reason, open or closed, and
-# files nothing, so the re-run records it then. A record can also name a
-# rework child that rework-child.sh filed for the conversation.
+# files nothing, so the re-run records it then.
 # rework_of($c): whether a `gc bd show` row is conversation $c's rework: the
 # ask its ruling filed for the PR's review run, whose discovered-from edge names
-# it (gctk review ask --source), or a rework child whose source_ruling_bead
-# names it.
-REWORK_OF_JQ='def rework_of($c): ((.metadata // {}).source_ruling_bead // "") == $c
-  or any((.dependencies // [])[]?; ((.id // .depends_on_id // "") == $c) and ((.dependency_type // .type // "") == "discovered-from"));'
+# it (gctk review ask --source).
+REWORK_OF_JQ='def rework_of($c):
+  any((.dependencies // [])[]?; ((.id // .depends_on_id // "") == $c) and ((.dependency_type // .type // "") == "discovered-from"));'
 CONSEQUENCE_JQ='def consequences: ((.metadata // {})["gc.ruling_consequence"] // {})
   | (if type == "string" then (fromjson? // {}) else . end) | if type == "object" then . else {} end;'
 RECORDED_ON=""
@@ -827,31 +825,6 @@ fi
 # in_target_rig <cmd> [args...] — run <cmd> in the rig of the PR the
 # consequence acts on.
 in_target_rig() { ( cd "$TARGET_PATH" && GC_RIG="$TARGET_RIG" GC_RIG_ROOT="$TARGET_PATH" "$@" ); }
-# A re-run of a --rework ruling whose record names the PR and no rework comes
-# after an attempt that stopped between those two records: before
-# converse-rework.sh filed its ask, or after it filed one whose record never
-# landed, as when the store refused the record. converse-rework.sh finds an ask
-# that attempt filed by its source and reason, open or closed, and files
-# nothing. A rework child that rework-child.sh filed for this conversation is
-# no ask, so one that has since closed would have the ruling sent a second
-# time, and nothing tells it from one an unrecorded earlier ruling filed. So a
-# closed rework child of this conversation on that PR that no recorded answer
-# names refuses the re-run, before any write, and the sitting holds to ask the
-# operator. The record is written after converse-rework.sh reports its ask,
-# since it names the ask only then.
-if [ "$PR_ANSWER" = rework ] && [ -n "$RECORDED_ON" ] && [ "$PR_TARGET" = "$RECORDED_ON" ] \
-   && [ -z "$RECORDED_CHILD" ] && [ -z "$TARGET_CLOSED" ]; then
-  REWORKS=$(in_target_rig bd_list --metadata-field "source_ruling_bead=$CONVERSATION" --all) \
-    || stopped "the reworks conversation $CONVERSATION has filed could not be read, to tell whether an earlier attempt of this ruling filed one on $PR_TARGET that has closed since; nothing was written"
-  NAMED=$(printf '%s' "$CONV_ROW" | jq -c "$CONSEQUENCE_JQ"'[ consequences[] | objects | (.child // "") | tostring | select(. != "") ]' 2>/dev/null)
-  UNNAMED=$(printf '%s' "$REWORKS" | jq -r --arg a "$PR_TARGET" --argjson named "${NAMED:-[]}" '
-      [ .[]? | select(((.metadata.anchor_bead // "") | tostring) as $on | $on == $a or $on == "") ] as $on_pr
-      | if any($on_pr[]; ((.status // "") | ascii_downcase) != "closed") then ""
-        else [ $on_pr[] | .id | select(. as $id | $named | any(. == $id) | not) ] | join(" ") end' 2>/dev/null) \
-    || stopped "the reworks conversation $CONVERSATION has filed did not read as a list; nothing was written"
-  [ -z "$UNNAMED" ] \
-    || die "an earlier attempt of this ruling recorded $PR_TARGET as the PR its --rework acts on and stopped before it recorded a rework, and conversation $CONVERSATION has a closed rework on $PR_TARGET that no recorded ruling names ($UNNAMED). That attempt may have filed it, and the writer adopts only an open rework, so this re-run would file a second one for the same ruling and send the PR's reviews back again; nothing was written. Re-run nothing: hold instead (converse-hold) and tell the operator which rework closed. A ruling that takes it as done signs off with --no-rework, and one that asks more of the branch is a ruling of its own"
-fi
 # --accept takes the subject's recommendation through the gate that put it to
 # the operator: a human gate under the key first-reaction that blocks the
 # subject. A gate under the key that blocks another bead, such as a member of

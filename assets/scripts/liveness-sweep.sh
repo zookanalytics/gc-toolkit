@@ -54,11 +54,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # and per-call bound.
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh from $HERE" >&2; exit 1; }
-# The one read of a branch's head on origin, which the pre-open green map takes
-# each anchor's head from. Its git calls go through git_remote_run, redefined
-# below to carry this sweep's per-call bound.
-# shellcheck source=git-lib.sh
-. "$HERE/git-lib.sh" || { echo "$PROG: cannot source git-lib.sh from $HERE" >&2; exit 1; }
 # The one reader of a run's link to the bead it works, which the worked and
 # husk resolutions ask through sweep_bd, below.
 # shellcheck source=run-lib.sh
@@ -125,7 +120,6 @@ elif timeout -k 1 1 true >/dev/null 2>&1; then
 else
     bounded() { timeout "$CALL_TIMEOUT" "$@"; }
 fi
-git_remote_run() { bounded "$@"; }
 # >>> control-char-scrub
 # A raw C0 byte inside a JSON string aborts jq on the whole payload, so every
 # C0 byte (U+0000-U+001F) is scrubbed before jq, LF included. DEL and bytes
@@ -282,83 +276,8 @@ fi
 # every read the classifier takes; its precheck runs the same classifier with
 # the reads beyond the bead set left empty.
 #
-# The pre_open_gate anchors whose lanes are all green, as an {anchor-id: true}
-# map the classifier's pre_open_all_green reads: such an anchor waits only on
-# pr-open.sh, so it is gated, not an unnamed wait. The gates come from the ONE
-# resolver, the `gctk review checks --resolve` pr-open.sh and merge.sh ask, so an
-# undeclared or legacy token (codex) gates pre-open here exactly as it does
-# there, and an open-as-draft check (demo), which runs against the open PR,
-# never holds a pre_open_gate anchor as not yet gated. Each gate derives through
-# lane-state.sh, the derivation pr-open.sh opens the PR on, pinned to this
-# sweep's store and bound by its per-call timeout. --no-remote: a pre_open_gate
-# anchor has no PR, so no GitHub approval backs a lane, as pr-open.sh reads it.
-# An anchor whose head origin does not carry, whose gates the resolver cannot
-# name, or that has a lane that does not derive green or cannot be read, stays
-# out of the map and a candidate. When origin does not answer the head read at
-# all, no head reads, and that says nothing about any one anchor: each anchor
-# the last pass reported stays out of the map, a candidate again, and every
-# other is "unread", a class of its own, so a failed read reports no anchor new.
-_LS_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-# The gates are resolved at the head of the anchor's branch on origin, the
-# commit pr-open.sh would open the PR at, read in the rig checkout the sweep
-# runs in (the order runs it there, and GC_RIG_ROOT names it). The resolver lays
-# that commit's own index over the pack's, so each rig's anchors are judged by
-# that rig's rows. GC_REVIEW_CHECKS_INDEX overrides the index the resolver
-# reads, so a hermetic test can point it at a fixture, or at a missing file for
-# the no-index fallback (every non-sentinel token gates). The fields are joined
-# on the unit separator, since tab is whitespace to read and an empty check_set
-# would shift the branch into its place.
-LANE_STATE="${GC_LANE_STATE_TOOL:-$_LS_DIR/lane-state.sh}"
-# shellcheck source=gctk-resolve.sh
-. "$_LS_DIR/gctk-resolve.sh" || { echo "liveness-sweep: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
-_LS_PREOPEN=$(jq -r '.[] | select((.metadata.merge_result // "") == "pre_open_gate")
-         | [(.id // ""), (.metadata.check_set // ""), (.metadata.branch // "")]
-         | map(tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' "$READY" 2>/dev/null)
-# Every branch's head comes from one ls-remote that names them all, so a slow
-# origin costs the sweep one bounded call, not one per anchor, and a ready set
-# with no such anchor costs none.
-_ls_branches=()
-while IFS=$'\037' read -r _aid _acs _abr; do
-  [ -n "$_aid" ] && [ -n "$_abr" ] && _ls_branches+=("$_abr")
-done <<< "$_LS_PREOPEN"
-_LS_HEADS=""; _LS_UNREAD=0
-if [ "${#_ls_branches[@]}" -gt 0 ] && ! _LS_HEADS=$(remote_branch_heads . "${_ls_branches[@]}"); then
-  _LS_UNREAD=1
-  echo "$PROG: WARN: origin did not answer the head read for ${#_ls_branches[@]} pre-open anchor branch(es); each holds what the last pass made of it" >&2
-fi
-_LS_REPORTED=$(cat "$BASELINE_FILE" 2>/dev/null || true)
-PREOPEN_GREEN_MAP=$(
-  printf '%s\n' "$_LS_PREOPEN" \
-  | while IFS=$'\037' read -r _aid _acs _abr; do
-      [ -n "$_aid" ] && [ -n "$_abr" ] || continue
-      if [ "$_LS_UNREAD" = 1 ]; then
-        case ",$_LS_REPORTED," in
-          *",$_aid,"*) ;;
-          *) jq -nc --arg id "$_aid" '{($id): "unread"}' ;;
-        esac
-        continue
-      fi
-      _head=$(printf '%s\n' "$_LS_HEADS" | awk -F'\t' -v b="$_abr" '$2 == b { print $1; exit }')
-      [ -n "$_head" ] || continue
-      _ls_gctk=$(gctk_path) || continue
-      _g=$(bounded env GCTK_SCRIPTS_DIR="$_LS_DIR" "$_ls_gctk" review checks --resolve "$_acs" --through pre-open \
-           --at "$_head" 2>/dev/null </dev/null) || continue
-      [ -n "$(printf '%s' "$_g" | tr -d '[:space:]')" ] || continue
-      _green=1
-      while IFS= read -r _l; do
-        [ -n "$_l" ] || continue
-        bounded "$LANE_STATE" green --anchor "$_aid" --lane "$_l" --no-remote ${DB:+--db "$DB"} \
-          >/dev/null 2>&1 </dev/null || { _green=0; break; }
-      done <<< "$_g"
-      [ "$_green" = 1 ] && jq -nc --arg id "$_aid" '{($id): true}'
-    done \
-  | jq -sc 'add // {}' 2>/dev/null)
-[ -n "$PREOPEN_GREEN_MAP" ] || PREOPEN_GREEN_MAP="{}"
-
 # >>> classify
-# PREOPEN_GREEN_MAP is set above for the whole-sweep run; default it here as
-# well, since the precheck test extracts this marked block and sources it on its
-# own under `set -u`.
+# Nothing holds an anchor pre-open, so the classifier's pre-open map is empty.
 [ -n "${PREOPEN_GREEN_MAP:-}" ] || PREOPEN_GREEN_MAP="{}"
 CLASSIFIED=$(jq -n --slurpfile live "$LIVE" --slurpfile ready "$READY" --slurpfile alive "$ALIVE" \
       --argjson openprs "${OPEN_PRS:-[]}" --argjson worked "${WORKED:-[]}" --argjson husks "${HUSK_STEPS:-[]}" \

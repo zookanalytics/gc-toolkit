@@ -8,7 +8,7 @@
       "pr",
       "reaction"
     ],
-    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
+    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a child of a PR's anchor names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
   },
   {
     "name": "blocked_reason",
@@ -21,14 +21,6 @@
     "type": "string",
     "owner": "pr/record",
     "doc": "The source branch a work bead's change is on, which the work formula's workspace-setup writes, and the PR's branch on each ask gctk review ask files. A bead carrying it is in flight. The pr evaluator and the landing order hold a PR whose head branch is not this one, a PR's composition finds the beads whose work the branch carries by it, and a review run takes only an ask that names the branch of its PR."
-  },
-  {
-    "name": "check_name",
-    "type": "string",
-    "readers": [
-      "reaction"
-    ],
-    "doc": "The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as work in flight."
   },
   {
     "name": "check_set",
@@ -643,7 +635,7 @@
       "reaction",
       "review"
     ],
-    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane."
+    "doc": "A memory note that waits on a bead whose task_kind is feedback-pattern waits on the pattern's follow-ups. A bead's role (lifecycle/lifecycle.toml). An ask carries none, so a bead that names a PR's branch and carries one, such as a rework child, is work of its own on the branch. A standing kind and a feedback pattern take no first reaction."
   },
   {
     "name": "withdraw_head",

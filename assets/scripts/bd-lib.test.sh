@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# bd-lib.test.sh — hermetic tests for the bd_list memoization, the anchor
-# graph reads and writes (bd_anchor_children, bd_anchor_link, bd_create_child,
-# bd_anchor_backfill, bd_live_children), and the per-rig state key, the pass
-# lock and pass_child (state_key, rig_state_key, take_pass_lock, pass_child).
+# bd-lib.test.sh — hermetic tests for bd_list, the anchor graph reads and
+# writes (bd_anchor_children, bd_anchor_link, bd_create_child,
+# bd_anchor_backfill), and the per-rig state key, the pass lock and pass_child
+# (state_key, rig_state_key, take_pass_lock, pass_child).
 #
-# The cache is off unless GC_RECONCILE_BD_CACHE names a directory, and the
-# refinery-reconcile order is its only caller (it clears per arm and removes the
-# dir at END). harness_init unsets every GC_* var, so each cache case exports the
-# variable after setup. Call counts come from STUB_GC_LOG, where the stub gc logs
-# every invocation one per line; a `gc bd list` logs a line starting `bd list`.
+# Call counts come from STUB_GC_LOG, where the stub gc logs every invocation one
+# per line; a `gc bd list` logs a line starting `bd list`.
 #
 # warn and die, the report every script that sources the library makes, row_meta,
 # the metadata read it shares with them, bd_gates_open_under_key, the order
@@ -162,74 +159,23 @@ eq "$r1$r2$r3$r4$r5$r6/$(wc -c < "$STUB_GC_LOG" | tr -d ' ')" "010100/0" \
 
 store '[{"id":"tk-a","status":"open","assignee":"","title":"a","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 
-CACHE="$TMP/cache"
 list_calls() { grep -c '^bd list' "$STUB_GC_LOG" 2>/dev/null; }
 reset_log()  { : > "$STUB_GC_LOG"; }
-cache_files() { find "$CACHE" -maxdepth 1 -type f -name '*.json' 2>/dev/null | wc -l | tr -d ' '; }
 
-# --- the variable unset: byte-identical to before, no caching -----------------
-unset GC_RECONCILE_BD_CACHE 2>/dev/null || true
+# --- bd_list: every call reads the server -------------------------------------
 reset_log
 a=$(bd_list --status=open); rc=$?
 b=$(bd_list --status=open)
-eq "$rc" 0 "unset: bd_list returns 0 on a readable array"
-has "$a" 'tk-a' "unset: bd_list returns the row"
-eq "$a" "$b" "unset: repeated reads agree"
-eq "$(list_calls)" 2 "unset: every call hits the server (no cache)"
+eq "$rc" 0 "bd_list returns 0 on a readable array"
+has "$a" 'tk-a' "bd_list returns the row"
+eq "$a" "$b" "repeated reads agree"
+eq "$(list_calls)" 2 "every call hits the server"
 
-# --- cache on: a repeated query is served from disk ---------------------------
-export GC_RECONCILE_BD_CACHE="$CACHE"; mkdir -p "$CACHE"
-reset_log
-m1=$(bd_list --status=open); m2=$(bd_list --status=open)
-eq "$(list_calls)" 1 "cache: a repeated query hits the server once"
-eq "$m1" "$m2" "cache: the hit returns the same bytes as the miss"
-has "$m1" 'tk-a' "cache: the served row is the real one"
-
-# --- a different query is a miss ----------------------------------------------
-bd_cache_clear; reset_log
-bd_list --status=open >/dev/null; bd_list --status=blocked >/dev/null
-eq "$(list_calls)" 2 "cache: a different --status is a separate entry (miss)"
-eq "$(cache_files)" 2 "cache: two distinct queries store two files"
-
-# --- a --status CSV is order-insensitive --------------------------------------
-bd_cache_clear; reset_log
-bd_list --status=open,closed >/dev/null; bd_list --status=closed,open >/dev/null
-eq "$(list_calls)" 1 "cache: open,closed and closed,open are one entry"
-
-# --- an entry past the hard max age is refetched ------------------------------
-bd_cache_clear; reset_log
-bd_list --status=deferred >/dev/null                       # store
-f=$(find "$CACHE" -maxdepth 1 -type f -name '*.json' | head -1)
-touch -d "$(jq -nr --argjson t "$(( $(date -u +%s) - GC_BD_CACHE_MAX_AGE - 100 ))" '$t | todate')" "$f"
-bd_list --status=deferred >/dev/null                       # expired -> refetch
-eq "$(list_calls)" 2 "cache: an entry older than GC_BD_CACHE_MAX_AGE is refetched"
-
-# --- bd_cache_clear drops every entry -----------------------------------------
-bd_cache_clear
-eq "$(cache_files)" 0 "bd_cache_clear empties the cache dir"
-
-# --- bd_cache_clear is a no-op (rc 0) when the cache is off --------------------
-unset GC_RECONCILE_BD_CACHE
-if bd_cache_clear; then ok "bd_cache_clear is a no-op (rc 0) when the variable is unset"; else bad "bd_cache_clear failed when unset"; fi
-
-# --- a set-but-missing cache dir disables caching, never errors ----------------
-export GC_RECONCILE_BD_CACHE="$TMP/absent"
-reset_log
-bd_list --status=open >/dev/null; rc=$?; bd_list --status=open >/dev/null
-eq "$rc" 0 "missing dir: bd_list still reads cleanly"
-eq "$(list_calls)" 2 "missing dir: caching is disabled (no hit)"
-
-# --- only a successful array is cached: a server error is not served or stored -
-export GC_RECONCILE_BD_CACHE="$CACHE"; bd_cache_clear; reset_log
+# --- a server error is "could not tell", never "none" -------------------------
 export STUB_LIST_FAIL=1
 bd_list --status=open; rc=$?
 unset STUB_LIST_FAIL
-eq "$rc" 1 "cache: a server error returns non-zero (could not tell)"
-eq "$(cache_files)" 0 "cache: a server error is not stored"
-# and the next good read is a real miss, not a served error
-reset_log
-bd_list --status=open >/dev/null
-eq "$(list_calls)" 1 "cache: the read after an error is a fresh miss"
+eq "$rc" 1 "a server error returns non-zero (could not tell)"
 
 # --- the anchor graph -----------------------------------------------------------
 dep_calls()  { grep -c '^bd dep list' "$STUB_GC_LOG" 2>/dev/null; }
@@ -240,7 +186,6 @@ ids_of()     { printf '%s' "$1" | jq -r '[ .[].id ] | sort | join(",")'; }
 mark_store() { printf '%s=%s\n' "$ANCHOR_JOINED_KEY" 2026-10-11T00:00:00Z > "$STUB_KV"; }
 ALL=open,in_progress,blocked,deferred,hooked,pinned,closed
 LIVE=open,in_progress,blocked,deferred,hooked,pinned
-unset GC_RECONCILE_BD_CACHE
 
 # One anchor in every shape a child can take: closed children with the edge, a
 # validation pass joined by a tracks edge, an open review filed without the edge, a
@@ -325,13 +270,6 @@ _bd_call() { gc bd "$@"; }
 eq "$(cut -d' ' -f1-2 "$TMP/hook.log" | paste -sd, -)" "kv get,list --metadata-field,dep list" \
   "the mark, the live read and the edge read all go through _bd_call"
 
-# The mark and the reads ride the bd_list memo when the order turns it on.
-export GC_RECONCILE_BD_CACHE="$CACHE"; bd_cache_clear; reset_log
-bd_anchor_children tk-anc "$ALL" >/dev/null; bd_anchor_children tk-anc "$ALL" >/dev/null
-bd_anchor_children tk-anc closed >/dev/null
-eq "$(kv_calls):$(list_calls):$(dep_calls)" "1:1:1" "cache: repeated reads of one anchor hit the server once per read"
-unset GC_RECONCILE_BD_CACHE
-
 # "Could not tell" is never "no children".
 reset_log
 export STUB_DEP_PARTIAL=1
@@ -391,13 +329,6 @@ else
   ok "bd_create_child refuses an anchor that does not resolve"
 fi
 eq "$(jq -r '[ .[] | select(.title == "orphan") ] | length' "$STUB_STORE")" 0 "…and creates nothing"
-# The create forgets the anchor's memoized edge read, so the same pass sees it.
-mark_store
-export GC_RECONCILE_BD_CACHE="$CACHE"; bd_cache_clear
-bd_anchor_children tk-old closed >/dev/null
-nid2=$(bd_create_child tk-old "a closed child" -t task --metadata '{"anchor_bead":"tk-old","task_kind":"review"}' --status=closed --json | jq -r '.id')
-eq "$(ids_of "$(bd_anchor_children tk-old closed)")" "$nid2" "cache: a child created in the pass is read in the same pass"
-unset GC_RECONCILE_BD_CACHE
 : > "$STUB_KV"
 
 # --- bd_anchor_backfill: join what the edge read does not reach -----------------
@@ -439,28 +370,6 @@ export STUB_DEP_PARTIAL=1
 bd_anchor_backfill tk-old >/dev/null 2>&1; rc=$?
 unset STUB_DEP_PARTIAL
 eq "$rc" 2 "backfill exits 2 when a read does not answer"
-
-# --- bd_live_children: one read, the live children grouped by anchor ----------
-store '[
-  {"id":"tk-r2","status":"open","metadata":{"anchor_bead":"tk-anc","task_kind":"review"}},
-  {"id":"tk-f1","status":"in_progress","metadata":{"anchor_bead":"tk-anc","task_kind":"finding"}},
-  {"id":"tk-w1","status":"blocked","metadata":{"anchor_bead":"tk-two","task_kind":"rework"}},
-  {"id":"tk-v1","status":"open","metadata":{"anchor_bead":"tk-two","task_kind":"validation"}},
-  {"id":"tk-c1","status":"closed","metadata":{"anchor_bead":"tk-anc","task_kind":"rework"}},
-  {"id":"tk-x1","status":"open","metadata":{"task_kind":"rework"}},
-  {"id":"tk-e1","status":"open","metadata":{"anchor_bead":""}}
-]'
-reset_log
-lc=$(bd_live_children); rc=$?
-eq "$rc" 0 "bd_live_children reads the store"
-eq "$(printf '%s\n' "$lc" | sort | paste -sd';' -)" "tk-anc	tk-f1,tk-r2	0;tk-two	tk-v1,tk-w1	1" \
-  "one line per anchor: its live child ids sorted, and whether a rework child is among them"
-eq "$(list_calls)" 1 "…in one read of the store"
-export STUB_LIST_FAIL=1
-lc=$(bd_live_children); rc=$?
-unset STUB_LIST_FAIL
-[ "$rc" -ne 0 ] && ok "an unreadable store is reported non-zero" || bad "an unreadable store read as no children"
-eq "$lc" "" "…with nothing printed, so no caller reads it as no children"
 
 # --- bd_create: the metadata rides the create, and is read back -------------
 # The stub mints new-<store length + 1>, keeps --metadata with its JSON types,
@@ -651,15 +560,6 @@ store "$ANC"; reset_log
 id=$(STUB_DROP_KEYS="new-2:anchor_bead" bd_create --child-of tk-anc --select anchor_bead "$META" "either order" -t task 2>/dev/null); rc=$?
 eq "$rc|$id|$(bstatus new-2)" "1||closed" "bd_create: --child-of ahead of --select still applies the selection"
 
-# A create changes what a list answers, so the per-pass cache is dropped.
-export GC_RECONCILE_BD_CACHE="$CACHE"; mkdir -p "$CACHE"; bd_cache_clear
-store '[]'
-bd_list --status=open >/dev/null
-eq "$(cache_files)" 1 "bd_create: (a cached list before the create)"
-id=$(bd_create "$META" "cache" -t task)
-eq "$(cache_files)" 0 "bd_create: the create drops the per-pass bd_list cache"
-unset GC_RECONCILE_BD_CACHE
-
 # --- bd_meta_readback: the verdict and the keys a bead is short of ------------
 store '[{"id":"tk-m","status":"open","assignee":"","title":"m","notes":"","metadata":{"task_kind":"review","anchor_bead":"tk-anc","pr_number":42}}]'
 eq "$(bd_meta_readback tk-m '{"task_kind":"review","anchor_bead":"tk-anc"}')" "landed	" \
@@ -768,11 +668,6 @@ STUB_DROP_KEYS="tk-x:status" bd_unmake tk-x "n"; rc=$?
 eq "$rc|$(bstatus tk-x)" "1|open" "bd_unmake: a close that does not read back returns 1"
 STUB_SHOW_FAIL=1 bd_unmake tk-x "n"; rc=$?
 eq "$rc" 1 "…and so does one whose read-back fails"
-export GC_RECONCILE_BD_CACHE="$CACHE"; mkdir -p "$CACHE"; bd_cache_clear
-bd_list --status=open >/dev/null
-bd_unmake tk-x "n" >/dev/null
-eq "$(cache_files)" 0 "bd_unmake: the close drops the per-pass bd_list cache"
-unset GC_RECONCILE_BD_CACHE
 
 # --- bd_unmake_orphans: what a stamp-after-create producer left behind ---------
 # Only an open bead with the title that nobody has taken and that is short of a
@@ -796,49 +691,6 @@ eq "$(bstatus tk-w1)|$(bstatus tk-h1)|$(bstatus tk-r1)|$(bstatus tk-p1)|$(bstatu
   "open|open|open|open|in_progress|open" "…a whole bead, a held, routed, poured or in-flight one, and another title are left alone"
 out=$(STUB_LIST_FAIL=1 bd_unmake_orphans task_kind "Review branch" "n"); rc=$?
 eq "$rc|$out" "1|" "bd_unmake_orphans: a listing that does not answer returns 1 and closes nothing"
-
-# --- pr_finishing_birth: a PR-finishing child is born carrying the shift -------
-eq "$PR_FINISHING_SHIFT" "-1" "PR_FINISHING_SHIFT: PR-finishing work is filed one level sooner than its anchor"
-eq "$(pr_finishing_birth '{"task_kind":"rework","anchor_bead":"tk-anc"}')" \
-  '{"task_kind":"rework","anchor_bead":"tk-anc","priority_shift":-1}' \
-  "pr_finishing_birth: the work order with priority_shift added, as a number"
-out=$(pr_finishing_birth '["not","an","object"]'); rc=$?
-[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and a work order that is not an object prints nothing and fails" \
-  || bad "…and a work order that is not an object prints nothing and fails (rc=$rc out='$out')"
-out=$(pr_finishing_birth ''); rc=$?
-[ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
-  || bad "…and so does an empty work order (rc=$rc out='$out')"
-
-# --- pr_finishing_settle: settle under a short lock wait ---------------------
-# A writer that logs its call and the lock wait it was handed into the stub
-# gc's own log.
-cat > "$TMP/qp-log" <<'QP'
-#!/usr/bin/env bash
-printf 'qp %s wait=%s\n' "$*" "${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" >> "$STUB_GC_LOG"
-echo "queue-priority: settled $2 at P1"
-QP
-chmod +x "$TMP/qp-log"
-store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
-reset_log
-out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" pr_finishing_settle tk-c1); rc=$?
-eq "$rc|$out" "0|queue-priority: settled tk-c1 at P1" "pr_finishing_settle: the writer's settle, its narrative on stdout"
-eq "$(grep '^qp ' "$STUB_GC_LOG")" "qp settle tk-c1 wait=$PR_FINISHING_LOCK_WAIT_SECS" "…waiting PR_FINISHING_LOCK_WAIT_SECS for the lock"
-eq "$PR_FINISHING_LOCK_WAIT_SECS" "30" "…which is 30 seconds"
-
-# One copy of the cadence's lock wait: a creator that set the wait itself would
-# let the two drift.
-copies=$(grep -l -E 'QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
-  | grep -v -e '\.test\.sh$' -e '/bd-lib\.sh$' | sed "s|^$HERE/||" | paste -sd' ' -)
-eq "$copies" "" "(NO-COPY) only bd-lib.sh sets the cadence's lock wait"
-
-# --- validation_work_order: the shape mol-validate reads ----------------------
-eq "$(validation_work_order tk-anc correctness abc123)" \
-  '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"correctness","reviewed_oid":"abc123","priority_shift":-1}' \
-  "validation_work_order: task_kind, anchor, lane and the reviewed head, born carrying the PR-finishing shift"
-eq "$(validation_work_order tk-anc human "")" '{"task_kind":"validation","anchor_bead":"tk-anc","check_name":"human","priority_shift":-1}' \
-  "…and an empty head leaves the pin out"
-eq "$(printf '%s' "$(validation_work_order tk-anc human x)" | jq -r --arg s "$VALIDATION_SELECT" '. as $m | $s | split(",") | all(.[]; . as $k | $m | has($k))')" "true" \
-  "…carrying every key VALIDATION_SELECT names"
 
 # --- state_key: one directory name per identity --------------------------------
 ck() { printf '%s' "$1" | cksum | cut -d' ' -f1; }

@@ -11,11 +11,8 @@
 # rig's own store whose status is outside the `done` category and whose
 # metadata.branch or metadata.target is the branch. That covers an anchor,
 # work not yet handed off, a convoy and the members landing on its integration
-# branch, and a successor that resumed the branch. The retired bead's own
-# review scaffolding, the beads whose anchor_bead names it, is not an owner once
-# that bead reads closed: scaffolding-sweep.sh retires it as moot, and
-# review-sweep.sh closes a review only after the branch is gone, so counting it
-# would keep nearly every branch. A ledger that does not read keeps the branch.
+# branch, and a successor that resumed the branch. A ledger that does not read
+# keeps the branch.
 # The default branch, main, and claude/* (the operator's own sessions) are
 # never ended.
 #
@@ -35,8 +32,7 @@
 #     --rig     the rig whose checkout's origin holds the branch; its store is
 #               the ledger the owner check reads
 #     --branch  the branch to end
-#     --bead    the bead the branch belongs to; its scaffolding is not an owner
-#               once it reads closed
+#     --bead    the bead the branch belongs to, which the report names
 #     --dry-run every read, then the plan; writes nothing
 # Exit: 0 the branch is gone from origin, ended now or already absent (a dry
 #       run: it would be ended) · 3 kept: a live owner names it or its name is
@@ -160,23 +156,11 @@ for FIELD in branch target; do
     || not_ended "the live beads of rig $RIG naming it could not be combined, so a live owner cannot be ruled out"
 done
 
-# The retired bead's scaffolding stops counting only once that bead reads
-# closed. While it is open it owns its branch, and so does its scaffolding.
-RETIRED=""
-if [ -n "$BEAD" ]; then
-  BSTATUS=$(gc bd --db "$STORE" show "$BEAD" --json </dev/null 2>/dev/null | scrub \
-    | jq -r 'if type == "array" then (.[0].status // empty) else empty end' 2>/dev/null)
-  [ -n "$BSTATUS" ] \
-    || not_ended "bead $BEAD did not read from rig $RIG, so its scaffolding cannot be told from an owner"
-  [ "$BSTATUS" = closed ] && RETIRED="$BEAD"
-fi
-
-OWNERS=$(printf '%s' "$LIVE_ROWS" | jq -r --arg b "$BRANCH" --arg r "$RETIRED" '
+OWNERS=$(printf '%s' "$LIVE_ROWS" | jq -r --arg b "$BRANCH" '
   .[] | (.metadata // {}) as $md
   | (($md.branch // "") | tostring) as $mb
   | (($md.target // "") | tostring) as $mt
   | select($mb == $b or $mt == $b)
-  | select($r == "" or ((($md.anchor_bead // "") | tostring) != $r))
   | "\(.id // "?") (\(.status // "?"), \(if $mb == $b then "metadata.branch" else "metadata.target" end))"' 2>/dev/null) \
   || not_ended "the live beads of rig $RIG could not be matched against the branch"
 if [ -n "$OWNERS" ]; then

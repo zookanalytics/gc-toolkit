@@ -29,23 +29,18 @@ var sweepTypes = []string{"task", "bug", "feature", "spike"}
 // topologyKinds are the gc.kind values of a topology root.
 var topologyKinds = []string{"workflow", "scope", "spec"}
 
-// reviewKind is the task kind of a review lane on the old review path, a
-// dispatched sign-off and so work in flight. The sweep passes over such a lane
-// while such beads exist, and the old path's retirement removes the clause.
-const reviewKind = "review"
-
 // stringKey is a String key, or its reading face, as the candidate rule reads
 // one.
 type stringKey interface {
 	Get(*ledger.Record) (string, bool, error)
 }
 
-// workMarkers are the keys that put a bead's work in motion: a review lane's
-// check_name and anchor_bead, and an implementation anchor's branch,
-// merge_result, work_dir, pr_url and pr_number. An anchor is a task or a bug
-// with no task_kind, so its markers alone set it apart from raw input.
+// workMarkers are the keys that put a bead's work in motion: the anchor_bead
+// of work that carries a PR to its merge, and an implementation anchor's
+// branch, merge_result, work_dir, pr_url and pr_number. An anchor is a task or
+// a bug with no task_kind, so its markers alone set it apart from raw input.
 var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prrecord.PRURL, prrecord.PRNumber,
-	checkNameKey, anchorKey}
+	anchorKey}
 
 // isCandidate reports whether a ready bead is raw input a fresh first reaction
 // may take, top-level and not already in motion. Each clause drops one kind of
@@ -53,7 +48,7 @@ var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prre
 // next move is decided; one with no description; one whose type the allowlist
 // leaves out; a topology root, and a step, a reaction's own root and step among
 // them, which advance only through their own run; a standing record and a
-// feedback pattern; a review lane; one that carries a headline, which every
+// feedback pattern; one that carries a headline, which every
 // exit of a first reaction and a sitting's ruling write, so it has been
 // triaged; one whose work markers put it in motion; and a member of a parent,
 // whose parent-child edge is its own. The sling's refusals are read again at
@@ -70,7 +65,7 @@ func isCandidate(r *ledger.Record) (bool, error) {
 			return false, nil
 		}
 	}
-	if kind := raw(taskKindKey, r); slices.Contains(standingKinds, kind) || kind == feedbackPattern || kind == reviewKind {
+	if kind := raw(taskKindKey, r); slices.Contains(standingKinds, kind) || kind == feedbackPattern {
 		return false, nil
 	}
 	for _, k := range workMarkers {

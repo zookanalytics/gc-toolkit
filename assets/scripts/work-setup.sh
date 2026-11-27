@@ -40,13 +40,11 @@
 #
 # A rejected branch resumes by MERGE and is never rewritten: a rebase forces a
 # push, which resets the PR's "changes since last review" and drifts its review
-# comments. The round is recorded before the merge moves HEAD, so the hand-off's
-# bring-current guard reads it whichever session re-runs the hand-off: where it
-# starts, and whether bringing the branch current is this bead's whole job. An
-# earlier round's audit and question are cleared. The rejection stays until the
-# merge concludes, so a stop before then merges again on the next run.
+# comments. The rejection stays until the merge concludes, so a stop before then
+# merges again on the next run.
 #
-# --conclude-merge commits a merge whose conflicts are resolved and audited.
+# --conclude-merge commits a merge whose conflicts are resolved, with the
+# worker's account of each in the commit's message.
 # --stop-merge asks a person about a conflict that cannot be resolved without
 # guessing and aborts the merge. The work bead then waits on the question's gate,
 # armed to re-sling, and the run ends, or a bead with no molecule drains.
@@ -165,18 +163,31 @@ if [ "$MODE" = conclude ]; then
 fi
 
 if [ "$MODE" = stop ]; then
-  BCA="$SCRIPT_DIR/bring-current-audit.sh"
-  "$BCA" ask --bead "$WORK_ID" --path "$AUDIT_PATH" --collided "$COLLIDED" --question "$QUESTION" \
-    || { echo "$PROG: the question reached no gate; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
+  work_read "$WORK_ID" || { echo "$PROG: $WORK_ID could not be read, so no gate asks the question; NOT stopping. Re-run the ask." >&2; exit 1; }
+  # The question's gate goes on the bead that owns the branch's merge, so it holds
+  # that merge: the bead's anchor_bead when it is a child, else the bead itself. It
+  # is keyed by this bead, and each round's question is an event of its own, so
+  # the call declares no quiet window.
+  ANCHOR=$(work_meta anchor_bead); [ -n "$ANCHOR" ] || ANCHOR="$WORK_ID"
+  Q_BRANCH=$(work_meta branch); Q_TARGET=$(work_meta target); [ -n "$Q_TARGET" ] || Q_TARGET=main
+  Q_HEAD=$(git rev-parse -q --verify "refs/remotes/origin/$Q_BRANCH" 2>/dev/null) || Q_HEAD=""
+  Q_HEAD=${Q_HEAD:0:8}; [ -n "$Q_HEAD" ] || Q_HEAD="its last pushed head"
+  MSG="$Q_BRANCH needs a decision before it can be brought current with $Q_TARGET
+Bringing $Q_BRANCH current with $Q_TARGET stopped at a conflict the worker could not resolve without guessing. Nothing was pushed: the branch is still at $Q_HEAD.
+
+The question: $QUESTION
+What collided in \`$AUDIT_PATH\`: $COLLIDED
+
+Your call: answer the question here, and record the answer in the notes of $WORK_ID. Clearing this gate re-slings $WORK_ID, and the worker that resumes it merges $Q_TARGET in again with your answer."
+  "$SCRIPT_DIR/human-gate.sh" --subject "$ANCHOR" --key "bring-current-question.$WORK_ID" --message "$MSG" >/dev/null \
+    || { echo "$PROG: the question reached no gate on $ANCHOR; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
   git merge --abort
-  # ask filed the gate on the anchor, under a key that names this bead.
-  # await-ruling.sh gives the work bead its own edge onto it, releases this
+  # await-ruling.sh gives the work bead its own edge onto the gate, releases this
   # session's claim on the bead, clears its route and arms the re-sling, so
   # clearing the gate re-slings the work, with a molecule or without one. A wait
   # that does not land ends and drains nothing, and running this again converges.
   CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
-  ANCHOR=$("$BCA" anchor --bead "$WORK_ID") \
-    && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
+  "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
     || { echo "$PROG: the wait did not land on $WORK_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
   if [ -n "$CLAIMED" ] && [ "$CLAIMED" != "$WORK_ID" ]; then
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "bringing the branch current needs a decision only a person can make; the bring-current-question gate on the anchor asks it"
@@ -355,19 +366,6 @@ gc bd update "$WORK_ID" "${RECORD[@]}" </dev/null >/dev/null || exit 1
 REJECTION=$(work_meta rejection_reason)
 if [ -n "$REJECTION" ] && [ -n "$(work_meta branch)" ]; then
   echo "resuming rejected branch by MERGE (git merge --no-edit origin/$BASE); never rebase or force-push"
-  RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$BRANCH" || git rev-parse HEAD)
-  # A conflict rejection asks for nothing else, so a commit of the bead's own is
-  # then an edit beyond the merge and owes an audit entry; any other rejection
-  # carries work of its own.
-  case "$REJECTION" in
-    "Conflicts with "*) RESUME_SCOPE=merge-only ;;
-    *) RESUME_SCOPE=with-work ;;
-  esac
-  if ! gc bd update "$WORK_ID" --set-metadata "bring_current_from=$RESUME_FROM" --set-metadata "bring_current_scope=$RESUME_SCOPE" \
-      --unset-metadata conflict_audit --unset-metadata conflict_question </dev/null >/dev/null; then
-    echo "$PROG: the round did not land on $WORK_ID; NOT merging, since the guard reads the round from the start, and a start with no scope beside it as a resume that owes no audit. Re-run this step." >&2
-    exit 1
-  fi
   if git merge --no-edit "origin/$BASE" >&2; then
     gc bd update "$WORK_ID" --unset-metadata rejection_reason </dev/null >/dev/null || exit 1
   else

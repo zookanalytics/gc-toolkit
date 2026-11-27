@@ -70,7 +70,6 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 	}
 	drop := map[string]func(*fake.Bead){
 		"tk-pattern":       meta("task_kind", feedbackPattern),
-		"tk-review":        meta("task_kind", "review"),
 		"tk-routed":        meta("gc.routed_to", "gc-toolkit/gc-toolkit.polecat"),
 		"tk-armed":         meta("gc.dispatch_when_ready", "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_args", "[]"),
 		"tk-capped":        meta("gc.dispatch_when_ready", "gc-toolkit/gc-toolkit.polecat", "gc.dispatch_when_ready_fail_count", "3"),
@@ -93,7 +92,6 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 		"tk-workdir":       meta("work_dir", "/tmp/tree"),
 		"tk-pr-url":        meta("pr_url", "https://github.com/zook/repo/pull/1"),
 		"tk-pr-number":     meta("pr_number", "1"),
-		"tk-lane":          meta("check_name", "correctness"),
 		"tk-anchored":      meta("anchor_bead", "tk-anchor"),
 		"tk-member":        func(b *fake.Bead) { b.Edges = []gcbd.Edge{{Type: gcbd.EdgeParentChild, ID: "tk-epic"}} },
 	}

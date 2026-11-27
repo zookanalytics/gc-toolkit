@@ -264,30 +264,24 @@ mk_sut_dir() { # <dir> <file>...
   mkdir -p "$d"
   local f
   for f in "$@"; do cp "$f" "$d/"; chmod +x "$d/$(basename "$f")"; done
-  # bd-lib.sh (the shared bead-store reads) and pace-lib.sh (the cadence arms'
-  # visit order and time budget) are libraries SUTs source by sibling path, and
-  # gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
+  # bd-lib.sh (the shared bead-store reads) is a library SUTs source by sibling
+  # path, and gctk-resolve.sh is what every ported script (lifecycle.sh among them) sources
   # the same way. pr-post.sh is the single writer of the city's PR posts and the
   # owner of the provenance definition every feedback reader asks, so a SUT that
   # posts or reads feedback runs it by sibling path. work-outcome.sh is the
   # gc.work_outcome stamp a conversation's closers source by sibling path, and
-  # conversation.sh the one shell definition of a conversation, which
-  # blocker-holder.sh sources the same way. Copy
+  # conversation.sh the one shell definition of a conversation. Copy
   # each of them beside the SUT so those calls resolve in the private dir; cp
   # keeps pr-post.sh's executable bit. They sit beside this harness, so they are found whatever the
   # SUT's own directory is.
   local here lib; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
+  for lib in "$here/bd-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, review-dismissal.sh, dispatch-path.sh, priority-lib.sh,
-  # git-lib.sh and run-lib.sh, the libraries the scripts under test source, are
-  # sourced by sibling path the same way.
-  [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
-  [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
+  # dispatch-path.sh, priority-lib.sh and run-lib.sh, the libraries the scripts
+  # under test source, are sourced by sibling path the same way.
   [ -f "$here/dispatch-path.sh" ] && cp "$here/dispatch-path.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
-  [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
   [ -f "$here/run-lib.sh" ] && cp "$here/run-lib.sh" "$d/"
   return 0
 }

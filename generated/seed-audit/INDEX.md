@@ -82,9 +82,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-pr-review-lane`](formulas/mol-pr-review-lane.md) | `city` |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` |
-| [`mol-review`](formulas/mol-review.md) | `city` |
 | [`mol-review-quorum`](formulas/mol-review-quorum.md) | `city` |
-| [`mol-review-quorum-signoff`](formulas/mol-review-quorum-signoff.md) | `city` |
 | [`mol-rig-demo`](formulas/mol-rig-demo.md) | `city` |
 | [`mol-scoped-work`](formulas/mol-scoped-work.md) | `city` |
 | [`mol-upstream-gc-pr-prep`](formulas/mol-upstream-gc-pr-prep.md) | `gascity` |
@@ -92,7 +90,6 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-upstream-gc-rebase-finish`](formulas/mol-upstream-gc-rebase-finish.md) | `gascity` |
 | [`mol-upstream-gc-rebase-rework`](formulas/mol-upstream-gc-rebase-rework.md) | `gascity` |
 | [`mol-upstream-gc-sync`](formulas/mol-upstream-gc-sync.md) | `gascity` |
-| [`mol-validate`](formulas/mol-validate.md) | `city` |
 | [`mol-validate-close`](formulas/mol-validate-close.md) | `city` |
 | [`mol-witness-patrol`](formulas/mol-witness-patrol.md) | `city` |
 

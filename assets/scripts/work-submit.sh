@@ -352,9 +352,9 @@ if [ -z "$CURRENT_BRANCH" ] || [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
     "Branch shape gate on $WORK_ID: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE). The refinery merges metadata.branch, so the commits must be moved onto $EXPECTED_BRANCH before handoff. Its run is cancelled and nothing was pushed." \
     "branch shape gate: on ${CURRENT_BRANCH:-detached HEAD}, expected $EXPECTED_BRANCH ($GATE_SOURCE); the work waits on the commits moving onto $EXPECTED_BRANCH"
 fi
-# Recorded as soon as the gate has proved it, before the push: the bring-current
-# guard finds the anchor through metadata.branch, and a stop below that re-slings
-# the work resumes this branch rather than cutting a new one from the base.
+# Recorded as soon as the gate has proved it, before the push: a stop below that
+# re-slings the work resumes this branch rather than cutting a new one from the
+# base.
 if [ -z "$METADATA_BRANCH" ]; then
   gc bd update "$WORK_ID" --set-metadata "branch=$CURRENT_BRANCH" </dev/null >/dev/null \
     || work_outage "could not record branch=$CURRENT_BRANCH on $WORK_ID, so nothing is pushed"
@@ -395,8 +395,7 @@ fi
 
 # The commit origin's branch holds as this run reads it: the push goes under the
 # lease on it (branch-push.sh), so a push someone made after this read is never
-# overwritten, and it is where the bring-current guard starts reading when no
-# resume recorded a start. ls-remote --exit-code exits 2 for a branch origin
+# overwritten. ls-remote --exit-code exits 2 for a branch origin
 # does not carry, a branch that must not exist yet, as branch-push.sh's
 # --from-origin reads it. Any other exit is a read that did not answer, which
 # says nothing about the branch, so nothing is pushed.
@@ -421,18 +420,6 @@ if [ -z "$REMOTE_REF" ] || [ "$REMOTE_REF" != "$LOCAL_HEAD" ]; then
   work_drain
   exit 1
 fi
-
-"$SCRIPT_DIR/bring-current-guard.sh" guard --bead "$WORK_ID" --to "$LOCAL_HEAD" --from "${PRE_PUSH_HEAD:-}"
-case $? in
-  0) ;;
-  3)
-    echo "BRING-CURRENT AUDIT INCOMPLETE: the push stands, but $WORK_ID is NOT handed off. Record the entries the guard names above (bring-current-audit.sh add), or, when it asks where the work began, stamp bring_current_from and bring_current_scope with the command it prints, then re-run this call. Do not drain: finishing the audit is yours." >&2
-    exit 3 ;;
-  *)
-    echo "BRING-CURRENT GUARD DID NOT FINISH: the push stands, but $WORK_ID is NOT handed off. It stays open, which holds any merge it gates, and the session that re-runs submit-and-exit retries the guard." >&2
-    work_drain
-    exit 1 ;;
-esac
 
 [ "$ANCHOR_SET" = 1 ] || resolve_anchor
 if [ -n "$ANCHOR" ]; then

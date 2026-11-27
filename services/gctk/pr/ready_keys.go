@@ -26,8 +26,7 @@ var (
 			"holds the PR.")
 )
 
-// The link from work on a PR's branch to the bead that owns the PR, which the
-// review lanes and the intake write until they file that work with a blocks
-// edge (lifecycle/lifecycle.toml, [metadata.gates]).
+// The link from work on a PR's branch to the bead that owns the PR
+// (lifecycle/lifecycle.toml, [metadata.gates]).
 var anchorKey = ledger.ReadOnly("anchor_bead", ledger.String,
 	"The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge.")

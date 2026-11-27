@@ -4,8 +4,7 @@
 # the order its open gates under one key are read in, the read of the bead a
 # disposed bead names, whether two bead ids name one store, the checked create,
 # metadata repair and unmake that code the deletion plan retires still files
-# through, the birth, settle and route of PR-finishing work, the validation
-# pass's work order, the gating-PR read's field set, the per-rig key an order's
+# through, the gating-PR read's field set, the per-rig key an order's
 # state lives under, the pass lock that lets an order run one pass at a time,
 # and warn and die, which a script reports through. Sourced, never executed.
 #
@@ -94,94 +93,6 @@ row_meta_all() {
   eval "$_rma"
 }
 
-# bd_list memoization — opt-in, off by default.
-#
-# When GC_RECONCILE_BD_CACHE names a directory, bd_list serves a repeated query
-# from a file in it instead of re-hitting the server. The refinery-reconcile
-# order turns it on for one pass: it clears the whole cache before every arm,
-# invalidates it (bd_cache_clear) at a write it then re-reads in the same arm,
-# and removes the directory when the pass ends. The hard max age is the backstop
-# for a clear a new arm forgets. When the variable is unset, every branch below
-# is skipped and bd_list behaves exactly as it did before.
-
-# Hard upper bound on a cached entry's age, in seconds. An older entry is
-# refetched, so a cache a killed pass left on disk cannot answer a later one
-# with stale rows.
-GC_BD_CACHE_MAX_AGE=90
-
-# _bd_norm_csv <csv> — the comma list sorted, so argument order does not matter.
-_bd_norm_csv() { printf '%s' "$1" | tr ',' '\n' | LC_ALL=C sort | paste -sd, -; }
-
-# _bd_cache_key <gc-bd-list-args...> — a stable digest of $PWD and the argument
-# list. $PWD is in the key because `gc bd` answers from the store the cwd
-# resolves, so two worktrees must not share an entry. A --status CSV is sorted
-# first, so `--status=open,closed` and `--status=closed,open` are one entry.
-_bd_cache_key() {
-  local out="" a prev=""
-  for a in "$@"; do
-    case "$a" in
-      --status=*) out="$out --status=$(_bd_norm_csv "${a#--status=}")" ;;
-      *)
-        if [ "$prev" = "--status" ]; then
-          out="$out $(_bd_norm_csv "$a")"
-        else
-          out="$out $a"
-        fi ;;
-    esac
-    prev="$a"
-  done
-  printf '%s\n%s' "$PWD" "$out" | sha256sum | cut -d' ' -f1
-}
-
-# _bd_cache_mtime <file> — epoch mtime, portable across GNU and BSD stat.
-_bd_cache_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'; }
-
-# _bd_cache_file <read-args...> — the cache entry for one read, or nothing when
-# the cache is off.
-_bd_cache_file() {
-  [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && [ -d "${GC_RECONCILE_BD_CACHE}" ] || return 0
-  printf '%s/%s.json' "$GC_RECONCILE_BD_CACHE" "$(_bd_cache_key "$@")"
-}
-
-# _bd_cache_hit <file> — print the entry when it is fresh; non-zero otherwise.
-_bd_cache_hit() {
-  local age cached
-  [ -n "${1:-}" ] && [ -f "$1" ] || return 1
-  age=$(( $(date +%s) - $(_bd_cache_mtime "$1") ))
-  [ "$age" -ge 0 ] && [ "$age" -le "$GC_BD_CACHE_MAX_AGE" ] || return 1
-  cached=$(cat "$1" 2>/dev/null) || return 1
-  printf '%s' "$cached"
-}
-
-# _bd_cache_drop <read-args...> — forget one read's entry, so the next read of
-# it refetches. A no-op when the cache is off. An edge write changes no bead's
-# fields, so it drops the edge reads it touched rather than every entry.
-_bd_cache_drop() {
-  local f
-  f=$(_bd_cache_file "$@")
-  [ -z "$f" ] || rm -f "$f" 2>/dev/null
-  return 0
-}
-
-# _bd_cache_put <file> <json> — store a validated read. A no-op without a file.
-_bd_cache_put() {
-  [ -n "${1:-}" ] || return 0
-  printf '%s' "$2" > "$1.$$.tmp" 2>/dev/null \
-    && mv -f "$1.$$.tmp" "$1" 2>/dev/null \
-    || rm -f "$1.$$.tmp" 2>/dev/null
-  return 0
-}
-
-# bd_cache_clear — drop every cached entry. A no-op when the cache is off or its
-# directory is gone. Whole-directory, not per-key: a write that changes one
-# anchor's rows also changes the enumerations and title probes keyed separately,
-# and a pass issues few enough writes that clearing all of them costs nothing.
-bd_cache_clear() {
-  [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && [ -d "${GC_RECONCILE_BD_CACHE}" ] || return 0
-  find "$GC_RECONCILE_BD_CACHE" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
-  return 0
-}
-
 # _bd_call <gc-bd-args...> — the `gc bd` call bd_list, the human gate reads and
 # the anchor-graph reads make. A script that pins its reads to one store
 # redefines it after sourcing this file (liveness-sweep.sh adds its --db pin and
@@ -193,17 +104,8 @@ _bd_call() { gc bd "$@"; }
 # ledger) returns non-zero without printing, so a caller reads "could not tell"
 # rather than an empty "none". stdin is /dev/null so a `gc bd list` inside a
 # `while read` loop cannot consume the loop's own driving input.
-#
-# With GC_RECONCILE_BD_CACHE set, a fresh entry for this ($PWD, args) is served
-# verbatim and a validated result is stored. Only a rc=0 JSON array is ever
-# cached, so the "could not tell" contract is unchanged: a server error is never
-# served and never stored.
 bd_list() {
-  local raw rc cache_file="" cached
-  [ -z "${GC_RECONCILE_BD_CACHE:-}" ] || cache_file=$(_bd_cache_file "$@")
-  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
-    printf '%s' "$cached"; return 0
-  fi
+  local raw rc
   raw=$(_bd_call list "$@" --limit=0 --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   # Strip the `gc bd:` rig-store notice (a store can emit it on stdout) with a
@@ -215,7 +117,6 @@ bd_list() {
     *[[:cntrl:]]*|'gc bd:'*) raw=$(printf '%s' "$raw" | grep -a -vE '^gc bd:' | scrub) ;;
   esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
 }
 
@@ -389,8 +290,7 @@ bd_gates_open_under_key() {
     else error("not an array") end' 2>/dev/null || return 1
 }
 
-# The anchor graph. A bead that hangs off a PR anchor (a review, a rework
-# child, a finding, a validation pass) names the anchor in
+# The anchor graph. A bead that hangs off a PR anchor names the anchor in
 # anchor_bead, and that key is what makes it a child. Each child also has an
 # edge onto its anchor, child -> anchor, the side parent-child uses, so the
 # anchor's dependents include it. A pair with no edge is joined with a `related`
@@ -423,15 +323,11 @@ ANCHOR_JOINED_KEY=anchor_edges.joined
 _BD_ANCHOR_STATUSES="open,in_progress,blocked,deferred,hooked,pinned,closed"
 
 # _bd_store_joined — 0 when the store is marked joined (ANCHOR_JOINED_KEY in
-# `gc bd kv`), served through the bd_list memo. An unset key and a read that did
-# not answer are both non-zero, and either way the caller reads the closed
-# children by anchor_bead, which is right whether the store is joined or not.
+# `gc bd kv`). An unset key and a read that did not answer are both non-zero,
+# and either way the caller reads the closed children by anchor_bead, which is
+# right whether the store is joined or not.
 _bd_store_joined() {
-  local cache_file cached found
-  cache_file=$(_bd_cache_file kv get "$ANCHOR_JOINED_KEY")
-  if cached=$(_bd_cache_hit "$cache_file"); then
-    [ "$cached" = 1 ]; return
-  fi
+  local found
   # `kv get` exits 1 for an unset key and still prints {"found": false}, so the
   # answer is read from the JSON, not the exit status.
   found=$(_bd_call kv get "$ANCHOR_JOINED_KEY" --json </dev/null 2>/dev/null | scrub | jq -r '
@@ -439,33 +335,26 @@ _bd_store_joined() {
     then (if .found == true and ((.value // "") | tostring) != "" then "1" else "0" end)
     else empty end' 2>/dev/null)
   [ -n "$found" ] || return 1
-  _bd_cache_put "$cache_file" "$found"
   [ "$found" = 1 ]
 }
 
-# _bd_anchor_up <anchor> [--cached] — every dependent of <anchor>, of any edge
-# type, as one array of bead rows. --cached serves and stores it through the
-# bd_list memo. Non-zero without output = the store did not answer; an anchor
-# that does not resolve is that too, never an empty set.
+# _bd_anchor_up <anchor> — every dependent of <anchor>, of any edge type, as
+# one array of bead rows. Non-zero without output = the store did not answer; an
+# anchor that does not resolve is that too, never an empty set.
 _bd_anchor_up() {
-  local raw rc cache_file="" cached
-  [ "${2:-}" = --cached ] && [ -n "${GC_RECONCILE_BD_CACHE:-}" ] && cache_file=$(_bd_cache_file dep list "$1" --direction=up)
-  if [ -n "$cache_file" ] && cached=$(_bd_cache_hit "$cache_file"); then
-    printf '%s' "$cached"; return 0
-  fi
+  local raw rc
   raw=$(_bd_call dep list "$1" --direction=up --json </dev/null 2>/dev/null); rc=$?
   [ "$rc" -eq 0 ] && [ -n "$raw" ] || return 1
   case "$raw" in *[[:cntrl:]]*) raw=$(printf '%s' "$raw" | scrub) ;; esac
   printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
-  _bd_cache_put "$cache_file" "$raw"
   printf '%s' "$raw"
 }
 
 # bd_anchor_children <anchor> <status-csv> — the children of <anchor> in those
 # statuses, as one array of bead rows: the bd_list contract, so non-zero without
 # output means "could not tell", never "none". A row carries the bead's own
-# fields and metadata, but not its outgoing .dependencies. Every read rides the
-# bd_list memo, and none writes. The live statuses are read by anchor_bead, and
+# fields and metadata, but not its outgoing .dependencies. No read writes. The
+# live statuses are read by anchor_bead, and
 # closed through the edge in a store marked joined, else by anchor_bead with
 # them. The live read goes first, so a child that closes between the two reads
 # is reported live rather than missed.
@@ -484,7 +373,7 @@ bd_anchor_children() {
   if [ -n "$live" ]; then
     rows=$(bd_list --metadata-field anchor_bead="$anchor" --status="$live") || return 1
   fi
-  up=$(_bd_anchor_up "$anchor" --cached) || return 1
+  up=$(_bd_anchor_up "$anchor") || return 1
   # Both arrays ride stdin: an anchor's rows can carry long descriptions, and
   # one jq argument is bounded by the OS per-argument limit.
   printf '%s\n%s' "$rows" "$up" | jq -sc --arg a "$anchor" '
@@ -524,7 +413,6 @@ bd_anchor_link() {
     [ -n "$child" ] && [ "$child" != "$anchor" ] || continue
     _bd_join "$child" "$anchor" || rc=1
   done
-  _bd_cache_drop dep list "$anchor" --direction=up
   return "$rc"
 }
 
@@ -538,7 +426,6 @@ bd_create_child() {
   shift || true
   [ -n "$anchor" ] || return 1
   gc bd create "$@" --deps "$ANCHOR_EDGE_TYPE:$anchor"; rc=$?
-  _bd_cache_drop dep list "$anchor" --direction=up
   return "$rc"
 }
 
@@ -575,36 +462,14 @@ STAMP_EOF
 
 # bd_anchor_backfill <anchor> [--check] — read the anchor_bead children of
 # <anchor>, every status, and join each one its up read does not reach
-# (_bd_anchor_stamp). Both reads skip the memo, so the comparison never rests on
-# an older read. Prints the ids it joined, or with --check the ids it would
+# (_bd_anchor_stamp). Prints the ids it joined, or with --check the ids it would
 # join. Exit 1 = a join did not land; 2 = a read did not answer.
 bd_anchor_backfill() {
-  local GC_RECONCILE_BD_CACHE=""
   local anchor="${1:-}" check="${2:-}" up kids
   [ -n "$anchor" ] || return 2
   up=$(_bd_anchor_up "$anchor") || return 2
   kids=$(bd_list --metadata-field anchor_bead="$anchor" --status="$_BD_ANCHOR_STATUSES") || return 2
   _bd_anchor_stamp "$anchor" "$kids" "$up" "$check"
-}
-
-# bd_live_children — the live beads hung on each anchor through anchor_bead:
-# its reviews, validation passes, findings and rework children, in one read of
-# the store. Prints one line per anchor that has any:
-#   <anchor>\t<child ids, sorted, comma-joined>\t<1 when one is a rework child, else 0>
-# A walking arm compares the id list with what it saw at its last visit, so a
-# child that opened or closed since then shows without a read per anchor.
-# Non-zero without output = the store did not answer.
-bd_live_children() {
-  local rows
-  rows=$(bd_list --status=open,in_progress,blocked,deferred,hooked,pinned \
-           --has-metadata-key anchor_bead) || return 1
-  printf '%s' "$rows" | jq -r '
-    [ .[] | { a: ((.metadata.anchor_bead // "") | tostring), id: ((.id // "") | tostring),
-              rw: (((.metadata.task_kind // "") | tostring) == "rework") }
-          | select(.a != "" and .id != "") ]
-    | group_by(.a)[]
-    | [ .[0].a, (map(.id) | sort | join(",")), (if any(.[]; .rw) then "1" else "0" end) ]
-    | @tsv' 2>/dev/null
 }
 
 # bd_create [--select <keys>] [--child-of <anchor>] <metadata-json>
@@ -705,7 +570,6 @@ bd_create() {
   else
     reply=$(gc bd create "$@" --metadata "$meta" --json 2>/dev/null | scrub)
   fi
-  bd_cache_clear
   id=$(printf '%s' "$reply" | jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' 2>/dev/null)
   if [ -z "$id" ] || [ "$id" = "null" ]; then
     err=$(printf '%s' "$reply" | jq -r 'if type == "object" then (.error // empty) else empty end' 2>/dev/null)
@@ -811,8 +675,7 @@ bd_meta_ensure() {
   done < <(printf '%s' "$meta" | jq -j 'to_entries[] | "\(.key)=\(.value | if type == "string" then . else tojson end)\u0000"' 2>/dev/null)
   if [ "${#sets[@]}" -gt 0 ]; then
     gc bd update "$id" "$@" "${sets[@]}" </dev/null >/dev/null 2>&1 || true
-    bd_cache_clear
-    got=$(bd_meta_readback "$id" "$meta" "$@")
+      got=$(bd_meta_readback "$id" "$meta" "$@")
     [ "${got%%$'\t'*}" = landed ] && return 0
   fi
   if [ "${got%%$'\t'*}" = unreadable ]; then printf 'unreadable\n'; else printf '%s\n' "${got#*$'\t'}"; fi
@@ -830,7 +693,6 @@ bd_unmake() {
   shift 2 || true
   gc bd update "$id" "$@" --status=closed --set-metadata gc.outcome=abandoned --append-notes "$note" \
     </dev/null >/dev/null 2>&1 || true
-  bd_cache_clear
   st=$(bd_json show "$id" "$@" </dev/null | jq -r --arg id "$id" '
     if type == "array" and ((.[0].id // "") == $id)
     then ((.[0].status // "") | tostring | ascii_downcase) else "" end' 2>/dev/null)
@@ -866,62 +728,6 @@ bd_unmake_orphans() {
     | select(any($sel[]; (($m[.] // "") | tostring) == ""))
     | .id' 2>/dev/null)
   return 0
-}
-
-# PR-finishing work, the reviews, validation passes, merge-ins, red-check fixes
-# and review reworks that carry an anchor's branch to its merge, is filed one
-# level sooner than its anchor (docs/steering.md, "PR-finishing work"). Each
-# creator files its child carrying this shift in the create, so the child is
-# born with it, and each creator's suite asserts it. A child adopted or re-routed
-# later keeps the shift it carries: after its birth the shift is the child's own
-# input, which a priority move may have set.
-# shellcheck disable=SC2034  # read by the scripts that source this file
-PR_FINISHING_SHIFT=-1
-
-# pr_finishing_birth <metadata-json> — the create payload of a PR-finishing
-# child: its work order with priority_shift added. Prints nothing and returns
-# non-zero for a work order that is not a JSON object, an empty one included, so
-# the create that would carry it files nothing.
-pr_finishing_birth() {
-  printf '%s' "${1:-}" | jq -ce --argjson s "$PR_FINISHING_SHIFT" \
-    'if type == "object" then . + {priority_shift: $s} else error("not an object") end' 2>/dev/null
-}
-
-# The longest a settle of PR-finishing work waits for the store's priority lock
-# when a script of the merge cadence runs it. The cadence runs its arms one
-# after another, so a longer wait holds every arm after it. A bead whose settle
-# times out in the cadence is settled by a later pass. A caller outside the
-# cadence keeps queue-priority.sh's own default wait, which is longer.
-PR_FINISHING_LOCK_WAIT_SECS=30
-
-# pr_finishing_settle <bead> — the cadence's settle of a bead of PR-finishing
-# work: queue-priority.sh settle, which computes the bead's priority and writes
-# it to the bead and to every live workflow poured for it
-# (docs/steering.md#settle), waiting for the lock PR_FINISHING_LOCK_WAIT_SECS
-# at most. The writer's narrative goes to stdout and its refusal to stderr, for
-# the caller to keep or drop. GC_QUEUE_PRIORITY_TOOL names another writer, as
-# each suite's harness does. Non-zero when the bead did not settle.
-pr_finishing_settle() {
-  QUEUE_PRIORITY_LOCK_WAIT_SECS="$PR_FINISHING_LOCK_WAIT_SECS" \
-    "${GC_QUEUE_PRIORITY_TOOL:-$(dirname -- "${BASH_SOURCE[0]}")/queue-priority.sh}" settle "${1:-}" </dev/null
-}
-
-# The keys a validation pass is found by: its task_kind, its anchor and its
-# lane, so a pass short of one of them is one no lane probe can find.
-# shellcheck disable=SC2034  # read by the scripts that source this file
-VALIDATION_SELECT="task_kind,anchor_bead,check_name"
-
-# validation_work_order <anchor> <lane> <reviewed-oid> — the metadata a
-# validation pass is filed with, the shape mol-validate reads, born carrying the
-# PR-finishing shift. task_kind, anchor_bead and check_name are
-# VALIDATION_SELECT. check_name is the lane: mol-validate rules the findings
-# whose finding.lane matches it. reviewed_oid pins the head the batch was
-# produced at, which mol-validate needs to back a machine lane; an empty
-# <reviewed-oid> leaves the pin out.
-validation_work_order() {
-  pr_finishing_birth "$(jq -nc --arg a "${1:-}" --arg l "${2:-}" --arg o "${3:-}" \
-    '{task_kind: "validation", anchor_bead: $a, check_name: $l}
-     + (if $o == "" then {} else {reviewed_oid: $o} end)' 2>/dev/null)"
 }
 
 # Per-rig state and the pass lock. An order that runs once per rig keeps its

@@ -97,8 +97,7 @@
 # waits end with the close. The successor itself, a waiter it blocks already,
 # and a waiter a ruling has recorded a PR-close disposition on (pr-dispose.sh)
 # need no edge. The ruled waiter closes under that ruling and waits for nothing
-# more, as an anchor does when scaffolding-sweep.sh carries one of its findings
-# forward just before the anchor's own close. A waiter that cannot take the edge
+# more. A waiter that cannot take the edge
 # refuses the close before anything is written: one joined to the successor by
 # another edge type, since bd keeps one edge per pair, and any waiter when the
 # successor is in another store, where the edge holds nothing. The edges go on
@@ -425,7 +424,7 @@ ORIGIN_JSON=$(bead_row "$ORIGIN_PATH" "$ORIGIN")
 # one edge per pair, so its type decides what the disposition does. PRIOR_SUCC
 # is other_successor's answer for the origin.
 ORIGIN_MARKER=""; ORIGIN_STATUS=""; JUDGED_STATUS=""; JUDGED_ASSIGNEE=""
-PAIR_TYPE=""; PRIOR_SUCC=""; ORIGIN_ASSIGNEE=""; ORIGIN_TASK_KIND=""
+PAIR_TYPE=""; PRIOR_SUCC=""; ORIGIN_ASSIGNEE=""
 ORIGIN_STEP_REF=""; ORIGIN_KIND_META=""; ORIGIN_OUTCOME=""; ORIGIN_WORKKEYS=1
 ORIGIN_BRANCH=""; RULED_KIND=""; RULED_SUCC=""; RULED_SUCC_STORE=""
 SUCC_STATUS=""; SUCC_OUTCOME=""
@@ -442,7 +441,6 @@ ROW_FIELDS=$(printf '%s\n%s\n' "$ORIGIN_JSON" "$SUCC_JSON" | jq -rs --arg s "$SU
       field("PAIR_TYPE"; $o | [.[0].dependencies[]? | select(((.depends_on_id // "") | tostring) == $s) | ((.type // "") | tostring)] | .[0] // ""),
       field("PRIOR_SUCC"; $o | [ .[0].dependencies[]? | select(disposition_edge) | edge_target | select(. != $s) ] | .[0] // ""),
       field("ORIGIN_ASSIGNEE"; $o | .[0].assignee // ""),
-      field("ORIGIN_TASK_KIND"; $o | .[0].metadata["task_kind"] // ""),
       field("ORIGIN_STEP_REF"; $o | .[0].metadata["gc.step_ref"] // .[0].metadata["gc.step_id"] // ""),
       field("ORIGIN_KIND_META"; $o | .[0].metadata["gc.kind"] // ""),
       field("ORIGIN_OUTCOME"; $o | .[0].metadata["gc.work_outcome"] // .[0].metadata["work_outcome"] // ""),
@@ -584,12 +582,10 @@ ruled_disposition() {
 GATE_REASON=""
 gates_pass() { # 0 eligible, 1 refused (reason in $GATE_REASON)
     GATE_REASON=""
-    local assignee="$ORIGIN_ASSIGNEE" task_kind="$ORIGIN_TASK_KIND" step_ref="$ORIGIN_STEP_REF" kind_meta="$ORIGIN_KIND_META"
+    local assignee="$ORIGIN_ASSIGNEE" step_ref="$ORIGIN_STEP_REF" kind_meta="$ORIGIN_KIND_META"
 
-    # (a) A review, step, or workflow bead is closed by its own machinery, never
-    # here: signoff.sh/review-sweep close reviews, and a step or workflow root is
-    # topology, not the work.
-    [ "$task_kind" != "review" ] || { GATE_REASON="$ORIGIN is a review bead (task_kind=review); signoff.sh and review-sweep close those"; return 1; }
+    # (a) A step or workflow bead is closed by its own machinery, never here: a
+    # step or workflow root is topology, not the work.
     if [ -n "$step_ref" ] || [ "$kind_meta" = "workflow" ]; then
         GATE_REASON="$ORIGIN is a step bead or workflow root, not a work bead"; return 1
     fi

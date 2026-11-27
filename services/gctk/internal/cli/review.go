@@ -40,13 +40,8 @@ const reviewChecksLong = `Prints the check index: every check a commit's review 
 index at the commit laid over the pack's (services/gctk/review/index.go).
 
 With no form named, or --show, it prints the effective index as TSV, one row per
-check, <name>\t<purpose>\t<phase>, leaving out a row whose phase is outside the
-ordered set and naming it on stderr. --check <name> prints that one row, the
-check known by its name without case. --resolve <set> --through <phase> prints
-the checks of the check_set <set> that gate the transition <phase>, one per
-line, or <name>\t<phase> with --with-phase: every check whose phase is at or
-before it, each token as the set writes it, none, off and approval dropped, and
-a token no layer declares at pre-open.
+check, <name>\t<purpose>. --check <name> prints that one row, the check known by
+its name without case.
 
 The rig's rows come from the review-checks.toml the commit --at names carries,
 read in the checkout the command runs in or GC_RIG_ROOT's, fetched from origin
@@ -56,34 +51,22 @@ GCTK_SCRIPTS_DIR, else above the scripts directory gc names. --file <index>, or
 GC_REVIEW_CHECKS_INDEX, names the whole effective index outright and stands in
 for both layers, so a call that names one needs no commit.
 
-Phases, in order: pre-open, open-as-draft, ready-for-review, merge.
-
 exit: 0 printed
       1 the commit --at names cannot be read (no repository here holds or can
         fetch it, or there is no repository here), the rig's index there does
-        not read, --check names a check no layer declares or one whose phase is
-        outside the ordered set, a resolved check's phase is outside it, the
-        pack's index cannot be found, or the index declares no check
+        not read, --check names a check no layer declares, the pack's index
+        cannot be found, or the index declares no check
       2 usage, a call that names no commit, included`
 
 func newReviewChecksCmd(stdout, stderr io.Writer) *cobra.Command {
-	var at, file, check, set, through string
-	var show, withPhase bool
+	var at, file, check string
+	var show bool
 	cmd := &cobra.Command{
-		Use:   "checks [--at <oid>] [--file <index>] [--show | --check <name> | --resolve <set> --through <phase> [--with-phase]]",
+		Use:   "checks [--at <oid>] [--file <index>] [--show | --check <name>]",
 		Short: "the check index at a commit, with the rig's index laid over the pack's",
 		Long:  reviewChecksLong,
 		Args:  cobra.NoArgs,
-		RunE: func(c *cobra.Command, _ []string) error {
-			resolve := c.Flags().Changed("resolve")
-			switch {
-			case resolve && (show || c.Flags().Changed("check")):
-				return errors.New("--resolve, --show and --check are different calls; name one")
-			case !resolve && (c.Flags().Changed("through") || withPhase):
-				return errors.New("--through and --with-phase go with --resolve")
-			case resolve && review.PhaseRank(through) == 0:
-				return fmt.Errorf("--resolve needs --through <phase>, one of %s (got %q)", review.Phases(), through)
-			}
+		RunE: func(_ *cobra.Command, _ []string) error {
 			if namedIndex(file) == "" && at == "" {
 				return errors.New("no commit named (--at is missing or empty) and no index named (--file, GC_REVIEW_CHECKS_INDEX); a rig's rows are read only at the commit being judged")
 			}
@@ -92,7 +75,7 @@ func newReviewChecksCmd(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stderr, "gctk review checks: %v\n", err)
 				return exit(1)
 			}
-			return exit(reviewChecks(src, at, check, set, through, resolve, withPhase, stdout, stderr))
+			return exit(reviewChecks(src, at, check, stdout, stderr))
 		},
 	}
 	f := cmd.Flags()
@@ -100,38 +83,14 @@ func newReviewChecksCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&file, "file", "", "an index named outright, which stands in for both layers")
 	f.BoolVar(&show, "show", false, "print every row of the effective index (the default)")
 	f.StringVar(&check, "check", "", "print the one row of this check")
-	f.StringVar(&set, "resolve", "", "print the checks of this check_set that gate --through")
-	f.StringVar(&through, "through", "", "the transition --resolve gates")
-	f.BoolVar(&withPhase, "with-phase", false, "print each resolved check with the phase it gates at")
 	return cmd
 }
 
-func reviewChecks(src review.IndexSources, at, check, set, through string, resolve, withPhase bool, stdout, stderr io.Writer) int {
-	warn := func(lines []string) {
-		for _, l := range lines {
-			fmt.Fprintf(stderr, "gctk review checks: %s\n", l)
-		}
-	}
+func reviewChecks(src review.IndexSources, at, check string, stdout, stderr io.Writer) int {
 	ix, err := review.ReadIndex(src, at)
 	if err != nil {
 		fmt.Fprintf(stderr, "gctk review checks: %v\n", err)
 		return 1
-	}
-	if resolve {
-		gates, warnings, err := ix.Resolve(set, through)
-		warn(warnings)
-		if err != nil {
-			fmt.Fprintf(stderr, "gctk review checks: %v\n", err)
-			return 1
-		}
-		for _, g := range gates {
-			if withPhase {
-				fmt.Fprintf(stdout, "%s\t%s\n", g.Name, g.Phase)
-			} else {
-				fmt.Fprintln(stdout, g.Name)
-			}
-		}
-		return 0
 	}
 	if len(ix.Checks) == 0 {
 		switch {
@@ -150,21 +109,11 @@ func reviewChecks(src review.IndexSources, at, check, set, through string, resol
 			fmt.Fprintf(stderr, "gctk review checks: '%s' does not declare check '%s'\n", ix.Source, check)
 			return 1
 		}
-		phase, warning, err := ix.PhaseOf(c)
-		if err != nil {
-			fmt.Fprintf(stderr, "gctk review checks: %v\n", err)
-			return 1
-		}
-		if warning != "" {
-			warn([]string{warning})
-		}
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", c.Name, c.Purpose, phase)
+		fmt.Fprintf(stdout, "%s\t%s\n", c.Name, c.Purpose)
 		return 0
 	}
-	rows, warnings := ix.Rows()
-	warn(warnings)
-	for _, r := range rows {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", r.Name, r.Purpose, r.Phase)
+	for _, c := range ix.Checks {
+		fmt.Fprintf(stdout, "%s\t%s\n", c.Name, c.Purpose)
 	}
 	return 0
 }
