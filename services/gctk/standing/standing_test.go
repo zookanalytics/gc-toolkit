@@ -339,10 +339,11 @@ func TestAFrontierBehindAPullRequestBeneathAnAsk(t *testing.T) {
 }
 
 // TestABeadThatCarriesTheHumanLabelWaitsOnYou: an open bead that carries bd's
-// human label is itself an ask, human-needed, whatever its assignee, and the
-// work it blocks waits on it, through one of its own waits or further along, as
-// prstatus's walk of what a person owes reads the label, whether Read is asked
-// about each bead alone or about every bead.
+// human label is itself an ask, human-needed, whatever its assignee, a gate that
+// is no human gate among them, and the work it blocks waits on it, through one
+// of its own waits or further along, as prstatus's walk of what a person owes
+// reads the label, whether Read is asked about each bead alone or about every
+// bead.
 func TestABeadThatCarriesTheHumanLabelWaitsOnYou(t *testing.T) {
 	beads := []Bead{
 		{ID: "tk-h", Title: "confirm the release notes", Status: "open", IssueType: "task", Labels: []string{"human"}},
@@ -350,6 +351,8 @@ func TestABeadThatCarriesTheHumanLabelWaitsOnYou(t *testing.T) {
 			Labels: []string{"human"}},
 		{ID: "tk-w", Title: "cut the release", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-h", Type: "blocks"}}},
 		{ID: "tk-v", Title: "announce the release", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-w", Type: "blocks"}}},
+		{ID: "tk-t", Title: "wait out the freeze", Status: "open", IssueType: "gate", AwaitType: "timer", Labels: []string{"human"}},
+		{ID: "tk-x", Title: "ship after the freeze", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-t", Type: "blocks"}}},
 	}
 	s := pullStoreOf(beads, pr.Answer{})
 	for _, c := range []struct {
@@ -362,8 +365,10 @@ func TestABeadThatCarriesTheHumanLabelWaitsOnYou(t *testing.T) {
 		{id: "tk-a", rule: RuleAsk, ask: AskHumanNeeded},
 		{id: "tk-w", rule: RuleOwnWait, names: []string{"tk-h"}},
 		{id: "tk-v", rule: RuleFurtherAlong, names: []string{"tk-h"}},
+		{id: "tk-t", rule: RuleAsk, ask: AskHumanNeeded},
+		{id: "tk-x", rule: RuleOwnWait, names: []string{"tk-t"}},
 	} {
-		for _, ids := range [][]string{{"tk-h", "tk-a", "tk-w", "tk-v"}, {c.id}} {
+		for _, ids := range [][]string{{"tk-h", "tk-a", "tk-w", "tk-v", "tk-t", "tk-x"}, {c.id}} {
 			r, err := Read(ids, s)
 			if err != nil {
 				t.Fatalf("%s, asked about %v: %v", c.id, ids, err)

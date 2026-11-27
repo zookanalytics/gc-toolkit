@@ -706,7 +706,7 @@ with what the person can do.
   things stand, and `closed`. A bead with no move of its own has no group: a
   conversation that answers a question, which the question's row carries, an
   epic or a Delivery with open members or with no members at all, and a gate
-  that is no human gate.
+  that asks no one, which is no human gate and carries no `human` label.
 - **The rule that placed it.** The first of these that applies answers:
   1. `closed`.
   2. `ask`: the bead is itself what a person owes, and the answer names the

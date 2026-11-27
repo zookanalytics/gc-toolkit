@@ -267,7 +267,7 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 | `status` | has a status no pool offers, such as deferred, pinned or a status its store adds |
 | `answers` | is the question a conversation answers, which the question's own reading carries |
 | `members` | is an epic or a Delivery with no members at all |
-| `gate` | is a gate that is no human gate |
+| `gate` | is a gate that asks no one, which is no human gate and carries no `human` label |
 | `not-scheduled` | is ready work that nothing sends anywhere: the store serves it as ready, no dispatch hold holds it, and no arm, route, assignee or live run moves it |
 | `outside` | is work that waits outside the city: `hold:external` holds it and no live run works it |
 | `for-product-owner` | is work nothing sends that is held for the Product Owner's placement, `hold:mayor` |

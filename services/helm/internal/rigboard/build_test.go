@@ -1470,4 +1470,26 @@ func TestNeedsThatCount(t *testing.T) {
 			}
 		}
 	})
+	t.Run("a park that carries bd's human label is human-needed, and the work it holds waits on it", func(t *testing.T) {
+		g := graph()
+		for i := range g.open {
+			if g.open[i].ID == "tk-park" {
+				g.open[i].Labels = []string{"human"}
+			}
+		}
+		park := person.Blocker{ID: "tk-park", Title: "parked", Status: "open", IssueType: "gate", Labels: []string{"human"}}
+		g.holding["tk-loose"], g.holding["tk-loose2"] = prstatus.Holds{Owed: []person.Blocker{park}}, prstatus.Holds{Owed: []person.Blocker{park}}
+		doc := boardOf(t, g)
+		if r := doc.Rows["tk-park"]; r.Group != GroupWaitingOnYou || r.Ask != AskHumanNeeded {
+			t.Errorf("tk-park reads group %q, ask %q; want it human-needed", r.Group, r.Ask)
+		}
+		for _, id := range []string{"tk-loose", "tk-loose2"} {
+			if r := doc.Rows[id]; r.Group != GroupWaitingOnYou || r.Signal != "Waits on tk-park" {
+				t.Errorf("%s reads group %q, signal %q; want it waiting on tk-park", id, r.Group, r.Signal)
+			}
+		}
+		if k := kindOf(doc.NeedsYou, "tk-park"); k != NeedKindHumanNeeded {
+			t.Errorf("tk-park is of kind %q in Needs you, want Human-needed", k)
+		}
+	})
 }

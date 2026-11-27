@@ -83,8 +83,9 @@ const (
 	// RuleMembers: the bead is an epic or a Delivery that is no ruling, with
 	// open members or none at all. No group: it has no move of its own.
 	RuleMembers Rule = "members"
-	// RuleGate: the bead is a gate that is no human gate, which holds what
-	// waits on it and asks no one. No group: it has no move of its own.
+	// RuleGate: the bead is a gate that asks no one, one that is no human gate
+	// and carries no human label, which holds what waits on it. No group: it
+	// has no move of its own.
 	RuleGate Rule = "gate"
 	// RuleNotScheduled: the work is ready work that nothing sends anywhere, as
 	// queue's order lists it (queue.Ordered's NotScheduled): the store's ready
@@ -421,12 +422,13 @@ func (r *Reading) reach(ids []string) []string {
 
 // askOf is whether a bead is itself an ask, and which ([Ask] says when each
 // applies): what the shared readers count as a person's move, and a ruling. A
-// gate, a decision and a conversation are each answered by their kind alone,
-// so a gate that is no human gate is never an ask. An epic or a Delivery is
-// tried as a ruling first. Any other bead, and an epic or a Delivery that is
-// no ruling, is tried as a pull request, then as a bead only a person clears:
-// human-needed when it carries bd's human label, and otherwise assigned to
-// you. beneath
+// gate, a decision and a conversation are each answered by their kind alone. A
+// gate is a question when it is a human gate, human-needed when it is any other
+// gate that carries bd's human label, which [person.Clears] reads as a
+// person's, and otherwise never an ask. An epic or a Delivery is tried as a
+// ruling first. Any other bead, and an epic or a Delivery that is no ruling, is
+// tried as a pull request, then as a bead only a person clears: human-needed
+// when it carries bd's human label, and otherwise assigned to you. beneath
 // reports whether the bead stands beneath another ask ([Reading.Beneath]),
 // where a pull request that needs attention for no reason of its own is no
 // ask.
@@ -436,10 +438,13 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 	}
 	switch k {
 	case KindGate:
-		if !person.IsHumanGate(b.IssueType, b.AwaitType) {
-			return ""
+		switch {
+		case person.IsHumanGate(b.IssueType, b.AwaitType):
+			return AskQuestion
+		case gascity.HasHumanLabel(b.Labels):
+			return AskHumanNeeded
 		}
-		return AskQuestion
+		return ""
 	case KindDecision:
 		if stays[b.ID] {
 			return ""
