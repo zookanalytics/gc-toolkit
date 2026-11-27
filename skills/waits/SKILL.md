@@ -27,9 +27,18 @@ FROM column.
 ## Make a bead wait on other work
 
 The message is that this bead does not go until that one closes. bd acts on
-it: the waiting bead stays out of `bd ready`, and once the blocker closes a
-routed bead is offered to its pool again. A waiting bead with no route needs an
-arm (below), or nothing sends it.
+it: the waiting bead stays out of `bd ready` until the blocker closes. The edge
+decides only when the bead can go. What sends it then depends on the bead:
+
+- A routed bead is offered to its pool again once the blocker closes, and needs
+  nothing more.
+- An unrouted bead that the work skill's intake rule lets you send now, and that
+  should start by itself once the blocker closes, also takes an arm (below), or
+  nothing sends it.
+- An unrouted bead that the intake rule leaves for the operator to place takes
+  no route and no arm. The edge still holds it once the operator places it.
+- A bead whose whole job ends once the blocker closes is checked and closed by
+  the validating closer instead (the next section).
 
 Writer: `gc bd dep add <waiting-bead> <blocker> --type=blocks`, its exit saying
 whether the edge landed. Write it only when both ids carry the same prefix, the
@@ -190,10 +199,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 Add `--on <formula>` to send it on a formula other than the default. The bead
 must be open and carry no route.
 
-Arm a blocked bead rather than leave it for someone to route once its blocker
-lands: a blocked work bead with no route and no arm is the debt
-`doctor/check-blocked-work-armed` reports. The intake rule that limits routing
-limits arming too (the work skill).
+An arm sends work, so the work skill's intake rule decides whether a bead may
+take one, as it decides whether a bead may be routed. Arm a blocked bead that
+rule lets you send now, rather than leave it for someone to route once its
+blocker lands: a blocked work bead with no route and no arm is the debt
+`doctor/check-blocked-work-armed` reports. A bead the rule leaves for the
+operator to place carries Gas City's `hold:mayor` label and no arm, and that
+check does not report it.
 
 ## Release a wait
 

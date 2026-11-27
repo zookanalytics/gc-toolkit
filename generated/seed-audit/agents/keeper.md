@@ -345,7 +345,8 @@ sending work.
 
 The default after `gc sling` is file-and-forget: the bead is the contract, and
 nothing here reads it again. A follow-up that is BLOCKED on another bead takes an
-edge and an arm, never a watcher (the `waits` skill):
+edge, and an arm when the work skill's intake rule lets it start by itself, never
+a watcher (the `waits` skill):
 
 ```
 # >>> gctk-bin
