@@ -1470,7 +1470,7 @@ func TestNeedsThatCount(t *testing.T) {
 			}
 		}
 	})
-	t.Run("a park that carries bd's human label is human-needed, and the work it holds waits on it", func(t *testing.T) {
+	t.Run("a park that carries bd's human label is a human-needed need that counts, and the work it holds waits on it", func(t *testing.T) {
 		g := graph()
 		for i := range g.open {
 			if g.open[i].ID == "tk-park" {
@@ -1488,8 +1488,10 @@ func TestNeedsThatCount(t *testing.T) {
 				t.Errorf("%s reads group %q, signal %q; want it waiting on tk-park", id, r.Group, r.Signal)
 			}
 		}
-		if k := kindOf(doc.NeedsYou, "tk-park"); k != NeedKindHumanNeeded {
-			t.Errorf("tk-park is of kind %q in Needs you, want Human-needed", k)
+		if v := doc.NeedsYou; !slices.Contains(ids(v.Counted), "tk-park") || kindOf(v, "tk-park") != NeedKindHumanNeeded ||
+			len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindHumanNeeded, 1}) {
+			t.Errorf("Needs you counts %v, folds %v and gives kinds %+v, with tk-park of kind %q; want tk-park counted and Human-needed last",
+				ids(v.Counted), ids(v.NotCounted), v.Kinds, kindOf(v, "tk-park"))
 		}
 	})
 }

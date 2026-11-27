@@ -61,9 +61,10 @@ const (
 	// RuleFurtherAlong: such a gate or bead holds the bead further along its
 	// waits, an ancestor's included. Group waiting-on-you.
 	RuleFurtherAlong Rule = "further-along"
-	// RuleParked: a gate that is no human gate, such as a park
-	// (docs/steering.md, "A park"), holds the bead through a wait of its own
-	// or an ancestor's, as gateHold reads it. Group not-moving.
+	// RuleParked: a gate that asks no one, one that is no human gate and
+	// carries no human label, such as a park (docs/steering.md, "A park"),
+	// holds the bead through a wait of its own or an ancestor's, as gateHold
+	// reads it. Group not-moving.
 	RuleParked Rule = "parked"
 	// RuleStatus: the bead's status is one no pool offers, such as deferred.
 	// Gas Town's pending record, the record a PR's bead carries from its
@@ -540,7 +541,7 @@ func (r *Reading) table(b Bead, k Kind, ask Ask, stays map[string]bool) Answer {
 			return Answer{Rule: RuleUnread, Why: "the walk of what a person owes for it ran past its bound"}
 		}
 	}
-	if w := gateHold(h); w != nil {
+	if w := r.gateHold(h); w != nil {
 		return Answer{Group: GroupNotMoving, Rule: RuleParked, Names: []Ref{{ID: w.ID, Title: w.Title}}}
 	}
 	switch st := status(b); {
@@ -621,13 +622,16 @@ func holdingAnswer(h waits.Holds, hold prstatus.Holds) Answer {
 }
 
 // gateHold is the first wait behind a bead's status, its own or an ancestor's,
-// on a gate that is no human gate, and nil when none is: a park
+// on a gate that asks no one, and nil when none is: a park
 // (docs/steering.md, "A park"), whose gate gctk bead park files with no await
 // type. A gate of a type bd closes by itself, such as a timer, reads as one
-// too.
-func gateHold(h waits.Holds) *waits.Wait {
+// too. A gate asks a person when it is a human gate or carries bd's human
+// label, which the read takes from the gate's own bead, since a wait carries
+// no labels.
+func (r *Reading) gateHold(h waits.Holds) *waits.Wait {
 	for i, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) {
+		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) &&
+			!gascity.HasHumanLabel(r.beads[w.ID].Labels) {
 			return &h.Waits[i]
 		}
 	}

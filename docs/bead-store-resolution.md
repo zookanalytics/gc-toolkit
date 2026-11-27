@@ -263,7 +263,7 @@ asks and the rules in `rules.go`, and the verdicts `ready`, `advancing` and
 | `ruling` | is an epic with members and none of them open, or a landed Delivery |
 | `own-wait` | is a human gate, or a bead only a person clears, that the stuck bead waits on through a wait of its own |
 | `further-along` | is such a gate or bead further along its waits, an ancestor's included |
-| `parked` | is a gate that is no human gate, which holds the stuck bead, its own or an ancestor's |
+| `parked` | is a gate that is no human gate and carries no `human` label, which holds the stuck bead, its own or an ancestor's |
 | `status` | has a status no pool offers, such as deferred, pinned or a status its store adds |
 | `answers` | is the question a conversation answers, which the question's own reading carries |
 | `members` | is an epic or a Delivery with no members at all |

@@ -470,10 +470,11 @@ counts them by kind (`NeedsYou` in `internal/rigboard/document.go`), so a count
 reaches zero only when nothing that counts needs the operator. A need does not
 count when what it is about is parked or waits for the Product Owner. It is
 parked itself when it, or an epic or Delivery above it, waits on a park, which
-the read tells as a wait on a gate that is no human gate, the wait standing
-reads as parked (`Reading.Parked`) and the row as "Held by a gate". A gate, a
-decision or a conversation does not count when every bead it holds or is about
-is parked, is a need that does not count, or carries hold:mayor. A pull request
+the read tells as a wait on a gate that is no human gate and carries no `human`
+label, the wait standing reads as parked (`Reading.Parked`) and the row as
+"Held by a gate". A gate, a decision or a conversation does not count when
+every bead it holds or is about is parked, is a need that does not count, or
+carries hold:mayor. A pull request
 or other work that is itself a need counts unless it is parked itself, and a
 need about nothing else counts. A question a sitting
 is talking over counts as in conversation. An epic's or a Delivery's needs

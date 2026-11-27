@@ -493,10 +493,9 @@ func (bt *built) live(id string) bool {
 }
 
 // parked reports whether a bead waits on a park, or an epic or a Delivery above
-// it does: a wait behind its status on a gate that is no human gate, as
-// standing reads the bead and each of those above it (Reading.Parked). Each is
-// read for its own waits, so work in flight under a parked epic, which the
-// epic's wait does not hold, is parked with it.
+// it does, as standing reads the bead and each of those above it
+// (Reading.Parked). Each is read for its own waits, so work in flight under a
+// parked epic, which the epic's wait does not hold, is parked with it.
 func (bt *built) parked(id string) bool {
 	for _, x := range append([]string{id}, bt.ix.ancestors(id)...) {
 		if _, ok := bt.ix.g.reading.Parked(x); ok {

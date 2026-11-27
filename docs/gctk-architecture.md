@@ -731,8 +731,8 @@ with what the person can do.
   3. `own-wait` or `further-along`: a human gate, or a bead only a person
      clears, holds it through a wait of its own, or further along its waits,
      an ancestor's included.
-  4. `parked`: a gate that is no human gate holds it, its own or an
-     ancestor's.
+  4. `parked`: a gate that is no human gate and carries no `human` label
+     holds it, its own or an ancestor's.
   5. `status`: its status is one no pool offers, such as deferred.
   6. `staying`: it is a conversation its sitting stays in, or a decision a
      ruling left waiting on the work it sent. It is a person's move again once

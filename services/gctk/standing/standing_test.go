@@ -385,3 +385,37 @@ func TestABeadThatCarriesTheHumanLabelWaitsOnYou(t *testing.T) {
 		}
 	}
 }
+
+// TestAGateThatCarriesTheHumanLabelParksNothing: a gate that carries bd's human
+// label asks a person, so Parked reads no park in it, while a park beside it
+// still parks the work both hold. A park labeled Human, which is not bd's
+// label, parks as any park does.
+func TestAGateThatCarriesTheHumanLabelParksNothing(t *testing.T) {
+	work := func(id string, waitsOn ...string) Bead {
+		b := Bead{ID: id, Title: "work " + id, Status: "open", IssueType: "task"}
+		for _, w := range waitsOn {
+			b.Edges = append(b.Edges, Edge{ID: w, Type: "blocks"})
+		}
+		return b
+	}
+	beads := []Bead{
+		{ID: "tk-t", Title: "wait out the freeze", Status: "open", IssueType: "gate", AwaitType: "timer", Labels: []string{"human"}},
+		{ID: "tk-h", Title: "parked for a person", Status: "open", IssueType: "gate", Labels: []string{"human"}},
+		{ID: "tk-p", Title: "parked", Status: "open", IssueType: "gate"},
+		{ID: "tk-c", Title: "parked, labeled Human", Status: "open", IssueType: "gate", Labels: []string{"Human"}},
+		work("tk-x", "tk-t"), work("tk-y", "tk-h"), work("tk-z", "tk-h", "tk-p"), work("tk-w", "tk-c"),
+	}
+	var ids []string
+	for _, b := range beads {
+		ids = append(ids, b.ID)
+	}
+	r, err := Read(ids, pullStoreOf(beads, pr.Answer{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"tk-x": "", "tk-y": "", "tk-z": "tk-p", "tk-w": "tk-c"} {
+		if got, parked := r.Parked(id); parked != (want != "") || got.ID != want {
+			t.Errorf("%s is parked by %q (%v), want %q", id, got.ID, parked, want)
+		}
+	}
+}
