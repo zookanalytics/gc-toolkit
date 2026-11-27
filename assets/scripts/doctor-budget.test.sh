@@ -36,7 +36,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/.."
 [ -d "$REPO/doctor" ] || REPO="$HERE/../.."
 FENCE="doctor-budget"
-CANON_HOST="$REPO/doctor/check-gate-integrity/run.sh"
+CANON_HOST="$REPO/doctor/check-one-anchor-per-pr/run.sh"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
@@ -56,8 +56,8 @@ hosts() { find "$REPO/doctor" -name 'run.sh' -type f 2>/dev/null | sort; }
 
 echo "── 1. the canonical block ──"
 BLOCK="$(extract "$CANON_HOST")"
-if [ -n "$BLOCK" ]; then ok "block present in check-gate-integrity"
-else bad "block present in check-gate-integrity" "no marked block"; fi
+if [ -n "$BLOCK" ]; then ok "block present in check-one-anchor-per-pr"
+else bad "block present in check-one-anchor-per-pr" "no marked block"; fi
 printf '%s\n' "$BLOCK" > "$TMP/block.sh"
 if bash -n "$TMP/block.sh" 2>/dev/null; then ok "block is valid bash"
 else bad "block is valid bash" "bash -n failed"; fi
@@ -70,7 +70,7 @@ while IFS= read -r f; do
     COPIES=$((COPIES + 1))
     if [ "$b" != "$BLOCK" ]; then
         DIVERGENT=$((DIVERGENT + 1))
-        bad "$(basename "$(dirname "$f")"): copy matches canonical" "block differs from check-gate-integrity"
+        bad "$(basename "$(dirname "$f")"): copy matches canonical" "block differs from check-one-anchor-per-pr"
     fi
 done < <(hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"

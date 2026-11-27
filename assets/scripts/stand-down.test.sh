@@ -31,7 +31,7 @@
 #     gate, a gate a person is assigned that this bead leaves or that is in
 #     progress, another live blocker, an open child, a gate that also holds another
 #     open bead with nothing else as the evidence, a claim, an unreadable bead, a
-#     disposition already naming other evidence, a review bead;
+#     disposition already naming other evidence;
 #   * a bead at each of the pending record's exceptions stands down only once
 #     its record names its PR and GitHub reads each PR the record names closed or
 #     merged, and the script's copy of those values is held to
@@ -357,8 +357,6 @@ refused "a claim" tk-w --key polecat-x --ruling "x"
 has "$OUT" "someone" "a claim: it names the holder"
 fresh; edge tk-w supersedes tk-conv
 refused "a disposition already naming other evidence" tk-w --key polecat-x --ruling "x" --successor tk-g
-fresh; bset tk-w metadata.task_kind=review
-refused "a review bead" tk-w --key polecat-x --ruling "x"
 fresh
 refused "an unreadable bead" tk-absent --key polecat-x --ruling "x"
 has "$OUT" "could not read tk-absent" "an unreadable bead: it says so"

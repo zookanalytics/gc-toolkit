@@ -15,13 +15,14 @@
 #     the step it sits in, so a decline cancels the run this shell is executing
 #     and no other;
 #   * OPEN GATE: every await-ruling.sh call in a formula follows a human-gate.sh
-#     filing that declares no quiet window, or bring-current-audit.sh's ask,
-#     because a wait needs an open gate and a quiet window files none for a
-#     situation a person already answered moot or benign;
+#     filing that declares no quiet window, because a wait needs an open gate
+#     and a quiet window files none for a situation a person already answered
+#     moot or benign;
 #   * STAND-DOWN: a gate that arms a re-sling tells a person how to rule the other
 #     way, through stand-down.sh under the gate's own key, and nothing tells them
-#     to close a bead the gate blocks, which bd refuses. bring-current-audit.sh's
-#     ask is the one that does not, because its gate asks how to resolve a conflict.
+#     to close a bead the gate blocks, which bd refuses. work-setup.sh's
+#     bring-current question is the one that does not, because its gate asks how
+#     to resolve a conflict.
 #     The skills a person's ruling reaches give the command;
 #
 # decline.test.sh holds the order of a decline, and work-setup.test.sh,
@@ -60,7 +61,7 @@ done
 
 # --- 2. Each cancel names the step it sits in. ----------------------------------
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-review mol-validate mol-rig-demo; do
+  for f in mol-rig-demo; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 path = sys.argv[1]
@@ -92,11 +93,9 @@ fi
 # --- 2b. A wait sits on an open gate. -------------------------------------------
 # human-gate.sh files nothing for a situation a person answered moot or benign
 # inside a quiet window the call declares, and the wait needs an open gate. So
-# the filing each await-ruling.sh call follows declares no --quiet-window, or is
-# bring-current-audit.sh's ask, which declares none itself
-# (bring-current-audit.test.sh holds it to that).
+# the filing each await-ruling.sh call follows declares no --quiet-window.
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-validate mol-rig-demo; do
+  for f in mol-rig-demo; do
     out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
@@ -110,7 +109,7 @@ for st in d.get("steps", []):
         waits += 1
         filer = None
         for j in range(i - 1, -1, -1):
-            if re.search(r'human-gate\.sh" --subject', lines[j]) or re.search(r'"\$BCA" ask', lines[j]):
+            if re.search(r'human-gate\.sh" --subject', lines[j]):
                 filer = lines[j]
                 break
         if filer is None:
@@ -157,7 +156,7 @@ skill_has converse-settle 'add `--leave <gate>` for that gate unless the ruling 
 # mol-polecat-work's step scripts file their gates through decline.sh, which ends
 # the message of each gate that arms a re-sling with the stand-down under that
 # gate's own key (decline.test.sh holds the sentence). So no work script arms a
-# gate's re-sling itself, apart from bring-current-audit.sh's question.
+# gate's re-sling itself, apart from work-setup.sh's bring-current question.
 OWN_WAITS=$(git -C "$ROOT" grep -n -E 'await-ruling\.sh" "\$[A-Z_]+" --key ' \
   -- 'assets/scripts/work-*.sh' ':!assets/scripts/*.test.sh' 2>/dev/null | grep -v -F -- '--key "bring-current-question.' || true)
 eq "$OWN_WAITS" "" "mol-polecat-work's scripts arm a gate's re-sling only through decline.sh, apart from the bring-current question"

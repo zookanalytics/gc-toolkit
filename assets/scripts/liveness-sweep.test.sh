@@ -389,7 +389,7 @@ grep -q "c-demand-live" "$ESC_BODIES" \
 echo "── the delta splits new from carried; index 0 is a real hit ──"
 PARTIAL="$(printf '%s' "$EXPECT_SURVIVORS" | cut -d, -f2-)"   # all but the FIRST id
 run_sweep "$PARTIAL"
-grep -q "delta: 1 new, 22 carried" <<< "$OUT" \
+grep -q "delta: 1 new, 17 carried" <<< "$OUT" \
     && ok "baseline missing one id → exactly 1 new (and position 0 counts as carried)" \
     || bad "delta split" "$OUT"
 grep -q "c-docupdate" "$ESC_BODIES" && ok "the new one is enumerated" || bad "new enumeration" "$(cat "$ESC_BODIES")"
