@@ -246,6 +246,21 @@ earlier round of the run declined.
 An ask stays open until the run records its result, so it is ruled again at
 each head: answered once the head carries its fix, or once its check ran there.
 
+## A finding that came back after a fix
+
+A lane's finding can raise again a point an earlier round of this run ruled
+must-fix and fixed, under a new id: the same defect, or the defect that round's
+fix was meant to remove, back in the same place or in the code that fix wrote.
+Name that earlier finding in the ruling's `restates`, as
+`{"iteration", "check", "finding"}`, and rule the finding by its lane's rule as
+any other. A finding that only shares a file or a section with an earlier one
+restates nothing. The read lists every round's findings with their rulings.
+
+The run counts these. A finding that comes back a second time, and a round
+whose must-fix findings are no fewer than two rounds before, call for a fresh
+look at the whole review, which can stop it for a person's answer, so mark a
+return only where the point is the same.
+
 ## Each answer says what the head carries
 
 The head's comment is rendered from your rulings, so write each reason as the

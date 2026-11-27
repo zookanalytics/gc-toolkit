@@ -8,10 +8,19 @@ round's fixes as one push, and answers them on the PR: in one comment for the
 head, and at each person's post, where it was made. A push is a new head, which
 the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
-the iteration that ends the loop, a pass or the last attempt, it writes the
-result for the last head the run judged and its target, which the landing order
-merges on, and closes the asks the run answered, so no step records it. The
-design is specs/tk-1tfzr71.108/design.md.
+the iteration its check ends the loop at, a pass or the last attempt, it writes
+the result for the last head the run judged and its target, which the landing
+order merges on, and closes the asks the run answered, so no step records it.
+The design is specs/tk-1tfzr71.108/design.md.
+
+The run goes on while its must-fix findings fall, with no fixed number of
+rounds. When the run's account calls for one, at every third round, when the
+findings stop falling or one comes back a second time, and at the last attempt,
+rule-and-repair's fan-out bonds a fresh look of mol-pr-review-look on the review
+pool, so the look is never the round's ruler. The look reads the whole review
+and sends it on or stops it for a person's answer. A stop's question goes to a
+gate on the bead that owns the PR, and the look's hard failure ends the loop at
+that round with no result (specs/tk-vdyedm5/design.md).
 
 The landing order pours a run attached to the bead that owns the PR, which the
 run then holds, with the record it read as the run's vars.
@@ -62,8 +71,8 @@ description = "The pool rule-and-repair runs on, and a deferred fix's bead is ar
 default = ""
 
 [vars.max_attempts]
-description = "The loop's bound: the heads one run judges, each iteration one head. The loop's check reads it to know its last attempt, where it records a result that does not pass."
-default = "3"
+description = "The loop's bound, which Gas City's checked step requires: the heads one run judges, each iteration one head. The run's account stops a run whose findings stop falling well before it, and a fresh look at the last attempt stops the review for a person's answer. The loop's check reads it to know its last attempt, where it records a result that does not pass."
+default = "30"
 
 [vars.binding_prefix]
 description = "The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog, and with no dot the name of its commands. Sling adds it to every pour, and a cooked run is passed it, as gc formula cook passes only its --var flags."
@@ -74,11 +83,14 @@ id = "review-loop"
 title = "Review {{pr_bead}} until a head passes"
 description = """
 The loop: each iteration judges one head of `{{pr_bead}}`'s PR. Triage picks
-the head's checks, one mol-pr-review-lane runs each, and rule-and-repair rules
-and fixes. The check after each iteration is `gctk review passed --record`, and
-a round that pushed, ruled a finding must-fix or left one unruled gets the next
-iteration, up to {{max_attempts}}. The iteration that ends the loop, a pass or
-the last attempt, has its check record the run's result before the loop closes.
+the head's checks, one mol-pr-review-lane runs each, rule-and-repair rules and
+fixes, and a fresh look of mol-pr-review-look follows when the run's account
+calls for one. The check after each iteration is `gctk review passed --record`,
+and a round that pushed, ruled a finding must-fix or left one unruled gets the
+next iteration, up to {{max_attempts}}. The iteration that ends the loop by its
+check, a pass or the last attempt, has the check record the run's result before
+the loop closes. A look that stops the review ends the loop by its own hard
+failure, with no check and no result.
 """
 
 [steps.check]
@@ -205,10 +217,12 @@ the head the round judged or did not read: run it again.
 `{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
 `commit` of a must-fix, `"summary": true` on a must-fix fixed in the PR's title
 or summary, and the `gate` of a question, and `pushed`, the head the push
-printed, when it pushed. When an ask's post settles a question that a gate on
-`{{pr_bead}}` asks, name that gate in the ask's ruling as `settles`. When the
-post makes the question moot, also set `"moot": true` in that ruling. Then
-check and write it:
+printed, when it pushed. When a lane's finding raises again a finding an earlier
+round of this run ruled must-fix, name that finding in its ruling as
+`"restates": {"iteration", "check", "finding"}`, as the bar says. When an ask's
+post settles a question that a gate on `{{pr_bead}}` asks, name that gate in the
+ask's ruling as `settles`. When the post makes the question moot, also set
+`"moot": true` in that ruling. Then check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
@@ -218,8 +232,9 @@ post the round ruled:
 On exit 1 or 2, run it again. When it fails again, cancel the run:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
-**7. Close this step.** The loop's check judges the round, and records the
-run's result when the round ends the loop.
+**7. Close this step.** A fresh look follows when the run's account calls for
+one, which the output check printed as `look`. Then the loop's check judges the
+round, and records the run's result when the round ends the loop.
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/claim-close.sh" --step review-loop`
 
 **Exit criteria:** every finding and ask ruled, the round's fixes pushed and
@@ -227,3 +242,8 @@ the PR's title and body current with `{{pr_bead}}`, the output written, the
 round's answers posted, this step closed.
 """
 metadata = { "gc.run_target" = "{{repair_target}}" }
+
+[steps.children.on_complete]
+for_each = "output.look"
+bond = "mol-pr-review-look"
+vars = { head = "{item.head}", review_target = "{{review_target}}", binding_prefix = "{{binding_prefix}}" }

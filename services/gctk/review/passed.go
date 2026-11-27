@@ -220,7 +220,9 @@ func rulingOf(round []Ruling, match func(Ruling) bool) (Ruling, bool) {
 
 // Explain is the account --explain prints of the iteration the verdict
 // judged: its head and picks, each lane's verdict and findings, each ruling,
-// the push, the asks on the bead, and the verdict with its reasons.
+// the push, each finding an earlier round of the run ruled must-fix, which a
+// finding of this round can restate, the asks on the bead, and the verdict with
+// its reasons.
 func (v *Verdict) Explain() string {
 	var b strings.Builder
 	run := v.Run
@@ -257,6 +259,7 @@ func (v *Verdict) Explain() string {
 			fmt.Fprintln(&b, "  rule-and-repair: nothing written")
 		}
 	}
+	explainEarlier(&b, run, v.Iteration)
 	for _, a := range v.Asks {
 		if !a.Open() {
 			continue
@@ -274,8 +277,37 @@ func (v *Verdict) Explain() string {
 	return b.String()
 }
 
+// explainEarlier writes each lane finding a round of the run before n ruled
+// must-fix, as a ruling's restates names it, under a line that says what a
+// finding that restates one is for.
+func explainEarlier(b *strings.Builder, run *Run, n int) {
+	var lines []string
+	for m := 1; m < n; m++ {
+		it := run.Iterations[m]
+		if it == nil || it.Repair == nil {
+			continue
+		}
+		for _, ln := range it.Lanes {
+			for _, f := range ln.Findings {
+				r, ok := rulingOf(it.Repair.Rulings, func(r Ruling) bool { return r.rulesFinding(ln.Check, f.ID) })
+				if ok && r.Ruling == RulingMustFix {
+					lines = append(lines, fmt.Sprintf("  round %d %s %s at %s: %s\n", m, ln.Check, f.ID, f.Locus, oneLine(f.Message)))
+				}
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "earlier rounds' must-fix findings, which a finding that raises one again names in its ruling's restates:")
+	for _, l := range lines {
+		b.WriteString(l)
+	}
+}
+
 // explainRuling writes one ruling's line of the account: what it rules, the
-// ruling, its commit, its gate, the question it settles and its reason.
+// ruling, its commit, its gate, the earlier finding it restates, the question it
+// settles and its reason.
 func explainRuling(b *strings.Builder, r Ruling) {
 	fmt.Fprintf(b, "    %s: %s", r.Subject(), r.Ruling)
 	if r.Commit != "" {
@@ -289,6 +321,9 @@ func explainRuling(b *strings.Builder, r Ruling) {
 	}
 	if r.Gate != "" {
 		fmt.Fprintf(b, " through %s", r.Gate)
+	}
+	if r.Restates != nil {
+		fmt.Fprintf(b, ", back after a fix of %s", r.Restates)
 	}
 	switch {
 	case r.Settles != "" && r.Moot:

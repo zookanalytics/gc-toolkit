@@ -305,8 +305,9 @@ without spending an attempt, and the retry replaces the same entry.
 
 It reads only the store, which is all a check's PATH reaches. It prints the
 verdict and each reason the iteration did not pass, with --explain the
-iteration's lanes, verdicts, findings and rulings and the asks on the bead, and
-with --record what it recorded.
+iteration's lanes, verdicts, findings and rulings, each finding an earlier round
+of the run ruled must-fix, and the asks on the bead, and with --record what it
+recorded.
 
 exit: 0 passed, and with --record its result recorded
       1 not yet: the next iteration runs, or with --record at the loop's last

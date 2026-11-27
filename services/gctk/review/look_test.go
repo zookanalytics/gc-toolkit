@@ -309,3 +309,27 @@ func TestTheHeadsCommentCarriesTheAccountAndTheLook(t *testing.T) {
 		t.Errorf("the comment lacks the look's verdict:\n%s", body)
 	}
 }
+
+// The round's read lists each finding an earlier round ruled must-fix, which a
+// finding of the round can restate, and a ruling that restates one says so.
+func TestTheRoundsReadListsTheFindingsItCanRestate(t *testing.T) {
+	w := newWorld(t)
+	w.bound("30")
+	w.mustFixRound(1, h1, nil, "F1")
+	w.output(triage(2, h1, "correctness"))
+	w.output(lane(2, "correctness", h1, review.VerdictRequestChanges, "G1"))
+	ref := review.FindingRef{Iteration: 1, Check: "correctness", Finding: "F1"}
+	w.output(repair(2, h1, fix, review.Ruling{Check: "correctness", Finding: "G1", Ruling: review.RulingMustFix,
+		Reason: "again", Commit: fix, Restates: &ref}))
+	v, err := review.Passed(w.ledger(), root, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.Explain()
+	for _, want := range []string{"earlier rounds' must-fix findings", "round 1 correctness F1 at a.go:f: m",
+		"back after a fix of correctness finding F1 of round 1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the account lacks %q:\n%s", want, got)
+		}
+	}
+}

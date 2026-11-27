@@ -287,4 +287,16 @@ func TestTheReviewConditionRendersWithTheRunsState(t *testing.T) {
 	if got := prstatus.RenderHeld(pr.Answer{}, question); !reflect.DeepEqual(got, []prstatus.Hold{prstatus.HeldGate}) {
 		t.Fatalf("a run's question to a person held %v, want a person's hold, gate", got)
 	}
+
+	// A run its fresh look stopped ended without a result, and while the look's
+	// question holds the PR the reason is that ruling, a person's hold, and no
+	// fault of the machine's.
+	stopped := closed
+	stopped.Gates = []person.Blocker{{ID: "tk-look-q", Title: "rewrite section 1?", IssueType: "gate", AwaitType: "human",
+		AwaitID: review.LookQuestionKey}}
+	asked := pr.Answer{Head: at, Target: "main", Conditions: []pr.Condition{{Kind: pr.KindReview}, {Kind: pr.KindWait, ID: "tk-look-q"}}}
+	want := []prstatus.Reason{{Held: prstatus.HeldGate, ID: "tk-look-q", Title: "rewrite section 1?"}}
+	if got := prstatus.RenderReasons(asked, stopped); !reflect.DeepEqual(got, want) {
+		t.Fatalf("a run its look stopped gave %+v, want only the look's question, %+v", got, want)
+	}
 }
