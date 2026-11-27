@@ -1,0 +1,12 @@
+# refinery-reconcile runs nothing and ships disabled. It stays while the city's
+# config overrides it, because Gas City reports an [[orders.overrides]] block
+# that names no order, and `gc order list` then prints no orders and exits 1. An
+# override of a disabled order applies and leaves the list whole. Delete this
+# file once no city config names refinery-reconcile.
+[order]
+description = "Runs nothing: kept disabled while city config overrides refinery-reconcile"
+trigger = "cooldown"
+interval = "60s"
+exec = "true"
+scope = "rig"
+enabled = false
