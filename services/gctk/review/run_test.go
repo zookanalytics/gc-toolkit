@@ -271,6 +271,63 @@ func TestAMustFixOfAnEarlierHeadWithNoFixingCommit(t *testing.T) {
 	}
 }
 
+// A finding the round fixed in the PR's summary is a must-fix with no commit:
+// its iteration does not pass, and the next judges the same head when the
+// round pushed nothing. A later iteration passes only once the check that
+// raised it has run since, so its lane judges the summary the round's push
+// published, and the fix needs no commit of its own.
+func TestAFindingFixedInThePRsSummary(t *testing.T) {
+	inSummary := review.Ruling{Check: "pm", Finding: "PM1", Ruling: review.RulingMustFix, Reason: "r", Summary: true}
+	first := func(w *world) {
+		w.output(triage(1, h1, "pm"))
+		w.output(lane(1, "pm", h1, review.VerdictRequestChanges, "PM1"))
+		w.output(repair(1, h1, "", inSummary))
+	}
+	w := newWorld(t)
+	first(w)
+	v := w.passed(0)
+	mustFail(t, v, "pm finding PM1 was ruled must-fix at "+h1)
+	if got := v.Explain(); !strings.Contains(got, "pm finding PM1: must-fix in the PR's summary: r") {
+		t.Errorf("the account does not name the fix in the summary:\n%s", got)
+	}
+
+	w = newWorld(t)
+	first(w)
+	w.output(triage(2, h1, "pm"))
+	w.output(lane(2, "pm", h1, review.VerdictApprove))
+	w.output(repair(2, h1, ""))
+	mustPass(t, w.passed(0))
+
+	w = newWorld(t)
+	first(w)
+	w.output(triage(2, h1, "correctness"))
+	w.output(lane(2, "correctness", h1, review.VerdictApprove))
+	w.output(repair(2, h1, ""))
+	mustFail(t, w.passed(0), "pm finding PM1 was fixed in the PR's summary in iteration 1, and pm has not run since")
+
+	// pm ran at iteration 2 and raised a point fixed in code, so iteration 3,
+	// at the head that fix pushed, passes without it.
+	w = newWorld(t)
+	first(w)
+	w.output(triage(2, h1, "pm"))
+	w.output(lane(2, "pm", h1, review.VerdictRequestChanges, "PM2"))
+	w.output(repair(2, h1, h2, review.Ruling{Check: "pm", Finding: "PM2", Ruling: review.RulingMustFix, Reason: "r", Commit: fix}))
+	w.output(triage(3, h2, "correctness"))
+	w.output(lane(3, "correctness", h2, review.VerdictApprove))
+	w.output(repair(3, h2, ""))
+	mustPass(t, w.passed(0))
+
+	// A lane picked at iteration 2 that wrote no verdict there did not run.
+	w = newWorld(t)
+	first(w)
+	w.output(triage(2, h1, "pm"))
+	w.output(repair(2, h1, ""))
+	w.output(triage(3, h1, "correctness"))
+	w.output(lane(3, "correctness", h1, review.VerdictApprove))
+	w.output(repair(3, h1, ""))
+	mustFail(t, w.passed(0), "and pm has not run since")
+}
+
 // An open ask that nothing holds and the round did not take fails the check.
 // An ask an open bead holds is neither taken nor counted against the pass.
 func TestAnAskNothingHoldsAndOneAnOpenBeadHolds(t *testing.T) {
@@ -524,31 +581,37 @@ func TestNoResultForARunThatJudgedNoHead(t *testing.T) {
 }
 
 // The asks the last round answered close with their work record, which the
-// runtime's enforced work-record gate takes: an ask fixed at an earlier head
-// as shipped with its commit on the PR's branch, any other as no-op.
+// runtime's enforced work-record gate takes: an ask fixed by a commit at an
+// earlier head as shipped with its commit on the PR's branch, any other as
+// no-op, one fixed in the PR's summary alone among them, since it put no work
+// on the branch.
 func TestRecordClosesTheAsksTheRunAnswered(t *testing.T) {
 	w := newWorld(t)
 	w.store.WorkRecordGate = true
 	w.ask("tk-fixed", "")
 	w.ask("tk-nit", "")
 	w.ask("tk-asked", "")
+	w.ask("tk-summary", "")
 	w.output(triage(1, h1, "correctness"))
 	w.output(lane(1, "correctness", h1, review.VerdictApprove))
 	w.output(repair(1, h1, h2, review.Ruling{Ask: "tk-fixed", Ruling: review.RulingMustFix, Commit: fix},
-		review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined}, review.Ruling{Ask: "tk-asked", Ruling: review.RulingDeclined}))
+		review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined}, review.Ruling{Ask: "tk-asked", Ruling: review.RulingDeclined},
+		review.Ruling{Ask: "tk-summary", Ruling: review.RulingMustFix, Summary: true}))
 	w.output(triage(2, h2, "correctness"))
 	w.output(lane(2, "correctness", h2, review.VerdictApprove))
 	w.output(repair(2, h2, "", review.Ruling{Ask: "tk-fixed", Ruling: review.RulingAnswered},
 		review.Ruling{Ask: "tk-nit", Ruling: review.RulingDeclined},
-		review.Ruling{Ask: "tk-asked", Ruling: review.RulingQuestion, Gate: "tk-gate"}))
+		review.Ruling{Ask: "tk-asked", Ruling: review.RulingQuestion, Gate: "tk-gate"},
+		review.Ruling{Ask: "tk-summary", Ruling: review.RulingAnswered}))
 	w.store.Put(bead{ID: "tk-gate", Status: "open", IssueType: "gate"})
 	got := w.record(2)
 	want := []review.ClosedAsk{{ID: "tk-fixed", Ruling: review.RulingAnswered, Outcome: "shipped", Commit: fix},
-		{ID: "tk-nit", Ruling: review.RulingDeclined, Outcome: "no-op"}}
+		{ID: "tk-nit", Ruling: review.RulingDeclined, Outcome: "no-op"},
+		{ID: "tk-summary", Ruling: review.RulingAnswered, Outcome: "no-op"}}
 	if !reflect.DeepEqual(got.Closed, want) {
 		t.Fatalf("Record closed %+v; want %+v", got.Closed, want)
 	}
-	for _, id := range []string{"tk-fixed", "tk-nit"} {
+	for _, id := range []string{"tk-fixed", "tk-nit", "tk-summary"} {
 		row, _ := w.store.Row(id)
 		if row.Status != "closed" || row.Metadata["gc.work_outcome"] == "" {
 			t.Fatalf("%s reads %+v; want it closed with its work record", id, row)

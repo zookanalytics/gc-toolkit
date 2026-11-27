@@ -150,16 +150,17 @@
 #   (APPROVE*) a PR a ruling leaves standing whose status (gctk pr status)
 #             reads needs-review with no approval standing, or does not read, is
 #             named in the headline, the close reason and the reminder, and
-#             printed with its link, read before the first write; one merging,
-#             working or needing attention asks for no Approve yet; a PR on the
-#             pending record is answered for and read the same way; one whose
-#             status names an approval standing beside a request for changes
-#             asks for no Approve, and its line names whose request holds it; a
-#             request beside no approval is named on the line that asks for it;
-#             a status with no conditions asks for it; several are counted in the
-#             headline and named in the reminder's actions, so it stays under the
-#             real cap; a host with no timeout tool makes no status read; a PR
-#             the ruling reworks or retires is not named
+#             printed with its link, read before the first write and from the
+#             bead as it stands, past a supervisor's copy that trails it; one
+#             merging, working or needing attention asks for no Approve yet; a
+#             PR on the pending record is answered for and read the same way;
+#             one whose status names an approval standing beside a request for
+#             changes asks for no Approve, and its line names whose request
+#             holds it; a request beside no approval is named on the line that
+#             asks for it; a status with no conditions asks for it; several are
+#             counted in the headline and named in the reminder's actions, so it
+#             stays under the real cap; a host with no timeout tool makes no
+#             status read; a PR the ruling reworks or retires is not named
 #
 # Runs the REAL converse-signoff.sh over the compiled fake gc of
 # test-harness.sh, linked into a stub pack beside the libraries it sources and
@@ -169,7 +170,9 @@
 # rig of a PR the ruling acts on by the REAL bead-store.sh over the fake's rig
 # list, and the rig whose pool runs the subject's validating closer by the REAL
 # rig-map.sh over the same list: rig-a carries the prefix tk, rig-b the prefix
-# rb, and the city's own row the prefix hq.
+# rb, and the city's own row the prefix hq. That pool is the one the REAL
+# resolve-route.sh finds in the fake's roster, where each rig runs the pack
+# under the binding gc-toolkit.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -215,9 +218,11 @@ GH
 # `pr status <bead> --json` answers the status $ST/status-<bead> holds, or
 # needs-review when none is set, and the conditions array
 # $ST/conditions-<bead> holds, as a PR on the pending record carries them,
-# with no conditions key when none is set, as on the old record. Every call is
-# logged to $GCTK_CALLS with how many writes came before it, and GCTK_DOWN fails
-# every status read.
+# with no conditions key when none is set, as on the old record. A call made
+# without GC_NO_API=1 answers the status $ST/cached-status-<bead> holds instead,
+# when one is set, as gctk's read of the supervisor's copy answers with a status
+# that trails the bead. Every call is logged to $GCTK_CALLS with how many writes
+# came before it, and GCTK_DOWN fails every status read.
 #
 # `reaction accept` leaves the store as Accept's writer would, per ACCEPT_DOES:
 # take (the default) answers each open first-reaction gate on the subject with
@@ -259,6 +264,7 @@ case "${1:-} ${2:-}" in
     [ -z "$_miss" ] || exit 4 ;;
   "pr status")
     _s=needs-review; [ -f "$ST/status-$3" ] && _s=$(<"$ST/status-$3")
+    if [ "${GC_NO_API:-}" != 1 ] && [ -f "$ST/cached-status-$3" ]; then _s=$(<"$ST/cached-status-$3"); fi
     _c=""; [ -f "$ST/conditions-$3" ] && _c=",\"conditions\":$(<"$ST/conditions-$3")"
     printf '{"status":"%s","held":[],"reasons":[]%s}\n' "$_s" "$_c" ;;
   "bead disarm")
@@ -420,7 +426,7 @@ P
 chmod +x "$S"/*.sh
 # Linked after the chmod, which would otherwise follow each link and change the
 # mode of the pack's own file.
-for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh; do
+for _lib in converse-signoff.sh conversation.sh work-outcome.sh bd-lib.sh review-verdict.sh review-dismissal.sh bead-store.sh rig-map.sh dispatch-path.sh resolve-route.sh; do
     ln -s "$HERE/$_lib" "$S/$_lib"
 done
 SCRIPT="$S/converse-signoff.sh"
@@ -430,8 +436,10 @@ RIG_A="$(cd "$TMP/rig-a" && pwd -P)"; RIG_B="$(cd "$TMP/rig-b" && pwd -P)"; CITY
 STUB_RIGS="$TMP/rigs.json"
 printf '{"rigs":[{"name":"the-city","prefix":"hq","path":"%s","hq":true},{"name":"rig-a","prefix":"tk","path":"%s","hq":false},{"name":"rig-b","prefix":"rb","path":"%s","hq":false}]}\n' \
     "$CITY_ROOT" "$RIG_A" "$RIG_B" > "$STUB_RIGS"
+STUB_AGENTS="$TMP/agents.json"
+printf '{"agents":[{"qualified_name":"rig-a/gc-toolkit.polecat"},{"qualified_name":"rig-b/gc-toolkit.polecat"},{"qualified_name":"gc-toolkit.mechanik"}]}\n' > "$STUB_AGENTS"
 GH_CALLS="$TMP/gh-calls" GCTK_CALLS="$TMP/gctk-calls" GCTK_BIN="$BIN/gctk" GC_RIG_ROOT="$TMP/rig"
-export STUB_RIGS GH_CALLS GCTK_CALLS GCTK_BIN GC_RIG_ROOT RIG_A RIG_B CITY_ROOT
+export STUB_RIGS STUB_AGENTS GH_CALLS GCTK_CALLS GCTK_BIN GC_RIG_ROOT RIG_A RIG_B CITY_ROOT
 
 # --- fixtures -----------------------------------------------------------------
 # A bead's edge is a dep row: `edge <id> <type> <on>` is <id>'s edge onto <on>.
@@ -750,10 +758,10 @@ hasnt "$(calls)" "pr-dispose" "(RECORD-REFUSED) …before the retirement acts"
 hasnt "$(calls)" "gate resolve" "(RECORD-REFUSED) …and before any gate is answered"
 
 # An attempt that retires the member's PR and answers its gate, then stops
-# because the conversation's close does not land, asks for a re-run. pr-facts
-# can consummate the retirement before it, closing the member's anchor, which is
-# then no open PR the ruling reaches. The re-run takes the PR from the record
-# the first attempt wrote on the conversation, finds it closed and goes on,
+# because the conversation's close does not land, asks for a re-run. The
+# retirement can be consummated before it, closing the member's anchor, which
+# is then no open PR the ruling reaches. The re-run takes the PR from the
+# record the first attempt wrote on the conversation, finds it closed and goes on,
 # rather than falling back to the epic, which pr-dispose.sh refuses.
 epic_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 1 "(RETIRED-RERUN) a sign-off that retired the member's PR, and whose close does not land, stops short"
@@ -930,6 +938,20 @@ eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-AR
 run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC/$(meta tk-sub gc.dispatch_when_ready_args)" "0/$CLOSER_ARGS" "(CLOSER-ARM-FAILS) the re-run arms the closer and signs off"
 eq "$(briefs tk-sub)" 1 "(CLOSER-ARM-FAILS) …keeping the one brief the first attempt wrote"
+
+# A city names the key it imports the pack under, so the closer's pool is the
+# one the roster names in the subject's rig under that key.
+closer_case
+printf '{"agents":[{"qualified_name":"rig-a/kit.polecat"},{"qualified_name":"rig-b/kit.polecat"}]}\n' > "$TMP/agents-kit.json"
+STUB_AGENTS="$TMP/agents-kit.json" run_signoff --conversation tk-conv --outcome "ruled — a fix is building" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 0 "(CLOSER-BINDING) a city that imports the pack under another key signs off"
+eq "$(meta tk-sub gc.dispatch_when_ready)" "rig-a/kit.polecat" "(CLOSER-BINDING) …arming the closer to its rig's pool under that key"
+closer_case
+printf '{"agents":[{"qualified_name":"rig-b/gc-toolkit.polecat"}]}\n' > "$TMP/agents-none.json"
+STUB_AGENTS="$TMP/agents-none.json" run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
+eq "$RC" 1 "(CLOSER-NO-POOL) a rig the roster names no polecat pool in stops the sign-off"
+hasnt "$(calls)" "gctk bead arm" "(CLOSER-NO-POOL) …before the arm"
+eq "$(field tk-g status)/$(field tk-conv status)" "open/in_progress" "(CLOSER-NO-POOL) …with the gate and the conversation still open"
 closer_case
 STUB_SHOW_FAIL_ON=tk-work run_signoff --conversation tk-conv --outcome "x" "${SENT[@]}" --close-brief "$BRIEF"
 eq "$RC" 1 "(CLOSER-UNREAD) a wait that does not read stops the sign-off"
@@ -1268,9 +1290,9 @@ esac
 eq "$(merge_held tk-anc)" released "(RETIRE) the gate releases the merge only after the PR is closed"
 eq "$(field tk-conv status)" "closed" "(RETIRE) the conversation is closed"
 eq "$(acts tk-conv)" "Retired the PR of tk-anc.|Ruled: the work moved to the new design" "(RETIRE) …and the conversation records the PR it retired, then the ruling"
-# The same sign-off run again once pr-facts has consummated the retirement,
-# closing the anchor: nothing is disposed again, and the conversation keeps the
-# action the first attempt recorded.
+# The same sign-off run again once the retirement is consummated, closing the
+# anchor: nothing is disposed again, and the conversation keeps the action the
+# first attempt recorded.
 setf tk-anc status closed; edge tk-anc supersedes tk-conv
 : > "$CALLS"
 run_signoff --conversation tk-conv --outcome "retired: the work moved" "${RETIRED[@]}" --retire not-needed
@@ -1663,6 +1685,14 @@ said "(APPROVE-RERUN)" owed
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "design approved." "${RULED[@]}" --no-rework
 said "(APPROVE-PERIOD)" owed
+
+# The status comes from the bead as it stands. With the suite's GC_NO_API=1
+# cleared for the run, the supervisor's copy still reads merging while the bead
+# needs review, and the headline asks for the Approve.
+open_pr; pr_at tk-anc 77; printf merging > "$ST/cached-status-tk-anc"
+GC_NO_API='' run_signoff "${STAND[@]}"
+eq "$RC" 0 "(APPROVE-STORE) a ruling whose PR's supervisor copy trails the bead signs off"
+said "(APPROVE-STORE) the copy reads merging and the bead needs review:" owed
 
 for _st in merging working needs-attention; do
     open_pr; pr_at tk-anc 77; pr_status tk-anc "$_st"

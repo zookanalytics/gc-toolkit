@@ -268,9 +268,12 @@ cd "<the path it printed>"
 
 ## Directory discipline
 
-`workspace-setup` creates a per-bead git worktree and records it in
-`metadata.work_dir`. Once created, **stay in it**: all edits, installs,
-commits, and pushes happen there. NEVER edit files in the shared rig
+`workspace-setup` creates a per-bead git worktree beside the agents' homes and
+records it in `metadata.work_dir`. Once created, **work in it**: all edits,
+installs, commits, and pushes happen there. It sits outside your home, so a
+shell that does not keep its directory between calls needs a `cd` into it at
+the head of each call that works in it, and an edit names its file by the full
+path under it, never by your home's copy. NEVER edit files in the shared rig
 checkout (`[[CITY-ROOT]]/rigs/gc-toolkit`) — that stomps the canonical repo and breaks the
 recovery metadata that points at your worktree.
 
@@ -370,9 +373,8 @@ Blocked work and human gates says.
 The bead you claimed is not always the bead your branch is gated by. Fresh
 work claims its own anchor and the two are one bead. A rework or rebase child
 stands on a branch some OTHER open bead anchors. Every reader that matters reads
-that anchor, the bead that owns the PR and carries its `merge_result`: the
-refinery's publication for the PR's title and body, `pr-facts.sh` for the PR's
-facts and the landing order for the merge. A write aimed at the claimed bead
+that anchor, the bead that owns the PR and carries its `merge_result`, from the
+PR's title and body to its merge. A write aimed at the claimed bead
 lands, errors nowhere, and is never read.
 
 `work-submit.sh` resolves it: the open bead on this branch that carries a
@@ -608,7 +610,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
@@ -695,6 +703,13 @@ feedback about this diff is `obs.directive=diff`. Feedback about *this
 change's content* (a bug, a wrong approach) is not an observation — it
 is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
+
+A change to how agents work that you would suggest, but should not make
+on your own, is filed the same way from any session, and never kept in
+your memory. Its `## Statement` says what you saw, in the work or in a
+message, that led to it, its `## Proposed norm` carries the suggestion,
+and its provenance names the bead you were working on. Nothing changes
+how an agent works until the operator approves the change.
 
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, and `"obs.source": "operator"` plus

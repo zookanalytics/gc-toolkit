@@ -93,8 +93,10 @@ fi
 case "$STEP" in
   self-review)
     ROOT=""
-    if CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) && [ -n "$CLAIMED" ]; then
+    if CLAIMED=$(gc hook current --id-only </dev/null) && [ -n "$CLAIMED" ]; then
       ROOT=$(bd_json show "$CLAIMED" | jq -r '.[0].metadata["gc.root_bead_id"] // empty' 2>/dev/null)
+    else
+      echo "$PROG: NOTE: this session's claim did not read, so no run root records gc.var.issue=$WORK_ID" >&2
     fi
     [ -z "$ROOT" ] || gc bd update "$ROOT" --set-metadata "gc.var.issue=$WORK_ID" </dev/null >/dev/null \
       || echo "$PROG: NOTE: root $ROOT does not record gc.var.issue=$WORK_ID" >&2 ;;

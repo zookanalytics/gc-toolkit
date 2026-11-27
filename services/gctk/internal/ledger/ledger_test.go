@@ -620,6 +620,33 @@ func TestAReleaseAndALabelRemovalRideTheOneUpdate(t *testing.T) {
 	}
 }
 
+// A label added rides the one update that carries the act's note, once however
+// often the act adds it, and leaves every label the bead already carries.
+func TestALabelAdditionRidesTheOneUpdate(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "b-1", Status: "open", Labels: []string{"hold:external"}})
+	l := New(s)
+	w := l.Write("b-1")
+	w.AddLabel("hold:mayor")
+	w.AddLabel("hold:mayor")
+	w.Note("held for placement")
+	if err := l.Commit(w); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--add-label", "hold:mayor", "--append-notes", "held for placement"}
+	if got := s.Writes(); len(got) != 1 || !slices.Equal(got[0].Args, want) {
+		t.Fatalf("the writes are %q, want one update %q", got, want)
+	}
+	if b, _ := s.Row("b-1"); !slices.Equal(b.Labels, []string{"hold:external", "hold:mayor"}) {
+		t.Fatalf("the bead carries labels %q", b.Labels)
+	}
+	w = l.Write("b-1")
+	w.AddLabel("learning")
+	if err := l.Commit(w); err != nil {
+		t.Fatalf("a write that adds a label alone carries a change: %v", err)
+	}
+}
+
 // A key's reading face reads the key and names it, and offers no write.
 func TestAViewReadsItsKey(t *testing.T) {
 	s := fake.New()

@@ -10,17 +10,18 @@
 #     the input convoy it names, and an input convoy (gc.synthetic, tracking
 #     exactly one bead) the bead it tracks. Which convoy a root names and which
 #     beads a convoy tracks are run-lib.sh's defs, the one reading of a run's
-#     link to its bead.
+#     link to its bead. The root of a PR's review run is the exception: it
+#     names the bead that owns the PR in its pr_bead var (gc.var.pr_bead), it is
+#     that bead's PR-finishing work, below, and the run's steps follow it.
 #   * PR-finishing work, a bead carrying anchor_bead, follows its anchor. Once
 #     the anchor's PR is approved, it runs at P0 whatever its shift. A PR is
 #     approved when its anchor owns an open PR, its merge_result a value of the
-#     pending record (pull_request_pending, pull_request_head_changed), and
-#     the posture pr-facts.sh records there
-#     (pr_posture, stored as <posture>@<oid>@<since>) reads approved before
-#     its first @, at the head pr-facts.sh last read for the PR (pr_head_oid,
-#     the posture's <oid>). An approval recorded at any other head is for code
-#     the PR no longer carries. An anchor that rests anywhere else has no open
-#     PR to be approved, whatever posture an earlier PR left on it.
+#     pending record (pull_request_pending, pull_request_head_changed), and the
+#     read of GitHub the one-PR update saved on it (pr_github_read) names an
+#     approver and no request for changes, read at the head the store holds.
+#     An approval read at any other head is for code the PR no longer carries.
+#     An anchor that rests anywhere else has no open PR to be approved,
+#     whatever read an earlier PR left on it.
 #   * A member follows its parent, and the most urgent one, the lowest
 #     P-number, when it has several.
 #   * A bead that follows nothing has its priority set directly: its bd
@@ -30,11 +31,14 @@
 # are closed, pinned or absent from the store follows nothing.
 #
 # The shift is the signed integer in priority_shift: +1 is one level later, -1
-# is one level sooner, and absent or empty reads as 0. A workflow's convoy, root
-# and steps carry no shift, and a bead that follows nothing has nothing to shift
-# from, so neither reads one. A shift that is not a signed integer makes its
-# bead unreadable, and so every bead that follows it: no priority is computed
-# from a guess.
+# is one level sooner, and absent or empty reads as 0. A workflow's convoy,
+# root and steps carry no shift, and a bead that follows nothing has nothing to
+# shift from, so neither reads one. The one root that reads a shift is a review
+# run's, which is PR-finishing work. Its pour writes no shift, so there absent or
+# empty reads as -1, the shift the rest of PR-finishing work is filed with,
+# until a move writes one. A shift that is not a signed integer makes its bead
+# unreadable, and so every bead that follows it: no priority is computed from a
+# guess.
 #
 # The bd priority field holds the priority a bead competes at, because a pool's
 # claim reads it and a pour copies it once. So a bead that follows something
@@ -43,9 +47,7 @@
 #
 # Readers: queue-priority.sh settles a bead (settle), re-ranks the work that
 # follows a moved bead (move, the operator's priority move), and re-settles
-# the polecat queue (reconcile). pr-facts.sh reads prio_pr_approved alone, for
-# the rank an anchor's PR-finishing work follows, which it settles that work to
-# and records on the anchor. priority-lib.test.sh runs the function over
+# the polecat queue (reconcile). priority-lib.test.sh runs the function over
 # priority-lib.fixture.json, the cases a copy of it in another language must
 # agree with, and fails when another file defines it.
 #
@@ -93,41 +95,58 @@ PRIORITY_JQ="$RUN_JQ"'
     | (if ($p | type) == "number" then $p
        else (($p // "") | tostring | if test("^[0-9]+$") then tonumber else null end) end)
     | if . == null then null else (floor | prio_clamp) end;
-  # The shift, as {ok, n}, or {ok: false, raw} for a value that is not a
+  # The shift, as {ok, n, absent}, where absent is true for a shift absent or
+  # empty, which reads as 0, or {ok: false, raw} for a value that is not a
   # signed integer.
   def prio_shift:
     (prio_meta.priority_shift // null) as $v
-    | if $v == null then {ok: true, n: 0}
+    | if $v == null then {ok: true, n: 0, absent: true}
       else ($v | tostring | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $s
-        | if $s == "" then {ok: true, n: 0}
-          elif ($s | test("^[+-]?[0-9]+$")) then {ok: true, n: ($s | ltrimstr("+") | tonumber)}
+        | if $s == "" then {ok: true, n: 0, absent: true}
+          elif ($s | test("^[+-]?[0-9]+$")) then {ok: true, n: ($s | ltrimstr("+") | tonumber), absent: false}
           else {ok: false, raw: $s} end end;
+  # The read of GitHub the one-PR update saved on the bead (pr_github_read), one
+  # JSON object the store keeps as text, or null for none or one that does not
+  # read as an object.
+  def prio_saved_read:
+    (prio_meta.pr_github_read // null)
+    | if type == "string" then (try fromjson catch null) else null end
+    | if type == "object" then . else null end;
   # Whether the PR of this anchor is approved, which ranks its PR-finishing work
   # at P0: its merge_result says it owns an open PR, a value of the pending
-  # record (pull_request_pending, pull_request_head_changed), and
-  # the dated posture pr-facts.sh records on it reads approved before its first
-  # @, at the oid after it, which is the head pr-facts.sh last read for the PR
-  # (pr_head_oid).
+  # record (pull_request_pending, pull_request_head_changed), and the
+  # conversation the one-PR update saved names an approver and no requester
+  # (approval() in services/gctk/pr/rules.go), while the saved PR is at the
+  # head the store holds (observed_pr_head_sha on a changed head, pr_head_sha
+  # otherwise).
   def prio_pr_approved:
-    (prio_str("pr_posture") | split("@")) as $p
-    | (prio_str("merge_result") as $mr
-        | $mr == "pull_request_pending" or $mr == "pull_request_head_changed")
-      and ($p[0] // "") == "approved"
-      and ($p[1] // "") != ""
-      and ($p[1] // "") == prio_str("pr_head_oid");
+    prio_str("merge_result") as $mr
+    | prio_saved_read as $r
+    | (if $mr == "pull_request_head_changed" then prio_str("observed_pr_head_sha") else prio_str("pr_head_sha") end) as $head
+    | ($mr == "pull_request_pending" or $mr == "pull_request_head_changed")
+      and ($r != null)
+      and ((try $r.conversation.approvers catch null) | if type == "array" then length > 0 else false end)
+      and ((try $r.conversation.requesters catch null) | if type == "array" then length == 0 else false end)
+      and $head != ""
+      and (((try $r.pr.head catch null) // "" | tostring) == $head);
 
   # What this bead can follow: {kind, on}, where kind is workflow, anchor,
   # parent or none, and on lists the beads it could follow. priority_of
-  # decides which of them it does follow.
+  # decides which of them it does follow. The root of a review run follows the
+  # bead its pr_bead var names, as PR-finishing work of that bead, and not the
+  # input convoy it also names, so it is the bead its steps were poured for. Its
+  # absent_shift, -1, is the shift it reads while it carries none.
   def prio_follows:
     ((.id // "") | tostring) as $self
     | prio_str("gc.root_bead_id") as $root
     | run_convoy as $convoy
     | prio_str("anchor_bead") as $anchor
+    | prio_str("gc.var.pr_bead") as $pr
     | run_tracked as $tracked
     | ([ prio_edges[] | select(.type == "parent-child") | .to ]
        + (if ((.parent // "") | tostring) != "" then [(.parent | tostring)] else [] end)) as $parents
     | if $root != "" and $root != $self then {kind: "workflow", on: [$root]}
+      elif prio_str("gc.kind") == "workflow" and $pr != "" and $pr != $self then {kind: "anchor", on: [$pr], absent_shift: -1}
       elif prio_str("gc.kind") == "workflow" and $convoy != "" and $convoy != $self then {kind: "workflow", on: [$convoy]}
       elif ((.issue_type // "") | tostring) == "convoy" and (prio_str("gc.synthetic") | ascii_downcase) == "true"
            and ($tracked | length) == 1 and $tracked[0] != $self then {kind: "workflow", on: [$tracked[0]]}
@@ -170,7 +189,8 @@ PRIORITY_JQ="$RUN_JQ"'
                       {id: $id, error: "follows \($bad.id), which is unreadable (\($bad.at): \($bad.reason))",
                        at: $bad.at, reason: $bad.reason}
                     else ($rs | sort_by(.priority, .id) | first) as $best
-                      | (if $f.kind == "workflow" then {ok: true, n: 0} else prio_shift end) as $s
+                      | (if $f.kind == "workflow" then {ok: true, n: 0}
+                         else prio_shift | if .absent == true then .n = ($f.absent_shift // 0) else . end end) as $s
                       | ($f.kind == "anchor" and ($g[$best.id] | prio_pr_approved)) as $ap
                       | if ($s.ok | not) then fault($id; "its priority_shift is \"\($s.raw)\", not a signed integer")
                         else {id: $id, priority: (if $ap then 0 else (($best.priority + $s.n) | prio_clamp) end),

@@ -439,23 +439,56 @@ func TestAWithdrawalDismissesOnlyTheApprovalsOfACommitWithoutItsHead(t *testing.
 }
 
 // A withdrawal waits while an approval it would dismiss carries an inline
-// comment the intake has not routed, because a dismissal retires it unread, and
-// dismisses once the intake routed it.
-func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t *testing.T) {
+// comment the city has not taken, because a dismissal retires it before the
+// take files its ask, and dismisses once the comment is taken: here the take
+// files the comment's ask in the first run and its mark lands in the second.
+func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesAnUntakenComment(t *testing.T) {
 	d := newCycle(t)
+	d.l.Refinery, d.l.Runs = boundRefinery, &pours{store: d.store}
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "rename this",
-		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carried(300, 100)}}}
 	id := d.withdraw(t, head)
-	o := d.once(t)
-	is(t, o, pr.ActChecked)
+	d.holdOnAsks(id)
+	d.github.Fail["AddReaction"] = errUnmarked
+	take, o := d.onceTaking(t)
+	is(t, take, pr.ActRetry)
 	if !strings.Contains(o.Detail, "inline comment 300") || slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" }) {
-		t.Fatalf("a withdrawal over an unrouted comment read %s, with asks %v", o.Detail, asks(d.github))
+		t.Fatalf("a withdrawal over an untaken comment read %s, with asks %v", o.Detail, asks(d.github))
 	}
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
+	delete(d.github.Fail, "AddReaction")
+	take, _ = d.runTaking(t)
+	is(t, take, pr.ActTaken)
+	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
+		t.Fatalf("once taken, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+	}
+}
+
+// A withdrawal for a newer head that acts before the take has filed the
+// message of an approval with no inline comment waits, since a dismissal takes
+// the message out of the posts the intake counts, and dismisses the approval in
+// a later run, once the take has filed the message's ask and marked it.
+func TestAWithdrawalWaitsOnAnApprovalsMessageTheTakeHasNotFiled(t *testing.T) {
+	d := newCycle(t)
+	message := approved(100, "operator", older)
+	message.NodeID, message.URL, message.Body = "PRR_100", prURL+"#pullrequestreview-100", "approved, but rename X"
+	d.pr.Reviews = []gh.Review{message}
+	d.pr.Facts.HeadRefOid = later
+	id := d.withdraw(t, head)
+	d.holdOnAsks(id)
+	d.l.Shuffle = func(ids []string) { slices.Reverse(ids) }
+	take, o := d.onceTaking(t)
+	is(t, o, pr.ActRequeued)
+	says(t, o, "the message of review 100", "has not taken")
+	is(t, take, pr.ActTaken)
+	if status(t, d, id) != "open" || !slices.Equal(states(d.pr), []string{"approved"}) {
+		t.Fatalf("before the take filed the message, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+	}
+	if got := d.asksFiled(); !slices.Equal(got, []string{"Approval message by operator on PR #7: " + prURL + "#pullrequestreview-100"}) {
+		t.Fatalf("the take filed %q, want the approval's message", got)
+	}
 	d.once(t)
 	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
-		t.Fatalf("once routed, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+		t.Fatalf("once the message was taken, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
 	}
 }
 
@@ -463,14 +496,18 @@ func TestAWithdrawalWaitsWhileAnApprovalItWouldDismissCarriesUnroutedComments(t 
 // definition of feedback applied to each inline comment as that read gives it.
 // A read of them that does not answer dismisses nothing and leaves the
 // withdrawal for the next run, and a comment edited into feedback since the
-// watch's read keeps the withdrawal open until the intake routes it.
+// watch's read keeps the withdrawal open until the take has filed and marked
+// it, once the watch's next read has saved it.
 func TestADismissalWaitsOnTheActsOwnReadOfTheReviewThreads(t *testing.T) {
 	d := newCycle(t)
+	d.l.Refinery, d.l.Runs = boundRefinery, &pours{store: d.store}
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "a note, not for review",
-		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	note := carried(300, 100)
+	note.Body = "a note, not for review"
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{note}}}
 	d.rule.notFeedback[300] = true
 	id := d.withdraw(t, head)
+	d.holdOnAsks(id)
 	d.refresh(t)
 	dismissed := func() bool {
 		return slices.ContainsFunc(d.github.Asks(), func(a ghfake.Ask) bool { return a.Method == "DismissReview" })
@@ -491,10 +528,10 @@ func TestADismissalWaitsOnTheActsOwnReadOfTheReviewThreads(t *testing.T) {
 		t.Fatalf("over a comment edited into feedback since the watch's read, the withdrawal is %s with asks %v: %s",
 			status(t, d, id), asks(d.github), o.Detail)
 	}
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
-	d.run(t)
+	take, _ := d.onceTaking(t)
+	is(t, take, pr.ActTaken)
 	if status(t, d, id) != "closed" || !slices.Equal(states(d.pr), []string{"dismissed"}) {
-		t.Fatalf("once routed, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
+		t.Fatalf("once taken, the withdrawal is %s and the reviews %v", status(t, d, id), states(d.pr))
 	}
 }
 
@@ -692,21 +729,27 @@ func TestAWithdrawalFilesItsGateWhenGitHubRefuses(t *testing.T) {
 
 // A withdrawal holds the bead from the refinery, so a changed head the order
 // sends back keeps its record marked while the withdrawal is open, the order
-// carries the withdrawal out on a later run, and then clears the marker.
+// carries the withdrawal out on a later run, and then clears the marker. Here
+// an inline comment the city has not taken holds the withdrawal open, until
+// the take's mark on it lands.
 func TestAWithdrawalOnAHeadSentBackToTheRefineryKeepsItsRecordMarked(t *testing.T) {
 	d := newCycle(t)
 	d.pr.Reviews = []gh.Review{approved(100, "operator", older)}
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 300, Author: "operator", Body: "rename this",
-		CreatedAt: "2026-11-12T01:00:00Z", Review: &gh.CommentReview{ID: 100, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}}}}
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{carried(300, 100)}}}
 	d.pr.Facts.HeadRefOid = later
 	id := d.withdraw(t, head)
-	is(t, d.once(t), pr.ActRequeued)
+	d.holdOnAsks(id)
+	d.github.Fail["AddReaction"] = errUnmarked
+	_, o := d.onceTaking(t)
+	is(t, o, pr.ActRequeued)
 	meta(t, d.row(t), map[string]string{"merge_result": record.HeadChanged, "pr_reconcile_pending": "true"})
 	savesNothingOfGitHub(t, d)
-	is(t, d.once(t), pr.ActChecked)
+	_, o = d.onceTaking(t)
+	is(t, o, pr.ActChecked)
 	savesNothingOfGitHub(t, d)
-	d.edit(t, func(b *fake.Bead) { b.Metadata["pr_comment_watermark"] = "300" })
-	is(t, d.once(t), pr.ActSettled)
+	delete(d.github.Fail, "AddReaction")
+	_, o = d.onceTaking(t)
+	is(t, o, pr.ActSettled)
 	if status(t, d, id) != "closed" || d.row(t).Status != "open" {
 		t.Fatalf("the withdrawal is %s and the bead %s", status(t, d, id), d.row(t).Status)
 	}

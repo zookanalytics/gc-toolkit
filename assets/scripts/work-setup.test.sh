@@ -51,7 +51,8 @@ SH
 # STUB_SHOW_FAIL for a show that does not answer, STUB_UPDATE_FAIL=tk-w for a
 # store that refuses every write, and STUB_UPDATE_FAIL_ON for one that refuses
 # the write carrying a text, as an outage or a guard does. STUB_HOOK_CURRENT is
-# the claim gc hook current names, and STUB_SESSIONS the session list.
+# the claim gc hook current names, tk-step, a step of the run, unless a case
+# names another, and STUB_SESSIONS the session list.
 chmod +x "$BIN/git"
 
 recorder() { # <name> <log word>
@@ -130,10 +131,10 @@ setup_run() {
 # again [<VAR=value>...] — the script run in $C against the store as the last run
 # left it, the way the bead's next run reaches it.
 again() {
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me STUB_HOOK_CURRENT=tk-step "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
 }
 tool() { # <args...> — another mode of the script, in $C
-  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me ${TOOL_ENV:-} "$PACK/work-setup.sh" "$@" 2>"$TMP/err"); RC=$?
+  OUT=$(cd "$C" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me STUB_HOOK_CURRENT=tk-step ${TOOL_ENV:-} "$PACK/work-setup.sh" "$@" 2>"$TMP/err"); RC=$?
 }
 set_meta() { # <key> <value> — what another writer put on the bead between runs, through bd
   STUB_GC_LOG=/dev/null gc bd update tk-w --set-metadata "$1=$2" >/dev/null
@@ -170,8 +171,8 @@ last_line() { printf '%s\n' "$OUT" | tail -n 1; }
 
 echo "# a rejected branch is brought current by merging the base in"
 clone polecat/w1
-STALE="stale base at head $W1: PR#1 conflicts with '$BASE'."
-setup_run "$(bead polecat/w1 "$(rejected "$STALE" '"prepare_mode":"merge","conflict_audit":"entries from an earlier round",
+MERGE_ONLY="Conflicts with $BASE at $BASE_TIP"
+setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY" '"prepare_mode":"merge","conflict_audit":"entries from an earlier round",
   "conflict_question":"a question from an earlier round"')")"
 eq "$RC" "0" "(1) the resume exits 0"
 eq "$(parents)" "$W1 $BASE_TIP" "(1) HEAD is a merge commit of the PR head and origin/$BASE, in that order"
@@ -181,7 +182,7 @@ called "git merge --no-edit origin/$BASE" \
 eq "$(rewrites)" "0" "(1) nothing rebases, resets, commits, cherry-picks or pushes"
 eq "$(g "$CO" rev-parse refs/heads/polecat/w1)" "$W1" "(1) origin's branch is untouched: the resume pushes nothing"
 eq "$(at_merge bring_current_from)" "$W1" "(1) before the merge runs, bring_current_from is the PR head"
-eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the stale-base rejection's scope is merge-only"
+eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the conflict rejection's scope is merge-only"
 eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" "(1) before the merge runs, the last round's audit and question are cleared"
 eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 merge-only" "(1) the round stays on the bead for the hand-off to read"
 eq "$(meta rejection_reason)" "<absent>" "(1) rejection_reason is unset"
@@ -241,13 +242,12 @@ for m in '' '{"rejection_reason":""}'; do
   eq "$(grep -c '^git merge --no-edit' "$CALLS")" "0" "(7) $label: nothing merges the base in"
 done
 
-echo "# the scope is merge-only for a stale-base or conflict rejection, and with-work for any other"
+echo "# the scope is merge-only for a conflict rejection, and with-work for any other"
 scope_case() { # <label> <rejection_reason> <scope>
   clone polecat/w1
   setup_run "$(bead polecat/w1 "$(rejected "$2")")"
   eq "$(at_merge bring_current_scope)" "$3" "(8) $1 is stamped $3 before the merge runs"
 }
-scope_case "a stale-base rejection" "$STALE" merge-only
 scope_case "a conflict rejection" "$CONFLICTS" merge-only
 scope_case "a failed-tests rejection" "tests failed" with-work
 
@@ -320,7 +320,20 @@ clone polecat/w2
 setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")")"
 TOOL_ENV=ASK_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16) a question that reaches no gate stops the stop"
+eq "$(grep -c '^bca ask ' "$CALLS")" "1" "(16) after it asked"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16) and the merge stays open"
+# gc exits 1 both for no claim and for a read of its own that failed, so this
+# session cannot tell a run's step from a claim on the work bead itself.
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
+: > "$CALLS"
+TOOL_ENV=STUB_HOOK_CURRENT= tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "1" "(16c) a claim that does not read stops the stop"
+eq "$(grep -cE '^(bca ask|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16c) before it asks, and nothing waits, cancels or drains"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16c) the merge stays open"
+has "$(cat "$TMP/err")" "gc hook current: session sess-me has no current claim" "(16c) with gc's own words on its stderr"
+has "$(cat "$TMP/err")" "this session's claim did not read, so it cannot tell a run's step from a claim on tk-w itself" "(16c) and saying why it stops"
+hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16c) and the notes record no stop, as a bead with no molecule's would"
 for held in tk-step tk-w; do
   clone polecat/w2
   setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
@@ -332,7 +345,7 @@ for held in tk-step tk-w; do
 done
 
 clone polecat/w1
-setup_run "$(bead polecat/w1 "$(rejected "$STALE")")" STUB_UPDATE_FAIL_ON=bring_current_from
+setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY")")" STUB_UPDATE_FAIL_ON=bring_current_from
 eq "$RC" "1" "(16c) a round the store refuses stops the resume"
 called "git merge --no-edit origin/$BASE" && bad "(16c) before the merge" || ok "(16c) before the merge"
 
@@ -340,17 +353,19 @@ echo "# a fresh run makes its worktree in the rig, whatever repo its directory i
 RIG="$TMP/rig"; "$REAL_GIT" clone -q "$O" "$RIG"
 SLOT="$TMP/slot"; mkdir -p "$SLOT"
 OTHER="$TMP/other-repo"; "$REAL_GIT" init -q "$OTHER"
+CITY="$TMP/city"; mkdir -p "$CITY"
 fresh_run() { # <bead-json> [<VAR=value>...] — the script in another repo's cwd
   local bead="$1"; shift
   : > "$CALLS"
   printf '%s' "$bead" > "$STORE"
-  OUT=$(cd "$OTHER" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_DIR="$SLOT" "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
+  OUT=$(cd "$OTHER" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_DIR="$SLOT" GC_CITY_PATH="$CITY" GC_RIG=rig-a "$@" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
 }
 FRESH='[{"id":"tk-w","status":"open","assignee":"","metadata":{}}]'
 fresh_run "$FRESH"
-TREE="$SLOT/worktrees/tk-w"
+TREE="$CITY/.gc/worktrees/rig-a/tk-w"
 eq "$RC" "0" "(20) a fresh run exits 0"
-eq "$(last_line)" "$TREE" "(20) it prints the tree, scoped to the bead under the session's directory"
+eq "$(last_line)" "$TREE" "(20) it prints the tree, scoped to the bead in the rig's directory of the city's worktrees"
+[ ! -e "$SLOT/worktrees" ] && ok "(20) nothing is cut under the session's directory" || bad "(20) nothing is cut under the session's directory"
 grep -qxF "worktree $TREE" <<< "$("$REAL_GIT" -C "$RIG" worktree list --porcelain)" && ok "(20) the rig's checkout registers the tree" || bad "(20) the rig's checkout registers the tree"
 grep -qxF "worktree $TREE" <<< "$("$REAL_GIT" -C "$OTHER" worktree list --porcelain)" && bad "(20) the repo the session sits in does not" || ok "(20) the repo the session sits in does not"
 eq "$(g "$TREE" branch --show-current)" "polecat/tk-w" "(20) on polecat/<bead>"
@@ -372,25 +387,27 @@ eq "$(last_line)" "$TREE" "(21b) and the tree is reused"
 GONE="$TMP/gone-tree"
 fresh_run "[$(row tk-w "$(kv work_dir "$GONE")")]" GC_DIR="$TMP/slot2"
 eq "$RC" "0" "(22) a recorded tree no longer on disk: a new one is made"
-eq "$(meta work_dir)" "$TMP/slot2/worktrees/tk-w" "(22) and recorded"
+eq "$(meta work_dir)" "$TREE" "(22) at the bead's one path, whichever session cuts it, and recorded"
 
 # A rework after a hand-off, which takes the tree and its local branch and clears
 # work_dir: only the branch is recorded.
-NEW="$TMP/slot4/worktrees/tk-w"
+"$REAL_GIT" -C "$RIG" worktree remove --force "$TREE"
+NEW="$TREE"
 fresh_run '[{"id":"tk-w","status":"open","assignee":"","metadata":{"branch":"polecat/w1","rejection_reason":"tests failed"}}]' GC_DIR="$TMP/slot4"
 eq "$RC" "0" "(22b) a rework with its branch recorded and no tree: exits 0"
-eq "$(last_line)" "$NEW" "(22b) it resumes in a fresh tree under the session's directory"
+eq "$(last_line)" "$NEW" "(22b) it resumes in a fresh tree at the bead's path"
 eq "$(meta work_dir)" "$NEW" "(22b) which is recorded"
 eq "$(g "$NEW" branch --show-current)" "polecat/w1" "(22b) on the recorded branch"
 eq "$(g "$NEW" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$W1 $BASE_TIP" "(22b) origin's branch, brought current by merge"
 "$REAL_GIT" -C "$RIG" worktree remove --force "$NEW"; "$REAL_GIT" -C "$RIG" branch -q -D polecat/w1
 # A rework on the tree an earlier hand-off left: detached at the pushed head,
-# still recorded, its local branch deleted.
+# still recorded, its local branch deleted. A recorded tree is reused wherever it
+# sits, under a slot's home included.
 OLD="$TMP/slot5/worktrees/tk-w"; mkdir -p "$TMP/slot5/worktrees"
 "$REAL_GIT" -C "$RIG" worktree add -q --detach "$OLD" "$W1"
 fresh_run "[$(row tk-w "$(kv branch polecat/w1 work_dir "$OLD" rejection_reason "tests failed")")]" GC_DIR="$TMP/slot6"
-eq "$RC" "0" "(22c) a rework whose recorded tree an earlier hand-off left: exits 0"
-eq "$(last_line)" "$OLD" "(22c) it resumes in that tree"
+eq "$RC" "0" "(22c) a rework whose recorded tree an earlier hand-off left under a slot's home: exits 0"
+eq "$(last_line)" "$OLD" "(22c) it resumes in that tree, where it is"
 eq "$(g "$OLD" branch --show-current)" "polecat/w1" "(22c) on the recorded branch"
 eq "$(g "$OLD" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$W1 $BASE_TIP" "(22c) origin's branch, brought current by merge"
 
@@ -403,7 +420,31 @@ clone polecat/w1
 fresh_run "$FRESH" NO_RIG_ROOT=1 GC_DIR="$TMP/slot3"
 eq "$RC" "1" "(24) no rig root: stops"
 has "$(cat "$TMP/err")" "cannot resolve the rig root" "(24) and says so"
-[ ! -e "$TMP/slot3/worktrees/tk-w" ] && ok "(24) and makes no tree" || bad "(24) and makes no tree"
+[ ! -e "$TREE" ] && ok "(24) and makes no tree" || bad "(24) and makes no tree"
+eq "$(meta work_dir)" "<absent>" "(24) and records none"
+
+for var in GC_CITY_PATH GC_RIG; do
+  fresh_run "$FRESH" "$var="
+  eq "$RC" "1" "(25) an empty $var: stops"
+  has "$(cat "$TMP/err")" "cannot name the tree" "(25) an empty $var: says why"
+  eq "$(meta work_dir)" "<absent>" "(25) an empty $var: records no tree"
+  { [ ! -e "$TREE" ] && [ ! -e "$CITY/.gc/worktrees/tk-w" ]; } \
+    && ok "(25) an empty $var: makes no tree" || bad "(25) an empty $var: makes no tree"
+done
+
+echo "# the tree is recorded before it is cut, and a recorded path is entered only as a checkout"
+mkdir -p "$TREE"; printf 'left\n' > "$TREE/left.txt"
+fresh_run "$FRESH"
+eq "$RC" "1" "(26) a directory holding a file at the bead's path: git refuses the cut, and the run stops"
+eq "$(meta work_dir)" "$TREE" "(26) the path was recorded before the cut"
+[ ! -e "$TREE/.git" ] && ok "(26) and no checkout is made there" || bad "(26) and no checkout is made there"
+rm -f "$TREE/left.txt"
+fresh_run "[$(row tk-w "$(kv work_dir "$TREE")")]"
+eq "$RC" "0" "(26b) a recorded directory with no .git is not entered: the tree is cut into it"
+eq "$(last_line)" "$TREE" "(26b) and printed"
+[ -e "$TREE/.git" ] && ok "(26b) the directory now holds the checkout" || bad "(26b) the directory now holds the checkout"
+eq "$(g "$TREE" branch --show-current)" "polecat/tk-w" "(26b) on polecat/<bead>"
+"$REAL_GIT" -C "$RIG" worktree remove --force "$TREE"
 
 echo "# metadata.branch is authoritative"
 clone polecat/w1
@@ -570,18 +611,19 @@ grep -qx 'runtime drain-ack' "$CALLS" && ok "(49c) the step goes back to the poo
 RIG2="$TMP/rig2"; "$REAL_GIT" clone -q "$CO" "$RIG2" 2>/dev/null
 g "$RIG2" fetch -q origin "+refs/heads/$BASE:refs/remotes/origin/$BASE"
 PEER2="$TMP/peer2-tree"; g "$RIG2" worktree add -q "$PEER2" -b polecat/w1 origin/polecat/w1
-OWN="$TMP/slot-adopt/worktrees/tk-w"
+OWN="$TMP/city-adopt/.gc/worktrees/rig-a/tk-w"
 : > "$CALLS"
 printf '[%s,%s]' "$(row tk-w "$(kv branch polecat/w1)")" "$(row tk-sib "$(kv branch polecat/w1 work_dir "$PEER2")")" > "$STORE"
-OUT=$(cd "$RIG2" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_DIR="$TMP/slot-adopt" RIG_ROOT_STUB="$RIG2" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
+OUT=$(cd "$RIG2" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-me GC_DIR="$TMP/slot-adopt" GC_CITY_PATH="$TMP/city-adopt" GC_RIG=rig-a RIG_ROOT_STUB="$RIG2" "$PACK/work-setup.sh" --bead tk-w --base "$BASE" 2>"$TMP/err"); RC=$?
 eq "$RC" "0" "(45) a run that made its own tree adopts the one holding the branch: exits 0"
 eq "$(last_line)" "$PEER2" "(45) and enters it"
 [ ! -e "$OWN" ] && ok "(45) the empty tree it made is gone" || bad "(45) the empty tree it made is gone"
+eq "$(meta work_dir)" "$PEER2" "(45) and the adopted tree is recorded in its place"
 
 echo "# a sitting sets its change up under --held-by"
 # The change a sitting filed: open, unassigned and unrouted, its target the base,
 # with a blocks edge onto the conversation tk-conv, which the sitting's hook names.
-SIT="$TMP/sitting-home"; CTREE="$SIT/worktrees/tk-c"; mkdir -p "$SIT"
+SIT="$TMP/sitting-home"; CTREE="$CITY/.gc/worktrees/rig-a/tk-c"; mkdir -p "$SIT"
 HELD_EDGE='{"id":"tk-conv","dependency_type":"blocks"}'
 # change [<assignee>] [<metadata members>] [<dependencies>] [<further rows>] —
 # the store holding the change: unassigned unless named, its target the base
@@ -593,7 +635,7 @@ change() {
 }
 sitting() { # [<VAR=value>...] — work-setup.sh --held-by, from the sitting's home
   : > "$CALLS"
-  OUT=$(cd "$SIT" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-sit GC_DIR="$SIT" STUB_HOOK_CURRENT=tk-conv "$@" \
+  OUT=$(cd "$SIT" && env PATH="$BIN:$PATH" WORK_READ_WAIT=0 GC_SESSION_ID=sess-sit GC_DIR="$SIT" GC_CITY_PATH="$CITY" GC_RIG=rig-a STUB_HOOK_CURRENT=tk-conv "$@" \
     "$PACK/work-setup.sh" --bead tk-c --held-by tk-conv 2>"$TMP/err"); RC=$?
 }
 ended() { grep -cE '^(runtime drain-ack|gate|await|cancel)( |$)' "$CALLS" | tr -d ' '; }
@@ -636,7 +678,8 @@ eq "$RC $(ended)" "1 0" "(61) the runs cannot be read: stops, and nothing is end
 change > "$STORE"
 sitting
 eq "$RC" "0" "(62) a sitting's setup exits 0"
-eq "$(last_line)" "$CTREE" "(62) it prints the tree, under the sitting's home"
+eq "$(last_line)" "$CTREE" "(62) it prints the tree, at the change's path beside the agents' homes"
+[ ! -e "$SIT/worktrees" ] && ok "(62) nothing is cut under the sitting's home" || bad "(62) nothing is cut under the sitting's home"
 eq "$(g "$CTREE" branch --show-current)" "polecat/tk-c" "(62) on polecat/<bead>"
 eq "$(g "$CTREE" rev-parse HEAD)" "$BASE_TIP" "(62) cut from the bead's target"
 eq "$(meta branch tk-c) $(meta work_dir tk-c)" "polecat/tk-c $CTREE" "(62) the branch and the tree are recorded"
@@ -651,7 +694,7 @@ eq "$(ended)" "0" "(63) and ends nothing"
 
 # A sibling in flight that records the same tree: a polecat's call waits on it
 # (49), and a sitting's is refused with no wait written.
-PEERC="$TMP/peer-c"; mkdir -p "$PEERC"
+PEERC="$TMP/peer-c"; "$REAL_GIT" -C "$RIG" worktree add -q --detach "$PEERC" "origin/$BASE"
 change "" "$(kv target "$BASE" branch polecat/tk-c work_dir "$PEERC")" "$HELD_EDGE" \
   "$(row tk-sib "$(kv branch polecat/tk-c work_dir "$PEERC")")" > "$STORE"
 printf '%s' '[{"root":"r","convoy":"c","bead":"tk-sib","formula":"mol-polecat-work","live":true}]' > "$RUNS"
@@ -661,8 +704,9 @@ has "$(cat "$TMP/err")" "where tk-sib is in flight" "(64) names the sibling"
 eq "$(ended)" "0" "(64) no wait is written, and nothing cancels or drains"
 change "" "$(kv target "$BASE" branch polecat/never-existed)" > "$STORE"
 printf '[]' > "$RUNS"
-sitting GC_DIR="$TMP/sitting-home-2"
+sitting GC_DIR="$TMP/sitting-home-2" GC_CITY_PATH="$TMP/city-2"
 eq "$RC" "1" "(65) a recorded branch that exists nowhere: stops"
+has "$(cat "$TMP/err")" "exists neither locally nor on origin" "(65) and says so"
 eq "$(ended)" "0" "(65) no gate is filed, and nothing cancels or drains"
 
 echo "# the store"

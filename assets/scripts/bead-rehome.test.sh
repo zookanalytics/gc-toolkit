@@ -31,8 +31,9 @@
 #       the ruling's own close, and it comes back when the close does not land;
 #   (o) any OTHER blocker is left alone and its refusal still stands;
 #   (q) the successor is required under EVERY kind, `not-needed` included;
-#   (s) a re-home writes no outcome of its own: neither gc.outcome nor
-#       gc.work_outcome;
+#   (s) the close records gc.work_outcome=no-op, the work record of a close
+#       that ships nothing, and no gc.outcome; a work outcome the origin
+#       records already stays, and the dry run names the record it would write;
 #   (x) an open human gate on the origin holds the close at the finalize gate,
 #       which is asked before anything is written;
 #   (y) --except-key reaches that gate, and nothing is excepted without it, and
@@ -73,14 +74,14 @@
 #       carries included, keeps its gates open and closes nothing;
 #   (ar) before a duplicate of a canonical that has neither closed nor shipped
 #       closes, each open bead it blocks gains a blocks edge onto the canonical,
-#       written before the close and named in its note, so none goes ready
-#       before the canonical delivers. A closed waiter, the canonical, a waiter
-#       it already blocks, a delivered canonical, another kind and the repair
-#       path move none. A waiter that cannot take the edge (another edge type,
-#       a canonical in another store, a read that fails) and a blocker of the
-#       duplicate refuse the close before anything is written; an edge bd
-#       refuses, or one that does not read back, refuses it after the edges
-#       before it, which stay;
+#       written in one bulk write before the close and named in its note, so
+#       none goes ready before the canonical delivers. A closed waiter, the
+#       canonical, a waiter it already blocks, a delivered canonical, a
+#       not-needed close and the repair path move none. A waiter that cannot
+#       take the edge (another edge type, a canonical in another store, a read
+#       that fails) and a blocker of the duplicate refuse the close before
+#       anything is written, and a write bd refuses refuses it with no edge
+#       written;
 #   (as) the edge goes on before the close and is read back, so two callers
 #       cannot both leave a successor: a caller that finds a first one's edge,
 #       with the first paused before or after its close or the bead reopened
@@ -95,10 +96,20 @@
 #   (au) the repair's note is written only while the origin has the status and
 #       assignee this run read, so a reopen or a claim since that read keeps its
 #       bead with no edge and no note (exit 4);
-#   (av) what comes to wait on a duplicate after the first read of its waiters
-#       moves once the close has landed. One that cannot move leaves the close
-#       standing, exit 4, a WARN and a note, and does not hold back one that can.
-#       Another kind and a delivered canonical read no waiters after the close;
+#   (av) what comes to wait on the origin after the first read of its waiters
+#       moves once the close has landed, under a re-home as under a duplicate.
+#       One that cannot move leaves the close standing, exit 4, a WARN and a
+#       note, and does not hold back one that can. A not-needed close and a
+#       delivered successor read no waiters after the close;
+#   (az) a re-home, a fold, and a fixed-upstream close a ruling made before its
+#       fix landed move the waits on the origin onto the successor as a
+#       duplicate's close does, in one bulk write, and a successor that has
+#       shipped moves none. A waiter a ruling has recorded a PR-close
+#       disposition on closes under that ruling and gains no edge, so the anchor
+#       whose finding scaffolding-sweep.sh carries forward stays free to close.
+#       A successor in another store, where no edge from here holds, refuses the
+#       close while a bead waits on the origin, and names the gate that holds a
+#       waiter and the wait to end;
 #   (ax) the close takes the store's record lock, the flock on pr-record.lock in
 #       the origin store's .beads directory that gctk's two writers of a PR's
 #       pending record take: it waits while another writer holds it, reads the
@@ -212,6 +223,8 @@ notes_with() {
 }
 # nometa <id> — the bead carries no metadata key.
 nometa() { case "$(bfield "$1" metadata)" in ""|"{}") return 0 ;; esac; return 1; }
+# nometa_but <id> <key> — the bead carries no metadata key but <key>.
+nometa_but() { case "$(bfield "$1" metadata | jq -c --arg k "$2" 'del(.[$k])' 2>/dev/null)" in ""|"{}") return 0 ;; esac; return 1; }
 # A bead's whole record, its row and the dep rows naming it, to prove a refused
 # run wrote nothing.
 snap() { brecord "$2"; }
@@ -366,7 +379,8 @@ eq "$(edge alpha al-origin1 al-succ1)" supersedes "the origin's supersedes edge 
 NOTE=$(field alpha notes al-origin1)
 has "$NOTE" "re-homed to al-succ1 in rig:alpha" "the close's note names kind, successor and store"
 has "$NOTE" "operator ruling rb-a3ny" "the close's note carries the note"
-if nometa al-origin1; then ok "no metadata key records the successor"; else bad "no metadata key records the successor ($(bfield al-origin1 metadata))"; fi
+# The close's one key is its work record, case (s).
+if nometa_but al-origin1 gc.work_outcome; then ok "no metadata key records the successor"; else bad "no metadata key records the successor ($(bfield al-origin1 metadata))"; fi
 if nometa al-succ1; then ok "and the successor gains no back-pointer key"; else bad "and the successor gains no back-pointer key ($(bfield al-succ1 metadata))"; fi
 has "$(cat "$TMP/out")" "events" "output points at the events table for attribution"
 has "$(cat "$STUB_GC_LOG")" "--actor test__rehome-hq-0000 " "the actor is passed through for the audit trail"
@@ -583,6 +597,7 @@ eq "$rc" 0 "--dry-run succeeds"
 eq "$(snap alpha al-origin9)" "$BEFORE" "--dry-run writes nothing"
 has "$(cat "$TMP/out")" "dry run" "--dry-run says so"
 has "$(cat "$TMP/out")" "al-origin9 supersedes bt-succ9, in rig:alpha" "--dry-run names the edge it would record"
+has "$(cat "$TMP/out")" "recording gc.work_outcome=no-op in the same write" "--dry-run names the work record the close would carry"
 mkbead alpha open al-origin15
 mkbead alpha open al-succ15
 dep al-origin15 al-succ15 blocks
@@ -591,13 +606,20 @@ eq "$rc" 0 "--dry-run succeeds over a wait edge"
 has "$(cat "$TMP/out")" "drop the 'blocked by al-succ15' wait edge" "--dry-run names the edge it would drop"
 eq "$(edge alpha al-origin15 al-succ15)" blocks "--dry-run does not drop it"
 
-# --- (s) a re-home writes no outcome of its own ---------------------------
+# --- (s) the close records the work record and no outcome word ------------
 mkbead alpha open al-task1
 mkbead beta open bt-tsucc1
 rc=0; run --origin al-task1 --successor bt-tsucc1 --kind re-homed || rc=$?
 eq "$rc" 0 "a re-home succeeds"
 eq "$(field alpha m.gc.outcome al-task1)" "" "the origin gets no gc.outcome"
-eq "$(field alpha m.gc.work_outcome al-task1)" "" "…and no gc.work_outcome"
+eq "$(field alpha m.gc.work_outcome al-task1)" "no-op" "…and gc.work_outcome=no-op, since it ships nothing under its own id"
+mkbead alpha open al-task2; bset al-task2 metadata.gc.work_outcome=shipped
+mkbead beta open bt-tsucc2
+rc=0; run --origin al-task2 --successor bt-tsucc2 --kind re-homed --dry-run || rc=$?
+hasnt "$(cat "$TMP/out")" "gc.work_outcome" "--dry-run plans no work record over one the origin records"
+rc=0; run --origin al-task2 --successor bt-tsucc2 --kind re-homed || rc=$?
+eq "$rc" 0 "a re-home of an origin that records a work outcome succeeds"
+eq "$(field alpha m.gc.work_outcome al-task2)" "shipped" "…and that work outcome stays as it was"
 
 # --- (gate-b) unlanded work: refused under an evidence kind ---------------
 mkbead alpha open al-unlanded
@@ -714,7 +736,7 @@ rc=0; run --origin al-wdup --successor al-wcanon --kind duplicate || rc=$?
 eq "$rc" 0 "a duplicate whose canonical is open closes at once"
 eq "$(field alpha status al-wdup)" closed "…the duplicate is closed"
 eq "$(edge alpha al-waiter1 al-wcanon)" blocks "…an open bead it blocked now waits on the canonical"
-CARRY_AT=$(grep -n ' dep add al-waiter1 al-wcanon ' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
+CARRY_AT=$(grep -n ' dep add --file - --no-cycle-check' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
 CLOSE_AT=$(grep -n ' update al-wdup .*--status=closed' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
 [ -n "$CARRY_AT" ] && [ -n "$CLOSE_AT" ] && [ "$CARRY_AT" -lt "$CLOSE_AT" ] \
     && ok "…its edge is written before the close" || bad "…its edge is written before the close (edge at '${CARRY_AT:-none}', close at '${CLOSE_AT:-none}')"
@@ -723,25 +745,25 @@ eq "$(edge alpha al-wcanon al-wcanon)" "" "…nor does the canonical, whose wait
 eq "$(snap alpha al-waiter3)" "$B3" "…and a bead the canonical already blocks is not written"
 has "$(field alpha notes al-wdup)" "waits on al-wcanon now: al-waiter1." "…the close's note names what moved"
 has "$(cat "$TMP/out")" "al-waiter1, which al-wdup blocked, wait on al-wcanon now" "…and so does the output"
-# No wait moves once the canonical has delivered, under another kind, or on the
+# No wait moves once the canonical has delivered, under not-needed, or on the
 # repair path, whose close already happened.
 mkbead alpha open al-wdup2
 mkbead alpha closed al-wcanon2
 mkbead alpha open al-wdup3
 mkbead alpha open al-wcanon3
 bset al-wcanon3 metadata.gc.work_outcome=shipped
-mkbead alpha open al-wre
-mkbead alpha open al-wresucc
+mkbead alpha open al-wnn
+mkbead alpha open al-wnnsucc
 mkbead alpha closed al-wdup4
 mkbead alpha open al-wcanon4
 mkbead alpha open al-waiter4
-dep al-waiter4 al-wdup2 blocks; dep al-waiter4 al-wdup3 blocks; dep al-waiter4 al-wre blocks; dep al-waiter4 al-wdup4 blocks
+dep al-waiter4 al-wdup2 blocks; dep al-waiter4 al-wdup3 blocks; dep al-waiter4 al-wnn blocks; dep al-waiter4 al-wdup4 blocks
 rc=0; run --origin al-wdup2 --successor al-wcanon2 --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-waiter4 al-wcanon2)" "0/" "a duplicate of a closed canonical moves no wait"
 rc=0; run --origin al-wdup3 --successor al-wcanon3 --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-waiter4 al-wcanon3)" "0/" "…nor one of a canonical that has shipped"
-rc=0; run --origin al-wre --successor al-wresucc --kind re-homed || rc=$?
-eq "$rc/$(edge alpha al-waiter4 al-wresucc)" "0/" "…nor a re-home, whose waits end on its caller's judgment"
+rc=0; run --origin al-wnn --successor al-wnnsucc --kind not-needed || rc=$?
+eq "$rc/$(edge alpha al-waiter4 al-wnnsucc)" "0/" "…nor a not-needed close, whose successor carries no work"
 rc=0; run --origin al-wdup4 --successor al-wcanon4 --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-waiter4 al-wcanon4)" "0/" "…nor the repair path"
 # A waiter that cannot take the edge refuses the close before anything is
@@ -801,8 +823,8 @@ dep al-waiter8g al-wdup8g blocks
 B8=$(snap alpha al-waiter8g)
 rc=0; run --origin al-wdup8g --successor al-wcanon8g --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-wgate8)/$(snap alpha al-waiter8g)" "5/open/$B8" "…and so does a human gate, which stays open"
-# An edge bd refuses, or one that does not read back, refuses the close, and the
-# edges written before it stay.
+# A write bd refuses refuses the close. The edges go on in one bulk write, which
+# bd commits whole or not at all, so no waiter gains one.
 mkbead alpha open al-wdup9
 mkbead alpha open al-wcanon9
 mkbead alpha open al-waiterA
@@ -812,9 +834,9 @@ dep al-waiterB al-wdup9 blocks
 rc=0; STUB_DEP_ADD_FAIL=al-waiterB run --origin al-wdup9 --successor al-wcanon9 --kind duplicate || rc=$?
 eq "$rc" 5 "a waiter bd refuses the edge refuses the close"
 eq "$(field alpha status al-wdup9)/$(edge alpha al-wdup9 al-wcanon9)" "open/" "…the duplicate stays open with no edge"
-eq "$(edge alpha al-waiterA al-wcanon9)" blocks "…a waiter carried before it keeps its edge"
+eq "$(edge alpha al-waiterA al-wcanon9)/$(edge alpha al-waiterB al-wcanon9)" "/" "…and neither waiter gains an edge"
 has "$(cat "$TMP/err")" "simulated refusal for al-waiterB" "…bd's refusal is printed"
-has "$(cat "$TMP/err")" "al-waiterA keep the blocks edge onto al-wcanon9" "…and the edges that stay are named"
+has "$(cat "$TMP/err")" "dep remove <bead> al-wdup9; re-run this call" "…and the refusal names the wait to end before a re-run"
 # --check and the dry run name the waits that would move, and write nothing.
 mkbead alpha open al-wdup11
 mkbead alpha open al-wcanon11
@@ -1374,12 +1396,18 @@ mkbead alpha open al-vf; mkbead alpha open al-vf-c
 rc=0; raced al-vf RACE_FAIL_UP_AFTER_CLOSE=1 -- --origin al-vf --successor al-vf-c --kind duplicate || rc=$?
 eq "$rc/$(field alpha status al-vf)" "4/closed" "(av) a second read that does not answer: exit 4, the close stands"
 has "$(cat "$TMP/err")" "did not read" "…and the WARN says so"
-# Only a duplicate of a canonical yet to deliver reads its waiters again.
+# A re-home moves a late wait as a duplicate does.
+mkbead alpha open al-vi; mkbead alpha open al-vi-s; mkbead alpha open al-vi-w
+H=$(waits_on vi al-vi-w al-vi)
+rc=0; raced al-vi RACE_BEFORE_CLOSE="$H" -- --origin al-vi --successor al-vi-s --kind re-homed || rc=$?
+eq "$rc/$(edge alpha al-vi-w al-vi-s)" "0/blocks" "(av) a re-home moves a late wait too"
+# Only a close whose successor carries work it has yet to deliver reads its
+# waiters again.
 mkbead alpha open al-vg; mkbead alpha open al-vg-s; mkbead alpha open al-vg-w
 H=$(waits_on vg al-vg-w al-vg)
 clear_calls
-rc=0; raced al-vg RACE_BEFORE_CLOSE="$H" -- --origin al-vg --successor al-vg-s --kind re-homed || rc=$?
-eq "$rc/$(edge alpha al-vg-w al-vg-s)" "0/" "(av) another kind moves no late wait"
+rc=0; raced al-vg RACE_BEFORE_CLOSE="$H" -- --origin al-vg --successor al-vg-s --kind not-needed || rc=$?
+eq "$rc/$(edge alpha al-vg-w al-vg-s)" "0/" "(av) a not-needed close moves no late wait"
 eq "$(grep -c -- '--direction=up' "$STUB_GC_LOG" || true)" 0 "…and reads no waiters"
 mkbead alpha open al-vh; mkbead alpha closed al-vh-c; mkbead alpha open al-vh-w
 H=$(waits_on vh al-vh-w al-vh)
@@ -1387,6 +1415,68 @@ clear_calls
 rc=0; raced al-vh RACE_BEFORE_CLOSE="$H" -- --origin al-vh --successor al-vh-c --kind duplicate || rc=$?
 eq "$rc/$(edge alpha al-vh-w al-vh-c)" "0/" "(av) a canonical already delivered moves no late wait"
 eq "$(grep -c -- '--direction=up' "$STUB_GC_LOG" || true)" 0 "…and reads no waiters"
+
+# --- (az) every kind whose successor carries the work moves its waits --------
+# A re-home, a fold and a fixed-upstream close a ruling made before its fix
+# landed move the waits on the origin onto the successor, as a duplicate's do.
+mkbead alpha open al-zre; mkbead alpha open al-zre-s; mkbead alpha open al-zre-w
+dep al-zre-w al-zre blocks
+clear_calls
+rc=0; run --origin al-zre --successor al-zre-s --kind re-homed || rc=$?
+eq "$rc/$(field alpha status al-zre)" "0/closed" "(az) a re-home onto an open successor closes"
+eq "$(edge alpha al-zre-w al-zre-s)" blocks "…and the bead that waited on it waits on the successor"
+CARRY_AT=$(grep -n ' dep add --file - --no-cycle-check' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
+CLOSE_AT=$(grep -n ' update al-zre .*--status=closed' "$STUB_GC_LOG" | head -1 | cut -d: -f1 || true)
+[ -n "$CARRY_AT" ] && [ -n "$CLOSE_AT" ] && [ "$CARRY_AT" -lt "$CLOSE_AT" ] \
+    && ok "…its edge is written before the close" || bad "…its edge is written before the close (edge at '${CARRY_AT:-none}', close at '${CLOSE_AT:-none}')"
+has "$(field alpha notes al-zre)" "waits on al-zre-s now: al-zre-w." "…and the close's note names what moved"
+mkbead alpha open al-zfo; mkbead alpha open al-zfo-s; mkbead alpha open al-zfo-w1; mkbead alpha open al-zfo-w2
+dep al-zfo-w1 al-zfo blocks; dep al-zfo-w2 al-zfo blocks
+clear_calls
+rc=0; run --origin al-zfo --successor al-zfo-s --kind folded || rc=$?
+eq "$rc/$(edge alpha al-zfo-w1 al-zfo-s)/$(edge alpha al-zfo-w2 al-zfo-s)" "0/blocks/blocks" "(az) a fold moves each wait on it onto the bead it folds into"
+eq "$(grep -c ' dep add --file - --no-cycle-check' "$STUB_GC_LOG" || true)/$(grep -c ' dep add al-zfo-w' "$STUB_GC_LOG" || true)" "1/0" \
+   "…in one bulk write, with no add of its own for each waiter"
+mkbead alpha open al-zsh; mkbead alpha open al-zsh-s; mkbead alpha open al-zsh-w
+bset al-zsh-s metadata.gc.work_outcome=shipped
+dep al-zsh-w al-zsh blocks
+rc=0; run --origin al-zsh --successor al-zsh-s --kind folded || rc=$?
+eq "$rc/$(edge alpha al-zsh-w al-zsh-s)" "0/" "(az) a fold into a bead that has shipped moves no wait"
+mkbead alpha open al-zfu; mkbead alpha open al-zfu-s; mkbead alpha open al-zfu-w
+bset al-zfu metadata.merge_result=pull_request metadata.gc.pr_close_disposition_kind=fixed-upstream metadata.gc.pr_close_disposition_successor=al-zfu-s
+dep al-zfu-w al-zfu blocks
+rc=0; run --origin al-zfu --successor al-zfu-s --kind fixed-upstream || rc=$?
+eq "$rc/$(field alpha status al-zfu)/$(edge alpha al-zfu-w al-zfu-s)" "0/closed/blocks" \
+   "(az) a fixed-upstream close a ruling made before its fix landed moves the wait onto the fix"
+# A waiter a ruling has recorded a PR-close disposition on closes under that
+# ruling and waits for nothing more: the anchor whose finding scaffolding-sweep.sh
+# carries forward to a bug just before the anchor's own close.
+mkbead alpha open al-zan; mkbead alpha open al-zan-f; mkbead alpha open al-zan-b; mkbead alpha open al-zan-c; mkbead alpha open al-zan-w
+bset al-zan metadata.merge_result=pull_request metadata.gc.pr_close_disposition_kind=not-needed metadata.gc.pr_close_disposition_successor=al-zan-c
+dep al-zan al-zan-f blocks; dep al-zan-w al-zan-f blocks
+BA=$(snap alpha al-zan)
+rc=0; run --origin al-zan-f --successor al-zan-b --kind re-homed || rc=$?
+eq "$rc/$(field alpha status al-zan-f)" "0/closed" "(az) a finding carried forward from an anchor a ruling closes is re-homed"
+eq "$(snap alpha al-zan)" "$BA" "…the anchor gains no wait on the bug, so nothing holds its close"
+eq "$(edge alpha al-zan-w al-zan-b)" blocks "…while a bead that is not ruled closed waits on the bug"
+rc=0; run --origin al-zan --successor al-zan-c --kind not-needed --if-ruled || rc=$?
+eq "$rc/$(field alpha status al-zan)" "0/closed" "…and the anchor's own close then lands"
+# A successor in another store holds no edge from the origin's store, so a bead
+# that waits on the origin refuses the close, and one a ruling closes does not.
+mkbead alpha open al-zx; mkbead beta open bt-zx-s; mkbead alpha open al-zx-w
+dep al-zx-w al-zx blocks
+BO=$(snap alpha al-zx); BW=$(snap alpha al-zx-w)
+rc=0; run --origin al-zx --successor bt-zx-s --kind re-homed || rc=$?
+eq "$rc" 5 "(az) a re-home into another store refuses while a bead waits on it"
+eq "$(snap alpha al-zx)|$(snap alpha al-zx-w)" "$BO|$BW" "…and writes nothing"
+has "$(cat "$TMP/err")" "holds nothing" "…because an edge across stores holds nothing"
+has "$(cat "$TMP/err")" "human-gate.sh --subject <bead> --key waits-on.bt-zx-s" "…it names the gate that holds a waiter that needs the work"
+has "$(cat "$TMP/err")" "dep remove <bead> al-zx, then re-run this close" "…and the wait to end before a re-run"
+rc=0; run --origin al-zx --successor bt-zx-s --kind re-homed --check || rc=$?
+eq "$rc" 1 "…--check refuses it too"
+bset al-zx-w metadata.gc.pr_close_disposition_kind=re-homed metadata.gc.pr_close_disposition_successor=bt-zx-s
+rc=0; run --origin al-zx --successor bt-zx-s --kind re-homed || rc=$?
+eq "$rc/$(field alpha status al-zx)" "0/closed" "(az) a re-home into another store whose only waiter a ruling closes closes"
 
 # --- (am) the retry withdraws its own gates before the close ---------------
 hgate() { # <id> <await_id> [<assignee>]: an open human gate in alpha
