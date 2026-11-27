@@ -35,8 +35,9 @@ The rule forces a question at round n when:
 
 - the round ruled must-fix findings, no fewer than round n-2 did, and round n-2
   ruled some, so its must-fix findings have not fallen over two rounds; or
-- one finding has come back a second time, so two findings of the run restate
-  it, directly or through each other.
+- one finding has come back a second time, so findings of two rounds of the run
+  restate it, directly or through each other. Two lanes that raise it again in
+  one round are one return.
 
 A round two back with no must-fix finding is no baseline, as when round 1 fixed
 only an ask and the next rounds judge the work the ask added. Comparing over two
@@ -87,12 +88,15 @@ it while the question is open.
 ## The bound
 
 Gas City requires `max_attempts` to be an integer. Its default goes from 3 to
-30. The rule ends a run long before that. After rounds 1 and 2 count a and b
-must-fix findings, every later round with a must-fix finding counts fewer than
-two rounds before, so a run passes or is stopped within a+b+2 rounds, plus any
-rounds that only fix a person's asks. The record's largest a+b is 18 (#1641's
-second run: 4, 14). A look is due at the 30th round, and it stops the review, so
-the bound brings its reading with it too.
+30. The rule ends a run long before that. A round with must-fix findings goes on
+without a question only when it counts fewer than two rounds before, or when
+that round counted none, as a round that fixed only a person's ask does. So a
+run whose first two rounds count a and b must-fix findings, and none of whose
+rounds fixes only an ask, passes or is stopped within a+b+2 rounds, unless a
+fresh look names rules that changed on the PR's target as the cause of the
+counts. The record's largest a+b is 18 (#1641's second run: 4, 14). A look is
+due at the 30th round, and it stops the review, so the bound brings its reading
+with it too.
 
 ## The rule replayed on the record
 

@@ -37,11 +37,30 @@ pass. The city's gc carries it: `git merge-base --is-ancestor fa848a578a
 iteration. In review run tk-py3sung (2026-11-26), the lane beads triage's
 fan-out bonded in iteration 2 carry `gc.scope_ref` naming
 `mol-pr-review.review-loop.iteration.2`, `gc.scope_role=member` and
-`gc.on_fail=abort_scope`, because the fan-out passes its control's scope to the
-fragment it compiles (`internal/dispatch/fanout.go`). That run's iteration-2
-rule-and-repair still blocks on its triage fan-out. So upstream issue #9339, a
-checked loop dropping the needs between its children from iteration 2 on, does
-not bite this formula's shape here.
+`gc.on_fail=abort_scope`. The city's dispatcher stamps them: it prepares each
+fragment a control of kind `fanout` bonds with `decorateDynamicFragmentRecipe`
+(`cmd/gc/cmd_convoy_dispatch.go`), whose `propagateDynamicScopeMetadata` gives
+each step the `gc.scope_ref`, `gc.on_fail` and `gc.attempt` of the step the
+fan-out follows. That run's iteration-2 rule-and-repair still blocks on its
+triage fan-out. So upstream issue #9339, a checked loop dropping the needs
+between its children from iteration 2 on, does not bite this formula's shape
+here.
+
+**Measured on Gas City's own harness.** On 2026-11-27 the exit was run as well
+as read. The run used the dispatch package's crash-injection harness at
+210638e33c8b (`internal/dispatch/crash_injection_test.go` and
+`ralph_hard_fail_test.go`), with the dispatcher's preparation of a fragment
+copied into the run. It cooked this change's mol-pr-review, mol-pr-review-lane
+and mol-pr-review-look into the harness's memory store and played each step. A
+look that closed `gc.outcome=fail` with `gc.failure_class=hard` ended the loop
+at its round, at round 1 and at round 3, a round the loop spawns at run time.
+The loop closed failed with `gc.final_disposition=hard_fail` and the look's
+`gc.failure_reason`, its check did not run at that round, and no next round was
+spawned. A look that closed passed at round 3 let the loop's check run after it,
+and the run went on. Without the preparation a bonded step carries no
+`gc.scope_ref`, so a hard look only fails its iteration, and the loop runs to
+its bound. The stop rests on that preparation, which the dispatcher makes for
+every control of kind `fanout` it processes.
 
 **Composed.** The look is a member that rule-and-repair's `on_complete` fan-out
 bonds. A stop writes `gc.failure_class=hard` and `gc.failure_reason` on its own

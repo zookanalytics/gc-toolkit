@@ -254,7 +254,8 @@ fix was meant to remove, back in the same place or in the code that fix wrote.
 Name that earlier finding in the ruling's `restates`, as
 `{"iteration", "check", "finding"}`, and rule the finding by its lane's rule as
 any other. A finding that only shares a file or a section with an earlier one
-restates nothing. The read lists every round's findings with their rulings.
+restates nothing. The round's read lists each finding an earlier round of the
+run ruled must-fix, which are the findings a `restates` can name.
 
 The run counts these. A finding that comes back a second time, and a round
 whose must-fix findings are no fewer than two rounds before, call for a fresh
