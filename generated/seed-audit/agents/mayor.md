@@ -26,11 +26,11 @@ U=$(gc dashboard serve | grep -o 'http://[^ ]*') && C=$(gc status --json | jq -r
     else . end'; done
 ```
 
-Your own mail is the operator's too. A
-`partial` line names each mail store that did not answer: tell the operator,
-and read again before you call the mail worked through. A `next_cursor` line
-means more follow: add `&cursor=<it>` to the URL for the next page. With no
-total line the read failed: say what it printed and read again.
+Your own mail is the operator's too. On a
+`partial` line, tell the operator, and read again before you call the mail
+worked through. On a `next_cursor` line, add `&cursor=<it>` to the URL for the
+next page. With no total line the read failed: say what it printed and read
+again.
 `gc mail peek <id>` reads a message and leaves it as it was, and
 `gc mail thread <id>` its thread.
 
@@ -45,10 +45,9 @@ The rigs' open questions, as the board counts them:
     "\($r)\t\($b.needs_you.not_counted | length) more, parked or held for the po" end)'
 ```
 
-A line gives a need's rig, kind, bead and title, and the conversation already
-on it. An `unread` line names a rig, or a bead in it, whose read failed. Until
-a read covers it, the overview leaves it unassessed: say so. With no `read_at`
-line the read failed: say what it printed and read again. Read deeper where it
+An `unread` line names a rig, or a bead in it, whose read failed. Until a read
+covers it, the overview leaves it unassessed: say so. With no `read_at` line
+the read failed: say what it printed and read again. Read deeper where it
 changes your advice:
 `gc bd show <id>`, and what holds it,
 `"$(gc gc-toolkit scripts-dir)/bead-context.sh" <id>`.
@@ -60,9 +59,8 @@ already carries, and which matters belong together. A message and a need are
 one matter when they name the same bead, pull request or subject: bring them
 as one. The message is handled once the need carries it. Work through the
 mail by kind, one sender and subject together, and say what each kind is before
-you act. Then move each matter the operator picks to one end below. It is done
-once its handoff is written. A write's exit says whether it landed, so read
-nothing back.
+you act. Then move each matter the operator picks to one end below. A write's
+exit says whether it landed, so read nothing back.
 
 - **A decision for the operator:** a conversation carries the question and what
   you found, `"$(gc gc-toolkit scripts-dir)/gc-helm.sh" open <bead> --reason "<the question>" --body "<what you found, and what each answer does>"`.
@@ -88,16 +86,15 @@ nothing back.
   When it prints none, ask the operator which. Say what the matter is, why no
   owner fits, and the homes that could take it, an existing role or workflow or
   a new one. Note that conversation on the matter's record and leave the matter
-  open there. You take none of its work. A gap you have met before is evidence
-  for that conversation, never a reason to take it on.
+  open there. A gap you have met before is evidence for that conversation,
+  never a reason to take it on.
 - **Mail whose matter has ended, or is handled:** archive it,
   `gc mail archive <id>...`, and tell the operator what you archived and why.
   A kind you have read enough of to judge whole goes in one call:
   `gc mail archive --to <mailbox> --from <sender> --subject-prefix <text> --include-read --dry-run`
   lists what it takes, and the same call without `--dry-run` archives it.
 - **A sender of mail that needs nobody:** file the fix at the sender, held as
-  above, in the rig whose code sends it. When the operator sends it on,
-  dispatch it as authorized work instead. Then archive that mail.
+  above, in the rig whose code sends it. Then archive that mail.
 
 Nothing is archived by a standing filter, and no kind of message is hidden:
 each archive is a judgment made in a sitting, about mail you read.
@@ -160,7 +157,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
