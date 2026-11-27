@@ -68,60 +68,90 @@ func load(t *testing.T, declaration string) *feedback.Rule {
 	return r
 }
 
-func TestReviews(t *testing.T) {
+func TestUntakenReviews(t *testing.T) {
 	r := load(t, "")
-	got, err := r.Reviews(self, cutover, []feedback.Review{
+	got, err := r.Untaken(self, cutover, []feedback.Review{
 		{ID: 1, Author: "operator", Body: "rename this", State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"},
 		{ID: 2, Author: self, Body: "verdict\n\n<!-- gc:city -->", State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"},
 		{ID: 3, Author: self, Body: "an unmarked review", State: "COMMENTED", SubmittedAt: "2026-09-01T00:00:00Z"},
 		{ID: 4, Author: self, Body: "an unmarked review after the cutover", State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"},
 		{ID: 5, Author: "preview", Body: mark + "\nSchema diff", State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"},
-	})
+		{ID: 6, Author: "operator", Body: "approved, but rename X", State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"},
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{1, 4}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("feedback %v, want %v: the city's marked review, its review before the cutover and a review not for review are not feedback", got, want)
+	if want := []int64{1, 4, 6}; !reflect.DeepEqual(got.Reviews, want) {
+		t.Fatalf("untaken %v, want %v: the city's marked review, its review before the cutover and a review not for review are not feedback", got.Reviews, want)
 	}
 }
 
-func TestCommentsADismissalRetiredAreNotFeedback(t *testing.T) {
+// A post the city has taken carries its EYES, and one it owes nothing more its
+// THUMBS_UP. Either takes the post out of the untaken ones, whatever its kind,
+// and any other reaction the city's account left takes nothing.
+func TestAPostTheCityMarkedIsTaken(t *testing.T) {
 	r := load(t, "")
-	got, err := r.Comments(self, cutover, []feedback.Comment{
+	at := "2026-11-12T01:00:00Z"
+	carrier := &feedback.Review{ID: 100, State: "COMMENTED", SubmittedAt: at}
+	got, err := r.Untaken(self, cutover,
+		[]feedback.Review{
+			{ID: 1, Author: "operator", Body: "a", State: "COMMENTED", SubmittedAt: at, Reactions: []string{"EYES"}},
+			{ID: 2, Author: "operator", Body: "b", State: "COMMENTED", SubmittedAt: at, Reactions: []string{"HEART"}},
+		},
+		[]feedback.Comment{
+			{ID: 10, Author: "operator", Body: "c", CreatedAt: at, Review: carrier, Reactions: []string{"THUMBS_UP"}},
+			{ID: 11, Author: "operator", Body: "d", CreatedAt: at, Review: carrier},
+		},
+		[]feedback.Comment{
+			{ID: 20, Author: "operator", Body: "e", CreatedAt: at, Reactions: []string{"EYES", "THUMBS_UP"}},
+			{ID: 21, Author: "operator", Body: "f", CreatedAt: at},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := feedback.Untaken{Reviews: []int64{2}, Inline: []int64{11}, Conversation: []int64{21}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("untaken %+v, want %+v", got, want)
+	}
+}
+
+func TestUntakenCommentsADismissalRetiredAreNotFeedback(t *testing.T) {
+	r := load(t, "")
+	got, err := r.Untaken(self, cutover, nil, []feedback.Comment{
 		{ID: 10, Author: "operator", Body: "live", CreatedAt: "2026-11-12T01:00:00Z",
 			Review: &feedback.Review{ID: 100, State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"}},
 		{ID: 11, Author: "operator", Body: "retired", CreatedAt: "2026-11-12T01:00:00Z",
 			Review: &feedback.Review{ID: 101, State: "DISMISSED", SubmittedAt: "2026-11-12T01:00:00Z"}},
 		{ID: 12, Author: self, Body: "drafted before the cutover, submitted after it", CreatedAt: "2026-09-01T00:00:00Z",
 			Review: &feedback.Review{ID: 102, State: "COMMENTED", SubmittedAt: "2026-11-12T01:00:00Z"}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{10, 12}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("feedback %v, want %v: a dismissal retires its comment, and a comment is dated by its review's submission", got, want)
+	if want := []int64{10, 12}; !reflect.DeepEqual(got.Inline, want) {
+		t.Fatalf("untaken %v, want %v: a dismissal retires its comment, and a comment is dated by its review's submission", got.Inline, want)
 	}
 }
 
-func TestIssueCommentsReadTheRigsDeclaration(t *testing.T) {
+func TestUntakenConversationCommentsReadTheRigsDeclaration(t *testing.T) {
 	comments := []feedback.Comment{
 		{ID: 20, Author: "vercel", Body: "[vc]: #abc\nThe latest updates.", CreatedAt: "2026-11-12T01:00:00Z"},
 		{ID: 21, Author: "operator", Body: "one more thing", CreatedAt: "2026-11-12T01:00:00Z"},
 	}
 	declared := load(t, "[[marker]]\nprefix = \"[vc]: #\"\n")
-	got, err := declared.IssueComments(self, cutover, comments)
+	got, err := declared.Untaken(self, cutover, nil, nil, comments)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{21}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("feedback %v, want %v on a rig that declares the prefix", got, want)
+	if want := []int64{21}; !reflect.DeepEqual(got.Conversation, want) {
+		t.Fatalf("untaken %v, want %v on a rig that declares the prefix", got.Conversation, want)
 	}
-	got, err = load(t, "").IssueComments(self, cutover, comments)
+	got, err = load(t, "").Untaken(self, cutover, nil, nil, comments)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []int64{20, 21}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("feedback %v, want %v on a rig that declares nothing", got, want)
+	if want := []int64{20, 21}; !reflect.DeepEqual(got.Conversation, want) {
+		t.Fatalf("untaken %v, want %v on a rig that declares nothing", got.Conversation, want)
 	}
 }
 

@@ -109,12 +109,13 @@ EOF
 done
 [ -n "$order_rows" ] || { echo "OK: orders/ is empty — this pack ships no cadence"; exit 0; }
 
-# The registry, the rig roster and the run history share nothing, so the three
-# reads are in flight at once. On a loaded host a gc call costs 5-15s of wall
-# time whatever it reads, so the check takes about one call's time, not three.
-# The roster and the history answer into files, and each is waited on before
-# it is read. Their stdio is redirected, so an early exit never holds the
-# doctor's pipe open behind it.
+# The registry, the rig roster, the run history and arm 3's question to the
+# deployed gctk share nothing, so the four probes are in flight at once, and no
+# probe starts after them. On a loaded host a gc call costs 5-15s of wall time
+# whatever it reads, so the three gc reads take about one call's time, not
+# three. The roster, the history and gctk's answer go into files, and each is
+# waited on before it is read. Their stdio is redirected, so an early exit never
+# holds the doctor's pipe open behind it.
 probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/gctk-check-cadence-live.XXXXXX" 2>/dev/null) || {
     echo "cadence liveness undetermined (I10) — cannot stage the registry, roster and history reads"
     detail "mktemp -d failed (e.g. /tmp under disk pressure); nothing was read, so a stopped cadence would not be visible."
@@ -127,11 +128,31 @@ trap 'rm -rf "$probe_dir"' EXIT
 # `now` anchors every window and is taken before the read is sent. The answer
 # holds no run newer than its fetch, so an anchor taken after the reads would cut
 # every window short by however long they took.
+# The history read may take the time left before the check's deadline, which
+# already holds back the budget's reserve for the report. The budget caps any
+# one probe at half so that a wedged probe cannot starve the probes after it,
+# and every other probe starts beside this one. A loaded host can hold the read
+# past half the budget, and cut there it would leave every order's cadence
+# unjudged.
 now=$(budget_now)
-run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
+BUDGET_CAP=$BUDGET_TOTAL run_bounded gc order history --limit 0 --json >"$probe_dir/runs.json" 2>/dev/null & runs_pid=$!
 # rig-map.sh reads the rig map, and names on stderr why it did not.
 RIG_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/rig-map.sh"
 run_bounded "$RIG_MAP" >"$probe_dir/rigs.json" 2>"$probe_dir/rigs.err" & rigs_pid=$!
+# Arm 3 (below) asks the deployed gctk for its revision. Resolved by the same
+# precedence lifecycle.sh resolves the binary by: GC_CITY_PATH is what an agent
+# session carries, so a chain without it reads "no binary deployed" on a city
+# that has one. Asked beside the reads, it keeps a slice of its own however long
+# the history takes. gctk_pid is empty when no binary was there to ask.
+gctk_bin="${GCTK_BIN:-}"
+if [ -z "$gctk_bin" ]; then
+    gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
+    [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
+fi
+gctk_pid=""
+if [ -n "$gctk_bin" ] && [ -x "$gctk_bin" ]; then
+    run_bounded "$gctk_bin" version >"$probe_dir/gctk.out" 2>/dev/null & gctk_pid=$!
+fi
 
 orders_json=$(run_bounded gc order list --json 2>/dev/null)
 if ! printf '%s' "$orders_json" | jq -e '(.orders | type) == "array"' >/dev/null 2>&1; then
@@ -320,14 +341,8 @@ done <<< "$order_rows"
 # A MISSING binary is an error, like an order that never runs: lifecycle.sh and
 # epic.sh have nothing else to exec, so every lifecycle write and every epic the
 # work skill files is refused until the gctk-build order publishes one.
-gctk_bin="${GCTK_BIN:-}"
-if [ -z "$gctk_bin" ]; then
-    # The same precedence lifecycle.sh resolves the binary by. GC_CITY_PATH is
-    # what an agent session carries, so a chain without it reads "no binary
-    # deployed" on a city that has one.
-    gctk_city="${GC_CITY_PATH:-${GC_CITY:-${GC_CITY_ROOT:-}}}"
-    [ -n "$gctk_city" ] && gctk_bin="$gctk_city/.gc/services/gctk/bin/gctk"
-fi
+#
+# The binary was resolved, and asked, beside the reads above.
 # The identity is the revision assets/scripts/gc-build.sh records and stamps
 # for gctk: git's hash of the `git ls-tree` listing of its inputs, go.mod,
 # go.sum and services/gctk. A merge that touches none of them neither rebuilds
@@ -343,12 +358,13 @@ gctk_identity() { # <commit> — gctk's identity at it, or nothing
 tree_rev=$(gctk_identity HEAD)
 if [ -z "$gctk_bin" ]; then
     warnings+=("gctk: no city named (GC_CITY_PATH, GC_CITY, GC_CITY_ROOT) and no GCTK_BIN — the deployed binary was NOT checked")
-elif [ ! -x "$gctk_bin" ]; then
+elif [ -z "$gctk_pid" ]; then
     errors+=("gctk: no binary at $gctk_bin — lifecycle.sh and epic.sh exec it and have no other implementation, so every lifecycle write and every epic the work skill files is refused until the gctk-build order (orders/gctk-build.toml) publishes one; its build-status.json says whether a build failed")
 elif [ -z "$tree_rev" ]; then
     warnings+=("gctk: cannot read this checkout's gctk revision (\`git -C $dir ls-tree HEAD -- go.mod go.sum services/gctk\`) — the deployed binary cannot be compared against it")
 else
-    gctk_rev=$(run_bounded "$gctk_bin" version 2>/dev/null | head -1); gctk_rc=${PIPESTATUS[0]}
+    wait "$gctk_pid"; gctk_rc=$?
+    gctk_rev=$(head -n 1 "$probe_dir/gctk.out" 2>/dev/null)
     if [ -z "$gctk_rev" ] && [ "$gctk_rc" -eq 124 ]; then
         # Refused for time, or timed out: the binary was not asked, or did not
         # answer inside the slice — neither is a fact about the binary.
@@ -380,9 +396,10 @@ if ! command -v flock >/dev/null 2>&1; then
     errors+=("flock: not found on PATH — refinery-reconcile takes its per-rig pass lock with flock(1) and refuses every pass without it, so nothing merges. Install it: util-linux on Linux, \`brew install flock\` on macOS.")
 fi
 
-if budget_spent; then
-    warnings+=("this run reached its ${BUDGET_TOTAL}s doctor budget before every probe ran — what follows is partial, and an arm skipped for time is not an arm that passed")
-fi
+# Every probe started beside the reads, and each one the budget refused or cut
+# short has said so above, so the time left now says nothing about a probe. A
+# warning on it would fault a history read that answered near the deadline and
+# was judged.
 
 if [ "${#errors[@]}" -ne 0 ]; then
     echo "pack cadence not live (I10): ${#errors[@]} finding(s)"

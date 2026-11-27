@@ -67,9 +67,16 @@ if [ "${1:-}" = "sling" ]; then
     "$STORE" > "$tmp" && mv "$tmp" "$STORE"
   exit 0
 fi
-# Any other non-bd command (the agent list pool-route.sh reads) is a quiet
-# success: pool-route reads the empty agent set as unreadable and returns the
-# route unverified.
+# The roster pool-route.sh resolves the pool's template against: STUB_AGENTS,
+# else this rig's polecat under the binding gc-toolkit. STUB_AGENTS_FAIL makes
+# it unreadable.
+if [ "${1:-} ${2:-}" = "agent list" ]; then
+  [ -z "${STUB_AGENTS_FAIL:-}" ] || { echo "gc: agent list unavailable" >&2; exit 1; }
+  roster='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.polecat"}]}'
+  printf '%s\n' "${STUB_AGENTS:-$roster}"
+  exit 0
+fi
+# Any other non-bd command is a quiet success.
 [ "${1:-}" = "bd" ] || exit 0
 shift
 case "${1:-}" in
@@ -241,6 +248,20 @@ SLING_AT=$(grep -n '^sling ' "$STUB_GC_LOG" | cut -d: -f1)
 if [ -n "$SETTLE_AT" ] && [ -n "$SLING_AT" ] && [ "$SETTLE_AT" -lt "$SLING_AT" ]; then
   ok "…after it is settled at its priority"
 else bad "…after it is settled at its priority (settle at '${SETTLE_AT:-none}', sling at '${SLING_AT:-none}')"; fi
+
+echo "# --- the pool is the one the roster names, under the city's binding ---"
+# A city that imports the pack as kit runs this rig's polecats as
+# gc-toolkit/kit.polecat, and no agent answers to gc-toolkit/gc-toolkit.polecat.
+reset
+OUT=$(STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/kit.polecat"}]}' run --base main "${PAGES[@]}" 2>/dev/null); RC=$?
+eq "$RC" "0" "a city that imports the pack under another key gets its re-audit"
+eq "$OUT" "re-1 gc-toolkit/kit.polecat filed" "…routed to the pool under that key"
+has "$(grep -- '^sling ' "$STUB_GC_LOG")" "--rig gc-toolkit gc-toolkit/kit.polecat re-1 --on mol-polecat-work" "…and slung there"
+reset
+OUT=$(STUB_AGENTS_FAIL=1 run --base main "${PAGES[@]}" 2>&1); RC=$?
+eq "$RC" "2" "a roster that does not read leaves the re-audit no pool to go to"
+has "$OUT" "nothing filed" "…so it says nothing was filed"
+eq "$(beads)|$(calls '^sling ')" "0|0" "…and files and slings nothing"
 
 echo "# --- one live re-audit per base ---"
 reset "$(reaudit re-9 open "" ',"gc.execution_routed_to":"gc-toolkit/gc-toolkit.polecat"')"

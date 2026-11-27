@@ -24,8 +24,8 @@ puts in front of this skill's name: `gc-toolkit` in `gc-toolkit.prs`.
 ## Answer its review comments
 
 The message is the city's answer to a reviewer: a fix that landed, an answer to
-a question, or a decision. The reviewer reads it, and the reconcile reads it as
-the city's own post rather than new feedback.
+a question, or a decision. The reviewer reads it, and the city reads it as its
+own post rather than new feedback.
 
 Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 
@@ -34,23 +34,21 @@ Writer: `pr-post.sh`, the only way the pack posts on a pull request.
 - A conversation comment:
   `"$(gc <binding> scripts-dir)/pr-post.sh" comment --repo github.com/<owner>/<name> --pr <number> --body-file <file>`.
 
-It appends the city's mark. The reconcile reads a post without that mark as new
-feedback and routes it into rework, so never post with `gh` directly.
+It appends the city's mark. A post without that mark reads as new feedback
+(`pr-post.sh feedback-def`), so never post with `gh` directly.
 
-A rework that answers a review's findings posts no answer of its own. It records
-each answer with `finding.sh answer`, as its work order says, and the city's one
-living comment per review shows the reviewer how each point was answered. A
-reply through `pr-post.sh` only adds detail that answer leaves out.
+The PR's review run answers each person's post where it was made, in the round
+that rules it. A reply through `pr-post.sh` only adds detail that answer leaves
+out.
 
-Resolve a thread only once its answer has landed. The write-back resolves a
-thread whose fix a rework landed, and one whose declined or deferred point its
-answer is on. A thread you answered yourself, a decline or a deferral included,
-with nothing left to land, you resolve with GitHub's `resolveReviewThread`
-mutation on the thread's `PRRT_` id:
+Resolve a thread only once its answer has landed. A thread you answered
+yourself, a decline or a deferral included, with nothing left to land, you
+resolve with GitHub's `resolveReviewThread` mutation on the thread's `PRRT_`
+id:
 `gh api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t=<PRRT_ id>`.
 Leave a thread open when a person replied in it after you, or when it holds a
-needs-you point, because that person's ruling closes it. A reply in a thread
-the city resolved is still feedback, which the reconcile reads and routes.
+question a person must answer, because that person's answer closes it. A reply
+in a thread the city resolved is still feedback.
 
 ## Send it back for rework
 
@@ -140,9 +138,13 @@ The anchor must own an open PR: not closed, at `merge_result`
 `pull_request_pending` or `pull_request_head_changed`. Under `not-needed` the successor is the evidence
 that ruled the work out, such as the conversation where it was decided. Under
 `duplicate`, `folded`, `re-homed` and `fixed-upstream` it is the bead that
-carries the work now. Never close the PR by hand first: a PR closed with no
-disposition recorded reads as abandoned, and the landing order files a human
-gate on the anchor asking whether to rework it or close it.
+carries the work now, and the anchor's close moves what waits on the anchor onto
+that bead. A bead in another rig's store holds no wait from this one, so when the
+successor is there the anchor's close is refused while a bead still waits on
+the anchor: judge each waiter before you retire the PR, as the `work` skill's
+close says. Never close the PR by hand first: a PR closed with no disposition
+recorded reads as abandoned, and the landing order files a human gate on the
+anchor asking whether to rework it or close it.
 
 Every open bead that blocks the anchor holds its close: an open human gate on
 the anchor (`docs/finalize-gate.md`), the sitting's own conversation and a

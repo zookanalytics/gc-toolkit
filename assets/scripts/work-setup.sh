@@ -9,16 +9,25 @@
 #   work-setup.sh --stop-merge --convoy <id>|--bead <id> --path <file> --collided "<text>"
 #                 --question "<text>" [--step <ref>] [--formula <f>]
 #
-# The worktree is the one metadata.work_dir records while it is on disk, else a
-# new one scoped to the bead and registered in the rig's checkout, whatever repo
-# this session's directory sits in. metadata.branch is authoritative when set: it
-# is fetched and fast-forwarded, and divergence stops the run rather than making a
-# different branch. Without one, polecat/<bead> is cut from the freshly fetched
-# base, since a stale local base causes spurious conflicts at the refinery. Which
-# tree the run entered is recorded on every path, because self-review and
-# submit-and-exit find the tree there. gc.work_branch is recorded too: the claim
-# stamps it from the pool slot's base checkout, and the close gate checks
-# gc.work_commit is reachable on it.
+# The worktree is the one metadata.work_dir records while it is a checkout on
+# disk, holding its .git, else a new one scoped to the bead and registered in the
+# rig's checkout, whatever repo this session's directory sits in. A new tree goes
+# at $GC_CITY_PATH/.gc/worktrees/$GC_RIG/<bead>, beside the agents' homes, where
+# Gas City's own claim cuts a bead's tree. A run's steps are claimed by different
+# sessions, so the tree outlives the session that cuts it, and Gas City can
+# remove a closed pool session's home with everything under it. work_dir is
+# recorded before the tree is cut, because every run cuts the bead's tree at that
+# one path, and a tree cut but never recorded would stop each later run's cut. A
+# recorded directory with no .git is cut again, never entered: no rig checkout
+# holds it, so git run there would act on whatever repository holds the city.
+#
+# metadata.branch is authoritative when set: it is fetched and fast-forwarded, and
+# divergence stops the run rather than making a different branch. Without one,
+# polecat/<bead> is cut from the freshly fetched base, since a stale local base
+# causes spurious conflicts at the refinery. Which tree the run entered is
+# recorded on every path, because self-review and submit-and-exit find the tree
+# there. gc.work_branch is recorded too: the claim stamps it from the pool slot's
+# base checkout, and the close gate checks gc.work_commit is reachable on it.
 #
 # A branch another worktree has checked out stops the checkout, which is the one
 # check two runs cannot race past. When a bead that records that tree is in flight,
@@ -40,7 +49,9 @@
 # --conclude-merge commits a merge whose conflicts are resolved and audited.
 # --stop-merge asks a person about a conflict that cannot be resolved without
 # guessing and aborts the merge. The work bead then waits on the question's gate,
-# armed to re-sling, and the run ends, or a bead with no molecule drains.
+# armed to re-sling, and the run ends, or a bead with no molecule drains. Which
+# of the two this session holds is its claim, read before anything is asked, so
+# a claim that does not read stops the stop with the merge still in progress.
 #
 # A converse sitting sets its change up with --held-by <conversation> beside
 # --bead. Its claim is the conversation, so the bead must show that the sitting
@@ -156,6 +167,12 @@ if [ "$MODE" = conclude ]; then
 fi
 
 if [ "$MODE" = stop ]; then
+  # A run's step declines its run, and a claim on the work bead itself has no
+  # run to end, so it drains.
+  if ! CLAIMED=$(gc hook current --id-only </dev/null) || [ -z "$CLAIMED" ]; then
+    echo "$PROG: this session's claim did not read, so it cannot tell a run's step from a claim on $WORK_ID itself. NOT stopping, since nothing asks the question yet, and the merge stays in progress. Re-run --stop-merge once gc hook current names this session's claim." >&2
+    exit 1
+  fi
   BCA="$SCRIPT_DIR/bring-current-audit.sh"
   "$BCA" ask --bead "$WORK_ID" --path "$AUDIT_PATH" --collided "$COLLIDED" --question "$QUESTION" \
     || { echo "$PROG: the question reached no gate; NOT stopping, since nothing asks it yet. Re-run the ask." >&2; exit 1; }
@@ -165,11 +182,10 @@ if [ "$MODE" = stop ]; then
   # session's claim on the bead, clears its route and arms the re-sling, so
   # clearing the gate re-slings the work, with a molecule or without one. A wait
   # that does not land ends and drains nothing, and running this again converges.
-  CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
   ANCHOR=$("$BCA" anchor --bead "$WORK_ID") \
     && "$SCRIPT_DIR/await-ruling.sh" "$WORK_ID" --key "bring-current-question.$WORK_ID" --subject "$ANCHOR" --formula "$FORMULA" \
     || { echo "$PROG: the wait did not land on $WORK_ID; NOT cancelling or draining, so the next worker retries." >&2; exit 1; }
-  if [ -n "$CLAIMED" ] && [ "$CLAIMED" != "$WORK_ID" ]; then
+  if [ "$CLAIMED" != "$WORK_ID" ]; then
     "$SCRIPT_DIR/decline.sh" --step "$STEP" --reason "bringing the branch current needs a decision only a person can make; the bring-current-question gate on the anchor asks it"
     exit $?
   fi
@@ -282,22 +298,26 @@ checkout() { # <git checkout args...>
 WORKTREE=$(work_meta work_dir)
 BRANCH=$(work_meta branch)
 CREATED_TREE=""
-if [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then
+if [ -n "$WORKTREE" ] && [ -e "$WORKTREE/.git" ]; then
   if [ -n "$BRANCH" ]; then
     read_tree_records "$WORKTREE"
     [ -z "$SIBLING" ] || wait_on_sibling "$WORKTREE"
   fi
   cd "$WORKTREE" || exit 1
 else
-  WORKTREE="${GC_DIR:-$PWD}/worktrees/$WORK_ID"
+  if [ -z "${GC_CITY_PATH:-}" ] || [ -z "${GC_RIG:-}" ]; then
+    echo "$PROG: cannot name the tree, which goes under \$GC_CITY_PATH/.gc/worktrees/\$GC_RIG: GC_CITY_PATH='${GC_CITY_PATH:-}' GC_RIG='${GC_RIG:-}'" >&2
+    exit 1
+  fi
+  WORKTREE="$GC_CITY_PATH/.gc/worktrees/$GC_RIG/$WORK_ID"
   RR="$SCRIPT_DIR/rig-root.sh"
   [ -x "$RR" ] || { echo "$PROG: rig-root.sh not found in the pack" >&2; exit 1; }
   RIG_ROOT=$("$RR")
   [ -n "$RIG_ROOT" ] || { echo "$PROG: cannot resolve the rig root" >&2; exit 1; }
+  gc bd update "$WORK_ID" --set-metadata work_dir="$WORKTREE" </dev/null >/dev/null || exit 1
   git -C "$RIG_ROOT" worktree add "$WORKTREE" --detach "origin/$BASE" >&2 || exit 1
   CREATED_TREE="$WORKTREE"
   cd "$WORKTREE" || exit 1
-  gc bd update "$WORK_ID" --set-metadata work_dir="$WORKTREE" </dev/null >/dev/null || exit 1
 fi
 
 RECORD_BRANCH=()
@@ -343,11 +363,11 @@ REJECTION=$(work_meta rejection_reason)
 if [ -n "$REJECTION" ] && [ -n "$(work_meta branch)" ]; then
   echo "resuming rejected branch by MERGE (git merge --no-edit origin/$BASE); never rebase or force-push"
   RESUME_FROM=$(git rev-parse -q --verify "refs/remotes/origin/$BRANCH" || git rev-parse HEAD)
-  # A conflict or stale-base rejection asks for nothing else, so a commit of the
-  # bead's own is then an edit beyond the merge and owes an audit entry; any other
-  # rejection carries work of its own.
+  # A conflict rejection asks for nothing else, so a commit of the bead's own is
+  # then an edit beyond the merge and owes an audit entry; any other rejection
+  # carries work of its own.
   case "$REJECTION" in
-    "stale base at head "*|"Conflicts with "*) RESUME_SCOPE=merge-only ;;
+    "Conflicts with "*) RESUME_SCOPE=merge-only ;;
     *) RESUME_SCOPE=with-work ;;
   esac
   if ! gc bd update "$WORK_ID" --set-metadata "bring_current_from=$RESUME_FROM" --set-metadata "bring_current_scope=$RESUME_SCOPE" \

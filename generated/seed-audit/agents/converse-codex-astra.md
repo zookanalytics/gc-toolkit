@@ -418,7 +418,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
@@ -505,6 +511,13 @@ feedback about this diff is `obs.directive=diff`. Feedback about *this
 change's content* (a bug, a wrong approach) is not an observation — it
 is just review. When unsure, file it; the distiller's job is to judge,
 yours is not to filter.
+
+A change to how agents work that you would suggest, but should not make
+on your own, is filed the same way from any session, and never kept in
+your memory. Its `## Statement` says what you saw, in the work or in a
+message, that led to it, its `## Proposed norm` carries the suggestion,
+and its provenance names the bead you were working on. Nothing changes
+how an agent works until the operator approves the change.
 
 Operator fast path: "learn this: …" files the same bead with the
 operator's wording as `## Statement`, and `"obs.source": "operator"` plus

@@ -809,53 +809,27 @@ out=$(pr_finishing_birth ''); rc=$?
 [ "$rc" -ne 0 ] && [ -z "$out" ] && ok "…and so does an empty work order" \
   || bad "…and so does an empty work order (rc=$rc out='$out')"
 
-# --- pr_finishing_settle and route_finishing: settle under a short lock wait, then sling ---
+# --- pr_finishing_settle: settle under a short lock wait ---------------------
 # A writer that logs its call and the lock wait it was handed into the stub
-# gc's own log, so the order of the settle and the sling reads off one log.
-# It refuses to settle tk-stuck, as a lock it cannot take leaves it.
+# gc's own log.
 cat > "$TMP/qp-log" <<'QP'
 #!/usr/bin/env bash
 printf 'qp %s wait=%s\n' "$*" "${QUEUE_PRIORITY_LOCK_WAIT_SECS:-unset}" >> "$STUB_GC_LOG"
-[ "$2" != tk-stuck ] || { echo "queue-priority: settle: could not take the priority lock" >&2; exit 1; }
 echo "queue-priority: settled $2 at P1"
 QP
 chmod +x "$TMP/qp-log"
-store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}},
-        {"id":"tk-c2","status":"open","assignee":"","title":"c2","notes":"","metadata":{"anchor_bead":"tk-anc"}},
-        {"id":"tk-stuck","status":"open","assignee":"","title":"stuck","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
+store '[{"id":"tk-c1","status":"open","assignee":"","title":"c1","notes":"","metadata":{"anchor_bead":"tk-anc"}}]'
 reset_log
 out=$(GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" pr_finishing_settle tk-c1); rc=$?
 eq "$rc|$out" "0|queue-priority: settled tk-c1 at P1" "pr_finishing_settle: the writer's settle, its narrative on stdout"
 eq "$(grep '^qp ' "$STUB_GC_LOG")" "qp settle tk-c1 wait=$PR_FINISHING_LOCK_WAIT_SECS" "…waiting PR_FINISHING_LOCK_WAIT_SECS for the lock"
 eq "$PR_FINISHING_LOCK_WAIT_SECS" "30" "…which is 30 seconds"
-reset_log
-GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-c1 rig/gc-toolkit.polecat >/dev/null; rc=$?
-eq "$rc" "0" "route_finishing: a child that settles is routed"
-eq "$(meta tk-c1 gc.routed_to)" "rig/gc-toolkit.polecat" "…to the pool named"
-SL=$(grep -n '^qp settle tk-c1 wait=30$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-RL=$(grep -n '^sling rig/gc-toolkit.polecat tk-c1 --no-formula --no-convoy$' "$STUB_GC_LOG" | head -1 | cut -d: -f1)
-if [ -n "$SL" ] && [ -n "$RL" ] && [ "$SL" -lt "$RL" ]; then
-  ok "…settled under the short lock wait before gc sling routes it, with no formula, no convoy and no priority"
-else
-  bad "route_finishing did not settle before it slung the child (settle at log line '${SL:-none}', sling at '${RL:-none}')"
-fi
-eq "$(grep -c '^bd update tk-c1' "$STUB_GC_LOG")" "0" "…and writes no route by hand"
-reset_log
-out=$(STUB_SLING_FAIL=1 GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-c2 rig/gc-toolkit.polecat 2>&1 >/dev/null); rc=$?
-[ "$rc" -ne 0 ] && ok "route_finishing: a sling that fails fails it" || bad "route_finishing: a sling that fails fails it (rc=$rc)"
-eq "$(meta tk-c2 gc.routed_to)" "<absent>" "…the child left unrouted"
-has "$out" "simulated sling failure" "…and the sling's refusal on stderr"
-reset_log
-GC_QUEUE_PRIORITY_TOOL="$TMP/qp-log" route_finishing tk-stuck rig/gc-toolkit.polecat 2>/dev/null; rc=$?
-eq "$rc" "1" "route_finishing: a child that does not settle returns 1"
-eq "$(meta tk-stuck gc.routed_to)" "<absent>" "…and is not routed"
-eq "$(grep -c -e '^sling' -e '^bd update tk-stuck' "$STUB_GC_LOG")" "0" "…by any sling or write"
 
-# One copy of the settle-then-route and of the cadence's lock wait: a creator
-# that routed a child itself, or set the wait itself, would let the two drift.
-copies=$(grep -l -E '^[[:space:]]*route_finishing[[:space:]]*\(\)|QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
+# One copy of the cadence's lock wait: a creator that set the wait itself would
+# let the two drift.
+copies=$(grep -l -E 'QUEUE_PRIORITY_LOCK_WAIT_SECS=' "$HERE"/*.sh \
   | grep -v -e '\.test\.sh$' -e '/bd-lib\.sh$' | sed "s|^$HERE/||" | paste -sd' ' -)
-eq "$copies" "" "(NO-COPY) only bd-lib.sh defines route_finishing or sets the cadence's lock wait"
+eq "$copies" "" "(NO-COPY) only bd-lib.sh sets the cadence's lock wait"
 
 # --- validation_work_order: the shape mol-validate reads ----------------------
 eq "$(validation_work_order tk-anc correctness abc123)" \

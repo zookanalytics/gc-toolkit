@@ -85,7 +85,7 @@ const (
 var epicFields = []struct{ flag, key, holds string }{
 	{"handle", "epic_handle", "epic_handle: the three to five `words` that name the epic wherever it is shown"},
 	{"hypothesis", "epic_hypothesis", "epic_hypothesis: for whom, what changes, and the signal that shows it worked, in one `sentence`"},
-	{"boundaries", "epic_boundaries", "epic_boundaries: the axis the epic is cut on, and the work beside it that it is not, with where that work lives"},
+	{"boundaries", "epic_boundaries", "epic_boundaries: the axis the epic is cut on, and the work a reader could mistake for the epic's own, with where that work lives"},
 	{"closure-condition", "epic_closure_condition", "epic_closure_condition: the three to six checks a person can run to answer the hypothesis"},
 	{"indicators", "epic_indicators", "epic_indicators: the one to three signals, watched while the epic is in flight, that say whether the hypothesis is being borne out"},
 }

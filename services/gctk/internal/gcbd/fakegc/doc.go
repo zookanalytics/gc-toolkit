@@ -180,8 +180,8 @@
 // # Where it departs from bd
 //
 // A dep add onto a bead the store does not hold stores the edge, where bd
-// refuses an edge onto a missing bead of its own store, because the fixtures
-// of pr-facts.test.sh add edges onto beads they never filed. A create mints the
+// refuses an edge onto a missing bead of its own store, because a suite's
+// fixtures can add edges onto beads they never filed. A create mints the
 // id new-<N>, for its store's Nth row, a rig's store included, where bd mints
 // under the store's prefix, and answers {"id": ...} alone. gc routes a by-id
 // call by its subjects' prefix only while every subject names one store, and

@@ -187,9 +187,9 @@ tab shows before its name:
   name or prefix for a new topic, and the question (*Engage*, below).
 - **Return to a conversation**, Ctrl+R, lists the open conversations
   (*Returning to a conversation*, below).
-- **People**, Ctrl+P, lists the seats the operator sits with: mechanik, of
-  which the city has one, and each rig's po, the Product Owner, by its rig's
-  name and prefix. The city's HQ has none.
+- **People**, Ctrl+P, lists the seats the operator sits with: mechanik and
+  the mayor, of which the city has one each, and each rig's po, the Product
+  Owner, by its rig's name and prefix. The city's HQ has no po.
 
 A page's key goes straight to that page from any page and any field, and the
 key of the page on screen does nothing. In the question, Ctrl+N and Ctrl+P go
@@ -215,9 +215,10 @@ no seat and says the seats did not read, and the other pages still list. A
 suspended rig's po reads rig suspended, since Gas City starts no session in a
 suspended rig, and the page says why it cannot start and how to resume the rig. The page reads the city again every ten seconds
 while it is on screen. ↑/↓ pick a seat, a line says what Enter does for it, and
-Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`
-or `gc-helm po --rig <name>`, as the form runs a conversation's attach. So all
-the command prints stays on the terminal and its exit status is the form's.
+Enter leaves the terminal and then runs the seat's command, `gc-helm mechanik`,
+`gc-helm mayor` or `gc-helm po --rig <name>`, as the form runs a
+conversation's attach. So all the command prints stays on the terminal and its
+exit status is the form's.
 Each command attaches to the seat's session, starting it first when it is not
 running (*A po sitting*, below). Gas City's attach carries no message, so a
 seat takes no question, and the sitting's purpose is given in the sitting. The
@@ -749,6 +750,20 @@ templates declare a pool at zero (`min_active_sessions = 0`) with no
 `scale_check` and no work routed to them, so no demand pass counts anything for
 one, and `assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
 
+**Mail starts the sitting's turn.** Mail sent or replied to a sitting, from any
+sender and from the dashboard too, starts the sitting's turn within about 30
+seconds, on the next pass of Gas City's orders lane, and later when that lane
+is busy. The mail-notify-on-send and mail-notify-on-reply orders run
+`gctk mail notify` on each mail event. It nudges the sitting with "You have
+mail from <sender>" unless a notice a sender's `--notify` queued will tell it
+first. The mail-notify-reconcile order runs the same pass every 15 minutes, so
+mail whose event's run failed, or whose event never reached the orders, starts
+the turn within about 15 minutes instead. A sitting that sleeps is woken by the
+nudge. Its prompt starts a turn once it is up, as at every wake, and Gas City's
+prompt hook adds its unread mail to that turn, whichever nudge dispatcher the
+city runs. A sitting that has finished, or is suspended, keeps its mail
+waiting. `gctk mail notify --help` states the rule.
+
 **Recovery resumes the sitting through its alias.** A sitting whose session
 sleeps, or whose runtime stopped, resumes when the operator attaches:
 `wake_mode = "resume"` replays its transcript. Its claim is idempotent for its
@@ -939,8 +954,8 @@ ruling reaches more than one, and each other one stands. It runs in that PR's
 own rig, with its store, pool and checkout, when a gate in another rig's store
 releases it. The PR it acts on is recorded on the conversation first
 (`gc.ruling_consequence`), so a re-run of the same ruling acts on the same PR.
-A re-run that finds that PR closed, as a retirement leaves it once pr-facts
-consummates it, goes on without it. The record also names the rework a ruling
+A re-run that finds that PR closed, as a consummated retirement leaves it, goes
+on without it. The record also names the rework a ruling
 filed, once it is filed, because the store keeps no trace of which ruling
 filed a child. A re-run that finds that rework closed files no second one and
 supersedes no review again, and a stay waits on the closed rework. An attempt
@@ -1098,16 +1113,15 @@ the change because someone else holds it, the sitting removes the edge itself,
 and a conversation's close ends its effect.
 
 **The tree.** Work's setup, `work-setup.sh --held-by <conversation>`, cuts the
-change's tree at `<the sitting's home>/worktrees/<bead>` on `polecat/<bead>`,
-fresh from its target, and records `work_dir` and `branch` on the bead, where and
-how it cuts a polecat's. It refuses a change that carries a rejection reason,
-writing nothing: a check sent that change back, and a polecat's resume brings
-its branch current by merging its target in, which a sitting never does. The
-home's start syncs the home to the default branch and leaves `worktrees/`
-alone. Before its first edit the sitting reads the polecat class's standards
-from their fragments. It commits after each step the operator agrees, with no
-identity flags, because each agent home's git configuration signs its commits,
-and the commits stay local until Work's hand-off pushes them.
+change's tree at `.gc/worktrees/<rig>/<bead>`, beside the agents' homes, on
+`polecat/<bead>`, fresh from its target, and records `work_dir` and `branch` on
+the bead, where and how it cuts a polecat's. It refuses a change that carries a
+rejection reason, writing nothing: a check sent that change back, and a
+polecat's resume brings its branch current by merging its target in, which a
+sitting never does. Before its first edit the sitting reads the polecat class's
+standards from their fragments. It commits after each step the operator agrees,
+with no identity flags, because each agent home's git configuration signs its
+commits, and the commits stay local until Work's hand-off pushes them.
 
 **The hand-off to the refinery** comes on the operator's go, which the sitting
 asks for once the agreed steps are in, or which the operator gives when they
@@ -1175,9 +1189,10 @@ proves that it holds the PR (`gctk pr push --check`): the bead owns a PR on the
 pending record and waits on the conversation through the `blocks` edge every
 conversation on an open PR carries, and the conversation is in progress under
 the sitting. It edits a checkout of the branch's tip in a tree under its home
-that has no local branch, and pushes through `gctk pr push`, which proves the
-holding again, refuses a checkout whose origin reaches any repository but the
-PR's, returns the PR to draft and pushes under the lease. A review run or
+that has no local branch. The home's start syncs the home to the default branch
+and leaves `worktrees/` alone. The sitting pushes through `gctk pr push`, which
+proves the holding again, refuses a checkout whose origin reaches any repository
+but the PR's, returns the PR to draft and pushes under the lease. A review run or
 another writer can work the branch at the same time, and the lease keeps
 either push from overwriting the other: when the branch holds a commit the tree
 does not, the push sends nothing, and the sitting merges that commit in and
@@ -1608,6 +1623,35 @@ for in the sitting. A sitting the attach starts itself, as it does
 while the city's controller is down, or when the po's last sitting ends
 between the attach's check that it is running and the attach itself, gets the
 po's prompt too, which the attach sends once the session runs.
+
+## A mayor sitting
+
+The mayor shows the operator what needs them across the city and why, and
+moves each matter they pick to its home. It is a named session of the city,
+one for the city, which the operator opens for one sitting at a time from its
+row on Engage's People page or with `gc-helm mayor`, Gas City's attach on
+`<binding>.mayor`. Its sitting starts and ends as a po's does (*A po sitting*,
+above). Only the operator's attach starts it: no escalation or fallback of the
+city's names it, so the mail still goes to `human`, and the board's city page
+shows how many messages wait there. Opening a po, mechanik or a conversation
+directly stays the ordinary way in, and the mayor is an optional one.
+
+A sitting reads the operator's mailbox, the mayor's own, where Gas City's own
+defaults send some alerts, and each rig's needs as `helm-svc board --json`
+prints them, the needs the board's rig pages count. It names a rig, a bead or
+a mail store whose read failed, and leaves it unassessed until a read
+covers it. Mail and a need that name one bead, pull request or subject are one
+matter. Each matter the operator picks ends at a handoff the mayor writes: a
+conversation for a decision (*Engage*, above), the rig's po for a priority or
+new work, held for it with `hold:mayor`, the `work` skill's writer for work a
+ruling or placement already authorized, the owner's record and word to the
+owner for a matter an agent owns, and, for a matter no role or workflow owns, a
+conversation about which home it needs, with the matter left open on its
+record. The mayor archives what has ended and says so, files the fix for a
+sender of junk held for the po, and keeps no rule of its own. It implements
+nothing, places nothing and sets no priority, the queue `hold:mayor` holds is
+the po's, and a matter is no longer the mayor's once its handoff is written.
+The method is its prompt's (`agents/mayor/prompt.template.md`).
 
 ## How a pane dies when no sitting is live
 

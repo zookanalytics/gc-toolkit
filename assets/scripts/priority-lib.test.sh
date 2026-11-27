@@ -87,6 +87,7 @@ echo "# a workflow bead leads to the bead it was poured for"
 walk step-1a && eq "$(ask 'priority_subject($g[0]) | .id')" '"m-plain"' "(SUBJECT) a step leads through its root and input convoy to its work bead"
 walk root-owned && eq "$(ask 'priority_subject($g[0]) | .id')" '"cv-owned"' "(SUBJECT) a workflow over a convoy gascity did not make leads to that convoy"
 walk rework-1 && eq "$(ask 'priority_subject($g[0]) | .id')" '"rework-1"' "(SUBJECT) a bead that is not a workflow bead is its own subject"
+walk step-rv && eq "$(ask 'priority_subject($g[0]) | .id')" '"run-rv"' "(SUBJECT) a review run's step leads to the run's root, which is PR-finishing work of the bead and not one of its workflows"
 
 echo "# the followers index"
 jq -c '[ .beads[] | {key: .id, value: .} ] | from_entries' "$FX" > "$TMP/all.json"
@@ -97,6 +98,9 @@ eq "$(printf '%s' "$idx" | jq -c '.["epic-1"] | sort')" \
 eq "$(printf '%s' "$idx" | jq -c '.["anchor-1"] | sort')" '["review-1","rework-1"]' "(FOLLOWERS) an anchor's PR-finishing work follows it"
 eq "$(printf '%s' "$idx" | jq -c '.["m-plain"] | sort')" '["cv-1"]' "(FOLLOWERS) a work bead's input convoy follows it, and a convoy gascity did not make does not"
 eq "$(printf '%s' "$idx" | jq -c '.["root-1"] | sort')" '["fin-1","step-1a"]' "(FOLLOWERS) a root's steps follow it"
+eq "$(printf '%s' "$idx" | jq -c '.["anchor-cm"] | sort')" '["cv-rv","cv-rv0","rework-cm","run-rv","run-rv0"]' \
+   "(FOLLOWERS) the bead that owns a PR is followed by its finishing work, its review runs' roots and their input convoys"
+eq "$(printf '%s' "$idx" | jq -c '.["run-rv"] | sort')" '["step-rv"]' "(FOLLOWERS) a review run's steps follow its root"
 eq "$(printf '%s' "$idx" | jq -c '.["closed-epic"] // [] | sort')" '["orphan"]' "(FOLLOWERS) the index names what could follow a closed bead, and priority_of decides it follows nothing"
 eq "$(printf '%s' "$idx" | jq -c '[ .[][] ] | index("merged-anchor")')" 'null' "(FOLLOWERS) a closed bead follows nothing"
 
@@ -144,13 +148,6 @@ for r in "${READERS[@]}"; do
     grep -Fq '$PRIORITY_JQ' "$r" && ok "(READERS) $rel applies \$PRIORITY_JQ" || bad "(READERS) $rel applies \$PRIORITY_JQ"
     grep -Fq 'priority_graph ' "$r" && ok "(READERS) $rel builds its graph with priority_graph" || bad "(READERS) $rel builds its graph with priority_graph"
 done
-# pr-facts.sh reads the approval alone: the rank an anchor's PR-finishing work
-# follows, which it settles that work to and records.
-r="$HERE/pr-facts.sh"
-grep -Eq '^[[:space:]]*\.[[:space:]]+"[^"]*priority-lib\.sh"' "$r" && ok "(READERS) pr-facts.sh sources priority-lib.sh" || bad "(READERS) pr-facts.sh sources priority-lib.sh"
-grep -Fq 'prio_pr_approved' "$r" && grep -Fq '$PRIORITY_JQ' "$r" \
-    && ok "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved" \
-    || bad "(READERS) pr-facts.sh reads the approval through \$PRIORITY_JQ's prio_pr_approved"
 
 echo "# no other file defines the function"
 copies="$(git -C "$ROOT" grep -l -F -e 'def priority_of(' -e 'def prio_follows:' -e 'def prio_shift:' -e 'def prio_pr_approved:' -- . 2>/dev/null \
