@@ -23,13 +23,16 @@ restart, so post no framing until the block below has written that line:
 
 ```bash
 NEED="<the one decision or input needed, at most 130 characters>"
-gc bd update "$CONVERSATION" --append-notes "holding: $NEED" \
+gc bd update "$CONVERSATION" --if-assignee "$GC_ALIAS" --if-status in_progress --append-notes "holding: $NEED" \
   && gc bd update "$SUBJECT" --append-notes "Conversation $CONVERSATION holding: $NEED" \
   && echo "the hold is recorded"
 ```
 
-No closing line means the store refused a write: do NOT post the framing, and
-say so in the thread rather than describing the subject as held.
+No closing line means nothing was held: the store refused a write, or the
+guarded write found the conversation no longer in progress under this sitting,
+as when the operator ended it meanwhile, and wrote nothing (exit 13). Do NOT
+post the framing, and say in the thread what stopped it rather than describing
+the subject as held.
 
 ## 2. Gate what must wait
 
@@ -72,6 +75,12 @@ gc bd dep remove "$ANCHOR" "$CONVERSATION" \
 The lift lasts for this sitting, and engage adds the edge again for the next
 sitting. A hold the operator wants to outlast the conversation is a gate of its
 own on the anchor (the `prs` skill, holding its merge).
+
+**A PR a return holds waits for the operator's settlement.** In a rig's store,
+when a stay's work is back, the city has already held its PR's merge for the
+return (`converse-stay`). Lift that hold only on the operator's ruling that settles the
+returned work, never because the return found nothing left to ask. A sign-off
+that ends the conversation releases it with the close.
 
 **On any other subject, gate only what must wait for the answer**, and only
 when no gate the conversation replies to holds it already. Such a bead is a
@@ -157,15 +166,21 @@ and record it on the conversation first (the prompt's hand-back). When the
 recommendation sends work, the decision names the formula the work goes on,
 chosen as the `work` skill says. The decision also says whether you recommend
 that the sitting end at its hand-off or stay for the work's return, and why
-(the prompt's End or stay). It says when a stay would come back, in the
-operator's terms, and recommends ending at the hand-off when that is after the
-merge:
+(the prompt's End or stay). It names the one piece of work a stay would be
+for, and says when the stay would come back, in the operator's terms, that it
+comes back to discuss the result whatever it finds, and that other work the
+ruling sends brings no return of its own:
 
-| The ruling sends | A stay comes back | You recommend |
-|---|---|---|
-| A rework of the PR under discussion | When the rework reaches the PR's branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR's checks review the reworked branch again. |
-| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
-| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
+| The stay is for | It comes back |
+|---|---|
+| New work that opens its own PR | Once the city has finished with that PR and only the operator's part is left, which is after its review and its required checks have passed, or once the work closes. |
+| A rework of the PR under discussion | Once the rework is done and the city has finished with the PR again. |
+| The conversation's own subject | Once the city has finished with the subject's PR, or once the subject closes. |
+| Work that opens no PR of its own | Once the work closes. |
+
+In the city's own store a stay comes back only once its work closes. For new
+work that opens its own PR, that is after the merge, so recommend ending at the
+hand-off there. `converse-stay` gives the read that tells the stores apart.
 
 Then offer the close-out as the last line, the only thing below the hand-back.
 The close-out is the switch that ends the sitting, put where the operator

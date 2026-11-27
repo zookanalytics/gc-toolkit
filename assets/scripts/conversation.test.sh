@@ -9,6 +9,11 @@
 #   (SHAPE)  `conversation` also wants a task tracking exactly one bead: a
 #            second tracks edge, no tracks edge, or another issue type is not one
 #   (SUBJ)   conversation_subjects names the beads its tracks edges reach
+#   (GATE-TYPE) $STAY_GATE_TYPE is the type services/gctk/gate defines
+#   (GATE)   stay_gate and open_stay_gate tell a stay's gate, open or closed,
+#            from a person's gate and from work; stay_named reads the ids every
+#            staying: line names; back_unstayed holds a closed stay's gate that
+#            closed after the last hand-back and that no staying: line names
 #   (NO-COPY) no other file in the pack defines these defs
 # Reads the repo only; no gc, no city, no network.
 #
@@ -70,8 +75,38 @@ eq "$(shape '{id:"tk-c1",issue_type:"gate",await_type:"human",assignee:"human",d
 eq "$(row human | jq -r "$CONVERSATION_JQ"'conversation_subjects | join(",")')" "n-1" \
    "(SUBJ) conversation_subjects names the bead it tracks"
 
+echo "# a stay's gate"
+GO_TYPE=$(sed -n 's/^const NeedsReview = "\(.*\)"$/\1/p' "$ROOT/services/gctk/gate/gate.go")
+eq "${STAY_GATE_TYPE:-}" "${GO_TYPE:-<no NeedsReview in services/gctk/gate/gate.go>}" \
+   "(GATE-TYPE) \$STAY_GATE_TYPE is the type services/gctk/gate defines as NeedsReview"
+gate_says() { jq -nc "$1" | jq -r "$STAY_GATE_JQ"'"\(stay_gate) \(open_stay_gate)"'; }
+eq "$(gate_says '{id:"tk-g",issue_type:"gate",await_type:"gctk:needs-review",status:"open"}')" "true true" \
+   "(GATE) an open gate of the type is a stay's open gate"
+eq "$(gate_says '{id:"tk-g",issue_type:"gate",await_type:"gctk:needs-review",status:"closed"}')" "true false" \
+   "(GATE) a closed one is a stay's gate, no longer open"
+eq "$(gate_says '{id:"tk-g",issue_type:"gate",await_type:"human",status:"open"}')" "false false" \
+   "(GATE) a person's gate is no stay's gate"
+eq "$(gate_says '{id:"tk-w",issue_type:"task",await_type:"gctk:needs-review",status:"open"}')" "false false" \
+   "(GATE) work is no stay's gate, whatever it carries"
+CONV='{"id":"tk-c1","notes":"staying: keep it (waits on tk-g1)\nholding: rule on it\nstaying: keep more (waits on tk-g2, tk-w)\nstaying: once more","metadata":{"gc.handback_at":"2026-11-12T10:00:00Z"}}'
+eq "$(printf '%s' "$CONV" | jq -r "$STAY_GATE_JQ"'stay_named | join(",")')" "tk-g1,tk-g2,tk-w" \
+   "(GATE) stay_named reads the ids every staying: line names, and none from a line that names nothing"
+back() { jq -nc "$1" | jq -r --argjson conv "$2" "$STAY_GATE_JQ"'back_unstayed($conv)'; }
+eq "$(back '{id:"tk-g3",issue_type:"gate",await_type:"gctk:needs-review",status:"closed",closed_at:"2026-11-12T11:00:00Z"}' "$CONV")" "true" \
+   "(GATE) a stay's gate that closed after the last hand-back, named by no staying: line, is back unstayed"
+eq "$(back '{id:"tk-g2",issue_type:"gate",await_type:"gctk:needs-review",status:"closed",closed_at:"2026-11-12T11:00:00Z"}' "$CONV")" "false" \
+   "(GATE) …but not one a staying: line names"
+eq "$(back '{id:"tk-g3",issue_type:"gate",await_type:"gctk:needs-review",status:"closed",closed_at:"2026-11-12T09:00:00Z"}' "$CONV")" "false" \
+   "(GATE) …nor one that closed before the last hand-back"
+eq "$(back '{id:"tk-g3",issue_type:"gate",await_type:"gctk:needs-review",status:"open"}' "$CONV")" "false" \
+   "(GATE) …nor one still open"
+eq "$(back '{id:"tk-g3",issue_type:"gate",await_type:"human",status:"closed",closed_at:"2026-11-12T11:00:00Z"}' "$CONV")" "false" \
+   "(GATE) …nor a person's gate"
+eq "$(back '{id:"tk-g3",issue_type:"gate",await_type:"gctk:needs-review",status:"closed",closed_at:"2026-11-01T11:00:00Z"}' '{"id":"tk-c1","notes":""}')" "true" \
+   "(GATE) with no hand-back recorded, any closed one no line names is back unstayed"
+
 echo "# no private copies"
-COPY_RE='def (conversation|conversation_alias|conversation_subjects)[^a-z_]|conversation_assignee\(\)'
+COPY_RE='def (conversation|conversation_alias|conversation_subjects|stay_gate|open_stay_gate|stay_named|back_unstayed)[^a-z_]|conversation_assignee\(\)'
 COPIES=""
 for d in agents assets doctor formulas lifecycle orders overlays packs services skills template-fragments tools; do
     [ -d "$ROOT/$d" ] || continue
@@ -81,7 +116,7 @@ for d in agents assets doctor formulas lifecycle orders overlays packs services 
         COPIES="$COPIES ${f#"$ROOT"/}"
     done <<< "$(grep -rlE "$COPY_RE" "$ROOT/$d" 2>/dev/null)"
 done
-eq "${COPIES# }" "" "(NO-COPY) no file outside conversation.sh defines the conversation shape"
+eq "${COPIES# }" "" "(NO-COPY) no file outside conversation.sh defines the conversation shape or a stay's gate"
 
 echo
 echo "conversation: $PASS passed, $FAIL failed"

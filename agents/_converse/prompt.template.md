@@ -50,8 +50,8 @@ one call to the next, so at the top of every later call, set `CONV`,
 |---|---|---|
 | `fresh` | You have just taken up the conversation. | `converse-recheck-premise` |
 | `interrupted` | A restart came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
-| `waiting` | You are staying for work that is still out, and an attach, a restart or a notice brought you back before it closed. | `converse-stay` |
-| `returned` | The work you stayed for has closed. | `converse-stay` |
+| `waiting` | You are staying for work that is still out, and an attach, a restart or a notice brought you back meanwhile. | `converse-stay` |
+| `returned` | The work you stayed for is back: the city has finished with its PR and only the operator's part is left, or the work has closed. | `converse-stay`, to carry out the return |
 | `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | Acknowledge the drain, as the cases below say. |
 | `unreadable` | The entry could not read the claim or the record. | Do not drain and do not close anything. Run the entry again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:`, and wait. |
@@ -95,31 +95,36 @@ that action.
    they would most want to stop: anything the course removes, any change of
    scope and anything it asks of another rig (`converse-settle`).
 4. **End or stay?** When the ruling sends work, agree with the operator whether
-   the sitting ends at its hand-off or stays until that work returns, and say
-   when the stay would come back, in the operator's terms. A return after the
-   merge comes too late to change the work except through another PR. So when
-   the stay would come back after the merge, as it does for new work that
-   opens its own PR, recommend ending at the hand-off, with what was agreed
-   written into the work's brief in full, and say why. Otherwise recommend
-   staying when the discussion will help judge the result, because what was
-   agreed holds more than the work's brief carries, and ending when the brief
-   and the work's ordinary checks suffice. Put the choice to the operator with
-   your recommendation, so they need not know to ask, and never stay without
-   their agreement.
+   the sitting ends at its hand-off or stays until that work is back. A stay
+   comes back for one piece of work, before the operator's next decision about
+   it, and always to discuss the result with them, whatever it finds. Say which
+   piece it is for, and when it would come back, in the operator's terms: once
+   the city has finished with that work's PR and only their part is left,
+   which is after its review and its required checks have passed, or once the
+   work closes. Trouble on the work, such as a failed check or a question filed
+   on it, does not bring the sitting back, because it reaches the operator as
+   it would with no stay. Other work the ruling sends brings no return of its
+   own, so say so. Recommend staying when the discussion will help judge the
+   result, because what was agreed holds more than the work's brief carries.
+   Recommend ending when the brief and the work's ordinary checks suffice. In
+   the city's own store a stay comes back only once its work closes. For new
+   work that opens its own PR, that is after the merge, so recommend ending at
+   the hand-off there. Put the choice to the operator with your
+   recommendation, so they need not know to ask, and never stay without their
+   agreement.
    - **End**: the sign-off closes the conversation (`converse-settle`). The
      sign-off's last words say what the record does next: what the subject
      waits on, and what closes the subject once that work lands. A sitting that
      ends makes no promise of its own to confirm, check, watch or follow up,
      because nothing brings it back.
-   - **Stay**: the sign-off leaves the conversation open and waiting on the
-     work, and the session sleeps until the work closes (`converse-stay`). The
-     return then tells the operator where what landed matches what was agreed
-     and where it departs. The return passes and fails nothing: the work's
-     checks give the verdicts, and the subject closes as it would after a
-     hand-off. A sitting can stay only for work other than its subject, in its
-     conversation's own store. It can stay for the landing of the PR whose
-     merge its conversation holds, or for work that waits on that PR, only
-     once that hold is lifted.
+   - **Stay**: the conversation stays open, waiting for that one piece of work,
+     and the session sleeps until it is back (`converse-stay`). The return
+     checks the result against each item that was agreed, tells the operator
+     which are covered, with its recommendation, and waits for them whatever it
+     found. In a rig's store, the work's PR does not merge until they settle
+     it with you. The return passes and fails nothing: the work's checks give
+     the verdicts, and the subject closes as it would after a hand-off. A
+     sitting stays only for work in its conversation's own store.
 
 ## Actions
 

@@ -62,6 +62,13 @@ type Store interface {
 	// create whose commit result it lost with the same reply and exit as a
 	// refusal, so the caller finds the bead before it files again.
 	Create(title string, args ...string) (string, error)
+	// CreateGate makes one `gc bd gate create` of a gate of type typ, titled
+	// title, whose await id is awaitID and which blocks the bead blocks, and
+	// returns the gate's id. On a Dolt server bd files the gate, then writes
+	// the blocked bead's edge onto it, then commits, so a create that stops
+	// between the two leaves a gate that nothing waits on. An error may still
+	// have filed the gate, as Create's may.
+	CreateGate(typ, awaitID, blocks, title string) (string, error)
 	// Prefix reads the id prefix the store gives a bead it files. A read that
 	// fails or names none returns a *ReadError.
 	Prefix() (string, error)

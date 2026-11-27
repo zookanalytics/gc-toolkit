@@ -389,8 +389,9 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   it blocks.
 - **A conversation is a task about one subject.** It tracks its subject,
   replies to each human gate it answers through bd's `replies-to` edge, and
-  blocks nothing but an open PR's anchor, whose merge it holds until it closes,
-  and the change its sitting makes, which it holds until the hand-off.
+  blocks nothing but an open PR's anchor, whose merge it holds until it closes
+  or its sitting lifts the hold, and the change its sitting makes, which it
+  holds until the hand-off.
   It waits in the operator's queue, assigned to `human`, until
   the operator engages it. `gc-helm.sh open` files one, and so do the
   operator's intake, `operator-intake.sh`, and a caller asking about a bead with
@@ -403,15 +404,25 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   the sitting and the operator choose whether it ends at that hand-off or stays
   until the work returns
   ([human-engagement.md](human-engagement.md#a-sitting-that-stays-for-the-return)).
-  Gas City sleeps a sitting that stays, and when the work closes it wakes the
-  sitting with its thread, or sends a sitting still up a notice that the work
-  closed. The board shows a conversation its sitting stays in, and the pull
-  request whose merge it holds, as waiting on that work, not as asks of the
-  operator. On its return the sitting compares
-  what landed with what was agreed and tells the operator where it departs. It
-  passes and fails nothing: the work's own checks give the verdicts, and the
-  subject closes as it would after a hand-off, such as through the validating
-  closer the stay armed (`mol-validate-close`,
+  A stay comes back at the operator's next decision about its work, never
+  after it. For work with no PR, the return is due when the work closes. For
+  work on a PR, whether it opens one or reworks the PR under discussion, the
+  next decision is the approval. The sitting comes back through its own task:
+  its conversation waits while the work is out, and Gas City sleeps the sitting
+  and wakes it with its thread when the return is due. Once the city has
+  finished with the PR and only the operator's part is left, the landing order
+  puts the conversation's hold on the PR's merge and releases the
+  conversation. A sitting stays for one piece of work at a time, and its
+  return outlasts a visit to the sitting and a fresh context for it. On each
+  return the sitting discusses with the operator how the result compares with
+  what was agreed, and waits for them to settle it. The PR does not merge until
+  they do. Settling releases the hold, and leaving the terminal neither
+  approves the work nor cancels the return. The board shows a conversation its
+  sitting stays in, and the pull request whose merge it holds, as waiting on
+  that work, not as asks of the operator. The return passes and fails nothing:
+  the work's own checks give the verdicts, and the subject closes as it would
+  after a hand-off, such as through the validating closer the stay armed
+  (`mol-validate-close`,
   [component-model.md](component-model.md#4-where-each-component-sits)). A
   sitting cut short hands the conversation back to the queue, and the next
   engagement resumes it from the record.
@@ -560,6 +571,13 @@ why a reader must know it, and the work that retires it.
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
   decision that the landing order is the one path is not yet what runs. The
   GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
+- **In the city's own store, a stay comes back only when its work closes.** The
+  landing order reads only the rigs' stores, so nothing resolves a stay's gate
+  in the city's own store, and a stay there waits on its work through an edge.
+  For new work that opens its own PR, that is after the merge, too late to
+  change the work except through another PR, and a stay on the conversation's
+  own subject is refused there. tk-ix11o44 retires it, by resolving the gate
+  there too or by ending every sitting there at its hand-off.
 - **The witness still patrols, and the deacon still runs `gc doctor`.** Until
   the patrols member's second landing, the witness's hourly loop salvages,
   checks pool seats and the refinery's queue in its session, and returns a dead

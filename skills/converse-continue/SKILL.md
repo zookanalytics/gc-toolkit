@@ -61,6 +61,11 @@ the operator's queue until they engage it:
 The entry says `interrupted` and names this skill when a restart came while the
 hold stood. Take the case that fits:
 
+- **The hold is a return's, and its check is not finished**: your thread shows
+  a return under way, or the conversation's notes carry a
+  `## Return hand-over` after their newest `holding:` line. A return records
+  its hold before it checks the work, so finish the return from where it
+  stopped (`converse-stay`, The return).
 - **Your thread holds the framing you posted.** Wait for the operator: there is
   nothing else to do.
 - **Your thread does not hold the framing.** Re-open the sitting from the

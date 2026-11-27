@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/gate"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
@@ -97,6 +98,8 @@ func TestAdvance(t *testing.T) {
 	}
 	humanGate := Bead{ID: "tk-g", Title: "a question", Status: "open", IssueType: "gate", AwaitType: "human"}
 	park := Bead{ID: "tk-park", Title: "parked until the review", Status: "open", IssueType: "gate"}
+	stayGate := Bead{ID: "tk-sg", Title: "back when tk-w needs your review", Status: "open", IssueType: "gate",
+		AwaitType: gate.NeedsReview}
 	epic := Bead{ID: "tk-e", Title: "an epic", Status: "open", IssueType: "epic", Hypothesis: "it helps"}
 	decision := Bead{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
 	advancing := Advance{Advancing: true}
@@ -166,6 +169,24 @@ func TestAdvance(t *testing.T) {
 				work("tk-s", ""), work("tk-w", pool)},
 			waitsOn: map[string][]string{"tk-c": {"tk-w"}},
 			asked:   "tk-c", want: advancing, frontier: VerdictAdvancing},
+		{name: "a conversation that waits on its stay's gate advances while the work is out",
+			live: []Bead{
+				{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c",
+					Edges: []Edge{{ID: "tk-s", Type: "tracks"}}},
+				stayGate, work("tk-s", ""), work("tk-w", pool)},
+			waitsOn: map[string][]string{"tk-c": {"tk-sg"}},
+			asked:   "tk-c", want: advancing, frontier: VerdictAdvancing},
+		{name: "the PR a staying conversation holds advances while the work is out",
+			live: []Bead{
+				{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c",
+					Edges: []Edge{{ID: "tk-w", Type: "tracks"}}},
+				stayGate, work("tk-w", pool)},
+			waitsOn: map[string][]string{"tk-c": {"tk-sg"}, "tk-w": {"tk-c"}},
+			asked:   "tk-w", want: advancing, frontier: VerdictAdvancing},
+		{name: "work behind a park is stuck on the park",
+			live:    []Bead{work("tk-w", pool), park},
+			waitsOn: map[string][]string{"tk-w": {"tk-park"}},
+			asked:   "tk-w", want: stuck("tk-park", "parked"), frontier: VerdictStuck},
 		{name: "a conversation that answers a question is stuck on the question",
 			live: []Bead{
 				{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "human",
@@ -397,5 +418,33 @@ func TestClosedMembersAreReadForAnEpicWithNoOpenMember(t *testing.T) {
 	}
 	if a, _ := r.Answer("tk-busy"); a.Rule != RuleMembers {
 		t.Errorf("Answer(tk-busy) = %+v, want members", a)
+	}
+}
+
+// A conversation that waits on its stay's gate stays, in the queued group,
+// since the city closes the gate. One behind a park is parked.
+func TestAConversationOnItsStaysGateStaysAndOneBehindAParkIsParked(t *testing.T) {
+	conv := Bead{ID: "tk-c", Title: "talk", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c",
+		Edges: []Edge{{ID: "tk-s", Type: "tracks"}}}
+	subject := Bead{ID: "tk-s", Title: "tk-s", Status: "open", IssueType: "task"}
+	for _, c := range []struct {
+		name  string
+		on    Bead
+		rule  Rule
+		group Group
+	}{
+		{"a stay's gate", Bead{ID: "tk-sg", Title: "back when tk-s needs your review", Status: "open", IssueType: "gate",
+			AwaitType: gate.NeedsReview}, RuleStaying, GroupQueued},
+		{"a park", Bead{ID: "tk-sg", Title: "parked", Status: "open", IssueType: "gate"}, RuleParked, GroupNotMoving},
+	} {
+		g := graphOf([]Bead{conv, subject, c.on}, map[string][]string{"tk-c": {"tk-sg"}})
+		r, err := Read([]string{"tk-c"}, g)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, ok := r.Answer("tk-c")
+		if !ok || a.Rule != c.rule || a.Group != c.group {
+			t.Errorf("a conversation behind %s: Answer = %+v, %v; want %s in %s", c.name, a, ok, c.rule, c.group)
+		}
 	}
 }

@@ -19,14 +19,19 @@ place of the close.
 
 Whether a sitting that sends work ends here or stays is the operator's choice.
 Put it to them with your recommendation, and say when a stay would come back,
-in their terms (the prompt's End or stay). Recommend ending at the hand-off
-when the stay would come back after the merge:
+in their terms (the prompt's End or stay). A stay comes back for one piece of
+work, to discuss the result with the operator whatever it finds:
 
-| The ruling sends | A stay comes back | You recommend |
-|---|---|---|
-| A rework of the PR under discussion | When the rework reaches the PR's branch, before the merge, which waits for the return | Staying when the discussion will help judge the result, and ending otherwise. Say that the PR's checks review the reworked branch again. |
-| New work that opens its own PR | Only after that PR has merged | Ending at the hand-off, with what was agreed written into the work's brief in full. Say that a stay would report only after the merge. |
-| Work that opens no PR of its own | When the work closes | Staying when the discussion will help judge the result, and ending otherwise. |
+| The stay is for | It comes back |
+|---|---|
+| New work that opens its own PR | Once the city has finished with that PR and only the operator's part is left, which is after its review and its required checks have passed, or once the work closes. |
+| A rework of the PR under discussion | Once the rework is done and the city has finished with the PR again. |
+| The conversation's own subject | Once the city has finished with the subject's PR, or once the subject closes. |
+| Work that opens no PR of its own | Once the work closes. |
+
+In the city's own store a stay comes back only once its work closes. For new
+work that opens its own PR, that is after the merge, so recommend ending at the
+hand-off there. `converse-stay` gives the read that tells the stores apart.
 
 ## Record
 
@@ -58,10 +63,11 @@ resolve reason.
 When the ruling needs work, file the work and send it before the sign-off, then
 name it in the sign-off's `--waiting-on`, with a `--close-brief` when the
 sign-off arms the subject's validating closer (Sign off, below). The `work`
-skill says which bead carries the work and how to choose its formula. When the
-sitting ends at the hand-off for new work that opens its own PR, write what was
-agreed into the create's description in full, because the brief is then all
-the work carries of the discussion.
+skill says which bead carries the work and how to choose its formula. Write
+what was agreed into the order as a list of items. Each item is a thing the
+result either covers or does not. The order is all the work carries of the
+discussion, and a sitting that stays checks the result against those items
+when it comes back.
 
 The work you send is yours to get right. What the operator says is direction to
 reason through: take each point up in the course or say why not. A remark is
@@ -98,6 +104,11 @@ BLOCK
 Record any other act on the subject's universe the same way once the act
 lands, in one plain sentence that names no other rig or its beads.
 
+When the sitting stays for work it sends itself, promise that work right after
+its send, before the sign-off (`converse-stay`, Stay). The stay comes back for
+that one piece. Before it stays, tell the operator that each other piece of
+work the ruling sends brings no return of its own.
+
 - **Beside the subject, not under it.** Work the subject waits on is a
   dependency. Add `--parent <epic>` only when the work belongs to that epic.
   The subject's parent, as `"$CONV/converse-parent.sh" "$SUBJECT"` prints it,
@@ -107,7 +118,8 @@ lands, in one plain sentence that names no other rig or its beads.
   work goes under that Delivery's epic.
 - **An epic's own decomposition is its member**, created with `--parent "$SUBJECT"`,
   and it gets no `--waiting-on`, because bd refuses a `blocks` edge from a
-  parent to its own descendant. A sitting that stays for it names it in the
+  parent to its own descendant. A sitting that stays for it promises it. In
+  the city's own store, where no promise is made, it names the member in the
   stay's `--waiting-on`, where it is the conversation's wait alone
   (`converse-stay`).
 - **Another rig's pool**: run the create as `gc bd --rig <rig> create`.
@@ -304,7 +316,9 @@ Take the case that fits the ruling:
 
 - **The subject is the work.** Sign off with `--ruled yes --no-wait`, then send
   the subject: `gc sling <rig>/<pool> "$SUBJECT" --on <formula>`. Never send a
-  formula the subject recommends this way: the next case takes it.
+  formula the subject recommends this way: the next case takes it. A sitting
+  that stays for the subject sends it first, then promises it, then makes this
+  sign-off its stay (`converse-stay`).
 - **The subject takes its recommendation.** Reply to the recommendation's gate,
   which is the human gate under the key `first-reaction` that blocks the
   subject, and sign off with `--ruled yes --no-wait --accept`. Send nothing
@@ -321,7 +335,8 @@ Take the case that fits the ruling:
   step: once the other gate clears, Start the conversation on that question
   and rule there to take the recommendation. A `first-reaction` gate on an
   epic's member asks about the member's recommendation, which this case does
-  not take.
+  not take. A sitting that stays makes this sign-off its stay, which promises
+  the subject once Accept has dispatched it (`converse-stay`).
 - **The work will not go on, and a human gate holds the subject.** Stand the
   subject down first, with the gate's `await_id` as the key:
   `"$CONV/stand-down.sh" "$SUBJECT" --key <situation-key> --ruling "<the ruling, one line>" --successor "$CONVERSATION"`.
@@ -333,11 +348,14 @@ Take the case that fits the ruling:
   ruling settles the other bead too. An open PR is retired instead (below).
 - **New work carries the ruling.** Send the work (Send the work, above), then
   sign off with `--ruled yes --waiting-on <the work> --close-brief "<…>"`,
-  without the brief for a subject the sign-off arms no closer for (above).
+  without the brief for a subject the sign-off arms no closer for (above). A
+  sitting that stays promises the work after its send, then makes this
+  sign-off its stay (`converse-stay`).
 - **New work decomposes an epic subject.** Sign off with
   `--ruled yes --no-wait`, or with a `--waiting-on` for only the dependencies
   the sitting also sent. An epic takes no `--close-brief`, because its members
-  carry the brief. A sitting that stays names the member in the stay's
+  carry the brief. A sitting that stays promises the member and signs off the
+  same way. In the city's own store, it names the member in the stay's
   `--waiting-on`, in place of `--no-wait`: the sign-off makes it the
   conversation's wait alone, and the epic's headline waits only on the
   dependencies the sitting also sent, or on nothing (`converse-stay`).

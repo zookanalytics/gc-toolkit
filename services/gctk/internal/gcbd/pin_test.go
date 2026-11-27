@@ -217,6 +217,36 @@ func TestStoreOfNamesTheLongestPrefix(t *testing.T) {
 	}
 }
 
+// InRig tells a bead in a rig's store from one in the city's own, by the store
+// StoreOf names, and names none where StoreOf names none.
+func TestInRigTellsARigsStoreFromTheCitys(t *testing.T) {
+	log := routeStub(t)
+	t.Setenv("STUB_CONFIG", routeConfig)
+	c := &Client{bin: "gc"}
+	for _, tc := range []struct {
+		id      string
+		rig, ok bool
+	}{
+		{"tk-ssm8qns.12", true, true},
+		{"tk-x-1", true, true},
+		{"pr-1", true, true},
+		{"hq-wisp-1a2b3", false, true},
+		{"ub-1", false, false},
+		{"zz-1", false, false},
+	} {
+		rig, ok, err := c.InRig(tc.id)
+		if err != nil || rig != tc.rig || ok != tc.ok {
+			t.Errorf("InRig(%q) = %v, %v, %v; want %v, %v", tc.id, rig, ok, err, tc.rig, tc.ok)
+		}
+	}
+	readsTheConfigOnly(t, log)
+	t.Setenv("STUB_CONFIG", "not json")
+	var re *ReadError
+	if _, _, err := c.InRig("tk-1"); !errors.As(err, &re) || re.ID != "tk-1" {
+		t.Errorf("InRig over a config that does not decode = %v; want a *ReadError for tk-1", err)
+	}
+}
+
 // The city's own prefix, when its config sets none, is the one Gas City
 // derives from the city's name.
 func TestStoreOfDerivesTheCitysPrefix(t *testing.T) {

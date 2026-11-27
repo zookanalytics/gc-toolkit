@@ -17,6 +17,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 )
@@ -97,6 +98,13 @@ a PR whole. A record:
     when no review result passed at that head and target, or an ask that
     nothing holds is open on the bead (gctk review ask), and the run pours it
     below
+  - named by an open stay's gate, a gctk:needs-review gate whose await id is
+    the bead (gctk gate create): once the PR reads needs-review or merging in
+    its own right, with what holds it set aside, the act puts the hold of each
+    open or in-progress conversation that waits on the gate on the PR, then
+    resolves the gate, and requests nothing else of the PR. While such a gate
+    is open no merge is requested, and the merge's act lists the store's open
+    gates again just before its request
   - ready on the saved read: the one act checked against GitHub first. With
     the record lock free, the one-PR update re-reads the PR in full, every
     part whatever its signs say, and saves what it read. The act then decides
@@ -118,6 +126,9 @@ a PR whole. A record:
     target: mr_merged, and the bead closes
   - closed unmerged, merged at another head, or no longer the PR the record
     names: an exception, kept blocked behind a human gate keyed by its value
+
+Each run also resolves each open stay's gate whose work has closed, with no
+lock and no write but the gate's close.
 
 Every act but the merge reads of GitHub only what it changes: the exceptions,
 a ready transition, a review run's pour and a retired PR's close read nothing
@@ -418,6 +429,7 @@ func landing(db, refinery string, ids ...string) (pr.Landing, error) {
 		Audit:        audit,
 		Wake:         wakes{rt: rt},
 		Labels:       prLabels{rt: rt},
+		Status:       listing.OwnStatus{},
 		Wait:         recordLockWait,
 	}, nil
 }

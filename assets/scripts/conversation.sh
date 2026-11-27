@@ -26,6 +26,31 @@
 #                             conversation_assignee <assignee> <bead-id>
 # conversation.test.sh runs both over one set of assignees, so they cannot
 # drift apart.
+#
+# A sitting that stays in a rig's store leaves its conversation waiting on one
+# gate of the type services/gctk/gate defines as NeedsReview. The gate blocks
+# the conversation, its await id names the one piece of work the stay comes
+# back for, and the landing order resolves it. The stay's sign-off names it in
+# the conversation's `staying:` line (converse-signoff.sh), and the sitting's
+# entry reads the stay by it (converse-entry.sh).
+#   $STAY_GATE_TYPE         the type, which `gctk gate create --type` takes
+#   $STAY_GATE_JQ           jq defs, the same convention:
+#                             stay_gate            on a row of a bead the
+#                                                  conversation waits on, as
+#                                                  `gc bd dep list <conversation>
+#                                                  --type blocks --json` prints
+#                                                  it: a gate of that type
+#                             open_stay_gate       on such a row: one not closed
+#                             stay_named           on a conversation's row: the
+#                                                  ids its `staying:` lines name
+#                             back_unstayed($conv) on such a row, with $conv the
+#                                                  conversation's row: a gate
+#                                                  that closed after the last
+#                                                  hand-back recorded on the
+#                                                  conversation and that no
+#                                                  `staying:` line names, so
+#                                                  the work the sitting sent
+#                                                  came back before it stayed
 # shellcheck disable=SC2034  # read by the scripts that source this file
 CONVERSATION_JQ='
   def conversation_alias:
@@ -38,6 +63,19 @@ CONVERSATION_JQ='
     (.issue_type // "") == "task"
     and ((((.assignee // "") | tostring) == "human") or conversation_alias)
     and (conversation_subjects | length) == 1;
+'
+
+STAY_GATE_TYPE="gctk:needs-review"
+STAY_GATE_JQ='
+  def stay_gate: (.issue_type // "") == "gate" and ((.await_type // "") | tostring) == "'"$STAY_GATE_TYPE"'";
+  def open_stay_gate: stay_gate and (((.status // "open") | tostring | ascii_downcase) != "closed");
+  def stay_named:
+    [ (.notes // "") | tostring | split("\n")[] | select(startswith("staying:"))
+      | capture(" \\(waits on (?<w>[^()]*)\\)$") | .w | split(", ")[] | select(. != "") ];
+  def back_unstayed($conv):
+    stay_gate and (open_stay_gate | not)
+    and (((.id // "") | tostring) as $g | ($conv | stay_named) | index($g) == null)
+    and (((.closed_at // "") | tostring) > ((($conv.metadata // {})["gc.handback_at"] // "") | tostring));
 '
 
 # conversation_assignee <assignee> <bead-id> — 0 when <assignee> is one a
