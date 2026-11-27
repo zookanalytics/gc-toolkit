@@ -89,7 +89,7 @@ screen renders settles need, whatever its size. Capture each changed screen as
 the section Review against the rig's standards says.
 
 When no visual helps, approve with a one-line note that says why, attach
-nothing, and record `--visual none`.
+nothing, and record `visual` as `none`.
 
 ### Pick the modality
 
@@ -418,15 +418,14 @@ a required state. Each of those is the note below, and it never blocks.
 
 ## The verdict
 
-The verdict carries its visual on either path, where the formula you run under
-says: the check's two flags, `--visual` and `--visual-fallback-from`, or the
-output's `visual` and `visual_fallback_from`, which the flags below stand for.
-`--visual` carries the decision: `none` when no visual is needed, otherwise the
-modality you picked. A verdict that delivers more than one modality, such as a
-clip of the screens beside a screenshot of each message, names the costliest. A
-fallback adds `--visual-fallback-from <the modality that fits>`.
+The verdict carries its visual in the output's `visual` and
+`visual_fallback_from`. `visual` carries the decision: `none` when no visual is
+needed, otherwise the modality you picked. A verdict that delivers more than one
+modality, such as a clip of the screens beside a screenshot of each message,
+names the costliest. A fallback adds `visual_fallback_from`, naming the modality
+that fits.
 
-The verdict's write refuses a demo verdict without `--visual`, and refuses
+The verdict's write refuses a demo verdict without `visual`, and refuses
 `none` with `request-changes`, because a check that found no visual needed has
 nothing to block on. It records the decision with the verdict and names it on
 the posted comment's `Visual:` line. That line says what kind of visual the
@@ -455,19 +454,19 @@ which states, and each screen, message or state you could not check, with what
 stopped it. The PR shows only the demo, so this list is how a person sees what
 the check covered.
 
-- **No visual needed.** Approve with `--visual none` and a one-line note. Attach
+- **No visual needed.** Approve with `visual` as `none` and a one-line note. Attach
   nothing.
 - **Delivered, and it shows the change working.** Approve with its modality.
   If the rig names a standard, approve only when every capture meets it.
 - **Delivered, and it shows the change failing.** Request changes with its
-  modality. The finding goes in `findings.json`.
+  modality. The finding goes in the output's `findings`.
 - **Delivered, and it shows a violation of the rig's standard.** Request changes
-  with its modality. Each cause of a violation is one finding in
-  `findings.json` that names the rule, and where the demo shows it as its
+  with its modality. Each cause of a violation is one finding in the output's
+  `findings` that names the rule, and where the demo shows it as its
   evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
-  modality delivered with `--visual` and the one that fits with
-  `--visual-fallback-from`, and say what stopped the one that fits.
+  modality delivered in `visual` and the one that fits in
+  `visual_fallback_from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: a surface none of these
   captures renders, a surface only live state produces, a required state the

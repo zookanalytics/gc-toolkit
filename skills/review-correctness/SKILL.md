@@ -263,9 +263,8 @@ records its P2s on the verdict, and they are neither filed nor fixed.
 
 ## The verdict
 
-The findings you write, `findings.json` or the output's `findings` as the
-formula you run under names them, carry every finding, P0, P1 and P2, each as
-one object with its `locus` and `message` and the fields of its contract: its
+The output's `findings` carry every finding, P0, P1 and P2, each as one
+object with its `locus` and `message` and the fields of its contract: its
 `severity`, its `category`, its `failure_scenario`, and on a P0 or P1 its
 `verification`.
 
@@ -292,7 +291,6 @@ Verification: <test evidence relied on; each suite run at the reviewed commit, N
 
 The check adds nothing of its own to the verdict the formula records. An
 approve of a change that edits `review-checks.toml` or a `docs/review-*.md`
-carries the verdict's needs-you note, `--needs-you` or the output's
-`needs_you` as the formula you run under names it, saying what the edit changes
+carries the output's `needs_you`, saying what the edit changes
 about the review that ran under it, and the verdict's write refuses one without
 it.
