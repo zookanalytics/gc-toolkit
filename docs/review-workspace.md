@@ -22,20 +22,10 @@ worktree there at the head the round judged or past it is kept as it stands,
 with its commits and its uncommitted edits, which the repair's read prints, and
 one at any other commit is refused and kept, which stops the run.
 
-On the old review path, a review bead reads its pinned commit in a detached
-worktree and runs there any suite its check calls for. It writes its verdict
-body and its finding set beside the worktree, as `findings.md` and `findings.json`, and signoff.sh reads
-them from there. A quorum lane writes no file: the block that stores its lane
-output on its step bead takes the object inline. It needs no workspace, so a
-lane whose gather failed before making one still records its `blocked` output.
-The reviewer may also write logs, probe output, or a second worktree at the
-base.
-All of it lives in one directory named for the review bead,
-`<dir>/gc-review-<review-bead>`. `assets/scripts/review-workspace.sh` owns that directory: it
-makes the worktree, and it removes the directory when the review ends.
-None of it goes in the agent's home, where a pool session's shell starts,
-because a home that holds a file gc did not write fails its session's next
-start (`assets/scripts/worktree-setup.sh`).
+`assets/scripts/review-workspace.sh` owns the directory. None of a review's
+files go in the agent's home, where a pool session's shell starts, because a
+home that holds a file gc did not write fails its session's next start
+(`assets/scripts/worktree-setup.sh`).
 
 ## Scope
 
@@ -43,9 +33,7 @@ start (`assets/scripts/worktree-setup.sh`).
 review gets its worktree, and when and how the directory is removed.
 
 **Boundaries:** the review lifecycle belongs to `formulas/mol-pr-review.toml`
-and `formulas/mol-pr-review-lane.toml`, and on the old path to
-`formulas/mol-review.toml` and `formulas/mol-review-quorum-signoff.toml`, and
-what a review reads, runs and
+and `formulas/mol-pr-review-lane.toml`, and what a review reads, runs and
 judges to its check's method. A polecat's per-bead worktree goes at its
 hand-off or to the controller's closed-bead reaper
 ([worktree-reclaim.md](worktree-reclaim.md)). Harness session
@@ -60,9 +48,10 @@ are done with the worktree, or never runs at all when the setup is split
 across calls. Each checkout left behind counts against the tmpfs quota, and
 exhausting that quota takes every agent's shell output down at once.
 
-So the directory's path depends only on the run's root or the review bead, and
-every shell rebuilds it. `review-workspace.sh add --review-bead <id> --oid <commit>`
-prints `<workspace>/wt`, a worktree detached at the commit. It makes the
+So the directory's path depends only on the run's root, or a demo capture's
+request bead, and every shell rebuilds it. `review-workspace.sh add` prints the
+part's worktree, detached at the commit, and `--review-bead <id>`, the form
+`mol-rig-demo` takes, prints `<workspace>/wt`. It makes the
 worktree on the first call and returns the same one on every later call at
 that commit, so a later block gets the worktree back by running the same line.
 Shells that run it at the same moment take turns on a lock, so each of them
@@ -78,18 +67,10 @@ reap removes it once the mol closes that bead.
 
 ## When it is removed
 
-- **At the verdict step.** mol-review's `verdict-and-drain` and the quorum's
-  `synthesize-and-signoff` run `review-workspace.sh remove` once the step chain
-  is closed, just before they drain. A verdict that fails and returns the bead
-  to the pool leaves the directory in place, so the reviewer who claims the bead
-  next gets the same worktree back.
-- **By the hourly reap.** `orders/review-workspace-reap.toml` runs
-  `review-workspace.sh reap`, city scope, no LLM and no agent. It takes the
-  directory of a review run once its root closes, however the run ended, so a
-  lane's evidence stays readable until every finding is ruled, and those of
-  reviews that closed without reaching the verdict
-  step, after a crash, a drain, or a close by another writer such as
-  review-sweep.
+The hourly reap removes it. `orders/review-workspace-reap.toml` runs
+`review-workspace.sh reap`, city scope, no LLM and no agent. It takes the
+directory of a review run once its root closes, however the run ended, so a
+lane's evidence stays readable until every finding is ruled.
 
 The reap reads every `gc-review-*` entry this user owns directly under the temp
 directory, and under `/tmp` as well. It removes an entry only when no process

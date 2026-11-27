@@ -1127,8 +1127,8 @@ commits, and the commits stay local until Work's hand-off pushes them.
 asks for once the agreed steps are in, or which the operator gives when they
 rule the edit. It is Work's hand-off, `work-submit.sh --held-by <conversation>`:
 the polecat's submit, with the same branch gate, push and check of origin's ref,
-bring-current guard, anchor summary and title, three hand-off writes, refinery
-wake and removal of the tree. Under `--held-by` both writers take as proof that
+anchor summary and title, three hand-off writes, refinery wake and removal of
+the tree. Under `--held-by` both writers take as proof that
 `gc hook current` names the conversation and the bead has its edge onto it, and
 they refuse a bead assigned to anyone, the refinery included, one whose PR
 waits on the pending record, one a run works or one routed to a pool. A refusal
