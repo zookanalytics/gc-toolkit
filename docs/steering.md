@@ -235,20 +235,26 @@ can apply one directly.
   the wait, a `blocks` edge onto that bead within one store. Work that goes on
   once that bead lands is then placed. `place` arms it while the edge holds it.
   Work whose job may end there is armed to its validating closer, and its hold
-  is lifted. The closer checks it once that bead closes. A bead already ruled
-  on that cannot go until the operator answers or acts waits on a human gate
-  that says what they owe, which the waits skill files too. It is then placed
-  as any other bead. `place` arms it while the gate holds it and lifts its
-  hold, so it leaves the queue for the operator's board. It starts once the
-  operator clears the gate.
-- **Close it**, when the work is not wanted. Work that waits on nothing and is
-  not worth an epic's time closes too, when something would file it again if
-  it mattered, such as the check, the patrol or the failing run that found a
-  defect, run again. The po names what would. Work closed that way is filed
-  again when it bites. Nothing reads the label on a closed bead. Work that
-  serves the rig's goals, and that nothing would file again, is not closed for
-  want of a release, whether it is an idea or a defect a person reported by
-  hand. It stays held, with a note of the question that would decide it.
+  is lifted. The closer checks it once that bead closes. A bead can also wait
+  on the operator, when it cannot go until they answer or act. Such a bead was
+  ruled on already. It waits on a human gate that says what they owe, which
+  the waits skill files too. It is then placed as any other bead. `place` arms
+  it while the gate holds it and lifts its hold, so it leaves the queue for the
+  operator's board. It starts once the operator clears the gate.
+- **Close it**, when the work is not wanted. Work that waits on nothing closes
+  too, when each of these holds:
+  - it is not worth an epic's time;
+  - something would file it again if it mattered, such as the check, the
+    patrol or the failing run that found a defect, run again.
+
+  The po names what would file it again. Work closed that way is filed again
+  when it bites. Nothing reads the label on a closed bead. Work is not closed
+  for want of a release when both of these hold:
+  - it serves the rig's goals;
+  - nothing would file it again, as for an idea or a defect a person reported
+    by hand.
+
+  Such work stays held, with a note of the question that would decide it.
 
 ```
 gctk bead place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]

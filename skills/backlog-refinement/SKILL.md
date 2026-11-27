@@ -93,13 +93,13 @@ its group in view.
 | close as fixed | the default branch already has the fix; cite the commit | the bead the commit names, under `fixed-upstream` |
 | close as duplicate | a closed or shipped bead in this bead's store did the same work | that bead, under `duplicate` |
 | fold into another | an open bead carries the same need | that bead, under `folded` |
-| close as not needed | the premise is gone, the work is not worth doing, or it waits on nothing, is not worth an epic's time, and something would file it again if it mattered; say why | the bead the ruling rests on, under `not-needed` |
+| close as not needed | the work should not be done or kept, in a case its check below lists; say which, and why | the bead the ruling rests on, under `not-needed` |
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
 | graduate into a new epic | beads share an outcome that no open epic's hypothesis covers, and the rig's goals make it worth a push of its own | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
-| place on its own | an emergency that cannot wait for an epic, such as the host going down, or work the operator names to run on its own; say which | nothing |
-| wait on a bead | it cannot start until another bead lands, or that bead's landing may end its job, or it cannot go until the operator answers or acts | the bead it waits on, or what the operator owes |
+| place on its own | it cannot wait for an epic, in a case its check below lists; say which | nothing |
+| wait on a bead | it cannot go until something else happens, in a case its check below lists | the bead it waits on, or what the operator owes |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
 Check before you propose:
@@ -121,23 +121,36 @@ Check before you propose:
   set of failures or open bugs that keeps returning, gets one bounded push.
   Its closure condition names the lines it closes on
   (`docs/epics.md`, "Epics are mortal").
-- **Place on its own:** name the emergency, or where the operator named the
-  bead. That a defect hurts is not enough, since most real defects do. Such a
+- **Place on its own:** propose it in one of these cases, and name it:
+  - an emergency that cannot wait for an epic, such as the host going down;
+  - work the operator names to run on its own, with where they named it.
+
+  That a defect hurts is not enough, since most real defects do. Such a
   defect goes under the epic its outcome belongs to, or into its theme's new
   epic.
-- **Wait on a bead:** the bead it waits on is open. One in another rig's store
-  takes a human gate in place of the edge, as the `waits` skill says. Work that
-  goes on once that bead lands is placed as any other bead, so its row names
-  the epic too. Work whose job that landing may end needs no epic, because the
-  validating closer checks it then.
+- **Wait on a bead:** propose it in one of these cases:
+  - it cannot start until another bead lands;
+  - another bead's landing may end its job;
+  - it cannot go until the operator answers or acts.
 
-  A bead that waits on the operator was ruled on already, and waits for
+  The bead it waits on is open. One in another rig's store takes a human gate
+  in place of the edge, as the `waits` skill says. Work that goes on once that
+  bead lands is placed as any other bead, so its row names the epic too. Work
+  whose job that landing may end needs no epic, because the validating closer
+  checks it then.
+
+  A bead that waits on the operator was ruled on already. It waits for
   something only they can give, such as a decision, an approval or a path. It
   waits on a human gate that says what they owe, and it is placed as any other
   bead, so its row names the epic too. A question to put to the operator in
   the sitting is an `ask` instead.
-- **Close as not needed:** a bead that waits on nothing closes, rather than
-  stay held with nothing to release it, when each of these holds:
+- **Close as not needed:** propose it in one of these cases, and say which:
+  - the premise is gone;
+  - the work is not worth doing;
+  - the bead waits on nothing, and each condition below holds.
+
+  A bead that waits on nothing closes, rather than stay held with nothing to
+  release it, when each of these holds:
   - it serves no open epic;
   - it belongs to no theme worth a push;
   - something would file it again if it mattered.
@@ -148,13 +161,16 @@ Check before you propose:
   defect a person reported by hand, or that one run found once, may have
   nothing that would.
 
-  A bead that serves the rig's goals, and that nothing would file again, is
-  not proposed for closing for want of a release, whether it is an idea or a
-  defect. That covers a product idea of the operator's, an opportunity an
-  agent noticed once, a risk that bites only once and a defect nothing would
-  find again. It stays held, with a note of one line that gives the question
-  that would decide it: what would make it worth doing, and what we would look
-  at to know. Once the operator agrees, write the note:
+  A bead is not proposed for closing for want of a release when both of these
+  hold:
+  - it serves the rig's goals;
+  - nothing would file it again.
+
+  That covers a product idea of the operator's, an opportunity an agent
+  noticed once, a risk that bites only once and a defect nothing would find
+  again. Such a bead stays held, with a note of one line that gives the
+  question that would decide it: what would make it worth doing, and what we
+  would look at to know. Once the operator agrees, write the note:
   `gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: kept, since nothing would file it again. What would decide it: <the question>."`
 
   Work that serves none of the rig's goals is still proposed for closing, idea
