@@ -220,18 +220,24 @@ conv_row() {
        then {dependencies:([ $tracked[] | {id:., dependency_type:"tracks"} ] + [ $r[] | {id:., dependency_type:"replies-to"} ])}
        else {dependencies:([ $tracked[] | {issue_id:$c, depends_on_id:., type:"tracks"} ] + [ $r[] | {issue_id:$c, depends_on_id:., type:"replies-to"} ])} end)'
 }
-# The reads `gctk pr status` makes, under the (HOLD-REAL) wrapper: a show
-# answers a row per id, its edges from $WALK_EDGES, a JSON object of each bead's
-# dependency rows, and the in-flight list answers $WALK_IN_FLIGHT, [] when unset.
-if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd list" ] && case " $* " in *" anchor_bead="*) true ;; *) false ;; esac; then
-  printf '%s\n' "${WALK_IN_FLIGHT:-[]}"
+# The reads `gctk pr status` makes, under the (HOLD-REAL) wrapper, through the
+# ledger's listing of the store `bd where` names: a list of the beads that name
+# the anchor answers none, and a list by id answers a row per id, its own edges
+# from $WALK_EDGES, a JSON object of each bead's dependency rows, and its fields
+# from the row an edge onto it carries there.
+if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd where" ]; then
+  printf '%s\n' '{"path":"/walk/.beads","prefix":"tk"}'
   exit 0
 fi
-if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd show" ]; then
-  shift 2
-  _ids=()
-  for a in "$@"; do case "$a" in --*) ;; *) _ids+=("$a") ;; esac; done
-  printf '%s' "${WALK_EDGES:-{\}}" | jq -c --args '. as $e | [$ARGS.positional[] | {id: ., dependencies: ($e[.] // [])}]' "${_ids[@]}"
+if [ -n "${STUB_WALK:-}" ] && [ "$1 ${2:-}" = "bd --db" ] && [ "${4:-}" = list ]; then
+  shift 4
+  case " $* " in *" anchor_bead="*) echo '[]'; exit 0 ;; esac
+  _ids=""
+  while [ $# -gt 0 ]; do [ "$1" = --id ] && _ids="${2:-}"; shift; done
+  printf '%s' "${WALK_EDGES:-{\}}" | jq -c --arg ids "$_ids" '. as $e
+    | ([$e[][]] | map({key: .id, value: del(.dependency_type)}) | from_entries) as $row
+    | [$ids | split(",")[] | select(. != "") | . as $id
+        | ($row[$id] // {}) + {id: $id, dependencies: [($e[$id] // [])[] | {issue_id: $id, depends_on_id: .id, type: .dependency_type}]}]'
   exit 0
 fi
 case "$1 ${2:-}" in

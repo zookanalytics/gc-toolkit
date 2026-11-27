@@ -329,10 +329,10 @@ func TestHoldingGatesShareReadsAcrossLevels(t *testing.T) {
 	}
 }
 
-// anchorBlocker is an open bead carrying the metadata a merge anchor records on
+// anchorBlocker is an open bead carrying the keys a merge anchor records on
 // itself.
 func anchorBlocker(id string, md map[string]string) person.Blocker {
-	return person.Blocker{ID: id, Title: "pr " + id, Status: "open", IssueType: "task", Metadata: md}
+	return person.Blocker{ID: id, Title: "pr " + id, Status: "open", IssueType: "task", Record: row(id, md)}
 }
 
 // with returns md with each pair of keys and values added, leaving md as it was.

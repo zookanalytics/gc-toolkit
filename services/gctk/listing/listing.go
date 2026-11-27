@@ -101,6 +101,7 @@ type Epic struct {
 // Listing is one pass's read of a store.
 type Listing struct {
 	pass *ledger.Ledger
+	prs  prstatus.Store
 	live []*ledger.Record
 	// beads is each bead decoded, by id, and closed each parent's closed beads
 	// as closedUnder read them, which the store answers only by a read of its
@@ -132,6 +133,7 @@ func Over(l *ledger.Ledger) (*Listing, error) { return read(l) }
 // read lists every live bead through a pass over l.
 func read(l *ledger.Ledger) (*Listing, error) {
 	ls := &Listing{pass: l.Pass(), beads: map[string]Bead{}, closed: map[string][]Bead{}}
+	ls.prs = prstatus.Over(ls.pass)
 	live, err := ls.pass.Find(ledger.Every())
 	if err != nil {
 		return nil, err
@@ -317,74 +319,17 @@ func (ls *Listing) Holds(ids []string) (map[string]waits.Holds, map[string]error
 
 var _ prstatus.Store = (*Listing)(nil)
 
-// Beads implements prstatus.Store: the row of each bead named the store holds,
-// with its metadata as the listing read it.
-func (ls *Listing) Beads(ids []string) (map[string]prstatus.Row, error) {
-	recs, err := ls.pass.Find(ledger.ByID(ids...).WithClosed())
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]prstatus.Row, len(recs))
-	for _, r := range recs {
-		out[r.ID] = prstatus.Row{ID: r.ID, Metadata: r.Rendered()}
-	}
-	return out, nil
+// Beads, Anchored and Blockers implement prstatus.Store through the one Store
+// over the ledger, over the listing's pass ([prstatus.Over]), so the listing
+// answers what `gctk pr status` reads, from the rows it lists.
+func (ls *Listing) Beads(ids []string) (map[string]*prstatus.Row, error) { return ls.prs.Beads(ids) }
+
+func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]*prstatus.Row, error) {
+	return ls.prs.Anchored(ids, statuses)
 }
 
-// Anchored implements prstatus.Store over the listing's live beads, which are
-// every bead the store holds at a status other than closed. A closed status
-// is refused, because the listing holds no closed bead.
-func (ls *Listing) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
-	if slices.Contains(statuses, "closed") {
-		return nil, errors.New("listing: the beads anchored at closed are not listed, since a listing holds live beads alone")
-	}
-	out := map[string][]prstatus.Row{}
-	for _, r := range ls.live {
-		a := text(anchorKey, r)
-		if a == "" || !slices.Contains(ids, a) || !slices.Contains(statuses, r.Status()) {
-			continue
-		}
-		out[a] = append(out[a], prstatus.Row{ID: r.ID, Metadata: r.Rendered()})
-	}
-	return out, nil
-}
-
-// Blockers implements prstatus.Store and is the read prstatus.Holding walks:
-// for each bead named, the far bead of each of its blocks edges. An edge onto a
-// bead the store does not hold is one into another store, which holds
-// nothing.
 func (ls *Listing) Blockers(ids []string) (map[string][]person.Blocker, error) {
-	recs, err := ls.byID(ids)
-	if err != nil {
-		return nil, err
-	}
-	var far []string
-	for _, id := range ids {
-		r, ok := recs[id]
-		if !ok {
-			return nil, &ledger.ReadError{ID: id, Reason: "the store holds no such bead"}
-		}
-		f, err := blocksOf(r)
-		if err != nil {
-			return nil, err
-		}
-		far = append(far, f...)
-	}
-	farRecs, err := ls.byID(far)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string][]person.Blocker, len(ids))
-	for _, id := range ids {
-		out[id] = []person.Blocker{}
-		f, _ := blocksOf(recs[id]) // decoded above
-		for _, x := range f {
-			if fr, ok := farRecs[x]; ok {
-				out[id] = append(out[id], blockerOf(fr))
-			}
-		}
-	}
-	return out, nil
+	return ls.prs.Blockers(ids)
 }
 
 // byID is each bead named the store holds, closed or live, as the pass read it.
@@ -398,25 +343,4 @@ func (ls *Listing) byID(ids []string) (map[string]*ledger.Record, error) {
 		out[r.ID] = r
 	}
 	return out, nil
-}
-
-// blocksOf is the far bead of each of r's blocks edges, each once.
-func blocksOf(r *ledger.Record) ([]string, error) {
-	edges, err := r.Edges()
-	if err != nil {
-		return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}
-	}
-	var out []string
-	for _, e := range edges {
-		if e.Type == ledger.EdgeBlocks && !slices.Contains(out, e.ID) {
-			out = append(out, e.ID)
-		}
-	}
-	return out, nil
-}
-
-// blockerOf is r in the fields prstatus reads of a blocker.
-func blockerOf(r *ledger.Record) person.Blocker {
-	return person.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
-		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Metadata: r.Rendered()}
 }

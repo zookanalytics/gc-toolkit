@@ -172,7 +172,7 @@ printf 'tk-rw|blocks|tk-a\ntk-c|tracks|tk-rw\ntk-c|tracks|tk-a\n' > "$STUB_DEPS"
 eq "$("$GCTK_BIN" pr status tk-a --json)" '{"status":"working","held":[],"reasons":[]}' "a conversation tracking the rework or the anchor holds nothing"
 store "[$UNAPPROVED, $RW_ROW, $GATE]"
 printf 'tk-rw|blocks|tk-a\ntk-g|blocks|tk-rw\n' > "$STUB_DEPS"
-out=$(STUB_SHOW_FAIL_ON=tk-rw "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?
+out=$(STUB_LIST_FAIL_ON=tk-g "$SUT" derive --anchor tk-a 2>/dev/null); rc=$?
 eq "$rc" "2" "a walk that does not read leaves the caller's labels alone"
 eq "$out" "" "…printing no value"
 : > "$STUB_DEPS"
@@ -182,7 +182,7 @@ eq "$out" "" "…printing no value"
 # lists visits, or every gate, in the store.
 : > "$STUB_GC_LOG"
 "$SUT" derive --anchor tk-a >/dev/null 2>&1
-grep -qF 'bd show tk-a --json' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's own row, which carries its blocks edges"
+grep -qE -- ' list --id tk-a( |$)' "$STUB_GC_LOG"; eq "$?" "0" "the derive reads the anchor's own row, which carries its blocks edges"
 grep -qF 'task_kind=visit' "$STUB_GC_LOG"; eq "$?" "1" "the derive makes no store-wide read of the open visits"
 grep -qF 'gc.continuation_group' "$STUB_GC_LOG"; eq "$?" "1" "the derive reads no continuation-group stamp"
 

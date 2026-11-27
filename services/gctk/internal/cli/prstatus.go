@@ -10,11 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // `gctk pr status <bead>` is how the shell asks what holds a PR and where it
@@ -23,13 +21,20 @@ import (
 // in the words the PR's status: label shows (docs/gctk-architecture.md, "The
 // rule that names a verb").
 //
-// prstatus.Read gathers the facts through gcbdStore and decides nothing here
-// either: the helm board asks the same package through its own store, so the
-// labels, engage and the board read one definition. For a PR on Gas Town's
-// pending record it asks the pr domain's evaluator over the store, the read the
-// one-PR update saved on the bead among it (pr.FromStore), as the rig
-// board asks it through its listing, so they give one answer and none of them
-// reads GitHub.
+// prstatus.Read gathers the facts through prstatus's Store over one pass of the
+// store gc routes the bead to (prstatus.Over), and nothing here decides: the
+// helm board asks the same package through its listing, over the same Store,
+// so the labels, engage and the board read one definition. For a PR on Gas
+// Town's pending record it asks the pr domain's evaluator through the same
+// pass, the read the one-PR update saved on the bead among it (pr.FromStore),
+// as the rig board asks it through its listing, so they give one answer, none
+// of them reads GitHub, and a run reads each bead once.
+//
+// The pass reads the store and never the supervisor's copy, whose rows carry
+// no await type, await id or close time (beads.Bead in Gas City's
+// internal/beads/beads.go), and a sign-off words the Approve clause of its
+// headline from this status (converse-signoff.sh), which no later read
+// corrects.
 
 // prStatusProg is the name warnings carry: the script whose derivation this is,
 // because its callers grep those lines and the language behind the command is
@@ -97,11 +102,17 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
 // gathers about the anchor, and with asJSON the values prstatus.Held and
 // prstatus.Reasons return beside it. For an anchor on Gas Town's pending record
-// it prints the state prstatus.Render gives the evaluator's answer over the
-// store instead (answerFromStore), with the conditions not met, and with asJSON
-// the values prstatus.RenderHeld and prstatus.RenderReasons return.
+// it prints the state prstatus.Render gives the evaluator's answer through the
+// same pass instead (pr.FromStore), with the conditions not met, and with
+// asJSON the values prstatus.RenderHeld and prstatus.RenderReasons return.
 func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
-	facts, err := prstatus.Read([]string{anchor}, gcbdStore{gcbd.New()})
+	l, err := ledger.Open("", anchor)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s: could not read what holds %s: %v; cannot derive a status\n", prStatusProg, anchor, err)
+		return 2
+	}
+	pass := l.Pass()
+	facts, err := prstatus.Read([]string{anchor}, prstatus.Over(pass))
 	f, answered := facts[anchor]
 	if err != nil || !answered {
 		if errors.Is(err, prstatus.ErrUnresolved) {
@@ -114,7 +125,7 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	state := prstatus.Derive(f)
 	var ans *pr.Answer
 	if pr.OnRecord(f.MergeResult) {
-		a, err := answerFromStore(anchor)
+		a, err := pr.FromStore(pass, anchor)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s: could not read what the store holds about the PR %s owns: %v; cannot derive a status\n", prStatusProg, anchor, err)
 			return 2
@@ -162,112 +173,6 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "%s\n", raw)
 	return 0
-}
-
-// gcbdStore is the [prstatus.Store] gctk reads through. An anchor's row comes
-// from gcbd.ShowCached, the supervisor's copy, which can trail a fresh write. A
-// row one pass stale decides nothing that lasts here: the command shows where a
-// PR stands, and the landing order derives each PR's labels from the store
-// again at every run and has them written where they differ.
-// converse-signoff.sh words the Approve clause of a sign-off's headline from
-// this status, and no later read corrects a headline, so it runs the command
-// with GC_NO_API=1, under which ShowCached reads the bead as it stands. Its
-// in-flight set comes from one `gc bd list` per anchor, whose metadata filter
-// matches a key against one value. A level of `blocks` edges comes from one
-// `gc bd show` of every bead in it, whose rows carry each edge's far bead
-// whole.
-type gcbdStore struct{ client *gcbd.Client }
-
-// Beads returns the row of each id gcbd.ShowCached reads. One it cannot read is
-// left out, which prstatus.Read reports as an anchor that does not resolve.
-func (s gcbdStore) Beads(ids []string) (map[string]prstatus.Row, error) {
-	out := make(map[string]prstatus.Row, len(ids))
-	for _, id := range ids {
-		if b := s.client.ShowCached(id); b != nil {
-			out[id] = prstatus.Row{ID: id, Metadata: metadataOf(b)}
-		}
-	}
-	return out, nil
-}
-
-// Anchored lists, for each id, the beads carrying anchor_bead=<id> at any of
-// statuses: one comma list, because a repeated --status keeps only the last, and
-// --limit 0, so the filter sees every candidate.
-func (s gcbdStore) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
-	out := make(map[string][]prstatus.Row, len(ids))
-	for _, id := range ids {
-		rows, ok := s.client.List(
-			"--metadata-field", "anchor_bead="+id,
-			"--status", strings.Join(statuses, ","),
-			"--limit", "0",
-			"--json",
-		)
-		if !ok {
-			return nil, fmt.Errorf("the in-flight set of %s did not read", id)
-		}
-		out[id] = []prstatus.Row{}
-		for i := range rows {
-			out[id] = append(out[id], prstatus.Row{ID: rows[i].ID, Metadata: metadataOf(&rows[i])})
-		}
-	}
-	return out, nil
-}
-
-// Blockers reads the `blocks` edges of every id in one client.Blockers.
-func (s gcbdStore) Blockers(ids []string) (map[string][]person.Blocker, error) {
-	edges, ok := s.client.Blockers(ids)
-	if !ok {
-		return nil, fmt.Errorf("the blocks edges of %s did not read", strings.Join(ids, " "))
-	}
-	out := make(map[string][]person.Blocker, len(ids))
-	for _, id := range ids {
-		out[id] = asBlockers(edges[id])
-	}
-	return out, nil
-}
-
-// metadataOf renders each of a bead's metadata values as the scripts read it,
-// `(.metadata[k] // "") | tostring`.
-func metadataOf(b *gcbd.Bead) map[string]string {
-	out := make(map[string]string, len(b.Metadata))
-	for k := range b.Metadata {
-		out[k] = b.Meta(k)
-	}
-	return out
-}
-
-// asBlockers projects `blocks` rows onto what the definition reads of them, the
-// far bead's metadata whole among it. A row with no status reads open.
-func asBlockers(rows []gcbd.Bead) []person.Blocker {
-	out := make([]person.Blocker, 0, len(rows))
-	for i := range rows {
-		b := &rows[i]
-		out = append(out, person.Blocker{
-			ID:        b.ID,
-			Title:     b.Title,
-			Status:    b.StatusLowerOr("open"),
-			IssueType: b.IssueTypeString(),
-			AwaitType: b.AwaitType,
-			AwaitID:   b.AwaitID,
-			Assignee:  b.AssigneeString(),
-			ClosedAt:  b.ClosedAtString(),
-			Metadata:  metadataOf(b),
-		})
-	}
-	return out
-}
-
-// answerFromStore is the pr domain's evaluator's answer for the PR anchor owns,
-// over the store gc routes the anchor to, read through the ledger, and the read
-// the one-PR update saved on the bead (pr.FromStore). It reads no
-// GitHub and loads no definition of feedback. A read of the store that fails
-// returns its error and no answer.
-func answerFromStore(anchor string) (pr.Answer, error) {
-	l, err := ledger.Open("", anchor)
-	if err != nil {
-		return pr.Answer{}, err
-	}
-	return pr.FromStore(l, anchor)
 }
 
 // feedbackIn loads the pack's definition of feedback in checkout, a rig's

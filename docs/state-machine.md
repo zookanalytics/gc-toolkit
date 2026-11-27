@@ -727,9 +727,9 @@ resolution.
 `prstatus.Read` gathers for every reader: the anchor's own row, its in-flight
 set, every bead carrying the anchor's `anchor_bead`, any `task_kind`, at a live
 status (`prstatus.InFlightStatuses`), and the gates and the beads a person owes
-that its walk reaches. `gctk pr status` and the rig board each hand
-`prstatus.Read` their own adapter onto the store, and neither gathers or
-decides any of it.
+that its walk reaches. `gctk pr status` and the rig board both hand
+`prstatus.Read` the one store over the ledger (`prstatus.Over`), each over its
+own pass, and neither gathers or decides any of it.
 
 `prstatus.Holding` is the one reader of what holds a PR through its edges, the
 human gates and the beads a person owes the next move on, and `prstatus.Read`

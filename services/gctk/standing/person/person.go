@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
 // Blocker is one bead in the fields these rules, and the walks that apply them,
@@ -19,9 +20,10 @@ import (
 // they read, in any case. AwaitID is the key a gate was filed under. Assignee is
 // the bead's assignee as it reads, which tells a conversation by its row
 // ([conversation.IsCandidate]). ClosedAt is when it closed, "" while it is live.
-// Metadata is the bead's metadata whole, each value as the store renders it, so
-// the reader that needs a key names it: a merge anchor's facts about its own
-// pull request, and the vars a review run was poured with.
+// Record is the bead as the store's read gave it, nil when the read gave none,
+// for a reader that reads the bead's keys through their declarations: a merge
+// anchor's facts about its own pull request, and the vars a review run was
+// poured with. A blocker with no record holds none of its keys.
 type Blocker struct {
 	ID        string
 	Title     string
@@ -31,7 +33,7 @@ type Blocker struct {
 	AwaitID   string
 	Assignee  string
 	ClosedAt  string
-	Metadata  map[string]string
+	Record    *ledger.Record
 }
 
 // Open reports whether the bead still blocks: any status but closed, a bead

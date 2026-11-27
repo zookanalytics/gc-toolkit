@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -13,15 +14,17 @@ import (
 // through it answers with the row it kept the first time it read that bead,
 // whatever selects the bead. Once it has read every live bead (Every), it
 // answers a selection of live beads from the rows it holds without reading the
-// store, so every question asked through it in one pass answers from one read.
-// It reads the store's blocked set once. It takes no write, because a write
-// would leave its rows stale.
+// store, and it answers a selection it has read from the store before from
+// those rows too, so every question asked through it in one pass answers from
+// one read, two domains that ask one selection among them. It reads the
+// store's blocked set once. It takes no write, because a write would leave its
+// rows stale.
 //
 // What the rows it holds cannot answer it reads first: a bead named that it
-// has not read, a selection that reaches closed beads, any selection before it
-// holds every live bead, and the beads the store lists under a parent, which
-// only the store answers. Reads run without holding the pass, so two at once
-// can read one bead, and the row kept first answers both.
+// has not read, a selection it has not read before, unless it holds every live
+// bead and the selection reaches no closed one, and the beads the store lists
+// under a parent, which only the store answers. Reads run without holding the
+// pass, so two at once can read one bead, and the row kept first answers both.
 func (l *Ledger) Pass() *Ledger {
 	return &Ledger{store: &pass{store: l.store, rows: map[string]*gcbd.Bead{}, absent: map[string]bool{}}}
 }
@@ -39,7 +42,10 @@ type pass struct {
 	// not hold.
 	absent map[string]bool
 	// listed is true once the pass holds every live bead's row.
-	listed  bool
+	listed bool
+	// read is each selection that names no bead and no parent the pass has read
+	// from the store, whose rows it keeps.
+	read    []gcbd.Query
 	blocked *gcbd.BlockedSet
 }
 
@@ -141,6 +147,9 @@ func (p *pass) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 		if everyLive(q) {
 			p.listed = true
 		}
+		if len(ask.IDs) == 0 {
+			p.read = append(p.read, ask)
+		}
 		p.mu.Unlock()
 	}
 	p.mu.Lock()
@@ -156,13 +165,14 @@ func (p *pass) Find(q gcbd.Query) ([]gcbd.Bead, error) {
 
 // ask is the read q needs before the rows the pass holds answer it, and
 // whether it needs one: none once the pass holds every live bead and q selects
-// live beads alone, and of the beads q names, only the ones it has not read.
+// live beads alone, none for a selection it has read before, and of the beads
+// q names, only the ones it has not read.
 func (p *pass) ask(q gcbd.Query) (gcbd.Query, bool) {
 	if p.listed && !q.Closed {
 		return q, false
 	}
 	if len(q.IDs) == 0 {
-		return q, true
+		return q, !slices.ContainsFunc(p.read, func(r gcbd.Query) bool { return reflect.DeepEqual(r, q) })
 	}
 	ask := q
 	ask.IDs = nil

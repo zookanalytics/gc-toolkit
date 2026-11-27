@@ -2,10 +2,11 @@
 // stands. Every reader asks it: the PR's labels through `gctk pr status`
 // (assets/scripts/pr-status-label.sh), gc-helm.sh engage through the same verb,
 // and the helm board (services/helm), which imports the package. [Read] gathers
-// what the city records about each anchor through a [Store], the reader's read
-// of the bead store through the ledger, which holds no rule of its own. [Derive],
-// [Held] and [Reasons] decide from the [Facts] it gathers. No reader gathers or
-// decides any of it for itself, so the readers cannot disagree.
+// what the city records about each anchor through a [Store], which holds no rule
+// of its own: the command and the board's listing both read through the one
+// Store over the ledger ([Over]), each over its own pass. [Derive], [Held] and
+// [Reasons] decide from the [Facts] it gathers. No reader gathers or decides any
+// of it for itself, so the readers cannot disagree.
 //
 // Where the PR stands is the anchor's status: vocabulary — working, merging,
 // needs-review, needs-attention — which says whose move it is on an open PR.
@@ -172,11 +173,11 @@ const reviewFormula = "mol-pr-review"
 func runsOf(blockers []person.Blocker) []Run {
 	var out []Run
 	for _, b := range blockers {
-		if b.Metadata["gc.kind"] != "workflow" || b.Metadata["gc.formula_name"] != reviewFormula {
+		if keyText(kindKey, b.Record) != "workflow" || keyText(formulaNameKey, b.Record) != reviewFormula {
 			continue
 		}
-		out = append(out, Run{ID: b.ID, Status: b.Status, Head: b.Metadata["gc.var.head"],
-			Target: b.Metadata["gc.var.target"], ClosedAt: b.ClosedAt})
+		out = append(out, Run{ID: b.ID, Status: b.Status, Head: keyText(runHeadVar, b.Record),
+			Target: keyText(runTargetVar, b.Record), ClosedAt: b.ClosedAt})
 	}
 	return out
 }

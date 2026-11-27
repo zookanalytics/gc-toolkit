@@ -74,10 +74,12 @@ func (s store) Holds(ids []string) (map[string]waits.Holds, map[string]error, er
 	return holds, failed, nil
 }
 
-func (store) Beads([]string) (map[string]prstatus.Row, error) { return map[string]prstatus.Row{}, nil }
+func (store) Beads([]string) (map[string]*prstatus.Row, error) {
+	return map[string]*prstatus.Row{}, nil
+}
 
-func (store) Anchored([]string, []string) (map[string][]prstatus.Row, error) {
-	return map[string][]prstatus.Row{}, nil
+func (store) Anchored([]string, []string) (map[string][]*prstatus.Row, error) {
+	return map[string][]*prstatus.Row{}, nil
 }
 
 func (store) Blockers(ids []string) (map[string][]person.Blocker, error) {
@@ -157,13 +159,13 @@ func TestAConversationReadsAlikeAskedAloneOrWithEveryBead(t *testing.T) {
 // request on Gas Town's pending record comes from answers.
 type pullStore struct {
 	store
-	prs     *fixture.Store
+	prs     prstatus.Store
 	answers map[string]pr.Answer
 }
 
-func (s pullStore) Beads(ids []string) (map[string]prstatus.Row, error) { return s.prs.Beads(ids) }
+func (s pullStore) Beads(ids []string) (map[string]*prstatus.Row, error) { return s.prs.Beads(ids) }
 
-func (s pullStore) Anchored(ids, statuses []string) (map[string][]prstatus.Row, error) {
+func (s pullStore) Anchored(ids, statuses []string) (map[string][]*prstatus.Row, error) {
 	return s.prs.Anchored(ids, statuses)
 }
 
