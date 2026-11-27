@@ -572,7 +572,7 @@ hasF "$TMP/pm.missing" "judge the change against the anchor's stated problem alo
 hasF "$TMP/pm.missing" 'no finding asks the change to add it' "…asks the change for no page"
 hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request for the page under one token"
 hasF "$TMP/pm.missing" "as a finding graded \`P2\`, which does not block" "…raised as a finding that does not block"
-hasF "$TMP/pm.missing" "The round files it, so a rig is asked once" "…which the round files, so a rig is asked once"
+hasF "$TMP/pm.missing" 'gc bd list --title-contains "docs/product-goals.md: missing" --all' "…which the round looks up with --all before it files, so a rig is asked once"
 notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
 
 echo "# the pm method walks the people a change affects through it"

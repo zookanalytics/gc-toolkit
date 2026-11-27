@@ -50,10 +50,22 @@ no reason to pass or fail the change, and no finding asks the change to add it,
 because a rig's product goals come from the operator, not from its code.
 
 Raise one request for the page instead, as a finding graded `P2`, which does
-not block, with the token `docs/product-goals.md: missing` in its message. The
-round files it, so a rig is asked once, and a later review finds that bead
-instead of filing another, even on a branch cut before the rig answered. The
-request's body names what the page holds, as the section above does. It says
+not block, with the token `docs/product-goals.md: missing` in its message.
+
+The round rules that finding deferred. Before it files anything, it lists the
+beads that already carry the token, closed ones included, so a rig is asked
+once, even on a branch cut before the rig answered:
+
+```bash
+gc bd list --title-contains "docs/product-goals.md: missing" --all
+```
+
+When a bead is listed, the round files nothing, and the ruling names that bead,
+its status and what it waits on, which can be another PR than this one.
+Otherwise the round files the request with `review-run.sh defer`, under a
+title that ends in the token in parentheses, and the ruling names the bead the
+call prints. The request's body names what the page holds, as the section above
+does. It says
 that the operator states the goals, so whoever takes the bead asks the operator
 for them, or for where the rig already keeps them, and does not draw them from
 the code. The request is answered by a `docs/product-goals.md`, or by a
