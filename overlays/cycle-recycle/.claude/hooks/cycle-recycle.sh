@@ -194,7 +194,7 @@ fi
 
 # (b) Refinery mid git-op: defer while a rebase/merge is in flight or a tracked
 # tree is dirty, in either the refinery's own worktree (CWD) or the rig's
-# canonical checkout ($GC_RIG_ROOT). Witness/deacon are idle pollers with no
+# canonical checkout ($GC_RIG_ROOT). The witness and the deacon run no
 # long git ops, so this is refinery-only. Untracked files are normal scratch and
 # are ignored. doctor/check-recycle-capable applies the same test to the rig's
 # canonical checkout, and its suite runs this script to prove the two agree.
@@ -231,11 +231,11 @@ $PROMPT"
 fi
 
 # `gc handoff` (non-auto) writes the durable HANDOFF mail first. For a
-# controller-restartable session, which the always-mode witness and deacon are,
-# it then requests the restart and signals the controller; for an on-demand
-# named session, the refinery, it only writes the mail and clears any restart
-# already requested. Non-auto is required so controller-restartable patrols
-# actually recycle — `--auto` would mail-only and never restart them. Its exit
+# controller-restartable session, which the always-mode deacon is, it then
+# requests the restart and signals the controller; for an on-demand named
+# session, the refinery or the witness, it only writes the mail and clears any
+# restart already requested. Non-auto is required so the deacon actually
+# recycles — `--auto` would mail-only and never restart it. Its exit
 # status does not say whether it requested the restart, since it exits 1 when
 # it cannot signal the controller after the request is durably set. Its report
 # on stdout does (cmd/gc/cmd_handoff.go): "Handoff: sent mail <id>, requesting

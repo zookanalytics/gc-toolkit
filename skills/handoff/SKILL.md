@@ -14,13 +14,14 @@ description: Use when the operator explicitly asks to hand off, reset, wrap up, 
 This skill has one shape. Confirm you are in it by reading `$GC_TEMPLATE`:
 
 - **Canonical path** — controller-restartable named sessions: the
-  always-on coordination agents in this city (mechanik, deacon, witness).
+  always-on coordination agents in this city (mechanik, deacon).
   Their `mode = "always"` declaration lets the controller stop and restart
   them cleanly when `gc handoff` fires. The transcript is replaced;
   durable state (beads, mail, work) survives.
 
 If `$GC_TEMPLATE` falls outside that shape — a `mode = "on_demand"`
-session, or anything else — **stop and confirm before proceeding.**
+session, such as the witness, or anything else — **stop and confirm before
+proceeding.**
 `gc handoff` will write the mail but cannot restart the user-attended
 process, so the next-life context is delayed until the operator manually
 restarts it. Surface the difference and let the operator decide.
