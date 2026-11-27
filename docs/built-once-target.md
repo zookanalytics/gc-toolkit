@@ -377,8 +377,6 @@ and what ends it:
   Town's loop that the city keeps run as orders that look and orders that act,
   because code does the work that needs no judgment (conversation tk-9l9pg0x).
   This ends when Gas Town's witness runs its scripted steps outside its session.
-- **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the old review path's retirement (tk-1tfzr71.122) lands.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
