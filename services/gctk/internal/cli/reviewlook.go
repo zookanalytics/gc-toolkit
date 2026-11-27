@@ -29,11 +29,12 @@ With no --file it prints what the look judges from: the account of the run's
 rounds up to the look's in one line, and whether the rule forces a question
 there; every round of the run, with each finding a lane raised, its ruling and
 the earlier finding it restates; the PR's other review runs, with their counts
-and how each ended; each commit that changed the review's rules since the PR's
-first run was poured, the rig's AGENTS.md, CLAUDE.md, review-checks.toml and
-docs/review-*.md on origin's copy of the target and the pack's skills/review-*
-and formulas/mol-pr-review*.toml; the commands that read the PR's change; and
-the shape of the output.
+and how each ended; each commit that changed the review's rules under the PR,
+which is each commit to the rig's AGENTS.md, CLAUDE.md, review-checks.toml and
+docs/review-*.md on origin's copy of the target that the head the PR's review
+first judged does not carry, and each commit to the pack's skills/review-* and
+formulas/mol-pr-review*.toml since the PR's first run was poured; the commands
+that read the PR's change; and the shape of the output.
 
 With --file it checks the output the look wrote there and records it. The
 output is one JSON object: review reading look, the head the round judged, a
@@ -109,11 +110,13 @@ func packRoot() string {
 }
 
 // lookView is what a fresh look judges from: the read, the review's rules that
-// changed on the PR's target since its first run was poured, and the checkout
-// that holds the round's head, "" when none does.
+// changed under the PR (review.RulesChanged) with the head the PR's review
+// first judged and when its first run was poured, which bound them, and the
+// checkout that holds the round's head, "" when none does.
 type lookView struct {
 	read  *review.LookRead
 	rules []review.RuleChange
+	first string
 	since time.Time
 	repo  string
 }
@@ -143,11 +146,11 @@ func viewLook(l *ledger.Ledger, bead string, repos []string, pack string) (*look
 	v := &lookView{read: rd, since: since}
 	for _, r := range repos {
 		if git.HasCommit(r, head) {
-			v.repo = r
+			v.repo, v.first = r, rd.FirstHead(r, head)
 			break
 		}
 	}
-	if v.rules, err = review.RulesChanged(v.repo, pack, run.Target, since); err != nil {
+	if v.rules, err = review.RulesChanged(v.repo, pack, run.Target, v.first, since); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -165,7 +168,7 @@ func reviewLookRead(l *ledger.Ledger, bead string, repos []string, pack string, 
 		fmt.Fprintf(stderr, "gctk review look: %v\n", err)
 		return 2
 	}
-	v.read.Print(stdout, v.rules, v.since, v.repo)
+	v.read.Print(stdout, v.rules, v.first, v.since, v.repo)
 	return 0
 }
 

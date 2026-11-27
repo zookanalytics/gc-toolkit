@@ -47,8 +47,8 @@ no other review skill.
 **2. Read the whole review.** The read prints the account of the run's rounds
 and whether the rule forces a question at this round. It also prints every
 round's findings with their rulings, the PR's earlier runs, the review's rules
-that changed on the PR's target since its first run, and the commands that
-read the PR's change at `{head}`:
+that changed under the PR, and the commands that read the PR's change at
+`{head}`:
 
 ```bash
 # >>> gctk-bin

@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -346,5 +350,117 @@ func TestTheRoundsReadListsTheFindingsItCanRestate(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the account lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// datedRepo is a git repository whose every commit carries the date it is
+// made at.
+type datedRepo struct {
+	t   *testing.T
+	dir string
+}
+
+func newDatedRepo(t *testing.T) *datedRepo {
+	t.Helper()
+	r := &datedRepo{t: t, dir: t.TempDir()}
+	r.git("2026-11-19T10:00:00Z", "init", "-q", "-b", "main")
+	return r
+}
+
+// git runs git in the repository, dating each commit it makes at.
+func (r *datedRepo) git(at string, args ...string) string {
+	r.t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", r.dir, "-c", "user.name=t", "-c", "user.email=t@example.com",
+		"-c", "commit.gpgsign=false"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_AUTHOR_DATE="+at,
+		"GIT_COMMITTER_DATE="+at)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		r.t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// commit writes subject into path, commits it as subject dated at, and
+// returns the commit.
+func (r *datedRepo) commit(at, path, subject string) string {
+	r.t.Helper()
+	full := filepath.Join(r.dir, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		r.t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(subject+"\n"), 0o644); err != nil {
+		r.t.Fatal(err)
+	}
+	r.git(at, "add", "-A")
+	r.git(at, "commit", "-q", "-m", subject)
+	return r.git(at, "rev-parse", "HEAD")
+}
+
+// The review's rules that changed under a PR are each rule commit on its
+// target that the head its review first judged does not carry, whatever its
+// date and however it landed, and each rule commit in the pack since its first
+// run was poured.
+func TestTheRulesThatChangedUnderThePR(t *testing.T) {
+	const (
+		before  = "2026-11-19T10:00:00Z"
+		written = "2026-11-24T10:00:00Z"
+		landed  = "2026-11-26T10:00:00Z"
+	)
+	began := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	rig := newDatedRepo(t)
+	rig.commit(before, "AGENTS.md", "base")
+	rig.commit(before, "docs/review-correctness.md", "a rule the PR's branch carries")
+	rig.git(before, "checkout", "-q", "-b", "pr")
+	first := rig.commit(before, "a.go", "the PR")
+	rig.commit(landed, "AGENTS.md", "the PR's own edit")
+	rig.git(written, "checkout", "-q", "-b", "merged", "main")
+	rig.commit(written, "AGENTS.md", "a rule merged after the review began")
+	rig.git(landed, "checkout", "-q", "main")
+	rig.git(landed, "merge", "-q", "--no-ff", "-m", "merge the rule", "merged")
+	rig.git(written, "checkout", "-q", "-b", "fast", "main")
+	rig.commit(written, "review-checks.toml", "a check fast-forwarded after the review began")
+	rig.git(landed, "checkout", "-q", "main")
+	rig.git(landed, "merge", "-q", "--ff-only", "fast")
+	rig.commit(landed, "docs/review-arch.md", "a guidance edit landed after the review began")
+	rig.commit(landed, "b.go", "not a rule")
+	rig.git(landed, "update-ref", "refs/remotes/origin/main", "main")
+
+	pack := newDatedRepo(t)
+	pack.commit(written, "skills/review-arch/SKILL.md", "a method installed before the review began")
+	pack.commit(landed, "skills/review-pm/SKILL.md", "a method installed after the review began")
+	pack.commit(landed, "skills/work/SKILL.md", "not a review skill")
+
+	got, err := review.RulesChanged(rig.dir, pack.dir, "main", first, began)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subjects []string
+	for _, c := range got {
+		subjects = append(subjects, c.Subject)
+	}
+	slices.Sort(subjects)
+	want := []string{"a check fast-forwarded after the review began", "a guidance edit landed after the review began",
+		"a method installed after the review began", "a rule merged after the review began"}
+	if !slices.Equal(subjects, want) {
+		t.Errorf("the rules that changed = %q; want %q", subjects, want)
+	}
+}
+
+// The head a PR's review first judged is the first head of its earliest run
+// that the checkout holds, else the head the look's round judged.
+func TestTheHeadAPRsReviewFirstJudged(t *testing.T) {
+	repo := newDatedRepo(t)
+	old := repo.commit("2026-11-19T10:00:00Z", "a.go", "the PR")
+	next := repo.commit("2026-11-20T10:00:00Z", "a.go", "a fix")
+	gone := strings.Repeat("e", 40)
+	rd := &review.LookRead{Step: &review.Step{Run: &review.Run{Head: next}},
+		Earlier: []review.EarlierRun{{Head: gone}, {Head: old}}}
+	if got := rd.FirstHead(repo.dir, next); got != old {
+		t.Errorf("with an earlier run's head held, the first head = %s; want %s", got, old)
+	}
+	rd = &review.LookRead{Step: &review.Step{Run: &review.Run{Head: gone}}}
+	if got := rd.FirstHead(repo.dir, next); got != next {
+		t.Errorf("with no run's head held, the first head = %s; want the round's head %s", got, next)
 	}
 }

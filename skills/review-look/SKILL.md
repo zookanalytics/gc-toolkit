@@ -21,9 +21,10 @@ The read prints the account of the run's rounds in one line, such as
 forces a question at this round. Then it prints every round's findings with
 their rulings and each finding that came back after a fix (its `restates`),
 the PR's earlier review runs with their counts and how each ended, and each
-commit that changed the review's rules on the PR's target since its first run.
-Last come the commands that read the PR's change. Read the change itself, and
-the findings against it, before you judge.
+commit that changed the review's rules under the PR. Those are the commits on
+the PR's target that the head its review first judged does not carry, and the
+pack's commits since its first run. Last come the commands that read the PR's
+change. Read the change itself, and the findings against it, before you judge.
 
 ## Why the findings keep coming
 

@@ -55,9 +55,16 @@ on the repair pool.
 
 The look reads the whole review through `gctk review look`. That read covers
 every round's findings and rulings, the PR's earlier runs, and the review's
-rules that changed on the PR's target since its first run: the rig's
-AGENTS.md, CLAUDE.md, check index and guidance, and the pack's review skills and
-review formulas. Its method is the `review-look` skill. It sends the review on,
+rules that changed under the PR. Those are the commits to the rig's AGENTS.md,
+CLAUDE.md, check index and guidance on the PR's target that the head the PR's
+review first judged does not carry, and the commits to the pack's review skills
+and review formulas since the PR's first run was poured. A lane reads the rig's
+rules at the head it judges, so a rule on the target reaches the review once
+the PR's branch carries it. A commit's date does not say when it reached the
+target, because a fast-forward or a merge lands a commit with the date it was
+made, so the rig's rules are read by what the first judged head carries. The
+pack's main lands each change as one squash commit dated when it landed, so its
+rules are read by date. Its method is the `review-look` skill. It sends the review on,
 or stops it for a person's answer with one question, a recommendation and its
 reading of why the findings keep coming, which says whether the trouble points
 to the PR's approach being wrong overall.

@@ -15,11 +15,11 @@ import (
 
 // A fresh look reads the whole review of a PR: every round of its run with
 // the account of the rounds, the PR's earlier runs and how each ended, and the
-// review's rules that changed on the PR's target since its first run began. It
-// writes its verdict, and its record files the question of a look that stops
-// the review on the bead that owns the PR, notes the reading there, and marks
-// the look's own step failed hard, so the loop ends at that round once the step
-// closes failed (formula-spec-v2.md, section 3.1).
+// review's rules that changed under the PR. It writes its verdict, and its
+// record files the question of a look that stops the review on the bead that
+// owns the PR, notes the reading there, and marks the look's own step failed
+// hard, so the loop ends at that round once the step closes failed
+// (formula-spec-v2.md, section 3.1).
 
 // LookRead is what a fresh look reads: its step, the account of the run's
 // rounds up to the look's, and the PR's earlier runs.
@@ -86,8 +86,23 @@ func ReadLook(l *ledger.Ledger, id string) (*LookRead, error) {
 	return out, nil
 }
 
+// FirstHead is the head the PR's review first judged that dir holds: the first
+// head of the PR's earliest run that dir holds, else head, the head the look's
+// round judged.
+func (r *LookRead) FirstHead(dir, head string) string {
+	for _, e := range r.Earlier {
+		if e.Head != "" && git.HasCommit(dir, e.Head) {
+			return e.Head
+		}
+	}
+	if h := r.Step.Run.Head; h != "" && git.HasCommit(dir, h) {
+		return h
+	}
+	return head
+}
+
 // Since is when the PR's first review run was poured, the earliest of its
-// runs, the start of the window the rules that changed are read over.
+// runs, the start of the window the pack's rules that changed are read over.
 func (r *LookRead) Since(l *ledger.Ledger) (time.Time, error) {
 	root, err := one(l, r.Step.Run.Root)
 	if err != nil {
@@ -123,16 +138,22 @@ var (
 	packRules = []string{"skills/review-*", "formulas/mol-pr-review*.toml"}
 )
 
-// RulesChanged is each commit since since that changed the review's rules: in
-// the rig's checkout, on origin's copy of target, and in the pack's checkout,
-// on what it has checked out, each commit once. A pack that is no checkout of
-// its own reads nothing, and a read that fails is an error.
-func RulesChanged(rig, pack, target string, since time.Time) ([]RuleChange, error) {
+// RulesChanged is each commit that changed the review's rules under the PR,
+// each once. In the rig's checkout it is each commit on origin's copy of target
+// that first, the head the PR's review first judged, does not carry. A lane
+// reads the rig's rules at the head it judges, so such a commit reaches the
+// review once the PR's branch carries it, whatever its date: a fast-forward or
+// a merge lands a commit with the date it was made. In the pack's checkout it
+// is each commit since since on what the checkout has checked out, from which
+// the city installs the pack, and whose main lands each change as one commit
+// dated when it landed. A pack that is no checkout of its own reads nothing,
+// and a read that fails is an error.
+func RulesChanged(rig, pack, target, first string, since time.Time) ([]RuleChange, error) {
 	var out []RuleChange
 	seen := map[string]bool{}
-	read := func(dir, rev string, paths []string) error {
-		raw, err := git.Output(dir, append([]string{"log", "--format=%x1e%H%x1f%cs%x1f%s", "--name-only",
-			"--since=" + since.UTC().Format(time.RFC3339), rev, "--"}, paths...)...)
+	read := func(dir string, paths []string, revs ...string) error {
+		args := append([]string{"log", "--format=%x1e%H%x1f%cs%x1f%s", "--name-only"}, revs...)
+		raw, err := git.Output(dir, append(append(args, "--"), paths...)...)
 		if err != nil {
 			return fmt.Errorf("the rules that changed in %s did not read: %w", dir, err)
 		}
@@ -154,12 +175,12 @@ func RulesChanged(rig, pack, target string, since time.Time) ([]RuleChange, erro
 		return nil
 	}
 	if rig != "" {
-		if err := read(rig, "origin/"+target, rigRules); err != nil {
+		if err := read(rig, rigRules, "^"+first, "origin/"+target); err != nil {
 			return nil, err
 		}
 	}
 	if top, ok := git.Toplevel(pack); ok && pack != "" {
-		if err := read(top, "HEAD", packRules); err != nil {
+		if err := read(top, packRules, "--since="+since.UTC().Format(time.RFC3339), "HEAD"); err != nil {
 			return nil, err
 		}
 	}
@@ -169,9 +190,9 @@ func RulesChanged(rig, pack, target string, since time.Time) ([]RuleChange, erro
 
 // Print writes what the look reads: the account and the rule's reading at its
 // round, every round of the run with each finding and its ruling, the PR's
-// earlier runs, the rules that changed, the PR's change in the rig's checkout,
-// and the output to write.
-func (r *LookRead) Print(w io.Writer, rules []RuleChange, since time.Time, repo string) {
+// earlier runs, the rules that changed as RulesChanged read them from first and
+// since, the PR's change in the rig's checkout, and the output to write.
+func (r *LookRead) Print(w io.Writer, rules []RuleChange, first string, since time.Time, repo string) {
 	st, run, n := r.Step, r.Step.Run, r.Step.Iteration
 	head := run.HeadOf(n)
 	if it := run.Iterations[n]; it != nil && it.Triage != nil {
@@ -242,7 +263,14 @@ func (r *LookRead) Print(w io.Writer, rules []RuleChange, since time.Time, repo 
 		fmt.Fprintf(w, "run %s poured %s at %s: must-fix by round %s; %s\n", e.Root, e.Poured, e.Head,
 			orNone([]string{e.Account.Counts()}), how)
 	}
-	fmt.Fprintf(w, "== The review's rules that changed since the PR's first run was poured, %s\n", since.UTC().Format(time.RFC3339))
+	fmt.Fprintln(w, "== The review's rules that changed under the PR")
+	if first != "" {
+		fmt.Fprintf(w, "on origin/%s: each commit that %s, the head the PR's review first judged, does not carry\n",
+			run.Target, first)
+	} else {
+		fmt.Fprintf(w, "on origin/%s: none read, as no checkout here holds the round's head\n", run.Target)
+	}
+	fmt.Fprintf(w, "in the pack: each commit since the PR's first run was poured, %s\n", since.UTC().Format(time.RFC3339))
 	if len(rules) == 0 {
 		fmt.Fprintln(w, "none")
 	}
@@ -289,10 +317,10 @@ func (e *LookUnrecorded) Error() string { return e.Why }
 // or finds open there; the look's step takes the look as its output, and for a
 // stop Gas City's hard failure record; and the bead that owns the PR is noted
 // with the look, stamped at. Each rule the look names is one of changed, the
-// review's rules that changed on the PR's target since its first run, as the
-// look's read printed them (RulesChanged). An output that does not stand
-// returns its *Refused, a read that fails the store's error, and a write that
-// does not land a *LookUnrecorded, after the writes before it landed.
+// review's rules that changed under the PR, as the look's read printed them
+// (RulesChanged). An output that does not stand returns its *Refused, a read
+// that fails the store's error, and a write that does not land a
+// *LookUnrecorded, after the writes before it landed.
 func RecordLook(l *ledger.Ledger, req OutputRequest, changed []RuleChange, filer Gates, at time.Time) (*LookRecord, error) {
 	raw, err := Output(l, req)
 	if err != nil {
@@ -304,8 +332,7 @@ func RecordLook(l *ledger.Ledger, req OutputRequest, changed []RuleChange, filer
 	}
 	for _, c := range lk.Rules {
 		if !slices.ContainsFunc(changed, func(rc RuleChange) bool { return rc.Commit == c }) {
-			return nil, refuse("the rule %s is none of the review's rules that changed on the PR's target since its first run, "+
-				"which the look's read prints", c)
+			return nil, refuse("the rule %s is none of the review's rules that changed under the PR, which the look's read prints", c)
 		}
 	}
 	st, err := ReadStep(l, req.Step)
