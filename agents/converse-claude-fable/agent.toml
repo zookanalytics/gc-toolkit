@@ -19,6 +19,7 @@ session_live = [
 ]
 nudge = ""
 idle_timeout = "0"
+context_advisory = { enabled = false }
 sleep_after_idle = "10m"
 min_active_sessions = 0
 max_active_sessions = 8

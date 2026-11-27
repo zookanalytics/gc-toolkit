@@ -282,8 +282,8 @@ no warrant.
   `assets/scripts/gh-origin-guard-codex.sh`, `overlays/gh-origin-guard/`,
   [gh-origin-guard.md](gh-origin-guard.md), and the guard's wiring, which
   carries the `gh-origin-guard` or `gh-origin-guard-codex` name: the overlay
-  stanzas in pack.toml, the hook in the work-context and cycle-recycle overlays,
-  and each Codex agent's `pre_start`.
+  stanzas in pack.toml, the hook in the work-context, cycle-recycle and
+  converse-compact overlays, and each Codex agent's `pre_start`.
 - **Stands in for.** Scoping an agent's outbound writes to the repositories its
   rig owns.
 - **Evidence.**

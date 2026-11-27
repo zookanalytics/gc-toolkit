@@ -39,9 +39,10 @@ command or its skill.
 
 ## Entering
 
-Each time this session starts or wakes, and on Gas City's notice that a blocker
-closed and your conversation may be unblocked, run the entry before anything
-else. The entry claims your conversation and prints where the sitting stands:
+Each time this session starts or wakes, after each compaction of its context,
+and on Gas City's notice that a blocker closed and your conversation may be
+unblocked, run the entry before anything else. The entry claims your
+conversation and prints where the sitting stands:
 
 ```bash
 "$(gc gc-toolkit scripts-dir)/converse-entry.sh"
@@ -54,10 +55,10 @@ one call to the next, so at the top of every later call, set `CONV`,
 | ENTRY | What it means | What to do |
 |---|---|---|
 | `fresh` | You have just taken up the conversation. | `converse-recheck-premise` |
-| `interrupted` | A restart came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
-| `waiting` | You are staying for work that is still out, and an attach, a restart or a notice brought you back before it closed. | `converse-stay` |
+| `interrupted` | A restart or a compaction came in the middle of the sitting. | The skill `NEXT` names. The `ENTRY` line says which case it is: the hold stands, nothing was held yet, or a stay stopped short. |
+| `waiting` | You are staying for work that is still out, and an attach, a restart, a compaction or a notice brought you back before it closed. | `converse-stay` |
 | `returned` | The work you stayed for has closed. | `converse-stay` |
-| `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |
+| `none` | No conversation is assigned to this session. | When your own sign-off ran and the steps after it have not all landed, as a compaction after the sign-off can leave them, finish those steps first, whether the sign-off closed the conversation or handed it back to the operator's queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted. Then `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | Acknowledge the drain, as the cases below say. |
 | `unreadable` | The entry could not read the claim or the record. | Do not drain and do not close anything. Run the entry again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:`, and wait. |
 
@@ -226,11 +227,14 @@ nothing after it. Never claim again: a new concern is a conversation of its own
 (`converse-continue`). A sitting that stays ends its turn without draining.
 
 While you hold the conversation, no clock ends the sitting, so a hold can wait
-as long as the operator does. When your context runs low before the operator
-answers, hand the conversation back to their queue (`converse-settle`, Ending
-early). That is the one ending that drains with the conversation still open.
-During a return, low context ends nothing: the comparison is still owed, and
-`converse-stay` says how it carries on. `docs/human-engagement.md` holds the
+as long as the operator does. A full context ends nothing either: your provider
+compacts the thread into a summary, and the sitting carries on with its
+conversation. After a compaction, run the entry again before anything else, and
+go on from where it and the summary show the sitting stood. During a return the
+comparison is still owed, and `converse-stay` says how it carries on. When the
+operator asks to end the sitting before they rule, hand the conversation back
+to their queue (`converse-settle`, Ending early). That is the one ending that
+drains with the conversation still open. `docs/human-engagement.md` holds the
 mechanism.
 
 

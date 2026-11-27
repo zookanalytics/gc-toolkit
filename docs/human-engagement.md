@@ -739,16 +739,17 @@ has no such clock: its work closing does not end it, idleness only sleeps it,
 and attaching wakes it. The idle sleep its template sets never reaches a sitting
 that holds its conversation or has a client attached.
 
-**The claim.** The sitting enters through `converse-entry.sh`, which its
-prompt runs first each time the session starts or wakes, and which claims with
-a plain `gc hook --claim`. The default work query finds the task assigned to the
-session, open through its second tier and in progress through its first, and
-its routed tier is closed to a session whose alias is not its template's name,
-so the sitting is offered nothing but its task. The claim sets `in_progress`,
-a lease and the session stamps under the session's alias. The converse
-templates declare a pool at zero (`min_active_sessions = 0`) with no
-`scale_check` and no work routed to them, so no demand pass counts anything for
-one, and `assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
+**The claim.** The sitting enters through `converse-entry.sh`, which its prompt
+runs first each time the session starts or wakes, and again after each
+compaction of its context, and which claims with a plain `gc hook --claim`. The
+default work query finds the task assigned to the session, open through its
+second tier and in progress through its first, and its routed tier is closed to
+a session whose alias is not its template's name, so the sitting is offered
+nothing but its task. The claim sets `in_progress`, a lease and the session
+stamps under the session's alias. The converse templates declare a pool at zero
+(`min_active_sessions = 0`) with no `scale_check` and no work routed to them, so
+no demand pass counts anything for one, and
+`assets/scripts/pool-demand-wiring.test.sh` keeps those three rules.
 
 **Mail starts the sitting's turn.** Mail sent or replied to a sitting, from any
 sender and from the dashboard too, starts the sitting's turn within about 30
@@ -775,6 +776,67 @@ record carries over in the task's and the subject's notes. Nothing in Gas City
 releases a sitting's claim on its own, and the pack's witness recovery skips a
 conversation too, so the alias is the way back in.
 
+**A full context is compacted, and the sitting goes on.** Claude Code and Codex
+compact a thread on their own as it nears its limit. Claude Code also compacts
+a long conversation left idle for about an hour, so the next message sends a
+summary rather than the whole thread (code.claude.com/docs/en/settings-reference,
+`idleCompaction`). The session, its claim and the operator's tab stay as they
+were, and the saved transcript keeps every earlier line. The prompt reaches a
+sitting as a message, so after a compaction only the summary carries it, and
+the record holds only what the sitting wrote to it. A Claude sitting's
+overlay, `overlays/converse-compact`, adds a PreCompact hook, whose output
+Claude Code takes as instructions for the summary
+(code.claude.com/docs/en/hooks, PreCompact). It asks the summary to quote word
+for word what the operator said that the record does not hold yet, to state the
+open decision and the recommendation with the facts they rest on, each with
+where its source lives, and quote the last hand-back, to copy the entry's
+`CONV`, `CONVERSATION`, `SUBJECT` and `GATES` lines, and to end by telling the
+sitting to run the entry again before anything else, as the prompt also tells
+it, and to work from the summary and what the entry prints. The entry's claim
+then returns the conversation as an existing assignment, so the entry reads a
+hold that stands as `interrupted`, and the sitting first takes up each turn of
+the operator's that it had not finished, such as a ruling the summary quotes,
+before it waits (`converse-continue`). It works from the summary and from what
+the entry printed, and reads again only the part of a bead, a file or a skill
+that a turn needs and neither holds. A compaction that comes after the
+sitting's sign-off and before the steps after it have landed leaves the entry
+no conversation, whether the sign-off closed the conversation or handed it back
+to the operator's queue. So the prompt's `none` entry and the steer have the
+sitting take those steps before it drains: the send or the close of the
+subject that some rulings make after the sign-off, and the hand-back, recorded
+and posted.
+The city's own PreCompact hook still runs `gc handoff --auto`, which mails the
+session a note and requests no restart. No sitting gets Gas City's context
+advisory, which tells a session past 60% of its window to plan a handoff and
+reset itself and past 80% to run `gc session reset` on itself. Every
+`converse-<model>` template sets `context_advisory = { enabled = false }`,
+which Gas City merges over the city's setting and its built-in default. No
+other agent sets it, so each keeps the advisory. A Codex sitting has the
+advisory off and no summary steer.
+
+**A finished sitting is not compacted until its window fills.** A sitting's last
+act is `gc runtime drain-ack`, and Gas City holds the stop it asks for while a
+tab is attached (*A sitting ends its own session*, below). A summary of that
+thread carries nothing on, since the sitting runs nothing after its drain-ack,
+so the hook first reads `GC_DRAIN_ACK` from its own session's tmux environment
+with `tmux show-environment -t "$TMUX_PANE" GC_DRAIN_ACK`. That is the read Gas
+City's runtime makes of the flag every drain-ack of the session sets, and the
+flag the tab's `done` title reads (*Viewing a sitting holds its stop*, below).
+While it reads `GC_DRAIN_ACK=1`, the hook prints no steer, writes one line to
+stderr, which Claude Code shows when the operator typed `/compact`, and exits 2.
+That blocks a typed `/compact` and the compactions Claude Code starts before the
+context limit, the idle one and the one at the auto-compact window, so the
+thread stays as it was. It does not block the compaction Claude Code makes once
+a request no longer fits the window, which runs despite the hook
+([the search](../specs/tk-kwnt509/gas-city-search.md#refuse-the-compaction-of-a-sitting-that-has-finished)),
+so a finished sitting someone keeps typing into is compacted when its window
+fills. Any other answer, or a read that fails, as outside tmux, prints the steer
+and exits 0, so a sitting whose drain is not acknowledged is compacted as
+before. The flag lives as long as the tmux session: a stop kills it, and a start
+makes a new one, so a sitting that starts again after a stop, as a stay's wake
+or an engage does, compacts as before. A compaction between a sign-off and its
+drain-ack is steered, because the flag is not set yet.
+
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a
 conversation a sitting first takes up and one whose work has returned alike,
@@ -786,10 +848,10 @@ values every later call sets and the skill to load next:
 | Entry | What the record shows | Next |
 |---|---|---|
 | `fresh` | A new claim, with no `staying:` line newest. | The premise re-check. |
-| `interrupted` | A restart, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
+| `interrupted` | A restart or a compaction, where the claim returns the conversation as an existing assignment: a `holding:` line newest means the hold stands, and none means nothing was held yet. A `no_work` drain over a conversation whose newest line is `holding:` is a hold that stands too. Or a stay that stopped short: its newest `staying:` line names no work yet, or names work that is still out with no edge onto it, or the conversation is still claimed while its work is out. | `converse-continue`, the premise re-check, or `converse-stay`. |
 | `waiting` | No ready work (a `no_work` drain), and the conversation open under the alias waits on open work, as `gctk bead holds` reads it, through an edge onto each bead its newest `staying:` line names that is still out. | `converse-stay`. |
 | `returned` | A claim whose newest `holding:` or `staying:` line is a `staying:` line that names work, each bead of which has closed, with nothing left open that the conversation waits on. | `converse-stay`. |
-| `none` | No ready work (a `no_work` drain), and no conversation under the alias. | Drain. |
+| `none` | No ready work (a `no_work` drain), and no conversation under the alias. | When the sitting's own sign-off ran and the steps after it have not all landed, as a compaction after the sign-off can leave them, those steps first, whether the sign-off closed the conversation or handed it back to the operator's queue: the send or the close of the subject that some rulings make after the sign-off, and the hand-back, recorded and posted. Then drain. |
 | `stop` | A drain for a reason other than `no_work` and `claims_errored`, such as `drain_pending` or `stale_session`: Gas City is stopping the session and hands it no work, whatever the conversation's state. The entry prints what the hook wrote to stderr, which can name the acknowledgement to run. | Drain. Gas City refuses the acknowledgement while the session holds a claim it started and has not finished, as a conversation in progress under it is, and tells it to continue. So a sitting refused over its conversation goes on with it, and acknowledges the drain once the conversation is closed, back in the operator's queue or left to wait. |
 
 A read that fails, a listing that answers no list, a conversation assigned to
@@ -998,7 +1060,8 @@ account is the operator's, so each line reads true whichever it is. A status on
 the old record carries no conditions, so needs-review there asks for the
 Approve.
 
-**A sitting cut short** writes its record, signs off with `--ruled no`, which
+**A sitting cut short**, which the operator asks to end before they rule,
+writes its record, signs off with `--ruled no`, which
 leaves every gate its conversation replies to open and owed with its reply in
 place and hands the conversation back to the operator's queue with one write
 guarded on the sitting that holds it and on the status it read, and drains.
@@ -1560,11 +1623,9 @@ alias, which drops the claim. Gas City does the rest with what it already has
   the return from the record.
 - **Low context during the return.** The comparison stays owed when the
   sitting's context runs low, so the sitting neither signs off nor holds for
-  that reason. Claude Code and Codex compact a thread on their own, and the
-  city's PreCompact hook runs `gc handoff --auto`, which mails the session a
-  note and requests no restart, so the sitting keeps its conversation through
-  a compaction and goes on with the return. When a fresh session must take the
-  return over, the sitting appends a `## Return hand-over` block to the
+  that reason. The sitting keeps its conversation through a compaction (*The
+  sitting*, above) and goes on with the return. When a fresh session must take
+  the return over, the sitting appends a `## Return hand-over` block to the
   conversation's notes: what was agreed and where it is recorded, the returned
   work and the revision to examine, the comparison so far with its evidence,
   what remains, and the conversation and its waits. It posts a hand-back that
@@ -1688,8 +1749,8 @@ session, the sitting's own and an operator's alike
 so nothing in the pack writes the title at the ending, and a tab reads done
 once its sitting has drained, whichever way the sitting ended: its
 conversation closed by the sign-off, a moot or benign close or a dismiss, or
-handed back to the queue by a sitting low on context. tmux reads the flag when
-it next draws the title. It does so at once when the pane prints, as the
+handed back to the operator's queue by a sitting cut short. tmux reads the flag
+when it next draws the title. It does so at once when the pane prints, as the
 agent's pane does after the sitting's own drain-ack, and otherwise at the
 client's next status refresh, every 15 seconds on the city's tmux server,
 which keeps tmux's default `status-interval`. So a dismiss from outside the
