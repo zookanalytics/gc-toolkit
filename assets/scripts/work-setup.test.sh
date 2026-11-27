@@ -256,10 +256,15 @@ eq "$RC" "1" "(13) a merge git refuses to start exits 1"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "" "(13) git refuses to start a merge over an uncommitted edit"
 eq "$(meta rejection_reason)" "$CONFLICTS" "(13) and the rejection stays"
 
+# with_anchor — the bead's store row list, with the PR anchor tk-a beside it: the
+# bead on polecat/w2 that carries a merge_result, targeting integration/c1.
+with_anchor() {
+  jq -c '. + [{id: "tk-a", status: "open", assignee: "", metadata: {branch: "polecat/w2", target: "integration/c1", merge_result: "pull_request_pending"}}]'
+}
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
 for how in molecule bare; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" in_progress sess-me)"
+  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" in_progress sess-me | with_anchor)"
   : > "$CALLS"
   if [ "$how" = molecule ]; then
     TOOL_ENV=STUB_HOOK_CURRENT=tk-step tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
@@ -306,13 +311,32 @@ has "$(cat "$TMP/err")" "this session's claim did not read, so it cannot tell a 
 hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16c) and the notes record no stop, as a bead with no molecule's would"
 for held in tk-step tk-w; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
+  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" | with_anchor)"
   TOOL_ENV="STUB_HOOK_CURRENT=$held AWAIT_RC=1" tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
   eq "$RC" "1" "(16b) holding $held: a wait that does not land stops the stop"
   eq "$(grep -cE '^(cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16b) holding $held: and nothing cancels or drains"
   eq "$(grep -cE '^bd update tk-w .*(--status|--assignee)' "$CALLS")" "0" "(16b) holding $held: the stop releases no claim itself, so it stays held"
   hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16b) holding $held: and the notes record no stop"
 done
+# A bead on a PR's branch with no anchor_bead of its own asks on the bead that
+# owns the branch's merge, the one there that carries a merge_result, and names
+# that bead's target when it records none.
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")" | with_anchor)"
+: > "$CALLS"
+tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "0" "(16d) a bead with no anchor_bead: --stop-merge exits 0"
+eq "$(grep -c '^gate --subject tk-a --key bring-current-question\.tk-w --message polecat/w2 needs a decision before it can be brought current with integration/c1$' "$CALLS")" "1" "(16d) the question goes to the bead on its branch that carries a merge_result, naming that bead's target"
+grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a --formula mol-polecat-work$' "$CALLS" \
+  && ok "(16d) and the bead waits on that gate" \
+  || bad "(16d) and the bead waits on that gate" "$(grep '^await' "$CALLS")"
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")")"
+: > "$CALLS"
+TOOL_ENV=STUB_LIST_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "1" "(16e) a branch whose beads do not list stops the stop"
+eq "$(grep -cE '^(gate|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16e) before it asks, and nothing waits, cancels or drains"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16e) the merge stays open"
 
 echo "# a fresh run makes its worktree in the rig, whatever repo its directory is in"
 RIG="$TMP/rig"; "$REAL_GIT" clone -q "$O" "$RIG"

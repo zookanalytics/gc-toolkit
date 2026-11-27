@@ -173,11 +173,33 @@ if [ "$MODE" = stop ]; then
   fi
   work_read "$WORK_ID" || { echo "$PROG: $WORK_ID could not be read, so no gate asks the question; NOT stopping. Re-run the ask." >&2; exit 1; }
   # The question's gate goes on the bead that owns the branch's merge, so it holds
-  # that merge: the bead's anchor_bead when it is a child, else the bead itself. It
-  # is keyed by this bead, and each round's question is an event of its own, so
-  # the call declares no quiet window.
-  ANCHOR=$(work_meta anchor_bead); [ -n "$ANCHOR" ] || ANCHOR="$WORK_ID"
-  Q_BRANCH=$(work_meta branch); Q_TARGET=$(work_meta target); [ -n "$Q_TARGET" ] || Q_TARGET=main
+  # that merge: the bead's anchor_bead when it is a child, else the oldest other
+  # unclosed bead on its branch that carries a merge_result, else the bead itself.
+  # The question names the bead's branch and target, else its anchor's. It is
+  # keyed by this bead, and each round's question is an event of its own, so the
+  # call declares no quiet window. A read that does not answer asks nothing.
+  ANCHOR=$(work_meta anchor_bead); Q_BRANCH=$(work_meta branch); Q_TARGET=$(work_meta target)
+  if [ -z "$ANCHOR" ] && [ -n "$Q_BRANCH" ]; then
+    if ! Q_ROWS=$(bd_json list --metadata-field "branch=$Q_BRANCH" --limit 0) \
+      || ! printf '%s' "$Q_ROWS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+      echo "$PROG: the beads on $Q_BRANCH could not be listed, so the bead that owns its merge is not known and no gate asks the question; NOT stopping. Re-run the ask." >&2
+      exit 1
+    fi
+    ANCHOR=$(printf '%s' "$Q_ROWS" | jq -r --arg self "$WORK_ID" '
+        [ .[] | select(.id != $self) | select((((.metadata // {}).merge_result // "") | tostring) != "") ]
+        | sort_by(.created_at // .created // .id) | .[0].id // empty')
+  fi
+  [ -n "$ANCHOR" ] || ANCHOR="$WORK_ID"
+  if [ "$ANCHOR" != "$WORK_ID" ] && { [ -z "$Q_BRANCH" ] || [ -z "$Q_TARGET" ]; }; then
+    if ! Q_ANCHOR_ROW=$(bd_json show "$ANCHOR") \
+      || ! printf '%s' "$Q_ANCHOR_ROW" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+      echo "$PROG: anchor $ANCHOR could not be read, so no gate asks the question; NOT stopping. Re-run the ask." >&2
+      exit 1
+    fi
+    [ -n "$Q_BRANCH" ] || Q_BRANCH=$(printf '%s' "$Q_ANCHOR_ROW" | jq -r '.[0].metadata.branch // empty')
+    [ -n "$Q_TARGET" ] || Q_TARGET=$(printf '%s' "$Q_ANCHOR_ROW" | jq -r '.[0].metadata.target // empty')
+  fi
+  [ -n "$Q_TARGET" ] || Q_TARGET=main
   Q_HEAD=$(git rev-parse -q --verify "refs/remotes/origin/$Q_BRANCH" 2>/dev/null) || Q_HEAD=""
   Q_HEAD=${Q_HEAD:0:8}; [ -n "$Q_HEAD" ] || Q_HEAD="its last pushed head"
   MSG="$Q_BRANCH needs a decision before it can be brought current with $Q_TARGET
