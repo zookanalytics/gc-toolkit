@@ -28,12 +28,18 @@ Three inputs, in this order.
    printed when the head carries one. A rig steers
    triage there in words, such as never adding a check, or adding one only for
    one kind of change: advice you weigh beside your own reading of the diff.
-3. **The change, at the head** — the run's read prints the change at its head: none at a head that already passed into the run's
-   target, since the last head that passed, the run's own repair since its
-   first head, which you read with the rulings its push answers, or else the
-   whole PR. Read its stat first, then skim the files the stat names.
-   A skim is the method here; reading every hunk is the specialist reviewer's
-   job, not yours.
+3. **The change, at the head**, which the run's read prints. The read takes
+   the first of these that applies:
+   - The head already passed into the run's target. The read prints no
+     change.
+   - An earlier head of the branch passed into the run's target. The read
+     prints the change since the last such head.
+   - The run's own repair pushed the head. The read prints that repair since
+     the run's first head. Read it with the rulings its push answers.
+   - None of these. The read prints the whole PR.
+
+   Read its stat first, then skim the files the stat names. A skim is the
+   method here; reading every hunk is the specialist reviewer's job, not yours.
 
 ### The index
 
