@@ -91,16 +91,16 @@ Write one JSON object in the shape the read printed:
 - `review`: `look`
 - `head`: the head the round judged, as the read names it
 - `verdict`: `continue` or `stop`
-- `reading`: why the findings keep coming, and whether that points to the PR's
-  approach being wrong overall, in a few sentences the round's comment shows
-  the person
+- `reading`: in a few plain sentences, why the findings keep coming, and
+  whether that points to the PR's approach being wrong overall
 - `recommendation` and `question`: for a stop, the question as above and the
   option you recommend
 - `rules`: each commit from the read's list that the reading gives as the
   cause of the counts
 
-The record refuses a stop without its question or its recommendation, a
-continue at a round the rule forces a question at that names no rule, a rule
-that is not in the read's list, and a continue at the run's last round. A stop's
-record files the question and marks your step failed hard, and you close the
-step failed, which ends the run's loop at this round.
+The record refuses an output in each of these cases:
+
+- a stop without its question or its recommendation;
+- a continue that names no rule, at a round where the rule forces a question;
+- a rule that is not in the read's list;
+- a continue at the run's last round.
