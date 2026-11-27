@@ -80,6 +80,7 @@ scope, but `gc formula show` is scope-strict and reports the rig-only ones as
 | [`mol-polecat-work`](formulas/mol-polecat-work.md) | `city` |
 | [`mol-pr-review`](formulas/mol-pr-review.md) | `city` |
 | [`mol-pr-review-lane`](formulas/mol-pr-review-lane.md) | `city` |
+| [`mol-pr-review-look`](formulas/mol-pr-review-look.md) | `city` |
 | [`mol-prompt-synth`](formulas/mol-prompt-synth.md) | `city` |
 | [`mol-refinery-patrol`](formulas/mol-refinery-patrol.md) | `city` |
 | [`mol-review`](formulas/mol-review.md) | `city` |

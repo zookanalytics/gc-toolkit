@@ -29,11 +29,12 @@ func newReviewCmd(stdout, stderr io.Writer) *cobra.Command {
 		"The review of a PR: which checks gate a change at a commit, with the rig's index laid over the pack's, "+
 			"and the rig's guidance for each; whether an iteration of a review run passed, which as the loop's "+
 			"check records the result of a run for the head and the target it judged; the asks a run works on the "+
-			"PR's branch; and, for a run's steps, what a step judges, the check of the output it writes and the "+
-			"head's comment its round posts.",
+			"PR's branch; and, for a run's steps, what a step judges, the check of the output it writes, the "+
+			"head's comment its round posts, and what a fresh look reads and records.",
 		newReviewChecksCmd(stdout, stderr), newReviewGuidanceCmd(stdout, stderr),
 		newReviewPassedCmd(stdout, stderr), newReviewAskCmd(stdout, stderr),
-		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr))
+		newReviewStepCmd(stdout, stderr), newReviewOutputCmd(stdout, stderr), newReviewCommentCmd(stdout, stderr),
+		newReviewLookCmd(stdout, stderr))
 }
 
 const reviewChecksLong = `Prints the check index: every check a commit's review can run, with the rig's
@@ -304,8 +305,9 @@ without spending an attempt, and the retry replaces the same entry.
 
 It reads only the store, which is all a check's PATH reaches. It prints the
 verdict and each reason the iteration did not pass, with --explain the
-iteration's lanes, verdicts, findings and rulings and the asks on the bead, and
-with --record what it recorded.
+iteration's lanes, verdicts, findings and rulings, each finding an earlier round
+of the run ruled must-fix, and the asks on the bead, and with --record what it
+recorded.
 
 exit: 0 passed, and with --record its result recorded
       1 not yet: the next iteration runs, or with --record at the loop's last

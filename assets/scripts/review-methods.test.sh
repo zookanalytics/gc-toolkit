@@ -5,7 +5,8 @@
 #   - Every row of the pack's review-checks.toml has skills/review-<check>/,
 #     whose SKILL.md is named review-<check> and has a `## The verdict` section,
 #     and every skills/review-* directory has a row, but review-ruling, the bar
-#     the review run's rule-and-repair step loads, which is no check's.
+#     the review run's rule-and-repair step loads, and review-look, the method
+#     of the run's fresh look, which are no check's.
 #   - Every signoff.sh flag a check's verdict section names is one signoff.sh
 #     accepts, and every skill a check's skill says to load is one the pack ships.
 #     Every field signoff.sh checks a finding set for is one the correctness
@@ -188,8 +189,9 @@ while IFS= read -r c; do
       || bad "$c: the skill it says to load, gc-toolkit.$s, ships"
   done
 done <<< "$NAMES"
-# review-ruling is the one review skill that is no check's method: the bar the
-# review run's rule-and-repair step applies, which the step loads by name.
+# review-ruling and review-look are the review skills that are no check's
+# method: the bar the review run's rule-and-repair step applies, and the method
+# of its fresh look, each loaded by name by the step that applies it.
 for d in "$ROOT"/skills/review-*/; do
   c=$(basename "$d"); c=${c#review-}
   if [ "$c" = ruling ]; then
@@ -198,6 +200,14 @@ for d in "$ROOT"/skills/review-*/; do
     grep -qF '{{binding_prefix}}review-ruling' "$ROOT/formulas/mol-pr-review.toml" \
       && ok "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads" \
       || bad "skills/review-ruling is the bar mol-pr-review's rule-and-repair loads"
+    continue
+  fi
+  if [ "$c" = look ]; then
+    grep -qxF -- look <<< "$NAMES" && bad "look is no check, so the pack's index declares none" \
+      || ok "look is no check, so the pack's index declares none"
+    grep -qF '{binding_prefix}review-look' "$ROOT/formulas/mol-pr-review-look.toml" \
+      && ok "skills/review-look is the method mol-pr-review-look's step loads" \
+      || bad "skills/review-look is the method mol-pr-review-look's step loads"
     continue
   fi
   grep -qxF -- "$c" <<< "$NAMES" && ok "skills/review-$c has a row in the pack's index" \
@@ -366,8 +376,10 @@ esac
 echo "# every step an agent claims in the review run carries the untrusted-data rule"
 # A step's agent reads that step's text and never the formula's description,
 # so the rule is in each step's own text. The loop's step holds the children an
-# agent claims, and the lane's template is the step a lane's agent claims.
-python3 - "$ROOT/formulas/mol-pr-review.toml" "$ROOT/formulas/mol-pr-review-lane.toml" > "$TMP/run-regions" <<'PY'
+# agent claims, and the templates of the lane and the fresh look are the steps
+# their agents claim.
+python3 - "$ROOT/formulas/mol-pr-review.toml" "$ROOT/formulas/mol-pr-review-lane.toml" \
+  "$ROOT/formulas/mol-pr-review-look.toml" > "$TMP/run-regions" <<'PY'
 import sys, tomllib, re, json
 claimed, carrying, texts = [], [], set()
 def walk(formula, steps):
@@ -387,8 +399,9 @@ for path in sys.argv[1:]:
 print(json.dumps({'claimed': sorted(claimed), 'carrying': sorted(carrying), 'texts': sorted(texts)}))
 PY
 case "$(jq -r '.claimed | join(" ")' "$TMP/run-regions")" in
-  *'mol-pr-review-lane.'*'mol-pr-review.rule-and-repair'*'mol-pr-review.triage'*) ok "the steps read are the lane's and the loop's children" ;;
-  *) bad "the steps read are the lane's and the loop's children" "$(jq -c .claimed "$TMP/run-regions")" ;;
+  *'mol-pr-review-lane.'*'mol-pr-review-look.'*'mol-pr-review.rule-and-repair'*'mol-pr-review.triage'*)
+    ok "the steps read are the lane's, the fresh look's and the loop's children" ;;
+  *) bad "the steps read are the lane's, the fresh look's and the loop's children" "$(jq -c .claimed "$TMP/run-regions")" ;;
 esac
 eq "$(jq -r '.carrying | join(" ")' "$TMP/run-regions")" "$(jq -r '.claimed | join(" ")' "$TMP/run-regions")" \
   "review-untrusted: every step an agent claims carries it, once"

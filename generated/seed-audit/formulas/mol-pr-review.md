@@ -8,10 +8,19 @@ round's fixes as one push, and answers them on the PR: in one comment for the
 head, and at each person's post, where it was made. A push is a new head, which
 the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
-the iteration that ends the loop, a pass or the last attempt, it writes the
-result for the last head the run judged and its target, which the landing order
-merges on, and closes the asks the run answered, so no step records it. The
-design is specs/tk-1tfzr71.108/design.md.
+the iteration its check ends the loop at, a pass or the last attempt, it writes
+the result for the last head the run judged and its target, which the landing
+order merges on, and closes the asks the run answered, so no step records it.
+The design is specs/tk-1tfzr71.108/design.md.
+
+The run goes on while its must-fix findings fall, with no fixed number of
+rounds. When the run's account calls for one, at every third round, when the
+findings stop falling or one comes back a second time, and at the last attempt,
+rule-and-repair's fan-out bonds a fresh look of mol-pr-review-look on the review
+pool, so the look is never the round's ruler. The look reads the whole review
+and sends it on or stops it for a person's answer. A stop's question goes to a
+gate on the bead that owns the PR, and the look's hard failure ends the loop at
+that round with no result (specs/tk-vdyedm5/design.md).
 
 The landing order pours a run attached to the bead that owns the PR, which the
 run then holds, with the record it read as the run's vars.
@@ -33,19 +42,20 @@ Variables:
   {{binding_prefix}}: The binding the city imports the pack under, with its trailing dot: the prefix of the pack's skill names in a session's catalog, and with no dot the name of its commands. Sling adds it to every pour, and a cooked run is passed it, as gc formula cook passes only its --var flags. (default=gc-toolkit.)
   {{branch}}: The PR's branch, as the bead's record names it. (default=)
   {{head}}: The head the refinery validated, the run's first head. Nothing moves it. (default=)
-  {{max_attempts}}: The loop's bound: the heads one run judges, each iteration one head. The loop's check reads it to know its last attempt, where it records a result that does not pass. (default=3)
+  {{max_attempts}}: The loop's bound, which Gas City's checked step requires: the heads one run judges, each iteration one head. The run's account stops a run whose findings stop falling well before it, and a fresh look at the last attempt stops the review for a person's answer. The loop's check reads it to know its last attempt, where it records a result that does not pass. (default=30)
   {{pr_bead}}: The bead that owns the PR, which the run is attached to and holds. (default=)
   {{repair_target}}: The pool rule-and-repair runs on, and a deferred fix's bead is armed for: <rig>/<binding>polecat. (default=)
   {{review_target}}: The pool triage and the lanes run on: <rig>/<binding>polecat-codex. (default=)
   {{target}}: The branch the PR merges into, the target the run's result is for. (default=)
 
-Steps (9):
+Steps (10):
   ├── mol-pr-review.review-loop.spec: Step spec for Review {{pr_bead}} until a head passes (spec)
   ├── mol-pr-review.review-loop.iteration.1.triage: Triage the head of {{pr_bead}}'s PR
   ├── mol-pr-review.review-loop.iteration.1.triage-fanout: Expand fanout for Triage the head of {{pr_bead}}'s PR [needs: mol-pr-review.review-loop.iteration.1.triage]
   ├── mol-pr-review.review-loop.iteration.1.rule-and-repair: Rule the findings at {{pr_bead}}'s head, and repair [needs: mol-pr-review.review-loop.iteration.1.triage-fanout]
-  ├── mol-pr-review.review-loop.iteration.1: Review {{pr_bead}} until a head passes [needs: mol-pr-review.review-loop.iteration.1.triage-fanout, mol-pr-review.review-loop.iteration.1.rule-and-repair]
+  ├── mol-pr-review.review-loop.iteration.1.rule-and-repair-fanout: Expand fanout for Rule the findings at {{pr_bead}}'s head, and repair [needs: mol-pr-review.review-loop.iteration.1.rule-and-repair]
+  ├── mol-pr-review.review-loop.iteration.1: Review {{pr_bead}} until a head passes [needs: mol-pr-review.review-loop.iteration.1.triage-fanout, mol-pr-review.review-loop.iteration.1.rule-and-repair-fanout]
   ├── mol-pr-review.review-loop: Review {{pr_bead}} until a head passes [needs: mol-pr-review.review-loop.iteration.1]
   ├── mol-pr-review.review-loop.iteration.1.triage-scope-check: Finalize scope for Triage the head of {{pr_bead}}'s PR [needs: mol-pr-review.review-loop.iteration.1.triage, mol-pr-review.review-loop.iteration.1.triage-fanout]
-  ├── mol-pr-review.review-loop.iteration.1.rule-and-repair-scope-check: Finalize scope for Rule the findings at {{pr_bead}}'s head, and repair [needs: mol-pr-review.review-loop.iteration.1.rule-and-repair]
+  ├── mol-pr-review.review-loop.iteration.1.rule-and-repair-scope-check: Finalize scope for Rule the findings at {{pr_bead}}'s head, and repair [needs: mol-pr-review.review-loop.iteration.1.rule-and-repair, mol-pr-review.review-loop.iteration.1.rule-and-repair-fanout]
   └── mol-pr-review.workflow-finalize: Finalize workflow [needs: mol-pr-review.review-loop, mol-pr-review.review-loop.iteration.1.triage-scope-check, mol-pr-review.review-loop.iteration.1.rule-and-repair-scope-check]

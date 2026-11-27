@@ -25,12 +25,20 @@ import (
 // entry for the same head and target replaces an earlier run's, so the earlier
 // run then reads as one with no result. The landing order's count is not moved
 // by that: it reads the last two runs, and the later one reads as recorded.
+//
+// A fresh look that stops the review ends its loop through its own hard
+// failure, the exit Gas City gives a member of a checked step's iteration
+// (formula-spec-v2.md, section 3.1), after its question's gate holds the bead
+// that owns the PR. So that run records no result either, and it reads as one
+// that put the review to a person, which no machinery failed at.
 
 // Ending is how a closed review run ended: its root, whether it recorded its
-// result, and how it ended, in one clause.
+// result, whether its fresh look stopped it to put the review to a person, and
+// how it ended, in one clause.
 type Ending struct {
 	Root   string
 	Result bool
+	Asked  bool
 	How    string
 }
 
@@ -64,6 +72,16 @@ func Ended(l *ledger.Ledger, root string) (Ending, error) {
 	loopOutcome, disposition := str(outcomeKey, loop), str(dispositionKey, loop)
 	switch {
 	case disposition == "hard_fail":
+		if lk := run.Stopped(); lk != nil {
+			gate := lk.Gate
+			if gate == "" {
+				gate = "a question's gate"
+			}
+			out.Asked = true
+			out.How = fmt.Sprintf("its fresh look at round %d stopped it to put the review to a person through %s (%s)",
+				lk.Iteration, gate, closed)
+			return out, nil
+		}
 		out.How = fmt.Sprintf("a step's hard failure ended its loop %s (%s)", loop.ID, closed)
 		return out, nil
 	case loopOutcome == "pass", loopOutcome == "fail" && disposition == "":
@@ -100,4 +118,13 @@ func Ended(l *ledger.Ledger, root string) (Ending, error) {
 	out.Result = true
 	out.How = fmt.Sprintf("its loop's check recorded its result at %s (%s)", head, closed)
 	return out, nil
+}
+
+// Stopped is the fresh look that stopped the run, the look of its latest
+// iteration when that look's verdict is stop, nil otherwise.
+func (run *Run) Stopped() *Look {
+	if it := run.Iterations[run.Latest()]; it != nil && it.Look != nil && it.Look.Verdict == LookStop {
+		return it.Look
+	}
+	return nil
 }

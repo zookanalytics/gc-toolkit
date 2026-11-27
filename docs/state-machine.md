@@ -318,6 +318,22 @@ names it, because Gas City grades a check whose re-runs ran out as an ordinary
 failure, which closes the loop as a recorded `passed: false` does
 ([The machine axis](#the-machine-axis)).
 
+The run goes on while its must-fix findings fall, with no fixed number of
+rounds. Each round's account counts the lane findings the round ruled must-fix
+and each that came back after a fix (`services/gctk/review/converge.go`), and
+each round's comment on the PR carries it in one line. At every third round, at
+a round whose must-fix findings are no fewer than two rounds before while that
+round had some, when one finding comes back a second time, and at the loop's
+last attempt, rule-and-repair's fan-out bonds a fresh look
+(`mol-pr-review-look`) on the review pool. The look sends the review on, or
+stops it for a person's answer. A stop files one framed question as a human
+gate keyed `review-question-not-converging` on the bead and closes the look's
+step failed hard, so the loop ends at that round without its check and the run
+records no result. The gate is a review run's question: a person's post on the
+PR filed after it pours a run that rules the post and can settle it, and
+clearing it pours a fresh run. The landing order counts a run its look stopped
+as no failure of the re-offer.
+
 **Asks.** Work the PR's branch needs, or a check owed at its next head, is an
 ask: an open task with no assignee, neither of Gas City's routes
 (`gc.routed_to`, `gc.execution_routed_to`) and no `task_kind`, that blocks the
@@ -817,7 +833,9 @@ at one head both ended without a result since that gate last closed, and
 `review-loop-exhausted`, which a run files when its loop spent its attempts.
 All three are the machine's fault, so none carries a `held:` value, and nothing
 reads one as a person's hold or a ruling owed. Clearing either gate gets one
-more run.
+more run. A run its fresh look stopped closed with no result as well, and while
+the look's question holds the bead the PR reads that ruling, a person's hold
+(`held:gate`), and no fault of the machine's.
 
 ### `pr.machine`, on the old path
 

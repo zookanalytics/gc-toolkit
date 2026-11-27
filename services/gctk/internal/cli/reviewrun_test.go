@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -140,5 +142,96 @@ func TestReviewCommentExits(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := reviewCommentIn(ledger.New(runStore()), "tk-run", 0, &out, &errb); code != 3 {
 		t.Errorf("a run with no rulings yet = exit %d; want 3", code)
+	}
+}
+
+// lookStore is runStore with a round for each count in counts, each ruling that
+// many correctness findings must-fix, the last calling for a fresh look, and
+// that look's open step, tk-look.
+func lookStore(counts ...int) *fake.Store {
+	s := runStore()
+	run, _ := s.Row("tk-run")
+	run.Metadata["gc.var.max_attempts"] = "30"
+	run.CreatedAt = "2026-11-27T10:00:00Z"
+	s.Put(run)
+	for i, c := range counts {
+		it := strconv.Itoa(i + 1)
+		look := `[]`
+		if i == len(counts)-1 {
+			look = `[{"head":"` + runHead + `"}]`
+		}
+		var findings, rulings []string
+		for k := 1; k <= c; k++ {
+			id := "F" + strconv.Itoa(k)
+			findings = append(findings, `{"id":"`+id+`","locus":"a.go","message":"m","severity":"P1","category":"c",`+
+				`"failure_scenario":"s","verification":"CONFIRMED: x"}`)
+			rulings = append(rulings, `{"check":"correctness","finding":"`+id+`","ruling":"must-fix","reason":"r","commit":"`+
+				runNext+`"}`)
+		}
+		for k, out := range []string{
+			`{"review":"triage","iteration":` + it + `,"head":"` + runHead + `","checks":[{"check":"correctness","head":"` + runHead + `"}],"material":false}`,
+			`{"review":"lane","iteration":` + it + `,"check":"correctness","head":"` + runHead + `","verdict":"request-changes","findings":[` +
+				strings.Join(findings, ",") + `]}`,
+			`{"review":"repair","iteration":` + it + `,"head":"` + runHead + `","rulings":[` + strings.Join(rulings, ",") +
+				`],"pushed":"` + runNext + `","look":` + look + `}`,
+		} {
+			s.Put(fake.Bead{ID: "tk-out" + it + string(rune('a'+k)), Status: "closed", IssueType: "task",
+				Metadata: map[string]string{"gc.root_bead_id": "tk-run", "gc.output_json": out}})
+		}
+	}
+	s.Put(fake.Bead{ID: "tk-look", Status: "in_progress", IssueType: "task", Metadata: map[string]string{
+		"gc.root_bead_id": "tk-run", "gc.attempt": strconv.Itoa(len(counts)),
+		"gc.step_ref": "mol-pr-review-look.mol-pr-review.review-loop.iteration." + strconv.Itoa(len(counts)) +
+			".rule-and-repair.item.1.look",
+	}})
+	return s
+}
+
+// failingGates is a gate filer whose every gate fails to land.
+type failingGates struct{}
+
+func (failingGates) File(string, string, string) error {
+	return errors.New("human-gate.sh: the store did not answer")
+}
+
+// look reads what a fresh look judges from, and refuses a step that is no
+// look. Its record says what it did, exits 3 on an output that does not stand
+// and 1 on a question that did not land. The domain's tests hold what a look
+// reads and what its record writes.
+func TestReviewLookExits(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := reviewLookRead(ledger.New(lookStore(1, 1, 1)), "tk-look", nil, "", &out, &errb); code != 0 {
+		t.Fatalf("the look's read = exit %d: %s", code, errb.String())
+	}
+	for _, want := range []string{"account: Round 3: 1 must-fix finding (1, 1, 1 by round), level. The review is not converging",
+		"rule: it forces a question", "== Each round of this run", "== Earlier runs on tk-pr", "== The review's rules that changed"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the look's read lacks %q:\n%s", want, out.String())
+		}
+	}
+	if code := reviewLookRead(ledger.New(lookStore(1, 1, 1)), "tk-tri", nil, "", &out, &errb); code != 3 {
+		t.Errorf("a read of triage's step = exit %d; want 3", code)
+	}
+	cont := []byte(`{"review":"look","head":"` + runHead + `","verdict":"continue","reading":"r"}`)
+	out.Reset()
+	req := review.OutputRequest{Step: "tk-look", Raw: cont}
+	if code := reviewLookRecord(ledger.New(lookStore(2, 1, 1)), req, "", failingGates{}, time.Now(), &out, &errb); code != 0 ||
+		!strings.Contains(out.String(), "sends the review on") {
+		t.Errorf("a continue's record = exit %d: %s%s", code, out.String(), errb.String())
+	}
+	stop := []byte(`{"review":"look","head":"` + runHead + `","verdict":"stop","reading":"r","recommendation":"x","question":"q?"}`)
+	if code := reviewLookRecord(ledger.New(lookStore(1, 1, 1)), review.OutputRequest{Step: "tk-look", Raw: stop}, "",
+		failingGates{}, time.Now(), &out, &errb); code != 1 {
+		t.Errorf("a stop whose question did not land = exit %d; want 1", code)
+	}
+	if code := reviewLookRecord(ledger.New(lookStore(1, 1, 1)), review.OutputRequest{Step: "tk-look", Raw: cont}, "",
+		failingGates{}, time.Now(), &out, &errb); code != 3 {
+		t.Errorf("a continue at a forced round with no rule = exit %d; want 3", code)
+	}
+	errb.Reset()
+	byRule := []byte(`{"review":"look","head":"` + runHead + `","verdict":"continue","reading":"r","rules":["` + runNext + `"]}`)
+	if code := reviewLookRecord(ledger.New(lookStore(1, 1, 1)), review.OutputRequest{Step: "tk-look", Raw: byRule}, "",
+		failingGates{}, time.Now(), &out, &errb); code != 3 || !strings.Contains(errb.String(), "none of the review's rules") {
+		t.Errorf("a continue naming a rule the read did not print = exit %d: %s; want 3", code, errb.String())
 	}
 }

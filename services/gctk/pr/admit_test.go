@@ -343,6 +343,30 @@ func TestARunThatRecordedItsResultIsNoFailureOfTheReOffer(t *testing.T) {
 	}
 }
 
+// A run its fresh look stopped put the review to a person, and no machinery
+// failed at it, so it counts as no failure: once the person's answer clears its
+// question, the run after it ending without a result is poured again.
+func TestARunItsLookStoppedIsNoFailureOfTheReOffer(t *testing.T) {
+	d := newAdmit(t)
+	is(t, d.once(t), pr.ActPoured)
+	judged(t, d, "tk-run1")
+	d.store.Put(fake.Bead{ID: "tk-run1-loop", Title: "loop", Status: "closed", Metadata: map[string]string{
+		"gc.root_bead_id": "tk-run1", "gc.kind": "ralph", "gc.step_ref": "mol-pr-review.review-loop",
+		"gc.outcome": "fail", "gc.final_disposition": "hard_fail"}})
+	d.store.Put(fake.Bead{ID: "tk-run1-look", Title: "look", Status: "closed", Metadata: map[string]string{
+		"gc.root_bead_id": "tk-run1", "gc.outcome": "fail", "gc.failure_class": "hard",
+		"gc.step_ref": "mol-pr-review-look.review-loop.iteration.1.rule-and-repair.item.1.look",
+		"gc.output_json": `{"review":"look","iteration":1,"head":"` + head + `","verdict":"stop","reading":"r",` +
+			`"recommendation":"x","question":"q?","gate":"tk-gate"}`}})
+	d.end(t, "tk-run1", "fail", "2026-11-12T09:10:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	d.end(t, "tk-run2", "canceled", "2026-11-12T09:20:00Z")
+	is(t, d.once(t), pr.ActPoured)
+	if gated(d, "review-run-failed") {
+		t.Fatal("a run its look stopped was counted as one that ended without a result")
+	}
+}
+
 // recorded writes what a run whose loop's check recorded its result leaves:
 // the steps of a run that judged the head and exhausted its loop (judged), and
 // the entry the check wrote for that head and target, naming the run.

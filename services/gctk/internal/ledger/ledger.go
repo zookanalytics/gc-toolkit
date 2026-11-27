@@ -230,6 +230,26 @@ func (w *Write) Release() {
 	}
 }
 
+// StepOutput gives a workflow step its structured output in the same write,
+// one JSON object as text. The key is Gas City's (gc.output_json,
+// formula-spec-v2.md, section 3.4), which a step writes before it closes and
+// the runtime reads for the step's fan-out, so no domain declares it, and the
+// act that records a step's output sets it here.
+func (w *Write) StepOutput(raw string) { w.set("gc.output_json", raw) }
+
+// FailureRecord gives a workflow step Gas City's record of a failure in the
+// same write: its class, hard or transient, and its reason. The keys are Gas
+// City's (gc.failure_class and gc.failure_reason, lifecycle/lifecycle.toml,
+// [metadata.runtime_owned]), which the runtime reads once the step closes with
+// gc.outcome fail, so no domain declares them, and the act that ends a step
+// failed sets them before its close. A hard class on a member of a checked
+// step's iteration ends that loop there without running its check
+// (formula-spec-v2.md, section 3.1).
+func (w *Write) FailureRecord(class, reason string) {
+	w.set("gc.failure_class", class)
+	w.set("gc.failure_reason", reason)
+}
+
 // Guard makes the write land only while the bead still has status and assignee,
 // "" for unassigned, which bd checks in the write's own transaction. A write
 // whose guard no longer holds writes nothing, and Commit returns an error that

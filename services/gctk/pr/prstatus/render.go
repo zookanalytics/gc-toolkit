@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -116,9 +117,14 @@ func RenderReasons(a pr.Answer, f Facts) []Reason {
 // attached to the anchor at that head and target has closed. It names the run
 // that closed last. A run that is live is the city's work in flight, and the
 // landing order pours another once the last one closed, so the reason stands
-// until a run is attached again.
+// until a run is attached again. A run its fresh look stopped ended without a
+// result too, and while the look's question holds the PR it is no fault of
+// the machine's but a ruling a person owes, which that gate's own reason says.
 func runFailed(a pr.Answer, f Facts) (Reason, bool) {
 	if a.Head == "" || !slices.ContainsFunc(a.Conditions, func(c pr.Condition) bool { return c.Kind == pr.KindReview }) {
+		return Reason{}, false
+	}
+	if slices.ContainsFunc(f.Gates, func(g person.Blocker) bool { return g.Open() && g.AwaitID == review.LookQuestionKey }) {
 		return Reason{}, false
 	}
 	var last *Run

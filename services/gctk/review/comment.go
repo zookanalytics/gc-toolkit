@@ -8,13 +8,15 @@ import (
 
 // The head's comment is where every lane's verdict at a head reaches the PR,
 // the place the operator decides from: one comment for each head a run
-// judged, carrying each lane's verdict, approvals included, each finding the
-// lane raised and how the round ruled it, and each ask the round took. Each
-// point's answer says what the head carries for it: the commit that fixes it
-// and the head that carries the commit, that the PR's summary carries its fix,
-// or that the head carries no change for it. The comment opens with its mark,
-// which names the run and the head, so a retry finds the comment and edits it
-// rather than posting a second.
+// judged, carrying the run's account of its rounds in one line (Account.Line),
+// the fresh look's verdict once a look at the round wrote one, each lane's
+// verdict, approvals included, each finding the lane raised and how the round
+// ruled it, and each ask the round took. Each point's answer says what the
+// head carries for it: the commit that fixes it and the head that carries the
+// commit, that the PR's summary carries its fix, or that the head carries no
+// change for it. The comment opens with its mark, which names the run and the
+// head, so a retry finds the comment and edits it rather than posting a second,
+// and the look's post edits the round's comment to add its verdict.
 //
 // GitHub refuses a comment over 65,536 characters, which no retry of the post
 // gets past, so the post cuts a comment longer than commentLimit (Fit), and
@@ -53,6 +55,12 @@ func Comment(run *Run, n int, asks []Ask) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, Mark(run.Root, head))
 	fmt.Fprintf(&b, "**Review at `%s`**: %s\n\n", short(head), summary(it))
+	if line := Converge(run, n).Line(); line != "" {
+		fmt.Fprintf(&b, "%s\n\n", line)
+	}
+	if it.Look != nil {
+		fmt.Fprintf(&b, "%s\n\n", lookLine(it.Look))
+	}
 	for _, ln := range it.Lanes {
 		if ln.NeedsYou != "" {
 			fmt.Fprintf(&b, "**Needs you (%s):** %s\n\n", ln.Check, oneLine(ln.NeedsYou))
@@ -282,6 +290,30 @@ func visualLine(ln Lane) string {
 		return ln.Visual
 	}
 	return fmt.Sprintf("%s (%s)", ln.Visual, strings.Join(notes, "; "))
+}
+
+// lookLine is the fresh look's verdict as the round's comment carries it: the
+// review goes on, with the look's reading and each rule it names as the cause,
+// or it stops at the gate that puts its question to a person, with the
+// question, the recommendation and the reading.
+func lookLine(lk *Look) string {
+	if lk.Verdict == LookStop {
+		at := ""
+		if lk.Gate != "" {
+			at = " at " + lk.Gate
+		}
+		return fmt.Sprintf("**Fresh look:** the review stops for your answer%s. %s Recommendation: %s Why the findings keep coming: %s",
+			at, Punctuated(oneLine(lk.Question)), Punctuated(oneLine(lk.Recommendation)), Punctuated(oneLine(lk.Reading)))
+	}
+	line := "**Fresh look:** the review goes on. " + Punctuated(oneLine(lk.Reading))
+	if len(lk.Rules) > 0 {
+		var rules []string
+		for _, c := range lk.Rules {
+			rules = append(rules, "`"+short(c)+"`")
+		}
+		line += " Rules that changed on its target account for the counts: " + strings.Join(rules, ", ") + "."
+	}
+	return line
 }
 
 // short is a commit's first twelve characters.
