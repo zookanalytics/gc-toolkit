@@ -72,6 +72,24 @@ way, opens on that decision: the stake, every option and what it costs, which
 option the branch takes, and what happens if they do not decide. Leave out what
 does not apply, so a small change's brief can be a sentence or two.
 
+**What approving sets in motion is read from the anchor**, at every stamp, a
+restamp as much as the first. Work that waits for the PR depends on its anchor:
+
+```bash
+gc bd dep list <anchor> --direction=up --type blocks --json
+```
+
+A dependent that carries `gc.dispatch_when_ready` is armed: once the anchor
+closes on landing and nothing else holds it, it is slung to the pool or agent
+that key names, on the formula its `gc.dispatch_when_ready_args` names, or the
+target's default when that names none. The brief names each one and what it
+does. A dependent with no arm starts nothing on its own.
+
+An action only the operator can take before the merge, such as setting a value
+in a service the branch deploys to, is a human gate on the anchor (the prs
+skill, "Hold its merge"), and the brief names the gate. A line in the summary
+holds nothing.
+
 **The account of the diff follows the brief**: the behavior before, the behavior
 now, and the shape of the change, in a short paragraph or a few bullets of
 markdown. Anything that would take the open text past one screen goes in a
