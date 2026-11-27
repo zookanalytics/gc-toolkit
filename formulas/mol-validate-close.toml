@@ -179,7 +179,10 @@ child's work:
 CONVOY_STATUS=$(gc convoy status {{convoy_id}} --json)
 WORK_BEAD_ID=$(printf '%s' "$CONVOY_STATUS" | jq -r 'if (.children | length) == 1 then .children[0].id else empty end')
 [ -n "$WORK_BEAD_ID" ] || { echo "mol-validate-close needs an input convoy with exactly one tracked member" >&2; exit 1; }
-gc bd update "$WORK_BEAD_ID" --append-notes "$(printf 'Did not close (%s): %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat <<'WHY'
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$WORK_BEAD_ID" "$(printf 'Did not close (%s): %s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(cat <<'WHY'
 <why the no-work conclusion did not hold, or why this is the operator/refinery to close>
 WHY
 )")"

@@ -30,18 +30,25 @@ when the stay would come back after the merge:
 
 ## Record
 
-Append the outcome to the subject's notes (the `records` skill). Notes are
-append-only, so never pass `--notes`, which replaces them:
+Put the outcome on the subject's notes (the `records` skill). Put `--notify`
+before `"$SUBJECT"` when the decision changes what the work on the subject
+should do:
 
 ```bash
-gc bd update "$SUBJECT" --append-notes "<the decision>. <why>. <what changed>."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$SUBJECT" "<the decision>. <why>. <what changed>."
 ```
 
 When the notes have grown past a quick read, append a current-state block too.
 The newest current-state block is in force, and the prep primes from it:
 
 ```bash
-gc bd update "$SUBJECT" --append-notes "## Current state ($(date -u +%Y-%m-%d))
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$SUBJECT" "## Current state ($(date -u +%Y-%m-%d))
 <where things stand>
 Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"
@@ -62,6 +69,10 @@ skill says which bead carries the work and how to choose its formula. When the
 sitting ends at the hand-off for new work that opens its own PR, write what was
 agreed into the create's description in full, because the brief is then all
 the work carries of the discussion.
+
+Record a ruling that changes what the work on a bead should do as a note on
+that bead, with `--notify` (the `records` skill). Add the flag whether or not
+that work is running.
 
 The work you send is yours to get right. What the operator says is direction to
 reason through: take each point up in the course or say why not. A remark is
@@ -114,9 +125,12 @@ lands, in one plain sentence that names no other rig or its beads.
 - **An epic the ruling files**: create it with the `work` skill's epic create,
   then append a note that says whose words each field is:
 
-  ```bash
-  gc bd update <the new epic> --append-notes "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
-  ```
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <the new epic> "Filed $(date -u +%Y-%m-%d) by $GC_SESSION_NAME in conversation $CONVERSATION. Proposed by this sitting: <each field it wrote, or none>. Stated by the operator: <each field they stated or approved, quoting their words, or none>."
+```
 
 **A rework's order is its ruling line**, which the sign-off hands the rework
 as the operator's ruling (`--rework`, below), so the line carries their words
@@ -127,19 +141,23 @@ its `merge_result`. A scaffold is such an order already, because the operator
 ruled each of its lines (`converse-iterate-document`):
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
   && BRIEF="## Rework brief ($NOW)
 $(cat <<'BLOCK'
 <what needs doing, why, and what done looks like, with each point the operator raised>
 BLOCK
 )" \
-  && gc bd update <anchor> --append-notes "$BRIEF" \
-  && echo "the brief is written, headed ## Rework brief ($NOW)"
+  && echo "the brief is headed ## Rework brief ($NOW)" \
+  && "$GCTK" bead note --notify <anchor> "$BRIEF"
 ```
 
-No closing line means the store refused the brief: send no rework. Otherwise
-the ruling line names the brief, as `converse-iterate-document`'s line names
-its scaffold:
+No `noted <anchor>` line means the store refused the brief: send no rework.
+Exit 3 after that line means the brief landed and a nudge may not have: send
+the nudge the message gives. Once the brief has landed, the ruling line names
+it, as `converse-iterate-document`'s line names its scaffold:
 `--ruling "Rework PR #<number> to the brief in the notes of <anchor>, the block headed ## Rework brief (<the time the write printed>)"`.
 
 **A follow-up that cannot start until another bead lands is armed** (the

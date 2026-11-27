@@ -153,12 +153,16 @@ func rigListWait() (time.Duration, error) {
 // is every session that has not closed (sessionListJSONRow in
 // cmd/gc/cmd_session.go at gastownhall/gascity c7eb6d2f43). Each of ID, Name,
 // SessionName, Alias and AgentName is an identity a bead can name the session
-// by, and is empty when the row carries none. LastActive is when its pane last
-// printed, zero when it has not printed or the row's time does not read.
+// by, and is empty when the row carries none. Provider is the agent the session
+// runs, such as claude or codex, and is empty for a session that runs a command
+// of its own in place of an agent, as the control-dispatcher does. LastActive
+// is when its pane last printed, zero when it has not printed or the row's time
+// does not read.
 type Session struct {
 	ID          string
 	Name        string
 	Template    string
+	Provider    string
 	Rig         string
 	State       string
 	Alias       string
@@ -174,6 +178,7 @@ type sessionRow struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Template    string    `json:"template"`
+	Provider    string    `json:"provider"`
 	Rig         string    `json:"rig"`
 	State       string    `json:"state"`
 	Alias       string    `json:"alias"`
@@ -181,6 +186,31 @@ type sessionRow struct {
 	SessionName string    `json:"session_name"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastActive  string    `json:"last_active"`
+}
+
+// Named is each session in list that name names, in the list's order, by any
+// form a claim's assignee takes: the session's id, its session name, or its
+// alias or the end of one, which an agent address is.
+func Named(list []Session, name string) []Session {
+	var out []Session
+	for _, s := range list {
+		if s.Alias == name || (s.Alias != "" && strings.HasSuffix(s.Alias, name)) || s.SessionName == name || s.ID == name {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Handle is the name a nudge or a cancel addresses the session by: its id,
+// else its session name, else its alias.
+func (s Session) Handle() string {
+	switch {
+	case s.ID != "":
+		return s.ID
+	case s.SessionName != "":
+		return s.SessionName
+	}
+	return s.Alias
 }
 
 // Sessions reads `gc session list --json` once. A read that fails, or prints
@@ -198,8 +228,8 @@ func (c *City) Sessions(ctx context.Context) ([]Session, error) {
 	}
 	out := make([]Session, 0, len(*list.Sessions))
 	for _, r := range *list.Sessions {
-		s := Session{ID: r.ID, Name: r.Name, Template: r.Template, Rig: r.Rig, State: r.State, Alias: r.Alias,
-			AgentName: r.AgentName, SessionName: r.SessionName, CreatedAt: r.CreatedAt.UTC()}
+		s := Session{ID: r.ID, Name: r.Name, Template: r.Template, Provider: r.Provider, Rig: r.Rig, State: r.State,
+			Alias: r.Alias, AgentName: r.AgentName, SessionName: r.SessionName, CreatedAt: r.CreatedAt.UTC()}
 		if t, err := time.Parse(time.RFC3339, r.LastActive); err == nil {
 			s.LastActive = t.UTC()
 		}

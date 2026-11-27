@@ -27,7 +27,10 @@ may close a bead as folded (the Close-with-successor row of
 bead's notes, then close the bead as folded into it:
 
 ```bash
-gc bd update <retiring-bead> --append-notes "## Folded in: <bead> ($(date -u +%Y-%m-%dT%H:%M:%SZ))
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note --notify <retiring-bead> "## Folded in: <bead> ($(date -u +%Y-%m-%dT%H:%M:%SZ))
 <the problem>. When this retirement lands, confirm it is gone with the code. If it survives into the replacement, it goes back to the queue as its own bead." \
   && "$(gc gc-toolkit scripts-dir)/bead-rehome.sh" --origin <bead> --successor <retiring-bead> --kind folded --note "it lives in <file>, which <retiring-bead> retires"
 ```

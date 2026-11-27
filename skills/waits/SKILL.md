@@ -62,12 +62,12 @@ Write the edge only when `<bead>` and `<blocker>` carry the same id prefix, as
 above.
 
 ```bash
-gc bd update <bead> --append-notes "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
-<what <blocker>'s landing fixes here, and what to check once it has>"
-gc bd dep add <bead> <blocker> --type=blocks
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
+"$GCTK" bead note <bead> "## Close brief (held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+<what <blocker>'s landing fixes here, and what to check once it has>"
+gc bd dep add <bead> <blocker> --type=blocks
 "$GCTK" bead arm <bead> --target <rig>/<binding>.polecat --on mol-validate-close --reason "waits for <blocker>; the validating closer checks it once that closes"
 ```
 

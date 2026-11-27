@@ -433,12 +433,12 @@ claimed bead everything else.
 
 ## Notes are APPENDED, never replaced
 
-Wherever you write a work bead's notes, use `--append-notes`, never
-`--notes`. `--notes` REPLACES: it silently erases the dispatch note — routing
-diagnosis, added requirements, reviewer corrections — at the exact moment the
-bead is handed to the people who need it, and nothing downstream can miss a
-note it never saw. This applies to every write in the done sequence,
-including the `auto_push=false` halt arm.
+Put a note on a bead with `gctk bead note` (the `records` skill), which only
+appends. Never pass `--notes` to a bd write: it REPLACES, silently erasing the
+dispatch note — routing diagnosis, added requirements, reviewer corrections — at
+the exact moment the bead is handed to the people who need it, and nothing
+downstream can miss a note it never saw. This applies to every write in the done
+sequence, including the `auto_push=false` halt arm.
 
 
 ## No consent UI

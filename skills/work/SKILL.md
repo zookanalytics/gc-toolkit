@@ -155,7 +155,10 @@ hypothesis, and files nothing. It prints the new epic's id:
 has printed the epic's id, record on the epic whose words each field is:
 
 ```bash
-gc bd update <epic> --append-notes "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: <each field they stated, and where they stated it, or none>."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <epic> "Filed $(date -u +%Y-%m-%d) by <you>. Proposed by <you>: <each field you wrote>. Stated by the operator: <each field they stated, and where they stated it, or none>."
 ```
 
 Work the epic plainly owns goes on under it meanwhile, and the epic's next
@@ -175,7 +178,10 @@ A change you would make yourself is a proposal for the epic's next review:
 leave the keys as they are, and record the change with its evidence:
 
 ```bash
-gc bd update <epic> --append-notes "Proposed by <you>, $(date -u +%Y-%m-%d): <the change, quoted>. Evidence: <what you read or ran>."
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <epic> "Proposed by <you>, $(date -u +%Y-%m-%d): <the change, quoted>. Evidence: <what you read or ran>."
 ```
 
 When work you must do depends on the operator's answer, file a human gate on

@@ -1,6 +1,6 @@
 ---
 name: records
-description: Use when you record an outcome or a finding in a bead's notes, sum up long notes, set a bead's one-line headline (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
+description: Use when you put a note on a bead, such as an outcome, a finding or a change to what the work on it should do, sum up long notes, set a bead's one-line headline (its takeaway), or file an observation of feedback about standing agent behavior. To ask a person to decide, use waits; for a durable document such as a spec, use filing-documentation.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -12,22 +12,42 @@ observation of feedback about standing agent behavior.
 
 ## Record an outcome on a bead
 
-Append the outcome to the bead notes: what was decided or found, why, and what
-changed. Do not replace existing notes.
+Put every note on a bead with `gctk bead note`: what was decided or found, why,
+and what changed.
 
 ```bash
-gc bd update <bead> --append-notes "<decision or finding, the reason, what changed>"
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <bead> "<decision or finding, the reason, what changed>"
 ```
 
-Never pass `--notes`: it replaces the whole field and erases every note other
-writers left there.
+Put `--notify` before the bead when your note changes what the work on the bead
+should do. Leave it off a note on work you are doing yourself. Decide the flag
+by what your note says, never by whether anyone is working the bead.
+
+Exit 3 means the note landed and a nudge may not have: send the nudge its
+message gives, then go on with what follows the note.
+
+With `--notify`, expect the note to reach:
+
+- a Claude Code session working the bead inside its running turn, with its next
+  tool result;
+- a Codex session working the bead once any turn it is running ends;
+- whoever takes the bead next, through its notes, when nobody works it now.
+
+Never pass `--notes` to a bd write: it replaces the whole field and erases every
+note other writers left there.
 
 When the notes have grown past a quick read, append a current-state block that
 says where things stand, each decision in force and each open question. The
 newest current-state block is the one in force:
 
 ```bash
-gc bd update <bead> --append-notes "## Current state ($(date -u +%Y-%m-%d))
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note <bead> "## Current state ($(date -u +%Y-%m-%d))
 <where things stand>
 Decisions in force: <each decision in force>
 Open questions: <each open question, or none>"

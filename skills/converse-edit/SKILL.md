@@ -81,12 +81,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 gc bd dep add "$PR" "$CONVERSATION" --type=blocks \
   && "$GCTK" pr push "$PR" --held-by "$CONVERSATION" --check \
-  && gc bd update "$PR" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"<their words>\""
+  && "$GCTK" bead note --notify "$PR" "$(date -u +%Y-%m-%d): the operator ruled that conversation $CONVERSATION edit this PR's branch with them: \"<their words>\""
 ```
 
 Exit 3 from the check names each reason it refused, such as a PR that is no
 longer on the pending record. Tell the operator, and edit nothing until the
-check passes.
+check passes. Exit 3 after the note's `noted` line means the ruling landed and a
+nudge may not have: send the nudge the message gives.
 
 A review run, or another writer such as the operator, can push onto the branch
 while you edit it. Your push never overwrites theirs: it stops, and you merge
@@ -223,17 +224,22 @@ once the one before it has landed. Add `--parent "$SUBJECT"` to the create when
 the subject is an epic:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 CHANGE=$(gc bd create "<what the change does>" -t task --metadata '{"target":"<the target>"}' \
     -d "Made with the operator in conversation $CONVERSATION, on their ruling of $(date -u +%Y-%m-%d): \"<their words>\"
 Scope: <what the change covers>" --json | jq -er '.id') \
   && echo "CHANGE=$CHANGE" \
   && gc bd dep add "$CHANGE" "$CONVERSATION" --type=blocks \
-  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): the operator ruled that this sitting make a change with them: \"<their words>\". $CHANGE carries it." \
+  && "$GCTK" bead note --notify "$SUBJECT" "$(date -u +%Y-%m-%d): the operator ruled that this sitting make a change with them: \"<their words>\". $CHANGE carries it." \
   && echo "filed and held"
 ```
 
-No `filed and held` line means a write did not land: repair what printed
-before the first edit. The `blocks` edge onto the conversation is the hold.
+No `noted` line means a write did not land: repair what printed before the
+first edit. Exit 3 after that line means the ruling landed and a nudge may not
+have: send the nudge the message gives. The `blocks` edge onto the conversation
+is the hold.
 While the conversation is open, bd counts the change blocked, so no pool is
 offered it, and Work's writers take the edge as the proof that this sitting
 holds the change.
@@ -277,7 +283,7 @@ names it again:
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-gc bd update "$SUBJECT" --append-notes "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+"$GCTK" bead note "$SUBJECT" "## Close brief (held on $CHANGE, $(date -u +%Y-%m-%dT%H:%M:%SZ))
 <what the change's landing settles on the subject, and what to check once it has>" \
   && gc bd dep add "$SUBJECT" "$CHANGE" --type=blocks \
   && "$GCTK" bead arm "$SUBJECT" --target "$GC_RIG/<binding>.polecat" --on mol-validate-close --reason "waits for $CHANGE, the change conversation $CONVERSATION makes; the validating closer checks it once that lands" \
@@ -304,8 +310,11 @@ hold, and append this sitting's ruling to the change, which as the subject also
 takes your outcome record:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 gc bd dep add "$SUBJECT" "$CONVERSATION" --type=blocks \
-  && gc bd update "$SUBJECT" --append-notes "$(date -u +%Y-%m-%d): resumed in conversation $CONVERSATION on the operator's ruling: \"<their words>\". <what is left to do>" \
+  && "$GCTK" bead note "$SUBJECT" "$(date -u +%Y-%m-%d): resumed in conversation $CONVERSATION on the operator's ruling: \"<their words>\". <what is left to do>" \
   && echo "held and recorded"
 ```
 
@@ -604,9 +613,12 @@ own.
   held, and the next sitting resumes it from the record. A sitting on another
   model has another home, and it enters the tree where the change records it:
 
-  ```bash
-  gc bd update "$CONVERSATION" --append-notes "change in flight: $CHANGE at $(git -C "$TREE" rev-parse --short HEAD), its tree at $TREE. In: <the steps agreed and committed>. Left: <what is still to do>."
-  ```
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead note "$CONVERSATION" "change in flight: $CHANGE at $(git -C "$TREE" rev-parse --short HEAD), its tree at $TREE. In: <the steps agreed and committed>. Left: <what is still to do>."
+```
 
 - **A dismiss** closes the conversation and so ends the hold. The change stays
   open and unrouted with its tree, its subject keeps waiting on it, and the

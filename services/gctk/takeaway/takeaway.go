@@ -666,27 +666,17 @@ func (t *Takeaways) pending(bead string) ([]waits.Wait, error) {
 }
 
 // holders is the sessions the session list names a claim's holder under, by
-// any form a claim writes: the session's id, its session name, or its alias
-// or the end of one, which an agent address is. The list holds every session
-// that has not closed, asleep ones included.
+// any form a claim writes (gascity.Named). The list holds every session that
+// has not closed, asleep ones included.
 func (t *Takeaways) holders(holder string) ([]string, error) {
 	list, err := t.City.Sessions(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	var out []string
-	for _, s := range list {
-		if s.Alias == holder || (s.Alias != "" && strings.HasSuffix(s.Alias, holder)) || s.SessionName == holder || s.ID == holder {
-			id := s.ID
-			if id == "" {
-				id = s.SessionName
-			}
-			if id == "" {
-				id = s.Alias
-			}
-			if !slices.Contains(out, id) {
-				out = append(out, id)
-			}
+	for _, s := range gascity.Named(list, holder) {
+		if id := s.Handle(); !slices.Contains(out, id) {
+			out = append(out, id)
 		}
 	}
 	return out, nil

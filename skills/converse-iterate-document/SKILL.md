@@ -120,6 +120,9 @@ because the next sitting primes from the subject. The first lines below are the
 worker's rules, so keep them as they stand:
 
 ```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
 TODAY=$(date -u +%Y-%m-%d) \
   && SCAFFOLD="## Current state ($TODAY)
 $(cat <<'BLOCK'
@@ -146,11 +149,13 @@ VERIFY: <each fact nobody has settled, where to read it, and where the document 
 Open questions: none
 BLOCK
 )" \
-  && gc bd update "$SUBJECT" --append-notes "$SCAFFOLD" \
-  && echo "the scaffold is written, dated $TODAY"
+  && echo "the scaffold is dated $TODAY" \
+  && "$GCTK" bead note --notify "$SUBJECT" "$SCAFFOLD"
 ```
 
-No closing line means the store refused the scaffold: send nothing.
+No `noted` line means the store refused the scaffold: send nothing. Exit 3 after
+that line means the scaffold landed and a nudge may not have: send the nudge the
+message gives.
 
 ## Send one rework
 

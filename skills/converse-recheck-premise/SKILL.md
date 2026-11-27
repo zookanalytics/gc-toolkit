@@ -102,7 +102,7 @@ ROW=$(gc bd show "$SUBJECT" --json) \
        "$GCTK" bead takeaway "$SUBJECT" "${KIND}: ${HEADLINE}" --by converse --no-wait \
          && echo "replaced the headline of $SUBJECT, which waited on nothing"
      fi \
-  && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
+  && "$GCTK" bead note "$SUBJECT" "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
   && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
        || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \
