@@ -16,7 +16,7 @@ The pack is its workflows. Every component belongs to one of six:
 | **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
 | **engagement** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
 | **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
-| **patrol** | drift between recorded and true state is repaired | the deacon's patrol, the witness's mail, the seat-progress and refinery-queue orders, `orders/liveness-sweep.toml`, `doctor/` |
+| **patrol** | drift between recorded and true state is repaired | the witness's mail, the seat-progress and refinery-queue orders, `orders/liveness-sweep.toml`, `doctor/` |
 
 ## Roster
 
@@ -28,7 +28,6 @@ All agents are native to this pack — no gastown import.
 | `polecat-codex` | worker pool (codex provider) | a polecat; the merge cadence routes review beads — beads carrying `mol-review` — to this pool |
 | `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the mechanical cadence runs as an order |
 | `witness` | on-demand singleton | the rig's mail: answers HELP and files each NOTICE as a finding, woken by its mail |
-| `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `converse-claude-opus`, `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |
 | `mechanik` | named session | city-scoped structural engineer: formulas, prompts, conventions |
 | `proactive` | optional | always-on first-reaction pass (2-slot pool) |

@@ -235,7 +235,7 @@ but resolves no origin is broken, not permissive: the owned set is empty and
 every write fails closed, rather than widening to the city or the working
 directory.
 
-City-scope agents such as the deacon and mechanik carry no rig root and
+City-scope agents such as the mechanik and the mayor carry no rig root and
 legitimately work across rigs, so for them the owned set is the origin of every
 rig under `$GC_CITY_PATH/rigs`. The working directory's `origin` is the last
 resort, used only when neither a rig root nor a city resolves. The owned set is
@@ -342,7 +342,7 @@ take `overlays/gh-origin-guard`. A Codex agent reads no `.claude` overlay and ru
 | Registration | Agents |
 |---|---|
 | `overlays/work-context` | polecat |
-| `overlays/cycle-recycle` | refinery, witness, deacon |
+| `overlays/cycle-recycle` | refinery, witness |
 | `overlays/gh-origin-guard` | converse-claude-opus, converse-claude-fable, converse-opus, converse-fable, mechanik, po, proactive, demo |
 | the Codex home, by `pre_start` | polecat-codex, converse-codex-sol, converse-codex-astra, converse-codex |
 

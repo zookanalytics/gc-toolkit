@@ -157,9 +157,9 @@ defect only on a line some test executes.
   `if !` or `|| exit`. The repository keeps a status with `x=$(cmd) || rc=$?`.
   shellcheck reports `local x=$(cmd)` (SC2155), and not
   `if ! x=$(cmd); then rc=$?` or an `rc=$?` after `x=$(cmd) || true`, which
-  lose the status the same way. Suites run some blocks under `bash -e`, as
-  `dolt-backup-manifest-check.test.sh` does with `bash -euo pipefail`, so a
-  block or function that ends on a false `[ … ] && x=1` fails there.
+  lose the status the same way. Suites run some blocks under `set -e`, as
+  `conversation-merge-hold.test.sh` runs its own, so a block or function that
+  ends on a false `[ … ] && x=1` fails there.
 - **Unreadable is not empty.** A read whose emptiness decides anything checks
   its exit status, and an unreadable answer holds or fails closed
   (`doctor/check-armed-dispatch-owed/run.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
@@ -182,8 +182,9 @@ defect only on a line some test executes.
 - **BSD and GNU userland.** The host is macOS: `sed`, `grep`, `awk`, `date`,
   `stat` and `find` are BSD, `/bin/bash` is 3.2, and `#!/usr/bin/env bash`
   finds bash 5. Where the userlands disagree, the repository tries both
-  spellings, as `epoch_of` in `assets/scripts/gc-deacon-ledger.sh` does for
-  `date` and `mtime_of` in `formulas/mol-deacon-patrol.toml` does for `stat`,
+  spellings, as `iso_to_epoch` in `doctor/check-armed-dispatch-owed/run.sh`
+  does for `date` and `_bd_cache_mtime` in `assets/scripts/bd-lib.sh` does for
+  `stat`,
   or writes the one form both accept, such as `sed -i.bak … && rm -f ….bak` for
   an in-place edit. CI's macOS job fails by name when one of those tools
   resolves outside `/usr/bin` and `/bin`.

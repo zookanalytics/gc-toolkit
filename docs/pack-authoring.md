@@ -351,7 +351,7 @@ closed bead of the rig's in a home's directory name
 `work_dir` and `pre_start` accept are upstream's
 ([config reference](https://docs.gascity.com/reference/config), `Agent`).
 
-A **city-scoped** agent (mechanik, deacon) spans rigs and has no single
+A **city-scoped** agent (mechanik, mayor) spans rigs and has no single
 `{{.Rig}}`, so it stays under `.gc/agents/` and passes the repo explicitly on
 each call (`gh --repo <owner>/<rig>`, `git -C <rig-root>`). A rig-scoped agent
 that legitimately targets a fixed repo the same way (the gascity-keeper
@@ -380,10 +380,11 @@ pool it was slung to does not choose.
 A patrol agent is not a distinct Gas City variant. It is a named singleton
 ([gascity/agent-types.md](gascity/agent-types.md#variant-a--named-singletons-named_session))
 whose prompt adds a patrol-wisp cycle on top of the standard lifecycle. The
-deacon and the refinery are this pack's patrol agents, as they are in upstream's
-gastown pack, whose witness patrols too: each `[[named_session]]` declares them
-like any other singleton, and their prompts implement the patrol contract
-below.
+refinery is this pack's one patrol agent. Upstream's gastown pack also patrols
+with its deacon and its witness. Here the witness runs only for its mail, and
+the doctor and patrol orders do what upstream's deacon does. Its
+`[[named_session]]` declares the refinery like any other singleton, and its
+prompt implements the patrol contract below.
 
 It is called out on its own because the contract has substantial mechanics
 that pool workers and ad-hoc sessions do not have, and because regressions in
@@ -402,87 +403,54 @@ discoverable hook.
 Patrol wisps are **root-level**: they are not sub-beads of a
 parent workflow molecule. Each cycle is its own root.
 
-### Startup discovery (4-tier)
+### Startup: adopt before pour
 
-When a patrol agent starts (boot, restart, or recovery), it walks
-four tiers before pouring a fresh wisp. The first tier that returns
-work wins:
-
-1. **In-progress wisp** — `bd list --status=in_progress
-   --assignee=$GC_AGENT`. Crash recovery: pick up where you left
-   off mid-cycle.
-2. **Routed work bead** — `bd ready --has-metadata-key=branch
-   --assignee=...`. Catches work that arrived during a
-   cycle-recycle window (e.g., operator `/clear`).
-3. **Open patrol wisp** — adopt the newest OPEN patrol wisp owned
-   by this agent; close older duplicates as
-   `orphaned cross-rotation`. Covers wisps that survived a
-   rotation without being claimed.
-4. **Fresh pour** — only when 1-3 are empty. Create a new patrol
-   wisp and claim it `in_progress`.
-
-In this pack the shape lives in each patrol prompt's own
-startup-adopt section (wisp queries with `--include-infra`,
-title-keyed adopt-before-pour) — the native agent prompts under
-`agents/` carry it directly; there is no shared
-startup-discovery fragment. If an agent's startup-discovery block is
-missing tier 2 or 3, expect missed-MERGE_READY-style stalls.
-
-Only refinery and deacon are held to the full walk. The other
-consumer shares the fragment for its ephemeral-awareness rules
-rather than for tier coverage:
-
-- **boot** — reads the *deacon's* wisp as a freshness signal rather
-  than reconciling one of its own, so the tiers do not apply. Its
-  block is held to a positive assertion that the patrol-wisp read
-  still exists at both call sites the fragment supersedes, carrying
-  `--include-infra`, `--limit=0`, `--json`, the deacon `--assignee`
-  and the `mol-deacon-patrol` title — and to the *absence* of any
-  `--status` filter, since a just-poured wisp sits at `open` through
-  the deacon's burn-then-claim window and any status filter
-  false-empties the read against a healthy deacon.
+When the refinery starts, restarts or recovers, its prompt's "Startup — adopt
+before pour" section reconciles to exactly one patrol wisp before it
+pours one. It lists the `mol-refinery-patrol` wisps with `--include-infra`, by
+title and never by assignee, narrowed to its own rig, adopts the newest and
+burns the rest. Only when none is left does it pour a fresh wisp, which it
+stamps with its rig before it assigns it, and then it claims the wisp
+`in_progress`. `assets/scripts/patrol-wisp-reconcile.test.sh` runs that block,
+extracted between its `patrol-wisp-reconcile` markers, against a stub store.
+Each later wisp is poured by `refinery-patrol.sh next`, whose guard
+`refinery-patrol.test.sh` runs.
 
 ### Lifecycle
 
 Beyond what the underlying named singleton provides:
 
 - **Restart-friendly.** A patrol agent can be killed mid-cycle
-  without losing work — tier-1 recovers via the `in_progress`
-  wisp. Use `gc runtime request-restart` (preferred) or
+  without losing work — the startup reconcile adopts the
+  `in_progress` wisp. Use `gc runtime request-restart` (preferred) or
   `gc session reset` when a refresh is needed; `gc session kill`
   also works for patrols because the reconciler will respawn and
-  the new instance will adopt the in-flight wisp via tier 1.
+  the new instance will adopt the in-flight wisp at its startup.
 - **Handoff.** Patrols do not need explicit operator-driven
   handoff — the next cycle is the handoff. Closing the current
   wisp and the cycle-recycle behavior in the prompt template
   together carry the cadence.
-- **Health.** Patrol freshness is checked by deacon's own patrol
-  (`mol-deacon-patrol.toml`): a stale patrol wisp on the refinery
-  surfaces as a deacon warning. The reconciler also
-  surfaces patrol agents that are alive-but-stuck via
-  `gc doctor` checks.
+- **Health.** The refinery queue's orders (`refinery-queue-detect` and
+  `refinery-queue-report`) report a handoff that sits unprepared past four
+  hours. The reconciler also surfaces patrol agents that are alive-but-stuck
+  via `gc doctor` checks, which the doctor order runs.
 
 ### Addressing
 
 Same as the underlying named singleton — patrols use the same
 QualifiedName (`<rig>/<binding>.<template>` for the rig-scoped
-witness/refinery, `<binding>.<template>` for the city-scoped
-deacon). See [gascity/agent-types.md, Variant A](gascity/agent-types.md#variant-a--named-singletons-named_session).
+refinery). See [gascity/agent-types.md, Variant A](gascity/agent-types.md#variant-a--named-singletons-named_session).
 
 ### Work routing visibility
 
 Patrol wisps are *produced* by the patrol cycle itself and recovered through
-the assignee tiers, not consumed from a routed pool. Outside work reaches a
+the startup reconcile, not consumed from a routed pool. Outside work reaches a
 patrol agent in the form it finds its work by
 ([deferred-dispatch.md](deferred-dispatch.md#a-named-agent-hears-through-gas-citys-hand-off)):
-the refinery's patrol takes a bead assigned to it, and the deacon, whose hook
-answers its own patrol wisps, takes mail.
+the refinery's patrol takes a bead assigned to it.
 
 ### Examples in the wild
 
-- **Deacon** (`gc-toolkit.deacon`, city-scoped, `mode = "always"`):
-  cross-rig gate checks, convoy dispatch, stuck-agent escalation.
-  Patrol cycle: `mol-deacon-patrol.toml`.
 - **Refinery** (`<rig>/gc-toolkit.refinery`, rig-scoped,
   `mode = "on_demand"`): merge queue processor; patrol cycle pours
   per merge-queue iteration.
@@ -553,7 +521,7 @@ A step-2 hit means a live session, not an orphan.
 
 One thing narrows the exposure without closing it: **bare does not imply
 a mismatch.** City-scoped singletons
-(`gc-toolkit.mechanik`, `gc-toolkit.deacon`) carry bare aliases too — but
+(`gc-toolkit.mechanik`, `gc-toolkit.mayor`) carry bare aliases too — but
 *their* assignees are written bare as well, so the exact lookup hits.
 The hazard is the mismatch between the two sides, not bareness.
 
@@ -571,7 +539,7 @@ and both scopes ship in one pack:
 
 | Agents | `scope` | Identity to stamp |
 | --- | --- | --- |
-| deacon, mechanik | `city` | `<binding>.<role>`, with no rig segment, so in a city that imports the pack as gc-toolkit the deacon is `gc-toolkit.deacon` |
+| mayor, mechanik | `city` | `<binding>.<role>`, with no rig segment, so in a city that imports the pack as gc-toolkit the mechanik is `gc-toolkit.mechanik` |
 | converse-claude-opus, converse-claude-fable, converse-codex-sol, converse-codex-astra, polecat, polecat-codex, proactive, refinery, witness | `rig` | `<rig>/<binding>.<role>`, so in that city the gc-toolkit rig's refinery is `gc-toolkit/gc-toolkit.refinery` |
 
 Each agent declares its own `scope` in `agents/<role>/agent.toml`, and the

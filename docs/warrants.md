@@ -172,7 +172,7 @@ no warrant.
     only by an operator, either with `gc dolt compact --gc-only --only-db`
     against the live server or with the offline `dolt gc` procedure
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
@@ -298,7 +298,7 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.

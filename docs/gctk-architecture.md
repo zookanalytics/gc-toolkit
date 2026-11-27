@@ -78,7 +78,7 @@ registry that enumerates its consumers.
   this surface.
 - **Hook.** Code injected into a workflow at a named place, which runs because a
   formula step, a patrol, a commit or a tool use reaches it. The registry is its
-  call sites: formula steps, the doctor checks the deacon's patrol runs, and the
+  call sites: formula steps, the doctor checks the doctor order runs, and the
   git and tool-use hooks the pack installs.
 - **Order.** Code the city runs on a schedule, an event or a condition. The
   registry is the orders set, and every order meets

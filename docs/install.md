@@ -5,7 +5,7 @@
 > `gc init`.
 
 gc-toolkit ships a **native agent roster** — polecat, refinery, witness,
-deacon, mechanik, polecat-codex, proactive, and the converse-claude-opus,
+mechanik, polecat-codex, proactive, and the converse-claude-opus,
 converse-claude-fable, converse-codex-sol and converse-codex-astra sittings —
 declared in its own `pack.toml`.
 It imports nothing: there are no gastown prerequisites, no transitive imports,
@@ -107,7 +107,7 @@ that does not import the pack itself.
 ### What the import brings in
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
-  codex provider), patrols (`refinery`, `deacon`), the rig's mail
+  codex provider), the merge patrol (`refinery`), the rig's mail
   (`witness`), conversation sittings (`converse-claude-opus`,
   `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`, which
   `gc-helm engage` opens per conversation), and `proactive` (always-on,
@@ -119,7 +119,7 @@ that does not import the pack itself.
   refused, and no PR merges either: the landing order runs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `gctk-build`, `helm-build`, and the feedback
+  `gctk-build`, `helm-build`, and the feedback
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).
@@ -270,7 +270,7 @@ gc config show | grep -E '^\[\[agent\]\]|^name ='
 ```
 
 Confirm the native roster is present — `polecat`, `polecat-codex`,
-`refinery`, `witness`, `deacon`, `converse-claude-opus`,
+`refinery`, `witness`, `converse-claude-opus`,
 `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`,
 `mechanik` — with no gastown entries.
 

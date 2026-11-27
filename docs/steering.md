@@ -77,8 +77,8 @@ finished work on a hold usually clears its route, because the next actor is not
 the pool that worked it, and intake holds new work with no route the same way.
 Gas City's `hold-label-routed-to` doctor check wants the route to equal the
 label's value, and Gas City's issue 6069 reports that check as a bug. So it
-warns on every held bead, and the deacon's patrol neither files that warning nor
-runs its fix (`formulas/mol-deacon-patrol.toml`).
+warns on every held bead. The doctor order never runs its fix, and
+`doctor/accepted.toml` accepts the warning, so the city page folds it.
 
 ## The writers that hold new work
 

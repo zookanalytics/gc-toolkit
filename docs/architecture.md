@@ -562,9 +562,6 @@ why a reader must know it, and the work that retires it.
 - **`gc-helm.sh` still carries the conversation verbs.** open, engage,
   attach, dismiss and handback run as shell, and gctk reaches open and the
   read-only resolve through the script. tk-ssm8qns.15 moves them into gctk.
-- **The deacon still runs `gc doctor`.** Until the patrols member's second
-  landing retires it, the deacon runs `gc doctor` and files each failure as a
-  patrol finding for a first reaction.
 - **The old review path's code still runs.** The merge cadence still runs the
   old review path beside the review run
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
