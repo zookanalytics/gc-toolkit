@@ -107,8 +107,8 @@
 // the row it would file and writes nothing, its created_by the actor bd
 // resolves (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then
 // unknown); a create's dependency, a dep add, a dep --blocks and each edge of
-// a dep add --file refuse an edge onto a bead the store does not hold, the
-// three dep forms refuse one from such a bead too, and a --file batch with a
+// a dep add --file refuse an edge onto a bead the store does not hold, those
+// dep forms refuse one from such a bead too, and a --file batch with a
 // refused edge writes none of its edges; in a rig's store an edge onto a bead
 // with another prefix is kept without the bead, as bd keeps one onto another
 // store; and a set-state that changes a bead's <dimension>:<value> label
