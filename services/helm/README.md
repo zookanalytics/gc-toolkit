@@ -295,8 +295,9 @@ same question: its pull-request ask says when a pull request is a need, and
 `Reading.Beneath` names the needs a row is listed beneath. Each Needs you view
 leads with how many of its needs count, and beneath that how many of each kind
 count: pull requests, questions, conversations waiting for you, in conversation and
-rulings, a zero among them, then assigned to you when one counts. A kind's count
-shows that kind alone, and a second click shows every kind again. The needs
+rulings, a zero among them, then human-needed and assigned to you, each when
+one counts. A kind's count shows that kind alone, and a second click shows
+every kind again. The needs
 that do not count, those about parked work or work held for the Product Owner,
 fold beneath the rest under Parked or unprioritized, closed until opened. The
 Work queue is the work in the

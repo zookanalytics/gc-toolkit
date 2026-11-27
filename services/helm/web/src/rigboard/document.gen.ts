@@ -313,8 +313,8 @@ export interface Need {
  * Count is the needs that count, and it reaches zero only when nothing that
  * counts needs you. Kinds is how many of them are of each kind: Pull request,
  * Question, Conversation waits for you, In conversation and Ruling, each one
- * zero included, then Assigned to you when one counts. Counted lists the needs
- * that count, and NotCounted the needs that do not.
+ * zero included, then Human-needed and Assigned to you, each when one counts.
+ * Counted lists the needs that count, and NotCounted the needs that do not.
  */
 export interface NeedsYou {
   count: number /* int */;
@@ -374,9 +374,10 @@ export type Group = typeof GroupWaitingOnYou | typeof GroupQueued | typeof Group
 export const AskQuestion = "Question";
 export const AskConversation = "Conversation";
 export const AskPullRequest = "Pull request";
+export const AskHumanNeeded = "Human-needed";
 export const AskAssignedToYou = "Assigned to you";
 export const AskRuling = "Ruling";
-export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskAssignedToYou | typeof AskRuling;
+export type Ask = typeof AskQuestion | typeof AskConversation | typeof AskPullRequest | typeof AskHumanNeeded | typeof AskAssignedToYou | typeof AskRuling;
 /**
  * NeedKind is the kind of need a row is, the kinds a Needs you view counts and
  * filters its needs by. It is the row's ask, in the ask's own words, except
@@ -389,5 +390,6 @@ export const NeedKindQuestion = "Question";
 export const NeedKindWaitsForYou = "Conversation waits for you";
 export const NeedKindInConversation = "In conversation";
 export const NeedKindRuling = "Ruling";
+export const NeedKindHumanNeeded = "Human-needed";
 export const NeedKindAssignedToYou = "Assigned to you";
-export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindAssignedToYou;
+export type NeedKind = typeof NeedKindPullRequest | typeof NeedKindQuestion | typeof NeedKindWaitsForYou | typeof NeedKindInConversation | typeof NeedKindRuling | typeof NeedKindHumanNeeded | typeof NeedKindAssignedToYou;

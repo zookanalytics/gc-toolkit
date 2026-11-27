@@ -640,14 +640,17 @@ func (bt *built) view(needs []Need, covers func(string) bool) NeedsYou {
 
 // kindCounts is how many needs of each kind count, in the order a view reads
 // them: the five kinds every view shows, each one zero included, so a glance
-// tells which is empty, then Assigned to you when one counts.
+// tells which is empty, then Human-needed and Assigned to you, each when one
+// counts.
 func kindCounts(by map[NeedKind]int) []KindCount {
 	out := []KindCount{}
 	for _, k := range []NeedKind{NeedKindPullRequest, NeedKindQuestion, NeedKindWaitsForYou, NeedKindInConversation, NeedKindRuling} {
 		out = append(out, KindCount{Kind: k, Count: by[k]})
 	}
-	if n := by[NeedKindAssignedToYou]; n > 0 {
-		out = append(out, KindCount{Kind: NeedKindAssignedToYou, Count: n})
+	for _, k := range []NeedKind{NeedKindHumanNeeded, NeedKindAssignedToYou} {
+		if n := by[k]; n > 0 {
+			out = append(out, KindCount{Kind: k, Count: n})
+		}
 	}
 	return out
 }

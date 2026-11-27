@@ -18,7 +18,8 @@ import (
 //   - ask: the ask's words. A question reads "Question", or the words of the
 //     conversation that answers it. A conversation reads whether it waits for
 //     you or a sitting holds it. A pull request reads where it stands, a
-//     ruling what it waits for, and a bead only a person clears "Assigned to
+//     ruling what it waits for, a bead that carries bd's human label
+//     "Human-needed", and any other bead only a person clears "Assigned to
 //     you".
 //   - own-wait: "Waits on your answer" for a human gate or a decision, the
 //     conversation's words for a conversation, and otherwise "Waits on <id>"
@@ -80,6 +81,7 @@ const (
 	AskQuestion      Ask = "Question"
 	AskConversation  Ask = "Conversation"
 	AskPullRequest   Ask = "Pull request"
+	AskHumanNeeded   Ask = "Human-needed"
 	AskAssignedToYou Ask = "Assigned to you"
 	AskRuling        Ask = "Ruling"
 )
@@ -97,6 +99,7 @@ const (
 	NeedKindWaitsForYou    NeedKind = "Conversation waits for you"
 	NeedKindInConversation NeedKind = "In conversation"
 	NeedKindRuling         NeedKind = "Ruling"
+	NeedKindHumanNeeded    NeedKind = "Human-needed"
 	NeedKindAssignedToYou  NeedKind = "Assigned to you"
 )
 
@@ -156,6 +159,8 @@ func (bt *built) askWords(id string, a standing.Answer) *askAnswer {
 			st = string(p.State())
 		}
 		return &askAnswer{kind: AskPullRequest, words: st, need: NeedKindPullRequest}
+	case standing.AskHumanNeeded:
+		return &askAnswer{kind: AskHumanNeeded, words: string(AskHumanNeeded), need: NeedKindHumanNeeded}
 	case standing.AskAssignedToYou:
 		return &askAnswer{kind: AskAssignedToYou, words: string(AskAssignedToYou), need: NeedKindAssignedToYou}
 	case standing.AskRuling:

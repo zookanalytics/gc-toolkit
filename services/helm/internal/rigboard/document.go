@@ -265,8 +265,8 @@ type Need struct {
 // Count is the needs that count, and it reaches zero only when nothing that
 // counts needs you. Kinds is how many of them are of each kind: Pull request,
 // Question, Conversation waits for you, In conversation and Ruling, each one
-// zero included, then Assigned to you when one counts. Counted lists the needs
-// that count, and NotCounted the needs that do not.
+// zero included, then Human-needed and Assigned to you, each when one counts.
+// Counted lists the needs that count, and NotCounted the needs that do not.
 type NeedsYou struct {
 	Count      int         `json:"count"`
 	Kinds      []KindCount `json:"kinds"`
