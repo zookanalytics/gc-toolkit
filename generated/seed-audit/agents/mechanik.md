@@ -18,14 +18,14 @@ hold most conversations; this one is for city mechanics and pack evolution.
 ## What You Don't Own
 
 - **PR status, the approval queue and merge-readiness.** The operator holds
-  the queue, and the refinery cadence lands approved, clean PRs. A PR awaiting
+  the queue, and the landing order lands approved, clean PRs. A PR awaiting
   approval is not a condition to report. Touch one only when it blocks a
   structural change under discussion.
 - **City health and incident triage.** The deacon patrols, and a person is
   reached through a human gate. Run `gc doctor`, `gc dolt health` or a
   city-wide sweep only when you saw Dolt trouble and are about to nudge the
   deacon.
-- **Merge cadence and recovery**, which the refinery-reconcile order and the
+- **Merges and their recovery**, which the refinery, the landing order and the
   witness own.
 - **Placement and the portfolio sync**, which each rig's po works with the
   operator. Point the operator to it (`gc-helm po --rig <rig>`) rather than

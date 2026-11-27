@@ -85,7 +85,8 @@ your prompt's "Blocked work and human gates" section says.
 If `metadata.rejection_reason` exists, this bead was previously attempted
 and rejected by the refinery. Read the reason carefully:
 - Conflict with the base: you'll resume the existing branch, bring it current
-  by MERGE, and write an audit entry for each conflict you resolve
+  by MERGE, and give each conflict you resolve its account in the merge
+  commit's message
 - Test failure: you'll resume the branch and fix the issue
 
 If `metadata.branch` exists, a branch already exists from the prior attempt.
@@ -149,38 +150,24 @@ releases the work, cancelled the run and drained.
 **2. Conflicts: resolve, write the account, then commit.** You are the only
 party that knows what collided and why you chose what you chose, so you write
 it down as you resolve. This applies to any merge of the base you run in this
-bead. For each file git could not merge, resolve it, stage it, and record one
-entry before you commit the merge. An edit beyond what the merge needed, such as
-a test repair a conflict forced, owes an entry too, and on a bead whose only job
-is the bring-current every file a commit of your own changes owes one:
-```bash
-"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/bring-current-audit.sh" add --bead "<the work bead>" --path "<file>" --rating "<routine|judgment>" --collided "<the two intents that met: what the base changed and why, what the branch changed and why>" --resolution "<what you kept or wrote, and why>" --check "<what a reviewer should look at to confirm it>"
-```
-Write the same account into the merge commit's message before you commit. A
-review bead's triage rules on the round from your entries, and the person who
-reads its verdict on the PR reads them there. A review run's triage reads the
-merge commit itself: its message, and the hunks you resolved, which
-`git show --remerge-diff` shows. Replace the file
+bead. For each file git could not merge, resolve it and stage it. A review
+run's triage reads the merge commit itself: its message, and the hunks you
+resolved, which `git show --remerge-diff` shows. Replace the file
 `git rev-parse --git-path MERGE_MSG` names with git's first line, then one
-paragraph for each entry, naming its file, what collided, what you kept or wrote
-and why, and what a reviewer should check. The commit keeps the file as written,
-so leave in no line that starts with `#`. Then commit the merge, which also
-clears the rejection:
+paragraph for each file you resolved, and for each edit beyond what the merge
+needed, such as a test repair a conflict forced: name its file, what collided,
+what you kept or wrote and why, and what a reviewer should check. The commit
+keeps the file as written, so leave in no line that starts with `#`. Then
+commit the merge, which also clears the rejection:
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/work-setup.sh" --conclude-merge --convoy {{convoy_id}}
 ```
-Rate an entry `routine` for an adjacent-line collision, an overlapping comment
-edit or an obvious composition, and `judgment` for an informed decision: an
-inferred intent, a side chosen on substance, or something new written. The
-rating informs triage; it gates nothing, so rate honestly rather than low.
-`bring-current-guard.sh coverage --bead <the work bead>` lists every item the
-guard will hold the hand-off to, and which already have an entry.
 
 **A conflict you cannot resolve without guessing** (two live designs, an
 intent you cannot infer) is a question for a person, not a guess. Push
 nothing: the branch stays as it was last reviewed. Ask once, with what collided
-and the one decision you need. The human gate it files on the anchor carries
-your entries so far and holds the anchor's merge. This call asks, aborts the
+and the one decision you need. The human gate it files on the anchor holds the
+anchor's merge. This call asks, aborts the
 merge, ends the run and drains. The work bead waits on that gate through its own
 edge, and clearing the gate re-slings the work:
 ```bash
@@ -595,11 +582,12 @@ words, with no bead id, because the PR title adds it.
 title with no type takes one from the bead's kind, which reads `chore:` on a
 task. Leave `--title` out only when the title already opens with the type and
 scope that fit and still names what the branch does. The handoff writes it onto
-the anchor, never onto the PR: the merge cadence composes the PR title from the
-anchor, so a title typed into the PR alone is replaced on its next pass.
+the anchor, never onto the PR: the PR's title is composed from the anchor at
+each push to the PR, so a title typed into the PR alone is replaced at the next
+one.
 
-**5. Hand off.** This pushes the branch and verifies it on origin, runs the
-bring-current guard, writes the summary and any retitle onto the anchor, writes
+**5. Hand off.** This pushes the branch and verifies it on origin, writes the
+summary and any retitle onto the anchor, writes
 the refinery handoff, wakes the refinery, closes this step, removes the worktree
 and its local branch, and drains. Pass the anchor the last call printed, when it
 printed one.
@@ -612,9 +600,7 @@ echo of its exit, so that its exit is the hand-off's own.
 ```
 - Exit 0: handed off and drained. You are gone.
 - Exit 3: nothing is handed off and you must not drain: it names what you owe,
-  an uncommitted change or a bring-current audit entry. Finish that and re-run
-  this call. What the bring-current guard holds a round to, and what it reopens,
-  is docs/state-machine.md, *Bringing a branch current*.
+  such as an uncommitted change. Finish that and re-run this call.
 - Exit 1: stop. The script says why, and when the refusal is final it has already
   recorded what releases the work, cancelled the run and drained.
 

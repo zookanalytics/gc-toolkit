@@ -54,9 +54,8 @@ again before you act on it.
 The poured formula's step descriptions are the plan. What the claim is —
 implementation, review, rebase — is decided by the formula on the bead, not
 by the pool you sit in. Implementation work normally carries
-`mol-polecat-work`; a review bead is simply a bead whose formula is the
-review method (`mol-review`). A bead with no poured workflow states its
-method in its metadata and dispatch note — a rework child, for example,
+`mol-polecat-work`. A bead with no poured workflow states its method in its
+metadata and dispatch note — a bead sent back to its branch, for example,
 resumes `metadata.branch` and fixes `metadata.rejection_reason` per
 `mol-polecat-work`'s steps — and `gc formula show <name>` reads any formula
 by name, whose scripts take `--bead <id>` where a step passes `--convoy`. That
@@ -123,8 +122,8 @@ The formula distinguishes two questions that look like one:
   and what self-review diffs against. On a rework child this is the branch
   under review, on purpose.
 - **Merge INTO** — `metadata.target`: where the refinery lands the work. A
-  caller-set target (a signoff's `REVIEW_BASE`, an integration effort's
-  `integration/<id>`) always wins; never overwrite it.
+  caller-set target (an integration effort's `integration/<id>`) always wins;
+  never overwrite it.
 
 Fresh work lives on `polecat/<bead-id>`, cut from freshly-fetched
 `origin/<base_branch>` and recorded in `metadata.branch`. When
@@ -192,12 +191,12 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 **Rejection-aware resume.** `metadata.rejection_reason` + `metadata.branch`
 mean a previous attempt was rejected with the branch intact. Resume that
 branch and fix the stated reason. Bring it current by merging the base in;
-never rebase it and never force-push it. When the merge conflicts, write one
-audit entry per conflicted file as you resolve it, saying what collided, what
-you decided and why, and what a reviewer should check. The hand-off is refused
-without them, and every message a person reads about the merge is composed
-from them. A conflict you cannot resolve without guessing is a question for a
-person: push nothing and ask. The formula's workspace-setup step carries the
+never rebase it and never force-push it. When the merge conflicts, write the
+merge commit's message as you resolve it: for each conflicted file, what
+collided, what you decided and why, and what a reviewer should check. A
+review run's triage reads that message beside the hunks you resolved. A
+conflict you cannot resolve without guessing is a question for a person:
+push nothing and ask. The formula's workspace-setup step carries the
 exact blocks.
 
 A conflict in code the base removed is drift, not a superseded branch, when the
@@ -224,7 +223,6 @@ claimed bead everything else.
 | Bead | Closed by |
 |---|---|
 | the work bead | the refinery, from merge-push — the anchor on a verified merge, a rework hand-back landed-on-branch — **NEVER you**, unless it duplicates another bead |
-| a review bead | `signoff.sh` after the verdict, or the cadence's `review-sweep.sh` when there is none to give — **NEVER you** |
 | your step beads | **you**, via `assets/scripts/claim-close.sh` |
 | `workflow-finalize` | the control-dispatcher — never you |
 
