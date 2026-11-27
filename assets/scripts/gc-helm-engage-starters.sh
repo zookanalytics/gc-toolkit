@@ -61,8 +61,8 @@ H
 
 # lens_body <with-opener> — the raw lens brief, with the literal __SKILL__ and
 # __SUBJECT__ placeholders. The skill's own method carries a final step written
-# for the bead it was built to serve (a review skill ends in a signoff.sh
-# verdict on its review bead), and a sitting holds a conversation, not that bead, so
+# for the bead it was built to serve (a review skill ends in the verdict its
+# review run's lane writes), and a sitting holds a conversation, not that bead, so
 # the brief keeps the skill's judgment and withholds its final writes. Its last
 # sentence says what to do first: with no opener the lens is the whole
 # assignment, and with one the opener that follows decides.

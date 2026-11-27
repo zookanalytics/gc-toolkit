@@ -208,7 +208,7 @@ So the two jobs are separate:
 | start | `assets/scripts/gc-helm-svc.sh` | the supervisor, on demand |
 
 `gc-build.sh` is the pack's one out-of-band builder. The `gctk-build` order runs
-it as `gc-build.sh gctk`, which builds the merge cadence's binary the same way,
+it as `gc-build.sh gctk`, which builds the binary the orders exec the same way,
 without the restart described below.
 
 Both orders are condition orders. On each pass the order dispatcher runs

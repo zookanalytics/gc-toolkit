@@ -141,7 +141,7 @@ fi
 if [ -n "$dupes" ]; then
     while IFS=$'\037' read -r url count bids; do
         [ -n "$url" ] || continue
-        errors+=("PR $url has $count open anchors: $bids — one unit of work has exactly one anchor; close or re-point the duplicates so a single check_set owns the merge")
+        errors+=("PR $url has $count open anchors: $bids — one unit of work has exactly one anchor; close or re-point the duplicates so a single anchor owns the merge")
     done <<< "$dupes"
 fi
 

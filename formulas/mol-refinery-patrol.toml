@@ -134,7 +134,7 @@ under your own worktree. A branch is never rebased.
 - Exit 3: the merge conflicted, and the work went back with the reason
   "Conflicts with <target> at <commit>": the bead itself to the pool through
   `gc sling` when it records no open PR, or, when it does, to its PR's review
-  run as an ask, or to the rework child already on its branch. Or the bead had
+  run as an ask. Or the bead had
   left you before the requeue wrote. Jump to next-iteration.
 - Exit 4: the target or the branch is not on origin, so the bead waits behind
   a human gate. Jump to next-iteration.
@@ -196,8 +196,8 @@ failure.**
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/refinery-requeue.sh" --bead <the bead> --reason "<failure summary>" --pool {{binding_prefix}}polecat
 ```
 It goes back as the bead itself through `gc sling`, unassigned, or, when it
-records an open PR, to its PR's review run as an ask, or to the rework child
-already on its branch. Exit 0 or 3: jump to next-iteration. Exit 1: end the
+records an open PR, to its PR's review run as an ask. Exit 0 or 3: jump to
+next-iteration. Exit 1: end the
 session with `gc runtime drain-ack`.
 
 **Pre-existing on the target:** track each failure once, then land. Run it
@@ -250,7 +250,7 @@ title = "Record patrol cycle summary"
 needs = ["merge-push"]
 description = """
 Summarize the cycle for the next session: the bead and branch handled, its
-disposition (landed, published, parked for the cadence, sent back, held behind
+disposition (landed, published, parked, sent back, held behind
 a gate), the checks and their results, the trackers filed or found, and the
 gates filed. If the cycle ended early, say why and what state it left. The
 summary lives in the wisp's closing reason."""

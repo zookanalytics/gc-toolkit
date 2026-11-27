@@ -524,10 +524,9 @@ bd_anchor_backfill() {
 #      with no --select, so the caller's next run can find it, and a caller
 #      hands it on only once bd_meta_ensure has made it whole.
 #
-# The read-back, the second write and the close serve only callers in code the
-# deletion plan retires: scripts tools/deletion-plan.tsv lists, and the part of
-# signoff.sh the review-lane migration replaces. Any other script files with
-# `gc bd create --metadata` and takes a non-zero exit as a create that failed.
+# No script files through the read-back, the second write and the close. A
+# script files with `gc bd create --metadata` and takes a non-zero exit as a
+# create that failed.
 bd_create() {
   local sel="" child="" anchor="" meta db="" prev="" a reply id row got short lost="" err
   while :; do

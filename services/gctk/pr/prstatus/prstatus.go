@@ -70,9 +70,8 @@ type State string
 
 const (
 	// Working: an unapproved PR the city is changing. Live work is anchored to
-	// it (a rework or fix child, a validation pass, a review, a finding), or it
-	// is a draft the city marks ready once its review loop passes. No human
-	// input is needed.
+	// it, or it is a draft the city marks ready once its review loop passes. No
+	// human input is needed.
 	Working State = "working"
 	// Merging: an approved PR with no known blocker. The city has it and
 	// believes its next state is merged: required checks may still be running,
@@ -146,9 +145,8 @@ type Facts struct {
 	// Once the work closes, the bead is among Owed.
 	Staying []person.Blocker
 	// InFlightCount is the size of the anchor's in-flight set: every bead
-	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses] (a
-	// rework or fix child, a validation pass, a review, a finding). Non-zero
-	// means the city is acting on the PR.
+	// carrying anchor_bead, any task_kind, at one of [InFlightStatuses].
+	// Non-zero means the city is acting on the PR.
 	InFlightCount int
 	// MergeResult is metadata.merge_result, the anchor's landing state. A value
 	// pr.OnRecord names is a PR on Gas Town's pending record, which the pr

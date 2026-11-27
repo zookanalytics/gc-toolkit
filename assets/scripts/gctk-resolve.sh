@@ -18,10 +18,9 @@
 # GC_CITY or GC_CITY_ROOT — the same precedence boot-health.sh, doctor-sweep.sh
 # and the tmux session picker read, and GC_CITY_PATH is the one the supervisor puts in
 # an agent session — else the city `gc service list --json` reports. The
-# listing is what the merge cadence itself needs: the order runner that execs
-# refinery-reconcile.sh carries no city variable at all (docs/
-# refinery-merge-cadence.md), so an env-only chain would miss the binary on
-# every order-driven call. Never a walk up from this file's own path — the
+# listing is what an exec order needs: the order runner carries no city
+# variable at all, so an env-only chain would miss the binary on every
+# order-driven call. Never a walk up from this file's own path — the
 # hermetic suites run from a tree inside a live city, and a filesystem hunt
 # would find that city's binary instead of the build a suite means to test.
 #

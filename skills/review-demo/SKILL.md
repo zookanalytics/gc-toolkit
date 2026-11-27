@@ -472,9 +472,9 @@ the check covered.
   captures renders, a surface only live state produces, a required state the
   capture tools cannot reach, a capture toolchain that does not resolve, or no
   running app to capture.
-  This never blocks. A rework child cannot build the city's capture capability,
-  and a red lane would keep the PR in draft, away from the human who would judge
-  it.
+  This never blocks. The round's repair cannot build the city's capture
+  capability, and a red lane would keep the PR in draft, away from the human
+  who would judge it.
 - **A human asked for the visual and it cannot be produced.** Approve the same
   way, naming the request and what would meet it. The verdict posts on the PR the
   human reads, and the merge still waits on a human approval.

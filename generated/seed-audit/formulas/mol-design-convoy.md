@@ -25,8 +25,7 @@ and closes its own step bead through assets/scripts/claim-close.sh.
 
 Every PR the effort produces merges only with a standing APPROVED review from an
 account that can push to the repository, which counts until it is dismissed:
-the landing order's evaluator holds every PR to that rule, so no check_set
-token arms it. design_gated
+the landing order's evaluator holds every PR to that rule. design_gated
 (var, default true) chooses when implementation starts. Gated: the design child
 is a stage, slung --merge mr, whose PR into the integration branch is the design
 gate, and the implementation child is armed behind the design child's closure, so

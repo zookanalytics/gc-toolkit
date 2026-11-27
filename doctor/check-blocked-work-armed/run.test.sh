@@ -254,8 +254,9 @@ eq "$RC" "0" "a blocked bead already routed (gc.routed_to) is not flagged"
 has "$OUT" "OK:" "clean run prints the OK line"
 clear_stores
 
-# A merge anchor (merge_result set) is driven by the merge cadence and offered
-# by no pool queue (lifecycle.toml: anchor state = status x merge_result), so
+# A merge anchor (merge_result set) is driven by the refinery and the landing
+# order, and offered by no pool queue (lifecycle.toml: anchor state = status x
+# merge_result), so
 # blocked-and-unrouted is not the anti-pattern for it — not flagged.
 blocked_store alpha "$(bmeta a-1 merge_result pre_open_gate)"
 eq "$(run_check >/dev/null; echo $?)" "0" "a blocked merge anchor (merge_result) is not flagged"
