@@ -145,12 +145,10 @@ FILES=()
 for f in "$ROOT"/formulas/*.toml "$ROOT"/packs/*/formulas/*.toml; do
   [ -f "$f" ] && FILES+=("$f")
 done
-for f in "$SYNC_TOML"; do
-  case " ${FILES[*]} " in
-    *" $f "*) ok "guard: the scan covers ${f#"$ROOT"/}" ;;
-    *)        bad "guard: the scan covers ${f#"$ROOT"/}" ;;
-  esac
-done
+case " ${FILES[*]} " in
+  *" $SYNC_TOML "*) ok "guard: the scan covers ${SYNC_TOML#"$ROOT"/}" ;;
+  *)                bad "guard: the scan covers ${SYNC_TOML#"$ROOT"/}" ;;
+esac
 eq "$(bare_adds "${FILES[@]}" | sed "s|^$ROOT/||" | tr '\n' ' ')" "" \
   "guard: no formula in formulas/ or packs/*/formulas/ runs a bare git worktree add"
 

@@ -157,10 +157,9 @@ done <<< "$NAMES"
 
 echo "# the triage blocks, run as written"
 TB="$TMP/blocks/triage"
-for m in triage-index-read; do
-  awk -v m="$m" '$0 == "# <<< " m {f = 0} f {print} $0 == "# >>> " m {f = 1}' "$ROOT/skills/review-triage/SKILL.md" > "$TB/$m.tmpl"
-  [ -s "$TB/$m.tmpl" ] && ok "$m extracts from the skill" || bad "$m extracts from the skill" "no '# >>> $m' block"
-done
+m=triage-index-read
+awk -v m="$m" '$0 == "# <<< " m {f = 0} f {print} $0 == "# >>> " m {f = 1}' "$ROOT/skills/review-triage/SKILL.md" > "$TB/$m.tmpl"
+[ -s "$TB/$m.tmpl" ] && ok "$m extracts from the skill" || bad "$m extracts from the skill" "no '# >>> $m' block"
 PACK_NAMES=$("$GCTK_BIN" review checks --file "$ROOT/review-checks.toml" 2>/dev/null | cut -f1 | tr '\n' ' ')
 # triage <shell> <block> <oid> [env...] : the block filled in at <oid> and run.
 triage() { local sh="$1" m="$2" oid="$3"; shift 3; fill triage "$oid" < "$TB/$m.tmpl" > "$TB/$m.sh"; run "$sh" "$TB/$m.sh" "$@"; }

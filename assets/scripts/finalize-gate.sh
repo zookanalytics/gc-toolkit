@@ -198,10 +198,7 @@ clause_epic_ruling_recorded() {
 finalize_gate_check() {
     [ -n "${1:-}" ] || { echo "$PROG: check requires a bead id" >&2; return 2; }
     # Every clause reads the store as it stands now, because the act this gate
-    # guards cannot be taken back. A refinery pass memoizes bd_list
-    # (GC_RECONCILE_BD_CACHE, bd-lib.sh), so the memo is off for every clause's
-    # reads.
-    local GC_RECONCILE_BD_CACHE=""
+    # guards cannot be taken back.
     clause_no_open_human_gate "$1" "${2:-}" || return 1
     clause_epic_ruling_recorded "$1" "${3:-}" || return 1
     # A further precondition is one more `clause_* "$1" || return 1` here.

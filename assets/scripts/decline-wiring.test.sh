@@ -61,8 +61,8 @@ done
 
 # --- 2. Each cancel names the step it sits in. ----------------------------------
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-rig-demo; do
-    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+  f=mol-rig-demo
+  out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 path = sys.argv[1]
 d = tomllib.load(open(path, "rb"))
@@ -80,12 +80,11 @@ for st in d.get("steps", []):
 print("%d|%s" % (calls, "; ".join(bad)))
 PY
 )
-    case "$out" in
-      0\|*) bad "$f: no run-cancel.sh or decline.sh --step call found" ;;
-      *\|) ok "$f: each of its ${out%%|*} run-cancel.sh and decline.sh --step calls names the step it sits in" ;;
-      *) bad "$f: a cancel names another step: ${out#*|}" ;;
-    esac
-  done
+  case "$out" in
+    0\|*) bad "$f: no run-cancel.sh or decline.sh --step call found" ;;
+    *\|) ok "$f: each of its ${out%%|*} run-cancel.sh and decline.sh --step calls names the step it sits in" ;;
+    *) bad "$f: a cancel names another step: ${out#*|}" ;;
+  esac
 else
   echo "skip - own-step check: $TOML_PY"
 fi
@@ -95,8 +94,8 @@ fi
 # inside a quiet window the call declares, and the wait needs an open gate. So
 # the filing each await-ruling.sh call follows declares no --quiet-window.
 if TOML_PY="$(tomllib_python)"; then
-  for f in mol-rig-demo; do
-    out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
+  f=mol-rig-demo
+  out=$("$TOML_PY" - "$ROOT/formulas/$f.toml" <<'PY'
 import re, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
 bad = []
@@ -119,12 +118,11 @@ for st in d.get("steps", []):
 print("%d|%s" % (waits, "; ".join(bad)))
 PY
 )
-    case "$out" in
-      0\|) ok "$f: no wait to check" ;;
-      *\|) ok "$f: each of its ${out%%|*} waits follows a filing with no quiet window" ;;
-      *) bad "$f: ${out#*|}" ;;
-    esac
-  done
+  case "$out" in
+    0\|) ok "$f: no wait to check" ;;
+    *\|) ok "$f: each of its ${out%%|*} waits follows a filing with no quiet window" ;;
+    *) bad "$f: ${out#*|}" ;;
+  esac
 else
   echo "skip - open-gate check: $TOML_PY"
 fi
