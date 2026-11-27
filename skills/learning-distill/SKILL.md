@@ -94,7 +94,9 @@ surface's current entries and the pattern-bead set, then pick exactly one:
   a near-duplicate sibling.
 - **SUPERSEDE** — replaces a weaker rule; the proposal removes the old
   bullet in the same PR.
-- **NOOP** — already covered. Stamp the observations consumed and stop.
+- **NOOP** — already covered. Quote the sentence of the existing rule that
+  covers it, then stamp the observations consumed and stop. A standing
+  directive that no sentence covers is not a NOOP: judge it as new.
 
 Duplicated near-rules are this system's own version of the pasted
 boilerplate comment it exists to eliminate. Do not become the disease.
