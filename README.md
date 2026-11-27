@@ -12,8 +12,8 @@ The pack is its workflows. Every component belongs to one of six:
 | Workflow | What it does | Entry points |
 |---|---|---|
 | **work** | a filed bead becomes a pushed branch | `mol-polecat-work`, `lifecycle/lifecycle.toml`, `assets/scripts/lifecycle.sh` |
-| **review** | a gate verdict lands on the anchor | polecat pools (cadence-routed via `REVIEW_POOL`), `formulas/mol-review.toml`, `assets/scripts/signoff.sh` |
-| **merge** | gates green at the live head become a landed PR | `orders/refinery-reconcile.toml` + 5 arms ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
+| **review** | a PR's head is judged by the checks it needs | `formulas/mol-pr-review.toml`, `formulas/mol-pr-review-lane.toml`, gctk's review domain |
+| **merge** | a validated, approved head becomes a landed PR | the refinery and the landing order, `orders/pr-reconcile.toml` ([docs/refinery-merge-cadence.md](docs/refinery-merge-cadence.md)) |
 | **engagement** | a human decision is asked for on the bead that waits for it, and settled in a sitting | `assets/scripts/human-gate.sh`, `gc-helm engage`, converse, the helm board |
 | **feedback** | corrective lessons become standing pack behavior | feedback miner/distiller orders ([docs/feedback-learning.md](docs/feedback-learning.md)) |
 | **patrol** | drift between recorded and true state is repaired | witness / deacon patrols, `orders/liveness-sweep.toml`, `doctor/` |
@@ -25,8 +25,8 @@ All agents are native to this pack — no gastown import.
 | Agent | Kind | Job |
 |---|---|---|
 | `polecat` | worker pool | claims routed work beads, implements, hands off |
-| `polecat-codex` | worker pool (codex provider) | a polecat; the merge cadence routes review beads — beads carrying `mol-review` — to this pool |
-| `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the mechanical cadence runs as an order |
+| `polecat-codex` | worker pool (codex provider) | a polecat; a review run's triage and lanes run on this pool |
+| `refinery` | patrol | merge judgment: rejection, blocked/refused calls; the landing order runs as an order |
 | `witness` | patrol | rig recovery: orphaned beads, stalled workflows |
 | `deacon` | patrol | city infra health: dolt, doctor sweep |
 | `converse-claude-opus`, `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra` | conversation sitting | one per engaged conversation: `gc-helm engage` starts it on a conversation about a board row's bead, and it holds that conversation |

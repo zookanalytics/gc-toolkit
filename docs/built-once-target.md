@@ -116,11 +116,9 @@ reads. A lane's verdict lives in the run. Every lane runs once the PR is open as
 a draft, and the operator reads each lane's verdict at a head in the run's one
 comment for that head on the PR, beside how each finding was ruled.
 
-The trade: review beads, lane derivation, validation passes, machine finding
-beads and the sweeps that close their leftovers go. Since its cutover a rig
-files none of those beads, the merge cadence's sweeps close what is left of
-them, and the old path's retirement (tk-1tfzr71.122) deletes it all. A person's
-post on a PR is an ask the PR's review run rules and answers where it was made.
+The trade: a check leaves no bead of its own, so nothing derives a lane from
+closed reviews, files a finding as a bead or sweeps leftovers. A person's post
+on a PR is an ask the PR's review run rules and answers where it was made.
 
 ### Merge
 
@@ -278,10 +276,7 @@ yet. Each remaining difference names its reason and what ends it:
   a sitting's ruling whose change the sitting does not make itself, is filed as
   an ask, which the run takes. A sitting that edits the branch with the
   operator can push while a run works it, and the lease keeps either push from
-  overwriting the other. A conflict on a branch whose rework child is still
-  open goes to that child's notes, until the old review path's retirement
-  (tk-1tfzr71.122). Gas
-  Town has no review run and no asks. Two workers on one branch would move it
+  overwriting the other. Gas Town has no review run and no asks. Two workers on one branch would move it
   under each other, and the lease refuses the second push until its worker
   merges the first. No end is planned.
 
@@ -378,7 +373,8 @@ and what ends it:
   because code does the work that needs no judgment (conversation tk-9l9pg0x).
   This ends when Gas Town's witness runs its scripted steps outside its session.
 - **Reading our anchors, PR states and conversations.** Our pipeline writes them.
-  This ends as the old review path's retirement (tk-1tfzr71.122) lands.
+  This ends when the patrols' second landing (tk-1tfzr71.174) retires the
+  witness's patrol loop.
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
@@ -477,11 +473,6 @@ home.
   gc copies into a session with no template pass, so their text cannot name the
   binding. Carried by tk-rzic0sg. All other pack text asks gc, in one line per
   shell block that runs a pack script, since each block is its own shell.
-- The decline sequence (file the human gate, cancel the run, drain): two copies
-  in the step text of `mol-validate.toml`, which tk-1tfzr71.122 retires. Outside
-  that file a decline calls `decline.sh`. `mol-review`'s failed gather cancels
-  its own run, because it returns the review to its pool through `gc sling` once
-  the cancel has landed.
 
 ### Compatibility debt
 
@@ -526,15 +517,12 @@ more than its size. A branch already in flight shows its measured net instead.
 ### 3. The lanes
 
 Each member is armed behind the one before it, and at most two migrations are
-in flight at once, on disjoint subsystems. The retirement last in lane A is the
-exception: the old review path's (tk-1tfzr71.122) is armed behind every rig's
-cutover. A member whose method is a design convoy lands only after the operator
-approves its design.
+in flight at once, on disjoint subsystems. A member whose method is a design
+convoy lands only after the operator approves its design.
 
 | Lane | Member | What it removes | Size |
 |---|---|---|---|
 | A | tk-1tfzr71.23 | the membership readers on parent-child | partial files |
-| A | tk-1tfzr71.122 | the old review path, once every rig's cutover has moved its PRs onto the pending record: review beads, lane derivation, validation passes, machine findings and their sweeps, `signoff.sh`, `mol-review`, `mol-review-quorum-signoff`, the bring-current guard and audit, the review dismissal, the refinery's merge cadence with its order and its pacing, and the cutover script | 20,698, and the cutover script |
 | B | tk-1tfzr71.174 | the patrols' second landing, once the first (tk-1tfzr71.19) has added the doctor order and the orders that look: the deacon and its doctor runner, boot health, the incident ledger, the liveness census, the witness's patrol loop and its nudge order, the salvage's branch context | 16,081, and `seat-progress.sh` with its test |
 | B | tk-1tfzr71.24 | the board's second data plane and pack-stamped rows, verbs that only call Gas City | partial files |
 | B | tk-1tfzr71.25 | registry entries, wrapper lint rules, parity tests, the `board` stub verb | 588 |

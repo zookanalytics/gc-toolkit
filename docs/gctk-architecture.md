@@ -863,7 +863,7 @@ why a reader must know it, and the work that retires it.
   conversation tk-au9jrqt. It retires with the arm.
 - **`lifecycle` writes the store through its adapter, around the ledger.** It
   is the plain write `lifecycle.sh` execs for the direct landing
-  (`direct-merge-push.sh`) and `gate-ensure.sh`, which name the keys it writes,
+  (`direct-merge-push.sh`), which names the keys it writes,
   so no domain declares them. tk-ssm8qns.16, which puts the
   other commands that read the store around the ledger behind it, carries this
   one too.

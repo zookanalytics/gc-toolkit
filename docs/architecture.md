@@ -568,8 +568,3 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The old review path's code still runs.** The merge cadence still runs the
-  old review path beside the review run
-  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
-  PR is on it, so step 7 is not yet the one review path in the code. The
-  retirement bead (tk-1tfzr71.122) deletes the old path.

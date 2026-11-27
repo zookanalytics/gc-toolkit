@@ -152,8 +152,7 @@ no warrant.
   retires once the build a city runs carries `gc hook --claim --worktree` and the
   formula moves onto the tree the claim cuts.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
-  commit. `submit-and-exit`: the merge and review nouns it holds retire, the
-  bring-current guard among them with the old review path (`tk-1tfzr71.122`).
+  commit. `submit-and-exit`: the merge and review nouns it holds retire.
 
 ## Dolt reclaim
 
@@ -392,57 +391,6 @@ no warrant.
   ffd9f6b0cb68.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
-
-## Machine axis
-
-- **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
-  keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
-  and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
-  table. Their writer and their one reader: the "record the pass's own verdict
-  on the anchor" section of `assets/scripts/gate-ensure.sh`, which records
-  `pr.machine` alone and reads the cause beside a `blocked` verdict it finds
-  there.
-- **Stands in for.** A merge-readiness verdict kept on the bead whose pull
-  request it is, which tells a block no automated actor will clear from a wait
-  the city is acting on, with the block's cause as a value a reader keys on.
-- **Evidence.**
-  - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
-    classifies an open PR from its draft flag, its merge state and its check
-    rollup alone, so a `BLOCKED` PR that is no draft and has no failed check
-    is `blocked` and actionable, a required check still running included (`classifyPullRequest` in
-    `internal/githubmonitor/monitor.go`). It reads no branch rule, review
-    thread or approval, and it records its class on a repair bead it files
-    (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
-    whose PR it is. Only `gc github pr backfill` runs it (`gc github pr
-    backfill` in `docs/reference/cli.md`, and `GitHubPRMonitor` in
-    `docs/reference/config.md`).
-  - The one state dimension Gas City reads as a bead label is `hold`, for
-    its dispatch holds `hold:mayor` and `hold:external`
-    (`engdocs/contributors/hold-label-conventions.md`, and
-    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`). Its other
-    label reads are flags and markers, such as a convoy's `owned`
-    (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`), and none of them is
-    a verdict tied to a head.
-  - In `gastownhall/beads`, labels as state keep one value per dimension,
-    read on its own, with an event bead as its history (*Labels as State
-    Cache* in `docs/core-concepts/labels.md`). `bd set-state` refuses an
-    empty value, and no state command removes a dimension (`setStateCmd`
-    and `runSetState` in `cmd/bd/state.go`), so a cause could not be
-    cleared when the verdict it qualifies moves on. A custom status (*Custom
-    Statuses and Types* in `docs/reference/configuration.md`) would take the
-    place of the bead's own status.
-  - In `gastownhall/gascity-packs`, no pack reads a branch's rules or a
-    check's required flag, and none records why a PR cannot merge as a value
-    a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
-    lifecycle in `pr_state`, a key of its own.
-  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
-  `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  786241099046.
-- **Retires when.** Gas City records a pull request's merge readiness where a
-  reader of the PR's own bead finds it, and tells a required check still
-  running from a block, for example once its PR monitor reads the base
-  branch's rules. The axis then moves onto that record.
 
 ## Saved GitHub read
 

@@ -30,11 +30,6 @@
 # names the record to write by hand, because a bead an ask blocks is no ready
 # work that brings the refinery back to it.
 #
-# One worker per branch: when an open rework child of such a bead is already on
-# its branch, running or parked, one filed before the PR's branch had a review
-# run to write it, the reason goes to that child's notes and nothing else is
-# filed.
-#
 # Any other bead, a rework child among them, goes back itself. One write,
 # guarded on the assignee and status it read, reopens it unassigned with the
 # rejection_reason and clears its claim route, its last pour's stamp and the
@@ -53,8 +48,7 @@
 # files a human gate keyed refinery-requeue-failed, which asks a person to pour
 # the work by hand.
 #
-# Exit: 0 sent back or armed to go back, sent to the review run as an ask, or
-#         the reason reached the child already on the branch
+# Exit: 0 sent back or armed to go back, or sent to the review run as an ask
 #       1 the work did not go back; the output says why. The bead stays with
 #         the refinery: its next patrol retries the requeue, and a
 #         refinery-requeue-failed gate the run filed waits for a person
@@ -74,7 +68,6 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
 
 FORMULA="mol-polecat-work"
-LIVE="open,in_progress,blocked,deferred,hooked,pinned"
 
 usage() { echo "usage: $PROG --bead <id> --reason <text> [--pool <name>]" >&2; exit 2; }
 BEAD=""; REASON=""; POOL="polecat"
@@ -132,16 +125,6 @@ sling() {
 if [ "$(bead_meta merge_result)" = pull_request_head_changed ]; then
   PR=$(bead_meta existing_pr)
   [ -n "$PR" ] || PR=$(bead_meta pr_url)
-  KIDS=$(bd_json list --metadata-field "anchor_bead=$BEAD" --status="$LIVE" --limit=0) \
-    && printf '%s' "$KIDS" | jq -e 'type == "array"' >/dev/null 2>&1 \
-    || stop "the open beads that name $BEAD as their anchor did not read"
-  CHILD=$(printf '%s' "$KIDS" | jq -r --arg b "$BRANCH" '[ .[] | select((.metadata.task_kind // "") == "rework" and (.metadata.branch // "") == $b) ] | sort_by(.created_at // .id) | .[0].id // empty')
-  if [ -n "$CHILD" ]; then
-    gc bd update "$CHILD" --append-notes "Refinery, on $BEAD's branch $BRANCH: $REASON. This child is the rework on the branch, so nothing else is filed for it." </dev/null >/dev/null \
-      || stop "the reason did not reach $CHILD, the rework child already on $BRANCH"
-    echo "$PROG: $CHILD is the rework on $BEAD's branch $BRANCH, so the reason went to its notes: $REASON"
-    exit 0
-  fi
   [ -n "$PR" ] || stop "$BEAD owns an open PR on the record but names none (existing_pr and pr_url are empty)"
   # The ask goes first and the record second (see the header).
   LINE="The refinery sent $PREP_READ back:"
