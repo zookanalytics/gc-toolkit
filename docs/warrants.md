@@ -471,10 +471,9 @@ no warrant.
   state and its approvals (`redPlans`, `redOn` and `decideRed` in
   `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels with the ones the store derives (`labelPlans` in
   `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
-  PR's signs with the ones each part keeps and reads again a conversation part
-  that holds no list of untaken posts or a checks part that holds no suites
-  (`moved` in `services/gctk/pr/saved.go`), and the net's full read with each
-  part's facts (`differs` there).
+  PR's signs with the ones each part keeps (`moved` in
+  `services/gctk/pr/saved.go`), and the net's full read with each part's facts
+  (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, from which the landing order finds and does its work, and

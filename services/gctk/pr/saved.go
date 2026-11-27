@@ -71,9 +71,7 @@ type PRSigns struct {
 }
 
 // SavedChecks is the required check runs at Head, each result its check suite
-// holds as the run's latest, and each check suite there. A checks part saved
-// before the update read the suites holds none, nil, which the update reads as
-// stale (moved).
+// holds as the run's latest, and each check suite there.
 type SavedChecks struct {
 	ReadAt string        `json:"read_at"`
 	Head   string        `json:"head"`
@@ -234,14 +232,11 @@ func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.L
 // state, and so does a move of the checks, which are read with it. A move of
 // the draft flag makes the checks stale, since a ready transition starts the
 // workflows that listen for it, and a suite that never starts a job moves no
-// sign of the checks. So does a checks part that holds no suites, as one saved
-// before the update read them. The PR part of an open PR whose merge state
-// GitHub read as UNKNOWN stays stale until a read finds the state, since GitHub
-// computes it after a push or a base move and moves no sign when it does; a
-// merged or closed PR's reads UNKNOWN for good. A conversation part that holds
-// no list of the posts the city has not taken is stale, since the take and the
-// evaluator read the list. Every part is stale when the saved read lacks a part
-// or stale says it is not current for the bead.
+// sign of the checks. The PR part of an open PR whose merge state GitHub read
+// as UNKNOWN stays stale until a read finds the state, since GitHub computes it
+// after a push or a base move and moves no sign when it does; a merged or
+// closed PR's reads UNKNOWN for good. Every part is stale when the saved read
+// lacks a part or stale says it is not current for the bead.
 func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
 		saved.Labels == nil {
@@ -249,11 +244,10 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	}
 	var p parts
 	p.labels = !slices.Equal(saved.Labels.Names, labels(s))
-	p.checks = !saved.Checks.Signs.equal(checkSigns(s)) || saved.PR.Signs.Draft != s.IsDraft ||
-		saved.Checks.Suites == nil
+	p.checks = !saved.Checks.Signs.equal(checkSigns(s)) || saved.PR.Signs.Draft != s.IsDraft
 	c := saved.Conversation.Signs
 	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
-	p.conversation = counts || c.UpdatedAt != s.UpdatedAt || saved.Conversation.Untaken == nil
+	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
 	unknown := saved.PR.State == "OPEN" && saved.PR.MergeState == "UNKNOWN"
 	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts || unknown
 	return p
