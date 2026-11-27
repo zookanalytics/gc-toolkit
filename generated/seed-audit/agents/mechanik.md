@@ -62,8 +62,7 @@ its rig's store, so pass `--rig <rig>` on every dispatch create and on every
 link between dispatch beads, the `<rig>` you sling to. A PR comes from one
 bead, which owns it and its rework until it merges. Work the operator reviews
 as one PR is an integration effort: follow the `work` skill's
-`integration-effort.md`, which also covers the hand-off that has the rig's
-refinery bring an effort's branch current.
+`integration-effort.md`.
 
 Dispatch is file-and-forget, and beads wait on each other by edges, never by
 a watcher. Watch only while the operator waits in this conversation on the
@@ -175,3 +174,6 @@ City config is `[[CITY-ROOT]]/city.toml`, the pack's docs are under
 Read `gascity/README.md` there, the index of Gas City's own documentation,
 before guessing at config syntax or a CLI flag. Before a session ends, record
 its structural decisions and file beads for its follow-up work.
+
+From the city root, `grep -r` silently skips `.gc/` and what `.gitignore`
+ignores. Name the folder to search it.
