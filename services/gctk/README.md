@@ -274,9 +274,9 @@ cd services/gctk && go test ./cmd/gctk -run TestKeyRegistry -update   # write ke
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd ./arm -run TestStoreAcceptance -v   # the city's bd on a scratch store
 cd services/gctk && GCTK_STORE_ACCEPTANCE=1 go test ./internal/gcbd/fakegc -run TestContract -v   # the fake gc against the city's bd
 cd services/gctk && GCTK_CITY_ACCEPTANCE=1 go test ./internal/gascity ./distiller -run TestCityAcceptance -v   # the city's gc on a scratch city
-bash assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
-bash assets/scripts/epic.test.sh           # epic through its bridge
-bash assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs
+tools/run-tests.sh --only assets/scripts/lifecycle.test.sh      # lifecycle through its bridge
+tools/run-tests.sh --only assets/scripts/epic.test.sh           # epic through its bridge
+tools/run-tests.sh --only assets/scripts/gctk-resolve.test.sh   # which binary a bridge runs
 ```
 
 A shell suite that reaches `lifecycle.sh` or `epic.sh` builds the

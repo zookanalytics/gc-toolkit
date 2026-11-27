@@ -125,3 +125,8 @@ operator, through a skill, a formula, an agent prompt, a template fragment or a
 doc that binds agents. Its PR summary names, in one sentence, the belief or goal
 the change serves: one of the Core Beliefs in
 [foundation.md](docs/foundation.md), or one of its goals.
+
+## A test suite runs through the test runner
+
+Run one `*.test.sh` suite as `tools/run-tests.sh --only <suite>`, never as
+`bash <suite>`.
