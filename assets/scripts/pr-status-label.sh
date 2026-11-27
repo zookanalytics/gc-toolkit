@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# pr-status-label.sh — the single writer of the workflow-owned `status:` and
-# `held:` GitHub PR labels. They project the city's own state onto GitHub's pull
-# request list, where that state is otherwise invisible until you open the PR.
+# pr-status-label.sh — the old path's writer of the workflow-owned `status:`
+# and `held:` GitHub PR labels. They project the city's own state onto
+# GitHub's pull request list, where that state is otherwise invisible until you
+# open the PR.
 # `status:` says whose move it is: the city is changing an unapproved PR
 # (working), the city is landing an approved one (merging), only a human's
 # review verdict is left (needs-review), or a blocker stands that the city will
@@ -21,21 +22,16 @@
 # board liveness cannot disagree.
 #
 # Its callers:
-#   - gctk pr reconcile, the landing order, every minute for each PR the rig's
-#     live beads own: it compares the labels the PR watch saved on the PR's bead
-#     with the derivation, and only where they differ calls reconcile on a PR
-#     the saved read shows open, or clear on one it shows merged or closed, with
-#     no --current-labels, so this writer reads the PR's labels.
-#   - gctk pr compare, the net, which calls clear on each PR its search finds
-#     carrying a label of these families that no live bead owns.
 #   - pr-facts.sh, which calls reconcile for each open PR its full pass's paced
 #     walk reaches, after a posture value it changes and after it routes a
 #     feedback batch, and clear when it records a merge or a close.
 #   - signoff.sh, which calls reconcile after a verdict.
 # A clear pr-facts.sh makes that does not land is recorded on the anchor as
 # status_label_clear_owed, and its full pass retries it. A
-# write the landing order or the net makes that does not land records nothing,
-# and their next run finds the same difference.
+# writer in gctk, services/gctk/pr/labels.go, writes the same labels for the
+# landing order and the net, and prstatus's
+# TestTheLabelsAreTheShellWritersLabels holds the names, colours and
+# descriptions below to the ones it writes.
 #
 # Every GitHub write is pinned to a repository the caller resolved (--repo), the
 # same origin-pinning pr-facts.sh already applies; gh-origin-guard.sh

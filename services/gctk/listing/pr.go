@@ -30,8 +30,8 @@ func (ls *Listing) PRAnswers(ids []string) (map[string]pr.Answer, map[string]err
 }
 
 // PRLabels derives the status: and held: labels of the open PR each bead named
-// owns, as `gctk pr status` derives them for the labels' writer: from the
-// evaluator's answer beside the facts prstatus.Read gathers for a PR on Gas
+// owns, as `gctk pr status` derives them, for the landing order to write: from
+// the evaluator's answer beside the facts prstatus.Read gathers for a PR on Gas
 // Town's pending record, and from those facts alone for any other. It returns
 // the labels of each bead it derived, and the error of each it could not,
 // since a read that does not answer changes no label.

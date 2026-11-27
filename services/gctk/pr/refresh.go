@@ -31,8 +31,10 @@ import (
 
 // Watch is GitHub as the PR watch reads it: the cheap question and the net's
 // full read over many PRs, a PR's own facts with or without the checks at its
-// head, its conversation, the login the city's account acts as, and a page of
-// the search for the PRs that carry any of a set of labels.
+// head, its conversation, the login the city's account acts as, a page of
+// the search for the PRs that carry any of a set of labels, and the labels on a
+// PR and in its repository, which the net takes off a PR no live bead owns
+// (Labeling).
 type Watch interface {
 	Signs(repo string, numbers []int) (map[int]gh.Signs, map[int]error)
 	FullRead(repo string, numbers []int) (map[int]gh.Full, map[int]error)
@@ -40,6 +42,7 @@ type Watch interface {
 	Conversation(repo string, number int) (*gh.Conversation, error)
 	Login() (string, error)
 	Labeled(repo string, names []string, after string) (gh.LabeledPage, error)
+	Labeling
 }
 
 // Watcher is what the PR watch reads and writes through. Dir is the store's

@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
@@ -126,13 +125,12 @@ A PR whose read failed keeps its saved read and is read again at the next
 pass, as is a PR the 3 minutes left.
 
 The pass then searches the rig's own repository, the one its clone's origin
-names, for the PRs that carry a status: or held: label the labels' writer
-names, 100 PRs a page, and reads on a page at a time until it has found 20
-PRs no live bead owns or the results end. It has the writer
-(pr-status-label.sh clear) take the city's labels off each of them, in a
-shuffled order, so a PR whose clear is slow or keeps failing holds no other
-back, starting none past the 3 minutes. A clear that does not land is found
-by the next pass's search.
+names, for the PRs that carry a status: or held: label the city names, 100
+PRs a page, and reads on a page at a time until it has found 20 PRs no live
+bead owns or the results end. It takes the city's labels off each of them,
+reading the PR's labels first, in a shuffled order, so a PR whose clear is
+slow or keeps failing holds no other back, starting none past the 3 minutes.
+A clear that does not land is found by the next pass's search.
 
 Each update prints on a line of its own, as <bead> <url> <action>: <detail>,
 each PR that failed as <url> failed: <why>, each PR left for the next pass as
@@ -252,7 +250,7 @@ func prPass(prog, counted, db string, window time.Duration, pass func(pr.Watcher
 		fmt.Fprintf(stdout, "%s left: the pass reached its %s, so the next pass reads it\n", url, window)
 	}
 	for _, url := range rep.Cleared {
-		fmt.Fprintf(stdout, "%s cleared: no live bead owns it, so the labels' writer took the city's labels off\n", url)
+		fmt.Fprintf(stdout, "%s cleared: no live bead owns it, so the pass took the city's labels off\n", url)
 	}
 	fmt.Fprintf(stdout, "%s %d PRs in %d repositories: %d updated, %d failed, %d left for the next pass.\n",
 		counted, rep.Asked, rep.Repositories, len(rep.Updates), len(rep.Failed), len(rep.Late))
@@ -291,8 +289,7 @@ func refreshedLine(u pr.Refreshed) string {
 // at db, else the one gc resolves here, the record lock in that store's .beads
 // directory, GitHub through gh, the pack's definition of feedback, loaded in
 // the clone at $GC_RIG_ROOT, else the working directory, that clone's origin,
-// and the labels' writer, which the runtime adapter runs from the scripts
-// directory GCTK_SCRIPTS_DIR names.
+// and the labels prstatus names, which the net takes off a PR through GitHub.
 func watcher(db string) (pr.Watcher, error) {
 	if db == "" {
 		routed, err := gcbd.New().Route()
@@ -320,7 +317,7 @@ func watcher(db string) (pr.Watcher, error) {
 			}
 			return rule, nil
 		},
-		Labels: prLabels{rt: gascity.New()},
+		Labels: prLabels{},
 		Origin: func() (string, error) { return git.OriginURL(dir) },
 		Wait:   watchLockWait,
 	}, nil

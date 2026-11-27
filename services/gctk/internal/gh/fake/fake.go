@@ -138,20 +138,24 @@ func (g *GitHub) FullAsked() [][]int {
 	return slices.Clone(g.full)
 }
 
-// Repo is one repository's default branch, the checks at each ref, and the
-// deployments of each environment, newest first, by the environment's name.
+// Repo is one repository's default branch, the checks at each ref, the
+// deployments of each environment, newest first, by the environment's name, and
+// the labels it holds.
 type Repo struct {
 	DefaultBranch string
 	Checks        map[string]*gh.HeadChecks
 	Deployments   map[string][]gh.Deployment
+	Labels        []gh.Label
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
 // "EnqueuePullRequest" with the PR's node id and the head it was pinned to, and
 // a merge's commit headline, "MarkReady" or "ConvertToDraft" with the PR's node
-// id, "DismissReview" with the review's id and the dismissal's message, or
+// id, "DismissReview" with the review's id and the dismissal's message,
 // "EditPullRequest" with the PR's node id and what it sets, title, body or both,
-// as its message.
+// as its message, "CreateLabel" or "EditLabel" with the repository, owner/name,
+// and the label's name, or "AddLabels" or "RemoveLabel" with the PR, as
+// owner/name#number, and the labels it names, joined by ", ".
 type Ask struct {
 	Method, ID, Head, Headline, Message string
 }
@@ -621,4 +625,112 @@ func (g *GitHub) repo(read, repo string) (*Repo, error) {
 		return nil, fmt.Errorf("github: no repository %s", repo)
 	}
 	return r, nil
+}
+
+// PullRequestLabels returns the labels the PR carries, failing as
+// Fail["PullRequestLabels"] says.
+func (g *GitHub) PullRequestLabels(repo string, number int) ([]string, error) {
+	p, err := g.pr("PullRequestLabels", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(p.Labels), nil
+}
+
+// RepoLabels returns the labels Repos holds for repo, none for a repository
+// it holds nothing for, failing as Fail["RepoLabels"] says.
+func (g *GitHub) RepoLabels(repo string) ([]gh.Label, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reads = append(g.reads, "RepoLabels")
+	if err := g.Fail["RepoLabels"]; err != nil {
+		return nil, err
+	}
+	if r := g.Repos[strings.ToLower(repo)]; r != nil {
+		return slices.Clone(r.Labels), nil
+	}
+	return nil, nil
+}
+
+// CreateLabel records the request and adds l to the labels Repos holds for
+// repo, in place of one of its name.
+func (g *GitHub) CreateLabel(repo string, l gh.Label) error {
+	return g.label(Ask{Method: "CreateLabel", ID: repo, Message: l.Name}, func() error {
+		r := g.repoOf(repo)
+		r.Labels = append(slices.DeleteFunc(r.Labels, func(x gh.Label) bool { return x.Name == l.Name }), l)
+		return nil
+	})
+}
+
+// EditLabel records the request and sets the description of the label of l's
+// name that Repos holds for repo, refusing one it does not hold.
+func (g *GitHub) EditLabel(repo string, l gh.Label) error {
+	return g.label(Ask{Method: "EditLabel", ID: repo, Message: l.Name}, func() error {
+		r := g.repoOf(repo)
+		i := slices.IndexFunc(r.Labels, func(x gh.Label) bool { return x.Name == l.Name })
+		if i < 0 {
+			return fmt.Errorf("github: %s holds no label %q (HTTP 404)", repo, l.Name)
+		}
+		r.Labels[i].Description = l.Description
+		return nil
+	})
+}
+
+// AddLabels records the request and adds each label named that the PR lacks.
+func (g *GitHub) AddLabels(repo string, number int, names []string) error {
+	return g.label(Ask{Method: "AddLabels", ID: key(repo, number), Message: strings.Join(names, ", ")}, func() error {
+		p, ok := g.PRs[key(repo, number)]
+		if !ok {
+			return fmt.Errorf("github: %s holds no pull request %d", repo, number)
+		}
+		for _, n := range names {
+			if !slices.Contains(p.Labels, n) {
+				p.Labels = append(p.Labels, n)
+			}
+		}
+		return nil
+	})
+}
+
+// RemoveLabel records the request and takes the label named off the PR,
+// refusing one it does not carry.
+func (g *GitHub) RemoveLabel(repo string, number int, name string) error {
+	return g.label(Ask{Method: "RemoveLabel", ID: key(repo, number), Message: name}, func() error {
+		p, ok := g.PRs[key(repo, number)]
+		if !ok {
+			return fmt.Errorf("github: %s holds no pull request %d", repo, number)
+		}
+		if !slices.Contains(p.Labels, name) {
+			return fmt.Errorf("github: Label does not exist (HTTP 404)")
+		}
+		p.Labels = slices.DeleteFunc(p.Labels, func(l string) bool { return l == name })
+		return nil
+	})
+}
+
+// label records a, then fails it as Fail names its method, or carries it out
+// through do.
+func (g *GitHub) label(a Ask, do func() error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, a)
+	if err := g.Fail[a.Method]; err != nil {
+		return err
+	}
+	return do()
+}
+
+// repoOf is the Repo the fake holds for repo, added when it holds none.
+func (g *GitHub) repoOf(repo string) *Repo {
+	if g.Repos == nil {
+		g.Repos = map[string]*Repo{}
+	}
+	r := g.Repos[strings.ToLower(repo)]
+	if r == nil {
+		r = &Repo{}
+		g.Repos[strings.ToLower(repo)] = r
+	}
+	return r
 }

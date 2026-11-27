@@ -8,36 +8,48 @@ import (
 	"testing"
 )
 
-// The labels' names are spelled twice, here and in their one writer, so the
-// test reads the writer's own spelling: its two prefixes and the values it
-// names under each.
-func TestLabelNamesAreTheWritersNames(t *testing.T) {
+// pr-status-label.sh, the old path's writer, spells every label again in shell,
+// so the test reads its spelling: its two prefixes, the values it names under
+// each, the colour of each family when no override is set, and the description
+// it gives each label. A label the Go writer makes that the shell spells
+// otherwise would have its description edited back and forth by the two.
+func TestTheLabelsAreTheShellWritersLabels(t *testing.T) {
 	raw, err := os.ReadFile("../../../assets/scripts/pr-status-label.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(raw)
-	assigned := func(name string) string {
+	assigned := func(re string) string {
 		t.Helper()
-		m := regexp.MustCompile(`(?m)^` + name + `="([^"]*)"`).FindStringSubmatch(src)
+		m := regexp.MustCompile(`(?m)^` + re).FindStringSubmatch(src)
 		if m == nil {
-			t.Fatalf("pr-status-label.sh assigns no %s", name)
+			t.Fatalf("pr-status-label.sh assigns nothing matching %s", re)
 		}
 		return m[1]
 	}
-	var want []string
-	for _, family := range [][2]string{{"LABEL_PREFIX", "STATUS_VALUES"}, {"HELD_PREFIX", "HELD_VALUES"}} {
-		prefix := assigned(family[0])
-		for _, v := range strings.Fields(assigned(family[1])) {
-			want = append(want, prefix+v)
+	described := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^\s*"\$\{(LABEL_PREFIX|HELD_PREFIX)\}([a-z-]+)"\)\s+printf '([^']*)'`).FindAllStringSubmatch(src, -1) {
+		described[m[1]+" "+m[2]] = m[3]
+	}
+	var want []Label
+	for _, family := range [][3]string{
+		{"LABEL_PREFIX", "STATUS_VALUES", `GROUP_COLOR="\$\{GC_PR_STATUS_LABEL_COLOR:-([0-9A-Fa-f]{6})\}"`},
+		{"HELD_PREFIX", "HELD_VALUES", `HELD_COLOR="\$\{GC_PR_HELD_LABEL_COLOR:-([0-9A-Fa-f]{6})\}"`},
+	} {
+		prefix, color := assigned(family[0]+`="([^"]*)"`), assigned(family[2])
+		for _, v := range strings.Fields(assigned(family[1] + `="([^"]*)"`)) {
+			want = append(want, Label{Name: prefix + v, Color: color, Description: described[family[0]+" "+v]})
 		}
 	}
-	if got := LabelNames(); !slices.Equal(got, want) {
-		t.Fatalf("LabelNames() = %q, the writer names %q", got, want)
+	if got := Defined(); !slices.Equal(got, want) {
+		t.Fatalf("Defined() = %+v, the shell writer names %+v", got, want)
 	}
-	for _, name := range want {
-		if !IsLabel(name) {
-			t.Errorf("IsLabel(%q) = false for a label the writer names", name)
+	for _, l := range want {
+		if !IsLabel(l.Name) {
+			t.Errorf("IsLabel(%q) = false for a label the writer names", l.Name)
+		}
+		if l.Description == "" || len(l.Description) > 100 {
+			t.Errorf("%q is described as %q, which GitHub does not hold", l.Name, l.Description)
 		}
 	}
 }

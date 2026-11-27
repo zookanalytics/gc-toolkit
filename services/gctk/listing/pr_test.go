@@ -7,9 +7,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 )
 
 const validatedHead = "1111111111111111111111111111111111111111"
@@ -114,11 +116,11 @@ func TestPRAnswersAskTheEvaluatorOverTheListingsPass(t *testing.T) {
 	}
 }
 
-// PRLabels derives the labels `gctk pr status` gives the labels' writer: a PR
-// on the pending record from the evaluator's answer, any other from the facts
-// its row and its edges hold, each over the rows of a pass the caller already
-// holds (Over), which it lists no second time. A bead nothing reads gets its
-// error and no labels.
+// PRLabels derives the labels `gctk pr status` derives, for the landing order
+// to write: a PR on the pending record from the evaluator's answer, any other
+// from the facts its row and its edges hold, each over the rows of a pass the
+// caller already holds (Over), which it lists no second time. A bead nothing
+// reads gets its error and no labels.
 func TestPRLabelsDeriveWhatTheWriterWrites(t *testing.T) {
 	s := rig()
 	s.Put(fake.Bead{ID: "tk-p", Title: "ready work", Status: "blocked", IssueType: "task",
@@ -147,5 +149,78 @@ func TestPRLabelsDeriveWhatTheWriterWrites(t *testing.T) {
 		if q.HasKey != "" || q.Key != "" || q.Every {
 			t.Errorf("PRLabels read the store by a key or whole: %+v", q)
 		}
+	}
+}
+
+// PRLabels reads a far bead as `gctk pr status` reads it: a human gate a
+// review run's failure filed is the machine's fault, which no held: label
+// names, where a person's gate is held: gate, and each review run carries the
+// time it closed.
+func TestPRLabelsReadAGatesKeyAndARunsCloseTime(t *testing.T) {
+	s := fake.New()
+	for _, b := range []fake.Bead{
+		{ID: "tk-m", Title: "work a failed review holds", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"merge_result": "pull_request"}, Edges: []gcbd.Edge{blocks("tk-mg"), blocks("tk-run")}},
+		{ID: "tk-mg", Title: "the review loop ran out", Status: "open", IssueType: "gate", AwaitType: "human",
+			AwaitID: "review-loop-exhausted"},
+		{ID: "tk-run", Title: "mol-pr-review", Status: "closed", IssueType: "task", ClosedAt: "2026-11-26T07:14:54Z",
+			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review"}},
+		{ID: "tk-g", Title: "work a person holds", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"merge_result": "pull_request"}, Edges: []gcbd.Edge{blocks("tk-pg")}},
+		{ID: "tk-pg", Title: "which way?", Status: "open", IssueType: "gate", AwaitType: "human", AwaitID: "polecat-blocked"},
+	} {
+		s.Put(b)
+	}
+	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels, failed := ls.PRLabels([]string{"tk-m", "tk-g"})
+	want := map[string][]string{"tk-m": {"status: needs-attention"}, "tk-g": {"status: needs-attention", "held: gate"}}
+	if !reflect.DeepEqual(labels, want) || len(failed) != 0 {
+		t.Fatalf("labels = %q and failed %v, want %q", labels, failed, want)
+	}
+	facts, err := prstatus.Read([]string{"tk-m"}, ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs := facts["tk-m"].Runs; len(runs) != 1 || runs[0].ClosedAt != "2026-11-26T07:14:54Z" {
+		t.Fatalf("the runs read as %+v, want tk-run with its close time", runs)
+	}
+}
+
+// The in-flight set is the anchored beads bd's listing shows unless asked, as
+// `gc bd list` reads it for `gctk pr status`: a wisp or a template that names
+// the anchor is no work in flight on its PR, and a task is.
+func TestPRLabelsCountTheInFlightSetBdsListingShows(t *testing.T) {
+	s := fake.New()
+	s.Put(fake.Bead{ID: "tk-a", Title: "work under review", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"merge_result": "pull_request"}})
+	for _, b := range []fake.Bead{
+		{ID: "tk-wisp-1", Title: "a step of a run", Status: "open", IssueType: "task", Ephemeral: true},
+		{ID: "tk-tpl", Title: "a formula's template", Status: "open", IssueType: "task", Template: true},
+	} {
+		b.Metadata = map[string]string{"anchor_bead": "tk-a"}
+		s.Put(b)
+	}
+	derive := func() []string {
+		t.Helper()
+		ls, err := read(ledger.New(s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		labels, failed := ls.PRLabels([]string{"tk-a"})
+		if len(failed) != 0 {
+			t.Fatalf("failed %v", failed)
+		}
+		return labels["tk-a"]
+	}
+	if got := derive(); !slices.Equal(got, []string{"status: needs-review"}) {
+		t.Fatalf("with only a wisp and a template naming it, the PR reads %q, want needs-review", got)
+	}
+	s.Put(fake.Bead{ID: "tk-fix", Title: "a fix child", Status: "in_progress", IssueType: "task",
+		Metadata: map[string]string{"anchor_bead": "tk-a"}})
+	if got := derive(); !slices.Equal(got, []string{"status: working"}) {
+		t.Fatalf("with a fix child in flight, the PR reads %q, want working", got)
 	}
 }

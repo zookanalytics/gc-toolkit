@@ -68,10 +68,12 @@ import (
 // such as a withdrawal's of the reviews it dismisses and an edit's of the PR's
 // title and body, a merge request or an enqueue pinned to the head the
 // evaluator judged, the merge under the commit headline the act names, the
-// PR's moves between draft and ready, the edit of its title and body, and the
-// dismissal of a review.
+// PR's moves between draft and ready, the edit of its title and body, the
+// dismissal of a review, and the labels on the PR and in its repository, which
+// a label write reads and writes (Labeling).
 type Hub interface {
 	GitHub
+	Labeling
 	MergePullRequest(id, head, headline string) error
 	EnqueuePullRequest(id, head string) error
 	MarkReady(id string) error
