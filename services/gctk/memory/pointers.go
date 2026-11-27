@@ -14,9 +14,10 @@ import (
 //
 // Each link in a pointer line that names a note in the directory begins a
 // pointer, which holds the text that describes that note and the separator
-// after it. It runs to the next such link, or, for a link inside parentheses,
-// to the next one in them or to their close. A link elsewhere, and a link in a
-// code span, are text.
+// after it. It runs to the next such link at its own depth of parentheses, and
+// one inside parentheses ends at their close at the latest, so a pointer holds
+// the parentheses in its text and the links in them. A link elsewhere, and a
+// link in a code span, are text.
 var (
 	wikiLink = regexp.MustCompile(`^\[\[[^]]+\]\]`)
 	mdLink   = regexp.MustCompile(`^\[[^]]*\]\([^)]+\)`)

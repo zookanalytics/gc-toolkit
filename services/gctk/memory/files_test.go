@@ -69,11 +69,11 @@ func TestPruneLinks(t *testing.T) {
 }
 
 // Each shape of pointer a city's index holds comes out with the text that
-// describes its note: a link emphasis wraps, one after a label, one after text
-// in its line, and one inside parentheses. The label and the other pointers
-// stay, a line left with no pointer goes, and a link in a code span is text.
-// The lines keep the shapes of the index of a city's root, in words of their
-// own.
+// describes its note, the parentheses in that text and their links included: a
+// link emphasis wraps, one after a label, one after text in its line, and one
+// inside parentheses. The label and the line's other pointers stay, a line left
+// with no pointer goes, and a link in a code span is text. The lines keep the
+// shapes of the index of a city's root, in words of their own.
 func TestPruneLinksTakesEachShapeOfPointer(t *testing.T) {
 	gone := func(name string) bool { return strings.HasPrefix(name, "gone-") }
 	for name, c := range map[string]struct{ line, want string }{
@@ -99,6 +99,7 @@ func TestPruneLinksTakesEachShapeOfPointer(t *testing.T) {
 			"- **Act:** [CEREMONY](ceremony.md) push ⇒ POLECAT (rigs only); effort → refinery (op 11-09) · " +
 				"[no close](close.md) argue none"},
 		"alone inside parentheses": {"- [A](a.md) the lesson ([B](gone-b.md)) · [C](c.md)", "- [A](a.md) the lesson · [C](c.md)"},
+		"parentheses in its text":  {"- [[gone-a]] (A, after [[b]]): the lesson · [C](c.md) c", "- [C](c.md) c"},
 		"italics and wiki links":   {"- *[[gone-a]]* (A) · _[B](gone-b.md)_ b · [[c]] (C)", "- [[c]] (C)"},
 		"in a code span":           {"- [A](a.md) writes `[B](gone-b.md)`", "- [A](a.md) writes `[B](gone-b.md)`"},
 	} {

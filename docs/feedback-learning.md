@@ -194,10 +194,12 @@ list item of one line that begins with a link, `[text](note.md)` or `[[note]]`,
 after an optional label. A label is bold or italic text that ends in a colon,
 such as `**Verify:**`. Bold or italics can wrap the link, as in
 `**[text](note.md)**`. Each link in that line to a note in the directory begins
-a pointer, which runs to the next such link, or, for a link inside parentheses,
-to the next one in them or to their close. So the text that describes a removed
-note goes with its link. The label and the other pointers stay, and a line left
-with no pointer goes. A link in a code span is text.
+a pointer. A pointer runs to the next such link at its own depth of
+parentheses, and a pointer inside parentheses ends at their close at the
+latest. So the text that describes a removed note goes with its link, along
+with any parentheses in that text and the links they hold. The label and the
+line's other pointers stay, and a line left with no pointer goes. A link in a
+code span is text.
 
 A link to a removed note that a run leaves in the index, or in a collection
 note outside an entry with text of its own, is a failure the run names by file
