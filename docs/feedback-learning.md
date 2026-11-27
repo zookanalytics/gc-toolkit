@@ -94,7 +94,11 @@ Four producers file the same bead contract:
    city sends. It captures only from durable sources: a PR review or
    comment, a rework's rejection reason, and a bead's notes. A session the
    operator attends, mechanik or a converse sitting, also captures the
-   operator's own turns.
+   operator's own turns. Any agent also files one, from any session, for a
+   change to how agents work that it would suggest but should not make on
+   its own: the statement says what it saw that led there, and the proposed
+   norm carries the suggestion, which binds no agent unless the loop proposes
+   it and the operator approves it.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments, with
    `obs.source=miner`, in two captures:
@@ -188,10 +192,12 @@ files in the memory directory's hidden `.memory-intake` folder, since an agent
 that opened one before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
-memory carries in its prompt (`template-fragments/memory-notes.template.md`),
-a list of three places: its memory holds what should change the next agent's
-behavior, an observation holds a correction to how agents work, and a bead's
-notes hold the state of its open work.
+memory carries in its prompt (`template-fragments/memory-notes.template.md`).
+Its memory holds what should change the next agent's behavior, an observation
+holds a correction to how agents work or a change to it the agent would
+suggest but should not make on its own, and a bead's notes hold the state of
+its open work. A suggestion stays out of memory, which would steer the next
+agent before the operator approves it.
 
 ## The promotion path
 
@@ -252,9 +258,11 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   conventions-list mechanism: agreeing a behavior matters is not agreeing
   that a static bullet every agent pays for is how to secure it, so an
   endorsed cluster still faces the carrier choice and Gate 3. A blocked
-  pattern is *surfaced* to the operator (held with the block stated), never
-  adopted; it promotes later on corroboration or an explicit `learn this`
-  endorsement.
+  pattern is *surfaced* to the operator, never adopted on its own: once
+  nothing else holds it back, its proposal is filed held for placement like
+  any other, with the block stated, so their placing it is the endorsement
+  and their closing it turns the pattern down until evidence from an event it
+  had not seen reopens it.
   `obs.source` records who filed an observation, not whose words it carries,
   so an operator correction captured by the agent it corrected reads `self`.
   The distiller checks the voice behind each `self` observation before it

@@ -359,10 +359,12 @@ because the session that next claims it resumes in the worktree the bead
 records. The witness
 triages HELP and NOTICE mail, and the mail wakes it. An order runs `gc doctor`
 each hour and records the run, and the board shows the checks that keep
-failing, when doctor last ran, each monitor order's last good run and the
-`human` mailbox that Gas City's orders send their alerts to. Patrol owns the
-warranted Dolt reclaim and suspended-store backup, and the reapers no native one
-covers: scratch and the review workspaces outside `.gc/worktrees/`.
+failing, when doctor last ran, each monitor order's last good run and how
+many messages wait in the `human` mailbox that Gas City's orders send their
+alerts to, which the mayor works through with the operator. Patrol owns
+the warranted Dolt reclaim and suspended-store backup, and the reapers no
+native one covers: scratch and the review workspaces outside
+`.gc/worktrees/`.
 
 The trade: the deacon, boot health, the incident ledger, the liveness census and
 the witness's patrol loop retire (tk-1tfzr71.19).
@@ -380,9 +382,9 @@ and what ends it:
 - **Findings and human gates in place of mayor mail.** Gas Town's witness mails
   the mayor about emergencies, failures, recovered and handed-off orphans and
   queue health. Here the orders and the witness file findings and human gates,
-  because the operator ruled at tk-rl8gz4b.29's design that it stays and the
-  city runs no mayor. This ends when an operator ruling gives escalation to a
-  seat.
+  because the operator ruled at tk-rl8gz4b.29's design that it stays, and the
+  city's mayor, a seat the operator opens, takes no escalation. This ends when
+  an operator ruling gives escalation to a seat.
 - **No orphan recovery.** Gas Town's witness salvages a dead owner's worktree
   and reopens its bead. Here Gas City's controller and core's orphan sweep
   release the claim within minutes, which a second writer would race, and the
