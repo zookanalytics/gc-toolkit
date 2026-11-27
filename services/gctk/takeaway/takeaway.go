@@ -34,9 +34,9 @@ import (
 )
 
 // The takeaway's keys, which this package writes, each in the one update that
-// writes the headline. gctk lifecycle's --takeaway also writes them itself, for
-// pr-facts.sh, and shell still reads them (docs/gctk-architecture.md, Debt), so
-// they stay registered in lifecycle/lifecycle.toml too.
+// writes the headline. gctk lifecycle's --takeaway can also write them, and
+// shell still reads them (docs/gctk-architecture.md, Debt), so they stay
+// registered in lifecycle/lifecycle.toml too.
 var (
 	textKey = ledger.Declare("gc.takeaway", ledger.String,
 		"A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, "+

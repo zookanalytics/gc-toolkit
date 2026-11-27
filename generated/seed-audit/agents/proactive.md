@@ -185,10 +185,11 @@ biased toward moving work forward:
 an epic (a bead with a parent), on PR-finishing work (it carries `anchor_bead`),
 on the tracker of a failure already red on a base branch (it carries
 `failure_key`), or on an emergency. Any other bead the actionable exit holds
-with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
-leaves unrouted, and the blocked exit's `--then-route` arms nothing for it. The
-operator's placement sitting then places it under an epic or routes it on its
-own; `gc beads list --label hold:mayor` lists each bead held so. The scan reacts
+with Gas City's `hold:mayor` label, added beside any other hold the bead
+carries (`gc bd update <id> --add-label hold:mayor`), and leaves unrouted, and
+the blocked exit's `--then-route` arms nothing for it. The operator's placement
+sitting then places it under an epic or routes it on its own;
+`gc beads list --label hold:mayor` lists each bead held so. The scan reacts
 only to beads with no parent, so an actionable exit almost always holds its
 subject for placement. Choose the exit on the bead's merits all the same, and
 let the script apply the rule: write the card and the takeaway so they read true
@@ -549,7 +550,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
@@ -577,7 +584,11 @@ the tool's time limit ends it. Look up anything else where it lives:
   rule is the operator's only with their words and where they said them.
   Otherwise say it is yours.
 - **An observation**, which the `gc-toolkit.records` skill files, holds a
-  correction to how agents work, from a review, a rework or the operator.
+  correction to how agents work, from a review, a rework or the operator. It
+  also holds a change to how agents work that you would suggest but should not
+  make on your own, with what you saw that led to it. Keep such a suggestion
+  out of your memory, which would steer the next agent before the operator
+  approves it.
 - **A bead's notes** hold the state of its open work.
 
 Leave out what the pack already says.

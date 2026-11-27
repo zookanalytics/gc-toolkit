@@ -91,13 +91,14 @@ var ErrGuard = gcbd.ErrGuard
 
 // Write is one act on one bead: every key it sets or clears, the title it gives
 // the bead, the status it moves the bead to, the agent it assigns the bead to,
-// the labels it removes, the note it appends and the guard it lands under, made
-// in one update.
+// the labels it adds and removes, the note it appends and the guard it lands
+// under, made in one update.
 type Write struct {
 	id          string
 	title       string
 	sets        []string // key=value, in the order set
 	unsets      []string
+	labelsOn    []string
 	labelsOff   []string
 	status      string
 	assignee    *string
@@ -177,6 +178,17 @@ func (w *Write) WorkRecord(outcome, commit, branch string) {
 	}
 }
 
+// AddLabel adds label to the bead in the same write. bd removes no label a
+// write does not name (ApplyLabelPatch in internal/storage/issueops/aggregate.go,
+// gastownhall/beads), so a label another writer put on the bead stays. A label
+// is the row's own field, which no key declares, so the act that adds one says
+// what it means.
+func (w *Write) AddLabel(label string) {
+	if !slices.Contains(w.labelsOn, label) {
+		w.labelsOn = append(w.labelsOn, label)
+	}
+}
+
 // RemoveLabel removes label from the bead in the same write, by its exact text,
 // as bd removes one. A label is the row's own field, which no key declares, so
 // the act that removes one says what it means.
@@ -226,7 +238,7 @@ func (w *Write) Guard(status, assignee string) { w.guard = &guard{status: status
 
 // args is the update's arguments: the guard, the status, the assignee, the
 // title, the priority, the description, the parent, every set, every removal,
-// every label removed, then the note.
+// every label added, every label removed, then the note.
 func (w *Write) args() []string {
 	var args []string
 	if w.guard != nil {
@@ -255,6 +267,9 @@ func (w *Write) args() []string {
 	}
 	for _, u := range w.unsets {
 		args = append(args, "--unset-metadata", u)
+	}
+	for _, l := range w.labelsOn {
+		args = append(args, "--add-label", l)
 	}
 	for _, l := range w.labelsOff {
 		args = append(args, "--remove-label", l)
@@ -480,7 +495,7 @@ func (l *Ledger) Commit(w *Write) error {
 	if w.err != nil {
 		return w.err
 	}
-	if len(w.sets)+len(w.unsets)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
+	if len(w.sets)+len(w.unsets)+len(w.labelsOn)+len(w.labelsOff) == 0 && w.status == "" && w.assignee == nil && w.title == "" && w.note == "" && w.prio == nil &&
 		w.description == nil && w.parent == nil {
 		return fmt.Errorf("ledger: a write to %s carries no key", w.id)
 	}
@@ -532,18 +547,6 @@ func landed(what, out string, err error) error {
 		return fmt.Errorf("ledger: %s did not land (%w): %s", what, err, out)
 	}
 	return fmt.Errorf("ledger: %s did not land: %w", what, err)
-}
-
-// SetState sets one state dimension of bead id to value, with reason, as one
-// `gc bd set-state`: bd records the change in an event bead and makes
-// <dimension>:<value> the bead's one label for the dimension. Gas City's hold
-// labels are such states (hold=mayor is the label hold:mayor). The write's exit
-// decides whether it landed, and nothing reads it back.
-func (l *Ledger) SetState(id, dimension, value, reason string) error {
-	if err := l.store.SetState(id, dimension, value, reason); err != nil {
-		return fmt.Errorf("ledger: the state %s=%s on %s did not land: %w", dimension, value, id, err)
-	}
-	return nil
 }
 
 // ReadyIDs is the id of every bead the store reports ready. A read that fails

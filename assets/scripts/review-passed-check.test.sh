@@ -3,7 +3,7 @@
 #
 # Covers the one call it makes, `gctk review passed <iteration bead>
 # --iteration <n> --record`, with the pack's scripts directory named for the
-# gate and the findings' close it runs; gctk's exit handed to Gas City as it
+# gate it files; gctk's exit handed to Gas City as it
 # is, 0, 1 or 75; and 75, a re-run that spends no attempt, when no iteration is
 # named or there is no gctk to ask.
 set -uo pipefail
