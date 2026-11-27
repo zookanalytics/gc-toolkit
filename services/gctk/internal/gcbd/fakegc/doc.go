@@ -106,11 +106,14 @@
 // bead and its own ancestor is refused either way; a create --dry-run answers
 // the row it would file and writes nothing, its created_by the actor bd
 // resolves (--actor, BEADS_ACTOR, BD_ACTOR, git's user.name, USER, then
-// unknown); in a rig's store a create's dependency onto a bead with another
-// prefix is kept without the bead, as bd keeps one onto another store; and a
-// set-state that changes a bead's <dimension>:<value> label swaps the
-// dimension's label and files a closed event bead, the bead's child, while one
-// to the value the bead holds writes nothing.
+// unknown); a create's dependency, a dep add, a dep --blocks and each edge of
+// a dep add --file refuse an edge onto a bead the store does not hold, the
+// three dep forms refuse one from such a bead too, and a --file batch with a
+// refused edge writes none of its edges; in a rig's store an edge onto a bead
+// with another prefix is kept without the bead, as bd keeps one onto another
+// store; and a set-state that changes a bead's <dimension>:<value> label
+// swaps the dimension's label and files a closed event bead, the bead's child,
+// while one to the value the bead holds writes nothing.
 //
 // # The settings
 //
@@ -179,11 +182,11 @@
 //
 // # Where it departs from bd
 //
-// A dep add onto a bead the store does not hold stores the edge, where bd
-// refuses an edge onto a missing bead of its own store, because a suite's
-// fixtures can add edges onto beads they never filed. A create mints the
-// id new-<N>, for its store's Nth row, a rig's store included, where bd mints
-// under the store's prefix, and answers {"id": ...} alone. gc routes a by-id
-// call by its subjects' prefix only while every subject names one store, and
-// the fake reads the first subject alone.
+// A create mints the id new-<N>, for its store's Nth row, a rig's store
+// included, where bd mints under the store's prefix, and answers {"id": ...}
+// alone. The fake therefore tells another store's bead by the prefix of the
+// store a call acts in, where bd compares the prefixes of an edge's two beads,
+// and the default store, which has no prefix, refuses an edge onto any bead it
+// does not hold. gc routes a by-id call by its subjects' prefix only while
+// every subject names one store, and the fake reads the first subject alone.
 package main
