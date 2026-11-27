@@ -456,16 +456,19 @@ keys = [
   # RETIRED. GitHub's mergeStateStatus at a head, `<value>@<oid>`. Nothing
   # writes or reads it: the saved read holds the merge state.
   "pr_merge_state",
-  # The old receipts' watermarks, one per id space: the highest id the old
-  # intake routed among the inline comments, the counted reviews' messages and
-  # the conversation comments.
-  "pr_comment_watermark", "pr_review_watermark", "pr_issue_comment_watermark",
-  # What the old intake routed a PR's last batch of posts to:
-  # `rework:<bead-id>` or `human:<gate-id>`.
+  # RETIRED. The old receipts' watermark for the inline comments: the highest id
+  # the old intake routed among them. Nothing writes or reads it.
+  "pr_comment_watermark",
+  # RETIRED. The old receipts' watermarks for the counted reviews' messages and
+  # for the conversation comments, each the highest id the old intake routed in
+  # its id space. Nothing writes or reads them.
+  "pr_review_watermark", "pr_issue_comment_watermark",
+  # RETIRED. What the old intake routed a PR's last batch of posts to:
+  # `rework:<bead-id>` or `human:<gate-id>`. Nothing writes or reads it.
   "pr_comment_disposition",
-  # The old intake's batch ledgers, one per id space: one
+  # RETIRED. The old intake's batch ledgers, one per id space: one
   # `<disposition>|<exclusive floor>|<inclusive mark>` record per batch, oldest
-  # first, joined by ";".
+  # first, joined by ";". Nothing writes or reads them.
   "pr_comment_batch", "pr_review_batch", "pr_issue_comment_batch",
   # RETIRED. The head oid the old intake last filed its gate for unmarked review
   # threads against. Nothing writes or reads it.
@@ -477,12 +480,15 @@ keys = [
   # the city's login from before it is the city's own (gc_city_own in
   # pr-post.sh). The one-PR update (gctk pr refresh) stamps it in the write that
   # saves the first conversation it reads for a bead that lacks it. Absent or
-  # malformed, every post under
-  # the city's login is the city's own. Never cleared.
+  # malformed, every post under the city's login is the city's own. Never
+  # cleared.
   "pr_provenance_since",
-  # How far past the watermarks the old intake had read the review threads as
-  # answered, for the inline comments and the counted reviews' messages.
-  "pr_comment_answered", "pr_review_answered",
+  # RETIRED. How far past its watermark the old intake had read the inline
+  # comments' review threads as answered. Nothing writes or reads it.
+  "pr_comment_answered",
+  # RETIRED. How far past its watermark the old intake had read the counted
+  # reviews' messages as answered. Nothing writes or reads it.
+  "pr_review_answered",
   # RETIRED. The rank the anchor's PR-finishing work was last settled at.
   # Nothing writes or reads it: the priority reconcile settles that work at the
   # rank the priority function reads (docs/steering.md#pr-finishing-work).
