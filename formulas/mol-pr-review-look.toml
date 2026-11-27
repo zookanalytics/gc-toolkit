@@ -57,8 +57,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" review look "$(gc hook current --id-only)"
 ```
 
-Exit 2 is a read that did not answer: run it again, and when it still does not
-answer, cancel the run, which the landing order pours again:
+On exit 2, run it again. When it exits 2 again, cancel the run:
 `"$(b='{binding_prefix}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the fresh look's read did not answer"`
 
 **3. Judge by the method** why the findings keep coming, and whether the review
