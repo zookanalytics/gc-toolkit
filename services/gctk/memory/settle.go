@@ -46,10 +46,10 @@ const landingDepth = 3
 // name, its proposal_bead and its eng_bead. A merge into an integration
 // branch lands when the effort's landing bead does. A wait that ended with no
 // fix landed makes its unit due at once, as old as the day it ended, with why.
-// A row whose unit is gone from its directory leaves the list, and a pointer
-// an earlier run could not take out goes. A place whose memory directory it
-// cannot learn is one patrol finding. An error is a city whose places did not
-// read.
+// A row whose unit is gone from its directory leaves the list, and the
+// pointers to each note removed come out as an apply takes them out. A place
+// whose memory directory it cannot learn is one patrol finding. An error is a
+// city whose places did not read.
 func (in *Intake) Settle() (Settled, error) {
 	ps, err := in.Places()
 	if err != nil {
@@ -333,8 +333,8 @@ func closedDay(r *ledger.Record, today string) string {
 
 // settleIn applies the decided waits to one place under its lock: it removes
 // each unit whose fix landed and is unchanged since it was judged, makes each
-// unit whose wait ended due, takes out the pointers to a removed note, an
-// earlier run's among them, and drops the rows whose unit is gone.
+// unit whose wait ended due, takes out the pointers to each note removed, and
+// drops the rows whose unit is gone.
 func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *Settled) {
 	state := ps.state(p)
 	release, err := in.lock(state, p.Dir)
@@ -349,11 +349,6 @@ func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *S
 		return
 	}
 	rows, err := readList(state)
-	if err != nil {
-		s.Failed = append(s.Failed, err.Error())
-		return
-	}
-	gone, err := readGone(state)
 	if err != nil {
 		s.Failed = append(s.Failed, err.Error())
 		return
@@ -382,14 +377,15 @@ func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *S
 			s.Due++
 		case u.Hash != r.Hash:
 		default:
-			if in.leave(state, p.Dir, u, gone, s) {
+			if in.leave(state, p.Dir, u, s) {
 				s.Left++
 				continue
 			}
 		}
 		keep = append(keep, r)
 	}
-	s.Failed = append(s.Failed, unlink(state, p.Dir, gone)...)
+	gone, failures := unlink(state, p.Dir)
+	s.Failed = append(s.Failed, failures...)
 	keep = withoutFiles(keep, gone)
 	if err := writeList(state, keep); err != nil {
 		s.Failed = append(s.Failed, err.Error())
@@ -398,22 +394,18 @@ func (in *Intake) settleIn(ps Places, p Place, outcomes map[string]outcome, s *S
 }
 
 // leave removes a unit whose fix landed, and reports whether it went.
-func (in *Intake) leave(state, dir string, u Unit, gone map[string]bool, s *Settled) bool {
+func (in *Intake) leave(state, dir string, u Unit, s *Settled) bool {
 	if u.Kind == Note {
 		r, _, err := removeNote(state, dir, u.Name, u.Full)
 		switch r {
 		case removed:
-			gone[u.Name] = true
 			return true
 		case failed:
 			s.Failed = append(s.Failed, fmt.Sprintf("%s stays, though its wait ended with a fix landed: %v", filepath.Join(dir, u.Name), err))
 		}
 		return false
 	}
-	r, _, hubGone, err := removeEntry(state, dir, u)
-	if hubGone {
-		gone[u.Name] = true
-	}
+	r, _, _, err := removeEntry(state, dir, u)
 	if err != nil {
 		s.Failed = append(s.Failed, fmt.Sprintf("%s: %v", filepath.Join(dir, u.Name), err))
 	}

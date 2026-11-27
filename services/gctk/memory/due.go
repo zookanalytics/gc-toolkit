@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -115,7 +114,7 @@ func hubs(dir string) ([]string, error) {
 	var out []string
 	for _, e := range entries {
 		n := e.Name()
-		if e.Type().IsRegular() && (n == indexName || (strings.HasPrefix(n, hubPrefix) && strings.HasSuffix(n, ".md"))) {
+		if e.Type().IsRegular() && (n == indexName || collection(n)) {
 			out = append(out, n)
 		}
 	}

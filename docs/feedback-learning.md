@@ -181,11 +181,31 @@ once, as old as the day the pattern closed, and the judge reads why. No note
 leaves because of its age. `gctk memory` keeps, for each directory, the list of
 the notes the judge kept, with each one's hash and what it waits on, and the
 text of each note it removed, in the pack's state directory. It removes a note
-only while the note is unchanged since the judge read it, and takes out the
-lines of the index and of a collection note (`hub-*.md`) that link a note it
-removed. A note it removes, and the text each of its edits replaces, stay as
-files in the memory directory's hidden `.memory-intake` folder, since an agent
-that opened one before can still write to it.
+only while the note is unchanged since the judge read it.
+
+Each apply and settle then takes out of the index, and of each collection note,
+every pointer to a note `gctk memory` has removed while that note's name holds
+no file. A collection note is a note named `hub-*.md` or `index-*.md`, which
+gathers pointers and entries with text of their own. The judge reads it entry by
+entry, so a run also takes out of it the line that asks a note's users to record
+their uses. `gctk memory` learns which notes it removed from the text it kept of
+each, so a pointer one run leaves comes out on the next. A pointer sits in a
+list item of one line that begins with a link, `[text](note.md)` or `[[note]]`,
+after an optional label. A label is bold or italic text that ends in a colon,
+such as `**Verify:**`. Bold or italics can wrap the link, as in
+`**[text](note.md)**`. Each link in that line to a note in the directory begins
+a pointer, which runs to the next such link, or, for a link inside parentheses,
+to the next one in them or to their close. So the text that describes a removed
+note goes with its link. The label and the other pointers stay, and a line left
+with no pointer goes. A link in a code span is text.
+
+A link to a removed note that a run leaves in the index, or in a collection
+note outside an entry with text of its own, is a failure the run names by file
+and line, and each run names it again until someone edits that line. A link in
+a note's own text, or in an entry's, stays as written. A note `gctk memory`
+removes, and the text each of its edits replaces, stay as files in the memory
+directory's hidden `.memory-intake` folder, since an agent that opened one
+before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
 memory carries in its prompt (`template-fragments/memory-notes.template.md`),
