@@ -115,9 +115,13 @@ SCRIPT="$HERE/worktree-setup.sh"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/gctk-worktree-setup-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
-# Host signing of commits and tags must not make this suite need a signing agent.
-export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
-  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
+# Host signing of commits and tags must not make this suite need a signing
+# agent. The host's own ignore file must not hide a file a case leaves for the
+# sync to find, such as .claude/settings.local.json, which a host can ignore in
+# every repository.
+export GIT_CONFIG_COUNT=3 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false \
+  GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false \
+  GIT_CONFIG_KEY_2=core.excludesFile GIT_CONFIG_VALUE_2=/dev/null
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "ok   - $1"; }
