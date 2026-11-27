@@ -418,8 +418,10 @@ landing bead, an ordinary bead") and I4. This member owes nothing there.
 
 - Nothing in this design changes a file `tools/deletion-plan.tsv` lists.
   `liveness-classify.sh`, which tk-1tfzr71.174 retires, reads parent-child
-  edges only to treat a bead with an open child as waiting, and it classes any
-  convoy as machinery before that, so it needs nothing.
+  edges only to class a ready bead that has a child not yet closed as gated. It
+  classes only the beads `bd ready` lists, and the nine convoys are closed, so
+  none of them is classed. A bead's own parent edge decides nothing there. So
+  the edge removals change none of its answers, and it needs nothing.
 - The design convoy's gate composes `work-gate.sh`, which no bead retires,
   through flags it already takes. So the gate adds no script, verb, mode or key,
   and `work-gate.sh` takes only a fix in place.
