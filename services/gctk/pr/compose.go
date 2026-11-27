@@ -9,7 +9,7 @@ import (
 )
 
 // Request is what a composition takes besides the bead: the PR as GitHub has
-// it, and the gates its bead's check set resolves to at its head.
+// it.
 type Request struct {
 	// Head is the commit the PR opens at, or carries now.
 	Head string
@@ -19,10 +19,6 @@ type Request struct {
 	Target string
 	// Body is the PR's body as published, nil for a PR not opened yet.
 	Body *string
-	// Gates is the gate set the bead's check set resolves to at Head, which the
-	// summary region names. Nil means it was not resolved: a region that must
-	// be written is then left as it stands, and reads NeedsGates.
-	Gates []Gate
 }
 
 // Outcome is what a composition did with one section of the body.
@@ -39,9 +35,6 @@ const (
 	// a hand-written body or markers cut into another shape, so it is left as
 	// it stands.
 	Unmanaged Outcome = "unmanaged"
-	// NeedsGates: the summary region must be written, and the request carries
-	// no gates for it to name.
-	NeedsGates Outcome = "needs-gates"
 	// Single: the branch carries one bead's work, the PR's own, which the
 	// summary region names already, so the body carries no branch-beads
 	// section.
@@ -107,7 +100,7 @@ func Compose(l *ledger.Ledger, id string, req Request) (*Composition, error) {
 // bead with no target opens into the rig's default branch, and a retargeted
 // bead's merged_target names its earlier base until its next record.
 func readRegion(bead *ledger.Record, req Request) (region, string, error) {
-	keys := []reading{summaryKey, record.Branch, checkSetKey}
+	keys := []reading{summaryKey, record.Branch}
 	vals := make([]string, len(keys))
 	for i, k := range keys {
 		v, err := value(bead, k)
@@ -116,20 +109,18 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		}
 		vals[i] = v
 	}
-	summary, branch, checkSet := vals[0], vals[1], vals[2]
+	summary, branch := vals[0], vals[1]
 	summary = carried(summary)
 	if strings.TrimFunc(summary, isSpace) == "" {
 		summary = ""
 	}
 	return region{
-		summary:  summary,
-		desc:     carried(bead.Description()),
-		id:       bead.ID,
-		branch:   branch,
-		target:   req.Target,
-		checkSet: checkSet,
-		head:     req.Head,
-		gates:    req.Gates,
+		summary: summary,
+		desc:    carried(bead.Description()),
+		id:      bead.ID,
+		branch:  branch,
+		target:  req.Target,
+		head:    req.Head,
 	}, branch, nil
 }
 
@@ -155,11 +146,7 @@ func firstOf(vals ...string) string {
 // published body's region is written in place when it is behind, and any other
 // body is left as it stands.
 func composeSummary(body []string, req Request, r region) ([]string, Outcome) {
-	known := req.Gates != nil
 	if req.Body == nil {
-		if !known {
-			return body, NeedsGates
-		}
 		return append(append([]string{summaryOpen}, r.lines()...), summaryClose), Written
 	}
 	if markers(body, summaryOpen, summaryClose) != markersOne {
@@ -168,9 +155,6 @@ func composeSummary(body []string, req Request, r region) ([]string, Outcome) {
 	cur := between(body, summaryOpen, summaryClose)
 	if r.current(cur) {
 		return body, Current
-	}
-	if !known {
-		return body, NeedsGates
 	}
 	want := r.lines()
 	if sameLines(cur, want) {

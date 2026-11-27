@@ -75,7 +75,7 @@ func stubCompose(t *testing.T, rows string) {
 
 const composeAnchor = `{"id":"tk-a","title":"Add the widget","issue_type":"feature","status":"open",` +
 	`"description":"Build the widget.","created_at":"2026-01-01T00:00:00Z",` +
-	`"metadata":{"branch":"polecat/tk-a","target":"main","check_set":"correctness","merge_result":"pull_request",` +
+	`"metadata":{"branch":"polecat/tk-a","target":"main","merge_result":"pull_request",` +
 	`"pr_summary":"Adds the widget."}}`
 
 type composed struct {
@@ -101,7 +101,7 @@ func runCompose(t *testing.T, args ...string) (composed, string, string, int) {
 
 func TestPRComposeANewPR(t *testing.T) {
 	stubCompose(t, "["+composeAnchor+"]")
-	got, raw, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef1234567890", "--gates", "correctness\tpre-open")
+	got, raw, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef1234567890")
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
@@ -109,27 +109,15 @@ func TestPRComposeANewPR(t *testing.T) {
 		t.Errorf("%+v", got)
 	}
 	if !strings.HasPrefix(got.Body, "<!-- gc:pr-summary -->\n## Summary\n\nAdds the widget.\n") ||
-		!strings.HasSuffix(got.Body, "- Head `abcdef12`; gates `correctness`; see the PR checks for current status.\n<!-- /gc:pr-summary -->\n") {
+		!strings.HasSuffix(got.Body, "- Head: `abcdef12`\n<!-- /gc:pr-summary -->\n") {
 		t.Errorf("body:\n%s", got.Body)
 	}
 	if !strings.Contains(raw, `"<!-- gc:pr-summary -->`) {
 		t.Errorf("the markers are escaped in the JSON: %s", raw)
 	}
-	got, _, _, code = runCompose(t, "tk-a", "--target", "trunk", "--head", "abcdef1234567890", "--gates", "correctness\tpre-open")
+	got, _, _, code = runCompose(t, "tk-a", "--target", "trunk", "--head", "abcdef1234567890")
 	if code != 0 || !strings.Contains(got.Body, "- Target: `trunk`\n") {
 		t.Errorf("the region names the target given, not the bead's: exit %d:\n%s", code, got.Body)
-	}
-}
-
-func TestPRComposeGatesGivenEmpty(t *testing.T) {
-	stubCompose(t, "["+composeAnchor+"]")
-	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--gates", "")
-	if code != 0 || got.Summary != "written" || !strings.Contains(got.Body, "- Head `abcdef12`; anchor declares no pre-open gate (`check_set=correctness`).") {
-		t.Errorf("exit %d: %+v", code, got)
-	}
-	got, _, _, code = runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12")
-	if code != 0 || got.Summary != "needs-gates" || got.Body != "" {
-		t.Errorf("without --gates: exit %d: %+v", code, got)
 	}
 }
 
@@ -149,7 +137,7 @@ func TestPRComposeReadsTheBeadsOwnStore(t *testing.T) {
 		`"metadata":{"fold_target":"polecat/tk-a"}}]}`)
 	log := filepath.Join(t.TempDir(), "calls")
 	t.Setenv("STUB_LOG", log)
-	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12", "--gates", "")
+	got, _, _, code := runCompose(t, "tk-a", "--target", "main", "--head", "abcdef12")
 	if code != 0 || got.BranchBeads != "written" || got.BranchBeadCount != 2 {
 		t.Fatalf("exit %d: %+v", code, got)
 	}
@@ -248,7 +236,7 @@ func stubEdit(t *testing.T, origin, state, title, body string) string {
 func runEdit(t *testing.T) (string, string, int) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--edit"}, "", &out, &errb)
+	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--edit"}, "", &out, &errb)
 	return out.String(), errb.String(), code
 }
 
@@ -279,7 +267,7 @@ func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
 		}
 	}
 
-	composedNow, _, _, code := runCompose(t, "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "")
+	composedNow, _, _, code := runCompose(t, "tk-a", "--head", "abcdef1234567890", "--target", "main")
 	if code != 0 {
 		t.Fatalf("the composition did not print: exit %d", code)
 	}
@@ -317,24 +305,6 @@ func TestPRComposeEditBringsAnOpenPRToItsComposition(t *testing.T) {
 	}
 }
 
-// An edit given no --gates leaves a summary region that must be written as it
-// stands. It names that region on stderr, edits nothing, and does not say the
-// PR shows its composition.
-func TestPRComposeEditWithNoGatesNamesTheSummaryItLeft(t *testing.T) {
-	hermeticGit(t)
-	stale := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
-	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "feat: Add the widget (tk-a)", stale)
-	var out, errb bytes.Buffer
-	code := Run([]string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--edit"}, "", &out, &errb)
-	if code != 0 || out.String() != "tk-a: edited nothing on https://github.com/acme/widgets/pull/7\n" ||
-		!strings.Contains(errb.String(), "the summary region of https://github.com/acme/widgets/pull/7 must be written, and no --gates gave the gate set it names, so it is left as it stands") {
-		t.Fatalf("an edit with no --gates: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
-	}
-	if raw, _ := os.ReadFile(calls); strings.Contains(string(raw), "updatePullRequest") {
-		t.Fatalf("an edit with no --gates changed the PR:\n%s", raw)
-	}
-}
-
 // --pr names the PR an edit takes when the bead records none yet, as the
 // refinery names a PR it adopts from the bead's branch. Given no --pr, a bead
 // that records no PR is refused with nothing asked of GitHub, and given one,
@@ -344,7 +314,7 @@ func TestPRComposeEditTakesThePRItNames(t *testing.T) {
 	old := "<!-- gc:pr-summary -->\n## Summary\n\nOld words.\n\n## Refinery handoff\n\n- Head `abcdef12`\n<!-- /gc:pr-summary -->"
 	calls := stubEdit(t, "git@github.com:acme/widgets.git", "OPEN", "chore: an old title (tk-a)", old)
 	t.Setenv("STUB_ROWS", "["+composeAnchor+"]")
-	args := []string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--gates", "", "--edit"}
+	args := []string{"pr", "compose", "tk-a", "--head", "abcdef1234567890", "--target", "main", "--edit"}
 	var out, errb bytes.Buffer
 	if code := Run(args, "", &out, &errb); code != 3 || out.String() != "" || !strings.Contains(errb.String(), "it names no PR") {
 		t.Fatalf("a bead that records no PR, given no --pr: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())

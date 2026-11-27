@@ -38,16 +38,11 @@ summary region names it, and never the bead's own target or merged_target,
 since a bead with no target opens into the rig's default branch and a
 retargeted bead's merged_target names its earlier base.
 
---gates is the gate set the bead's check set resolves to at --head, as
-gctk review checks --resolve <set> --through open-as-draft --with-phase prints
-it, empty for none. Without it a region that must be written is not: the body
-printed carries none, and --edit leaves the PR's as it stands.
-
 It prints one JSON object: {"title", "body", "summary", "branch_beads",
 "branch_bead_count"}. summary and branch_beads are each section's outcome:
-written (the body carries it), needs-gates (the summary region, given no
---gates), single (one bead's work, so no section) or unread (the beads on the
-branch did not read). title is empty when the bead's title has no words.
+written (the body carries it), single (one bead's work, so no section) or
+unread (the beads on the branch did not read). title is empty when the bead's
+title has no words.
 
 With --edit the PR is open, and the command brings its title and body to the
 composition in place of printing it. It reads the title and body the PR shows,
@@ -64,9 +59,7 @@ origin of the clone it runs in names ($GC_RIG_ROOT, else the working
 directory), and open from the bead's branch.
 It prints one line saying what it edited, and names on stderr each section it
 left as it stands: one the body carries no markers it can read for, as in a
-hand-written body, the summary region when it must be written and no --gates
-gave the gate set it names, and the branch-beads section when its beads did
-not read.
+hand-written body, and the branch-beads section when its beads did not read.
 
 exit: 0 printed; with --edit, the PR shows the composition, edited or already,
         but for each section named on stderr as left as it stands
@@ -78,8 +71,8 @@ exit: 0 printed; with --edit, the PR shows the composition, edited or already,
         not open from the bead's branch; nothing was changed`
 
 type prComposeOpts struct {
-	head, target, gates, pr string
-	edit                    bool
+	head, target, pr string
+	edit             bool
 }
 
 func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -90,8 +83,8 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long:        prComposeLong,
 		Args:        cobra.ExactArgs(1),
 		Annotations: map[string]string{usageExitKey: "1"},
-		RunE: func(c *cobra.Command, args []string) error {
-			req, err := o.request(c)
+		RunE: func(_ *cobra.Command, args []string) error {
+			req, err := o.request()
 			if err != nil {
 				return err
 			}
@@ -108,7 +101,6 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&o.head, "head", "", "the commit the PR opens at, or carries now")
 	f.StringVar(&o.target, "target", "", "the branch the PR opens into, or is open into")
-	f.StringVar(&o.gates, "gates", "", "the gates the bead's check set resolves to at --head, one <check>\\t<phase> per line")
 	f.BoolVar(&o.edit, "edit", false, "edit the open PR's title and body to the composition where they differ, reading the body from the PR")
 	f.StringVar(&o.pr, "pr", "", "with --edit, the PR's URL, when the bead's record names none yet")
 	return cmd
@@ -116,19 +108,13 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 
 // request is the composition the flags ask for, or the usage error that refuses
 // it.
-func (o prComposeOpts) request(c *cobra.Command) (pr.Request, error) {
+func (o prComposeOpts) request() (pr.Request, error) {
 	req := pr.Request{Head: strings.TrimSpace(o.head), Target: strings.TrimSpace(o.target)}
 	if req.Head == "" {
 		return req, errors.New("the summary region names the PR's head: give --head")
 	}
 	if req.Target == "" {
 		return req, errors.New("the summary region names the branch the PR opens into: give --target")
-	}
-	if c.Flags().Changed("gates") {
-		req.Gates = pr.ParseGates(o.gates)
-		if req.Gates == nil {
-			req.Gates = []pr.Gate{}
-		}
 	}
 	if url := strings.TrimSpace(o.pr); url != "" {
 		if !o.edit {
@@ -198,12 +184,8 @@ func prComposeEdit(bead, url string, req pr.Request, stdout, stderr io.Writer) i
 			outcome pr.Outcome
 			name    string
 		}{{c.Summary, "summary region"}, {c.BranchBeads, "branch-beads section"}} {
-			switch s.outcome {
-			case pr.Unmanaged:
+			if s.outcome == pr.Unmanaged {
 				fmt.Fprintf(stderr, "gctk pr compose: the body of %s carries no %s its markers let it read, so it is left as it stands\n", got.URL, s.name)
-				left = true
-			case pr.NeedsGates:
-				fmt.Fprintf(stderr, "gctk pr compose: the %s of %s must be written, and no --gates gave the gate set it names, so it is left as it stands\n", s.name, got.URL)
 				left = true
 			}
 		}

@@ -293,7 +293,7 @@ cmd_withdraw() {
 # the next round's lanes read on the PR the summary this round left there.
 publish() {
     local rc
-    (cd "$1" && "$gctk" pr compose "$PR_BEAD" --head "$2" --target "$TARGET" --gates '' --edit); rc=$?
+    (cd "$1" && "$gctk" pr compose "$PR_BEAD" --head "$2" --target "$TARGET" --edit); rc=$?
     case "$rc" in
         0) ;;
         3) die 3 "gctk pr compose refused to edit the PR, so nothing is pushed" ;;

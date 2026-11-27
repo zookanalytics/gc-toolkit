@@ -181,7 +181,7 @@ fi
 # TITLE and BODY_FILE.
 compose() {
   local out
-  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" --gates '' </dev/null) || return 1
+  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" </dev/null) || return 1
   TITLE=$(printf '%s' "$out" | jq -r '.title // ""')
   printf '%s' "$out" | jq -j '.body // ""' > "$BODY_FILE"
   [ -n "$TITLE" ] && [ -s "$BODY_FILE" ]
@@ -198,7 +198,7 @@ push() {
 }
 
 if [ -n "$PR_URL" ]; then
-  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr compose "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --gates '' --edit </dev/null >&2 \
+  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr compose "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --edit </dev/null >&2 \
     || stop "the title and body of PR #$PR_NUMBER did not take, so the head is not pushed under a stale body"
   GC_RIG_ROOT="$HOME_DIR" "$gctk" pr draft "$OWNER" --pr "$PR_URL" </dev/null >&2 \
     || stop "PR #$PR_NUMBER did not return to draft, so the head is not pushed onto it while it is ready"

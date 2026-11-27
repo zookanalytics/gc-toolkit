@@ -209,7 +209,7 @@ eq "$(git -C "$WT" rev-parse HEAD)" "$HEAD1" "at the head the round judged"
 run push
 eq "$RC" 0 "a worktree at the head pushes nothing"
 eq "$(called 'pr draft')" 0 "and drafts nothing"
-has "$(cat "$LOG")" "gctk pr compose tk-pr --head $HEAD1 --target main --gates  --edit" \
+has "$(cat "$LOG")" "gctk pr compose tk-pr --head $HEAD1 --target main --edit" \
     "and brings the PR's title and body current with its bead at the head the round judged"
 has "$(cat "$LOG")" "pr-compose-cwd $WT" "from the run's worktree, whose origin names the rig's repository"
 has "$OUT" "tk-pr: edited the body" "and prints what it edited"
@@ -229,7 +229,7 @@ eq "$(git -C "$TMP/origin.git" rev-parse polecat/tk-pr)" "$HEAD1" "and the branc
 STUB_ORIGIN="$TMP/origin.git" run push
 eq "$RC" 0 "the repair's commits push"
 eq "$(cat "$TMP/origin.git.at-draft")" "$HEAD1" "after the PR returned to draft, while the branch was still at the head"
-has "$(cat "$LOG")" "gctk pr compose tk-pr --head $FIX --target main --gates  --edit" \
+has "$(cat "$LOG")" "gctk pr compose tk-pr --head $FIX --target main --edit" \
     "and after the PR's title and body were brought current at the head it pushes"
 eq "$(cat "$TMP/origin.git.at-edit")" "$HEAD1" "…while the branch was still at the head"
 eq "$(grep -n -E '^gctk pr (draft|compose)' "$LOG" | cut -d' ' -f3 | tr '\n' ' ')" "draft compose " "…which comes after the draft"

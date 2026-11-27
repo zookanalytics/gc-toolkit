@@ -31,14 +31,6 @@
     "doc": "The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as work in flight."
   },
   {
-    "name": "check_set",
-    "type": "string",
-    "readers": [
-      "pr"
-    ],
-    "doc": "The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, [metadata.gates]). A composition names it when no pre-open gate resolves from it."
-  },
-  {
     "name": "eng_bead",
     "type": "string",
     "readers": [

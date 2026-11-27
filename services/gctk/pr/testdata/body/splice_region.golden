@@ -8,7 +8,7 @@ New summary.
 ## Refinery handoff
 
 - Issue: `tk-a1`
-- Head `abcdef12`; gates `correctness`; see the PR checks for current status.
+- Head: `abcdef12`
 <!-- /gc:pr-summary -->
 
 Operator note below.
