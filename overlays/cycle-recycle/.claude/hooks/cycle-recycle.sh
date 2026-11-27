@@ -80,10 +80,11 @@ session_start() {
 # pack, each watched file of <role> whose mtime is later than the session's
 # first prompt: the role's prompt template and every fragment in the pack's
 # template-fragments/, which Gas City renders into the prompt at launch, and the
-# role's patrol formula, whose steps the session reads as it reaches them and
-# keeps. A fast-forward rewrites only the files whose content changed, so an
-# mtime is when the new text reached the checkout. The pack is the first of
-# GC_RIG_ROOT and the city's rigs/gc-toolkit that carries the role's formula.
+# role's patrol formula when it has one, whose steps the session reads as it
+# reaches them and keeps. The witness runs no formula. A fast-forward rewrites
+# only the files whose content changed, so an mtime is when the new text
+# reached the checkout. The pack is the first of GC_RIG_ROOT and the city's
+# rigs/gc-toolkit that carries the role's prompt template.
 # Prints nothing when no file changed, or when the start, the pack or the times
 # cannot be read: uncertain -> no drift. An mtime later than now counts as no
 # change, so a file stamped in the future cannot recycle a session on every
@@ -93,7 +94,7 @@ pack_drift() {
     case "$start" in '' | *[!0-9]*) return 0 ;; esac
     pack=""
     for c in "${GC_RIG_ROOT:-}" "${GC_CITY_PATH:-}/rigs/gc-toolkit"; do
-        [ -n "$c" ] && [ -f "$c/formulas/mol-$2-patrol.toml" ] && { pack="$c"; break; }
+        [ -n "$c" ] && [ -f "$c/agents/$2/prompt.template.md" ] && { pack="$c"; break; }
     done
     [ -n "$pack" ] || return 0
     now=$(date +%s)

@@ -151,21 +151,22 @@ else
     esac
 
     # --- Arm 1d: the hook's drift check sees a pack file change --------------
-    # Drives `cycle-recycle.sh --drift refinery` on a fixture pack whose patrol
-    # formula was written an hour after the transcript's first prompt. --drift
-    # takes its role as an argument, so GC_AGENT stays empty here too, and a
-    # script predating --drift self-gates out instead of recycling anything.
-    mkdir -p "$probe/pack/formulas"
-    printf 'text\n' > "$probe/pack/formulas/mol-refinery-patrol.toml"
+    # Drives `cycle-recycle.sh --drift refinery` on a fixture pack whose
+    # refinery prompt was written an hour after the transcript's first prompt.
+    # --drift takes its role as an argument, so GC_AGENT stays empty here too,
+    # and a script predating --drift self-gates out instead of recycling
+    # anything.
+    mkdir -p "$probe/pack/agents/refinery"
+    printf 'text\n' > "$probe/pack/agents/refinery/prompt.template.md"
     dt="$probe/drift.jsonl"
     first=$(jq -nr --argjson t "$(($(date +%s) - 3600))" '$t | todate' 2>/dev/null)
     printf '{"type":"user","timestamp":"%s","message":{"content":"startup"}}\n' "$first" > "$dt"
-    want_drift="formulas/mol-refinery-patrol.toml"
+    want_drift="agents/refinery/prompt.template.md"
     got_drift=$(printf '{"transcript_path":"%s"}' "$dt" \
         | GC_AGENT='' GC_RIG_ROOT="$probe/pack" GC_CITY_PATH='' run_piped sh "$HOOK" --drift refinery 2>/dev/null)
     case "$got_drift" in
         "$want_drift") : ;;
-        '') errors+=("\`sh $HOOK --drift refinery\` found no change in a pack whose patrol formula was written an hour after the transcript's first prompt — the hook cannot see a pack change, so a patrol session runs the text it started with until something else restarts it") ;;
+        '') errors+=("\`sh $HOOK --drift refinery\` found no change in a pack whose refinery prompt was written an hour after the transcript's first prompt — the hook cannot see a pack change, so a patrol session runs the text it started with until something else restarts it") ;;
         *)  errors+=("\`sh $HOOK --drift refinery\` returned \"$got_drift\" for a pack whose only changed file is $want_drift — its drift check disagrees with the files it watches") ;;
     esac
     rm -rf "$probe"
