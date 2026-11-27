@@ -209,11 +209,12 @@ func tally(ln Lane, rp *Repair) string {
 }
 
 // answer is one point's answer: its ruling, and what the head carries for it.
+// It opens with the ruling's lead.
 func answer(r Ruling, ok bool, rp *Repair) string {
 	if !ok {
 		return "Not ruled."
 	}
-	reason := oneLine(r.Reason)
+	reason, opening := oneLine(r.Reason), lead(r)
 	switch r.Ruling {
 	case RulingMustFix:
 		also := ""
@@ -222,25 +223,47 @@ func answer(r Ruling, ok bool, rp *Repair) string {
 		}
 		switch {
 		case r.Commit == "" && r.Summary:
-			return "Fixed in the PR's summary: " + reason
+			return opening + " in the PR's summary: " + reason
 		case rp.Pushed != "":
-			return fmt.Sprintf("Fixed by `%s`, which `%s` carries%s: %s", short(r.Commit), short(rp.Pushed), also, reason)
+			return fmt.Sprintf("%s by `%s`, which `%s` carries%s: %s", opening, short(r.Commit), short(rp.Pushed), also, reason)
 		default:
-			return fmt.Sprintf("Fixed by `%s`%s: %s", short(r.Commit), also, reason)
+			return fmt.Sprintf("%s by `%s`%s: %s", opening, short(r.Commit), also, reason)
 		}
 	case RulingDeclined:
-		return "Declined, and the head carries no change for it: " + reason
+		return opening + ", and the head carries no change for it: " + reason
 	case RulingDeferred:
-		return "Deferred to work of its own once this PR lands: " + reason
+		return opening + " to work of its own once this PR lands: " + reason
 	case RulingAnswered:
-		return "Answered: " + reason
+		return opening + ": " + reason
 	case RulingQuestion:
 		if r.Gate == "" {
-			return "A question for you: " + reason
+			return opening + " for you: " + reason
 		}
-		return fmt.Sprintf("Put to you through %s: %s", r.Gate, reason)
+		return fmt.Sprintf("%s through %s: %s", opening, r.Gate, reason)
 	}
-	return fmt.Sprintf("Ruled %s: %s", r.Ruling, reason)
+	return fmt.Sprintf("%s %s: %s", opening, r.Ruling, reason)
+}
+
+// lead is the words a ruling's answer opens with, ahead of the rest of the
+// answer and the reason. A reason that opened with them would print them
+// twice, so the round's output check refuses one (checkRuling).
+func lead(r Ruling) string {
+	switch r.Ruling {
+	case RulingMustFix:
+		return "Fixed"
+	case RulingDeclined:
+		return "Declined"
+	case RulingDeferred:
+		return "Deferred"
+	case RulingAnswered:
+		return "Answered"
+	case RulingQuestion:
+		if r.Gate == "" {
+			return "A question"
+		}
+		return "Put to you"
+	}
+	return "Ruled"
 }
 
 // visualLine says what kind of visual a demo verdict rests on: its modality,

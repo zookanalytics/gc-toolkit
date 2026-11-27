@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/git"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
@@ -338,7 +339,8 @@ var (
 // subject no lane raised and no ask the round can take, a ruling outside the
 // set, a commit that is not a full object name, a must-fix that names neither
 // a fixing commit nor a fix in the PR's summary, a commit or a fix in the
-// summary on a ruling that changes nothing, a question with no gate, and a fix
+// summary on a ruling that changes nothing, a question with no gate, a reason
+// that opens with the lead the head's comment prints in front of it, and a fix
 // for an ask an earlier round of the run declined, which a later ruling of its
 // own overrules only through an ask that carries it.
 func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string) error {
@@ -375,6 +377,9 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 		return refuse("%s is ruled %s and names the gate %s, which only a question goes to", r.Subject(), r.Ruling, r.Gate)
 	case strings.TrimSpace(r.Reason) == "":
 		return refuse("%s is ruled %s with no reason", r.Subject(), r.Ruling)
+	case opensWith(r.Reason, lead(r)):
+		return refuse("%s is ruled %s, and its reason opens with %q, which the head's comment prints in front of it: "+
+			"open the reason with the answer itself", r.Subject(), r.Ruling, lead(r))
 	}
 	if was, ok := declined[r.Ask]; ok && r.Ask != "" && r.Ruling == RulingMustFix {
 		return refuse("an earlier round of this run ruled %s %s, so no repair changes code for it; a ruling that overrules that "+
@@ -382,6 +387,25 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 	}
 	return nil
 }
+
+// opensWith says whether text opens with the words, word for word, with
+// letter case and the punctuation around each word set aside, so "Fixed in
+// <commit>." opens with "Fixed" and "Answered, with no change" with
+// "Answered".
+func opensWith(text, words string) bool {
+	got, want := strings.Fields(text), strings.Fields(words)
+	if len(want) == 0 || len(got) < len(want) {
+		return false
+	}
+	for i, w := range want {
+		if !strings.EqualFold(strings.TrimFunc(got[i], notLetterOrDigit), w) {
+			return false
+		}
+	}
+	return true
+}
+
+func notLetterOrDigit(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
 
 // earlierDeclines is each ask an earlier round of the run ruled declined or
 // deferred, with that ruling.

@@ -164,7 +164,11 @@ each head: answered once the head carries its fix, or once its check ran there.
 ## Each answer says what the head carries
 
 The head's comment is rendered from your rulings, so write each reason as the
-answer the operator reads. A must-fix point's answer names its fix: the commit
-the round pushed, the fix in the PR's title or summary, or both. Any other
-point's answer says why the head carries no change for it. A reason never says
+answer the operator reads. The comment prints each ruling's words in front of
+its reason, such as "Answered:" or "Declined, and the head carries no change
+for it:", and for a must-fix the fix its ruling names: the commit the round
+pushed, the fix in the PR's title or summary, or both. So a reason opens with
+the answer itself, and `review-run.sh output` refuses one that opens with its
+ruling's words. A must-fix point's reason says what its fix does. Any other
+point's reason says why the head carries no change for it. A reason never says
 a point is fixed unless the head or the PR's title or summary carries the fix.

@@ -380,6 +380,63 @@ func TestARepairOutputsFixInThePRsSummary(t *testing.T) {
 	}
 }
 
+// The head's comment prints each ruling's lead in front of its reason, so a
+// reason that opens with the same words, in any letter case and whatever
+// punctuation follows them, would print them twice, and the round's output is
+// refused until the reason opens with the answer itself. A reason that uses
+// the words later, or another word that starts the same way, stands.
+func TestARepairReasonOpensWithItsAnswer(t *testing.T) {
+	setup := func() (*world, string) {
+		w := newWorld(t)
+		w.output(triage(1, h1, "correctness"))
+		w.output(lane(1, "correctness", h1, review.VerdictRequestChanges, "F1"))
+		return w, w.step(1, "rule-and-repair")
+	}
+	ruled := func(ruling, reason string) review.Ruling {
+		r := review.Ruling{Check: "correctness", Finding: "F1", Ruling: ruling, Reason: reason}
+		switch ruling {
+		case review.RulingMustFix:
+			r.Commit = fix
+		case review.RulingQuestion:
+			r.Gate = "tk-gate"
+		}
+		return r
+	}
+	for _, c := range []struct {
+		ruling, reason, lead string
+	}{
+		{review.RulingMustFix, "Fixed in " + fix[:12] + ".", "Fixed"},
+		{review.RulingMustFix, "fixed: the boundary holds", "Fixed"},
+		{review.RulingDeclined, "Declined, a nit the lane's own rule passes", "Declined"},
+		{review.RulingDeferred, "Deferred: it needs the PR on main", "Deferred"},
+		{review.RulingAnswered, "Answered, with no change at this head.", "Answered"},
+		{review.RulingAnswered, "  ANSWERED the head already does it", "Answered"},
+		{review.RulingQuestion, "Put to you, since only you can choose", "Put to you"},
+	} {
+		w, st := setup()
+		mustRefuse(t, w.check(st, repair(1, h1, "", ruled(c.ruling, c.reason)), nil),
+			"its reason opens with \""+c.lead+"\", which the head's comment prints in front of it")
+	}
+	summary := review.Ruling{Check: "correctness", Finding: "F1", Ruling: review.RulingMustFix,
+		Reason: "Fixed in the summary, which names the cost now", Summary: true}
+	w, st := setup()
+	mustRefuse(t, w.check(st, repair(1, h1, "", summary), nil), "its reason opens with \"Fixed\"")
+	for _, c := range []struct {
+		ruling, reason string
+	}{
+		{review.RulingMustFix, "the boundary holds, and the test that fixed it fails without it"},
+		{review.RulingDeclined, "Declining it keeps the seam, which the lane's rule passes"},
+		{review.RulingAnswered, "the head already does it, as answered in the thread"},
+		{review.RulingQuestion, "Put simply: keep the flag or drop it"},
+		{review.RulingQuestion, "A question only you can answer: keep the flag or drop it"},
+	} {
+		w, st := setup()
+		if err := w.check(st, repair(1, h1, "", ruled(c.ruling, c.reason)), nil); err != nil {
+			t.Errorf("a %s reason %q: %v", c.ruling, c.reason, err)
+		}
+	}
+}
+
 // A finding is its lane's check, compared without case, and its id as the
 // lane wrote it, in the round's output as in the pass rule: two findings whose
 // ids differ only in case are two, each ruled once, and the round that rules
