@@ -4,8 +4,7 @@
 # refusal (exit 1); a write that names no route leaving the route as it is; the
 # refusal of a route that is not rig-qualified, `human` included; the clear of
 # the executor identity with the assignee; --set-dated's compare-and-preserve
-# rule for the @<since> component; the --takeaway writer and its cap;
-# a landing's work record and its clear of the live objections; and the
+# rule for the @<since> component; a landing's work record and its clear of the live objections; and the
 # refusal when no gctk binary resolves.
 #
 # ONE IMPLEMENTATION, REACHED THROUGH THE SCRIPT. lifecycle.sh execs
@@ -229,9 +228,6 @@ writes_when "a moved state writes" \
 writes_when "--append-notes always writes" \
   "{$BASE,\"metadata\":{\"merge_result\":\"blocked\"}}" \
   n-2 --to blocked --append-notes "another line"
-writes_when "--takeaway always writes (it stamps a fresh instant)" \
-  '{"id":"n-2","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.takeaway":"same text","gc.takeaway_at":"2026-08-28T04:05:06Z","gc.takeaway_by":"lifecycle"}}' \
-  n-2 --to blocked --takeaway "same text"
 # The assignee the flag names does not change, and only the flag can force the
 # write.
 writes_when "--assignee always writes" \
@@ -281,33 +277,19 @@ echo "# a write names no route unless asked"
 store '[{"id":"a-6","status":"open","assignee":"rig/refinery","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
 out="$("$SUT" transition a-6 --to refused_false_completion --assignee "" \
-  --set blocked_reason="PR#7 closed out-of-band" \
-  --takeaway "PR#7 was closed without merging — rework it or close this bead" 2>&1)"; rc=$?
+  --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
 eq "$rc" 0 "transition to refused_false_completion exits 0"
 eq "$(meta a-6 'gc.routed_to')" "<absent>" "refused_false_completion writes no route"
 hasnt "$(grep '^bd update' "$STUB_GC_LOG")" "gc.routed_to" "…since the update names no route"
 eq "$(bassignee a-6)" "" "--assignee '' cleared the assignee"
-eq "$(meta a-6 'gc.takeaway')" "PR#7 was closed without merging — rework it or close this bead" \
-  "the park names what it wants"
-eq "$(meta a-6 'gc.takeaway_by')" "lifecycle" "the takeaway names its writer"
-case "$(meta a-6 'gc.takeaway_at')" in
-  ????-??-??T??:??:??Z) ok "the takeaway is dated" ;;
-  *) bad "the takeaway carries no gc.takeaway_at" ;;
-esac
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "state + clear + reason + takeaway ride in ONE update"
-eq "$(meta a-6 'gc.takeaway_settled')" "" "the park's headline carries its own disposition, not a settled one"
+eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "state + clear + reason ride in ONE update"
 
 # The entry keeps whatever route the bead carries: a transition routes no work,
 # and the gate holds the bead whatever its route.
 store '[{"id":"a-6b","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.routed_to":"rig/pool"}}]'
-out="$("$SUT" transition a-6b --to blocked --expect blocked --takeaway "PR#7 sits on another base" 2>&1)"; rc=$?
+out="$("$SUT" transition a-6b --to blocked --expect blocked 2>&1)"; rc=$?
 eq "$rc" 0 "transition to blocked exits 0"
 eq "$(meta a-6b 'gc.routed_to')" "rig/pool" "…and the bead keeps the route it carries"
-
-store '[{"id":"a-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked","gc.takeaway_settled":"1"}}]'
-out="$("$SUT" transition a-8 --to refused_false_completion --takeaway "needs a ruling on the base branch" 2>&1)"; rc=$?
-eq "$rc" 0 "a takeaway over an inherited settled-key exits 0"
-eq "$(meta a-8 'gc.takeaway_settled')" "" "…and clears it, leaving the park's own disposition on the bead"
 
 # --- unassigning takes the executor identity with it ----------------------------
 # gc.session_id and gc.session_name name the session that claimed the bead, so
@@ -390,78 +372,14 @@ eq "$(meta r-2 'gc.routed_to')" "gc-toolkit/gc-toolkit.polecat" "…and stamped 
 # on the bead, so no transition parks a bead on a route, whatever the state.
 store '[{"id":"r-3","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
 : > "$STUB_GC_LOG"
-out="$("$SUT" transition r-3 --to refused_false_completion --route human --takeaway "PR#7 was closed without merging" 2>&1)"; rc=$?
+out="$("$SUT" transition r-3 --to refused_false_completion --route human 2>&1)"; rc=$?
 eq "$rc" 1 "--route human exits 1"
 has "$out" "not rig-qualified" "…refused as a bare name"
 has "$out" "human gate" "…and the refusal names the gate that parks a bead for a person"
-out="$("$SUT" transition r-3 --to blocked --expect blocked --route human --takeaway "parked" 2>&1)"; rc=$?
+out="$("$SUT" transition r-3 --to blocked --expect blocked --route human 2>&1)"; rc=$?
 eq "$rc" 1 "--route human on a re-record exits 1 too"
 eq "$(meta r-3 merge_result)" "blocked" "the refused transitions wrote nothing"
 eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
-
-# --- --takeaway writes the bead's headline ---------------------------------------
-# gc.takeaway is the bead's one-line headline. A write that parks a bead needs
-# none, since the gate its caller files says what is asked.
-# A caller that passes --takeaway gets the headline in the transition's one
-# update, capped, and refused when it says nothing.
-echo "# --takeaway"
-store '[{"id":"p-1","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition p-1 --to refused_false_completion --set blocked_reason="PR#7 closed out-of-band" 2>&1)"; rc=$?
-eq "$rc" 0 "a write with no takeaway exits 0"
-eq "$(meta p-1 merge_result)" "refused_false_completion" "…and enters the state"
-eq "$(meta p-1 'gc.takeaway')" "<absent>" "…writing no headline"
-eq "$(meta p-1 'gc.routed_to')" "<absent>" "…and no route"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "1" "…in one update"
-
-# The takeaway triple is this flag's to write.
-store '[{"id":"p-6","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-out="$("$SUT" transition p-6 --to refused_false_completion --set gc.takeaway="via --set" 2>&1)"; rc=$?
-eq "$rc" 1 "--set gc.takeaway is refused (owned by --takeaway)"
-has "$out" "--takeaway" "the refusal names the owning flag"
-
-# Over the cap the verb REJECTS rather than truncating: only the author knows
-# which clause is the headline, and a truncated one loses it silently.
-# gc-helm.sh truncates the conversation titles it writes at the same cap, and it
-# is sh, which reads no Go, so it carries its own copy as TAKEAWAY_MAX.
-eq "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" "140" "gc-helm.sh caps a conversation's title at the same 140 codepoints"
-store '[{"id":"p-7","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-LONG=$(printf 'x%.0s' $(seq 141))
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition p-7 --to refused_false_completion --takeaway "$LONG" 2>&1)"; rc=$?
-eq "$rc" 1 "a takeaway over the cap exits 1"
-has "$out" "141 chars" "the refusal reports the measured length"
-has "$out" "the cap is 140" "…and the cap"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and nothing was written"
-
-store '[{"id":"p-8","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-out="$("$SUT" transition p-8 --to refused_false_completion --takeaway "$(printf 'x%.0s' $(seq 140))" 2>&1)"; rc=$?
-eq "$rc" 0 "a takeaway AT the cap is accepted"
-
-# An EMPTY takeaway is not one. Normalization can leave nothing behind, and
-# writing that would overwrite the headline a bead carries with nothing, under
-# a fresh date and author.
-store '[{"id":"p-9","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition p-9 --to refused_false_completion --takeaway "" 2>&1)"; rc=$?
-eq "$rc" 1 "an empty --takeaway exits 1"
-has "$out" "tells the operator nothing" "the refusal says what an empty headline would show"
-eq "$(meta p-9 'gc.takeaway')" "<absent>" "no empty takeaway is written"
-eq "$(meta p-9 merge_result)" "blocked" "the refused transition wrote nothing"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "and never reached bd"
-
-store '[{"id":"p-10","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-: > "$STUB_GC_LOG"
-out="$("$SUT" transition p-10 --to refused_false_completion --takeaway "   " 2>&1)"; rc=$?
-eq "$rc" 1 "a whitespace-only --takeaway exits 1"
-has "$out" "tells the operator nothing" "…with the same refusal"
-eq "$(meta p-10 'gc.takeaway')" "<absent>" "…and nothing is written"
-eq "$(grep -c '^bd update' "$STUB_GC_LOG" || true)" "0" "…and nothing reaches bd"
-
-# The refusal belongs to the flag, whatever the route.
-store '[{"id":"p-11","status":"open","assignee":"","notes":"","metadata":{"merge_result":"blocked"}}]'
-out="$("$SUT" transition p-11 --to blocked --route rig/mechanik --takeaway " " 2>&1)"; rc=$?
-eq "$rc" 1 "an empty --takeaway is refused on a pool route too"
 
 # --- rejection to unanchored ------------------------------------------------------
 echo "# unanchored"

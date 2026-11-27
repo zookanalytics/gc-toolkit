@@ -2,7 +2,7 @@
 # lifecycle.sh — the plain write of a bead's merge_result.
 #   lifecycle.sh transition <bead-id> --to <value> [--expect <value>] [--set k=v]...
 #     [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>]
-#     [--route <rig>/<agent>] [--takeaway <text>] [--close]
+#     [--route <rig>/<agent>] [--close]
 #     [--append-notes <t>] [--json]
 # transition: ONE atomic `gc bd update` carrying every field, whose exit is the
 # transition's. --to sets merge_result, and --to unanchored clears it. It checks
@@ -25,8 +25,6 @@
 # route, so a bare name such as `human` is refused. A write with no --route
 # leaves the route as the bead carries it. An --assignee "" write also clears
 # the executor identity (gc.session_id, gc.session_name).
-# --takeaway writes the triple (text/_at/_by) in the same atomic call, capped at
-# 140 codepoints and refused when it normalizes to nothing.
 # Exits: 0 ok; 1 --expect mismatch / bd refusal / usage, or no gctk binary to
 # run; 2 the bead could not be read before the write, or a landed write could
 # not be reported as JSON.

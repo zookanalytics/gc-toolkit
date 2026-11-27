@@ -1,9 +1,9 @@
 // Package takeaway is a bead's takeaway: the one-line headline its handling
-// concluded, who wrote it and when, and whether anything still waits on the
-// bead, which `gctk bead takeaway` writes in one update. With --release the
-// same update takes the bead out of play, and the verb removes its arm first
-// and ends the run beneath it after, so a release stops the bead or sends it
-// on to a pool or a named agent.
+// concluded, which `gctk bead takeaway` appends to the bead's notes with who
+// wrote it and when, in one update, and the waits it names, each written as a
+// blocks edge after it. With --release the same update takes the bead out of
+// play, and the verb removes its arm first and ends the run beneath it after,
+// so a release stops the bead or sends it on to a pool or a named agent.
 //
 // The release is one update guarded by the status and the assignee it read, so
 // a close or a claim that lands after the read refuses it whole, and a re-read
@@ -12,8 +12,8 @@
 // bead with whoever holds it now. A claim a live session holds is never taken.
 // The verb asks waits what holds the bead and which runs work it, the pr record
 // where its PR stands and which branch its work is on, prstatus which beads are
-// human gates, and the arm to remove its arm. The reaction's dispose writes each exit's headline through
-// it, and its sweep asks it whether a bead carries a headline.
+// human gates, and the arm to remove its arm. The reaction's dispose writes each
+// exit's headline through it.
 package takeaway
 
 import (
@@ -31,34 +31,6 @@ import (
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
-)
-
-// The takeaway's keys, which this package writes, each in the one update that
-// writes the headline. gctk lifecycle's --takeaway can also write them, and
-// shell still reads them (docs/gctk-architecture.md, Debt), so they stay
-// registered in lifecycle/lifecycle.toml too.
-var (
-	textKey = ledger.Declare("gc.takeaway", ledger.String,
-		"A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, "+
-			"which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off "+
-			"leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged. "+
-			"Absent, nothing has concluded on the bead.")
-	atKey = ledger.Declare("gc.takeaway_at", ledger.String,
-		"When the bead's headline was written, RFC 3339 UTC to the second, in the update that writes it.")
-	byKey = ledger.Declare("gc.takeaway_by", ledger.String,
-		"Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The "+
-			"first reaction's sweep passes over a bead that carries one, as one already triaged.")
-	settledKey = ledger.Declare("gc.takeaway_settled", ledger.String,
-		"1 when the writer of the bead's headline said nothing waits on the bead, and empty when it named a "+
-			"wait or said neither, written with every headline so no earlier headline's answer stands for a "+
-			"later one. lifecycle/lifecycle.toml [holds] pairs it with gc.takeaway, so a headline left with "+
-			"neither an edge nor this mark reads as a hold on prose.")
-)
-
-// Text and By are the reading faces of a bead's headline and of who wrote it.
-var (
-	Text = textKey.View()
-	By   = byKey.View()
 )
 
 // Request is one takeaway on Bead: the headline Text, the writer By names,
@@ -185,7 +157,7 @@ func (t *Takeaways) Take(req Request) (string, error) {
 		return "", refuse("--release ends the run beneath %s through the pack's run-cancel.sh, and GCTK_SCRIPTS_DIR names no pack scripts directory to run it from. Run it as GCTK_SCRIPTS_DIR=\"$(gc <binding> scripts-dir)\" gctk bead takeaway ... Nothing was written.", bead)
 	}
 
-	r := &take{t: t, req: req, bead: bead, text: text, by: by, noWait: req.NoWait}
+	r := &take{t: t, req: req, bead: bead, text: text, by: by}
 	if err := r.readAnchor(); err != nil {
 		return "", err
 	}
@@ -208,7 +180,6 @@ type take struct {
 	t                *Takeaways
 	req              Request
 	bead, text, by   string
-	noWait           bool
 	anchor           *ledger.Record // the bead as a release read it
 	status, assignee string         // its status and assignee then
 	mergeResult      string
@@ -275,19 +246,19 @@ func (r *take) guardRelease() error {
 	if r.req.Route != "" || r.req.Assign != "" {
 		r.holds = gascity.Spellings(r.anchor.Labels(), "hold:mayor")
 	}
-	// A release that parks the bead for a person states its disposition: the
-	// wait as an edge, or the settled mark that says there is none. Only an
-	// open blocker the bead already carries lets it go with neither, since that
-	// edge is the wait. A headline holding the bead with no edge and no mark is
-	// the hold on prose doctor/check-wait-is-an-edge reports.
+	// A release that parks the bead for a person says what it waits on: the
+	// wait as an edge, or --no-wait for none. Only an open blocker the bead
+	// already carries lets it go with neither, since that edge is the wait. A
+	// park with neither would leave a wait its headline names in prose alone,
+	// which holds nothing.
 	if r.req.Route == "" && r.req.Assign == "" && !r.req.NoWait && len(r.req.WaitingOn) == 0 {
 		pending, err := r.t.pending(r.bead)
 		if err != nil {
-			return refuse("--release parks %s for a person, and a park states its disposition, but %s's blockers could not be read (%v), so an open blocker that holds it cannot be proven. Pass --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it, or re-run once the store answers. Nothing was written.",
+			return refuse("--release parks %s for a person, and a park says what it waits on, but %s's blockers could not be read (%v), so an open blocker that holds it cannot be proven. Pass --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it, or re-run once the store answers. Nothing was written.",
 				r.bead, r.bead, err)
 		}
 		if len(pending) == 0 {
-			return refuse("--release parks %s for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it. %s carries no open blocker to hold it, so with neither the headline is a hold on prose, which doctor/check-wait-is-an-edge reports. Nothing was written.",
+			return refuse("--release parks %s for a person, and a park says what it waits on: --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it. %s carries no open blocker to hold it, so with neither, a wait its headline names would hold nothing. Nothing was written.",
 				r.bead, r.bead)
 		}
 	}
@@ -300,9 +271,8 @@ func (r *take) guardRelease() error {
 // merge on work that merges with it. A shared branch alone is no proof, since
 // workspace-setup writes it before the wait pushes. The proof is a state a
 // push precedes: the wait closed, handed to the refinery, or its PR on the
-// pending record. When every named wait is a landed rider, nothing waits, and
-// the headline takes the settled mark --no-wait writes. A route also counts
-// each owed wait that is neither closed nor a human gate as work on a blocker.
+// pending record. A route also counts each owed wait that is neither closed
+// nor a human gate as work on a blocker.
 func (r *take) sortWaits() error {
 	if len(r.req.WaitingOn) == 0 {
 		return nil
@@ -351,9 +321,6 @@ func (r *take) sortWaits() error {
 		case row.Status() != "closed" && !person.IsHumanGate(row.IssueType(), row.AwaitType()):
 			r.routeWaits = append(r.routeWaits, w)
 		}
-	}
-	if len(r.riders) > 0 && len(r.real) == 0 {
-		r.noWait = true
 	}
 	return nil
 }
@@ -538,21 +505,14 @@ func (r *take) write() (string, error) {
 	return fmt.Sprintf("takeaway set on %s (by %s)%s: %s", r.bead, r.by, note, r.text), nil
 }
 
-// update is the one update: the headline, its time, its writer and its settled
-// mark, and for a release the park, guarded by the status and the assignee the
-// release read. The park reopens the bead and assigns it to the named agent or
-// to nobody, clears Gas City's route and session pins, and lifts hold:mayor
-// from a bead it sends on.
+// update is the one update: the headline appended to the bead's notes under a
+// heading that names its writer and its time, and for a release the park,
+// guarded by the status and the assignee the release read. The park reopens
+// the bead and assigns it to the named agent or to nobody, clears Gas City's
+// route and session pins, and lifts hold:mayor from a bead it sends on.
 func (r *take) update(at string, release bool) *ledger.Write {
 	w := r.t.Ledger.Write(r.bead)
-	textKey.Set(w, r.text)
-	atKey.Set(w, at)
-	byKey.Set(w, r.by)
-	settled := ""
-	if r.noWait {
-		settled = "1"
-	}
-	settledKey.Set(w, settled)
+	w.Note(Note(r.by, at, r.text))
 	if release {
 		w.Guard(r.status, r.assignee)
 		w.Status("open")
@@ -563,6 +523,12 @@ func (r *take) update(at string, release bool) *ledger.Write {
 		}
 	}
 	return w
+}
+
+// Note is the headline as the bead's notes carry it: a heading that names who
+// wrote it and when, RFC 3339 UTC to the second, over the headline itself.
+func Note(by, at, text string) string {
+	return "## Takeaway (" + by + ", " + at + ")\n" + text
 }
 
 // keptClaim nudges the holder of the claim the release kept to stop and give

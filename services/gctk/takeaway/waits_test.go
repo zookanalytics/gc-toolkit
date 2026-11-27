@@ -28,7 +28,7 @@ func TestEachWaitIsAnEdgeAfterTheHeadline(t *testing.T) {
 	if got := w.lines("DEP-ADD "); !slices.Equal(got, []string{"DEP-ADD tk-a tk-blk1 --type blocks", "DEP-ADD tk-a tk-blk2 --type blocks"}) {
 		t.Errorf("(EDGE) the edges are %q, want one per wait", got)
 	}
-	has(t, w.update("tk-a"), "--set-metadata gc.takeaway=routed — the fix is slung", "(EDGESTAMP) the headline")
+	has(t, w.update("tk-a"), "--append-notes "+Note("converse", stamp, "routed — the fix is slung"), "(EDGESTAMP) the headline")
 	w.before("UPDATE tk-a", "DEP-ADD ", "(EDGESTAMP) the headline comes before its edges")
 	if !w.saidAny("waiting-on edge: tk-a depends on tk-blk1") {
 		t.Errorf("(EDGE) the edge is unsaid: %q", w.said)
@@ -60,7 +60,7 @@ func TestAnEdgeThatDoesNotLandFailsTheVerbAfterTheHeadline(t *testing.T) {
 	if code != 4 || out != "" {
 		t.Fatalf("(EDGEFAIL) exits %d with %q, want 4", code, out)
 	}
-	if w.row("tk-a").Metadata["gc.takeaway"] != "held for review" {
+	if w.row("tk-a").Notes != Note("host", stamp, "held for review") {
 		t.Error("(EDGEFAIL) the headline was lost with the edge")
 	}
 	if !w.saidAny("could not wire --waiting-on tk-nope") || !w.saidAny("gc bd dep add tk-a tk-nope -t blocks") {
@@ -89,9 +89,8 @@ func TestAWaitInAnotherStoreIsRefused(t *testing.T) {
 
 // A landed rider rode the bead's own branch and has put its work there, proven
 // by a state a push precedes: it closed, the refinery holds it, or its PR waits
-// on the pending record. The bead's own merge lands it, so it takes no edge,
-// and a headline whose every wait is one takes the settled mark. A shared
-// branch without that proof keeps its edge, and so does a wait on another
+// on the pending record. The bead's own merge lands it, so it takes no edge. A
+// shared branch without that proof keeps its edge, and so does a wait on another
 // branch, one with no branch, or any wait of a bead with no branch (EDGERIDE,
 // EDGERECORD, EDGECLOSED, EDGEUNLANDED, EDGESEP, EDGENOBR, EDGENOSUBJ,
 // EDGEMIX).
@@ -112,16 +111,15 @@ func TestALandedRiderTakesNoEdge(t *testing.T) {
 		name, bead string
 		waits      []string
 		edges      []string
-		settled    bool
 	}{
-		{"EDGERIDE", "tk-a", []string{"tk-w-handed"}, nil, true},
-		{"EDGERECORD", "tk-a", []string{"tk-w-rec"}, nil, true},
-		{"EDGECLOSED", "tk-a", []string{"tk-w-merged"}, nil, true},
-		{"EDGEUNLANDED", "tk-a", []string{"tk-w-pend"}, []string{"tk-w-pend"}, false},
-		{"EDGESEP", "tk-a", []string{"tk-w-diff"}, []string{"tk-w-diff"}, false},
-		{"EDGENOBR", "tk-a", []string{"tk-w-nobr"}, []string{"tk-w-nobr"}, false},
-		{"EDGENOSUBJ", "tk-b", []string{"tk-w-handed"}, []string{"tk-w-handed"}, false},
-		{"EDGEMIX", "tk-a", []string{"tk-w-handed", "tk-w-diff"}, []string{"tk-w-diff"}, false},
+		{"EDGERIDE", "tk-a", []string{"tk-w-handed"}, nil},
+		{"EDGERECORD", "tk-a", []string{"tk-w-rec"}, nil},
+		{"EDGECLOSED", "tk-a", []string{"tk-w-merged"}, nil},
+		{"EDGEUNLANDED", "tk-a", []string{"tk-w-pend"}, []string{"tk-w-pend"}},
+		{"EDGESEP", "tk-a", []string{"tk-w-diff"}, []string{"tk-w-diff"}},
+		{"EDGENOBR", "tk-a", []string{"tk-w-nobr"}, []string{"tk-w-nobr"}},
+		{"EDGENOSUBJ", "tk-b", []string{"tk-w-handed"}, []string{"tk-w-handed"}},
+		{"EDGEMIX", "tk-a", []string{"tk-w-handed", "tk-w-diff"}, []string{"tk-w-diff"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			w := setup(t)
@@ -135,11 +133,6 @@ func TestALandedRiderTakesNoEdge(t *testing.T) {
 			if !slices.Equal(edges, c.edges) {
 				t.Errorf("the edges are onto %q, want %q", edges, c.edges)
 			}
-			mark := "--set-metadata gc.takeaway_settled= "
-			if c.settled {
-				mark = "--set-metadata gc.takeaway_settled=1"
-			}
-			has(t, w.update(c.bead)+" ", mark, "the settled mark")
 			if len(c.edges) < len(c.waits) && !w.saidAny("is a landed rider on "+c.bead+"'s own branch") {
 				t.Errorf("a rider's skip is unsaid: %q", w.said)
 			}
@@ -147,27 +140,10 @@ func TestALandedRiderTakesNoEdge(t *testing.T) {
 	}
 }
 
-// --no-wait is the writer's answer that nothing waits on the bead, stamped as
-// gc.takeaway_settled=1 in the headline's own write. Every other headline
-// writes it empty, so no earlier answer stands for a later headline, and
-// --no-wait beside a named wait is refused before anything is written
-// (SETTLED, UNSETTLED, BOTH).
-func TestNoWaitIsTheSettledMark(t *testing.T) {
+// --no-wait says nothing waits on the bead, so beside a named wait it is
+// refused before anything is written (BOTH).
+func TestNoWaitBesideANamedWaitIsRefused(t *testing.T) {
 	w := newWorld(t)
-	w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.takeaway_settled": "1"}})
-	if code, _, _ := w.take(Request{Bead: "tk-a", Text: "resolved — the board was right", NoWait: true}); code != 0 {
-		t.Fatal("(SETTLED) a --no-wait headline did not land")
-	}
-	has(t, w.update("tk-a"), "--set-metadata gc.takeaway_settled=1", "(SETTLED) the headline's write")
-	w = newWorld(t)
-	w.put(fake.Bead{ID: "tk-a", Title: "the bead", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.takeaway_settled": "1"}})
-	if code, _, _ := w.take(Request{Bead: "tk-a", Text: "holding — needs a ruling"}); code != 0 {
-		t.Fatal("(UNSETTLED) a headline did not land")
-	}
-	if got := w.row("tk-a").Metadata["gc.takeaway_settled"]; got != "" {
-		t.Errorf("(UNSETTLED) an earlier settled mark stood beside a later headline: %q", got)
-	}
-	w = newWorld(t)
 	task(w, "tk-blk1", nil)
 	code, _, err := w.take(Request{Bead: "tk-a", Text: "both", NoWait: true, WaitingOn: []string{"tk-blk1"}})
 	if code != 2 || len(w.log) != 0 {
@@ -176,18 +152,18 @@ func TestNoWaitIsTheSettledMark(t *testing.T) {
 	has(t, errText(err), "contradicts", "(BOTH) the refusal")
 }
 
-// A release that parks a bead for a person states its disposition: a named
+// A release that parks a bead for a person says what it waits on: a named
 // wait, or --no-wait. A bead an open blocker already holds needs neither, since
 // that edge is its wait. A park whose blockers do not read is refused, since no
 // edge that holds it can be proven, and a bare headline parks nothing, so it
 // needs neither (NEITHERPARK, NEITHERPROBE, DELEGBARE, NEITHERBARE).
-func TestAParkForAPersonStatesItsDisposition(t *testing.T) {
+func TestAParkForAPersonSaysWhatItWaitsOn(t *testing.T) {
 	w := newWorld(t)
 	code, _, err := w.take(Request{Bead: "tk-a", Text: "parked on prose alone", By: "proactive", Release: true})
 	if code != 2 || len(w.log) != 0 {
 		t.Errorf("(NEITHERPARK) exits %d with %q written, want 2 and nothing", code, w.log)
 	}
-	has(t, errText(err), "states its disposition", "(NEITHERPARK) the refusal")
+	has(t, errText(err), "says what it waits on", "(NEITHERPARK) the refusal")
 
 	w = newWorld(t)
 	w.store.BlockedErr = errBroken

@@ -10,7 +10,6 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -48,15 +47,15 @@ var workMarkers = []stringKey{prrecord.Branch, prrecord.Result, workDirKey, prre
 	checkNameKey, anchorKey}
 
 // isCandidate reports whether a ready bead is raw input a fresh first reaction
-// may take, top-level and not already in motion. Each clause drops one kind of
-// bead that is no input: one with a dispatch path or a dispatch hold, whose
-// next move is decided; one with no description; one whose type the allowlist
-// leaves out; a topology root, and a step, a reaction's own root and step among
-// them, which advance only through their own run; a standing record and a
-// feedback pattern; a review lane; one that carries a headline, which every
-// exit of a first reaction and a sitting's ruling write, so it has been
-// triaged; one whose work markers put it in motion; and a member of a parent,
-// whose parent-child edge is its own. The sling's refusals are read again at
+// may take, top-level and not already in motion, by its own row. Each clause
+// drops one kind of bead that is no input: one with a dispatch path or a
+// dispatch hold, whose next move is decided; one with no description; one whose
+// type the allowlist leaves out; a topology root, and a step, a reaction's own
+// root and step among them, which advance only through their own run; a
+// standing record and a feedback pattern; a review lane; one whose work markers
+// put it in motion; and a member of a parent, whose parent-child edge is its
+// own. The beads that track a candidate say whether it already had a first
+// reaction or a sitting (dropReacted). The sling's refusals are read again at
 // its sling, since a bead can change while the sweep runs.
 func isCandidate(r *ledger.Record) (bool, error) {
 	if len(dispatchPaths(r)) > 0 || gascity.HasDispatchHold(r.Labels()) {
@@ -65,7 +64,7 @@ func isCandidate(r *ledger.Record) (bool, error) {
 	if r.Description() == "" || !slices.Contains(sweepTypes, r.IssueType()) || slices.Contains(topologyKinds, raw(kindKey, r)) {
 		return false, nil
 	}
-	for _, k := range []stringKey{stepRefKey, stepIDKey, rootBeadKey, takeaway.Text, takeaway.By} {
+	for _, k := range []stringKey{stepRefKey, stepIDKey, rootBeadKey} {
 		if raw(k, r) != "" {
 			return false, nil
 		}
@@ -138,7 +137,9 @@ func (e *SweepError) Error() string { return e.Msg }
 // one ready read is unassigned beads that are not epics, by priority, and the
 // candidate rule keeps the raw input among them (isCandidate). It then drops
 // every bead a live run works, by waits' run link, and a run map that does not
-// read drops nothing, which it says. Each reaction goes to the rig's proactive
+// read drops nothing, which it says. It drops every bead that already had a
+// first reaction or a sitting, and leaves a bead for the next sweep when that
+// read fails, which it says (dropReacted). Each reaction goes to the rig's proactive
 // pool whether or not the pool runs, by the name the city's roster gives it,
 // read once before the first sling, and a sling gc sling refuses, such as to a
 // pool the city does not configure, fails that candidate alone. A slung run
@@ -170,7 +171,7 @@ func (r *Reactions) Sweep(dryRun bool, deadline time.Duration, emit func(Swept))
 			cands = append(cands, rec)
 		}
 	}
-	cands = r.dropInFlight(cands)
+	cands = r.dropReacted(r.dropInFlight(cands))
 
 	if dryRun {
 		for _, c := range cands {
@@ -265,6 +266,55 @@ func (r *Reactions) dropInFlight(cands []*ledger.Record) []*ledger.Record {
 		r.say("%d candidate(s) already have a live workflow, so the sweep does not offer them (the sling would refuse them)", n)
 	}
 	return kept
+}
+
+// dropReacted is the candidates that have had no first reaction and no
+// sitting, by the beads that track each one: a run of the first-reaction
+// formula whose root has closed, unless Gas City's run cancel ended it, since
+// a reaction its check refused did not react, or a closed conversation that
+// tracks it. A live run and an open conversation are the sling's refusals to
+// count. Each exit of a reaction leaves a state that keeps its subject out of
+// the candidates while it stands, and this record keeps the subject out once
+// that state ends with nothing dispatched (specs/tk-1tfzr71.105/design.md,
+// section 2). The sling does not read it, so a request can still ask for
+// another reaction, and a candidate whose record does not read is left for the
+// next sweep, which it says.
+func (r *Reactions) dropReacted(cands []*ledger.Record) []*ledger.Record {
+	var out []*ledger.Record
+	var unread []string
+	for _, c := range cands {
+		had, err := r.hadReaction(c.ID)
+		switch {
+		case err != nil:
+			unread = append(unread, c.ID)
+		case !had:
+			out = append(out, c)
+		}
+	}
+	if len(unread) > 0 {
+		r.say("could not read whether %s had a first reaction or a sitting, so the sweep leaves them for the next one", strings.Join(unread, " "))
+	}
+	return out
+}
+
+// hadReaction reports whether bead has had a first reaction or a sitting: a
+// closed conversation tracks it, or a run of the first-reaction formula works
+// it whose root closed without Gas City's run cancel. One read of the beads
+// that track it answers both.
+func (r *Reactions) hadReaction(bead string) (bool, error) {
+	up, err := r.Ledger.Dependents(bead, "tracks")
+	if err != nil {
+		return false, err
+	}
+	convs, err := r.conversations(bead, up, true)
+	if err != nil || len(convs) > 0 {
+		return len(convs) > 0, err
+	}
+	runs, err := waits.EndedRunsOf(r.Ledger, bead, up)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(runs, func(w waits.Run) bool { return w.Formula == Formula && w.Outcome != waits.Canceled }), nil
 }
 
 // now is the reaction's clock.

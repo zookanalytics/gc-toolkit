@@ -277,9 +277,10 @@
     "name": "gc.outcome",
     "type": "string",
     "readers": [
-      "review"
+      "review",
+      "waits"
     ],
-    "doc": "The terminal disposition a step records. A review run's loop that closed reading pass passed its check."
+    "doc": "The run link reports how a run ended as its closed root's outcome, which reads canceled once Gas City's run cancel ended it. The terminal disposition a step records. A review run's loop that closed reading pass passed its check."
   },
   {
     "name": "gc.output_json",
@@ -373,30 +374,6 @@
       "waits"
     ],
     "doc": "The formula step a step bead carries out, as \u003cformula\u003e.\u003cstep\u003e. A live run with an open step whose ref ends in .load-context has not passed load-context. A review run's step's place in its formula. Its last part names the step, triage, rule-and-repair or lane, which says the output the step writes. A first reaction takes no bead that names the step it carries out."
-  },
-  {
-    "name": "gc.takeaway",
-    "type": "string",
-    "owner": "takeaway",
-    "doc": "A bead's headline: the one line, at most lifecycle.TakeawayMax codepoints, that its handling concluded, which gctk bead takeaway writes and every exit of a first reaction and every sitting's sign-off leaves. The first reaction's sweep passes over a bead that carries one, as one already triaged. Absent, nothing has concluded on the bead."
-  },
-  {
-    "name": "gc.takeaway_at",
-    "type": "string",
-    "owner": "takeaway",
-    "doc": "When the bead's headline was written, RFC 3339 UTC to the second, in the update that writes it."
-  },
-  {
-    "name": "gc.takeaway_by",
-    "type": "string",
-    "owner": "takeaway",
-    "doc": "Who wrote the bead's headline, such as host, proactive or converse, in the update that writes it. The first reaction's sweep passes over a bead that carries one, as one already triaged."
-  },
-  {
-    "name": "gc.takeaway_settled",
-    "type": "string",
-    "owner": "takeaway",
-    "doc": "1 when the writer of the bead's headline said nothing waits on the bead, and empty when it named a wait or said neither, written with every headline so no earlier headline's answer stands for a later one. lifecycle/lifecycle.toml [holds] pairs it with gc.takeaway, so a headline left with neither an edge nor this mark reads as a hold on prose."
   },
   {
     "name": "gc.var.branch",

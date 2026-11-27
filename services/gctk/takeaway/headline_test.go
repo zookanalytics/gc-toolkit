@@ -14,12 +14,12 @@ import (
 func TestTheHeadlineIsCappedBeforeAnythingIsWritten(t *testing.T) {
 	at := strings.Repeat("é", lifecycle.TakeawayMax)
 	w := newWorld(t)
-	if code, _, err := w.take(Request{Bead: "tk-a", Text: at}); code != 0 || w.row("tk-a").Metadata["gc.takeaway"] != at {
+	if code, _, err := w.take(Request{Bead: "tk-a", Text: at}); code != 0 || w.row("tk-a").Notes != Note("host", stamp, at) {
 		t.Errorf("(CAP) a headline at the cap exits %d (%v)", code, err)
 	}
 	w = newWorld(t)
-	if code, _, _ := w.take(Request{Bead: "tk-a", Text: "a" + strings.Repeat(" \n", 100) + "b"}); code != 0 || w.row("tk-a").Metadata["gc.takeaway"] != "a b" {
-		t.Errorf("(CAPWS) the headline stored is %q", w.row("tk-a").Metadata["gc.takeaway"])
+	if code, _, _ := w.take(Request{Bead: "tk-a", Text: "a" + strings.Repeat(" \n", 100) + "b"}); code != 0 || w.row("tk-a").Notes != Note("host", stamp, "a b") {
+		t.Errorf("(CAPWS) the notes hold %q", w.row("tk-a").Notes)
 	}
 	for _, req := range []Request{
 		{Bead: "tk-a", Text: at + "x"},

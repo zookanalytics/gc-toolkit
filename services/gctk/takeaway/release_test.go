@@ -25,8 +25,7 @@ func TestAReleaseParksAnOpenBeadInOneGuardedWrite(t *testing.T) {
 	}
 	up := w.update("tk-a")
 	has(t, up, "--if-status=open --if-assignee= --status=open --assignee= ", "(CAS) the park is guarded on the status and the assignee it read")
-	for _, want := range []string{"--set-metadata gc.takeaway=parked", "--set-metadata gc.takeaway_by=proactive",
-		"--set-metadata gc.takeaway_at=2026-11-20T06:00:00Z", "--set-metadata gc.takeaway_settled=1", "--set-metadata gc.routed_to= ",
+	for _, want := range []string{"--append-notes " + Note("proactive", stamp, "parked"), "--set-metadata gc.routed_to= ",
 		"--unset-metadata gc.execution_routed_to", "--unset-metadata gc.session_name", "--unset-metadata gc.session_id"} {
 		has(t, up, want, "(RELEASE) the one update")
 	}
@@ -290,7 +289,7 @@ func TestAReleaseOnAClosedBeadKeepsItsDisposition(t *testing.T) {
 	for _, never := range []string{"--status", "--assignee", "--if-", "gc.routed_to", "--unset-metadata"} {
 		hasnt(t, up, never, "(FOLDED) the closed bead's write")
 	}
-	has(t, up, "--set-metadata gc.takeaway=folded into tk-carrier", "(FOLDED) the headline")
+	has(t, up, "--append-notes "+Note("proactive", stamp, "folded into tk-carrier"), "(FOLDED) the headline")
 	if b := w.row("tk-a"); b.Status != "closed" || b.Assignee != "polecat-old" || b.Metadata["gc.routed_to"] != "human" {
 		t.Errorf("(FOLDSTORE) the closed bead reads %s under %q routed %q", b.Status, b.Assignee, b.Metadata["gc.routed_to"])
 	}

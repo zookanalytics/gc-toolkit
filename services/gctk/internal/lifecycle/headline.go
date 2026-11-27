@@ -10,10 +10,9 @@ import (
 )
 
 // TakeawayMax caps a headline in codepoints: a takeaway and a park gate's title,
-// each one line read at a glance. Headline applies it for gctk's writers, and
-// `gctk lifecycle --takeaway` applies it too. assets/scripts/gc-helm.sh carries
-// its own copy, TAKEAWAY_MAX, for the conversation titles it writes, and
-// lifecycle.test.sh holds both to 140.
+// each one line read at a glance. Headline applies it for gctk's writers.
+// assets/scripts/gc-helm.sh carries its own copy, TAKEAWAY_MAX, for the
+// conversation titles it writes, and gc-helm.test.sh holds the two equal.
 const TakeawayMax = 140
 
 // ErrNoHeadline is Headline's refusal of a text that holds nothing but space.
