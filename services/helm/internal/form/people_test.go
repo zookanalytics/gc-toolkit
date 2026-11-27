@@ -523,7 +523,7 @@ func TestOpeningASeatKeepsTheUnsavedQuestion(t *testing.T) {
 	m := newForm(t, f, Options{DraftDir: dir})
 	loadCity(m)
 	focusOn(t, m, questionField)
-	typeText(m, "is the deacon stuck?")
+	typeText(m, "is the witness stuck?")
 	toPage(t, m, peopleScreen)
 	if _, cmd := m.Update(key(tea.KeyEnter)); !isQuit(cmd) || strings.Join(f.seats, "|") != "mechanik" {
 		t.Fatalf("Enter: seats %v", f.seats)

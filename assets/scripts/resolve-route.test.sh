@@ -39,7 +39,7 @@ export PATH="$BIN:$PATH"
 export STUB_AGENTS='{"agents":[
   {"qualified_name":"bd.dog"},
   {"qualified_name":"gc-toolkit.dog"},
-  {"qualified_name":"gc-toolkit.deacon"},
+  {"qualified_name":"gc-toolkit.mechanik"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"},
   {"qualified_name":"gc-toolkit/gc-toolkit.refinery"},
   {"qualified_name":"gc-toolkit/gc-toolkit.witness"},

@@ -34,7 +34,7 @@ template="${GC_TEMPLATE:-}"
 [ -n "$template" ] || exit 0
 case "${template##*.}" in
   polecat) : ;;
-  *) exit 0 ;; # refinery/witness/deacon/mechanik/converse — not a work-bead worker
+  *) exit 0 ;; # refinery/witness/mechanik/converse — not a work-bead worker
 esac
 
 command -v jq >/dev/null 2>&1 || exit 0

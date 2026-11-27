@@ -44,22 +44,22 @@ hasnt "$OUT" "\"refinery\" carries" "the matched role is not flagged"
 # --- 3. fragment but no overlay is an ERROR ----------------------------------
 reset
 patch refinery "overlays/cycle-recycle"
-inject refinery; inject deacon   # deacon injects but has no overlay stanza
+inject refinery; inject mechanik   # mechanik injects but has no overlay stanza
 OUT=$(run); RC=$?
 eq "$RC" "2" "a role injecting the fragment with no overlay is an ERROR"
-has "$OUT" "\"deacon\" injects" "the role with dead doctrine is named"
+has "$OUT" "\"mechanik\" injects" "the role with dead doctrine is named"
 has "$OUT" "carries no overlay_dir" "the finding says the overlay is missing"
 
 # --- 4. both directions at once → two findings -------------------------------
 reset
 patch refinery "overlays/cycle-recycle"   # overlay, but its prompt is plain → overlay-only
 plain refinery
-inject deacon                             # fragment, no overlay → fragment-only
+inject mechanik                           # fragment, no overlay → fragment-only
 OUT=$(run); RC=$?
 eq "$RC" "2" "a mismatch in both directions errors"
 has "$OUT" "2 finding(s)" "both halves are reported"
 has "$OUT" "refinery" "the overlay-only role is named"
-has "$OUT" "deacon" "the fragment-only role is named"
+has "$OUT" "mechanik" "the fragment-only role is named"
 
 # --- 5. injection is read from the RESOLVED prompt_template ------------------
 # refinery carries the overlay and shares a template that injects, and has no

@@ -324,7 +324,7 @@ api_endpoint_target() { # api_endpoint_target <endpoint> <effective-host> <fill-
 #
 # $GC_RIG_ROOT is authoritative and narrow: a rig agent is measured against its
 # OWN rig even while standing in a clone of something else. City-scope agents
-# (deacon, mechanik) carry no rig root and legitimately work across rigs, so
+# (mechanik, mayor, po) carry no rig root and legitimately work across rigs, so
 # for them the owned set is every rig in the city. Falling back to the working
 # directory instead would make the guard vacuous exactly where it is needed —
 # a checkout of someone else's repository would authorize itself.

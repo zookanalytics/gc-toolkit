@@ -32,13 +32,13 @@ STUB
 chmod +x "$BIN/gc"
 export PATH="$BIN:$PATH"
 
-# converse exists ONLY rig-scoped; deacon exists ONLY city-scoped. That split
+# converse exists ONLY rig-scoped; mechanik exists ONLY city-scoped. That split
 # is the whole subject: neither name is routable at both scopes, and the
 # conditional-prefix form the copies used to carry cannot tell them apart.
 export STUB_AGENTS='{"agents":[{"qualified_name":"gc-toolkit/gc-toolkit.converse"},
   {"qualified_name":"rig-a/gc-toolkit.converse"},
   {"qualified_name":"gc-toolkit/gc-toolkit.polecat"},
-  {"qualified_name":"gc-toolkit.deacon"}]}'
+  {"qualified_name":"gc-toolkit.mechanik"}]}'
 unset STUB_AGENTS_FAIL 2>/dev/null || true
 
 run() { # <route-or-flag>... -> stdout in OUT, stderr in ERR, status in RC
@@ -65,10 +65,10 @@ has "$(cat "$TMP/err")" "gc-toolkit/gc-toolkit.converse, rig-a/gc-toolkit.conver
 echo "# a bare name that IS a live identity is returned bare"
 # City-scoped agents carry unqualified identities, so 'bare' is not itself the
 # defect — being unmatched is. A blanket "qualify everything" rule would refuse
-# the deacon, who is only ever addressed this way.
-env -u GC_RIG "$SUT" gc-toolkit.deacon >"$TMP/out" 2>"$TMP/err"; RC=$?
+# the mechanik, who is only ever addressed this way.
+env -u GC_RIG "$SUT" gc-toolkit.mechanik >"$TMP/out" 2>"$TMP/err"; RC=$?
 eq "$RC" 0 "exit 0"
-eq "$(cat "$TMP/out")" "gc-toolkit.deacon" "the city identity survives unqualified"
+eq "$(cat "$TMP/out")" "gc-toolkit.mechanik" "the city identity survives unqualified"
 
 echo "# an explicitly qualified name is taken as given"
 GC_RIG=gc-toolkit run gc-toolkit/gc-toolkit.polecat
@@ -131,7 +131,7 @@ eq "$(verdict gc-toolkit/gc-toolkit.converse '')" "unbound-store" \
     "a rig-less caller cannot reconcile a qualified route with its store"
 eq "$(env -u GC_RIG "$SUT" --verdict gc-toolkit/gc-toolkit.converse 2>/dev/null)" "unbound-store" \
     "…unset reads the same as empty"
-eq "$(verdict gc-toolkit.deacon '')" "ok" "a bare city identity is still read on identity alone"
+eq "$(verdict gc-toolkit.mechanik '')" "ok" "a bare city identity is still read on identity alone"
 eq "$(verdict gc-toolkit.converse '')" "no-identity" "…and an unheld bare name still reads no-identity"
 eq "$(verdict human '')" "no-identity" "…rig-less too"
 eq "$(verdict '' '')" "no-identity" "an empty route is still no-identity"
