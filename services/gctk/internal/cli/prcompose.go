@@ -38,10 +38,10 @@ summary region names it, and never the bead's own target or merged_target,
 since a bead with no target opens into the rig's default branch and a
 retargeted bead's merged_target names its earlier base.
 
---gates is the gate set the bead's check set resolves to at --head, as
-gctk review checks --resolve <set> --through open-as-draft --with-phase prints
-it, empty for none. Without it a region that must be written is not: the body
-printed carries none, and --edit leaves the PR's as it stands.
+--gates is the gate set the summary region names at --head, one
+<check>\t<phase> per line, and --gates '' names none. Without it a region that
+must be written is not: the body printed carries none, and --edit leaves the
+PR's as it stands.
 
 It prints one JSON object: {"title", "body", "summary", "branch_beads",
 "branch_bead_count"}. summary and branch_beads are each section's outcome:
@@ -108,7 +108,7 @@ func newPRComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&o.head, "head", "", "the commit the PR opens at, or carries now")
 	f.StringVar(&o.target, "target", "", "the branch the PR opens into, or is open into")
-	f.StringVar(&o.gates, "gates", "", "the gates the bead's check set resolves to at --head, one <check>\\t<phase> per line")
+	f.StringVar(&o.gates, "gates", "", "the gates the summary region names at --head, one <check>\\t<phase> per line, empty for none")
 	f.BoolVar(&o.edit, "edit", false, "edit the open PR's title and body to the composition where they differ, reading the body from the PR")
 	f.StringVar(&o.pr, "pr", "", "with --edit, the PR's URL, when the bead's record names none yet")
 	return cmd
