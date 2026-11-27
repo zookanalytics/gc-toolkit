@@ -1126,16 +1126,16 @@ conversation_reply() {
 # `gc bd dep remove <anchor> <conversation>`
 # (skills/converse-hold), and the lift stands for that sitting: open, completing
 # a conversation a sitting has taken, leaves the hold as that sitting left it.
-# The edge holds only the anchor: a review, a rework or a supplement is a bead
-# of its own that the anchor waits on, and goes on while the merge waits. Before
+# The edge holds only the anchor: a review or a rework is a bead of its own that
+# the anchor waits on, and goes on while the merge waits. Before
 # a PR opens, the anchor is the work itself, which the edge would stop, so only
 # an open PR's anchor takes one.
 
 # subject_anchor <subject-row> — the anchor a conversation about the subject
 # would hold the merge of: the subject itself when it is an anchor (it carries a
-# merge_result), else the bead its anchor_bead names, as a PR's review, rework or
-# supplement names it. Prints nothing for a subject that is neither. <row> is the
-# subject's own row, as row_now prints it.
+# merge_result), else the bead its anchor_bead names, as a PR's review or rework
+# names it. Prints nothing for a subject that is neither. <row> is the subject's
+# own row, as row_now prints it.
 subject_anchor() {
     printf '%s' "$1" | jq -r '(.metadata // {}) as $m
         | if (($m.merge_result // "") | tostring) != "" then (.id // "") | tostring

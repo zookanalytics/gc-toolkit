@@ -165,10 +165,10 @@ renudge-stale-human-gates mails it again while the gate stays open. Both
 address the gate's assignee, then `gc.deferred_assignee`, then
 `$GC_ESCALATION_RECIPIENT`, which defaults to the `human` mailbox
 ([gascity/human-engagement.md](gascity/human-engagement.md#human-gates-and-the-orders-that-surface-them)).
-The operator of this city reads the board, not mail, so the town's `city.toml`
-disables the renudge order, and the creation notice is a record in an unread
-mailbox rather than the reach. A city whose operator reads mail keeps both, and
-every gate the pack files reaches that operator through them unchanged.
+The operator of this city reads the board, not mail, and the town's `city.toml`
+sets which of the two orders the city runs. A city whose operator reads mail
+keeps both, and every gate the pack files reaches that operator through them
+unchanged.
 
 **The board is the reach.** The helm board draws each open human gate as a
 question, and lists the gate and each bead it holds as waiting on the operator,
@@ -236,8 +236,8 @@ session carries `human`. A sitting starts only when the operator engages.
 
 A conversation on an open PR holds the PR's merge until it closes. The subject
 counts as an open PR when it is the PR's anchor, not closed, or a bead whose
-`anchor_bead` names that anchor, such as the PR's review, rework or
-supplement. An anchor counts only while its `merge_result` is
+`anchor_bead` names that anchor, such as the PR's review or rework. An
+anchor counts only while its `merge_result` is
 `pull_request_pending` or `pull_request_head_changed`. The hold is bd's own: the anchor depends on the
 conversation through a `blocks` edge, so bd counts the anchor blocked while
 the conversation is open and lets it go once the conversation closes.
@@ -257,8 +257,8 @@ the conversation is open and lets it go once the conversation closes.
   conversation, by the one definition its labels, the board and engage read
   ([state-machine.md](state-machine.md#the-status-label-github-projection)): a
   conversation is a bead a person owes the next move on. The edge holds only
-  the merge. Reviews, reworks and supplements keep running, because each is a
-  bead the anchor waits on, which the edge does not block. The landing order
+  the merge. Reviews and reworks keep running, because each is a bead the
+  anchor waits on, which the edge does not block. The landing order
   pours the PR's review runs, and the refinery's find-work takes the PR's bead
   at a new head, as each would with no conversation, whether the conversation
   waits in the operator's queue or a sitting holds it. Gas City gives the

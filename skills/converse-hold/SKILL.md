@@ -109,8 +109,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 ```
 
 When nothing holds the subject, pass `--no-wait` in place of `--waiting-on`.
-Nothing holds a review, rework or supplement of an open PR when no gate of its
-own holds it, because this conversation holds the anchor, not that subject.
+Nothing holds a review or rework of an open PR when no gate of its own holds
+it, because this conversation holds the anchor, not that subject.
 Nothing holds an anchor whose hold this sitting lifted, either. When the writer
 refuses, the board cannot show the hold: do NOT post the framing, fix what the
 writer names, and run it again. Never park a live conversation: the writer's

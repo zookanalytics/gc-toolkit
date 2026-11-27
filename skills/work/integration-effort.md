@@ -125,7 +125,8 @@ RIG_ROOT=$(gc rig list --json | jq -r --arg r <rig> '.rigs[] | select(.name == $
 ```
 
 Once the refinery has taken the landing bead, send work for its branch to the
-PR as a rework or a supplement (the prs skill).
+PR as an ask on the landing bead, which the PR's review run takes (the prs
+skill, "Send it back for rework").
 
 ## Share an input among the effort's beads
 
