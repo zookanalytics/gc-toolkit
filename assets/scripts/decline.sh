@@ -14,9 +14,11 @@
 # benign before is asked again.
 #
 # What this session holds is read before anything is written: the bead `gc hook
-# current` names. A bead with a gc.step_ref is a step of a run, and the run ends
-# through run-cancel.sh. A bead with none is a claim with no run, which a claimant
-# with no poured workflow holds on the work bead itself, so nothing is cancelled.
+# current` names. A claim that does not read stops the call there, since running
+# it again can change that. A bead with a gc.step_ref is a step of a run, and the
+# run ends through run-cancel.sh. A bead with none is a claim with no run, which a
+# claimant with no poured workflow holds on the work bead itself, so nothing is
+# cancelled.
 # A gated decline of such a claim ends once the gate and its wait have landed,
 # and await-ruling.sh has then released the claim. A gate asked with no wait, as
 # for a parked bead, leaves the bead as it is, this session's name included: a
@@ -122,18 +124,19 @@ claim_read() {
     else empty end' 2>/dev/null
 }
 
-# A claim with no run: what `gc hook current` names reads, and carries no
-# gc.step_ref. Anything this cannot read is a step, whose cancel proves the run
-# is this session's or refuses.
+if ! HELD=$(gc hook current --id-only </dev/null) || [ -z "$HELD" ]; then
+  echo "$PROG: this session's claim did not read, so what it holds is not known. Nothing was written, and NOT cancelling or draining, so running this again can end it." >&2
+  exit 1
+fi
+# A claim with no run: the bead the claim names reads, and carries no
+# gc.step_ref. A bead this cannot read is a step, whose cancel proves the run is
+# this session's or refuses.
 CLAIM=""; CLAIM_STATUS=""
-HELD=$(gc hook current --id-only </dev/null 2>/dev/null) || HELD=""
-if [ -n "$HELD" ]; then
-  ROW=$(claim_read "$HELD")
-  IFS='|' read -r ROW_STATUS _ ROW_STEP _ <<<"$ROW"
-  if [ -n "$ROW" ] && [ -z "$ROW_STEP" ]; then
-    CLAIM="$HELD"
-    CLAIM_STATUS="$ROW_STATUS"
-  fi
+ROW=$(claim_read "$HELD")
+IFS='|' read -r ROW_STATUS _ ROW_STEP _ <<<"$ROW"
+if [ -n "$ROW" ] && [ -z "$ROW_STEP" ]; then
+  CLAIM="$HELD"
+  CLAIM_STATUS="$ROW_STATUS"
 fi
 if [ -n "$CLAIM" ]; then
   KEEP="NOT draining: $CLAIM is a claim with no run, so it stays with this session, which can run this again."

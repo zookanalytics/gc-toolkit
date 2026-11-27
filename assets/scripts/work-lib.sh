@@ -191,8 +191,11 @@ work_held_by_proof() {
   [ -z "$live" ] || why="$why; a run works it ($live)"
   route=$(work_meta gc.routed_to)
   [ -z "$(printf '%s' "$route" | tr -d '[:space:]')" ] || why="$why; it is routed to $route"
-  claimed=$(gc hook current --id-only </dev/null 2>/dev/null) || claimed=""
-  [ "$claimed" = "$WORK_HELD_BY" ] || why="$why; gc hook current names ${claimed:-no bead}, not $WORK_HELD_BY"
+  if ! claimed=$(gc hook current --id-only </dev/null) || [ -z "$claimed" ]; then
+    why="$why; gc hook current names no bead, not $WORK_HELD_BY"
+  elif [ "$claimed" != "$WORK_HELD_BY" ]; then
+    why="$why; gc hook current names $claimed, not $WORK_HELD_BY"
+  fi
   printf '%s' "$WORK_ROW" | jq -e --arg c "$WORK_HELD_BY" \
       'any(.[0].dependencies[]?; (.id // "") == $c and (.dependency_type // "") == "blocks")' >/dev/null 2>&1 \
     || why="$why; it has no blocks edge onto $WORK_HELD_BY"

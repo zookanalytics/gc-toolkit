@@ -19,7 +19,10 @@ finding, never by finding another way to send.
 
 When a rig of this city owns the software, the problem is work for that rig
 rather than an upstream finding: `gc rig list` names the rigs, and the
-`gc-toolkit.work` skill files the bead there.
+`gc-toolkit.work` skill files the bead there. When that rig carries a fork of
+an upstream project, a bug the city's own configuration fixes, in `city.toml`
+or a pack the city runs, takes that change as its fix instead, and the fork
+carries no patch for it.
 
 The pack's `docs/outbound-sends.md` holds the reasons and where the line sits.
 
