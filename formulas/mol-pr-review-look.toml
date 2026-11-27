@@ -74,10 +74,9 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 ```
 
 Exit 3 prints why the output does not stand: correct the file and run it again.
-On exit 1 or 2, run it again. A stop's record files the question on the bead
-that owns the PR and marks this step failed hard.
+On exit 1 or 2, run it again.
 
-**5. Post the look on the PR**, which adds its verdict to the round's comment:
+**5. Post the look on the PR**, in the round's comment:
 
 ```bash
 # >>> gctk-bin
@@ -86,9 +85,7 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" pr answer "$(gc hook current --id-only)"
 ```
 
-On exit 1 or 2, run it again. When it fails again, close this step all the
-same: the record put the look in the notes of the bead that owns the PR, and a
-stop's question is on its gate.
+On exit 1 or 2, run it again. When it fails again, go on to close this step.
 
 **6. Close this step.** A look that sends the review on closes it plainly, and
 the loop's check judges the round:
