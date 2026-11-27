@@ -69,9 +69,8 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"that head as {name, status, conclusion, suite, url}, suite the id of the check suite that holds the "+
 		"result and url its log; and suites, each check suite at that head as {id, status, created_at, "+
 		"check_runs}, check_runs how many check runs it holds; with the signs head, rollup, contexts, "+
-		"check_runs and statuses, the last two counts by state. conversation: since, the provenance instant "+
-		"the definition of feedback was applied from; approvers and requesters, the accounts that can push "+
-		"whose approval or "+
+		"check_runs and statuses, the last two counts by state. conversation: since, the provenance instant the definition "+
+		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+
 		"request for changes stands; untaken, each post that is feedback and carries neither of the city's "+
 		"marks, its EYES or its THUMBS_UP, as {kind, id, node, author, url, state, path, line, review}: kind "+
 		"review, inline or conversation, node its node id on GitHub, state a review's, path and line an inline "+
