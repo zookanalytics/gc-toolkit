@@ -248,19 +248,19 @@ each head: answered once the head carries its fix, or once its check ran there.
 
 ## A finding that came back after a fix
 
-A lane's finding can raise again a point an earlier round of this run ruled
-must-fix and fixed, under a new id: the same defect, or the defect that round's
-fix was meant to remove, back in the same place or in the code that fix wrote.
+A lane's finding can raise again, under a new id, a point an earlier round of
+this run ruled must-fix and fixed. It restates that earlier finding when both
+of these hold:
+
+- It raises the same defect, or the defect that round's fix was meant to
+  remove.
+- It sits in the same place, or in the code that round's fix wrote.
+
 Name that earlier finding in the ruling's `restates`, as
 `{"iteration", "check", "finding"}`, and rule the finding by its lane's rule as
 any other. A finding that only shares a file or a section with an earlier one
 restates nothing. The round's read lists each finding an earlier round of the
-run ruled must-fix, which are the findings a `restates` can name.
-
-The run counts these. A finding that comes back a second time, and a round
-whose must-fix findings are no fewer than two rounds before, call for a fresh
-look at the whole review, which can stop it for a person's answer, so mark a
-return only where the point is the same.
+run ruled must-fix, and a `restates` names one of those.
 
 ## Each answer says what the head carries
 
