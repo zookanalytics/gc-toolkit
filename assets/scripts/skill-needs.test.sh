@@ -602,7 +602,7 @@ have "…whose stop writes nothing to the conversation before it acknowledges th
 have "…and says a sitting refused its ack over its conversation goes on with it" \
     'The acknowledgement is refused because this session holds the conversation**, which it started and has not finished. The sitting goes on: carry the conversation on where your thread left it, and run the acknowledgement again once the conversation is closed, back in the operator'"'"'s queue or left to wait.' "$TMP/prompt-stay"
 have "…and asks for help when its thread does not hold the conversation" \
-    'The acknowledgement is refused and your thread does not hold the conversation**, so you cannot tell where it was left. Say so in the thread, mail the witness `HELP:`, and wait.' "$TMP/prompt-stay"
+    'The acknowledgement is refused and your thread does not hold the conversation**, so you cannot tell where it was left. Say so in the thread, mail the witness `HELP:` with `--notify`, and wait.' "$TMP/prompt-stay"
 lacks "…and reconstructs no entry from a conversation's notes" 'staying:' "$PROMPT" \
     "the entry reads the record; the prompt acts on what it prints"
 have "the stay skill stays through the sign-off" \

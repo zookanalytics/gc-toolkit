@@ -142,7 +142,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6168 and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -927,7 +927,7 @@ no warrant.
     code implements it.
   - The search is
     [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** A Gas City release requests a session's turn for its unread
   mail whoever sent it, as #1966 rules. The orders and the verb then retire,
   and each agent they list is woken by Gas City. Before that, once the city

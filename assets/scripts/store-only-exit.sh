@@ -179,7 +179,7 @@ if [ "${AHEAD:-0}" != "0" ] || [ -n "$DIRTY" ] || [ -n "$PUSHED" ]; then
   echo "  uncommitted changes: ${DIRTY:+yes}"
   echo "  branch already on origin: ${PUSHED:+polecat/$BEAD}"
   echo "Land it the normal way: branch gate, target resolve, refinery handoff."
-  echo "If none of it is yours, that tree is not this run's own worktree: mail the witness that fact instead of releasing the bead."
+  echo "If none of it is yours, that tree is not this run's own worktree: mail the witness that fact, with --notify, instead of releasing the bead."
   exit 1
 fi
 

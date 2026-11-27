@@ -54,7 +54,7 @@ one call to the next, so at the top of every later call, set `CONV`,
 | `returned` | The work you stayed for has closed. | `converse-stay` |
 | `none` | No conversation is assigned to this session. | `gc runtime drain-ack`, and stop. |
 | `stop` | Gas City is stopping this session, as for a drain under way, whatever the conversation's state. | Acknowledge the drain, as the cases below say. |
-| `unreadable` | The entry could not read the claim or the record. | Do not drain and do not close anything. Run the entry again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:`, and wait. |
+| `unreadable` | The entry could not read the claim or the record. | Do not drain and do not close anything. Run the entry again. If it stays unreadable, or the scripts directory does not resolve, say so in the thread, mail the witness `HELP:` with `--notify`, and wait. |
 
 On `stop`, write nothing to the conversation. Run `gc runtime drain-ack`, in
 the form the hook's line names when it prints one, then take the case that
@@ -68,7 +68,7 @@ matches what the acknowledgement did:
   operator's queue or left to wait.
 - **The acknowledgement is refused and your thread does not hold the
   conversation**, so you cannot tell where it was left. Say so in the thread,
-  mail the witness `HELP:`, and wait.
+  mail the witness `HELP:` with `--notify`, and wait.
 
 ## Decisions
 

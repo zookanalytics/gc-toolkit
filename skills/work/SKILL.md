@@ -279,12 +279,13 @@ this answers:
   agent when its blocker closes. The refinery takes an integration effort's
   landing bead and its bring-current hand-off, which `integration-effort.md`
   files.
-- **The deacon and the witness patrol**, and each one's hook offers only its
-  patrol's own wisp, so neither takes a bead. Send what one of them must act
-  on as mail, which its patrol reads every cycle:
+- **The deacon and the witness** take no bead: the deacon's hook offers only
+  its patrol's own wisp, and the witness runs only for its mail. Send what one
+  of them must act on as mail, with `--notify`, which asks Gas City for the
+  recipient's turn and wakes a witness that sleeps:
 
   ```bash
-  gc mail send <qualified-name> -s "<what it must do>" -m "<the bead, and what to do about it>"
+  gc mail send <qualified-name> --notify -s "<what it must do>" -m "<the bead, and what to do about it>"
   ```
 
 ## Stand up an integration effort

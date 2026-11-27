@@ -296,13 +296,14 @@ such as a base branch with failing pre-flights or a broken dedupe lookup. Use
 `HELP:` when you need an answer and `NOTICE:` when you are reporting a fact.
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" -s "HELP: <one line>" -m "Issue: <work-bead>
+gc mail send "${GC_RIG:+$GC_RIG/}{{ .BindingPrefix }}witness" --notify -s "HELP: <one line>" -m "Issue: <work-bead>
 Hit: <what you hit>. Tried: <what you tried>. Need: <what unblocks it>."
 ```
 
-The witness triages its inbox every patrol cycle. It unblocks what it can and
-files the rest as a finding, whose first reaction puts it to a person when one
-is needed, so mailing it is not a slower route to a human. It is the route that
+The witness runs only for its mail, and `--notify` asks Gas City to wake it.
+It unblocks what it can and files the rest as a finding, whose first reaction
+puts it to a person when one is needed, so mailing it is not a slower route to
+a human. It is the route that
 spends a human only when one is required.
 
 File a human gate yourself when no agent can answer: missing credentials,

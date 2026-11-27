@@ -145,7 +145,7 @@ mode = "on_demand"
 [[named_session]]
 template = "witness"
 scope = "rig"
-mode = "always"
+mode = "on_demand"
 
 [[named_session]]
 template = "deacon"

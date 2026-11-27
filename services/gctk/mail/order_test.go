@@ -16,7 +16,8 @@ import (
 // event type, and one on a cadence, since an event only starts a pass sooner
 // (docs/gctk-architecture.md, "What an order guarantees"). Each kills its run
 // at its timeout, so the pass's deadline ends inside it. Each wakes the
-// sessions of every converse template the pack ships, and of no other agent.
+// sessions of every converse template the pack ships and each rig's witness,
+// whose mail is its only work, and of no other agent.
 func TestTheOrders(t *testing.T) {
 	entries, err := os.ReadDir("../../../agents")
 	if err != nil {
@@ -31,6 +32,8 @@ func TestTheOrders(t *testing.T) {
 	if len(converse) == 0 {
 		t.Fatal("the pack ships no converse template under agents/")
 	}
+	woken := append(slices.Clone(converse), "witness")
+	slices.Sort(woken)
 	type trigger struct{ kind, on, interval string }
 	for file, when := range map[string]trigger{
 		"mail-notify-on-send.toml":   {kind: "event", on: "mail.sent"},
@@ -63,8 +66,8 @@ func TestTheOrders(t *testing.T) {
 		}
 		agents := strings.Fields(o.Order.Env["GCTK_MAIL_NOTIFY_AGENTS"])
 		slices.Sort(agents)
-		if !slices.Equal(agents, converse) {
-			t.Errorf("%s: GCTK_MAIL_NOTIFY_AGENTS names %q, and the pack's converse templates are %q", file, agents, converse)
+		if !slices.Equal(agents, woken) {
+			t.Errorf("%s: GCTK_MAIL_NOTIFY_AGENTS names %q, and the pack's converse templates and its witness are %q", file, agents, woken)
 		}
 	}
 }

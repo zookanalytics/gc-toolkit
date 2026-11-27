@@ -606,5 +606,5 @@ Your mail budget is **0–1 messages**. Escalate a genuine blocker to the
 witness as `HELP`; everything else is a nudge or a bead note:
 
 ```bash
-gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
+gc mail send "${GC_RIG:+$GC_RIG/}gc-toolkit.witness" --notify -s "HELP: <one line>" -m "Issue: <S>, run <root>. Hit: <what the exit or the check said>. Need: <what unblocks it>."
 ```

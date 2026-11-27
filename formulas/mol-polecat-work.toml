@@ -104,8 +104,9 @@ them with `gc mail archive <id>` after absorbing the context.
 - What does "done" look like?
 - If rejected: what specifically needs fixing?
 
-If blocked or unclear, mail the witness first, as your prompt's "Blocked work
-and human gates" section says: it answers what another agent can. When no agent
+If blocked or unclear, mail the witness first, with `--notify`, as your
+prompt's "Blocked work and human gates" section says: it answers what another
+agent can. When no agent
 can answer, as with a decision that is the operator's to make, file a human gate
 as that section shows.
 
@@ -550,7 +551,7 @@ the difference between a bead someone can dispose of and one that just sits:
   --kind re-homed`, plus `--successor-store rig:<name>` where the successor's
   id prefix is ambiguous. docs/authority-map.md gives that verb to converse
   dispositions and operator re-homes, so write the exact invocation into the
-  note and mail the witness a `NOTICE:` carrying it.
+  note and mail the witness a `NOTICE:` carrying it, with `--notify`.
 - The bead legitimately stays open pending something else — a ruling, a
   cadence, a person. Open and unrouted IS the resting state and no close verb
   is owed. Say in the note what would close it.

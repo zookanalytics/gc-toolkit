@@ -109,7 +109,7 @@ esac
 
 # The witness may not close another agent's beads, so the request to do it
 # needs a route onward. The prompt carries that next to the ban itself.
-if awk '/Close another agent.s step beads/ {f=NR} f && NR <= f + 4 && /reap/ {r=1} f && NR <= f + 4 && /notice-finding/ {n=1} END {exit !(r && n)}' "$PROMPT"; then
+if awk '/Close another agent.s step beads/ {f=NR} f && NR <= f + 4 && /reap/ {r=1} f && NR <= f + 4 && /finding/ {n=1} END {exit !(r && n)}' "$PROMPT"; then
   ok "the witness prompt files a reap request as a finding, beside its ban on reaping"
 else
   bad "the witness prompt's ban on closing another agent's beads no longer says where a reap request goes"

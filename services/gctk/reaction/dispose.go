@@ -203,9 +203,9 @@ func Validate(rt gascity.Runtime, rig string, d *Dispose) error {
 
 // handoffForm is the form the named agent who takes a bead in, by the agent's
 // name, or the refusal of an agent no bead is handed to. The po takes no work by
-// assignment, since its queue is the new work intake holds. The deacon and the
-// witness patrol their own wisps and take what they must act on as mail. The
-// keeper is no target of a first reaction. Any other agent has no form this
+// assignment, since its queue is the new work intake holds. The deacon patrols
+// its own wisps and the witness runs only for its mail, so each takes what it
+// must act on as mail. The keeper is no target of a first reaction. Any other agent has no form this
 // exit knows.
 func handoffForm(who, flag, route, bead string) (string, error) {
 	name := who[strings.LastIndex(who, "/")+1:]
@@ -220,7 +220,7 @@ func handoffForm(who, flag, route, bead string) (string, error) {
 	case is("keeper"):
 		return "", usage("%s %s names the keeper, and a first reaction hands no bead to the keeper. Pass %s for the pool that would build %s, %s the mechanik or a refinery for work that is theirs, or put %s to the operator with --disposition ruling", flag, who, route, bead, flag, bead)
 	case is("deacon"), is("witness"):
-		return "", usage("%s %s names an agent that patrols its own wisps and takes no bead, so a bead handed to it is read by nobody. Send it what it must act on as mail (gc mail send %s -s \"<what it must do>\" -m \"<the bead, and what to do about it>\"), and dispose %s another way", flag, who, who, bead)
+		return "", usage("%s %s names an agent that takes no bead, so a bead handed to it is read by nobody. Send it what it must act on as mail (gc mail send %s --notify -s \"<what it must do>\" -m \"<the bead, and what to do about it>\"), and dispose %s another way", flag, who, who, bead)
 	}
 	return "", usage("%s %s names no agent this exit can hand a bead to. The mechanik takes a route and the refinery the assignee (docs/authority-map.md, Route work), so pass %s with one of their qualified names, or route the bead to a pool", flag, who, flag)
 }
