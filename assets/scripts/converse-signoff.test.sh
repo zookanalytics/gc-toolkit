@@ -77,12 +77,9 @@
 #             before any write, and a re-run once it has closed, with the PR
 #             still open, files no second rework; a re-run whose record names
 #             the PR and no rework, after an attempt whose record of its rework
-#             the store refused, adopts and records that rework while it is
-#             open, and once it has closed is refused before any write, a
-#             stay's first line included, naming it, while a closed rework
-#             another ruling's record names or one on another PR refuses
-#             nothing, an open one beside a closed one is adopted, and a read
-#             of the conversation's reworks that fails stops the re-run
+#             the store refused, sends the ruling to the writer again, which
+#             finds that ask by its source and reason, and records it, while
+#             it is open and once it has closed
 #   (ANSWER*) a ruling on a turn that does not sign off answers only the gates
 #             it names, after the same rework or retirement, and leaves the
 #             conversation open for the sign-off

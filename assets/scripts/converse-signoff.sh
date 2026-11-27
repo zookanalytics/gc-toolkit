@@ -313,9 +313,7 @@
 #   form <key>=<value>, or a ruling that leaves the subject waiting on work its
 #   closer would check with no --close-brief, a --close-brief where no closer
 #   is armed, a subject waiting on work in the city's own store, or a
-#   --waiting-on that names the subject itself, or a re-run of a --rework
-#   whose record names the PR and no rework while a closed rework of this
-#   conversation on that PR that no recorded answer names stands.
+#   --waiting-on that names the subject itself.
 set -u
 
 # >>> control-char-scrub
