@@ -149,9 +149,12 @@ A review of an epic makes its own closes, none of them forced, through the
 Every message that returns a decision, a framing, a sign-off or a return ends
 in a hand-back that the operator can act on from its last several lines alone.
 Detail and evidence sit above the hand-back, a few sentences each, and
-reference material goes on the bead rather than in the message.
+reference material goes on the bead rather than in the message. The hand-back
+gives the operator only what helps them decide or act, in words they can
+follow without the city's internals.
 
-A hand-back names its subject by what it is to the operator:
+A hand-back names its subject by what it is to the operator, so they know it
+from what they already know:
 
 - a PR, or a decision about one, by the PR's number and what it does for them;
 - a report by who filed it and what it found;
@@ -162,19 +165,30 @@ A hand-back names its subject by what it is to the operator:
 The hand-back has these parts:
 
 - **Header**: `<subject-id> — <short human label>`, for one subject and never
-  a list of ids. The label is a plain phrase rather than the bead's title, and
-  it stays the same on every hand-back of the sitting.
-- **Body**: two to four plain sentences. The first hand-back's body opens with
-  what the subject is, what state it is in and why it reached the operator
-  now, before any mechanism, and a report with no PR involved says so. A later
-  hand-back opens with where the subject stands now. The body then says what
-  was done or is needed, and the consequence that tips the decision. It gives
-  the why and the stakes, never the mechanics: no other bead ids, and no script
-  or formula names.
+  a list of ids. It tells the operator which subject this is, so the label is
+  a plain phrase rather than the bead's title, and it stays the same on every
+  hand-back of the sitting.
+- **Body**: two to four plain sentences that let the operator place the
+  subject. The first hand-back's body opens with what the subject is, what
+  state it is in and why it reached the operator now, before any mechanism, and
+  a report with no PR involved says so. A later hand-back opens with where the
+  subject stands now, and a return with what its result settles and what it
+  leaves open. Every hand-back's body says what the conversation is settling
+  and what kind of answer it brings, such as findings, a proposal to rule on
+  or a design to review. The body then says what was done or is needed, and the
+  consequence that tips the decision. It gives the why and the stakes, never
+  the mechanics: no other bead ids, and no script or formula names.
 - **Decision**, when one is open: the recommendation first, so the operator
   can accept it without reading further. State it as the course before any
-  reason for it: what would be built or changed, each change given as what it
-  is today and what it becomes. When the operator asked for the best solution,
+  reason for it: what would be built or changed and how it would be used,
+  so the operator knows what their yes sets going. Name each change by
+  what it would change for them or for the people the work serves, as
+  they would see it or use it, before what it costs or when it lands, and
+  never only by its place in the city's process, such as who builds it or
+  what it waits on. Say each change once: when the detail above already
+  lays out the course, give it by its gist in a sentence or two rather
+  than listing its changes again, and state in full only what the detail
+  does not lay out. When the operator asked for the best solution,
   that course is the whole decision. When the course changes during the
   sitting, state the new one whole rather than as changes to the last. When
   the sitting has several threads open, say whether the decision settles one
@@ -194,9 +208,13 @@ The hand-back has these parts:
   as `proven`, `safe` or `costs nothing`.
 
 A message with detail above its hand-back opens the way the body does. Name
-things as the operator sees them on the board, the PR or the CLI. Pipeline
-vocabulary (moot, twin, fold, retract, park) and names learned from code stay
-out, or say what they mean where they are used. A hand-back with nothing to
+things as the operator sees them on the board, the PR or the CLI. The operator
+acts on the hand-back alone, so before you post it, read it as they would,
+knowing nothing of your reading, and replace each word they have not used and
+cannot see there with plain words for what it stands for, even when the detail
+above has used it: a term of the city's process, a name from the code, or a
+label you made up while you worked. An alternative the message names is
+weighed, with its reason, or left out. A hand-back with nothing to
 decide is legal: leave out the decision, and still end the message with the
 hand-back. When it is unclear whether anything is still owed, keep the
 conversation open.
