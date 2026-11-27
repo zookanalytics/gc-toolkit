@@ -344,6 +344,19 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
     reads only its two fixed hold values, whose names are not roles.
   - **Mechanik**, the operator's standing conversation, owns how the city works
     and every edit to the town repo.
+  - **The mayor**, one for the city, shows the operator what needs them across
+    it and moves each matter they pick to its home: a session of the city the
+    operator opens for a sitting as they open a po
+    ([human-engagement.md](human-engagement.md#a-mayor-sitting)). It reads the
+    operator's mailbox, Gas City's `human`, and each rig's open questions as the
+    board counts them. It owns each archive it makes in a sitting and each
+    handoff it writes there: a conversation for a decision, the rig's po for a
+    priority or new work, an existing writer for work a ruling already
+    authorized, the owner's record for an owned matter, and a conversation
+    about the missing home for a matter no role owns. It owns no matter past
+    its handoff. It implements nothing, places nothing and sets no priority,
+    and the queue `hold:mayor` holds stays the po's. No escalation or fallback
+    of the city's names it, so the mail still goes to `human`.
   - **A converse sitting** holds one bead's conversation, below. The patrols,
     the pools and the refinery keep what they own.
 - **A subject is the bead a human gate or a conversation is about.** Its notes
@@ -418,12 +431,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render through gctk's shared readers over the ledger, from Gas City's
-  `human` mailbox, and from Gas City's event log, which holds doctor's runs and
-  each monitor order's last good run. It reads no store of its own. The write
-  verbs are gctk commands, which skills, prompts and the board's write routes
-  call. The board's one write that gctk does not carry is archiving a mailbox
-  message, which Gas City's mail performs. Accept clears a first reaction's
+  per render through gctk's shared readers over the ledger, and from Gas City's
+  event log, which holds doctor's runs and each monitor order's last good run.
+  It reads no store of its own. Its city page counts the messages waiting in
+  Gas City's `human` mailbox and lists none, since the mayor works through them
+  with the operator. The write verbs are gctk commands, which skills,
+  prompts and the board's write routes call. Accept clears a first reaction's
   recommendation gate and nothing else, under the bead's acceptance lock. The
   po's backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
@@ -553,9 +566,6 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The board lists no mailbox yet.** It neither reads Gas City's `human`
-  mailbox nor archives a message in it, so no message there reaches the
-  operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
 - **The old review path's code still runs.** The merge cadence still runs the
   old review path beside the review run
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
