@@ -11,8 +11,7 @@ import (
 
 // actorName is the form of an actor a write query can hold: the characters a
 // session id, an alias or an agent's name carries, so no quote can end the
-// query's literal. It is the guard assets/scripts/seat-progress.sh puts on the
-// identity it reads.
+// query's literal.
 var actorName = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 // lastWritesQuery is the newest created_at per actor across the store's

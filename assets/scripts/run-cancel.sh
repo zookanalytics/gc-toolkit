@@ -2,7 +2,7 @@
 # run-cancel — end a graph.v2 molecule's run through gascity.
 #
 #   run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
-#   run-cancel.sh --root <root-id> --reason "<text>" [--ended] [--db <path>] [--dry-run]
+#   run-cancel.sh --root <root-id> --reason "<text>" [--db <path>] [--dry-run]
 #
 # A molecule's lifecycle is gascity's: pour, claim, finalize, autoclose and run
 # cancel. A run that should not continue is cancelled through gascity's run
@@ -37,9 +37,7 @@
 # open under a closed root, which a root closed by hand leaves behind, is closed
 # by gascity's `gc convoy delete <root> --force`. That close is refused when
 # such a member carries `branch` or `merge_result`, because that member is a
-# work bead and only the refinery closes one. --ended is for a caller that read
-# the root as closed and means to end only what such a run left open: it refuses
-# a root that reads live instead of cancelling it.
+# work bead and only the refinery closes one.
 #
 # The cancel is retried on a 5xx answer or a failed connection. When it still
 # does not land the script exits 1, and the caller does not drain: its step
@@ -47,7 +45,7 @@
 # to next retries the cancel, this session at its next claim included.
 #
 # Callers: decline.sh; mol-review's failed gather and mol-validate's decline
-# arms; orphan-dispose.sh (--ended); gctk bead takeaway --release.
+# arms; gctk bead takeaway --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail
 
@@ -64,7 +62,7 @@ scrub() { tr -d '\000-\037'; }
 usage() {
   cat >&2 <<'USAGE'
 usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
-       run-cancel.sh --root <root-id> --reason "<text>" [--ended] [--db <path>] [--dry-run]
+       run-cancel.sh --root <root-id> --reason "<text>" [--db <path>] [--dry-run]
 
   --step     the gc.step_ref of the step this shell is executing, e.g.
              mol-polecat-work.load-context, or a check loop's name, e.g.
@@ -79,8 +77,6 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
   --bead     accepted and not read: mol-validate's step text passes one. The
              step is the one `gc hook current` names, and a --bead that names
              another bead is reported.
-  --ended    the caller read the root as closed: close only what the run left
-             open, and refuse a root that reads live rather than cancel it.
   --db       the store the run's beads live in, for a caller outside it.
   --dry-run  resolve and report; write nothing and send nothing.
 
@@ -101,14 +97,14 @@ require_value() {
     exit 2
   fi
   case "$2" in
-    --step|--root|--reason|--bead|--ended|--db|--dry-run|-h|--help)
+    --step|--root|--reason|--bead|--db|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2
       usage
       exit 2 ;;
   esac
 }
 
-STEP=""; ROOT=""; REASON=""; HINT=""; ENDED=0; DB=""; DRY_RUN=0
+STEP=""; ROOT=""; REASON=""; HINT=""; DB=""; DRY_RUN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -116,7 +112,6 @@ while [ $# -gt 0 ]; do
     --root)    require_value "$@"; ROOT="$2";   shift 2 ;;
     --reason)  require_value "$@"; REASON="$2"; shift 2 ;;
     --bead)    require_value "$@"; HINT="$2";   shift 2 ;;
-    --ended)   ENDED=1; shift ;;
     --db)      require_value "$@"; DB="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 2 ;;
@@ -126,10 +121,6 @@ done
 
 if [ -n "$STEP" ] && [ -n "$ROOT" ]; then
   echo "$PROG: --step and --root name the run two ways; pass one" >&2
-  exit 2
-fi
-if [ "$ENDED" = 1 ] && [ -n "$STEP" ]; then
-  echo "$PROG: --ended names a run by its closed root; pass --root" >&2
   exit 2
 fi
 if [ -z "$STEP" ] && [ -z "$ROOT" ]; then
@@ -262,10 +253,6 @@ esac
 
 ROOT_CLOSED=0
 [ "$(printf '%s' "$ROOT_JSON" | jq -r '.[0].status // ""' 2>/dev/null)" = "closed" ] && ROOT_CLOSED=1
-if [ "$ENDED" = 1 ] && [ "$ROOT_CLOSED" = 0 ]; then
-  echo "$PROG: root $ROOT does not read closed, and --ended ends only a run that is over; nothing was cancelled" >&2
-  exit 2
-fi
 
 # The held step as it reads now: the cancel interrupts this session only while
 # the step reads in_progress, so only then is it put back to not started.

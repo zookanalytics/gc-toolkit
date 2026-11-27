@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hermetic test for the patrol-wisp LEAK GUARDS of every patrolling agent:
-# witness, deacon and refinery.
+# the deacon and the refinery.
 #
 # THE LEAK: a mol-<agent>-patrol wisp that no query can see survives every
 # reconcile pass and accumulates one row per interrupted pour. Three
@@ -12,7 +12,7 @@
 #   2. AN --assignee-SCOPED RECONCILE CANNOT SEE THAT WISP. It matches no
 #      query on this restart or any later one, so it is unreachable garbage.
 #      Reconcile stays assignee-BLIND and matches by TITLE. The per-rig
-#      witness and refinery then narrow to THIS rig: several rigs run this
+#      refinery then narrows to THIS rig: several rigs run this
 #      pack and pour the same patrol title into one shared store, so title
 #      alone collides across rigs. A wisp is this rig's when its assignee
 #      segment or pour-stamped gc.rig names this rig, or when it names no rig
@@ -256,17 +256,6 @@ FX_CURRENT='[
   {"id":"w-decoy","status":"in_progress","title":"mol-doc-keeper-drift-audit","assignee":"@A@","created_at":"2026-09-18T03:01:00Z","issue_type":"molecule","ephemeral":true},
   {"id":"w-cur",  "status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:02:00Z","issue_type":"molecule","ephemeral":true}
 ]'
-# The witness leaves its successor deferred for the hour between passes
-# (w-next, status deferred, newest). A session restarted inside that hour finds
-# only that successor, or, when the session stopped between its defer and its
-# burn, the completed cycle beside it.
-FX_DEFERRED_ONLY='[
-  {"id":"w-next","status":"deferred","title":"@T@","assignee":"@A@","metadata":{"gc.rig":"@R@"},"created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
-]'
-FX_DEFERRED_SUCCESSOR='[
-  {"id":"w-done","status":"in_progress","title":"@T@","assignee":"@A@","created_at":"2026-09-18T03:00:00Z","issue_type":"molecule","ephemeral":true},
-  {"id":"w-next","status":"deferred",   "title":"@T@","assignee":"@A@","metadata":{"gc.rig":"@R@"},"created_at":"2026-09-18T03:05:00Z","issue_type":"molecule","ephemeral":true}
-]'
 # Cross-rig: several rigs pour the same title into one shared store. A foreign
 # rig's wisp — assignee names @O@ — must be neither adopted as the survivor nor
 # burned as surplus; only this rig's wisps (w-mine, w-orph) are reconciled.
@@ -296,14 +285,11 @@ fx() {
 # --- Per-agent contracts. ----------------------------------------------------
 # Fields: agent | scope (rig|city) | happy-path pour result | assign-fails
 # rollback result | does the pour snippet also resolve and burn the CURRENT
-# wisp? The witness and deacon both do it in the same block, so each snippet
-# burns its own current wisp on the happy path. The per-rig witness stamps
-# gc.rig before the assign (two updates) and then defers its next wisp (a
-# third); a failed assign exits before that defer. The city-singleton deacon
-# takes no rig scope, so it only assigns (one update). The refinery has no pour
-# block, so its pour fields are `-`.
+# wisp? The deacon does it in the same block, so its snippet burns its own
+# current wisp on the happy path. The city-singleton deacon takes no rig scope,
+# so it only assigns (one update). The refinery has no pour block, so its pour
+# fields are `-`.
 AGENTS=(
-  "witness  rig  0|w-cur|w-new,w-new,w-new 1|w-new|w-new,w-new yes"
   "deacon   city 0|w-cur|w-new       1|w-new|w-new       yes"
   "refinery rig  -                   -                   -"
 )
@@ -311,7 +297,6 @@ AGENTS=(
 # run-tests --affected selects a suite only by a path it names, so they are
 # named here, and the loop fails on a file it reads that this list leaves out.
 READS=(
-  agents/witness/prompt.template.md formulas/mol-witness-patrol.toml
   agents/deacon/prompt.template.md formulas/mol-deacon-patrol.toml
   agents/refinery/prompt.template.md
 )
@@ -319,7 +304,7 @@ READS=(
 for SPEC in "${AGENTS[@]}"; do
   read -r AGENT SCOPE POUR_OK POUR_FAIL BURNS_CURRENT <<<"$SPEC"
   TITLE="mol-$AGENT-patrol"
-  # A per-rig agent (witness, refinery) runs with GC_RIG set and a rig-prefixed
+  # A per-rig agent (the refinery) runs with GC_RIG set and a rig-prefixed
   # assignee. The deacon is a city singleton: GC_RIG arrives unset and its
   # assignee carries no rig segment — the exact shape its reconcile must handle
   # and the shape a rig-scoped sweep silently drops.
@@ -414,27 +399,8 @@ for SPEC in "${AGENTS[@]}"; do
 
   eq "$(run_reconcile '[]')" "|" "$AGENT: empty store yields no wisp and no burn"
 
-  # Only the witness defers its successor. A session restarted inside the hour
-  # adopts that successor rather than pouring a second chain, and one stopped
-  # between its defer and its burn adopts the successor and burns the cycle.
-  if [ "$AGENT" = witness ]; then
-    eq "$(run_reconcile "$(fx "$FX_DEFERRED_ONLY")")" "w-next|" \
-       "$AGENT: REGRESSION: a lone deferred successor is adopted, not poured around"
-    eq "$(run_reconcile "$(fx "$FX_DEFERRED_SUCCESSOR")")" "w-next|w-done" \
-       "$AGENT: REGRESSION: adopts the deferred successor and burns the completed cycle"
-    # CONTROL: without the deferred listing the lone successor is invisible, and
-    # the startup block goes on to pour a second chain beside it.
-    grep -v -- '--status=deferred' "$TMP/reconcile.sh" > "$TMP/reconcile-nodeferred.sh"
-    if cmp -s "$TMP/reconcile.sh" "$TMP/reconcile-nodeferred.sh"; then
-      bad "$AGENT: control did not drop the deferred listing — its shape changed, re-check the grep"
-    else
-      eq "$(run_reconcile "$(fx "$FX_DEFERRED_ONLY")" "$TMP/reconcile-nodeferred.sh")" "|" \
-         "$AGENT: CONTROL: without the deferred listing a restart inside the hour finds no wisp"
-    fi
-  fi
-
-  # Cross-rig scoping is only the per-rig agents' concern. The witness and
-  # refinery coexist across rigs in one store, so each must leave a foreign
+  # Cross-rig scoping is only the per-rig agents' concern. The refinery
+  # coexists across rigs in one store, so it must leave a foreign
   # rig's wisp alone. The city-singleton deacon has no sibling and no rig, so
   # it has no cross-rig case; its regression is the FX_LEAK check above run
   # with GC_RIG unset and a rig-less assignee — the shape a rig sweep drops —

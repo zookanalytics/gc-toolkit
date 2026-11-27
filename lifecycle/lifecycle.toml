@@ -1486,21 +1486,26 @@ keys = ["upstream_send_key", "gh_command", "gh_verb", "gh_target_repo"]
 #   Strings; never cleared.
 
 [metadata.patrol_bookkeeping]
-# Rig-stamps and recovery bookkeeping the patrols write on beads they touch.
+# Rig-stamps the patrols write on beads they touch, and the retired recovery
+# bookkeeping.
 keys = [
   "gc.rig", "reconcile_rig",
   "recovered", "recovered_at", "recovered_count",
 ]
 # gc.rig — the rig a patrol stamps on a bead just before assigning it, so an
-#   interrupted pour leaves a rig-scoped orphan; written by mol-witness-patrol.toml
-#   and mol-refinery-patrol.toml. The rig name.
+#   interrupted pour leaves a rig-scoped orphan; written by the refinery's
+#   startup pour (agents/refinery/prompt.template.md) and refinery-patrol.sh.
+#   The rig name.
 # reconcile_rig — the rig a checkout-reconcile bead pertains to, the field
 #   reconcile-rig-checkouts.sh enumerates the mayor's beads by. A rig name.
-# recovered / recovered_at / recovered_count — witness orphan-recovery
-#   bookkeeping (mol-witness-patrol.toml). recovered_at and recovered_count feed a
-#   crash-loop RATE, which is what a reader must judge a repeat recovery by;
-#   recovered is a flag nothing clears, so its mere presence is not that signal.
-#   Two timestamps and a count; not cleared.
+# recovered / recovered_at / recovered_count — RETIRED. The witness's orphan
+#   recovery stamped them on a bead it gave back to the pool: a flag, the time
+#   and the count of its recoveries. Nothing writes or reads them now: Gas
+#   City's controller and core's orphan sweep release a dead session's claim,
+#   and they write none. Registered so that the residue on beads stamped before
+#   the retirement reads as known, not as a stray, and left out of
+#   check-state-space's RETIRED_KEYS, since that residue leaves nothing undone.
+#   A flag, a time and a count; never cleared.
 
 # Runtime-owned: documented here so readers know they exist; the claim, pour and
 # step semantics belong to the Gas City runtime, not to pack transitions. The
