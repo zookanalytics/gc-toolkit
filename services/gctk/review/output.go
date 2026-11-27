@@ -353,9 +353,10 @@ func checkRestates(r Ruling, run *Run, n int) error {
 // repair called for, at the head the round judged, with a verdict of continue
 // or stop and its reading. A stop carries its recommendation and its question.
 // A continue goes against the account's call only by naming each commit, a
-// full object name, that the reading gives as the cause among the rules that
-// changed on the PR's target, and never at the run's last round. The gate is
-// the record's to fill in, so the look writes none.
+// full object name, that the reading gives as the cause, which the record
+// holds to the rules that changed on the PR's target (RecordLook), and never at
+// the run's last round. The gate is the record's to fill in, so the look writes
+// none.
 func lookOutput(run *Run, n int, req OutputRequest) (*Look, error) {
 	var lk Look
 	if err := decode(req.Raw, &lk, OutputLook); err != nil {

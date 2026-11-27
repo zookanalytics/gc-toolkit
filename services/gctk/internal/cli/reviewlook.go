@@ -42,7 +42,8 @@ the question. It is refused when the round called for no look, at another head,
 with no reading, for a stop without its question or its recommendation, for a
 continue at the run's last round by its bound, for a continue at a round the
 account forces a question at that names no rule as the cause, and for a rule
-that is not a full object name. A stop's question goes to a human gate on the
+that is not a full object name or is none of the commits the read prints as the
+review's rules that changed. A stop's question goes to a human gate on the
 bead that owns the PR under review-question-not-converging (human-gate.sh, from
 the scripts directory GCTK_SCRIPTS_DIR names), filed or found open there. The
 step takes the look as its gc.output_json, and for a stop gc.failure_class hard
@@ -89,7 +90,7 @@ func newReviewLookCmd(stdout, stderr io.Writer) *cobra.Command {
 				return exit(reviewLookRead(l, bead, repos, packRoot(), stdout, stderr))
 			}
 			req := review.OutputRequest{Step: bead, Raw: raw, Repos: repos}
-			return exit(reviewLookRecord(l, req, gates{gascity.New()}, time.Now(), stdout, stderr))
+			return exit(reviewLookRecord(l, req, packRoot(), gates{gascity.New()}, time.Now(), stdout, stderr))
 		},
 	}
 	cmd.Flags().StringVar(&db, "db", "", "the store's .beads directory, else the store gc routes the bead to")
@@ -107,53 +108,85 @@ func packRoot() string {
 	return filepath.Join(dir, "..", "..")
 }
 
-// reviewLookRead prints what the look bead names reads over l, with the rules
+// lookView is what a fresh look judges from: the read, the review's rules that
+// changed on the PR's target since its first run was poured, and the checkout
+// that holds the round's head, "" when none does.
+type lookView struct {
+	read  *review.LookRead
+	rules []review.RuleChange
+	since time.Time
+	repo  string
+}
+
+// viewLook reads what the look bead names judges from over l, with the rules
 // that changed read in the first of repos that holds the round's head and in
-// pack.
-func reviewLookRead(l *ledger.Ledger, bead string, repos []string, pack string, stdout, stderr io.Writer) int {
+// pack. A bead that is no look is a *review.NotARun, and a read that fails says
+// which.
+func viewLook(l *ledger.Ledger, bead string, repos []string, pack string) (*lookView, error) {
 	rd, err := review.ReadLook(l, bead)
 	var notRun *review.NotARun
 	switch {
 	case errors.As(err, &notRun):
-		fmt.Fprintf(stderr, "gctk review look: %v\n", err)
-		return 3
+		return nil, err
 	case err != nil:
-		fmt.Fprintf(stderr, "gctk review look: the store did not answer: %v\n", err)
-		return 2
+		return nil, fmt.Errorf("the store did not answer: %w", err)
 	}
 	since, err := rd.Since(l)
 	if err != nil {
-		fmt.Fprintf(stderr, "gctk review look: the store did not answer: %v\n", err)
-		return 2
+		return nil, fmt.Errorf("the store did not answer: %w", err)
 	}
 	run := rd.Step.Run
 	head := run.HeadOf(rd.Step.Iteration)
 	if it := run.Iterations[rd.Step.Iteration]; it != nil && it.Triage != nil {
 		head = it.Triage.Head
 	}
-	repo := ""
+	v := &lookView{read: rd, since: since}
 	for _, r := range repos {
 		if git.HasCommit(r, head) {
-			repo = r
+			v.repo = r
 			break
 		}
 	}
-	rules, err := review.RulesChanged(repo, pack, run.Target, since)
-	if err != nil {
+	if v.rules, err = review.RulesChanged(v.repo, pack, run.Target, since); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// reviewLookRead prints what the look bead names reads over l (viewLook).
+func reviewLookRead(l *ledger.Ledger, bead string, repos []string, pack string, stdout, stderr io.Writer) int {
+	v, err := viewLook(l, bead, repos, pack)
+	var notRun *review.NotARun
+	switch {
+	case errors.As(err, &notRun):
+		fmt.Fprintf(stderr, "gctk review look: %v\n", err)
+		return 3
+	case err != nil:
 		fmt.Fprintf(stderr, "gctk review look: %v\n", err)
 		return 2
 	}
-	rd.Print(stdout, rules, since, repo)
+	v.read.Print(stdout, v.rules, v.since, v.repo)
 	return 0
 }
 
-// reviewLookRecord records the look req names over l, with filer filing a
-// stop's question, and says what it did.
-func reviewLookRecord(l *ledger.Ledger, req review.OutputRequest, filer review.Gates, at time.Time, stdout, stderr io.Writer) int {
-	got, err := review.RecordLook(l, req, filer, at)
+// reviewLookRecord records the look req names over l, against the rules that
+// changed as its read reads them in req's repos and in pack, with filer filing
+// a stop's question, and says what it did.
+func reviewLookRecord(l *ledger.Ledger, req review.OutputRequest, pack string, filer review.Gates, at time.Time,
+	stdout, stderr io.Writer) int {
 	var refused *review.Refused
 	var notRun *review.NotARun
 	var unrecorded *review.LookUnrecorded
+	v, err := viewLook(l, req.Step, req.Repos, pack)
+	switch {
+	case errors.As(err, &notRun):
+		fmt.Fprintf(stderr, "gctk review look: %v; write it again\n", err)
+		return 3
+	case err != nil:
+		fmt.Fprintf(stderr, "gctk review look: %v\n", err)
+		return 2
+	}
+	got, err := review.RecordLook(l, req, v.rules, filer, at)
 	switch {
 	case errors.As(err, &refused), errors.As(err, &notRun):
 		fmt.Fprintf(stderr, "gctk review look: %v; write it again\n", err)

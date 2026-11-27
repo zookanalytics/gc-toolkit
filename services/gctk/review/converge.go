@@ -17,8 +17,9 @@ import (
 //   - the round ruled must-fix findings, no fewer than round n-2 did, and
 //     round n-2 ruled some: its must-fix findings have not fallen over two
 //     rounds; or
-//   - one finding has come back a second time: two findings of the run restate
-//     it after fixes, directly or through each other, the later in round n.
+//   - one finding has come back a second time: findings of two rounds of the
+//     run restate it after fixes, directly or through each other, the later
+//     round n. Two lanes that raise it again in one round are one return.
 //
 // A fresh look, a step on a session that is never the round's ruler, is due
 // at a round that goes on, one that ruled something must-fix or pushed, when
@@ -28,8 +29,8 @@ import (
 // on the PR's target as the cause, and a look at the last round stops it.
 
 // Round is one round's account: its iteration, the head it judged, the lane
-// findings it ruled must-fix, whether it goes on, and each of its findings that
-// came back after a fix, by the first finding of its chain.
+// findings it ruled must-fix, whether it goes on, and each earlier finding that
+// came back in it after a fix, by the first finding of its chain, once each.
 type Round struct {
 	N       int
 	Head    string
@@ -53,7 +54,7 @@ type Account struct {
 func Converge(run *Run, n int) Account {
 	var a Account
 	first := map[FindingRef]FindingRef{}
-	back := map[FindingRef]int{}
+	back, at := map[FindingRef]int{}, map[FindingRef]int{}
 	var latest []FindingRef
 	for m := 1; m <= n; m++ {
 		it := run.Iterations[m]
@@ -77,6 +78,10 @@ func Converge(run *Run, n int) Account {
 				root = ref
 			}
 			first[FindingRef{Iteration: m, Check: ru.Check, Finding: ru.Finding}.key()] = root
+			if at[root] == m {
+				continue
+			}
+			at[root] = m
 			back[root]++
 			r.Returns = append(r.Returns, root)
 			if m == n {

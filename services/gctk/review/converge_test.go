@@ -133,6 +133,21 @@ func TestTheRuleForcesAQuestionWhenAFindingComesBackTwice(t *testing.T) {
 	if a := review.Converge(run, 3); a.Forced == "" {
 		t.Error("two findings that restate the first force nothing; want a question")
 	}
+
+	// Two findings of one round that raise the same point again, as two lanes
+	// can, are one return, and the point's return in a later round is its second.
+	run = rounds(30, 4, 3, 2)
+	first := review.FindingRef{Iteration: 1, Check: "correctness", Finding: "F1"}
+	run.Iterations[2].Repair.Rulings[0].Restates = &first
+	run.Iterations[2].Repair.Rulings[1].Restates = &first
+	if a := review.Converge(run, 2); a.Forced != "" || len(a.Rounds[1].Returns) != 1 {
+		t.Errorf("one point raised again twice in round 2 forces %q with returns %v; want nothing forced and one return",
+			a.Forced, a.Rounds[1].Returns)
+	}
+	back(run, 3, review.FindingRef{Iteration: 2, Check: "correctness", Finding: "F2"})
+	if a := review.Converge(run, 3); a.Forced == "" {
+		t.Error("the point's return in a second round forces nothing; want a question")
+	}
 }
 
 // The run's last round by its bound calls for a look, which stops the review.

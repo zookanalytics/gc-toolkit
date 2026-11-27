@@ -90,7 +90,7 @@ Write one JSON object in the shape the read printed:
   cause of the counts
 
 The record refuses a stop without its question or its recommendation, a
-continue at a round the rule forces a question at that names no rule, and a
-continue at the run's last round. A stop's record files the question and marks
-your step failed hard, and you close the step failed, which ends the run's loop
-at this round.
+continue at a round the rule forces a question at that names no rule, a rule
+that is not in the read's list, and a continue at the run's last round. A stop's
+record files the question and marks your step failed hard, and you close the
+step failed, which ends the run's loop at this round.

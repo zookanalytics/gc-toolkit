@@ -211,7 +211,7 @@ func TestALooksRecord(t *testing.T) {
 	w := newWorld(t)
 	st := w.looked(3, 3, 3)
 	g := &gateFiler{w: w}
-	got, err := review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, stop)}, g, at)
+	got, err := review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, stop)}, nil, g, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestALooksRecord(t *testing.T) {
 	st = w.looked(5, 2, 1)
 	g = &gateFiler{w: w}
 	cont := review.Look{Review: review.OutputLook, Head: h1, Verdict: review.LookContinue, Reading: "each fix is narrower than the last"}
-	if got, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, cont)}, g, at); err != nil {
+	if got, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, cont)}, nil, g, at); err != nil {
 		t.Fatal(err)
 	}
 	row, _ = w.store.Row(st)
@@ -253,10 +253,25 @@ func TestALooksRecord(t *testing.T) {
 
 	w = newWorld(t)
 	st = w.looked(3, 3, 3)
-	_, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, stop)}, &gateFiler{w: w, err: errors.New("down")}, at)
+	_, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, stop)}, nil,
+		&gateFiler{w: w, err: errors.New("down")}, at)
 	var unrecorded *review.LookUnrecorded
 	if !errors.As(err, &unrecorded) {
 		t.Errorf("a question that did not land returns %v; want a record to run again", err)
+	}
+
+	// A continue the account forced a question at goes on by naming a rule the
+	// look's read printed among the review's rules that changed, and no other.
+	w = newWorld(t)
+	st = w.looked(3, 3, 3)
+	byRules := cont
+	byRules.Rules = []string{fix}
+	_, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, byRules)}, nil, &gateFiler{w: w}, at)
+	mustRefuse(t, err, "none of the review's rules that changed")
+	changed := []review.RuleChange{{Commit: fix, Date: "2026-11-26", Subject: "docs(review): a new rule", Paths: []string{"AGENTS.md"}}}
+	if _, err = review.RecordLook(w.ledger(), review.OutputRequest{Step: st, Raw: jsonOf(t, byRules)}, changed,
+		&gateFiler{w: w}, at); err != nil {
+		t.Errorf("a continue that names a rule the read printed: %v", err)
 	}
 }
 

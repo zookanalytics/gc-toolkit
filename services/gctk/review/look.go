@@ -288,10 +288,12 @@ func (e *LookUnrecorded) Error() string { return e.Why }
 // gate on the bead that owns the PR under LookQuestionKey, which filer files
 // or finds open there; the look's step takes the look as its output, and for a
 // stop Gas City's hard failure record; and the bead that owns the PR is noted
-// with the look, stamped at. An output that does not stand returns its
-// *Refused, a read that fails the store's error, and a write that does not land
-// a *LookUnrecorded, after the writes before it landed.
-func RecordLook(l *ledger.Ledger, req OutputRequest, filer Gates, at time.Time) (*LookRecord, error) {
+// with the look, stamped at. Each rule the look names is one of changed, the
+// review's rules that changed on the PR's target since its first run, as the
+// look's read printed them (RulesChanged). An output that does not stand
+// returns its *Refused, a read that fails the store's error, and a write that
+// does not land a *LookUnrecorded, after the writes before it landed.
+func RecordLook(l *ledger.Ledger, req OutputRequest, changed []RuleChange, filer Gates, at time.Time) (*LookRecord, error) {
 	raw, err := Output(l, req)
 	if err != nil {
 		return nil, err
@@ -299,6 +301,12 @@ func RecordLook(l *ledger.Ledger, req OutputRequest, filer Gates, at time.Time) 
 	var lk Look
 	if err := json.Unmarshal(raw, &lk); err != nil {
 		return nil, err
+	}
+	for _, c := range lk.Rules {
+		if !slices.ContainsFunc(changed, func(rc RuleChange) bool { return rc.Commit == c }) {
+			return nil, refuse("the rule %s is none of the review's rules that changed on the PR's target since its first run, "+
+				"which the look's read prints", c)
+		}
 	}
 	st, err := ReadStep(l, req.Step)
 	if err != nil {
