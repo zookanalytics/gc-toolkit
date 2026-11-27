@@ -61,21 +61,10 @@ func band(gates []Gate, phase string) string {
 	return strings.Join(names, ",")
 }
 
-// Superseded is a PR the branch had that closed unmerged, which a new PR
-// replaces, and the head it closed at.
-type Superseded struct {
-	Number, Head string
-}
-
 // region is what the managed summary region says, and of what.
 type region struct {
 	summary, desc, id, branch, target, checkSet, head string
-	// opening is a PR opened, or adopted, at head once its pre-open gates
-	// signed off there. Otherwise the PR is open already, and its head may have
-	// moved past the one the gates signed off at.
-	opening bool
-	gates   []Gate
-	sup     *Superseded
+	gates                                             []Gate
 }
 
 // summaryLines are the lines the region's `## Summary` carries: the summary,
@@ -115,12 +104,10 @@ func (r region) content() []string {
 
 // facts are the refinery handoff's facts: the bead, its branches and its gates.
 //
-// The last fact states the gates, in words that turn on whether the PR is
-// opening. Neither states a CI result, because the body is static and CI state
-// is live. An opening PR's says its pre-open gates signed off at its head, true
-// at that moment. An open PR's names the head and points to the PR's checks,
-// because its gates have not signed off again at a head a rework moved, and one
-// of them may be asking for changes.
+// The head's fact states no CI result, because the body is static and CI state
+// is live. With gates, it points to the PR's checks for them, because they have
+// not signed off again at a head a rework moved, and one of them may be asking
+// for changes.
 func (r region) facts() []string {
 	out := []string{
 		"- Issue: `" + r.id + "`",
@@ -129,21 +116,13 @@ func (r region) facts() []string {
 	}
 	head := short(r.head)
 	signed, draft := band(r.gates, phasePreOpen), band(r.gates, phaseOpenAsDraft)
-	switch {
-	case r.opening && signed != "":
-		out = append(out, "- Gates `"+signed+"` signed off pre-open at `"+head+"`. For CI status, see the PR checks.")
-	case r.opening:
-		out = append(out, "- Anchor declares no pre-open gate (`check_set="+r.checkSet+"`); opened at `"+head+"`.")
-	case signed != "":
+	if signed != "" {
 		out = append(out, "- Head `"+head+"`; gates `"+signed+"`; see the PR checks for current status.")
-	default:
+	} else {
 		out = append(out, "- Head `"+head+"`; anchor declares no pre-open gate (`check_set="+r.checkSet+"`).")
 	}
 	if draft != "" {
 		out = append(out, "- Draft-stage gates `"+draft+"` run against the open PR before it is marked ready for review.")
-	}
-	if r.sup != nil && r.sup.Number != "" {
-		out = append(out, "- Supersedes #"+r.sup.Number+" (closed unmerged at `"+short(r.sup.Head)+"`); re-implemented and re-gated at `"+head+"`.")
 	}
 	return out
 }
@@ -182,9 +161,6 @@ func stripSummaryHeading(summary string) []string {
 	}
 	return out
 }
-
-// handoffHeading is the heading the region's handoff facts sit under.
-var handoffHeading = regexp.MustCompile(`^##[ \t]+Refinery handoff[ \t]*$`)
 
 // openedGreen is a handoff fact an older composer wrote, which says the PR
 // opened green: a CI result, which a static body cannot know.
@@ -282,66 +258,6 @@ func appendSection(body []string, open, close string, section []string) []string
 	out := append(append([]string{}, body...), "", open)
 	out = append(out, section...)
 	return append(out, close)
-}
-
-// The legacy shape's lines: its summary heading, a blank line, and a handoff
-// fact.
-var (
-	legacySummary = regexp.MustCompile(`^##[ \t]+Summary[ \t]*$`)
-	legacyBlank   = regexp.MustCompile(`^[ \t]*$`)
-	legacyFact    = regexp.MustCompile(`^-[ \t]`)
-)
-
-// establish is the body with the managed region marked over the shape a
-// composition wrote before the markers existed: the first `## Summary` heading,
-// whatever follows it up to the `## Refinery handoff` heading, and that
-// heading's contiguous facts. Whatever comes before the heading or after the
-// facts stays. ok is false when the body does not carry that shape, so a body
-// it did not write is never cut.
-func establish(body []string, section []string) (out []string, ok bool) {
-	const (
-		lead = iota
-		toHandoff
-		handoffHead
-		facts
-		tail
-	)
-	state, opened := lead, false
-	for _, line := range body {
-		switch state {
-		case lead:
-			if legacySummary.MatchString(line) {
-				out = append(out, summaryOpen)
-				out = append(out, section...)
-				out = append(out, summaryClose)
-				opened, state = true, toHandoff
-				continue
-			}
-			out = append(out, line)
-		case toHandoff:
-			if handoffHeading.MatchString(line) {
-				state = handoffHead
-			}
-		case handoffHead:
-			switch {
-			case legacyBlank.MatchString(line):
-			case legacyFact.MatchString(line):
-				state = facts
-			default:
-				state = tail
-				out = append(out, line)
-			}
-		case facts:
-			if legacyFact.MatchString(line) {
-				continue
-			}
-			state = tail
-			out = append(out, line)
-		case tail:
-			out = append(out, line)
-		}
-	}
-	return out, opened && state != toHandoff
 }
 
 // textLines is a text's lines: a final newline ends the last line rather than
