@@ -54,6 +54,15 @@ runs only `--gc-only`, which keeps the managed server up and needs no stop. If
 the deployed `gc dolt compact` has no `--gc-only` flag, the pass refuses and
 exits rather than fall back to the flatten.
 
+Gas City's compact runs that GC only on a store no session is connected to. A
+GC can lose what sessions write meanwhile to the store's `dolt_ignore`d tables,
+such as mail and wisps, so compact skips the store and counts the skip as a
+failed database (`gc dolt compact --help`, "Live-session gate"). The pass reads
+the line compact prints for that skip as a deferral, not a failure, and it never
+passes `--force`. A store that a running city's processes keep a connection to
+is deferred on every pass, so collecting it takes the writers stopped, as Gas
+City's bloat-recovery runbook does.
+
 A reclaim never starts while the data plane is unreachable or overloaded,
 judged off the same `server.reachable` and 5000ms latency the deacon patrol's
 Dolt-health step reads. A full GC is heavy, and piling one onto a server that
@@ -104,9 +113,10 @@ assets/scripts/dolt-reclaim.sh             # reclaim, one line per store plus a 
 `GC_DOLT_RECLAIM_HEALTH_TIMEOUT` (default 90s) bounds the health probe before
 each reclaim. Every run prints the size of every store, not only the ones reclaimed,
 so a store climbing toward the line stays visible in the order log. The exit is
-0 when a reclaim ran or nothing was over the line, 1 when a reclaim was
-attempted and failed — a quarantined store, or one that needs an operator — and
-2 when the pass could not run at all.
+0 when no reclaim failed, because each store over the line was reclaimed or
+deferred or none was over it. It is 1 when a reclaim was attempted and failed,
+such as on a quarantined store or one that needs an operator, and 2 when the
+pass could not run at all.
 
 `assets/scripts/dolt-reclaim.test.sh` is the regression suite, hermetic against
 a stubbed `gc` and fixture stores in a tempdir — no city, no real Dolt. Its

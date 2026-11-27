@@ -76,7 +76,7 @@ case "$sub" in
     done
     [ -n "${STUB_COMPACT_ADVANCE:-}" ] && echo $(( $(cat "$CLOCK_FILE") + STUB_COMPACT_ADVANCE )) > "$CLOCK_FILE"
     if [ -n "${STUB_COMPACT_FAIL_DB:-}" ] && [ "$db" = "$STUB_COMPACT_FAIL_DB" ]; then
-      echo "stub: $db is quarantined" >&2
+      echo "${STUB_COMPACT_FAIL_MSG:-stub: $db is quarantined}" >&2
       exit "${STUB_COMPACT_FAIL_RC:-1}"
     fi
     [ -n "$db" ] && rm -rf "${STUB_DOLT_ROOT:?}/$db/.dolt/noms"/* 2>/dev/null
@@ -133,7 +133,7 @@ reset_case() {
   COMPACT_LOG="$TMP/compact.log"; : > "$COMPACT_LOG"; export COMPACT_LOG
   CITY_LOG="$TMP/city.log"; : > "$CITY_LOG"; export CITY_LOG
   export STUB_HEALTH="" STUB_HEALTH_RC=0 STUB_HEALTH_SLEEP="" STUB_HEALTH_AFTER_COMPACT="" STUB_NO_GC_ONLY=""
-  export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_ADVANCE=""
+  export STUB_COMPACT_FAIL_DB="" STUB_COMPACT_FAIL_RC=1 STUB_COMPACT_FAIL_MSG="" STUB_COMPACT_ADVANCE=""
   rm -f "$CLOCK_FILE"
   export STUB_NO_CITY="" STUB_CITY_PATH="/fixture-city"
   unset GC_DOLT_RECLAIM_BUDGET GC_DOLT_RECLAIM_HEALTH_TIMEOUT 2>/dev/null || true
@@ -294,6 +294,27 @@ run
 eq "$RC" "1" "a failed reclaim exits 1"
 has "$OUT$ERR" "fat FAILED" "  ... names the store that failed"
 has "$OUT" "0 reclaimed, 1 failed" "  ... and counts it in the summary"
+
+# --- compact's live-session skip is a deferral, not a failure ----------------
+# Compact runs no full GC on a store any session is connected to, and exits 1.
+# The line its gate prints for the store is that skip. A probe that failed
+# prints another line, and stays a failure.
+reset_case
+make_db fat "$OVER"; write_list fat
+export STUB_COMPACT_FAIL_DB=fat STUB_COMPACT_FAIL_MSG="compact: db=fat 4 live session(s) connected — skipping DOLT_GC to protect dolt_ignore'd tables; re-run with --force to override"
+run
+eq "$RC" "0" "a store compact skipped for its connected sessions exits 0"
+has "$OUT" "fat deferred — sessions are connected" "  ... and is deferred, not failed"
+has "$OUT" "0 reclaimed, 0 failed, 1 deferred" "  ... and the summary counts the deferral"
+has "$ERR" "4 live session(s) connected" "  ... and compact's own line still reaches the log"
+hasnt "$(cat "$COMPACT_LOG")" "--force" "  ... and the pass never forces the GC"
+
+reset_case
+make_db fat "$OVER"; write_list fat
+export STUB_COMPACT_FAIL_DB=fat STUB_COMPACT_FAIL_MSG="compact: db=fat live-session probe failed rc=1 — cannot confirm the database is quiescent, skipping DOLT_GC; re-run with --force to override"
+run
+eq "$RC" "1" "a store whose session probe failed exits 1"
+has "$OUT$ERR" "fat FAILED" "  ... and is a failure, not a deferral"
 
 # --- several over the line: each reclaimed, each --gc-only -------------------
 reset_case
