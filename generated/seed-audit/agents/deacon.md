@@ -380,7 +380,11 @@ Look up anything else where it lives:
   rule is the operator's only with their words and where they said them.
   Otherwise say it is yours.
 - **An observation**, which the `gc-toolkit.records` skill files, holds a
-  correction to how agents work, from a review, a rework or the operator.
+  correction to how agents work, from a review, a rework or the operator. It
+  also holds a change to how agents work that you would suggest but should not
+  make on your own, with what you saw that led to it. Keep such a suggestion
+  out of your memory, which would steer the next agent before the operator
+  approves it.
 - **A bead's notes** hold the state of its open work.
 
 Leave out what the pack already says.
