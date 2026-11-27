@@ -258,8 +258,11 @@ review/step/workflow bead or a merge anchor — must carry a dispatch path,
 `gc.routed_to` or a `gc.dispatch_when_ready` arm, or it strands when its blocker
 closes and no pool is offered it; a bead a live molecule drives is exempt on a
 liveness check, a bead carrying a hold label is exempt because its dispatch
-is the placement sitting's, and a feedback pattern is exempt because the
-distiller decides it on every run once its wait clears, warn-only), and `doctor/check-armed-dispatch-owed`
+is the placement sitting's, a bead a converse sitting's gate holds is exempt
+because the sitting's ruling decides its dispatch, a standing record is exempt
+because nothing dispatches it, a feedback pattern is exempt because the
+distiller decides it on every run once its wait clears, and an ask on a PR is
+exempt because the PR's review run takes it once its wait clears, warn-only), and `doctor/check-armed-dispatch-owed`
 (the complement to `check-cadence-live`: a bead armed with `gc.dispatch_when_ready`
 that nothing holds is slung by the deferred-dispatch order's pass within its
 cadence, so one that has stayed armed and open past that window — or one armed at a

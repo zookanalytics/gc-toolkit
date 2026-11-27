@@ -4,13 +4,14 @@
 # (blocked plainly-work bead with neither route nor arm, including one carrying
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
-# worked by a live run, merge anchor, held by either hold label in any case,
-# held by a converse sitting's gate, review/step/workflow metadata, every
-# standing kind, decision/epic/infra types), a bead carrying only the retired
-# placement marker, the per-rig labelling, the remedy string, the fail-closed
-# probes (unreadable blocked listing, unreadable runs, unreadable gate listing,
-# unreadable rig list), a raw control byte in a listing's row, and the quiet
-# paths (empty store, all-armed store).
+# worked by a live run, merge anchor, an ask its PR's bead waits on, held by
+# either hold label in any case, held by a converse sitting's gate,
+# review/step/workflow metadata, every standing kind, decision/epic/infra
+# types), a task shaped like an ask that no PR bead on its branch waits on, a
+# bead carrying only the retired placement marker, the per-rig labelling, the
+# remedy string, the fail-closed probes (unreadable blocked listing, unreadable
+# runs, unreadable gate listing, unreadable rig list), a raw control byte in a
+# listing's row, and the quiet paths (empty store, all-armed store).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECK="$HERE/run.sh"
@@ -352,6 +353,48 @@ blocked_store alpha "$(bmeta a-1 task_kind feedback-pattern)"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a feedback pattern waiting on its follow-up is not flagged"
 hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy"
+clear_stores
+
+# An ask on a PR waits on other work through its own blocks edge and holds the
+# bead that owns the PR, which the open ask keeps in the same listing. The PR's
+# review run takes the ask once that work closes, so it owes no arm, and an arm
+# would start a second worker on the PR's branch. A task of the same shape that
+# no PR bead on its branch waits on is work like any other.
+# bask <id> <branch> [<task_kind>] — a task naming <branch>, unassigned and
+# unrouted, blocked by the work it waits on. bpr <id> <branch> <blocker>... —
+# the bead that owns a PR on <branch>, held by each <blocker>.
+bask() { printf '{"id":"%s","status":"open","assignee":"","issue_type":"task","title":"Review ask: bring the branch current","blocked_by":["x-0"],"metadata":{"branch":"%s"%s}}' \
+    "$1" "$2" "${3:+,\"task_kind\":\"$3\"}"; }
+bpr() { local id="$1" br="$2" by; shift 2; by=$(printf '"%s",' "$@")
+    printf '{"id":"%s","status":"blocked","assignee":"","issue_type":"task","blocked_by":[%s],"metadata":{"merge_result":"pull_request_pending","branch":"%s"}}' \
+    "$id" "${by%,}" "$br"; }
+blocked_store alpha "$(bask a-1 polecat/a-2)" "$(bpr a-2 polecat/a-2 a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "0" "an ask that waits on other work and holds its PR's bead is not flagged"
+hasnt "$OUT" "gctk bead arm a-1" "…and draws no arm remedy"
+eq "$(gate_reads)" "0" "…judged on the blocked listing alone"
+clear_stores
+blocked_store alpha "$(bask a-1 polecat/a-2)" "$(bask a-3 polecat/a-2)" "$(bpr a-2 polecat/a-2 a-1 a-3)" "$(bwork a-4)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a store holding two asks on one PR beside stranded work warns"
+has "$OUT" "1 finding" "…with the stranded work its one finding"
+has "$OUT" "gctk bead arm a-4" "…naming the stranded work"
+hasnt "$OUT" "bead a-1 " "…and neither ask"
+hasnt "$OUT" "bead a-3 " "…of the two"
+clear_stores
+blocked_store alpha "$(bask a-1 polecat/a-2)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a task shaped like an ask whose PR bead is not in the listing is flagged"
+clear_stores
+blocked_store alpha "$(bask a-1 polecat/a-2)" "$(bpr a-2 polecat/a-9 a-1)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a task naming another branch than the PR bead it holds is flagged"
+clear_stores
+blocked_store alpha "$(bask a-1 polecat/a-2)" "$(bpr a-2 polecat/a-2 x-5)"
+eq "$(run_check >/dev/null; echo $?)" "1" "a task naming a PR bead's branch that the bead does not wait on is flagged"
+clear_stores
+blocked_store alpha "$(bask a-1 polecat/a-2 rework)" "$(bpr a-2 polecat/a-2 a-1)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a task with a role that names the branch and holds the PR's bead is work of its own — flagged"
+has "$OUT" "gctk bead arm a-1" "…with the arm remedy"
 clear_stores
 
 # A negative list would flag any type it forgot; the allowlist exempts every

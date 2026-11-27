@@ -2,7 +2,7 @@
 # doctor/check-blocked-work-armed — blocked work carries a dispatch path. A
 # LIVE, unassigned bead that is plainly work (not a review, step or workflow-
 # topology bead, not a standing record or a feedback pattern, and not a merge
-# anchor) and
+# anchor or an ask on its PR) and
 # is held out of `bd ready` by an open `blocks` edge must ALSO carry a way to be
 # dispatched once that edge clears: either `gc.routed_to` (a pool queue
 # consumes it, and bd's readiness gates the offer until the blocker closes) or
@@ -67,6 +67,18 @@
 # reader of a gate shares, says which of them still hold. A candidate is
 # reported as unverifiable and never flagged when that listing cannot be read.
 #
+# So is an ask on a PR (`gctk review ask`). It is a task that names the branch
+# of the bead that owns the PR and holds that bead's merge through its own
+# blocks edge. An ask filed to wait on other work sits in `bd blocked` until
+# that work closes. The landing order then pours the PR's review run, which
+# takes it (admit, services/gctk/pr/admit.go). That run is its dispatch path,
+# so it owes no arm, and an arm would start a second worker on the PR's branch.
+# The test is refinery-lib.sh's refinery_ask, the definition gctk's isAsk is
+# tested against, read with the branch of a bead that carries a merge_result
+# and waits on the candidate. The open ask holds that bead, so it is in the
+# same listing. A task of that shape that holds no such bead is work like any
+# other, because no review run takes it.
+#
 # The remedy the finding names is arming — gctk bead arm, which is a safe
 # universal substitute for a hand-held sling (docs/deferred-dispatch.md).
 # The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
@@ -129,6 +141,15 @@ WORK_TYPES=" bug feature task chore spike story "
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/bd-lib.sh" || {
     echo "cannot determine whether blocked work carries a dispatch path"
     printf '  - %s\n' "assets/scripts/bd-lib.sh could not be sourced from this pack, so a bead a converse sitting holds cannot be told from stranded work."
+    exit 1
+}
+# What an ask on a PR is. Exposes $REFINERY_ASK_JQ. An unsourceable one warns:
+# without it an ask a review run takes would read as stranded work and draw the
+# arm remedy.
+# shellcheck source=../../assets/scripts/refinery-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/refinery-lib.sh" || {
+    echo "cannot determine whether blocked work carries a dispatch path"
+    printf '  - %s\n' "assets/scripts/refinery-lib.sh could not be sourced from this pack, so an ask on a PR cannot be told from stranded work."
     exit 1
 }
 # The one reader of a run's link to the bead it works. An unsourceable one
@@ -232,11 +253,21 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
     }
     # The predicate, entirely on the listing's own fields: plainly work
     # (unassigned; not review/standing/feedback-pattern/step/workflow-topology;
-    # not a merge anchor; an allowlisted work issue_type, which a gate is not),
-    # carrying no dispatch path (has_dispatch_path: no route and no arm), AND
-    # not held (has_dispatch_hold: no hold label).
-    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ"'
-        .[]? | . as $b
+    # not a merge anchor or an ask on its PR; an allowlisted work issue_type,
+    # which a gate is not), carrying no dispatch path (has_dispatch_path: no
+    # route and no arm), AND not held (has_dispatch_hold: no hold label). The
+    # bead that owns an ask's PR is a row of the same listing, which $prs reads
+    # by its branch and the beads it waits on.
+    cand=$(printf '%s' "$raw" | jq -r --arg allow "$WORK_TYPES" "$STANDING_KINDS_JQ$DISPATCH_PATH_JQ$REFINERY_ASK_JQ"'
+        def pr_ask($prs):
+            (((.metadata // {}).branch // "") | tostring) as $br
+            | ((.id // "") | tostring) as $ask
+            | $br != "" and refinery_ask($br)
+              and any($prs[]; .branch == $br and any(.waits[]; . == $ask));
+        [ .[]? | select(((.metadata // {}).merge_result // "") != "")
+          | { branch: (((.metadata // {}).branch // "") | tostring),
+              waits: [ (.blocked_by // [])[] | tostring ] } ] as $prs
+        | .[]? | . as $b
         | ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")) as $id
         | ($b.metadata // {}) as $m
         | select(($b.assignee // "") == "")
@@ -246,6 +277,7 @@ while IFS=$'\037' read -r rig_name rig_path suspended; do
         | select(($m["gc.step_ref"] // "") == "")
         | select(($m["gc.kind"] // "") == "")
         | select(($m["merge_result"] // "") == "")
+        | select(($b | pr_ask($prs)) | not)
         | select($allow | contains(" " + (($b.issue_type // "") | tostring) + " "))
         | select(($b | has_dispatch_path) | not)
         | select(($b | has_dispatch_hold) | not)

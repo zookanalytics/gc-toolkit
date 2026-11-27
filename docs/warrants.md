@@ -765,14 +765,16 @@ no warrant.
     nothing reports a run that has finished, so the start titles each pour with
     its token and searches it after an earlier attempt.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
-    blocked bead runs before its blockers close, and #8832, native execution
-    admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
-  #7163, #8832 and PR #8834 open and unmerged.
+    blocked bead runs before its blockers close, whose fix is the open PR
+    #9406, and #8832, native execution admission loses current input
+    readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff, with
+  #7163, #8832, PR #8834 and PR #9406 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
-  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
-  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
-  and the order, the dispatch lock, the title token, the cap and
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163,
+  which PR #9406 fixes). The arm then becomes a plain
+  `gc sling <pool> <bead> --on <formula>` at arm time, and the order, the
+  dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
 ## Feedback patterns
@@ -814,8 +816,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/beads`
-  main 3a274fbf8f76 and `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff, `gastownhall/beads`
+  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
