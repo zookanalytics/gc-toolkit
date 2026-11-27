@@ -38,6 +38,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -242,7 +243,7 @@ type Client struct {
 	bin     string
 	httpc   *http.Client
 	baseURL string
-	city    string
+	city    func() (name, why string)
 	db      string
 	ctx     context.Context
 }
@@ -276,7 +277,7 @@ func (c *Client) In(db string) *Client {
 	}
 	p := *c
 	p.db = db
-	p.httpc, p.baseURL, p.city = nil, "", ""
+	p.httpc, p.baseURL, p.city = nil, "", nil
 	return &p
 }
 
@@ -564,10 +565,14 @@ func (c *Client) stopped() error {
 func New() *Client {
 	c := &Client{bin: "gc"}
 	if base, ok := daemon.BaseURL(); ok {
-		if city, ok := daemon.City(); ok {
+		if path := daemon.CityPath(); path != "" {
+			httpc := &http.Client{Timeout: daemonTimeout}
 			c.baseURL = base
-			c.city = city
-			c.httpc = &http.Client{Timeout: daemonTimeout}
+			c.httpc = httpc
+			// The city's name is asked of the supervisor at the first bead
+			// read that needs it, once for this client and the copies
+			// WithContext makes.
+			c.city = sync.OnceValues(func() (string, string) { return daemon.City(httpc, base, path) })
 		}
 	}
 	return c
@@ -577,7 +582,7 @@ func New() *Client {
 // three fields move together in New, so any one of them being empty means the
 // path is off and ShowCached goes straight to the subprocess.
 func (c *Client) daemonConfigured() bool {
-	return c.httpc != nil && c.baseURL != "" && c.city != ""
+	return c.httpc != nil && c.baseURL != "" && c.city != nil
 }
 
 // Show reads one bead straight from `gc bd`, never the supervisor API: the
@@ -681,9 +686,16 @@ func (c *Client) array(strict bool, args ...string) ([]Bead, bool) {
 // array), so the payload decodes directly into a Bead. Scrub and UseNumber run
 // here too, for the same control-byte and number-fidelity reasons the
 // subprocess path needs them. A 200 that decodes to a bead with no id is a miss
-// (a problem+json body slipped past the status check), not a bead.
+// (a problem+json body slipped past the status check), not a bead. The route
+// names the city by the name the supervisor lists it under ([daemon.City]).
+// When the listing does not answer, or names no city at the session's path, the
+// read falls back with the listing's reason and asks no bead route.
 func (c *Client) showViaDaemon(id string) (*Bead, string) {
-	resp, err := c.httpc.Get(daemon.BeadURL(c.baseURL, c.city, id))
+	city, why := c.city()
+	if why != "" {
+		return nil, why
+	}
+	resp, err := c.httpc.Get(daemon.BeadURL(c.baseURL, city, id))
 	if err != nil {
 		return nil, "transport"
 	}

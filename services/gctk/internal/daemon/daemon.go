@@ -9,15 +9,19 @@
 // in any runtime file; it is derived from config exactly as `gc`'s own
 // supervisor-API discovery derives it — `$GC_HOME/supervisor.toml`'s
 // `[supervisor]` bind and port, defaulting to the supervisor's own
-// `127.0.0.1:8372`. Reachability is not probed here: the caller's request and
-// its fallback are the reachability signal.
+// `127.0.0.1:8372`. The city's name in the read URL is the supervisor's own
+// answer, from its city listing ([City]). Reachability is not probed: the
+// caller falls back when the listing read or the bead read fails.
 //
 // The TOML read is a scalar lookup within one section, which is enough for
 // these flat keys.
 package daemon
 
 import (
+	"encoding/json"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,6 +33,10 @@ const (
 	defaultBind = "127.0.0.1"
 	defaultPort = 8372
 )
+
+// maxListing caps the city listing a read will decode, so a runaway payload
+// cannot exhaust memory. One city's entry is a few hundred bytes.
+const maxListing = 1 << 20
 
 // Disabled reports whether the supervisor-API read path is turned off for this
 // process, mirroring `gc beads`' GC_NO_API escape hatch so one switch governs
@@ -59,10 +67,9 @@ func gcHome() string {
 	return filepath.Join(home, ".gc")
 }
 
-// cityPath resolves the city directory the current session belongs to, from the
-// env chain a supervisor stamps into an agent session — GC_CITY_PATH leads it,
-// GC_CITY and GC_CITY_ROOT follow (services/gctk/README.md).
-func cityPath() string {
+// CityPath is the directory of the city this process works in, the first of
+// GC_CITY_PATH, GC_CITY and GC_CITY_ROOT that is set, or empty when none is.
+func CityPath() string {
 	for _, env := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
 		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 			return v
@@ -103,26 +110,41 @@ func BaseURL() (string, bool) {
 	return "http://" + net.JoinHostPort(bind, strconv.Itoa(port)), true
 }
 
-// City resolves the effective city name the API path segment carries: the
-// [workspace] name declared in the city's city.toml, else the basename of the
-// city path — the same workspace.name-else-basename rule the supervisor's own
-// effective-name resolution applies. ("", false) when no city path is set. A
-// name that does not match a running city makes the daemon answer 404, which
-// the caller treats as a miss and falls back, so a wrong guess costs a fork,
-// never a wrong read.
-func City() (string, bool) {
-	cp := cityPath()
-	if cp == "" {
-		return "", false
+// City is the name the supervisor serves the city at path under, the name
+// every per-city route carries. It asks the supervisor's city listing, GET
+// /v0/cities, and takes the name the listing gives the city at path. The
+// supervisor serves a city under the name its registry entry stores, which
+// neither city.toml's [workspace] name nor the path's basename has to match.
+// It lists the city at the path that entry stores, the path it runs the city
+// from, which the city's sessions find in GC_CITY_PATH (startOneCity in
+// cmd/gc/cmd_supervisor.go at gastownhall/gascity 77143ecd18). So the two
+// paths are compared as text, once each is cleaned. why is empty when a city is
+// listed at path, and otherwise says what failed, for the caller's route log.
+func City(httpc *http.Client, base, path string) (name, why string) {
+	resp, err := httpc.Get(base + "/v0/cities")
+	if err != nil {
+		return "", "city-transport"
 	}
-	if v, ok := tomlSectionValue(filepath.Join(cp, "city.toml"), "workspace", "name"); ok && v != "" {
-		return v, true
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", "city-status-" + strconv.Itoa(resp.StatusCode)
 	}
-	base := filepath.Base(filepath.Clean(cp))
-	if base == "" || base == "." || base == string(filepath.Separator) {
-		return "", false
+	var listing struct {
+		Items []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"items"`
 	}
-	return base, true
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxListing)).Decode(&listing); err != nil {
+		return "", "city-decode"
+	}
+	want := filepath.Clean(path)
+	for _, city := range listing.Items {
+		if city.Name != "" && filepath.Clean(city.Path) == want {
+			return city.Name, ""
+		}
+	}
+	return "", "city-unlisted"
 }
 
 // BeadURL builds the single-bead read URL. The id and city are path-escaped so

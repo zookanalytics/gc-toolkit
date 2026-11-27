@@ -1,12 +1,16 @@
 package gcbd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -14,7 +18,8 @@ import (
 // and List tests drive a stubbed `gc` on PATH; GC_NO_API=1 stops New() from
 // discovering the ambient session's real daemon and routing a read there
 // instead of to the stub. The daemon-path tests below build a Client pointed at
-// a fake server directly, so GC_NO_API does not reach them.
+// a fake server directly, so GC_NO_API does not reach them, or turn it off for
+// New and point New at a fake server (supervisorListing).
 func TestMain(m *testing.M) {
 	if err := os.Setenv("GC_NO_API", "1"); err != nil {
 		panic(err)
@@ -42,6 +47,11 @@ func gcShowStub(t *testing.T, showJSON, marker string) string {
 	return p
 }
 
+// knownCity is a city's name a test gives a client, so no listing is read.
+func knownCity(name string) func() (string, string) {
+	return func() (string, string) { return name, "" }
+}
+
 // daemonServing returns a fake supervisor that serves beadJSON at any path and
 // records the last path it was asked for, so a test can assert the per-city URL
 // shape.
@@ -67,7 +77,7 @@ func TestShowCachedReadsViaDaemonWithoutForkingBd(t *testing.T) {
 		bin:     gcShowStub(t, `[{"id":"b-1","metadata":{"merge_result":"from_bd"}}]`, marker),
 		httpc:   srv.Client(),
 		baseURL: srv.URL,
-		city:    "testcity",
+		city:    knownCity("testcity"),
 	}
 	b := c.ShowCached("b-1")
 	if b == nil {
@@ -105,14 +115,14 @@ func TestShowCachedFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 			http.Error(w, `{"code":"bead-not-found"}`, http.StatusNotFound)
 		}))
 		t.Cleanup(srv.Close)
-		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: "c"})
+		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: knownCity("c")})
 	})
 
 	t.Run("transport failure", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		dead := srv.URL
 		srv.Close() // nothing listens now; the GET is refused
-		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: &http.Client{}, baseURL: dead, city: "c"})
+		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: &http.Client{}, baseURL: dead, city: knownCity("c")})
 	})
 
 	t.Run("undecodable 200 body", func(t *testing.T) {
@@ -120,7 +130,7 @@ func TestShowCachedFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 			fmt.Fprint(w, `not json`)
 		}))
 		t.Cleanup(srv.Close)
-		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: "c"})
+		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: knownCity("c")})
 	})
 
 	t.Run("200 with no id is a miss, not a bead", func(t *testing.T) {
@@ -128,7 +138,7 @@ func TestShowCachedFallsBackToBdWhenDaemonUnavailable(t *testing.T) {
 			fmt.Fprint(w, `{"status":"open"}`)
 		}))
 		t.Cleanup(srv.Close)
-		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: "c"})
+		assertFellBack(t, &Client{bin: gcShowStub(t, bdPayload, ""), httpc: srv.Client(), baseURL: srv.URL, city: knownCity("c")})
 	})
 }
 
@@ -142,7 +152,7 @@ func TestShowBypassesDaemon(t *testing.T) {
 		bin:     gcShowStub(t, `[{"id":"b-1","metadata":{"merge_result":"from_bd"}}]`, marker),
 		httpc:   srv.Client(),
 		baseURL: srv.URL,
-		city:    "c",
+		city:    knownCity("c"),
 	}
 	b := c.Show("b-1")
 	if b == nil || b.Meta("merge_result") != "from_bd" {
@@ -160,5 +170,92 @@ func TestShowCachedWithoutDaemonConfigUsesBd(t *testing.T) {
 	b := c.ShowCached("b-1")
 	if b == nil || b.Meta("merge_result") != "from_bd" {
 		t.Fatalf("ShowCached with no daemon config = %+v, want from_bd", b)
+	}
+}
+
+// supervisorListing starts a fake supervisor that lists one city, name at
+// path, and serves beadJSON on that city's route for b-1, and points New at
+// it: GC_HOME's supervisor.toml names its address, GC_NO_API is off and the
+// session names no city, which each test then sets. It returns every path the
+// supervisor is asked for, in order.
+func supervisorListing(t *testing.T, name, path, beadJSON string) func() []string {
+	t.Helper()
+	var mu sync.Mutex
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/v0/cities":
+			fmt.Fprintf(w, `{"items":[{"name":%q,"path":%q,"running":true}],"total":1}`, name, path)
+		case "/v0/city/" + name + "/bead/b-1":
+			fmt.Fprint(w, beadJSON)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	toml := fmt.Sprintf("[supervisor]\nbind = %q\nport = %s\n", u.Hostname(), u.Port())
+	if err := os.WriteFile(filepath.Join(home, "supervisor.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_HOME", home)
+	t.Setenv("GC_NO_API", "")
+	for _, env := range []string{"GC_CITY_PATH", "GC_CITY", "GC_CITY_ROOT"} {
+		t.Setenv(env, "")
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(asked)
+	}
+}
+
+// New names the city on the bead route by the name the supervisor lists at the
+// session's city path, not by the path's basename, and reads that listing once
+// for the client and the copies WithContext makes.
+func TestNewNamesTheCityAsTheSupervisorListsIt(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dirname")
+	asked := supervisorListing(t, "registered", dir, `{"id":"b-1","metadata":{"merge_result":"from_daemon"}}`)
+	t.Setenv("GC_CITY_PATH", dir)
+	c := New()
+	for i, read := range []*Client{c, c.WithContext(context.Background())} {
+		if b, why := read.showViaDaemon("b-1"); b == nil || b.Meta("merge_result") != "from_daemon" {
+			t.Fatalf("read %d: showViaDaemon = (%+v, %q), want the supervisor's bead", i, b, why)
+		}
+	}
+	want := []string{"/v0/cities", "/v0/city/registered/bead/b-1", "/v0/city/registered/bead/b-1"}
+	if got := asked(); !slices.Equal(got, want) {
+		t.Errorf("supervisor asked for %q, want %q", got, want)
+	}
+}
+
+// A city the supervisor's listing gives no name is a read to fall back from,
+// with the listing's reason, and asks no bead route, even where the path's
+// basename is another listed city's name.
+func TestNewFallsBackForACityTheSupervisorDoesNotList(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "dirname")
+	asked := supervisorListing(t, "dirname", filepath.Join(t.TempDir(), "elsewhere"), `{"id":"b-1"}`)
+	t.Setenv("GC_CITY_PATH", dir)
+	if b, why := New().showViaDaemon("b-1"); b != nil || why != "city-unlisted" {
+		t.Fatalf("showViaDaemon = (%+v, %q), want no bead and the reason city-unlisted", b, why)
+	}
+	if got, want := asked(), []string{"/v0/cities"}; !slices.Equal(got, want) {
+		t.Errorf("supervisor asked for %q, want %q", got, want)
+	}
+}
+
+// A session that names no city reads every bead through `gc bd`, and New wires
+// no supervisor read at all.
+func TestNewWithoutACityPathWiresNoSupervisorRead(t *testing.T) {
+	supervisorListing(t, "registered", "/cities/one", `{"id":"b-1"}`)
+	if New().daemonConfigured() {
+		t.Error("New wired the supervisor read for a session that names no city")
 	}
 }

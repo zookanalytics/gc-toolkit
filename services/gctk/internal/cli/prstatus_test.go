@@ -214,17 +214,21 @@ func TestPRStatusDerive(t *testing.T) {
 // The anchor's row is the supervisor's copy while the supervisor answers, and
 // the bead as it stands under GC_NO_API=1, which converse-signoff.sh sets on its
 // call. The copy still carries a merge_hold the bead no longer does, so the
-// status tells the two reads apart. The fake supervisor serves the anchor only
-// at the city's bead path, where any other path misses and falls back to the
-// store.
+// status tells the two reads apart. The fake supervisor lists the city at its
+// path and serves the anchor only at that city's bead path, where any other
+// path misses and falls back to the store.
 func TestPRStatusAnchorRowIsTheSupervisorsCopy(t *testing.T) {
 	stubGC(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, `[]`)
+	city := filepath.Join(t.TempDir(), "testcity")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v0/city/testcity/bead/tk-a" {
+		switch r.URL.Path {
+		case "/v0/cities":
+			fmt.Fprintf(w, `{"items":[{"name":"testcity","path":%q}],"total":1}`, city)
+		case "/v0/city/testcity/bead/tk-a":
+			fmt.Fprint(w, `{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}`)
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		fmt.Fprint(w, `{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}`)
 	}))
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
@@ -236,7 +240,7 @@ func TestPRStatusAnchorRowIsTheSupervisorsCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GC_HOME", home)
-	t.Setenv("GC_CITY_PATH", filepath.Join(t.TempDir(), "testcity"))
+	t.Setenv("GC_CITY_PATH", city)
 
 	t.Run("while the supervisor answers, its copy", func(t *testing.T) {
 		t.Setenv("GC_NO_API", "")
