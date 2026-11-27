@@ -44,16 +44,15 @@ claim and a run.
 ## This city's measurement
 
 On 2026-11-27 at about 22:30Z I ran one `gc bd sql` per store, over all seven
-of the city's stores: HQ, gc-toolkit, signal-loom, gascity, shutupandlisten,
-sprintshow and growth-factor. It counts the two notes `work-gate.sh` appends
-when it refuses. A run writes "already in_progress under live <owner>" when a
+of the city's stores: the HQ store, gc-toolkit's and the five other rigs'. It
+counts the two notes `work-gate.sh` appends when it refuses. A run writes "already in_progress under live <owner>" when a
 bare claimant holds the bead. A claimant writes "in flight in live run <run>"
 when a run works the bead.
 
-Four beads carry the run's note. In gc-toolkit they are tk-u5vx1d and
-tk-kboai6, last updated 2026-10-04 and 2026-10-08. In shutupandlisten they are
-su-kmstq and su-a0fs.1, last updated 2026-08-17 and 2026-08-19. No bead carries
-the claimant's note, and none carries both, which is what the stall leaves.
+Four beads carry the run's note. Two are in gc-toolkit, tk-u5vx1d and
+tk-kboai6, last updated 2026-10-04 and 2026-10-08, and two are in one other
+rig's store, last updated 2026-08-17 and 2026-08-19. No bead carries the
+claimant's note, and none carries both, which is what the stall leaves.
 The race is rare here, so the change removes the bare sends outside retiring
 code and adds nothing that detects or repairs the stall.
 
