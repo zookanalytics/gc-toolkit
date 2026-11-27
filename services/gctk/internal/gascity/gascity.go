@@ -3,7 +3,8 @@
 // adapters"). It runs `gc sling`, reads the formula a sling to an agent pours
 // when it names none, reads the city's roster, its named sessions, its
 // session list, its rigs and whether a formula resolves, wakes and nudges a
-// session, names the city's root and the settings file its Claude sessions
+// session, reads a session's unread mail and the nudges still to be delivered
+// to it, names the city's root and the settings file its Claude sessions
 // start with, runs the pack's scripts that ask a person, runs gc doctor, and
 // reads and records the city's events. A domain reaches them only through
 // Runtime, or through an interface of its own that City meets. City is the

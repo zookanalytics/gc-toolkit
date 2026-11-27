@@ -146,13 +146,16 @@ skill_links() {
 #
 # A home on its own branch fast-forwards to the tip. A detached home whose HEAD
 # the tip contains moves there too, back onto its own branch when that branch
-# fast-forwards to the tip, and otherwise detached at the tip. Anything else
-# fails the start: a commit the tip lacks, a branch not the home's own, a
-# rebase, merge or other operation stopped partway, a change to a tracked file
-# other than gc's merge into a provider settings file, an untracked file gc did
-# not write, and a fast-forward git refuses. A failed fetch leaves the last tip
-# fetched. Only a linked worktree syncs, since a main checkout is the rig's
-# own, and a repository with no origin is left alone.
+# fast-forwards to the tip, and otherwise detached at the tip. A home whose HEAD
+# is a tip the default branch had before a rewrite, such as a fork's rebase,
+# holds nothing origin did not have, so it moves to the new tip as a detached
+# home does, its own branch left on the old history. Anything else fails the
+# start: a commit the tip lacks, a branch not the home's own, a rebase, merge
+# or other operation stopped partway, a change to a tracked file other than
+# gc's merge into a provider settings file, an untracked file gc did not write,
+# and a fast-forward git refuses. A failed fetch leaves the last tip fetched.
+# Only a linked worktree syncs, since a main checkout is the rig's own, and a
+# repository with no origin is left alone.
 sync_worktree() {
     [ "$SYNC" = "--sync" ] || return 0
     [ -f "$WT/.git" ] || return 0
@@ -207,8 +210,13 @@ check_operation() {
 }
 
 # check_head — a HEAD the tip does not contain, or a branch not the home's own.
-# The move that clears a commit the tip lacks is also the one a rewrite of the
-# default branch, such as a fork's rebase, asks of every home in the rig.
+# A HEAD the tip does not contain is no finding when it is itself a tip the
+# default branch had before a rewrite. git's merge-base --fork-point answers
+# that from the reflog of the default branch's remote-tracking ref, which
+# records each tip a fetch or push gave it, until git expires the entries the
+# new tip no longer reaches (gc.reflogExpireUnreachable, 30 days by default).
+# Such a home's own branch cannot fast-forward to the new tip, so the home moves
+# as a detached home does.
 check_head() {
     CURRENT=$(git -C "$WT" symbolic-ref -q --short HEAD) || CURRENT=""
     if ! git -C "$WT" rev-parse -q --verify 'HEAD^{commit}' >/dev/null; then
@@ -220,11 +228,16 @@ check_head() {
         found "branch $CURRENT checked out, not its own $BRANCH" \
             "switch it back with git -C '$WT' switch $BRANCH"
     fi
-    if ! git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
-        AHEAD=$(git -C "$WT" rev-list --count HEAD --not "$DEFAULT_REF" 2>/dev/null) || AHEAD="?"
-        found "commits $TIP lacks on its HEAD ($AHEAD, newest $(git -C "$WT" rev-parse --short HEAD))" \
-            "keep what they hold elsewhere, then move it with git -C '$WT' checkout --detach origin/HEAD, the step that moves every home of a rig whose default branch was rewritten"
+    if git -C "$WT" merge-base --is-ancestor HEAD "$DEFAULT_REF" 2>/dev/null; then
+        return 0
     fi
+    if [ "$(git -C "$WT" merge-base --fork-point "$DEFAULT_REF" HEAD 2>/dev/null)" = "$(git -C "$WT" rev-parse HEAD)" ]; then
+        CURRENT=""
+        return 0
+    fi
+    AHEAD=$(git -C "$WT" rev-list --count HEAD --not "$DEFAULT_REF" 2>/dev/null) || AHEAD="?"
+    found "commits $TIP lacks on its HEAD ($AHEAD, newest $(git -C "$WT" rev-parse --short HEAD))" \
+        "keep what they hold elsewhere, then move it with git -C '$WT' checkout --detach origin/HEAD"
 }
 
 # check_changes — a change to a tracked file other than gc's merge into a
@@ -264,10 +277,11 @@ listing() {
         END { if (NR > 5) out = out ", and " (NR - 5) " more"; print out }'
 }
 
-# fast_forward — moves the home to the tip, as the checks leave it: on its own
-# branch, or detached on a commit the tip contains. A detached home is done
-# once its HEAD is the tip, since a post-checkout hook's exit status becomes
-# the checkout's after the checkout has moved the home.
+# fast_forward — moves the home to the tip, as the checks leave it. A home on
+# its own branch whose HEAD the tip contains, the only kind of home the checks
+# leave CURRENT set for, fast-forwards that branch. Any other home moves by a
+# checkout, and is done once its HEAD is the tip, since a post-checkout hook's
+# exit status becomes the checkout's after the checkout has moved the home.
 fast_forward() {
     if [ -n "$CURRENT" ]; then
         git -C "$WT" merge -q --ff-only "$DEFAULT_REF"

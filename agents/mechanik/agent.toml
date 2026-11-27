@@ -1,6 +1,9 @@
 # mechanik — city-scoped structural engineer (named singleton, always;
 # stanza in pack.toml). Dispatches pack edits to polecats; direct-edits city.toml.
 scope = "city"
+# mechanik runs on Fable because the operator talks to it directly.
+provider = "claude"
+option_defaults = { model = "claude-fable-5-2" }
 # mechanik holds the operator's standing conversation, and its prompt's start
 # step pins its session. resume brings it back after a restart the pin does not
 # prevent, such as the process exiting on its own. One restart still starts

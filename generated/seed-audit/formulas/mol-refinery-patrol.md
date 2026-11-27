@@ -24,7 +24,7 @@ pr-reconcile.toml) verifies its merge, which is not yours to run:
 docs/refinery-merge-cadence.md.
 
 Variables:
-  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol sends a bead back to the polecat pool, and an empty prefix names <rig>/polecat instead of <rig>/gc-toolkit.polecat, which no pool claims. (default=gc-toolkit.)
+  {{binding_prefix}}: Agent identity prefix with trailing dot. Non-empty default on purpose: this patrol sends a bead back to the polecat pool, and an empty prefix names <rig>/polecat instead of <rig>/<binding>.polecat, which no pool claims. (default=gc-toolkit.)
   {{build_command}}: Build command. Empty = skip. (default=)
   {{default_merge_strategy}}: The strategy for a bead that names none: 'direct' lands by a fast-forward push, 'mr' publishes a PR. Whatever this says, a bead that would land direct on the rig's default branch takes mr, so the default branch takes work only through a PR (docs/warrants.md). The merge-push step reads the rig's value, else this default. (default=direct)
   {{delete_merged_branches}}: Delete a branch from origin once its direct landing is recorded. (default=true)

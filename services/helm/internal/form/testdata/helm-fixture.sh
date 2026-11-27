@@ -8,10 +8,10 @@
 #
 # It answers the verbs the form calls: `conversations [<ref>] --json`, `open`,
 # `engage <conversation> --no-input --no-attach` and the attach,
-# `engage <conversation> --no-input`, and the seats' verbs, `po --rig <rig>`
-# and `mechanik`, which the form runs for the seat picked on its People page. A
-# save and a start each take a second, as the real verbs take a few, so each
-# acknowledgement can be seen landing. It writes nothing.
+# `engage <conversation> --no-input`, and the seats' verbs, `po --rig <rig>`,
+# `mechanik` and `mayor`, which the form runs for the seat picked on its People
+# page. A save and a start each take a second, as the real verbs take a few, so
+# each acknowledgement can be seen landing. It writes nothing.
 case "${1:-} ${2:-}" in
   "conversations --json")
     sleep 1
@@ -24,6 +24,7 @@ case "${1:-} ${2:-}" in
  "rigs":[{"name":"gc-toolkit","prefix":"tk","converse":true,"suspended":false},{"name":"harbor","prefix":"hb","converse":true,"suspended":false},{"name":"paused","prefix":"pz","converse":true,"suspended":true}],
  "seats":[
  {"seat":"mechanik","rig":"","session":{"id":"s-m","name":"gc-toolkit__mechanik","state":"active","attached":false,"created_at":"2026-08-31T04:11:47Z"}},
+ {"seat":"mayor","rig":"","session":null},
  {"seat":"po","rig":"gc-toolkit","session":null},
  {"seat":"po","rig":"harbor","session":{"id":"s-h","name":"harbor--gc-toolkit__po","state":"asleep","attached":false,"created_at":"2026-11-08T08:00:00Z"}},
  {"seat":"po","rig":"paused","session":null}],
@@ -74,7 +75,7 @@ JSON
       *) echo "(the fixture attaches nothing: $2)" ;;
     esac
     ;;
-  "po --rig"|"mechanik ")
+  "po --rig"|"mechanik "|"mayor ")
     sleep 1
     echo "(the fixture opens no seat: $*)"
     ;;

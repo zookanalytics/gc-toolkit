@@ -1,6 +1,7 @@
 package pr
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,43 +24,37 @@ import (
 // reads: when it was read, the provenance instant the definition of feedback
 // was applied with, the PR's identity, its head, state, draft flag and merge
 // state, the required check runs at that head, the accounts whose approval or
-// request for changes stands, the newest feedback in each id space and the
-// review threads waiting on the city's answer. It holds no answer, no condition
-// and no readiness, which the rule derives at each read.
+// request for changes stands, the posts that are feedback the city has not
+// taken and the review threads waiting on the city's answer. It holds no
+// answer, no condition and no readiness, which the rule derives at each read.
 type GitHubRead struct {
-	ReadAt     string         `json:"read_at"`
-	Since      string         `json:"since"`
-	URL        string         `json:"url"`
-	Number     int            `json:"number"`
-	Repository string         `json:"repository"`
-	HeadBranch string         `json:"head_branch"`
-	Base       string         `json:"base"`
-	Head       string         `json:"head"`
-	State      string         `json:"state"`
-	Draft      bool           `json:"draft"`
-	MergeState string         `json:"merge_state"`
-	Checks     []RequiredRun  `json:"checks"`
-	Approvers  []string       `json:"approvers"`
-	Requesters []string       `json:"requesters"`
-	Feedback   NewestFeedback `json:"feedback"`
-	Awaiting   []string       `json:"awaiting"`
+	ReadAt     string        `json:"read_at"`
+	Since      string        `json:"since"`
+	URL        string        `json:"url"`
+	Number     int           `json:"number"`
+	Repository string        `json:"repository"`
+	HeadBranch string        `json:"head_branch"`
+	Base       string        `json:"base"`
+	Head       string        `json:"head"`
+	State      string        `json:"state"`
+	Draft      bool          `json:"draft"`
+	MergeState string        `json:"merge_state"`
+	Checks     []RequiredRun `json:"checks"`
+	Approvers  []string      `json:"approvers"`
+	Requesters []string      `json:"requesters"`
+	Untaken    []Post        `json:"untaken"`
+	Awaiting   []string      `json:"awaiting"`
 }
 
 // RequiredRun is one result of a check run the PR requires, at the read's head,
-// as a check suite there holds its latest result.
+// as a check suite there holds its latest result: the suite that holds it, by
+// its id, and where its log is read, empty when GitHub names nowhere.
 type RequiredRun struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
-}
-
-// NewestFeedback is the highest feedback id in each id space, 0 where there is
-// none: the reviews the intake counts, the inline comments and the
-// conversation comments.
-type NewestFeedback struct {
-	Review       int64 `json:"review"`
-	Inline       int64 `json:"inline"`
-	Conversation int64 `json:"conversation"`
+	Suite      int64  `json:"suite,omitempty"`
+	URL        string `json:"url,omitempty"`
 }
 
 // githubReadKey is the saved read on the bead that owns the PR. Its one writer
@@ -70,15 +65,20 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"for labels, signs, the cheap signs read no later than its facts. pr: the PR's id, its node id on "+
 		"GitHub, its url, number, repository, head_branch and base, its head, state, draft, merge_state, "+
 		"in_merge_queue and merge_queue_enabled, and merge_commit and merged_at once it merged, with the signs "+
-		"state, draft, head, base, base_tip and updated_at. checks: head and runs, the required check runs at "+
-		"that head as {name, status, conclusion}, with the signs head, rollup, contexts, check_runs and "+
-		"statuses, the last two counts by state. conversation: since, the provenance instant the definition "+
+		"state, draft, head, base, base_tip and updated_at. checks: head; runs, the required check runs at "+
+		"that head as {name, status, conclusion, suite, url}, suite the id of the check suite that holds the "+
+		"result and url its log; and suites, each check suite at that head as {id, status, created_at, "+
+		"check_runs}, check_runs how many check runs it holds; with the signs "+
+		"head, rollup, contexts, check_runs and statuses, the last two counts by state. A checks part that "+
+		"holds no suites is read again. conversation: since, the provenance instant the definition "+
 		"of feedback was applied from; approvers and requesters, the accounts that can push whose approval or "+
-		"request for changes stands; feedback, the newest feedback id in each id space as {review, inline, "+
-		"conversation}; awaiting, the review threads waiting on the city's answer; unresolved, the unresolved "+
-		"threads; review_decision; and approvals, each review that approves and has not been dismissed, "+
-		"whoever gave it, as {id, author, commit, inline}, inline the newest inline comment it carries that is "+
-		"feedback, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a "+
+		"request for changes stands; untaken, each post that is feedback and carries neither of the city's "+
+		"marks, its EYES or its THUMBS_UP, as {kind, id, node, author, url, state, path, line, review}: kind "+
+		"review, inline or conversation, node its node id on GitHub, state a review's, path and line an inline "+
+		"comment's file and the line it was made on, and review the review that carried it; awaiting, the "+
+		"review threads waiting on the city's answer; unresolved, the unresolved threads; review_decision; and "+
+		"approvals, each review that approves and has not been dismissed, whoever gave it, as {id, author, "+
+		"commit}, with the signs comments, reviews, dismissed, updated_at, newest_post, the latest time a "+
 		"post changed, and viewer_reactions, each reaction the account the read runs as left on an inline "+
 		"comment, as the comment's id and the reaction, which the definition of feedback reads as an answer "+
 		"to the comment's thread, absent when there is none. labels: names, every label, which are their own signs. The update writes a part only "+
@@ -90,10 +90,23 @@ var githubReadKey = ledger.Declare("pr_github_read", ledger.JSON[*SavedRead](),
 		"holds (observed_pr_head_sha on a changed head, pr_head_sha otherwise) and its since is the bead's "+
 		"pr_provenance_since. Absent or not current, GitHub's side of the PR reads as unread. The landing "+
 		"order finds and does its work from it and the store, and reads GitHub first only for a merge: it has "+
-		"the update read every part of the PR again, and decides the merge on what that read saved. The order's "+
+		"the update read every part of the PR again, and decides the merge on what that read saved. Its take "+
+		"files an ask for each untaken post and marks the post with the city's EYES, then has the update read "+
+		"the PR's conversation again. The order's "+
 		"label comparison reads the labels it saved, and labels that differ from the derived ones make a label "+
 		"write due, on an open PR or, for one it shows merged or closed, a clear.",
 	ledger.Warrant("saved-github-read"))
+
+// provenanceKey is the instant from which the definition of feedback reads an
+// unmarked post under the city's login as feedback. The one-PR update stamps it
+// on a bead that lacks it, in the write that saves the first conversation it
+// reads there.
+var provenanceKey = ledger.Declare("pr_provenance_since", ledger.String,
+	"The instant from which a post under the city's login is feedback unless it carries the city's mark, UTC "+
+		"in the form YYYY-MM-DDTHH:MM:SSZ: when the city first read the PR's conversation. The one-PR update "+
+		"(gctk pr refresh) stamps it on the bead that owns the PR, when the bead lacks it, in the write that "+
+		"saves the first conversation it reads there, applying the definition from it. A value that is not an "+
+		"instant in that form makes every such post the city's own.")
 
 // FromStore answers whether the PR the bead owns is ready to merge at its
 // current revision, over the read the one-PR update saved on the bead: it reads
@@ -127,7 +140,6 @@ type side struct {
 	branch   string
 	holds    []string
 	assignee string
-	rc       receipts
 	since    string
 	results  []review.Result
 	missing  []string
@@ -162,12 +174,7 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 	b := side{bead: bead, rec: rec, branch: read(record.Branch),
 		holds:    []string{read(mergeHoldKey), read(rebaseHoldKey)},
 		assignee: strings.TrimSpace(r.Assignee()),
-		rc: receipts{
-			review: mark(read(reviewWatermarkKey)), comment: mark(read(commentWatermarkKey)),
-			issueComment:   mark(read(issueCommentWatermarkKey)),
-			reviewAnswered: mark(read(reviewAnsweredKey)), commentAnswered: mark(read(commentAnsweredKey)),
-		},
-		since: read(provenanceKey),
+		since:    read(provenanceKey),
 	}
 	results, _, rerr := review.Results.Get(r)
 	if err == nil {
@@ -190,6 +197,9 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 	if err != nil {
 		return side{}, nil, err
 	}
+	if err := postAsks(l, r, rec.URL, waitConds); err != nil {
+		return side{}, nil, err
+	}
 	anchored, err := anchoredTo(l, bead)
 	if err != nil {
 		return side{}, nil, err
@@ -198,8 +208,62 @@ func readSide(l *ledger.Ledger, bead string) (side, *ledger.Record, error) {
 	return b, r, nil
 }
 
+// postAsks names, on each of waits that is an open ask filed for a post on the
+// PR at url, the post it carries, as the URL its reason ends with (PostNamed),
+// since a person's post the city works reads working on the PR. It reads the
+// asks on the bead r only when the bead waits on something.
+func postAsks(l *ledger.Ledger, r *ledger.Record, url string, waits []Condition) error {
+	if len(waits) == 0 || url == "" {
+		return nil
+	}
+	asks, err := review.AsksOn(l, r.ID)
+	if err != nil {
+		return err
+	}
+	for _, a := range asks {
+		if !a.Open() {
+			continue
+		}
+		post := PostNamed(a.Reason, url)
+		if post == "" {
+			continue
+		}
+		for i := range waits {
+			if waits[i].Kind == KindWait && waits[i].ID == a.ID {
+				waits[i].Value = post
+			}
+		}
+	}
+	return nil
+}
+
 // head is the head the store holds for the PR (storeHead).
 func (b side) head() string { return storeHead(b.rec) }
+
+// AwaitsReview reports whether a PR waits on a person's review as the read the
+// one-PR update saved on its bead shows it, from three of the bead's values as
+// stored: its merge_result, the head the refinery validated (pr_head_sha) and
+// the saved read (pr_github_read). It does when the bead is on the pending
+// record at that head ([record.Pending]), the saved read is of the PR at that
+// head, open and no draft, and no approval stands there with no request for
+// changes beside it. A read that is absent, does not decode, or is of another
+// head shows nothing, so the PR waits on the PR watch's next read and on no
+// person yet.
+func AwaitsReview(result, head, saved string) bool {
+	head = strings.TrimSpace(head)
+	if strings.TrimSpace(result) != record.Pending || head == "" || strings.TrimSpace(saved) == "" {
+		return false
+	}
+	var read SavedRead
+	if err := json.Unmarshal([]byte(saved), &read); err != nil || read.PR == nil || read.Conversation == nil {
+		return false
+	}
+	if read.PR.Head != head || !strings.EqualFold(read.PR.State, "OPEN") || read.PR.Draft {
+		return false
+	}
+	c := read.Conversation
+	return len(c.Approvers) == 0 || len(c.Requesters) > 0
+}
 
 // storeHead is the head the store holds for a record's PR: the one the landing
 // order found when the record reads a changed head, and the one the refinery
@@ -233,15 +297,27 @@ func (b side) unread(read *GitHubRead) string {
 }
 
 // requiredRuns is each result the check suites hold of a check run the PR
-// requires, suite by suite, in the order GitHub lists them.
+// requires, suite by suite, in the order GitHub lists them, each with its
+// suite's id and its log.
 func requiredRuns(suites []gh.CheckSuite) []RequiredRun {
 	out := []RequiredRun{}
 	for _, s := range suites {
 		for _, r := range s.Runs {
 			if r.Required {
-				out = append(out, RequiredRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion})
+				out = append(out, RequiredRun{Name: r.Name, Status: r.Status, Conclusion: r.Conclusion,
+					Suite: s.ID, URL: r.URL})
 			}
 		}
+	}
+	return out
+}
+
+// savedSuites is each check suite as the checks part keeps it, in the order
+// GitHub lists them, never nil.
+func savedSuites(suites []gh.CheckSuite) []SavedSuite {
+	out := []SavedSuite{}
+	for _, s := range suites {
+		out = append(out, SavedSuite{ID: s.ID, Status: s.Status, CreatedAt: s.CreatedAt, CheckRuns: len(s.Runs)})
 	}
 	return out
 }
@@ -263,8 +339,8 @@ func listed(l []string) []string {
 // of GitHub's, ahead of the store's, and judges no head. Otherwise GitHub's
 // conditions come first: the PR's identity, state, draft flag, head and merge
 // state, its required checks, its approval and the review loop's result, then
-// the store's, then the feedback the receipts do not cover and the review
-// threads waiting on the city's answer. An answer that judged a head carries
+// the store's, then each post that is feedback the city has not taken and the
+// review threads waiting on the city's answer. An answer that judged a head carries
 // the review loop's result there, passed or not, when one stands.
 func decideOver(b side, read *GitHubRead, why string) Answer {
 	ans := Answer{Bead: b.bead, Conditions: []Condition{}}
@@ -339,7 +415,7 @@ func decideOver(b side, read *GitHubRead, why string) Answer {
 	}
 
 	ans.Conditions = append(front, store...)
-	ans.Conditions = append(ans.Conditions, unhandled(b.rc, read.Feedback)...)
+	ans.Conditions = append(ans.Conditions, unhandled(read.Untaken)...)
 	for _, id := range read.Awaiting {
 		ans.Conditions = append(ans.Conditions, Condition{Kind: KindThread, Value: id,
 			Detail: fmt.Sprintf("review thread %s waits on the city's answer", id)})

@@ -8,10 +8,29 @@
 # build, as the step declares them, passed at that HEAD, a fail of any of them
 # passing only by the work bead's pre-existing mark for it. For a check the step
 # declares no command for, whatever run the iteration made in its place answers.
-# Every other state, including any internal error in this script, exits non-zero
-# so the loop spawns the next iteration. Fail-closed is deliberate: a false pass
-# hands an unverified diff to the refinery, which is the red handoff this loop
-# exists to stop.
+# Every other state, including any internal error in this script, exits non-zero.
+# Fail-closed is deliberate: a false pass hands an unverified diff to the
+# refinery, which is the red handoff this loop exists to stop.
+#
+# Exit: 0 green at HEAD · 1 not yet: a check red or unrecorded at HEAD, a dirty
+#       tree, or a run wired wrong, so the next iteration runs, and on the
+#       loop's last attempt the loop ends failed · 75 no verdict: a read this
+#       script needs did not answer, so Gas City runs it again without spending
+#       an attempt.
+#
+# ## Why a read it could not make exits 75
+#
+# Gas City grades a non-zero exit other than 75 as the verdict "not yet", which
+# spends one of the loop's attempts, each a fresh session, and on the last
+# attempt ends the loop failed. A read that did not answer, such as a bead store
+# that did not reply, a record store gctk could not read, or a tree git could
+# not read, says nothing about the work, so it exits 75 with NO VERDICT on
+# stderr. formula-spec-v2.md, section 3.1
+# ("Infrastructure outcomes — exit 75"), makes that a run with no verdict: Gas
+# City runs this script again on a later pass, for the same iteration, and
+# charges the run to an infrastructure budget the control bead counts in
+# gc.check_infra_retry instead of to an attempt. That budget spans the whole
+# loop, and once it is spent Gas City grades a 75 as a failure.
 #
 # ## Why this READS the records instead of running the checks
 #
@@ -51,12 +70,11 @@
 # this purpose). `bd` talks to the bead store directly; `gc` subcommands first
 # load the full city config including the pack import closure, which in the
 # condition env can be cold — then the `gc` call dies before doing anything
-# ("... locked but not cached ...; run 'gc import install'"). A resolution that
-# dies goes blind to an already-green gate AND suppresses the exhaustion note
-# below (which is gated on a resolved $ISSUE), so the loop burns its whole
-# budget and ends with nothing on the work bead to say so. Keeping resolution on
-# `bd` keeps both working in a minimal env. Each `bd` call carries a `# raw-bd:`
-# marker, which the raw-bd-invocation lint reads.
+# ("... locked but not cached ...; run 'gc import install'"). A read that dies
+# that way dies on every run, so its no-verdict exits would spend the
+# infrastructure budget and then the loop's attempts, blind to an already-green
+# gate. Keeping resolution on `bd` keeps it working in a minimal env. Each `bd`
+# call carries a `# raw-bd:` marker, which the raw-bd-invocation lint reads.
 #
 # ## Why this script notes the LAST failing attempt on the work bead
 #
@@ -70,10 +88,18 @@
 # run's end would close. When the last attempt closed red instead, this script
 # is the only thing that runs at that moment, so it appends what it found to the
 # work bead's notes. That note is its one write: it routes, assigns and nudges
-# nothing. It fires only on the budget's last attempt (GC_ITERATION >=
-# gc.max_attempts) and only once for a run (a work bead whose notes already
-# record this run's exhaustion is left alone). The write is best-effort: a note
-# that fails must not change the verdict, which is a FAIL either way.
+# nothing. It fires only on a verdict on the budget's last attempt
+# (GC_ITERATION >= gc.max_attempts) and only once for a run (a work bead whose
+# notes already record this run's exhaustion is left alone). The write is
+# best-effort: a note that fails must not change the verdict, which is a FAIL
+# either way.
+#
+# A run that exits 75 spent no attempt, so it writes no note. Once the
+# infrastructure budget is spent, Gas City grades the last attempt's 75 as a
+# failure and the loop ends with no note on the work bead, because this script
+# cannot tell that 75 from one Gas City will run again: the budget's bound is a
+# constant in gc's code (maxCheckInfraRetries, internal/dispatch/ralph.go), and
+# no bead carries it.
 
 set -uo pipefail
 
@@ -96,6 +122,13 @@ incomplete() {
 	note "$1"
 	note_if_budget_exhausted "$1"
 	exit 1
+}
+
+# A read this script needs did not answer: see "Why a read it could not make
+# exits 75".
+no_verdict() {
+	printf 'self-review-check: NO VERDICT: %s\n' "$1" >&2
+	exit 75
 }
 
 # The iteration bead this attempt ran on, read at most once (memoized). Empty
@@ -212,7 +245,7 @@ if [ -z "$ROOT" ]; then
 	# raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 	ROOT=$(bd show "$GC_BEAD_ID" --json 2>/dev/null |
 		jq -r '.[0].metadata."gc.root_bead_id" // empty') ||
-		fail "could not read root bead id from $GC_BEAD_ID"
+		no_verdict "could not read root bead id from $GC_BEAD_ID"
 fi
 [ -n "$ROOT" ] || fail "could not resolve the molecule root bead"
 
@@ -224,13 +257,13 @@ fi
 # The reads go through `bd` only. The root's own row is read first, since the
 # step's commands are read from it below. A run that cannot be read leaves
 # gc.var.issue on that row, which the self-review iteration stamps as the
-# fallback for a degraded store, so the exhaustion note below still has a bead
-# to go on; the check says the run went unverified.
+# fallback for a degraded store, so the check still has a bead to go on; it says
+# the run went unverified.
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
-ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null)
-[ -n "$ROOT_JSON" ] || fail "could not read root bead $ROOT"
+ROOT_JSON=$(bd show "$ROOT" --json 2>/dev/null) && [ -n "$ROOT_JSON" ] ||
+	no_verdict "could not read root bead $ROOT"
 # shellcheck source=run-lib.sh
-. "${GC_RUN_LIB:-$(cd "$(dirname "$0")" && pwd)/run-lib.sh}" || fail "cannot source run-lib.sh beside this script"
+. "${GC_RUN_LIB:-$(cd "$(dirname "$0")" && pwd)/run-lib.sh}" || no_verdict "cannot source run-lib.sh beside this script"
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
 review_bd() { bd "$@"; }
 if RUN_JSON=$(run_lib subject review_bd "$ROOT"); then
@@ -238,13 +271,13 @@ if RUN_JSON=$(run_lib subject review_bd "$ROOT"); then
 	[ -n "$ISSUE" ] || fail "the run of root $ROOT works no single bead: $(printf '%s' "$RUN_JSON" | jq -c . 2>/dev/null) (its input convoy must track exactly one bead, the one gc.var.issue names when the root records it)"
 else
 	ISSUE=$(printf '%s' "$ROOT_JSON" | jq -r '.[0].metadata."gc.var.issue" // empty' 2>/dev/null)
-	[ -n "$ISSUE" ] || fail "could not read the run of root $ROOT, and the root carries no gc.var.issue"
+	[ -n "$ISSUE" ] || no_verdict "could not read the run of root $ROOT, and the root carries no gc.var.issue"
 	note "WARN: could not read the run of root $ROOT; proceeding on root gc.var.issue=$ISSUE (membership unverified)"
 fi
 
 # --- 3. The worktree, as recorded by workspace-setup -------------------------
 # raw-bd: gc bd loads the city config, which can be cold here — see "Why resolution is bd-only"
-ISSUE_JSON=$(bd show "$ISSUE" --json 2>/dev/null) || fail "could not read work bead $ISSUE"
+ISSUE_JSON=$(bd show "$ISSUE" --json 2>/dev/null) || no_verdict "could not read work bead $ISSUE"
 WORKTREE=$(printf '%s' "$ISSUE_JSON" | jq -r '.[0].metadata.work_dir // empty')
 [ -n "$WORKTREE" ] || fail "work bead $ISSUE has no metadata.work_dir yet"
 [ -d "$WORKTREE" ] || fail "recorded work_dir does not exist: $WORKTREE"
@@ -253,16 +286,19 @@ git -C "$WORKTREE" rev-parse --git-dir >/dev/null 2>&1 ||
 
 # --- 4. The tree must be clean ----------------------------------------------
 # Uncommitted changes mean the iteration left work the declared checks never
-# saw, and no record at HEAD describes them.
-DIRTY=$(git -C "$WORKTREE" status --porcelain 2>/dev/null) ||
-	fail "could not read git status in $WORKTREE"
+# saw, and no record at HEAD describes them. The status is read with the flags
+# gctk reads it with (Checkout.Dirty in services/gctk/internal/git), so a tree
+# gctk refuses to certify is a dirty tree here, whatever config such as
+# status.showUntrackedFiles would hide from a plain status.
+DIRTY=$(git -C "$WORKTREE" status --porcelain --untracked-files=normal --ignore-submodules=none 2>/dev/null) ||
+	no_verdict "could not read git status in $WORKTREE"
 if [ -n "$DIRTY" ]; then
 	printf '%s\n' "$DIRTY" >&2
 	incomplete "worktree is dirty; another iteration is needed (see the status above)"
 fi
 
 HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
-	fail "could not resolve HEAD in $WORKTREE"
+	no_verdict "could not resolve HEAD in $WORKTREE"
 
 # --- 5. Every recorded check must pass at THIS HEAD, as the step declares it --
 # The iteration ran each check through `gctk rig`. A check the rig declares no
@@ -288,9 +324,9 @@ HEAD_SHA=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null) ||
 # (rig-check-pre-existing.sh). A run with another command or scope replaces the
 # record, and its fail needs a judgment of its own. rig-check-lib.sh holds the
 # one definition of that judgment.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || fail "could not resolve this script's directory"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || no_verdict "could not resolve this script's directory"
 # shellcheck source=rig-check-lib.sh
-. "$HERE/rig-check-lib.sh" || fail "cannot source rig-check-lib.sh beside this script"
+. "$HERE/rig-check-lib.sh" || no_verdict "cannot source rig-check-lib.sh beside this script"
 FAILED=""
 UNRECORDED=""
 # judged <check> <record> : a fail at HEAD fails the check unless the work
@@ -335,8 +371,8 @@ another_run() {
 # >>> gctk-bin
 GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 # <<< gctk-bin
-[ -x "$GCTK" ] || fail "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
-RIG_ERR=$(mktemp "${TMPDIR:-/tmp}/self-review-check.XXXXXX") || fail "could not make a file to read gctk rig's lines into"
+[ -x "$GCTK" ] || no_verdict "no gctk binary at $GCTK to read the recorded checks; the city's gctk-build order publishes it"
+RIG_ERR=$(mktemp "${TMPDIR:-/tmp}/self-review-check.XXXXXX") || no_verdict "could not make a file to read gctk rig's lines into"
 trap 'rm -f "$RIG_ERR"' EXIT
 for CHECK in test lint typecheck; do
 	case "$CHECK" in
@@ -346,9 +382,10 @@ for CHECK in test lint typecheck; do
 	esac
 	# rig's own lines go to stderr, where they say what is recorded, and the
 	# record it found is the one JSON line on stdout. Exit 4 is a read gctk
-	# could not make, which says nothing about the code, so the verdict quotes
-	# gctk's reason: an unreadable store, or a change its status counts and
-	# step 4's does not.
+	# could not make, such as a record store it cannot read, and any exit gctk
+	# does not give --check an answer with, such as a signal's, answers nothing
+	# either, so both are no verdict. Exit 2 is gctk refusing the call as wired,
+	# which a run again would meet the same way, so it is a verdict.
 	REC=$(cd "$WORKTREE" && "$GCTK" rig "$CHECK" --check 2>"$RIG_ERR")
 	RC=$?
 	cat "$RIG_ERR" >&2
@@ -358,8 +395,9 @@ for CHECK in test lint typecheck; do
 		UNRECORDED="$UNRECORDED $CHECK"
 		continue
 		;;
-	4) fail "gctk rig $CHECK --check read nothing at $HEAD_SHA: $(head -n 4 "$RIG_ERR" | paste -sd ' ' -)" ;;
-	*) fail "gctk rig $CHECK --check exited $RC in $WORKTREE" ;;
+	2) fail "gctk rig $CHECK --check refused the call: $(head -n 1 "$RIG_ERR")" ;;
+	4) no_verdict "gctk rig $CHECK --check read nothing at $HEAD_SHA: $(head -n 4 "$RIG_ERR" | paste -sd ' ' -)" ;;
+	*) no_verdict "gctk rig $CHECK --check exited $RC in $WORKTREE, which gives no answer" ;;
 	esac
 	if [ -n "$RUN" ] && ! printf '%s' "$REC" | jq -e --arg s "$SCOPE" --arg c "$RUN" '(.scope // "") == $s and (.command // "") == $c' >/dev/null 2>&1; then
 		note "$CHECK: $(another_run "$REC" "$SCOPE" "$RUN")"

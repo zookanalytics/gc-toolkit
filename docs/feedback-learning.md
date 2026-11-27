@@ -94,7 +94,11 @@ Four producers file the same bead contract:
    city sends. It captures only from durable sources: a PR review or
    comment, a rework's rejection reason, and a bead's notes. A session the
    operator attends, mechanik or a converse sitting, also captures the
-   operator's own turns.
+   operator's own turns. Any agent also files one, from any session, for a
+   change to how agents work that it would suggest but should not make on
+   its own: the statement says what it saw that led there, and the proposed
+   norm carries the suggestion, which binds no agent unless the loop proposes
+   it and the operator approves it.
 2. **PR miner.** The `mol-feedback-miner` order sweeps each importing
    rig's merged/closed PRs' review and conversation comments, with
    `obs.source=miner`, in two captures:
@@ -103,13 +107,14 @@ Four producers file the same bead contract:
      whether or not it is about standing behavior. A post that makes a
      standing correction also names the correction's slug in
      `obs.correction`, so the recurrence metric counts its repeats. A post
-     is the city's when it carries the city's mark
-     (`assets/scripts/pr-post.sh`). A post that is not for review
+     is the city's when the city's login posted it with the city's mark
+     (`assets/scripts/pr-post.sh`). The mark counts under no other login. A
+     post that is not for review
      ([not-for-review.md](not-for-review.md)) and a GitHub App's approval
      are notices, not review feedback, whoever posted them. On a rig that
      declares no marker, so is Vercel's deployment notice, an app's
      conversation comment whose first non-blank line opens with `[vc]:`.
-     Any other unmarked post is outside when another login posted it, an
+     Any other post is outside when another login posted it, an
      app's included, or when it is Claude Code's `/code-review` output
      posted under the city's login. The rig's store records the day from
      which the outside capture still owes a read of every merged or closed
@@ -187,10 +192,12 @@ files in the memory directory's hidden `.memory-intake` folder, since an agent
 that opened one before can still write to it.
 
 Where what an agent learns goes is guidance every Claude role that keeps
-memory carries in its prompt (`template-fragments/memory-notes.template.md`),
-a list of three places: its memory holds what should change the next agent's
-behavior, an observation holds a correction to how agents work, and a bead's
-notes hold the state of its open work.
+memory carries in its prompt (`template-fragments/memory-notes.template.md`).
+Its memory holds what should change the next agent's behavior, an observation
+holds a correction to how agents work or a change to it the agent would
+suggest but should not make on its own, and a bead's notes hold the state of
+its open work. A suggestion stays out of memory, which would steer the next
+agent before the operator approves it.
 
 ## The promotion path
 
@@ -251,9 +258,11 @@ pays for. Three gates — defined in full in the `learning-distill` rubric,
   conventions-list mechanism: agreeing a behavior matters is not agreeing
   that a static bullet every agent pays for is how to secure it, so an
   endorsed cluster still faces the carrier choice and Gate 3. A blocked
-  pattern is *surfaced* to the operator (held with the block stated), never
-  adopted; it promotes later on corroboration or an explicit `learn this`
-  endorsement.
+  pattern is *surfaced* to the operator, never adopted on its own: once
+  nothing else holds it back, its proposal is filed held for placement like
+  any other, with the block stated, so their placing it is the endorsement
+  and their closing it turns the pattern down until evidence from an event it
+  had not seen reopens it.
   `obs.source` records who filed an observation, not whose words it carries,
   so an operator correction captured by the agent it corrected reads `self`.
   The distiller checks the voice behind each `self` observation before it

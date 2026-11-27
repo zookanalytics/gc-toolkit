@@ -65,7 +65,14 @@
 # names it and it carries no gc.step_ref, so there is no step to close and no other
 # bead to write. Any other --bead caller must hold this step, as claim-close.sh judges
 # it. Both are read before anything is pushed or written, because a close refused
-# after the handoff can only be reported.
+# after the handoff can only be reported, and a claim that does not read is refused.
+#
+# Such a claimant's store-only exit runs in another order. The validating closer's
+# arm refuses a claimed bead, and no run root can hold the closer, so the check
+# runs first, then the record and the hand-back, and a brief's closer is armed
+# last, on the bead handed back. No refusal drains. Before the hand-back the claim
+# is still this session's, which a drained session would leave held. After it, the
+# call run again takes the exit again and arms the closer.
 #
 # A converse sitting hands its change off with --held-by <conversation> beside
 # --bead. Its claim is the conversation, so in place of that check the bead must
@@ -87,9 +94,10 @@
 # does, and writes nothing.
 #
 # exit: 0 handed off, or halted as asked, and drained · 3 the caller owes something
-# first, nothing handed off, no drain · 1 stopped, and what follows was taken care
-# of · 2 usage. Under --held-by nothing drains, and 1 is a stop that asked and
-# ended nothing.
+# first, and nothing drains: nothing is handed off, or the store-only exit of a
+# claimant with no poured run handed the bead back and its closer is not armed yet
+# · 1 stopped, and what follows was taken care of · 2 usage. Under --held-by
+# nothing drains, and 1 is a stop that asked and ended nothing.
 set -uo pipefail
 
 PROG="work-submit"
@@ -219,10 +227,11 @@ if [ -n "$WORK_HELD_BY" ]; then
   [ -n "$BASE" ] || work_held_stop "$WORK_ID records no target, the branch its change lands on, so nothing is pushed"
   DIRECT_CLAIM=1
 elif [ -n "$BEAD" ] && [ "$ANCHOR_ONLY" = 0 ]; then
-  CLAIMED=$(gc hook current --id-only </dev/null 2>/dev/null) || CLAIMED=""
   OWNER=$(work_field .assignee)
   if [ -n "$(work_meta gc.step_ref)" ]; then
     refuse_claim "$WORK_ID is the step $(work_meta gc.step_ref), and --bead names the work bead."
+  elif ! CLAIMED=$(gc hook current --id-only </dev/null) || [ -z "$CLAIMED" ]; then
+    refuse_claim "--bead $WORK_ID cannot be shown to be this session's claim, because the claim did not read."
   elif [ "$CLAIMED" != "$WORK_ID" ]; then
     "$SCRIPT_DIR/claim-close.sh" --step "$STEP" --dry-run >/dev/null \
       || refuse_claim "--bead $WORK_ID is not this session's claim, and neither is $STEP."
@@ -261,10 +270,19 @@ fi
 
 if [ -n "$STORE_ONLY" ]; then
   # store-only-exit.sh refuses a run with work to land, and writes nothing then.
-  "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" ${CONVOY:+--convoy "$CONVOY"} --done "$DONE_BRIEF" \
-    || { work_drain; exit 1; }
+  if [ "$DIRECT_CLAIM" = 1 ]; then
+    "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" \
+      || { echo "$PROG: the store-only exit refused, so nothing is recorded and $WORK_ID stays this session's claim." >&2; exit 3; }
+  else
+    "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" ${CONVOY:+--convoy "$CONVOY"} --done "$DONE_BRIEF" \
+      || { work_drain; exit 1; }
+  fi
   gc bd update "$WORK_ID" --set-metadata halt_reason=store_only --append-notes "Store-only exit: filed $STORE_ONLY. $NOTES" </dev/null >/dev/null || exit 1
   "$SCRIPT_DIR/hand-back.sh" "$WORK_ID" --set-metadata gc.routed_to="" || exit 1
+  if [ "$DIRECT_CLAIM" = 1 ] && [ -n "$DONE_BRIEF" ]; then
+    "$SCRIPT_DIR/store-only-exit.sh" --bead "$WORK_ID" --base "$BASE" --done "$DONE_BRIEF" \
+      || { echo "$PROG: $WORK_ID is handed back, but its validating closer is not armed. Run this call again: it takes the exit again and arms the closer." >&2; exit 3; }
+  fi
   close_step
   work_drain
   exit 0
