@@ -276,7 +276,7 @@ live there are exempt).
 Another non-invariant check, `doctor/check-demo-toolchain`, reports readiness
 rather than structure: whether the demo:capture toolchain — Node, ffmpeg,
 `OPENAI_API_KEY`, and the `gh` that delivers a clip inline — is resolvable,
-warn-only, so a demo session learns before it captures whether the clip will
+warn-only, so a session learns before it captures whether the clip will
 narrate or degrade to a silent, captioned one. It also reports whether
 `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session, and warns when the
 secrets file holds that key and the session does not. The capture installs its

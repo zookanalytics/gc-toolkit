@@ -12,9 +12,8 @@ ends (the gc-toolkit.review-demo skill).
     --var serve_dir=<dir>               # or: --var serve_cmd="<cmd>" / --var base_url=<url> / none, for the rig's ui_serve_command
     --var deliver_subject=<bead>        # optional; or --var deliver_pr=<n>; omit to just report
 
-The capture is engine-driven over @zookanalytics/sprintshow
-(the gc-toolkit.demo-capture skill): the engine drives Playwright headlessly,
-the only path a pool session has, since it carries no browser MCP. The
+The capture is engine-driven over @zookanalytics/sprintshow (the
+gc-toolkit.demo-capture skill): the engine drives Playwright headlessly. The
 mechanical half — engine resolution, lint, capture, liveness check — lives in
 assets/scripts/rig-demo-capture.sh so this formula, the demo review check, and a
 shell all drive it the same way. Delivery is assets/scripts/demo-deliver.sh,

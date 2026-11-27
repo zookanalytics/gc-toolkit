@@ -164,7 +164,7 @@ driver would silently ignore:
 demo_engine_cli lint demo.md          # --strict makes warnings non-zero
 ```
 
-## Capture — the engine drives (default)
+## Capture
 
 Point the engine at the app and let it drive the browser, check each step, and
 assemble the MP4:
@@ -209,8 +209,7 @@ Two capture modes come from one script:
 - **walkthrough** (default) — one continuous recorded take at a human pace with
   a synthetic cursor and live captions. The watchable cut.
 - **proof** (`--mode proof`) — one screenshot per step, each with its assertion
-  checked and its caption burned in. Deterministic and frame-exact; the shape
-  an agent produces when it drives the browser itself.
+  checked and its caption burned in. Deterministic and frame-exact.
 
 The MP4 lands at `demos/<script-name>.mp4` by default (`-o` to override). Other
 flags: `--no-narrate`, `--music <file>`, `--keep` (keep the `.captures/<run>/`
@@ -327,26 +326,6 @@ attached, remove the worktree:
 ```bash
 git -C <checkout> worktree remove <worktree>
 ```
-
-## Capture — you drive over Playwright MCP
-
-When the session is demo-gated and carries the `playwright` MCP server (the
-`demo` agent's `agents/demo/mcp/playwright.toml`), an agent can drive the
-browser itself: screenshot each
-step into a captures directory with a `manifest.json`, then hand the frames to
-the engine to assemble. This is the Gas City path, where the agent already
-holds the browser. That browser is the session's own, outside any sandbox the
-engine runs in, so it reaches whatever the session reaches, the live city
-included. Point it only at an app that serves fixture data.
-
-```bash
-demo_engine_cli assemble .captures/agent-run -o demos/board.mp4
-```
-
-`manifest.json` is the contract `assemble` reads. The engine's
-`examples/agent-mcp/` documents its shape and the MCP wiring, and
-`examples/seed-test/` shows the seed-test bootstrap for a demo that first needs
-a login or seeded data.
 
 ## Deliver to the PR
 

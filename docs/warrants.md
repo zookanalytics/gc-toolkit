@@ -298,7 +298,7 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main c2027dae0ac5 and
   `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.

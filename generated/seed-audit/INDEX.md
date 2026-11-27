@@ -44,7 +44,6 @@ when one is named, and are not committed:
 - [`converse-fable`](agents/converse-fable.md)
 - [`converse-opus`](agents/converse-opus.md)
 - [`deacon`](agents/deacon.md)
-- [`demo`](agents/demo.md)
 - [`dog`](agents/dog.md)
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
@@ -119,7 +118,6 @@ runs to re-prime after compaction.
 | converse-fable | `gascity`, `gc-toolkit` | 1 | _none_ |
 | converse-opus | `gascity`, `gc-toolkit` | 1 | _none_ |
 | deacon | `city` | 1 | _none_ |
-| demo | `gascity`, `gc-toolkit` | 1 | _none_ |
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |
