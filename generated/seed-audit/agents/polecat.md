@@ -99,13 +99,15 @@ worktree, pushed branch, refinery handoff), a review bead carries
   with an earlier ruling, and say where your recommendation departs from
   what they said.
 
-<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback) adopted:2026-11-23 -->
-- When a design or proposal fixes a time window, an interval, an age limit
-  or another threshold, give the reason for that value and what a wrong
-  value costs, because a constant copied from a neighbouring rule is not a
-  reason. Where no reason holds the value, let the evidence that should
-  trigger the decision, or a judgment made case by case, decide instead,
-  or drop the requirement.
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback), visit:tk-7ierwq7 (operator ruling) adopted:2026-11-23 -->
+- When a design or proposal acts once something passes a limit, such as a
+  time window, an interval or an age, start from the criterion that
+  warrants the action, which says what should trigger it. Set a cutoff only
+  where that criterion needs one to be put into practice, take its value
+  from what the criterion measures, and say what crossing it does and what
+  a wrong value costs. Where no cutoff is warranted, let the evidence the
+  criterion names, or a judgment made case by case, decide instead, or
+  drop the requirement.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by polecat and polecat-codex (via the
