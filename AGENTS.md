@@ -100,14 +100,18 @@ under [the board's composition](docs/gctk-architecture.md#compositions) in
 gctk-architecture.md. Tooling that runs only on this repository, such as its
 lint detectors and its test runner, is outside this rule.
 
-A script that already exists takes a fix in place, where a fix corrects what
-the script does and adds no verb, mode or key to it. A change that needs more
-from a script grows it only where gctk cannot hold the growth or is
-inappropriate for it. Otherwise the change moves the intent it extends into
-gctk whole, by the
+A script that already exists takes a fix in place: the lines that correct what
+the script does, adding no verb, mode or key to it. A new function in a shared
+shell library, or a reader that several scripts move onto, is growth, whatever
+the change calls itself. A change that needs more from a script grows it only
+where gctk cannot hold the growth or is inappropriate for it. Otherwise the
+change moves the intent it extends into gctk whole, by the
 [rules a domain move follows](docs/gctk-architecture.md#the-rules-a-domain-move-follows),
-or waits on a bead that already moves that intent. Code the deletion plan
-retires takes neither a fix nor growth, because it
+or waits on a bead that already moves that intent. Where gctk already holds
+part of the intent a fix corrects, such as a key it declares or a record it
+writes for that intent, gctk can hold the rest, so the fix moves the intent
+into gctk whole in the same way. Code the deletion plan retires takes neither a
+fix nor growth, because it
 [gets no new work](#code-the-deletion-plan-retires-gets-no-new-work).
 
 Logic gctk cannot hold includes the build that produces its own binary, and
@@ -116,7 +120,9 @@ such as the tmux key bindings each agent session installs. A change that adds a
 script, or grows one past a fix, says in a sentence of its design or its PR
 summary why gctk cannot hold that logic or is inappropriate for it. A review
 sends the change back when the sentence is missing or gives only a preference,
-such as bash being quicker to write, and asks for nothing more.
+such as bash being quicker to write, and asks for nothing more. It sends back a
+fix made in place to an intent gctk already holds part of, and asks for the
+move, or for a wait on a bead that already carries it.
 
 ## A change to the pack's behavior names the foundation belief or goal it serves
 
