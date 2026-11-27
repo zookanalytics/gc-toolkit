@@ -70,22 +70,17 @@ obs() { # id created_at provenance category pattern source
   jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cat "$4" --arg pat "$5" --arg s "$6" \
     '{id:$id, created_at:$c, metadata:{task_kind:"observation", "obs.provenance":$p, "obs.category":$cat, "obs.distilled":$pat, "obs.source":$s}}'
 }
-outside() { # id created_at provenance correction — the miner's outside capture
-  jq -nc --arg id "$1" --arg c "$2" --arg p "$3" --arg cor "$4" \
-    '{id:$id, created_at:$c, metadata:({task_kind:"observation", "obs.provenance":$p, "obs.category":"outside-review", "obs.source":"miner"}
-       + (if $cor == "" then {} else {"obs.correction":$cor} end))}'
-}
 mislabelled() { # id created_at category — carries the label, not the kind
   jq -nc --arg id "$1" --arg c "$2" --arg cat "$3" \
     '{id:$id, created_at:$c, metadata:{"obs.provenance":("prov-" + $id), "obs.category":$cat}}'
 }
 
-# alpha: one category seen three times (two inside the window, one older),
-# one singleton, one event double-captured under a single provenance key, and
-# one whole-turn provenance carrying three corrections that are not the same
-# correction — different category, different pattern bead.
+# alpha: one pattern drawing an event before its rule's adoption and three
+# after it, one singleton, one post double-captured and not judged yet, and
+# one whole-turn provenance whose corrections the distiller put in two
+# patterns, with another capture of that turn it has not judged yet.
 {
-  obs a1 "$(ago 80)"  "pr:o/r#1:comment:1" doc-venue ""        self
+  obs a1 "$(ago 80)"  "pr:o/r#1:comment:1" doc-venue tk-pat1   self
   obs a2 "$(ago 10)"  "pr:o/r#2:comment:2" doc-venue tk-pat1   miner
   obs a3 "$(ago 3)"   "pr:o/r#3:comment:3" doc-venue tk-pat1   operator
   obs a4 "$(ago 5)"   "bead:x:turn:1"      lone-slug ""        self
@@ -96,7 +91,7 @@ mislabelled() { # id created_at category — carries the label, not the kind
   obs a9 "$(ago 6)"   "bead:y:turn:2"      turn-one  ""        miner
 } | jq -s . > "$STUB_STORE_DIR/alpha.json"
 
-# beta: one event inside the prior window that repeats alpha's oldest category.
+# beta: one older event the distiller has not judged.
 {
   obs b1 "$(ago 45)" "pr:o/r#4:comment:4" doc-venue "" miner
 } | jq -s . > "$STUB_STORE_DIR/beta.json"
@@ -144,28 +139,24 @@ hasnt "$INV" "tk-instray" "the correctness method itself is not inventoried"
 # --- 2. report over the fixture corpus ------------------------------------
 J=$("$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
 eq "$(jq -r '.corpus.observations' <<< "$J")" "10" "every observation across both stores is read"
-eq "$(jq -r '.corpus.events_after_dedup' <<< "$J")" "8" "two captures of one correction collapse to one event"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$J")" "9" "two captures of one post the distiller has not judged are one event"
 eq "$(jq -r '.corpus.stores' <<< "$J")" "2" "both stores counted"
 
-# a2, a3 repeat doc-venue (a1 is older); a4/a5 are firsts of their slug.
-eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$J")" "2" "M1 counts only events whose category was seen earlier"
-eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$J")" "6" "M1 denominator is the window's categorised events"
-eq "$(jq -r '.m1_category_repeat.prior.repeats' <<< "$J")" "1" "the prior window is scored the same way"
-eq "$(jq -r '.m1_category_repeat.fragmentation.distinct' <<< "$J")" "5" "fragmentation counts distinct slugs"
-
-# a2 and a3 carry obs.distilled=tk-pat1 and postdate the adoption date.
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$J")" "3" \
-   "M2 attributes post-adoption events through obs.distilled"
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-quiet")] | .[0].since_adoption' <<< "$J")" "0" \
+# a2, a3 and a7 carry obs.distilled=tk-pat1 after the adoption date, a1 before it.
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$J")" "3" \
+   "recurrence after adoption attributes events through obs.distilled"
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-quiet")] | .[0].since_adoption' <<< "$J")" "0" \
    "a rule with no matching observations scores zero, not null"
-eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$J")" "4" "every adopted entry is inventoried"
-eq "$(jq -r '.m2_post_adoption.measurable' <<< "$J")" "3" "an entry without a pattern anchor is not counted as measurable"
+eq "$(jq -r '.post_adoption.adopted_total' <<< "$J")" "4" "every adopted entry is inventoried"
+eq "$(jq -r '.post_adoption.measurable' <<< "$J")" "3" "an entry without a pattern anchor is not counted as measurable"
+eq "$(jq -r '.post_adoption.window_attribution.events' <<< "$J")" "7" "coverage is read over the window's events"
+eq "$(jq -r '.post_adoption.window_attribution.attributed' <<< "$J")" "4" "and counts those the distiller attributed"
 
 # --- 2a. task_kind decides, the label only narrows ------------------------
 # `-l observation` is a listing narrowing, not the discriminator: the label is
 # free-text and any bead may carry it. A bead without task_kind=observation is
-# not an observation, and admitting it would inflate the corpus both metrics
-# are scored against.
+# not an observation, and admitting it would inflate the corpus the coverage
+# is read over.
 mkdir -p "$TMP/stores2a"
 {
   obs         k1 "$(ago 5)" "pr:o/r#30:comment:30" real-slug tk-pat1 self
@@ -177,77 +168,52 @@ JSON
 K=$(STUB_RIGS="$TMP/rigs2a.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
 eq "$(jq -r '.corpus.observations' <<< "$K")" "1" \
    "a bead carrying the label but not task_kind=observation is not an observation"
-eq "$(jq -r '.m1_category_repeat.fragmentation.categorised' <<< "$K")" "1" \
-   "and its obs.category never reaches the M1 accounting"
 
-# --- 2a2. the outside capture is not a correction category ---------------
-# The miner files every outside review post under outside-review, so a window
-# of them would read as one category repeating. M1 leaves them out; the
-# corpus and M2 still count them.
+# --- 2a2. one post read twice, under two slugs ----------------------------
+# The miner files every outside review post under outside-review, and a
+# self-report of the same post mints a slug of its own. Once the distiller
+# puts both captures in one pattern they are one event, which keeps the
+# earlier capture's time, so a post first captured before adoption and read
+# again after it is not recurrence.
 mkdir -p "$TMP/stores2o"
 {
-  obs o1 "$(ago 6)" "pr:o/r#40:comment:40" real-slug    ""      self
-  obs o2 "$(ago 5)" "pr:o/r#41:comment:41" outside-review ""    miner
-  obs o3 "$(ago 4)" "pr:o/r#42:review:42"  outside-review tk-pat1 miner
-  obs o4 "$(ago 3)" "pr:o/r#43:comment:43" outside-review ""    miner
+  obs o1 "$(ago 6)"  "pr:o/r#42:review:42"  outside-review     tk-pat1 miner
+  obs o2 "$(ago 5)"  "pr:o/r#42:review:42"  split-the-function tk-pat1 self
+  obs o3 "$(ago 40)" "pr:o/r#43:comment:43" guard-empty-input  tk-pat1 self
+  obs o4 "$(ago 2)"  "pr:o/r#43:comment:43" outside-review     tk-pat1 miner
+  obs o5 "$(ago 4)"  "pr:o/r#44:comment:44" outside-review     ""      miner
 } | jq -s . > "$TMP/stores2o/alpha.json"
 cat > "$TMP/rigs2o.json" <<JSON
 {"rigs":[{"name":"alpha","path":"$TMP/stores2o/alpha.json"}]}
 JSON
 O=$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
-eq "$(jq -r '.corpus.events_after_dedup' <<< "$O")" "4" "outside-review observations are in the corpus"
-eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$O")" "1" "M1 leaves the outside capture out of its denominator"
-eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$O")" "0" "and never counts an outside post as a repeat"
-eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$O")" "3" "the report counts the outside posts beside M1"
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
-   "an outside post the distiller stamped still counts in M2"
-has "$(STUB_RIGS="$TMP/rigs2o.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)" \
-    "outside review posts that name no correction, not counted above: 3 this window" "the text report names them"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$O")" "3" "a post read twice and put in one pattern is one event"
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$O")" "1" \
+   "so it recurs once, and the post first captured before adoption does not recur"
 
-# --- 2a3. an outside post that names a standing correction ----------------
-# The same correction posted on three PRs, each filed as an outside post that
-# names it, counts as one category repeating. An outside post that names none
-# stays out of M1. A self-report of one of those posts under the same slug is
-# the same event, read twice.
-mkdir -p "$TMP/stores2c"
-{
-  outside c1 "$(ago 9)" "pr:o/r#50:comment:50" redundant-comments
-  outside c2 "$(ago 7)" "pr:o/r#51:comment:51" redundant-comments
-  outside c3 "$(ago 5)" "pr:o/r#52:review:52"  redundant-comments
-  obs     c4 "$(ago 4)" "pr:o/r#52:review:52"  redundant-comments "" self
-  outside c5 "$(ago 3)" "pr:o/r#53:comment:53" ""
-  outside c6 "$(ago 2)" "pr:o/r#54:comment:54" ""
-} | jq -s . > "$TMP/stores2c/alpha.json"
-cat > "$TMP/rigs2c.json" <<JSON
-{"rigs":[{"name":"alpha","path":"$TMP/stores2c/alpha.json"}]}
-JSON
-C=$(STUB_RIGS="$TMP/rigs2c.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
-eq "$(jq -r '.m1_category_repeat.window.categorised' <<< "$C")" "3" "M1 counts each outside post that names a correction under it"
-eq "$(jq -r '.m1_category_repeat.window.repeats' <<< "$C")" "2" "so the second and third posting of one correction are repeats"
-eq "$(jq -c '.m1_category_repeat.top_repeating' <<< "$C")" '[{"category":"redundant-comments","count":2}]' \
-   "and the repeating category is the correction's slug"
-eq "$(jq -r '.corpus.events_after_dedup' <<< "$C")" "5" "a self-report of a post under the slug its outside capture names is the same event"
-eq "$(jq -r '.m1_category_repeat.outside_events.window' <<< "$C")" "2" "the outside posts that name no correction stay out of M1, counted beside it"
-
-# --- 2b. one provenance key, several distinct corrections -----------------
+# --- 2b. one provenance key, several corrections --------------------------
 # A whole-turn provenance (bead:<id>:turn:<date>) covers every correction made
-# in that turn. Collapsing the group to one row loses real recurrence, and
-# picking the earliest row loses the attribution a later capture carries.
+# in that turn. Its corrections in two patterns are an event in each, two of
+# them in one pattern are one event there, and a capture the distiller has not
+# judged stands apart until it does.
 mkdir -p "$TMP/stores4"
 {
-  obs t1 "$(ago 5)" "bead:z:turn:9" cat-one tk-pat1  self
-  obs t2 "$(ago 5)" "bead:z:turn:9" cat-two tk-quiet self
-  obs t3 "$(ago 4)" "bead:z:turn:9" cat-one ""       miner
+  obs t1 "$(ago 5)" "bead:z:turn:9" cat-one   tk-pat1  self
+  obs t2 "$(ago 5)" "bead:z:turn:9" cat-two   tk-quiet self
+  obs t3 "$(ago 5)" "bead:z:turn:9" cat-three tk-pat1  self
+  obs t4 "$(ago 4)" "bead:z:turn:9" cat-one   ""       miner
 } | jq -s . > "$TMP/stores4/alpha.json"
 cat > "$TMP/rigs4.json" <<JSON
 {"rigs":[{"name":"alpha","path":"$TMP/stores4/alpha.json"}]}
 JSON
 D=$(STUB_RIGS="$TMP/rigs4.json" "$SUT" --repo "$REPO" --window-days 30 --json 2>&1)
-eq "$(jq -r '.corpus.observations' <<< "$D")" "3" "all three captures are read"
-eq "$(jq -r '.corpus.events_after_dedup' <<< "$D")" "2" \
-   "distinct corrections under one provenance key stay distinct events"
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$D")" "1" \
-   "the survivor keeps the attribution when only one capture in the group carries it"
+eq "$(jq -r '.corpus.observations' <<< "$D")" "4" "all four captures are read"
+eq "$(jq -r '.corpus.events_after_dedup' <<< "$D")" "3" \
+   "one turn is an event in each pattern its corrections fall in, and in the unjudged set"
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-pat1")] | .[0].since_adoption' <<< "$D")" "1" \
+   "two corrections of one turn in one pattern recur once"
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-quiet")] | .[0].since_adoption' <<< "$D")" "1" \
+   "and its correction in another pattern recurs there"
 
 # --- 2c. a date-only anchor does not count its own adoption day -----------
 # The distiller stamps consumed observations when it files the proposal, so
@@ -273,18 +239,17 @@ cat > "$TMP/rigs5.json" <<JSON
 {"rigs":[{"name":"alpha","path":"$TMP/stores5/alpha.json"}]}
 JSON
 A=$(STUB_RIGS="$TMP/rigs5.json" "$SUT" --repo "$REPO2" --window-days 30 --json 2>&1)
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-today")] | .[0].since_adoption' <<< "$A")" "0" \
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-today")] | .[0].since_adoption' <<< "$A")" "0" \
    "evidence from the adoption day itself is not post-adoption recurrence"
-eq "$(jq -r '[.m2_post_adoption.rules[] | select(.pattern=="tk-older")] | .[0].since_adoption' <<< "$A")" "1" \
+eq "$(jq -r '[.post_adoption.rules[] | select(.pattern=="tk-older")] | .[0].since_adoption' <<< "$A")" "1" \
    "evidence after the adoption day still counts"
 
 # --- 3. the qualifiers fire ----------------------------------------------
 T=$("$SUT" --repo "$REPO" --window-days 30 2>&1)
 has "$T" "unmeasurable (no pattern-bead anchor)" "entries that cannot be attributed are named"
 
-# A corpus shaped like the live one: a fresh slug per event, nothing distilled.
-# Both qualifiers must fire, or a floored M1 and an unmeasured M2 read as a
-# healthy loop.
+# A corpus the distiller has not judged: the coverage qualifier must fire, or
+# an unmeasured count reads as a healthy loop.
 mkdir -p "$TMP/stores3"
 {
   obs f1 "$(ago 12)" "q1" slug-one   "" self
@@ -296,11 +261,10 @@ cat > "$TMP/rigs3.json" <<JSON
 {"rigs":[{"name":"alpha","path":"$TMP/stores3/alpha.json"}]}
 JSON
 F=$(STUB_RIGS="$TMP/rigs3.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)
-has "$F" "HIGH FRAGMENTATION" "the fragmentation qualifier fires when slugs are near-unique"
 has "$F" "LOW COVERAGE" "the coverage qualifier fires when most window events are unattributed"
 
-# Negative control: a corpus that is well clustered and fully attributed must
-# NOT print either qualifier, or the warnings are unconditional decoration.
+# Negative control: a fully attributed window must NOT print the qualifier, or
+# the warning is unconditional decoration.
 mkdir -p "$TMP/stores2"
 {
   obs c1 "$(ago 40)" "p1" shared-slug tk-pat1 self
@@ -312,14 +276,13 @@ cat > "$TMP/rigs2.json" <<JSON
 {"rigs":[{"name":"alpha","path":"$TMP/stores2/alpha.json"}]}
 JSON
 C=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$REPO" --window-days 30 2>&1)
-hasnt "$C" "HIGH FRAGMENTATION" "a clustered corpus does not trip the fragmentation qualifier"
 hasnt "$C" "LOW COVERAGE" "a fully attributed window does not trip the coverage qualifier"
 
 # --- 4. fail closed on a partial city ------------------------------------
 OUT=$(STUB_BROKEN_RIG="beta" "$SUT" --repo "$REPO" 2>&1); RC=$?
 eq "$RC" "1" "an unreadable store exits 1"
 has "$OUT" "refusing to report on a partial city" "and says why"
-hasnt "$OUT" "M1  repeat feedback" "no partial report is printed"
+hasnt "$OUT" "corpus:" "no partial report is printed"
 
 OUT=$(STUB_RIGS_EMPTY=1 "$SUT" --repo "$REPO" 2>&1); RC=$?
 eq "$RC" "1" "an empty rig enumeration exits 1"
@@ -348,10 +311,10 @@ R=$("$SUT" --inventory --repo "$GREPO" --ref HEAD 2>&1)
 has   "$R" "tk-merged"   "--ref reads the carrier from the ref"
 hasnt "$R" "tk-unmerged" "and not from the working tree"
 R=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$GREPO" --ref HEAD --window-days 30 --json 2>&1)
-eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "1" \
+eq "$(jq -r '.post_adoption.adopted_total' <<< "$R")" "1" \
    "report mode honors --ref, so an unmerged entry is not counted as adopted"
 R=$(STUB_RIGS="$TMP/rigs2.json" "$SUT" --repo "$GREPO" --window-days 30 --json 2>&1)
-eq "$(jq -r '.m2_post_adoption.adopted_total' <<< "$R")" "2" \
+eq "$(jq -r '.post_adoption.adopted_total' <<< "$R")" "2" \
    "and without --ref the working tree is what it reads"
 SREPO="$TMP/srepo"; mkdir -p "$SREPO/skills/review-correctness"
 git -C "$SREPO" init -q >/dev/null 2>&1

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # learning-recurrence.sh — the feedback-learning loop's success metric.
-# Repeat feedback is the honest measure: if the loop works, the same
-# correction stops coming back. Reads observation beads across every store,
-# collapses exact duplicate captures, and reports two numbers plus the
-# coverage that qualifies them.
+# Recurrence after adoption is the honest measure: if the loop works, a
+# correction the city adopted a rule for stops coming back. Reads observation
+# beads across every store, collapses duplicate captures of one event, and
+# reports, for each adopted rule, the events the distiller attributed to its
+# pattern since adoption, with the coverage that qualifies the count.
 #   learning-recurrence.sh [--window-days N] [--json]
 #   learning-recurrence.sh --inventory [--ref <git-ref>]
 # Runs standalone — it needs no distiller run and no order. The distiller
-# echoes it at the end of a run; with the distiller disabled this script IS
-# how the metric is read.
+# echoes it at the end of a run.
 # Exit: 0 report written · 1 a store was unreadable (no partial number) · 2 usage
 set -uo pipefail
 
@@ -25,8 +25,8 @@ usage() {
 usage: learning-recurrence.sh [--window-days N] [--json] [--repo PATH]
        learning-recurrence.sh --inventory [--ref <git-ref>] [--repo PATH]
 
-  --window-days  comparison window in days; the report contrasts it with the
-                 window immediately before it (default 30)
+  --window-days  the window, in days, whose attribution coverage the report
+                 states (default 30)
   --json         emit the report as JSON instead of text
   --inventory    print the adopted-rule inventory (one TSV row per entry) and
                  exit; the retirement pass reads this instead of re-parsing
@@ -141,97 +141,56 @@ while IFS="$TAB" read -r R RPATH; do
   # `-l observation` narrows the listing; `task_kind` decides what an
   # observation is (docs/component-model.md I12). A bead the label brought in
   # without the metadata is some other kind of bead and does not enter the
-  # corpus — counting it would inflate the denominator of both metrics.
+  # corpus — counting it would inflate the corpus the coverage is read over.
   jq --arg rig "$R" '[.[]
       | select((((.metadata // {}).task_kind // "") | tostring) == "observation")
       | {
         id, created_at,
         rig: $rig,
         provenance: (.metadata["obs.provenance"] // ""),
-        category:   (.metadata["obs.category"]   // ""),
-        correction: (.metadata["obs.correction"] // ""),
-        pattern:    (.metadata["obs.distilled"]  // ""),
-        source:     (.metadata["obs.source"]     // "")
+        pattern:    (.metadata["obs.distilled"]  // "")
       }]' "$RAW" > "$RAW.norm"
   jq -s 'add' "$OBS" "$RAW.norm" > "$OBS.next" && mv "$OBS.next" "$OBS"
 done < "$RIGSET"
 
 emit_inventory > "$TMP/inventory.tsv"
 
-# One event per correction. Observations with no provenance key stand alone
-# rather than collapsing into each other.
+# One event per provenance key and pattern: two observations are one event
+# when they share a provenance key and the distiller attributed both to one
+# pattern, such as the self-report and the miner's reading of one post,
+# whatever category slug each capture minted. A provenance key can name a
+# whole turn, and a turn's corrections in different patterns are an event in
+# each. Observations the distiller has not judged yet share the empty pattern,
+# and an observation with no provenance key stands alone.
 # The report is process-local: $TMP is the mktemp -d above and the EXIT trap
 # removes it. --json prints it to stdout; nothing here persists an artifact.
 NOW=$(date -u +%s)
-# M1 counts corrections by category. The feedback miner files every review post
-# from outside the city under the one category outside-review, which names where
-# the feedback came from rather than which correction it makes. An outside post
-# that makes a standing correction carries the correction's slug as
-# obs.correction, and its event takes that slug as its category before anything
-# is counted, so a self-report of the same post under the same slug is one
-# event with it. An outside post that names no correction keeps outside-review,
-# and M1 leaves it out: counted, every such post after the first would read as
-# a repeat. Those posts stay in the corpus, and in M2 once the distiller stamps
-# them.
 jq -n \
   --slurpfile obs "$OBS" \
   --argjson now "$NOW" \
   --argjson window "$WINDOW_DAYS" \
-  --arg outside "outside-review" \
   --rawfile inventory "$TMP/inventory.tsv" '
   def epoch: (try (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) catch null);
-  def correction: .category != "" and .category != $outside;
 
   ($window * 86400)                as $span
   | ($now - $span)                 as $w_start
-  | ($now - (2 * $span))           as $p_start
   | ($obs[0] // [])                as $all
   | ($all | length)                as $raw_count
 
-  # Two observations are one correction when they share a provenance key AND
-  # a category: the self-report and the miner reading of one event. A
-  # provenance key can name a whole turn, and a turn carries several distinct
-  # corrections, so provenance alone is not the key. The survivor keeps the
-  # earliest capture time and any attribution the group carries — the
-  # distiller stamps obs.distilled on one member, not on all of them.
+  # The survivor keeps the earliest capture time, so a post captured before
+  # adoption and captured again after it is not recurrence.
   # \u001f cannot appear in a value: the reader above strips control
   # characters from every store.
   | ( $all
       | map(. + {ts: (.created_at | epoch)})
       | map(select(.ts != null))
-      | map(if .category == $outside and (.correction | tostring) != ""
-            then . + {category: (.correction | tostring)} else . end)
       | group_by(if .provenance == "" then "id:" + .id
-                 else "prov:" + .provenance + "\u001f" + .category end)
-      | map( (sort_by(.ts) | .[0])
-             + {pattern: ((map(.pattern) | map(select(. != "")) | first) // "")} ) ) as $events
+                 else "prov:" + .provenance + "\u001f" + .pattern end)
+      | map(sort_by(.ts) | .[0]) )                                 as $events
 
   | ($events | map(select(.ts >= $w_start)))                       as $window_ev
-  | ($events | map(select(.ts >= $p_start and .ts < $w_start)))    as $prior_ev
 
-  # M1 — repeat feedback by category. obs.category is stamped at capture, so
-  # this half survives the distiller being disabled. An event is a REPEAT when
-  # an earlier event already carried its category: the correction has been
-  # made before. Anchoring on the corpus rather than on the window boundary
-  # keeps the number readable on a corpus younger than two windows.
-  | ( $events | map(select(correction))
-      | group_by(.category)
-      | map({key: .[0].category, value: (map(.ts) | min)})
-      | from_entries )                                             as $cat_first
-  | def repeats($set): $set | map(select(correction and $cat_first[.category] < .ts));
-    ($window_ev | map(select(correction)))                         as $w_cat
-  | (repeats($window_ev))                                          as $w_repeat
-  | ($prior_ev  | map(select(correction)))                         as $p_cat
-  | (repeats($prior_ev))                                           as $p_repeat
-
-  # obs.category is a free slug minted at capture. When nearly every event
-  # mints its own, M1 under-counts recurrence that a human would see, so the
-  # report states the fragmentation beside the rate instead of letting a low
-  # number read as a healthy loop.
-  | ($events | map(select(correction)))                            as $all_cat
-  | ($all_cat | map(.category) | unique | length)                  as $distinct_cats
-
-  # M2 — post-adoption recurrence, attributable only through obs.distilled.
+  # Recurrence after adoption, attributable only through obs.distilled.
   | ( $inventory
       | split("\n") | map(select(length > 0))
       | map(split("\t"))
@@ -251,9 +210,9 @@ jq -n \
                    end)
                } ) )                                               as $rule_rows
 
-  # Coverage qualifies M2: an undistilled observation cannot be attributed to
-  # any rule, so a zero recurrence count over an unattributed window means
-  # "not measured", not "no recurrence".
+  # Coverage qualifies the count: an undistilled observation cannot be
+  # attributed to any rule, so a zero recurrence count over an unattributed
+  # window means "not measured", not "no recurrence".
   | ($window_ev | map(select(.pattern != "")) | length)            as $w_attributed
 
   | {
@@ -263,22 +222,7 @@ jq -n \
         stores: ($all | map(.rig) | unique | length)
       },
       window_days: $window,
-      m1_category_repeat: {
-        window:  {events: ($window_ev|length), categorised: ($w_cat|length), repeats: ($w_repeat|length),
-                  rate: (if ($w_cat|length) == 0 then null else (($w_repeat|length) / ($w_cat|length)) end)},
-        prior:   {events: ($prior_ev|length), categorised: ($p_cat|length), repeats: ($p_repeat|length),
-                  rate: (if ($p_cat|length) == 0 then null else (($p_repeat|length) / ($p_cat|length)) end)},
-        fragmentation: {categorised: ($all_cat|length), distinct: $distinct_cats,
-                        events_per_category: (if $distinct_cats == 0 then null else (($all_cat|length) / $distinct_cats) end)},
-        key_discriminating: (if $distinct_cats == 0 then null
-                             else ((($all_cat|length) / $distinct_cats) >= 1.5) end),
-        top_repeating: ( $w_repeat | group_by(.category)
-                         | map({category: .[0].category, count: length})
-                         | sort_by(-.count) | .[0:8] ),
-        outside_events: {window: ($window_ev | map(select(.category == $outside)) | length),
-                         prior: ($prior_ev | map(select(.category == $outside)) | length)}
-      },
-      m2_post_adoption: {
+      post_adoption: {
         rules: $rule_rows,
         adopted_total: ($rule_rows | length),
         measurable: ($rule_rows | map(select(.measurable)) | length),
@@ -297,41 +241,23 @@ fi
 
 jq -r '
   def pct: if . == null then "n/a" else ((. * 1000 | round) / 10 | tostring) + "%" end;
-  def arrow($a; $b): if $a == null or $b == null then ""
-                     elif $a < $b then "  (falling)" elif $a > $b then "  (rising)" else "  (flat)" end;
-  "feedback-learning recurrence — \(.window_days)d window",
+  "feedback-learning recurrence after adoption",
   "",
   "corpus: \(.corpus.observations) observations across \(.corpus.stores) stores, \(.corpus.events_after_dedup) events after duplicate-capture dedup",
   "",
-  "M1  repeat feedback by category (measurable with the distiller off)",
-  ( if .m1_category_repeat.key_discriminating == false then
-      "      this window: \(.m1_category_repeat.window.repeats)/\(.m1_category_repeat.window.categorised) events repeat a category already seen  = rate withheld",
-      "      prior window: \(.m1_category_repeat.prior.repeats)/\(.m1_category_repeat.prior.categorised)  = rate withheld"
-    else
-      "      this window: \(.m1_category_repeat.window.repeats)/\(.m1_category_repeat.window.categorised) events repeat a category already seen  = \(.m1_category_repeat.window.rate | pct)",
-      "      prior window: \(.m1_category_repeat.prior.repeats)/\(.m1_category_repeat.prior.categorised)  = \(.m1_category_repeat.prior.rate | pct)\(arrow(.m1_category_repeat.window.rate; .m1_category_repeat.prior.rate))"
-    end ),
-  ( if (.m1_category_repeat.top_repeating | length) == 0 then "      no category recurred this window"
-    else "      recurring: " + (.m1_category_repeat.top_repeating | map("\(.category) x\(.count)") | join(", ")) end),
-  "      category spread: \(.m1_category_repeat.fragmentation.distinct) distinct categories over \(.m1_category_repeat.fragmentation.categorised) events",
-  "      outside review posts that name no correction, not counted above: \(.m1_category_repeat.outside_events.window) this window, \(.m1_category_repeat.outside_events.prior) prior",
-  ( if .m1_category_repeat.key_discriminating == false
-    then "      HIGH FRAGMENTATION: capture mints a fresh slug for nearly every event, so repeats is pinned to (categorised - distinct) and M1 restates the category spread instead of measuring recurrence. Its rate is withheld above; read the M2 pattern-bead clusters."
+  "recurrence after adoption (needs obs.distilled — the distiller attributes it)",
+  "      adopted entries: \(.post_adoption.adopted_total), of which \(.post_adoption.measurable) carry a rule:<pattern-bead> anchor",
+  "      recurring after adoption: \(.post_adoption.recurring)  (from the day after the adoption date)",
+  "      window attribution, last \(.window_days)d: \(.post_adoption.window_attribution.attributed)/\(.post_adoption.window_attribution.events) events carry obs.distilled = \(.post_adoption.window_attribution.coverage | pct) coverage",
+  ( if (.post_adoption.window_attribution.coverage // 0) < 0.5
+    then "      LOW COVERAGE: most of this window is unattributed, so a low count reads as unmeasured, not as improvement."
     else empty end),
-  "",
-  "M2  recurrence after adoption (needs obs.distilled — the distiller attributes it)",
-  "      adopted entries: \(.m2_post_adoption.adopted_total), of which \(.m2_post_adoption.measurable) carry a rule:<pattern-bead> anchor",
-  "      recurring after adoption: \(.m2_post_adoption.recurring)  (from the day after the adoption date)",
-  "      window attribution: \(.m2_post_adoption.window_attribution.attributed)/\(.m2_post_adoption.window_attribution.events) events carry obs.distilled = \(.m2_post_adoption.window_attribution.coverage | pct) coverage",
-  ( if (.m2_post_adoption.window_attribution.coverage // 0) < 0.5
-    then "      LOW COVERAGE: most of this window is unattributed, so a low M2 reads as unmeasured, not as improvement."
-    else empty end),
-  ( .m2_post_adoption.rules
+  ( .post_adoption.rules
     | map(select(.measurable and .since_adoption > 0))
     | if length == 0 then empty
       else ["      rules with recurrence since adoption:"] + map("        \(.pattern) (\(.file), adopted \(.adopted)): \(.since_adoption)") | .[]
       end),
-  ( .m2_post_adoption.rules
+  ( .post_adoption.rules
     | map(select(.measurable | not))
     | if length == 0 then empty
       else ["      unmeasurable (no pattern-bead anchor): " + (map(.file) | unique | join(", "))] | .[]
