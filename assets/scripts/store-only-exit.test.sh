@@ -320,7 +320,8 @@ reset; set_work '.metadata["gc.execution_routed_to"] = "gc-toolkit.polecat"'
 run "${DONE_ARGS[@]}"; refused "a pool that is not rig-qualified" "gave 'gc-toolkit.polecat'"
 reset
 OUT=$(FAKE_HOOK_FAIL=1 "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
-refused "no step this session claimed" "gc hook current names no step this session claimed"
+refused "a claim that does not read" "this session's claim did not read, so no run root can hold its validating closer"
+has "$OUT" "gc hook current: session has no claimed bead (stub)" "a claim that does not read: gc's own words reach stderr"
 reset
 OUT=$(FAKE_HOOK_CURRENT=tk-unknown "$SCRIPT" "${DONE_ARGS[@]}" 2>&1); RC=$?
 refused "a claimed step the store does not return" "tk-unknown, the step this session claimed, names no run root"
