@@ -307,9 +307,9 @@ commit_fixture() { # <dir> -> the new revision on stdout
 # toolchain never compiles it; what matters is that the builder folds the
 # folder's sources into both its staleness identity and its mtime scan.
 add_gctk_dep() {
-    mkdir -p "$ROOT/services/gctk/prstatus"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/prstatus.go"
-    printf 'package prstatus\n'            > "$ROOT/services/gctk/prstatus/extra.go"
+    mkdir -p "$ROOT/services/gctk/pr/prstatus"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/pr/prstatus/prstatus.go"
+    printf 'package prstatus\n'            > "$ROOT/services/gctk/pr/prstatus/extra.go"
 }
 
 # `has`, not `//`: jq's alternative operator treats FALSE as absent, so a
@@ -475,7 +475,7 @@ present "$GOTMP/go-link-old" "(CURRENT) the sweep is scoped to builds; scratch i
 fixture
 add_gctk_dep
 cache_binary
-touch "$ROOT/services/gctk/prstatus/prstatus.go"
+touch "$ROOT/services/gctk/pr/prstatus/prstatus.go"
 [ -z "$(find "$ROOT/services/helm" \( -name '*.go' -o -name go.mod -o -name go.sum \) -newer "$STATE/bin/helm-svc" -print -quit 2>/dev/null)" ] \
     && ok "(DEPMOD) the change is confined to services/gctk — nothing under services/helm is newer" \
     || bad "(DEPMOD) something under services/helm is newer; the case would not isolate the sibling"
@@ -888,7 +888,7 @@ run_build
 eq "$RC" 0 "(DEPREV) the first build exits 0"
 eq "$(status_field source_rev)" "$GCTK_REV1" "(DEPREV) source_rev is the revision over every folder helm-svc compiles from"
 rm -f "$RECORD"
-git -C "$ROOT" rm -q "services/gctk/prstatus/extra.go" >/dev/null 2>&1 || true
+git -C "$ROOT" rm -q "services/gctk/pr/prstatus/extra.go" >/dev/null 2>&1 || true
 GCTK_REV2="$(commit_fixture "$ROOT" || true)"
 [ -n "$GCTK_REV2" ] && [ "$GCTK_REV2" != "$GCTK_REV1" ] \
     && ok "(DEPREV) the services/gctk deletion advanced the revision" \

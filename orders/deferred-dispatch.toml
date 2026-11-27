@@ -2,8 +2,8 @@
 # `gc sling` reads no `blocks` deps, so a dep between work beads holds nothing;
 # `gctk bead arm` records the start ON the bead, and this order's pass,
 # `gctk bead start-armed`, slings each armed bead the pool's own serve rule
-# would serve, exactly once, and retires the arm of a bead that closed or whose
-# work another path delivered (docs/deferred-dispatch.md). Exec, not a formula:
+# would serve, exactly once, and retires each arm whose dispatch is no longer
+# owed (docs/deferred-dispatch.md). Exec, not a formula:
 # store reads plus one sling per owed bead need no LLM. Rig-scoped: one pass
 # per importing rig against its own store, named by --db.
 # Single-flight is the runtime's open-tracking gate, and beneath it each sling

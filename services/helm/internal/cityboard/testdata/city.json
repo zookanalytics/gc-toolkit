@@ -173,5 +173,9 @@
         "last_good": "2026-11-16T22:21:46Z"
       }
     ]
+  },
+  "mail": {
+    "counted": false,
+    "waiting": 0
   }
 }

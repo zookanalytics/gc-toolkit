@@ -128,6 +128,9 @@ case "${1:-} ${2:-}" in
     exit 0 ;;
   "runtime drain-ack")
     printf 'DRAIN\n' >> "${FAKE_TRACE:-/dev/null}"; exit 0 ;;
+  # The step this session claimed, which a decline arm reads before it writes.
+  "hook current")
+    printf '%s\n' "${FAKE_HOOK_CURRENT:-tk-step}"; exit 0 ;;
 esac
 [ "${1:-}" = "bd" ] || { echo "gc stub: unsupported '$*'" >&2; exit 2; }
 shift

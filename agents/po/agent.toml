@@ -4,6 +4,9 @@
 # the rig's epics. Its shape is Gas Town's mayor's, and
 # docs/built-once-target.md names each difference.
 scope = "rig"
+# The po runs on Fable because the operator talks to it directly.
+provider = "claude"
+option_defaults = { model = "claude-fable-5-2" }
 # Each sitting starts in a new conversation, so no sitting inherits another's
 # context.
 wake_mode = "fresh"

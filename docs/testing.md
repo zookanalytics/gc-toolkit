@@ -17,7 +17,10 @@ what a test at a script's command line covers, what stands in for each outside
 system and what holds it to the real one, and how a test reads the state it
 asserts on.
 
-**Boundaries.** How tests are run in parallel, their parts and their time
+**Boundaries.** The repository's two test commands, `make test` and
+`make test-affected`, are the [Makefile](../Makefile)'s, and
+[tools/test.sh](../tools/test.sh) says what each runs. How the shell suites are
+run in parallel, which of them a change selects, their parts and their time
 limits are [tools/run-tests.sh](../tools/run-tests.sh)'s header. What a CI
 check runs is [.github/workflows/tests.yml](../.github/workflows/tests.yml).
 The rules a gctk domain follows as it moves out of shell are
@@ -139,6 +142,17 @@ Run it with every change to the fake, and whenever the bd the city runs
 changes. A case it fails is a difference between the fake and bd: change the
 fake to bd's rule, or, where a suite still depends on the fake's own rule, list
 the difference in the fake's package doc.
+
+## A Go test under the race detector and in any order
+
+Both test commands run the Go tests with `go test -race -shuffle=on`, so a Go
+test passes with the race detector on and in whatever order its package's tests
+run. A test that fails only under the race detector, or only in some order,
+shows a defect in the test or in the code it tests, and the fix goes there. A
+failing package's output opens with the order's seed, `-test.shuffle <seed>`,
+and `go test -race -shuffle=<seed> ./<package>` runs that order again.
+`make test` also prints the Go tests' statement coverage, and nothing fails on
+the figure.
 
 ## A test's time
 

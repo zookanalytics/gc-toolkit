@@ -44,9 +44,13 @@ feedback *says*, not how loud it is.
   corrective feedback about standing behavior — a mis-capture,
   diff-content review, noise — is discarded with a one-line stated
   reason; discarded observations are stamped consumed like any judged
-  observation. Outside review feedback is the exception: it is read as
-  a set ([below](#outside-review-feedback-is-read-as-a-set)), never
-  discarded as diff review.
+  observation. Outside review feedback is read as a set
+  ([below](#outside-review-feedback-is-read-as-a-set)), never discarded
+  as diff review. An agent's suggestion, a change to how agents work
+  that it proposes from what it saw, is never discarded for not being
+  corrective feedback. It is evidence like any self-reported
+  observation: merge it with its repeats, weigh it by judgment 2 for
+  recurrence and shared cause, and send it where judgment 3 says.
 
 ### 2. Has the pattern earned generalization?
 
@@ -273,9 +277,16 @@ Know which case you are in before you read the rollup's number.
 the blocked all-self cluster and for the promotable all-operator one alike,
 and cannot tell them apart on its own. It counts over distinct events too,
 so one correction captured by both self-report and the miner is one voice,
-not two. A blocked pattern is **surfaced, not adopted**: hold it on its
-pattern bead with the block stated and do not file the `prompt-update` bead.
-It promotes later on corroboration or endorsement.
+not two. A blocked pattern is **surfaced, not adopted**. Once this gate is
+all that holds it back, file its proposal held for placement like any other,
+with the block stated in its reasoning. The pattern waits on that proposal.
+The operator rules on it in placement:
+
+- Placing it is the endorsement.
+- Closing it as not needed is a veto.
+- A vetoed pattern is surfaced again only on evidence from an event it had
+  not seen when the operator ruled.
+
 `obs.source` records who filed an observation, and the capture recipe files
 every agent capture as `self`, so an operator correction captured by the agent
 it corrected reads `self`. Before you treat a cluster as all-self, check each
@@ -290,11 +301,10 @@ another agent's `gc session nudge`. A pool session has no one at its terminal
 by design, so count no quote from one as the operator's voice.
 
 *Worked example.* Every observation `obs.source=self`, no endorsement →
-**blocked**, however many events it spans. Self-sourced clusters have been
-promoted and operator-vetoed before; that block is what stops the
-re-promote. A cluster of operator corrections over several separate events
-is the opposite case and promotes, because the corrections are the external
-check.
+**blocked**, however many events it spans, so its proposal reaches the
+operator stating the block. A cluster of operator corrections over several
+separate events is the opposite case and promotes, because the corrections
+are the external check.
 
 ### Gate 2 — remedy class: exhortations and structural fixes are not bullets
 
@@ -496,15 +506,15 @@ of three states. The distiller formula gives the command for each.
   passed with no recurrence among the observations judged and none left
   unjudged. The close reason says which, so the recurrence bar below can tell
   an adopted rule from a dismissal.
-- **Waiting on its follow-up.** A promote, a retirement proposal or a
-  route-to-engineering outcome waits on the bead filed for it, and a contest
-  waits on its gate. Once the operator answers a contention gate, act on the
-  ruling its close reason records: a scope-narrowing or a retirement is a
-  proposal the pattern then waits on, and a dismissal closes it.
-- **Deferred while it gathers evidence.** A hold or a surface is deferred for
-  the formula's window, with the block it is held on and the recurrence that
-  would change the call. When the window ends with no new evidence, dismiss
-  it, but only when no observation or memory note is left unjudged, because
+- **Waiting on its follow-up.** A promote, a surface, a retirement proposal
+  or a route-to-engineering outcome waits on the bead filed for it, and a
+  contest waits on its gate. Once the operator answers a contention gate, act
+  on the ruling its close reason records: a scope-narrowing or a retirement is
+  a proposal the pattern then waits on, and a dismissal closes it.
+- **Deferred while it gathers evidence.** A hold is deferred for the
+  formula's window, with the block it is held on and the recurrence that would
+  change the call. When the window ends with no new evidence, dismiss it, but
+  only when no observation or memory note is left unjudged, because
   any of them may be its recurrence. A run that leaves some unjudged, a gated
   run with observations pending, a run whose due notes outnumber what it
   judged, or a run in which `gctk memory due` could not read a memory
@@ -591,9 +601,9 @@ write.
   directory's key, its name and the hash you read. A note is one occurrence
   in its writer's voice, and a note that cites an event an observation already
   carries counts with that event once.
-- A pattern backed only by notes meets Gate 1, so notes alone never promote a
-  rule into a paid carrier. A structural fix and a wording fix go to a bead,
-  which that gate does not guard.
+- A pattern backed only by notes meets Gate 1, so notes alone reach a paid
+  carrier only through a surfaced proposal the operator places. A structural
+  fix and a wording fix go to a bead, which that gate does not guard.
 - A ruling a note gives as the operator's is checked against the source the
   note names, as you check the voice behind a self-reported observation. It is
   the operator's voice only when that source holds their words. Otherwise the
@@ -625,11 +635,17 @@ that work closes with nothing landed, the note comes back due, and
 `gc-toolkit.work` closes one that needs no work, as an upstream finding is,
 has no close reason, and the disposition note its close appends says why.
 
-A veto is a close with nothing landed: a prompt-update the pattern spawned
-whose PR closed unmerged, as load-and-gate's vetoed-PR sweep reads it. The
-veto has settled the rule the note states, so do not keep the note for that
-rule: judge what else it holds as you judge any due note, and drop it when
-nothing else in it is worth keeping.
+A veto is a close with nothing landed on a prompt-update the pattern
+spawned:
+
+- Its PR closed unmerged, as load-and-gate's vetoed-PR sweep reads it.
+- The operator closed it as not needed before any PR. Its disposition note
+  gives their reason.
+
+When `memory_prior` says the pattern's follow-ups closed, read how each one
+closed. The veto has settled the rule the note states, so do not keep the
+note for that rule: judge what else it holds as you judge any due note, and
+drop it when nothing else in it is worth keeping.
 
 ### Decision lines
 

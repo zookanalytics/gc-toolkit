@@ -56,10 +56,10 @@ func (w *world) attempts(id string) string {
 
 func blocks(id string) gcbd.Edge { return gcbd.Edge{Type: gcbd.EdgeBlocks, ID: id, Status: "open"} }
 
-// An arm on a bead that has closed, or that carries a merge_result because
-// another path delivered its work, retires whatever holds the bead: the arm
-// is cleared with a note that names the case, and nothing is slung. A dry run
-// reports each retire and writes nothing.
+// An arm on a bead that has closed, or an arm that pours work on one that
+// carries a merge_result because another path delivered its work, retires
+// whatever holds the bead: the arm is cleared with a note that names the case,
+// and nothing is slung. A dry run reports each retire and writes nothing.
 func TestStartRetiresTheArmOfAClosedOrDeliveredBead(t *testing.T) {
 	w := newWorld(t)
 	w.put(fake.Bead{ID: "closed", Status: "closed", Metadata: armedBead("mol-x", nil)})
@@ -99,6 +99,88 @@ func TestStartRetiresTheArmOfAClosedOrDeliveredBead(t *testing.T) {
 	}
 	if sum[arm.ActRetire] != 4 || sum.Failed() != 0 {
 		t.Errorf("summary = %v", sum)
+	}
+}
+
+// The validating closer's arm pours no work, so a merge_result does not retire
+// it: on a bead that owns a PR, what holds the bead holds the arm, and once
+// nothing does the closer is slung, which puts such a bead to a person. A bead
+// that closed still retires it, and an arm that pours work, the target's
+// default included, still retires on a merge_result.
+func TestStartSendsTheClosersArmOnABeadThatCarriesAMergeResult(t *testing.T) {
+	w := newWorld(t)
+	anchor := map[string]string{"merge_result": "pull_request_head_changed"}
+	w.put(fake.Bead{ID: "blocker", Title: "the rewrite"})
+	w.put(fake.Bead{ID: "behind", Metadata: armedBead("mol-validate-close", anchor),
+		Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "blocker", Status: "open", Title: "the rewrite"}}})
+	w.store.List("behind", "blocker")
+	w.store.Mark("behind")
+	w.put(fake.Bead{ID: "landed", Metadata: armedBead("mol-validate-close", anchor)})
+	w.put(fake.Bead{ID: "closed", Status: "closed", Metadata: armedBead("mol-validate-close", anchor)})
+	w.put(fake.Bead{ID: "default", Metadata: armedBead("", anchor)})
+	w.store.MakeReady("landed", "default")
+
+	lines, _ := w.run(true)
+	act(t, lines, "behind", arm.ActHold, "blocked", `blocker "the rewrite" holds it`)
+	act(t, lines, "landed", arm.ActStart, "", "slings it to "+pool+" on mol-validate-close")
+	act(t, lines, "closed", arm.ActRetire, "closed", "none is owed")
+	act(t, lines, "default", arm.ActRetire, "delivered", "merge_result=pull_request_head_changed")
+	if n := len(w.store.Writes()); n != 0 {
+		t.Errorf("the dry run wrote %d times", n)
+	}
+
+	lines, sum := w.run(false)
+	act(t, lines, "behind", arm.ActHold, "blocked", `blocker "the rewrite" holds it`)
+	act(t, lines, "landed", arm.ActStart, "", "dispatched to "+pool+" on mol-validate-close")
+	act(t, lines, "closed", arm.ActRetire, "closed", "none is owed")
+	act(t, lines, "default", arm.ActRetire, "delivered", "merge_result=pull_request_head_changed")
+	want := []gascity.Sling{{Rig: "rig", Target: pool, Bead: "landed", Formula: "mol-validate-close", Title: "mol-validate-close arm:landed@" + armedAt}}
+	if got := w.rt.Slings(); !reflect.DeepEqual(got, want) {
+		t.Errorf("slings = %+v, want %+v", got, want)
+	}
+	if !w.armed("behind") {
+		t.Error("the closer's arm behind an open blocker was cleared")
+	}
+	for _, id := range []string{"landed", "closed", "default"} {
+		if w.armed(id) {
+			t.Errorf("%s is still armed", id)
+		}
+	}
+	if sum[arm.ActHold] != 1 || sum[arm.ActStart] != 1 || sum[arm.ActRetire] != 2 || sum.Failed() != 0 {
+		t.Errorf("summary = %v", sum)
+	}
+}
+
+// The start's read before its sling judges a merge_result by the same rule: on
+// a bead that came to carry one after the pass listed it, an arm that pours
+// work retires and the closer's arm is slung.
+func TestStartReadsAMergeResultAgainBeforeItsSling(t *testing.T) {
+	w := newWorld(t)
+	w.put(fake.Bead{ID: "work", Metadata: armedBead("mol-x", nil)})
+	w.put(fake.Bead{ID: "check", Metadata: armedBead("mol-validate-close", nil)})
+	w.store.MakeReady("work", "check")
+	// The start holds a bead's lock only for the steps it takes on that bead,
+	// so a read made while the lock file exists is its read before the sling.
+	w.store.OnFind = func(q gcbd.Query) {
+		if len(q.IDs) != 1 {
+			return
+		}
+		id := q.IDs[0]
+		if _, err := os.Stat(filepath.Join(w.arms.Locks, "dispatch-"+id+".lock")); err != nil {
+			return
+		}
+		row, _ := w.store.Row(id)
+		row.Metadata["merge_result"] = "pull_request_head_changed"
+		w.store.Put(row)
+	}
+	lines, _ := w.run(false)
+	act(t, lines, "work", arm.ActRetire, "delivered", "merge_result=pull_request_head_changed")
+	act(t, lines, "check", arm.ActStart, "", "dispatched to "+pool+" on mol-validate-close")
+	if s := w.rt.Slings(); len(s) != 1 || s[0].Bead != "check" {
+		t.Errorf("slings = %+v; want the closer on check alone", s)
+	}
+	if w.armed("work") || w.armed("check") {
+		t.Errorf("armed after the pass: work %v, check %v; want neither", w.armed("work"), w.armed("check"))
 	}
 }
 

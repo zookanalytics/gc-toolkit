@@ -47,11 +47,14 @@
 #                                     new reclaims and leaves the rest to the
 #                                     next pass; a reclaim already running is not
 #                                     interrupted (default 1200, 0 disables). Set
-#                                     below the order timeout by at least one
-#                                     store's GC, so the last reclaim started
-#                                     finishes before the order's hard kill.
-#      GC_DOLT_RECLAIM_HEALTH_TIMEOUT seconds bounding the pre-reclaim Dolt health
-#                                     probe (default 20)
+#                                     below the order timeout by at least two
+#                                     health probes and one store's GC, so the
+#                                     last reclaim started finishes before the
+#                                     order's hard kill.
+#      GC_DOLT_RECLAIM_HEALTH_TIMEOUT seconds the pre-reclaim Dolt health probe
+#                                     may run; a probe still running then
+#                                     proves nothing and defers nothing
+#                                     (default 90)
 # Exit: 0 reclaimed, or nothing over the line · 1 a reclaim was attempted and
 #       failed · 2 usage, or the pass could not run at all (no gc, no --gc-only,
 #       no database list).
@@ -73,7 +76,7 @@ done
 
 THRESHOLD_MIB="${GC_DOLT_RECLAIM_THRESHOLD_MIB:-2048}"
 BUDGET="${GC_DOLT_RECLAIM_BUDGET:-1200}"
-HEALTH_TIMEOUT="${GC_DOLT_RECLAIM_HEALTH_TIMEOUT:-20}"
+HEALTH_TIMEOUT="${GC_DOLT_RECLAIM_HEALTH_TIMEOUT:-90}"
 for v in THRESHOLD_MIB BUDGET HEALTH_TIMEOUT; do
     case "${!v}" in
         '' | *[!0-9]*) echo "$PROG: GC_DOLT_RECLAIM_$v must be a whole number" >&2; exit 2 ;;
@@ -160,34 +163,57 @@ if [ -z "$OVER" ]; then
 fi
 
 # A reclaim is a full GC; refuse to pile one onto a data plane that is already
-# unreachable or overloaded, judged off the same server.reachable / 5000ms
-# latency the deacon patrol uses. A broken or absent probe is unproven, never a
-# reason to skip: the reclaim only proceeds when the plane is proven healthy
-# enough OR the probe could not answer at all, and the heavy case this guards
-# — a server answering slowly — is the one the probe does detect.
-dolt_degraded() { # echoes a reason and returns 0 when degraded
+# unreachable or overloaded. dolt_degraded prints a one-line reason and returns
+# 0 when degraded, 1 when healthy, and 2 when the probe proved neither. The
+# verdict reads server.reachable and server.latency_ms, the fields and 5000ms
+# ceiling the deacon patrol's dolt-health step reads. The report's wall time is
+# not a Dolt signal. `gc dolt health` caps each Dolt call it makes, so a server
+# that cannot answer the ping inside its cap reads as unreachable, while the
+# time the whole report takes follows host load and the gc calls it makes.
+#
+# The bound is a hang guard. It is long enough for the report on a server the
+# probe cannot reach. That report skips the per-database counts, so it spends
+# at most the caps of its ping, `gc rig list` and `gc dolt-cleanup` calls, about
+# 50 seconds together, plus its own process scans. A probe still running at the
+# bound is therefore unproven, like a failed run or an answer with no readable
+# latency. Unproven never defers, so a stalled probe cannot disable reclaiming.
+# The kill-after holds the bound for a probe that ignores TERM.
+dolt_degraded() {
     local out reachable latency rc=0
     # `|| rc=$?` keeps the failing probe from aborting the script under `set -e`
-    # and captures timeout's 124 or the command's own code.
-    out="$(timeout "$HEALTH_TIMEOUT" "$GC" dolt health --json 2>/dev/null)" || rc=$?
-    if [ "$rc" -eq 124 ]; then
-        printf 'health probe exceeded %ss; data plane too slow to answer' "$HEALTH_TIMEOUT"; return 0
-    fi
-    [ "$rc" -eq 0 ] || return 1
+    # and captures timeout's 124 or 137, or the command's own code.
+    out="$(timeout -k 5 "$HEALTH_TIMEOUT" "$GC" dolt health --json 2>/dev/null)" || rc=$?
+    case "$rc" in
+        0) ;;
+        124 | 137) printf 'health probe gave no answer within %ss' "$HEALTH_TIMEOUT"; return 2 ;;
+        *) printf 'health probe exited %s' "$rc"; return 2 ;;
+    esac
     # Read reachable raw: jq's `//` treats false like null and would swallow the
     # very reachable:false this looks for.
     reachable="$(printf '%s' "$out" | jq -r '.server.reachable' 2>/dev/null || true)"
     [ "$reachable" = "false" ] && { printf 'Dolt server unreachable'; return 0; }
     latency="$(printf '%s' "$out" | jq -r '.server.latency_ms // empty' 2>/dev/null || true)"
     case "$latency" in
-        '' | *[!0-9]*) return 1 ;;
+        '' | *[!0-9]*) printf 'health probe answer carried no readable server.latency_ms'; return 2 ;;
         *) [ "$latency" -gt 5000 ] && { printf 'Dolt server latency %sms over 5000ms' "$latency"; return 0; } ;;
     esac
     return 1
 }
 
-if [ "$DRY_RUN" -eq 0 ] && DEGRADED="$(dolt_degraded)"; then
-    echo "$PROG: deferred — $DEGRADED; the next pass reclaims once the data plane recovers"
+# Runs the gate before a reclaim starts, prints what it found for the store it
+# names (none for the whole pass), and returns 0 when the reclaim must wait.
+gate_holds() {
+    local detail rc=0
+    detail="$(dolt_degraded)" || rc=$?
+    case "$rc" in
+        0) echo "$PROG: ${1:+$1 }deferred — $detail; the next pass reclaims once the data plane recovers"
+           return 0 ;;
+        2) echo "$PROG: ${1:+$1: }Dolt health unknown — $detail; reclaiming anyway" ;;
+    esac
+    return 1
+}
+
+if [ "$DRY_RUN" -eq 0 ] && gate_holds; then
     exit 0
 fi
 
@@ -215,8 +241,7 @@ while IFS=$'\t' read -r name noms kb; do
     # unreachable, and the contract is that a reclaim never STARTS on a degraded
     # plane. Defer this store to the next pass; a later store still proceeds if
     # the plane has recovered by its turn.
-    if DEGRADED="$(dolt_degraded)"; then
-        echo "$PROG: $name deferred — $DEGRADED; the next pass reclaims once the data plane recovers"
+    if gate_holds "$name"; then
         deferred=$(( deferred + 1 ))
         continue
     fi

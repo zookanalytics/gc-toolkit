@@ -37,7 +37,6 @@ structural change, don't read it, and having read it, don't report it.
 ## Principles
 
 1. **Prefer config, vars and conventions over upstream code changes.**
-   Divergence belongs in gc-toolkit, not in a gascity fork.
 2. **Design for per-rig variation**, configurable per rig, not hardcoded.
 3. **Observe before prescribing:** know whether a problem is one-off or
    systemic. A fix to code the pack's deletion plan retires is not filed as
@@ -62,8 +61,7 @@ its rig's store, so pass `--rig <rig>` on every dispatch create and on every
 link between dispatch beads, the `<rig>` you sling to. A PR comes from one
 bead, which owns it and its rework until it merges. Work the operator reviews
 as one PR is an integration effort: follow the `work` skill's
-`integration-effort.md`, which also covers the hand-off that has the rig's
-refinery bring an effort's branch current.
+`integration-effort.md`.
 
 Dispatch is file-and-forget, and beads wait on each other by edges, never by
 a watcher. Watch only while the operator waits in this conversation on the
@@ -108,9 +106,10 @@ one with `--quiet-window`.
 
 ## Upstream gascity
 
-A bug in upstream `gascity` is left to upstream (usually right), carried as a
-local patch on the fork's main (`docs/fork-patching.md`), or engaged upstream
-only with something materially new and only through the operator. A pack
+A `gascity` bug the city's own config fixes takes that change as its fix, with
+no fork patch. Any other is left to upstream (usually right), carried as a
+local patch on the fork's main, or engaged upstream only with something
+materially new and only through the operator (`docs/fork-patching.md`). A pack
 feature Gas City cannot express is reshaped to fit what Gas City ships
 (`docs/foundation.md`). Agents file no upstream PR and propose none as
 follow-up work. When the operator promotes a commit, hand them a GitHub compare
@@ -304,7 +303,13 @@ Search only inside the city (`$GC_CITY_PATH`), your rig or worktree, and
 `$TMPDIR` or your scratchpad. Never search the home folder (`~`), `/Users` or
 the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
-the tool's time limit ends it. Look up anything else where it lives:
+the tool's time limit ends it.
+
+In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
+as `.gc/` from the city root, and does not say so. An empty result proves
+nothing about such a folder. Name the folder as the path to search it.
+
+Look up anything else where it lives:
 
 - a formula: `gc formula show <name>`, whose `--json` carries each step's text
   under `.steps[]`, or `gc formula list`;
@@ -332,7 +337,11 @@ the tool's time limit ends it. Look up anything else where it lives:
   rule is the operator's only with their words and where they said them.
   Otherwise say it is yours.
 - **An observation**, which the `gc-toolkit.records` skill files, holds a
-  correction to how agents work, from a review, a rework or the operator.
+  correction to how agents work, from a review, a rework or the operator. It
+  also holds a change to how agents work that you would suggest but should not
+  make on your own, with what you saw that led to it. Keep such a suggestion
+  out of your memory, which would steer the next agent before the operator
+  approves it.
 - **A bead's notes** hold the state of its open work.
 
 Leave out what the pack already says.
