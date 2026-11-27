@@ -471,10 +471,9 @@ no warrant.
   state and its approvals (`redPlans`, `redOn` and `decideRed` in
   `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels with the ones the store derives (`labelPlans` in
   `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
-  PR's signs with the ones each part keeps and reads again a conversation part
-  that holds no list of untaken posts or a checks part that holds no suites
-  (`moved` in `services/gctk/pr/saved.go`), and the net's full read with each
-  part's facts (`differs` there).
+  PR's signs with the ones each part keeps (`moved` in
+  `services/gctk/pr/saved.go`), and the net's full read with each part's facts
+  (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, from which the landing order finds and does its work, and
@@ -532,9 +531,9 @@ no warrant.
     [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
     and for the check suites the checks keep, its
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
-- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  786241099046.
+  0c9c8e697843.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR

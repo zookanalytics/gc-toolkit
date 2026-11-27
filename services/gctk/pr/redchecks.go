@@ -218,11 +218,8 @@ func (s redState) approved() bool {
 // check that never reports, in that order.
 func decideRed(s redState) redStep {
 	p, c := s.pr(), s.o.saved.Checks
-	switch {
-	case c == nil || c.Head != p.Head:
+	if c == nil || c.Head != p.Head {
 		return s.none("the PR's checks are not read at its head " + p.Head + " yet")
-	case c.Suites == nil:
-		return s.none("the saved checks hold no check suites yet, which the PR watch's next pass reads")
 	}
 	newest := newestAtHead(c)
 	green := len(c.Runs) > 0 && len(checks(c.Runs)) == 0

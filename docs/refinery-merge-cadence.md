@@ -359,15 +359,12 @@ second, in the write that saves the first conversation the update reads for
 it, and the definition is applied from that instant. A conversation read from
 another instant than the one the bead holds when the update writes, as when
 another writer stamped one meanwhile, is not saved, and the next pass reads it
-again. A conversation part that holds no list of the posts the city has not
-taken is read again by the next pass whatever its signs say, since the take and
-the evaluator read the list.
+again.
 
 The checks part keeps each result of a check run the PR requires at the head,
 with the check suite that holds it and its log, and each check suite there:
 its status, when GitHub created it and how many check runs it holds. The
-landing order's red-check acts read them ([The landing order](#the-landing-order)). A checks part saved with
-no suites is read again at the next pass.
+landing order's red-check acts read them ([The landing order](#the-landing-order)).
 
 `gctk pr refresh --pr <url>` is the same update run alone for one PR, which
 reads the PR's signs itself first: the call a webhook's rule can make for the PR
