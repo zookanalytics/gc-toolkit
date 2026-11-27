@@ -22,6 +22,16 @@
 # the default reports "Already up to date" and looks advanced, so this reads the
 # local branch first and runs no fast-forward on a parked HEAD.
 #
+# A pack the city imports from a checkout runs from its working tree, and the
+# city's config names that pack's agents by exact name, so a tree that drops or
+# renames one stops the config from loading. Before it fast-forwards such a
+# checkout, the pass puts copies of the city's city.toml, pack.toml, packs.lock
+# and .gc/site.toml beside the incoming tree and runs `gc config show
+# --validate` on them. It holds the fast-forward when the config does not load
+# with the incoming tree but does with the tree at HEAD. A config that fails
+# with both is no fault of the incoming commits, and holds nothing. A held
+# fast-forward takes the exception path, with what gc said.
+#
 # A parked HEAD and a refused fast-forward take the exception path, which never
 # touches the checkout: one idempotent bead per blocked rig records why, and a
 # human gate on it asks someone to act. A rig whose fetch fails is skipped until
@@ -106,8 +116,56 @@ resolve_subject() {
     fi
 }
 
+# pack_source <rel> — whether the city's config imports a pack from <rel>, a
+# path inside the city, or from a folder under it.
+pack_source() {
+    local source
+    while IFS= read -r source; do
+        case "$source" in "$1" | "$1"/*) return 0 ;; esac
+    done < <(sed -n 's/^[[:space:]]*source[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$CITY_DIR/city.toml" "$CITY_DIR/pack.toml" 2>/dev/null)
+    return 1
+}
+
+# scratch_city <dir> <path> <rel> <rev> — copies of the city's config files in
+# <dir>, with the tree of <rev> in the checkout at <path> where <rel> puts it.
+scratch_city() {
+    local dir="$1" path="$2" rel="$3" rev="$4" file
+    mkdir -p "$dir/.gc" "$dir/$rel" || return 1
+    for file in city.toml pack.toml packs.lock .gc/site.toml; do
+        [ ! -f "$CITY_DIR/$file" ] || cp "$CITY_DIR/$file" "$dir/$file" || return 1
+    done
+    git -C "$path" archive "$rev" | tar -x -C "$dir/$rel"
+}
+
+# config_refusal <path> <remote> — gc's error lines when the city's config does
+# not load with the tree a fast-forward of the checkout at <path> to <remote>
+# brings, but does with the tree at HEAD (see the header). It prints nothing
+# for a checkout no pack of the city comes from, or one the fast-forward would
+# not move.
+config_refusal() {
+    local path="$1" remote="$2" rel head next scratch said=""
+    [ -n "$CITY_DIR" ] && [ -f "$CITY_DIR/city.toml" ] || return 0
+    case "$path" in "$CITY_DIR"/*) rel="${path#"$CITY_DIR"/}" ;; *) return 0 ;; esac
+    pack_source "$rel" || return 0
+    head=$(git -C "$path" rev-parse HEAD 2>/dev/null) && next=$(git -C "$path" rev-parse "$remote" 2>/dev/null) || return 0
+    [ "$head" != "$next" ] && git -C "$path" merge-base --is-ancestor "$head" "$next" 2>/dev/null || return 0
+    scratch=$(mktemp -d "${TMPDIR:-/tmp}/reconcile-config.XXXXXX") || return 0
+    if scratch_city "$scratch/next" "$path" "$rel" "$next" \
+        && ! said=$(gc config show --validate --city "$scratch/next" 2>&1 >/dev/null) \
+        && scratch_city "$scratch/head" "$path" "$rel" "$head" \
+        && gc config show --validate --city "$scratch/head" >/dev/null 2>&1; then
+        said=$(printf '%s\n' "$said" | grep -v ': warning: ' || true)
+        printf '%s\n' "${said:-gc config show --validate refused the incoming tree with no error line}"
+    fi
+    rm -rf -- "$scratch"
+}
+
 advanced=0; blocked=0
-rigs=$("$SELF_DIR/rig-map.sh" | jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"') || exit 0
+map=$("$SELF_DIR/rig-map.sh") || exit 0
+rigs=$(jq -r '.rigs[] | select(.hq != true) | "\(.name)\t\(.path)"' <<< "$map") || exit 0
+# The city's root, whose config the packs in its checkouts feed.
+CITY_DIR=$(jq -r '[.rigs[] | select(.hq == true) | .path][0] // empty' <<< "$map")
 
 while IFS=$'\t' read -r name path; do
     [ -n "${name:-}" ] && [ -d "$path/.git" ] || continue
@@ -121,7 +179,9 @@ while IFS=$'\t' read -r name path; do
     # and merges that a deploy mirror never takes.
     local_branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null || true)
     refusal=""
-    if [ "$local_branch" = "$default_branch" ]; then
+    held=""
+    [ "$local_branch" != "$default_branch" ] || held=$(config_refusal "$path" "$remote")
+    if [ "$local_branch" = "$default_branch" ] && [ -z "$held" ]; then
         if refusal=$(git -C "$path" merge --ff-only --no-overwrite-ignore "$remote" 2>&1 >/dev/null); then
             # Advanced or already up to date.
             advanced=$((advanced + 1))
@@ -132,8 +192,9 @@ while IFS=$'\t' read -r name path; do
         [ -n "$refusal" ] || refusal="git merge --ff-only refused with no message"
     fi
 
-    # Reached when the HEAD is parked off the default branch or git refused the
-    # fast-forward. File the subject bead and its human gate.
+    # Reached when the HEAD is parked off the default branch, the city's config
+    # does not load with the incoming tree, or git refused the fast-forward.
+    # File the subject bead and its human gate.
     blocked=$((blocked + 1))
     porcelain=$(git -C "$path" status --porcelain 2>/dev/null || true)
     local_log=$(git -C "$path" log --oneline "$remote"..HEAD 2>/dev/null || true)
@@ -142,7 +203,12 @@ while IFS=$'\t' read -r name path; do
     # than loses what is in its way.
     reset_cmd="git -C $path checkout --no-overwrite-ignore -B $default_branch $remote"
     restore_cmd="git -C $path restore --source=HEAD --staged --worktree -- <file>"
-    if [ "$local_branch" != "$default_branch" ]; then
+    if [ -n "$held" ]; then
+        stall=config
+        incoming_log=$(git -C "$path" log --oneline HEAD.."$remote" 2>/dev/null || true)
+        body=$(printf 'rigs/%s is held where it is: the config of the city does not load with the\ntree %s brings, though it loads with the tree the checkout holds now.\nPath: %s\nCity: %s\n\n## What gc config show --validate said\n%s\n\nThe city.toml of the town names the agents of this pack by exact name, so an\nincoming commit that deletes or renames one fails the whole load. Make the\nconfig load with the incoming tree, and this bead closes on its own when the\nrig next fast-forwards cleanly:\n- An agent the incoming commits delete or rename: take each entry that names\n  it out of the city.toml of the town, or rename it there.\n- A pack change that should not have landed: revert it on %s.\n\n## git log --oneline HEAD..%s\n%s\n' \
+            "$name" "$remote" "$path" "$CITY_DIR" "$held" "$default_branch" "$remote" "$incoming_log")
+    elif [ "$local_branch" != "$default_branch" ]; then
         stall=parked
         body=$(printf 'rigs/%s is parked off %s — its live checkout HEAD is on %s.\nPath: %s\n\nThe rig root is a deploy mirror: reconcile fast-forwards it to %s and\ndirectory-imported packs build from its working tree, so nothing checks out a\nbranch or commits there. Restore it once any local work is saved elsewhere:\n  git -C %s checkout %s\nThis bead closes on its own when the rig next fast-forwards cleanly.\n\n## git status --porcelain\n%s\n\n## git log --oneline %s..HEAD\n%s\n' \
             "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$path" \
@@ -172,6 +238,9 @@ while IFS=$'\t' read -r name path; do
     # a stall nobody is asked about is the exact silent rot this script
     # prevents.
     case "$stall" in
+        config)
+            msg=$(printf 'rigs/%s is held off %s: the config of the city does not load with the tree it brings, so its pack change is not live.\ngc config show --validate said: %s\nPath: %s\nSubject bead %s carries what gc said in full and the incoming commits, and clears when rigs/%s next fast-forwards cleanly.\nMake the config load with the incoming tree: take each city.toml entry that names an agent the incoming commits delete or rename out of the town repo, or revert the pack change.' \
+                "$name" "$remote" "$(printf '%s\n' "$held" | head -1)" "$path" "$bead" "$name") ;;
         parked)
             msg=$(printf 'rigs/%s is parked off its deploy branch %s — HEAD is on %s, so reconcile cannot advance it and its working tree serves an off-%s build to every directory-imported pack.\nPath: %s\nSubject bead %s carries the full git status and log, and clears when rigs/%s next fast-forwards cleanly.\nRestore it: save any local work elsewhere, then git -C %s checkout %s.' \
                 "$name" "$default_branch" "${local_branch:-<detached HEAD>}" "$default_branch" "$path" "$bead" "$name" "$path" "$default_branch") ;;

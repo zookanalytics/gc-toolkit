@@ -1036,9 +1036,12 @@ otherwise overwrites. A file the incoming commits delete leaves the working
 tree with them when its copy is unmodified, so a change that stops tracking a
 file a live checkout still needs, such as machine-local config, removes an
 unmodified copy of it there. A checkout whose HEAD is off its default branch is
-not fast-forwarded. A refused fast-forward and a checkout off its default
-branch each file one idempotent human gate per blocked rig (via
-`human-gate.sh`, on the rig's subject bead and carrying what git refused and
-`git status`). Once the rig fast-forwards cleanly, the gate is withdrawn
+not fast-forwarded. Nor is a checkout a pack of the city comes from when the
+city's config does not load with the incoming tree but does with the tree at
+HEAD: the script copies the city's config files beside that tree and runs
+`gc config show --validate` on them. A refused fast-forward, a held one and a
+checkout off its default branch each file one idempotent human gate per blocked
+rig (via `human-gate.sh`, on the rig's subject bead and carrying what git
+refused or gc said, and `git status`). Once the rig fast-forwards cleanly, the gate is withdrawn
 `moot:` and the subject bead closes. The 15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.

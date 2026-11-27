@@ -27,7 +27,12 @@
 # keeps its subject open until a later withdrawal succeeds; (k) a rig whose
 # fetch fails is skipped, with nothing touched or filed, and is left with an
 # empty FETCH_HEAD, which doctor/check-pour-text-current reports, while a pass
-# whose fetch works leaves FETCH_HEAD listing what it fetched; (l) no escalation
+# whose fetch works leaves FETCH_HEAD listing what it fetched; (l) a
+# fast-forward the city's config does not load with, in a checkout a pack of
+# the city comes from, is held and put to a person with gc's error lines and the
+# incoming commits, and goes once the config loads, while a config that fails
+# with both trees, a checkout no pack comes from and a checkout already at its
+# remote hold nothing and run no check beyond what they need; (m) no escalation
 # tells a person to run git reset --hard or --keep.
 set -euo pipefail
 
@@ -144,6 +149,19 @@ case "$1" in
         [ -n "$key" ] && sed -i.bak "s/^${id}|[^|]*|/${id}|${key}|/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
       close) sed -i.bak "s/^\($1\)|\([^|]*\)|open/\1|\2|closed/" "$FAKE_LEDGER" && rm -f "$FAKE_LEDGER.bak" ;;
     esac ;;
+  config)
+    # config show --validate --city <dir>: the load fails when <dir>/city.toml
+    # names an agent that no pack under <dir>/rigs defines, as Gas City's does,
+    # and warns either way.
+    dir=""; while [ $# -gt 0 ]; do [ "$1" = "--city" ] && dir="$2"; shift; done
+    printf '%s\n' "$dir" >> "$FAKE_CONFIG_CALLS"
+    echo "gc config show: warning: a warning the check leaves out" >&2
+    for agent in $(sed -n 's/^agent = "\(.*\)"$/\1/p' "$dir/city.toml"); do
+      ls -d "$dir"/rigs/*/agents/"$agent" >/dev/null 2>&1 && continue
+      echo "gc config show: city import \"pk\": patches.agent[0]: agent \"$agent\" not found in pack" >&2
+      exit 1
+    done
+    echo "Config valid." ;;
   session) : ;;
 esac
 exit 0
@@ -182,7 +200,7 @@ chmod +x "$TMP/bin/human-gate.sh"
 
 export PATH="$TMP/bin:$PATH" FAKE_RIGS_JSON="$TMP/rigs.json" FAKE_LEDGER="$TMP/ledger"
 export GC_RECONCILE_HUMAN_GATE_TOOL="$TMP/bin/human-gate.sh" FAKE_ESCALATIONS="$TMP/escalations"
-export FAKE_RETRACTIONS="$TMP/retractions"
+export FAKE_RETRACTIONS="$TMP/retractions" FAKE_CONFIG_CALLS="$TMP/config-calls"
 : > "$TMP/escalations"; : > "$TMP/retractions"
 
 # --- Run 1: alpha advances, beta files a gate, hq is skipped. ----------------
@@ -420,6 +438,79 @@ eq "$(bead_for lambda)" "$LAMBDA_BEAD" "the same subject stays open — no fresh
 bash "$SCRIPT" >/dev/null
 eq "$(retract_count lambda)" "1" "the next patrol retries the withdrawal on the still-open subject"
 eq "$(open_count lambda)" "0" "a successful withdrawal finally closes the subject"
+
+# --- A fast-forward the city's config does not load with. -------------------
+# The city imports a pack from each checkout its city.toml names as a source,
+# and names the pack's agent keeper. pack_rig's incoming commit deletes keeper.
+CITY="$TMP/city"
+mkdir -p "$CITY/.gc"
+config_names() { # SOURCE AGENT... -> the city imports SOURCE and names each AGENT
+  local source="$1" agent; shift
+  { printf '[[packs]]\nsource = "%s"\n' "$source"
+    for agent in "$@"; do printf '\n[[patches.agent]]\nagent = "%s"\n' "$agent"; done; } > "$CITY/city.toml"
+}
+city_rigs() { # NAME -> the rig list holds the city's root and its checkout NAME
+  printf '{"rigs":[\n  {"name":"mycity","path":"%s","hq":true},\n  {"name":"%s","path":"%s"}\n]}\n' \
+    "$CITY" "$1" "$CITY/rigs/$1" > "$TMP/rigs.json"
+}
+# pack_rig NAME -> a checkout under the city whose remote's main is one commit
+# ahead and deletes agents/keeper.
+pack_rig() {
+  local s="$TMP/$1.src"
+  git init -q -b main "$s"; mkdir -p "$s/agents/keeper" "$s/agents/other"
+  echo keeper > "$s/agents/keeper/agent.toml"; echo other > "$s/agents/other/agent.toml"
+  git -C "$s" add -A; git -C "$s" commit -qm p1
+  git clone -q --bare "$s" "$TMP/$1.git"; git clone -q "$TMP/$1.git" "$CITY/rigs/$1"
+  git -C "$s" rm -rq agents/keeper; git -C "$s" commit -qm "p2: drop keeper"
+  git -C "$s" push -q "$TMP/$1.git" main
+}
+calls() { wc -l < "$TMP/config-calls" | tr -d ' '; }
+
+pack_rig pk
+PK_HEAD="$(git -C "$CITY/rigs/pk" rev-parse HEAD)"
+config_names rigs/pk keeper
+city_rigs pk
+: > "$TMP/escalations"; : > "$TMP/retractions"; : > "$TMP/config-calls"
+PK_OUT="$(bash "$SCRIPT")"
+eq "$(git -C "$CITY/rigs/pk" rev-parse HEAD)" "$PK_HEAD" "a fast-forward the city's config does not load with is held"
+eq "$PK_OUT" "reconcile-rig-checkouts: 0 advanced, 1 blocked" "a held fast-forward is counted blocked"
+eq "$(open_count pk)" "1" "a held fast-forward files one reconcile bead"
+eq "$(esc_count pk)" "1" "a held fast-forward is put to a person"
+body_has pk 'agent "keeper" not found in pack' && ok "the held rig's bead carries what gc said" || bad "the held rig's bead carries what gc said"
+body_has pk 'a warning the check leaves out' && bad "the held rig's bead leaves out gc's warnings" || ok "the held rig's bead leaves out gc's warnings"
+body_has pk 'p2: drop keeper' && ok "the held rig's bead names the incoming commit" || bad "the held rig's bead names the incoming commit"
+grep -q 'agent "keeper" not found in pack' <<< "$(msg_for pk)" && ok "the held rig's gate says what gc said" || bad "the held rig's gate says what gc said"
+eq "$(calls)" "2" "a held fast-forward validates the incoming tree and the tree at HEAD"
+
+# Once the town takes the entry out, the next pass fast-forwards and clears the hold.
+config_names rigs/pk
+: > "$TMP/config-calls"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$CITY/rigs/pk" rev-parse HEAD)" "$(git -C "$TMP/pk.git" rev-parse main)" "the fast-forward goes once the config loads with the incoming tree"
+eq "$(open_count pk)" "0" "the held rig's bead closes once it fast-forwards"
+eq "$(retract_count pk)" "1" "the held rig's gate is withdrawn once it fast-forwards"
+eq "$(calls)" "1" "a fast-forward the config loads with validates the incoming tree alone"
+: > "$TMP/config-calls"
+bash "$SCRIPT" >/dev/null
+eq "$(calls)" "0" "a checkout already at its remote runs no check"
+
+# A config that fails with the tree at HEAD too is no fault of the incoming commits.
+pack_rig pq
+config_names rigs/pq keeper ghost
+city_rigs pq
+: > "$TMP/config-calls"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$CITY/rigs/pq" rev-parse HEAD)" "$(git -C "$TMP/pq.git" rev-parse main)" "a config that fails with both trees holds nothing"
+eq "$(open_count pq)" "0" "a config that fails with both trees files no reconcile bead"
+
+# A checkout no pack of the city comes from runs no check.
+pack_rig pz
+config_names rigs/pk keeper
+city_rigs pz
+: > "$TMP/config-calls"
+bash "$SCRIPT" >/dev/null
+eq "$(git -C "$CITY/rigs/pz" rev-parse HEAD)" "$(git -C "$TMP/pz.git" rev-parse main)" "a checkout no pack comes from fast-forwards unchecked"
+eq "$(calls)" "0" "a checkout no pack comes from runs no check"
 
 # --- A rig whose fetch fails. -----------------------------------------------
 # rho's origin is gone, so its pass skips it: nothing moves and nothing is filed.

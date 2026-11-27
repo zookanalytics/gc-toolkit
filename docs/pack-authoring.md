@@ -255,6 +255,9 @@ both at once:
   state. `reconcile-rig-checkouts` ff-s each checkout forward on a 15m cooldown
   ([refinery-merge-cadence.md](refinery-merge-cadence.md), *Adjacent order*), so the window is
   usually minutes — but it is open exactly when you go to confirm the landing.
+  A change the city's config does not load with, such as one that deletes an
+  agent the town's `city.toml` names, stays held until the config loads with it,
+  and its rig's reconcile bead says what `gc config show --validate` said.
 - **An untracked draft shadows the committed artifact** — a file authored in
   place at the destination path and never committed is still sitting there
   after the merge, and it is what the pack reads. It also blocks its own

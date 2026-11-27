@@ -97,7 +97,7 @@ apart from them.
 
 | Power | Sole holder | Evidence required | May never |
 |---|---|---|---|
-| Move a live `rigs/*` checkout: fast-forward it to its default branch | `assets/scripts/reconcile-rig-checkouts.sh`, which `orders/reconcile-rig-checkouts.toml` runs | HEAD on the default branch. The fast-forward runs as `git merge --ff-only --no-overwrite-ignore`, so git refuses rather than overwrites or deletes a local change on a path the incoming commits rewrite, or untracked content in their way, an ignored file included | commit, merge, rebase or reset in the checkout; move a HEAD parked off the default branch; change anything in a checkout whose fast-forward git refuses |
+| Move a live `rigs/*` checkout: fast-forward it to its default branch | `assets/scripts/reconcile-rig-checkouts.sh`, which `orders/reconcile-rig-checkouts.toml` runs | HEAD on the default branch. The fast-forward runs as `git merge --ff-only --no-overwrite-ignore`, so git refuses rather than overwrites or deletes a local change on a path the incoming commits rewrite, or untracked content in their way, an ignored file included. A checkout a pack of the city comes from fast-forwards only to a tree the city's config loads with, unless the config fails with the tree at HEAD too | commit, merge, rebase or reset in the checkout; move a HEAD parked off the default branch; change anything in a checkout whose fast-forward git refuses or the config check holds |
 
 ## Powers over the worktrees a rig's checks run in
 
