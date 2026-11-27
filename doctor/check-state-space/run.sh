@@ -85,7 +85,7 @@ retired_consequence() { # <key> <value> <bead>
         gc.superseded_by_store|superseded_by_store|duplicate_of_store)
             printf '%s' "the store half of a retired successor key, read beside it and nowhere else. Settle the bead's successor key first, then clear this one" ;;
         placement)
-            printf '%s' "intake holds new work with Gas City's hold:mayor label and nothing writes this marker, so a retired writer stamped it. The po's queue reads only the label, so a bead carrying the marker and no hold:mayor waits in no queue. Unless a parent, a route, an arm, an assignee or a live run shows it placed, hold it with gc bd set-state $3 hold=mayor --reason \"<why it waits for placement>\", then clear the key" ;;
+            printf '%s' "intake holds new work with Gas City's hold:mayor label and nothing writes this marker, so a retired writer stamped it. The po's queue reads only the label, so a bead carrying the marker and no hold:mayor waits in no queue. Unless a parent, a route, an arm, an assignee or a live run shows it placed, hold it with gc bd update $3 --add-label hold:mayor --append-notes \"<why it waits for placement>\", which keeps any other hold it carries, then clear the key" ;;
         *) printf '%s' "nothing reads it. Clear the key" ;;
     esac
 }

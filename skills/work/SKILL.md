@@ -29,7 +29,9 @@ gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks l
 
 Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
 bead may not be sent yet (below). A bead that already exists is held with
-`gc bd set-state <id> hold=mayor --reason "<why it waits for placement>"`.
+`gc bd update <id> --add-label hold:mayor --append-notes "<why it waits for placement>"`.
+The added label leaves any other hold the bead carries, such as `hold:external`,
+which `set-state` would swap out for it.
 Filing starts nothing: afterwards, send the bead, make it wait (the waits
 skill), or leave it for the operator to place.
 
