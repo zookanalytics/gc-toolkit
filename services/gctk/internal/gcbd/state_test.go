@@ -34,28 +34,6 @@ func ranArgs(t *testing.T, log string) string {
 	return strings.ReplaceAll(strings.TrimSpace(string(raw)), "\n", " ")
 }
 
-// A set-state names its store, the bead, the dimension's value and the reason,
-// and a set-state that exits non-zero is a write that did not land, saying
-// what bd said.
-func TestASetStateIsOneWriteWithItsReason(t *testing.T) {
-	log := stubWriter(t)
-	if err := New().In("/rig/.beads").SetState("tk-1", "hold", "mayor", "held for placement"); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := ranArgs(t, log), "bd --db /rig/.beads set-state tk-1 hold=mayor --reason held for placement"; got != want {
-		t.Fatalf("the set-state ran %q, want %q", got, want)
-	}
-	t.Setenv("STUB_ERR", "Error: issue tk-1 not found")
-	t.Setenv("STUB_EXIT", "1")
-	err := New().SetState("tk-1", "hold", "mayor", "")
-	if err == nil || !strings.Contains(err.Error(), "not found") || !strings.Contains(err.Error(), "exited 1") {
-		t.Fatalf("a refused set-state read as %v", err)
-	}
-	if got := ranArgs(t, log); got != "bd set-state tk-1 hold=mayor" {
-		t.Fatalf("a set-state with no reason ran %q", got)
-	}
-}
-
 // An edge write names its store, the two beads and the edge's type, and one bd
 // refuses is a write that did not land, with what bd said.
 func TestAnEdgeWriteIsOneDepAdd(t *testing.T) {

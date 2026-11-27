@@ -16,14 +16,17 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 )
 
-// PR is one pull request's state on GitHub. Suites holds the check suites at
-// each commit, by its oid. ReviewDecision is what the net's read and the read
-// of the conversation give. The rest is what the cheap question reads beside
-// what it counts from the rest: its labels, when GitHub last changed it, its
-// base's tip, and its head's check rollup state and the commit statuses there,
-// counted by state.
+// PR is one pull request's state on GitHub. Title and Body are its text, which
+// PullRequestText reads and EditPullRequest sets. Suites holds the check suites
+// at each commit, by its oid. ReviewDecision is what the net's read and the
+// read of the conversation give. The rest is what the cheap question reads
+// beside what it counts from the rest: its labels, when GitHub last changed it,
+// its base's tip, and its head's check rollup state and the commit statuses
+// there, counted by state. Requested is each account a review request asked to
+// review it.
 type PR struct {
 	Facts          gh.PullRequest
+	Title, Body    string
 	Reviews        []gh.Review
 	Suites         map[string][]gh.CheckSuite
 	Threads        []gh.Thread
@@ -34,6 +37,7 @@ type PR struct {
 	ReviewDecision string
 	Rollup         string
 	Statuses       map[string]int
+	Requested      []string
 }
 
 // GitHub is an in-memory GitHub. Self is the login the reads run as. Fail
@@ -46,6 +50,8 @@ type PR struct {
 // in place of the default, which refuses a request whose head is not the PR's
 // and otherwise merges the PR, or adds it to the queue. OnDismiss, when set,
 // answers a dismissal in place of the default, which dismisses the review.
+// OnReact, when set, runs as a reaction is asked, and an error it returns
+// fails that reaction, which then leaves nothing on the post.
 type GitHub struct {
 	Self      string
 	PRs       map[string]*PR
@@ -53,6 +59,7 @@ type GitHub struct {
 	OnRead    func(method string, p *PR)
 	OnMerge   func(method string, p *PR, head string) error
 	OnDismiss func(p *PR, review int64) error
+	OnReact   func(subject, content string) error
 	SignsFail map[int]error
 	FullFail  map[int]error
 	// LabeledPage is how many PRs a page of the search holds,
@@ -145,11 +152,15 @@ type Repo struct {
 }
 
 // Ask is one request a test's code made of GitHub: "MergePullRequest" or
-// "EnqueuePullRequest" with the PR's node id and the head it was pinned to,
-// "MarkReady" or "ConvertToDraft" with the PR's node id, or "DismissReview"
-// with the review's id and the dismissal's message.
+// "EnqueuePullRequest" with the PR's node id and the head it was pinned to, and
+// a merge's commit headline, "MarkReady" or "ConvertToDraft" with the PR's node
+// id, "DismissReview" with the review's id and the dismissal's message,
+// "AddReaction" with the post's node id and the reaction as its message,
+// "ResolveThread" with the thread's node id, "RequestReview" with the login
+// asked, or "EditPullRequest" with the PR's node id and what it sets, title,
+// body or both, as its message.
 type Ask struct {
-	Method, ID, Head, Message string
+	Method, ID, Head, Headline, Message string
 }
 
 // Asks returns the merge requests made, in order.
@@ -210,8 +221,8 @@ func (g *GitHub) byID(id string) *PR {
 // MergePullRequest records the request and answers it: by OnMerge when set,
 // else by refusing a head that is not the PR's and otherwise merging the PR,
 // with a merge commit named after its head.
-func (g *GitHub) MergePullRequest(id, head string) error {
-	return g.ask("MergePullRequest", id, head, func(p *PR) {
+func (g *GitHub) MergePullRequest(id, head, headline string) error {
+	return g.ask(Ask{Method: "MergePullRequest", ID: id, Head: head, Headline: headline}, func(p *PR) {
 		p.Facts.State, p.Facts.MergedAt = "MERGED", "2026-11-12T08:00:00Z"
 		p.Facts.MergeCommit = "e" + head[1:]
 	})
@@ -220,25 +231,25 @@ func (g *GitHub) MergePullRequest(id, head string) error {
 // EnqueuePullRequest records the request and answers it as MergePullRequest
 // does, adding the PR to the queue where that one merges it.
 func (g *GitHub) EnqueuePullRequest(id, head string) error {
-	return g.ask("EnqueuePullRequest", id, head, func(p *PR) { p.Facts.InMergeQueue = true })
+	return g.ask(Ask{Method: "EnqueuePullRequest", ID: id, Head: head}, func(p *PR) { p.Facts.InMergeQueue = true })
 }
 
-func (g *GitHub) ask(method, id, head string, take func(*PR)) error {
+func (g *GitHub) ask(a Ask, take func(*PR)) error {
 	g.mu.Lock()
-	g.asks = append(g.asks, Ask{Method: method, ID: id, Head: head})
-	err := g.Fail[method]
-	p := g.byID(id)
+	g.asks = append(g.asks, a)
+	err := g.Fail[a.Method]
+	p := g.byID(a.ID)
 	g.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		return fmt.Errorf("github: no pull request has the node id %s", id)
+		return fmt.Errorf("github: no pull request has the node id %s", a.ID)
 	}
 	if g.OnMerge != nil {
-		return g.OnMerge(method, p, head)
+		return g.OnMerge(a.Method, p, a.Head)
 	}
-	if p.Facts.HeadRefOid != head {
+	if p.Facts.HeadRefOid != a.Head {
 		return fmt.Errorf("github: Head branch was modified. Review and try the merge again")
 	}
 	take(p)
@@ -253,6 +264,44 @@ func (g *GitHub) PullRequest(repo string, number int) (*gh.PullRequest, error) {
 	}
 	f := p.Facts
 	return &f, nil
+}
+
+// PullRequestText returns the PR's title and body, with its facts.
+func (g *GitHub) PullRequestText(repo string, number int) (*gh.Text, error) {
+	p, err := g.pr("PullRequestText", repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &gh.Text{PullRequest: p.Facts, Title: p.Title, Body: p.Body}, nil
+}
+
+// EditPullRequest records the request and sets each of the PR's title and body
+// it is given, leaving the other as it stands.
+func (g *GitHub) EditPullRequest(id string, title, body *string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var set []string
+	if title != nil {
+		set = append(set, "title")
+	}
+	if body != nil {
+		set = append(set, "body")
+	}
+	g.asks = append(g.asks, Ask{Method: "EditPullRequest", ID: id, Message: strings.Join(set, " and ")})
+	if err := g.Fail["EditPullRequest"]; err != nil {
+		return err
+	}
+	p := g.byID(id)
+	if p == nil {
+		return fmt.Errorf("github: no pull request has the node id %s", id)
+	}
+	if title != nil {
+		p.Title = *title
+	}
+	if body != nil {
+		p.Body = *body
+	}
+	return nil
 }
 
 // Reviews returns the PR's reviews.
@@ -347,6 +396,99 @@ func (g *GitHub) DismissReview(repo string, number int, id int64, message string
 		return nil
 	}
 	return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
+}
+
+// AddReaction records the reaction and answers it: with OnReact's error when it
+// returns one, else by leaving content among the reactions Self left on the
+// review, inline comment or conversation comment whose node id is subject,
+// once, as GitHub keeps one reaction of each content for each account. A node
+// id no post holds is an error, as GitHub answers one that resolves to nothing.
+func (g *GitHub) AddReaction(subject, content string) error {
+	g.mu.Lock()
+	g.asks = append(g.asks, Ask{Method: "AddReaction", ID: subject, Message: content})
+	err := g.Fail["AddReaction"]
+	g.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if g.OnReact != nil {
+		if err := g.OnReact(subject, content); err != nil {
+			return err
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	add := func(have []string) []string {
+		if slices.Contains(have, content) {
+			return have
+		}
+		return append(slices.Clone(have), content)
+	}
+	for _, p := range g.PRs {
+		for i, v := range p.Reviews {
+			if v.NodeID == subject {
+				p.Reviews[i].ViewerReactions = add(v.ViewerReactions)
+				return nil
+			}
+		}
+		for i, t := range p.Threads {
+			for j, c := range t.Comments {
+				if c.NodeID == subject {
+					p.Threads[i].Comments = slices.Clone(t.Comments)
+					p.Threads[i].Comments[j].ViewerReactions = add(c.ViewerReactions)
+					return nil
+				}
+			}
+		}
+		for i, c := range p.Comments {
+			if c.NodeID == subject {
+				p.Comments[i].ViewerReactions = add(c.ViewerReactions)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", subject)
+}
+
+// ResolveThread records the resolution and answers it: with Fail's error for
+// it when set, else by marking resolved the review thread whose node id is id.
+// A node id no thread holds is an error, as GitHub answers one that resolves to
+// nothing.
+func (g *GitHub) ResolveThread(id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: "ResolveThread", ID: id})
+	if err := g.Fail["ResolveThread"]; err != nil {
+		return err
+	}
+	for _, p := range g.PRs {
+		for i, t := range p.Threads {
+			if t.ID == id {
+				p.Threads[i].Resolved = true
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("github: Could not resolve to a node with the global id of '%s'", id)
+}
+
+// RequestReview records the request and adds login to the PR's requested
+// reviewers, once, as GitHub keeps one request for each account.
+func (g *GitHub) RequestReview(repo string, number int, login string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.asks = append(g.asks, Ask{Method: "RequestReview", ID: login})
+	if err := g.Fail["RequestReview"]; err != nil {
+		return err
+	}
+	p, ok := g.PRs[key(repo, number)]
+	if !ok {
+		return fmt.Errorf("gh: gh: Not Found (HTTP 404)")
+	}
+	if !slices.Contains(p.Requested, login) {
+		p.Requested = append(p.Requested, login)
+	}
+	return nil
 }
 
 // Login returns Self.

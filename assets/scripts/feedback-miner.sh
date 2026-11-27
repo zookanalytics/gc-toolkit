@@ -5,13 +5,16 @@
 # city, and files the observations the miner's agent condenses.
 #
 # Where a post comes from is decided in this order:
-#   1. A post carrying the city's mark is the city's (gc_city_marked, from
-#      `pr-post.sh feedback-def`, which carries the one definition of the mark).
+#   1. A post under the city's login that carries the city's mark is the
+#      city's (gc_city_marked, from `pr-post.sh feedback-def`, which carries the
+#      one definition of the mark). The mark counts only under that login, as
+#      gc_city_own counts it, so the rules below class a post from any other
+#      login that carries or quotes it.
 #   2. Any other post that is not for review is a notice, not review feedback,
 #      whoever posted it (gc_not_for_review, from the same definitions): it
 #      opens with the no-review mark, or with a prefix the rig declares.
-#   3. An unmarked post from any login other than the one gh posts as is
-#      outside, except a GitHub App account's approval, which is a notice. On
+#   3. A post from any login other than the one gh posts as is outside,
+#      except a GitHub App account's approval, which is a notice. On
 #      a rig that declares no prefix, Vercel's deployment notice is a notice
 #      too: an app's conversation comment whose first non-blank line opens
 #      with Vercel's hidden link reference, `[vc]:`. That keeps the learning
@@ -296,7 +299,7 @@ if [ "$VERB" = fetch-pr ]; then
     | .[]
     | select(has_text)
     | ((.user.login // "") | tostring) as $login
-    | gc_city_marked as $marked
+    | (($login == $self) and gc_city_marked) as $marked
     | (code_review_signed
        or (.gc_stream == "inline" and (.pull_request_review_id as $r | any($signed[]; . == $r)))) as $is_signed
     | (if $marked then "city"
@@ -703,7 +706,7 @@ if [ "$VERB" = flag ]; then
   MSG="These posts on $SLUG's pull requests are under the city's login ($SELF), carry no city mark, are not Claude Code /code-review output, and were posted after their PR's provenance cutover, when every city post on that PR carries the mark:
 $LIST
 
-Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covered when it posted. Find what posted each one. A writer that neither covers yet needs its posts sent through pr-post.sh, and one that they cover now needs nothing more. Until a writer is covered, pr-facts.sh reads each post it makes as feedback for the city to answer, and the feedback miner leaves those posts out of the outside capture. A post flagged while this finding is open is added to its notes."
+Every pack script posts through assets/scripts/pr-post.sh, which tools/lint-learned.d/pr-post-bypass.sh enforces, and gh-origin-guard.sh refuses an unmarked post an agent types, so each of these came from a writer neither covered when it posted. Find what posted each one. A writer that neither covers yet needs its posts sent through pr-post.sh, and one that they cover now needs nothing more. Until a writer is covered, each post it makes reads as feedback for the city to answer, and the feedback miner leaves those posts out of the outside capture. A post flagged while this finding is open is added to its notes."
   ARGS=(--scope miner-findings --key "$FLAG_KEY" --title "City posts on $SLUG pull requests without the city's mark" --message "$MSG" --type bug --priority 2)
   [ -n "$RIG" ] && ARGS+=(--rig "$RIG")
   "$PATROL_FINDING" "${ARGS[@]}" || { err "the unmarked-post finding did not record"; exit 1; }

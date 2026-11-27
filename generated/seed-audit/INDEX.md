@@ -48,6 +48,7 @@ when one is named, and are not committed:
 - [`dog`](agents/dog.md)
 - [`gemini`](agents/gemini.md)
 - [`keeper`](agents/keeper.md)
+- [`mayor`](agents/mayor.md)
 - [`mechanik`](agents/mechanik.md)
 - [`po`](agents/po.md)
 - [`polecat`](agents/polecat.md)
@@ -122,6 +123,7 @@ runs to re-prime after compaction.
 | dog | `city` | 1 | _none_ |
 | gemini | `city`, `gascity`, `gc-toolkit` | 1 | _none_ |
 | keeper | `gascity` | 1 | _none_ |
+| mayor | `city` | 1 | _none_ |
 | mechanik | `city` | 1 | _none_ |
 | po | `gascity`, `gc-toolkit` | 1 | _none_ |
 | polecat **DIVERGES** | `gc-toolkit` | 2 | _none_ |

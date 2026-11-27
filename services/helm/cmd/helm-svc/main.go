@@ -99,7 +99,7 @@ func serve() {
 		server.WithSPA(spaHandler()),
 		server.WithActuator(selectActuator(cityPath)),
 		server.WithRigBoard(source.NewGC(cityPath), source.NewSupervisorAPI(), server.RigBoardTTL),
-		server.WithCityPage(source.NewEventLog(), server.CityPageTTL),
+		server.WithCityPage(source.NewEventLog(), source.NewMailCount(), server.CityPageTTL),
 	)
 
 	// The supervisor removes any stale socket before spawning us, so we own

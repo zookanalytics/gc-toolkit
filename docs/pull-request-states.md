@@ -33,15 +33,17 @@ shows the same value on the PR's row.
 
 | Label | What it means | What you can do |
 |---|---|---|
-| `status: working` | The city is still working on the PR, for example reviewing it or reworking it to answer review comments. | Nothing yet. |
+| `status: working` | The city is still working on the PR, for example reviewing it, reworking it to answer review comments, or answering a comment a person made on it, approved or not. | Nothing yet. |
 | `status: needs-review` | The city has finished with the PR, and it waits for a person to review it. | Review it. Approve it, or comment, and the city works on your comments. |
 | `status: merging` | The PR is approved and nothing known stops it. | Nothing. The city merges it once its required checks pass. |
 | `status: needs-attention` | Something stops the PR that the city will not clear on its own. | Clear what stops it. A `held:` label usually names it. |
 
 When more than one applies, the label shows the first that does, in this
-order: `needs-attention`, `merging`, `working`, `needs-review`.
+order: `needs-attention`, `merging`, `working`, `needs-review`. A person's
+comment on an approved PR stops its merge until the review run that takes the
+comment finishes, so the PR reads `working` until then.
 
-`services/gctk/prstatus` declares the four values as `State`, each with its
+`services/gctk/pr/prstatus` declares the four values as `State`, each with its
 meaning, and `gctk pr status <bead>` prints the one a PR reads. The board also
 places the PR's bead by whose move it is: a bead whose PR reads `needs-review`
 or `needs-attention` waits on you, and one whose PR reads `working` or
@@ -49,7 +51,7 @@ or `needs-attention` waits on you, and one whose PR reads `working` or
 ([bead-standing.md](bead-standing.md#where-a-beads-words-meet-its-pull-requests)).
 
 A `held:` label names one kind of thing that holds the PR for a person, one of
-the values `services/gctk/prstatus` declares as `Hold`. More than one can show
+the values `services/gctk/pr/prstatus` declares as `Hold`. More than one can show
 at once, and any of them makes the status `needs-attention`.
 
 | Label | What holds the PR | What you can do |

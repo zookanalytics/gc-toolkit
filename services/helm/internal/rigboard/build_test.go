@@ -8,8 +8,8 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/listing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus/fixture"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
@@ -142,6 +142,11 @@ func (s storeOf) Worked(ids []string) (map[string]bool, error) {
 	}
 	return out, nil
 }
+
+// awaitingReview is the read the one-PR update saves of a PR open at head h
+// with no approval, so a PR on the pending record at that head waits on a
+// person's review (pr.AwaitsReview).
+const awaitingReview = `{"pr":{"head":"h","state":"OPEN","draft":false},"conversation":{"approvers":[],"requesters":[]}}`
 
 // Beads is a row for each bead named whose pull request reads, whose one
 // metadata key is the bead's merge_result.
@@ -520,7 +525,7 @@ func TestNeedOrder(t *testing.T) {
 		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
 	owed := person.Blocker{ID: "tk-pr", Status: "open", IssueType: "task",
-		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}}
+		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}}
 	g := &testRead{rig: "gc-toolkit",
 		open: []bead{
 			{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"},
@@ -797,8 +802,7 @@ func TestAPullRequestThatWaitsOnAStay(t *testing.T) {
 			prGroup: GroupWaitingOnYou, prSignal: "In conversation", cGroup: GroupWaitingOnYou, cSignal: "In conversation"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			prMeta := map[string]string{"merge_result": "pull_request_pending",
-				"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}
+			prMeta := map[string]string{"merge_result": "pull_request_pending"}
 			store := fixture.NewStore([]fixture.Bead{
 				{ID: "tk-pr", Title: "the change", Status: "open", IssueType: "task", WaitsOn: []string{"tk-c", "tk-rw"}, Metadata: prMeta},
 				{ID: "tk-c", Title: "should this land as built?", Status: "open", IssueType: "task", Assignee: sitting,
@@ -935,8 +939,7 @@ func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 			prGroup: GroupWaitingOnYou, prSignal: "Waits on your answer", dGroup: GroupWaitingOnYou, dSignal: "Question"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			prMeta := map[string]string{"merge_result": "pull_request",
-				"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}
+			prMeta := map[string]string{"merge_result": "pull_request_pending"}
 			store := fixture.NewStore([]fixture.Bead{
 				{ID: "tk-pr", Title: "the change", Status: "open", IssueType: "task", WaitsOn: []string{"tk-d"}, Metadata: prMeta},
 				{ID: "tk-d", Title: "keep the old flag?", Status: "open", IssueType: "decision", WaitsOn: []string{"tk-w"}},
@@ -1000,9 +1003,9 @@ func TestAPullRequestThatWaitsOnARuledDecision(t *testing.T) {
 // record stands where the evaluator's answer says.
 func TestAPullRequestHeldOnlyByWhatItWaitsOn(t *testing.T) {
 	type pull struct {
-		waitsOn []string
-		answer  pr.Answer
-		posture string
+		waitsOn      []string
+		answer       pr.Answer
+		awaitsReview bool
 	}
 	wait := func(id string) pr.Condition { return pr.Condition{Kind: pr.KindWait, ID: id} }
 	q := bead{ID: "tk-q", Title: "which way?", Status: "open", Priority: 2, IssueType: "gate", AwaitType: "human", CreatedAt: "2026-01-02"}
@@ -1030,7 +1033,7 @@ func TestAPullRequestHeldOnlyByWhatItWaitsOn(t *testing.T) {
 			aSignal: "needs-attention", aReasons: 1},
 		{name: "one held by another pull request's review is listed beneath that pull request",
 			a:    &pull{waitsOn: []string{"tk-b"}, answer: pr.Answer{Conditions: []pr.Condition{wait("tk-b")}}},
-			b:    &pull{posture: "review_required@h@2026-11-01T00:00:00Z", answer: pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindApproval}}}},
+			b:    &pull{awaitsReview: true, answer: pr.Answer{Conditions: []pr.Condition{{Kind: pr.KindApproval}}}},
 			asks: map[string]Ask{"tk-b": AskPullRequest, "tk-q": AskQuestion}, counted: []string{"tk-b", "tk-q"}, bHolds: []string{"tk-a"},
 			aSignal: "Waits on tk-b"},
 		{name: "a chain through another pull request a question holds ends beneath the question, which holds both",
@@ -1055,8 +1058,8 @@ func TestAPullRequestHeldOnlyByWhatItWaitsOn(t *testing.T) {
 					continue
 				}
 				meta := map[string]string{"merge_result": "pull_request_pending"}
-				if side.p.posture != "" {
-					meta["pr_posture"] = side.p.posture
+				if side.p.awaitsReview {
+					meta["pr_head_sha"], meta["pr_github_read"] = "h", awaitingReview
 				}
 				fixed = append(fixed, fixture.Bead{ID: side.id, Title: titles[side.id], Status: "blocked", IssueType: "task",
 					WaitsOn: side.p.waitsOn, Metadata: meta})
@@ -1344,7 +1347,7 @@ func TestNeedsThatCount(t *testing.T) {
 		holding: map[string]prstatus.Holds{
 			"tk-pe": {}, "tk-pf": {}, "tk-pq": {},
 			"tk-wb": {Owed: []person.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task",
-				Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}}}},
+				Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}}}},
 			"tk-wp":    {Gates: []person.Blocker{gate("tk-qp")}},
 			"tk-desk":  {Gates: []person.Blocker{gate("tk-qd")}},
 			"tk-wf":    {Gates: []person.Blocker{gate("tk-qf")}},

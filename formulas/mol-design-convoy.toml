@@ -525,8 +525,8 @@ case "$(printf '%s' "$DESIGN_GATED_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:
 esac
 # <<< design-gated-resolve
 
-POOL="${GC_RIG:+$GC_RIG/}gc-toolkit.polecat"
-REFINERY="${GC_RIG:+$GC_RIG/}gc-toolkit.refinery"
+POOL="${GC_RIG:+$GC_RIG/}{{binding_prefix}}polecat"
+REFINERY="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
 case "$POOL" in */*) ;; *) echo "cannot rig-qualify the pool and the refinery; set GC_RIG" >&2; exit 1 ;; esac
 ```
 

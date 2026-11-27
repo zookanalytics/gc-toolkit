@@ -1014,13 +1014,16 @@ fi
 # makes no call and exits non-zero too, so every PR left standing reads as one
 # whose status did not read: the sign-off exists to get a ruling's writes down,
 # and an unbounded call ahead of them could hold them. Prints nothing when the
-# status does not read.
+# status does not read. The headline keeps the clause this status words, and no
+# later read corrects it, so the call runs with GC_NO_API=1. That turns off
+# gctk's read of the supervisor's copy of the PR's bead, which can trail a fresh
+# write, and the status comes from the bead as it stands.
 pr_status() {
   local t
   [ -x "$GCTK" ] || return 1
   for t in timeout gtimeout; do
     command -v "$t" >/dev/null 2>&1 || continue
-    "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
+    GC_NO_API=1 "$t" -k 5 20 "$GCTK" pr status "$1" --json </dev/null 2>/dev/null | scrub | jq -er '
       select((.status | type) == "string" and .status != "")
       | [.status,
           (.conditions | if type != "array" then "untold"
@@ -1338,8 +1341,12 @@ $CLOSE_BRIEF" >/dev/null 2>&1 \
   else
     [ -x "$GCTK" ] \
       || stopped "no gctk binary at '$GCTK' (GCTK_BIN names one, or GC_CITY_PATH the city whose build it is), so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
+    # The closer's pool carries the binding the city imports the pack under,
+    # which only the roster knows.
+    CLOSER_POOL=$(GC_RIG="$CLOSER_RIG" "$HERE/resolve-route.sh" polecat) \
+      || stopped "the roster names no one polecat pool in rig $CLOSER_RIG, and resolve-route.sh's message above says why, so $SUBJECT's validating closer was not armed; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
     "$GCTK" bead arm "$SUBJECT" --db "$CLOSER_PATH/.beads" \
-        --target "$CLOSER_RIG/gc-toolkit.polecat" --on mol-validate-close \
+        --target "$CLOSER_POOL" --on mol-validate-close \
         --reason "waits for $CLOSER_WAITS, the work conversation $CONVERSATION's ruling sent; the validating closer checks it once that lands" \
       || stopped "$SUBJECT's validating closer was not armed, and gctk bead arm's message above says why; the headline and the close brief are written, no gate was resolved and the conversation is not closed"
   fi

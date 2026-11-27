@@ -1,12 +1,15 @@
 # Worktree reclaim
 
-A polecat works each bead in a git worktree of its own under its agent home,
-and records the path in `metadata.work_dir`. Its hand-off to the refinery
-removes the tree and deletes the tree's local branch. A tree the hand-off
-leaves is the controller's: Gas City's closed-bead reaper removes it once its
-bead has closed, the tree reads clean, and a ref reaches every commit in it.
-Every checkout is a full working tree, so a tree that nothing removes stays as
-a floor under the disk.
+A polecat works each bead in a git worktree of its own at
+`.gc/worktrees/<rig>/<bead>`, beside the agents' homes, and records the path in
+`metadata.work_dir`. The tree sits outside every home because a run's steps are
+claimed by different sessions, and Gas City can remove a closed pool session's
+home with everything under it (`auto_prune_worker_dir`, on unless a city turns
+it off). Its hand-off to the refinery removes the tree and deletes the tree's
+local branch. A tree the hand-off leaves is the controller's: Gas City's
+closed-bead reaper removes it once its bead has closed, the tree reads clean,
+and a ref reaches every commit in it. Every checkout is a full working tree, so
+a tree that nothing removes stays as a floor under the disk.
 
 ## Scope
 

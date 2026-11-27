@@ -67,7 +67,7 @@ func TestClears(t *testing.T) {
 		{"closed and labeled human", Blocker{ID: "b", Status: "closed", IssueType: "bug", Labels: []string{"human"}}, false},
 		{"a human gate labeled human", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Labels: []string{"human"}}, false},
 		{"a merge anchor waiting on a review", Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task",
-			Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}}, false},
+			Metadata: map[string]string{"merge_result": "pull_request_pending"}}, false},
 	} {
 		if got := Clears(tc.b); got != tc.want {
 			t.Errorf("%s: Clears(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)
