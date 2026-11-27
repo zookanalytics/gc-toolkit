@@ -716,8 +716,9 @@ with what the person can do.
      open human gate and tracks no decision that asks. It is a `pull-request`
      when its pull request reads needs-review or needs-attention, a `ruling`
      when it is an epic with members and none of them open, or a landed
-     Delivery, and `assigned-to-you` when it is any other open bead only a
-     person clears.
+     Delivery, `human-needed` when it is any other open bead that carries
+     bd's `human` label, and `assigned-to-you` when it is any other open bead
+     only a person clears.
      Work that carries `hold:mayor` asks nothing, because Gas City's hold
      names the Product Owner as its next actor. A pull request whose
      needs-attention rests only on the human gates and the beads a person owes
@@ -775,8 +776,10 @@ with what the person can do.
   otherwise `advancing` or `stuck` by the beads it waits on, each read as the
   bead's advance reads it.
 
-A bead only a person clears is an open decision, a conversation, or any bead
-assigned to `human`, the operator's queue. That rule, the rule for a human gate
+A bead only a person clears is an open decision, a conversation, any bead
+assigned to `human`, the operator's queue, or any open bead that carries bd's
+`human` label, whatever it is routed, armed or assigned to, because bd reads
+that label as a request for a person. That rule, the rule for a human gate
 and the rule for a bead that waits on work of its own first are the rules about
 one bead. They sit in `standing/person`, beneath `prstatus`, which reads them
 for what holds a pull request.
