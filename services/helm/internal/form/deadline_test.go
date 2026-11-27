@@ -55,10 +55,11 @@ case "$1 ${2:-}" in
 esac
 `
 
-// realOpen is the gc-helm.sh this module ships, run with gcStub first on PATH
-// and nothing of the session's city in its environment, under timeout. It
-// returns the Script and the directory the stub keeps its store in.
-func realOpen(t *testing.T, timeout time.Duration) (Script, string) {
+// realOpen is the gc-helm.sh this module ships, run under the Script's default
+// deadline, with gcStub first on PATH and nothing of the session's city in its
+// environment. It returns the Script and the directory the stub keeps its store
+// in.
+func realOpen(t *testing.T) (Script, string) {
 	t.Helper()
 	dir := t.TempDir()
 	state, bin, rig := filepath.Join(dir, "state"), filepath.Join(dir, "bin"), filepath.Join(dir, "rig")
@@ -99,19 +100,42 @@ func realOpen(t *testing.T, timeout time.Duration) (Script, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Script{Path: path, Timeout: timeout}, state
+	return Script{Path: path}, state
 }
 
 // answers is fakeHelm whose saves run a Script, each request and answer
-// recorded.
+// recorded. A save the stub stalls is killed at the stall, however long the
+// calls before it take: its context ends once the stub writes $STATE/stalled,
+// and verbs.Exec answers that as it answers the save's deadline. A stalled file
+// an earlier save left is not this save's.
 type answers struct {
 	*fakeHelm
-	s   Script
-	got []savedMsg
+	s     Script
+	state string
+	got   []savedMsg
 }
 
 func (h *answers) Save(ctx context.Context, req SaveRequest) (Saved, error) {
 	h.saves = append(h.saves, req)
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	stalled := filepath.Join(h.state, "stalled")
+	if _, err := os.Stat(stalled); err != nil {
+		go func() {
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					if _, err := os.Stat(stalled); err == nil {
+						stop()
+					}
+				}
+			}
+		}()
+	}
 	sv, err := h.s.Save(ctx, req)
 	h.got = append(h.got, savedMsg{saved: sv, err: err})
 	return sv, err
@@ -127,14 +151,14 @@ func TestANewTopicSaveKilledAtItsDeadlineKeepsItsSubject(t *testing.T) {
 	const q = "why do sittings start slowly?"
 	for _, stall := range []string{"after-subject", "in-conversation-create"} {
 		t.Run(stall, func(t *testing.T) {
-			s, state := realOpen(t, 3*time.Second)
+			s, state := realOpen(t)
 			if err := os.WriteFile(filepath.Join(state, "stall."+stall), nil, 0o644); err != nil {
 				t.Fatal(err)
 			}
 			h := &answers{fakeHelm: &fakeHelm{
 				city:  rigCity(),
 				about: map[string]About{"tk-subj1": subjectAbout("tk-subj1", "gc-toolkit")},
-			}, s: s}
+			}, s: s, state: state}
 			m := newFormOn(t, h, Options{Rig: "gc-toolkit"})
 			loadCity(m)
 			typeText(m, q)
@@ -199,7 +223,7 @@ func TestANewTopicSaveKilledAtItsDeadlineKeepsItsSubject(t *testing.T) {
 // holds one conversation.
 func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *testing.T) {
 	const q = "is the rollout safe to approve?"
-	s, state := realOpen(t, 3*time.Second)
+	s, state := realOpen(t)
 	rows := `[{"id": "tk-gate1", "issue_type": "gate", "await_type": "human", "status": "open", "title": "Approve the rollout", "description": "Approve it or say why not."},
 		{"id": "tk-held1", "issue_type": "task", "status": "blocked", "title": "the rollout", "metadata": {"merge_result": "pull_request_pending", "pr_number": "41"},
 		 "dependencies": [{"type": "blocks", "depends_on_id": "tk-gate1"}]}]`
@@ -210,7 +234,7 @@ func TestAGateSaveKilledInItsReplyIsSavedAgainOntoTheConversationItFiled(t *test
 	}
 	a := subjectAbout("tk-held1", "gc-toolkit")
 	a.Ref, a.Gate = "tk-gate1", "tk-gate1"
-	h := &answers{fakeHelm: &fakeHelm{about: map[string]About{"tk-gate1": a}}, s: s}
+	h := &answers{fakeHelm: &fakeHelm{about: map[string]About{"tk-gate1": a}}, s: s, state: state}
 	m := newFormOn(t, h, Options{Subject: "tk-gate1", DraftDir: t.TempDir()})
 	settle(m)
 	typeText(m, q)

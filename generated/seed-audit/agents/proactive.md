@@ -185,10 +185,11 @@ biased toward moving work forward:
 an epic (a bead with a parent), on PR-finishing work (it carries `anchor_bead`),
 on the tracker of a failure already red on a base branch (it carries
 `failure_key`), or on an emergency. Any other bead the actionable exit holds
-with Gas City's `hold:mayor` label (`gc bd set-state <id> hold=mayor`) and
-leaves unrouted, and the blocked exit's `--then-route` arms nothing for it. The
-operator's placement sitting then places it under an epic or routes it on its
-own; `gc beads list --label hold:mayor` lists each bead held so. The scan reacts
+with Gas City's `hold:mayor` label, added beside any other hold the bead
+carries (`gc bd update <id> --add-label hold:mayor`), and leaves unrouted, and
+the blocked exit's `--then-route` arms nothing for it. The operator's placement
+sitting then places it under an epic or routes it on its own;
+`gc beads list --label hold:mayor` lists each bead held so. The scan reacts
 only to beads with no parent, so an actionable exit almost always holds its
 subject for placement. Choose the exit on the bead's merits all the same, and
 let the script apply the rule: write the card and the takeaway so they read true
