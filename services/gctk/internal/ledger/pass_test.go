@@ -113,6 +113,31 @@ func TestPassNarrowsByAssigneeStatusAndListing(t *testing.T) {
 	}
 }
 
+// A selection a pass has read from the store it answers again from its rows,
+// through a pass made over it too, so two domains that ask one selection read
+// the store once, and the second answer holds no bead the store gained after
+// the first. A selection that differs reads the store for itself.
+func TestPassAnswersASelectionItReadFromItsRows(t *testing.T) {
+	s := passStore()
+	k := Key[string]{decl: &decl{name: "gc.x", typ: "string"}, codec: String}
+	l := New(s).Pass()
+	for _, through := range []*Ledger{l, l, l.Pass()} {
+		got, err := through.Find(Matching(k, "cv"))
+		if err != nil || !slices.Equal(recordIDs(got), []string{"a"}) {
+			t.Fatalf("the beads whose key holds cv = %v, %v; want a", recordIDs(got), err)
+		}
+		s.Put(fake.Bead{ID: "d", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.x": "cv"}})
+	}
+	if finds := s.Finds(); len(finds) != 1 {
+		t.Errorf("the reads = %+v; want one, of the selection asked three times", finds)
+	}
+	got, err := l.Find(Matching(k, "cv").WithClosed())
+	if err != nil || !slices.Equal(recordIDs(got), []string{"a", "d"}) || len(s.Finds()) != 2 {
+		t.Errorf("the selection widened to closed beads = %v, %v after %d reads; want a and d, read afresh",
+			recordIDs(got), err, len(s.Finds()))
+	}
+}
+
 // Every read of a bead through a pass answers with the row it kept first, so
 // a write that lands between two reads changes neither: not a read by id, not
 // a parent's beads, and not a snapshot.

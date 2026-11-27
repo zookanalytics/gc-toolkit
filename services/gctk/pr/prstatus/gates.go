@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -45,7 +46,7 @@ func IsMachineGate(b person.Blocker) bool {
 // anchor whose pull request is not open has none to review, and a bead with no
 // merge_result is no merge anchor.
 func awaitsPerson(b person.Blocker, own []person.Blocker, edges map[string][]person.Blocker) bool {
-	f := RowFacts(b.Metadata)
+	f := RowFacts(b.Record)
 	if f.MergeResult == "" {
 		return false
 	}
@@ -62,7 +63,7 @@ func awaitsPerson(b person.Blocker, own []person.Blocker, edges map[string][]per
 	case NeedsAttention:
 		return true
 	case NeedsReview:
-		return pr.AwaitsReview(f.MergeResult, b.Metadata["pr_head_sha"], b.Metadata["pr_github_read"])
+		return pr.AwaitsReview(b.Record)
 	}
 	return false
 }
@@ -233,7 +234,7 @@ func (w *holdWalk) step(edges map[string][]person.Blocker) {
 				w.holds.Gates = append(w.holds.Gates, b)
 			case person.Clears(b):
 				w.found = append(w.found, b)
-			case b.Metadata["merge_result"] != "":
+			case keyText(record.Result, b.Record) != "":
 				w.weigh[b.ID] = b
 			}
 		}

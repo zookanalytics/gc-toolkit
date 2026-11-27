@@ -244,8 +244,23 @@ func TestAwaitsReview(t *testing.T) {
 		{"a head the refinery has not validated", "pull_request_head_changed", head, read(nil), false},
 		{"no PR on the record", "", head, read(nil), false},
 	} {
-		if got := pr.AwaitsReview(tc.result, tc.head, tc.read); got != tc.want {
+		md := map[string]string{}
+		for k, v := range map[string]string{"merge_result": tc.result, "pr_head_sha": tc.head, "pr_github_read": tc.read} {
+			if v != "" {
+				md[k] = v
+			}
+		}
+		s := fake.New()
+		s.Put(fake.Bead{ID: "tk-b", Status: "blocked", IssueType: "task", Metadata: md})
+		recs, err := ledger.New(s).Find(ledger.ByID("tk-b"))
+		if err != nil || len(recs) != 1 {
+			t.Fatalf("%s: the bead read %v, %v", tc.name, recs, err)
+		}
+		if got := pr.AwaitsReview(recs[0]); got != tc.want {
 			t.Errorf("%s: AwaitsReview = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+	if pr.AwaitsReview(nil) {
+		t.Error("AwaitsReview(nil) = true, want false: no bead owns no PR")
 	}
 }

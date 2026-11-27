@@ -6,30 +6,31 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
-// Row is a bead as [Read] reads it: its id and its metadata, each value as the
-// store holds it, rendered the way `(.metadata[k] // "") | tostring` renders it.
-type Row struct {
-	ID       string
-	Metadata map[string]string
-}
+// Row is a bead as [Read] reads it: the ledger's record of it, whose keys
+// prstatus reads through their declarations. It is named here so that a Store
+// outside gctk, such as the helm board's tests', can name it.
+type Row = ledger.Record
 
-// Store is the reads [Read] gathers through: one reader's adapter onto the bead
-// store. It holds no rule. [Read] decides which beads to read and over which
-// statuses, and an adapter only carries out each read. Each read answers for
-// every id it is given, and returns an error when any of them did not read,
-// because a bead nothing read proves nothing about what holds a PR.
+// Store is the reads [Read] gathers through. It holds no rule. [Read] decides
+// which beads to read and over which statuses, and a store only carries out
+// each read. Each read answers for every id it is given, and returns an error
+// when any of them did not read, because a bead nothing read proves nothing
+// about what holds a PR. Every reader in gctk reads through the one Store over
+// the ledger ([Over]).
 type Store interface {
 	// Beads returns the row of each id the store holds. An id it holds no row
 	// for is left out.
-	Beads(ids []string) (map[string]Row, error)
-	// Anchored returns, for each id, the beads whose metadata.anchor_bead names
-	// it, at any of statuses.
-	Anchored(ids []string, statuses []string) (map[string][]Row, error)
+	Beads(ids []string) (map[string]*Row, error)
+	// Anchored returns, for each id, the beads whose anchor_bead names it, at
+	// any of statuses.
+	Anchored(ids []string, statuses []string) (map[string][]*Row, error)
 	// Blockers returns, for each id, the far bead of each of its `blocks` edges,
-	// open and closed, with its metadata. It is the read [Holding] walks
+	// open and closed, with its record. It is the read [Holding] walks
 	// ([ReadBlockers]).
 	Blockers(ids []string) (map[string][]person.Blocker, error)
 }
@@ -123,7 +124,7 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 		if !walked {
 			continue
 		}
-		f := RowFacts(rows[id].Metadata)
+		f := RowFacts(rows[id])
 		f.Gates, f.Owed, f.Staying, f.InFlightCount = h.Gates, h.Owed, h.Staying, len(inFlight[id])
 		f.Runs = runsOf(own[id])
 		facts[id] = f
@@ -131,15 +132,15 @@ func Read(anchors []string, s Store) (map[string]Facts, error) {
 	return facts, errors.Join(errs...)
 }
 
-// RowFacts are the facts a bead's own row records, read off its metadata: its
-// holds and its landing state. [Read] adds what it gathers beside
-// the row to them: the gates, the beads a person owes, the beads that wait on
-// work of their own first, the in-flight count and the review runs. [Holding]
-// weighs a merge anchor it reaches by its row's facts.
-func RowFacts(md map[string]string) Facts {
+// RowFacts are the facts a bead's own row records, read off its keys: its holds
+// and its landing state. [Read] adds what it gathers beside the row to them:
+// the gates, the beads a person owes, the beads that wait on work of their own
+// first, the in-flight count and the review runs. [Holding] weighs a merge
+// anchor it reaches by its row's facts. A nil row records none.
+func RowFacts(r *Row) Facts {
 	return Facts{
-		MergeHold:   md["merge_hold"],
-		RebaseHold:  md["rebase_hold"],
-		MergeResult: md["merge_result"],
+		MergeHold:   keyText(mergeHoldKey, r),
+		RebaseHold:  keyText(rebaseHoldKey, r),
+		MergeResult: keyText(record.Result, r),
 	}
 }

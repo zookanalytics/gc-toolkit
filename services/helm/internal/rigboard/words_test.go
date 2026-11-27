@@ -3,6 +3,7 @@ package rigboard
 import (
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -21,8 +22,8 @@ func TestOwnWaitWords(t *testing.T) {
 		{"a conversation in your queue", person.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "human"}, "Conversation waits for you"},
 		{"a conversation a sitting holds", person.Blocker{ID: "tk-c", Status: "open", IssueType: "task", Assignee: "gc-toolkit/gc-toolkit.tk-c"}, "In conversation"},
 		{"a decision", person.Blocker{ID: "tk-d", Status: "open", IssueType: "decision"}, "Waits on your answer"},
-		{"another bead's pull request", person.Blocker{ID: "tk-pr", Status: "open", IssueType: "task",
-			Metadata: map[string]string{"merge_result": "pull_request_pending"}}, "Waits on tk-other, tk-pr"},
+		{"another bead's pull request", fixture.BlockerOf(fixture.Bead{ID: "tk-pr", Status: "open", IssueType: "task",
+			Metadata: map[string]string{"merge_result": "pull_request_pending"}}), "Waits on tk-other, tk-pr"},
 	} {
 		if got := ownWaitWords(&c.o, waits); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

@@ -7,14 +7,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // store is a [Store] over fixed answers. Each read is recorded, so a test can
 // tell what Read asked for and how often, and fail names a read that errors.
 type store struct {
-	rows     map[string]Row
-	anchored map[string][]Row
+	rows     map[string]*Row
+	anchored map[string][]*Row
 	edges    map[string][]person.Blocker
 	fail     string
 	calls    []string
@@ -29,11 +31,11 @@ func (s *store) record(read string, ids []string) error {
 	return nil
 }
 
-func (s *store) Beads(ids []string) (map[string]Row, error) {
+func (s *store) Beads(ids []string) (map[string]*Row, error) {
 	if err := s.record("beads", ids); err != nil {
 		return nil, err
 	}
-	out := map[string]Row{}
+	out := map[string]*Row{}
 	for _, id := range ids {
 		if r, ok := s.rows[id]; ok {
 			out[id] = r
@@ -42,12 +44,12 @@ func (s *store) Beads(ids []string) (map[string]Row, error) {
 	return out, nil
 }
 
-func (s *store) Anchored(ids []string, statuses []string) (map[string][]Row, error) {
+func (s *store) Anchored(ids []string, statuses []string) (map[string][]*Row, error) {
 	s.statuses = append(s.statuses, slices.Clone(statuses))
 	if err := s.record("anchored", ids); err != nil {
 		return nil, err
 	}
-	out := map[string][]Row{}
+	out := map[string][]*Row{}
 	for _, id := range ids {
 		out[id] = s.anchored[id]
 	}
@@ -65,7 +67,16 @@ func (s *store) Blockers(ids []string) (map[string][]person.Blocker, error) {
 	return out, nil
 }
 
-func row(id string, md map[string]string) Row { return Row{ID: id, Metadata: md} }
+// row is the record a store's read gives of the bead id, carrying md.
+func row(id string, md map[string]string) *Row {
+	s := fake.New()
+	s.Put(fake.Bead{ID: id, Status: "open", IssueType: "task", Metadata: md})
+	recs, err := ledger.New(s).Find(ledger.ByID(id).WithClosed())
+	if err != nil || len(recs) != 1 {
+		panic(fmt.Sprintf("the store's fake did not serve %s: %v", id, err))
+	}
+	return recs[0]
+}
 
 // Read gathers every fact the rule reads off the anchor's own row, the size of
 // its in-flight set, and the gates and the beads a person owes that its walk
@@ -75,12 +86,12 @@ func TestReadGathersTheFacts(t *testing.T) {
 	decider := person.Blocker{ID: "d", Title: "pick the release window", Status: "open", IssueType: "decision"}
 	other := anchorBlocker("b", awaitingReview)
 	s := &store{
-		rows: map[string]Row{"a": row("a", map[string]string{
+		rows: map[string]*Row{"a": row("a", map[string]string{
 			"merge_hold": "true", "rebase_hold": "1",
 			"merge_result": "pull_request_pending",
 			"unread":       "x",
 		})},
-		anchored: map[string][]Row{"a": {row("rw", nil), row("rv", nil)}},
+		anchored: map[string][]*Row{"a": {row("rw", nil), row("rv", nil)}},
 		edges:    map[string][]person.Blocker{"a": {task("rw"), decider}, "rw": {gate("g"), other}},
 	}
 	facts, err := Read([]string{"a"}, s)
@@ -107,7 +118,7 @@ func TestReadGathersTheFacts(t *testing.T) {
 // once: they are the walk's first level.
 func TestReadBatchesItsReads(t *testing.T) {
 	s := &store{
-		rows:  map[string]Row{"a": row("a", nil), "b": row("b", nil)},
+		rows:  map[string]*Row{"a": row("a", nil), "b": row("b", nil)},
 		edges: map[string][]person.Blocker{"a": {task("rw")}, "b": {task("rw"), task("t")}, "rw": {gate("g")}},
 	}
 	facts, err := Read([]string{"a", "b", "a"}, s)
@@ -130,7 +141,7 @@ func TestReadBatchesItsReads(t *testing.T) {
 func TestReadFailsClosed(t *testing.T) {
 	for _, read := range []string{"beads", "anchored", "blockers"} {
 		t.Run(read, func(t *testing.T) {
-			s := &store{rows: map[string]Row{"a": row("a", nil)}, fail: read}
+			s := &store{rows: map[string]*Row{"a": row("a", nil)}, fail: read}
 			if facts, err := Read([]string{"a"}, s); err == nil || facts != nil {
 				t.Errorf("(%v, %v), want (nil, an error)", facts, err)
 			}
@@ -138,7 +149,7 @@ func TestReadFailsClosed(t *testing.T) {
 	}
 
 	t.Run("a level of the walk", func(t *testing.T) {
-		s := &store{rows: map[string]Row{"a": row("a", nil)}, edges: map[string][]person.Blocker{"a": {task("rw")}}}
+		s := &store{rows: map[string]*Row{"a": row("a", nil)}, edges: map[string][]person.Blocker{"a": {task("rw")}}}
 		calls := 0
 		walk := failAt{Store: s, n: 2, calls: &calls}
 		if facts, err := Read([]string{"a"}, walk); err == nil || facts != nil {
@@ -165,7 +176,7 @@ func (f failAt) Blockers(ids []string) (map[string][]person.Blocker, error) {
 // An anchor with no row has no answer, and the others keep theirs. One that no
 // read reaches costs no further read.
 func TestReadLeavesOutAnAnchorWithNoRow(t *testing.T) {
-	s := &store{rows: map[string]Row{"a": row("a", nil)}}
+	s := &store{rows: map[string]*Row{"a": row("a", nil)}}
 	facts, err := Read([]string{"a", "gone"}, s)
 	if _, ok := facts["a"]; !ok || !errors.Is(err, ErrUnresolved) || !strings.Contains(err.Error(), "gone") {
 		t.Errorf("(%v, %v), want a's answer and ErrUnresolved naming gone", facts, err)
@@ -187,7 +198,7 @@ func TestReadLeavesOutAnAnchorWithNoRow(t *testing.T) {
 // An anchor whose walk runs past its bound has no answer, because the gates past
 // it are unknown, and the others keep theirs.
 func TestReadLeavesOutAnAnchorPastTheWalksBound(t *testing.T) {
-	s := &store{rows: map[string]Row{"a": row("a", nil), "deep": row("deep", nil)}, edges: map[string][]person.Blocker{"a": {gate("g")}}}
+	s := &store{rows: map[string]*Row{"a": row("a", nil), "deep": row("deep", nil)}, edges: map[string][]person.Blocker{"a": {gate("g")}}}
 	s.edges["deep"] = []person.Blocker{task("n1")}
 	for i := 1; i <= walkDepth; i++ {
 		s.edges[fmt.Sprintf("n%d", i)] = []person.Blocker{task(fmt.Sprintf("n%d", i+1))}
@@ -258,12 +269,12 @@ func TestReasons(t *testing.T) {
 func TestReadGathersTheReviewRunsAttachedToTheAnchor(t *testing.T) {
 	root := func(id, status, head string) person.Blocker {
 		return person.Blocker{ID: id, Status: status, ClosedAt: map[string]string{"closed": "2026-11-12T09:10:00Z"}[status],
-			Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review",
-				"gc.var.head": head, "gc.var.target": "main"}}
+			Record: row(id, map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-pr-review",
+				"gc.var.head": head, "gc.var.target": "main"})}
 	}
-	other := person.Blocker{ID: "w", Status: "open", Metadata: map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-polecat-work"}}
+	other := person.Blocker{ID: "w", Status: "open", Record: row("w", map[string]string{"gc.kind": "workflow", "gc.formula_name": "mol-polecat-work"})}
 	s := &store{
-		rows:  map[string]Row{"a": row("a", map[string]string{})},
+		rows:  map[string]*Row{"a": row("a", map[string]string{})},
 		edges: map[string][]person.Blocker{"a": {root("r1", "closed", "h1"), root("r2", "open", "h2"), other}},
 	}
 	facts, err := Read([]string{"a"}, s)

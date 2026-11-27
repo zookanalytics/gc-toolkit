@@ -6,9 +6,10 @@
       "listing",
       "place",
       "pr",
+      "pr/prstatus",
       "reaction"
     ],
-    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead, and prstatus's in-flight set reads it. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
+    "doc": "A placement refuses PR-finishing work, which follows its anchor and is never a member of an epic. The pr evaluator holds the PR of the bead an open bead names, until that work is filed with a blocks edge. prstatus counts each live bead that names a PR's bead, at a live status and shown by bd's listing, in the PR's in-flight set. The merge anchor a review, rework, finding or validation child names (lifecycle/lifecycle.toml, [metadata.gates]). A listing names it on each bead. The bead whose PR a bead's work finishes. Intake admits such PR-finishing work to a pool."
   },
   {
     "name": "blocked_reason",
@@ -233,9 +234,10 @@
     "readers": [
       "distiller",
       "pr",
+      "pr/prstatus",
       "waits"
     ],
-    "doc": "A live workflow root of mol-feedback-distiller in the home rig's store is a distiller run that is still going, and gctk distiller start slings no other while one is. The run link reports a run's formula as its root's. The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is."
+    "doc": "A live workflow root of mol-feedback-distiller in the home rig's store is a distiller run that is still going, and gctk distiller start slings no other while one is. The run link reports a run's formula as its root's. The formula a workflow root was poured from, which Gas City stamps at the pour (lifecycle/lifecycle.toml, [metadata.runtime_owned]). A live root of mol-pr-review that a blocks edge of a PR's bead names is a review run attached to the bead, and the landing order marks no PR ready while one is. prstatus reads a workflow root of mol-pr-review that a PR's bead waits on as a review run attached to it."
   },
   {
     "name": "gc.handback",
@@ -267,11 +269,12 @@
     "readers": [
       "distiller",
       "pr",
+      "pr/prstatus",
       "reaction",
       "review",
       "waits"
     ],
-    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. A first reaction takes no bead whose kind is workflow, scope or spec, a topology root."
+    "doc": "The runtime's kind of a bead. A root reading workflow is a run's root. A review run's loop is the bead of its run that reads ralph, the control bead of its checked step. prstatus reads a blocker of a PR's bead whose kind is workflow, of the review formula, as a review run attached to it. A first reaction takes no bead whose kind is workflow, scope or spec, a topology root."
   },
   {
     "name": "gc.outcome",
@@ -411,9 +414,10 @@
     "type": "string",
     "readers": [
       "pr",
+      "pr/prstatus",
       "review"
     ],
-    "doc": "A review run's head var: the head the refinery validated, the run's first head. A review run's head var, which Gas City stamps on its root at the pour: the head the landing order poured it at. The order counts a closed run at the PR's validated head toward its re-offer."
+    "doc": "A review run's head var: the head the refinery validated, the run's first head. A review run's head var, which Gas City stamps on its root at the pour: the head the landing order poured it at. The order counts a closed run at the PR's validated head toward its re-offer. prstatus names a closed review run at the head the pr evaluator judged when the run ended without a result there."
   },
   {
     "name": "gc.var.issue",
@@ -444,9 +448,10 @@
     "type": "string",
     "readers": [
       "pr",
+      "pr/prstatus",
       "review"
     ],
-    "doc": "A review run's target var: the branch the PR merges into, the target its result is for. A review run's target var, which Gas City stamps on its root at the pour: the target its result is for. The order counts a closed run for the record's target toward its re-offer."
+    "doc": "A review run's target var: the branch the PR merges into, the target its result is for. A review run's target var, which Gas City stamps on its root at the pour: the target its result is for. The order counts a closed run for the record's target toward its re-offer. prstatus reads a review run's result as one for the target it was poured for."
   },
   {
     "name": "gc.work_outcome",
@@ -472,9 +477,10 @@
     "name": "merge_hold",
     "type": "string",
     "readers": [
-      "pr"
+      "pr",
+      "pr/prstatus"
     ],
-    "doc": "A hold on the bead's merge, set by hand. Any value but an unset spelling holds the PR."
+    "doc": "A hold on the bead's merge, set by hand. Any value but an unset spelling holds the PR. prstatus reads a PR whose bead holds a merge hold as needs-attention, with no held: value of its own."
   },
   {
     "name": "merge_result",
@@ -595,9 +601,10 @@
     "name": "rebase_hold",
     "type": "string",
     "readers": [
-      "pr"
+      "pr",
+      "pr/prstatus"
     ],
-    "doc": "A hold on bringing the bead's branch current, set by hand. Any value but an unset spelling holds the PR."
+    "doc": "A hold on bringing the bead's branch current, set by hand. Any value but an unset spelling holds the PR. prstatus reads a PR whose bead holds a rebase hold as needs-attention, with no held: value of its own."
   },
   {
     "name": "rejection_reason",

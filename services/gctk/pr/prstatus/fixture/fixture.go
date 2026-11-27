@@ -1,10 +1,13 @@
 // Package fixture holds the scenarios each reader of prstatus is tested
-// against, and an in-memory [prstatus.Store] that serves a scenario's beads. A
-// reader's test renders a scenario into the reads its own adapter makes, asks
-// the reader, and compares the answer with what [prstatus.Read] gathers from the
-// same beads through [Store]. The expected answer is the definition's own, so a
-// change to the definition reaches every reader's test, and a reader that kept
-// a rule of its own would part from it there.
+// against, and a store that serves a scenario's beads: the store adapter's fake
+// holding them, read through [prstatus.Over], the Store gctk's readers read
+// through. A reader's test renders a scenario into the reads its own adapter
+// makes, asks the reader, and compares the answer with what [prstatus.Read]
+// gathers from the same beads through [NewStore]. The expected answer is the
+// definition's own, so a change to the definition reaches every reader's test,
+// and a reader that kept a rule of its own would part from it there. It sits
+// at the binary layer, which may hold the store's fake where a domain may not,
+// and outside internal/, so the helm board's tests can import it.
 package fixture
 
 import (
@@ -12,8 +15,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
@@ -71,87 +76,45 @@ func Scenarios() ([]Scenario, error) {
 	return out, nil
 }
 
-// Store serves a scenario's beads as a [prstatus.Store]. It answers as the bead
-// store does: a row for each bead it holds, the beads naming an anchor in
-// anchor_bead at the statuses asked for, and each `blocks` edge's far bead. An
-// edge onto a bead it does not hold is left out, as bd leaves out an edge onto
-// another store's bead. Asking for the edges of a bead it does not hold is an
-// error, because no row answered for it.
-type Store struct {
-	beads map[string]Bead
-	order []string
-}
-
-// NewStore serves beads.
-func NewStore(beads []Bead) *Store {
-	s := &Store{beads: make(map[string]Bead, len(beads))}
+// NewStore serves beads as the bead store does, through [prstatus.Over]: a row
+// for each bead it holds, the beads naming an anchor in anchor_bead, and each
+// `blocks` edge's far bead. An edge onto a bead it does not hold is left out,
+// as bd leaves out an edge onto another store's bead, and asking for the edges
+// of a bead it does not hold is an error, because no row answered for it.
+func NewStore(beads []Bead) prstatus.Store {
+	s := fake.New()
 	for _, b := range beads {
-		s.beads[b.ID] = b
-		s.order = append(s.order, b.ID)
-	}
-	return s
-}
-
-// Beads returns the row of each id the store holds.
-func (s *Store) Beads(ids []string) (map[string]prstatus.Row, error) {
-	out := make(map[string]prstatus.Row, len(ids))
-	for _, id := range ids {
-		if b, ok := s.beads[id]; ok {
-			out[id] = prstatus.Row{ID: b.ID, Metadata: b.Metadata}
-		}
-	}
-	return out, nil
-}
-
-// Anchored returns, for each id, the beads whose anchor_bead names it, at any of
-// statuses, in the store's order.
-func (s *Store) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
-	out := make(map[string][]prstatus.Row, len(ids))
-	for _, id := range ids {
-		for _, k := range s.order {
-			b := s.beads[k]
-			if b.Metadata["anchor_bead"] == id && slices.ContainsFunc(statuses, func(st string) bool { return strings.EqualFold(st, b.Status) }) {
-				out[id] = append(out[id], prstatus.Row{ID: b.ID, Metadata: b.Metadata})
-			}
-		}
-	}
-	return out, nil
-}
-
-// Blockers returns, for each id, the far bead of each of its `blocks` edges.
-func (s *Store) Blockers(ids []string) (map[string][]person.Blocker, error) {
-	out := make(map[string][]person.Blocker, len(ids))
-	for _, id := range ids {
-		b, ok := s.beads[id]
-		if !ok {
-			return nil, fmt.Errorf("no row for %s", id)
-		}
-		out[id] = nil
+		row := fake.Bead{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
+			Assignee: b.Assignee, Metadata: b.Metadata}
 		for _, w := range b.WaitsOn {
-			if far, ok := s.beads[w]; ok {
-				out[id] = append(out[id], BlockerOf(far))
-			}
+			row.Edges = append(row.Edges, gcbd.Edge{Type: gcbd.EdgeBlocks, ID: w})
 		}
+		for _, t := range b.Tracks {
+			row.Edges = append(row.Edges, gcbd.Edge{Type: "tracks", ID: t})
+		}
+		s.Put(row)
 	}
-	return out, nil
+	return prstatus.Over(ledger.New(s))
 }
 
-// BlockerOf is a bead as the far end of a `blocks` edge.
+// holder is the bead BlockerOf puts beside the bead it is given, whose one
+// `blocks` edge names that bead.
+const holder = "fixture-holder"
+
+// BlockerOf is a bead as the far end of a `blocks` edge, with its record, as
+// [NewStore] serves it.
 func BlockerOf(b Bead) person.Blocker {
-	return person.Blocker{
-		ID:        b.ID,
-		Title:     b.Title,
-		Status:    b.Status,
-		IssueType: b.IssueType,
-		AwaitType: b.AwaitType,
-		Assignee:  b.Assignee,
-		Metadata:  b.Metadata,
+	got, err := NewStore([]Bead{b, {ID: holder, Status: "open", WaitsOn: []string{b.ID}}}).Blockers([]string{holder})
+	if err != nil || len(got[holder]) != 1 {
+		panic(fmt.Sprintf("fixture: the store did not serve %s as a blocker: %v", b.ID, err))
 	}
+	return got[holder][0]
 }
 
 // Answer is what the definition gathers and decides for a scenario's anchor: the
-// facts [prstatus.Read] gathers through [Store], and the status, held values and
-// reasons the definition gives for them. It is what every reader must answer.
+// facts [prstatus.Read] gathers through [NewStore], and the status, held values
+// and reasons the definition gives for them. It is what every reader must
+// answer.
 type Answer struct {
 	Facts   prstatus.Facts
 	Status  prstatus.State

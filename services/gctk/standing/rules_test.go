@@ -6,6 +6,7 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus/fixture"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
@@ -82,8 +83,8 @@ func TestTable(t *testing.T) {
 	decision := person.Blocker{ID: "tk-d", Title: "pick one", Status: "open", IssueType: "decision"}
 	// A merge anchor whose pull request waits on a person's review, as
 	// prstatus.Holding names it among the beads a person owes.
-	owesReview := person.Blocker{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
-		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_number": "7"}}
+	owesReview := fixture.BlockerOf(fixture.Bead{ID: "tk-pr", Title: "land the change", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_number": "7"}})
 	prWait := waits.Wait{ID: "tk-pr", Type: "blocks", Title: "land the change", Status: "open", IssueType: "task"}
 	// Where queue placed the bead: in a place something sends it from, in one
 	// nothing does, and waiting outside the city.

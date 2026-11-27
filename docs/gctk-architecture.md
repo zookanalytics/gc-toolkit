@@ -517,10 +517,12 @@ Nothing outside it parses a metadata value or spells a key's name.
   by the key's declaration, so it never spells the key.
 - **A pass reads a store once.** A pass is a ledger whose every read of a bead
   answers with the row it kept when it first read that bead. Once it has read
-  every live bead, it answers a selection of live beads from those rows, and
-  it reads the store again only for a bead it has not read, such as a closed
-  one. Every domain asked through one pass answers from one read of each
-  bead, and a pass takes no write.
+  every live bead, it answers a selection of live beads from those rows. It
+  answers a selection it has read from the store before from its rows too, so
+  two domains that ask one selection through it read the store for it once.
+  It reads the store again only for a bead it has not read, such as a closed
+  one, and a selection it has not read. Every domain asked through one pass
+  answers from one read of each bead, and a pass takes no write.
 
 ## The adapters
 
@@ -829,13 +831,6 @@ rule above, which turns those answers into a group and a move.
 Each entry is a place where the built code falls short of the layers above,
 why a reader must know it, and the work that retires it.
 
-- **`gctk pr status` reads around the ledger.** Its command builds the store
-  that `prstatus` (`pr/prstatus`) reads over the store adapter and gathers the
-  PR's facts itself (`internal/cli/prstatus.go`), and `prstatus` spells the
-  keys it reads, so the key registry does not show it reading them. For the
-  same reason `listing` hands `prstatus` each record's metadata whole, as the
-  ledger renders it. A new pr verb takes neither shape. tk-ssm8qns.39 moves
-  `prstatus` onto the ledger.
 - **The pr domain reads which posts are feedback through the pack's shell.**
   Its evaluator asks the feedback adapter, which runs `pr-post.sh feedback-def`
   through jq, because that script holds the one definition every reader of

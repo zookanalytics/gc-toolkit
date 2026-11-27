@@ -91,10 +91,8 @@ func (r *Record) Template() bool { return r.row.Template() }
 func (r *Record) ListedByDefault() bool { return r.row.ListedByDefault() }
 
 // Rendered is every metadata value the row holds, each as the pack's scripts
-// render it, `(.metadata[k] // "") | tostring`. It is the input of a domain
-// that still spells the keys it reads, prstatus's Store among them
-// (docs/gctk-architecture.md, Debt). A domain reads a key it declares through
-// the declaration.
+// render it, `(.metadata[k] // "") | tostring`. A domain reads a key it
+// declares through the declaration.
 func (r *Record) Rendered() map[string]string {
 	out := make(map[string]string, len(r.row.Metadata))
 	for k := range r.row.Metadata {

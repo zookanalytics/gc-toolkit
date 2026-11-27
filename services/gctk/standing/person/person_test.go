@@ -1,11 +1,28 @@
 package person
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+)
 
 func task(id string) Blocker { return Blocker{ID: id, Status: "open", IssueType: "task"} }
 
 func decision(id string) Blocker {
 	return Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
+}
+
+// keyed is b with the record a store's read gives of it, carrying md.
+func keyed(b Blocker, md map[string]string) Blocker {
+	s := fake.New()
+	s.Put(fake.Bead{ID: b.ID, Status: b.Status, IssueType: b.IssueType, Metadata: md})
+	recs, err := ledger.New(s).Find(ledger.ByID(b.ID).WithClosed())
+	if err != nil || len(recs) != 1 {
+		panic("the store's fake did not serve " + b.ID)
+	}
+	b.Record = recs[0]
+	return b
 }
 
 func closed(b Blocker) Blocker {
@@ -48,8 +65,8 @@ func TestClears(t *testing.T) {
 		{"closed", Blocker{ID: "d", Status: "closed", IssueType: "decision"}, false},
 		{"closed in any case", Blocker{ID: "d", Status: "Closed", IssueType: "decision"}, false},
 		{"a task", Blocker{ID: "d", Status: "open", IssueType: "task"}, false},
-		{"routed to a pool", Blocker{ID: "d", Status: "open", Metadata: map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}, false},
-		{"routed to human", Blocker{ID: "d", Status: "open", IssueType: "task", Metadata: map[string]string{"gc.routed_to": "human"}}, false},
+		{"routed to a pool", keyed(Blocker{ID: "d", Status: "open"}, map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}), false},
+		{"routed to human", keyed(Blocker{ID: "d", Status: "open", IssueType: "task"}, map[string]string{"gc.routed_to": "human"}), false},
 		{"a human gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human"}, false},
 		{"a timer gate", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "timer"}, false},
 		{"a bug in your queue", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "human"}, true},
@@ -57,8 +74,8 @@ func TestClears(t *testing.T) {
 		{"a human gate in your queue", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Assignee: "human"}, false},
 		{"closed in your queue", Blocker{ID: "b", Status: "closed", IssueType: "bug", Assignee: "human"}, false},
 		{"assigned to an agent", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik"}, false},
-		{"a merge anchor waiting on a review", Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task",
-			Metadata: map[string]string{"merge_result": "pull_request_pending"}}, false},
+		{"a merge anchor waiting on a review", keyed(Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task"},
+			map[string]string{"merge_result": "pull_request_pending"}), false},
 	} {
 		if got := Clears(tc.b); got != tc.want {
 			t.Errorf("%s: Clears(%+v) = %v, want %v", tc.name, tc.b, got, tc.want)

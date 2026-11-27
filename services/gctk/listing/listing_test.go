@@ -127,7 +127,7 @@ func TestListingReadsTheClosedBeadsUnderAParent(t *testing.T) {
 // The beads that record a hand-back are read in one read of the store that
 // reaches closed beads, each with its hand-back and when it was recorded, a
 // live one among them as the listing decoded it. A read that fails is an
-// error, not an empty answer.
+// error, not an empty answer, on a listing that had not read them.
 func TestListingReadsTheHandBacks(t *testing.T) {
 	s := rig()
 	tracks := func(id string) gcbd.Edge { return gcbd.Edge{Type: "tracks", ID: id} }
@@ -138,6 +138,10 @@ func TestListingReadsTheHandBacks(t *testing.T) {
 		Edges:    []gcbd.Edge{tracks("tk-decide")},
 		Metadata: map[string]string{"gc.handback": "tk-decide — still open", "gc.handback_at": "2026-01-04T00:00:00Z"}})
 	ls, err := read(ledger.New(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unread, err := read(ledger.New(s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +166,7 @@ func TestListingReadsTheHandBacks(t *testing.T) {
 		}
 	}
 	s.FindErr = errors.New("the store is down")
-	if _, err := ls.HandedBack(); err == nil {
+	if _, err := unread.HandedBack(); err == nil {
 		t.Error("a failed read answered with no hand-backs")
 	}
 }
@@ -217,39 +221,5 @@ func TestListingAnswersTheDomainsFromItsRows(t *testing.T) {
 		if q.HasKey != "" || q.Key != "" || q.Every {
 			t.Errorf("a question read the store by a key or whole: %+v", q)
 		}
-	}
-}
-
-// prstatus's in-flight set reads live beads alone, and a listing refuses a
-// closed status rather than answer it with nothing.
-func TestListingRefusesAClosedAnchoredSet(t *testing.T) {
-	ls, err := read(ledger.New(rig()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ls.Anchored([]string{"tk-e.2"}, []string{"open", "closed"}); err == nil {
-		t.Error("a closed in-flight set read as an answer")
-	}
-	got, err := ls.Anchored([]string{"tk-e.2"}, prstatus.InFlightStatuses)
-	if err != nil || len(got["tk-e.2"]) != 1 || got["tk-e.2"][0].ID != "tk-review" {
-		t.Errorf("Anchored = %+v, %v; want the review", got, err)
-	}
-}
-
-// A bead named that the store does not hold fails a read of its blockers, and
-// an edge onto a bead the store does not hold is one into another store.
-func TestListingBlockersReadTheStoreOnce(t *testing.T) {
-	s := rig()
-	s.Put(fake.Bead{ID: "tk-far", Title: "far", Status: "open", IssueType: "task", Edges: []gcbd.Edge{blocks("xx-1"), blocks("tk-old")}})
-	ls, err := read(ledger.New(s))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := ls.Blockers([]string{"tk-far"})
-	if err != nil || len(got["tk-far"]) != 1 || got["tk-far"][0].ID != "tk-old" || got["tk-far"][0].Status != "closed" {
-		t.Errorf("Blockers = %+v, %v; want the closed bead in this store alone", got, err)
-	}
-	if _, err := ls.Blockers([]string{"tk-gone"}); err == nil {
-		t.Error("a bead the store does not hold read as one with no blockers")
 	}
 }

@@ -148,26 +148,26 @@ func (s storeOf) Worked(ids []string) (map[string]bool, error) {
 // person's review (pr.AwaitsReview).
 const awaitingReview = `{"pr":{"head":"h","state":"OPEN","draft":false},"conversation":{"approvers":[],"requesters":[]}}`
 
-// Beads is a row for each bead named whose pull request reads, whose one
-// metadata key is the bead's merge_result.
-func (s storeOf) Beads(ids []string) (map[string]prstatus.Row, error) {
+// Beads is a row for each bead named whose pull request reads, whose one key
+// is the bead's merge_result.
+func (s storeOf) Beads(ids []string) (map[string]*prstatus.Row, error) {
 	if s.r.prs != nil {
 		return s.r.prs.Beads(ids)
 	}
-	out := map[string]prstatus.Row{}
+	var rows []fixture.Bead
 	for _, b := range s.all() {
 		if slices.Contains(ids, b.ID) && !s.r.noFacts[b.ID] {
-			out[b.ID] = prstatus.Row{ID: b.ID, Metadata: map[string]string{"merge_result": b.MergeResult}}
+			rows = append(rows, fixture.Bead{ID: b.ID, Status: b.Status, Metadata: map[string]string{"merge_result": b.MergeResult}})
 		}
 	}
-	return out, nil
+	return fixture.NewStore(rows).Beads(ids)
 }
 
-func (s storeOf) Anchored(ids []string, statuses []string) (map[string][]prstatus.Row, error) {
+func (s storeOf) Anchored(ids []string, statuses []string) (map[string][]*prstatus.Row, error) {
 	if s.r.prs != nil {
 		return s.r.prs.Anchored(ids, statuses)
 	}
-	out := map[string][]prstatus.Row{}
+	out := map[string][]*prstatus.Row{}
 	for _, id := range ids {
 		out[id] = nil
 	}
@@ -524,8 +524,8 @@ func TestNeedOrder(t *testing.T) {
 	gate := func(id string) person.Blocker {
 		return person.Blocker{ID: id, Status: "open", IssueType: "gate", AwaitType: "human"}
 	}
-	owed := person.Blocker{ID: "tk-pr", Status: "open", IssueType: "task",
-		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}}
+	owed := fixture.BlockerOf(fixture.Bead{ID: "tk-pr", Status: "open", IssueType: "task",
+		Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}})
 	g := &testRead{rig: "gc-toolkit",
 		open: []bead{
 			{ID: "tk-e", Title: "Epic", Status: "open", Priority: 1, IssueType: "epic", Epic: listing.Epic{Hypothesis: "it works"}, CreatedAt: "2026-01-01"},
@@ -1346,8 +1346,8 @@ func TestNeedsThatCount(t *testing.T) {
 		},
 		holding: map[string]prstatus.Holds{
 			"tk-pe": {}, "tk-pf": {}, "tk-pq": {},
-			"tk-wb": {Owed: []person.Blocker{{ID: "tk-pr2", Status: "open", IssueType: "task",
-				Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}}}},
+			"tk-wb": {Owed: []person.Blocker{fixture.BlockerOf(fixture.Bead{ID: "tk-pr2", Status: "open", IssueType: "task",
+				Metadata: map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h", "pr_github_read": awaitingReview}})}},
 			"tk-wp":    {Gates: []person.Blocker{gate("tk-qp")}},
 			"tk-desk":  {Gates: []person.Blocker{gate("tk-qd")}},
 			"tk-wf":    {Gates: []person.Blocker{gate("tk-qf")}},

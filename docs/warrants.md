@@ -454,11 +454,13 @@ no warrant.
   `Compare` runs for each PR whose full read differs from it (`gctk pr compare`,
   from `orders/pr-compare.toml`), and `Refresh` runs for one PR
   (`gctk pr refresh`). Its readers are `FromStore` in
-  `services/gctk/pr/read.go`, which `answerFromStore` in
+  `services/gctk/pr/read.go`, which `prStatus` in
   `services/gctk/internal/cli/prstatus.go` calls for `gctk pr status`, and
   `PRAnswers` in `services/gctk/listing/pr.go` calls from `Read` in
   `services/gctk/standing/standing.go`, which the rig board's read and
-  `gctk bead stands` ask, the landing order, which finds
+  `gctk bead stands` ask, `AwaitsReview` there, which prstatus's walk asks of
+  each merge anchor it reaches (`awaitsPerson` in
+  `services/gctk/pr/prstatus/gates.go`), the landing order, which finds
   and does its work from it and the store (`plan`, `seenPR` and
   `decideAtHead` in `services/gctk/pr/landing.go`, through `Reconcile` for
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
@@ -532,9 +534,9 @@ no warrant.
     [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
     and for the check suites the checks keep, its
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
-- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  786241099046.
+  0c9c8e697843.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR

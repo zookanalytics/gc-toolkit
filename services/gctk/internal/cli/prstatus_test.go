@@ -21,205 +21,118 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus/fixture"
 )
 
-// gcStub answers a `bd show` of a bead $STUB_SHOW holds with $STUB_SHOW, each
-// row carrying the anchor's `blocks` edges, $STUB_BLOCKERS, `[]` when it is
-// unset, unless the row names dependencies of its own. It answers every `bd
-// list` with $STUB_LIST, so a derive test drives the whole gathering path with
-// no live store — the same `gc bd` seam pr-status-label.test.sh exercises
-// through the shell, proven here in-process. A `bd show` of any other bead is
-// the walk's read, and answers a row per id from $STUB_EDGES, a JSON object of
-// each bead's dependency rows, unless $STUB_EDGES_RAW gives its whole answer.
-// $STUB_EDGES_FAIL fails the walk's read past the anchor, and $STUB_LOG, when
-// set, records the arguments of every call.
-const gcStub = `#!/bin/sh
-[ -z "$STUB_LOG" ] || printf '%s\n' "$*" >> "$STUB_LOG"
-case "$2" in
-  show)
-    shift 2
-    if printf '%s' "$STUB_SHOW" | jq -e --arg id "$1" 'any(.[]; .id == $id)' >/dev/null 2>&1; then
-      printf '%s' "$STUB_SHOW" | jq -c --argjson b "${STUB_BLOCKERS:-[]}" 'map(if has("dependencies") then . else . + {dependencies: $b} end)'
-      exit 0
-    fi
-    [ -z "$STUB_EDGES_FAIL" ] || { echo "simulated show failure" >&2; exit 1; }
-    [ -z "$STUB_EDGES_RAW" ] || { printf '%s\n' "$STUB_EDGES_RAW"; exit 0; }
-    ids=""
-    for a in "$@"; do case "$a" in --*) ;; *) ids="$ids $a" ;; esac; done
-    edges=$STUB_EDGES
-    [ -n "$edges" ] || edges='{}'
-    # shellcheck disable=SC2086
-    printf '%s' "$edges" | jq -c --args '. as $e | [$ARGS.positional[] | {id: ., dependencies: ($e[.] // [])}]' $ids ;;
-  list) printf '%s\n' "$STUB_LIST" ;;
-  *) echo unsupported >&2; exit 2 ;;
-esac
-`
-
-func stubGC(t *testing.T, show, list string) {
+// storeDerive runs `gctk pr status <anchor>` with extra over store, the rows
+// the store stub serves (storeStub, bead_test.go), and returns what it printed,
+// its exit, and each `gc` call it made, in order.
+func storeDerive(t *testing.T, store, anchor string, extra ...string) (string, int, []string) {
 	t.Helper()
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(gcStub), 0o755); err != nil {
-		t.Fatal(err)
+	calls := filepath.Join(t.TempDir(), "calls")
+	for name, body := range map[string]string{
+		"gc-store": storeStub,
+		"gc":       "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$STUB_CALLS\"\nexec \"$(dirname \"$0\")/gc-store\" \"$@\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("STUB_SHOW", show)
-	t.Setenv("STUB_LIST", list)
-}
-
-func derive(t *testing.T, anchor string, extra ...string) (string, int) {
-	t.Helper()
+	t.Setenv("STUB_STORE", store)
+	t.Setenv("STUB_CALLS", calls)
 	var out, errbuf bytes.Buffer
 	code := Run(append([]string{"pr", "status", anchor}, extra...), "", &out, &errbuf)
-	return out.String(), code
+	raw, _ := os.ReadFile(calls)
+	return out.String(), code, strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
+// The status prints alone, and a read that does not answer derives nothing, so
+// a caller leaves the labels as they are rather than flip them on a guess: an
+// anchor the store does not hold, edges that do not decode, on the anchor or on
+// a bead the walk reaches, and a store that does not answer.
 func TestPRStatusDerive(t *testing.T) {
-	t.Run("a rework child in the in-flight set => working", func(t *testing.T) {
-		stubGC(t,
-			`[{"id":"tk-a","status":"open","metadata":{}}]`,
-			`[{"id":"tk-k","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
-		}
-	})
-
-	t.Run("a non-rework bead in the in-flight set => working", func(t *testing.T) {
-		stubGC(t,
-			`[{"id":"tk-a","status":"open","metadata":{}}]`,
-			`[{"id":"tk-v","metadata":{"task_kind":"validation","anchor_bead":"tk-a"}}]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "working\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "working\n")
-		}
-	})
-
-	t.Run("operator freeze => needs-attention", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}]`, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	t.Run("nothing outstanding => needs-review", func(t *testing.T) {
-		stubGC(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
-		}
-	})
-
-	t.Run("unresolvable anchor => exit 2, no guess", func(t *testing.T) {
-		stubGC(t, `[]`, `[]`)
-		t.Setenv("STUB_EDGES_RAW", `[]`)
-		if out, code := derive(t, "tk-missing"); code != 2 || out != "" {
-			t.Fatalf("derive of a missing anchor = (%q, %d), want (%q, 2)", out, code, "")
-		}
-	})
-
-	// A PR off the pending record with nothing in flight reads needs-review
-	// until an open human gate blocks its anchor; the gate is a hold, so the
-	// same PR then reads needs-attention.
-	anchor := `[{"id":"tk-a","status":"open","metadata":{}}]`
-	gate := `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","await_id":"pr-comments.7.x","title":"answer the review","dependency_type":"blocks"}]`
-
-	t.Run("no open human gate => needs-review", func(t *testing.T) {
-		stubGC(t, anchor, `[]`)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
-		}
-	})
-
-	t.Run("an open human gate blocking the anchor => needs-attention", func(t *testing.T) {
-		stubGC(t, anchor, `[]`)
-		t.Setenv("STUB_BLOCKERS", gate)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	t.Run("an open human gate outranks live work => needs-attention", func(t *testing.T) {
-		stubGC(t, anchor, `[{"id":"tk-k","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`)
-		t.Setenv("STUB_BLOCKERS", gate)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	t.Run("unreadable blocker read => exit 2, no guess", func(t *testing.T) {
-		stubGC(t, anchor, `[]`)
-		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-x"}]`)
-		if out, code := derive(t, "tk-a"); code != 2 || out != "" {
-			t.Fatalf("derive with the blocker read failing = (%q, %d), want (%q, 2)", out, code, "")
-		}
-	})
-
-	// The gate read is the one reader rule, from the anchor's end: the beads its
-	// `blocks` edges reach, each a dep-list row carrying the far bead's type,
-	// status and await type. Only a human gate in a status other than closed
-	// holds; a conversation that tracks the anchor is not among the blockers at
-	// all.
-	for _, tc := range []struct{ name, blockers, want string }{
-		{"an in_progress human gate => needs-attention",
-			`[{"id":"tk-g","status":"in_progress","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`,
-			"needs-attention\n"},
-		{"a closed human gate => needs-review",
-			`[{"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`,
-			"needs-review\n"},
-		{"a gate with no await type => needs-review",
-			`[{"id":"tk-g","status":"open","issue_type":"gate","dependency_type":"blocks"}]`,
-			"needs-review\n"},
-		{"a task blocking the anchor => needs-review",
-			`[{"id":"tk-t","status":"open","issue_type":"task","dependency_type":"blocks"}]`,
-			"needs-review\n"},
-		{"one human gate among other blockers => needs-attention",
-			`[{"id":"tk-t","status":"open","issue_type":"task","dependency_type":"blocks"},{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`,
-			"needs-attention\n"},
+	const anchor = `{"id":"tk-a","status":"open","metadata":{}}`
+	const gated = `{"id":"tk-a","status":"open","metadata":{},"dependencies":[{"id":"tk-g","dependency_type":"blocks"}]}`
+	for _, tc := range []struct {
+		name, store, want string
+		code              int
+	}{
+		{"a rework in the in-flight set => working",
+			`[` + anchor + `,{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`, "working\n", 0},
+		{"an operator freeze => needs-attention", `[{"id":"tk-a","status":"open","metadata":{"merge_hold":true}}]`, "needs-attention\n", 0},
+		{"nothing outstanding => needs-review", `[` + anchor + `]`, "needs-review\n", 0},
+		{"an in-progress human gate on the anchor => needs-attention",
+			`[` + gated + `,{"id":"tk-g","status":"in_progress","issue_type":"gate","await_type":"human"}]`, "needs-attention\n", 0},
+		{"an anchor the store does not hold => exit 2", `[]`, "", 2},
+		{"edges on the anchor that do not decode => exit 2",
+			`[{"id":"tk-a","status":"open","metadata":{},"dependencies":[{"dependency_type":"blocks"}]}]`, "", 2},
+		{"edges on a bead the walk reaches that do not decode => exit 2",
+			`[` + gated + `,{"id":"tk-g","status":"open","dependencies":[{"dependency_type":"blocks"}]}]`, "", 2},
+		{"a store that does not answer => exit 2", `not json`, "", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stubGC(t, anchor, `[]`)
-			t.Setenv("STUB_BLOCKERS", tc.blockers)
-			if out, code := derive(t, "tk-a"); code != 0 || out != tc.want {
-				t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, tc.want)
+			if out, code, _ := storeDerive(t, tc.store, "tk-a"); code != tc.code || out != tc.want {
+				t.Fatalf("derive = (%q, %d), want (%q, %d)", out, code, tc.want, tc.code)
 			}
 		})
 	}
-
-	// The gate read names the anchor, so the cost follows the anchor rather than
-	// the number of gates in the store, and nothing lists visits store-wide. The
-	// in-flight read names the anchor too, over bd-lib.sh's live statuses,
-	// spelled out here so a change to prstatus.InFlightStatuses shows here.
-	t.Run("the gate read is the anchor's own show", func(t *testing.T) {
-		stubGC(t, anchor, `[]`)
-		log := filepath.Join(t.TempDir(), "gc.log")
-		t.Setenv("STUB_LOG", log)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-review\n")
-		}
-		raw, err := os.ReadFile(log)
-		if err != nil {
-			t.Fatal(err)
-		}
-		calls := string(raw)
-		for _, want := range []string{
-			"bd list --metadata-field anchor_bead=tk-a --status open,in_progress,blocked,deferred,hooked,pinned --limit 0 --json\n",
-			"bd show tk-a --json\n",
-		} {
-			if !strings.Contains(calls, want) {
-				t.Errorf("the derive did not make the read %q; calls:\n%s", want, calls)
-			}
-		}
-		for _, stray := range []string{"task_kind=visit", "gc.continuation_group", "-t tracks", "bd dep list"} {
-			if strings.Contains(calls, stray) {
-				t.Errorf("the derive made a visit read (%q); calls:\n%s", stray, calls)
-			}
-		}
-	})
 }
 
-// The anchor's row is the supervisor's copy while the supervisor answers, and
-// the bead as it stands under GC_NO_API=1, which converse-signoff.sh sets on its
-// call. The copy still carries a merge_hold the bead no longer does, so the
-// status tells the two reads apart. The fake supervisor serves the anchor only
-// at the city's bead path, where any other path misses and falls back to the
-// store.
-func TestPRStatusAnchorRowIsTheSupervisorsCopy(t *testing.T) {
-	stubGC(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, `[]`)
+// The command reads the store gc routes the anchor to through the ledger's
+// listing, each bead once: the anchor's row, the beads that name it as their
+// anchor, then one read per level of the beads its `blocks` edges reach, the
+// level's own rows already read. Nothing behind a closed blocker is read, and
+// nothing reads a visit or shows a bead.
+func TestPRStatusReadsEachBeadOnce(t *testing.T) {
+	store := `[
+ {"id":"tk-a","status":"open","metadata":{},"dependencies":[{"id":"tk-x","dependency_type":"blocks"},{"id":"tk-y","dependency_type":"blocks"},{"id":"tk-z","dependency_type":"blocks"}]},
+ {"id":"tk-x","status":"open","dependencies":[{"id":"tk-g","dependency_type":"blocks"}]},
+ {"id":"tk-y","status":"open"},
+ {"id":"tk-z","status":"closed","dependencies":[{"id":"tk-w","dependency_type":"blocks"}]},
+ {"id":"tk-g","status":"open","issue_type":"gate","await_type":"human"},
+ {"id":"tk-w","status":"open"},
+ {"id":"tk-k","status":"open","metadata":{"anchor_bead":"tk-a"}}]`
+	out, code, calls := storeDerive(t, store, "tk-a")
+	if code != 0 || out != "needs-attention\n" {
+		t.Fatalf("derive = (%q, %d), want the gate two beads away", out, code)
+	}
+	var reads []string
+	named, anchored := map[string]int{}, 0
+	for _, c := range calls {
+		args := strings.Fields(c)
+		if !slices.Contains(args, "list") {
+			continue
+		}
+		if i := slices.Index(args, "--id"); i >= 0 && i+1 < len(args) {
+			reads = append(reads, args[i+1])
+			for _, id := range strings.Split(args[i+1], ",") {
+				named[id]++
+			}
+		}
+		if slices.Contains(args, "anchor_bead=tk-a") {
+			anchored++
+		}
+	}
+	if want := []string{"tk-a", "tk-x,tk-y,tk-z", "tk-g"}; !slices.Equal(reads, want) || anchored != 1 {
+		t.Errorf("the reads named %v and the anchored beads %d times, want %v and once; calls:\n%s", reads, anchored, want, strings.Join(calls, "\n"))
+	}
+	for id, n := range named {
+		if n > 1 {
+			t.Errorf("%s was read %d times", id, n)
+		}
+	}
+	for _, c := range calls {
+		for _, stray := range []string{"bd show", "task_kind=visit", "gc.continuation_group", "bd dep list"} {
+			if strings.Contains(c, stray) {
+				t.Errorf("the derive made the read %q", c)
+			}
+		}
+	}
+}
+
+// The anchor's row is the store's, whether or not the supervisor answers: a
+// copy that still carries a merge_hold the bead no longer does changes
+// nothing. The fake supervisor serves the anchor at the city's bead path.
+func TestPRStatusReadsTheStoreNotTheSupervisorsCopy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v0/city/testcity/bead/tk-a" {
 			http.NotFound(w, r)
@@ -238,111 +151,43 @@ func TestPRStatusAnchorRowIsTheSupervisorsCopy(t *testing.T) {
 	}
 	t.Setenv("GC_HOME", home)
 	t.Setenv("GC_CITY_PATH", filepath.Join(t.TempDir(), "testcity"))
-
-	t.Run("while the supervisor answers, its copy", func(t *testing.T) {
-		t.Setenv("GC_NO_API", "")
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0), the copy's merge_hold", out, code, "needs-attention\n")
-		}
-	})
-	t.Run("under GC_NO_API=1, the bead as it stands", func(t *testing.T) {
-		t.Setenv("GC_NO_API", "1")
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-review\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0), the store's row with no hold", out, code, "needs-review\n")
-		}
-	})
+	t.Setenv("GC_NO_API", "")
+	if out, code, _ := storeDerive(t, `[{"id":"tk-a","status":"open","metadata":{}}]`, "tk-a"); code != 0 || out != "needs-review\n" {
+		t.Fatalf("derive = (%q, %d), want (%q, 0), the store's row with no hold", out, code, "needs-review\n")
+	}
 }
 
-// --json prints the status beside what holds the PR, the values the held: labels
-// carry. An open human gate blocking the anchor holds it, and a live decision
-// holds it as a bead a person owes the next move on. A route marks no blocker
-// as a person's.
+// --json prints the status beside what holds the PR, the values the held:
+// labels carry, in their order, each reason naming its bead: an empty array of
+// each when nothing holds it, a gate and a decision on the anchor together, a
+// decision with no status as an open one, and the merge freeze, which holds no
+// held: value of its own.
 func TestPRStatusDeriveHeld(t *testing.T) {
-	anchor := `[{"id":"tk-a","status":"open","metadata":{}}]`
-	rework := `[{"id":"tk-k","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
-	gate := `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`
-	for _, tc := range []struct {
-		name, show, list string
-		env              map[string]string
-		want             string
-	}{
-		{"nothing holds the PR", anchor, `[]`, nil,
+	const anchor = `{"id":"tk-a","status":"open","metadata":{},"dependencies":[{"id":"tk-g","dependency_type":"blocks"},{"id":"tk-d","dependency_type":"blocks"}]}`
+	const gate = `{"id":"tk-g","title":"answer the review","status":"open","issue_type":"gate","await_type":"human"}`
+	for _, tc := range []struct{ name, store, want string }{
+		{"nothing holds the PR", `[{"id":"tk-a","status":"open","metadata":{}}]`,
 			`{"status":"needs-review","held":[],"reasons":[]}`},
-		{"an open human gate on the anchor", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": gate},
-			`{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}`},
-		{"an open human gate beside the PR's rework in flight", anchor, rework,
-			map[string]string{"STUB_BLOCKERS": gate},
-			`{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}`},
-		{"a closed human gate releases the PR", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]`},
-			`{"status":"needs-review","held":[],"reasons":[]}`},
-		{"a live blocker routed to human is no person's", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"human"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-review","held":[],"reasons":[]}`},
-		{"a live decision blocker", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
-		{"a decision with no status reads open", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":""}]}`},
-		{"a closed decision no longer holds", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"closed","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
-			`{"status":"needs-review","held":[],"reasons":[]}`},
-		{"a blocker a pool will claim is the city's", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-d","status":"open","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.polecat"},"dependency_type":"blocks"}]`},
-			`{"status":"needs-review","held":[],"reasons":[]}`},
-		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}}]`, `[]`, nil,
+		{"a human gate and a decision on the anchor", `[` + anchor + `,` + gate + `,{"id":"tk-d","title":"pick one","status":"open","issue_type":"decision"}]`,
+			`{"status":"needs-attention","held":["gate","blocked"],"reasons":[{"held":"gate","id":"tk-g","title":"answer the review"},{"held":"blocked","id":"tk-d","title":"pick one"}]}`},
+		{"a decision with no status reads open", `[` + anchor + `,{"id":"tk-d","title":"pick one","issue_type":"decision"}]`,
+			`{"status":"needs-attention","held":["blocked"],"reasons":[{"held":"blocked","id":"tk-d","title":"pick one"}]}`},
+		{"the merge freeze reads needs-attention and holds nothing", `[{"id":"tk-a","status":"open","metadata":{"merge_hold":"true"}}]`,
 			`{"status":"needs-attention","held":[],"reasons":[]}`},
-		{"a human gate on the anchor beside a person's blocker", anchor, `[]`,
-			map[string]string{"STUB_BLOCKERS": `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"},{"id":"tk-d","status":"open","issue_type":"decision","metadata":{},"dependency_type":"blocks"}]`},
-			`{"status":"needs-attention","held":["gate","blocked"],"reasons":[{"held":"gate","id":"tk-g","title":""},{"held":"blocked","id":"tk-d","title":""}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stubGC(t, tc.show, tc.list)
-			for k, v := range tc.env {
-				t.Setenv(k, v)
-			}
-			if out, code := derive(t, "tk-a", "--json"); code != 0 || out != tc.want+"\n" {
+			if out, code, _ := storeDerive(t, tc.store, "tk-a", "--json"); code != 0 || out != tc.want+"\n" {
 				t.Fatalf("derive --json = (%q, %d), want (%q, 0)", out, code, tc.want+"\n")
 			}
 		})
 	}
-
-	// Without --json the derive prints the status alone, the line every other
-	// caller reads, and a held value reads in it as needs-attention.
-	t.Run("a human gate without --json prints needs-attention", func(t *testing.T) {
-		stubGC(t, anchor, rework)
-		t.Setenv("STUB_BLOCKERS", gate)
-		if out, code := derive(t, "tk-a"); code != 0 || out != "needs-attention\n" {
-			t.Fatalf("derive = (%q, %d), want (%q, 0)", out, code, "needs-attention\n")
-		}
-	})
-
-	// A read the held values rest on that does not answer derives nothing, so the
-	// labels stay as they are rather than flip on a guess: the anchor's edges that
-	// do not decode, and an in-flight set that does not read.
-	t.Run("unreadable edges => exit 2, no guess", func(t *testing.T) {
-		stubGC(t, anchor, rework)
-		t.Setenv("STUB_BLOCKERS", `[{"dependency_type":"blocks"}]`)
-		if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
-			t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
-		}
-	})
-	t.Run("unreadable in-flight set => exit 2, no guess", func(t *testing.T) {
-		stubGC(t, anchor, `{"error":"timeout"}`)
-		if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
-			t.Fatalf("derive --json with a read failing = (%q, %d), want (%q, 2)", out, code, "")
-		}
-	})
 }
 
-// Every scenario the readers are tested against reaches the derive as the `gc
-// bd` reads return its beads, and the derive answers what prstatus.Read gathers
-// from the same beads through the in-memory store: the status, the held values
-// and the reasons. The answer is the definition's own, so a change to it reaches
-// this reader with no edit here, and a rule kept in this command would part from
-// it.
+// Every scenario the readers are tested against reaches the derive as the
+// store's rows, and the derive answers what prstatus.Read gathers from the same
+// beads through the fixture's store: the status, the held values and the
+// reasons. The answer is the definition's own, so a change to it reaches this
+// reader with no edit here, and a rule kept in this command would part from it.
 func TestPRStatusDeriveReadsTheDefinition(t *testing.T) {
 	scenarios, err := fixture.Scenarios()
 	if err != nil {
@@ -354,36 +199,15 @@ func TestPRStatusDeriveReadsTheDefinition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			anchor, _ := sc.Bead(sc.Anchor)
-			show, err := json.Marshal([]any{storeRow(sc, anchor)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The store's answer to the in-flight read: the beads naming the
-			// anchor in anchor_bead at a status the read asks for.
-			list := []any{}
+			rows := []any{}
 			for _, b := range sc.Beads {
-				if b.Metadata["anchor_bead"] == sc.Anchor && slices.Contains(prstatus.InFlightStatuses, b.Status) {
-					list = append(list, storeRow(sc, b))
-				}
+				rows = append(rows, storeRow(b))
 			}
-			rawList, err := json.Marshal(list)
+			store, err := json.Marshal(rows)
 			if err != nil {
 				t.Fatal(err)
 			}
-			edges := map[string]any{}
-			for _, b := range sc.Beads {
-				if b.ID != sc.Anchor {
-					edges[b.ID] = storeRow(sc, b)["dependencies"]
-				}
-			}
-			rawEdges, err := json.Marshal(edges)
-			if err != nil {
-				t.Fatal(err)
-			}
-			stubGC(t, string(show), string(rawList))
-			t.Setenv("STUB_EDGES", string(rawEdges))
-			out, code := derive(t, sc.Anchor, "--json")
+			out, code, _ := storeDerive(t, string(store), sc.Anchor, "--json")
 			var got struct {
 				Status  prstatus.State    `json:"status"`
 				Held    []prstatus.Hold   `json:"held"`
@@ -399,15 +223,14 @@ func TestPRStatusDeriveReadsTheDefinition(t *testing.T) {
 	}
 }
 
-// storeRow is a scenario bead as `gc bd show --json` prints it: its fields, and
-// each edge of its own as the far bead's row with the type of the edge.
-func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
+// storeRow is a scenario bead as the store stub holds it: its fields, and each
+// edge of its own by the far bead and the edge's type.
+func storeRow(b fixture.Bead) map[string]any {
 	row := map[string]any{"id": b.ID, "title": b.Title, "status": b.Status, "metadata": b.Metadata}
-	if b.IssueType != "" {
-		row["issue_type"] = b.IssueType
-	}
-	if b.AwaitType != "" {
-		row["await_type"] = b.AwaitType
+	for k, v := range map[string]string{"issue_type": b.IssueType, "await_type": b.AwaitType, "assignee": b.Assignee} {
+		if v != "" {
+			row[k] = v
+		}
 	}
 	deps := []any{}
 	for _, edge := range []struct {
@@ -415,117 +238,11 @@ func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
 		ids  []string
 	}{{"blocks", b.WaitsOn}, {"tracks", b.Tracks}} {
 		for _, id := range edge.ids {
-			if far, ok := sc.Bead(id); ok {
-				dep := map[string]any{"id": far.ID, "title": far.Title, "status": far.Status, "metadata": far.Metadata, "dependency_type": edge.kind}
-				if far.IssueType != "" {
-					dep["issue_type"] = far.IssueType
-				}
-				if far.AwaitType != "" {
-					dep["await_type"] = far.AwaitType
-				}
-				if far.Assignee != "" {
-					dep["assignee"] = far.Assignee
-				}
-				deps = append(deps, dep)
-			}
+			deps = append(deps, map[string]any{"id": id, "dependency_type": edge.kind})
 		}
 	}
 	row["dependencies"] = deps
 	return row
-}
-
-// The walk behind the held: gate value: a gate on a rework the anchor waits on
-// holds the PR, by the one read the label and engage share.
-func TestPRStatusDeriveWalksToTheGate(t *testing.T) {
-	unapproved := `[{"id":"tk-a","status":"open","metadata":{}}]`
-	inFlight := `[{"id":"tk-rw","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-a"}}]`
-	rework := `[{"id":"tk-rw","status":"open","issue_type":"task","dependency_type":"blocks"}]`
-	const openGate = `{"id":"tk-g","title":"approve the release","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks"}`
-
-	for _, tc := range []struct {
-		name       string
-		edges      string
-		wantStatus string
-		wantHeld   []string
-	}{
-		{"an open gate on the rework holds the PR",
-			`{"tk-rw":[` + openGate + `]}`, "needs-attention", []string{"gate"}},
-		{"resolving the gate clears the hold",
-			`{"tk-rw":[{"id":"tk-g","status":"closed","issue_type":"gate","await_type":"human","dependency_type":"blocks"}]}`, "working", []string{}},
-		{"a gate two beads away holds the PR",
-			`{"tk-rw":[{"id":"tk-t","status":"open","issue_type":"task","dependency_type":"blocks"}],"tk-t":[` + openGate + `]}`, "needs-attention", []string{"gate"}},
-		{"a conversation tracking the rework holds nothing",
-			`{"tk-rw":[{"id":"tk-c","status":"open","issue_type":"task","assignee":"human","dependency_type":"tracks"}]}`, "working", []string{}},
-		{"a gate the rework only tracks holds nothing",
-			`{"tk-rw":[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"tracks"}]}`, "working", []string{}},
-		{"a gate that awaits no person holds nothing",
-			`{"tk-rw":[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"timer","dependency_type":"blocks"}]}`, "working", []string{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stubGC(t, unapproved, inFlight)
-			t.Setenv("STUB_BLOCKERS", rework)
-			t.Setenv("STUB_EDGES", tc.edges)
-			out, code := derive(t, "tk-a", "--json")
-			var got struct {
-				Status string   `json:"status"`
-				Held   []string `json:"held"`
-			}
-			if code != 0 || json.Unmarshal([]byte(out), &got) != nil {
-				t.Fatalf("derive --json = (%q, %d)", out, code)
-			}
-			if got.Status != tc.wantStatus || !slices.Equal(got.Held, tc.wantHeld) {
-				t.Errorf("status=%q held=%v, want %q and %v", got.Status, got.Held, tc.wantStatus, tc.wantHeld)
-			}
-		})
-	}
-
-	t.Run("a human gate among the blockers counts once, as a gate", func(t *testing.T) {
-		stubGC(t, unapproved, `[]`)
-		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"human","dependency_type":"blocks","metadata":{}}]`)
-		out, code := derive(t, "tk-a", "--json")
-		if want := `{"status":"needs-attention","held":["gate"],"reasons":[{"held":"gate","id":"tk-g","title":""}]}` + "\n"; code != 0 || out != want {
-			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
-		}
-	})
-
-	t.Run("a gate that awaits no person is no person's blocker, routed to human or not", func(t *testing.T) {
-		stubGC(t, unapproved, `[]`)
-		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-g","status":"open","issue_type":"gate","await_type":"timer","dependency_type":"blocks","metadata":{"gc.routed_to":"human"}}]`)
-		out, code := derive(t, "tk-a", "--json")
-		if want := `{"status":"needs-review","held":[],"reasons":[]}` + "\n"; code != 0 || out != want {
-			t.Errorf("derive --json = (%q, %d), want (%q, 0)", out, code, want)
-		}
-	})
-
-	t.Run("a walk that does not read leaves the labels alone", func(t *testing.T) {
-		stubGC(t, unapproved, inFlight)
-		t.Setenv("STUB_BLOCKERS", rework)
-		t.Setenv("STUB_EDGES_FAIL", "1")
-		if out, code := derive(t, "tk-a", "--json"); code != 2 || out != "" {
-			t.Errorf("derive --json = (%q, %d), want (%q, 2)", out, code, "")
-		}
-	})
-
-	t.Run("one read per level, the anchor's own edges read once", func(t *testing.T) {
-		stubGC(t, unapproved, inFlight)
-		t.Setenv("STUB_BLOCKERS", `[{"id":"tk-x","status":"open","dependency_type":"blocks"},{"id":"tk-y","status":"open","dependency_type":"blocks"},{"id":"tk-z","status":"closed","dependency_type":"blocks"}]`)
-		log := filepath.Join(t.TempDir(), "calls")
-		t.Setenv("STUB_LOG", log)
-		if _, code := derive(t, "tk-a"); code != 0 {
-			t.Fatalf("derive exit %d", code)
-		}
-		raw, err := os.ReadFile(log)
-		if err != nil {
-			t.Fatal(err)
-		}
-		calls := string(raw)
-		if !strings.Contains(calls, "bd show tk-x tk-y --json\n") {
-			t.Errorf("the open blockers read in one show, the closed one left out: %s", calls)
-		}
-		if strings.Count(calls, "bd show") != 3 {
-			t.Errorf("the anchor's row, its own edges and one read per level past them, each once: %s", calls)
-		}
-	})
 }
 
 func TestPRStatusUsageErrors(t *testing.T) {
