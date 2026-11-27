@@ -385,12 +385,13 @@ head of each call below that reads the tree. A requirement in the notes that the
 branch does not answer is a defect for this step: fix it, commit, and run the
 checks again.
 
-**2. Review the diff:**
+**2. Review the diff.** Read the branch's commits first, bodies and all: a
+commit's body carries the reasons for its change, which the diff does not show.
 ```bash
-git diff origin/{{base_branch}}...HEAD
+git log origin/{{base_branch}}..HEAD
 ```
 ```bash
-git log --oneline origin/{{base_branch}}..HEAD
+git diff origin/{{base_branch}}...HEAD
 ```
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-mentions.sh" --branch origin/{{base_branch}} --bead "<the work bead>"
