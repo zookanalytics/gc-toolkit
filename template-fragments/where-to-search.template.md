@@ -7,8 +7,6 @@ the disk root (`/`): on macOS such a search reaches folders the system guards
 with a privacy prompt, nobody answers the prompt, and the search waits until
 the tool's time limit ends it.
 
-{{/* The mechanik's prompt says this in a sentence of its own, because its
-     prime has no room for this fragment (mechanik-prime-cap.test.sh). */ -}}
 In a Claude session, a recursive `grep` skips what a `.gitignore` ignores, such
 as `.gc/` from the city root, and does not say so. An empty result proves
 nothing about such a folder. Name the folder as the path to search it.

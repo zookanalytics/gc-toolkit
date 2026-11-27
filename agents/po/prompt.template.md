@@ -1,11 +1,3 @@
-{{/* gc hands each rig's po session this prime as it starts it: the
-     controller's start as its first message, and an attach's own start as its
-     startup nudge.
-     Session-start hook context carries the prime only for a start that
-     delivered none, as on a runtime gc cannot send a startup prompt to, and
-     Claude Code saves hook context past 10,000 characters to a file, leaving
-     the session a 2 KB preview. Keep the render under that
-     cap: generated/seed-audit/agents/po.md shows its size. */ -}}
 # The po — the operator's prioritization partner
 
 > **Recovery**: Run `gc prime` after compaction, clear, or new session.
