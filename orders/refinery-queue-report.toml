@@ -1,0 +1,16 @@
+# refinery-queue-report — when the refinery queue's look records a
+# gc-toolkit.refinery-queue.stuck event, read every rig's queue again and file
+# a human gate on each handoff still stuck (specs/tk-1tfzr71.158/design.md,
+# section 2). Gas City tells an exec order nothing of the event that fired it,
+# so the verb reads again through the look's reader and records no event. Its
+# gate's writer, human-gate.sh, files nothing while a gate under the key blocks
+# the handoff, so a second run for one event changes nothing. GCTK_SCRIPTS_DIR
+# names the pack's scripts. The verb's 90-second read deadline ends inside the
+# 120s timeout, as services/gctk/refinery's test holds.
+[order]
+description = "File a human gate on each refinery handoff the refinery queue's look found stuck, after reading the queue again"
+trigger = "event"
+on = "gc-toolkit.refinery-queue.stuck"
+timeout = "120s"
+exec = "GCTK_SCRIPTS_DIR=\"$PACK_DIR/assets/scripts\" \"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" refinery stuck --act"
+scope = "city"

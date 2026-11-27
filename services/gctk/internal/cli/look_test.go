@@ -29,8 +29,9 @@ type lookCity struct {
 
 // lookStub puts a gc on PATH that logs each call's arguments on one line and
 // answers the looks' reads the way a city does: the session, rig and agent
-// lists, each store's listing, its blocked set, its write log, and the event
-// emit. A read of beads by id answers the store's listing too.
+// lists, each store's listing, its blocked set, its write log, the event emit,
+// and an event log that holds no event of the types read. A read of beads by
+// id answers the store's listing too.
 func lookStub(t *testing.T, c lookCity) (calls func() string) {
 	t.Helper()
 	bin := t.TempDir()
@@ -60,6 +61,7 @@ case "$*" in
   "bd --db "*" sql --json "*wisp_events*) cat '` + answer("writes", c.writes) + `' ;;
   "bd --db "*" sql --json "*) echo '[]' ;;
   "event emit "*) cat '` + answer("emit", c.emit) + `' ;;
+  "events --type "*) : ;;
   *) echo "stub gc: no answer for $*" >&2; exit 9 ;;
 esac
 `
@@ -93,7 +95,7 @@ func TestSessionProgressRecordsWhatItFound(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
 	}
 	var rec session.Record
-	if err := json.Unmarshal(out.Bytes(), &rec); err != nil || len(rec.Stalled) != 1 || rec.Stalled[0].Bead != "tk-1" || !rec.Stalled[0].Wrote {
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil || len(rec.Stalled) != 1 || rec.Stalled[0].Bead != "tk-1" || rec.Stalled[0].From != session.FromWrite {
 		t.Fatalf("stdout %q: %v", out.String(), err)
 	}
 	if !strings.HasSuffix(errb.String(), "hq-1 holding tk-1; recorded\n") {
@@ -328,5 +330,74 @@ func TestAStopEndsEveryStoreReadUnderTheLook(t *testing.T) {
 	}
 	for _, pid := range pids {
 		storeGroupGone(t, pid)
+	}
+}
+
+// scriptStub puts a pack script named name in a scripts directory that
+// GCTK_SCRIPTS_DIR names, which logs each call's arguments one to a line.
+func scriptStub(t *testing.T, name string) (calls func() string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + log + "'; done\necho \"" + strings.TrimSuffix(name, ".sh") + ": filed\"\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", dir)
+	return func() string {
+		raw, _ := os.ReadFile(log)
+		return string(raw)
+	}
+}
+
+// With --act, progress reads the same seats, files the finding through the
+// pack's patrol-finding.sh, and records no event.
+func TestSessionProgressActFilesAndRecordsNoEvent(t *testing.T) {
+	calls := lookStub(t, lookCity{
+		sessions: `{"sessions":[{"id":"hq-1","state":"active","agent_name":"tools/gc-toolkit.polecat-1","created_at":"2026-11-01T00:00:00Z","last_active":"` + agoStamp(10*time.Second) + `"}]}`,
+		hq:       `[{"id":"hq-1","title":"s","status":"open","issue_type":"session","metadata":{"pool_managed":"true","last_woke_at":"` + agoStamp(5*time.Hour) + `"}}]`,
+		rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"hq-1","metadata":{"gc.session_id":"hq-1"}}]`,
+	})
+	filed := scriptStub(t, "patrol-finding.sh")
+	var out, errb bytes.Buffer
+	if code := Run([]string{"session", "progress", "--act"}, "", &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	var acted session.Acted
+	if err := json.Unmarshal(out.Bytes(), &acted); err != nil || len(acted.Filed) != 1 || acted.Filed[0].Key != "no-progress.hq-1" {
+		t.Fatalf("stdout %q: %v", out.String(), err)
+	}
+	if strings.Contains(calls(), "event emit") {
+		t.Errorf("the act recorded an event:\n%s", calls())
+	}
+	if got := filed(); !strings.Contains(got, "--key\nno-progress.hq-1\n--about\ntk-1\n") || !strings.HasPrefix(got, "--rig\ntools\n") {
+		t.Errorf("patrol-finding.sh got:\n%s", got)
+	}
+	if !strings.Contains(errb.String(), "patrol-finding: filed\n") || !strings.HasSuffix(errb.String(), "gctk session progress --act: 1 filed\n") {
+		t.Errorf("stderr %q", errb.String())
+	}
+}
+
+// With --act, stuck reads the same queues, files a gate on the stuck handoff
+// through the pack's human-gate.sh, and records no event.
+func TestRefineryStuckActGatesAndRecordsNoEvent(t *testing.T) {
+	calls := lookStub(t, lookCity{
+		hq:  "[]",
+		rig: `[{"id":"tk-1","title":"t","status":"open","issue_type":"task","assignee":"tools/gc-toolkit.refinery","updated_at":"` + agoStamp(6*time.Hour) + `","metadata":{"branch":"polecat/tk-1"}}]`,
+	})
+	gated := scriptStub(t, "human-gate.sh")
+	var out, errb bytes.Buffer
+	if code := Run([]string{"refinery", "stuck", "--act"}, "", &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	var acted refinery.Acted
+	if err := json.Unmarshal(out.Bytes(), &acted); err != nil || len(acted.Gated) != 1 || acted.Gated[0].Bead != "tk-1" {
+		t.Fatalf("stdout %q: %v", out.String(), err)
+	}
+	if strings.Contains(calls(), "event emit") {
+		t.Errorf("the act recorded an event:\n%s", calls())
+	}
+	if got := gated(); !strings.HasPrefix(got, "--subject\ntk-1\n--key\nwitness-refinery-queue\n") {
+		t.Errorf("human-gate.sh got:\n%s", got)
 	}
 }

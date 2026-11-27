@@ -28,6 +28,18 @@ const (
 	// Bound is how long a busy seat may go without a write before the look
 	// reports it.
 	Bound = 3 * time.Hour
+	// PromptAnswered and Nudged are the events Gas City records when a seat's
+	// quiet stretch ends. The controller records session.pending_cleared once
+	// when a pending interaction, such as a permission prompt, is answered or
+	// withdrawn. It records work.nudged when its work ladder, which paces a
+	// seat whose pane has gone quiet while it holds work, reaches the seat
+	// ("work.nudged means the notice reached the seat",
+	// cmd/gc/work_ladder_notice.go; both types in internal/events/events.go,
+	// at gastownhall/gascity 6dce31bbb6). A seat that prints after either
+	// has been busy only since then, so the look counts Bound from the later
+	// of them as well.
+	PromptAnswered = "session.pending_cleared"
+	Nudged         = "work.nudged"
 	// Deadline bounds the look's session list and store reads, counted from
 	// the start of its run, and CallBound the record of its event. The rig list
 	// keeps the runtime adapter's own bound (gascity.RigListWait), so a run
@@ -37,11 +49,24 @@ const (
 	CallBound = 20 * time.Second
 )
 
+// What a stalled seat's silence is counted from, the latest of these.
+const (
+	// FromWrite is its newest write.
+	FromWrite = "write"
+	// FromWake is when it last woke, having written nothing since.
+	FromWake = "wake"
+	// FromPrompt is when a prompt it waited at was answered (PromptAnswered).
+	FromPrompt = "prompt"
+	// FromNudge is when Gas City's work ladder last reached it (Nudged).
+	FromNudge = "nudge"
+)
+
 // City is Gas City as the look reaches it: the session list, the rig list and
 // the event log.
 type City interface {
 	Sessions(ctx context.Context) ([]gascity.Session, error)
 	Rigs() ([]gascity.Rig, error)
+	Events(ctx context.Context, typ string, since time.Duration) ([]gascity.Event, error)
 	Emit(ctx context.Context, e gascity.Emit) error
 }
 
@@ -55,8 +80,8 @@ type Progress struct {
 }
 
 // Stalled is one pool seat the look found: the claim it holds, the identity
-// its writes carry, and since when it has written nothing, which is its newest
-// write when Wrote is set and otherwise when it woke.
+// its writes carry, and since when it has printed with nothing written, which
+// From names.
 type Stalled struct {
 	Rig      string    `json:"rig"`
 	Bead     string    `json:"bead"`
@@ -64,7 +89,7 @@ type Stalled struct {
 	Identity string    `json:"identity"`
 	Agent    string    `json:"agent,omitempty"`
 	Since    time.Time `json:"since"`
-	Wrote    bool      `json:"wrote"`
+	From     string    `json:"from"`
 }
 
 // Unread is a read the look made that failed: a rig's store, or one claim. A
@@ -114,19 +139,30 @@ type claim struct {
 	woke     time.Time
 }
 
-// Run looks once, over the HQ and each rig that is not suspended, as core's
-// orphan sweep walks them. A claim counts when it is in progress, names the
-// session that holds it, that session is listed, and the claim is assigned to
-// the identity the session's writes carry: its alias when it has one, and
-// otherwise its session id (AssigneeIdentifier in
+// Run looks once and records the event when the look found a seat. Its reads
+// and its event end when ctx does.
+func (p *Progress) Run(ctx context.Context) Outcome {
+	out := p.Read(ctx)
+	if out.Record == nil {
+		return out
+	}
+	return p.finish(ctx, out)
+}
+
+// Read reads once, over the HQ and each rig that is not suspended, as core's
+// orphan sweep walks them, and records nothing. A claim counts when it is in
+// progress, names the session that holds it, that session is listed, and the
+// claim is assigned to the identity the session's writes carry: its alias when
+// it has one, and otherwise its session id (AssigneeIdentifier in
 // internal/session/assignee_identities.go at gastownhall/gascity c7eb6d2f43).
 // The seat counts when its session bead, in the city's store, marks it a pool
-// seat and its pane printed within Printing. It is stalled when its newest
-// write as that identity, to the claim's store or the city's, and no earlier
-// than its last wake, is Bound old or more. A read that fails for one rig or
-// one claim leaves it out of the record and makes the run fail. Its session
-// list, its store reads and its event end when ctx does.
-func (p *Progress) Run(ctx context.Context) Outcome {
+// seat and its pane printed within Printing. It is stalled when the latest of
+// its newest write as that identity, to the claim's store or the city's, its
+// last wake, and the last time Gas City recorded its quiet stretch ending
+// (PromptAnswered, Nudged) is Bound old or more. A read that fails for one rig
+// or one claim leaves it out of the record and fails the outcome. Its session
+// list and its store and event reads end when ctx does.
+func (p *Progress) Read(ctx context.Context) Outcome {
 	reads, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	now := p.Now().UTC().Truncate(time.Second)
@@ -170,9 +206,13 @@ func (p *Progress) Run(ctx context.Context) Outcome {
 		claims = nil
 	}
 	claims = p.seats(city, claims, now, rec)
-	p.judge(stores, cityDB, claims, now, rec)
+	p.judge(reads, stores, cityDB, claims, now, rec)
 	slices.SortFunc(rec.Stalled, func(a, b Stalled) int { return cmp.Or(cmp.Compare(a.Rig, b.Rig), cmp.Compare(a.Bead, b.Bead)) })
-	return p.finish(ctx, rec)
+	out := Outcome{Record: rec}
+	for _, u := range rec.Unread {
+		out.Failures = append(out.Failures, unreadLine(u))
+	}
+	return out
 }
 
 // claims reads one rig's in-progress beads that name a session, and keeps each
@@ -270,9 +310,10 @@ func (p *Progress) seats(city *ledger.Ledger, claims []claim, now time.Time, rec
 }
 
 // judge reads each seat's newest write, in its claim's store and the city's,
-// and records each seat whose silence since then, or since it woke, is Bound
-// or more.
-func (p *Progress) judge(stores map[string]*ledger.Ledger, cityDB string, claims []claim, now time.Time, rec *Record) {
+// and then, for a seat silent for Bound since that write or its wake, when Gas
+// City last recorded its quiet stretch ending. It records each seat whose
+// silence since the latest of the three is Bound or more.
+func (p *Progress) judge(ctx context.Context, stores map[string]*ledger.Ledger, cityDB string, claims []claim, now time.Time, rec *Record) {
 	if len(claims) == 0 {
 		return
 	}
@@ -293,6 +334,7 @@ func (p *Progress) judge(stores map[string]*ledger.Ledger, cityDB string, claims
 		}
 		writes[db] = got
 	}
+	var silent []Stalled
 	for _, c := range claims {
 		why := cmp.Or(failed[c.rig.Store()], failed[cityDB])
 		if why != "" {
@@ -303,25 +345,80 @@ func (p *Progress) judge(stores map[string]*ledger.Ledger, cityDB string, claims
 		if t := writes[cityDB][c.identity]; t.After(newest) {
 			newest = t
 		}
-		since, wrote := c.woke, false
+		since, from := c.woke, FromWake
 		if !newest.IsZero() && !newest.Before(c.woke) {
-			since, wrote = newest, true
+			since, from = newest, FromWrite
 		}
 		if now.Sub(since) < Bound {
 			continue
 		}
-		rec.Stalled = append(rec.Stalled, Stalled{Rig: c.rig.Name, Bead: c.bead, Session: c.seat.ID, Identity: c.identity,
-			Agent: c.seat.AgentName, Since: since, Wrote: wrote})
+		silent = append(silent, Stalled{Rig: c.rig.Name, Bead: c.bead, Session: c.seat.ID, Identity: c.identity,
+			Agent: c.seat.AgentName, Since: since, From: from})
+	}
+	if len(silent) == 0 {
+		return
+	}
+	oldest := now
+	for _, s := range silent {
+		if s.Since.Before(oldest) {
+			oldest = s.Since
+		}
+	}
+	quiet, err := p.quiet(ctx, now.Sub(oldest)+time.Minute)
+	if err != nil {
+		for _, s := range silent {
+			rec.Unread = append(rec.Unread, Unread{Rig: s.Rig, Bead: s.Bead, Why: "when Gas City last found its seat quiet did not read: " + err.Error()})
+		}
+		return
+	}
+	for _, s := range silent {
+		if q, ok := quiet[s.Session]; ok && q.at.After(s.Since) {
+			s.Since, s.From = q.at, q.from
+		}
+		if now.Sub(s.Since) < Bound {
+			continue
+		}
+		rec.Stalled = append(rec.Stalled, s)
 	}
 }
 
-// finish records the event when the record names a seat, and fails the run for
-// each read that failed.
-func (p *Progress) finish(ctx context.Context, rec *Record) Outcome {
-	out := Outcome{Record: rec}
-	for _, u := range rec.Unread {
-		out.Failures = append(out.Failures, unreadLine(u))
+// quietEnd is the last time Gas City recorded a seat's quiet stretch ending,
+// and what recorded it, FromPrompt or FromNudge.
+type quietEnd struct {
+	at   time.Time
+	from string
+}
+
+// quiet reads, for each session, the last time within window that Gas City
+// recorded its quiet stretch ending. The window reaches back to the oldest
+// silent seat's newest write or wake, before which a quiet stretch's end
+// changes nothing. Both events carry the session's id in their payload's
+// session_id.
+func (p *Progress) quiet(ctx context.Context, window time.Duration) (map[string]quietEnd, error) {
+	out := map[string]quietEnd{}
+	for _, q := range []struct{ typ, from string }{{PromptAnswered, FromPrompt}, {Nudged, FromNudge}} {
+		events, err := p.City.Events(ctx, q.typ, window)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range events {
+			var payload struct {
+				SessionID string `json:"session_id"`
+			}
+			if json.Unmarshal(e.Payload, &payload) != nil || payload.SessionID == "" {
+				continue
+			}
+			if cur, ok := out[payload.SessionID]; !ok || e.Ts.After(cur.at) {
+				out[payload.SessionID] = quietEnd{at: e.Ts.UTC(), from: q.from}
+			}
+		}
 	}
+	return out, nil
+}
+
+// finish records the read's event when its record names a seat.
+func (p *Progress) finish(ctx context.Context, out Outcome) Outcome {
+	rec := out.Record
 	if len(rec.Stalled) == 0 {
 		return out
 	}

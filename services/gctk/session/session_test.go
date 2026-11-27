@@ -102,7 +102,7 @@ func TestASeatSilentSinceItWokeIsStalled(t *testing.T) {
 	if len(out.Failures) > 0 || !out.Recorded {
 		t.Fatalf("failures %v, recorded %v", out.Failures, out.Recorded)
 	}
-	want := []Stalled{{Rig: "tools", Bead: "tk-1", Session: "hq-1", Identity: "hq-1", Agent: "tools/gc-toolkit.polecat-1", Since: ago(4 * time.Hour)}}
+	want := []Stalled{{Rig: "tools", Bead: "tk-1", Session: "hq-1", Identity: "hq-1", Agent: "tools/gc-toolkit.polecat-1", Since: ago(4 * time.Hour), From: FromWake}}
 	if !reflect.DeepEqual(out.Record.Stalled, want) {
 		t.Fatalf("stalled %+v", out.Record.Stalled)
 	}
@@ -141,7 +141,7 @@ func TestTheSilenceRunsFromTheNewestWriteSinceTheWake(t *testing.T) {
 	if got := stalledIDs(out.Record); !reflect.DeepEqual(got, []string{"hq-old@tk-old", "hq-stale@tk-stale"}) {
 		t.Fatalf("stalled %v", got)
 	}
-	if s := out.Record.Stalled[0]; !s.Wrote || !s.Since.Equal(ago(4*time.Hour)) {
+	if s := out.Record.Stalled[0]; s.From != FromWrite || !s.Since.Equal(ago(4*time.Hour)) {
 		t.Errorf("hq-old %+v", s)
 	}
 }
@@ -319,7 +319,7 @@ func TestOwnerOf(t *testing.T) {
 // The payload's keys are the ones a reader of the event names, so a change to
 // one is a change to its contract.
 func TestThePayloadsKeys(t *testing.T) {
-	raw, err := json.Marshal(Record{Read: t0, Stalled: []Stalled{{Rig: "r", Bead: "b", Session: "s", Identity: "i", Agent: "a", Since: t0, Wrote: true}},
+	raw, err := json.Marshal(Record{Read: t0, Stalled: []Stalled{{Rig: "r", Bead: "b", Session: "s", Identity: "i", Agent: "a", Since: t0, From: FromWrite}},
 		Unread: []Unread{{Rig: "r", Bead: "b", Why: "w"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestThePayloadsKeys(t *testing.T) {
 		want []string
 	}{
 		{shape, []string{"read", "stalled", "unread"}},
-		{shape["stalled"].([]any)[0], []string{"agent", "bead", "identity", "rig", "session", "since", "wrote"}},
+		{shape["stalled"].([]any)[0], []string{"agent", "bead", "from", "identity", "rig", "session", "since"}},
 		{shape["unread"].([]any)[0], []string{"bead", "rig", "why"}},
 	} {
 		if got := keys(tc.at); !reflect.DeepEqual(got, tc.want) {

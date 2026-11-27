@@ -16,6 +16,7 @@ type Message struct {
 	From      string    `json:"from"`
 	To        string    `json:"to"`
 	Subject   string    `json:"subject"`
+	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	Read      bool      `json:"read"`
 }
@@ -102,4 +103,38 @@ func (c *City) NudgeQueue(ctx context.Context, session string) (NudgeQueue, erro
 // outcome: 0 when the nudge was delivered or queued.
 func (c *City) NudgeWaitIdle(ctx context.Context, session, message string) Bounded {
 	return c.runBounded(ctx, c.bin, "session", "nudge", "--delivery", "wait-idle", session, message)
+}
+
+// MailPeek reads one message with `gc mail peek <id> --json`, which leaves it
+// unread and prints it under "message" (mailMessageJSONResult in
+// cmd/gc/cmd_mail.go at gastownhall/gascity 6dce31bbb6). A message that does
+// not read, or reads with no subject, is an error.
+func (c *City) MailPeek(ctx context.Context, id string) (Message, error) {
+	b := c.runBounded(ctx, c.bin, "mail", "peek", id, "--json")
+	if f := b.Failure(); f != "" {
+		return Message{}, fmt.Errorf("gc mail peek %s did not read: %s", id, f)
+	}
+	var out struct {
+		Message *Message `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(b.Stdout)), &out); err != nil || out.Message == nil || out.Message.Subject == "" {
+		return Message{}, fmt.Errorf("gc mail peek %s printed no message with a subject: %s", id, clipLine(b.Stdout))
+	}
+	return *out.Message, nil
+}
+
+// MailArchive archives one message with `gc mail archive <id>`.
+func (c *City) MailArchive(ctx context.Context, id string) error {
+	if f := c.runBounded(ctx, c.bin, "mail", "archive", id).Failure(); f != "" {
+		return fmt.Errorf("gc mail archive %s failed: %s", id, f)
+	}
+	return nil
+}
+
+// MailMarkUnread marks one message unread with `gc mail mark-unread <id>`.
+func (c *City) MailMarkUnread(ctx context.Context, id string) error {
+	if f := c.runBounded(ctx, c.bin, "mail", "mark-unread", id).Failure(); f != "" {
+		return fmt.Errorf("gc mail mark-unread %s failed: %s", id, f)
+	}
+	return nil
 }

@@ -107,8 +107,30 @@ type Queue struct {
 	Now  func() time.Time
 }
 
-// Run looks once, over every rig that is not suspended, as core's orphan
-// sweep walks them. The HQ, whose agents serve the city, has no refinery
+// Run looks once and records the event when the look found a handoff. Its
+// reads and its event end when ctx does.
+func (q *Queue) Run(ctx context.Context) Outcome {
+	out := q.Read(ctx)
+	if out.Record == nil || len(out.Record.Stuck) == 0 {
+		return out
+	}
+	rec := out.Record
+	payload, err := json.Marshal(rec)
+	if err == nil {
+		emit, cancel := context.WithTimeout(ctx, CallBound)
+		err = q.City.Emit(emit, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
+		cancel()
+	}
+	if err != nil {
+		out.Failures = append(out.Failures, "the look's event was not recorded: "+err.Error())
+		return out
+	}
+	out.Recorded = true
+	return out
+}
+
+// Read reads once, over every rig that is not suspended, as core's orphan
+// sweep walks them, and records nothing. The HQ, whose agents serve the city, has no refinery
 // queue. A rig's queue is the open beads assigned to an agent named Role in
 // that rig's directory, by the identity work assigned to it names, and a rig
 // that no such agent serves is a queue whose address does not resolve, which
@@ -119,9 +141,8 @@ type Queue struct {
 // ([waits.Holds]), and the close of the last wait that held it is Bound old
 // too. A rig list or an agent list that does not read judges nothing. A rig
 // whose queue does not read, or what holds a handoff past the bound, is left
-// out of the record and fails the run. Its store reads and its event end when
-// ctx does.
-func (q *Queue) Run(ctx context.Context) Outcome {
+// out of the record and fails the outcome. Its store reads end when ctx does.
+func (q *Queue) Read(ctx context.Context) Outcome {
 	reads, cancel := context.WithTimeout(ctx, Deadline)
 	defer cancel()
 	now := q.Now().UTC().Truncate(time.Second)
@@ -160,20 +181,6 @@ func (q *Queue) Run(ctx context.Context) Outcome {
 	for _, u := range rec.Unread {
 		out.Failures = append(out.Failures, fmt.Sprintf("the refinery queue of %s did not read, so its handoffs were not judged: %s", u.Rig, u.Why))
 	}
-	if len(rec.Stuck) == 0 {
-		return out
-	}
-	payload, err := json.Marshal(rec)
-	if err == nil {
-		emit, cancel := context.WithTimeout(ctx, CallBound)
-		err = q.City.Emit(emit, gascity.Emit{Type: EventType, Actor: Actor, Message: rec.Summary(), Payload: payload})
-		cancel()
-	}
-	if err != nil {
-		out.Failures = append(out.Failures, "the look's event was not recorded: "+err.Error())
-		return out
-	}
-	out.Recorded = true
 	return out
 }
 
