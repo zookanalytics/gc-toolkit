@@ -271,7 +271,7 @@ Done says.
 The recount: the hand-off has conflicted once, on 2026-11-10, before a conflict
 went to a polecat (gate tk-ucjq40f, 14 files on `integration/tk-1tfzr71.15`). The
 operator ruled "A polecat should do this", and tk-1tfzr71.94 resolved it. #1484
-made a conflict a polecat task on 2026-11-13. Since then 29 hand-offs have
+made a conflict a polecat task on 2026-11-14. Since then 29 hand-offs have
 closed, and no task titled "Merge origin/<target> into <branch> and resolve its
 conflicts" has been filed in any store.
 
@@ -433,9 +433,9 @@ landing bead, an ordinary bead") and I4. This member owes nothing there.
 
 | Open PR | What it changes in this member's files | How the unit meets it |
 |---|---|---|
-| #1719 (tk-1tfzr71.242), the refinery one item per session | rewords other bullets of `docs/built-once-target.md`'s Merge section, `effort-bring-current.sh`'s header, `integration-effort.md`'s steps 6 and the hand-off's steps 1 and 3, the refinery prompt, and `mol-design-convoy.toml`'s dispatch prose | Its hunks reach neither lane A's row, the hand-off bullet, nor the lines section 2 rewrites. Whichever lands second merges the other in. |
-| #1683 (tk-y3ud19l), a claimant and a run that both refuse | `work-gate.sh`'s header comment and its hold read, `await-ruling.sh`'s callers, and the Verified line of `docs/warrants.md`'s "The work formula's overrides" | Its hunks in `work-gate.sh` reach neither line 2 nor the malformed-convoy message. Both changes edit `await-ruling.sh`'s callers and re-stamp the same Verified line, so the second to land merges the callers and keeps the later date. |
-| #1647 (tk-2358fdf), copied text taken as written | `mol-design-convoy.toml`'s load-context step 2 and its file-design step | The gate's block sits in step 1, beside #1647's first hunk. The second to land merges the other in. |
+| #1719 (tk-1tfzr71.242), the refinery one item per session | rewords other bullets of `docs/built-once-target.md`'s Merge section, `effort-bring-current.sh`'s header, `integration-effort.md`'s steps 6 and the hand-off's steps 1 and 3, the refinery prompt, and `mol-design-convoy.toml`'s dispatch prose, and re-stamps the Verified line of `docs/warrants.md`'s "The work formula's overrides" | Its hunks reach neither lane A's row, the hand-off bullet, nor the lines section 2 rewrites. Whichever lands second merges the other in and keeps the later date on the Verified line. |
+| #1683 (tk-y3ud19l), a claimant and a run that both refuse | `work-gate.sh`'s header comment and its hold read, `work-gate.test.sh`'s cases, `await-ruling.sh`'s callers, and the same Verified line | Its hunks in `work-gate.sh` reach neither line 2 nor the malformed-convoy message. Both changes edit `await-ruling.sh`'s callers and `work-gate.test.sh` and re-stamp the Verified line, so the second to land merges the callers and the cases and keeps the later date. |
+| #1647 (tk-2358fdf), copied text taken as written | `mol-design-convoy.toml`'s load-context step 2 and its file-design step, `mol-design-convoy-arm.test.sh`, `mol-polecat-work.toml`'s preflight-tests step, and the same Verified line | The gate's block sits in step 1, beside #1647's first hunk, and its preflight-tests hunks are clear of workspace-setup's base-branch line. The second to land merges the other in and keeps the later date on the Verified line. |
 | #1634 (tk-72u5bsc), cross-store parent links | `bead-context.sh` | The unit does not touch it. |
 
 An effort in flight meets nothing it has to cut over for:
@@ -491,9 +491,8 @@ no PR of its own.
 1. **The design convoy's gate.** `formulas/mol-design-convoy.toml`'s
    load-context runs section 5's block first and says what each exit means. The
    load-context row of `docs/design-convoy.md`'s step table names the gate and
-   what a held, parked or finished subject meets there.
-   `generated/seed-audit/formulas/mol-design-convoy.md` is regenerated. One case
-   in `assets/scripts/mol-design-convoy-arm.test.sh` pins that load-context runs
+   what a held, parked or finished subject meets there. One case in
+   `assets/scripts/mol-design-convoy-arm.test.sh` pins that load-context runs
    `work-gate.sh` with `--convoy {{convoy_id}}`, `--step
    mol-design-convoy.load-context` and `--formula mol-design-convoy` before it
    reads the card.
@@ -508,8 +507,7 @@ no PR of its own.
    open bead's parent-child edge onto a convoy with `gc bd --rig <rig> dep remove
    <bead> <convoy>`, read each bead back, and record the writes in the unit's
    notes without naming another rig.
-4. **The texts.** Section 2's three rows, with
-   `generated/seed-audit/formulas/mol-polecat-work.md` regenerated.
+4. **The texts.** Section 2's three rows.
 5. **The deletion page.** Remove lane A's row for tk-1tfzr71.23 from
    `docs/built-once-target.md`. If the integration-effort hand-off's line still
    names this member, its end reads "This ends when tk-1tfzr71.243 brings every
