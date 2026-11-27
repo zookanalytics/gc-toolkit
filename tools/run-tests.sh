@@ -10,7 +10,7 @@
 #
 # Usage:
 #   run-tests.sh [-j N] [-t SECS] [--retry N|--no-retry] [--list] [-q]
-#                [--seconds FILE] [--affected BASE | PATH ...]
+#                [--seconds FILE] [--affected BASE | [--only] PATH ...]
 #
 #   -j, --jobs N       concurrent runs (default: $TEST_JOBS or half the cores)
 #   -t, --timeout SECS end a run that writes nothing for SECS (below), 0 disables
@@ -20,6 +20,7 @@
 #       --affected BASE
 #                      run the subset of the change HEAD's commits make since
 #                      BASE (below), for example --affected origin/main
+#       --only         run just the *.test.sh files the PATHs name (below)
 #       --list         print what would run, one run per line, and exit
 #   -q, --quiet        print only the summary and the failures
 #       --seconds FILE write each run's seconds to FILE (below)
@@ -86,6 +87,13 @@
 # exits 0. A BASE git cannot read is a usage error. A change handed over as
 # PATHs, as in `run-tests.sh $(git diff --name-only origin/main...HEAD)`, runs
 # every suite when it is empty, because an empty change expands to no PATH.
+#
+# --only runs the files its PATHs name and nothing the subset would add, so it
+# is how a single suite is run by hand. Each PATH is a *.test.sh that exists,
+# tracked or not, and a relative one is read from the repository root, as in
+# the subset. Anything else, no PATH at all, or --affected beside it, is a
+# usage error. Each file still runs as every file below does, above the test
+# floor and with the caller's GC_* and BEADS_* variables cleared.
 #
 # A file runs once, unless its opening comment block declares named parts:
 #
@@ -238,6 +246,7 @@ JOBS="${TEST_JOBS:-$(half_the_cores)}"
 TIMEOUT="${TEST_TIMEOUT:-900}"
 RETRY="${TEST_RETRY:-1}"
 LIST_ONLY=0
+ONLY=0
 QUIET=0
 AFFECTED=""
 AFFECTED_SET=0
@@ -259,6 +268,7 @@ while [ $# -gt 0 ]; do
     --affected)    AFFECTED="${2:-}"; AFFECTED_SET=1; shift; [ $# -eq 0 ] || shift ;;
     --affected=*)  AFFECTED="${1#--affected=}"; AFFECTED_SET=1; shift ;;
     --list)        LIST_ONLY=1; shift ;;
+    --only)        ONLY=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     --seconds)     SECONDS_FILE="${2:-}"; SECONDS_SET=1; shift; [ $# -eq 0 ] || shift ;;
     --seconds=*)   SECONDS_FILE="${1#--seconds=}"; SECONDS_SET=1; shift ;;
@@ -279,6 +289,10 @@ if [ "$SECONDS_SET" -eq 1 ]; then
     -*) echo "run-tests: --seconds needs a file to write, not the option '$SECONDS_FILE'" >&2; exit 2 ;;
   esac
   { : >"$SECONDS_FILE"; } 2>/dev/null || { echo "run-tests: cannot write the --seconds file '$SECONDS_FILE'" >&2; exit 2; }
+fi
+if [ "$ONLY" -eq 1 ]; then
+  [ "$AFFECTED_SET" -eq 0 ] || { echo "run-tests: --only runs the files its PATHs name, so it takes no --affected" >&2; exit 2; }
+  [ "${#ARGS[@]}" -gt 0 ] || { echo "run-tests: --only needs the path of a *.test.sh to run" >&2; exit 2; }
 fi
 if [ "$AFFECTED_SET" -eq 1 ]; then
   case "$AFFECTED" in
@@ -584,7 +598,16 @@ fi
 
 # Resolve the set of *.test.sh files to run.
 declare -a TESTS=()
-if [ "${#ARGS[@]}" -eq 0 ]; then
+if [ "$ONLY" -eq 1 ]; then
+  declare -A seen=()
+  for a in "${ARGS[@]}"; do
+    tidy path "$a"
+    case "$path" in /*) ;; *) path="$ROOT/$path" ;; esac
+    case "$path" in *.test.sh) [ -f "$path" ] ;; *) false ;; esac || {
+      echo "run-tests: --only runs a *.test.sh that exists, and '$a' is not one" >&2; exit 2; }
+    [ -n "${seen[$path]:-}" ] || { seen[$path]=1; TESTS+=("$path"); }
+  done
+elif [ "${#ARGS[@]}" -eq 0 ]; then
   while IFS= read -r rel; do
     [ -n "$rel" ] && TESTS+=("$ROOT/$rel")
   done < <(git -C "$ROOT" ls-files '*.test.sh')

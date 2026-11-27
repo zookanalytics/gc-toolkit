@@ -109,6 +109,11 @@
 #     reaches the same suites from a branch's commit;
 #   - a BASE git cannot read, a missing BASE, an option or a range where BASE
 #     belongs, and a PATH beside --affected are usage errors;
+#   - --only lists just the suites its PATHs name, tracked or not, each once,
+#     and none the subset would add; a file it runs is refused the binary
+#     behind its removed stub, which the same file run directly reaches; a
+#     PATH that is not a *.test.sh that exists, no PATH, and --affected beside
+#     it are usage errors;
 #   - the runner runs no suite, and exits 2, unless its own bash and the first
 #     bash on PATH from the repository root are both 5.1 or later.
 #
@@ -1474,6 +1479,29 @@ if command -v go >/dev/null 2>&1; then
   eq "$LIST" "t/a.test.sh t/b.test.sh " \
     "a package both programs import reaches the suite of each library's wrapper, though both libraries name their compiling function build"
 fi
+
+echo "── 22. --only runs just the suites its PATHs name ──"
+alist --only lib/tool.test.sh
+eq "$RC" 0 "--only over one suite exits 0"
+eq "$LIST" "lib/tool.test.sh " "it lists that suite alone: no suite that names it and no tree-wide suite"
+printf '#!/usr/bin/env bash\ntrue\n' > "$AREPO/lib/fresh.test.sh"
+alist --only lib/fresh.test.sh ./lib/tool.test.sh "$AREPO/lib/tool.test.sh"
+eq "$LIST" "lib/fresh.test.sh lib/tool.test.sh " "a suite git does not track yet runs too, and a suite named three ways runs once"
+for p in lib/tool.sh lib/missing.test.sh lib; do
+  alist --only "$p"
+  eq "$RC" 2 "--only refuses $p, which is not a *.test.sh that exists"
+  has "$OUT" "'$p' is not one" "…and names it"
+done
+alist --only
+eq "$RC" 2 "--only with no PATH is a usage error"
+alist --only --affected base lib/tool.test.sh
+eq "$RC" 2 "--only beside --affected is a usage error"
+has "$OUT" "takes no --affected" "…and says why"
+reset_state
+PATH="$CANARY:$PATH" run --only "$FIX/floor.test.sh"
+eq "$RC" 0 "--only runs a file above the floor"
+has "$(cat "$STATE/refusal")" "test-floor: refused 'gc bd create'" "…so its call after its stub goes is refused"
+if [ -e "$STATE/canary" ]; then bad "…and never reaches the binary behind the floor" "$(cat "$STATE/canary")"; else ok "…and never reaches the binary behind the floor"; fi
 
 printf '\nrun-tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
