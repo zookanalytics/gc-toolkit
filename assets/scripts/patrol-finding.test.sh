@@ -173,21 +173,23 @@ eq "$(beads)" "2" "(distinct keys) two situations are two beads"
 # second subject under the key is its own finding, and --distinct leaves the
 # exact match in force: a repeat on the same subject still lands on its bead.
 reset
+put_bead tk-aaa open
+put_bead tk-bbb open
 "$SUT" --key witness-salvage-refused --about tk-aaa --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
 "$SUT" --key witness-salvage-refused --about tk-bbb --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-eq "$(beads)" "2" "(--about) one per-bead key over two beads is two findings"
+eq "$(findings witness-salvage-refused)" "2" "(--about) one per-bead key over two beads is two findings"
 "$SUT" --key witness-salvage-refused --about tk-aaa --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-eq "$(beads)" "2" "(--about) a repeat on the same bead files nothing new, --distinct or not"
-eq "$(meta new-1 'finding.occurrences')" "2" "(--about) the repeat is counted on the first subject's bead"
-eq "$(meta new-1 'finding.about')" "tk-aaa" "(--about) the subject is stamped"
-eq "$(cat "$STUB_DEPS")" "new-1|tracks|tk-aaa
-new-2|tracks|tk-bbb" "(--about) tracks edges, never parent-child"
+eq "$(findings witness-salvage-refused)" "2" "(--about) a repeat on the same bead files nothing new, --distinct or not"
+eq "$(meta new-3 'finding.occurrences')" "2" "(--about) the repeat is counted on the first subject's bead"
+eq "$(meta new-3 'finding.about')" "tk-aaa" "(--about) the subject is stamped"
+eq "$(cat "$STUB_DEPS")" "new-3|tracks|tk-aaa
+new-4|tracks|tk-bbb" "(--about) tracks edges, never parent-child"
 
 # A finding with no --about must not adopt an --about-scoped bead: finding.about
 # is ABSENT there, which the listing filter alone cannot express.
 "$SUT" --key witness-salvage-refused --distinct --title "salvage refused" --message "no worktree" >/dev/null 2>&1
-eq "$(beads)" "3" "(--about) a finding with no subject is its own situation"
-eq "$(meta new-3 'finding.about')" "<absent>" "(--about) and carries no subject stamp"
+eq "$(findings witness-salvage-refused)" "3" "(--about) a finding with no subject is its own situation"
+eq "$(meta new-5 'finding.about')" "<absent>" "(--about) and carries no subject stamp"
 
 # ── 6. recurring after the bead was closed ───────────────────────────
 reset

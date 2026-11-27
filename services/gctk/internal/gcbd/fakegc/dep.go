@@ -88,7 +88,27 @@ func (c *Call) dep(s, d string, args []string) error {
 		return err
 	}
 	defer release()
+	rows, err := readRows(s)
+	if err != nil {
+		return err
+	}
+	if id, missing := c.missingEnd(rows, blocked, src); missing {
+		return c.fail(1, "Error: issue "+id+" not found")
+	}
 	return c.depPut(d, src, "blocks", blocked)
+}
+
+// missingEnd reports the end bd finds missing in an edge by which the bead
+// from depends on the bead to, as bd's addDependencyInTx checks them: from
+// must be a row of the store, and so must to, unless to is foreign.
+func (c *Call) missingEnd(rows []*Object, from, to string) (string, bool) {
+	if !holds(rows, from) {
+		return from, true
+	}
+	if !holds(rows, to) && !c.foreign(to) {
+		return to, true
+	}
+	return "", false
 }
 
 // knob is a dep-read setting: 1 for every dep read, or a text that limits it
@@ -208,7 +228,7 @@ func depRows(rows []*Object, edges []edge, ids []string, dir, typ string) []Valu
 
 func (c *Call) depAdd(s, d string, args []string) error {
 	if len(args) > 1 && (args[1] == "--file" || strings.HasPrefix(args[1], "--file=")) {
-		return c.depAddFile(d, args)
+		return c.depAddFile(s, d, args)
 	}
 	a, b := "", ""
 	if len(args) > 1 {
@@ -245,8 +265,15 @@ func (c *Call) depAdd(s, d string, args []string) error {
 		return err
 	}
 	defer release()
+	rows, edges, err := readStore(s, d)
+	if err != nil {
+		return err
+	}
+	if id, missing := c.missingEnd(rows, a, b); missing {
+		return c.fail(1, "Error: issue "+id+" not found")
+	}
 	if typ == "blocks" || typ == "conditional-blocks" {
-		if err := c.refuseAcrossChain(s, d, a, b); err != nil {
+		if err := c.refuseAcrossChain(rows, edges, a, b); err != nil {
 			return err
 		}
 	}
@@ -260,11 +287,7 @@ func (c *Call) depAdd(s, d string, args []string) error {
 // other's ancestor over parent-child edges at any depth, as bd's
 // CheckBlockingHierarchyInTx does: a parent cannot close until its children
 // do, and a child inherits its parent's block.
-func (c *Call) refuseAcrossChain(s, d, a, b string) error {
-	rows, edges, err := readStore(s, d)
-	if err != nil {
-		return err
-	}
+func (c *Call) refuseAcrossChain(rows []*Object, edges []edge, a, b string) error {
 	parents := func(id string) []string {
 		var out []string
 		for _, e := range edges {
@@ -309,8 +332,8 @@ func (c *Call) refuseAcrossChain(s, d, a, b string) error {
 }
 
 // depAddFile lands a --file batch of {"from","to","type"} edges, which bd
-// commits in one transaction: a refused pair writes none of the batch.
-func (c *Call) depAddFile(d string, args []string) error {
+// commits in one transaction: a refused edge writes none of the batch.
+func (c *Call) depAddFile(s, d string, args []string) error {
 	src := ""
 	if v, ok := strings.CutPrefix(args[1], "--file="); ok {
 		src = v
@@ -349,7 +372,7 @@ func (c *Call) depAddFile(d string, args []string) error {
 		return err
 	}
 	defer release()
-	edges, err := readEdges(d)
+	rows, edges, err := readStore(s, d)
 	if err != nil {
 		return err
 	}
@@ -363,6 +386,9 @@ func (c *Call) depAddFile(d string, args []string) error {
 	for _, e := range batch {
 		if listed(c.getenv("STUB_DEP_ADD_FAIL"), e.a) {
 			return c.fail(1, "Error: add deps: simulated refusal for "+e.a)
+		}
+		if id, missing := c.missingEnd(rows, e.a, e.b); missing {
+			return c.fail(1, "Error: issue "+id+" not found")
 		}
 		r := row(e)
 		if have := depHave(edges, r.a, r.typ, r.b); have != "" && have != e.typ {

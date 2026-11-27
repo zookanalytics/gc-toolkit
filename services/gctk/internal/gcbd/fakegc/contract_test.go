@@ -211,9 +211,14 @@ func contractCases() []contractCase {
 			{args: []string{"close", "{x}"}, actor: "me", settings: []string{"STUB_ENFORCE_CLOSE_OWNER=1"}},
 			{args: []string{"update", "{y}", "--status=closed"}, actor: "me", settings: []string{"STUB_ENFORCE_CLOSE_OWNER=1"}},
 		}},
-		{name: "a bead the store does not hold takes no write, and a show answers only what it holds", beads: []string{"a"}, steps: []step{
+		{name: "a bead the store does not hold takes no write, and a show answers only what it holds", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"update", "ct-nope", "--status=closed"}},
 			{args: []string{"close", "ct-nope"}},
+			{args: []string{"dep", "add", "ct-nope", "{a}", "--type=blocks"}},
+			{args: []string{"dep", "add", "{a}", "ct-nope", "--type=tracks"}},
+			{args: []string{"dep", "ct-gone", "--blocks", "{a}"}},
+			{args: []string{"dep", "{a}", "--blocks", "ct-nope"}},
+			{args: []string{"dep", "add", "--file", "-"}, stdin: `{"from":"{a}","to":"{b}","type":"blocks"}` + "\n" + `{"from":"{b}","to":"ct-nope","type":"tracks"}` + "\n"},
 			{args: []string{"show", "ct-nope", "--json"}, answer: "json"},
 			{args: []string{"show", "{a}", "ct-nope", "--json"}, answer: "rows"},
 			{args: []string{"show", "ct-nope", "{a}", "--json"}, answer: "rows"},
