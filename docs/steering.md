@@ -243,11 +243,12 @@ can apply one directly.
   operator clears the gate.
 - **Close it**, when the work is not wanted. Work that waits on nothing and is
   not worth an epic's time closes too, when something would file it again if
-  it mattered. A defect is such work, because the check, the patrol or the
-  failing run that found it finds it again, so it is filed again when it
-  bites. Nothing reads the label on a closed bead. An idea that serves the
-  rig's goals, and that nothing would file again, is not closed for want of a
-  release. It stays held, with a note of the question that would decide it.
+  it mattered, such as the check, the patrol or the failing run that found a
+  defect, run again. The po names what would. Work closed that way is filed
+  again when it bites. Nothing reads the label on a closed bead. Work that
+  serves the rig's goals, and that nothing would file again, is not closed for
+  want of a release, whether it is an idea or a defect a person reported by
+  hand. It stays held, with a note of the question that would decide it.
 
 ```
 gctk bead place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]

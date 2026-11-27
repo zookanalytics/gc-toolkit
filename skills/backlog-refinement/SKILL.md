@@ -142,17 +142,20 @@ Check before you propose:
   - it belongs to no theme worth a push;
   - something would file it again if it mattered.
 
-  Ask of it: would anything file this again if it mattered? A defect would,
-  because the check, the patrol or the failing run that found it finds it
-  again. That is why a defect closed this way is filed again if it bites.
+  Ask of it: would anything file this again if it mattered? Answer with what
+  would, and name it in the reason, such as the check, the patrol or the
+  failing run that found the defect, which files it again when it runs. A
+  defect a person reported by hand, or that one run found once, may have
+  nothing that would.
 
-  An idea that serves the rig's goals, and that nothing would file again, is
-  not proposed for closing for want of a release. That covers a product idea
-  of the operator's, an opportunity an agent noticed once and a risk that bites
-  only once. It stays held, with a note of one line that gives the question
+  A bead that serves the rig's goals, and that nothing would file again, is
+  not proposed for closing for want of a release, whether it is an idea or a
+  defect. That covers a product idea of the operator's, an opportunity an
+  agent noticed once, a risk that bites only once and a defect nothing would
+  find again. It stays held, with a note of one line that gives the question
   that would decide it: what would make it worth doing, and what we would look
   at to know. Once the operator agrees, write the note:
-  `gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: kept as an idea. What would decide it: <the question>."`
+  `gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: kept, since nothing would file it again. What would decide it: <the question>."`
 
   Work that serves none of the rig's goals is still proposed for closing, idea
   or not.
