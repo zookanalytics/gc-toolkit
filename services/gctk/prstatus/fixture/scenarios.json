@@ -292,6 +292,15 @@
     ]
   },
   {
+    "name": "a blocker a pool would claim that carries bd's human label is a person's",
+    "anchor": "tk-a",
+    "want": {"status": "needs-attention", "held": ["blocked"]},
+    "beads": [
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-d", "status": "open", "issue_type": "task", "title": "confirm the release notes", "labels": ["human"], "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
+    ]
+  },
+  {
     "name": "a human gate the anchor waits on counts once, as a gate",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},

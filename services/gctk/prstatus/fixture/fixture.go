@@ -28,6 +28,7 @@ type Bead struct {
 	IssueType string            `json:"issue_type,omitempty"`
 	AwaitType string            `json:"await_type,omitempty"`
 	Assignee  string            `json:"assignee,omitempty"`
+	Labels    []string          `json:"labels,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	WaitsOn   []string          `json:"waits_on,omitempty"`
 	Tracks    []string          `json:"tracks,omitempty"`
@@ -145,6 +146,7 @@ func BlockerOf(b Bead) person.Blocker {
 		IssueType: b.IssueType,
 		AwaitType: b.AwaitType,
 		Assignee:  b.Assignee,
+		Labels:    b.Labels,
 		Metadata:  b.Metadata,
 	}
 }

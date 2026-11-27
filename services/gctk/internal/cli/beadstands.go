@@ -36,8 +36,8 @@ further-along, parked, status, staying, answers, members, gate,
 not-scheduled, outside, for-product-owner, in-flight, scheduled and
 not-ready, and unread where a read could not answer the part a rule needs,
 with why saying what it could not. ask is what a person owes when the bead is
-itself the ask: question, conversation, pull-request, assigned-to-you or
-ruling, and "" otherwise. names are the beads the rule
+itself the ask: question, conversation, pull-request, human-needed,
+assigned-to-you or ruling, and "" otherwise. names are the beads the rule
 names, each {"id", "title"}: the gate or the bead a person owes, the gate
 that parks it, the question a conversation answers, or the beads it waits
 on.

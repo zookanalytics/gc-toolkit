@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
@@ -115,8 +116,8 @@ const (
 	RuleUnread Rule = "unread"
 )
 
-// Ask is what a person owes when a bead is itself the ask, one of the five
-// below, which askOf reads. docs/bead-standing.md gives each ask to a person,
+// Ask is what a person owes when a bead is itself the ask, one of those below,
+// which askOf reads. docs/bead-standing.md gives each ask to a person,
 // beside the words the board shows for it (services/helm/internal/rigboard),
 // with what the person can do.
 type Ask string
@@ -142,6 +143,11 @@ const (
 	// that ask is the person's move on it, so it reads as waiting on them, by
 	// the own-wait or the further-along rule.
 	AskPullRequest Ask = "pull-request"
+	// AskHumanNeeded: any other open bead that carries bd's human label
+	// ([gascity.HasHumanLabel]), whatever its route, arm or assignee. bd reads
+	// that label as a request for a person, and `bd human list` lists such a
+	// bead as human-needed.
+	AskHumanNeeded Ask = "human-needed"
 	// AskAssignedToYou: any other open bead only a person clears
 	// ([person.Clears]), such as one assigned to human.
 	AskAssignedToYou Ask = "assigned-to-you"
@@ -418,7 +424,9 @@ func (r *Reading) reach(ids []string) []string {
 // gate, a decision and a conversation are each answered by their kind alone,
 // so a gate that is no human gate is never an ask. An epic or a Delivery is
 // tried as a ruling first. Any other bead, and an epic or a Delivery that is
-// no ruling, is tried as a pull request, then as assigned to you. beneath
+// no ruling, is tried as a pull request, then as a bead only a person clears:
+// human-needed when it carries bd's human label, and otherwise assigned to
+// you. beneath
 // reports whether the bead stands beneath another ask ([Reading.Beneath]),
 // where a pull request that needs attention for no reason of its own is no
 // ask.
@@ -457,7 +465,10 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 		}
 	}
 	if person.Clears(person.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
-		Assignee: b.Assignee}) {
+		Assignee: b.Assignee, Labels: b.Labels}) {
+		if gascity.HasHumanLabel(b.Labels) {
+			return AskHumanNeeded
+		}
 		return AskAssignedToYou
 	}
 	return ""

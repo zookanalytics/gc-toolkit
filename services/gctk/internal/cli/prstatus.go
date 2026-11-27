@@ -243,6 +243,7 @@ func asBlockers(rows []gcbd.Bead) []person.Blocker {
 			AwaitType: b.AwaitType,
 			AwaitID:   b.AwaitID,
 			Assignee:  b.AssigneeString(),
+			Labels:    b.LabelStrings(),
 			ClosedAt:  b.ClosedAtString(),
 			Metadata:  metadataOf(b),
 		})
