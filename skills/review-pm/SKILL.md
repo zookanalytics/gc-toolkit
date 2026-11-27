@@ -25,11 +25,14 @@ is yours. Judge the intent the change serves, not the wording it satisfied.
 `docs/product-goals.md` first, then the anchor `<anchor_bead>` for the problem
 the change claims, then the diff at `<reviewed_oid>`, in `<worktree>`
 (`git diff origin/<review_base>...HEAD`), and the PR as it will reach the
-operator: the page the review formula printed from `<review_pr_url>`, or
-pre-open the anchor's pending PR summary. Then the rig's guidance for this
-check, the reviewed commit's `docs/review-pm.md`, which the review formula
-printed when the commit carries one. A rig says there where it keeps its product
-goals when that is not where this method looks.
+operator: the title and summary `<anchor_bead>` records, whether or not a PR
+page exists. The PR's title is composed from the anchor's title, and
+`gctk pr summary <anchor_bead>` prints its summary, or nothing when it records
+none, and then the PR carries the anchor's description. That record is what
+the PR publishes, so a page that lags it is no finding. Then the rig's guidance
+for this check, the reviewed commit's `docs/review-pm.md`, which the review
+formula printed when the commit carries one. A rig says there where it keeps its
+product goals when that is not where this method looks.
 
 ### The product goals
 

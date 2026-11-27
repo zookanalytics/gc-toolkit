@@ -19,7 +19,7 @@ worktree that holds it, and prints what the review reads:
 - The change, which is the whole diff against its target. A large diff gets
   read in chunks, not sampled.
 - What the change was asked to do, in the anchor bead where the formula prints
-  one, and in the PR as published.
+  one, and in the PR's title and summary as the anchor records them.
 - The test evidence, which is what `gctk rig` recorded at the reviewed commit.
 - The rig's guidance for this check, `docs/review-correctness.md` at the
   reviewed commit, when the commit carries one. It adds to this method and
@@ -115,14 +115,18 @@ finding, raised under the angle that names its cause.
   it is defined, so prose that repeats another file or a nearby comment is a
   finding, in a docs page as in a comment. When a comment is long, ask whether
   the code is complex or the comment is making a simple thing look complex.
-- **The PR as published** — the PR's summary is where the merge is decided, so
-  it accounts for the whole diff you read, and its title names what the diff
-  does, by the skill `gc-toolkit.commit-conventions`. A summary that does not
-  state what the whole diff does is a finding, and so is a title that misnames
-  it. A false one blocks, and one that is true but merely weak is a P2. Where
-  no PR page exists yet, read the summary and the title the review formula
-  printed from the anchor, and a finding on either takes
-  `anchor <id> / PR summary` or `anchor <id> / title` as its locus.
+- **The PR's title and summary** — the PR's summary is where the merge is
+  decided, so it accounts for the whole diff you read, and its title names what
+  the diff does, by the skill `gc-toolkit.commit-conventions`. Judge the ones
+  the anchor records, whether or not a PR page exists: the PR's title is
+  composed from the anchor's title, and `gctk pr summary <anchor>` prints its
+  summary, or nothing when it records none, and then the PR carries the
+  anchor's description. The refinery brings the PR's title and body to that
+  record at each head it takes, and so does each review round's push, so a page
+  that lags the record is no finding. A summary that does not state what the
+  whole diff does is a finding, and so is a title that misnames it. A false one
+  blocks, and one that is true but merely weak is a P2. A finding on either
+  takes `anchor <id> / PR summary` or `anchor <id> / title` as its locus.
 - **Work-quality standards** — hold the diff's output (code, comments,
   docs) to the "Standards for what you produce" entries of the work-quality
   fragments, which this skill carries in its `references/` directory as
