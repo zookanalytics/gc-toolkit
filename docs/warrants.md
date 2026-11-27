@@ -131,8 +131,11 @@ no warrant.
     so `gc worktree ensure` cannot make a tree inside an agent's home. The search
     is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
-    whole, so an inherited step cannot gain metadata, and a step that needs
-    `gc.continuation_group` must be overridden. The base declares none.
+    whole. The only metadata an inherited step gains without an override is
+    what a formula-level `[[scope]]` declaration stamps, its scope keys and
+    `gc.on_fail` (`applyScopeDecls` in `internal/formula/scope_decl.go`, and
+    section 3.5 of `docs/reference/specs/formula-spec-v2.md`), so a step that
+    needs `gc.continuation_group` must be overridden. The base declares none.
   - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
     `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
     live root of one formula on one bead is refused, unless `--force` skips the
@@ -142,7 +145,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6168 and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -613,7 +616,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
