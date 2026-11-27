@@ -41,9 +41,9 @@
 #                recovery fix stamps to re-offer a strand, so a stamped molecule
 #                reads as reachable here and drops out.
 #
-# Held on purpose is a note, not a finding: a non-empty gc.takeaway or
-# hold_reason on the root or any member is an operator parking it, and the
-# resting state it names is `status=blocked`, which `bd ready` never offers.
+# Held on purpose is a note, not a finding: a non-empty hold_reason on the root
+# or any member is an operator parking it, and the resting state it names is
+# `status=blocked`, which `bd ready` never offers.
 #
 # Fail-safe toward silence. Every unestablished fact reports nothing rather than
 # guessing, because each input misread turns a healthy molecule into a false
@@ -64,8 +64,7 @@ SEP=$'\037'
 # What a hold looks like, spliced into the root and member reads so the two
 # cannot drift. `$m` is the bead's own metadata; an EMPTY value is a hold that
 # was CLEARED, which is the state a released bead is left in.
-HELD='((($m["gc.takeaway"] // "") | tostring) != "")
-      or ((($m["hold_reason"] // "") | tostring) != "")'
+HELD='((($m["hold_reason"] // "") | tostring) != "")'
 
 errors=(); warnings=(); notes=()
 declare -A held_count=() held_age=()
@@ -394,7 +393,7 @@ done <<< "$scopes"
 if [ "${#held_count[@]}" -ne 0 ]; then
     while IFS= read -r hlabel; do
         [ -n "$hlabel" ] || continue
-        notes+=("$hlabel: ${held_count[$hlabel]} started, session-less molecule(s) held on purpose — gc.takeaway or hold_reason on the root or a member — silent up to ${held_age[$hlabel]}m; reported, not judged")
+        notes+=("$hlabel: ${held_count[$hlabel]} started, session-less molecule(s) held on purpose — hold_reason on the root or a member — silent up to ${held_age[$hlabel]}m; reported, not judged")
     done <<< "$(printf '%s\n' "${!held_count[@]}" | LC_ALL=C sort)"
 fi
 

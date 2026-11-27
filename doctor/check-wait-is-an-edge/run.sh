@@ -19,14 +19,13 @@
 # declares a settled-key for it in `settled_keys`: a bead carrying that key
 # non-empty is one whose writer said, beside the marker, that no edge is owed
 # for it. A pair can narrow that to one value of the key and to the statuses it
-# names. A sitting that settled its subject says nothing is waiting. The pending
-# record's marker, true on an open or blocked bead, says the landing order's
-# next run answers the reason the record wrote. On any other status, or at any
-# other value, no run of the order reads the bead, so the reason holds. That is
-# the same refusal to read prose, from the other side — a sitting knows whether
-# it settled its subject or parked it, and no reader can recover that
-# afterwards from the sentence it left. The key is structural and the marker
-# still stands beside it, so nothing here is a blanked hold.
+# names. The pending record's marker, true on an open or blocked bead, says the
+# landing order's next run answers the reason the record wrote. On any other
+# status, or at any other value, no run of the order reads the bead, so the
+# reason holds. That is the same refusal to read prose, from the other side —
+# the writer knows whether its reason waits on a bead, and no reader can
+# recover that afterwards from the sentence it left. The key is structural and
+# the marker still stands beside it, so nothing here is a blanked hold.
 #
 # Whether a held bead still waits is its own pending waits, as `gctk bead holds`
 # answers them (docs/gctk-architecture.md, "The bead holds contract"): a wait of
@@ -69,14 +68,12 @@ LIVE_STATUSES='open,in_progress,blocked,deferred,hooked,pinned'
 # the same list and stand in only when that file cannot be read, which is
 # noted rather than substituted in silence.
 BUILTIN_MARKER_KEYS='triage.hold
-blocked_reason
-gc.takeaway'
+blocked_reason'
 # <marker>=[<status>,...:]<settled-key>[=<value>]: the marker holds while the
 # settled-key is absent or empty, while it reads anything but the value the
 # pair names, and on a bead at a status the pair does not name. Same list as
 # the declaration, same standby role.
-BUILTIN_SETTLED_KEYS='gc.takeaway=gc.takeaway_settled
-blocked_reason=open,blocked:pr_reconcile_pending=true'
+BUILTIN_SETTLED_KEYS='blocked_reason=open,blocked:pr_reconcile_pending=true'
 # The terminal end of a wait — the bead others block ON. It can carry no
 # `blocks` edge of its own by construction (the gated bead blocks on it; it
 # blocks on nothing), so a marker it carries is exempt, not a finding. It is a

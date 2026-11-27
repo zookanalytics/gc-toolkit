@@ -22,18 +22,17 @@ gc bd show <each gate GATES names>
 ```
 
 The conditions they state are the premise, often bulleted literally, such as
-*"no `triage.hold` and no `gc.takeaway` on the root"*. Check that each
-condition still holds, on the subject and on whatever bead the condition is
-about:
+*"no `triage.hold` on the root"*. Check that each condition still holds, on the
+subject and on whatever bead the condition is about:
 
 ```bash
-gc bd show "$SUBJECT" --json | jq -r '.[0].metadata
-  | "hold=\(.["triage.hold"] // "") takeaway=\(.["gc.takeaway"] // "")"'
+gc bd show "$SUBJECT" --json | jq -r '.[0] | "hold=\(.metadata["triage.hold"] // "")\n\(.notes // "")"'
 ```
 
 A non-empty `triage.hold` is a live hold, and an empty one is cleared. A
-`gc.takeaway` dates the last sitting rather than naming a live wait: read it,
-then check whether that wait is still open.
+headline in the notes, under a `## Takeaway` heading, dates the sitting that
+wrote it rather than naming a live wait: read it, then check whether the wait
+it names is still open.
 
 Two readings end the question with nothing posted:
 
@@ -48,10 +47,10 @@ Two readings end the question with nothing posted:
   mistake this check prevents. The ask is the PR itself when the operator
   asked about the PR, or picked the PR or its anchor to talk over, which
   files an ask that has you prepare and hold for them. The PR's wait is then
-  what they came about, so the premise holds and needs them. A takeaway alone
-  is never a benign wait, because nothing clears it: re-check the ids in its
-  body (`gc bd show`, and `gc bd list --parent "$SUBJECT" --all`), and it is
-  moot only if something is open again.
+  what they came about, so the premise holds and needs them. A headline alone
+  is never a benign wait, because nothing clears it: re-check the ids it names
+  (`gc bd show`, and `gc bd list --parent "$SUBJECT" --all`), and it is moot
+  only if something is open again.
 
 Either reading names the stamp or the state it rests on. When you cannot name
 one, hold the sitting: uncertain is not benign.
@@ -74,35 +73,14 @@ record:
   subject's PR then shows, so write that action as one plain sentence that
   names no other rig or its beads.
 - The close writes no headline, because a headline for a conversation that
-  needs nobody spends the attention the close saves. The one exception is a
-  headline an earlier sitting's hold left waiting on nothing: a headline with
-  no `gc.takeaway_settled`, on a subject none of whose own waits is pending.
-  The block replaces that headline with `HEADLINE`, the reading in one short
-  sentence of at most 130 characters. The headline reads
-  `<moot|benign>: <your sentence>`, and its writer refuses a headline over 140
-  characters, so the whole reading goes only to the notes and the close
-  reason. `gctk bead holds` answers what still holds the subject, and the
-  block leaves this conversation out of that answer, because the
-  conversation's close frees an open PR's merge.
+  needs nobody spends the attention the close saves.
 
 Each write takes its exit, and the conversation closes only after them:
 
 ```bash
-# >>> gctk-bin
-GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
-# <<< gctk-bin
 KIND="<moot|benign>"; WHY="<the premise, and what is true instead>"
-HEADLINE="<the reading in one short sentence, at most 130 characters>"
 ACTION="<what ended the visit, in one plain sentence>"
-ROW=$(gc bd show "$SUBJECT" --json) \
-  && WAITS=$(printf '%s\n' "$ROW" | jq -er --arg s "$SUBJECT" 'if type == "array" and length == 1 and .[0].id == $s then (.[0].metadata // {}) | if ((.["gc.takeaway"] // "") | tostring) != "" and ((.["gc.takeaway_settled"] // "") | tostring) == "" then "waits" else "settled" end else error("unread") end') \
-  && HOLDS=$("$GCTK" bead holds "$SUBJECT") \
-  && OPEN=$(printf '%s\n' "$HOLDS" | jq -er --arg c "$CONVERSATION" 'if .error == null and (.pending | type) == "array" then [ .pending[].id | select(. != $c) ] | join(" ") else error("unread") end') \
-  && if [ "$WAITS" != waits ] || [ -n "$OPEN" ]; then echo "$SUBJECT keeps its headline${OPEN:+: $OPEN still holds it}"; else
-       "$GCTK" bead takeaway "$SUBJECT" "${KIND}: ${HEADLINE}" --by converse --no-wait \
-         && echo "replaced the headline of $SUBJECT, which waited on nothing"
-     fi \
-  && gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
+gc bd update "$SUBJECT" --append-notes "$KIND (conversation $CONVERSATION): $WHY" \
   && gc bd update "$CONVERSATION" --set-metadata gc.work_outcome=no-op \
   && { gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" \
        || gc bd close "$CONVERSATION" --reason "${KIND}: ${WHY}" --force; } \

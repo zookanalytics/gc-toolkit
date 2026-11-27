@@ -25,10 +25,9 @@
 #   (SIGNOFF, DISMISS, MOOT, BARE-CLOSE) every close of the conversation, the
 #                  sign-off, dismiss, the premise re-check's moot close and a
 #                  bare `gc bd close`, frees the merge, with no write to the edge
-#   (MOOT)         a moot close whose reading runs past the headline's cap
-#                  closes the conversation: the close reason and the subject's
-#                  notes keep the reading whole, and the headline it writes is
-#                  the reading's short sentence
+#   (MOOT)         a moot close closes the conversation, writes no headline,
+#                  and keeps the reading whole in the close reason and the
+#                  subject's notes
 #   (REVIEW-RULING) a ruling in a conversation on the PR's review reaches the PR
 #                  whose merge it holds, and its rework is filed against the
 #                  anchor and lands before the conversation's close
@@ -192,15 +191,10 @@ skill_block() {
          inb { buf = buf $0 "\n"; if (index($0, m)) hit = 1 }' "$ROOT/skills/$1/SKILL.md"
 }
 # The premise re-check's close, a moot reading filled in for its placeholders.
-# A reading that states the premise and what is true instead runs past the
-# headline's cap, TAKEAWAY_MAX in gc-helm.sh, so only its short sentence fits
-# the headline.
 MOOT_WHY="the conversation asked whether the PR should land as built, and the operator has since answered that on GitHub, so the merge it holds waits on no person and nothing is left to ask"
-MOOT_HEADLINE="the PR it asked about was answered on GitHub"
 skill_block converse-recheck-premise 'closed $CONVERSATION as $KIND' \
     | sed -e 's#KIND="<moot|benign>"#KIND="moot"#' \
           -e "s#WHY=\"<[^>]*>\"#WHY=\"$MOOT_WHY\"#" \
-          -e "s#HEADLINE=\"<[^>]*>\"#HEADLINE=\"$MOOT_HEADLINE\"#" \
           -e 's#ACTION="<[^>]*>"#ACTION="The visit ended: its question was already answered."#' > "$TMP/moot-close.sh"
 [ -s "$TMP/moot-close.sh" ] && ok "the premise re-check's close is found in the skill" \
     || bad "the premise re-check's close is found in the skill"
@@ -283,15 +277,13 @@ no_release && ok "(DISMISS) …with nothing written to release the merge" \
     || bad "(DISMISS) …with nothing written to release the merge ($(tr '\n' ';' < "$CALLS"))"
 eq "$(status_of tk-anc)" "$BASE" "(DISMISS) the PR derives what it did before the conversation opened"
 
-echo "# the premise re-check's moot close frees the merge, and the conversation keeps no headline"
+echo "# the premise re-check's moot close frees the merge and writes no headline"
 pr; run_open tk-anc --json; C=$(opened_conv)
-setm tk-anc gc.takeaway "holding — should this land as built?"
 : > "$CALLS"
 run_block "$TMP/moot-close.sh" "$C" tk-anc
 eq "$RC" 0 "(MOOT) the moot close exits 0"
 has "$OUT" "closed $C as moot" "(MOOT) …closing the conversation"
-has "$OUT" "replaced the headline of tk-anc, which waited on nothing" "(MOOT) …and the conversation, about to close, kept no headline"
-eq "$(meta tk-anc gc.takeaway)" "moot: $MOOT_HEADLINE" "(MOOT) …the headline it wrote is the reading's short sentence"
+hasnt "$(field tk-anc notes)" "## Takeaway" "(MOOT) …writing no headline"
 eq "$(field "$C" close_reason)" "moot: $MOOT_WHY" "(MOOT) …while the conversation's close reason keeps the whole reading"
 has "$(field tk-anc notes)" "moot (conversation $C): $MOOT_WHY" "(MOOT) …and so do the subject's notes"
 no_release && ok "(MOOT) …with nothing written to release the merge" \

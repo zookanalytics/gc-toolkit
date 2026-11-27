@@ -44,16 +44,11 @@ git -C "$REPO" init -q
 git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 
 # The pack the sign-off runs from: the real scripts it composes, and stubs for
-# the headline writer, the rework's filer and the store resolver.
+# the rework's filer and the store resolver.
 SR="$TMPD/pack/assets/scripts"; mkdir -p "$SR"
 for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh work-outcome.sh review-verdict.sh review-dismissal.sh dispatch-path.sh; do
   ln -s "$HERE/$f" "$SR/$f"
 done
-cat > "$SR/gc-helm.sh" <<'H'
-#!/usr/bin/env bash
-[ "$1" = takeaway ] && gc bd update "$2" --set-metadata "gc.takeaway=$3" >/dev/null
-exit 0
-H
 cat > "$SR/converse-rework.sh" <<'R'
 #!/usr/bin/env bash
 echo "filed rework tk-rw on $2"
@@ -62,7 +57,7 @@ cat > "$SR/bead-store.sh" <<'S'
 #!/usr/bin/env bash
 case "$1" in --path) echo "$REPO" ;; *) echo fixture ;; esac
 S
-chmod +x "$SR/gc-helm.sh" "$SR/converse-rework.sh" "$SR/bead-store.sh"
+chmod +x "$SR/converse-rework.sh" "$SR/bead-store.sh"
 
 # gc stub: one JSON file per bead under $STORE/b, its edges as deps [{type, on}],
 # and its comments in <id>.comments.json. A show of a bead whose <id>.show

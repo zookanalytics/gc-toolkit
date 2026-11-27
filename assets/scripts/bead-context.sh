@@ -8,9 +8,8 @@
 #      routing (gc.routed_to, gc.execution_routed_to); anchor state when the
 #      bead carries a merge_result (merge_result, pr_number, branch,
 #      merged_target); the first_reaction fields (the gc.first_reaction*
-#      record an older reaction left on its subject); gc.origin; and the
-#      distilled gc.takeaway headline (with gc.takeaway_settled). The free-text
-#      body is never parsed.
+#      record an older reaction left on its subject); and gc.origin. The
+#      free-text body is never parsed.
 #   D. Context edges, shown but never gating — the parent, the relates-to edges,
 #      the beads that track it (a conversation about it, a convoy carrying it),
 #      the beads that wait on this one by a blocks or an until edge (open ones
@@ -87,7 +86,7 @@ usage: bead-context.sh <bead-id> [--store rig:<name> | --db <path>/.beads]
 
 Rebuilds one bead's working context in a single call: its core (title, status,
 priority, type, task_kind, assignee, routing, anchor state, first_reaction,
-origin, takeaway), its context edges (parent, relates-to, the beads that
+origin), its context edges (parent, relates-to, the beads that
 track it, the beads that wait on it by a blocks or until edge, with a count per
 class), and the store that answered. --frontier adds the verdict on what holds
 it (ready/advancing/stuck) with each open wait named and its closed blockers
@@ -208,8 +207,8 @@ SUBJ=$(printf '%s' "$RAW" | jq -c '.[0]')
 
 # ── A. Subject core ─────────────────────────────────────────────────────────
 # absent -> null, present-but-empty -> "" is preserved: `//` alternates only on
-# null, so a metadata key that resolves to "" (a cleared route, an unsettled
-# takeaway) reads as the empty string it is, distinct from an absent key.
+# null, so a metadata key that resolves to "" (a cleared route) reads as the
+# empty string it is, distinct from an absent key.
 SUBJECT_CORE=$(printf '%s' "$SUBJ" | jq -c '
   (.metadata // {}) as $m | {
     id,
@@ -233,9 +232,7 @@ SUBJECT_CORE=$(printf '%s' "$SUBJ" | jq -c '
         reason: ($m["gc.first_reaction_reason"] // null),
         target: ($m["gc.first_reaction_target"] // null)
       },
-    origin: ($m["gc.origin"] // null),
-    takeaway: ($m["gc.takeaway"] // null),
-    takeaway_settled: ($m["gc.takeaway_settled"] // null)
+    origin: ($m["gc.origin"] // null)
   }')
 
 # ── E. Store ────────────────────────────────────────────────────────────────
@@ -419,11 +416,6 @@ RT=$(g '.subject.routed_to // ""'); XRT=$(g '.subject.execution_routed_to // ""'
 [ -n "$RT" ]  && printf '  Routed to   %s\n' "$RT"
 [ -n "$XRT" ] && printf '  Execution   %s  (provenance, not a live route)\n' "$XRT"
 OR=$(g '.subject.origin // ""'); [ -n "$OR" ] && printf '  Origin      %s\n' "$OR"
-TA=$(g '.subject.takeaway // ""')
-if [ -n "$TA" ]; then
-  SETTLED=$(g '.subject.takeaway_settled // ""')
-  printf '  Takeaway    %s%s\n' "$TA" "$(case "$SETTLED" in ""|null|0) ;; *) printf '  [settled]' ;; esac)"
-fi
 FR=$(g '.subject.first_reaction.reaction // ""')
 if [ -n "$FR" ]; then
   FRT=$(g '.subject.first_reaction.target // ""')

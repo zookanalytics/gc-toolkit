@@ -283,7 +283,7 @@ eq "$RC" "0" "a descriptor-only frontier is not an executable frontier"
 
 echo "== 12. held on purpose is a NOTE, not a finding =="
 clear_stores
-store alpha "$(root R1 CV1 dead-slot "$OLD" '"gc.takeaway":"operator parked this"')" \
+store alpha "$(root R1 CV1 dead-slot "$OLD" '"hold_reason":"operator parked this"')" \
             "$(step done1 R1 closed "$OLD" hq-dead hq-dead)" \
             "$(step front1 R1 open "$OLD")" \
             "$(convoy CV1 open)"
