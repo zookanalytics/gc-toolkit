@@ -170,8 +170,8 @@ last_line() { printf '%s\n' "$OUT" | tail -n 1; }
 
 echo "# a rejected branch is brought current by merging the base in"
 clone polecat/w1
-STALE="stale base at head $W1: PR#1 conflicts with '$BASE'."
-setup_run "$(bead polecat/w1 "$(rejected "$STALE" '"prepare_mode":"merge","conflict_audit":"entries from an earlier round",
+MERGE_ONLY="Conflicts with $BASE at $BASE_TIP"
+setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY" '"prepare_mode":"merge","conflict_audit":"entries from an earlier round",
   "conflict_question":"a question from an earlier round"')")"
 eq "$RC" "0" "(1) the resume exits 0"
 eq "$(parents)" "$W1 $BASE_TIP" "(1) HEAD is a merge commit of the PR head and origin/$BASE, in that order"
@@ -181,7 +181,7 @@ called "git merge --no-edit origin/$BASE" \
 eq "$(rewrites)" "0" "(1) nothing rebases, resets, commits, cherry-picks or pushes"
 eq "$(g "$CO" rev-parse refs/heads/polecat/w1)" "$W1" "(1) origin's branch is untouched: the resume pushes nothing"
 eq "$(at_merge bring_current_from)" "$W1" "(1) before the merge runs, bring_current_from is the PR head"
-eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the stale-base rejection's scope is merge-only"
+eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the conflict rejection's scope is merge-only"
 eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" "(1) before the merge runs, the last round's audit and question are cleared"
 eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 merge-only" "(1) the round stays on the bead for the hand-off to read"
 eq "$(meta rejection_reason)" "<absent>" "(1) rejection_reason is unset"
@@ -241,13 +241,12 @@ for m in '' '{"rejection_reason":""}'; do
   eq "$(grep -c '^git merge --no-edit' "$CALLS")" "0" "(7) $label: nothing merges the base in"
 done
 
-echo "# the scope is merge-only for a stale-base or conflict rejection, and with-work for any other"
+echo "# the scope is merge-only for a conflict rejection, and with-work for any other"
 scope_case() { # <label> <rejection_reason> <scope>
   clone polecat/w1
   setup_run "$(bead polecat/w1 "$(rejected "$2")")"
   eq "$(at_merge bring_current_scope)" "$3" "(8) $1 is stamped $3 before the merge runs"
 }
-scope_case "a stale-base rejection" "$STALE" merge-only
 scope_case "a conflict rejection" "$CONFLICTS" merge-only
 scope_case "a failed-tests rejection" "tests failed" with-work
 
@@ -332,7 +331,7 @@ for held in tk-step tk-w; do
 done
 
 clone polecat/w1
-setup_run "$(bead polecat/w1 "$(rejected "$STALE")")" STUB_UPDATE_FAIL_ON=bring_current_from
+setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY")")" STUB_UPDATE_FAIL_ON=bring_current_from
 eq "$RC" "1" "(16c) a round the store refuses stops the resume"
 called "git merge --no-edit origin/$BASE" && bad "(16c) before the merge" || ok "(16c) before the merge"
 

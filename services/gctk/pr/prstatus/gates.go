@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -35,23 +35,20 @@ func IsMachineGate(b person.Blocker) bool {
 // working while it does.
 // Its gates and the beads a person owes count for nothing here: the walk reaches
 // each of them and counts it itself, so one move is not counted twice. A
-// person's move is needs-attention, and needs-review once the pull request is
-// open on Gas Town's pending record, the record a PR's bead carries from its
-// publication to its merge (services/gctk/pr/record declares its values, and
-// docs/state-machine.md, "The pending record", defines them), at the head the
-// refinery validated ([record.Pending]), where the move is a review. The walk
-// reads no GitHub, so that review is a person's move only once pr-facts.sh has
-// recorded a posture, which it does not read while the pull request is a draft,
-// the city's work. A pull request at a head the refinery has not validated
-// ([record.HeadChanged]) waits on the refinery, an anchor whose pull request is
-// not open has none to review, and a bead with no merge_result is no merge
-// anchor.
+// person's move is needs-attention, and needs-review once the pull request
+// waits on a person's review as the read the one-PR update saved on its bead
+// shows it ([pr.AwaitsReview]): open on Gas Town's pending record at the head
+// the refinery validated, read at that head, no draft, and not approved. The
+// walk reads no GitHub, so a pull request whose read is not of that head waits
+// on the PR watch, a draft is the city's work, an approved one is the city's to
+// land, one at a head the refinery has not validated waits on the refinery, an
+// anchor whose pull request is not open has none to review, and a bead with no
+// merge_result is no merge anchor.
 func awaitsPerson(b person.Blocker, own []person.Blocker, edges map[string][]person.Blocker) bool {
-	result := b.Metadata["merge_result"]
-	if result == "" {
+	f := RowFacts(b.Metadata)
+	if f.MergeResult == "" {
 		return false
 	}
-	f := RowFacts(b.Metadata)
 	for _, e := range own {
 		switch {
 		case !e.Open() || person.IsHumanGate(e.IssueType, e.AwaitType):
@@ -65,8 +62,7 @@ func awaitsPerson(b person.Blocker, own []person.Blocker, edges map[string][]per
 	case NeedsAttention:
 		return true
 	case NeedsReview:
-		posture, _ := splitDated(f.PRPosture)
-		return result == record.Pending && posture != ""
+		return pr.AwaitsReview(f.MergeResult, b.Metadata["pr_head_sha"], b.Metadata["pr_github_read"])
 	}
 	return false
 }

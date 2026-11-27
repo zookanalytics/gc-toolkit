@@ -1,27 +1,19 @@
 [
   {
-    "name": "an approved PR with nothing in flight",
-    "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
-    "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}}
-    ]
-  },
-  {
-    "name": "an unapproved PR with a review child in flight",
+    "name": "a PR with a review child in flight",
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv"]},
       {"id": "tk-a.rv", "status": "open", "issue_type": "task", "metadata": {"task_kind": "review", "anchor_bead": "tk-a", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
   },
   {
-    "name": "an unapproved PR with nothing in flight",
+    "name": "a PR with nothing in flight",
     "anchor": "tk-a",
     "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}}
+      {"id": "tk-a", "status": "open"}
     ]
   },
   {
@@ -29,7 +21,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv", "tk-g"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv", "tk-g"]},
       {"id": "tk-a.rv", "status": "open", "issue_type": "task", "metadata": {"task_kind": "review", "anchor_bead": "tk-a"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -39,7 +31,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-g"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -49,7 +41,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rv"]},
       {"id": "tk-a.rv", "status": "open", "issue_type": "task", "title": "arch review", "waits_on": ["tk-g"], "metadata": {"task_kind": "review", "anchor_bead": "tk-a", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "rule on the arch finding"}
     ]
@@ -59,18 +51,18 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-t"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-t", "status": "open", "issue_type": "task", "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "approve the release"}
     ]
   },
   {
-    "name": "an open human gate on one of two blockers, on an approved PR",
+    "name": "an open human gate on one of two blockers",
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw", "tk-a.rw2"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw", "tk-a.rw2"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task"},
       {"id": "tk-a.rw2", "status": "open", "issue_type": "task", "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
@@ -81,7 +73,7 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-g"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-g", "status": "closed", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -91,7 +83,7 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open"},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-g"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -101,7 +93,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "closed", "issue_type": "task", "waits_on": ["tk-g"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -111,7 +103,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"]}
     ]
   },
@@ -120,7 +112,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-a.rv", "status": "open", "issue_type": "task", "title": "arch review", "metadata": {"task_kind": "review", "anchor_bead": "tk-a", "gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "is this review stuck?", "tracks": ["tk-a.rv"]}
     ]
@@ -128,18 +120,18 @@
   {
     "name": "a conversation that has closed holds nothing",
     "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "closed", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"]}
     ]
   },
   {
     "name": "a conversation tracking the anchor with no edge onto it, as once its sitting lifted the hold",
     "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open"},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a"]}
     ]
   },
@@ -148,7 +140,7 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a.rw"]}
     ]
@@ -158,17 +150,17 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c", "tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c", "tk-a.rw"]},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.polecat-1", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a", "source_ruling_bead": "tk-c"}}
     ]
   },
   {
-    "name": "an approved PR whose conversation stays for other work waits for the return, not merging",
+    "name": "a PR whose conversation stays for other work waits for the return",
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
@@ -178,7 +170,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "closed", "issue_type": "task", "title": "the docs it waits on"}
     ]
@@ -188,7 +180,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "in_progress", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
@@ -198,7 +190,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "human", "title": "what about this?", "tracks": ["tk-a"], "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
@@ -208,7 +200,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-c"]},
       {"id": "tk-c", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-c", "title": "should this land as built?", "tracks": ["tk-a"], "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -218,9 +210,9 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-bc"], "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-bc"], "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[],\"requesters\":[]}}"}},
       {"id": "tk-bc", "status": "open", "issue_type": "task", "assignee": "gc-toolkit/gc-toolkit.tk-bc", "title": "does this one land first?", "tracks": ["tk-b"], "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "open", "issue_type": "task", "title": "the docs it waits on", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
@@ -228,9 +220,9 @@
   {
     "name": "a live blocker routed to human is no person's",
     "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "task", "title": "pick the release window", "metadata": {"gc.routed_to": "human"}}
     ]
   },
@@ -239,16 +231,16 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?"}
     ]
   },
   {
     "name": "a closed decision no longer holds",
     "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "closed", "issue_type": "decision", "title": "keep the old flag?"}
     ]
   },
@@ -257,7 +249,7 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?", "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "open", "issue_type": "task", "title": "drop the flag's callers", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
@@ -267,7 +259,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?", "waits_on": ["tk-w"]},
       {"id": "tk-w", "status": "closed", "issue_type": "task", "title": "drop the flag's callers"}
     ]
@@ -277,7 +269,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate", "blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?", "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
@@ -285,9 +277,9 @@
   {
     "name": "a blocker a pool will claim is the city's",
     "anchor": "tk-a",
-    "want": {"status": "merging", "held": []},
+    "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-d"]},
       {"id": "tk-d", "status": "open", "issue_type": "task", "title": "fix the flaky check", "metadata": {"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}
     ]
   },
@@ -296,7 +288,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-g"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "answer the review"}
     ]
   },
@@ -305,7 +297,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-review", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-g"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-g"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "timer", "title": "wait out the freeze"}
     ]
   },
@@ -314,19 +306,9 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}}
-    ]
-  },
-  {
-    "name": "an approved PR whose rework waits on another PR that waits on a review",
-    "anchor": "tk-a",
-    "want": {"status": "needs-attention", "held": ["blocked"]},
-    "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}}
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[],\"requesters\":[]}}"}}
     ]
   },
   {
@@ -334,19 +316,9 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-d"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "keep the old flag?"}
-    ]
-  },
-  {
-    "name": "an approved PR whose rework waits on a decision",
-    "anchor": "tk-a",
-    "want": {"status": "needs-attention", "held": ["blocked"]},
-    "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-p"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-p", "status": "open", "issue_type": "decision", "title": "pick the release window"}
     ]
   },
   {
@@ -354,9 +326,9 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-b.rw"], "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-b.rw"], "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[],\"requesters\":[]}}"}},
       {"id": "tk-b.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-b"}}
     ]
   },
@@ -365,9 +337,9 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_posture": "approved@def@2026-10-27T00:00:00Z"}}
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[\"operator\"],\"requesters\":[]}}"}}
     ]
   },
   {
@@ -375,9 +347,9 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "closed", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "mr_merged", "pr_posture": "approved@def@2026-10-27T00:00:00Z"}}
+      {"id": "tk-b", "status": "closed", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "mr_merged"}}
     ]
   },
   {
@@ -385,7 +357,7 @@
     "anchor": "tk-a",
     "want": {"status": "working", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the change the rework builds on"}
     ]
@@ -395,8 +367,8 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-b"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR this one is stacked on", "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}}
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-b"]},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR this one is stacked on", "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[],\"requesters\":[]}}"}}
     ]
   },
   {
@@ -404,9 +376,9 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-g"], "metadata": {"merge_result": "pull_request_pending", "pr_posture": "approved@def@2026-10-27T00:00:00Z"}},
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "waits_on": ["tk-g"], "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[\"operator\"],\"requesters\":[]}}"}},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"}
     ]
   },
@@ -415,10 +387,10 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw", "tk-a.rw2"], "metadata": {"pr_posture": "review_required@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-a.rw", "tk-a.rw2"]},
       {"id": "tk-a.rw", "status": "open", "issue_type": "task", "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
       {"id": "tk-a.rw2", "status": "open", "issue_type": "task", "waits_on": ["tk-b"], "metadata": {"task_kind": "rework", "anchor_bead": "tk-a"}},
-      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_posture": "review_required@def@2026-10-27T00:00:00Z"}}
+      {"id": "tk-b", "status": "open", "issue_type": "task", "title": "the PR the rework builds on", "metadata": {"merge_result": "pull_request_pending", "pr_head_sha": "def", "pr_github_read": "{\"pr\":{\"head\":\"def\",\"state\":\"OPEN\",\"draft\":false},\"conversation\":{\"approvers\":[],\"requesters\":[]}}"}}
     ]
   },
   {
@@ -426,7 +398,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": []},
     "beads": [
-      {"id": "tk-a", "status": "open", "metadata": {"merge_hold": "true", "pr_posture": "approved@abc@2026-10-27T00:00:00Z"}}
+      {"id": "tk-a", "status": "open", "metadata": {"merge_hold": "true"}}
     ]
   },
   {
@@ -434,7 +406,7 @@
     "anchor": "tk-a",
     "want": {"status": "needs-attention", "held": ["gate", "blocked"]},
     "beads": [
-      {"id": "tk-a", "status": "open", "waits_on": ["tk-g", "tk-d"], "metadata": {"pr_posture": "approved@abc@2026-10-27T00:00:00Z"}},
+      {"id": "tk-a", "status": "open", "waits_on": ["tk-g", "tk-d"]},
       {"id": "tk-g", "status": "open", "issue_type": "gate", "await_type": "human", "title": "sign off the release"},
       {"id": "tk-d", "status": "open", "issue_type": "decision", "title": "pick the release window"}
     ]

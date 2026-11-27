@@ -12,7 +12,7 @@ import (
 // test reads the writer's own spelling: its two prefixes and the values it
 // names under each.
 func TestLabelNamesAreTheWritersNames(t *testing.T) {
-	raw, err := os.ReadFile("../../../assets/scripts/pr-status-label.sh")
+	raw, err := os.ReadFile("../../../../assets/scripts/pr-status-label.sh")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,12 +71,24 @@ type PRSigns struct {
 }
 
 // SavedChecks is the required check runs at Head, each result its check suite
-// holds as the run's latest.
+// holds as the run's latest, and each check suite there. A checks part saved
+// before the update read the suites holds none, nil, which the update reads as
+// stale (moved).
 type SavedChecks struct {
 	ReadAt string        `json:"read_at"`
 	Head   string        `json:"head"`
 	Runs   []RequiredRun `json:"runs"`
+	Suites []SavedSuite  `json:"suites"`
 	Signs  CheckSigns    `json:"signs"`
+}
+
+// SavedSuite is one check suite at the head: its id, its own status, when
+// GitHub created it, and how many check runs it holds, required or not.
+type SavedSuite struct {
+	ID        int64  `json:"id"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+	CheckRuns int    `json:"check_runs"`
 }
 
 // CheckSigns are the signs kept with the checks: the head, the rollup's state,
@@ -91,16 +103,17 @@ type CheckSigns struct {
 
 // SavedConversation is the PR's conversation as the one-PR update read it, with
 // the definition of feedback applied from Since: the accounts whose approval or
-// request for changes stands, the newest feedback in each id space and the
-// review threads waiting on the city's answer, which the rule reads, and the
-// unresolved threads and GitHub's review decision, which the net compares
-// (differs). Approvals is each approval that stands.
+// request for changes stands, the posts that are feedback the city has not
+// taken (untakenOf) and the review threads waiting on the city's answer, which
+// the rule reads and the landing order's take files from, and the unresolved
+// threads and GitHub's review decision, which the net compares (differs).
+// Approvals is each approval that stands.
 type SavedConversation struct {
 	ReadAt         string            `json:"read_at"`
 	Since          string            `json:"since"`
 	Approvers      []string          `json:"approvers"`
 	Requesters     []string          `json:"requesters"`
-	Feedback       NewestFeedback    `json:"feedback"`
+	Untaken        []Post            `json:"untaken"`
 	Awaiting       []string          `json:"awaiting"`
 	Unresolved     []string          `json:"unresolved"`
 	ReviewDecision string            `json:"review_decision"`
@@ -109,14 +122,12 @@ type SavedConversation struct {
 }
 
 // Approval is one review that approves the PR and has not been dismissed,
-// whoever gave it: its id, its author, the commit it was given on, "" when
-// GitHub names none, and Inline, the newest inline comment it carries that is
-// feedback by the definition, 0 for none, which a dismissal would retire.
+// whoever gave it: its id, its author, and the commit it was given on, "" when
+// GitHub names none.
 type Approval struct {
 	ID     int64  `json:"id"`
 	Author string `json:"author"`
 	Commit string `json:"commit"`
-	Inline int64  `json:"inline"`
 }
 
 // ConversationSigns are the signs kept with the conversation: the comment, review
@@ -157,7 +168,7 @@ func (s *SavedRead) view() (*GitHubRead, string) {
 	p, c := s.PR, s.Conversation
 	return &GitHubRead{ReadAt: p.ReadAt, Since: c.Since, URL: p.URL, Number: p.Number, Repository: p.Repository,
 		HeadBranch: p.HeadBranch, Base: p.Base, Head: p.Head, State: p.State, Draft: p.Draft, MergeState: p.MergeState,
-		Checks: s.Checks.Runs, Approvers: c.Approvers, Requesters: c.Requesters, Feedback: c.Feedback,
+		Checks: s.Checks.Runs, Approvers: c.Approvers, Requesters: c.Requesters, Untaken: c.Untaken,
 		Awaiting: c.Awaiting}, ""
 }
 
@@ -220,12 +231,17 @@ func labels(s gh.Signs) []string { return listed(slices.Sorted(slices.Values(s.L
 // by the one-PR update's table (specs/tk-1tfzr71.149/design.md, section 4). A
 // part whose own signs differ is stale. A move of the comment, review or
 // dismissed count makes the PR part stale too, since reviews move its merge
-// state, and so does a move of the checks, which are read with it. The PR part
-// of an open PR whose merge state GitHub read as UNKNOWN stays stale until a
-// read finds the state, since GitHub computes it after a push or a base move
-// and moves no sign when it does; a merged or closed PR's reads UNKNOWN for
-// good. Every part is stale when the saved read lacks a part or stale says it
-// is not current for the bead.
+// state, and so does a move of the checks, which are read with it. A move of
+// the draft flag makes the checks stale, since a ready transition starts the
+// workflows that listen for it, and a suite that never starts a job moves no
+// sign of the checks. So does a checks part that holds no suites, as one saved
+// before the update read them. The PR part of an open PR whose merge state
+// GitHub read as UNKNOWN stays stale until a read finds the state, since GitHub
+// computes it after a push or a base move and moves no sign when it does; a
+// merged or closed PR's reads UNKNOWN for good. A conversation part that holds
+// no list of the posts the city has not taken is stale, since the take and the
+// evaluator read the list. Every part is stale when the saved read lacks a part
+// or stale says it is not current for the bead.
 func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	if stale != "" || saved == nil || saved.PR == nil || saved.Checks == nil || saved.Conversation == nil ||
 		saved.Labels == nil {
@@ -233,10 +249,11 @@ func moved(saved *SavedRead, s gh.Signs, stale string) parts {
 	}
 	var p parts
 	p.labels = !slices.Equal(saved.Labels.Names, labels(s))
-	p.checks = !saved.Checks.Signs.equal(checkSigns(s))
+	p.checks = !saved.Checks.Signs.equal(checkSigns(s)) || saved.PR.Signs.Draft != s.IsDraft ||
+		saved.Checks.Suites == nil
 	c := saved.Conversation.Signs
 	counts := c.Comments != s.Comments || c.Reviews != s.Reviews || c.Dismissed != s.Dismissed
-	p.conversation = counts || c.UpdatedAt != s.UpdatedAt
+	p.conversation = counts || c.UpdatedAt != s.UpdatedAt || saved.Conversation.Untaken == nil
 	unknown := saved.PR.State == "OPEN" && saved.PR.MergeState == "UNKNOWN"
 	p.pr = saved.PR.Signs != prSigns(s) || p.checks || counts || unknown
 	return p

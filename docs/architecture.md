@@ -190,8 +190,14 @@ performer; the full transition table with writers is
    rules edit the
    branch with them can push while a run works it. Work that needs the branch
    changed, such as
-   a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
+   a person's comment or a conflict with the target, is filed as an ask, and
+   only the PR's review run takes it. A run puts a question to a person in one
+   place, a human gate on the PR's bead, which the person answers on the board
+   as any gate. A person's comment made while the question is open is feedback
+   like any other, and the landing order pours a run for it while the gate
+   still holds the bead. When the comment settles the question, that run
+   resolves the gate. Each city writer returns the PR to draft before it
+   pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
@@ -231,9 +237,8 @@ any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 `gc` build that moves the text the seed audit renders — are handled by these
-reactive paths: `pr-facts.sh` (an arm of the cadence), or the landing order for
-a PR on the pending record, records PR events and files a human gate, a pack
-order runs `gc doctor` and records each run, which the board shows,
+reactive paths: the landing order records PR events and files a human gate, a
+pack order runs `gc doctor` and records each run, which the board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -375,8 +380,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
-  close, until a person resolves the gate with the answer as its reason, headed
-  `ruled:`, `moot:` or `benign:`
+  close, until the gate is resolved with a person's answer as its reason,
+  headed `ruled:`, `moot:` or `benign:`
   ([component-model.md](component-model.md#4-where-each-component-sits) has the
   helper's contract). A situation that needs a person is a human gate, not
   mail to the po. A patrol files a human gate on the bead a
@@ -557,11 +562,6 @@ why a reader must know it, and the work that retires it.
 - **`gc-helm.sh` still carries the conversation verbs.** open, engage,
   attach, dismiss and handback run as shell, and gctk reaches open and the
   read-only resolve through the script. tk-ssm8qns.15 moves them into gctk.
-- **The merge cadence still admits work on a pending record.** It files work
-  for a PR on the pending record beside the landing order
-  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
-  decision that the landing order is the one path is not yet what runs. The
-  GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
 - **The witness still patrols, and the deacon still runs `gc doctor`.** Until
   the patrols member's second landing, the witness's hourly loop salvages,
   checks pool seats and the refinery's queue in its session, and returns a dead
@@ -572,5 +572,4 @@ why a reader must know it, and the work that retires it.
   old review path beside the review run
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
   PR is on it, so step 7 is not yet the one review path in the code. The
-  retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
-  (tk-1tfzr71.21) has landed.
+  retirement bead (tk-1tfzr71.122) deletes the old path.

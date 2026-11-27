@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
@@ -102,18 +101,18 @@ func putOutput(s *fake.Store, id, raw string) {
 func checking(t *testing.T, s *fake.Store, rt *gcfake.Runtime, n int) (int, string, string) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	rec := &recorder{dir: t.TempDir(), wait: time.Second, gates: gates{rt}, scripts: rt}
+	rec := &recorder{dir: t.TempDir(), wait: time.Second, gates: gates{rt}}
 	code := passedIn(ledger.New(s), "tk-run", n, false, rec, &out, &errb)
 	return code, out.String(), errb.String()
 }
 
 // The loop's check with --record records the run's result when the iteration
-// ends the loop, and then closes the findings whose asks closed: at a pass it
-// exits 0 once that landed; at an iteration that neither passed nor is the
+// ends the loop: at a pass it exits 0 once that landed, and runs no script, so
+// it reaches only the store; at an iteration that neither passed nor is the
 // last it records nothing; at the last attempt not passing it records a result
 // that does not pass, asks a person through a review-loop-exhausted gate and
-// exits 1, so the loop ends exhausted. A write, the gate or the findings' close
-// that does not land exits 75, which spends no attempt.
+// exits 1, so the loop ends exhausted. A write that does not land exits 75,
+// which spends no attempt.
 func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	triage := func(n int, head string) string {
 		return `{"review":"triage","iteration":` + string(rune('0'+n)) + `,"head":"` + head + `","checks":[],"material":false}`
@@ -145,8 +144,8 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 		!strings.Contains(out, "tk-pr: review passed at "+runHead+" into main") {
 		t.Fatalf("a passed iteration = exit %d, review_results %s: %s%s", code, result(s), out, errs)
 	}
-	if got := scripts(rt); len(got) != 1 || got[0] != "finding.sh close-answered --anchor tk-pr" {
-		t.Fatalf("a passed iteration ran %v; want only finding.sh close-answered", got)
+	if got := scripts(rt); len(got) != 0 {
+		t.Fatalf("a passed iteration ran %v; want no script", got)
 	}
 
 	s = withBound(runStore())
@@ -162,9 +161,8 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 		t.Fatalf("the last attempt not passing = exit %d, review_results %s: %s%s", code, result(s), out, errs)
 	}
 	got := scripts(rt)
-	if len(got) != 2 || !strings.HasPrefix(got[0], "human-gate.sh --subject tk-pr --key review-loop-exhausted --message Review run tk-run exhausted its attempts at "+runNext) ||
-		got[1] != "finding.sh close-answered --anchor tk-pr" {
-		t.Fatalf("the exhausted loop ran %v; want its gate, then the findings' close", got)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "human-gate.sh --subject tk-pr --key review-loop-exhausted --message Review run tk-run exhausted its attempts at "+runNext) {
+		t.Fatalf("the exhausted loop ran %v; want its gate alone", got)
 	}
 
 	s = withBound(runStore())
@@ -173,12 +171,5 @@ func TestTheLoopsCheckRecordsTheRunsResult(t *testing.T) {
 	s.UpdateErr = errors.New("the store did not take the write")
 	if code, _, errs := checking(t, s, &gcfake.Runtime{}, 1); code != passedNoVerdict || !strings.Contains(errs, "runs again") {
 		t.Fatalf("a result write that did not land = exit %d: %s; want %d", code, errs, passedNoVerdict)
-	}
-	s.UpdateErr = nil
-	rt = &gcfake.Runtime{OnScript: func(c gcfake.Call) gascity.Result {
-		return gascity.Result{Code: 1, Output: "finding.sh: could not read findings"}
-	}}
-	if code, _, errs := checking(t, s, rt, 1); code != passedNoVerdict || !strings.Contains(errs, "findings whose asks closed") {
-		t.Fatalf("a findings' close that did not land = exit %d: %s; want %d", code, errs, passedNoVerdict)
 	}
 }

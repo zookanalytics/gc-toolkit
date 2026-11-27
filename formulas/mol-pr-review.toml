@@ -3,9 +3,10 @@ A PR's review run for one head: a checked loop that judges one head per
 iteration. In each iteration triage first checks that the run still stands,
 then reads the change at the head and picks the checks it needs, a lane of
 mol-pr-review-lane runs each picked check by its own method, and
-rule-and-repair rules every finding and every ask the round can take, answers
-them on the PR in one comment for the head, and makes the round's fixes as one
-push. A push is a new head, which the next iteration triages. The loop's check,
+rule-and-repair rules every finding and every ask the round can take, makes the
+round's fixes as one push, and answers them on the PR: in one comment for the
+head, and at each person's post, where it was made. A push is a new head, which
+the next iteration triages. The loop's check,
 `gctk review passed --record`, is also the run's final validate and record: at
 the iteration that ends the loop, a pass or the last attempt, it writes the
 result for the last head the run judged and its target, which the landing order
@@ -183,7 +184,7 @@ prints for the ruling's reason:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" defer --title "<the fix, one line>" --file "<a file holding what it fixes and why>"`
 A question only a person can answer goes to a gate on `{{pr_bead}}`, which the
 call prints for the ruling:
-`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, and what each answer means>"`
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" question --key "<a slug for the point>" --message "<the question, what it asks about (a post by its URL, else what the ask names), and what each answer means>"`
 
 **4. Push the round's fixes** in every round, a round with nothing to push
 included. The call brings the PR's title and body to what `{{pr_bead}}`
@@ -204,12 +205,18 @@ the head the round judged or did not read: run it again.
 `{"check", "finding"}` or `{"ask"}` each with its `ruling`, its `reason`, the
 `commit` of a must-fix, `"summary": true` on a must-fix fixed in the PR's title
 or summary, and the `gate` of a question, and `pushed`, the head the push
-printed, when it pushed. Then check and write it:
+printed, when it pushed. When an ask's post settles a question that a gate on
+`{{pr_bead}}` asks, name that gate in the ask's ruling as `settles`. When the
+post makes the question moot, also set `"moot": true` in that ruling. Then
+check and write it:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" output`
 Exit 3 prints why the output does not stand: correct the file and run it again.
 
-**6. Answer them on the PR** in the head's one comment:
+**6. Answer them on the PR**, in the head's one comment and at each person's
+post the round ruled:
 `"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/review-run.sh" post`
+On exit 1 or 2, run it again. When it fails again, cancel the run:
+`"$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/decline.sh" --step review-loop --reason "the round's answers did not land on the PR"`
 
 **7. Close this step.** The loop's check judges the round, and records the
 run's result when the round ends the loop.
@@ -217,6 +224,6 @@ run's result when the round ends the loop.
 
 **Exit criteria:** every finding and ask ruled, the round's fixes pushed and
 the PR's title and body current with `{{pr_bead}}`, the output written, the
-comment posted, this step closed.
+round's answers posted, this step closed.
 """
 metadata = { "gc.run_target" = "{{repair_target}}" }

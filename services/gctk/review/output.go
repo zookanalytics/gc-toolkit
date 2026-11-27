@@ -33,14 +33,17 @@ import (
 // then says so, so the approver reads the diff for one.
 
 // OutputRequest is one step's output to check: the step's bead, the text the
-// step wrote, the checkouts that can read the reviewed commit, and the reader
-// of the withdrawal filed on a bead for a head, open or closed, "" when none
-// is, which the pr domain answers (pr.WithdrawalFor).
+// step wrote, the checkouts that can read the reviewed commit, the reader of
+// the withdrawal filed on a bead for a head, open or closed, "" when none is,
+// which the pr domain answers (pr.WithdrawalFor), and the reader of the
+// person's post on the PR at pr that an ask's reason names, "" when it names
+// none, which the pr domain answers too (pr.PostNamed).
 type OutputRequest struct {
 	Step       string
 	Raw        []byte
 	Repos      []string
 	Withdrawal func(bead, head string) (string, error)
+	Post       func(reason, pr string) string
 }
 
 // Refused is the error of an output the step must write again: why.
@@ -86,7 +89,7 @@ func Output(l *ledger.Ledger, req OutputRequest) ([]byte, error) {
 	case OutputLane:
 		v, err = laneOutput(run, n, req)
 	case OutputRepair:
-		v, err = repairOutput(l, run, n, req)
+		v, err = repairOutput(l, st, req)
 	}
 	if err != nil {
 		return nil, err
@@ -219,12 +222,23 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 	return &ln, nil
 }
 
-func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair, error) {
+// repairOutput checks rule-and-repair's output: a ruling for every finding a
+// lane raised and every ask the round can take, each standing by checkRuling.
+// A ruling that settles a question rules an ask that carries a person's post
+// on the PR, since the question is answered with that post. The gate a ruling
+// names, in gate or settles, is kept trimmed, so the round's post and the
+// run's record read the gate the check read.
+func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error) {
+	run, n := st.Run, st.Iteration
 	var rp Repair
 	if err := decode(req.Raw, &rp, OutputRepair); err != nil {
 		return nil, err
 	}
 	rp.Iteration = n
+	for i := range rp.Rulings {
+		r := &rp.Rulings[i]
+		r.Gate, r.Settles = strings.TrimSpace(r.Gate), strings.TrimSpace(r.Settles)
+	}
 	it := run.Iterations[n]
 	if it == nil || it.Triage == nil {
 		return nil, refuse("triage has written nothing in iteration %d, so there is nothing to rule", n)
@@ -246,6 +260,16 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 			return nil, refuse("%s is ruled twice", r.Subject())
 		}
 		subjects[r.subject()] = true
+		if r.Ask != "" && strings.TrimSpace(r.Settles) != "" {
+			if req.Post == nil {
+				return nil, errors.New("no reader of the posts an ask names was given, so a settled question cannot be checked")
+			}
+			i := slices.IndexFunc(asks, func(a Ask) bool { return a.ID == r.Ask })
+			if req.Post(asks[i].Reason, st.PR()) == "" {
+				return nil, refuse("%s settles the question at %s, and it carries no person's post on the PR to answer "+
+					"the question with", r.Subject(), r.Settles)
+			}
+		}
 	}
 	for _, ln := range it.Lanes {
 		for _, f := range ln.Findings {
@@ -258,6 +282,9 @@ func repairOutput(l *ledger.Ledger, run *Run, n int, req OutputRequest) (*Repair
 		if a.Takeable() && !subjects[Ruling{Ask: a.ID}.subject()] {
 			return nil, refuse("ask %s is open and nothing holds it, so the round rules it", a.ID)
 		}
+	}
+	if err := checkSettles(l, run.PRBead, rp.Rulings); err != nil {
+		return nil, err
 	}
 	if rp.Pushed != "" && !git.IsObjectID(rp.Pushed) {
 		return nil, refuse("the push %q is not a full object name", rp.Pushed)
@@ -381,6 +408,87 @@ func checkRuling(r Ruling, it *Iteration, asks []Ask, declined map[string]string
 			"comes as an ask of its own, which the round rules must-fix", r.Subject(), was)
 	}
 	return nil
+}
+
+// checkSettles is why the round's rulings do not stand on the questions they
+// settle: moot with no gate, a gate settled by a finding's ruling or by a
+// question's, a gate two rulings settle, one the round also puts a question
+// to, and one that is not an open human gate on the bead that owns the PR
+// under a question's key. A read that fails returns the store's error.
+func checkSettles(l *ledger.Ledger, bead string, rs []Ruling) error {
+	asked := map[string]bool{}
+	for _, r := range rs {
+		if r.Ruling == RulingQuestion {
+			asked[strings.TrimSpace(r.Gate)] = true
+		}
+	}
+	settled := map[string]string{}
+	var owner *ledger.Record
+	for _, r := range rs {
+		gate := strings.TrimSpace(r.Settles)
+		switch {
+		case gate == "" && r.Moot:
+			return refuse("%s is ruled moot and names no gate whose question it makes moot", r.Subject())
+		case gate == "":
+			continue
+		case r.Ask == "":
+			return refuse("%s names the gate %s it settles, and only the ruling of an ask for a person's post settles one",
+				r.Subject(), gate)
+		case r.Ruling == RulingQuestion:
+			return refuse("%s is put to a person and names the gate %s it settles, and a question settles none", r.Subject(), gate)
+		case settled[gate] != "":
+			return refuse("%s and %s both settle the gate %s, which one post answers", settled[gate], r.Subject(), gate)
+		case asked[gate]:
+			return refuse("%s settles the gate %s, which the round puts a question to", r.Subject(), gate)
+		}
+		settled[gate] = r.Subject()
+		if owner == nil {
+			o, err := one(l, bead)
+			if err != nil {
+				return err
+			}
+			owner = o
+		}
+		why, err := openQuestion(l, owner, gate)
+		if err != nil {
+			return err
+		}
+		if why != "" {
+			return refuse("%s settles %s, which %s", r.Subject(), gate, why)
+		}
+	}
+	return nil
+}
+
+// openQuestion says why gate is not a question a review run put to a person
+// that holds owner, the bead that owns the PR, and is empty when it is: an
+// open human gate under a key QuestionKey opens, with owner's blocks edge onto
+// it. A read that fails returns the store's error.
+func openQuestion(l *ledger.Ledger, owner *ledger.Record, gate string) (string, error) {
+	rows, err := l.Find(ledger.ByID(gate).WithClosed())
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "the store does not hold", nil
+	}
+	g := rows[0]
+	switch {
+	case !strings.EqualFold(g.IssueType(), "gate") || g.AwaitType() != "human":
+		return "is no human gate", nil
+	case !strings.HasPrefix(g.AwaitID(), QuestionKey):
+		return fmt.Sprintf("is keyed %q, which is no question's key (%s<slug>)", g.AwaitID(), QuestionKey), nil
+	case g.Status() == "closed":
+		return "is closed already", nil
+	}
+	edges, err := owner.Edges()
+	if err != nil {
+		return "", &ledger.ReadError{ID: owner.ID, Reason: "its edges did not decode: " + err.Error()}
+	}
+	if !slices.ContainsFunc(edges, func(e ledger.Edge) bool { return e.Type == ledger.EdgeBlocks && e.ID == gate }) {
+		return "does not hold " + owner.ID, nil
+	}
+	return "", nil
 }
 
 // earlierDeclines is each ask an earlier round of the run ruled declined or

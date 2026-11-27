@@ -1,12 +1,14 @@
 package prstatus
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -353,8 +355,26 @@ func withStatus(b person.Blocker, s string) person.Blocker {
 }
 
 // awaitingReview is a pull request open on Gas Town's pending record at the head
-// the refinery validated, with no approval: its next move is a person's review.
-var awaitingReview = map[string]string{"merge_result": "pull_request_pending", "pr_posture": "review_required@h@t"}
+// the refinery validated, h, whose saved read shows it at that head with no
+// approval: its next move is a person's review.
+var awaitingReview = map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h",
+	"pr_github_read": savedRead("h", false, false)}
+
+// savedRead is the read the one-PR update saves of a PR open at head: a draft
+// or not, and approved by an account whose approval stands with no request for
+// changes beside it, or with no approval.
+func savedRead(head string, draft, approved bool) string {
+	approvers := []string{}
+	if approved {
+		approvers = []string{"operator"}
+	}
+	raw, err := json.Marshal(pr.SavedRead{PR: &pr.SavedPR{Head: head, State: "OPEN", Draft: draft},
+		Conversation: &pr.SavedConversation{Approvers: approvers, Requesters: []string{}}})
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
 
 func decision(id string) person.Blocker {
 	return person.Blocker{ID: id, Title: "decide " + id, Status: "open", IssueType: "decision"}
@@ -381,24 +401,29 @@ func TestHoldingOwed(t *testing.T) {
 		{"another pull request the city is changing",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {task("b.rw")}}, []string{}, []string{}},
 		{"another pull request the city is landing",
-			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}}, []string{}, []string{}},
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_github_read", savedRead("h", false, true)))}}, []string{}, []string{}},
 		{"another pull request under a merge hold",
-			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t", "merge_hold", "true"))}},
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_github_read", savedRead("h", false, true), "merge_hold", "true"))}},
 			[]string{}, []string{"b"}},
 		{"a pull request waiting on a review at the blocked status the pending record gives it",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", awaitingReview), "blocked")}},
 			[]string{}, []string{"b"}},
 		{"a pull request whose head the refinery is validating",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_head_changed"))}}, []string{}, []string{}},
-		{"a pull request in its draft stage, with no posture recorded",
-			map[string][]person.Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", map[string]string{"merge_result": "pull_request_pending"}), "blocked")}},
+		{"a pull request in its draft stage",
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", with(awaitingReview, "pr_github_read", savedRead("h", true, false))), "blocked")}},
 			[]string{}, []string{}},
+		{"a pull request the PR watch has not read yet",
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {withStatus(anchorBlocker("b", map[string]string{"merge_result": "pull_request_pending", "pr_head_sha": "h"}), "blocked")}},
+			[]string{}, []string{}},
+		{"a pull request whose saved read is of an earlier head",
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_github_read", savedRead("g", false, false)))}}, []string{}, []string{}},
 		{"a pull request that closed unmerged has no review to wait on",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "merge_result", "pull_request_closed_unmerged"))}}, []string{}, []string{}},
 		{"a bead that is no merge anchor is no review to wait on",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("t", with(awaitingReview, "merge_result", ""))}}, []string{}, []string{}},
 		{"a pull request held only by its gate is the gate's to clear",
-			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_posture", "approved@h@t"))}, "b": {gate("g")}},
+			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", with(awaitingReview, "pr_github_read", savedRead("h", false, true)))}, "b": {gate("g")}},
 			[]string{"g"}, []string{}},
 		{"a pull request waiting on a review and a decision is two moves",
 			map[string][]person.Blocker{"a": {task("rw")}, "rw": {anchorBlocker("b", awaitingReview)}, "b": {decision("d")}}, []string{}, []string{"b", "d"}},

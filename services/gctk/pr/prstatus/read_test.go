@@ -77,8 +77,8 @@ func TestReadGathersTheFacts(t *testing.T) {
 	s := &store{
 		rows: map[string]Row{"a": row("a", map[string]string{
 			"merge_hold": "true", "rebase_hold": "1",
-			"pr_posture": "approved@oid@t", "merge_result": "pull_request_pending",
-			"unread": "x",
+			"merge_result": "pull_request_pending",
+			"unread":       "x",
 		})},
 		anchored: map[string][]Row{"a": {row("rw", nil), row("rv", nil)}},
 		edges:    map[string][]person.Blocker{"a": {task("rw"), decider}, "rw": {gate("g"), other}},
@@ -92,7 +92,6 @@ func TestReadGathersTheFacts(t *testing.T) {
 		MergeHold: "true", RebaseHold: "1",
 		Gates:         []person.Blocker{gate("g")},
 		Owed:          []person.Blocker{decider, other},
-		PRPosture:     "approved@oid@t",
 		InFlightCount: 2,
 		MergeResult:   "pull_request_pending",
 	}
@@ -216,7 +215,7 @@ func TestReadOfNoAnchors(t *testing.T) {
 // Reasons names each thing behind the held values in their order, each by its
 // bead: the gates nearest first, then each bead a person owes nearest first.
 func TestReasons(t *testing.T) {
-	approved := Facts{PRPosture: "approved@oid@t"}
+	none := Facts{}
 	with := func(f Facts, edit func(*Facts)) Facts { edit(&f); return f }
 	d1 := person.Blocker{ID: "d1", Title: "first", Status: "open", IssueType: "decision"}
 	d2 := person.Blocker{ID: "d2", Title: "second", Status: "open", IssueType: "decision"}
@@ -226,12 +225,12 @@ func TestReasons(t *testing.T) {
 		f    Facts
 		want []Reason
 	}{
-		{"nothing holds the PR", approved, nil},
-		{"gates nearest first", with(approved, func(f *Facts) { f.Gates = []person.Blocker{gate("near"), gate("far")} }),
+		{"nothing holds the PR", none, nil},
+		{"gates nearest first", with(none, func(f *Facts) { f.Gates = []person.Blocker{gate("near"), gate("far")} }),
 			[]Reason{{HeldGate, "near", "ask near"}, {HeldGate, "far", "ask far"}}},
-		{"each bead a person owes, nearest first", with(approved, func(f *Facts) { f.Owed = []person.Blocker{d1, b, d2} }),
+		{"each bead a person owes, nearest first", with(none, func(f *Facts) { f.Owed = []person.Blocker{d1, b, d2} }),
 			[]Reason{{HeldBlocked, "d1", "first"}, {HeldBlocked, "b", "pr b"}, {HeldBlocked, "d2", "second"}}},
-		{"the gates before the beads a person owes", with(approved, func(f *Facts) {
+		{"the gates before the beads a person owes", with(none, func(f *Facts) {
 			f.Gates, f.Owed = []person.Blocker{gate("g")}, []person.Blocker{d1}
 		}), []Reason{{HeldGate, "g", "ask g"}, {HeldBlocked, "d1", "first"}}},
 	} {
