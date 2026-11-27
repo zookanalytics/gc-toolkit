@@ -139,9 +139,12 @@ worktree of the clone shares and which outlives any one of them:
 `--publish-bead <bead>` copies a record onto the bead's `rig_check.<check>` key,
 a key rig declares through the ledger, in one write that nothing reads back. A record says what a command did at
 a commit and never whose failure it is: a caller that judges a recorded fail
-pre-existing writes that judgment on a bead with
-`assets/scripts/rig-check-pre-existing.sh`. `gctk rig <check> --help` states the
-flags, which record answers a call, and the exit codes. `specs/tk-1hazlo2/rig-checks.md`
+pre-existing, red on the target too and carried by a tracker, marks it on a
+bead with `gctk rig pre-existing`, and the self-review's exit condition and
+`review-evidence.sh` ask the same verb whether the mark holds, which it does
+only for the fail it judged and while a tracker it names is open.
+`gctk rig <check> --help` states the flags, which record answers a call, and
+the exit codes. `specs/tk-1hazlo2/rig-checks.md`
 records the design and its measured cost.
 
 `serve` runs a copy of the rig's UI from the checkout it is called in: the serve

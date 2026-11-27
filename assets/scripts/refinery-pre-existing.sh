@@ -24,7 +24,7 @@
 # The bead must be assigned to this refinery ($GC_AGENT), and the refinery's
 # tree for it must hold its branch (refinery-lib.sh). The tracker is then
 # marked on the bead whose PR a review reads at the prepared head
-# (rig-check-pre-existing.sh): the bead's anchor_bead when it names one, else
+# (`gctk rig pre-existing`): the bead's anchor_bead when it names one, else
 # the bead. A mark that does not land changes nothing else, since a review at
 # that head runs the suite itself.
 #
@@ -104,6 +104,9 @@ fi
 
 MARKED_ON="$ANCHOR"
 [ -n "$MARKED_ON" ] || MARKED_ON="$BEAD"
-"$HERE/rig-check-pre-existing.sh" --bead "$MARKED_ON" --check "$CHECK" --commit "$PREP_HEAD" --worktree "$PREP_TREE" --trackers "$TRACKER" >&2 \
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+( CDPATH='' cd -- "$PREP_TREE" && "$GCTK" rig pre-existing "$CHECK" --bead "$MARKED_ON" --commit "$PREP_HEAD" --tracker "$TRACKER" ) >&2 \
   || echo "$PROG: the mark on $MARKED_ON did not land; the landing goes on, and a review at $PREP_HEAD runs the suite itself" >&2
 printf '%s\n' "$TRACKER"

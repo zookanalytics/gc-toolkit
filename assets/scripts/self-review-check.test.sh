@@ -82,12 +82,15 @@ go_json_str() {
   printf '%s' "$j"
 }
 # premark <commit> <record> [tracker...] : a pre-existing mark, in the shape
-# rig-check-pre-existing.sh writes.
+# `gctk rig pre-existing` writes.
 premark() {
   local c="$1" r="$2" t trackers=""; shift 2
   for t in "$@"; do trackers+="${trackers:+,}$(json_str "$t")"; done
   printf '{"commit":%s,"record":%s,"trackers":[%s]}' "$(json_str "$c")" "$r" "$trackers"
 }
+# The trackers the cases' marks name, each open; a case sets TRACKER_ROWS to
+# rows of its own.
+OPEN_TRACKERS='{"id":"tk-t1","status":"open","metadata":{}},{"id":"tk-b1","status":"in_progress","metadata":{}}'
 # pour_vars : the vars the case's pour renders, in the pour's order, as
 # POUR_NAMES and POUR_VALUES. A command defaults to what green and SB_GREEN
 # ran, and a case sets VAR_<NAME> to declare another, or to empty for a command
@@ -138,6 +141,7 @@ write_state() {
   if [ -n "${MD_MAX_ATTEMPTS-3}" ]; then
     rows+=",{\"id\":\"control-1\",\"metadata\":{\"gc.kind\":\"ralph\",\"gc.step_id\":\"self-review\",\"gc.max_attempts\":$(json_str "${MD_MAX_ATTEMPTS-3}"),\"gc.root_bead_id\":$(json_str "$root")}}"
   fi
+  rows+=",${TRACKER_ROWS-$OPEN_TRACKERS}"
   store "[$rows]"
   # The run of the root, as run-lib.sh would name it: by default it works the
   # case's issue, and RUN_BEAD="" is a run that names no bead.
@@ -149,8 +153,9 @@ write_state() {
 # script must resolve the worktree from bead metadata, never from cwd.
 # GC_ITERATION default 1 keeps the gate cases far from the budget so they never
 # trip the exhaustion note. GC_COLD=1 is the ralph condition env with a cold
-# import cache, where every gc call dies before doing any work, and
-# UPDATE_FAILS=1 a store that refuses the work bead's write.
+# import cache, where every gc call dies before doing any work,
+# UPDATE_FAILS=1 a store that refuses the work bead's write, and FAIL_ON a
+# store that fails each call whose arguments carry its text.
 run_case() {
   local desc="$1" want="$2"
   : > "$CALLS"
@@ -158,7 +163,7 @@ run_case() {
       GC_RUN_LIB="$HERE/run-lib.stub.sh" RUN_LIB_STUB_RUNS="$TMP/runs.json" \
       RUN_LIB_STUB_FAIL="${RUN_FAILS:+subject}" \
       STUB_GC_FAIL="${GC_COLD:+1}" STUB_UPDATE_FAIL="${UPDATE_FAILS:+${ISSUE_ID-gc-issue}}" \
-      GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
+      STUB_FAIL_ON="${FAIL_ON-}" GC_ITERATION="${ITERATION-1}" GCTK_BIN="${GCTK-$GCTK_BUILT}" bash "$SCRIPT" ) >"$TMP/out" 2>&1
   local got=$?
   if [ "$got" = "$want" ]; then ok "$desc (exit $got)"
   else bad "$desc (got exit $got, want $want)"; sed 's/^/       /' "$TMP/out"; fi
@@ -184,6 +189,7 @@ reset_env() {
   unset ROOT_ID ISSUE_ID MD_ROOT_ISSUE RUN_BEAD RUN_FAILS GC_COLD
   unset MD_WORK_DIR MD_BRANCH MD_ROUTE MD_ABORTED_AT MD_MAX_ATTEMPTS MD_SUBJECT_MAX
   unset UPDATE_FAILS ITERATION MD_PRE_LINT MD_PRE_TEST MD_SETUP_BUILD MD_PRE_BUILD GCTK MD_NOTES
+  unset TRACKER_ROWS FAIL_ON
   unset VAR_BASE VAR_SETUP VAR_TYPECHECK VAR_LINT VAR_BUILD VAR_AFFECTED VAR_TEST
   clear_records
 }
@@ -214,29 +220,35 @@ run_case "FAIL when a check's record at HEAD is a fail" 1
 assert_out "names the red check" "not green at $HEAD_SHA: lint"
 
 # --- 3d. a red check marked pre-existing at HEAD ------------------------------
+# `gctk rig pre-existing` judges the mark (services/gctk/internal/rig, whose Go
+# tests hold its rules); these cases pin the call and what each answer does.
 reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
 run_case "PASS when the red check's record is marked pre-existing at HEAD" 0
-assert_out "names the tracker that carries it" "pre-existing, tracked by tk-t1"
+assert_out "names the tracker that carries it" "lint: the fail at $HEAD_SHA is pre-existing, tracked by tk-t1"
+assert_call "asks gctk about the work bead's lint mark" "bd list --id gc-issue "
 
 reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$OLD_SHA" "$(recorded lint)" tk-t1); write_state
 run_case "FAIL when the pre-existing mark names another commit" 1
+assert_out "names the red check" "not green at $HEAD_SHA: lint"
+
+# A mark holds only while a tracker it names is open.
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1)
+TRACKER_ROWS='{"id":"tk-t1","status":"closed","metadata":{}}'; write_state
+run_case "FAIL when the mark's tracker closed with no open bead carrying its failure" 1
+assert_out "says why, and what to do" "lint: the pre-existing mark on gc-issue at $HEAD_SHA names no open tracker, so it judges nothing: tk-t1 is not open and no open bead carries its failure, so merge the base in"
 
 reset_env; VAR_LINT=false; green; record "$WT" lint --command false
-MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)"); write_state
-run_case "FAIL when the pre-existing mark names no tracker" 1
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); FAIL_ON="--id tk-t1"; write_state
+run_case "FAIL when the mark's tracker does not read" 1
+assert_out "says the question could not be answered" "lint: gctk rig pre-existing lint exited 4, so nothing shows the fail at $HEAD_SHA is pre-existing"
 
 # --- 3d2. a run that replaced the marked record --------------------------------
 # gctk rig replaces a commit's record when a call declares another run. When the
 # replacing run is the declared one, its fail is not the one judged pre-existing;
 # when it is not, its record answers nothing for the declared run.
-reset_env; VAR_LINT='exit 3'; green; record "$WT" lint --command false
-MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
-record "$WT" lint --command 'exit 3'
-run_case "FAIL when the declared run replaced the marked record of another command at HEAD" 1
-assert_out "says the mark judged another run" "judged another run's fail"
-
 reset_env; VAR_LINT=false; green; record "$WT" lint --command false
 MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); write_state
 record "$WT" lint --command 'exit 3'
@@ -247,7 +259,7 @@ reset_env; VAR_AFFECTED=""; VAR_TEST=false; green; record "$WT" test --scope aff
 MD_PRE_TEST=$(premark "$HEAD_SHA" "$(recorded test)" tk-t1); write_state
 record "$WT" test --scope full --command false
 run_case "FAIL when the declared full-suite run replaced the marked record of the affected subset" 1
-assert_out "says the test mark judged another run" "test: the pre-existing mark at $HEAD_SHA judged another run's fail"
+assert_out "says the test mark judged another run" "test: the pre-existing mark on gc-issue at $HEAD_SHA judged another run's fail"
 
 # --- 3d2b. a record at HEAD that is not the declared run's ----------------------
 # --check reports whatever is recorded at HEAD. A record counts only when it is
@@ -304,10 +316,6 @@ reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail)
 MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
 run_case "PASS when the failed build's note at HEAD is marked pre-existing" 0
 assert_out "names the build's tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
-reset_env; VAR_BUILD='make all'; MD_SETUP_BUILD=$(noted "$HEAD_SHA" none fail 'make all')
-MD_PRE_BUILD=$(premark "$HEAD_SHA" "$(noted "$HEAD_SHA" none fail)" tk-b1); write_state; green
-run_case "FAIL when the build mark holds a note of another command" 1
-assert_out "says the build mark judged another run" "build: the pre-existing mark at $HEAD_SHA judged another run's fail"
 # A note counts only while its commands are the ones the step declares.
 reset_env; VAR_BUILD='make all'; write_state; green
 run_case "FAIL when the note at HEAD is of another build command than the step declares" 1
@@ -336,10 +344,6 @@ assert_out "…naming that build" "not green at $HEAD_SHA: build"
 reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" fail pass "$OWN_BUILD" "$OWN_SETUP"); write_state; green
 run_case "FAIL when the repo's own setup failed at HEAD" 1
 assert_out "…naming that setup" "not green at $HEAD_SHA: setup"
-reset_env; VAR_BUILD=""; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass fail "$OWN_BUILD" "$OWN_SETUP")
-MD_PRE_BUILD=$(premark "$HEAD_SHA" "$MD_SETUP_BUILD" tk-b1); write_state; green
-run_case "PASS when a pre-existing mark holds the note of the repo's own failed build" 0
-assert_out "…naming its tracker" "build: the fail at $HEAD_SHA is pre-existing, tracked by tk-b1"
 # Each command is judged by itself, so the one the step does declare still has
 # to match.
 reset_env; MD_SETUP_BUILD=$(noted "$HEAD_SHA" pass pass make "$OWN_SETUP"); write_state; green
@@ -536,6 +540,12 @@ reset_env; GC_COLD=1; write_state; green
 run_case "PASS under a cold gc (resolution is bd-only, and the record reads call no gc)" 0
 if grep -q '^convoy ' "$CALLS"; then bad "resolution must not shell out to gc convoy"; sed 's/^/       /' "$CALLS"
 else ok "resolution must not shell out to gc convoy"; fi
+# The pre-existing question is gctk's, which reads through gc, so under a cold
+# gc a marked fail cannot be judged, and the check fails with gctk's reason.
+reset_env; VAR_LINT=false; green; record "$WT" lint --command false
+MD_PRE_LINT=$(premark "$HEAD_SHA" "$(recorded lint)" tk-t1); GC_COLD=1; write_state
+run_case "FAIL under a cold gc on a marked fail, which gctk cannot judge" 1
+assert_out "…saying the question had no answer" "lint: gctk rig pre-existing lint exited 4, so nothing shows the fail at $HEAD_SHA is pre-existing"
 
 # --- 12. exhaustion note ----------------------------------------------------
 # The last failing attempt (GC_ITERATION >= gc.max_attempts) notes the

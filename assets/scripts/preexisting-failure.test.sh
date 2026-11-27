@@ -35,6 +35,12 @@ hasnt() { if hasin "$1" "$2"; then bad "$3 (found '$2')"; else ok "$3"; fi; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 
+# The walk from a closed tracker is `gctk bead carrier`'s, built from this tree,
+# which reads the store through the gc stub below.
+( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
+  || { echo "FAIL - gctk did not build: $(tail -3 "$TMP/gctk-build.log" | tr '\n' ' ')"; exit 1; }
+export GCTK_BIN="$TMP/gctk" GC_NO_API=1
+
 # ── gc stub ──────────────────────────────────────────────────────────
 # A JSON bead store with the list/create/show surface the script uses. List
 # filters the way bd does: --status takes one comma list, --title-contains is a

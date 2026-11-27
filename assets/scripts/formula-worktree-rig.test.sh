@@ -92,12 +92,13 @@ echo "${GC_RIG_ROOT:-<unset>}" >> "$FAKE_LC_LOG.root"
 LC
 # gctk answers the gather's record reads: a fail of the tests, a pass of lint
 # and nothing for typecheck, logging each call and the directory it ran in. The
-# rig's guidance is the real one's.
+# anchor carries no pre-existing mark. The rig's guidance is the real one's.
 cat > "$TMP/gctk" <<'GCTK'
 #!/usr/bin/env bash
 [ "$1" != review ] || exec "$GCTK_REAL" "$@"
 printf '%s|%s\n' "$*" "$(pwd -P)" >> "$GCTK_LOG"
 case "$2" in
+  pre-existing) exit 1 ;;
   test) echo '{"check":"test","result":"fail","scope":"affected","exit_code":1,"command":"t"}'; exit 1 ;;
   lint) echo '{"check":"lint","result":"pass","exit_code":0,"command":"l"}'; exit 0 ;;
   *) exit 3 ;;

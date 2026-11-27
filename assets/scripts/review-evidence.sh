@@ -2,9 +2,9 @@
 # review-evidence.sh — what `gctk rig` recorded at the commit a review reads.
 #   review-evidence.sh --anchor <bead> --commit <sha> --worktree <path>
 # Reads the review's worktree, which --worktree names and which must be checked
-# out at <sha>, whatever directory the call is made in. Callers: the
-# review-gather block of formulas/mol-review.toml and of
-# formulas/mol-review-quorum-signoff.toml, which every check's review runs.
+# out at <sha>, whatever directory the call is made in. Callers: a review run's
+# lane (review-run.sh lane), and the review-gather block of
+# formulas/mol-review.toml and of formulas/mol-review-quorum-signoff.toml.
 #
 # A call that names no worktree reads the checkout it is made in. A run keeps
 # the step text it was poured with, and a review poured before its gather named
@@ -23,22 +23,19 @@
 # commit.
 #
 # A record says what a command did at a commit and never whose failure it is.
-# A fail's line says whether the anchor's rig_check_pre_existing.<check> holds
-# that very record at <sha>, and which trackers carry it, by rig-check-lib.sh's
-# definition of that judgment. The anchor is read only when some record fails.
+# A fail's line adds what `gctk rig pre-existing` answers of the anchor's mark:
+# "pre-existing, tracked by <trackers>" while the mark holds that very record
+# and a tracker it names is open; why it does not hold when the mark judged
+# another run, names no open tracker or could not be read; and nothing when the
+# anchor carries no mark at <sha>. Only the first calls the fail pre-existing.
+# The anchor is read only when some record fails.
 #
 # Exit: 0 printed · 1 nothing printed: the worktree cannot be entered or is not
-# at <sha>, or a lib beside this script or a temp file is missing · 2 usage, a
-# --worktree with no path included
+# at <sha>, or a temp file is missing · 2 usage, a --worktree with no path
+# included
 set -uo pipefail
 
 PROG="review-evidence"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# shellcheck source=bd-lib.sh
-. "${GC_BD_LIB:-$HERE/bd-lib.sh}" || { echo "$PROG: cannot source bd-lib.sh beside this script" >&2; exit 1; }
-# shellcheck source=rig-check-lib.sh
-. "$HERE/rig-check-lib.sh" || { echo "$PROG: cannot source rig-check-lib.sh beside this script" >&2; exit 1; }
 
 usage() {
   [ -z "${1:-}" ] || echo "$PROG: $1" >&2
@@ -94,7 +91,6 @@ echo "gctk: $GCTK"
 ERR=$(mktemp "${TMPDIR:-/tmp}/$PROG.XXXXXX") || { echo "$PROG: could not make a file to read gctk rig's lines into" >&2; exit 1; }
 trap 'rm -f "$ERR"' EXIT
 
-ANCHOR_JSON=""; ANCHOR_READ=0
 for CHECK in test lint typecheck; do
   REC=$("$GCTK" rig "$CHECK" --check 2>"$ERR"); RC=$?
   case "$RC" in
@@ -108,20 +104,11 @@ for CHECK in test lint typecheck; do
         continue
       fi
       if [ "$RC" = 1 ]; then
-        if [ "$ANCHOR_READ" = 0 ]; then
-          ANCHOR_READ=1
-          ANCHOR_JSON=$(bd_json show "$ANCHOR")
-          printf '%s' "$ANCHOR_JSON" | jq -e --arg id "$ANCHOR" 'type == "array" and (.[0].id // "") == $id' >/dev/null 2>&1 || ANCHOR_JSON=""
-        fi
-        if [ -z "$ANCHOR_JSON" ]; then
-          LINE="$LINE; the anchor $ANCHOR did not read, so no pre-existing mark is known"
-        else
-          PRE=$(printf '%s' "$ANCHOR_JSON" | jq -r --arg k "rig_check_pre_existing.$CHECK" --arg c "$HEAD_SHA" --arg rec "$REC" \
-            "$PRE_EXISTING_JQ"' pre_existing($k; $c; $rec)' 2>/dev/null)
-          case "$PRE" in
-            "tracked by "*) LINE="$LINE; pre-existing, $PRE" ;;
-            "another run") LINE="$LINE; the anchor's pre-existing mark at this commit judged another run's fail" ;;
-          esac
+        PRE=$("$GCTK" rig pre-existing "$CHECK" --bead "$ANCHOR" 2>"$ERR"); PRC=$?
+        if [ -n "$PRE" ]; then
+          LINE="$LINE; $PRE"
+        elif [ "$PRC" != 0 ] && [ "$PRC" != 1 ]; then
+          LINE="$LINE; no pre-existing mark on $ANCHOR was judged, as gctk rig pre-existing exited $PRC: $(head -n 1 "$ERR")"
         fi
       fi
       printf '%s\n' "$LINE" ;;

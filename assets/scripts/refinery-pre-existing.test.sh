@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic test for refinery-pre-existing.sh, the refinery's path for a failed
 # check already red on the target. Runs the real script against real git
-# repositories and a fake gc (refinery-test-lib.sh), with stubs for
-# preexisting-failure.sh and rig-check-pre-existing.sh that log their calls.
+# repositories and a fake gc and gctk (refinery-test-lib.sh), with a stub for
+# preexisting-failure.sh that logs its calls.
 # Proves:
 #   - a failure already tracked is confirmed, nothing is filed, and the tracker
 #     is marked on the bead at the prepared head and printed;
@@ -49,7 +49,8 @@ PF_FOUND=tk-old run --bead a --check test --test TestFoo
 eq "$RC" 0 "the path exits 0, so the landing goes ahead"
 eq "$OUT" "tk-old" "it prints the tracker"
 hasnt "$(logged scripts)" "preexisting-failure file" "nothing is filed"
-has "$(logged scripts)" "rig-check-pre-existing --bead a --check test --commit $HEAD_A --worktree $HOME_DIR/worktrees/a --trackers tk-old" "the tracker is marked on the bead at the prepared head"
+has "$(logged gctk)" "rig pre-existing test --bead a --commit $HEAD_A --tracker tk-old" "the tracker is marked on the bead at the prepared head"
+has "$(logged gctk)" "rig pre-existing ran in $HOME_DIR/worktrees/a" "…in the prepared tree"
 
 echo "# an untracked failure is filed with its evidence, then marked"
 fresh
@@ -59,7 +60,7 @@ eq "$OUT" "tk-filed" "it prints the new tracker"
 has "$(logged scripts)" "preexisting-failure key --lint shellcheck assets/scripts/x.sh" "the key comes from the script"
 has "$(cat "$LOGS/filed.txt")" "FAIL: TestFoo (pkg/x)" "the filing carries the evidence"
 has "$(cat "$LOGS/filed.txt")" "while the refinery merged a" "…and where it was seen"
-has "$(logged scripts)" "--trackers tk-filed" "the new tracker is marked"
+has "$(logged gctk)" "--tracker tk-filed" "the new tracker is marked"
 
 echo "# a rework child's mark goes on its anchor"
 fresh
@@ -68,14 +69,14 @@ rm -rf "$HOME_DIR/worktrees/a"; git -C "$HOME_DIR" worktree prune
 prepared ch polecat/a
 PF_FOUND=tk-old run --bead ch --check test --test TestFoo
 eq "$RC" 0 "the path exits 0"
-has "$(logged scripts)" "rig-check-pre-existing --bead an --check test" "the mark goes on the anchor"
+has "$(logged gctk)" "rig pre-existing test --bead an " "the mark goes on the anchor"
 
 echo "# a failure the bead was sent to fix lands nothing"
 fresh
 PF_FOUND=a run --bead a --check test --test TestFoo
 eq "$RC" 1 "a tracker that is the bead itself exits 1"
 eq "$OUT" "" "…prints no tracker"
-hasnt "$(logged scripts)" "rig-check-pre-existing" "…marks nothing"
+hasnt "$(logged gctk)" "rig pre-existing" "…marks nothing"
 has "$ERR" "send it back as a failure its branch caused" "…and says to send the work back"
 fresh
 work ch polecat/a '{"task_kind":"rework","anchor_bead":"an"}'
@@ -83,13 +84,13 @@ rm -rf "$HOME_DIR/worktrees/a"; git -C "$HOME_DIR" worktree prune
 prepared ch polecat/a
 PF_FOUND=an run --bead ch --check test --test TestFoo
 eq "$RC" 1 "a tracker that is the anchor a rework child lands for exits 1"
-hasnt "$(logged scripts)" "rig-check-pre-existing" "…and marks nothing"
+hasnt "$(logged gctk)" "rig pre-existing" "…and marks nothing"
 
 echo "# a lookup, a filing or evidence that is missing lands nothing"
 fresh
 PF_FIND_RC=1 run --bead a --check test --test TestFoo
 eq "$RC" 1 "a lookup that does not answer exits 1"
-hasnt "$(logged scripts)" "rig-check-pre-existing" "…and marks nothing"
+hasnt "$(logged gctk)" "rig pre-existing" "…and marks nothing"
 fresh
 PF_FILE_RC=1 run --bead a --check test --test TestFoo
 eq "$RC" 1 "a filing that does not land exits 1"
@@ -100,7 +101,7 @@ hasnt "$(logged scripts)" "preexisting-failure file" "…and files nothing"
 
 echo "# a mark that does not land leaves the landing going ahead"
 fresh
-PF_FOUND=tk-old STUB_RIG_CHECK_PRE_EXISTING_RC=1 run --bead a --check test --test TestFoo
+PF_FOUND=tk-old STUB_MARK_RC=1 run --bead a --check test --test TestFoo
 eq "$RC" 0 "the path still exits 0"
 has "$ERR" "the mark on a did not land" "it says the mark did not land"
 
@@ -110,7 +111,7 @@ branch_with polecat/b b.txt >/dev/null
 work b polecat/b
 PF_FOUND=tk-old run --bead b --check test --test TestFoo
 eq "$RC" 1 "a bead this iteration did not prepare is refused"
-hasnt "$(logged scripts)" "rig-check-pre-existing" "nothing is marked"
+hasnt "$(logged gctk)" "rig pre-existing" "nothing is marked"
 run --bead a --check test
 eq "$RC" 2 "no failure named is usage"
 
