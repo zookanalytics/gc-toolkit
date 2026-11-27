@@ -461,17 +461,33 @@ dispatch residual").
 **Gas City's reason.** Gas City gives none. Upstream tracks the behavior as a
 fault in two open bugs: #7163, "a formula slung onto a blocked bead runs before its
 blockers close", and #8832, "native execution admission loses current input
-readiness". Its fix is the open PR #8834, "preserve live native input readiness at
-execution admission". All three were open on 2026-11-27. Measured here: of the
-three design convoys a sitting has slung since 2026-11-15, none had a held
-subject (section 5's census). The work formula's first step already gates the
-same fault for its work beads (`docs/warrants.md`, "The work formula's
-overrides").
+readiness". Measured here: of the three design convoys a sitting has slung since
+2026-11-15, none had a held subject (section 5's census). The work formula's
+first step already gates the same fault for its work beads (`docs/warrants.md`,
+"The work formula's overrides").
 
-**The fix at the source.** It is upstream's own PR #8834, carried by #7163 and
-#8832. The city follows it through the deferred-dispatch warrant's trigger. When
-it fires, the gate's held case becomes something Gas City does. The parked,
-finished and handed-off refusals do not depend on it.
+**The fix at the source.** Two open upstream PRs fix it. Their sizes were read on
+2026-11-27 at 20:13Z:
+
+- #9406, "fix(sling): hold a graph workflow slung onto a blocked bead with
+  --on", which fixes #7163: 28 files, 3,143 lines added and 156 removed, at head
+  4b44c124550f. It copies the bead's own ready-blocking edges onto every bead
+  the workflow creates, so the run waits, poured, until those blockers close. By
+  its own account it copies no hold the bead takes only from a blocked parent,
+  such as a parked epic's, and a blocker added after the pour holds only the
+  bead.
+- #8834, "fix: preserve live native input readiness at execution admission",
+  which closes #8832: 56 files, 2,658 lines added and 276 removed, at head
+  4bae2f222c0b.
+
+The upstream finding tk-zhc0s0z carries both for the city. It waits in the
+operator's list of upstream findings, and its evidence names both PRs, their
+sizes and this design. The city also follows the fix through the
+deferred-dispatch warrant's trigger. Once #9406 lands, a run poured onto a
+subject that a wait of its own holds waits until that wait clears, so the gate's
+held case meets only a subject held through an ancestor or by a wait added after
+the pour. The parked, finished and handed-off refusals do not depend on either
+fix.
 
 The other primitives this design searched:
 
