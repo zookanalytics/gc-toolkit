@@ -691,6 +691,15 @@ no warrant.
     `cmd/gc/agent_home_worktree_cleanup.go`) moves a home only when it carries
     the worker-dir prune's `.worktree-stale` marker, sits on a branch that names
     a closed bead and has no uncommitted work.
+  - Nothing in Gas City hides from git what it writes into a home or a rig
+    checkout. It adds ignore lines only to a scope root's tracked `.gitignore`
+    (`ensureGitignoreEntries` in `cmd/gc/gitignore.go`). Of what it writes into
+    a work dir, it records only the skill links, in the ownership manifest it
+    keeps in each sink (`ownershipManifestFile` in
+    `internal/materialize/skills.go`), which the script reads to name each
+    link. [gastownhall/gascity#6736](https://github.com/gastownhall/gascity/issues/6736),
+    open, proposes a block of gc's own in the exclude file, for its `.beads`
+    files and `.gc/`.
   - Nothing in Gas City brings a failed `pre_start` to a person. The command's
     output goes into the start's error, which the controller and reconciler log
     ([Agent](https://docs.gascity.com/reference/config#agent), `pre_start`). Five
@@ -711,10 +720,12 @@ no warrant.
     in its records:
     [specs/tk-1tfzr71.10/gas-city-search.md](../specs/tk-1tfzr71.10/gas-city-search.md);
     [specs/tk-eu1f6tm/gas-city-search.md](../specs/tk-eu1f6tm/gas-city-search.md)
-    for when the script fetches, its retry of the add and its signal traps; and
+    for when the script fetches, its retry of the add and its signal traps;
     [specs/tk-p0fbvug/gas-city-search.md](../specs/tk-p0fbvug/gas-city-search.md)
     for the move of a home whose HEAD is a tip the default branch had before a
-    rewrite.
+    rewrite; and
+    [specs/tk-rdimhd9/gas-city-search.md](../specs/tk-rdimhd9/gas-city-search.md)
+    for which of gc's writes its excludes name.
 - **Verified.** 2026-11-23, at `gastownhall/gascity` main dfd5200c3ee3 and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City provisions a tree bound to an agent, with a sync to
