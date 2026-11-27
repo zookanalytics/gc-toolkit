@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/queue"
@@ -60,9 +61,10 @@ const (
 	// RuleFurtherAlong: such a gate or bead holds the bead further along its
 	// waits, an ancestor's included. Group waiting-on-you.
 	RuleFurtherAlong Rule = "further-along"
-	// RuleParked: a gate that is no human gate, such as a park
-	// (docs/steering.md, "A park"), holds the bead through a wait of its own
-	// or an ancestor's, as gateHold reads it. Group not-moving.
+	// RuleParked: a gate that asks no one, one that is no human gate and
+	// carries no human label, such as a park (docs/steering.md, "A park"),
+	// holds the bead through a wait of its own or an ancestor's, as gateHold
+	// reads it. Group not-moving.
 	RuleParked Rule = "parked"
 	// RuleStatus: the bead's status is one no pool offers, such as deferred.
 	// Gas Town's pending record, the record a PR's bead carries from its
@@ -82,8 +84,9 @@ const (
 	// RuleMembers: the bead is an epic or a Delivery that is no ruling, with
 	// open members or none at all. No group: it has no move of its own.
 	RuleMembers Rule = "members"
-	// RuleGate: the bead is a gate that is no human gate, which holds what
-	// waits on it and asks no one. No group: it has no move of its own.
+	// RuleGate: the bead is a gate that asks no one, one that is no human gate
+	// and carries no human label, which holds what waits on it. No group: it
+	// has no move of its own.
 	RuleGate Rule = "gate"
 	// RuleNotScheduled: the work is ready work that nothing sends anywhere, as
 	// queue's order lists it (queue.Ordered's NotScheduled): the store's ready
@@ -103,8 +106,7 @@ const (
 	// run's start. Group queued.
 	RuleInFlight Rule = "in-flight"
 	// RuleScheduled: something sends the work as things stand, as its place in
-	// queue's order says (queue.Place): it is armed, routed to a pool or
-	// assigned to an agent, and no dispatch hold holds it. Group queued.
+	// queue's order says (queue.Place's Scheduled). Group queued.
 	RuleScheduled Rule = "scheduled"
 	// RuleNotReady: any other work, which nothing sends and the store does not
 	// serve as ready. The answer names each wait that holds it. Group
@@ -116,8 +118,8 @@ const (
 	RuleUnread Rule = "unread"
 )
 
-// Ask is what a person owes when a bead is itself the ask, one of the five
-// below, which askOf reads. docs/bead-standing.md gives each ask to a person,
+// Ask is what a person owes when a bead is itself the ask, one of those below,
+// which askOf reads. docs/bead-standing.md gives each ask to a person,
 // beside the words the board shows for it (services/helm/internal/rigboard),
 // with what the person can do.
 type Ask string
@@ -143,6 +145,11 @@ const (
 	// that ask is the person's move on it, so it reads as waiting on them, by
 	// the own-wait or the further-along rule.
 	AskPullRequest Ask = "pull-request"
+	// AskHumanNeeded: any other open bead that carries bd's human label
+	// ([gascity.HasHumanLabel]), whatever its route, arm or assignee. bd reads
+	// that label as a request for a person, and `bd human list` lists such a
+	// bead as human-needed.
+	AskHumanNeeded Ask = "human-needed"
 	// AskAssignedToYou: any other open bead only a person clears
 	// ([person.Clears]), such as one assigned to human.
 	AskAssignedToYou Ask = "assigned-to-you"
@@ -416,10 +423,13 @@ func (r *Reading) reach(ids []string) []string {
 
 // askOf is whether a bead is itself an ask, and which ([Ask] says when each
 // applies): what the shared readers count as a person's move, and a ruling. A
-// gate, a decision and a conversation are each answered by their kind alone,
-// so a gate that is no human gate is never an ask. An epic or a Delivery is
-// tried as a ruling first. Any other bead, and an epic or a Delivery that is
-// no ruling, is tried as a pull request, then as assigned to you. beneath
+// gate, a decision and a conversation are each answered by their kind alone. A
+// gate is a question when it is a human gate, human-needed when it is any other
+// gate that carries bd's human label, which [person.Clears] reads as a
+// person's, and otherwise never an ask. An epic or a Delivery is tried as a
+// ruling first. Any other bead, and an epic or a Delivery that is no ruling, is
+// tried as a pull request, then as a bead only a person clears: human-needed
+// when it carries bd's human label, and otherwise assigned to you. beneath
 // reports whether the bead stands beneath another ask ([Reading.Beneath]),
 // where a pull request that needs attention for no reason of its own is no
 // ask.
@@ -429,10 +439,13 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 	}
 	switch k {
 	case KindGate:
-		if !person.IsHumanGate(b.IssueType, b.AwaitType) {
-			return ""
+		switch {
+		case person.IsHumanGate(b.IssueType, b.AwaitType):
+			return AskQuestion
+		case gascity.HasHumanLabel(b.Labels):
+			return AskHumanNeeded
 		}
-		return AskQuestion
+		return ""
 	case KindDecision:
 		if stays[b.ID] {
 			return ""
@@ -458,7 +471,10 @@ func (r *Reading) askOf(b Bead, k Kind, stays map[string]bool, membersOpen, memb
 		}
 	}
 	if person.Clears(person.Blocker{ID: b.ID, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
-		Assignee: b.Assignee}) {
+		Assignee: b.Assignee, Labels: b.Labels}) {
+		if gascity.HasHumanLabel(b.Labels) {
+			return AskHumanNeeded
+		}
 		return AskAssignedToYou
 	}
 	return ""
@@ -525,7 +541,7 @@ func (r *Reading) table(b Bead, k Kind, ask Ask, stays map[string]bool) Answer {
 			return Answer{Rule: RuleUnread, Why: "the walk of what a person owes for it ran past its bound"}
 		}
 	}
-	if w := gateHold(h); w != nil {
+	if w := r.gateHold(h); w != nil {
 		return Answer{Group: GroupNotMoving, Rule: RuleParked, Names: []Ref{{ID: w.ID, Title: w.Title}}}
 	}
 	switch st := status(b); {
@@ -606,13 +622,16 @@ func holdingAnswer(h waits.Holds, hold prstatus.Holds) Answer {
 }
 
 // gateHold is the first wait behind a bead's status, its own or an ancestor's,
-// on a gate that is no human gate, and nil when none is: a park
+// on a gate that asks no one, and nil when none is: a park
 // (docs/steering.md, "A park"), whose gate gctk bead park files with no await
 // type. A gate of a type bd closes by itself, such as a timer, reads as one
-// too.
-func gateHold(h waits.Holds) *waits.Wait {
+// too. A gate asks a person when it is a human gate or carries bd's human
+// label, which the read takes from the gate's own bead, since a wait carries
+// no labels.
+func (r *Reading) gateHold(h waits.Holds) *waits.Wait {
 	for i, w := range h.Waits {
-		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) {
+		if strings.EqualFold(w.IssueType, "gate") && !person.IsHumanGate(w.IssueType, w.AwaitType) &&
+			!gascity.HasHumanLabel(r.beads[w.ID].Labels) {
 			return &h.Waits[i]
 		}
 	}

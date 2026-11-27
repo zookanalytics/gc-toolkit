@@ -194,7 +194,7 @@ func pullStoreOf(beads []Bead, answer pr.Answer) pullStore {
 	holds := map[string]waits.Holds{}
 	for _, b := range beads {
 		row := fixture.Bead{ID: b.ID, Title: b.Title, Status: b.Status, IssueType: b.IssueType, AwaitType: b.AwaitType,
-			Assignee: b.Assignee, WaitsOn: edgesOf(b, "blocks"), Tracks: edgesOf(b, "tracks")}
+			Assignee: b.Assignee, Labels: b.Labels, WaitsOn: edgesOf(b, "blocks"), Tracks: edgesOf(b, "tracks")}
 		if b.MergeResult != "" {
 			row.Metadata = map[string]string{"merge_result": b.MergeResult}
 		}
@@ -334,6 +334,88 @@ func TestAFrontierBehindAPullRequestBeneathAnAsk(t *testing.T) {
 		want := Waited{ID: "tk-pr", Advance: Advance{On: "tk-q", Why: string(RuleOwnWait)}}
 		if !ok || f.Verdict != VerdictStuck || !slices.Equal(f.Waits, []Waited{want}) {
 			t.Errorf("asked about %v: tk-w's frontier = %+v, want stuck with %+v", ids, f, want)
+		}
+	}
+}
+
+// TestABeadThatCarriesTheHumanLabelWaitsOnYou: an open bead that carries bd's
+// human label is itself an ask, human-needed, whatever its assignee, a gate that
+// is no human gate among them, and the work it blocks waits on it, through one
+// of its own waits or further along, as prstatus's walk of what a person owes
+// reads the label, whether Read is asked about each bead alone or about every
+// bead.
+func TestABeadThatCarriesTheHumanLabelWaitsOnYou(t *testing.T) {
+	beads := []Bead{
+		{ID: "tk-h", Title: "confirm the release notes", Status: "open", IssueType: "task", Labels: []string{"human"}},
+		{ID: "tk-a", Title: "check the migration", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik",
+			Labels: []string{"human"}},
+		{ID: "tk-w", Title: "cut the release", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-h", Type: "blocks"}}},
+		{ID: "tk-v", Title: "announce the release", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-w", Type: "blocks"}}},
+		{ID: "tk-t", Title: "wait out the freeze", Status: "open", IssueType: "gate", AwaitType: "timer", Labels: []string{"human"}},
+		{ID: "tk-x", Title: "ship after the freeze", Status: "open", IssueType: "task", Edges: []Edge{{ID: "tk-t", Type: "blocks"}}},
+	}
+	s := pullStoreOf(beads, pr.Answer{})
+	for _, c := range []struct {
+		id    string
+		rule  Rule
+		ask   Ask
+		names []string
+	}{
+		{id: "tk-h", rule: RuleAsk, ask: AskHumanNeeded},
+		{id: "tk-a", rule: RuleAsk, ask: AskHumanNeeded},
+		{id: "tk-w", rule: RuleOwnWait, names: []string{"tk-h"}},
+		{id: "tk-v", rule: RuleFurtherAlong, names: []string{"tk-h"}},
+		{id: "tk-t", rule: RuleAsk, ask: AskHumanNeeded},
+		{id: "tk-x", rule: RuleOwnWait, names: []string{"tk-t"}},
+	} {
+		for _, ids := range [][]string{{"tk-h", "tk-a", "tk-w", "tk-v", "tk-t", "tk-x"}, {c.id}} {
+			r, err := Read(ids, s)
+			if err != nil {
+				t.Fatalf("%s, asked about %v: %v", c.id, ids, err)
+			}
+			a, _ := r.Answer(c.id)
+			var names []string
+			for _, n := range a.Names {
+				names = append(names, n.ID)
+			}
+			if a.Group != GroupWaitingOnYou || a.Rule != c.rule || a.Ask != c.ask || !slices.Equal(names, c.names) {
+				t.Errorf("%s, asked about %v: got group=%q rule=%q ask=%q names=%v, want group=%q rule=%q ask=%q names=%v",
+					c.id, ids, a.Group, a.Rule, a.Ask, names, GroupWaitingOnYou, c.rule, c.ask, c.names)
+			}
+		}
+	}
+}
+
+// TestAGateThatCarriesTheHumanLabelParksNothing: a gate that carries bd's human
+// label asks a person, so Parked reads no park in it, while a park beside it
+// still parks the work both hold. A park labeled Human, which is not bd's
+// label, parks as any park does.
+func TestAGateThatCarriesTheHumanLabelParksNothing(t *testing.T) {
+	work := func(id string, waitsOn ...string) Bead {
+		b := Bead{ID: id, Title: "work " + id, Status: "open", IssueType: "task"}
+		for _, w := range waitsOn {
+			b.Edges = append(b.Edges, Edge{ID: w, Type: "blocks"})
+		}
+		return b
+	}
+	beads := []Bead{
+		{ID: "tk-t", Title: "wait out the freeze", Status: "open", IssueType: "gate", AwaitType: "timer", Labels: []string{"human"}},
+		{ID: "tk-h", Title: "parked for a person", Status: "open", IssueType: "gate", Labels: []string{"human"}},
+		{ID: "tk-p", Title: "parked", Status: "open", IssueType: "gate"},
+		{ID: "tk-c", Title: "parked, labeled Human", Status: "open", IssueType: "gate", Labels: []string{"Human"}},
+		work("tk-x", "tk-t"), work("tk-y", "tk-h"), work("tk-z", "tk-h", "tk-p"), work("tk-w", "tk-c"),
+	}
+	var ids []string
+	for _, b := range beads {
+		ids = append(ids, b.ID)
+	}
+	r, err := Read(ids, pullStoreOf(beads, pr.Answer{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"tk-x": "", "tk-y": "", "tk-z": "tk-p", "tk-w": "tk-c"} {
+		if got, parked := r.Parked(id); parked != (want != "") || got.ID != want {
+			t.Errorf("%s is parked by %q (%v), want %q", id, got.ID, parked, want)
 		}
 	}
 }

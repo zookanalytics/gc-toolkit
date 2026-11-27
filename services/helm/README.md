@@ -296,8 +296,9 @@ same question: its pull-request ask says when a pull request is a need, and
 `Reading.Beneath` names the needs a row is listed beneath. Each Needs you view
 leads with how many of its needs count, and beneath that how many of each kind
 count: pull requests, questions, conversations waiting for you, in conversation and
-rulings, a zero among them, then assigned to you when one counts. A kind's count
-shows that kind alone, and a second click shows every kind again. The needs
+rulings, a zero among them, then human-needed and assigned to you, each when
+one counts. A kind's count shows that kind alone, and a second click shows
+every kind again. The needs
 that do not count, those about parked work or work held for the Product Owner,
 fold beneath the rest under Parked or unprioritized, closed until opened. The
 Work queue is the work in the
@@ -470,10 +471,11 @@ counts them by kind (`NeedsYou` in `internal/rigboard/document.go`), so a count
 reaches zero only when nothing that counts needs the operator. A need does not
 count when what it is about is parked or waits for the Product Owner. It is
 parked itself when it, or an epic or Delivery above it, waits on a park, which
-the read tells as a wait on a gate that is no human gate, the wait standing
-reads as parked (`Reading.Parked`) and the row as "Held by a gate". A gate, a
-decision or a conversation does not count when every bead it holds or is about
-is parked, is a need that does not count, or carries hold:mayor. A pull request
+the read tells as a wait on a gate that is no human gate and carries no `human`
+label, the wait standing reads as parked (`Reading.Parked`) and the row as
+"Held by a gate". A gate, a decision or a conversation does not count when
+every bead it holds or is about is parked, is a need that does not count, or
+carries hold:mayor. A pull request
 or other work that is itself a need counts unless it is parked itself, and a
 need about nothing else counts. A question a sitting
 is talking over counts as in conversation. An epic's or a Delivery's needs

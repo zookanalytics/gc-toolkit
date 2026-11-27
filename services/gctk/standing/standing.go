@@ -499,14 +499,14 @@ func (r *Reading) ForProductOwner(id string) bool {
 }
 
 // Parked is the gate that parks an open bead: the first wait behind its status,
-// its own or an ancestor's, on a gate that is no human gate. It is false for a
-// bead no such gate holds.
+// its own or an ancestor's, on a gate that is no human gate and carries no human
+// label. It is false for a bead no such gate holds.
 func (r *Reading) Parked(id string) (Ref, bool) {
 	h, ok := r.holds[id]
 	if !ok {
 		return Ref{}, false
 	}
-	if w := gateHold(h); w != nil {
+	if w := r.gateHold(h); w != nil {
 		return Ref{ID: w.ID, Title: w.Title}, true
 	}
 	return Ref{}, false

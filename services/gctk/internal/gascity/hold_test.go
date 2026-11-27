@@ -44,6 +44,22 @@ func TestADispatchHoldIsGasCitysHoldLabelInAnyCase(t *testing.T) {
 	}
 }
 
+// The human label is human, trimmed and in its exact case, as Gas City's
+// HasHumanLabel reads a label, and no dispatch hold reads as it.
+func TestTheHumanLabelIsHumanInItsExactCase(t *testing.T) {
+	for label, want := range map[string]bool{
+		"human": true, " human ": true,
+		"Human": false, "HUMAN": false, "humans": false, "hold:mayor": false, "": false,
+	} {
+		if got := IsHumanLabel(label); got != want {
+			t.Errorf("IsHumanLabel(%q) = %v, want %v", label, got, want)
+		}
+	}
+	if !HasHumanLabel([]string{"learning", "human"}) || HasHumanLabel([]string{"Human", "hold:external"}) || HasHumanLabel(nil) {
+		t.Error("HasHumanLabel misreads a bead's labels")
+	}
+}
+
 // A hold's spellings are the labels that read as it, each as the bead carries
 // it, so a lift can remove each by its exact text.
 func TestAHoldsSpellingsAreTheLabelsThatReadAsIt(t *testing.T) {

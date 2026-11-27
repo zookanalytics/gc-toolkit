@@ -236,18 +236,22 @@ func TestListingRefusesAClosedAnchoredSet(t *testing.T) {
 	}
 }
 
-// A bead named that the store does not hold fails a read of its blockers, and
-// an edge onto a bead the store does not hold is one into another store.
+// A bead named that the store does not hold fails a read of its blockers, an
+// edge onto a bead the store does not hold is one into another store, and each
+// blocker carries its labels, which person.Clears reads bd's human label from.
 func TestListingBlockersReadTheStoreOnce(t *testing.T) {
 	s := rig()
-	s.Put(fake.Bead{ID: "tk-far", Title: "far", Status: "open", IssueType: "task", Edges: []gcbd.Edge{blocks("xx-1"), blocks("tk-old")}})
+	s.Put(fake.Bead{ID: "tk-ask", Title: "ask", Status: "open", IssueType: "task", Labels: []string{"human"}})
+	s.Put(fake.Bead{ID: "tk-far", Title: "far", Status: "open", IssueType: "task",
+		Edges: []gcbd.Edge{blocks("xx-1"), blocks("tk-old"), blocks("tk-ask")}})
 	ls, err := read(ledger.New(s))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := ls.Blockers([]string{"tk-far"})
-	if err != nil || len(got["tk-far"]) != 1 || got["tk-far"][0].ID != "tk-old" || got["tk-far"][0].Status != "closed" {
-		t.Errorf("Blockers = %+v, %v; want the closed bead in this store alone", got, err)
+	if err != nil || len(got["tk-far"]) != 2 || got["tk-far"][0].ID != "tk-old" || got["tk-far"][0].Status != "closed" ||
+		got["tk-far"][1].ID != "tk-ask" || !slices.Equal(got["tk-far"][1].Labels, []string{"human"}) {
+		t.Errorf("Blockers = %+v, %v; want the closed bead and the labeled one in this store alone", got, err)
 	}
 	if _, err := ls.Blockers([]string{"tk-gone"}); err == nil {
 		t.Error("a bead the store does not hold read as one with no blockers")

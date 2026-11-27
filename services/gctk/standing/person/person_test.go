@@ -33,8 +33,9 @@ func TestIsHumanGate(t *testing.T) {
 	}
 }
 
-// Only a person clears a live decision, and never a human gate, which the
-// human-gate rule counts on its own.
+// Only a person clears a live decision, a bead in the operator's queue and a
+// live bead that carries bd's human label, whatever its route or assignee, and
+// never a human gate, which the human-gate rule counts on its own.
 func TestClears(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -57,6 +58,14 @@ func TestClears(t *testing.T) {
 		{"a human gate in your queue", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Assignee: "human"}, false},
 		{"closed in your queue", Blocker{ID: "b", Status: "closed", IssueType: "bug", Assignee: "human"}, false},
 		{"assigned to an agent", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik"}, false},
+		{"labeled human", Blocker{ID: "b", Status: "open", IssueType: "bug", Labels: []string{"human"}}, true},
+		{"labeled human and routed to a pool", Blocker{ID: "b", Status: "open", IssueType: "task", Labels: []string{"later", "human"},
+			Metadata: map[string]string{"gc.routed_to": "gc-toolkit/gc-toolkit.polecat"}}, true},
+		{"labeled human and assigned to an agent", Blocker{ID: "b", Status: "open", IssueType: "bug", Assignee: "gc-toolkit.mechanik",
+			Labels: []string{"human"}}, true},
+		{"labeled Human, which is not bd's label", Blocker{ID: "b", Status: "open", IssueType: "bug", Labels: []string{"Human"}}, false},
+		{"closed and labeled human", Blocker{ID: "b", Status: "closed", IssueType: "bug", Labels: []string{"human"}}, false},
+		{"a human gate labeled human", Blocker{ID: "g", Status: "open", IssueType: "gate", AwaitType: "human", Labels: []string{"human"}}, false},
 		{"a merge anchor waiting on a review", Blocker{ID: "b", Title: "pr b", Status: "open", IssueType: "task",
 			Metadata: map[string]string{"merge_result": "pull_request_pending"}}, false},
 	} {

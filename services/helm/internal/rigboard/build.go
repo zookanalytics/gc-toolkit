@@ -493,10 +493,9 @@ func (bt *built) live(id string) bool {
 }
 
 // parked reports whether a bead waits on a park, or an epic or a Delivery above
-// it does: a wait behind its status on a gate that is no human gate, as
-// standing reads the bead and each of those above it (Reading.Parked). Each is
-// read for its own waits, so work in flight under a parked epic, which the
-// epic's wait does not hold, is parked with it.
+// it does, as standing reads the bead and each of those above it
+// (Reading.Parked). Each is read for its own waits, so work in flight under a
+// parked epic, which the epic's wait does not hold, is parked with it.
 func (bt *built) parked(id string) bool {
 	for _, x := range append([]string{id}, bt.ix.ancestors(id)...) {
 		if _, ok := bt.ix.g.reading.Parked(x); ok {
@@ -640,14 +639,17 @@ func (bt *built) view(needs []Need, covers func(string) bool) NeedsYou {
 
 // kindCounts is how many needs of each kind count, in the order a view reads
 // them: the five kinds every view shows, each one zero included, so a glance
-// tells which is empty, then Assigned to you when one counts.
+// tells which is empty, then Human-needed and Assigned to you, each when one
+// counts.
 func kindCounts(by map[NeedKind]int) []KindCount {
 	out := []KindCount{}
 	for _, k := range []NeedKind{NeedKindPullRequest, NeedKindQuestion, NeedKindWaitsForYou, NeedKindInConversation, NeedKindRuling} {
 		out = append(out, KindCount{Kind: k, Count: by[k]})
 	}
-	if n := by[NeedKindAssignedToYou]; n > 0 {
-		out = append(out, KindCount{Kind: NeedKindAssignedToYou, Count: n})
+	for _, k := range []NeedKind{NeedKindHumanNeeded, NeedKindAssignedToYou} {
+		if n := by[k]; n > 0 {
+			out = append(out, KindCount{Kind: k, Count: n})
+		}
 	}
 	return out
 }

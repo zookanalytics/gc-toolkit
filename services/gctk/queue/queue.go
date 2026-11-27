@@ -84,8 +84,9 @@ type Store interface {
 // Place is where one piece of work sits: its id and its layer. Scheduled is
 // true when something sends the piece anywhere as things stand: a live run
 // works it, or no dispatch hold holds it and it is armed to start by itself,
-// routed to a pool or an agent, or assigned to one. Outside is true when it
-// waits outside the city: hold:external holds it and no live run works it.
+// routed to a pool or an agent, or assigned to one. An arm or a route sends no
+// piece that carries bd's human label. Outside is true when it waits outside
+// the city: hold:external holds it and no live run works it.
 type Place struct {
 	ID        string
 	Layer     int
@@ -238,17 +239,27 @@ func waiting(h waits.Holds, anchorOf func(id string) string) []string {
 // scheduled reports whether something sends a piece of work anywhere as
 // things stand: a live run works it, or no dispatch hold holds it and it is
 // armed to start by itself, routed to a pool or an agent, or assigned to one.
-// A dispatch hold is one of Gas City's hold labels, as the runtime adapter
-// reads one (gascity.HasDispatchHold). Gas City serves a bead that carries one
-// to no worker, and the deferred-dispatch pass slings no armed bead while one
-// holds it, so its route, arm or assignee waits for the hold to lift. A live
-// run is work underway, so it counts whatever the bead carries.
+// An arm or a route sends no piece that carries bd's human label. A dispatch
+// hold is one of Gas City's hold labels, as the runtime adapter reads one
+// (gascity.HasDispatchHold). Gas City serves a bead that carries one to no
+// worker, and the deferred-dispatch pass slings no armed bead while one holds
+// it, so its route, arm or assignee waits for the hold to lift. The human label
+// is no dispatch hold: Gas City's routed tiers and the deferred-dispatch pass
+// leave out a bead that carries it, while Gas City's assignee-scoped tiers
+// still serve one (gascity.HumanLabel). A live run is work underway, so it
+// counts whatever the bead carries.
 func scheduled(h waits.Holds, worked bool, routedTo, assignee string, labels []string) bool {
 	if worked {
 		return true
 	}
-	return !gascity.HasDispatchHold(labels) && ((h.Arm != nil && strings.TrimSpace(h.Arm.Target) != "") ||
-		strings.TrimSpace(routedTo) != "" || strings.TrimSpace(assignee) != "")
+	if gascity.HasDispatchHold(labels) {
+		return false
+	}
+	if strings.TrimSpace(assignee) != "" {
+		return true
+	}
+	armed := h.Arm != nil && strings.TrimSpace(h.Arm.Target) != ""
+	return (armed || strings.TrimSpace(routedTo) != "") && !gascity.HasHumanLabel(labels)
 }
 
 // ForProductOwner reports whether labels hold a bead for the Product Owner's

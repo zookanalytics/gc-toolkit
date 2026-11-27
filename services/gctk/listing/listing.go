@@ -418,5 +418,5 @@ func blocksOf(r *ledger.Record) ([]string, error) {
 // blockerOf is r in the fields prstatus reads of a blocker.
 func blockerOf(r *ledger.Record) person.Blocker {
 	return person.Blocker{ID: r.ID, Title: r.Title(), Status: r.Status(), IssueType: r.IssueType(),
-		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Metadata: r.Rendered()}
+		AwaitType: r.AwaitType(), Assignee: r.Assignee(), Labels: r.Labels(), Metadata: r.Rendered()}
 }

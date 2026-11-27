@@ -90,6 +90,7 @@ export const NEED_WORDS: Record<NeedKind, { one: string; many: string }> = {
   'Conversation waits for you': { one: 'conversation waiting for you', many: 'conversations waiting for you' },
   'In conversation': { one: 'in conversation', many: 'in conversation' },
   Ruling: { one: 'ruling', many: 'rulings' },
+  'Human-needed': { one: 'human-needed', many: 'human-needed' },
   'Assigned to you': { one: 'assigned to you', many: 'assigned to you' },
 };
 

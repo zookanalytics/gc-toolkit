@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/conversation"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
 // Blocker is one bead in the fields these rules, and the walks that apply them,
@@ -18,10 +19,11 @@ import (
 // store fills it from its own read, and passes the status and the issue type as
 // they read, in any case. AwaitID is the key a gate was filed under. Assignee is
 // the bead's assignee as it reads, which tells a conversation by its row
-// ([conversation.IsCandidate]). ClosedAt is when it closed, "" while it is live.
-// Metadata is the bead's metadata whole, each value as the store renders it, so
-// the reader that needs a key names it: a merge anchor's facts about its own
-// pull request, and the vars a review run was poured with.
+// ([conversation.IsCandidate]). Labels are the bead's labels as they read.
+// ClosedAt is when it closed, "" while it is live. Metadata is the bead's
+// metadata whole, each value as the store renders it, so the reader that needs
+// a key names it: a merge anchor's facts about its own pull request, and the
+// vars a review run was poured with.
 type Blocker struct {
 	ID        string
 	Title     string
@@ -30,6 +32,7 @@ type Blocker struct {
 	AwaitType string
 	AwaitID   string
 	Assignee  string
+	Labels    []string
 	ClosedAt  string
 	Metadata  map[string]string
 }
@@ -46,23 +49,26 @@ func IsHumanGate(issueType, awaitType string) bool {
 	return strings.EqualFold(issueType, "gate") && awaitType == "human"
 }
 
-// Clears reports whether only a person clears a bead that is no human gate: a
-// live decision or conversation, or any bead assigned to `human`, the
-// operator's queue. A conversation reads as one by its row
+// Clears reports whether only a person clears a bead that is no human gate. No
+// automated actor clears a live decision or conversation, or any bead assigned
+// to `human`, the operator's queue. A conversation reads as one by its row
 // ([conversation.IsCandidate]): a task in the operator's queue or held by a
-// sitting, which a person's ruling or dismissal closes. No automated actor
-// clears any of them. A human gate is never one, because the human-gate rule
-// counts it on its own, and a route marks no bead as a person's. A bead with no
-// status reads open, and only a closed one is not live. It reads the row alone,
-// so it cannot tell one that waits on work of its own first, which no person
-// owes a move on while that work is out: [Stays] tells that from the bead's own
-// edges.
+// sitting, which a person's ruling or dismissal closes. A live bead that
+// carries bd's `human` label is one too, whatever its route or assignee,
+// because bd reads that label as a request for a person
+// ([gascity.HasHumanLabel]). A human gate is never one, because the human-gate
+// rule counts it on its own, and a route marks no bead as a person's. A bead
+// with no status reads open, and only a closed one is not live. It reads the
+// row alone, so it cannot tell one that waits on work of its own first, which
+// no person owes a move on while that work is out: [Stays] tells that from the
+// bead's own edges.
 func Clears(b Blocker) bool {
 	if !b.Open() || IsHumanGate(b.IssueType, b.AwaitType) {
 		return false
 	}
 	return strings.EqualFold(b.IssueType, "decision") || b.Assignee == "human" ||
-		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID)
+		conversation.IsCandidate(strings.ToLower(b.IssueType), b.Assignee, b.ID) ||
+		gascity.HasHumanLabel(b.Labels)
 }
 
 // Stays reports whether a bead that [Clears] reads as a person's waits on work

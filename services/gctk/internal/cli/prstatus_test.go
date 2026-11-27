@@ -426,6 +426,9 @@ func storeRow(sc fixture.Scenario, b fixture.Bead) map[string]any {
 				if far.Assignee != "" {
 					dep["assignee"] = far.Assignee
 				}
+				if len(far.Labels) > 0 {
+					dep["labels"] = far.Labels
+				}
 				deps = append(deps, dep)
 			}
 		}

@@ -438,12 +438,12 @@ that has not started.
 
 The rig board's Needs you lists a need about parked work apart from the rest
 and does not count it. It tells a park as a wait on a gate that is no human
-gate, the gate the text form of `park` files, which its table reads as "Held by
-a gate". A park made with `--waiting-on` onto a task or a human gate reads as
-the wait it is. A need that waits on a park, or sits under an epic or Delivery
-that does, does not count, and neither does a question, decision or
-conversation about nothing but what is parked, what carries `hold:mayor`, or
-other needs that do not count
+gate and carries no `human` label, the gate the text form of `park` files,
+which its table reads as "Held by a gate". A park made with `--waiting-on` onto
+a task or a human gate reads as the wait it is. A need that waits on a park, or
+sits under an epic or Delivery that does, does not count, and neither does a
+question, decision or conversation about nothing but what is parked, what
+carries `hold:mayor`, or other needs that do not count
 ([services/helm/README.md](../services/helm/README.md), *What it counts*).
 
 ### Where a park goes

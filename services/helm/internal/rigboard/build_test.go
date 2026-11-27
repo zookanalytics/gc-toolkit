@@ -1455,4 +1455,46 @@ func TestNeedsThatCount(t *testing.T) {
 			t.Errorf("an assigned need that counts gives kinds %+v, want Assigned to you last", v.Kinds)
 		}
 	})
+	t.Run("a bead that carries bd's human label is human-needed, whatever its route or assignee", func(t *testing.T) {
+		// tk-b.1 is armed, and here routed to a pool too, beside the assignee each case gives it.
+		for _, assignee := range []string{"", "gc-toolkit.mechanik"} {
+			g := graph()
+			for i := range g.open {
+				if g.open[i].ID == "tk-b.1" {
+					g.open[i].Labels, g.open[i].RoutedTo, g.open[i].Assignee = []string{"human"}, "gc-toolkit/gc-toolkit.polecat", assignee
+				}
+			}
+			doc := boardOf(t, g)
+			if r := doc.Rows["tk-b.1"]; r.Group != GroupWaitingOnYou || r.Ask != AskHumanNeeded || r.Signal != string(AskHumanNeeded) {
+				t.Errorf("assigned to %q, tk-b.1 reads group %q, ask %q, signal %q; want it human-needed", assignee, r.Group, r.Ask, r.Signal)
+			}
+			if v := doc.NeedsYou; kindOf(v, "tk-b.1") != NeedKindHumanNeeded || len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindHumanNeeded, 1}) {
+				t.Errorf("assigned to %q, tk-b.1 is of kind %q and the kinds are %+v, want Human-needed last", assignee, kindOf(v, "tk-b.1"), v.Kinds)
+			}
+		}
+	})
+	t.Run("a park that carries bd's human label is a human-needed need that counts, and the work it holds waits on it", func(t *testing.T) {
+		g := graph()
+		for i := range g.open {
+			if g.open[i].ID == "tk-park" {
+				g.open[i].Labels = []string{"human"}
+			}
+		}
+		park := person.Blocker{ID: "tk-park", Title: "parked", Status: "open", IssueType: "gate", Labels: []string{"human"}}
+		g.holding["tk-loose"], g.holding["tk-loose2"] = prstatus.Holds{Owed: []person.Blocker{park}}, prstatus.Holds{Owed: []person.Blocker{park}}
+		doc := boardOf(t, g)
+		if r := doc.Rows["tk-park"]; r.Group != GroupWaitingOnYou || r.Ask != AskHumanNeeded {
+			t.Errorf("tk-park reads group %q, ask %q; want it human-needed", r.Group, r.Ask)
+		}
+		for _, id := range []string{"tk-loose", "tk-loose2"} {
+			if r := doc.Rows[id]; r.Group != GroupWaitingOnYou || r.Signal != "Waits on tk-park" {
+				t.Errorf("%s reads group %q, signal %q; want it waiting on tk-park", id, r.Group, r.Signal)
+			}
+		}
+		if v := doc.NeedsYou; !slices.Contains(ids(v.Counted), "tk-park") || kindOf(v, "tk-park") != NeedKindHumanNeeded ||
+			len(v.Kinds) != 6 || v.Kinds[5] != (KindCount{NeedKindHumanNeeded, 1}) {
+			t.Errorf("Needs you counts %v, folds %v and gives kinds %+v, with tk-park of kind %q; want tk-park counted and Human-needed last",
+				ids(v.Counted), ids(v.NotCounted), v.Kinds, kindOf(v, "tk-park"))
+		}
+	})
 }

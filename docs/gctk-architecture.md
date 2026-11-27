@@ -713,7 +713,7 @@ with what the person can do.
   things stand, and `closed`. A bead with no move of its own has no group: a
   conversation that answers a question, which the question's row carries, an
   epic or a Delivery with open members or with no members at all, and a gate
-  that is no human gate.
+  that asks no one, which is no human gate and carries no `human` label.
 - **The rule that placed it.** The first of these that applies answers:
   1. `closed`.
   2. `ask`: the bead is itself what a person owes, and the answer names the
@@ -723,8 +723,9 @@ with what the person can do.
      open human gate and tracks no decision that asks. It is a `pull-request`
      when its pull request reads needs-review or needs-attention, a `ruling`
      when it is an epic with members and none of them open, or a landed
-     Delivery, and `assigned-to-you` when it is any other open bead only a
-     person clears.
+     Delivery, `human-needed` when it is any other open bead that carries
+     bd's `human` label, and `assigned-to-you` when it is any other open bead
+     only a person clears.
      Work that carries `hold:mayor` asks nothing, because Gas City's hold
      names the Product Owner as its next actor. A pull request whose
      needs-attention rests only on the human gates and the beads a person owes
@@ -737,8 +738,8 @@ with what the person can do.
   3. `own-wait` or `further-along`: a human gate, or a bead only a person
      clears, holds it through a wait of its own, or further along its waits,
      an ancestor's included.
-  4. `parked`: a gate that is no human gate holds it, its own or an
-     ancestor's.
+  4. `parked`: a gate that is no human gate and carries no `human` label
+     holds it, its own or an ancestor's.
   5. `status`: its status is one no pool offers, such as deferred.
   6. `staying`: it is a conversation its sitting stays in, or a decision a
      ruling left waiting on the work it sent. It is a person's move again once
@@ -753,7 +754,8 @@ with what the person can do.
      ([In flight](steering.md#in-flight)), or work a live run works, and
      where its pull request stands is part of the answer.
   10. `scheduled`: it is work that is armed, routed or assigned, and no
-      dispatch hold holds it.
+      dispatch hold holds it. An arm or a route sends no work that carries
+      bd's `human` label.
   11. `not-ready`: it is any other work, which nothing sends and the store
       does not serve as ready.
 
@@ -781,8 +783,10 @@ with what the person can do.
   otherwise `advancing` or `stuck` by the beads it waits on, each read as the
   bead's advance reads it.
 
-A bead only a person clears is an open decision, a conversation, or any bead
-assigned to `human`, the operator's queue. That rule, the rule for a human gate
+A bead only a person clears is an open decision, a conversation, any bead
+assigned to `human`, the operator's queue, or any open bead that carries bd's
+`human` label, whatever it is routed, armed or assigned to, because bd reads
+that label as a request for a person. That rule, the rule for a human gate
 and the rule for a bead that waits on work of its own first are the rules about
 one bead. They sit in `standing/person`, beneath `prstatus`, which reads them
 for what holds a pull request.
