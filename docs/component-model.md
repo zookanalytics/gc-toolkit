@@ -124,11 +124,10 @@ writes.
 ### An anchor's children
 
 A bead that hangs off an anchor (a rework child) names the anchor in
-`anchor_bead`, and that key is
-what makes it a child. The child also has an edge onto the anchor, its
-membership edge, and that edge can be of any type. bd keeps one edge per ordered
-pair and refuses a second type on it, so an edge the pair already carries is the
-membership edge. The pack joins a child whose pair has no edge with a `related`
+`anchor_bead`, and that key is what makes it a child. The child also has an
+edge onto the anchor, its membership edge, and that edge can be of any type. bd
+keeps one edge per ordered pair and refuses a second type on it, so an edge the
+pair already carries is the membership edge. The pack joins a child whose pair has no edge with a `related`
 edge. A conversation about the anchor carries no `anchor_bead`, so its `tracks`
 edge makes it no child, and neither are a review run's asks and withdrawals,
 each of which blocks the bead that owns the PR through an edge of its own.
@@ -414,7 +413,7 @@ prerequisite, and the four exclusions above are what such a check encodes.
 | `assets/scripts/review-run.sh` | review | The review run's step script. It prints what each step reads, checks a step's output and writes it, and makes the run's only writes outside its beads, each owned by one step: the withdrawal, the push and its edit of the PR's title and body, the round's answers on the PR (`gctk pr answer`), a deferral, a question to a person and a demo delivery. Its triage read first checks that the run stands, and cancels a run that must stop with no result. |
 | `assets/scripts/review-passed-check.sh` | review | The review loop's check and the run's final validate and record: runs `gctk review passed --record` on the iteration the control dispatcher hands it, so the iteration that ends the loop records the run's result and files `review-loop-exhausted` when the loop spent its attempts, and the loop passes, iterates, or runs the check again when the store did not answer or a record did not land. |
 | `services/gctk` (`gctk review`) | review | The review domain: the check index at a commit (`checks`, `guidance`), the loop's pass rule and, as the loop's check, the run's result (`passed`), asks (`ask`), and a run step's reads, its output check and the head's comment (`step`, `output`, `comment`) ([gctk-architecture.md](gctk-architecture.md)). |
-| `assets/scripts/review-workspace.sh` | review | A review's directory on disk. A review run's is named for its root, with a detached worktree for triage, for each lane and for the repair, and the review-workspace-reap order's pass removes it once the root closes. The same pass removes the directory of a review that closed some other way. `mol-rig-demo` takes one for the worktree its app runs from, named for its demo-request bead. |
+| `assets/scripts/review-workspace.sh` | review | A review's directory on disk. A review run's is named for its root, with a detached worktree for triage, for each lane and for the repair, and the review-workspace-reap order's pass removes it once the root closes. The same pass removes an idle directory that names no bead the city's stores have. `mol-rig-demo` takes one for the worktree its app runs from, named for its demo-request bead. |
 | `assets/scripts/review-evidence.sh` | review | Prints what `gctk rig` recorded at the commit a review reads, a line per check, and whether the anchor's pre-existing mark holds a recorded fail. Every review's gather runs it, so a check's method reads the evidence and works none of it out. |
 | `assets/scripts/demo-repo-artifact.sh` | review | The demo check's repo-artifact modality: lists the visuals a reviewed commit carries that its change adds, names, or sits beside, and attaches the chosen one to the PR inline, as the commit stores it, through `demo-deliver.sh`. The comment says what the change does to the visual and names the commit that last changed it. |
 | `assets/scripts/demo-screenshot.sh` | review | The demo check's screenshot modality: renders one state of the surface a change affects and saves it as a PNG for `demo-deliver.sh` to attach, through the SprintShow engine's screenshot command, which checks each step's proof as the engine's videos do. The surface is an app page a demo:capture script drives to the state, a command's output as the engine's own terminal shows it, or markdown as GitHub's own renderer renders a comment. It refuses an engine whose help lists no screenshot command, a terminal capture on an engine whose help lists no terminal surface, a command the engine stopped waiting on before it finished or took the screen, output captured earlier that cat had not finished printing when the engine stopped waiting on it, and markdown holding a block that github.com's page script finishes, such as a mermaid diagram or math. |

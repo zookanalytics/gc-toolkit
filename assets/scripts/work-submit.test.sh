@@ -508,7 +508,6 @@ eq "$(field assignee)" "" "(12b) nothing is handed off"
 eq "$(closed_step)" "in_progress" "(12b) the step stays open"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(12b) the session drains"
 
-
 echo "# a refused handoff write stops the chain"
 for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
   prepare polecat/tk-w "$FRESH"

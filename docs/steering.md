@@ -25,8 +25,8 @@ how a bead is placed. How
 the operator decides when work runs: the steering moves, the state each move
 writes, what that state holds and what it leaves running, and how each move is
 released. The order work queues in: how a bead's priority is derived, where it
-is written, and the writers that keep it there, the creators of PR-finishing
-work among them.
+is written, and the writers that keep it there, the landing order's settle of
+a review run among them.
 
 **Boundaries.** The design that decides how work is steered by epic, with the
 alternatives it rejected and the units that build it, is
@@ -568,8 +568,8 @@ its `pr_bead` var (`gc.var.pr_bead`) and follows the anchor, and the run's
 steps, on every pool, follow the root. So a settle of the anchor writes the
 run's input convoy and leaves the run to its root, and the pass settles a
 queued step of the run with its root. The pour writes no shift on the root, so
-its shift reads -1, the shift each child is filed with, until a move writes
-one. The landing order settles the root once the act that poured it has freed
+its shift reads -1, one level sooner than its anchor, until a move writes one.
+The landing order settles the root once the act that poured it has freed
 the record lock, because the pour gives every bead it makes the anchor's own
 priority. A run whose settle fails runs at that priority until the pass
 reaches a step of it queued for the polecat pool. An approval that comes after
@@ -579,19 +579,13 @@ anchor's children and not the run.
 **It never has a parent.** Each child is joined to its anchor with a `blocks`
 edge and a membership edge, never a parent-child edge, so no cascade reaches
 it: a park or a decision hold on the anchor's epic leaves the PR's finishing
-work running. The suite of each script that files a child asserts that the
-child has no parent.
+work running.
 
-**Its rank.** Each child is filed with `priority_shift=-1` in its create, so it
-is born one level sooner than its anchor. Its priority is:
+**Its rank.** Its priority is:
 
 - P0 once the anchor's PR is approved, whatever its shift;
 - otherwise its anchor's priority plus its shift: at -1, P1 for an anchor at P2,
   and P0 for an anchor at P1 or P0.
-
-A child adopted or re-routed later keeps the shift it carries, because after its
-birth the shift is its own input, which `queue-priority.sh move --shift` may
-have set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor owns
 an open PR, at `pull_request_pending` or `pull_request_head_changed` on the

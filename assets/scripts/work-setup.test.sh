@@ -300,7 +300,6 @@ for held in tk-step tk-w; do
   hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16b) holding $held: and the notes record no stop"
 done
 
-
 echo "# a fresh run makes its worktree in the rig, whatever repo its directory is in"
 RIG="$TMP/rig"; "$REAL_GIT" clone -q "$O" "$RIG"
 SLOT="$TMP/slot"; mkdir -p "$SLOT"

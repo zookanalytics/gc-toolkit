@@ -83,7 +83,7 @@ IDX=$(cat "$root/review-checks.toml")
 PURPOSE=$(head -5 "$GC_RIG_ROOT/docs/review-pm.md")
 while read -r l; do :; done < "$root/review-checks.toml"
 [ -r "$root/review-checks.toml" ] && echo readable
-"$GCTK" review checks --resolve c --through merge --file "$HERE/../../review-checks.toml"
+"$GCTK" review checks --check c --file "$HERE/../../review-checks.toml"
 FIXTURE
 eq "$(reads "$TMP/reads.sh" | wc -l | tr -d ' ')" "7" "every read shape in the fixture is found"
 

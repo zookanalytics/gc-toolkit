@@ -142,9 +142,8 @@ eq "$?" 0 "--verdict exits 0 even for a dead route — it reads, it does not jud
 
 echo "# a name the CALLER passes is taken as given, rig-less or not"
 # The asymmetry with --verdict above is the point: a caller naming
-# <rig>/<pool> is choosing the route, and this is the path signoff.sh resolves
-# the review bead's fix_target_pool through — a key gate-ensure.sh stamps from
-# its own --fix-pool argument. --verdict reads a route nobody here chose.
+# <rig>/<pool> is choosing the route. --verdict reads a route nobody here
+# chose.
 env -u GC_RIG "$SUT" gc-toolkit/gc-toolkit.polecat >"$TMP/out" 2>"$TMP/err"; RC=$?
 eq "$RC" 0 "exit 0"
 eq "$(cat "$TMP/out")" "gc-toolkit/gc-toolkit.polecat" "the route the caller named is returned"

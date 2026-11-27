@@ -354,10 +354,9 @@ _bd_anchor_up() {
 # statuses, as one array of bead rows: the bd_list contract, so non-zero without
 # output means "could not tell", never "none". A row carries the bead's own
 # fields and metadata, but not its outgoing .dependencies. No read writes. The
-# live statuses are read by anchor_bead, and
-# closed through the edge in a store marked joined, else by anchor_bead with
-# them. The live read goes first, so a child that closes between the two reads
-# is reported live rather than missed.
+# live statuses are read by anchor_bead, and closed through the edge in a store
+# marked joined, else by anchor_bead with them. The live read goes first, so a
+# child that closes between the two reads is reported live rather than missed.
 bd_anchor_children() {
   local anchor="${1:-}" statuses="${2:-}" s live="" closed="" rows='[]' up
   [ -n "$anchor" ] && [ -n "$statuses" ] || return 1
@@ -674,7 +673,7 @@ bd_meta_ensure() {
   done < <(printf '%s' "$meta" | jq -j 'to_entries[] | "\(.key)=\(.value | if type == "string" then . else tojson end)\u0000"' 2>/dev/null)
   if [ "${#sets[@]}" -gt 0 ]; then
     gc bd update "$id" "$@" "${sets[@]}" </dev/null >/dev/null 2>&1 || true
-      got=$(bd_meta_readback "$id" "$meta" "$@")
+    got=$(bd_meta_readback "$id" "$meta" "$@")
     [ "${got%%$'\t'*}" = landed ] && return 0
   fi
   if [ "${got%%$'\t'*}" = unreadable ]; then printf 'unreadable\n'; else printf '%s\n' "${got#*$'\t'}"; fi
