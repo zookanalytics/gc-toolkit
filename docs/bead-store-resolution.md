@@ -151,8 +151,6 @@ reference to a dozen live beads.
 - `bead-rehome.sh` places both ends of a disposition, so the edge it writes
   in the origin's store names a successor that the store its prefix names
   actually holds.
-- `mol-witness-patrol`'s cleanup step holds `git worktree remove` behind
-  `--present`: a worktree whose owner cannot be placed is not an unowned one.
 
 A gate that concludes absence without going through it is reporting on
 whichever store it happened to be standing in.

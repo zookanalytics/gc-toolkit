@@ -1276,8 +1276,8 @@ keys = [
 
 [metadata.patrol_findings]
 # One durable bead per distinct patrol finding, written by
-# assets/scripts/patrol-finding.sh (the deacon and witness patrols file through
-# it). finding.key and finding.about together are the dedup identity. A report
+# assets/scripts/patrol-finding.sh (the deacon's patrol, the witness and the
+# seat-progress report file through it). finding.key and finding.about together are the dedup identity. A report
 # whose key and subject both match a live bead records a recurrence on that
 # bead, unless that bead is held at blocked with nothing open left to wait on.
 # A report that names no subject matches only a bead with no finding.about. An
@@ -1550,9 +1550,9 @@ keys = [
 #   pour beside gc.kind=workflow. The landing order reads it to tell a review
 #   run, a live root of mol-pr-review, attached to a PR's bead by a blocks edge.
 # gc.formula_contract — `graph.v2` on a workflow root, stamped by the formula
-#   pour beside gc.kind=workflow. orphan-dispose.sh, run-cancel.sh and
-#   mol-witness-patrol.toml read it, or gc.kind=workflow, to classify a bead as a
-#   workflow root — the runtime's own IsWorkflowRoot test, mirrored in the pack.
+#   pour beside gc.kind=workflow. run-cancel.sh, run-lib.sh and gctk's waits
+#   domain read it, or gc.kind=workflow, to classify a bead as a workflow root —
+#   the runtime's own IsWorkflowRoot test, mirrored in the pack.
 # gc.work_dir / gc.work_commit / gc.work_branch — the runtime's work-record
 #   keys on a work bead: the worker's checkout, the commit that satisfied the
 #   bead, and the branch that commit is on. The gascity binary writes gc.work_dir

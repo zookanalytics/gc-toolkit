@@ -173,10 +173,10 @@ record for it. The work skill gives each agent's command.
   assignee.** The refinery's patrol lists the open beads assigned to it that
   carry a `branch`, and the keeper's wake sweep lists the beads assigned to it
   that carry a handback. A route never reaches either list.
-- **The deacon and the witness patrol their own wisps.** Each one's hook
-  answers its patrol's wisp ahead of a bead routed or assigned to it, and
-  neither patrol lists assigned beads, so they take mail, which each patrol
-  reads every cycle.
+- **The deacon and the witness take mail.** The deacon's hook answers its
+  patrol's wisp ahead of a bead routed or assigned to it, and its patrol lists
+  no assigned bead. The witness runs only for its mail, and `--notify` wakes
+  it.
 
 A route or an assignee alone gives a running agent no turn. Core's
 `nudge-on-route` order would nudge a routed agent, but it reads the route from

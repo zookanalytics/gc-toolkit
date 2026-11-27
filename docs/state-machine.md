@@ -54,7 +54,7 @@ stateDiagram-v2
     [*] --> filed
     filed --> routed: gc sling / gctk bead start-armed
     routed --> claimed: gc hook --claim (runtime)
-    claimed --> routed: witness patrol — dead session
+    claimed --> routed: Gas City's release — dead session
     state "poured (gc.execution_routed_to)" as poured
   }
 
@@ -120,7 +120,7 @@ same way until its hand-off to the refinery removes the edge
 |---|---|---|
 | filed → routed | `gc sling` (runtime); the deferred-dispatch order's `gctk bead start-armed`, for a bead `gctk bead arm` armed, when blockers must close first | dispatch |
 | routed → claimed | `gc hook --claim` (runtime) | pool demand spawns a session |
-| claimed → routed | witness patrol (`mol-witness-patrol`) | session died with the claim held |
+| claimed → routed | Gas City's release: the controller's, and core's orphan sweep (`gc bd release-if-current`) (runtime) | session died with the claim held |
 | claimed → handed_off | `mol-polecat-work` submit step (ONE atomic `gc bd update`) | push verified on the remote |
 | handed_off → merged | `direct-merge-push.sh`, which the refinery's merge-push step runs for the `direct` strategy, via `lifecycle.sh` | FF merge pushed and verified on the target, or found there by a later patrol through the bead's `direct_landing_sha` stamp; record + close in one call |
 | handed_off → pull_request_pending | `refinery-publish.sh`, the refinery's merge-push step for the `mr` strategy, through `gctk pr record` | the PR is published at the prepared head ([The pending record](#the-pending-record)) |
@@ -852,8 +852,9 @@ up dating a state that no longer holds, with nothing in either key saying so.
 
 The one boundary crossing between the work and merge workflows is a single
 atomic write. There is nothing to reconstruct afterward: a session that dies
-before the write leaves a claimed bead the witness patrol re-routes; one that
-dies after it leaves a complete handoff the refinery picks up.
+before the write leaves a claimed bead that Gas City's release puts back in its
+pool, and one that dies after it leaves a complete handoff the refinery picks
+up.
 
 ```mermaid
 sequenceDiagram

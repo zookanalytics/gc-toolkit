@@ -69,8 +69,8 @@ At the end of every turn, and before every prompt, the hook, in order:
    its first prompt ([Pack drift](#pack-drift)). With neither, the common
    path, the hook exits cheaply.
 5. **Recycles**: it writes a durable HANDOFF mail (`gc handoff`, which also
-   requests the restart for the witness and the deacon), reaps the retiring
-   session's scratch (`scratch-reap.sh --session`, since the recycle abandons
+   requests the restart for the deacon, an always-mode session), reaps the
+   retiring session's scratch (`scratch-reap.sh --session`, since the recycle abandons
    that tree whole — docs/scratch-reclaim.md), and requests a restart
    (`gc session reset`). Before a prompt it then blocks the prompt once a
    restart is requested ([Before a prompt](#before-a-prompt)).
@@ -196,8 +196,8 @@ recycle when:
 - an **operator is attached** to watch or debug the pane; or
 - the **refinery is mid git-op** — a rebase/merge in progress or a dirty
   tree, in either the refinery's own worktree or the rig's canonical
-  checkout (`GC_RIG_ROOT`). Witness and deacon are idle pollers with no
-  long git operations, so this guard is refinery-only. Untracked files are
+  checkout (`GC_RIG_ROOT`). The witness and the deacon run no long git
+  operations, so this guard is refinery-only. Untracked files are
   normal scratch and do not count.
 
 The bias is **uncertain → skip**. Deferring only delays the recycle: the

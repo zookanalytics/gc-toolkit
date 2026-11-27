@@ -466,7 +466,6 @@ bd 1.3.2.
 | Pack machinery | Gas City's primitive | Carried by |
 |---|---|---|
 | the hand-stamped routes in code other members retire, and the rescues that repair them | `gc sling --no-formula`, assignment | the member that retires each, tk-1tfzr71.19 to .22 |
-| `orphan-dispose.sh`'s generic arms | core's orphan-sweep | tk-1tfzr71.19 |
 
 ### Copied boilerplate
 

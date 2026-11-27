@@ -102,8 +102,7 @@ Each writer that files or disposes new work follows the rule.
   bead's prefix names, on that agent's default formula. A bead it finds already
   tracking the failure it sends nowhere, so a failure is sent once.
 - **The witness** files mail about a pack defect as a bug carrying `hold:mayor`
-  from its create and routed to no pool (`formulas/mol-witness-patrol.toml`, the
-  `bug-file` block).
+  from its create and routed to no pool (`agents/witness/prompt.template.md`).
 - **The feedback distiller** files each prompt-update and engineering bead
   carrying `hold:mayor` from its create and routed to no pool
   (`formulas/mol-feedback-distiller.toml`, the file-and-dispatch step). The

@@ -107,10 +107,11 @@ that does not import the pack itself.
 ### What the import brings in
 
 - **The roster** — worker pools (`polecat`, and `polecat-codex` on the
-  codex provider), patrols (`refinery`, `witness`, `deacon`), conversation
-  sittings (`converse-claude-opus`, `converse-claude-fable`,
-  `converse-codex-sol`, `converse-codex-astra`, which `gc-helm engage` opens
-  per conversation), and `proactive` (always-on, 2-slot).
+  codex provider), patrols (`refinery`, `deacon`), the rig's mail
+  (`witness`), conversation sittings (`converse-claude-opus`,
+  `converse-claude-fable`, `converse-codex-sol`, `converse-codex-astra`, which
+  `gc-helm engage` opens per conversation), and `proactive` (always-on,
+  2-slot).
 - **The lifecycle** — `lifecycle/lifecycle.toml` (the metadata registry) and
   the plain write `assets/scripts/lifecycle.sh`. The script execs the `gctk`
   binary that the `gctk-build` order builds from `services/gctk`, so the city
@@ -118,7 +119,7 @@ that does not import the pack itself.
   refused, and no PR merges either: the landing order runs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
   `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
-  `boot-health`, `witness-nudge`, `gctk-build`, `helm-build`, and the feedback
+  `boot-health`, `gctk-build`, `helm-build`, and the feedback
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
   `gc-toolkit.session-title`, …).

@@ -22,8 +22,9 @@ landing order does, and the runtime guarantees the arrangement depends on.
 through are [state-machine.md](state-machine.md). The refinery *agent*'s steps,
 which land, publish, park or send work back, live in
 `formulas/mol-refinery-patrol.toml` and the scripts each step calls, and are not
-driven by either order. The witness patrol's `check-refinery` step watches
-that patrol's queue for a hand-off gone stuck.
+driven by either order. The refinery-queue orders watch that patrol's queue
+for a hand-off gone stuck: `refinery-queue-detect` looks every 30 minutes, and
+`refinery-queue-report` files a human gate on each one it found.
 
 ## Mechanism
 

@@ -205,9 +205,7 @@ or to a skill, by the rule in
   `cmd $FILES` is the review's. An unbraced name before a colon can take a zsh
   modifier, so `"$REV:review-checks.toml"` reaches git as
   `<rev>eview-checks.toml`, and `zsh-colon-modifier.sh` flags it. JSON reaches
-  jq through `printf '%s'`, since zsh's `echo` expands its escapes, and
-  `candidate-pipeline.test.sh` runs its block under `bash -O xpg_echo` and
-  `zsh -f` to catch an `echo`.
+  jq through `printf '%s'`, since zsh's `echo` expands its escapes.
 - **No variable survives a tool call.** Each call runs in a fresh shell, so a
   block sets every variable it reads, the claimed step's id included, and
   resolves each script path itself, as the formulas' candidate loop does.
