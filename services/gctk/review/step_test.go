@@ -16,15 +16,19 @@ import (
 )
 
 // A run's steps as Gas City writes them: the first iteration's steps carry the
-// loop's bare name and later ones the formula's name before it, and a lane
-// bonded inside an iteration carries its own formula's name before that.
+// loop's bare name and later ones the formula's name before it, and a lane or a
+// fresh look bonded inside an iteration carries its own formula's name before
+// that.
 func stepRef(n int, name string) string {
 	loop := "review-loop.iteration.1"
 	if n > 1 {
 		loop = "mol-pr-review.review-loop.iteration." + string(rune('0'+n))
 	}
-	if name == "lane" {
+	switch name {
+	case "lane":
 		return "mol-pr-review-lane." + loop + ".triage.item.1.lane"
+	case "look":
+		return "mol-pr-review-look." + loop + ".rule-and-repair.item.1.look"
 	}
 	return loop + "." + name
 }

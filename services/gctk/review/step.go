@@ -39,10 +39,11 @@ const (
 	stepTriage = "triage"
 	stepRepair = "rule-and-repair"
 	stepLane   = "lane"
+	stepLook   = "look"
 )
 
 // Step is one step of a review run: its bead, its gc.step_ref, the output it
-// writes (triage, lane or repair, "" for a step that writes none), the
+// writes (triage, lane, repair or look, "" for a step that writes none), the
 // iteration it runs in (0 outside the loop), the run, and the PR's record and
 // branch as the bead that owns the PR carries them.
 type Step struct {
@@ -77,6 +78,8 @@ func ReadStep(l *ledger.Ledger, id string) (*Step, error) {
 		st.Output = OutputRepair
 	case stepLane:
 		st.Output = OutputLane
+	case stepLook:
+		st.Output = OutputLook
 	}
 	if raw := str(attemptKey, b); raw != "" {
 		n, err := strconv.Atoi(raw)

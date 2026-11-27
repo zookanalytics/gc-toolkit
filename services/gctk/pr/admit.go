@@ -231,7 +231,8 @@ func (u *run) writers(s state) ([]string, error) {
 // failedRuns is the last two runs attached to the bead s read at its validated
 // head and target, when both ended without a result, counting only runs that
 // closed after the bead's last review-run-failed gate closed. It is empty
-// otherwise.
+// otherwise, and when either of the two is a run its fresh look stopped to put
+// the review to a person, which no machinery failed at (review.Ending.Asked).
 func (u *run) failedRuns(s state) ([]review.Ending, error) {
 	since := time.Time{}
 	for _, b := range s.blockers {
@@ -289,7 +290,7 @@ func (u *run) failedRuns(s state) ([]review.Ending, error) {
 		if err != nil {
 			return nil, err
 		}
-		if e.Result {
+		if e.Result || e.Asked {
 			return nil, nil
 		}
 		out = append(out, e)

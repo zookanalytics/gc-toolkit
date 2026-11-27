@@ -15,7 +15,9 @@ import (
 // and the target. Its loop is a checked template step, one iteration per head
 // it judges. In each iteration triage picks the checks the head needs, one lane
 // runs each, and rule-and-repair rules every finding and every ask it takes
-// and makes the round's fixes as one push.
+// and makes the round's fixes as one push. When the run's account calls for one
+// (converge.go), a fresh look then reads the whole review and sends it on or
+// stops it for a person's answer.
 //
 // What the run judged is in its steps' outputs, which Gas City keeps on the
 // run's beads: each step writes one JSON object as its gc.output_json before it
@@ -30,6 +32,7 @@ const (
 	OutputTriage = "triage"
 	OutputLane   = "lane"
 	OutputRepair = "repair"
+	OutputLook   = "look"
 )
 
 // A lane's verdict.
@@ -112,13 +115,22 @@ type Finding struct {
 
 // Repair is what rule-and-repair writes: the head it ruled at, a ruling for
 // each finding and each ask it took, and the head its push made, "" when it
-// pushed nothing.
+// pushed nothing. Look is the fresh look the round calls for, one item naming
+// the head it judged or none, which the output check fills from the run's
+// account and the step's fan-out bonds, so the round's own ruler never writes
+// it.
 type Repair struct {
-	Review    string   `json:"review"`
-	Iteration int      `json:"iteration"`
-	Head      string   `json:"head"`
-	Rulings   []Ruling `json:"rulings"`
-	Pushed    string   `json:"pushed,omitempty"`
+	Review    string    `json:"review"`
+	Iteration int       `json:"iteration"`
+	Head      string    `json:"head"`
+	Rulings   []Ruling  `json:"rulings"`
+	Pushed    string    `json:"pushed,omitempty"`
+	Look      []LookDue `json:"look"`
+}
+
+// LookDue is the fresh look a round calls for: the head the round judged.
+type LookDue struct {
+	Head string `json:"head"`
 }
 
 // Ruling is how the round ruled one finding, named by its lane's check and its
@@ -127,18 +139,68 @@ type Repair struct {
 // summary, and the gate a question went to. Settles is the gate of a question
 // a person's post settles, which only the ruling of that post's ask names, and
 // Moot says the post makes the question moot rather than answering it. The
-// round's post closes that gate with the post as its answer.
+// round's post closes that gate with the post as its answer. Restates names the
+// finding of an earlier round of the run that a lane's finding raises again
+// after the round that ruled it must-fix fixed it, so the finding has come
+// back.
 type Ruling struct {
-	Check   string `json:"check,omitempty"`
-	Finding string `json:"finding,omitempty"`
-	Ask     string `json:"ask,omitempty"`
-	Ruling  string `json:"ruling"`
-	Reason  string `json:"reason,omitempty"`
-	Commit  string `json:"commit,omitempty"`
-	Summary bool   `json:"summary,omitempty"`
-	Gate    string `json:"gate,omitempty"`
-	Settles string `json:"settles,omitempty"`
-	Moot    bool   `json:"moot,omitempty"`
+	Check    string      `json:"check,omitempty"`
+	Finding  string      `json:"finding,omitempty"`
+	Ask      string      `json:"ask,omitempty"`
+	Ruling   string      `json:"ruling"`
+	Reason   string      `json:"reason,omitempty"`
+	Commit   string      `json:"commit,omitempty"`
+	Summary  bool        `json:"summary,omitempty"`
+	Gate     string      `json:"gate,omitempty"`
+	Settles  string      `json:"settles,omitempty"`
+	Moot     bool        `json:"moot,omitempty"`
+	Restates *FindingRef `json:"restates,omitempty"`
+}
+
+// FindingRef names one lane's finding in a round of the run: the iteration,
+// the lane's check and the finding's id.
+type FindingRef struct {
+	Iteration int    `json:"iteration"`
+	Check     string `json:"check"`
+	Finding   string `json:"finding"`
+}
+
+// String is the finding as the account names it.
+func (f FindingRef) String() string {
+	return fmt.Sprintf("%s finding %s of round %d", f.Check, f.Finding, f.Iteration)
+}
+
+// The fresh look's verdict: the review goes on to its next round, or stops for
+// a person's answer.
+const (
+	LookContinue = "continue"
+	LookStop     = "stop"
+)
+
+// LookQuestionKey keys the human gate a fresh look that stops the review files
+// on the bead that owns the PR. It is a question's key, so the gate reads as a
+// ruling a person owes on the PR, and a person's post on the PR filed after it
+// is ruled by the run it pours, which can settle it.
+const LookQuestionKey = QuestionKey + "not-converging"
+
+// Look is what a fresh look writes: the head its round judged, its verdict,
+// its reading of why the findings keep coming, which says whether the trouble
+// points to the PR's approach being wrong overall, and for a stop its
+// recommendation and the one question it puts to a person. Rules names each
+// commit, among the rules that changed on the PR's target, that the reading
+// gives as the cause of the counts, which a look sends a run on by when the
+// account forces a question. Gate is the question's gate, which the look's
+// record files and fills in.
+type Look struct {
+	Review         string   `json:"review"`
+	Iteration      int      `json:"iteration"`
+	Head           string   `json:"head"`
+	Verdict        string   `json:"verdict"`
+	Reading        string   `json:"reading"`
+	Recommendation string   `json:"recommendation,omitempty"`
+	Question       string   `json:"question,omitempty"`
+	Rules          []string `json:"rules,omitempty"`
+	Gate           string   `json:"gate,omitempty"`
 }
 
 // QuestionKey opens the key of each human gate a review run puts a question to
@@ -227,6 +289,7 @@ type Iteration struct {
 	Triage *Triage
 	Lanes  []Lane
 	Repair *Repair
+	Look   *Look
 }
 
 // NotARun is the error of a bead that is neither a review run's root nor a
@@ -362,8 +425,17 @@ func (run *Run) add(raw string) string {
 			return fmt.Sprintf("iteration %d has a second repair output", head.Iteration)
 		}
 		it.Repair = &rp
+	case OutputLook:
+		var lk Look
+		if err := strict(raw, &lk); err != nil {
+			return "its look output does not read: " + err.Error()
+		}
+		if it.Look != nil {
+			return fmt.Sprintf("iteration %d has a second look output", head.Iteration)
+		}
+		it.Look = &lk
 	default:
-		return fmt.Sprintf("its output names the step %q, which is not triage, lane or repair", *head.Review)
+		return fmt.Sprintf("its output names the step %q, which is not triage, lane, repair or look", *head.Review)
 	}
 	return ""
 }

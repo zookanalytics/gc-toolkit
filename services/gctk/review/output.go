@@ -62,7 +62,8 @@ func Output(l *ledger.Ledger, req OutputRequest) ([]byte, error) {
 		return nil, err
 	}
 	if st.Output == "" {
-		return nil, refuse("%s (%s) is not a step that writes an output: triage, a lane and rule-and-repair do", st.ID, st.Ref)
+		return nil, refuse("%s (%s) is not a step that writes an output: triage, a lane, rule-and-repair and a fresh look do",
+			st.ID, st.Ref)
 	}
 	var head struct {
 		Review    *string `json:"review"`
@@ -90,6 +91,8 @@ func Output(l *ledger.Ledger, req OutputRequest) ([]byte, error) {
 		v, err = laneOutput(run, n, req)
 	case OutputRepair:
 		v, err = repairOutput(l, st, req)
+	case OutputLook:
+		v, err = lookOutput(run, n, req)
 	}
 	if err != nil {
 		return nil, err
@@ -223,11 +226,14 @@ func laneOutput(run *Run, n int, req OutputRequest) (*Lane, error) {
 }
 
 // repairOutput checks rule-and-repair's output: a ruling for every finding a
-// lane raised and every ask the round can take, each standing by checkRuling.
-// A ruling that settles a question rules an ask that carries a person's post
-// on the PR, since the question is answered with that post. The gate a ruling
-// names, in gate or settles, is kept trimmed, so the round's post and the
-// run's record read the gate the check read.
+// lane raised and every ask the round can take, each standing by checkRuling,
+// and each finding that restates an earlier one by checkRestates. A ruling that
+// settles a question rules an ask that carries a person's post on the PR, since
+// the question is answered with that post. The gate a ruling names, in gate or
+// settles, is kept trimmed, so the round's post and the run's record read the
+// gate the check read. The output's look is the fresh look the run's account
+// calls for once the round's rulings are in it (Converge), whatever the step
+// wrote there.
 func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error) {
 	run, n := st.Run, st.Iteration
 	var rp Repair
@@ -254,6 +260,9 @@ func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error
 	subjects := map[subject]bool{}
 	for _, r := range rp.Rulings {
 		if err := checkRuling(r, it, asks, declined); err != nil {
+			return nil, err
+		}
+		if err := checkRestates(r, run, n); err != nil {
 			return nil, err
 		}
 		if subjects[r.subject()] {
@@ -292,7 +301,111 @@ func repairOutput(l *ledger.Ledger, st *Step, req OutputRequest) (*Repair, error
 	if rp.Rulings == nil {
 		rp.Rulings = []Ruling{}
 	}
+	rp.Look = []LookDue{}
+	ruled := *run
+	ruled.Iterations = maps.Clone(run.Iterations)
+	round := *it
+	round.Repair = &rp
+	ruled.Iterations[n] = &round
+	if Converge(&ruled, n).Due {
+		rp.Look = []LookDue{{Head: rp.Head}}
+	}
 	return &rp, nil
+}
+
+// checkRestates is why a ruling's restates does not stand, nil when it names
+// none or stands: only a lane's finding restates one, and it names a finding a
+// lane raised in an earlier round of the run, which that round ruled must-fix,
+// so it came back after a fix.
+func checkRestates(r Ruling, run *Run, n int) error {
+	ref := r.Restates
+	switch {
+	case ref == nil:
+		return nil
+	case r.Ask != "":
+		return refuse("%s names a finding it restates, and only a lane's finding restates one", r.Subject())
+	case ref.Iteration < 1 || ref.Iteration >= n:
+		return refuse("%s restates %s, and only a finding of an earlier round, from 1 to %d, comes back", r.Subject(), ref, n-1)
+	}
+	earlier := run.Iterations[ref.Iteration]
+	if earlier == nil {
+		return refuse("%s restates %s, and round %d wrote nothing", r.Subject(), ref, ref.Iteration)
+	}
+	ln, ok := lane(earlier, ref.Check)
+	if !ok || !slices.ContainsFunc(ln.Findings, func(f Finding) bool { return f.ID == ref.Finding }) {
+		return refuse("%s restates %s, which no lane of that round raised", r.Subject(), ref)
+	}
+	if earlier.Repair == nil {
+		return refuse("%s restates %s, which that round never ruled", r.Subject(), ref)
+	}
+	was, ok := rulingOf(earlier.Repair.Rulings, func(e Ruling) bool { return e.rulesFinding(ref.Check, ref.Finding) })
+	switch {
+	case !ok:
+		return refuse("%s restates %s, which that round left unruled, so no fix of it came before", r.Subject(), ref)
+	case was.Ruling != RulingMustFix:
+		return refuse("%s restates %s, which that round ruled %s, not must-fix, so no fix of it came before", r.Subject(), ref,
+			was.Ruling)
+	}
+	return nil
+}
+
+// lookOutput checks a fresh look's output: the round's own look, which its
+// repair called for, at the head the round judged, with a verdict of continue
+// or stop and its reading. A stop carries its recommendation and its question.
+// A continue goes against the account's call only by naming each commit, a
+// full object name, that the reading gives as the cause among the rules that
+// changed on the PR's target, and never at the run's last round. The gate is
+// the record's to fill in, so the look writes none.
+func lookOutput(run *Run, n int, req OutputRequest) (*Look, error) {
+	var lk Look
+	if err := decode(req.Raw, &lk, OutputLook); err != nil {
+		return nil, err
+	}
+	lk.Iteration = n
+	it := run.Iterations[n]
+	if it == nil || it.Triage == nil || it.Repair == nil || len(it.Repair.Look) == 0 {
+		return nil, refuse("round %d's repair called for no fresh look, so none runs there", n)
+	}
+	if lk.Head != it.Triage.Head {
+		return nil, refuse("round %d judged %s, and the output names the head %q", n, it.Triage.Head, lk.Head)
+	}
+	acct := Converge(run, n)
+	lk.Reading, lk.Recommendation, lk.Question = strings.TrimSpace(lk.Reading), strings.TrimSpace(lk.Recommendation),
+		strings.TrimSpace(lk.Question)
+	switch {
+	case lk.Verdict != LookContinue && lk.Verdict != LookStop:
+		return nil, refuse("the verdict reads %q, not %s or %s", lk.Verdict, LookContinue, LookStop)
+	case lk.Reading == "":
+		return nil, refuse("a look writes its reading: why the findings keep coming, and whether that points to the PR's " +
+			"approach being wrong overall")
+	case lk.Gate != "":
+		return nil, refuse("the look names the gate %s, which its record files and fills in", lk.Gate)
+	case lk.Verdict == LookStop && (lk.Question == "" || lk.Recommendation == ""):
+		return nil, refuse("a stop puts one question to a person, with its recommendation, and this one carries %s",
+			missing(lk.Question, lk.Recommendation))
+	case lk.Verdict == LookContinue && acct.Last:
+		return nil, refuse("round %d is the run's last by its bound, so the look stops the review for a person's answer", n)
+	case lk.Verdict == LookContinue && acct.Forced != "" && len(lk.Rules) == 0:
+		return nil, refuse("the account forces a question, as %s, so a look sends the review on only by naming the rules "+
+			"that changed on its target that caused the counts", acct.Forced)
+	}
+	for _, c := range lk.Rules {
+		if !git.IsObjectID(c) {
+			return nil, refuse("the rule %q is not a full object name", c)
+		}
+	}
+	return &lk, nil
+}
+
+// missing names what a stop lacks of its question and its recommendation.
+func missing(question, recommendation string) string {
+	switch {
+	case question == "" && recommendation == "":
+		return "neither"
+	case question == "":
+		return "no question"
+	}
+	return "no recommendation"
 }
 
 // contract is why a lane's finding breaks the finding contract, "" when it

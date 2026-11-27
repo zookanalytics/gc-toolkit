@@ -1517,8 +1517,15 @@ keys = [
   "gc.native_step_dependencies.v1", "gc.graphv2_*", "gc.var.*",
   "pin_awake",
   "gc.formula_contract", "gc.work_dir", "gc.work_commit", "gc.work_branch",
-  "gc.work_outcome", "work_outcome",
+  "gc.work_outcome", "work_outcome", "gc.failure_class", "gc.failure_reason",
 ]
+# gc.failure_class / gc.failure_reason — the runtime's record of a step that
+#   closes with gc.outcome fail: its class, hard or transient, and why. A
+#   review run's fresh look that stops the review writes both on its own step
+#   (gctk review look --file, class hard) before it closes failed, so Gas City
+#   ends the run's loop there without running its check (formula-spec-v2.md,
+#   section 3.1); the runtime copies the reason onto the loop and the scope that
+#   held the step.
 # gc.outcome — the terminal disposition a workflow step or bead records: a broad
 #   enum whose members include `pass` and `recorded` (a step or verdict that
 #   stood), `superseded`, `moot` and `dismissed`, written by the pack component
