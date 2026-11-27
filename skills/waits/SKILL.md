@@ -79,6 +79,29 @@ gate, below).
 - `<rig>` is the bead's own rig, whose polecat pool runs the closer, and the
   arm needs the bead open with no route. A first reaction writes the brief, the
   edge and the arm in one exit, its close exit with `--waiting-on <blocker>`.
+- A pull request's anchor at status `blocked`, whose PR is pending, takes no
+  arm. Leave its status as its PR's record keeps it, and have a check stand in
+  for it. File the check in the anchor's store (the work skill, "File new
+  work"):
+
+  ```bash
+  gc bd create "Check PR <number> once <blocker> lands" -t task -d "<bead>'s PR may be moot once <blocker> lands. This check holds the PR's merge until it has been checked." --json
+  ```
+
+  Give the check this close brief, in place of the one above:
+
+  ```bash
+  gc bd update <check> --append-notes "## Close brief (check of PR <number>, held on <blocker>, $(date -u +%Y-%m-%dT%H:%M:%SZ))
+  The claim: PR <number> (<bead>) still has work its target lacks once <blocker> has closed. <what <blocker>'s landing does to the PR, and what to check in the PR once it has>"
+  ```
+
+  Then give the check the edge and the arm above, with the check in place of
+  `<bead>`. Last, make the anchor wait on the check, which holds the PR's merge
+  until the check closes (the prs skill, "Hold its merge"):
+
+  ```bash
+  gc bd dep add <bead> <check> --type=blocks
+  ```
 - A bead that Gas City's `hold:mayor` label holds, new work in the po's queue,
   keeps its arm until the hold lifts. Once the arm lands, lift the hold, and the
   bead waits on its blocker instead of in the queue. Gas City reads the label in

@@ -765,14 +765,16 @@ no warrant.
     nothing reports a run that has finished, so the start titles each pour with
     its token and searches it after an earlier attempt.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
-    blocked bead runs before its blockers close, and #8832, native execution
-    admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
-  #7163, #8832 and PR #8834 open and unmerged.
+    blocked bead runs before its blockers close, whose fix is the open PR
+    #9406, and #8832, native execution admission loses current input
+    readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main 77143ecd18ff, with
+  #7163, #8832, PR #8834 and PR #9406 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
-  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
-  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
-  and the order, the dispatch lock, the title token, the cap and
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163,
+  which PR #9406 fixes). The arm then becomes a plain
+  `gc sling <pool> <bead> --on <formula>` at arm time, and the order, the
+  dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
 ## Feedback patterns

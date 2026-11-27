@@ -16,6 +16,10 @@ code another bead retires, reaches here through the arm its wait carries, once
 that bead has closed. That close is a claim too: the bead it waited on can close
 without the fix it promised.
 
+A check that holds a pending pull request's merge until another bead closes
+reaches here the same way. Its claim is that the PR still has work once that
+bead has closed, and closing the check releases the PR's merge.
+
 ## The contract
 
 1. **The subject arrives as the input convoy's single tracked member.** Each
@@ -24,8 +28,9 @@ without the fix it promised.
 2. **Validate before you close.** A close brief is its writer's claim, not a
    verdict — re-derive it. Read the bead's universe and confirm what the brief
    says: the thing it says is already fixed is fixed, the bead names nothing
-   left to do, or the record a store-only exit names finishes the bead. A
-   close is only as good as the check behind it.
+   left to do, the record a store-only exit names finishes the bead, or the
+   pull request whose merge a check holds still has work. A close is only as
+   good as the check behind it.
 3. **Close only when fully confident; otherwise ask the operator.** Confident
    that there is nothing to do: close the subject with `gc.work_outcome=no-op`
    and a note recording what you checked. Any doubt — the premise does not

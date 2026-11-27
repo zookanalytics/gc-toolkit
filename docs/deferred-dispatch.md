@@ -252,7 +252,8 @@ runs `gctk bead start-armed` on the rig's store (`services/gctk/arm`), which:
   the pass listed it, a question to a person, a bead left for the next pass,
   or a failure. A bead at a status other than
   `open` is held, and its line says so on every pass, because no wait landing
-  dispatches it.
+  dispatches it. A pull request's anchor is kept at such a status by its PR's
+  record, so its line leaves that status to the record.
 
 A held arm keeps its record. Releasing the hold, by closing a park's gate or by
 the prerequisite landing, needs no re-arm: the first pass after it dispatches
@@ -401,7 +402,9 @@ work the sitting sent, after its headline writes the edge
 A bead that waits this way can be a pull request's anchor, which carries a
 `merge_result`. Its arm sends the closer all the same once nothing holds the
 bead, and the closer puts the anchor to a person, because the refinery closes
-an anchor on its merge.
+an anchor on its merge. An anchor whose PR is pending sits at status `blocked`,
+which its record keeps, so `arm` refuses it there. The waits skill arms a check
+that waits for the work instead, and holds the PR's merge on the check.
 
 bd also defines an `until` edge type. Nothing in the pack acts on one, so an
 `until` edge holds no bead and closes none.

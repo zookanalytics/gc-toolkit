@@ -267,6 +267,7 @@ func TestStartHoldsWhatHoldsTheBead(t *testing.T) {
 	w.put(fake.Bead{ID: "human", Metadata: armedBead("mol-x", nil), Labels: []string{"human"}})
 	w.put(fake.Bead{ID: "assigned", Metadata: armedBead("mol-x", nil), Assignee: "rig/mechanik"})
 	w.put(fake.Bead{ID: "deferred", Status: "deferred", Metadata: armedBead("mol-x", nil)})
+	w.put(fake.Bead{ID: "pending", Status: "blocked", Metadata: armedBead("mol-validate-close", map[string]string{"merge_result": "pull_request_pending"})})
 	w.put(fake.Bead{ID: "an-epic", IssueType: "epic", Metadata: armedBead("mol-x", nil)})
 	w.put(fake.Bead{ID: "unready", Metadata: armedBead("mol-x", nil)})
 	w.store.MakeReady("unjudged", "foreign", "label", "human", "assigned", "an-epic")
@@ -280,6 +281,10 @@ func TestStartHoldsWhatHoldsTheBead(t *testing.T) {
 	act(t, lines, "human", arm.ActHold, "label", "human")
 	act(t, lines, "assigned", arm.ActHold, "assigned", "rig/mechanik")
 	act(t, lines, "deferred", arm.ActHold, "status", "status deferred")
+	act(t, lines, "pending", arm.ActHold, "status", "leave its status to the record")
+	if why := lines["pending"].Start.Why; strings.Contains(why, "to open") {
+		t.Errorf("pending: why = %q; a PR's anchor keeps the status its record gives it", why)
+	}
 	act(t, lines, "an-epic", arm.ActHold, "epic", "an epic")
 	act(t, lines, "unready", arm.ActHold, "unready", "bd does not report it ready")
 	if s := w.rt.Slings(); len(s) != 0 {
@@ -288,7 +293,7 @@ func TestStartHoldsWhatHoldsTheBead(t *testing.T) {
 	if n := len(w.store.Writes()); n != 0 {
 		t.Errorf("%d writes; a held arm takes none", n)
 	}
-	if sum[arm.ActHold] != 10 || sum.Failed() != 0 {
+	if sum[arm.ActHold] != 11 || sum.Failed() != 0 {
 		t.Errorf("summary = %v", sum)
 	}
 }

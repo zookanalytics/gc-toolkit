@@ -262,7 +262,7 @@ scan_store() {
         [ -n "$cid" ] || continue
         case "$act/$kase" in
             hold/status)
-                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Return it to open, or disarm it: gctk bead disarm $cid --reason \"<why>\"") ;;
+                findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. To disarm it: gctk bead disarm $cid --reason \"<why>\"") ;;
             fail/malformed)
                 findings+=("$label bead $cid: armed for dispatch, and $why — no wait landing can dispatch it. Disarm it (gctk bead disarm $cid --reason \"<why>\"), then arm it again (gctk bead arm) if the dispatch is still wanted") ;;
             hold/unjudged)

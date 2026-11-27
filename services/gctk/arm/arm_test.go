@@ -187,6 +187,7 @@ func TestArmRefusals(t *testing.T) {
 	w.put(fake.Bead{ID: "claimed", Status: "in_progress"})
 	w.put(fake.Bead{ID: "routed", Metadata: map[string]string{"gc.routed_to": pool}})
 	w.put(fake.Bead{ID: "deferred", Status: "deferred"})
+	w.put(fake.Bead{ID: "pending", Status: "blocked", Metadata: map[string]string{"merge_result": "pull_request_pending"}})
 	w.put(fake.Bead{ID: "plain"})
 	w.put(fake.Bead{ID: "foreign", Edges: []gcbd.Edge{{Type: gcbd.EdgeBlocks, ID: "xx-1"}}})
 	for _, tc := range []struct {
@@ -198,6 +199,7 @@ func TestArmRefusals(t *testing.T) {
 		{"a bead in progress", arm.Request{ID: "claimed", Target: pool, Reason: "r"}, "dispatched already"},
 		{"a routed bead", arm.Request{ID: "routed", Target: pool, Reason: "r"}, "dispatched already"},
 		{"a bead at another status", arm.Request{ID: "deferred", Target: pool, Reason: "r"}, "status deferred"},
+		{"a pending PR's anchor", arm.Request{ID: "pending", Target: pool, Formula: "mol-validate-close", Reason: "r"}, "hold the PR's merge on the check"},
 		{"a target with no formula to pour", arm.Request{ID: "plain", Target: "rig/rig.raw", Reason: "r"}, "--no-formula --no-convoy"},
 		{"a target the config does not name", arm.Request{ID: "plain", Target: "rig/rig.none", Reason: "r"}, "name one with --on"},
 		{"a wait edge into another store", arm.Request{ID: "foreign", Target: pool, Reason: "r"}, "xx-1"},
@@ -207,6 +209,11 @@ func TestArmRefusals(t *testing.T) {
 		if !arm.Refused(err) || !strings.Contains(err.Error(), tc.says) {
 			t.Errorf("%s: arm = %v; want refused, saying %q", tc.name, err, tc.says)
 		}
+	}
+	// A PR's anchor keeps the status its PR's record gives it, so the refusal
+	// never asks for it to be returned to open.
+	if _, err := w.arms.Arm(arm.Request{ID: "pending", Target: pool, Formula: "mol-validate-close", Reason: "r"}); err == nil || strings.Contains(err.Error(), "to open") {
+		t.Errorf("a pending PR's anchor = %v; want a refusal that leaves its status to its record", err)
 	}
 	if _, err := w.arms.Arm(arm.Request{ID: "gone", Target: pool, Reason: "r"}); err == nil || arm.Refused(err) {
 		t.Errorf("a bead the store does not hold = %v; want a read error", err)

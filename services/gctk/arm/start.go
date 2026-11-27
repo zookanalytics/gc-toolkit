@@ -12,7 +12,6 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/arm/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
-	prrecord "github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
@@ -197,12 +196,12 @@ func retireCase(r *ledger.Record) (Act, bool) {
 	if r.Status() == "closed" {
 		return Act{Action: ActRetire, Case: "closed", Why: "the bead closed with a dispatch still armed, so none is owed"}, true
 	}
-	if mr, _, _ := prrecord.Result.Get(r); strings.TrimSpace(mr) != "" {
+	if mr := mergeResultOf(r); mr != "" {
 		if arm := record.Of(r); arm != nil && arm.Formula() == closer {
 			return Act{}, false
 		}
 		return Act{Action: ActRetire, Case: "delivered",
-			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", strings.TrimSpace(mr))}, true
+			Why: fmt.Sprintf("another path already delivered its work (merge_result=%s), so the arm retires without a sling", mr)}, true
 	}
 	return Act{}, false
 }
@@ -251,6 +250,10 @@ func (a *Arms) judge(r *ledger.Record, arm *record.Arm, h waits.Holds, holdsErr,
 	switch status := r.Status(); {
 	case arm != nil && arm.Malformed() != "":
 		return Act{Action: ActFail, Case: "malformed", Why: "its arm does not decode, so nothing is slung: " + arm.Malformed()}, true
+	case status != "open" && mergeResultOf(r) != "":
+		return Act{Action: ActHold, Case: "status",
+			Why: fmt.Sprintf("it owns a pull request (merge_result=%s), whose record keeps it at status %s, and the start sends an open bead alone: "+
+				"leave its status to the record, and disarm it. %s", mergeResultOf(r), status, checkPRPath)}, true
 	case status != "open":
 		return Act{Action: ActHold, Case: "status",
 			Why: fmt.Sprintf("it is at status %s, and the start sends an open bead alone: return it to open, or disarm it", status)}, true

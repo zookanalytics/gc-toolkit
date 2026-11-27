@@ -6,8 +6,9 @@
 # of each rig's own. Covers: the OWED finding (an arm the
 # next pass would start, whose own blocks edges closed long ago, that never
 # dispatched, and an arm nothing holds whose formula the start cannot resolve,
-# named with why), the STRANDED finding (armed at a non-open status, or with a
-# record that does not decode, whatever its age), the narrowing
+# named with why), the STRANDED finding (armed at a non-open status, a pending
+# PR's anchor among them, whose finding leaves its status to the PR's record,
+# or with a record that does not decode, whatever its age), the narrowing
 # exemptions (still waiting on its own open blocker; dispatchable only
 # recently, within the order's window; armed only recently, after its blockers
 # closed; delivered via merge_result; closed; assigned; held by a hold label;
@@ -170,6 +171,7 @@ armed_store() { local n="$1"; shift; local IFS=,; ARMED[$n]="$*"; put_store "$n"
 aarmed()  { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
 astatus() { printf '{"id":"%s","status":"%s","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z"}}' "$1" "$2"; }
 amr()     { printf '{"id":"%s","status":"open","metadata":{"gc.dispatch_when_ready":"rig/pool","merge_result":"pull_request"}}' "$1"; }
+apending() { printf '{"id":"%s","status":"blocked","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_args":%s,"gc.dispatch_when_ready_armed_at":"2020-01-01T00:00:00Z","merge_result":"pull_request_pending"}}' "$1" "$(jq -cn '["--on","mol-validate-close"] | tojson')"; }
 aassigned() { printf '{"id":"%s","status":"open","assignee":"rig/rig.refinery","metadata":{"gc.dispatch_when_ready":"rig/pool","gc.dispatch_when_ready_armed_at":"%s"}}' "$1" "${2:-2020-01-01T00:00:00Z}"; }
 # amalformed <id> [armed_at] — an open arm whose sling arguments are no JSON
 # array, a record the start reports as malformed.
@@ -249,7 +251,20 @@ OUT=$(run_check); RC=$?
 eq "$RC" "1" "an arm at a non-open status warns (exit 1)"
 has "$OUT" "it is at status blocked" "the finding names the stranding status"
 has "$OUT" "alpha bead a-2" "the stranded finding names the rig and bead"
-has "$OUT" "Return it to open, or disarm it: gctk bead disarm a-2 --reason" "the stranded finding names gctk's disarm"
+has "$OUT" "return it to open, or disarm it — no wait landing can dispatch it. To disarm it: gctk bead disarm a-2 --reason" "the stranded finding names the reopen and gctk's disarm"
+clear_stores
+
+# --- 2b. STRANDED: a closer's arm on a pending PR's anchor -------------------
+# The PR's record keeps its anchor at status blocked, so no wait landing sends
+# the arm, and the finding leaves that status to the record.
+armed_store alpha "$(apending a-2p)"
+OUT=$(run_check); RC=$?
+eq "$RC" "1" "a closer's arm on a pending PR's anchor warns (exit 1)"
+has "$OUT" "alpha bead a-2p: armed for dispatch, and it owns a pull request (merge_result=pull_request_pending), whose record keeps it at status blocked" "the stranded finding names the anchor's record and status"
+has "$OUT" "leave its status to the record, and disarm it" "the finding leaves the anchor's status to its record"
+has "$OUT" "hold the PR's merge on the check" "the finding names the check that holds the PR's merge"
+has "$OUT" "To disarm it: gctk bead disarm a-2p --reason" "the finding names gctk's disarm"
+hasnt "$OUT" "to open" "nothing asks for the anchor to be returned to open"
 clear_stores
 
 # --- 3. EXEMPT: still waiting on its OWN open blocker ------------------------
