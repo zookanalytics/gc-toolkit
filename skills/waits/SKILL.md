@@ -123,6 +123,10 @@ same gate:
 - **What it blocks is your choice.** A gate on a bead with open children
   pauses every part of it that has not started, and a child added later
   waits too. When only one member waits, file the gate on that member.
+- **Work whose PR has not opened** is that PR's anchor, so a gate on it holds
+  the PR's opening as well as its merge. A check of the open PR, or an action
+  only its merge waits for, is never such a gate (hold its merge, the prs
+  skill).
 - **An action only a named person can perform**, when work waits on it, is
   such a gate assigned to that person after the create:
   `gc bd update <gate> --assignee <person>`. It is theirs to perform and

@@ -575,6 +575,13 @@ only when that one meets the standard.
 ```bash
 "$(b='{{binding_prefix}}'; gc "${b%.}" scripts-dir)/rig-mentions.sh" --file "<the summary file>"
 ```
+What a person must check on the open PR, such as its preview, or do before it
+merges, such as storing a secret the merge's own run reads, goes in the
+summary's opening brief, never in a human gate. A gate on this bead holds its
+PR's opening as well as its merge, and a check of the open PR could then never
+be made (the skill `{{binding_prefix}}prs`, "Hold its merge"). File a gate at
+submit only for what must be settled before the PR opens, such as whether the
+change may be published at all.
 
 **4. Name the branch on the anchor's title.** The refinery and `pr-facts.sh`
 read the anchor, the open bead that carries a `merge_result` for this branch,

@@ -125,6 +125,18 @@ its merge, whatever it was for. Never make an anchor wait on a follow-up that
 needs the PR on main to do its own work. Make the follow-up wait on the anchor
 instead (the waits skill), and never file it under the anchor (the work skill).
 
+Before the PR opens, its anchor is the work itself, and a gate on it holds the
+PR's opening as well as its merge, because the refinery, which opens the PR,
+takes no bead that a gate holds (`refinery-find-work.sh`). That holds work back
+for a ruling that must come before anyone sees the PR, such as whether the
+change may be published at all. A check a person makes on the open PR, such as a
+look at its preview, or an action its merge waits for, such as storing a secret
+the merge's own run reads, must hold only the merge, so it is never a gate filed
+before the PR opens. Such a gate keeps the PR from opening, and a check of the
+open PR can then never be made. It goes in the brief that opens the PR's summary
+(the commit-conventions skill), which the operator reads before they approve the
+PR, and the landing order merges no PR without an approval.
+
 ## Retire it
 
 The message is that the PR will not land because its work moved, is not needed,
