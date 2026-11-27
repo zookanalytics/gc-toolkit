@@ -31,9 +31,9 @@
 # fast-forward the city's config does not load with, in a checkout a pack of
 # the city comes from, is held and put to a person with gc's error lines and the
 # incoming commits, and goes once the config loads, while a config that fails
-# with both trees, a checkout no pack comes from and a checkout already at its
-# remote hold nothing and run no check beyond what they need; (m) no escalation
-# tells a person to run git reset --hard or --keep.
+# with both trees holds nothing, and a checkout no pack comes from or one
+# already at its remote runs no check; (m) no escalation tells a person to run
+# git reset --hard or --keep.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -156,10 +156,13 @@ case "$1" in
     dir=""; while [ $# -gt 0 ]; do [ "$1" = "--city" ] && dir="$2"; shift; done
     printf '%s\n' "$dir" >> "$FAKE_CONFIG_CALLS"
     echo "gc config show: warning: a warning the check leaves out" >&2
+    rig=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$dir/city.toml"); i=0
     for agent in $(sed -n 's/^agent = "\(.*\)"$/\1/p' "$dir/city.toml"); do
-      ls -d "$dir"/rigs/*/agents/"$agent" >/dev/null 2>&1 && continue
-      echo "gc config show: city import \"pk\": patches.agent[0]: agent \"$agent\" not found in pack" >&2
-      exit 1
+      if ! ls -d "$dir"/rigs/*/agents/"$agent" >/dev/null 2>&1; then
+        echo "gc config show: applying rig patches: rig \"$rig\": overrides[$i]: agent \"$agent\" not found in pack" >&2
+        exit 1
+      fi
+      i=$((i + 1))
     done
     echo "Config valid." ;;
   session) : ;;
@@ -444,10 +447,10 @@ eq "$(open_count lambda)" "0" "a successful withdrawal finally closes the subjec
 # and names the pack's agent keeper. pack_rig's incoming commit deletes keeper.
 CITY="$TMP/city"
 mkdir -p "$CITY/.gc"
-config_names() { # SOURCE AGENT... -> the city imports SOURCE and names each AGENT
+config_names() { # SOURCE AGENT... -> the city's rig app imports SOURCE and overrides each AGENT
   local source="$1" agent; shift
-  { printf '[[packs]]\nsource = "%s"\n' "$source"
-    for agent in "$@"; do printf '\n[[patches.agent]]\nagent = "%s"\n' "$agent"; done; } > "$CITY/city.toml"
+  { printf '[[rigs]]\nname = "app"\n\n[rigs.imports.pk]\nsource = "%s"\n' "$source"
+    for agent in "$@"; do printf '\n[[rigs.overrides]]\nagent = "%s"\n' "$agent"; done; } > "$CITY/city.toml"
 }
 city_rigs() { # NAME -> the rig list holds the city's root and its checkout NAME
   printf '{"rigs":[\n  {"name":"mycity","path":"%s","hq":true},\n  {"name":"%s","path":"%s"}\n]}\n' \

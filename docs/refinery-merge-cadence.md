@@ -1041,7 +1041,9 @@ city's config does not load with the incoming tree but does with the tree at
 HEAD: the script copies the city's config files beside that tree and runs
 `gc config show --validate` on them. A refused fast-forward, a held one and a
 checkout off its default branch each file one idempotent human gate per blocked
-rig (via `human-gate.sh`, on the rig's subject bead and carrying what git
-refused or gc said, and `git status`). Once the rig fast-forwards cleanly, the gate is withdrawn
-`moot:` and the subject bead closes. The 15-minute window is also the exposure behind
+rig (via `human-gate.sh`, on the rig's subject bead). The bead of a refused
+fast-forward carries what git refused and `git status`, and the bead of a held
+one carries what gc said and the incoming commits. Once the rig fast-forwards
+cleanly, the gate is withdrawn `moot:` and the subject bead closes. The
+15-minute window is also the exposure behind
 component-model I9, watched by `doctor/check-pour-text-current`.
