@@ -21,8 +21,9 @@ not own: how it is recorded, how it waits, and how the operator takes it up.
 speak for our own repository — a send to the rig's origin is ordinary work,
 and PRs on it go through the refinery's publication
 ([`refinery-publish.sh`](../assets/scripts/refinery-publish.sh)). A
-problem in software another rig of this city owns is work for that rig. The
-commands an agent runs are the
+problem in software another rig of this city owns is work for that rig. A
+problem in a project that rig forks can be an upstream finding instead, as the
+skill below says. The commands an agent runs are the
 [`gc-toolkit.external-issue`](../skills/external-issue/SKILL.md) skill, how the
 guard refuses an agent's own write is [gh-origin-guard.md](gh-origin-guard.md),
 and who may act on what is [authority-map.md](authority-map.md).
