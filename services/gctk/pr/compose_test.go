@@ -16,13 +16,11 @@ const (
 	newHead = "0123456789abcdef"
 )
 
-var gates = []Gate{{"correctness", phasePreOpen}, {"triage", phasePreOpen}}
-
 // anchor is the bead that owns the PR: on polecat/A, with a summary and a
 // dispatch text.
 func anchor(meta map[string]string) fake.Bead {
-	m := map[string]string{"branch": "polecat/A", "target": "main", "check_set": "correctness,triage",
-		"merge_result": "pull_request", "pr_summary": "Adds the widget."}
+	m := map[string]string{"branch": "polecat/A", "target": "main", "merge_result": "pull_request",
+		"pr_summary": "Adds the widget."}
 	for k, v := range meta {
 		m[k] = v
 	}
@@ -52,12 +50,12 @@ func bodyOf(s string) *string { return &s }
 // opened is the body a create of the anchor's PR wrote at head.
 func opened(t *testing.T, s gcbd.Store) string {
 	t.Helper()
-	return compose(t, s, Request{Target: "main", Head: head, Gates: gates}).Body
+	return compose(t, s, Request{Target: "main", Head: head}).Body
 }
 
 func TestComposeANewPR(t *testing.T) {
 	s := storeWith(anchor(nil))
-	got := compose(t, s, Request{Target: "main", Head: head, Gates: gates})
+	got := compose(t, s, Request{Target: "main", Head: head})
 	if got.Title != "feat: add the widget (A)" {
 		t.Errorf("title = %q", got.Title)
 	}
@@ -66,30 +64,23 @@ func TestComposeANewPR(t *testing.T) {
 	}
 	for _, want := range []string{
 		summaryOpen + "\n## Summary\n\nAdds the widget.\n",
-		"- Head `abcdef12`; gates `correctness,triage`; see the PR checks for current status.\n" + summaryClose + "\n",
+		"- Target: `main`\n- Head: `abcdef12`\n" + summaryClose + "\n",
 	} {
 		if !strings.Contains(got.Body, want) {
 			t.Errorf("body lacks %q:\n%s", want, got.Body)
 		}
 	}
-
-	t.Run("without its gates a new PR's region is not composed", func(t *testing.T) {
-		got := compose(t, s, Request{Target: "main", Head: head})
-		if got.Summary != NeedsGates || got.Body != "" {
-			t.Errorf("(%q, %q), want needs-gates and no body", got.Summary, got.Body)
-		}
-	})
 }
 
 func TestComposeAnOpenPR(t *testing.T) {
-	refresh := func(s gcbd.Store, body, at string, g []Gate) *Composition {
-		return compose(t, s, Request{Target: "main", Head: at, Gates: g, Body: bodyOf(body)})
+	refresh := func(s gcbd.Store, body, at string) *Composition {
+		return compose(t, s, Request{Target: "main", Head: at, Body: bodyOf(body)})
 	}
 
 	t.Run("a PR merely opened keeps the facts it opened with", func(t *testing.T) {
 		s := storeWith(anchor(nil))
 		body := opened(t, s)
-		if got := refresh(s, body, head, gates); got.Summary != Current || got.Body != body {
+		if got := refresh(s, body, head); got.Summary != Current || got.Body != body {
 			t.Errorf("(%q, %q)", got.Summary, got.Body)
 		}
 	})
@@ -98,47 +89,45 @@ func TestComposeAnOpenPR(t *testing.T) {
 		s := storeWith(anchor(nil))
 		body := "Above.\n" + opened(t, s) + "Below.\n"
 		s.Put(anchor(map[string]string{"pr_summary": "Adds the widget, reworked."}))
-		got := refresh(s, body, head, gates)
+		got := refresh(s, body, head)
 		if got.Summary != Written {
 			t.Fatalf("summary = %q", got.Summary)
 		}
 		for _, want := range []string{"Above.\n" + summaryOpen + "\n## Summary\n\nAdds the widget, reworked.\n",
-			"- Head `abcdef12`; gates `correctness,triage`; see the PR checks for current status.\n" + summaryClose + "\nBelow.\n"} {
+			"- Head: `abcdef12`\n" + summaryClose + "\nBelow.\n"} {
 			if !strings.Contains(got.Body, want) {
 				t.Errorf("body lacks %q:\n%s", want, got.Body)
 			}
 		}
-		if again := refresh(s, got.Body, head, gates); again.Summary != Current {
+		if again := refresh(s, got.Body, head); again.Summary != Current {
 			t.Errorf("the written region reads %q on the next pass", again.Summary)
 		}
 	})
 
 	t.Run("a head a rework moved is written in", func(t *testing.T) {
 		s := storeWith(anchor(nil))
-		got := refresh(s, opened(t, s), newHead, gates)
-		if got.Summary != Written || !strings.Contains(got.Body, "- Head `01234567`;") {
+		got := refresh(s, opened(t, s), newHead)
+		if got.Summary != Written || !strings.Contains(got.Body, "- Head: `01234567`\n") {
 			t.Errorf("(%q):\n%s", got.Summary, got.Body)
 		}
 	})
 
-	t.Run("a region saying the PR opened green is written over", func(t *testing.T) {
+	// The facts after the content are read only for the head they name, so a
+	// region whose head fact is worded otherwise stays as it is until its content
+	// or its head moves.
+	t.Run("a head fact worded otherwise is kept until the head moves", func(t *testing.T) {
 		s := storeWith(anchor(nil))
-		body := strings.Replace(opened(t, s), "- Head `abcdef12`; gates `correctness,triage`; see the PR checks for current status.",
-			"- Gates `correctness,triage` signed off pre-open at `abcdef12`; PR opened green.", 1)
-		if !strings.Contains(body, "opened green") {
-			t.Fatalf("the body carries no opened-green fact to write over:\n%s", body)
+		body := strings.Replace(opened(t, s), "- Head: `abcdef12`",
+			"- Head `abcdef12`; anchor declares no pre-open gate (`check_set=`).", 1)
+		if !strings.Contains(body, "check_set=") {
+			t.Fatalf("the body carries no head fact worded otherwise:\n%s", body)
 		}
-		if got := refresh(s, body, head, gates); got.Summary != Written || strings.Contains(got.Body, "opened green") {
-			t.Errorf("(%q):\n%s", got.Summary, got.Body)
+		if got := refresh(s, body, head); got.Summary != Current || got.Body != body {
+			t.Errorf("at its head: (%q):\n%s", got.Summary, got.Body)
 		}
-	})
-
-	t.Run("the opened-green words quoted outside the region's facts are no claim", func(t *testing.T) {
-		claim := "- Gates `correctness` signed off pre-open at `abcdef12`; PR opened green."
-		s := storeWith(anchor(map[string]string{"pr_summary": "Drops the line that read\n\n" + claim}))
-		body := opened(t, s) + "\nOperator note quoting it:\n" + claim + "\n## Refinery handoff\n\n" + claim + "\n"
-		if got := refresh(s, body, head, gates); got.Summary != Current || got.Body != body {
-			t.Errorf("(%q):\n%s", got.Summary, got.Body)
+		if got := refresh(s, body, newHead); got.Summary != Written || strings.Contains(got.Body, "check_set") ||
+			!strings.Contains(got.Body, "- Head: `01234567`\n") {
+			t.Errorf("at a head a rework moved: (%q):\n%s", got.Summary, got.Body)
 		}
 	})
 
@@ -149,15 +138,15 @@ func TestComposeAnOpenPR(t *testing.T) {
 		own := "Brief.\n\n<details>\n<summary>The account</summary>\n\nWhat changed.\n\n</details>"
 		s := storeWith(anchor(map[string]string{"pr_summary": own}))
 		body := opened(t, s)
-		if got := refresh(s, body, head, gates); got.Summary != Current {
+		if got := refresh(s, body, head); got.Summary != Current {
 			t.Errorf("the region a create wrote reads %q", got.Summary)
 		}
 		s.Put(anchor(map[string]string{"pr_summary": own + "\n\nOne more line."}))
-		got := refresh(s, body, head, gates)
+		got := refresh(s, body, head)
 		if got.Summary != Written {
 			t.Fatalf("a restamp reads %q", got.Summary)
 		}
-		if again := refresh(s, got.Body, head, gates); again.Summary != Current || again.Body != got.Body {
+		if again := refresh(s, got.Body, head); again.Summary != Current || again.Body != got.Body {
 			t.Errorf("the next pass reads %q", again.Summary)
 		}
 	})
@@ -166,7 +155,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 		s := storeWith(anchor(map[string]string{"pr_summary": "Brief.\n\n## Refinery handoff\n\nQuoted."}))
 		body := opened(t, s)
 		s.Put(anchor(map[string]string{"pr_summary": "Brief."}))
-		if got := refresh(s, body, head, gates); got.Summary != Written {
+		if got := refresh(s, body, head); got.Summary != Written {
 			t.Errorf("a summary that shrank to its first boundary reads %q", got.Summary)
 		}
 	})
@@ -175,11 +164,11 @@ func TestComposeAnOpenPR(t *testing.T) {
 		quoting := "Brief.\n\n<details>\n" + dispatchOpener + "\n\nQuoted."
 		s := storeWith(anchor(map[string]string{"pr_summary": quoting}))
 		body := opened(t, s)
-		if got := refresh(s, body, head, gates); got.Summary != Current {
+		if got := refresh(s, body, head); got.Summary != Current {
 			t.Errorf("the region a create wrote reads %q", got.Summary)
 		}
 		s.Put(anchor(map[string]string{"pr_summary": "Brief."}))
-		if got := refresh(s, body, head, gates); got.Summary != Written {
+		if got := refresh(s, body, head); got.Summary != Written {
 			t.Errorf("a summary that shrank to the quoted opener reads %q", got.Summary)
 		}
 	})
@@ -190,7 +179,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 		b := anchor(nil)
 		b.Description = "Build the widget, and its stand."
 		s.Put(b)
-		if got := refresh(s, body, head, gates); got.Summary != Written || !strings.Contains(got.Body, "\nBuild the widget, and its stand.\n") {
+		if got := refresh(s, body, head); got.Summary != Written || !strings.Contains(got.Body, "\nBuild the widget, and its stand.\n") {
 			t.Errorf("(%q):\n%s", got.Summary, got.Body)
 		}
 	})
@@ -198,12 +187,12 @@ func TestComposeAnOpenPR(t *testing.T) {
 	t.Run("a region the dispatch text stands in for is kept current like any other", func(t *testing.T) {
 		s := storeWith(anchor(map[string]string{"pr_summary": ""}))
 		body := opened(t, s)
-		if got := refresh(s, body, head, gates); got.Summary != Current {
+		if got := refresh(s, body, head); got.Summary != Current {
 			t.Errorf("the region a create wrote reads %q", got.Summary)
 		}
-		got := refresh(s, body, newHead, gates)
+		got := refresh(s, body, newHead)
 		if got.Summary != Written || !strings.Contains(got.Body, "## Summary\n\nBuild the widget.\n") ||
-			!strings.Contains(got.Body, "- Head `01234567`;") {
+			!strings.Contains(got.Body, "- Head: `01234567`\n") {
 			t.Errorf("a head a rework moved reads (%q):\n%s", got.Summary, got.Body)
 		}
 	})
@@ -211,23 +200,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 	t.Run("a head the summary quotes is not one the facts name", func(t *testing.T) {
 		s := storeWith(anchor(map[string]string{"pr_summary": "Fixes what `01234567` broke."}))
 		body := opened(t, s)
-		if got := refresh(s, body, newHead, gates); got.Summary != Written {
-			t.Errorf("reads %q", got.Summary)
-		}
-	})
-
-	t.Run("a stale region with no gates is left, and says so", func(t *testing.T) {
-		s := storeWith(anchor(nil))
-		body := opened(t, s)
-		if got := refresh(s, body, newHead, nil); got.Summary != NeedsGates || got.Body != body {
-			t.Errorf("(%q, %q)", got.Summary, got.Body)
-		}
-	})
-
-	t.Run("a current region needs no gates", func(t *testing.T) {
-		s := storeWith(anchor(nil))
-		body := opened(t, s)
-		if got := refresh(s, body, head, nil); got.Summary != Current {
+		if got := refresh(s, body, newHead); got.Summary != Written {
 			t.Errorf("reads %q", got.Summary)
 		}
 	})
@@ -235,7 +208,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 	t.Run("an open PR's body written before the markers is left as it stands", func(t *testing.T) {
 		s := storeWith(anchor(nil))
 		body := "## Summary\n\nOld.\n\n## Refinery handoff\n\n- Issue: `A`\n"
-		if got := refresh(s, body, head, gates); got.Summary != Unmanaged || got.Body != body {
+		if got := refresh(s, body, head); got.Summary != Unmanaged || got.Body != body {
 			t.Errorf("(%q, %q)", got.Summary, got.Body)
 		}
 	})
@@ -246,7 +219,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 		"a closer above opener": summaryClose + "\n" + summaryOpen + "\n",
 	} {
 		t.Run(name+" is left as it stands", func(t *testing.T) {
-			if got := refresh(storeWith(anchor(nil)), body, head, gates); got.Summary != Unmanaged || got.Body != body {
+			if got := refresh(storeWith(anchor(nil)), body, head); got.Summary != Unmanaged || got.Body != body {
 				t.Errorf("(%q, %q)", got.Summary, got.Body)
 			}
 		})
@@ -260,7 +233,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 		if strings.Contains(body, "\r") {
 			t.Fatalf("the region a create wrote carries a carriage return: %q", body)
 		}
-		if got := refresh(s, body, head, gates); got.Summary != Current || got.Body != body {
+		if got := refresh(s, body, head); got.Summary != Current || got.Body != body {
 			t.Errorf("the region a create wrote reads %q", got.Summary)
 		}
 	})
@@ -268,7 +241,7 @@ func TestComposeAnOpenPR(t *testing.T) {
 	t.Run("a body's carriage returns do not hide its markers", func(t *testing.T) {
 		s := storeWith(anchor(nil))
 		body := strings.ReplaceAll(opened(t, s), "\n", "\r\n")
-		if got := refresh(s, body, head, gates); got.Summary != Current || strings.Contains(got.Body, "\r") {
+		if got := refresh(s, body, head); got.Summary != Current || strings.Contains(got.Body, "\r") {
 			t.Errorf("(%q, %q)", got.Summary, got.Body)
 		}
 	})
@@ -287,7 +260,7 @@ func TestComposeTheTarget(t *testing.T) {
 		{"the new base of a retargeted bead, whose merged_target names the old one",
 			map[string]string{"merged_target": "integration/x", "target": "integration/y"}, "integration/y"},
 	} {
-		got := compose(t, storeWith(anchor(c.meta)), Request{Target: c.target, Head: head, Gates: gates})
+		got := compose(t, storeWith(anchor(c.meta)), Request{Target: c.target, Head: head})
 		if !strings.Contains(got.Body, "- Target: `"+c.target+"`\n") {
 			t.Errorf("%s:\n%s", c.name, got.Body)
 		}
@@ -295,8 +268,8 @@ func TestComposeTheTarget(t *testing.T) {
 	// A published region a rework moved the head of is written again, naming the
 	// base its caller read the open PR against.
 	s := storeWith(anchor(map[string]string{"merged_target": "integration/x", "target": "integration/y"}))
-	body := compose(t, s, Request{Target: "integration/x", Head: head, Gates: gates}).Body
-	got := compose(t, s, Request{Target: "integration/y", Head: newHead, Gates: gates, Body: bodyOf(body)})
+	body := compose(t, s, Request{Target: "integration/x", Head: head}).Body
+	got := compose(t, s, Request{Target: "integration/y", Head: newHead, Body: bodyOf(body)})
 	if got.Summary != Written || !strings.Contains(got.Body, "- Target: `integration/y`\n") {
 		t.Errorf("(%q)\n%s", got.Summary, got.Body)
 	}
@@ -307,7 +280,7 @@ func TestComposeTheBranchBeads(t *testing.T) {
 		return fake.Bead{ID: id, Title: "rider " + id, Status: "closed", CreatedAt: created, Metadata: meta}
 	}
 	beads := func(s gcbd.Store, body string) *Composition {
-		return compose(t, s, Request{Target: "main", Head: head, Gates: gates, Body: bodyOf(body)})
+		return compose(t, s, Request{Target: "main", Head: head, Body: bodyOf(body)})
 	}
 
 	t.Run("one bead's work is the PR's own, and gets no section", func(t *testing.T) {
@@ -401,7 +374,7 @@ func TestComposeTheBranchBeads(t *testing.T) {
 	t.Run("a read that fails leaves the section, and the rest is composed", func(t *testing.T) {
 		s := &failing{Store: two, key: "fold_target"}
 		body := opened(t, storeWith(anchor(nil)))
-		got := compose(t, s, Request{Target: "main", Head: newHead, Gates: gates, Body: bodyOf(body)})
+		got := compose(t, s, Request{Target: "main", Head: newHead, Body: bodyOf(body)})
 		if got.BranchBeads != Unread || got.Unread == nil || got.Summary != Written {
 			t.Errorf("(%q, %v, %q)", got.BranchBeads, got.Unread, got.Summary)
 		}
@@ -432,21 +405,5 @@ func TestComposeABeadThatDoesNotRead(t *testing.T) {
 	s.FindErr = errors.New("simulated")
 	if _, err := Compose(ledger.New(s), "A", Request{Target: "main", Head: head}); err == nil {
 		t.Error("a bead whose read failed composed")
-	}
-}
-
-func TestParseGates(t *testing.T) {
-	got := ParseGates("correctness\tpre-open\n\ndemo\topen-as-draft\nodd")
-	want := []Gate{{"correctness", "pre-open"}, {"demo", "open-as-draft"}, {"odd", ""}}
-	if len(got) != len(want) {
-		t.Fatalf("%v", got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("%v, want %v", got, want)
-		}
-	}
-	if ParseGates("") != nil {
-		t.Error("an empty set names a gate")
 	}
 }

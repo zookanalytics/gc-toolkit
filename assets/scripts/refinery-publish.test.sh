@@ -5,6 +5,8 @@
 # title and body (gctk pr compose --edit). Proves:
 #   - with no PR open, the head is pushed under the lease and the PR opens as a
 #     draft with the composed title and body, then is recorded pending;
+#   - a body composed with no summary region opens no PR and pushes nothing,
+#     and the next pass, whose body carries the region, opens it;
 #   - a PR open on the branch that the city's account opened and the bead never
 #     recorded is adopted: its title is edited, it is returned to draft, the
 #     head is pushed, and it is recorded, with no second PR;
@@ -78,7 +80,7 @@ run() { OUT=$("$SUT/refinery-publish.sh" "$@" 2>&1); RC=$?; }
 # composes for <bead> at <head>, into main.
 page() {
   local out f="$GH_DIR/view_$1.json"
-  out=$("$BIN/gctk-real" pr compose "$2" --head "$3" --target main --gates '') || { rt_bad "page: $2's PR did not compose"; return 1; }
+  out=$("$BIN/gctk-real" pr compose "$2" --head "$3" --target main) || { rt_bad "page: $2's PR did not compose"; return 1; }
   jq --argjson c "$out" '.title = $c.title | .body = $c.body' "$f" > "$f.n" && mv "$f.n" "$f"
 }
 # titled <n> <title> — PR #<n>'s title is <title>.
@@ -101,6 +103,27 @@ eq "$(bstatus a) $(bassignee a)" "blocked " "…and is blocked on it, assigned t
 hasnt "$(logged gctk)" "--edit" "a new PR needs no edit"
 hasnt "$(logged gctk)" "pr draft" "a PR that opens as a draft needs no return to draft"
 
+echo "# a body composed with no summary region opens no PR, and the next pass opens it"
+fresh
+BEFORE=$(branch_with polecat/ns ns.txt)
+work ns polecat/ns
+main_with ns-later.txt >/dev/null
+prepared ns polecat/ns
+HEAD_NS=$(git -C "$HOME_DIR/worktrees/ns" rev-parse HEAD)
+eq "$([ "$HEAD_NS" != "$BEFORE" ] && echo new)" "new" "the prep merged main that moved, so its prepared head is new"
+STUB_COMPOSE_SUMMARY=needs-gates run --bead ns
+eq "$RC" 1 "a body with no summary region stops the step (exit 1)"
+has "$OUT" "carries no summary region (summary needs-gates), so the PR does not open with it" "…and says why"
+hasnt "$(logged gh)" "pr create" "no PR opens"
+eq "$(tip polecat/ns)" "$BEFORE" "nothing is pushed"
+hasnt "$(logged gctk)" "pr record" "nothing is recorded"
+reset_logs
+run --bead ns
+eq "$RC" 0 "the next pass, whose body carries the summary region, publishes"
+has "$(logged gh)" "pr create --repo zook/rig --base main --head polecat/ns --draft" "…opening the PR as a draft"
+eq "$(tip polecat/ns)" "$HEAD_NS" "…with the head pushed"
+eq "$(meta ns merge_result)" "pull_request_pending" "…and recorded pending"
+
 echo "# a PR the city's account opened and the bead never recorded is adopted"
 fresh
 branch_with polecat/b b.txt >/dev/null
@@ -115,7 +138,7 @@ run --bead b
 eq "$RC" 0 "the publication exits 0"
 has "$OUT" "adopting PR #41" "it says it adopts the open PR"
 hasnt "$(logged gh)" "pr create" "no second PR opens"
-has "$(logged gctk)" "pr compose b --pr https://github.com/zook/rig/pull/41 --head $HEAD_B --target main --gates  --edit" \
+has "$(logged gctk)" "pr compose b --pr https://github.com/zook/rig/pull/41 --head $HEAD_B --target main --edit" \
   "gctk edits the PR the bead does not record, which --pr names"
 eq "$(logged edits)" "41 title" "the PR's title is edited, and its body, which shows the composition, is not"
 eq "$(shows 41 title)" "$TITLE_B" "…to the composed title"
@@ -152,7 +175,7 @@ pr 62 polecat/n gc-city-bot
 page 62 n "$HEAD_N"
 run --bead n
 eq "$RC" 0 "the publication exits 0"
-has "$(logged gctk)" "pr compose n --pr https://github.com/zook/rig/pull/62 --head $HEAD_N --target main --gates  --edit" "gctk is asked for the edit"
+has "$(logged gctk)" "pr compose n --pr https://github.com/zook/rig/pull/62 --head $HEAD_N --target main --edit" "gctk is asked for the edit"
 eq "$(logged edits)" "" "…and edits nothing"
 has "$OUT" "shows its composition already" "…saying the PR shows its composition"
 eq "$(tip polecat/n)" "$HEAD_N" "the head is pushed"
@@ -273,7 +296,7 @@ prepared dt polecat/dt
 HEAD_DT=$(git -C "$HOME_DIR/worktrees/dt" rev-parse HEAD)
 run --bead dt
 eq "$RC" 0 "a bead that records no target publishes (exit 0)"
-has "$(logged gctk)" "pr compose dt --head $HEAD_DT --target trunk " "…its body naming the rig's default branch"
+eq "$(grep '^pr compose dt ' "$LOGS/gctk.log")" "pr compose dt --head $HEAD_DT --target trunk" "…its body naming the rig's default branch"
 has "$(logged gh)" "pr create --repo zook/rig --base trunk --head polecat/dt" "…the base the PR opens into"
 fresh
 branch_with integration/y y-base.txt >/dev/null
@@ -283,7 +306,7 @@ prepared rt polecat/rt
 HEAD_RT=$(git -C "$HOME_DIR/worktrees/rt" rev-parse HEAD)
 run --bead rt
 eq "$RC" 0 "a retargeted bead whose merged_target names its old base publishes (exit 0)"
-has "$(logged gctk)" "pr compose rt --head $HEAD_RT --target integration/y " "…its body naming the new base"
+eq "$(grep '^pr compose rt ' "$LOGS/gctk.log")" "pr compose rt --head $HEAD_RT --target integration/y" "…its body naming the new base"
 has "$(logged gh)" "pr create --repo zook/rig --base integration/y --head polecat/rt" "…the base the PR opens into"
 
 echo "# an edit that does not take pushes nothing"

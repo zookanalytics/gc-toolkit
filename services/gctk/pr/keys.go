@@ -11,13 +11,6 @@ import "github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 // record's, read through what package record exports: the selection OnTarget
 // and the reading face Result.
 
-// The bead that owns the PR: which checks gate it.
-var (
-	checkSetKey = ledger.ReadOnly("check_set", ledger.String,
-		"The review checks a bead's change is gated by, as a comma list (lifecycle/lifecycle.toml, "+
-			"[metadata.gates]). A composition names it when no pre-open gate resolves from it.")
-)
-
 // The keys that say whether a bead's work is on a branch, which the branch-beads
 // section reads.
 var (

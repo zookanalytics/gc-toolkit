@@ -52,18 +52,17 @@ func readCases[T any](t *testing.T, path string) []T {
 // trimming are pinned with the render.
 func TestRegionRendersAsBefore(t *testing.T) {
 	type regionCase struct {
-		Name, Summary, Desc, ID, Branch, Target, Gates, Head string
-		CheckSet                                             string `json:"check_set"`
+		Name, Summary, Desc, ID, Branch, Target, Head string
 	}
 	for _, c := range readCases[regionCase](t, "testdata/region-cases.json") {
 		t.Run(c.Name, func(t *testing.T) {
-			meta := map[string]string{"branch": c.Branch, "target": c.Target, "check_set": c.CheckSet}
+			meta := map[string]string{"branch": c.Branch, "target": c.Target}
 			if c.Summary != "" {
 				meta["pr_summary"] = c.Summary
 			}
 			store := fake.New()
 			store.Put(fake.Bead{ID: c.ID, Title: "t", Status: "open", Description: c.Desc, Metadata: meta})
-			req := Request{Head: c.Head, Target: c.Target, Gates: gatesOf(c.Gates)}
+			req := Request{Head: c.Head, Target: c.Target}
 			got, err := Compose(ledger.New(store), c.ID, req)
 			if err != nil {
 				t.Fatal(err)
@@ -75,14 +74,6 @@ func TestRegionRendersAsBefore(t *testing.T) {
 			golden(t, filepath.Join("testdata/region", c.Name+".golden"), text(lines[1:len(lines)-1]))
 		})
 	}
-}
-
-// gatesOf is a resolved gate set, empty rather than nil when it names none.
-func gatesOf(s string) []Gate {
-	if g := ParseGates(s); g != nil {
-		return g
-	}
-	return []Gate{}
 }
 
 func TestTitleRendersAsBefore(t *testing.T) {
@@ -130,8 +121,7 @@ func TestBeadsSectionRendersAsBefore(t *testing.T) {
 // branch-beads section added or written in place, each beside text people
 // added.
 func TestBodyEditsAsBefore(t *testing.T) {
-	region := textLines("## Summary\n\nNew summary.\n\n## Refinery handoff\n\n- Issue: `tk-a1`\n" +
-		"- Head `abcdef12`; gates `correctness`; see the PR checks for current status.\n")
+	region := textLines("## Summary\n\nNew summary.\n\n## Refinery handoff\n\n- Issue: `tk-a1`\n- Head: `abcdef12`\n")
 	beads := textLines("## Beads on this branch\n\nEvery bead whose work is on `polecat/A`. Approving this PR " +
 		"approves all of them.\n\n- `A` — anchor _(opener)_\n- `B` — rider\n")
 	in := func(name string) []string {

@@ -33,9 +33,12 @@
 # the step returns the PR to draft (`gctk pr draft`) and pushes the head, so a
 # review started at that head reads the current body, and the push starts a
 # round of the city's work on a draft. With no PR open, it pushes the head and
-# opens the PR as a draft with them. Every push goes under the lease on the
-# commit the prep read on the branch (branch-push.sh), so a push someone made
-# after the prep is never overwritten: the step stops, and the next pass
+# opens the PR as a draft with them. It opens a PR only on a body with the
+# summary region composed in, because no later composition adds the region to
+# a published body that carries none: on any other body the step stops before
+# the push, and the next pass composes again. Every push goes under the lease
+# on the commit the prep read on the branch (branch-push.sh), so a push someone
+# made after the prep is never overwritten: the step stops, and the next pass
 # prepares the branch again. The PR is a draft while the city works on it:
 # `gctk pr draft` converts only a PR that is ready, so a round's later push
 # changes nothing, and the landing order marks the PR ready once the review
@@ -178,11 +181,12 @@ fi
 
 # compose: the title and body the owner says the PR it opens should carry at
 # the prepared head, its handoff naming TARGET, the base the PR opens into, in
-# TITLE and BODY_FILE.
+# TITLE and BODY_FILE, and the summary region's outcome in SUMMARY.
 compose() {
   local out
-  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" --gates '' </dev/null) || return 1
+  out=$("$gctk" pr compose "$OWNER" --head "$HEAD_OID" --target "$TARGET" </dev/null) || return 1
   TITLE=$(printf '%s' "$out" | jq -r '.title // ""')
+  SUMMARY=$(printf '%s' "$out" | jq -r '.summary // ""')
   printf '%s' "$out" | jq -j '.body // ""' > "$BODY_FILE"
   [ -n "$TITLE" ] && [ -s "$BODY_FILE" ]
 }
@@ -198,13 +202,14 @@ push() {
 }
 
 if [ -n "$PR_URL" ]; then
-  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr compose "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --gates '' --edit </dev/null >&2 \
+  GC_RIG_ROOT="$HOME_DIR" "$gctk" pr compose "$OWNER" --pr "$PR_URL" --head "$HEAD_OID" --target "$TARGET" --edit </dev/null >&2 \
     || stop "the title and body of PR #$PR_NUMBER did not take, so the head is not pushed under a stale body"
   GC_RIG_ROOT="$HOME_DIR" "$gctk" pr draft "$OWNER" --pr "$PR_URL" </dev/null >&2 \
     || stop "PR #$PR_NUMBER did not return to draft, so the head is not pushed onto it while it is ready"
   push
 else
   compose || stop "the title and body of $OWNER's PR did not compose"
+  [ "$SUMMARY" = written ] || stop "the body composed for $OWNER's PR carries no summary region (summary ${SUMMARY:-absent}), so the PR does not open with it"
   push
   if ! CREATED=$(gh pr create --repo "$REPO" --base "$TARGET" --head "$BRANCH" --draft --title "$TITLE" --body-file "$BODY_FILE" </dev/null 2>/dev/null); then
     # A create that fails can still have opened the PR, or another writer

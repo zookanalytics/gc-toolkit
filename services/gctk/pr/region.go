@@ -19,52 +19,9 @@ const (
 // one of the two boundaries the summary's own lines end at.
 const dispatchOpener = "<summary>Dispatch — what this work was asked to do</summary>"
 
-// Gate is one check a bead's check set resolves to at a head, and the phase it
-// gates.
-type Gate struct {
-	Name, Phase string
-}
-
-// The phases a region names: the checks that sign off before the PR opens, and
-// the ones that run against it while it is a draft.
-const (
-	phasePreOpen     = "pre-open"
-	phaseOpenAsDraft = "open-as-draft"
-)
-
-// ParseGates reads the gates `gctk review checks --resolve --with-phase` prints:
-// one `<check>\t<phase>` per line. A blank line names no gate.
-func ParseGates(s string) []Gate {
-	var out []Gate
-	for _, line := range strings.Split(s, "\n") {
-		if line == "" {
-			continue
-		}
-		f := strings.Split(line, "\t")
-		g := Gate{Name: f[0]}
-		if len(f) > 1 {
-			g.Phase = f[1]
-		}
-		out = append(out, g)
-	}
-	return out
-}
-
-// band is the names of the gates in phase, in their order, as one comma list.
-func band(gates []Gate, phase string) string {
-	var names []string
-	for _, g := range gates {
-		if g.Phase == phase {
-			names = append(names, g.Name)
-		}
-	}
-	return strings.Join(names, ",")
-}
-
 // region is what the managed summary region says, and of what.
 type region struct {
-	summary, desc, id, branch, target, checkSet, head string
-	gates                                             []Gate
+	summary, desc, id, branch, target, head string
 }
 
 // summaryLines are the lines the region's `## Summary` carries: the summary,
@@ -102,29 +59,16 @@ func (r region) content() []string {
 	return out
 }
 
-// facts are the refinery handoff's facts: the bead, its branches and its gates.
-//
-// The head's fact states no CI result, because the body is static and CI state
-// is live. With gates, it points to the PR's checks for them, because they have
-// not signed off again at a head a rework moved, and one of them may be asking
-// for changes.
+// facts are the refinery handoff's facts: the bead, its branches and the head
+// the summary describes. The head's fact states no CI result, because the body
+// is static and CI state is live.
 func (r region) facts() []string {
-	out := []string{
+	return []string{
 		"- Issue: `" + r.id + "`",
 		"- Source branch: `" + r.branch + "`",
 		"- Target: `" + r.target + "`",
+		"- Head: `" + short(r.head) + "`",
 	}
-	head := short(r.head)
-	signed, draft := band(r.gates, phasePreOpen), band(r.gates, phaseOpenAsDraft)
-	if signed != "" {
-		out = append(out, "- Head `"+head+"`; gates `"+signed+"`; see the PR checks for current status.")
-	} else {
-		out = append(out, "- Head `"+head+"`; anchor declares no pre-open gate (`check_set="+r.checkSet+"`).")
-	}
-	if draft != "" {
-		out = append(out, "- Draft-stage gates `"+draft+"` run against the open PR before it is marked ready for review.")
-	}
-	return out
 }
 
 // short is a commit's first eight characters, which the region names it by.
@@ -162,33 +106,25 @@ func stripSummaryHeading(summary string) []string {
 	return out
 }
 
-// openedGreen is a handoff fact an older composer wrote, which says the PR
-// opened green: a CI result, which a static body cannot know.
-var openedGreen = regexp.MustCompile("^- Gates `[^`]*` signed off pre-open at `[^`]*`; PR opened green\\.$")
-
 // current reports whether the lines between a body's markers still say what
 // this region says of the PR at its head: they open with the same content,
-// summary and dispatch text alike, and the handoff facts after it name this head
-// and state no CI result. The other facts are not compared, so an open PR whose
-// content and head have not moved keeps the facts it was opened with. The
-// content is compared whole, as the composer writes it, never read up to a
-// boundary line, so a summary that carries a collapsed section of its own, or a
-// line like the handoff heading, reads as itself.
+// summary and dispatch text alike, and a handoff fact after it names this head.
+// The other facts are not compared, so an open PR whose content and head have
+// not moved keeps the facts it was opened with. The content is compared whole,
+// as the composer writes it, never read up to a boundary line, so a summary that
+// carries a collapsed section of its own, or a line like the handoff heading,
+// reads as itself.
 func (r region) current(between []string) bool {
 	head := append(r.content(), handoffHead...)
 	if !hasPrefix(between, head...) {
 		return false
 	}
-	names := false
 	for _, f := range between[len(head):] {
-		if openedGreen.MatchString(f) {
-			return false
-		}
 		if r.head != "" && strings.Contains(f, "`"+short(r.head)+"`") {
-			names = true
+			return true
 		}
 	}
-	return names
+	return false
 }
 
 // sameLines reports whether two sections say the same, blank lines at their

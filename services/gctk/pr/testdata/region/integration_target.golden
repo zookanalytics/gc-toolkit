@@ -17,4 +17,4 @@ Keep the gadget's tests.
 - Issue: `tk-a1`
 - Source branch: `polecat/tk-a1`
 - Target: `integration/tk-x1`
-- Head `abcdef12`; gates `correctness,triage`; see the PR checks for current status.
+- Head: `abcdef12`
