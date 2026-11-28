@@ -464,7 +464,8 @@ no warrant.
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
   what the one-PR update saves once it has re-read the PR in full
   (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
-  takes each post the conversation keeps untaken as its own ask (`takePlans`,
+  takes each post the conversation keeps untaken as its own ask, or as the
+  operator's follow-up for a post the quote holds (`takePlans`,
   `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
   read the conversation again through `RefreshConversation` in `refresh.go`),
   decides each owned PR's red checks and conflict from its checks, its merge
@@ -534,7 +535,7 @@ no warrant.
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
 - **Verified.** 2026-11-28, at `gastownhall/gascity` main 6dce31bbb68e,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  0c9c8e697843.
+  3b9e9716641a.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR

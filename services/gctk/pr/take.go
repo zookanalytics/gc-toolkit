@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
@@ -18,7 +19,7 @@ import (
 // The take (specs/tk-1tfzr71.161/design.md, sections 1 to 3). Each post a
 // person makes on a PR the city owns becomes an ask on the bead that owns the
 // PR, which the PR's review run rules. A post by an account the repository does
-// not count as its own (Post.Held) becomes the operator's follow-up on the bead
+// not count as its own (held) becomes the operator's follow-up on the bead
 // in place of an ask (FollowUp), since its text reaches no agent to rule it,
 // and takes the same mark once the follow-up is filed. The one-PR update saves
 // each post that is feedback the city has not taken in the PR's saved read
@@ -148,15 +149,18 @@ func (u *run) take(t takeOf, stop time.Duration) RunOutcome {
 // it reads the bead again, decides from that read which posts are untaken
 // (untakenOn), and for each files the post's ask on the bead (review.FileAsk),
 // then marks the post with takenMark. A post whose ask did not file is not
-// marked, so the mark never stands without its ask. A held post's follow-up is
-// decided on the PR's conversation as GitHub holds it now, read under the lock,
-// since a read of the PR's quote follows up a held post and marks it without
-// changing the saved read: a held post the city marked since, or one gone
-// since, files nothing. Once a mark has landed it starts no post with less than
-// refreshReserve of ctx left. It returns the take's outcome, whose detail opens
-// with the take it is (takeOf.of), and how many of the posts the saved read
-// holds untaken it found marked or gone, its own marks included, so that the
-// saved read is read again.
+// marked, so the mark never stands without its ask. What each post is owed is
+// decided on the PR's conversation as GitHub holds it now, read under the lock
+// (standings). The saved read keeps no author's standing, since a change to it
+// moves none of the signs that keep a saved read current. A post the quote
+// holds (held) is owed the operator's follow-up in place of an ask. A read of
+// the PR's quote follows up a held post and marks it without changing the saved
+// read, so a held post the city marked since files nothing, and a post gone
+// since files nothing either. Once a mark has landed it starts no post with
+// less than refreshReserve of ctx left. It returns the take's outcome, whose
+// detail opens with the take it is (takeOf.of), and how many of the posts the
+// saved read holds untaken it found marked or gone, its own marks included, so
+// that the saved read is read again.
 func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
@@ -188,17 +192,14 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		return said(ActRetry, "waits for the next run: "+why)
 	}
 	hub := u.Hub(ctx, o.host)
+	c, err := hub.Conversation(o.repo, o.number)
+	if err != nil {
+		return said(ActRetry, "waits for the next run: the PR's conversation did not read again, so whose each post "+
+			"is, and whether the city marked it since, is unknown: "+err.Error())
+	}
+	now := standings(c)
 	noChecks := func(string) (review.Index, error) {
 		return review.Index{}, errors.New("a post's ask sends back no check")
-	}
-	var current map[string][]string
-	var unread error
-	if slices.ContainsFunc(posts, func(p Post) bool { return p.Held }) {
-		if c, err := hub.Conversation(o.repo, o.number); err != nil {
-			unread = err
-		} else {
-			current = reactionsOf(c)
-		}
 	}
 	var took, failed, left, gone []string
 	marked := 0
@@ -211,23 +212,20 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 			left = append(left, p.name())
 			continue
 		}
+		s, ok := now[postKey{p.Kind, p.ID}]
+		if !ok {
+			marked++
+			gone = append(gone, p.name())
+			continue
+		}
 		var what string
-		if p.Held {
-			if unread != nil {
-				failed = append(failed, fmt.Sprintf("%s, an outside account's: the PR's conversation did not read "+
-					"again, so whether the post is still owed its follow-up is unknown: %v", p.name(), unread))
+		if s.held {
+			if s.marked {
+				marked++
+				took = append(took, p.name()+", an outside account's, followed up already")
 				continue
 			}
 			held := []quote.Held{{Kind: p.Kind, Author: p.Author, URL: p.URL, Node: p.Node}}
-			if len(stillOwed(held, current)) == 0 {
-				marked++
-				if _, ok := current[p.Node]; ok {
-					took = append(took, p.name()+", an outside account's, followed up already")
-				} else {
-					gone = append(gone, p.name())
-				}
-				continue
-			}
 			if err := FollowUp(ctx, u.Gates, o.id, o.repo, o.number, held); err != nil {
 				failed = append(failed, fmt.Sprintf("%s, an outside account's: %v", p.name(), err))
 				continue
@@ -259,7 +257,7 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		out.Detail = t.of() + " took no post"
 	}
 	if len(gone) > 0 {
-		out.Detail += ", and found " + strings.Join(gone, ", ") + " gone from the PR, which owes no follow-up"
+		out.Detail += ", and found " + strings.Join(gone, ", ") + " gone from the PR, which files nothing"
 	}
 	reserved := ""
 	if len(left) > 0 {
@@ -280,4 +278,36 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		}
 	}
 	return out, marked
+}
+
+// postKey is a post's identity on its PR: its kind and its id in that kind's
+// space (Post).
+type postKey struct {
+	kind string
+	id   int64
+}
+
+// standing is a post as the PR's conversation shows it now: whether the quote
+// holds it (held), and whether it carries either of the city's marks.
+type standing struct{ held, marked bool }
+
+// standings is each post of c, its reviews, its review threads' comments and
+// its conversation comments, as the take decides on it, by its kind and id.
+func standings(c *gh.Conversation) map[postKey]standing {
+	out := map[postKey]standing{}
+	for _, v := range c.Reviews {
+		out[postKey{PostReview, v.ID}] = standing{held(v.Author, v.AuthorType, v.AuthorAssociation),
+			marked(v.ViewerReactions)}
+	}
+	for _, t := range c.Threads {
+		for _, cm := range t.Comments {
+			out[postKey{PostInline, cm.ID}] = standing{held(cm.Author, cm.AuthorType, cm.AuthorAssociation),
+				marked(cm.ViewerReactions)}
+		}
+	}
+	for _, cm := range c.Comments {
+		out[postKey{PostConversation, cm.ID}] = standing{held(cm.Author, cm.AuthorType, cm.AuthorAssociation),
+			marked(cm.ViewerReactions)}
+	}
+	return out
 }

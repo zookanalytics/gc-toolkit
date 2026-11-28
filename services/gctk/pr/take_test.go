@@ -487,3 +487,63 @@ func TestTheTakeFilesNothingForAnOutsidePostFollowedUpSince(t *testing.T) {
 		t.Fatalf("the next run took %+v and filed %q", take, d.gates.list())
 	}
 }
+
+// The take weighs each post by its author's standing on the PR's conversation
+// as GitHub holds it under the lock, never by the saved read, which keeps no
+// author's standing and stays current while no sign moves. A post saved
+// untaken while its author was a member, who has left the organization since,
+// is the operator's follow-up, and one saved while its author was outside, who
+// has become a collaborator since, is an ask.
+func TestTheTakeWeighsEachPostByItsAuthorsStandingNow(t *testing.T) {
+	d := taking(t)
+	d.pr.Reviews = nil
+	d.pr.Threads = nil
+	d.pr.Comments = []gh.IssueComment{
+		{ID: 800, NodeID: "IC_800", URL: prURL + "#issuecomment-800", Author: "Leaver", AuthorType: "User",
+			AuthorAssociation: "MEMBER", Body: "do this", CreatedAt: "2026-11-12T05:00:00Z"},
+		{ID: 801, NodeID: "IC_801", URL: prURL + "#issuecomment-801", Author: "Joiner", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "and this", CreatedAt: "2026-11-12T05:01:00Z"},
+	}
+	d.refresh(t)
+	d.pr.Comments[0].AuthorAssociation = "NONE"
+	d.pr.Comments[1].AuthorAssociation = "COLLABORATOR"
+	if _, err := d.watch.Refresh(prURL); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.savedConversation(t).Untaken; len(got) != 2 {
+		t.Fatalf("the saved read holds the untaken posts %+v, want both, kept while no sign moved", got)
+	}
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+	if got := d.asksFiled(); !slices.Equal(got, []string{"Conversation comment by Joiner on PR #7: " + prURL +
+		"#issuecomment-801"}) {
+		t.Fatalf("the take filed the asks %q, want only the collaborator's", got)
+	}
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " outside-post-leaver"}) {
+		t.Fatalf("the take filed the gates %q, want only the one for the account that left", got)
+	}
+	if got := d.marked(); !slices.Equal(got, []string{"IC_800 EYES", "IC_801 EYES"}) {
+		t.Fatalf("the take marked %q", got)
+	}
+}
+
+// A take that cannot read the PR's conversation again takes no post, since
+// whose each post is, and whether the city marked it since, is unknown, and
+// the next run takes them.
+func TestTheTakeWaitsWhenTheConversationDoesNotRead(t *testing.T) {
+	d := taking(t)
+	d.refresh(t)
+	d.github.Fail["Conversation"] = errors.New("github: HTTP 502")
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActRetry)
+	says(t, take, "did not read again", "HTTP 502")
+	if got, gates, marks := d.asksFiled(), d.gates.list(), d.marked(); len(got)+len(gates)+len(marks) != 0 {
+		t.Fatalf("the take filed the asks %q and the gates %q, and marked %q, without the conversation", got, gates,
+			marks)
+	}
+	delete(d.github.Fail, "Conversation")
+	take, _ = takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+}
