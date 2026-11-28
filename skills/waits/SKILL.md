@@ -202,11 +202,10 @@ must be open and carry no route.
 
 An arm sends work, so the work skill's intake rule decides whether a bead may
 take one, as it decides whether a bead may be routed. Arm a blocked bead that
-rule lets you send now, rather than leave it for someone to route once its
-blocker lands: a blocked work bead with no route and no arm is the debt
-`doctor/check-blocked-work-armed` reports. A bead the rule leaves for the
-operator to place carries Gas City's `hold:mayor` label and no arm, and that
-check does not report it.
+rule lets you send now. A blocked work bead with no route and no arm is the
+debt `doctor/check-blocked-work-armed` reports. A bead the rule leaves for the
+operator to place carries Gas City's `hold:mayor` label and no arm. That check
+does not report it.
 
 ## Release a wait
 
