@@ -3,11 +3,10 @@
 #
 # lifecycle/lifecycle.toml `[holds]` declares gc.takeaway a hold marker and
 # names gc.takeaway_settled as the key that answers it, so a bead carrying the
-# headline without that key is a wait doctor/check-wait-is-an-edge reports. The
-# marker is REPLACED by every sitting and the key beside it is not, unless each
-# writer rewrites both: a settled sign-off would otherwise answer for the park
-# that follows it on the same bead, and the park would go unreported for as
-# long as it stands.
+# headline without that key is held. The marker is REPLACED by every sitting
+# and the key beside it is not, unless each writer rewrites both: a settled
+# sign-off would otherwise answer for the park that follows it on the same bead,
+# and the park would read as settled for as long as it stands.
 #
 # So every site that writes the marker writes its settled-key in the same
 # statement — empty unless the writer means settled, which only

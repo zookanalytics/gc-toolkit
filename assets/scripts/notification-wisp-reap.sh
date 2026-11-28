@@ -7,8 +7,7 @@
 # refreshing the standing one, so the copies accumulate without bound on the
 # operator's board. This periodic sweep of the city store closes every open
 # copy of one headline but the newest. It does not change how core creates the
-# notices — that is upstream — so it is a backstop, the notification
-# counterpart to the HQ-store marooned-work backstop.
+# notices — that is upstream — so it is a backstop.
 #
 # City scope: the notices live in the one city store. The sweep is idempotent;
 # a pass skipped or cut short by its budget costs only the reap the next pass

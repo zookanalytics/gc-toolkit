@@ -18,11 +18,7 @@
 #             against both hold labels itself
 # A reader with a private test drifts silently: it keeps the keys or labels it
 # copied and misses every one added later. The behavioral half lives beside
-# each reader (doctor/check-blocked-work-armed/run.test.sh,
-# doctor/check-step-terminal/run.test.sh,
-# doctor/check-armed-dispatch-owed/run.test.sh,
-# doctor/check-po-queue-only/run.test.sh, liveness-classify.test.sh,
-# liveness-recheck.test.sh).
+# each reader, in its own test.
 # Reads the repo only; no gc, no city, no network.
 set -uo pipefail
 
@@ -126,9 +122,8 @@ asks() { # <reader> <predicate>
         && ok "(READERS) $1 asks $2" \
         || bad "(READERS) $1 asks $2"
 }
-for r in doctor/check-blocked-work-armed/run.sh doctor/check-step-terminal/run.sh; do
-    sources "$r"; asks "$r" has_dispatch_path
-done
+sources doctor/check-blocked-work-armed/run.sh
+asks doctor/check-blocked-work-armed/run.sh has_dispatch_path
 for r in assets/scripts/liveness-sweep.sh assets/scripts/liveness-sweep-precheck.sh \
          assets/scripts/liveness-recheck.sh doctor/check-po-queue-only/run.sh; do
     sources "$r"

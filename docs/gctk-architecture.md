@@ -683,13 +683,12 @@ The status rests on these answers.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed. A caller that asks what a bead records it waits
   on, what still holds its close, or whether its own work sits on another bead
-  asks this: a takeaway's waits and its route guard, and the check that a wait
-  is an edge. An ancestor's park answers none of them, because the work it
-  holds is still the bead's own.
+  asks this: a takeaway's waits and its route guard. An ancestor's park answers
+  none of them, because the work it holds is still the bead's own.
 - **When did the last wait that applies to it land?** This is the latest close
   among the waits the rule for where its work is applies: its own, and for work
   that has not started each live ancestor's too. A caller that ages the time
-  since nothing held a bead, as the check on owed dispatches does, reads it.
+  since nothing held a bead reads it.
 
 No surviving intent maps to `waits`. It exists to prove that one rule can live
 in one place, so its defense is its own. `waits` computes no wait itself. It
@@ -880,9 +879,7 @@ why a reader must know it, and the work that retires it.
   it are declared in `takeaway`, whose `bead takeaway` writes them, but shell
   reads them itself, spelling each key, against rules 1 and 6:
   `bead-context.sh`, the `converse-recheck-premise` skill's close,
-  `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
-  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
-  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
+  `doctor/check-root-advancing`, which counts a headline as a hold on purpose,
   and the liveness recheck, which tk-1tfzr71.174 retires. `gctk lifecycle
   --takeaway` can also write the keys. So the keys stay registered in
   `lifecycle/lifecycle.toml`. tk-1tfzr71.216

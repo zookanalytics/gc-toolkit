@@ -58,9 +58,9 @@ wait is also written as a `blocks` edge, after the headline. A wait in another
 store than the bead is refused before anything is written, because an edge
 there would hold nothing, and an edge the store refuses leaves the headline
 written and makes the call exit 4 (the waits skill). A headline with neither
-flag leaves the bead waiting on its text alone, which
-`doctor/check-wait-is-an-edge` reports unless a live `blocks` edge holds the
-bead.
+flag writes no edge. When a live `blocks` edge already holds the bead, that
+edge is its wait. When no such edge holds it, the bead waits on the headline's
+text alone and sits until someone notices.
 
 In a sitting, leave the headlines to the hold and the sign-off (the
 converse-hold and converse-settle steps). The one other headline a sitting

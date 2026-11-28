@@ -9,8 +9,8 @@ The merge side of the anchor lifecycle is driven by orders, never by an agent.
 The landing order merges each PR on the pending record and takes each person's
 post on it, its red checks and its conflicts as work
 ([The landing order](#the-landing-order)), and the merge cadence's arms keep the
-old review path's dispatch and sweeps. The cadence's liveness has its own
-doctor check (`check-cadence-live`).
+old review path's dispatch and sweeps. Gas City's doctor check
+`order-firing-current` reports a cadence order that stops firing.
 
 ## Scope
 
@@ -251,8 +251,8 @@ so a single-rig answer looks city-wide. Always:
 gc order history refinery-reconcile --since 30m --limit 0
 ```
 
-Prefer `gc doctor` (`check-cadence-live`) over hand-rolled queries: it asserts
-per rig that the order is registered and firing within its interval.
+Prefer `gc doctor` (`order-firing-current`) over hand-rolled queries: it
+reports a cron or cooldown order that has not fired within its interval.
 
 ## The PR watch
 

@@ -8,7 +8,7 @@
 # Sourced (never executed) by the readers that tell a standing record from
 # work or input: the liveness sweep, its precheck and its claim-time re-check
 # (liveness-sweep.sh, liveness-sweep-precheck.sh, liveness-recheck.sh), and
-# the doctor checks check-blocked-work-armed and check-hq-marooned-work. The
+# the doctor check check-blocked-work-armed. The
 # sweep and its precheck read the list through their shared classifier
 # (liveness-classify.sh). One definition: a kind added here is dropped by every
 # one of them at once, and standing-kinds.test.sh fails when a reader stops

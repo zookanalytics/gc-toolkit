@@ -60,8 +60,7 @@ echo "# every reader sources the one definition"
 READERS="assets/scripts/liveness-sweep.sh
 assets/scripts/liveness-sweep-precheck.sh
 assets/scripts/liveness-recheck.sh
-doctor/check-blocked-work-armed/run.sh
-doctor/check-hq-marooned-work/run.sh"
+doctor/check-blocked-work-armed/run.sh"
 for r in $READERS; do
     f="$ROOT/$r"
     if [ ! -f "$f" ]; then bad "(READERS) $r exists"; continue; fi

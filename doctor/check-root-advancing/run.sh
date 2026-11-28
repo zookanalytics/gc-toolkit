@@ -9,8 +9,8 @@
 # orphan-recovery skips them (it keys on an assignee), and with no route no pool
 # is ever offered them, so the molecule advances no further and its
 # workflow-finalize waits forever under the control-dispatcher. Nothing else
-# fires on it: I8 is scoped to CLOSED roots, I11 to CLAIMED or ROUTED steps, and
-# every recovery pass needs either an owner or a route this one has neither of.
+# fires on it: every recovery pass needs either an owner or a route, and this one
+# has neither.
 #
 # A root is reported STRANDED only when all four hold, because each of the four
 # is a distinct healthy shape this must not report:

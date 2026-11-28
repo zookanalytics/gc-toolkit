@@ -251,10 +251,8 @@ from outside; what it asserts is that the measurement chain works.
   about *anything*, not only about recycling. It is injected onto the same
   three roles this overlay is wired to, because a role that has the hook but
   not the doctrine has a boundary that will not prompt and an agent that was
-  never told not to. `doctor/check-cycle-recycle-hook` asserts the two halves
-  stay in step: the set of roles carrying the overlay and the set injecting the
-  fragment must be equal, so a role cannot end up with the hook but not the
-  doctrine, or the doctrine but not the hook.
+  never told not to. No check holds the set of roles carrying the overlay
+  equal to the set injecting the fragment.
 - **Always exit 0**, so a failing hook never blocks the `Stop` event or a
   prompt.
 - **Keep stdout empty** — all diagnostics go to stderr, so Claude never

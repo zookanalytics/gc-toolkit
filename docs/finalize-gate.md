@@ -90,9 +90,8 @@ excepts a human gate, so it never releases an epic this clause holds.
 it, so it never reaches an undisposed epic. A review of an epic
 ([`converse-epic-review`](../skills/converse-epic-review/SKILL.md)) runs the
 gate on each Delivery it closes and, once it has recorded the close ruling, on
-the epic. A bare `gc bd close` runs no gate, and the doctor invariant I15
-(`doctor/check-epic-closed-implies-ruled`) reports an epic closed that way
-without its ruling.
+the epic. A bare `gc bd close` runs no gate, and nothing reports an epic
+closed that way without its ruling.
 
 `--as-disposed` reads the bead as carrying that disposition. `bead-rehome.sh`
 asks with it before it writes anything, on its close and on its read-only

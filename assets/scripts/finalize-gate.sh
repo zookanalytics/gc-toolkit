@@ -116,11 +116,10 @@ clause_no_open_human_gate() {
 # never reaches an undisposed epic. A
 # review of an epic (skills/converse-epic-review) runs the gate on each
 # Delivery it closes and, once it has recorded the close ruling, on the epic.
-# A bare `gc bd close` runs no gate, and
-# doctor/check-epic-closed-implies-ruled (I15) reports it after the fact. The
-# disposition is read off the `gc bd show` row, which carries the edge onto a
-# successor in the epic's own store; an edge into another rig's store reaches
-# this clause only through <as-disposed>.
+# A bare `gc bd close` runs no gate. The disposition is read off the
+# `gc bd show` row, which carries the edge onto a successor in the epic's own
+# store; an edge into another rig's store reaches this clause only through
+# <as-disposed>.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     _fgr_as_disposed="${2:-}"
@@ -145,7 +144,7 @@ clause_epic_ruling_recorded() {
     # carries the far bead with its issue_type, so it costs no second read. A
     # show row leaves out an edge into another rig's store (DISPOSITION_JQ), so
     # an epic whose parent sits there reads as having no epic parent and is
-    # held, as I15 reports it.
+    # held.
     _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r "$DISPOSITION_JQ"'
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),
@@ -161,8 +160,7 @@ clause_epic_ruling_recorded() {
     }
     IFS=$'\037' read -r _fgr_type _fgr_hashyp _fgr_disposed _fgr_ruling _fgr_hasreason _fgr_epicparent <<< "$_fgr_fields"
     [ "$_fgr_type" = "epic" ] || return 0   # not an epic: this clause does not apply
-    # The predicate doctor/check-epic-closed-implies-ruled (I15) applies to a
-    # closed epic. The close ruling with its outcome releases any epic, and it is
+    # The close ruling with its outcome releases any epic, and it is
     # read before the hypothesis, so an Epic the operator ruled closed with no
     # hypothesis passes. A disposition, the duplicates or supersedes edge
     # bead-rehome.sh records, is a recorded terminal reason, so it releases one

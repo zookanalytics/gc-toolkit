@@ -320,9 +320,9 @@ eq "$(beads)" "0" "(dry-run) --distinct still files nothing"
 # key, so the key must not vary with how the `<rig>:` prefix is rendered. --check
 # strips the prefix, resolving every rendering of one check to one key.
 reset
-"$SUT" --check "gc-toolkit:check-step-terminal" --scope deacon-findings \
-  --title "doctor gc-toolkit:check-step-terminal: I8 holds" --message "step-terminal I8" >/dev/null 2>&1
-eq "$(meta new-1 'finding.key')" "doctor-check-step-terminal" "(check) the <rig>: prefix is stripped to one canonical key"
+"$SUT" --check "gc-toolkit:check-root-advancing" --scope deacon-findings \
+  --title "doctor gc-toolkit:check-root-advancing: I13 holds" --message "root-advancing I13" >/dev/null 2>&1
+eq "$(meta new-1 'finding.key')" "doctor-check-root-advancing" "(check) the <rig>: prefix is stripped to one canonical key"
 
 # A bare check name (no `<rig>:` prefix) passes through unchanged.
 reset
@@ -332,8 +332,8 @@ eq "$(meta new-1 'finding.key')" "doctor-fork-rate" "(check) a prefix-less name 
 # One check is one bead: the derived key is stable, so a recurrence lands on the
 # open bead instead of filing another.
 reset
-"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
-"$SUT" --check "gc-toolkit:check-step-terminal" --title "t" --message "first" >/dev/null 2>&1
+"$SUT" --check "gc-toolkit:check-root-advancing" --title "t" --message "first" >/dev/null 2>&1
+"$SUT" --check "gc-toolkit:check-root-advancing" --title "t" --message "first" >/dev/null 2>&1
 eq "$(beads)" "1" "(check) one check is one bead across recurrences"
 eq "$(meta new-1 'finding.occurrences')" "2" "(check) the recurrence counted on it"
 
@@ -356,11 +356,11 @@ has "$OUT" "--check" "(doctor-key) the refusal names --check"
 eq "$(beads)" "0" "(doctor-key) nothing filed on the refused dot-form call"
 
 reset
-OUT=$("$SUT" --key doctor-gc-toolkit-check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
+OUT=$("$SUT" --key doctor-gc-toolkit-check-root-advancing --scope deacon-findings --title t --message m 2>&1); RC=$?
 eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dash) doctor key is refused"
 
 reset
-OUT=$("$SUT" --key doctor-gc-toolkit.check-cadence-live --scope deacon-findings --title t --message m 2>&1); RC=$?
+OUT=$("$SUT" --key doctor-gc-toolkit.check-root-advancing --scope deacon-findings --title t --message m 2>&1); RC=$?
 eq "$RC" "2" "(doctor-key) a hand-typed rig-embedded (dot) doctor key is refused"
 
 # The whole-sweep failure names no check, so its key is the one hand-typed

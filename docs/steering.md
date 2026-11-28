@@ -201,8 +201,7 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
   or named to the sling directly;
 - the deferred-dispatch pass slings no armed bead while it is held, because a
   sling reads no hold, and its dry run (`gctk bead start-armed --dry-run`)
-  names the label that holds the arm, so `doctor/check-armed-dispatch-owed`
-  owes that arm no dispatch;
+  names the label that holds the arm;
 - `gctk bead place` refuses a bead that `hold:external` also holds, because a
   placement lifts only `hold:mayor`.
 

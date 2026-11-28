@@ -837,10 +837,10 @@ claimed and the session stays, because the converse templates keep
 and writes what the operator owes as the subject's headline,
 `holding — <the one decision needed>`. The headline names the gate that holds
 the subject with `--waiting-on`, or says `--no-wait` when nothing holds it but
-the conversation, so `doctor/check-wait-is-an-edge` never reads an unedged
-hold. On an open PR's anchor that wait is the conversation itself, whose edge
-holds the merge, and a review or rework of an open PR waits on nothing the
-conversation adds, because the edge holds the anchor and not the subject. The
+the conversation, so the headline is never a hold on prose. On an open PR's
+anchor that wait is the conversation itself, whose edge holds the merge, and a
+review or rework of an open PR waits on nothing the conversation adds, because
+the edge holds the anchor and not the subject. The
 gates the conversation replies to stay open and owed. When something else must
 wait for the answer and no gate the conversation replies to holds it, as when
 a pre-open anchor's PR must not open before the operator rules, the sitting
@@ -1336,8 +1336,8 @@ as a hold unless its writer stamped that key beside it.
 
 Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with
-neither the edge nor the flag is a subject parked on a sentence, and
-`doctor/check-wait-is-an-edge` reports it. No agent in the pack writes a
+neither the edge nor the flag is a subject parked on a sentence, which sits
+until someone notices. No agent in the pack writes a
 `triage.hold`; the liveness sweep's disposition menu offers a human gate in its
 place.
 
