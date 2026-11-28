@@ -130,13 +130,12 @@ shows the reviewed commit on the deployment's own data, in the cases the app
 target under `video` names. Any other visual that only live state could produce
 is no capture, and the verdict says so, as for any visual that cannot be
 produced here. The sandbox is macOS's `sandbox-exec`, and a host without it
-runs no capture; `doctor/check-demo-toolchain` reports whether this one has it.
+runs no capture.
 
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
 --subject <anchor_bead>` resolves the PR from the anchor and attaches the file
 to it in a comment, inline and uncommitted. It refuses a PR outside the rig's
-origin and exits non-zero when it cannot attach. `doctor/check-demo-toolchain`
-reports whether the `gh` it needs is present.
+origin and exits non-zero when it cannot attach.
 
 - `video`: record it in this review with `rig-demo-capture.sh --script demo.md
   --output demo.mp4 <app target>`, the rig-demo mol's capture core. Do not pour
@@ -197,8 +196,6 @@ reports whether the `gh` it needs is present.
   whether it is narrated.
   Narration needs `OPENAI_API_KEY` in the session. Without it the clip is
   silent and captioned, and it still shows the change.
-  `doctor/check-demo-toolchain` reports which parts of the capture toolchain
-  resolve in this session.
 
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 

@@ -65,7 +65,7 @@ done
 [ -s "$FILE" ] || { echo "$PROG: --file '$FILE' is empty" >&2; exit 1; }
 
 # --- gh, at the version --attach shipped in ------------------------------
-command -v gh >/dev/null 2>&1 || { echo "$PROG: gh not found; gh >= 2.99.0 is required for 'gh pr comment --attach'. doctor/check-demo-toolchain names this gap." >&2; exit 1; }
+command -v gh >/dev/null 2>&1 || { echo "$PROG: gh not found; gh >= 2.99.0 is required for 'gh pr comment --attach'." >&2; exit 1; }
 GHVER=$(gh --version 2>/dev/null | sed -n 's/^gh version \([0-9][0-9.]*\).*/\1/p' | head -1)
 GHMAJOR=${GHVER%%.*}; GHREST=${GHVER#*.}; GHMINOR=${GHREST%%.*}
 case "$GHMAJOR" in ''|*[!0-9]*) GHMAJOR=0 ;; esac
