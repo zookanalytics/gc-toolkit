@@ -713,7 +713,7 @@ func TestWaitEdgesIntoAnotherStore(t *testing.T) {
 // A bead's arm is the arm's record answer, each key as the store holds it: the
 // target, the arguments that name its formula, why and by whom it was armed and
 // when, and the attempts made on it. A bead that carries no target carries no
-// arm, whatever else it holds.
+// arm, whatever else it holds, and a blank target is no target.
 func TestTheArm(t *testing.T) {
 	s := fake.New()
 	s.Put(bead{ID: "armed", Status: "open", Metadata: map[string]string{
@@ -726,12 +726,16 @@ func TestTheArm(t *testing.T) {
 	}})
 	s.Put(bead{ID: "noticed", Status: "open", Metadata: map[string]string{"gc.notify_when_ready": "rig/mechanik"}})
 	s.Put(bead{ID: "plain", Status: "open", Metadata: map[string]string{"gc.dispatch_when_ready_reason": "left behind"}})
+	for id, target := range map[string]string{"blank": "", "spaces": "  "} {
+		s.Put(bead{ID: id, Status: "open", Metadata: map[string]string{
+			"gc.dispatch_when_ready": target, "gc.dispatch_when_ready_armed_at": "2026-10-30T01:05:10Z"}})
+	}
 	want := `{"target":"rig/rig.polecat","args":"[\"--on\",\"mol-polecat-work\"]","reason":"waits for unit 1",` +
 		`"armed_by":"a-session","armed_at":"2026-10-30T01:05:10Z","fail_count":"1"}`
 	if raw, err := json.Marshal(holdsOf(t, s, "armed").Arm); err != nil || string(raw) != want {
 		t.Errorf("armed's arm prints %s, %v; want %s", raw, err, want)
 	}
-	for _, id := range []string{"noticed", "plain"} {
+	for _, id := range []string{"noticed", "plain", "blank", "spaces"} {
 		if h := holdsOf(t, s, id); h.Arm != nil {
 			t.Errorf("%s carries no target and reads arm %+v", id, h.Arm)
 		}

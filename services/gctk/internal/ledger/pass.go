@@ -1,8 +1,10 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -202,8 +204,8 @@ func everyLive(q gcbd.Query) bool {
 // selected reports whether q selects r: its status, the ids named, the key it
 // carries, the value that key holds, the text its title holds, its issue type,
 // its assignee, and whether the listing shows it unless asked, as the store's
-// listing selects them. A key's value compares as the scripts render it,
-// `(.metadata[k] // "") | tostring`.
+// listing selects them. A key's value compares as the store compares it
+// (unquoted), so a pass and the store select the same rows.
 func selected(q gcbd.Query, r *gcbd.Bead) bool {
 	if !q.Closed && !live(r) {
 		return false
@@ -232,9 +234,28 @@ func selected(q gcbd.Query, r *gcbd.Bead) bool {
 		}
 	}
 	if q.Key != "" {
-		if _, held := r.Metadata[q.Key]; !held || r.Meta(q.Key) != q.Value {
+		if v, held := r.Metadata[q.Key]; !held || unquoted(v) != q.Value {
 			return false
 		}
 	}
 	return true
+}
+
+// unquoted is a key's value as bd's listing compares it,
+// JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.<key>')): a string is itself and any
+// other JSON value is its JSON text, a false as "false" and a null as "null".
+func unquoted(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return t
+	case bool:
+		return strconv.FormatBool(t)
+	case json.Number:
+		return t.String()
+	default:
+		raw, _ := json.Marshal(t)
+		return string(raw)
+	}
 }

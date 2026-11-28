@@ -2,7 +2,9 @@ package ledger
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -17,6 +19,9 @@ type Selection struct {
 	q    gcbd.Query
 	none bool
 	err  error
+	// keep is the test a row the store selects must pass as well, nil when
+	// every row the store selects is the selection's.
+	keep func(*Record) bool
 }
 
 // ByID selects the beads named.
@@ -45,16 +50,32 @@ func Typed(typ string) Selection {
 	return Selection{q: gcbd.Query{Type: typ}, none: typ == ""}
 }
 
-// Carrying selects the beads that carry k.
-func Carrying[T any](k Key[T]) Selection { return Selection{q: gcbd.Query{HasKey: k.decl.name}} }
+// Carrying selects the beads that carry k: those that hold a value of k, as
+// Get reads one. The store selects a bead whose row has the key, and a row has
+// a key it holds as a JSON null or a blank text, which Get reads as no value,
+// or as a false, which a String key reads as no value, so Find leaves out each
+// such row.
+func Carrying[T any](k Key[T]) Selection {
+	return Selection{q: gcbd.Query{HasKey: k.decl.name}, keep: k.held}
+}
 
-// Matching selects the beads whose k holds v.
+// Matching selects the beads whose k holds v, as Get reads it. The store
+// compares the key's stored text, so it also selects a row whose key Get reads
+// as no value, such as a String key's JSON false for "false", and Find keeps
+// only the rows whose Get reads v. A v whose text is blank selects nothing,
+// since a key holds no value as a blank text.
 func Matching[T any](k Key[T], v T) Selection {
 	text, err := k.codec.Encode(v)
 	if err != nil {
 		return Selection{err: fmt.Errorf("%s does not encode as %s: %w", k.decl.name, k.decl.typ, err)}
 	}
-	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}}
+	if strings.TrimSpace(text) == "" {
+		return Selection{none: true}
+	}
+	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}, keep: func(r *Record) bool {
+		got, held, err := k.Get(r)
+		return held && err == nil && reflect.DeepEqual(got, v)
+	}}
 }
 
 // Assigned selects the beads assigned to who, as the store's listing matches an
@@ -101,7 +122,11 @@ func (l *Ledger) Find(s Selection) ([]*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	return records(rows), nil
+	out := records(rows)
+	if s.keep != nil {
+		out = slices.DeleteFunc(out, func(r *Record) bool { return !s.keep(r) })
+	}
+	return out, nil
 }
 
 // ServeRule is a pool's serve rule as bd's ready read takes it: unassigned
@@ -113,17 +138,17 @@ type ServeRule struct {
 	ExcludeLabels []string
 }
 
-// Ready reads the beads that carry k that the store reports ready under rule,
-// by bd's own readiness, in the order the store gives them. Each record's
-// edges are the listing's, as Find's are. A read that fails returns its
-// *ReadError.
+// Ready reads the beads that carry k, as Carrying selects them, that the store
+// reports ready under rule, by bd's own readiness, in the order the store gives
+// them. Each record's edges are the listing's, as Find's are. A read that fails
+// returns its *ReadError.
 func Ready[T any](l *Ledger, k Key[T], rule ServeRule) ([]*Record, error) {
 	rows, err := l.store.Ready(gcbd.ReadyQuery{HasKey: k.decl.name, Unassigned: rule.Unassigned,
 		ExcludeTypes: slices.Clone(rule.ExcludeTypes), ExcludeLabels: slices.Clone(rule.ExcludeLabels)})
 	if err != nil {
 		return nil, err
 	}
-	return records(rows), nil
+	return slices.DeleteFunc(records(rows), func(r *Record) bool { return !k.held(r) }), nil
 }
 
 // ReadyByPriority reads every bead the store reports ready under rule, by bd's

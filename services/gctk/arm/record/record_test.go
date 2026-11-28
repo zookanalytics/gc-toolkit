@@ -114,8 +114,9 @@ func TestTheAttemptsAgainstTheCap(t *testing.T) {
 }
 
 // The arm is the presence of its target, and it carries each key as the store
-// holds it, which is what gctk bead holds prints. A target that is empty, and an
-// arm with no arm time, which every pour's token is made from, are malformed.
+// holds it, which is what gctk bead holds prints. A blank target is no target,
+// so it carries no arm, and an arm with no arm time, which every pour's token is
+// made from, is malformed.
 func TestTheTargetAndTheArmTime(t *testing.T) {
 	if a := armOf(t, map[string]string{"gc.dispatch_when_ready_reason": "left behind"}); a != nil {
 		t.Errorf("a bead with no target reads arm %+v", a)
@@ -132,8 +133,8 @@ func TestTheTargetAndTheArmTime(t *testing.T) {
 	if full.Formula() != "mol-x" || full.Attempts() != 1 || full.Malformed() != "" {
 		t.Errorf("the arm decodes to %q, %d, %q", full.Formula(), full.Attempts(), full.Malformed())
 	}
-	if a := armOf(t, armed(map[string]string{"gc.dispatch_when_ready": " "})); a == nil || !strings.Contains(a.Malformed(), "no target") {
-		t.Errorf("an empty target reads %+v; want it malformed for its target", a)
+	if a := armOf(t, armed(map[string]string{"gc.dispatch_when_ready": " "})); a != nil {
+		t.Errorf("a blank target reads arm %+v; want none", a)
 	}
 	noTime := armed(nil)
 	delete(noTime, "gc.dispatch_when_ready_armed_at")

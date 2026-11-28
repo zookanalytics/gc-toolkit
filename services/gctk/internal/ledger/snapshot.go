@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -129,7 +130,9 @@ func (r *Record) Parents() ([]string, error) {
 
 // value is a metadata key's stored text, and whether the row holds the key. A
 // string is itself, and any other JSON value is its JSON text. A null value is
-// one the row does not hold, and so is a false when falseUnset.
+// one the row does not hold, and so is a blank text, and a false when
+// falseUnset. Only that test trims, so a text the row holds is returned as
+// stored.
 func (r *Record) value(name string, falseUnset bool) (string, bool) {
 	v, ok := r.row.Metadata[name]
 	if !ok || v == nil || (falseUnset && v == false) {
@@ -137,6 +140,9 @@ func (r *Record) value(name string, falseUnset bool) (string, bool) {
 	}
 	switch t := v.(type) {
 	case string:
+		if strings.TrimSpace(t) == "" {
+			return "", false
+		}
 		return t, true
 	case json.Number:
 		return t.String(), true

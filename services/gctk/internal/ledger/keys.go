@@ -11,7 +11,9 @@ import (
 )
 
 // Codec decodes a key's stored text into its typed value and encodes a value
-// for a write. Type is the name the registry gives it.
+// for a write. Type is the name the registry gives it. A codec decodes only
+// text the row holds, so a key the row lacks, holds as a null or holds as a
+// blank text holds no value, whatever its codec.
 type Codec[T any] struct {
 	Type   string
 	Decode func(string) (T, error)
@@ -120,8 +122,9 @@ func (v View[T]) Get(r *Record) (T, bool, error) { return v.key.Get(r) }
 func (v View[T]) Name() string { return v.key.Name() }
 
 // Get returns the key's value on r: its current spelling, else its first alias
-// the row holds. ok is false when the row holds neither. A value that does not
-// decode is an error.
+// the row holds. ok is false when the row holds neither: it lacks them, or
+// holds each as a null, a blank text or, on a String key, a false. A value the
+// row holds decodes as stored, and one that does not decode is an error.
 func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 	for _, name := range append([]string{k.decl.name}, k.decl.aliases...) {
 		raw, held := r.value(name, k.codec.falseUnset)
@@ -135,6 +138,13 @@ func (k Key[T]) Get(r *Record) (v T, ok bool, err error) {
 		return v, true, nil
 	}
 	return v, false, nil
+}
+
+// held reports whether r holds k, as Get reads it. A value that does not
+// decode is held, so a selection keeps its row and its reader meets the error.
+func (k Key[T]) held(r *Record) bool {
+	_, ok, _ := k.Get(r)
+	return ok
 }
 
 // Act is an act a key's value is set in: a Write on a bead, or the Filing of a
