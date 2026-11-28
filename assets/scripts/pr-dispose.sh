@@ -318,9 +318,9 @@ if [ "$PR_STATE" = "OPEN" ]; then
   # an outside account's post cannot pass for the notice. A conversation that
   # does not read could hide the notice, so the PR is not closed.
   CMARK=$("$PR_POST" mark 2>/dev/null) || CMARK=""
-  GCTK=$(gctk_path) || GCTK=""
+  gctk=$(gctk_path) || gctk=""
   QUOTE=""
-  [ -z "$GCTK" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$_bd_lib_dir" "$GCTK" github quote "$LIVE_URL" --json 2>/dev/null) || QUOTE=""
+  [ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$_bd_lib_dir" "$gctk" github quote "$LIVE_URL" --json 2>/dev/null) || QUOTE=""
   [ -n "$QUOTE" ] \
     || die "the marker is recorded but PR#$PRNUM's conversation could not be read through gctk github quote, so whether it already carries the closing comment is unknown; the PR was NOT closed and is still OPEN — close it by hand (or re-run once gctk works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
   POSTED=$(printf '%s' "$QUOTE" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '

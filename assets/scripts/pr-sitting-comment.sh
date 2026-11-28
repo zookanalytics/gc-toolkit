@@ -170,9 +170,9 @@ BODY="$BODY$DRAWN"$'\n'
 # quote holds carries no text, so an outside account's post cannot match.
 # Unreadable is fail-safe: refresh has nothing to edit, and post skips rather
 # than risk a duplicate.
-GCTK=$(gctk_path) || GCTK=""
+gctk=$(gctk_path) || gctk=""
 QUOTE=""
-[ -z "$GCTK" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$GCTK" github quote "https://$ORIGIN_REPO_Q/pull/$PR" --json 2>/dev/null) || QUOTE=""
+[ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$gctk" github quote "https://$ORIGIN_REPO_Q/pull/$PR" --json 2>/dev/null) || QUOTE=""
 if [ -z "$QUOTE" ]; then
   echo "$PROG: could not read PR#$PR comments; nothing posted" >&2
   exit 0

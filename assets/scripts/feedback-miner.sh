@@ -268,10 +268,10 @@ if [ "$VERB" = fetch-pr ]; then
   part="$base.$$"
   rm -f "$base.failed"
   SLUG=$(meta repo); SELF=$(meta self)
-  GCTK=$(gctk_path) || { : > "$base.failed"; exit 0; }
+  gctk=$(gctk_path) || { : > "$base.failed"; exit 0; }
   # A quote that printed and then failed to file a held post's follow-up is
   # still the PR's posts, and the follow-up is gctk's to file on a later read.
-  QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$GCTK" github quote "https://github.com/$SLUG/pull/$N" --json 2>/dev/null) || [ -n "$QUOTE" ] \
+  QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$gctk" github quote "https://github.com/$SLUG/pull/$N" --json 2>/dev/null) || [ -n "$QUOTE" ] \
     || { : > "$base.failed"; exit 0; }
   printf '%s' "$QUOTE" | jq -c '
     def bare: gsub("(?m)^│ ?"; "");
