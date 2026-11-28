@@ -55,15 +55,17 @@ with its framing. When this session did not run the re-check, as when
 `gc bd show "$CONVERSATION"` and `gc bd show <gate>` for each gate.
 
 Then read the subject's own human gates, and the subject's description with
-the newest `## Current state` block in its notes, which is the distilled truth:
+its notes from the newest `## Current state` block on. That block is the
+distilled truth, and each note after it is newer than the block. Notes that
+hold no such block print whole:
 
 ```bash
 gc bd dep list "$SUBJECT" --type blocks --json | jq -r '.[] | select(.issue_type == "gate" and .await_type == "human") | "\(.id) [\(.status)] \(.title)"'
-gc bd show "$SUBJECT" --json | jq -r '.[0] | (.description // ""), ("\n" + (.notes // "") | split("\n## ") | map(select(startswith("Current state"))) | last | if . then "## " + . else "No ## Current state block in the notes." end)'
+gc bd show "$SUBJECT" --json | jq -r '.[0] | (.description // ""), ("\n" + (.notes // "") | split("\n## Current state") | if length > 1 then "## Current state" + last else .[0][1:] end)'
 ```
 
-The rest of its notes is its history, read only where the operator's decision
-turns on it, and so are the subject's other conversations:
+The notes before that block are its history, read only where the operator's
+decision turns on them, and so are the subject's other conversations:
 `gc bd dep list "$SUBJECT" --direction=up --type tracks`. Read its core state
 with `"$CONV/bead-context.sh" "$SUBJECT" --frontier --horizon`, one call that
 reads the subject's own store: its assignee and route, its readiness with its
