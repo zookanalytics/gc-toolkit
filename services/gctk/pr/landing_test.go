@@ -168,14 +168,33 @@ func (d *land) timed() *clock {
 	return c
 }
 
-// gates records each gate filed, fails a filing when err is set, and while
-// stall is set answers no filing until the act's context ends.
+// gates records each gate filed and each key withdrawn, fails a filing when err
+// is set and a withdrawal when withdrawErr is, and while stall is set answers
+// no filing until the act's context ends.
 type gates struct {
-	mu       sync.Mutex
-	filed    []string
-	messages []string
-	err      error
-	stall    bool
+	mu          sync.Mutex
+	filed       []string
+	messages    []string
+	withdrawn   []string
+	err         error
+	withdrawErr error
+	stall       bool
+}
+
+func (g *gates) Withdraw(_ context.Context, subject, key, message string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.withdrawErr != nil {
+		return g.withdrawErr
+	}
+	g.withdrawn = append(g.withdrawn, subject+" "+key+" "+message)
+	return nil
+}
+
+func (g *gates) withdrawals() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.withdrawn)
 }
 
 func (g *gates) File(ctx context.Context, subject, key, message string) error {
@@ -249,7 +268,8 @@ func (a *audit) calls() (checks, reaudits []string) {
 // land is one bead on the pending record, blocked and assigned to nobody,
 // whose PR the evaluator reads ready, with the landing order's sources and the
 // PR watch's one-PR update, which saves GitHub's side on the bead. reads and
-// writes mark where the last run's GitHub reads and store writes start.
+// writes mark where the last run's GitHub reads and store writes start, and
+// asked where a case's requests of GitHub start.
 type land struct {
 	*world
 	co     *checkout
@@ -261,6 +281,7 @@ type land struct {
 	tick   int
 	reads  int
 	writes int
+	asked  int
 }
 
 func newLand(t *testing.T) *land {
@@ -285,6 +306,10 @@ func newLand(t *testing.T) *land {
 		Hub:      func(context.Context, string) pr.Hub { return w.github },
 		Reread: func(_ context.Context, url string) error {
 			_, err := d.watch.Reread(url)
+			return err
+		},
+		RefreshConversation: func(_ context.Context, url string) error {
+			_, err := d.watch.RefreshConversation(url)
 			return err
 		},
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
@@ -954,6 +979,24 @@ func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
 	}
 }
 
+// The bead is a plain task, so Gas City's work-record gate reads its close, and
+// once enforced it refuses a close whose record names no outcome. The verified
+// merge's close names the work shipped in the merge commit on the target, over
+// the branch workspace-setup stamped when the work was cut.
+func TestAVerifiedMergesCloseCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	is(t, d.once(t), pr.ActLanded)
+	b := d.row(t)
+	if b.Status != "closed" {
+		t.Fatalf("under an enforced work-record gate the verified merge left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+}
+
 // The one-PR update writes pr_state=merged once it reads the PR merged, which
 // can come before a run lands the bead: the record is still pending, and the
 // run lands it.
@@ -1010,6 +1053,38 @@ func TestAVerifiedMergeWhoseCloseBdRefusesIsAnExceptionBehindAGate(t *testing.T)
 	}
 	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("a run after the exception read %+v, want nothing: the marker is cleared", out)
+	}
+}
+
+// Once what held a refused close is gone, a person closes the bead with the
+// command its gate names. An enforced work-record gate reads that close too,
+// and the exception's record already names the work shipped in the merge
+// commit on the target.
+func TestTheCloseARefusedLandingsGateNamesCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	held := true
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		if held && slices.Contains(args, "--status=closed") {
+			return errors.New("exit status 1: Error: cannot close blocked issue: " + bead + " is blocked by [tk-kid]")
+		}
+		return nil
+	}
+	is(t, d.once(t), pr.ActExcepted)
+	meta(t, d.row(t), map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+	closing := "--status=closed --set-metadata merge_result=" + record.Merged
+	if msg := d.gates.messages[0]; !strings.Contains(msg, "gc bd update "+bead+" "+closing) {
+		t.Fatalf("the gate's message %q names another close", msg)
+	}
+	held = false
+	if out, err := d.store.Update(bead, strings.Fields(closing)...); err != nil {
+		t.Fatalf("the close the gate names was refused: %v %s", err, out)
+	}
+	if b := d.row(t); b.Status != "closed" || b.Metadata["merge_result"] != record.Merged {
+		t.Fatalf("the close the gate names left the bead %s with merge_result %q", b.Status, b.Metadata["merge_result"])
 	}
 }
 

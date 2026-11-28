@@ -69,7 +69,8 @@ unassigned, carries Gas City's `hold:mayor` label, and has no route and no arm.
 Gas City keeps a bead carrying the label out of its default work query, the
 hook, pool demand and the route-restore sweeps, so no pool is offered it. The
 label names Gas City's default coordinator, and no code branches on who that
-is.
+is. In this pack each rig's po works it. The city's mayor seat, whose name the
+label carries, takes none of it.
 
 A held bead carries no route. Gas City's hold conventions say a pack that parks
 finished work on a hold usually clears its route, because the next actor is not
@@ -87,7 +88,7 @@ Each writer that files or disposes new work follows the rule.
   finding, because its card is the triage that backlog refinement reads. Its
   actionable exit routes a member, PR-finishing work, a failure's tracker or a
   confirmed emergency. It releases any other bead with no route, then holds it
-  with `gc bd set-state <bead> hold=mayor --reason "<why it was held>"`. The
+  with `gc bd update <bead> --add-label hold:mayor --append-notes "<why>"`. The
   blocked exit's `--then-route` arms a dispatch only for a bead the rule admits.
   Any other bead it holds, and arms nothing, while its wait still lands as a
   `blocks` edge. The close exit keeps its validating closer, because a close
@@ -117,14 +118,22 @@ Each writer that files or disposes new work follows the rule.
   waits on closes, whether or not the rule admits it, because a close shrinks
   the queue.
 - **The po**, in a sitting and only once the operator agrees, holds a bead with
-  `gc bd set-state <bead> hold=mayor --reason "<the operator's reason>"`.
+  `gc bd update <bead> --add-label hold:mayor --append-notes "<the operator's reason>"`.
 
 The witness and the distiller write the label in the create, which is the
-bead's own record of it. The first reaction and the po write it with
-`set-state`, which records the reason in an event bead. The first reaction
-writes it last, after the release and after intake's note, because the check a
-re-offered reaction runs first refuses a held bead. A worker cut off before the
-label lands leaves the bead released under its headline, which no pool is
+bead's own record of it. The first reaction and the po add it to a bead that
+exists with `--add-label`, in the update whose note says why. bd removes no
+label an update does not name (`ApplyLabelPatch` in
+`internal/storage/issueops/aggregate.go`, gastownhall/beads), so a hold another
+writer put on the bead, such as `hold:external`, stays beside `hold:mayor`.
+Gas City's hold conventions set a hold with `set-state`, whose event bead
+records the reason, but set-state swaps the first `hold:` label the bead
+carries, in label order, for the one it sets (`findStateLabel` in
+`cmd/bd/state.go`), so it would remove that hold.
+
+The first reaction writes the hold last, after the release, because the check a
+re-offered reaction runs first refuses a held bead. A worker cut off before that
+update lands leaves the bead released under its headline, which no pool is
 offered and the scan passes over, and the reaction's next worker finishes the
 exit.
 
@@ -563,10 +572,7 @@ PR-finishing work carries an anchor's built branch to its merge. Its creators
 are the scripts that make it claimable:
 
 - On the old review path, `gate-ensure.sh` slings the reviews it files, and the
-  validation passes that `pr-facts.sh` and `signoff.sh` file.
-- `pr-facts.sh` routes the merge-in of an approved PR that conflicts, the fix
-  for a red required check, and the comment rework. On a PR on the pending
-  record it files each as an ask instead.
+  validation passes that `signoff.sh` files.
 - On the old review path, `rework-child.sh` slings the rework that a review
   verdict or an operator ruling asks for.
 
@@ -605,53 +611,31 @@ have set.
 
 **Reading the approval.** For the rank, a PR is approved when its anchor owns
 an open PR, at `pull_request_pending` or `pull_request_head_changed` on the
-pending record, and the posture
-`pr-facts.sh` records there, `pr_posture`, reads `approved` at the PR head
-`pr-facts.sh` last read, `pr_head_oid`. The
-posture is a dated key stored as `<posture>@<oid>@<since>`
-([state-machine.md](state-machine.md#posture)), so the priority function reads
-the part before the first `@` and compares the `<oid>` after it with
-`pr_head_oid`. An approval recorded at any other head is for code the PR no
-longer carries, so it ranks nothing at P0. An anchor that rests anywhere else
-has no open PR to be approved, whatever posture an earlier PR left on it. The
-pending record's writers clear neither key, so an anchor that leaves the
-record's open values for an exception and comes back keeps the posture its
-earlier head was read at until `pr-facts.sh` reads the PR again. The posture is
-not `review-verdict.sh`'s approval rule, nor the evaluator's, which the landing
-order merges on: an unanswered review comment outranks an approval in
-the posture, and a PR whose base requires no approving review reports no review
-decision, so either ranks as not approved.
+pending record, and the read the one-PR update saved on it (`pr_github_read`)
+names an approver and no request for changes, read at the head the store holds:
+`observed_pr_head_sha` on a changed head, `pr_head_sha` otherwise
+([state-machine.md](state-machine.md#the-prs-conversation)). The approvers and
+requesters are the accounts whose approval or request for changes stands, as
+the evaluator's approval rule reads the reviews. A read at any other head is of
+code the PR no longer carries, so it ranks nothing at P0. An anchor that rests
+anywhere else has no open PR to be approved, whatever read an earlier PR left
+on it.
 
 **Where it is written.** Each creator runs `queue-priority.sh settle` on a child
 before it makes the child claimable, in the order [Settle](#settle) gives.
 `rework-child.sh` and `gate-ensure.sh` then sling the child, and the pour copies
-its priority. `pr-facts.sh` then routes it, in a write that carries no priority.
-A child whose priority does not settle is neither slung nor routed, and the
+its priority. A child whose priority does not settle is not slung, and the
 creator's retry settles it: the next pass of the cadence arm, or the caller of
 `rework-child.sh` running it again.
 
-**Re-ranked when its rank moves.** The rank moves when the posture or the PR
-head `pr-facts.sh` records moves the anchor into or out of an approval at that
-head, and when the anchor leaves the values of an open PR. Either way the anchor's open
-reviews, reworks and validation passes are settled again, with their live
-workflows. The anchor's
-`pr_finishing_settled` records the rank all of that work last settled at,
-`approved` or `unapproved`, and reads `unsettled` while a re-rank is owed. The
-write that moves the rank marks the record `unsettled` in the same update: the
-posture and head write in `pr-facts.sh`. Every pass of `pr-facts.sh`
-compares the record of each anchor it reads as owning an open PR with the rank
-the priority function gives that anchor, one on a draft PR included: it records a
-draft's head though it reads no posture for it. Every full pass does the same
-for each live anchor that carries a record and rests anywhere else, whichever
-writer moved it there. While the two differ, the pass settles the work, and it
-records the rank only once every bead of it has settled. A record naming the
-other rank turns `unsettled` before the first settle. So a settle that fails, or a pass that
-stops partway, leaves a record that a later pass settles again and that no
-return to the other rank reads as settled. The next full pass settles an
-anchor that another writer moved, such as the landing order's move of a PR into
-one of the record's exceptions. A finding carries
-`anchor_bead` too, but no pool claims
-it, so that settle leaves it as it is.
+**Re-ranked when its rank moves.** The rank moves when the PR watch saves a read
+that moves the anchor into or out of an approval at its head, and when the
+anchor leaves the values of an open PR. No writer settles the work at that
+moment: the fifteen-minute pass ([The pass](#the-pass)) settles each bead the
+polecat pool's queue offers at the rank the priority function reads, so a moved
+rank reaches the anchor's PR-finishing work waiting in that queue, with its live
+workflows, within that interval. A finding carries `anchor_bead` too, but no
+pool claims it, so the pass leaves it as it is.
 
 ### The pass
 

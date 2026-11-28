@@ -372,7 +372,7 @@ func cutGraph(all map[string]row) map[string]bool {
 // keys the table and the trail read.
 var readKeys = regexp.MustCompile(`^(anchor_bead|task_kind|merge_result|pr_number|pr_url|branch|rejection_reason|` +
 	`gc\.work_outcome|gc\.routed_to|gc\.kind|gc\.formula_contract|gc\.input_convoy_id|gc\.var\.issue|gc\.root_bead_id|gc\.step_ref|` +
-	`gc\.dispatch_when_ready.*|gc\.notify_when_ready|merge_hold|rebase_hold|pr_posture|epic_.*)$`)
+	`gc\.dispatch_when_ready.*|gc\.notify_when_ready|merge_hold|rebase_hold|epic_.*)$`)
 
 // fixtureRecord is a bead as the fixture keeps it, with the fields whose text
 // the privacy scan replaced.

@@ -30,7 +30,7 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 			HeadBranch: r.HeadBranch, Base: r.Base, Head: r.Head, State: r.State, Draft: r.Draft, MergeState: r.MergeState},
 		Checks: &pr.SavedChecks{ReadAt: r.ReadAt, Head: r.Head, Runs: r.Checks},
 		Conversation: &pr.SavedConversation{ReadAt: r.ReadAt, Since: r.Since, Approvers: r.Approvers,
-			Requesters: r.Requesters, Feedback: r.Feedback, Awaiting: r.Awaiting, Unresolved: []string{}},
+			Requesters: r.Requesters, Untaken: r.Untaken, Awaiting: r.Awaiting, Unresolved: []string{}},
 		Labels: &pr.SavedLabels{ReadAt: r.ReadAt, Names: []string{}},
 	})
 	if err != nil {
@@ -42,16 +42,14 @@ func savedRead(t *testing.T, edit func(*pr.GitHubRead)) string {
 // pendingRows is a rig whose tk-a owns PR 7 on Gas Town's pending record,
 // blocked and assigned to nobody as the record writes it, validated at
 // pendingHead into main with a review result passed there, and carrying read as
-// the read the one-PR update saved, none when read is empty. Its recorded
-// posture is approved, which prstatus.Derive reads as merging. With gated, tk-a
+// the read the one-PR update saved, none when read is empty. With gated, tk-a
 // waits on tk-q, an open human gate.
 func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 	t.Helper()
 	md := map[string]any{"merge_result": "pull_request_pending", "pr_number": "7",
 		"pr_url": "https://github.com/acme/widgets/pull/7", "pr_repo": "acme/widgets", "pr_head_sha": pendingHead,
 		"merged_target": "main", "branch": "polecat/tk-a",
-		"review_results": `[{"head":"` + pendingHead + `","target":"main","passed":true}]`,
-		"pr_posture":     "approved@1111111@2026-01-01T00:00:00Z"}
+		"review_results": `[{"head":"` + pendingHead + `","target":"main","passed":true}]`}
 	if read != "" {
 		md["pr_github_read"] = read
 	}
@@ -79,12 +77,12 @@ func pendingRows(t *testing.T, gated bool, read string) []json.RawMessage {
 // status the evaluator's answer renders as, from the GitHub read the landing
 // order saved on its bead. Its row carries the status and the held: values
 // `gctk pr status` gives it, prstatus.Render's over the answer, where the
-// recorded posture alone would read merging every time, so four of the cases
-// fail if the board falls back to it. A PR the city is moving reads as its
-// pull request in the queue, and one that waits on a person for a reason of
-// its own is a need. One the question on the board alone holds is listed beneath
-// it and reads what it waits on, with its label's words left to its pull
-// request.
+// facts alone would read needs-review every time, so each case that renders
+// another status fails if the board falls back to them. A PR the city is
+// moving reads as its pull request in the queue, and one that waits on a person
+// for a reason of its own is a need. One the question on the board alone holds
+// is listed beneath it and reads what it waits on, with its label's words left
+// to its pull request.
 func TestAPullRequestOnThePendingRecordReadsTheEvaluatorsAnswer(t *testing.T) {
 	cases := []struct {
 		name     string

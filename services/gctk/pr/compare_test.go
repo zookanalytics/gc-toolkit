@@ -145,14 +145,14 @@ func TestTheNetSavesAPostEditThatLeftThePRsUpdatedAtUnmoved(t *testing.T) {
 			CreatedAt: "2026-11-16T08:30:00Z", UpdatedAt: "2026-11-16T08:30:00Z"}}
 		d.rule.notFeedback[300] = true
 		d.poll(t)
-		if got := d.saved(t, bead).Conversation.Feedback.Conversation; got != 0 {
-			t.Fatalf("a post marked not for review was saved as feedback %d", got)
+		if got := d.saved(t, bead).Conversation.Untaken; len(got) != 0 {
+			t.Fatalf("a post marked not for review was saved as feedback the city has not taken: %+v", got)
 		}
 		d.pr.Comments[0].Body, d.pr.Comments[0].UpdatedAt = "a note", "2026-11-16T09:30:00Z"
 		delete(d.rule.notFeedback, 300)
 		onlyTheNetSees(t, d, []string{"Login", "Conversation"}, "conversation")
-		if got := d.saved(t, bead).Conversation.Feedback.Conversation; got != 300 {
-			t.Fatalf("the net saved the newest conversation feedback %d, want the edited post's 300", got)
+		if got := d.saved(t, bead).Conversation.Untaken; len(got) != 1 || got[0].ID != 300 {
+			t.Fatalf("the net saved the untaken posts %+v, want the edited post 300", got)
 		}
 	})
 }

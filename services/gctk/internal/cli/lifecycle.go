@@ -34,7 +34,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <value> [--expect <value>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent> | --keep-route] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <value> [--expect <value>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
 `
 
 // Lifecycle dispatches the subcommand's verbs. It returns a process exit code
@@ -198,7 +198,6 @@ type transitionOpts struct {
 	expect      string
 	route       string
 	routeSet    bool
-	keepRoute   bool
 	assignee    string
 	assigneeSet bool
 	closeIt     bool
@@ -252,9 +251,6 @@ func parseTransition(args []string) (transitionOpts, error) {
 		case "--route":
 			o.route, i = next(i)
 			o.routeSet = true
-		case "--keep-route":
-			o.keepRoute = true
-			i++
 		case "--takeaway":
 			o.takeaway, i = next(i)
 			o.takeawaySet = true
@@ -290,11 +286,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.to == "" {
 		fmt.Fprintf(stderr, "%s: transition needs --to <value>\n", prog)
-		return 1
-	}
-	// --keep-route writes no route at all, so it cannot also name one.
-	if o.keepRoute && o.routeSet {
-		fmt.Fprintf(stderr, "%s: --keep-route and --route ask for opposite things: --keep-route leaves gc.routed_to as the bead carries it\n", prog)
 		return 1
 	}
 	// gc.routed_to is matched as an exact string by every pool claim, so a route
