@@ -455,6 +455,14 @@ Nothing outside it parses a metadata value or spells a key's name.
 - **Each key is parsed once.** The declaration's codec decodes the stored value,
   whether it is a plain string, a list, a flag, or a dated value such as
   `value@oid@since`. Every reader gets the typed value from that one decode.
+- **A key holds no value in one way.** A row holds no value of a key when it
+  lacks the key, holds it as a JSON null or a blank text, or holds a `String`
+  key as a JSON false. The declaration's read applies that test before its codec
+  decodes, and returns a value the row holds as stored. Every selection by key
+  keeps only the rows that read finds holding the key: `Carrying` and `Ready` the
+  rows that hold it, and `Matching` the rows whose value is the one matched. So
+  no domain meets a bead the store selects by a key its read says the bead does
+  not hold.
 - **A legacy alias lives in its key's declaration.** A key that still has an
   older spelling in some store declares the alias beside its name. The ledger
   reads either spelling and writes only the current one, and the alias goes
