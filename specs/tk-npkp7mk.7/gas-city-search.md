@@ -127,10 +127,15 @@ incident.
   under `${GC_SYSTEM_PACKS_DIR:-<city>/.gc/system/packs}`, then the caller's own
   directory (core's `notify-claims-stall.sh`, `reaper.sh` and
   `jsonl-export.sh`) or a path relative to the gascity checkout (bd's
-  `examples/bd/dolt/assets/scripts/_notify.sh`). Gas City prunes the
-  `.gc/system/packs` tree and resolves builtin packs from the user-global cache
-  (`pruneRetiredSystemPacks` in `cmd/gc/embed_builtin_packs.go`), and nothing
-  sets `GC_SYSTEM_PACKS_DIR`.
+  `examples/bd/dolt/assets/scripts/_notify.sh`). The hook's header gives the
+  search's reason: "Packs can override escalation by shipping
+  assets/scripts/escalate.sh and placing that pack earlier in
+  GC_ESCALATE_SEARCH_PACKS." Gas City retired the per-city `.gc/system/packs`
+  tree in d71b469e54 (#3344, 2026-06-14), "compose builtins via pinned
+  imports", and now prunes it and resolves builtin packs from the user-global
+  cache (`pruneRetiredSystemPacks` in `cmd/gc/embed_builtin_packs.go`). Nothing
+  sets `GC_SYSTEM_PACKS_DIR`, so that reason no longer holds: no override pack
+  is found.
 
 **Why it does not deliver the alert as it stands.** A gc-toolkit exec order
 cannot run it. The order's env names only its own pack's directory
