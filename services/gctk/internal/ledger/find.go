@@ -2,7 +2,9 @@ package ledger
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 )
@@ -57,13 +59,23 @@ func Carrying[T any](k Key[T]) Selection {
 	return Selection{q: gcbd.Query{HasKey: k.decl.name}, keep: k.held}
 }
 
-// Matching selects the beads whose k holds v.
+// Matching selects the beads whose k holds v, as Get reads it. The store
+// compares the key's stored text, so it also selects a row whose key Get reads
+// as no value, such as a String key's JSON false for "false", and Find keeps
+// only the rows whose Get reads v. A v whose text is blank selects nothing,
+// since a key holds no value as a blank text.
 func Matching[T any](k Key[T], v T) Selection {
 	text, err := k.codec.Encode(v)
 	if err != nil {
 		return Selection{err: fmt.Errorf("%s does not encode as %s: %w", k.decl.name, k.decl.typ, err)}
 	}
-	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}}
+	if strings.TrimSpace(text) == "" {
+		return Selection{none: true}
+	}
+	return Selection{q: gcbd.Query{Key: k.decl.name, Value: text}, keep: func(r *Record) bool {
+		got, held, err := k.Get(r)
+		return held && err == nil && reflect.DeepEqual(got, v)
+	}}
 }
 
 // Assigned selects the beads assigned to who, as the store's listing matches an

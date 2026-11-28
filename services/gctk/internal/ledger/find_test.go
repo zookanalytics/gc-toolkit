@@ -136,7 +136,37 @@ func (s *typedStore) typed(rows []gcbd.Bead, err error) ([]gcbd.Bead, error) {
 	return rows, err
 }
 
-func (s *typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) { return s.typed(s.Store.Find(q)) }
+// Find selects as bd's listing does on the typed rows: a key's value matches
+// when JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.<key>')) is the text asked for,
+// so a false matches "false" and a null "null".
+func (s *typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) {
+	if q.Key == "" {
+		return s.typed(s.Store.Find(q))
+	}
+	key, value := q.Key, q.Value
+	q.Key, q.Value, q.HasKey = "", "", key
+	rows, err := s.typed(s.Store.Find(q))
+	return slices.DeleteFunc(rows, func(r gcbd.Bead) bool { return bdUnquoted(r.Metadata[key]) != value }), err
+}
+
+// bdUnquoted is a stored value as bd's JSON_UNQUOTE renders it.
+func bdUnquoted(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return t
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case json.Number:
+		return t.String()
+	}
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
 
 func (s *typedStore) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return s.typed(s.Store.Ready(q)) }
 
@@ -203,5 +233,69 @@ func TestCarryingKeepsTheBeadsWhoseKeyHoldsAValue(t *testing.T) {
 	}
 	if got, err := Ready(l, testShell, ServeRule{}); err != nil || !slices.Equal(sorted(got), held) {
 		t.Errorf("the ready beads that carry a String key = %v, %v; want %v", sorted(got), err, held)
+	}
+}
+
+// A Matching selection keeps the beads whose key Get reads as the value
+// matched. bd compares a key's unquoted text, so it selects a String key's
+// JSON false for "false" and its null for "null", which Get reads as no value,
+// and Find leaves those rows out while it keeps the texts "false" and "null". A
+// JSON flag's false is a value, so it matches false. A value whose text is
+// blank selects nothing, since a key holds no value as a blank text. A pass
+// keeps the same beads, both when it reads the store for them and when it
+// answers from the rows it holds.
+func TestMatchingKeepsTheBeadsWhoseKeyReadsTheValue(t *testing.T) {
+	s := newTypedStore()
+	for _, b := range []struct{ id, metadata string }{
+		{"s-x", `{"test.ledger.shell":"x"}`},
+		{"s-false-text", `{"test.ledger.shell":"false"}`},
+		{"s-false", `{"test.ledger.shell":false}`},
+		{"s-null-text", `{"test.ledger.shell":"null"}`},
+		{"s-null", `{"test.ledger.shell":null}`},
+		{"s-empty", `{"test.ledger.shell":""}`},
+		{"s-blank", `{"test.ledger.shell":"  "}`},
+		{"f-false", `{"test.ledger.flag":false}`},
+		{"f-true", `{"test.ledger.flag":true}`},
+	} {
+		s.put(t, b.id, "open", b.metadata)
+	}
+	l := New(s)
+	sorted := func(rs []*Record) []string { return slices.Sorted(slices.Values(recordIDs(rs))) }
+	cases := []struct {
+		name string
+		sel  Selection
+		want []string
+	}{
+		{"a String key's beads that hold x", Matching(testShell, "x"), []string{"s-x"}},
+		{`a String key's beads that hold "false"`, Matching(testShell, "false"), []string{"s-false-text"}},
+		{`a String key's beads that hold "null"`, Matching(testShell, "null"), []string{"s-null-text"}},
+		{"a String key's beads that hold an empty text", Matching(testShell, ""), nil},
+		{"a String key's beads that hold spaces", Matching(testShell, "  "), nil},
+		{"a JSON flag's beads that hold false", Matching(testFlag, false), []string{"f-false"}},
+		{"a JSON flag's beads that hold true", Matching(testFlag, true), []string{"f-true"}},
+	}
+	for _, c := range cases {
+		for _, via := range []struct {
+			name string
+			l    *Ledger
+		}{{"the ledger", l}, {"a pass that reads the store", l.Pass()}} {
+			got, err := via.l.Find(c.sel)
+			if err != nil || !slices.Equal(sorted(got), c.want) {
+				t.Errorf("%s, read through %s = %v, %v; want %v", c.name, via.name, sorted(got), err, c.want)
+			}
+		}
+	}
+	p := l.Pass()
+	if _, err := p.Find(Every()); err != nil {
+		t.Fatal(err)
+	}
+	before := len(s.Finds())
+	for _, c := range cases {
+		if got, err := p.Find(c.sel); err != nil || !slices.Equal(sorted(got), c.want) {
+			t.Errorf("%s, answered by a pass from its rows = %v, %v; want %v", c.name, sorted(got), err, c.want)
+		}
+	}
+	if n := len(s.Finds()) - before; n != 0 {
+		t.Errorf("a pass that holds every live bead read the store %d more times", n)
 	}
 }
