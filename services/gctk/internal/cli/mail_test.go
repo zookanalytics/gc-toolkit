@@ -58,8 +58,26 @@ func TestAMailFindingThatDidNotArchiveNamesTheArchive(t *testing.T) {
 	}
 }
 
+// A filing that files nothing marks the mail unread and says it stays unread.
+func TestAMailFindingThatFilesNothingLeavesTheMailUnread(t *testing.T) {
+	mailStub(t, ":")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "patrol-finding.sh"), []byte("#!/bin/sh\necho 'patrol-finding: the store refused the create' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", dir)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"mail", "finding", "hq-m1", "--key", "k"}, "", &out, &errb); code != 1 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "nothing filed for mail hq-m1, which stays unread: ") || strings.Contains(errb.String(), "mark-unread") {
+		t.Errorf("stderr %q", errb.String())
+	}
+}
+
 // A filing whose bound passes while its writer runs ends the writer and files
-// nothing.
+// nothing. The bound has passed for the mark too, so the line names the
+// command that marks the mail unread.
 func TestAMailFindingPastItsBoundEndsItsWriter(t *testing.T) {
 	mailStub(t, ":")
 	started := blockedWriter(t, "patrol-finding.sh")
@@ -79,7 +97,8 @@ func TestAMailFindingPastItsBoundEndsItsWriter(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the filing did not end at its bound while its writer ran")
 	}
-	if !strings.Contains(errb.String(), "nothing filed for mail hq-m1") || !strings.Contains(errb.String(), "was stopped") {
+	if !strings.Contains(errb.String(), "nothing filed for mail hq-m1, which may stay read: ") || !strings.Contains(errb.String(), "was stopped") ||
+		!strings.HasSuffix(errb.String(), ". Mark it unread with gc mail mark-unread hq-m1, so the next turn that reads the mailbox meets it again\n") {
 		t.Errorf("stderr %q", errb.String())
 	}
 	writerGone(t, pid)

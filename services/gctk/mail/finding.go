@@ -50,12 +50,13 @@ type Ask struct {
 
 // Filed is what one filing did: whether the finding was filed, whether the
 // mail was then archived, whether the writer refused it because a live
-// finding shares its key or subject, what the writer printed, and why nothing
-// was filed or archived when that is so.
+// finding shares its key or subject, whether a filing that filed nothing
+// marked the mail unread, what the writer printed, and why nothing was filed,
+// archived or marked unread when that is so.
 type Filed struct {
-	Filed, Archived, Refused bool
-	Output                   string
-	Why                      string
+	Filed, Archived, Refused, Unread bool
+	Output                           string
+	Why                              string
 }
 
 // Finding files one mail as a patrol finding: the record a NOTICE leaves
@@ -99,7 +100,9 @@ func (f *Finding) File(ctx context.Context, a Ask) Filed {
 func (f *Finding) unfiled(ctx context.Context, mail string, out Filed) Filed {
 	if err := f.City.MailMarkUnread(ctx, mail); err != nil {
 		out.Why += "; and the mail was not marked unread: " + err.Error()
+		return out
 	}
+	out.Unread = true
 	return out
 }
 

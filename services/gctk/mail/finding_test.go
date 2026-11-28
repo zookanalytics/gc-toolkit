@@ -14,12 +14,13 @@ import (
 // mailbox is the city a filing reaches: one message, what was done to it, and
 // the writer's answer.
 type mailbox struct {
-	msg     gascity.Message
-	peekErr error
-	archErr error
-	answer  gascity.Result
-	calls   [][]string
-	done    []string
+	msg       gascity.Message
+	peekErr   error
+	archErr   error
+	unreadErr error
+	answer    gascity.Result
+	calls     [][]string
+	done      []string
 }
 
 func (m *mailbox) MailPeek(_ context.Context, id string) (gascity.Message, error) {
@@ -34,7 +35,7 @@ func (m *mailbox) MailArchive(_ context.Context, id string) error {
 
 func (m *mailbox) MailMarkUnread(_ context.Context, id string) error {
 	m.done = append(m.done, "mark-unread "+id)
-	return nil
+	return m.unreadErr
 }
 
 func (m *mailbox) Script(name string, args ...string) gascity.Result {
@@ -66,25 +67,30 @@ func TestANoticeIsFiledThenArchived(t *testing.T) {
 }
 
 // A mail that does not read, a refusal and any other failure file nothing and
-// leave the mail unread; a refusal says so, and a finding filed whose mail did
-// not archive says that.
+// leave the mail unread; a refusal says so, a mark that fails too is said, and
+// a finding filed whose mail did not archive says that.
 func TestAFilingThatFailsLeavesTheMailUnread(t *testing.T) {
 	m := &mailbox{peekErr: errors.New("gc mail peek hq-m1 did not read")}
-	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || len(m.calls) != 0 ||
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || !out.Unread || len(m.calls) != 0 ||
 		!reflect.DeepEqual(m.done, []string{"peek hq-m1", "mark-unread hq-m1"}) {
 		t.Errorf("unread mail: %+v, done %v", out, m.done)
 	}
 	m = &mailbox{msg: notice, answer: gascity.Result{Code: Refused, Output: "patrol-finding: refused; live: tk-9"}}
 	out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"})
-	if out.Filed || !out.Refused || !strings.Contains(out.Output, "live: tk-9") || m.done[len(m.done)-1] != "mark-unread hq-m1" {
+	if out.Filed || !out.Refused || !out.Unread || !strings.Contains(out.Output, "live: tk-9") || m.done[len(m.done)-1] != "mark-unread hq-m1" {
 		t.Errorf("refused: %+v, done %v", out, m.done)
 	}
 	if got := m.calls[0]; got[6] != "" || got[7] != "--title" {
 		t.Errorf("an ask about no bead passes --about empty, and no --distinct: %q", got)
 	}
 	m = &mailbox{msg: notice, answer: gascity.Result{Code: 1}}
-	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || out.Refused || m.done[len(m.done)-1] != "mark-unread hq-m1" {
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || out.Refused || !out.Unread || m.done[len(m.done)-1] != "mark-unread hq-m1" {
 		t.Errorf("failed: %+v, done %v", out, m.done)
+	}
+	m = &mailbox{msg: notice, answer: gascity.Result{Code: 1}, unreadErr: errors.New("gc mail mark-unread hq-m1 failed: its bound passed")}
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || out.Unread ||
+		!strings.Contains(out.Why, "the mail was not marked unread: gc mail mark-unread hq-m1 failed") {
+		t.Errorf("not marked unread: %+v", out)
 	}
 	m = &mailbox{msg: notice, archErr: errors.New("gc mail archive hq-m1 failed")}
 	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); !out.Filed || out.Archived || !strings.Contains(out.Why, "archive") {

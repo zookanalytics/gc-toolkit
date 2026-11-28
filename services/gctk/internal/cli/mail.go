@@ -39,7 +39,8 @@ then a Source section naming the mail, its sender, when it was sent and its
 subject, then a Witness section holding --note when one is given.
 
 Once the finding is filed it archives the mail. When nothing is filed it marks
-the mail unread, so the next turn that reads the mailbox meets it again.
+the mail unread, so the next turn that reads the mailbox meets it again. When
+that mark fails too, its line names gc mail mark-unread <mail>.
 
 patrol-finding.sh refuses a new finding that shares its key or its subject
 with a live finding in the scope, and lists those findings. When the mail
@@ -75,6 +76,11 @@ func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
 			if o := strings.TrimRight(out.Output, "\n"); o != "" {
 				fmt.Fprintln(stdout, o)
 			}
+			stays, mark := "which stays unread", ""
+			if !out.Unread {
+				stays = "which may stay read"
+				mark = fmt.Sprintf(". Mark it unread with gc mail mark-unread %s, so the next turn that reads the mailbox meets it again", a.Mail)
+			}
 			switch {
 			case out.Archived:
 				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s and archived it\n", a.Mail, a.Key)
@@ -83,10 +89,10 @@ func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s, but it was not archived: %s. Archive it with gc mail archive %s\n", a.Mail, a.Key, out.Why, a.Mail)
 				return nil
 			case out.Refused:
-				fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, which stays unread: a live finding listed above shares the key or the subject. Run again with its --key and --about when the mail reports its situation, or with --distinct when it reports another (%s)\n", a.Mail, out.Why)
+				fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, %s: a live finding listed above shares the key or the subject. Run again with its --key and --about when the mail reports its situation, or with --distinct when it reports another (%s)%s\n", a.Mail, stays, out.Why, mark)
 				return exit(mail.Refused)
 			}
-			fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, which stays unread: %s\n", a.Mail, out.Why)
+			fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, %s: %s%s\n", a.Mail, stays, out.Why, mark)
 			return exit(1)
 		},
 	}
