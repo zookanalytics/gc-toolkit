@@ -263,12 +263,18 @@ func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string,
 	return rule.Awaiting(self, since, threadsOf(threads))
 }
 
-// threadsOf is threads in the facts the definition weighs a thread by.
+// threadsOf is threads in the facts the definition weighs a thread by. A post
+// the quote holds (Post.Held) is left out: its text reaches no agent, so it
+// neither asks for the city's answer nor answers one, and the operator's
+// follow-up holds the PR for it (FollowUp).
 func threadsOf(threads []gh.Thread) []feedback.Thread {
 	var ts []feedback.Thread
 	for _, t := range threads {
 		ft := feedback.Thread{ID: t.ID, Resolved: t.Resolved}
 		for _, c := range t.Comments {
+			if held(c.Author, c.AuthorType, c.AuthorAssociation) {
+				continue
+			}
 			ft.Comments = append(ft.Comments, commentOf(c))
 		}
 		ts = append(ts, ft)

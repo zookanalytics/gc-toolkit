@@ -18,11 +18,13 @@ import (
 // reads its text, and the operator learns of it through one human gate per
 // account per PR, on the bead that owns the PR. The board shows an open gate as
 // a question, and on an open bead the gate holds the PR's merge until the
-// operator clears it. human-gate.sh files one open gate per bead and key, so
-// the take and every reader of the PR file it once, and a later post by the
-// same account while it is open is one its message covers. Once its gate is
-// filed or found open, the post takes the take's mark, so no later read files
-// a gate for it again after the operator clears the one it has.
+// operator clears it. It is the one hold a held post puts on the PR, since a
+// review thread is weighed without its held posts (threadsOf). human-gate.sh
+// files one open gate per bead and key, so the take and every reader of the PR
+// file it once, and a later post by the same account while it is open is one
+// its message covers. Once its gate is filed or found open, the post takes the
+// take's mark, so no later read files a gate for it again after the operator
+// clears the one it has.
 
 // followUpKeyPrefix opens the key of a held post's human gate, which the
 // account's login, lower-cased, ends.
