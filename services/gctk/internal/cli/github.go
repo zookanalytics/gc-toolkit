@@ -27,9 +27,11 @@ import (
 // stopped.
 const quoteReadBound = 2 * time.Minute
 
-// quoteHub is the read a quote is made from.
+// quoteHub is the read a quote is made from, and the mark its follow-up
+// leaves on each post it follows up.
 type quoteHub interface {
 	Posted(repo string, number int) (*gh.Posted, error)
+	AddReaction(subject, content string) error
 }
 
 // newQuoteHub is the GitHub read a quote makes, on host. A variable so a test
@@ -38,12 +40,13 @@ var newQuoteHub = func(host string) quoteHub { return gh.NewBounded(host, quoteR
 
 // quoteFollowUp files the operator's follow-up for the posts a quote held on
 // the PR at url, number in repo, on the bead that owns it in the store the
-// command runs against, and returns that bead, "" when the store holds none.
-// The gate is filed through human-gate.sh in the pack's scripts directory,
-// which an agent's own call of gctk names in no GCTK_SCRIPTS_DIR, so it is
-// resolved as the definition of feedback resolves it. A variable so a test can
-// record it.
-var quoteFollowUp = func(url, repo string, number int, held []quote.Held) (string, error) {
+// command runs against, marking each post through hub once its gate is filed
+// (pr.FollowUpHeld), and returns that bead, "" when the store holds none. The
+// gate is filed through human-gate.sh in the pack's scripts directory, which
+// an agent's own call of gctk names in no GCTK_SCRIPTS_DIR, so it is resolved
+// as the definition of feedback resolves it. A variable so a test can record
+// it.
+var quoteFollowUp = func(hub quoteHub, url, repo string, number int, held []quote.Held) (string, error) {
 	bead, err := pr.OwnerOf(ledger.New(gcbd.New()), url)
 	if err != nil || bead == "" {
 		return bead, err
@@ -55,7 +58,7 @@ var quoteFollowUp = func(url, repo string, number int, held []quote.Held) (strin
 	if err := os.Setenv("GCTK_SCRIPTS_DIR", scripts); err != nil {
 		return bead, err
 	}
-	return bead, pr.FollowUp(context.Background(), actGates{rt: gascity.New()}, bead, repo, number, held)
+	return bead, pr.FollowUpHeld(context.Background(), actGates{rt: gascity.New()}, hub, bead, repo, number, held)
 }
 
 func newGitHubCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -88,8 +91,11 @@ organization that owns it or a collaborator on it, or is GitHub Actions on an
 item such an account opened. Every other post is held: it shows as a
 placeholder that carries nothing its text could be fetched with, and the
 operator gets one human gate for each outside account on the bead that owns the
-PR, under the key outside-post-<login>, which a later read finds open. A post
-reaches agents once the operator says what it says in a post of their own. On
+PR, under the key outside-post-<login>, which a later read finds open. Once its
+gate is filed or found open, each such post takes the city's EYES, the mark the
+landing order's take leaves on a post it took, and no later read files a gate
+for a post that carries it. A post reaches agents once the operator says what
+it says in a post of their own. On
 any other repository, such as an upstream project's, nothing is held, and the
 block marks all of it as another repository's text.
 
@@ -104,7 +110,8 @@ follow-up, and stderr says so.
 
 exit: 0 the quote printed, and any follow-up it owed was filed
       1 GitHub's read failed, the URL names no post the item holds, or the
-        follow-up did not file, which stderr names after the quote printed
+        follow-up did not file or a post's mark did not land, which stderr
+        names after the quote printed
       2 usage`
 
 func newGitHubQuoteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -123,7 +130,8 @@ func newGitHubQuoteCmd(stdout, stderr io.Writer) *cobra.Command {
 			if description && post != "" {
 				return errors.New("--description prints a whole item's title and body, so its URL names no post")
 			}
-			p, err := newQuoteHub(host).Posted(repo, number)
+			hub := newQuoteHub(host)
+			p, err := hub.Posted(repo, number)
 			if err != nil {
 				fmt.Fprintf(stderr, "gctk github quote: %v\n", err)
 				return exit(1)
@@ -154,18 +162,24 @@ func newGitHubQuoteCmd(stdout, stderr io.Writer) *cobra.Command {
 					"issue, so no follow-up was filed\n", len(held))
 				return nil
 			}
-			bead, err := quoteFollowUp(p.URL, repo, number, held)
+			owed := pr.Owed(held)
+			if len(owed) == 0 {
+				fmt.Fprintf(stderr, "gctk github quote: held %d post(s) by an outside account, each of which the "+
+					"city has followed up already\n", len(held))
+				return nil
+			}
+			bead, err := quoteFollowUp(hub, p.URL, repo, number, owed)
 			switch {
 			case err != nil:
 				fmt.Fprintf(stderr, "gctk github quote: held %d post(s) by an outside account, and the operator's "+
-					"follow-up did not file: %v\n", len(held), err)
+					"follow-up did not complete: %v\n", len(owed), err)
 				return exit(1)
 			case bead == "":
 				fmt.Fprintf(stderr, "gctk github quote: held %d post(s) by an outside account, and no bead in this "+
-					"store owns the PR, so no follow-up was filed\n", len(held))
+					"store owns the PR, so no follow-up was filed\n", len(owed))
 			default:
 				fmt.Fprintf(stderr, "gctk github quote: held %d post(s) by an outside account, and the operator has "+
-					"a follow-up for them\n", len(held))
+					"a follow-up for them\n", len(owed))
 			}
 			return nil
 		},

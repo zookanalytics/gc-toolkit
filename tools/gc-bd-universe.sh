@@ -442,7 +442,7 @@ fetch_conversation() {
     combined="$(printf '%s\n%s\n' "$view" "$quote" | jq -s '
         .[0] as $view | (.[1].posts // []) as $posts
         | def who: if .held then "an outside account" else (.author.login // "?") end;
-          def said: if .held then "(held for the operator, who has a follow-up for it)" else (.text // "") end;
+          def said: if .held then "(held for the operator)" else (.text // "") end;
         ($posts | map(select(.kind == "conversation") | {author: who, held: (.held // false),
                                     created_at: (.at // null), body: said})) as $ic
         | ($posts | map(select(.kind == "review") | {author: who, held: (.held // false),

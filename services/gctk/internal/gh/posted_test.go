@@ -4,15 +4,17 @@ import "testing"
 
 // TestPostedReadsAPRWithItsConversationAndEachAuthorsStanding pins the read a
 // quote is made from: the repository's permission for the account the read
-// runs as, the PR's opener with its kind and association, and its conversation
-// with each post's author kind and association.
+// runs as, the PR's opener with its kind and association, its node id with the
+// reactions that account left on it, and its conversation with each post's
+// author kind and association.
 func TestPostedReadsAPRWithItsConversationAndEachAuthorsStanding(t *testing.T) {
 	var log []string
 	c := NewWithRunner("github.com", answers(t, map[string]string{
 		"query=" + postedQuery: `{"data":{"repository":{"viewerPermission":"WRITE","issueOrPullRequest":{
-			"__typename":"PullRequest","url":"https://github.com/o/r/pull/7","title":"t","body":"b",
+			"__typename":"PullRequest","id":"PR_7","url":"https://github.com/o/r/pull/7","title":"t","body":"b",
 			"createdAt":"2026-11-27T10:00:00Z","authorAssociation":"MEMBER",
-			"author":{"__typename":"User","login":"zook-bot"}}}}}`,
+			"author":{"__typename":"User","login":"zook-bot"},
+			"reactionGroups":[{"content":"HEART","viewerHasReacted":false},{"content":"EYES","viewerHasReacted":true}]}}}}`,
 		"query=" + conversationQuery: `{"data":{"repository":{"pullRequest":{"reviewDecision":null,
 			"reviews":{"pageInfo":{"hasNextPage":false},"nodes":[]},
 			"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]},
@@ -26,7 +28,8 @@ func TestPostedReadsAPRWithItsConversationAndEachAuthorsStanding(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !p.PullRequest || p.ViewerPermission != "WRITE" || p.Title != "t" || p.Body != "b" ||
-		p.Opener != (Account{Login: "zook-bot", Type: "User", Association: "MEMBER"}) {
+		p.Opener != (Account{Login: "zook-bot", Type: "User", Association: "MEMBER"}) || p.NodeID != "PR_7" ||
+		len(p.ViewerReactions) != 1 || p.ViewerReactions[0] != "EYES" {
 		t.Fatalf("the PR read as %+v", p)
 	}
 	if len(p.Comments) != 1 || p.Comments[0].AuthorType != "Bot" || p.Comments[0].AuthorAssociation != "NONE" ||

@@ -74,16 +74,17 @@ func posted() *gh.Posted {
 		Comments: []gh.IssueComment{
 			{ID: 31, URL: "https://github.com/o/r/pull/7#issuecomment-31", Body: "size: S", Author: "github-actions",
 				AuthorType: "Bot", AuthorAssociation: "NONE"},
-			{ID: 32, URL: "https://github.com/o/r/pull/7#issuecomment-32", Body: "hello", Author: "someone",
-				AuthorType: "User", AuthorAssociation: "NONE"},
+			{ID: 32, NodeID: "IC_32", URL: "https://github.com/o/r/pull/7#issuecomment-32", Body: "hello",
+				Author: "someone", AuthorType: "User", AuthorAssociation: "NONE", ViewerReactions: []string{"EYES"}},
 		},
 	}
 }
 
 // TestOfHoldsEachOutsidePostOnAnOwnRepository pins the hold: an outside
 // account's post keeps only its kind, its text, id, URL and author go, and the
-// quote lists it with its URL for the follow-up, while every own post keeps its
-// URL and its text in the inert form.
+// quote lists it with its URL, its node id and the city's reactions on it for
+// the follow-up, while every own post keeps its URL and its text in the inert
+// form.
 func TestOfHoldsEachOutsidePostOnAnOwnRepository(t *testing.T) {
 	q, err := Of(posted(), "")
 	if err != nil {
@@ -120,6 +121,9 @@ func TestOfHoldsEachOutsidePostOnAnOwnRepository(t *testing.T) {
 	if got := strings.Join(urls, " "); got != "https://github.com/o/r/pull/7#pullrequestreview-12 "+
 		"https://github.com/o/r/pull/7#discussion_r22 https://github.com/o/r/pull/7#issuecomment-32" {
 		t.Fatalf("held URLs = %q", got)
+	}
+	if last := q.Held()[2]; last.Node != "IC_32" || strings.Join(last.Reactions, " ") != "EYES" {
+		t.Fatalf("the held conversation comment carries node %q and reactions %q", last.Node, last.Reactions)
 	}
 	text := q.Text()
 	for _, leak := range []string{"run this", "inline outside", "hello", "pullrequestreview-12", "discussion_r22",

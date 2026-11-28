@@ -19,6 +19,8 @@ type postedHub struct {
 
 func (h postedHub) Posted(string, int) (*gh.Posted, error) { return h.p, h.err }
 
+func (postedHub) AddReaction(string, string) error { return nil }
+
 // pinQuote makes the command read p, or fail with err, and record each
 // follow-up it files, answering it with bead and followErr, until the test
 // ends.
@@ -27,7 +29,7 @@ func pinQuote(t *testing.T, p *gh.Posted, err error, bead string, followErr erro
 	hub, follow := newQuoteHub, quoteFollowUp
 	var filed []string
 	newQuoteHub = func(string) quoteHub { return postedHub{p, err} }
-	quoteFollowUp = func(url, repo string, number int, held []quote.Held) (string, error) {
+	quoteFollowUp = func(_ quoteHub, url, repo string, number int, held []quote.Held) (string, error) {
 		for _, h := range held {
 			filed = append(filed, url+" "+h.Author+" "+h.URL)
 		}
@@ -128,11 +130,28 @@ func TestGitHubQuoteExits(t *testing.T) {
 	out.Reset()
 	errb.Reset()
 	if code := Run([]string{"github", "quote", "https://github.com/o/r/pull/7"}, "test", &out, &errb); code != 1 ||
-		!strings.Contains(out.String(), quote.Placeholder) || !strings.Contains(errb.String(), "did not file") {
+		!strings.Contains(out.String(), quote.Placeholder) || !strings.Contains(errb.String(), "did not complete") {
 		t.Fatalf("a follow-up that did not file exited %d: %s", code, errb.String())
 	}
 	pinQuote(t, aPR(), nil, "tk-1", nil)
 	if code := Run([]string{"github", "quote", "https://github.com/o/r/pull/7#issuecomment-9"}, "test", &out, &errb); code != 1 {
 		t.Fatalf("a post the PR does not hold exited %d", code)
+	}
+}
+
+// A held post that already carries the city's EYES was followed up by the take
+// or an earlier read, so a quote files nothing for it, however often the PR is
+// read after the operator clears its gate, and says so.
+func TestGitHubQuoteFilesNothingForAPostAlreadyFollowedUp(t *testing.T) {
+	p := aPR()
+	p.Comments[1].NodeID, p.Comments[1].ViewerReactions = "IC_2", []string{"EYES"}
+	filed := pinQuote(t, p, nil, "tk-1", nil)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"github", "quote", "https://github.com/o/r/pull/7"}, "test", &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if len(*filed) != 0 || !strings.Contains(out.String(), quote.Placeholder) ||
+		!strings.Contains(errb.String(), "followed up already") {
+		t.Fatalf("filed %q, stderr %q", *filed, errb.String())
 	}
 }

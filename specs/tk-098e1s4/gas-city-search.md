@@ -67,4 +67,8 @@ the operator through the board.
 `ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go` keeps one repair bead per
 PR and head for the monitor alone. `human-gate.sh` files one open gate per
 subject and key, so the key `outside-post-<login>` on the owning bead gives one
-follow-up per account per PR, whichever read holds the post first.
+follow-up per account per PR, whichever read holds the post first. A cleared
+gate is no open one, so once a post's gate is filed or found open the post takes
+the city's EYES, the mark the landing order's take leaves on a post it took
+(`takenMark` in `services/gctk/pr/marks.go`), and no later read, nor the take,
+files a gate for a post that carries it.

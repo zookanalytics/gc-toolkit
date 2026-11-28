@@ -12,17 +12,21 @@ import (
 // ViewerPermission is the permission the account the read runs as holds on the
 // repository: ADMIN, MAINTAIN, WRITE, TRIAGE or READ, empty when GitHub names
 // none. Opener is the account that opened it, with its kind and its
-// association with the repository, as a review's author is.
+// association with the repository, as a review's author is. NodeID is the
+// item's node id, which a reaction names it by, and ViewerReactions the
+// reactions the account the read runs as left on it, as on each post.
 type Posted struct {
 	Repository       string
 	Number           int
 	URL              string
+	NodeID           string
 	PullRequest      bool
 	Title            string
 	Body             string
 	CreatedAt        string
 	Opener           Account
 	ViewerPermission string
+	ViewerReactions  []string
 	Reviews          []Review
 	Threads          []Thread
 	Comments         []IssueComment
@@ -40,8 +44,10 @@ type Account struct {
 const postedQuery = `query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){viewerPermission
     issueOrPullRequest(number:$number){__typename
-      ... on PullRequest{url title body createdAt authorAssociation author{__typename login}}
-      ... on Issue{url title body createdAt authorAssociation author{__typename login}
+      ... on PullRequest{id url title body createdAt authorAssociation author{__typename login}
+        reactionGroups{content viewerHasReacted}}
+      ... on Issue{id url title body createdAt authorAssociation author{__typename login}
+        reactionGroups{content viewerHasReacted}
         comments(first:100){pageInfo{hasNextPage endCursor} nodes{` + issueCommentFields + `}}}}}}`
 
 const issueCommentsOfIssueQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
@@ -62,14 +68,16 @@ func (c *Client) Posted(repo string, number int) (*Posted, error) {
 		Repository *struct {
 			ViewerPermission *string `json:"viewerPermission"`
 			Item             *struct {
-				Typename    string                        `json:"__typename"`
-				URL         string                        `json:"url"`
-				Title       string                        `json:"title"`
-				Body        string                        `json:"body"`
-				CreatedAt   string                        `json:"createdAt"`
-				Association string                        `json:"authorAssociation"`
-				Author      *actor                        `json:"author"`
-				Comments    *connection[issueCommentNode] `json:"comments"`
+				Typename       string                        `json:"__typename"`
+				NodeID         string                        `json:"id"`
+				URL            string                        `json:"url"`
+				Title          string                        `json:"title"`
+				Body           string                        `json:"body"`
+				CreatedAt      string                        `json:"createdAt"`
+				Association    string                        `json:"authorAssociation"`
+				Author         *actor                        `json:"author"`
+				ReactionGroups reactionGroups                `json:"reactionGroups"`
+				Comments       *connection[issueCommentNode] `json:"comments"`
 			} `json:"issueOrPullRequest"`
 		} `json:"repository"`
 	}
@@ -82,9 +90,9 @@ func (c *Client) Posted(repo string, number int) (*Posted, error) {
 		return nil, fmt.Errorf("github: %s holds no issue or pull request %d", repo, number)
 	}
 	it := page.Repository.Item
-	out := &Posted{Repository: repo, Number: number, URL: it.URL, Title: it.Title, Body: it.Body,
+	out := &Posted{Repository: repo, Number: number, URL: it.URL, NodeID: it.NodeID, Title: it.Title, Body: it.Body,
 		CreatedAt: it.CreatedAt, Opener: Account{Login: it.Author.name(), Type: it.Author.kind(), Association: it.Association},
-		Reviews: []Review{}, Threads: []Thread{}, Comments: []IssueComment{}}
+		ViewerReactions: it.ReactionGroups.viewer(), Reviews: []Review{}, Threads: []Thread{}, Comments: []IssueComment{}}
 	if page.Repository.ViewerPermission != nil {
 		out.ViewerPermission = *page.Repository.ViewerPermission
 	}

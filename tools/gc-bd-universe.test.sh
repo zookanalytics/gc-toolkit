@@ -87,7 +87,7 @@ out=$("$SUT" fetch tk-pr conversation 2>&1); rc=$?
 eq "$rc" 0 "fetch conversation exits 0"
 has "$out" "UNTRUSTED DATA" "…fenced as reached data"
 has "$out" "Each post is quoted as gctk github quote quotes it" "…naming the quote as the owner of the form"
-has "$out" "(held for the operator, who has a follow-up for it)" "…and showing the held post as held"
+has "$out" "(held for the operator)" "…and showing the held post as held"
 
 out=$("$SUT" fetch tk-pr pr --json 2>&1); rc=$?
 eq "$rc" 0 "fetch pr --json exits 0"
