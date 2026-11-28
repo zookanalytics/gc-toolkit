@@ -75,6 +75,7 @@ flowchart LR
   DISP -->|successor edge, then checked close| LEDGER
   RUN -->|review result| LEDGER
   RUN -->|repair push| BR
+  RUN -->|title + summary| PR
   ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
   ORD -.->|landing order: a PR's re-read in full before its merge| PR
@@ -184,11 +185,19 @@ performer; the full transition table with writers is
 7. **Review.** For each head the refinery validates without a passed review
    result, the landing order pours a review run. The run records the PR's
    review result, which the evaluator reads. While it works, the run is the
-   one worker on the PR's branch. A converse sitting the operator rules edit the
+   one worker on the PR's branch, and it brings the PR's title and summary to
+   what the bead that owns the PR records. A converse sitting the operator
+   rules edit the
    branch with them can push while a run works it. Work that needs the branch
    changed, such as
-   a person's comment or a conflict with the target, is filed as an ask, and a
-   run takes it. Each city writer returns the PR to draft before it pushes.
+   a person's comment or a conflict with the target, is filed as an ask, and
+   only the PR's review run takes it. A run puts a question to a person in one
+   place, a human gate on the PR's bead, which the person answers on the board
+   as any gate. A person's comment made while the question is open is feedback
+   like any other, and the landing order pours a run for it while the gate
+   still holds the bead. When the comment settles the question, that run
+   resolves the gate. Each city writer returns the PR to draft before it
+   pushes.
    The landing order marks the PR ready once a run has passed at the head the
    refinery validated. When a run rules a head's change material, the landing
    order dismisses each approval given on a commit that does not contain that
@@ -204,13 +213,11 @@ performer; the full transition table with writers is
    `bead-rehome.sh`, and names in bd's own `duplicates` or `supersedes` edge the
    bead that carries its work now, or under `not-needed` the evidence that ruled
    it out ([state-machine.md](state-machine.md#disposition)). A duplicate closes
-   at once. While its canonical has neither closed nor shipped, each open bead
-   the duplicate blocks first gains a `blocks` edge onto the canonical, so none
-   goes ready before the canonical delivers. Every other disposition ends the
-   waits on its bead with the close: `fixed-upstream` once the fix has closed or
-   shipped, or on a person's ruling, and `re-homed`, `folded` and `not-needed`
-   at once. The polecat that builds a work bead never closes it, except as the
-   duplicate of another bead, through `bead-rehome.sh`.
+   at once. A disposition that moves a bead's work to a successor keeps the
+   waits for that work until the successor delivers. A `not-needed` close ends
+   the waits on its bead, since nothing carries its work. The polecat that
+   builds a work bead never closes it, except as the duplicate of another bead,
+   through `bead-rehome.sh`.
 
 An integration effort's beads take this pipeline through the handoff, and then
 the refinery lands each one directly on the effort's integration branch, which
@@ -230,9 +237,8 @@ any other head does.
 
 External facts the pack does not write — GitHub closing or retargeting a PR, a
 `gc` build that moves the text the seed audit renders — are handled by these
-reactive paths: `pr-facts.sh` (an arm of the cadence), or the landing order for
-a PR on the pending record, records PR events and files a human gate, a pack
-order runs `gc doctor` and records each run, which the board shows,
+reactive paths: the landing order records PR events and files a human gate, a
+pack order runs `gc doctor` and records each run, which the board shows,
 `queue-priority.sh reconcile` settles queued work after a raw priority or parent
 edit no writer saw, and `seed-audit-reaudit.sh`, which a landing on the default
 branch calls, slings the one re-render of the default branch's
@@ -343,6 +349,19 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
     reads only its two fixed hold values, whose names are not roles.
   - **Mechanik**, the operator's standing conversation, owns how the city works
     and every edit to the town repo.
+  - **The mayor**, one for the city, shows the operator what needs them across
+    it and moves each matter they pick to its home: a session of the city the
+    operator opens for a sitting as they open a po
+    ([human-engagement.md](human-engagement.md#a-mayor-sitting)). It reads the
+    operator's mailbox, Gas City's `human`, and each rig's open questions as the
+    board counts them. It owns each archive it makes in a sitting and each
+    handoff it writes there: a conversation for a decision, the rig's po for a
+    priority or new work, an existing writer for work a ruling already
+    authorized, the owner's record for an owned matter, and a conversation
+    about the missing home for a matter no role owns. It owns no matter past
+    its handoff. It implements nothing, places nothing and sets no priority,
+    and the queue `hold:mayor` holds stays the po's. No escalation or fallback
+    of the city's names it, so the mail still goes to `human`.
   - **A converse sitting** holds one bead's conversation, below. The patrols,
     the pools and the refinery keep what they own.
 - **A subject is the bead a human gate or a conversation is about.** Its notes
@@ -361,8 +380,8 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   though two writers in the same instant can each file one, because bd keeps
   no idempotency at create. Each gate blocks that
   bead, so the bead leaves `bd ready` and the pool's offer, and bd refuses its
-  close, until a person resolves the gate with the answer as its reason, headed
-  `ruled:`, `moot:` or `benign:`
+  close, until the gate is resolved with a person's answer as its reason,
+  headed `ruled:`, `moot:` or `benign:`
   ([component-model.md](component-model.md#4-where-each-component-sits) has the
   helper's contract). A situation that needs a person is a human gate, not
   mail to the po. A patrol files a human gate on the bead a
@@ -417,12 +436,12 @@ primitives ([human-engagement.md](human-engagement.md) is the reference).
   that follows it, workflows already poured included
   ([steering.md](steering.md#priority)).
 - **The board is render-only.** `services/helm` (helm-svc) derives every row
-  per render through gctk's shared readers over the ledger, from Gas City's
-  `human` mailbox, and from Gas City's event log, which holds doctor's runs and
-  each monitor order's last good run. It reads no store of its own. The write
-  verbs are gctk commands, which skills, prompts and the board's write routes
-  call. The board's one write that gctk does not carry is archiving a mailbox
-  message, which Gas City's mail performs. Accept clears a first reaction's
+  per render through gctk's shared readers over the ledger, and from Gas City's
+  event log, which holds doctor's runs and each monitor order's last good run.
+  It reads no store of its own. Its city page counts the messages waiting in
+  Gas City's `human` mailbox and lists none, since the mayor works through them
+  with the operator. The write verbs are gctk commands, which skills,
+  prompts and the board's write routes call. Accept clears a first reaction's
   recommendation gate and nothing else, under the bead's acceptance lock. The
   po's backlog refinement works the queue, every bead `hold:mayor` holds in any
   spelling ([steering.md](steering.md#the-queue-the-po-works)). Everything
@@ -436,10 +455,12 @@ lands on the question rather than re-orienting.
 ## How lessons compound
 
 The feedback workflow ([feedback-learning.md](feedback-learning.md)) turns
-corrective feedback into standing behavior, so attention is never spent twice:
+corrective feedback and agents' own suggestions for how agents work into
+standing behavior, so attention is never spent twice:
 
 1. **Capture.** Working agents self-report observation beads when a turn
-   brings corrective feedback; the `feedback-miner` order sweeps merged PRs'
+   brings corrective feedback, and file their own suggestions as observations
+   too; the `feedback-miner` order sweeps merged PRs'
    review comments, recording every review post from outside the city and
    what self-report missed in the city's own; "learn this: …" is the
    operator fast path. Agents' memory notes are a second intake: a note
@@ -541,23 +562,14 @@ why a reader must know it, and the work that retires it.
 - **`gc-helm.sh` still carries the conversation verbs.** open, engage,
   attach, dismiss and handback run as shell, and gctk reaches open and the
   read-only resolve through the script. tk-ssm8qns.15 moves them into gctk.
-- **The merge cadence still admits work on a pending record.** It files work
-  for a PR on the pending record beside the landing order
-  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), so the
-  decision that the landing order is the one path is not yet what runs. The
-  GitHub intake (tk-1tfzr71.21) moves that filing into the landing order's run.
 - **The witness still patrols, and the deacon still runs `gc doctor`.** Until
   the patrols member's second landing, the witness's hourly loop salvages,
   checks pool seats and the refinery's queue in its session, and returns a dead
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The board lists no mailbox yet.** It neither reads Gas City's `human`
-  mailbox nor archives a message in it, so no message there reaches the
-  operator on the board. The inbox bead that tk-1tfzr71.159 files retires it.
 - **The old review path's code still runs.** The merge cadence still runs the
   old review path beside the review run
   ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
   PR is on it, so step 7 is not yet the one review path in the code. The
-  retirement bead (tk-1tfzr71.122) deletes the old path once the GitHub intake
-  (tk-1tfzr71.21) has landed.
+  retirement bead (tk-1tfzr71.122) deletes the old path.

@@ -32,13 +32,14 @@ import (
 // reads as clear. Every reader of an ask here applies that one test, so an ask
 // that waits on other work is neither taken nor counted against a pass.
 
-// Ask is one ask on a PR's bead as the store holds it. WaitingOn is each bead
-// its own blocks edges name, open or closed, and Holds is what
-// `gctk bead holds` reads for an open ask, "" for a closed one.
+// Ask is one ask on a PR's bead as the store holds it. Filed is when the store
+// filed it, its created_at. WaitingOn is each bead its own blocks edges name,
+// open or closed, and Holds is what `gctk bead holds` reads for an open ask, ""
+// for a closed one.
 type Ask struct {
-	ID, Status, Reason, Source string
-	Checks, WaitingOn          []string
-	Holds                      waits.Status
+	ID, Status, Reason, Source, Filed string
+	Checks, WaitingOn                 []string
+	Holds                             waits.Status
 }
 
 // Open reports whether the ask is still to be answered.
@@ -97,7 +98,7 @@ func AsksIn(l *ledger.Ledger, owner *ledger.Record, rows []*ledger.Record) ([]As
 		if !isAsk(r, branch) {
 			continue
 		}
-		a := Ask{ID: r.ID, Status: r.Status(), Reason: strings.TrimSpace(r.Description())}
+		a := Ask{ID: r.ID, Status: r.Status(), Reason: strings.TrimSpace(r.Description()), Filed: r.CreatedAt()}
 		redges, err := r.Edges()
 		if err != nil {
 			return nil, &ledger.ReadError{ID: r.ID, Reason: "its edges did not decode: " + err.Error()}

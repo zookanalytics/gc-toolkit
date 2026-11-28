@@ -19,21 +19,10 @@ type Request struct {
 	Target string
 	// Body is the PR's body as published, nil for a PR not opened yet.
 	Body *string
-	// Opening is a PR opened, or adopted, at Head once its pre-open gates
-	// signed off there. A composition then writes the summary region whenever
-	// it differs, and marks one over the shape a body took before the markers
-	// existed. Otherwise the PR is open, and the region is written only when it
-	// no longer says what the bead says at Head.
-	Opening bool
 	// Gates is the gate set the bead's check set resolves to at Head, which the
 	// summary region names. Nil means it was not resolved: a region that must
 	// be written is then left as it stands, and reads NeedsGates.
 	Gates []Gate
-	// Supersedes is the PR this one replaces, which an opening PR's region
-	// names.
-	Supersedes *Superseded
-	// Summary and BranchBeads say which of the body's sections to compose.
-	Summary, BranchBeads bool
 }
 
 // Outcome is what a composition did with one section of the body.
@@ -63,14 +52,14 @@ const (
 )
 
 // Composition is a PR's title and body as its bead says they should be, and
-// what became of each section asked for.
+// what became of each section.
 type Composition struct {
 	Title string
 	Body  string
-	// Summary is the summary region's outcome, "" when it was not asked for.
+	// Summary is the summary region's outcome.
 	Summary Outcome
-	// BranchBeads is the branch-beads section's outcome, "" when it was not
-	// asked for, and BranchBeadCount the beads whose work is on the branch.
+	// BranchBeads is the branch-beads section's outcome, and BranchBeadCount
+	// the beads whose work is on the branch.
 	BranchBeads     Outcome
 	BranchBeadCount int
 	// Unread is why the beads on the branch did not read, when they did not.
@@ -105,12 +94,8 @@ func Compose(l *ledger.Ledger, id string, req Request) (*Composition, error) {
 	if req.Body != nil {
 		body = textLines(strings.ReplaceAll(*req.Body, "\r", ""))
 	}
-	if req.Summary {
-		body, out.Summary = composeSummary(body, req, r)
-	}
-	if req.BranchBeads {
-		body, out.BranchBeads, out.BranchBeadCount, out.Unread = composeBeads(l, body, id, branch)
-	}
+	body, out.Summary = composeSummary(body, req, r)
+	body, out.BranchBeads, out.BranchBeadCount, out.Unread = composeBeads(l, body, id, branch)
 	out.Body = text(body)
 	return out, nil
 }
@@ -144,9 +129,7 @@ func readRegion(bead *ledger.Record, req Request) (region, string, error) {
 		target:   req.Target,
 		checkSet: checkSet,
 		head:     req.Head,
-		opening:  req.Opening,
 		gates:    req.Gates,
-		sup:      req.Supersedes,
 	}, branch, nil
 }
 
@@ -169,9 +152,7 @@ func firstOf(vals ...string) string {
 
 // composeSummary is the body with the summary region composed in, and what
 // became of it. A PR not opened yet gets the region, marked, as its body. A
-// published body's region is written in place when it is behind, an opening
-// PR's whenever it differs. An opening PR's body that carries the shape written
-// before the markers existed gets the region marked over that shape. Any other
+// published body's region is written in place when it is behind, and any other
 // body is left as it stands.
 func composeSummary(body []string, req Request, r region) ([]string, Outcome) {
 	known := req.Gates != nil
@@ -181,34 +162,21 @@ func composeSummary(body []string, req Request, r region) ([]string, Outcome) {
 		}
 		return append(append([]string{summaryOpen}, r.lines()...), summaryClose), Written
 	}
-	switch markers(body, summaryOpen, summaryClose) {
-	case markersOne:
-		cur := between(body, summaryOpen, summaryClose)
-		if !req.Opening && r.current(cur) {
-			return body, Current
-		}
-		if !known {
-			return body, NeedsGates
-		}
-		want := r.lines()
-		if sameLines(cur, want) {
-			return body, Current
-		}
-		return splice(body, summaryOpen, summaryClose, want), Written
-	case markersNone:
-		if !req.Opening {
-			return body, Unmanaged
-		}
-		if _, ok := establish(body, nil); !ok {
-			return body, Unmanaged
-		}
-		if !known {
-			return body, NeedsGates
-		}
-		established, _ := establish(body, r.lines())
-		return established, Written
+	if markers(body, summaryOpen, summaryClose) != markersOne {
+		return body, Unmanaged
 	}
-	return body, Unmanaged
+	cur := between(body, summaryOpen, summaryClose)
+	if r.current(cur) {
+		return body, Current
+	}
+	if !known {
+		return body, NeedsGates
+	}
+	want := r.lines()
+	if sameLines(cur, want) {
+		return body, Current
+	}
+	return splice(body, summaryOpen, summaryClose, want), Written
 }
 
 // composeBeads is the body with the branch-beads section composed in, what

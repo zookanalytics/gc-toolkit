@@ -47,6 +47,8 @@
 #        spawn-fixed, so in a pool it names a bead the worker is not working,
 #        and injecting it sends the polecat to do that bead under this claim.
 #   (15) every case exits 0 — a hook that fails must never block a tool call
+#   (16) the runner reports a hook's own exit status and keeps its stdout: the
+#        shipped hook followed by `exit 19` reads rc=19 with its context intact
 
 set -u
 
@@ -112,12 +114,12 @@ bead tk-bare  '[{"id":"tk-bare","title":"Title only","description":""}]'
 } > "$FX/bead-tk-long.json"
 
 # --- runner --------------------------------------------------------------
-# Returns the hook's stdout; records exit status in RUN_RC.
-RUN_RC=0
-run_hook() { # run_hook <payload> [env assignments...]
+# run_hook <payload> [env assignments...] — the hook on one tool call's payload.
+# Sets OUT to its stdout and RC to its exit status. Call it bare: inside $(...)
+# it runs in a subshell, and both values are lost with it.
+run_hook() {
     local payload="$1"; shift
-    local out
-    out="$(printf '%s' "$payload" | env -i \
+    OUT="$(printf '%s' "$payload" | env -i \
         HOME="$SANDBOX/home" \
         PATH="/usr/bin:/bin" \
         TMPDIR="$SANDBOX/tmp" \
@@ -128,8 +130,7 @@ run_hook() { # run_hook <payload> [env assignments...]
         GC_TEMPLATE="gc-toolkit/gc-toolkit.polecat" \
         "$@" \
         sh "$HOOK" 2>/dev/null)"
-    RUN_RC=$?
-    printf '%s' "$out"
+    RC=$?
 }
 
 claim_payload() { # claim_payload <session> <bead-id-json-blob>
@@ -139,23 +140,37 @@ claim_payload() { # claim_payload <session> <bead-id-json-blob>
           tool_response: {stdout: $stdout, stderr: "", interrupted: false}}'
 }
 
+echo "── runner ──"
+
+# (16) The shipped hook followed by `exit 19`: it injects as it always does,
+# then exits non-zero. RC must read 19, or the exit-0 assertions below pass
+# for a hook that fails, and OUT must still hold the injection.
+EXIT19_HOOK="$SANDBOX/hook-then-exit-19.sh"
+printf 'sh "%s"\nexit 19\n' "$HOOK" > "$EXIT19_HOOK"
+HOOK="$EXIT19_HOOK" run_hook "$(claim_payload s-runner '{"bead_id":"tk-step1"}')"
+[ "$RC" -eq 19 ] && ok "hook that exits 19: the runner reports 19" \
+    || bad "hook that exits 19: the runner reports 19" "rc=$RC"
+case "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+    *SPEC-MARKER-BODY*) ok "hook that exits 19: the runner keeps its stdout" ;;
+    *) bad "hook that exits 19: the runner keeps its stdout" "got: ${OUT:0:200}" ;;
+esac
+
 echo "── injection ──"
 
 # (1)(2)(3)(4) claim of a formula step, real object-shaped tool_response with
 # warning noise ahead of the JSON.
-out="$(run_hook "$(claim_payload s1 'note: city.toml unreadable
-{"schema_version":"1","ok":true,"bead_id":"tk-step1","assignee":"x"}')")"
-rc="$RUN_RC"
-[ "$rc" -eq 0 ] && ok "step claim: exit 0" || bad "step claim: exit 0" "rc=$rc"
-if printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+run_hook "$(claim_payload s1 'note: city.toml unreadable
+{"schema_version":"1","ok":true,"bead_id":"tk-step1","assignee":"x"}')"
+[ "$RC" -eq 0 ] && ok "step claim: exit 0" || bad "step claim: exit 0" "rc=$RC"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1; then
     ok "step claim: stdout is valid JSON"
 else
-    bad "step claim: stdout is valid JSON" "got: ${out:0:200}"
+    bad "step claim: stdout is valid JSON" "got: ${OUT:0:200}"
 fi
-evt="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null)"
+evt="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null)"
 [ "$evt" = "PostToolUse" ] && ok "step claim: hookEventName=PostToolUse" \
     || bad "step claim: hookEventName=PostToolUse" "got: '$evt'"
-ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+ctx="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 case "$ctx" in
     *SPEC-MARKER-BODY*) ok "step claim: injects the WORK bead's description" ;;
     *) bad "step claim: injects the WORK bead's description" "context: ${ctx:0:200}" ;;
@@ -172,50 +187,50 @@ esac
 echo "── idempotence ──"
 
 # (5) same session, same work bead -> silent.
-out2="$(run_hook "$(claim_payload s1 '{"bead_id":"tk-step1"}')")"
-[ -z "$out2" ] && ok "repeat claim in same session: silent" \
-    || bad "repeat claim in same session: silent" "got: ${out2:0:120}"
-[ "$RUN_RC" -eq 0 ] && ok "repeat claim: exit 0" || bad "repeat claim: exit 0" "rc=$RUN_RC"
+run_hook "$(claim_payload s1 '{"bead_id":"tk-step1"}')"
+[ -z "$OUT" ] && ok "repeat claim in same session: silent" \
+    || bad "repeat claim in same session: silent" "got: ${OUT:0:120}"
+[ "$RC" -eq 0 ] && ok "repeat claim: exit 0" || bad "repeat claim: exit 0" "rc=$RC"
 
 # (6) same session, DIFFERENT work bead -> injects again.
-out3="$(run_hook "$(claim_payload s1 '{"bead_id":"tk-solo"}')")"
-case "$(printf '%s' "$out3" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+run_hook "$(claim_payload s1 '{"bead_id":"tk-solo"}')"
+case "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
     *SOLO-MARKER*) ok "different bead, same session: injects again" ;;
-    *) bad "different bead, same session: injects again" "got: ${out3:0:200}" ;;
+    *) bad "different bead, same session: injects again" "got: ${OUT:0:200}" ;;
 esac
 
 echo "── resolution ──"
 
 # (8) no gc.root_bead_id -> the claimed bead IS the work bead (fresh session).
-out4="$(run_hook "$(claim_payload s2 '{"bead_id":"tk-solo"}')")"
-case "$(printf '%s' "$out4" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+run_hook "$(claim_payload s2 '{"bead_id":"tk-solo"}')"
+case "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
     *SOLO-MARKER*) ok "non-formula claim: uses the claimed bead itself" ;;
-    *) bad "non-formula claim: uses the claimed bead itself" "got: ${out4:0:200}" ;;
+    *) bad "non-formula claim: uses the claimed bead itself" "got: ${OUT:0:200}" ;;
 esac
 
 # (8b) a step whose run names no bead, or whose run cannot be read, is the
 # work bead itself: the hook injects the step's own description rather than
 # guessing at another bead.
-out4b="$(run_hook "$(claim_payload s2b '{"bead_id":"tk-step2"}')")"
-case "$(printf '%s' "$out4b" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+run_hook "$(claim_payload s2b '{"bead_id":"tk-step2"}')"
+case "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
     *STEP2-MARKER*) ok "a run that names no bead: uses the claimed step itself" ;;
-    *) bad "a run that names no bead: uses the claimed step itself" "got: ${out4b:0:200}" ;;
+    *) bad "a run that names no bead: uses the claimed step itself" "got: ${OUT:0:200}" ;;
 esac
-out4c="$(run_hook "$(claim_payload s2c '{"bead_id":"tk-step1"}')" RUN_LIB_STUB_FAIL="subject")"
-case "$(printf '%s' "$out4c" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+run_hook "$(claim_payload s2c '{"bead_id":"tk-step1"}')" RUN_LIB_STUB_FAIL="subject"
+case "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
     *STEP-MARKER*) ok "a run that cannot be read: uses the claimed step itself" ;;
-    *) bad "a run that cannot be read: uses the claimed step itself" "got: ${out4c:0:200}" ;;
+    *) bad "a run that cannot be read: uses the claimed step itself" "got: ${OUT:0:200}" ;;
 esac
-[ "$RUN_RC" -eq 0 ] && ok "a run that cannot be read: exit 0" || bad "a run that cannot be read: exit 0" "rc=$RUN_RC"
+[ "$RC" -eq 0 ] && ok "a run that cannot be read: exit 0" || bad "a run that cannot be read: exit 0" "rc=$RC"
 
 # (9) empty description -> silent.
-out5="$(run_hook "$(claim_payload s3 '{"bead_id":"tk-bare"}')")"
-[ -z "$out5" ] && ok "empty description: silent" \
-    || bad "empty description: silent" "got: ${out5:0:120}"
+run_hook "$(claim_payload s3 '{"bead_id":"tk-bare"}')"
+[ -z "$OUT" ] && ok "empty description: silent" \
+    || bad "empty description: silent" "got: ${OUT:0:120}"
 
 # (10) over-long multi-line description -> bounded + pointer.
-out6="$(run_hook "$(claim_payload s4 '{"bead_id":"tk-long"}')")"
-ctx6="$(printf '%s' "$out6" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
+run_hook "$(claim_payload s4 '{"bead_id":"tk-long"}')"
+ctx6="$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)"
 n="${#ctx6}"
 if [ "$n" -gt 0 ] && [ "$n" -lt 13000 ]; then
     ok "long description: whole payload bounded ($n chars)"
@@ -237,24 +252,24 @@ echo "── gates ──"
 notclaim="$(jq -nc '{session_id: "s9", tool_name: "Bash",
     tool_input: {command: "git status --short"},
     tool_response: {stdout: "", stderr: ""}}')"
-out7="$(run_hook "$notclaim")"
-[ -z "$out7" ] && ok "non-claim command: silent" || bad "non-claim command: silent" "got: ${out7:0:120}"
+run_hook "$notclaim"
+[ -z "$OUT" ] && ok "non-claim command: silent" || bad "non-claim command: silent" "got: ${OUT:0:120}"
 
 # (11) non-polecat role -> silent.
-out8="$(run_hook "$(claim_payload s5 '{"bead_id":"tk-solo"}')" GC_TEMPLATE="gc-toolkit/gc-toolkit.refinery")"
-[ -z "$out8" ] && ok "refinery template: silent" || bad "refinery template: silent" "got: ${out8:0:120}"
+run_hook "$(claim_payload s5 '{"bead_id":"tk-solo"}')" GC_TEMPLATE="gc-toolkit/gc-toolkit.refinery"
+[ -z "$OUT" ] && ok "refinery template: silent" || bad "refinery template: silent" "got: ${OUT:0:120}"
 
 # (12) non-claude provider -> silent (this overlay is Claude-only).
-out9="$(run_hook "$(claim_payload s6 '{"bead_id":"tk-solo"}')" GC_PROVIDER="codex")"
-[ -z "$out9" ] && ok "codex provider: silent" || bad "codex provider: silent" "got: ${out9:0:120}"
+run_hook "$(claim_payload s6 '{"bead_id":"tk-solo"}')" GC_PROVIDER="codex"
+[ -z "$OUT" ] && ok "codex provider: silent" || bad "codex provider: silent" "got: ${OUT:0:120}"
 
 # (13) empty stdin, and malformed stdin.
-out10="$(run_hook "")"
-[ -z "$out10" ] && ok "empty stdin: silent" || bad "empty stdin: silent" "got: ${out10:0:120}"
-[ "$RUN_RC" -eq 0 ] && ok "empty stdin: exit 0" || bad "empty stdin: exit 0" "rc=$RUN_RC"
-out11="$(run_hook 'not json at all --claim')"
-[ -z "$out11" ] && ok "malformed stdin: silent" || bad "malformed stdin: silent" "got: ${out11:0:120}"
-[ "$RUN_RC" -eq 0 ] && ok "malformed stdin: exit 0" || bad "malformed stdin: exit 0" "rc=$RUN_RC"
+run_hook ""
+[ -z "$OUT" ] && ok "empty stdin: silent" || bad "empty stdin: silent" "got: ${OUT:0:120}"
+[ "$RC" -eq 0 ] && ok "empty stdin: exit 0" || bad "empty stdin: exit 0" "rc=$RC"
+run_hook 'not json at all --claim'
+[ -z "$OUT" ] && ok "malformed stdin: silent" || bad "malformed stdin: silent" "got: ${OUT:0:120}"
+[ "$RC" -eq 0 ] && ok "malformed stdin: exit 0" || bad "malformed stdin: exit 0" "rc=$RC"
 
 # (14) a claim that printed no bead_id, which is what a redirected or swallowed
 # stdout looks like. $GC_TRIGGER_BEAD_ID is spawn-fixed and survives every later
@@ -262,11 +277,11 @@ out11="$(run_hook 'not json at all --claim')"
 noid="$(jq -nc '{session_id: "s7", tool_name: "Bash",
     tool_input: {command: "gc hook --claim --json > /dev/shm/claim.txt 2>&1"},
     tool_response: {stdout: "", stderr: "", interrupted: false}}')"
-out12="$(run_hook "$noid" GC_TRIGGER_BEAD_ID="tk-solo")"
-[ -z "$out12" ] && ok "claim with no bead_id: silent despite a stale trigger id" \
-    || bad "claim with no bead_id: silent despite a stale trigger id" "got: ${out12:0:200}"
-[ "$RUN_RC" -eq 0 ] && ok "claim with no bead_id: exit 0" \
-    || bad "claim with no bead_id: exit 0" "rc=$RUN_RC"
+run_hook "$noid" GC_TRIGGER_BEAD_ID="tk-solo"
+[ -z "$OUT" ] && ok "claim with no bead_id: silent despite a stale trigger id" \
+    || bad "claim with no bead_id: silent despite a stale trigger id" "got: ${OUT:0:200}"
+[ "$RC" -eq 0 ] && ok "claim with no bead_id: exit 0" \
+    || bad "claim with no bead_id: exit 0" "rc=$RC"
 
 echo
 echo "work-context-hook: $PASS passed, $FAIL failed"

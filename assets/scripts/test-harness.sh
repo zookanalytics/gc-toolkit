@@ -280,18 +280,11 @@ mk_sut_dir() { # <dir> <file>...
   for lib in "$here/bd-lib.sh" "$here/pace-lib.sh" "$here/gctk-resolve.sh" "$here/pr-post.sh" "$here/work-outcome.sh" "$here/conversation.sh"; do
     [ -f "$lib" ] && cp "$lib" "$d/"
   done
-  # review-verdict.sh, the approval rule, review-dismissal.sh, what a dismissal
-  # retires, review-answer.sh, what the living answer to a review shows,
-  # dispatch-path.sh, the one definition of a dispatch path and a label hold,
-  # which converse-signoff.sh and the liveness scripts source to ask how a bead
-  # is dispatched, priority-lib.sh,
-  # the priority function, whose reading of a PR's approval pr-facts.sh
-  # sources, git-lib.sh, the one read of a branch's head on origin, which
-  # gate-ensure.sh and signoff.sh source, and run-lib.sh, the one reader of a
-  # run's link to its bead, are sourced by sibling path the same way.
+  # review-verdict.sh, review-dismissal.sh, dispatch-path.sh, priority-lib.sh,
+  # git-lib.sh and run-lib.sh, the libraries the scripts under test source, are
+  # sourced by sibling path the same way.
   [ -f "$here/review-verdict.sh" ] && cp "$here/review-verdict.sh" "$d/"
   [ -f "$here/review-dismissal.sh" ] && cp "$here/review-dismissal.sh" "$d/"
-  [ -f "$here/review-answer.sh" ] && cp "$here/review-answer.sh" "$d/"
   [ -f "$here/dispatch-path.sh" ] && cp "$here/dispatch-path.sh" "$d/"
   [ -f "$here/priority-lib.sh" ] && cp "$here/priority-lib.sh" "$d/"
   [ -f "$here/git-lib.sh" ] && cp "$here/git-lib.sh" "$d/"
@@ -528,7 +521,7 @@ case "$sub" in
       printf -v "$1" '%s' "$val"
     }
     if [ "$path" = "graphql" ]; then
-      # The write-back surface: three reads plus four mutations, over a fixture
+      # The review-thread surface: its reads and its mutations, over a fixture
       # the mutations actually MUTATE. A stub that forgot the write would let a
       # second pass look idempotent when the real API would have written twice.
       gqvar num num
@@ -559,16 +552,6 @@ case "$sub" in
         | map(if $st or (.pullRequestReview | type) != "object" then . else .pullRequestReview |= del(.state) end
               | if $rx then . else del(.reactionGroups) end);'
       case "$gqquery" in
-        *pullRequests\(states:OPEN*)
-          # pr-facts.sh's posture read: every open PR, served as one page from
-          # open_prs.json (a list of PR nodes). No fixture is an empty list, in
-          # which every anchor's PR has left the open list.
-          [ -z "${STUB_OPEN_PRS_FAIL:-}" ] || exit 1
-          of="$G/open_prs.json"
-          if [ -s "$of" ]; then nodes=$(cat "$of"); else nodes='[]'; fi
-          printf '%s' "$nodes" | jq -c '{data: {repository: {pullRequests: {
-              pageInfo: {hasNextPage: false, endCursor: null}, nodes: .}}}}' || exit 1
-          exit 0 ;;
         *removeReaction*)
           # Drops the viewer's reaction of that content from the node, so the next
           # read shows it gone. STUB_UNREACT_RC models a removal the API refuses.
@@ -737,9 +720,9 @@ case "$sub" in
         # The ids this stub gives new comments start over on each PR fixture, so
         # two PRs can hold one id. GitHub's ids are unique, and an edit names its
         # comment by id alone, so the stub picks the fixture whose comment with
-        # that id carries the review or finding key the new body carries, and
-        # otherwise the first fixture holding the id.
-        key=$(printf '%s' "$b" | grep -Eo '<!-- gc-(review-answer:r[0-9]+|finding:[A-Za-z0-9._-]+) -->' | head -1)
+        # that id carries the finding key the new body carries, and otherwise
+        # the first fixture holding the id.
+        key=$(printf '%s' "$b" | grep -Eo '<!-- gc-finding:[A-Za-z0-9._-]+ -->' | head -1)
         hit=""; first=""
         for cand in "$G"/threads_*.json; do
           [ -s "$cand" ] || continue

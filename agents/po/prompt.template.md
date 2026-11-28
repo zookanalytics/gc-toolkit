@@ -57,9 +57,7 @@ foundation it reads out. When the page is missing, read `docs/review-pm.md` the
 same way, since a rig that keeps its goals elsewhere names the place there.
 When the rig keeps none, or the operator changes them, load the
 `backlog-refinement` skill and follow its "When the goals are missing or change"
-before you ask the operator anything, whatever the sitting is for. It finds an
-answer an earlier sitting recorded, and it takes the operator's words to the
-page, so no later sitting asks again.
+before you ask the operator anything, whatever the sitting is for.
 
 ## Sequencing: WSJF
 
@@ -101,7 +99,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
   gate releases it.
 - Priority: `"$S/queue-priority.sh" move <bead> <P0-P4>`, or `--shift <±n>`
   under a parent.
-- Hold: `gc bd --rig {{ .RigName }} set-state <bead> hold=mayor --reason "<why>"`.
+- Hold: `gc bd --rig {{ .RigName }} update <bead> --add-label hold:mayor --append-notes "<ruling: reason>"`,
+  which keeps any other hold, unlike `set-state`.
 - Close: the `work` skill's "Close a bead that needs no work", with the kind and
   the bead the disposition names: `fixed-upstream` or `duplicate` and a closed or
   shipped bead in the same store, `folded` and an open bead that carries the

@@ -33,14 +33,14 @@ cat > "$TMP/rigs.json" <<'EOF'
 {"rigs":[{"name":"alpha","suspended":false},{"name":"beta","suspended":false}]}
 EOF
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$TMP/bin/gc" <<'GC'
-# With BARRIER set, each of the three reads the check overlaps marks itself
-# started and waits until all three are, giving up after 20s. Reads made one
-# after another never get past the first.
+# With BARRIER set, each of the four probes the check overlaps, these three reads
+# and gctk-barrier's answer, marks itself started and waits until all four are,
+# giving up after 20s. Probes made one after another never get past the first.
 barrier() {
     [ -n "${BARRIER:-}" ] || return 0
     : > "$BARRIER/$1"
     for _ in $(seq 1 200); do
-        [ -f "$BARRIER/orders" ] && [ -f "$BARRIER/rigs" ] && [ -f "$BARRIER/runs" ] && return 0
+        [ -f "$BARRIER/orders" ] && [ -f "$BARRIER/rigs" ] && [ -f "$BARRIER/runs" ] && [ -f "$BARRIER/gctk" ] && return 0
         sleep 0.1
     done
     exit 7
@@ -109,6 +109,18 @@ gctk_stub() { # <version-output> -> installs a fake gctk at $TMP/bin/gctk-stub
 # fixture checkout, so arm 3 notes a match and adds nothing to those cases.
 printf '#!/bin/sh\n[ "$1" = version ] && echo "%s"\n' "$PACK_REV" > "$TMP/bin/gctk-current"
 chmod +x "$TMP/bin/gctk-current"
+# The same binary for case 7d, whose answer waits at the gc stub's barrier until
+# the three reads are in flight beside it.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; printf 'rev=%q\n' "$PACK_REV"; cat; } > "$TMP/bin/gctk-barrier" <<'GCTK'
+[ "$1" = version ] || exit 0
+: > "$BARRIER/gctk"
+for _ in $(seq 1 200); do
+    [ -f "$BARRIER/orders" ] && [ -f "$BARRIER/rigs" ] && [ -f "$BARRIER/runs" ] && { echo "$rev"; exit 0; }
+    sleep 0.1
+done
+exit 7
+GCTK
+chmod +x "$TMP/bin/gctk-barrier"
 
 # GCTK_BIN is pinned to that binary so arm 3 stays out of every order case:
 # unset, it would resolve through the AMBIENT city and read the live binary,
@@ -254,13 +266,15 @@ has "$OUT" "daily: registered but has NOT fired in the last 259200s" "a run olde
 rm -f "$TMP/pack/orders/daily.toml" "$TMP/hist/daily.json" "$TMP/hist/other-pack.json"
 printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
 
-# --- 7d. the registry, roster and history reads are in flight at once ---------------
-# Each stubbed read waits for the other two to start, so a check that made them
-# one after another could not read its registry, and would warn.
+# --- 7d. the registry, roster and history reads and arm 3's probe are in flight at once
+# Each stubbed probe waits for the other three to start, so a check that made
+# them one after another, or asked gctk after the reads, could not read its
+# registry, and would warn.
 mkdir -p "$TMP/barrier"
-OUT=$(BARRIER="$TMP/barrier" run_check); RC=$?
-eq "$RC" "0" "the three reads overlap: each saw the other two in flight"
-hasnt "$OUT" "could not read" "…and every one of them answered"
+OUT=$(BARRIER="$TMP/barrier" GCTK_BIN="$TMP/bin/gctk-barrier" run_check); RC=$?
+eq "$RC" "0" "the four probes overlap: each saw the other three in flight"
+hasnt "$OUT" "could not read" "…and every read answered"
+has "$OUT" "deployed binary matches this checkout" "…and so did gctk, asked beside the reads"
 
 # --- 7e. the reads answer into one temp dir, removed when the check exits ------------
 mkdir -p "$TMP/probe-tmp"
@@ -285,6 +299,21 @@ OUT=$(HIST_DELAY=2 run_check); RC=$?
 eq "$RC" "0" "a run inside its window when the read was sent counts, however long the read took"
 hasnt "$OUT" "has NOT fired" "…so the read's own latency calls no order stopped"
 printf '{"entries":[{"rig":"alpha"},{"rig":"beta"}]}' > "$TMP/hist/tick.json"
+
+# --- 7g. the history read may take the time left before the deadline -------------------
+# The budget caps a probe at half so a wedged one cannot starve the probes after
+# it, and every other probe starts beside the history read. A 24s budget caps a
+# probe at 12s and ends at 19s, after its 5s reserve, so a read that answers
+# after 14s runs past the cap and finishes before the deadline.
+S=$(date +%s)
+OUT=$(GC_DOCTOR_CHECK_TIMEOUT=24 HIST_DELAY=14 run_check); RC=$?
+E=$(( $(date +%s) - S ))
+if [ "$E" -ge 14 ]; then ok "the history read answered past half the budget (the check took ${E}s)"
+else bad "the history read answered past half the budget (the check took ${E}s, under the read's own 14s)"; fi
+eq "$RC" "0" "a history read that answers past half the budget, before the deadline, is judged"
+hasnt "$OUT" "could not read the order run history" "…rather than cut at half the budget"
+hasnt "$OUT" "doctor budget" "…and no budget warning follows it"
+has "$OUT" "deployed binary matches this checkout" "…and gctk, asked beside it, still answered"
 
 # --- 8. arm 3: a gctk is deployed, and it is the one this checkout describes ----
 # Orders can fire perfectly while the cadence runs logic several commits old,

@@ -13,7 +13,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/prstatus"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/prstatus"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
@@ -29,8 +29,7 @@ import (
 // pending record it asks the pr domain's evaluator over the store, the read the
 // one-PR update saved on the bead among it (pr.FromStore), as the rig
 // board asks it through its listing, so they give one answer and none of them
-// reads GitHub. The cli tests pin GC_NO_API, so every read answers from the
-// same `gc bd` stub the shell acceptance drives.
+// reads GitHub.
 
 // prStatusProg is the name warnings carry: the script whose derivation this is,
 // because its callers grep those lines and the language behind the command is
@@ -87,11 +86,12 @@ func newPRCmd(stdout, stderr io.Writer) *cobra.Command {
 		"The pull request a bead owns: where it stands, what its title and body say, the account of the change "+
 			"they carry, GitHub's side of it saved on the bead, its record from publication to the verified merge, "+
 			"its draft between rounds of the city's work, the withdrawal of approvals a material change leaves "+
-			"behind, and the push of a converse sitting that edits its branch.",
+			"behind, a review round's answers on it, and the push of a converse sitting that edits its branch.",
 		status, newPRComposeCmd(stdout, stderr), newPRSummaryCmd(stdout, stderr),
 		newPRPollCmd(stdout, stderr), newPRCompareCmd(stdout, stderr), newPRRefreshCmd(stdout, stderr),
 		newPRRecordCmd(stdout, stderr), newPRReconcileCmd(stdout, stderr),
-		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRPushCmd(stdout, stderr))
+		newPRDraftCmd(stdout, stderr), newPRWithdrawCmd(stdout, stderr), newPRAnswerCmd(stdout, stderr),
+		newPRPushCmd(stdout, stderr))
 }
 
 // prStatus prints the state prstatus.Derive returns for the facts prstatus.Read
@@ -165,18 +165,25 @@ func prStatus(anchor string, asJSON bool, stdout, stderr io.Writer) int {
 }
 
 // gcbdStore is the [prstatus.Store] gctk reads through. An anchor's row comes
-// from gcbd.Show, which prefers the supervisor API. Its in-flight set comes from
-// one `gc bd list` per anchor, whose metadata filter matches a key against one
-// value. A level of `blocks` edges comes from one `gc bd show` of every bead in
-// it, whose rows carry each edge's far bead whole.
+// from gcbd.ShowCached, the supervisor's copy, which can trail a fresh write. A
+// row one pass stale decides nothing that lasts here: the command shows where a
+// PR stands, and the landing order derives each PR's labels from the store
+// again at every run and has them written where they differ.
+// converse-signoff.sh words the Approve clause of a sign-off's headline from
+// this status, and no later read corrects a headline, so it runs the command
+// with GC_NO_API=1, under which ShowCached reads the bead as it stands. Its
+// in-flight set comes from one `gc bd list` per anchor, whose metadata filter
+// matches a key against one value. A level of `blocks` edges comes from one
+// `gc bd show` of every bead in it, whose rows carry each edge's far bead
+// whole.
 type gcbdStore struct{ client *gcbd.Client }
 
-// Beads returns the row of each id gcbd.Show reads. One it cannot read is left
-// out, which prstatus.Read reports as an anchor that does not resolve.
+// Beads returns the row of each id gcbd.ShowCached reads. One it cannot read is
+// left out, which prstatus.Read reports as an anchor that does not resolve.
 func (s gcbdStore) Beads(ids []string) (map[string]prstatus.Row, error) {
 	out := make(map[string]prstatus.Row, len(ids))
 	for _, id := range ids {
-		if b := s.client.Show(id); b != nil {
+		if b := s.client.ShowCached(id); b != nil {
 			out[id] = prstatus.Row{ID: id, Metadata: metadataOf(b)}
 		}
 	}

@@ -168,14 +168,33 @@ func (d *land) timed() *clock {
 	return c
 }
 
-// gates records each gate filed, fails a filing when err is set, and while
-// stall is set answers no filing until the act's context ends.
+// gates records each gate filed and each key withdrawn, fails a filing when err
+// is set and a withdrawal when withdrawErr is, and while stall is set answers
+// no filing until the act's context ends.
 type gates struct {
-	mu       sync.Mutex
-	filed    []string
-	messages []string
-	err      error
-	stall    bool
+	mu          sync.Mutex
+	filed       []string
+	messages    []string
+	withdrawn   []string
+	err         error
+	withdrawErr error
+	stall       bool
+}
+
+func (g *gates) Withdraw(_ context.Context, subject, key, message string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.withdrawErr != nil {
+		return g.withdrawErr
+	}
+	g.withdrawn = append(g.withdrawn, subject+" "+key+" "+message)
+	return nil
+}
+
+func (g *gates) withdrawals() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.withdrawn)
 }
 
 func (g *gates) File(ctx context.Context, subject, key, message string) error {
@@ -249,7 +268,8 @@ func (a *audit) calls() (checks, reaudits []string) {
 // land is one bead on the pending record, blocked and assigned to nobody,
 // whose PR the evaluator reads ready, with the landing order's sources and the
 // PR watch's one-PR update, which saves GitHub's side on the bead. reads and
-// writes mark where the last run's GitHub reads and store writes start.
+// writes mark where the last run's GitHub reads and store writes start, and
+// asked where a case's requests of GitHub start.
 type land struct {
 	*world
 	co     *checkout
@@ -261,6 +281,7 @@ type land struct {
 	tick   int
 	reads  int
 	writes int
+	asked  int
 }
 
 func newLand(t *testing.T) *land {
@@ -285,6 +306,10 @@ func newLand(t *testing.T) *land {
 		Hub:      func(context.Context, string) pr.Hub { return w.github },
 		Reread: func(_ context.Context, url string) error {
 			_, err := d.watch.Reread(url)
+			return err
+		},
+		RefreshConversation: func(_ context.Context, url string) error {
+			_, err := d.watch.RefreshConversation(url)
 			return err
 		},
 		Feedback: func() (pr.Feedback, error) { return w.rule, nil },
@@ -954,6 +979,24 @@ func TestAMergedValidatedHeadOnItsTargetCloses(t *testing.T) {
 	}
 }
 
+// The bead is a plain task, so Gas City's work-record gate reads its close, and
+// once enforced it refuses a close whose record names no outcome. The verified
+// merge's close names the work shipped in the merge commit on the target, over
+// the branch workspace-setup stamped when the work was cut.
+func TestAVerifiedMergesCloseCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	is(t, d.once(t), pr.ActLanded)
+	b := d.row(t)
+	if b.Status != "closed" {
+		t.Fatalf("under an enforced work-record gate the verified merge left the bead %s", b.Status)
+	}
+	meta(t, b, map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+}
+
 // The one-PR update writes pr_state=merged once it reads the PR merged, which
 // can come before a run lands the bead: the record is still pending, and the
 // run lands it.
@@ -1010,6 +1053,38 @@ func TestAVerifiedMergeWhoseCloseBdRefusesIsAnExceptionBehindAGate(t *testing.T)
 	}
 	if out := d.reconcile(t, pr.Options{}); len(out) != 0 {
 		t.Fatalf("a run after the exception read %+v, want nothing: the marker is cleared", out)
+	}
+}
+
+// Once what held a refused close is gone, a person closes the bead with the
+// command its gate names. An enforced work-record gate reads that close too,
+// and the exception's record already names the work shipped in the merge
+// commit on the target.
+func TestTheCloseARefusedLandingsGateNamesCarriesTheWorkRecord(t *testing.T) {
+	d := newLand(t)
+	d.store.WorkRecordGate = true
+	d.md["gc.work_branch"] = branch
+	d.put("blocked", "")
+	mergedOnGitHub(d, head)
+	held := true
+	d.store.BeforeUpdate = func(_ string, args []string) error {
+		if held && slices.Contains(args, "--status=closed") {
+			return errors.New("exit status 1: Error: cannot close blocked issue: " + bead + " is blocked by [tk-kid]")
+		}
+		return nil
+	}
+	is(t, d.once(t), pr.ActExcepted)
+	meta(t, d.row(t), map[string]string{"gc.work_outcome": "shipped", "gc.work_commit": merged, "gc.work_branch": "main"})
+	closing := "--status=closed --set-metadata merge_result=" + record.Merged
+	if msg := d.gates.messages[0]; !strings.Contains(msg, "gc bd update "+bead+" "+closing) {
+		t.Fatalf("the gate's message %q names another close", msg)
+	}
+	held = false
+	if out, err := d.store.Update(bead, strings.Fields(closing)...); err != nil {
+		t.Fatalf("the close the gate names was refused: %v %s", err, out)
+	}
+	if b := d.row(t); b.Status != "closed" || b.Metadata["merge_result"] != record.Merged {
+		t.Fatalf("the close the gate names left the bead %s with merge_result %q", b.Status, b.Metadata["merge_result"])
 	}
 }
 
@@ -1404,6 +1479,67 @@ func TestTheMergeIsDecidedOnTheReReadPinnedToTheHeadItJudged(t *testing.T) {
 		t.Fatalf("asked %v on a head the re-read found moved", asks(e.github))
 	}
 	meta(t, e.row(t), map[string]string{"merge_result": record.HeadChanged, "observed_pr_head_sha": other})
+}
+
+// The squash lands under the subject the bead composes to when the act reads it
+// last, never under the PR's title as the refinery last published it: a retitle
+// since that publication brings no new head, so no publication carries it to the
+// PR before the merge.
+func TestTheMergeLandsUnderTheSubjectTheBeadComposesToWhenItIsRequested(t *testing.T) {
+	retitle := func(t *testing.T, d *land, title string) {
+		t.Helper()
+		b := d.row(t)
+		b.Title = title
+		d.store.Put(b)
+	}
+	headline := func(t *testing.T, d *land) string {
+		t.Helper()
+		asked := d.github.Asks()
+		if len(asked) != 1 || asked[0].Method != "MergePullRequest" {
+			t.Fatalf("asked %v, want one merge", asks(d.github))
+		}
+		return asked[0].Headline
+	}
+	t.Run("retitled after its last publication", func(t *testing.T) {
+		d := newLand(t)
+		d.refresh(t)
+		retitle(t, d, "refactor(pr): name what the work became")
+		o := d.run(t)
+		is(t, o, pr.ActRequested)
+		want := "refactor(pr): name what the work became (" + bead + ") (#7)"
+		if got := headline(t, d); got != want {
+			t.Fatalf("the merge was asked under %q, want %q", got, want)
+		}
+		if !strings.Contains(o.Detail, want) {
+			t.Fatalf("the outcome %q does not name the subject %q", o.Detail, want)
+		}
+	})
+	// Each read of the bead finds it retitled again, so only the subject of the
+	// title the bead has when the merge is asked for is the one its last read
+	// found.
+	t.Run("retitled while the act reads it", func(t *testing.T) {
+		d := newLand(t)
+		d.refresh(t)
+		reads := 0
+		d.store.OnFind = func(q gcbd.Query) {
+			if slices.Contains(q.IDs, bead) {
+				reads++
+				retitle(t, d, fmt.Sprintf("the work as read %d times", reads))
+			}
+		}
+		var title string
+		d.github.OnMerge = func(string, *ghfake.PR, string) error {
+			title = d.row(t).Title
+			return nil
+		}
+		is(t, d.run(t), pr.ActRequested)
+		if reads < 2 {
+			t.Fatalf("the run read the bead %d times, too few to tell its last read from an earlier one", reads)
+		}
+		if got, want := headline(t, d), "chore: "+title+" ("+bead+") (#7)"; got != want {
+			t.Fatalf("the merge was asked under %q, want %q", got, want)
+		}
+	})
 }
 
 func TestAPushBetweenTheAnswerAndTheRequestIsRefusedAndRequeued(t *testing.T) {

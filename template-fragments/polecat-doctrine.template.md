@@ -106,9 +106,12 @@ cd "<the path it printed>"
 
 ## Directory discipline
 
-`workspace-setup` creates a per-bead git worktree and records it in
-`metadata.work_dir`. Once created, **stay in it**: all edits, installs,
-commits, and pushes happen there. NEVER edit files in the shared rig
+`workspace-setup` creates a per-bead git worktree beside the agents' homes and
+records it in `metadata.work_dir`. Once created, **work in it**: all edits,
+installs, commits, and pushes happen there. It sits outside your home, so a
+shell that does not keep its directory between calls needs a `cd` into it at
+the head of each call that works in it, and an edit names its file by the full
+path under it, never by your home's copy. NEVER edit files in the shared rig
 checkout (`{{ .RigRoot }}`) — that stomps the canonical repo and breaks the
 recovery metadata that points at your worktree.
 
@@ -208,9 +211,8 @@ Blocked work and human gates says.
 The bead you claimed is not always the bead your branch is gated by. Fresh
 work claims its own anchor and the two are one bead. A rework or rebase child
 stands on a branch some OTHER open bead anchors. Every reader that matters reads
-that anchor, the bead that owns the PR and carries its `merge_result`: the
-refinery's publication for the PR's title and body, `pr-facts.sh` for the PR's
-facts and the landing order for the merge. A write aimed at the claimed bead
+that anchor, the bead that owns the PR and carries its `merge_result`, from the
+PR's title and body to its merge. A write aimed at the claimed bead
 lands, errors nowhere, and is never read.
 
 `work-submit.sh` resolves it: the open bead on this branch that carries a

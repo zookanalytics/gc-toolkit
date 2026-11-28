@@ -162,7 +162,8 @@ func TestASavedReadThatDoesNotDecodeAnswersNothing(t *testing.T) {
 }
 
 // A saved read is GitHub's side at one head only while it holds the PR, its
-// checks and its conversation, the checks read at the PR's head.
+// checks and its conversation, the checks read at the PR's head. Each case
+// keeps the provenance instant the update stamped with the conversation.
 func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 	for name, edit := range map[string]func(*pr.SavedRead){
 		"no PR part":            func(s *pr.SavedRead) { s.PR = nil },
@@ -178,7 +179,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			md := maps.Clone(w.md)
+			md := w.savedMD(t)
 			md["pr_github_read"] = string(raw)
 			unread(t, w.fromStore(t, md))
 		})
@@ -191,7 +192,7 @@ func TestASavedReadMissingAPartOrSplitAcrossHeadsIsNotCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		md := maps.Clone(w.md)
+		md := w.savedMD(t)
 		md["pr_github_read"] = string(raw)
 		isReady(t, w.fromStore(t, md))
 	})
@@ -202,5 +203,49 @@ func isReadyAt(t *testing.T, a pr.Answer, h string) {
 	t.Helper()
 	if !a.Ready || a.Head != h || a.Target != "main" {
 		t.Fatalf("ready=%v at %q into %q, conditions %+v, want ready at %s into main", a.Ready, a.Head, a.Target, a.Conditions, h)
+	}
+}
+
+// AwaitsReview reads a PR as waiting on a person's review only from a saved read
+// of the PR at the head the refinery validated, open and no draft, that names no
+// approval, or an approval beside a request for changes that stands.
+func TestAwaitsReview(t *testing.T) {
+	const head = "1111111111111111111111111111111111111111"
+	read := func(edit func(*pr.SavedRead)) string {
+		s := &pr.SavedRead{PR: &pr.SavedPR{Head: head, State: "OPEN"},
+			Conversation: &pr.SavedConversation{Approvers: []string{}, Requesters: []string{}}}
+		if edit != nil {
+			edit(s)
+		}
+		raw, err := json.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	approved := func(s *pr.SavedRead) { s.Conversation.Approvers = []string{"operator"} }
+	for _, tc := range []struct {
+		name               string
+		result, head, read string
+		want               bool
+	}{
+		{"no approval at the validated head", "pull_request_pending", head, read(nil), true},
+		{"an approval beside a request for changes", "pull_request_pending", head,
+			read(func(s *pr.SavedRead) { approved(s); s.Conversation.Requesters = []string{"reviewer"} }), true},
+		{"an approval that stands", "pull_request_pending", head, read(approved), false},
+		{"a draft", "pull_request_pending", head, read(func(s *pr.SavedRead) { s.PR.Draft = true }), false},
+		{"a PR that is not open", "pull_request_pending", head, read(func(s *pr.SavedRead) { s.PR.State = "CLOSED" }), false},
+		{"a read of another head", "pull_request_pending", head,
+			read(func(s *pr.SavedRead) { s.PR.Head = "2222222222222222222222222222222222222222" }), false},
+		{"a read with no conversation", "pull_request_pending", head, read(func(s *pr.SavedRead) { s.Conversation = nil }), false},
+		{"no saved read", "pull_request_pending", head, "", false},
+		{"a saved read that does not decode", "pull_request_pending", head, "{not json", false},
+		{"no validated head", "pull_request_pending", "", read(nil), false},
+		{"a head the refinery has not validated", "pull_request_head_changed", head, read(nil), false},
+		{"no PR on the record", "", head, read(nil), false},
+	} {
+		if got := pr.AwaitsReview(tc.result, tc.head, tc.read); got != tc.want {
+			t.Errorf("%s: AwaitsReview = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

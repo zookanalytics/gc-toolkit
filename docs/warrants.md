@@ -79,8 +79,16 @@ no warrant.
     reads the same record for what gets past it, a forced relaunch and a claimant
     with no poured workflow, so it adds no key and writes nothing to let a run
     through.
-  - `workspace-setup` brings a rejected branch current by merge, where Gas Town's
-    rebases it under an open PR, and waits behind a sibling.
+  - `workspace-setup` cuts the tree at `.gc/worktrees/<rig>/<bead>`, beside the
+    agents' homes, where Gas City's claim cuts a bead's tree. Core's variants cut
+    it in the agent's home, and Gas Town's under
+    `.gc/worktrees/<rig>/artifacts/worktrees/`. A run's steps are claimed by
+    different sessions, so the tree outlives the session that cuts it, and Gas
+    City can remove a closed pool session's home with everything under it. The tree
+    is recorded as `work_dir`, which Gas City's closed-bead reaper reads, where
+    Gas Town's records `artifact_dir`, which no Gas City reader reads. It brings
+    a rejected branch current by merge, where Gas Town's rebases it under an open
+    PR, and waits behind a sibling.
   - `preflight-tests` runs the checks through `gctk rig`, so every polecat starting
     from one base shares one recorded run, keys a tracker on a stamp, and has the
     tracker it files sent to the rig's polecat pool. Core's runs each command raw
@@ -100,8 +108,21 @@ no warrant.
     `{{test_command}}` raw and files its tracker with a `gc bd create` that
     routes it nowhere, and its `workspace-setup` is a placeholder each
     variant overrides with a tree of its own. `mol-polecat-commit.toml` and
-    `mol-scoped-work.toml` cut theirs with `git worktree add` and remove them with
+    `mol-scoped-work.toml` cut theirs with `git worktree add` at
+    `$GC_DIR/worktrees/<bead>`, in the agent's home, and remove them with
     `git worktree remove` once the work is pushed.
+  - `cmd/gc/session_worktree_prune.go`, `pruneAgentHomeWorktreeIfSafe`: once a
+    pool session's bead closes, it removes the session's home with
+    `WorktreeRemove(workerDir, true)`, a forced removal, after gates that read the
+    home itself, its uncommitted work and its unpushed commits, so a tree nested
+    in the home goes with it. `auto_prune_worker_dir` turns it off, and it is on
+    when unset.
+  - `cmd/gc/cmd_hook_worktree.go`: `gc hook --claim --worktree` cuts the claimed
+    bead's tree at `<city>/.gc/worktrees/<rig>/<bead>` through
+    `gc worktree ensure` ([gc hook](https://docs.gascity.com/reference/cli#gc-hook)).
+  - `cmd/gc/bead_worktree_reaper.go`, `scanBorrowVetoReferences`: the reaper keeps
+    a tree that a bead outside the terminal states names in `gc.work_dir` or
+    `work_dir`.
   - `internal/worktree/worktree.go`, the owner `gc worktree` runs: `Cleanup`
     removes a tree only when its HEAD is merged into the base given, and
     `verifyProvenance` requires that base to be the one the tree was made from, so
@@ -117,15 +138,19 @@ no warrant.
     live root of one formula on one bead is refused, unless `--force` skips the
     lookup, under the lock `withGraphV2SourceWorkflowLock` takes.
   In `gastownhall/gascity-packs`, `gastown/formulas/mol-polecat-work.toml` overrides
-  `workspace-setup`, `self-review` and `submit-and-exit`, rebases a rejected
-  branch, and at the handoff detaches the tree and deletes its branch.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 1f1f1289df6d and
+  `workspace-setup`, `self-review` and `submit-and-exit`, cuts its tree at
+  `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
+  `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
+  and deletes its branch.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
   is planned for the merge resume, since the refinery brings every branch current
   by merge and never rebases one
-  ([built-once-target.md](built-once-target.md#merge)).
+  ([built-once-target.md](built-once-target.md#merge)). Its cut of the tree
+  retires once the build a city runs carries `gc hook --claim --worktree` and the
+  formula moves onto the tree the claim cuts.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
   commit. `submit-and-exit`: the merge and review nouns it holds retire, the
   bring-current guard among them with the old review path (`tk-1tfzr71.122`).
@@ -147,7 +172,7 @@ no warrant.
     only by an operator, either with `gc dolt compact --gc-only --only-db`
     against the live server or with the offline `dolt gc` procedure
     (`docs/troubleshooting/dolt-bloat-recovery.md`).
-- **Verified.** 2026-10-19, at `gastownhall/gascity` main 1e05ae624.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 572f981c6.
 - **Retires when.** The supervisor wires `DOLT_GC`, and the maintenance doc
   drops its observe-only note.
 
@@ -231,13 +256,21 @@ no warrant.
   `ready`, `list`, `query` or `search`, orders by a parent's priority. Gas City
   and bd copy a priority from another bead only when they create a bead: a
   sling pours its workflow at the priority of the bead it is slung on
-  (`BeadPriorityOverride` in `internal/sling/sling.go`), and `bd swarm` creates
-  its molecule at its epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates
-  the copy when the source's priority changes. Neither one's documentation
-  describes a priority that follows another bead's.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b
+  (`BeadPriorityOverride` in `internal/sling/sling.go`), a cook attached to a
+  bead makes its whole sub-workflow at that bead's priority and takes none of
+  its own (`newFormulaCookCmd` in `cmd/gc/cmd_formula.go`, whose flags name no
+  priority and whose graph.v2 arm instantiates at the attach bead's priority,
+  as `Attach` in `internal/molecule/molecule.go` does for a v1 formula), a
+  fragment a running workflow adds takes its root's (`InstantiateFragment` in
+  `internal/molecule/molecule.go`), and `bd swarm` creates its molecule at its
+  epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
+  source's priority changes. Neither one's documentation describes a priority
+  that follows another bead's.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main 97c0c9b3b11b
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
-  `internal/sling/sling.go`), and at `gastownhall/beads` main 786241099046 and
+  `internal/sling/sling.go`, `Attach` and `InstantiateFragment` in
+  `internal/molecule/molecule.go`, `newFormulaCookCmd` in
+  `cmd/gc/cmd_formula.go`), and at `gastownhall/beads` main 786241099046 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -265,8 +298,8 @@ no warrant.
     `push-branch` and `create-pr` commands write as a GitHub App installation,
     so GitHub holds those writes to the installation's repositories. It scopes
     no agent's own `gh`.
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475 and
-  `gastownhall/gascity-packs` main aa55b477d4c2. The config reference's
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68 and
+  `gastownhall/gascity-packs` main 44b9db7168f6. The config reference's
   `[github]` table declares pull-request monitors, whose `authors` allow-list
   scopes the pull requests a monitor acts on, and scopes no agent's writes.
   GitHub's *Managing your personal access tokens* page was read on 2026-11-20.
@@ -354,9 +387,9 @@ no warrant.
     in Gas City handles a refusal inside the closes Gas City makes itself, such
     as the autoclose sweep's retry of a convoy, wisp or molecule autoclose
     (`cmd/gc/autoclose_sweep.go` 21-22).
-- **Verified.** 2026-11-22, at `gastownhall/gascity-packs` main 44b9db7168f6,
+- **Verified.** 2026-11-23, at `gastownhall/gascity-packs` main 44b9db7168f6,
   `gastownhall/beads` main 786241099046 and `gastownhall/gascity` main
-  1042f51083f9.
+  ffd9f6b0cb68.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
 
@@ -403,45 +436,13 @@ no warrant.
     a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
     lifecycle in `pr_state`, a key of its own.
   - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main f2bb5cdc01d8,
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records a pull request's merge readiness where a
   reader of the PR's own bead finds it, and tells a required check still
   running from a block, for example once its PR monitor reads the base
   branch's rules. The axis then moves onto that record.
-
-## Owed status label clear
-
-- **Covers.** The `status_label_clear_owed` key, in the
-  `[metadata.pr_status_label]` table of `lifecycle/lifecycle.toml`. Its
-  writer: `clear_status_label` in `assets/scripts/pr-facts.sh`. Its reader: the
-  "retry the status: label clears that terminal records still owe" section of
-  `assets/scripts/pr-facts.sh`.
-- **Stands in for.** A retry of a failed write to an outside service, kept
-  until a later pass lands it.
-- **Evidence.**
-  - In `gastownhall/gascity`, a failed order is not retried ("No retry on
-    dispatch failure" in `engdocs/architecture/orders.md`), and
-    `[steps.retry]` retries a formula step's attempt within its run (section
-    3.2 of `docs/reference/specs/formula-spec-v2.md`). Gas City keeps no
-    outbox or retry queue that a pack can hand a write to an outside
-    service. Its usage facts retry a failed write with a marker of their
-    own: a fact whose sink fails leaves the session bead's
-    `usage_compute_emitted_at` marker unset for the next reconcile tick
-    (`emitComputeFactForBead` in `cmd/gc/usage_compute.go`).
-  - In `gastownhall/gascity-packs`, a pack that retries such a write keeps a
-    marker of its own: the `gastown` pack's `pr_reconcile_pending` key, and
-    the `oversight-rig` pack's `delivered` label.
-  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main e6e47235027b and
-  `gastownhall/gascity-packs` main 44b9db7168f6.
-- **Retires when.** Gas City ships a retry that a pack can hand a failed write
-  to an outside service, such as an outbox that a later pass drains, or its
-  writer retires, since the landing order makes the clears it retries by
-  comparing the labels the PR watch saved for a PR with the ones the store
-  derives, and the net by searching for the city's labels on PRs no live bead
-  owns, and neither records anything.
 
 ## Saved GitHub read
 
@@ -463,22 +464,30 @@ no warrant.
   `gctk pr reconcile`, from `orders/pr-reconcile.toml`), decides a merge on
   what the one-PR update saves once it has re-read the PR in full
   (`rereadAndDecide` there, through `Reread` in `services/gctk/pr/refresh.go`),
-  and compares each owned PR's saved labels with the ones the store derives
-  (`labelPlans` in `services/gctk/pr/labels.go`), and the PR watch
-  itself, which compares a PR's signs with the ones each part keeps (`moved` in
-  `services/gctk/pr/saved.go`) and the net's full read with each part's facts
-  (`differs` there).
+  takes each post the conversation keeps untaken as its own ask (`takePlans`,
+  `untakenOn` and `take` in `services/gctk/pr/take.go`, which has the update
+  read the conversation again through `RefreshConversation` in `refresh.go`),
+  decides each owned PR's red checks and conflict from its checks, its merge
+  state and its approvals (`redPlans`, `redOn` and `decideRed` in
+  `services/gctk/pr/redchecks.go`), and compares each owned PR's saved labels with the ones the store derives (`labelPlans` in
+  `services/gctk/pr/labels.go`), and the PR watch itself, which compares a
+  PR's signs with the ones each part keeps and reads again a conversation part
+  that holds no list of untaken posts or a checks part that holds no suites
+  (`moved` in `services/gctk/pr/saved.go`), and the net's full read with each
+  part's facts (`differs` there).
 - **Stands in for.** A record of GitHub's facts about a pull request, kept on
   the bead that owns it, from which a display derives the PR's status in place
   of reading GitHub, from which the landing order finds and does its work, and
   against which a pass of the PR watch tells
   whether the PR moved or differs from it. The facts are the PR's node id, state, draft flag, head and merge
   state, its merge commit and time once it merged, the required checks at that
-  head, the standing approvals, each with the commit it was given on, and
-  requests for changes, the newest feedback in each comment space, the review
-  threads waiting on the city's answer and those unresolved, and the PR's
-  labels, in four parts that each keep the instant their read was sent and the
-  cheap signs read with it.
+  head, each with the check suite that holds its result and its log, each check
+  suite there, with its status, its creation time and how many check runs it
+  holds, the standing approvals, each with the commit it was given on, and
+  requests for changes, each post that is feedback the city has not taken,
+  with what its ask names it by, the review threads waiting on the city's
+  answer and those unresolved, and the PR's labels, in four parts that each
+  keep the instant their read was sent and the cheap signs read with it.
 - **Evidence.**
   - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor lists each
     open PR's number, title, URL, author, draft flag, merge state, base and head
@@ -493,7 +502,9 @@ no warrant.
     [GitHubPRMonitor](https://docs.gascity.com/reference/config#githubprmonitor)
     entry declares a poll interval and a webhook secret, which no code outside
     the configuration package reads. No Go source there, tests aside, reads a
-    pull request's reviews or review threads.
+    pull request's reviews or review threads. The monitor's check rollup gives
+    each check's name, status, conclusion and log, and no check suite and no
+    suite's creation time.
   - A webhook rule hands one verified provider event to an order or a
     conversation and keeps no state of its own
     ([WebhookRule](https://docs.gascity.com/reference/config#webhookrule) in
@@ -514,10 +525,14 @@ no warrant.
     (`internal/github/client.go`), and a `gh:pr` gate reads only a PR's state
     and title (`checkGHPRWithRunner` in `cmd/bd/gate.go`).
   - The search is [specs/tk-1tfzr71.134/gas-city-search.md](../specs/tk-1tfzr71.134/gas-city-search.md),
-    and the search for the parts, their signs and their one writer is
+    the search for the parts, their signs and their one writer is
     [specs/tk-1tfzr71.149/gas-city-search.md](../specs/tk-1tfzr71.149/gas-city-search.md#the-one-pr-update-saves-githubs-side-on-the-bead-unit-1),
-    read at `gastownhall/gascity` main 9a4b1e718.
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9,
+    read at `gastownhall/gascity` main 9a4b1e718, and the search for the
+    untaken posts the conversation keeps is
+    [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
+    and for the check suites the checks keep, its
+    [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
+- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
   786241099046.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
@@ -538,10 +553,12 @@ no warrant.
   `services/gctk/pr/landing.go` calls on each act that decides the record of a
   PR no ruling retired, on the act's own read of the PR's reviews and the
   history the rig's clone holds once the act fetches the PR's branch. It
-  dismisses an approval only once the act's own read of the PR's review
-  threads shows no feedback on it that the intake has not routed, and closes a
-  withdrawal once its read of the reviews after the dismissals shows none
-  standing on a commit without the head. Once a ruling has retired the PR and
+  dismisses an approval only once the act's own reads of the PR's reviews and
+  review threads show neither the approval's message nor an inline comment it
+  carries as feedback the city has not taken (`unrouted` in
+  `services/gctk/pr/feedback.go`), and closes a withdrawal once its read of the
+  reviews after the dismissals shows none standing on a commit without the
+  head. Once a ruling has retired the PR and
   the read the PR watch saved shows it closed, `decideRetired` in
   `landing.go` closes each withdrawal still open, since no approval it
   withdraws can merge a closed PR. Its reader for the review run:
@@ -559,7 +576,7 @@ no warrant.
     `internal/githubmonitor/client.go`). A search of the repository for a
     dismissal finds a session's startup dialogs, mail and a dashboard note,
     and no review.
-  - A dismissal can wait on routing, and GitHub can refuse it or not answer,
+  - A dismissal can wait on the take, and GitHub can refuse it or not answer,
     so the withdrawal must last until a later pass carries it out. Gas City
     keeps no such wait for a write to an outside service: a failed order is not
     retried ("No retry on dispatch failure" in
@@ -580,7 +597,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before
@@ -634,7 +651,7 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-22, at `gastownhall/gascity` main 1042f51083f9, with
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
   main 44b9db7168f6, and `gastownhall/beads` v1.3.4 (7ef2fd05eb0c), the bd
   the city runs.
@@ -783,8 +800,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b119475, `gastownhall/beads`
-  main 3a274fbf8f76 and `gastownhall/gascity-packs` main aa55b477d4c2.
+- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
+  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
@@ -814,7 +831,7 @@ no warrant.
     each run as one event, whose newest is what doctor found last
     ([the search](../specs/tk-1tfzr71.158/gas-city-search.md#the-doctor-order-gctk-doctor-run-and-its-event)).
     So this entry covers the patrol finding alone.
-- **Verified.** 2026-11-21, at `gastownhall/gascity` main 781c975d7921.
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
 - **Retires when.** Gas City ships a keyed problem record: one record per key,
   which a recurrence finds and updates and which stays until it is resolved.
 
@@ -874,3 +891,47 @@ no warrant.
   Code's directory, with the judge's decisions on those beads and their links,
   and the list, the kept text and the read of Claude Code's directories
   retire.
+
+## Mail wake
+
+- **Covers.** `orders/mail-notify-on-send.toml`,
+  `orders/mail-notify-on-reply.toml`, `orders/mail-notify-reconcile.toml` and
+  `services/gctk/mail`, the pass they run, with the notify ledger and its lock
+  that the pass keeps under the city's `.gc/runtime/packs/gc-toolkit`.
+- **Stands in for.** A session's turn requested for its unread mail whoever
+  sent it, as `--notify` requests one when the sender asks. The notify ledger
+  stands in for the replay of a keyed `gc session nudge`, which Gas City gives
+  only where its op journal records the nudge.
+- **Evidence.** In `gastownhall/gascity`, only the sender can request the
+  recipient's turn, and a keyed nudge is kept from being sent twice only where
+  the op journal records it:
+  - `gc mail send --notify` and `gc mail reply --notify` request it, one
+    message at a time (`newMailSendCmd` and `newMailReplyCmd` in
+    `cmd/gc/cmd_mail.go`).
+  - The API's send and reply, which the dashboard uses, take no notify option
+    (`humaHandleMailSend` and `humaHandleMailReply` in
+    `internal/api/huma_handlers_mail.go`).
+  - `gc mail check --inject` shows unread mail only in a turn something else
+    starts (`cmdMailCheckWithFormat` in `cmd/gc/cmd_mail.go`).
+  - `gc session nudge --key` answers a rerun under the same key with the first
+    run's outcome only "while the op journal records this command"
+    (`sessionNudgeKeyUsage` in `cmd/gc/cmd_session.go`). With no `[ops]` gate
+    set, the journal records only over a SQLite sessions store, and over a
+    store bd serves it records under no gate until bd's writes take
+    `--if-revision` (`OpsConfig` in `internal/config/ops.go`). A city `gc init`
+    makes keeps its sessions in a SQLite store by default, while an upgrade
+    leaves an older city's sessions in its work ledger ("Your city's storage
+    stays as it was" in `docs/getting-started/upgrading.md`). There a keyed
+    nudge runs unrecorded, and a rerun nudges again (`newCLIOp` in
+    `cmd/gc/op_record.go`).
+  - Issue #1966, a design issue that is open, carries the maintainer ruling of
+    2026-06-28 that coordinator sessions "wake on mail with a debounce", and no
+    code implements it.
+  - The search is
+    [specs/tk-qpnzxnj/gas-city-search.md](../specs/tk-qpnzxnj/gas-city-search.md).
+- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68.
+- **Retires when.** A Gas City release requests a session's turn for its unread
+  mail whoever sent it, as #1966 rules. The orders and the verb then retire,
+  and each agent they list is woken by Gas City. Before that, once the city
+  keeps its sessions in a store the op journal records, the notify ledger's
+  move onto a keyed nudge is due.
