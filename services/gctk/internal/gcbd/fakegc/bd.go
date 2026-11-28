@@ -59,6 +59,8 @@ func (c *Call) bd(s, d string, args []string) (err error) {
 		return c.show(s, d, args)
 	case "list":
 		return c.list(s, d, args)
+	case "children":
+		return c.children(s, d, args)
 	case "update":
 		return c.update(s, d, args)
 	case "create":
@@ -461,6 +463,11 @@ func (c *Call) list(s, d string, args []string) error {
 	if err != nil {
 		return err
 	}
+	// bd reads --status all as every status: no status filter, and none of the
+	// default scope's exclusions.
+	if statuses == "all" {
+		statuses, listAll = "", true
+	}
 	var statusList []string
 	if statuses != "" {
 		statusList = strings.Split(statuses, ",")
@@ -548,6 +555,24 @@ func (c *Call) list(s, d string, args []string) error {
 		c.out("gc: simulated trailing output\n")
 	}
 	return nil
+}
+
+// children is bd's `children <id>`, which bd runs as the listing
+// `list --parent <id> --status all`, so it answers every child of the bead
+// whatever its status, and a list fault applies to it. bd takes exactly one id.
+func (c *Call) children(s, d string, args []string) error {
+	var ids, flags []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+		} else {
+			ids = append(ids, a)
+		}
+	}
+	if len(ids) != 1 {
+		return c.fail(1, fmt.Sprintf("Error: accepts 1 arg(s), received %d", len(ids)))
+	}
+	return c.list(s, d, append([]string{"--parent", ids[0], "--status", "all"}, flags...))
 }
 
 // hidden reports whether a listing leaves the row out unless it asks for its

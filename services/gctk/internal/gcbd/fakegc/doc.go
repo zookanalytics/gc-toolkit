@@ -80,20 +80,23 @@
 //     gc.execution_routed_to and records poured_priority. With --no-formula it
 //     routes instead, writing gc.routed_to.
 //   - gc-toolkit scripts-dir prints STUB_PACK's assets/scripts.
-//   - bd where, show, list, update, create, close, dep (list, add, add --file,
-//     remove, --blocks), kv (get, set, clear, list), gate (list, resolve),
-//     comment, comments, set-state, blocked, ready, statuses, the built-in
-//     statuses bd prints for a store with no custom status, and sql, which
-//     answers the one query gctk reads beside blocked: the ids bd's blocked
-//     rule marks. A --db pin and a --rig ahead of the verb pick the store
-//     (route), and an --actor ahead of it is the actor the call writes as.
+//   - bd where, show, list, children, update, create, close, dep (list, add,
+//     add --file, remove, --blocks), kv (get, set, clear, list), gate (list,
+//     resolve), comment, comments, set-state, blocked, ready, statuses, the
+//     built-in statuses bd prints for a store with no custom status, and sql,
+//     which answers the one query gctk reads beside blocked: the ids bd's
+//     blocked rule marks. A --db pin and a --rig ahead of the verb pick the
+//     store (route), and an --actor ahead of it is the actor the call writes
+//     as.
 //
 // Each keeps bd's rule where the contract test pins one: a listing carries
 // each bead's edges, selects a parent's children by --parent and hides a
 // template, an agent, role or message bead and a wisp unless it asks for that
 // kind, and one that asks for neither --all nor --status leaves out closed and
-// pinned beads; a show leaves out an edge onto a bead the store does not
-// hold, one into another store, which a listing keeps, and under
+// pinned beads, while --status all keeps every status; children <id> is the
+// listing `list --parent <id> --status all`, as bd runs it, so a list fault
+// reads those arguments; a show leaves out an edge onto a bead the store does
+// not hold, one into another store, which a listing keeps, and under
 // --include-dependents carries the beads with an edge onto the bead, in the
 // store's order, each cut to its id, title, status, priority and type and the
 // edge's type, with no dependents key when there are none; blocked and ready
