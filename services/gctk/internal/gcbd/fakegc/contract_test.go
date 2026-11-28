@@ -228,6 +228,14 @@ func contractCases() []contractCase {
 				{args: []string{"list", "--parent", "{p}", "--json"}, answer: "null-or-ids"},
 				{args: []string{"list", "--parent", "{p}", "--all", "--json"}, answer: "null-or-ids"},
 			}},
+		{name: "children lists a bead's children of every status, and a bead with none as an empty list", beads: []string{"p", "n"},
+			more: [][]string{{"kid", "--parent", "{p}"}, {"donekid", "--parent", "{p}"}, {"pinkid", "--parent", "{p}"}}, steps: []step{
+				{args: []string{"close", "{donekid}"}},
+				{args: []string{"update", "{pinkid}", "--status=pinned"}},
+				{args: []string{"children", "{p}", "--json"}, answer: "null-or-ids"},
+				{args: []string{"list", "--parent", "{p}", "--status", "all", "--json"}, answer: "null-or-ids"},
+				{args: []string{"children", "{n}", "--json"}, answer: "null-or-ids"},
+			}},
 		{name: "an update reads --status in either spelling and refuses a key with no value", beads: []string{"a", "b"}, state: []string{"a", "b"}, steps: []step{
 			{args: []string{"update", "{a}", "--status", "in_progress"}},
 			{args: []string{"update", "{b}", "--set-metadata", "k=v", "--set-metadata", "novalue"}},

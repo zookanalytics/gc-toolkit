@@ -192,7 +192,5 @@ Still park a true duplicate: a second fresh root for an issue whose
 worktree shows no paused rebase, or two fresh roots
 racing before any `metadata.work_dir` exists, or any root whose
 `gc.var.resume_handoff` is absent or doesn't match the issue's current
-`metadata.resume_handoff`. A concurrent live polecat
-on the same worktree is the separate `polecat-patterns`
-worktree-reclaim/liveness concern, not this rule.
+`metadata.resume_handoff`.
 {{ end }}
