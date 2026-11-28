@@ -27,18 +27,41 @@ func TestMailNotifyNeedsItsAgents(t *testing.T) {
 	}
 }
 
-// A filing whose bound passes while its writer runs ends the writer and files
-// nothing.
-func TestAMailFindingPastItsBoundEndsItsWriter(t *testing.T) {
+// mailStub puts a gc on PATH that answers a peek of the mail hq-m1, marks it
+// unread, and answers its archive with archive, a line of shell.
+func mailStub(t *testing.T, archive string) {
+	t.Helper()
 	bin := t.TempDir()
 	stub := "#!/bin/sh\ncase \"$*\" in\n" +
 		"  \"mail peek hq-m1 --json\") echo '{\"message\":{\"id\":\"hq-m1\",\"from\":\"tools/gc-toolkit.polecat\",\"subject\":\"NOTICE: x\",\"body\":\"b\"}}' ;;\n" +
 		"  \"mail mark-unread hq-m1\") : ;;\n" +
+		"  \"mail archive hq-m1\") " + archive + " ;;\n" +
 		"  *) echo \"stub gc: no answer for $*\" >&2; exit 9 ;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(bin, "gc"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// A finding filed whose mail did not archive succeeds, and names the command
+// that archives the mail.
+func TestAMailFindingThatDidNotArchiveNamesTheArchive(t *testing.T) {
+	mailStub(t, "echo 'mail store busy' >&2; exit 1")
+	scriptStub(t, "patrol-finding.sh")
+	var out, errb bytes.Buffer
+	if code := Run([]string{"mail", "finding", "hq-m1", "--key", "k"}, "", &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "filed mail hq-m1 under k, but it was not archived: ") ||
+		!strings.HasSuffix(errb.String(), ". Archive it with gc mail archive hq-m1\n") {
+		t.Errorf("stderr %q", errb.String())
+	}
+}
+
+// A filing whose bound passes while its writer runs ends the writer and files
+// nothing.
+func TestAMailFindingPastItsBoundEndsItsWriter(t *testing.T) {
+	mailStub(t, ":")
 	started := blockedWriter(t, "patrol-finding.sh")
 	bound := mailFindingBound
 	mailFindingBound = time.Second

@@ -80,7 +80,7 @@ func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
 				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s and archived it\n", a.Mail, a.Key)
 				return nil
 			case out.Filed:
-				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s, but it was not archived, so the next read files it again as an occurrence: %s\n", a.Mail, a.Key, out.Why)
+				fmt.Fprintf(stderr, "gctk mail finding: filed mail %s under %s, but it was not archived: %s. Archive it with gc mail archive %s\n", a.Mail, a.Key, out.Why, a.Mail)
 				return nil
 			case out.Refused:
 				fmt.Fprintf(stderr, "gctk mail finding: nothing filed for mail %s, which stays unread: a live finding listed above shares the key or the subject. Run again with its --key and --about when the mail reports its situation, or with --distinct when it reports another (%s)\n", a.Mail, out.Why)
