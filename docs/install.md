@@ -118,7 +118,7 @@ that does not import the pack itself.
   needs a Go toolchain. Until the first build lands, every such write is
   refused, and no PR merges either: the landing order runs the same binary.
 - **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
-  `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
+  `deferred-dispatch`, `reconcile-rig-checkouts`,
   `gctk-build`, `helm-build`, and the feedback
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,

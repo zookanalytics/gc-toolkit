@@ -635,8 +635,8 @@ gc sling refuses a route that cannot work, such as to a proactive pool the city
 does not configure, or it refuses the subject because a first reaction already
 runs on it or an open conversation tracks it, a live workflow already drives
 it, it is already routed or armed, held, assigned or not open, an open human
-gate blocks it, or it is a standing record or a feedback pattern, whose kind
-takes no first reaction. The intake asks nothing about the pool before the
+gate blocks it, or it is a feedback pattern, whose kind takes no first
+reaction. The intake asks nothing about the pool before the
 sling: a reaction slung to a proactive pool that is suspended, or capped at no
 sessions, waits there until the pool runs, and no framing reaches the operator
 until then. `--no-react` files the conversation at once.
@@ -825,10 +825,8 @@ premise has died is resolved `moot:`, and one whose premise holds but needs
 nobody `benign:`, with the reading as the answer. When the conversation's own
 ask has died with it, the sitting appends the reading to the subject's notes
 and closes the conversation with it, posting nothing and stamping no headline.
-A gate's message is written when it is filed, so the sitting runs the re-check
-command a gate names, as the liveness sweep's gate names
-`liveness-recheck.sh`, through the pack's own copy, and its census supersedes
-the message's lists.
+A gate's message is written when it is filed, so the sitting checks its age
+before it prepares from it.
 
 **The hold** is the operator owing an answer later. The sitting keeps its task
 claimed and the session stays, because the converse templates keep
@@ -1284,16 +1282,13 @@ under the key, and each gate Accept would answer there.
 
 A sitting that reaches a conclusion leaves its subject with a `gc.takeaway`,
 a one-line headline of what was settled or what is being waited for. A
-takeaway exempts nothing anywhere in the liveness family —
-`liveness-sweep.sh`, its precheck and `liveness-recheck.sh`. The wait it names
-does, for as long as that wait is live, and every shape the wait takes is a
-rule those scripts already apply: a `blocks` blocker, which
-`takeaway --waiting-on` and a human gate both write, keeps the bead out of
-`bd ready`, the set the sweep classifies; a child reaches the parent-child arm;
-and a `tracks` target reaches its own. A parked subject whose routed work has
-all landed therefore returns as an ordinary unnamed wait in the sweep's batch
-gate on the rig's triage subject, and the takeaway is never cleared: it is the
-record of what the sitting concluded. A subject a sitting's ruling leaves
+takeaway holds nothing by itself. The wait it names holds the subject for as
+long as that wait is live, through the edge that records it: a `blocks`
+blocker, which `takeaway --waiting-on` and a human gate both write, keeps the
+bead out of `bd ready`. A parked subject whose routed work has all landed is
+ready again, and the board's Work queue lists it under Not scheduled, with the
+other ready work that no hold, route, assignee, arm or live run sends. The
+takeaway is never cleared: it is the record of what the sitting concluded. A subject a sitting's ruling leaves
 waiting on work comes back through the validating closer the sign-off arms
 instead ([The sitting](#the-sitting)), which checks it once that work lands.
 
@@ -1338,8 +1333,7 @@ Everywhere else a takeaway carries its wait as an edge: `--waiting-on` for
 work a pool owes, a human gate for what a person owes. A headline written with
 neither the edge nor the flag is a subject parked on a sentence, and
 `doctor/check-wait-is-an-edge` reports it. No agent in the pack writes a
-`triage.hold`; the liveness sweep's disposition menu offers a human gate in its
-place.
+`triage.hold`.
 
 ## How a held sitting ends
 

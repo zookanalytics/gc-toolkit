@@ -177,11 +177,6 @@ hold for the pack's shell readers, which test rows they have already read. It
 reads either of Gas City's hold labels, `hold:mayor` and `hold:external`, each
 trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 
-- the liveness sweep names a held bead's wait, so it does not report the bead as
-  an unnamed wait;
-- the re-check a liveness gate's message carries (`liveness-recheck.sh`) names
-  the same wait, so a census cut before intake held the bead does not put it on
-  that gate's agenda as well;
 - `doctor/check-blocked-work-armed` owes a held bead no arm, because its dispatch
   is the route it gets once the sitting places it;
 - `doctor/check-po-queue-only` takes a bead routed or assigned to the po as
@@ -276,8 +271,8 @@ A hold also lifts these ways:
   closer's arm, takes this write too, because deferred dispatch fires a held
   bead's arm only once its hold lifts. A bead lifted with nothing else
   written is raw input again unless a first reaction held it: the proactive
-  scan reacts to it when intake is on, and the liveness sweep names it until
-  then. A bead a first reaction held keeps that reaction's headline, which
+  scan reacts to it when intake is on, and the board lists it under Not
+  scheduled until then. A bead a first reaction held keeps that reaction's headline, which
   keeps the scan off it, so it takes another reaction only when someone asks
   for one.
 - A close leaves the label on a closed bead, which nothing reads.

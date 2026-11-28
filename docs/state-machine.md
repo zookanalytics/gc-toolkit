@@ -410,9 +410,8 @@ check_set may carry, but it is a universal merge rule, not a check (below). The
 one resolver, `gctk review checks --resolve <cs> --through <phase> --at <oid>`,
 reads the check index at the commit the reader judges, drops all three and
 returns the checks whose phase gates `<phase>`, so no reader of a stage
-transition re-derives that drop: `gate-ensure.sh`, `review-outcome.sh` and
-`liveness-sweep.sh` all ask it rather than tokenizing
-`check_set` themselves.
+transition re-derives that drop: `gate-ensure.sh` and `review-outcome.sh` both
+ask it rather than tokenizing `check_set` themselves.
 `bring-current-guard.sh` judges no transition and asks no phase, and it reads
 `check_set`'s names itself three times. When it records a conflicted round, it
 rules on the round itself for a set of `none` or `off`, and it adds `triage` to
