@@ -1,6 +1,6 @@
 ---
 name: Gas City search — mailing a person about a stuck prompt
-description: The search behind the prompt-alert orders and their verb, gctk session prompt-alert, which mail the escalation recipient and the mechanik once about each prompt a pool seat waits at that Gas City escalated, and once when it clears. It covers the work ladder's nudge_refused escalation, the pending-interaction events, event-triggered orders, core's escalate.sh with its incident keys and GC_ESCALATION_RECIPIENT, the notify-on-claims-stalled orders, gc mail send --dedup, why none delivers this alert as it stands, the measurements the windows rest on, and the gaps it leaves. Read it when changing the orders or the verb, or when a review asks why the alert is the pack's.
+description: The search behind the prompt-alert orders and their verb, gctk session prompt-alert, which mail the escalation recipient and the mechanik once about each prompt a pool seat waits at that Gas City escalated, and once when it clears. It covers the work ladder's nudge_refused escalation, the pending-interaction events, event-triggered orders, core's escalate.sh with its incident keys and GC_ESCALATION_RECIPIENT, the notify-on-claims-stalled orders, gc mail send --dedup, why none delivers this alert as it stands, the measurements its reads rest on, and the gaps it leaves. Read it when changing the orders or the verb, or when a review asks why the alert is the pack's.
 ---
 
 # Gas City search for tk-npkp7mk.7
@@ -83,8 +83,12 @@ has outlasted the ladder's nudges.
 
 **Measured.** In the 48 hours to 2026-11-28T01:40Z the log held 33
 `session.pending` and 34 `session.pending_cleared` events, and no escalation of
-any of their sessions. A day of either reads in about 2 seconds (18 and 19
-events). The census on tk-p4by7cv found that the lane recorded 6 of the 18
+any of their sessions. The pass reads both types with no window, which gc
+answers with the newest page of each, 500 events (`fetchCityEvents` in
+`cmd/gc/cmd_events.go` at 6dce31bbb6). At 2026-11-28T08:25Z each such read
+took about 10 seconds and answered 76 events reaching back to 2026-11-23, from
+the log and its archives, where a day of `session.pending` took about 3
+seconds. The census on tk-p4by7cv found that the lane recorded 6 of the 18
 two-minute prompts in one 72-hour window, and all three long waits.
 
 ## Event-triggered orders
@@ -221,6 +225,13 @@ gascity-packs at 44b9db7168f6 holds no mention of `work.escalated`,
 - **A prompt the lane never records.** A seat escalated at a prompt Gas City
   did not record is not alerted. The lane recorded every long wait in the
   census window.
+- **A prompt older than the log.** Gas City records a prompt once, when it
+  appears (`Watcher.apply` in `internal/pendingwatch/pendingwatch.go` at
+  6dce31bbb6). A seat whose escalations no pass takes until the prompt has
+  left the newest 500 prompts in the log and its archives is not alerted.
+  This city keeps its archives 168 hours and records about 15 prompts a day,
+  so that takes a week with no pass, such as orders first started beside a
+  prompt a week old.
 - **A clear that never comes.** A prompt up when its session closed or slept
   while no watcher ran gets no `session.pending_cleared`, so its incident stays
   in the ledger and no note goes.

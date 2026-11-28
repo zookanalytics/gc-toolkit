@@ -204,6 +204,36 @@ func TestAClearIsNotedByTheNextPassHoweverLate(t *testing.T) {
 	}
 }
 
+// A prompt that has waited more than a day when a pass first takes its seat's
+// escalation, as at the orders' first pass, is alerted once, since Gas City
+// records a prompt only when it appears.
+func TestAPromptOlderThanADayIsAlertedAtItsFirstPass(t *testing.T) {
+	c := newAlertCity(t)
+	c.Add(pendingEv(0, "s-1", "tmux-a"), escalationEv(25*time.Hour, "s-1", nudgeRefused))
+	noFailures(t, c.pass(25*time.Hour+time.Minute))
+	sends := c.Sends()
+	if got := addresses(sends); !slices.Equal(got, []string{"human", "gc-toolkit.mechanik"}) || !strings.Contains(sends[0].Body, "has waited 25h1m") {
+		t.Fatalf("mailed %+v", sends)
+	}
+	c.Add(escalationEv(26*time.Hour, "s-1", nudgeRefused))
+	noFailures(t, c.pass(26*time.Hour+time.Minute))
+	if n := len(c.Sends()); n != 2 {
+		t.Errorf("the next escalation mailed %q", addresses(c.sentSince(2)))
+	}
+}
+
+// A prompt that cleared long before its seat's next nudge_refused escalation,
+// which Gas City also records for a seat whose runtime is unavailable, is not
+// alerted.
+func TestAnOldClearedPromptIsNotAlerted(t *testing.T) {
+	c := newAlertCity(t)
+	c.Add(pendingEv(0, "s-1", "tmux-a"), clearEv(10*time.Minute, "s-1", "tmux-a", "resolved"), escalationEv(30*time.Hour, "s-1", nudgeRefused))
+	noFailures(t, c.pass(30*time.Hour+time.Minute))
+	if len(c.Sends()) != 0 {
+		t.Errorf("mailed %q", addresses(c.Sends()))
+	}
+}
+
 // An escalation for any reason but nudge_refused is not about a prompt: it
 // mails nothing, and with no incident open the pass reads nothing past the
 // escalations.

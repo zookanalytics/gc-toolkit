@@ -38,11 +38,6 @@ const (
 	// pass that runs on any event inside the window still sees the escalation
 	// whose own run failed.
 	EscalationWindow = 2 * time.Hour
-	// PromptWindow is how far back a pass reads the sessions' pending prompts.
-	// A prompt's first escalation comes at least twenty minutes after it
-	// appears, so the window reaches back from a seat's escalation to its
-	// prompt for a day.
-	PromptWindow = 24 * time.Hour
 	// AlertDeadline bounds a pass from its start: its wait for the lock, its
 	// reads and its mail. SendBound bounds each message.
 	AlertDeadline = 120 * time.Second
@@ -232,7 +227,13 @@ func (a *PromptAlert) Run(ctx context.Context) AlertOutcome {
 		}
 	}
 	if len(refused) > 0 {
-		pendingEvents, err := a.City.Events(ctx, pendingType, PromptWindow)
+		// The prompts are read with no window too, the newest page as the
+		// clears are. Gas City records a prompt once, when it appears, and its
+		// seat's escalations repeat without it, so a prompt that has waited
+		// past any window when a pass first takes its seat's escalation, at
+		// the orders' first pass or after a day of failed ones, is still
+		// found.
+		pendingEvents, err := a.City.Events(ctx, pendingType, 0)
 		if err != nil {
 			failures = append(failures, "the sessions' prompts did not read, so no new prompt was alerted: "+err.Error())
 		} else {
