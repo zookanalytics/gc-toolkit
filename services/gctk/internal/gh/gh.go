@@ -122,22 +122,29 @@ type PullRequest struct {
 // Review is one review of a PR. NodeID is its node id, which a reaction names
 // it by, and URL its address on the PR. State is APPROVED, CHANGES_REQUESTED,
 // COMMENTED, DISMISSED or PENDING. AuthorCanPush is whether its author can push
-// to the repository (authorCanPushToRepository). Commit is the commit the
-// review was given on, its commit_id, empty when GitHub names none. UpdatedAt
-// is when the review last changed, which an edit of its text moves.
-// ViewerReactions are the reactions the account the read ran as left on it.
+// to the repository (authorCanPushToRepository). AuthorType is the kind of
+// account that posted it, as GitHub types it (User, Bot, Organization or
+// Mannequin), and AuthorAssociation the author's association with the
+// repository (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR,
+// FIRST_TIMER, MANNEQUIN or NONE), each empty for an account GitHub no longer
+// names. Commit is the commit the review was given on, its commit_id, empty
+// when GitHub names none. UpdatedAt is when the review last changed, which an
+// edit of its text moves. ViewerReactions are the reactions the account the
+// read ran as left on it.
 type Review struct {
-	ID              int64
-	NodeID          string
-	URL             string
-	State           string
-	Body            string
-	SubmittedAt     string
-	UpdatedAt       string
-	Author          string
-	AuthorCanPush   bool
-	Commit          string
-	ViewerReactions []string
+	ID                int64
+	NodeID            string
+	URL               string
+	State             string
+	Body              string
+	SubmittedAt       string
+	UpdatedAt         string
+	Author            string
+	AuthorType        string
+	AuthorAssociation string
+	AuthorCanPush     bool
+	Commit            string
+	ViewerReactions   []string
 }
 
 // CheckSuite is one check suite at a commit, with the latest result of each of
@@ -178,19 +185,21 @@ type Thread struct {
 // whole. Review is the review that carried it, nil when GitHub names none.
 // ViewerReactions are the reactions the account the read ran as left on it,
 // such as THUMBS_UP. UpdatedAt is when it last changed, which an edit of its
-// text moves.
+// text moves. AuthorType and AuthorAssociation are a review's.
 type Comment struct {
-	ID              int64
-	NodeID          string
-	URL             string
-	Author          string
-	Body            string
-	CreatedAt       string
-	UpdatedAt       string
-	Path            string
-	OriginalLine    int
-	Review          *CommentReview
-	ViewerReactions []string
+	ID                int64
+	NodeID            string
+	URL               string
+	Author            string
+	AuthorType        string
+	AuthorAssociation string
+	Body              string
+	CreatedAt         string
+	UpdatedAt         string
+	Path              string
+	OriginalLine      int
+	Review            *CommentReview
+	ViewerReactions   []string
 }
 
 // CommentReview is the review that carried an inline comment.
@@ -200,19 +209,22 @@ type CommentReview struct {
 	SubmittedAt string
 }
 
-// IssueComment is one comment on a PR's conversation. NodeID is its node id,
-// which a reaction names it by, and URL its address on the PR. UpdatedAt is
-// when it last changed, which an edit of its text moves. ViewerReactions are
-// the reactions the account the read ran as left on it.
+// IssueComment is one comment on a PR's or an issue's conversation. NodeID is
+// its node id, which a reaction names it by, and URL its address on the PR or
+// the issue. UpdatedAt is when it last changed, which an edit of its text
+// moves. ViewerReactions are the reactions the account the read ran as left on
+// it. AuthorType and AuthorAssociation are a review's.
 type IssueComment struct {
-	ID              int64
-	NodeID          string
-	URL             string
-	Author          string
-	Body            string
-	CreatedAt       string
-	UpdatedAt       string
-	ViewerReactions []string
+	ID                int64
+	NodeID            string
+	URL               string
+	Author            string
+	AuthorType        string
+	AuthorAssociation string
+	Body              string
+	CreatedAt         string
+	UpdatedAt         string
+	ViewerReactions   []string
 }
 
 // The queries. Each paginated one pages a single connection, which is what
@@ -269,14 +281,14 @@ const (
         checkRuns(first:100,filterBy:{checkType:LATEST}){pageInfo{hasNextPage}
           nodes{name status conclusion detailsUrl isRequired(pullRequestNumber:$number)}}`
 
-	reviewFields = `fullDatabaseId id url state body submittedAt updatedAt authorCanPushToRepository author{login} commit{oid}
+	reviewFields = `fullDatabaseId id url state body submittedAt updatedAt authorCanPushToRepository authorAssociation author{__typename login} commit{oid}
           reactionGroups{content viewerHasReacted}`
 
-	commentFields = `fullDatabaseId id url author{login} body createdAt updatedAt path originalLine
+	commentFields = `fullDatabaseId id url authorAssociation author{__typename login} body createdAt updatedAt path originalLine
           pullRequestReview{fullDatabaseId submittedAt state}
           reactionGroups{content viewerHasReacted}`
 
-	issueCommentFields = `fullDatabaseId id url body createdAt updatedAt author{login}
+	issueCommentFields = `fullDatabaseId id url body createdAt updatedAt authorAssociation author{__typename login}
           reactionGroups{content viewerHasReacted}`
 
 	threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$endCursor:String){
@@ -570,6 +582,7 @@ type reviewNode struct {
 	SubmittedAt   string `json:"submittedAt"`
 	UpdatedAt     string `json:"updatedAt"`
 	AuthorCanPush bool   `json:"authorCanPushToRepository"`
+	Association   string `json:"authorAssociation"`
 	Author        *actor `json:"author"`
 	Commit        *struct {
 		Oid string `json:"oid"`
@@ -583,8 +596,8 @@ func (n reviewNode) review() (Review, error) {
 		return Review{}, err
 	}
 	v := Review{ID: id, NodeID: n.NodeID, URL: n.URL, State: n.State, Body: n.Body, SubmittedAt: n.SubmittedAt,
-		UpdatedAt: n.UpdatedAt, Author: n.Author.name(), AuthorCanPush: n.AuthorCanPush,
-		ViewerReactions: n.ReactionGroups.viewer()}
+		UpdatedAt: n.UpdatedAt, Author: n.Author.name(), AuthorType: n.Author.kind(), AuthorAssociation: n.Association,
+		AuthorCanPush: n.AuthorCanPush, ViewerReactions: n.ReactionGroups.viewer()}
 	if n.Commit != nil {
 		v.Commit = n.Commit.Oid
 	}
@@ -599,6 +612,7 @@ type issueCommentNode struct {
 	Body           string         `json:"body"`
 	CreatedAt      string         `json:"createdAt"`
 	UpdatedAt      string         `json:"updatedAt"`
+	Association    string         `json:"authorAssociation"`
 	Author         *actor         `json:"author"`
 	ReactionGroups reactionGroups `json:"reactionGroups"`
 }
@@ -608,8 +622,9 @@ func (n issueCommentNode) comment() (IssueComment, error) {
 	if err != nil {
 		return IssueComment{}, err
 	}
-	return IssueComment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), Body: n.Body,
-		CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, ViewerReactions: n.ReactionGroups.viewer()}, nil
+	return IssueComment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), AuthorType: n.Author.kind(),
+		AuthorAssociation: n.Association, Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt,
+		ViewerReactions: n.ReactionGroups.viewer()}, nil
 }
 
 // commentNode is an inline comment as the thread reads ask for it.
@@ -617,6 +632,7 @@ type commentNode struct {
 	ID           string `json:"fullDatabaseId"`
 	NodeID       string `json:"id"`
 	URL          string `json:"url"`
+	Association  string `json:"authorAssociation"`
 	Author       *actor `json:"author"`
 	Body         string `json:"body"`
 	CreatedAt    string `json:"createdAt"`
@@ -636,8 +652,9 @@ func (n commentNode) comment() (Comment, error) {
 	if err != nil {
 		return Comment{}, err
 	}
-	c := Comment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), Body: n.Body, CreatedAt: n.CreatedAt,
-		UpdatedAt: n.UpdatedAt, Path: n.Path, ViewerReactions: n.ReactionGroups.viewer()}
+	c := Comment{ID: id, NodeID: n.NodeID, URL: n.URL, Author: n.Author.name(), AuthorType: n.Author.kind(),
+		AuthorAssociation: n.Association, Body: n.Body, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Path: n.Path,
+		ViewerReactions: n.ReactionGroups.viewer()}
 	if n.OriginalLine != nil {
 		c.OriginalLine = *n.OriginalLine
 	}
@@ -789,9 +806,11 @@ type connection[T any] struct {
 	Nodes []T `json:"nodes"`
 }
 
-// actor is a post's author, which GitHub leaves null for a deleted account.
+// actor is a post's author, which GitHub leaves null for a deleted account:
+// its login and the kind of account it is (__typename).
 type actor struct {
 	Login string `json:"login"`
+	Type  string `json:"__typename"`
 }
 
 func (a *actor) name() string {
@@ -799,6 +818,13 @@ func (a *actor) name() string {
 		return ""
 	}
 	return a.Login
+}
+
+func (a *actor) kind() string {
+	if a == nil {
+		return ""
+	}
+	return a.Type
 }
 
 // prVars are the variables every PR query takes.
