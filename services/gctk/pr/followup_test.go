@@ -87,6 +87,9 @@ func (m *marks) read() ([]quote.Held, error) {
 	return now, nil
 }
 
+// tk1 names tk-1 as the bead a follow-up goes on.
+func tk1() (string, error) { return "tk-1", nil }
+
 // followUpHeld is pr.FollowUpHeld on PR #7 of acme/widgets for tk-1, under a
 // record lock of the test's own, reading the posts again through m.
 func followUpHeld(t *testing.T, dir string, g pr.Gates, m *marks, held []quote.Held) error {
@@ -96,7 +99,8 @@ func followUpHeld(t *testing.T, dir string, g pr.Gates, m *marks, held []quote.H
 		m.held = held
 	}
 	m.mu.Unlock()
-	return pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, "tk-1", "acme/widgets", 7, held)
+	_, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, tk1, "acme/widgets", 7, true, held)
+	return err
 }
 
 // A read's follow-up files nothing for a post the city already marked taken or
@@ -139,7 +143,7 @@ func TestFollowUpHeldSkipsMarkedPostsAndMarksTheRest(t *testing.T) {
 		!strings.Contains(err.Error(), "pullrequestreview-2") || !slices.Equal(m.left, []string{"IC_1 EYES"}) {
 		t.Fatalf("a mark that did not land read as %v, with marks %q", err, m.left)
 	}
-	if err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, nil, m.read, "tk-1", "acme/widgets", 7,
+	if _, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, nil, m.read, tk1, "acme/widgets", 7, true,
 		held[:1]); err == nil {
 		t.Fatal("a follow-up with nothing to mark posts through read as filed")
 	}
@@ -164,7 +168,7 @@ func TestFollowUpHeldDecidesOnThePostsAsTheyStand(t *testing.T) {
 		t.Fatalf("filed %q and marked %q for posts already followed up or gone", g.list(), m.left)
 	}
 	failing := func() ([]quote.Held, error) { return nil, errors.New("gh: HTTP 502") }
-	if err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, failing, "tk-1", "acme/widgets", 7,
+	if _, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, failing, tk1, "acme/widgets", 7, true,
 		held); err == nil || !strings.Contains(err.Error(), "did not read the posts again") || len(g.list()) != 0 {
 		t.Fatalf("a read again that failed read as %v, filing %q", err, g.list())
 	}
@@ -212,8 +216,9 @@ func TestFollowUpHeldFilesOneGateForReadsAtOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs <- pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, "tk-1", "acme/widgets", 7,
-				held)
+			_, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, tk1, "acme/widgets", 7,
+				true, held)
+			errs <- err
 		}()
 	}
 	close(start)
@@ -250,5 +255,81 @@ func TestOwnerOfIsTheLiveOwnerElseAClosedAnchor(t *testing.T) {
 	}
 	if _, err := pr.OwnerOf(ledger.New(d.store), "not a url"); err == nil {
 		t.Fatal("a URL that names no PR read as owned")
+	}
+}
+
+// findings records each finding a follow-up files, answering it with id, or
+// failing it with err.
+type findings struct {
+	filed []string
+	id    string
+	err   error
+}
+
+func (f *findings) File(_ context.Context, key, title, message string) (string, error) {
+	f.filed = append(f.filed, key+" "+title+"\n"+message)
+	return f.id, f.err
+}
+
+// A follow-up goes on the bead that owns the PR. An issue, which no bead owns,
+// and a PR no bead owns get a finding of their own for the item, one under the
+// item's key, so no held post goes without a question.
+func TestFollowUpSubjectIsTheOwnerElseAFindingOfItsOwn(t *testing.T) {
+	d := newLand(t)
+	f := &findings{id: "tk-f1"}
+	if got, err := pr.FollowUpSubject(context.Background(), d.l.Ledger, f, "acme/widgets", 7, true, prURL); err != nil ||
+		got != bead || len(f.filed) != 0 {
+		t.Fatalf("the owned PR's follow-up goes on %q, %v, filing %q", got, err, f.filed)
+	}
+	other := "https://github.com/acme/widgets/pull/99"
+	if got, err := pr.FollowUpSubject(context.Background(), d.l.Ledger, f, "acme/widgets", 99, true, other); err != nil ||
+		got != "tk-f1" || len(f.filed) != 1 || !strings.HasPrefix(f.filed[0], "outside-posts.acme.widgets.99 Posts by "+
+		"outside accounts on acme/widgets#99 are held from the city's agents\n") ||
+		!strings.Contains(f.filed[0], "no bead owns the PR") {
+		t.Fatalf("a PR no bead owns goes on %q, %v, filing %q", got, err, f.filed)
+	}
+	issue := "https://github.com/acme/widgets/issues/5"
+	if got, err := pr.FollowUpSubject(context.Background(), d.l.Ledger, f, "acme/widgets", 5, false, issue); err != nil ||
+		got != "tk-f1" || len(f.filed) != 2 || !strings.HasPrefix(f.filed[1], "outside-posts.acme.widgets.5 ") ||
+		!strings.Contains(f.filed[1], "no bead owns the issue") {
+		t.Fatalf("an issue goes on %q, %v, filing %q", got, err, f.filed)
+	}
+	f = &findings{err: errors.New("patrol-finding.sh: exit 1")}
+	if _, err := pr.FollowUpSubject(context.Background(), d.l.Ledger, f, "acme/widgets", 5, false, issue); err == nil {
+		t.Fatal("a finding that did not file read as a bead")
+	}
+}
+
+// A read files no finding while every post it held was followed up by another
+// filer: it asks for the bead only once a post is owed one under the lock, and
+// a bead it cannot name files nothing and says so. On an issue the gate's
+// message names the issue.
+func TestFollowUpHeldNamesItsBeadOnlyWhenAPostIsOwed(t *testing.T) {
+	dir := t.TempDir()
+	held := []quote.Held{{Kind: quote.KindConversation, Author: "stranger",
+		URL: "https://github.com/acme/widgets/issues/5#issuecomment-1", Node: "IC_1"}}
+	asked := 0
+	subject := func() (string, error) { asked++; return "tk-f1", nil }
+	g, m := &gates{}, &marks{held: []quote.Held{{Kind: quote.KindConversation, Author: "stranger",
+		URL: held[0].URL, Node: "IC_1", Reactions: []string{"EYES"}}}}
+	if got, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, subject, "acme/widgets", 5,
+		false, held); err != nil || got != "" || asked != 0 || len(g.list()) != 0 {
+		t.Fatalf("a post followed up since went on %q, %v, asking for its bead %d times and filing %q",
+			got, err, asked, g.list())
+	}
+	m = &marks{held: held}
+	if got, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, subject, "acme/widgets", 5,
+		false, held); err != nil || got != "tk-f1" || asked != 1 ||
+		!slices.Equal(g.list(), []string{"tk-f1 outside-post-stranger"}) {
+		t.Fatalf("an owed post went on %q, %v, asking %d times and filing %q", got, err, asked, g.list())
+	}
+	if msg := g.messages[0]; !strings.Contains(msg, "its posts on issue #5") || !strings.Contains(msg, "on the issue.") {
+		t.Fatalf("the issue's gate reads %q", msg)
+	}
+	nobody := func() (string, error) { return "", nil }
+	g, m = &gates{}, &marks{held: held}
+	if _, err := pr.FollowUpHeld(context.Background(), dir, time.Minute, g, m, m.read, nobody, "acme/widgets", 5,
+		false, held); err == nil || len(g.list()) != 0 || len(m.left) != 0 {
+		t.Fatalf("a follow-up with no bead read as %v, filing %q and marking %q", err, g.list(), m.left)
 	}
 }

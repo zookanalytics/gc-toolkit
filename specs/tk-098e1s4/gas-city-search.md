@@ -7,11 +7,14 @@ description: The primitives searched in Gas City, bd and GitHub for each need of
 
 This change adds a gctk noun, `github`, with one verb, `quote`, its
 `--description` and `--json` flags, and the keys its JSON carries, which the
-`quote` package declares. It files one human gate per outside account per PR,
-through `human-gate.sh`, under the situation key `outside-post-<login>`. It adds
-no order, no bead key and no lifecycle state. Each need names the primitive
-searched at `gastownhall/gascity` main 6dce31bbb68e (2026-11-27), and GitHub's
-own documentation where GitHub is the platform.
+`quote` package declares. It files one human gate per outside account per
+item, through `human-gate.sh`, under the situation key `outside-post-<login>`,
+on the bead that owns the PR, or on a finding of its own for an issue or a PR
+no bead owns, which `patrol-finding.sh` files under the key
+`outside-posts.<owner>.<repo>.<number>`. It adds no order, no bead key and no
+lifecycle state. Each need names the primitive searched at
+`gastownhall/gascity` main 6dce31bbb68e (2026-11-27), and GitHub's own
+documentation where GitHub is the platform.
 
 ## Read a PR's or an issue's posted text for an agent
 
@@ -59,6 +62,24 @@ City's core orders that mail a gate's addressee,
 `notify-on-human-gate-creation` and `renudge-stale-human-gates` under
 `internal/bootstrap/packs/core/orders/`, are off in this city, which reaches
 the operator through the board.
+
+## Hold the follow-up of an item no bead owns
+
+**Covered by the pack's patrol finding, which the reader files.** A human gate
+blocks a bead, and `bd gate create` requires the bead it blocks (`--blocks`),
+so an issue, or a PR no bead owns, needs a bead for its gates to go on. bd's
+`external_ref` names an external item on a bead, and `bd list --external-ref`
+finds the beads that name it, but bd indexes the field without making it
+unique (`idx_issues_external_ref` in
+`internal/storage/schema/migrations/0001_create_issues.up.sql`, beads v1.3.4),
+so it keeps no one bead per item by itself. `patrol-finding.sh` keeps one live
+bead per situation key, the pack's record of a situation no bead of its own
+holds, so the key `outside-posts.<owner>.<repo>.<number>` gives one finding per
+item, and the gates on it give one question per account. Nothing waits on the
+finding. The reaction sweep reads only ready beads
+(`ReadyByPriority` in `services/gctk/reaction/sweep.go`), so a finding's first
+reaction comes once its gates are cleared, when its message leaves an agent
+nothing to do.
 
 ## File the follow-up once per account per PR
 

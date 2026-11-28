@@ -2,11 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
+	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 )
@@ -29,9 +34,9 @@ func pinQuote(t *testing.T, p *gh.Posted, err error, bead string, followErr erro
 	hub, follow := newQuoteHub, quoteFollowUp
 	var filed []string
 	newQuoteHub = func(string) quoteHub { return postedHub{p, err} }
-	quoteFollowUp = func(_ quoteHub, url, repo string, number int, held []quote.Held) (string, error) {
+	quoteFollowUp = func(_ quoteHub, url, repo string, number int, pull bool, held []quote.Held) (string, error) {
 		for _, h := range held {
-			filed = append(filed, url+" "+h.Author+" "+h.URL)
+			filed = append(filed, fmt.Sprintf("%s %t %s %s", url, pull, h.Author, h.URL))
 		}
 		return bead, followErr
 	}
@@ -67,7 +72,7 @@ func TestGitHubQuotePrintsTheBlockAndFilesTheFollowUp(t *testing.T) {
 		strings.Contains(text, "outside words") || strings.Contains(text, "issuecomment-2") {
 		t.Fatalf("the quote printed\n%s", text)
 	}
-	if len(*filed) != 1 || (*filed)[0] != "https://github.com/o/r/pull/7 stranger https://github.com/o/r/pull/7#issuecomment-2" {
+	if len(*filed) != 1 || (*filed)[0] != "https://github.com/o/r/pull/7 true stranger https://github.com/o/r/pull/7#issuecomment-2" {
 		t.Fatalf("follow-ups filed %q", *filed)
 	}
 	if !strings.Contains(errb.String(), "the operator has a follow-up") || strings.Contains(errb.String(), "tk-1") {
@@ -106,8 +111,8 @@ func TestGitHubQuoteJSONAndDescription(t *testing.T) {
 
 // A URL of another shape, or --description with a post's URL, is a usage
 // error; a read that fails, or a follow-up that does not file, exits 1, the
-// latter once the quote printed; and a PR no bead owns files nothing and says
-// so.
+// latter once the quote printed; and a follow-up that finds every post
+// followed up by another filer files nothing and says so.
 func TestGitHubQuoteExits(t *testing.T) {
 	pinQuote(t, aPR(), nil, "", nil)
 	var out, errb bytes.Buffer
@@ -119,8 +124,8 @@ func TestGitHubQuoteExits(t *testing.T) {
 	}
 	errb.Reset()
 	if code := Run([]string{"github", "quote", "https://github.com/o/r/pull/7"}, "test", &out, &errb); code != 0 ||
-		!strings.Contains(errb.String(), "no bead in this store owns the PR") {
-		t.Fatalf("a PR no bead owns exited %d: %s", code, errb.String())
+		!strings.Contains(errb.String(), "followed up before this one could") {
+		t.Fatalf("a follow-up another filer made first exited %d: %s", code, errb.String())
 	}
 	pinQuote(t, nil, errors.New("gh: HTTP 502"), "", nil)
 	if code := Run([]string{"github", "quote", "https://github.com/o/r/pull/7"}, "test", &out, &errb); code != 1 {
@@ -153,5 +158,47 @@ func TestGitHubQuoteFilesNothingForAPostAlreadyFollowedUp(t *testing.T) {
 	if len(*filed) != 0 || !strings.Contains(out.String(), quote.Placeholder) ||
 		!strings.Contains(errb.String(), "followed up already") {
 		t.Fatalf("filed %q, stderr %q", *filed, errb.String())
+	}
+}
+
+// An issue's outside post is held and followed up as a PR's is, named as an
+// issue's.
+func TestGitHubQuoteFollowsUpAnIssuesOutsidePost(t *testing.T) {
+	p := aPR()
+	p.PullRequest, p.URL = false, "https://github.com/o/r/issues/7"
+	p.Comments[1].URL = "https://github.com/o/r/issues/7#issuecomment-2"
+	filed := pinQuote(t, p, nil, "tk-f1", nil)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"github", "quote", "https://github.com/o/r/issues/7"}, "test", &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if len(*filed) != 1 || (*filed)[0] != "https://github.com/o/r/issues/7 false stranger https://github.com/o/r/issues/7#issuecomment-2" ||
+		!strings.Contains(errb.String(), "the operator has a follow-up") {
+		t.Fatalf("follow-ups filed %q, stderr %q", *filed, errb.String())
+	}
+}
+
+// A held post's finding is filed through patrol-finding.sh as a task in the
+// quote's scope with no first reaction, and its id is the one the script
+// names for the key, whether it filed the finding or found it live; a script
+// that fails, or names no finding for the key, is an error.
+func TestFindingsFileThroughPatrolFinding(t *testing.T) {
+	answers := map[string]gascity.Result{
+		"filed":   {Output: "patrol-finding: GC_RIG unset; filing in the 'gc-toolkit' store (--rig names another)\npatrol-finding: filed tk-f9 for [outside-posts.o.r.7]\n"},
+		"tracks":  {Output: "patrol-finding: tk-f8 already tracks [outside-posts.o.r.7] — recorded occurrence 2, text unchanged\n"},
+		"another": {Output: "patrol-finding: filed tk-f7 for [outside-posts.o.r.70]\n"},
+		"failed":  {Code: 1, Output: "patrol-finding: dedup lookup failed\n"},
+	}
+	for name, want := range map[string]string{"filed": "tk-f9", "tracks": "tk-f8", "another": "", "failed": ""} {
+		rt := &gcfake.Runtime{OnScript: func(gcfake.Call) gascity.Result { return answers[name] }}
+		got, err := findings{rt: rt}.File(context.Background(), "outside-posts.o.r.7", "a title", "a message")
+		if got != want || (want == "") != (err != nil) {
+			t.Fatalf("%s: the finding read as %q, %v, want %q", name, got, err, want)
+		}
+		call := rt.Scripts()[0]
+		if call.Name != "patrol-finding.sh" || !slices.Equal(call.Args, []string{"--scope", "github-quote", "--key",
+			"outside-posts.o.r.7", "--title", "a title", "--message", "a message", "--type", "task", "--no-react"}) {
+			t.Fatalf("%s: the finding was filed as %+v", name, call)
+		}
 	}
 }
