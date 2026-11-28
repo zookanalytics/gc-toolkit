@@ -176,6 +176,7 @@ OUT=$(run_check); RC=$?
 eq "$RC" "2" "an unheld bead routed to the po is an ERROR"
 has "$OUT" "alpha bead al-r1 (open task): routed to gc-toolkit.po, outside the po's queue" "the finding names the store, the bead and the route"
 has "$OUT" "gc bd update al-r1 --add-label hold:mayor --append-notes" "…and names holding it for the po as a remedy"
+has "$OUT" "gctk bead disarm al-r1 --reason \"held for placement\" --db $TMP/alpha/.beads && gc bd update al-r1" "…which removes any arm first, in its own store"
 
 # --- 3. a bead assigned to the po's alias ------------------------------------
 reset
@@ -280,6 +281,7 @@ runs '{"root":"al-run1","convoy":"al-cv1","bead":"al-q6","formula":"mol-polecat-
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a queued bead something already sends is an ERROR"
 has "$OUT" "queued bead al-q4 is armed for dispatch to alpha/gc-toolkit.polecat" "an arm on a queued bead is named"
+has "$OUT" "queued bead al-q4 is armed for dispatch to alpha/gc-toolkit.polecat: a placement that stopped before its lift, an arm set while it was held, or a hold written over an older arm" "…with each cause, a hold written over an older arm among them"
 has "$OUT" "gctk bead disarm al-q4 --reason" "…with the disarm"
 has "$OUT" "queued bead hq-q5 is assigned to someone" "an assignee on a queued bead is named"
 has "$OUT" "queued bead al-q6 is worked by live run al-run1 (mol-polecat-work)" "a live run working a queued bead is named"

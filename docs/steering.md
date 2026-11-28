@@ -118,7 +118,7 @@ Each writer that files or disposes new work follows the rule.
   waits on closes, whether or not the rule admits it, because a close shrinks
   the queue.
 - **The po**, in a sitting and only once the operator agrees, holds a bead with
-  `gc bd update <bead> --add-label hold:mayor --append-notes "<the operator's reason>"`.
+  the Hold lever of its prompt (`agents/po/prompt.template.md`).
 
 The witness and the distiller write the label in the create, which is the
 bead's own record of it. The first reaction and the po add it to a bead that
@@ -130,6 +130,13 @@ Gas City's hold conventions set a hold with `set-state`, whose event bead
 records the reason, but set-state swaps the first `hold:` label the bead
 carries, in label order, for the one it sets (`findStateLabel` in
 `cmd/bd/state.go`), so it would remove that hold.
+
+A bead that exists can carry an arm from an earlier dispatch, so the first
+reaction and the po each remove the arm before they add the label, with
+`gctk bead disarm`, which writes nothing on a bead with no arm. The first
+reaction's release runs it, and the po's lever runs it ahead of its update. The
+held bead then has no arm, and its placement decides how it is sent
+([Placing a bead](#placing-a-bead)).
 
 The first reaction writes the hold last, after the release, because the check a
 re-offered reaction runs first refuses a held bead. A worker cut off before that
