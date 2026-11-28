@@ -136,10 +136,11 @@ func newSessionCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&o.subject, "subject", "", "the `bead` the session is about, which leads the title")
 	f.StringVar(&o.pr, "pr", "", "the `number` of the pull request the session is about, which follows the subject as #<n>")
 	f.StringVar(&o.session, "session", "", "the session to title, by `id-or-alias`; default the session this runs in ($GC_SESSION_ID)")
-	return group("session", "actions on a session, and the pool seats that print while their work stands still",
+	return group("session", "actions on a session, the pool seats that print while their work stands still, and the prompts they wait at",
 		`Actions on a session, and the pool seats: give a session a title its record and
-its terminal show (title), and find each pool seat that prints while its work
-stands still (progress).`, title, newSessionProgressCmd(stdout, stderr))
+its terminal show (title), find each pool seat that prints while its work
+stands still (progress), and mail a person once about each prompt a pool seat
+waits at that Gas City escalated (prompt-alert).`, title, newSessionProgressCmd(stdout, stderr), newSessionPromptAlertCmd(stdout, stderr))
 }
 
 // checkTitleOpts trims title's flags and fills the default session, or says

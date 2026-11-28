@@ -2,15 +2,16 @@ package fake
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 )
 
-// Mail is the city's mailboxes and nudge queues in memory, safe for concurrent
-// use. A nudge leaves the mail unread and the queue as they were, as Gas
-// City's does.
+// Mail is the city's mailboxes and nudge queues in memory, and the mail sent,
+// safe for concurrent use. A nudge leaves the mail unread and the queue as
+// they were, as Gas City's does, and a send changes no inbox it reads.
 type Mail struct {
 	// Inboxes is each session's inbox, and Queues the nudges still to be
 	// delivered to it, by the session a read names. A session neither names
@@ -21,10 +22,13 @@ type Mail struct {
 	InboxErr, QueueErr map[string]error
 	// OnNudge answers a nudge, and nil answers exit 0.
 	OnNudge func(Nudge) gascity.Bounded
+	// OnSend answers a send, and nil answers it sent, under a new id.
+	OnSend func(gascity.MailSend) (gascity.MailSent, error)
 
 	mu     sync.Mutex
 	reads  []string
 	nudges []Nudge
+	sends  []gascity.MailSend
 }
 
 // MailInbox records the read and answers the session's inbox.
@@ -77,4 +81,24 @@ func (m *Mail) Nudges() []Nudge {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return slices.Clone(m.nudges)
+}
+
+// SendMail records the send and answers it.
+func (m *Mail) SendMail(_ context.Context, s gascity.MailSend) (gascity.MailSent, error) {
+	m.mu.Lock()
+	m.sends = append(m.sends, s)
+	n := len(m.sends)
+	on := m.OnSend
+	m.mu.Unlock()
+	if on != nil {
+		return on(s)
+	}
+	return gascity.MailSent{ID: fmt.Sprintf("m-%d", n)}, nil
+}
+
+// Sends returns each send asked for, answered or failed, in order.
+func (m *Mail) Sends() []gascity.MailSend {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.sends)
 }

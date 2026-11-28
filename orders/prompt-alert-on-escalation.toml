@@ -1,0 +1,48 @@
+# prompt-alert-on-escalation — when Gas City escalates a pool seat, mail a
+# person once about each prompt such a seat waits at, so a prompt nobody
+# answers is seen. Gas City's work ladder holds back a pool seat's nudges while
+# it waits at a prompt for a person, a permission prompt or a question, and
+# escalates the seat with reason nudge_refused after its third refused nudge,
+# then about hourly while the prompt stays up. Nothing in Gas City mails the
+# escalation or the prompt, so without this order a stuck prompt shows only in
+# the event log and on the dashboard, to someone already looking.
+# `gctk session prompt-alert --help` states the rule.
+#
+# The event starts the pass and decides nothing. The pass reads the
+# escalations, the sessions' prompts and their clears again, and its ledger
+# keeps which recipients each prompt's mail has reached, so the hourly
+# escalations of one prompt mail it once. prompt-alert-on-clear runs the same
+# pass when a prompt clears, since an order's event trigger names one event
+# type, and that pass sends the note saying how it cleared.
+#
+# No order runs the pass on a cadence, since Gas City's escalation is its
+# cadence. A run that fails, or an escalation the bus drops, is made good by the
+# seat's next escalation, about an hour later, or by any pass before it. A
+# clear whose run failed waits for the next escalation or clear in the city.
+# Gas City's work ladder escalates pool seats alone (ladderGoverns in
+# cmd/gc/work_ladder_lane.go at gastownhall/gascity 6dce31bbb6), so a named
+# session waiting at a prompt is not alerted.
+#
+# Exec, not a formula: a pass reads events and sends mail, with no judgment for
+# an LLM. City scope, since sessions, events and mail are the city's: one run
+# per city. A pass ends at its two-minute deadline, inside this timeout.
+#
+# The escalation recipient, $GC_ESCALATION_RECIPIENT or human, gets every
+# message. GCTK_PROMPT_ALERT_AGENTS names each agent that gets a copy, by the
+# name the pack gives it. A city names others with an entry for each
+# prompt-alert order in city.toml:
+#
+#   [[orders.overrides]]
+#   name = "prompt-alert-on-escalation"
+#   env = { GCTK_PROMPT_ALERT_AGENTS = "mechanik <another agent>" }
+[order]
+description = "When Gas City escalates a pool seat that waits at a prompt, mail the escalation recipient and the mechanik once about the prompt"
+trigger = "event"
+on = "work.escalated"
+timeout = "150s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" session prompt-alert --agents \"$GCTK_PROMPT_ALERT_AGENTS\""
+scope = "city"
+
+[order.env]
+# The pack's mechanik, which reads the copy at its next turn.
+GCTK_PROMPT_ALERT_AGENTS = "mechanik"

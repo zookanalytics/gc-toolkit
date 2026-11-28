@@ -5,7 +5,11 @@
 // `gctk session progress`, finds each pool seat whose pane prints while it has
 // written nothing for three hours, and records what it found as one Gas City
 // event, gc-toolkit.seat-progress.stalled (specs/tk-1tfzr71.158/design.md,
-// sections 2 and 10).
+// sections 2 and 10). Its prompt alert, `gctk session prompt-alert`, mails a
+// person once about each prompt a pool seat waits at that Gas City escalated
+// the seat for, and once when it clears. The domain owns that alert's ledger,
+// prompt-alert.json in the city's .gc/runtime/packs/gc-toolkit, which keeps
+// whom each prompt's mail has reached, and the lock its passes share.
 package session
 
 import (

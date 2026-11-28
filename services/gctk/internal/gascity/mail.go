@@ -52,6 +52,56 @@ func (c *City) MailInbox(ctx context.Context, session string) (Inbox, error) {
 	return Inbox{Addresses: out.Recipients, Unread: unread}, nil
 }
 
+// MailSend is one message to send: its recipient, subject and body, the key
+// Gas City keeps a second live copy of it out of the recipient's mailbox by,
+// and whether to request the recipient's turn.
+type MailSend struct {
+	To, Subject, Body, Dedup string
+	Notify                   bool
+}
+
+// MailSent is what a send answered: the message's id, and whether the
+// recipient's mailbox already held a live message with the send's dedup key,
+// so that nothing was sent.
+type MailSent struct {
+	ID      string
+	Already bool
+}
+
+// SendMail runs one `gc mail send <to> --subject <s> --message <body> --json`,
+// with --dedup when m names a key and --notify when m asks for it, ended once
+// ctx ends. gc prints one JSON result when the mailbox holds the message, and
+// with a dedup key it answers already_done, sending nothing, while a live
+// message with that key is in the mailbox (doMailSendJSON in cmd/gc/cmd_mail.go
+// at gastownhall/gascity 6dce31bbb6). A send that fails, or answers no result
+// with ok and an id, is an error.
+func (c *City) SendMail(ctx context.Context, m MailSend) (MailSent, error) {
+	args := []string{"mail", "send", m.To, "--subject=" + m.Subject, "--message=" + m.Body, "--json"}
+	if m.Dedup != "" {
+		args = append(args, "--dedup="+m.Dedup)
+	}
+	if m.Notify {
+		args = append(args, "--notify")
+	}
+	b := c.runBounded(ctx, c.bin, args...)
+	if f := b.Failure(); f != "" {
+		return MailSent{}, fmt.Errorf("gc mail send %s did not send: %s", m.To, f)
+	}
+	var out struct {
+		OK          bool   `json:"ok"`
+		ID          string `json:"id"`
+		AlreadyDone bool   `json:"already_done"`
+	}
+	line := strings.TrimSpace(b.Stdout)
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	if err := json.Unmarshal([]byte(line), &out); err != nil || !out.OK || out.ID == "" {
+		return MailSent{}, fmt.Errorf("gc mail send %s printed no result that says it sent: %s", m.To, clipLine(b.Stdout))
+	}
+	return MailSent{ID: out.ID, Already: out.AlreadyDone}, nil
+}
+
 // QueuedNudge is one nudge `gc nudge status` lists for a session: its source,
 // "mail" for a mail notice from the nudge queue and "gc:mail" for one the
 // session's conversation lane carries, and the bead it is about where the

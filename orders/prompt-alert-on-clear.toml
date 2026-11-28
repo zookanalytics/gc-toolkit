@@ -1,0 +1,20 @@
+# prompt-alert-on-clear — when a session's prompt clears, run the pass
+# prompt-alert-on-escalation runs, so each recipient an escalated prompt's
+# alert reached gets one note saying how it cleared, as Gas City records it:
+# answered or withdrawn, replaced by another prompt, or gone with its session.
+# The escalation order's header states what the pass does and how to tune it.
+#
+# Most prompts clear without an escalation, and their pass mails nothing. A
+# city that changes GCTK_PROMPT_ALERT_AGENTS changes it for each prompt-alert
+# order.
+[order]
+description = "When a session's prompt clears, tell each recipient its alert reached that it cleared, and how"
+trigger = "event"
+on = "session.pending_cleared"
+timeout = "150s"
+exec = "\"${GCTK_BIN:-$GC_CITY_PATH/.gc/services/gctk/bin/gctk}\" session prompt-alert --agents \"$GCTK_PROMPT_ALERT_AGENTS\""
+scope = "city"
+
+[order.env]
+# The pack's mechanik, which reads the copy at its next turn.
+GCTK_PROMPT_ALERT_AGENTS = "mechanik"

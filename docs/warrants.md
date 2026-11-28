@@ -933,3 +933,51 @@ no warrant.
   and each agent they list is woken by Gas City. Before that, once the city
   keeps its sessions in a store the op journal records, the notify ledger's
   move onto a keyed nudge is due.
+
+## Prompt alert
+
+- **Covers.** `orders/prompt-alert-on-escalation.toml`,
+  `orders/prompt-alert-on-clear.toml`, `services/gctk/session/alert.go` and
+  `services/gctk/session/alert_ledger.go`, the pass the orders run, with the
+  alert ledger and its lock that the pass keeps under the city's
+  `.gc/runtime/packs/gc-toolkit`.
+- **Stands in for.** A mail to a person, once, when Gas City's work ladder
+  escalates a pool seat that waits at a prompt, and a note once the prompt
+  clears. The alert ledger stands in for a send kept to one per key after its
+  message is archived, and for the incident state of core's escalation hook,
+  which no pack outside the gascity repository can reach.
+- **Evidence.** In `gastownhall/gascity`, a stuck prompt reaches no one who is
+  not already looking, and no send a pack can make is kept to one per key once
+  its message is archived:
+  - The work ladder records `work.escalated` with reason `nudge_refused` when a
+    pool seat cannot take its nudges at a pending interaction, at the third
+    refusal and about hourly after (`(*ladderPass).nudge` in
+    `cmd/gc/work_ladder_lane.go`, `refusalAlerts` in
+    `internal/workladder/decide.go`). Its one reader in Gas City, the
+    claims-stall guard, reads it only with reason `trigger_unanswered`
+    (`(*claimStallGuard).observe` in `cmd/gc/claim_stall_guard.go`).
+  - The controller records `session.pending` and `session.pending_cleared`
+    once per transition, and the API lists the pending interactions for a
+    client to show (docs/reference/api.md, "Pending Interactions"). No order or
+    script of core reads either.
+  - `gc mail send --dedup` suppresses a send only while the earlier message
+    with the key is unarchived, and leaves a longer cadence to the sender's own
+    last-sent state (`newMailSendCmd` in `cmd/gc/cmd_mail.go`).
+  - Core's `escalate.sh` keeps an unchanged incident quiet for a day, but its
+    callers find it in their own directory or in the `.gc/system/packs` tree
+    Gas City prunes (`pruneRetiredSystemPacks` in
+    `cmd/gc/embed_builtin_packs.go`), and an exec order's env names only its
+    own pack's directory (`orderExecEnvWithError` in `cmd/gc/order_store.go`).
+  - The published packs, at `gastownhall/gascity-packs` main 44b9db7168f6,
+    mention none of the three events.
+  - The search is
+    [specs/tk-npkp7mk.7/gas-city-search.md](../specs/tk-npkp7mk.7/gas-city-search.md).
+- **Verified.** 2026-11-28, at `gastownhall/gascity` main 6dce31bbb6 and
+  `gastownhall/gascity-packs` main 44b9db7168f6.
+- **Retires when.** Gas City mails its escalation recipient when its work
+  ladder escalates a seat at a prompt, and when that prompt clears. The orders
+  and the verb then retire. Before that, once a pack's exec order can run
+  core's escalation hook, the escalation recipient's mail is due to move onto
+  it, as its entry in the re-implementation register of
+  [gctk-architecture.md](gctk-architecture.md#the-re-implementation-register)
+  says.

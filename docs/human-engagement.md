@@ -1,6 +1,6 @@
 ---
 name: Human engagement — gc-toolkit's subject, human gate and conversation model
-description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers, edits a change and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
+description: gc-toolkit's own model for engaging a person — the subject, the human gate and the conversation, how a gate reaches the operator, how a stuck prompt reaches a person, the way in through Engage, how a conversation starts, how a sitting claims, holds, answers, edits a change and ends, Accept, how a parked subject comes back, how a po sitting opens, the helm board, and the ground the pack builds itself. A pack convention; the Gas City primitives it rides are gascity/human-engagement.md.
 ---
 
 # Human engagement
@@ -175,6 +175,23 @@ question, and lists the gate and each bead it holds as waiting on the operator,
 until the gate is cleared, its filer withdraws it, or, for the gate that put a
 recommendation to the operator, Accept clears it. Nothing re-mails, and no session claims a gate, so a gate a sitting is
 discussing is still open and unassigned until the sitting answers it.
+
+## How a stuck prompt reaches a person
+
+A pool seat that waits at a prompt for a person, a permission prompt or a
+question, is a pending interaction
+([gascity/human-engagement.md](gascity/human-engagement.md#where-a-question-surfaces)).
+Gas City's work ladder holds back the seat's nudges while it waits and
+escalates the seat about hourly. The prompt-alert orders turn that escalation
+into mail: one alert per prompt to `$GC_ESCALATION_RECIPIENT`, by default the
+`human` mailbox, and a copy to the mechanik, then one note to each when the
+prompt clears (`gctk session prompt-alert --help` states the rule). The
+pack's mayor reads `human` in the sittings the operator opens with it, and the
+mechanik reads its copy at its next turn, so the alert reaches the operator at
+their next sitting with either. Nothing in the pack answers or refuses the
+prompt, so a person decides it. The ladder escalates pool seats alone, so a
+named session at a prompt, such as a sitting waiting on the operator, is not
+alerted.
 
 ## The way in
 
