@@ -532,9 +532,9 @@ no warrant.
     [specs/tk-1tfzr71.161/gas-city-search.md](../specs/tk-1tfzr71.161/gas-city-search.md#the-saved-reads-untaken-posts-unit-2),
     and for the check suites the checks keep, its
     [red checks](../specs/tk-1tfzr71.161/gas-city-search.md#red-checks-unit-5).
-- **Verified.** 2026-11-25, at `gastownhall/gascity` main 887a253144d4,
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e,
   `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  786241099046.
+  0c9c8e697843.
 - **Retires when.** Gas City records the facts the rule reads, namely a pull
   request's reviews, the required checks at its head and its review threads,
   where a reader of the PR's own bead finds them, for example once its PR
@@ -597,7 +597,7 @@ no warrant.
     reviews.
   - The search is the draft cycle and the withdrawal in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, with
   the `gastown` pack it bundles at 66897e7132c9, and `gastownhall/gascity-packs`
   main 44b9db7168f6.
 - **Retires when.** Gas City dismisses a pull request's approvals given before

@@ -264,9 +264,12 @@ caller judged it (--if-status, --if-assignee, --if-ruled), or a write did not
 land: the origin changed since it was judged, or its own edge did not write
 or read back, or a write after the close did not land, a late waiter's edge
 onto the successor included, which leaves the close standing · 5 the close is
-held or refused, a waiter that cannot wait on the successor included · 6 the origin
-already names another successor, read before any write or beside this run's
-own edge · 7 the evidence refuses the close · 64 usage
+held, and a re-run closes it once what holds it is gone: a wait on the origin
+is still open, the store's record lock was not taken, a read the close needs
+did not answer, or bd refused the close or a write that makes way for it · 6
+the origin already names another successor, read before any write or beside
+this run's own edge · 7 the close is refused until a person acts: the evidence
+refuses it, or a waiter cannot come to wait on the successor · 64 usage
 U
     exit "${1:-1}"
 }
@@ -813,8 +816,10 @@ carry_waits() {
     [ -n "$CARRY" ] || return 0
     local err
     if ! err=$(carry_edges "$CARRY" 2>&1 >/dev/null); then
-        printf '%s\n' "$err" >&2
-        die "$ORIGIN blocks $CARRY, and bd refused the blocks edges onto $SUCCESSOR, as printed above, so closing $ORIGIN would release them before $SUCCESSOR has delivered. Nothing is closed. Judge the refusal: a bead that does not need the work $SUCCESSOR carries ends its wait with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN; $RERUN" 5
+        # bd's words go in the refusal's own line, since a caller may keep only
+        # the last line this script prints.
+        err=$(printf '%s' "$err" | tr -s '\n' ' ')
+        die "$ORIGIN blocks $CARRY, and bd refused the blocks edges onto $SUCCESSOR (${err:-it gave no reason}), so closing $ORIGIN would release them before $SUCCESSOR has delivered. Nothing is closed. Judge the refusal: a bead that does not need the work $SUCCESSOR carries ends its wait with gc bd --db $ORIGIN_PATH/.beads dep remove <bead> $ORIGIN; $RERUN" 7
     fi
     CARRIED="$CARRY"
     return 0
@@ -1120,10 +1125,11 @@ else
     fi
 
     # The origin's waiters, read before the first write: one that cannot come to
-    # wait on the successor holds the close, and so does anything bd's close
-    # would refuse on, so no waiter gains an edge for a close that is refused.
+    # wait on the successor refuses the close, and anything bd's close would
+    # refuse on holds it, so no waiter gains an edge for a close that does not
+    # land.
     [ -z "$CARRY_UNREAD" ] || die "$CARRY_UNREAD; nothing written. Re-run this close." 5
-    [ -z "$CARRY_HELD" ] || die "$CARRY_HELD, then re-run this close. Nothing written" 5
+    [ -z "$CARRY_HELD" ] || die "$CARRY_HELD, then re-run this close. Nothing written" 7
     if [ -n "$CARRY" ] && [ -z "$EXCEPT_KEY" ]; then
         except_key_holds "$ORIGIN_JSON"
         [ -z "$HOLD_UNREAD" ] || die "$HOLD_UNREAD; nothing written. Re-run this close." 5

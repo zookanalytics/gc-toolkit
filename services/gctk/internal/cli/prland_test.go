@@ -335,9 +335,10 @@ func TestAReviewRunsPriorityIsSettledThroughThePriorityWriter(t *testing.T) {
 // The landing order closes a bead whose PR a ruling retired through the
 // runtime adapter: the pack's bead-rehome.sh, from GCTK_SCRIPTS_DIR, gets the
 // bead, the disposition, the note and the run's judgment of the bead, a waiting
-// bead's empty assignee among it, and runs as the refinery. Its exits 4 and 5
-// are a close held for now, and any other failure is an error carrying the
-// script's own words.
+// bead's empty assignee among it, and the key of the gate a refusal files, and
+// runs as the refinery. Its exits 4 and 5 are a close held for now, its exits
+// 3, 6 and 7 a close refused until a person acts, and any other failure is an
+// error carrying the script's own words.
 func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing.T) {
 	scripts := t.TempDir()
 	log := filepath.Join(scripts, "calls")
@@ -353,13 +354,13 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed",
+	x := pr.Disposal{Bead: "tk-1", Status: "blocked", Assignee: "", Note: "PR #7 closed", Number: 7,
 		Disposition: pr.Disposition{Kind: "not-needed", Successor: "tk-conv", Store: "rig:rig"}}
 	if err := l.Dispositions.Close(x); err != nil {
 		t.Fatal(err)
 	}
 	want := "actor=rig/gc-toolkit.refinery\n--origin\ntk-1\n--successor\ntk-conv\n--kind\nnot-needed\n--note\nPR #7 closed\n" +
-		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\n\n--if-ruled\n"
+		"--successor-store\nrig:rig\n--if-status\nblocked\n--if-assignee\n\n--if-ruled\n--except-key\npr-dispose-failed.7\n"
 	if raw, _ := os.ReadFile(log); string(raw) != want {
 		t.Fatalf("bead-rehome.sh got %q, want %q", raw, want)
 	}
@@ -370,10 +371,18 @@ func TestLandingClosesADisposedBeadThroughThePacksWriterAsTheRefinery(t *testing
 			t.Fatalf("exit %s read as %v", code, err)
 		}
 	}
-	t.Setenv("STUB_EXIT", "3")
+	for _, code := range []string{"3", "6", "7"} {
+		t.Setenv("STUB_EXIT", code)
+		var refused *pr.RefusedClose
+		if err := l.Dispositions.Close(x); !errors.As(err, &refused) || !strings.Contains(refused.Why, "held by tk-conv") {
+			t.Fatalf("exit %s read as %v", code, err)
+		}
+	}
+	t.Setenv("STUB_EXIT", "2")
 	var held *pr.HeldClose
-	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || !strings.Contains(err.Error(), "exit 3") {
-		t.Fatalf("exit 3 read as %v", err)
+	var refused *pr.RefusedClose
+	if err := l.Dispositions.Close(x); err == nil || errors.As(err, &held) || errors.As(err, &refused) || !strings.Contains(err.Error(), "exit 2") {
+		t.Fatalf("exit 2 read as %v", err)
 	}
 }
 

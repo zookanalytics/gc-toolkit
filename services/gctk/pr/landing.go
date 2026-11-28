@@ -15,6 +15,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
 
 // The landing order and the publication it reads (specs/tk-1tfzr71.66/design.md,
@@ -155,7 +156,9 @@ type Waker interface {
 // still has the status and assignee the run judged it under and still records
 // the ruling the run read. A close the writer
 // holds for now, because a wait on the bead is still open or the bead moved
-// since the run judged it or since the writer read it, is a *HeldClose. An act
+// since the run judged it or since the writer read it, is a *HeldClose, and a
+// close it refuses until a person acts is a *RefusedClose. The writer withdraws
+// the gate a refusal filed (GateKey) just before a close it no longer refuses. An act
 // does not stop the writer, since it ends the bead's branch on the git remote
 // once the close has landed, and a stop between the two would leave the branch
 // of a closed bead, which no run of the order reads again.
@@ -166,11 +169,17 @@ type Dispositions interface {
 // Disposal is the close a run owes a bead whose PR closed under a ruling's
 // disposition, which it hands to the disposition writer once the record lock
 // is free: the bead, the status and assignee the run judged it under with the
-// lock held, the disposition it read there, and the note the close carries.
+// lock held, the disposition it read there, the note the close carries, and
+// the PR's number.
 type Disposal struct {
 	Bead, Status, Assignee, Note string
 	Disposition                  Disposition
+	Number                       int
 }
+
+// GateKey is the situation key of the human gate a refused close files on the
+// bead.
+func (x Disposal) GateKey() string { return fmt.Sprintf("pr-dispose-failed.%d", x.Number) }
 
 // Disposition is the close a ruling recorded on the bead that owns a PR before
 // it closed the PR (pr-dispose.sh): its kind, the bead that carries the work
@@ -192,6 +201,16 @@ func (d Disposition) ruling() string {
 type HeldClose struct{ Why string }
 
 func (e *HeldClose) Error() string { return e.Why }
+
+// RefusedClose is a disposition's close the writer refuses until a person
+// acts, saying why: a bead that waits on the bead and cannot come to wait on
+// the successor, the bead or the successor missing from its store, a successor
+// the bead already names other than the ruling's, or evidence that refuses the
+// close.
+// No later run gets past it alone, so the run asks a person (dispose).
+type RefusedClose struct{ Why string }
+
+func (e *RefusedClose) Error() string { return e.Why }
 
 // Landing is what the record's verbs act through. Dir is the store's .beads
 // directory, where the record lock lives, and Refinery the refinery's assignee,
@@ -548,7 +567,7 @@ func (l Landing) Reconcile(o Options, report func(RunOutcome)) error {
 		}
 		cancel()
 		if u.disposal != nil {
-			out = u.dispose(*u.disposal, out)
+			out = u.dispose(*u.disposal, out, o.Stop)
 		}
 		if u.landed != nil {
 			out.Detail += u.audit(*u.landed, start, o.Window)
@@ -1426,7 +1445,7 @@ func (u *run) decideRetired(s state, number int) plan {
 		if len(moot) > 0 {
 			detail += fmt.Sprintf("; %s closed, which nothing takes now", strings.Join(moot, ", "))
 		}
-		u.disposal = &Disposal{Bead: s.id, Status: s.status, Assignee: s.assignee, Disposition: d,
+		u.disposal = &Disposal{Bead: s.id, Status: s.status, Assignee: s.assignee, Disposition: d, Number: number,
 			Note: fmt.Sprintf("PR #%d closed under the disposition a ruling recorded before the close", number)}
 		return RunOutcome{Bead: s.id, Action: ActChecked, Detail: detail + "; the bead goes to the disposition writer"}
 	})
@@ -1451,22 +1470,84 @@ func (u *run) moot(id, status, assignee, note string) error {
 // answer after it. A close the writer holds for now, such as one an open wait
 // on the bead holds, or the close of a bead reassigned or ruled again since the
 // act judged it, waits for the next run, which reads the bead again under the
-// lock, so it reports as checked. The writer runs to its end, past the act's
-// bound (Dispositions).
-func (u *run) dispose(x Disposal, out RunOutcome) RunOutcome {
+// lock, so it reports as checked. A close the writer refuses until a person
+// acts files the human gate that asks them, within stop, and the next run
+// hands the close over again, which the writer takes once the person has
+// acted. The writer runs to its end, past the act's bound (Dispositions).
+func (u *run) dispose(x Disposal, out RunOutcome, stop time.Duration) RunOutcome {
 	if u.Dispositions == nil {
 		return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", but no disposition writer is set"}
 	}
 	err := u.Dispositions.Close(x)
 	var held *HeldClose
+	var refused *RefusedClose
 	switch {
 	case err == nil:
 		return RunOutcome{Bead: x.Bead, Action: ActDisposed, Detail: out.Detail + ", which closed it"}
 	case errors.As(err, &held):
 		return RunOutcome{Bead: x.Bead, Action: ActChecked,
 			Detail: out.Detail + ", which holds its close for now, and the next run reads it again: " + held.Why}
+	case errors.As(err, &refused):
+		return u.askOnRefusal(x, out, refused.Why, stop)
 	}
 	return RunOutcome{Bead: x.Bead, Action: ActFailed, Detail: out.Detail + ", which did not answer: " + err.Error()}
+}
+
+// askOnRefusal files the human gate that asks a person to act on a refused
+// close, under the disposal's key, naming the refusal this run met. Once a
+// person clears one obstruction, the writer can refuse the close for another,
+// and the gate already open under the key is found and nothing is filed again,
+// so that gate takes this run's message (refreshGates). A gate that does not
+// file, or a message that does not take, leaves the next run to file or write
+// it.
+func (u *run) askOnRefusal(x Disposal, out RunOutcome, why string, stop time.Duration) RunOutcome {
+	ctx, cancel := bounded(stop)
+	defer cancel()
+	d := x.Disposition
+	message := fmt.Sprintf("PR #%d closed under a ruling, but %s stays open: its close is refused until you act\n\n"+
+		"The ruling's disposition, %s onto %s, did not close %s. The disposition writer says: %s\n\n"+
+		"Do what it says, and the landing order's next run closes %s and withdraws this gate. "+
+		"If the writer then refuses the close for another reason, the run writes that reason here in place of this one.",
+		x.Number, x.Bead, d.Kind, d.Successor, x.Bead, why, x.Bead)
+	refused := out.Detail + ", which refuses its close until a person acts"
+	if err := u.Gates.File(ctx, x.Bead, x.GateKey(), message); err != nil {
+		return RunOutcome{Bead: x.Bead, Action: ActRetry,
+			Detail: refused + ", and the human gate that asks them did not file; the next run files it: " + err.Error()}
+	}
+	if err := refreshGates(u.Ledger.Within(ctx), x.Bead, x.GateKey(), message); err != nil {
+		return RunOutcome{Bead: x.Bead, Action: ActRetry, Detail: refused + ", and the human gate " + x.GateKey() +
+			" did not take this run's refusal, so it can still name an earlier one; the next run writes it: " + err.Error()}
+	}
+	return RunOutcome{Bead: x.Bead, Action: ActExcepted, Detail: refused + ", so the human gate " + x.GateKey() + " asks them: " + why}
+}
+
+// refreshGates gives each open human gate under key that holds bead, and that
+// no person is assigned, message as its description where it holds another,
+// as human-gate.sh made the message the description of the gate it filed. A
+// gate a person is assigned keeps the text they took it on, and a gate that
+// closed or was assigned since the read is left as it is.
+func refreshGates(l *ledger.Ledger, bead, key, message string) error {
+	rows, err := l.Find(ledger.ByID(bead))
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	gates, err := blockersIn(l, rows[0], false)
+	if err != nil {
+		return err
+	}
+	for _, g := range gates {
+		if !person.IsHumanGate(g.IssueType(), g.AwaitType()) || g.AwaitID() != key || g.Assignee() != "" ||
+			g.Description() == message {
+			continue
+		}
+		w := l.Write(g.ID)
+		w.Guard(g.Status(), "")
+		w.Description(message)
+		if err := l.Commit(w); err != nil && !errors.Is(err, ledger.ErrGuard) {
+			return fmt.Errorf("the gate %s did not take it: %w", g.ID, err)
+		}
+	}
+	return nil
 }
 
 // decideHeadChanged decides a PR the saved read shows open at a head other
