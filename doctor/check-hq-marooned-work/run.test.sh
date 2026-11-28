@@ -4,7 +4,7 @@
 # legitimate HQ resident is exempt (infra type, a bead an open human gate
 # blocks, which another gate does not exempt, a conversation,
 # debt label, gc-doctor title, an assigned bead, a bead
-# routed to a city-scoped agent, a standing subject); the
+# routed to a city-scoped agent); the
 # machinery types bd's ready-work query excludes (step, convoy,
 # startup-health-episode) are exempt while a marooned spec is still flagged; the
 # city-route exemption keys off the agent's scope not its name; a label still
@@ -106,7 +106,6 @@ B_DOCTOR='{"id":"ok-doctor","status":"open","issue_type":"task","title":"gc doct
 B_ASSIGNED='{"id":"ok-assigned","status":"open","issue_type":"bug","title":"already being worked","assignee":"gc-toolkit/gc-toolkit.polecat"}'
 B_DOGROUTE='{"id":"ok-dogroute","status":"open","issue_type":"task","title":"city task the dog claims","metadata":{"gc.routed_to":"gc-toolkit.dog"}}'
 B_DOGQUAL='{"id":"ok-dogqual","status":"open","issue_type":"task","title":"city task routed at the qualified form","metadata":{"gc.routed_to":"gc-toolkit/gc-toolkit.dog"}}'
-B_TRIAGE='{"id":"ok-triage","status":"open","issue_type":"task","title":"triage: escalations raised from an ephemeral subject (this rig)","metadata":{"task_kind":"triage-subject","triage.scope":"ephemeral-subject-findings"}}'
 B_STARTUP='{"id":"ok-startup","status":"open","issue_type":"startup-health-episode","title":"Startup health: gc-toolkit__ripley-pool"}'
 B_STEP='{"id":"ok-step","status":"open","issue_type":"step","title":"mol-polecat-work.implement"}'
 B_CONVOY='{"id":"ok-convoy","status":"open","issue_type":"convoy","title":"convoy: an epic"}'
@@ -240,16 +239,15 @@ OUT=$(BD_SILENT_STORE=testcity run_check); RC=$?
 eq "$RC" "1" "a listing that exits 0 with no output warns instead of passing"
 has "$OUT" "NOT checked" "the silent listing's warning says the store was skipped, not clean"
 
-# --- 9. city machinery and standing subjects are exempt; a real marooned bead
+# --- 9. city machinery is exempt; a real marooned bead
 #        among them is still caught -----------------------------------------
-store "$B_DOGROUTE" "$B_DOGQUAL" "$B_TRIAGE" "$B_BUG"
+store "$B_DOGROUTE" "$B_DOGQUAL" "$B_BUG"
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a real marooned bug among city machinery is still an ERROR"
 has "$OUT" "1 finding" "only the marooned bug is a finding"
 has "$OUT" "m-bug" "the marooned bug is named"
 hasnt "$OUT" "ok-dogroute" "a task routed to the city dog (bare identity) is not flagged"
 hasnt "$OUT" "ok-dogqual" "a task routed to the dog at the qualified form is not flagged"
-hasnt "$OUT" "ok-triage" "a standing triage-subject is not flagged"
 
 # --- 10. the city-route exemption keys off scope, not the name 'dog' ---------
 # With the dog marked rig-scoped, its pool cannot read the HQ store, so a bead

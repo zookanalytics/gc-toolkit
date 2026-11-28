@@ -433,8 +433,8 @@ run find "$K"
 eq "$RC/$OUT" "0/tk-fixpr" "a fixed-upstream edge onto a fix still in flight answers with the fix"
 
 echo "# find and file: a mixed run files its new finding, one key per flagged file"
-KA="shellcheck assets/scripts/liveness-sweep-precheck.test.sh"
-KB="shellcheck assets/scripts/liveness-sweep.test.sh"
+KA="shellcheck assets/scripts/bd-lib.test.sh"
+KB="shellcheck assets/scripts/run-lib.test.sh"
 store "$(closed tk-folded 2026-10-09T07:18:35Z "$(ptr "$KA" tk-batch)" "$(reason "folded into" tk-batch)")" \
       "$(bead tk-batch open task 'batch: clear the pre-existing shellcheck tracker set')"
 run find "$KA"

@@ -1,11 +1,7 @@
 package reaction
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -52,53 +48,13 @@ func TestABeadTheStoreDoesNotHoldIsAnErrorNotARefusal(t *testing.T) {
 	w.wantSling(1, "could not read tk-plain's own row (gc bd list exited 1", code, said, "(SUBJECT-READS)")
 }
 
-// A standing record and a feedback pattern take no first reaction in any
-// state, so each is refused with 6, naming its kind.
+// A feedback pattern takes no first reaction in any state, so it is refused
+// with 6, naming its kind.
 func TestAKindThatTakesNoReactionIsRefusedWithSix(t *testing.T) {
-	for _, kind := range append(slices.Clone(standingKinds), feedbackPattern) {
-		w := newWorld(t)
-		w.put(input("tk-kind", func(b *fake.Bead) { b.Metadata["task_kind"] = kind }))
-		code, said := w.sling("tk-kind")
-		why := "it is a standing record (task_kind=" + kind + ")"
-		if kind == feedbackPattern {
-			why = "it is a feedback pattern, which the feedback distiller dispatches"
-		}
-		w.wantSling(Excluded, why, code, said, "(KIND-SKIP) "+kind)
-	}
-	if len(standingKinds) == 0 {
-		t.Error("(KIND) the domain names no standing kind")
-	}
-}
-
-// The standing kinds are the ones assets/scripts/standing-kinds.sh defines, as
-// jq reads its definition, so a kind added there fails this test until the Go
-// copy names it too.
-func TestTheStandingKindsAreTheOnesTheScriptsDefine(t *testing.T) {
-	lib, err := filepath.Abs("../../../assets/scripts/standing-kinds.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text, err := os.ReadFile(lib)
-	if err != nil {
-		t.Fatalf("standing-kinds.sh is not in this checkout: %v", err)
-	}
-	_, rest, ok := strings.Cut(string(text), "STANDING_KINDS_JQ='")
-	defs, _, closed := strings.Cut(rest, "'")
-	if !ok || !closed {
-		t.Fatal("standing-kinds.sh holds no STANDING_KINDS_JQ definition")
-	}
-	out, err := exec.Command("jq", "-nc", defs+" standing_kinds").Output()
-	if err != nil {
-		t.Fatalf("jq over standing-kinds.sh's standing_kinds: %v", err)
-	}
-	var shell []string
-	if err := json.Unmarshal(out, &shell); err != nil {
-		t.Fatalf("jq answered %q for standing_kinds: %v", out, err)
-	}
-	slices.Sort(shell)
-	if got := slices.Sorted(slices.Values(standingKinds)); !slices.Equal(got, shell) {
-		t.Errorf("(KIND-SHARED) standingKinds names %q; standing-kinds.sh defines %q", got, shell)
-	}
+	w := newWorld(t)
+	w.put(input("tk-kind", func(b *fake.Bead) { b.Metadata["task_kind"] = feedbackPattern }))
+	code, said := w.sling("tk-kind")
+	w.wantSling(Excluded, "it is a feedback pattern, which the feedback distiller dispatches", code, said, "(KIND-SKIP) "+feedbackPattern)
 }
 
 // A bead whose next move is decided already is refused with 5: a status other
@@ -122,13 +78,13 @@ func TestADecidedRowIsRefusedWithFive(t *testing.T) {
 		"held":       {func(b *fake.Bead) { b.Labels = []string{"learning", "hold:mayor"} }, "it is held (hold:mayor)"},
 		"held outside": {func(b *fake.Bead) { b.Labels = []string{"Hold:External"} },
 			"it is held (Hold:External): hold:mayor keeps it for the operator's placement sitting"},
-		"standing and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = standingKinds[0] }, "it is a standing record"},
+		"pattern and closed": {func(b *fake.Bead) { b.Status = "closed"; b.Metadata["task_kind"] = feedbackPattern }, "it is a feedback pattern"},
 	} {
 		w := newWorld(t)
 		w.put(input("tk-row", c.edit))
 		code, said := w.sling("tk-row")
 		want := Decided
-		if name == "standing and closed" {
+		if name == "pattern and closed" {
 			want = Excluded
 		}
 		w.wantSling(want, c.why, code, said, "(ROW) "+name)

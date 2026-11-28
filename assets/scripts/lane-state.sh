@@ -12,8 +12,8 @@
 #
 #   lane-state.sh green --anchor <id> --lane <lane> [--no-remote] [--db <path>]
 #
-# --db pins every store read to that store, for a caller that pins its own reads
-# (liveness-sweep.sh). bd-lib.sh's reads go through _bd_call, which the pin
+# --db pins every store read to that store, for a caller that pins its own
+# reads. bd-lib.sh's reads go through _bd_call, which the pin
 # redefines, and the anchor read the GitHub fallback makes carries it too. The
 # bd_list memo keys an entry by the cwd and the arguments, never the pin, so it
 # stays off under one.

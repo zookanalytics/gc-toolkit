@@ -60,7 +60,7 @@ var (
 		"The id of the formula step a step bead carries out, which Gas City writes at the pour. A first reaction "+
 			"takes no step.")
 	taskKindKey = ledger.ReadOnly("task_kind", ledger.String,
-		"A standing kind and a feedback pattern take no first reaction, and the sweep passes over a review lane.")
+		"A feedback pattern takes no first reaction, and the sweep passes over a review lane.")
 	workDirKey = ledger.ReadOnly("work_dir", ledger.String,
 		"The worktree a bead's work is built in, which work-setup.sh writes. The sweep passes over a bead that "+
 			"carries one, as work in flight.")
@@ -68,13 +68,6 @@ var (
 		"The check a review lane of the old review path runs. The sweep passes over a bead that carries one, as "+
 			"work in flight.")
 )
-
-// standingKinds are the task kinds of a standing record, open by design and
-// never closed, on which a first reaction has no disposition to make. They copy
-// the kinds assets/scripts/standing-kinds.sh defines for the scripts, which
-// TestTheStandingKindsAreTheOnesTheScriptsDefine holds them to, and they leave
-// with those kinds.
-var standingKinds = []string{"triage-subject"}
 
 // feedbackPattern is the task kind of a feedback pattern, which the feedback
 // distiller dispatches.
@@ -234,17 +227,13 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 }
 
 // rowRefusal is the refusal bead's own row carries, nil when it carries none:
-// its kind first, since a standing record and a feedback pattern take no first
-// reaction in any state, then its status, its assignee, its dispatch path and
+// its kind first, since a feedback pattern takes no first reaction in any
+// state, then its status, its assignee, its dispatch path and
 // its dispatch hold. A dispatch path is a route a pool queue serves or an arm
 // (assets/scripts/dispatch-path.sh), either one not blank, and each is named
 // on its own.
 func rowRefusal(row *ledger.Record) *Refusal {
-	kind := raw(taskKindKey, row)
-	switch {
-	case slices.Contains(standingKinds, kind):
-		return &Refusal{Code: Excluded, Why: fmt.Sprintf("it is a standing record (%s=%s), open by design, so a first reaction has no disposition to make on it", taskKindKey.Name(), kind)}
-	case kind == feedbackPattern:
+	if raw(taskKindKey, row) == feedbackPattern {
 		return &Refusal{Code: Excluded, Why: "it is a feedback pattern, which the feedback distiller dispatches"}
 	}
 	if st := row.Status(); st != "" && st != "open" {

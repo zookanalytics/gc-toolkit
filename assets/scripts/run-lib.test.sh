@@ -239,7 +239,6 @@ assets/scripts/work-gate.sh
 assets/scripts/gate-ensure.sh
 assets/scripts/queue-priority.sh
 assets/scripts/priority-lib.sh
-assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh

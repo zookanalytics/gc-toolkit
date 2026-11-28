@@ -9,13 +9,11 @@
 # rig-workable bead that no worker is positioned to claim.
 #
 # Rig-workable = an OPEN, UNASSIGNED bead whose issue_type is not an infra type
-# (the INFRA_TYPES set defined below), which is neither city machinery nor
-# held-by-design, and which is unrouted or routed anywhere but a city-scoped
-# agent. The exclusions carve out the legitimate HQ residents: a bead routed to
-# a city-scoped agent (resolved from `gc agent list`) is reachable there; a
-# standing record (a task_kind assets/scripts/standing-kinds.sh lists) is a
-# held-by-design escalation host, not work; a bead an open human gate blocks
-# waits on a person's answer, which the board shows; a `debt` label or a
+# (the INFRA_TYPES set defined below), which is not city machinery, and which
+# is unrouted or routed anywhere but a city-scoped agent. The exclusions carve
+# out the legitimate HQ residents: a bead routed to a city-scoped agent
+# (resolved from `gc agent list`) is reachable there; a bead an open human gate
+# blocks waits on a person's answer, which the board shows; a `debt` label or a
 # `gc doctor:` title is a doctor/tech-debt advisory record. An assigned bead is
 # already claimed, and that covers a conversation, which is always assigned: to
 # `human` in the operator's queue or to its sitting's alias. A human gate is a
@@ -41,16 +39,6 @@ city="${GC_CITY_PATH:-${GC_CITY:-}}"
 # HQ store must still be caught.
 INFRA_TYPES='["session","message","molecule","chore","rig","agent","role","gate","merge-request","step","convoy","startup-health-episode"]'
 
-# Standing-record task_kinds: a held-by-design host for escalations, not work
-# anyone claims. The one definition, shared with the liveness sweep, exposes
-# $STANDING_KINDS_JQ. An unsourceable one warns: without it a standing record
-# would read as marooned work.
-# shellcheck source=../../assets/scripts/standing-kinds.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/assets/scripts/standing-kinds.sh" || {
-    echo "cannot determine whether the HQ store holds marooned work"
-    printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from marooned work."
-    exit 1
-}
 # Which human gates still hold the bead they block, from the one rule every
 # reader of a gate shares. Exposes $HUMAN_GATE_JQ. An unsourceable one warns:
 # without it a bead that waits on a person's answer would read as marooned work.
@@ -207,7 +195,7 @@ if [ "$rc" -ne 0 ] || [ ! -s "$listing" ]; then
     detail "could not list open beads in $STORE (rc=$rc) — the HQ store was NOT checked; an unreadable store is not proof it is clean.${list_err:+ \`gc bd list\` stderr: $list_err}"
     exit 1
 fi
-rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES" "$STANDING_KINDS_JQ"'
+rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES" '
     .[]? | . as $b
     | (($b.issue_type // "") | tostring) as $t
     | (($b.metadata // {})) as $m
@@ -219,7 +207,6 @@ rows=$(jq -r --argjson infra "$INFRA_TYPES" --argjson city_routes "$CITY_ROUTES"
     | select(($infra | index($t)) == null)            # not HQ machinery (infra type)
     | select($as == "")                               # unassigned — not already claimed
     | select(($city_routes | index($rtb)) == null)    # not routed to a city-scoped agent that reads the HQ store
-    | select(($b | is_standing_kind) | not)           # not a held-by-design standing record
     | select(($labels | index("debt")) == null)       # not a parked tech-debt / advisory record
     | select(($title | test("^gc doctor:")) == false) # not a doctor advisory record
     | [ ((($b.id // "?") | tostring) | gsub("[[:cntrl:]]"; " ")),

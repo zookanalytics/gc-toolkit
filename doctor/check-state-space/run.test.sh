@@ -288,7 +288,7 @@ has "$OUT" "gc bd set-state a-p2 hold=mayor" "…and a carrier in another live s
 has "$OUT" "waits in no queue" "…and the finding says what the marker alone leaves undone"
 hasnt "$OUT" "a-p3" "a closed bead carrying it is history, not a finding"
 # One bead carrying two retired keys is named once for each.
-store '[{"id":"a-r13","status":"blocked","metadata":{"escalation_key":"k","visit.recheck":"liveness-recheck.sh"}}]'
+store '[{"id":"a-r13","status":"blocked","metadata":{"escalation_key":"k","visit.recheck":"recheck --ids a-1"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a bead carrying two retired keys is an ERROR"
 has "$OUT" "gc bd update a-r13 --unset-metadata escalation_key" "…named for the first key"

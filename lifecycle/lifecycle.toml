@@ -558,17 +558,15 @@ keys = [
 #   child rework-child.sh files carries source_review_bead or
 #   source_ruling_bead, never both, and the writer dedups a second child against
 #   that key. gate-ensure's quiescence probe counts a live child by either key.
-#   The finding lanes' fix-unit readers (finding.sh, liveness-sweep.sh) take no
-#   child carrying source_ruling_bead: it answers the ruling, not a finding. Not
-#   cleared.
+#   The finding lanes' fix-unit reader (finding.sh) takes no child carrying
+#   source_ruling_bead: it answers the ruling, not a finding. Not cleared.
 # task_kind — the bead's role, the one field a reader decides a kind from (I12);
 #   every writer of a kind also sets the matching label. Its vocabulary across
 #   the pack: `review` (a review dispatch, and the approve outcome that backs a
 #   lane green), `rework` (a fix unit answering a verdict), `finding` (a review
 #   objection, [metadata.review_findings]), `validation` (a validator pass,
-#   mol-validate.toml), `triage-subject` (an
-#   ephemeral-findings bucket), and `observation`/`feedback-pattern`/
-#   `prompt-update` (the learning loop). Set once at creation; not cleared.
+#   mol-validate.toml), and `observation`/`feedback-pattern`/`prompt-update`
+#   (the learning loop). Set once at creation; not cleared.
 # fix_target_pool — the pool a rework fix unit routes to, written on the review
 #   child by gate-ensure.sh when a fix pool is configured; read by signoff.sh,
 #   which defaults it to `<rig>.polecat`. Never cleared. A pool name.
@@ -1216,23 +1214,19 @@ keys = [
 #   these: an anchor whose PR is open is a named wait however long the PR sits,
 #   so no pass escalates it for its age. Registered so that residue on a
 #   pre-retirement bead reads as known, not as a stray.
-# visit.recheck — RETIRED. The recheck command liveness-sweep.sh stamped on a
-#   batch visit, a shell snippet. Nothing writes or reads it: the sweep's gate
-#   carries the command in its message (`liveness-recheck.sh --ids <new>
-#   --carried <carried> --pass-at <time>`), and doctor/check-state-space lists
-#   it in RETIRED_KEYS.
-# sweep.* — RETIRED. The census liveness-sweep.sh stamped on a batch visit:
+# visit.recheck — RETIRED. The re-check command the liveness census stamped on
+#   a batch visit, a shell snippet. Nothing writes or reads it, and
+#   doctor/check-state-space lists it in RETIRED_KEYS.
+# sweep.* — RETIRED. The ids the liveness census stamped on a batch visit:
 #   sweep.new_ids and sweep.carried_ids (comma-joined id lists, this pass and
 #   carried) and sweep.pass_at (the pass timestamp). Nothing writes or reads
-#   them: the census rides the re-check command in the gate's message, and
-#   doctor/check-state-space lists each in RETIRED_KEYS.
-# triage.* — the standing triage subjects liveness-sweep.sh keeps: triage.scope
-#   names what a subject covers (`unnamed-waits` on the sweep's bucket, or the
-#   scope tokens its recurrence pass evaluates: p<=N, label:X, kind:X,
-#   unrouted), triage.last_seen the comma-joined ids in scope when the last
-#   recurrence was filed (absent until the subject is first evaluated, empty
-#   for an empty scope), and triage.hold a held-by-design marker ([holds]
-#   marker_keys).
+#   them, and doctor/check-state-space lists each in RETIRED_KEYS.
+# triage.* — triage.scope and triage.last_seen are RETIRED: a triage bucket's
+#   scope and the comma-joined ids in it when its last recurrence was filed,
+#   which the liveness census kept on the buckets it filed under
+#   task_kind=triage-subject. Nothing writes or reads them or the kind.
+#   triage.hold is a hold marker, defined in [holds] (marker_keys). Nothing in
+#   the pack writes it.
 # gc.pr_visit_summary / gc.pr_visit_actions — RETIRED. They were the closing
 #   text of a visit's PR reminder, stashed on the visit before it closed. The
 #   comment pr-sitting-comment.sh draws reads a visit's conclusion and actions
@@ -1606,7 +1600,6 @@ keys = [
 #   alias. Absent leaves the
 #   disposition unstated. Never cleared.
 # gc.synthetic — "true" on a machine-minted convoy, written by the runtime that
-#   mints it. liveness-sweep.sh's machine_convoy test reads it, with the sling-
-#   and input-convoy title prefixes, as a signal that a convoy is machine-owned
-#   rather than a person's. The pack does not write it. Absent means the convoy
+#   mints it. priority-lib.sh reads it to tell a run's input convoy, which it
+#   follows to the one bead the convoy tracks. The pack does not write it. Absent means the convoy
 #   is not marked synthetic. A boolean-valued string.
