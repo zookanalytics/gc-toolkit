@@ -8,8 +8,7 @@
 # stdin intact, the hook's own measurement returns the context size a
 # transcript carries, its drift check finds a pack file changed after a
 # transcript's first prompt, and the refinery's git-op defer guard is not
-# latched. Capability, not installation — check-config-bound already asserts
-# the overlay_dir exists.
+# latched: capability, not installation.
 # The measurement arms drive the SHIPPED script (`cycle-recycle.sh --measure`
 # and `--drift`) rather than a copy of its logic, so a check that passes is
 # evidence about the hook and not about the fixture. The guard arm reads the

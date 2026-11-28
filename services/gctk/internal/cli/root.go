@@ -131,8 +131,7 @@ func newVersionCmd(version string, stdout io.Writer) *cobra.Command {
 		Short: "the revision this binary was built from",
 		Long: `Prints the revision this binary was built from: the tree hash of
 services/gctk the build order stamps, else the toolchain's commit, with -dirty
-for a modified tree, else unknown. doctor/check-cadence-live compares it against
-the checkout.`,
+for a modified tree, else unknown.`,
 		Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
 			fmt.Fprintln(stdout, version)

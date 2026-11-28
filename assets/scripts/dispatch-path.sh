@@ -18,9 +18,7 @@
 # and the readers here test JSON rows they have already read.
 #
 # Sourced (never executed) by the readers that ask whether a bead already has a
-# dispatch path: the doctor checks check-blocked-work-armed, which flags blocked
-# work that has none, and check-step-terminal, which counts a step as offerable
-# only when it has one.
+# dispatch path, which dispatch-path.test.sh's READERS section lists.
 # The readers that leave a held bead alone source it too:
 # check-blocked-work-armed, which owes one no arm; check-po-queue-only, which
 # reads a bead routed or assigned to the po as reaching it only when no hold
@@ -30,8 +28,8 @@
 # name the hold as a wait.
 # The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
 # it selects armed beads by Gas City's own serve rule and holds one carrying a
-# hold label in any case, as Gas City's hook does, and check-armed-dispatch-owed
-# reads its dry run. The first reaction's check, sling and sweep (gctk reaction)
+# hold label in any case, as Gas City's hook does. The first reaction's check,
+# sling and sweep (gctk reaction)
 # read no row here either: they ask the arm's record and the runtime adapter's
 # dispatch hold (services/gctk/internal/gascity/hold.go).
 # gctk bead place, gctk reaction accept and gctk bead takeaway, which lift

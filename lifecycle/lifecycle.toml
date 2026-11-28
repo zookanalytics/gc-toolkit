@@ -33,9 +33,7 @@ approval_rule = "universal-nonself-standing"
 # The hold markers: the metadata a live bead carries to say it is not moving.
 # I1 holds that a hold is a wait edge to a live bead in the same store, so
 # each key below records a hold the graph cannot answer, and a live bead
-# carrying one with no such blocker is what doctor/check-wait-is-an-edge
-# reports. The check reads this declaration instead of carrying its own list,
-# so a marker added here is asserted without a code change. A hold is a KEY,
+# carrying one owes such a blocker. A hold is a KEY,
 # never a sentence: prose is where a conclusion is recorded beside the edge,
 # and reading it for holds would make prose a hold carrier again.
 [holds]
@@ -61,16 +59,15 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # or the exception that holds it. The record writes it only on a bead whose
 # marker, pr_reconcile_pending, is true. A run of the landing order decides a
 # record whose marker is true while its bead is open, blocked or closed (plan()
-# in services/gctk/pr/landing.go, with record.Read), and the check that reads
-# this declaration reads no closed bead. So the pair answers the reason on an
+# in services/gctk/pr/landing.go, with record.Read), and I1 holds no closed
+# bead to an edge. So the pair answers the reason on an
 # open or blocked bead whose marker is true, where the reason waits on the
 # order's next run and not on a bead. On any other status, such as after a
 # claim or a deferral, or at any other value, no run reads the record, so the
 # reason holds and the bead owes its edge, as it does once the order clears the
 # marker. The order clears an exception's marker only after it files the
 # exception's human gate, and the edge an exception or a refinery park owes is
-# the human gate filed with it. doctor/check-wait-is-an-edge/run.test.sh holds
-# the pair's statuses and value to that code.
+# the human gate filed with it.
 settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=open,blocked:pr_reconcile_pending=true"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
 # hold that must show as an edge asserts it through blocked_reason or
@@ -79,22 +76,8 @@ settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=open,blocked:
 # block ON, which by construction can hold no `blocks` edge of its own. A human
 # gate is filed blocking the bead that waits (human-gate.sh, or the native
 # `bd gate create --type=human --blocks`), and a park is a plain gate a bead's
-# own edge points at, so a gate is exempt from I1 rather than a permanent
-# unedged finding, whatever it carries. Leaving this line out disables the
-# exemption; the check reads an omitted field as one the declaration dropped.
+# own edge points at, so a gate is exempt from I1, whatever it carries.
 terminal_wait_type = "gate"
-# How doctor/check-wait-is-an-edge reports a marker with no live blocker.
-# "warn" while a backlog of marker-only holds is still being converted to
-# edges; "error" once none are left. The posture is declared here rather than
-# compiled into the check, so ending the conversion is this line, and so it is
-# readable beside the markers it governs.
-#
-# A finding converts two ways, and neither blanks a marker: the wait it names
-# becomes a `blocks` edge on the same store, or — where nothing is waiting —
-# its writer re-stamps it with the settled-key. The second is what keeps this
-# posture reachable, because a ritual that stamps a marker on every sign-off
-# regenerates the population faster than closes drain it.
-hold_severity = "warn"
 
 [machine_axis]
 # What the merge cadence can do with this anchor on its next pass, recorded by
@@ -196,7 +179,7 @@ since_format = "RFC 3339 UTC"
 # refuses a --takeaway that normalizes to nothing, and one longer than 140
 # codepoints.
 #
-# A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
+# A WAIT IS AN EDGE, never a metadata string (I1):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd
 # ready honors with `conditional-blocks` and `waits-for`. `parent-child` is
 # decomposition that cascades the parent's blocked state DOWN to its children,
@@ -952,8 +935,8 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
-# doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
-# from its stall arms with the remedy status=blocked. No pack
+# doctor/check-root-advancing reads a molecule whose root or member carries it
+# (or gc.takeaway) as parked on purpose. No pack
 # script writes it; an operator or the refinery stamps it by hand when parking a
 # branch. Never cleared. Freeform.
 
@@ -1096,8 +1079,8 @@ keys = [
 # operator rules at a review of the epic, whose block in the epic's notes is the
 # dated record docs/epics.md calls for. No key marks an epic as reviewed, and no
 # pack script writes the ruling's keys. finalize-gate.sh
-# (clause_epic_ruling_recorded) and doctor/check-epic-closed-implies-ruled read
-# epic_hypothesis, epic_ruling and epic_ruling_reason, and `gctk epic
+# (clause_epic_ruling_recorded) reads epic_hypothesis, epic_ruling and
+# epic_ruling_reason, and `gctk epic
 # unweighed` reads the ruling's keys, epic_shifted_at and epic_weighed_at.
 keys = [
   "epic_handle", "epic_hypothesis", "epic_boundaries",
@@ -1117,9 +1100,8 @@ keys = [
 #   `close` (docs/epics.md). continue and shift keep the epic open; close is the
 #   one terminal ruling. Each later ruling overwrites the last.
 #   clause_epic_ruling_recorded holds the finalize of an epic other than a
-#   Delivery until it reads close with an outcome, and
-#   check-epic-closed-implies-ruled errors on such a closed epic that lacks
-#   either. Absent means the hypothesis has not been ruled on.
+#   Delivery until it reads close with an outcome. Absent means the hypothesis
+#   has not been ruled on.
 # epic_ruling_reason — why the latest ruling was made, written with it. On a close
 #   ruling it is the outcome, and the close requires it: the hypothesis held, was
 #   disproven, cannot be met as stated, stalled, or ran past its cost. On continue

@@ -30,7 +30,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/.."
 [ -d "$REPO/doctor" ] || REPO="$HERE/../.."
 FENCE="doctor-parallel-reads"
-CANON_HOST="$REPO/doctor/check-armed-dispatch-owed/run.sh"
+CANON_HOST="$REPO/doctor/check-po-queue-only/run.sh"
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
@@ -52,8 +52,8 @@ hosts() { find "$REPO/doctor" -name 'run.sh' -type f 2>/dev/null | sort; }
 
 echo "── 1. the canonical block ──"
 BLOCK="$(extract "$CANON_HOST")"
-if [ -n "$BLOCK" ]; then ok "block present in check-armed-dispatch-owed"
-else bad "block present in check-armed-dispatch-owed" "no marked block"; fi
+if [ -n "$BLOCK" ]; then ok "block present in check-po-queue-only"
+else bad "block present in check-po-queue-only" "no marked block"; fi
 printf '%s\n' "$BLOCK" > "$TMP/block-only.sh"
 if bash -n "$TMP/block-only.sh" 2>/dev/null; then ok "block is valid bash"
 else bad "block is valid bash" "bash -n failed"; fi
@@ -74,13 +74,13 @@ while IFS= read -r f; do
     COPIES=$((COPIES + 1))
     if [ "$b" != "$BLOCK" ]; then
         DIVERGENT=$((DIVERGENT + 1))
-        bad "$(basename "$(dirname "$f")"): copy matches canonical" "block differs from check-armed-dispatch-owed"
+        bad "$(basename "$(dirname "$f")"): copy matches canonical" "block differs from check-po-queue-only"
     fi
 done < <(hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
-if [ "$COPIES" -ge 3 ]; then ok "copy census $COPIES ≥ 3"
-else bad "copy census $COPIES ≥ 3" "copies disappeared — did a check inline its own reads again?"; fi
+if [ "$COPIES" -ge 1 ]; then ok "copy census $COPIES ≥ 1"
+else bad "copy census $COPIES ≥ 1" "copies disappeared — did a check inline its own reads again?"; fi
 
 echo "── 3. a read keeps its stdout, its stderr and its own rc ──"
 # probe <stdout> <stderr> <rc> prints both streams (printf %b escapes) and

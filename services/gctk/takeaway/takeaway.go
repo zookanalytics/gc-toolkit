@@ -279,7 +279,7 @@ func (r *take) guardRelease() error {
 	// wait as an edge, or the settled mark that says there is none. Only an
 	// open blocker the bead already carries lets it go with neither, since that
 	// edge is the wait. A headline holding the bead with no edge and no mark is
-	// the hold on prose doctor/check-wait-is-an-edge reports.
+	// a hold on prose.
 	if r.req.Route == "" && r.req.Assign == "" && !r.req.NoWait && len(r.req.WaitingOn) == 0 {
 		pending, err := r.t.pending(r.bead)
 		if err != nil {
@@ -287,7 +287,7 @@ func (r *take) guardRelease() error {
 				r.bead, r.bead, err)
 		}
 		if len(pending) == 0 {
-			return refuse("--release parks %s for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it. %s carries no open blocker to hold it, so with neither the headline is a hold on prose, which doctor/check-wait-is-an-edge reports. Nothing was written.",
+			return refuse("--release parks %s for a person, and a park states its disposition: --waiting-on <bead> for the wait it holds on, which becomes a blocks edge, or --no-wait when nothing waits on it. %s carries no open blocker to hold it, so with neither the headline is a hold on prose. Nothing was written.",
 				r.bead, r.bead)
 		}
 	}

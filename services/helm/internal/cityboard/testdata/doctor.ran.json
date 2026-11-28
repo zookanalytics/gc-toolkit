@@ -77,10 +77,10 @@
           "streak": 2
         },
         {
-          "name": "gc-toolkit:check-wait-is-an-edge",
+          "name": "gc-toolkit:check-state-space",
           "status": "warning",
           "severity": "blocking",
-          "message": "waits a live bead records that hold nothing (I1): 44 finding(s) across 7 store(s) — reported as a warning while the conversion backlog stands (lifecycle/lifecycle.toml hold_severity)",
+          "message": "state space violated (I2): 2 finding(s)",
           "first_failed": "2026-11-16T22:18:18Z",
           "streak": 2
         },

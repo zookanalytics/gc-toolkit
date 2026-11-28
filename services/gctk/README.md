@@ -181,8 +181,6 @@ caller's path, so a gctk change goes live when the order next publishes it, on
 the first pass after the change reaches the checkout, while a script edit is
 live from the working tree at once. A build that fails is tried again every
 five minutes. The bridges run whatever binary the order last published.
-`doctor/check-cadence-live` reports a deployed binary built from sources other
-than the checkout's.
 
 ## Layout
 

@@ -465,9 +465,8 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 # A stamping component's binary carries the revision it was built from
-# (`gctk version`), stamped as SOURCE_REV, so doctor/check-cadence-live
-# compares the identity the build records against the checkout rather than a
-# commit hash. A build with no revision to stamp falls back to the toolchain's
+# (`gctk version`), stamped as SOURCE_REV: the identity the build records
+# from the checkout's sources rather than a commit hash. A build with no revision to stamp falls back to the toolchain's
 # VCS stamp.
 GO_BUILD_FLAGS=()
 if [ "$STAMP" -eq 1 ] && [ -n "$SOURCE_REV" ]; then

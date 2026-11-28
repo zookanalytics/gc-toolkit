@@ -75,8 +75,8 @@ while IFS= read -r f; do
 done < <(hosts)
 [ "$DIVERGENT" -eq 0 ] && ok "all $COPIES copies identical"
 # A floor, not an equality: new hosts are expected, a host going missing is not.
-if [ "$COPIES" -ge 13 ]; then ok "copy census $COPIES ≥ 13"
-else bad "copy census $COPIES ≥ 13" "copies disappeared — did a check inline its own bound again?"; fi
+if [ "$COPIES" -ge 10 ]; then ok "copy census $COPIES ≥ 10"
+else bad "copy census $COPIES ≥ 10" "copies disappeared — did a check inline its own bound again?"; fi
 
 echo "── 3. the budget, derived ──"
 budget() { GC_DOCTOR_CHECK_TIMEOUT="$1" bash -c 'set -u; . "$1"; printf "%s %s" "$BUDGET_TOTAL" "$BUDGET_CAP"' _ "$TMP/block.sh"; }

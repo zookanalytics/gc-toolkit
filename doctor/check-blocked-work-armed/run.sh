@@ -69,10 +69,6 @@
 #
 # The remedy the finding names is arming — gctk bead arm, which is a safe
 # universal substitute for a hand-held sling (docs/deferred-dispatch.md).
-# The complement check is doctor/check-wait-is-an-edge (I1): that one asserts
-# the wait IS an edge rather than prose; this one asserts an edged wait has
-# somewhere to go. A bead can pass one and fail the other.
-#
 # Read-only. Exit 0=OK 1=Warning. stdout: first line = message, then
 # "  - detail" lines. Warn-only: a standing backlog of unarmed blocked work
 # exists, so this reports and never fails the sweep. An UNREADABLE probe warns
@@ -111,8 +107,7 @@ WORK_TYPES=" bug feature task chore spike story "
     printf '  - %s\n' "assets/scripts/standing-kinds.sh could not be sourced from this pack, so a standing record cannot be told from stranded work."
     exit 1
 }
-# What counts as a dispatch path and a dispatch hold, from the one definition
-# shared with check-step-terminal and gc-helm.sh.
+# What counts as a dispatch path and a dispatch hold, from the one definition.
 # Exposes $DISPATCH_PATH_JQ. An unsourceable one warns: without it no bead can be
 # told to have a dispatch path or a hold.
 # shellcheck source=../../assets/scripts/dispatch-path.sh

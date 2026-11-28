@@ -68,7 +68,7 @@ usage: patrol-finding.sh --key <situation-key> --title <one line>
               is reserved for that derivation (`doctor-sweep-failed`, a
               whole-sweep failure, is the one hand-typed doctor key)
   --check     a doctor check name — the sweep payload's `.name`, e.g.
-              `gc-toolkit:check-step-terminal`. Derives the key `doctor-<check>`
+              `gc-toolkit:check-root-advancing`. Derives the key `doctor-<check>`
               with the `<rig>:` prefix stripped, so every rendering of one
               check's name dedups to one bead. Mutually exclusive with --key;
               give exactly one
