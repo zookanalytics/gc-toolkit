@@ -219,27 +219,16 @@ The pack's checks, and what a failure means:
 
 | Check | Asserts (invariant) | First-failure cause |
 |---|---|---|
-| `check-wait-is-an-edge` | every live bead carrying a declared hold marker also carries a pending wait edge onto a live bead in the same store — a wait is an edge, not prose or a bare marker (I1) — and no live bead's wait edge points into another store | a hold left as a marker or note with no wait edge filed, one whose waits all landed or name another store, or a wait edge into another store, which holds nothing |
 | `check-state-space` | every open bead's `merge_result` is a value the pack writes, and no open bead carries a closed-only one (I2) | a writer minted a value nothing handles, or a landed bead was reopened |
-| `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
 | `check-gate-integrity` | gating anchors declare a non-empty `check_set` or the `none` opt-out (I6) | an anchor normalized by no gate-ensure pass, or a `check_set` written empty by hand |
 | `check-gate-marker-provenance` | every closed approve review backing a lane on an open gating anchor records the outcome its writer stamps, `gc.outcome=recorded` or `superseded` (I7 depth) | an approve verdict whose outcome was never recorded, which still derives its lane green |
-| `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | the pack each rig executes is the pack that landed (I9) | a rig checkout lagging past the reconciler's self-heal window, or an unfetched remote-tracking ref |
-| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` to exec, and `flock` resolves for the pass lock `refinery-reconcile` takes (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
-| `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
-| `check-epic-closed-implies-ruled` | a closed epic other than a Delivery was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a Delivery, an epic whose parent is an epic and that carries no hypothesis, is exempt, because its epic carries the ruling (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |
 | `check-po-queue-only` | each rig's po receives nothing but its queue: no bead that a hold does not hold is routed or assigned to it, no mail to it waits unread, and every bead in its queue is new work that nothing has sent (I16) | a path that sends the po work: a route, an assignment, `gc sling <po> --on <formula>`, mail from any sender, or `hold:mayor` set on PR-finishing work, on a bead with a landing state, or on a bead an arm, an assignee or a live run already sends |
-| `check-config-bound` | prompts/overlays/fragments resolve in the composed config; no order registered with no rig declares `scope = "rig"` | a rename that missed a reference, or a `scope = "rig"` order file where Gas City reads city-level orders, such as the city's own `orders/` |
-| `check-seed-audit-current` | `generated/seed-audit/` is present and the pre-commit hook that regenerates it is wired (warn-only) | a fresh clone before its first render, or `core.hooksPath` not set to `assets/hooks` |
 | `check-recycle-capable` | cycle-recycle can fire: the Stop and UserPromptSubmit events reach the hook with its stdin intact, the hook's own `--measure` reads a transcript's context size, its `--drift` sees a changed pack file, and no refinery defer guard is latched | the wiring stopped passing the hook its stdin, the transcript shape moved under the measurement or the drift check, or an uncommitted tracked file has latched the refinery's git-op guard |
-| `check-cycle-recycle-hook` | the cycle-recycle Stop hook and its no-consent doctrine are wired to the same roles: every agent carrying the `cycle-recycle` overlay also injects the `heartbeat-no-consent-ui` fragment, and vice versa (static: pack.toml + prompt templates) | a role that recycles with nothing forbidding it a blocking consent UI, or a role carrying the doctrine for a turn boundary it never reaches |
 | `check-wisp-cascade-intact` | every bead store carries the four `ON DELETE CASCADE` foreign keys from the wisp auxiliary tables into `wisps(id)` | a store whose schema migration recorded the constraints as applied without adding them, leaving it to accumulate auxiliary rows no wisp reaches |
 | `check-blocked-work-armed` | every blocked, unassigned plain-work bead carries a dispatch path — `gc.routed_to` or a `gc.dispatch_when_ready` arm (warn-only) | a blocked work bead with no route and no arm, so it strands when its blocker closes and no pool is offered it |
-| `check-armed-dispatch-owed` | every bead armed with `gc.dispatch_when_ready` that nothing holds, by an open blocker on it or, unless it is in flight, on an ancestor, was slung within the deferred-dispatch cadence (warn-only) | the deferred-dispatch order not firing, or an arm set at a non-open status that `bd ready` never surfaces |
-| `check-hq-marooned-work` | no rig-workable bead sits unclaimed in the HQ (city) store, which no pool reads | a city-scoped role with `GC_RIG` unset filing a bare `bd create` into the HQ store, marooning the work by construction |
 | `check-demo-toolchain` | the demo:capture toolchain — Node, ffmpeg, `OPENAI_API_KEY`, and `gh` — is resolvable, and `VERCEL_AUTOMATION_BYPASS_SECRET` reaches the session whenever the secrets file holds it (readiness, warn-only) | a missing demo dependency, so a capture degrades to a silent, captioned clip, or `VERCEL_AUTOMATION_BYPASS_SECRET` in the secrets file but not in the session, because `GC_SUPERVISOR_ENV` does not name it or the supervisor was installed before the file held it |
 
 `gc doctor --verbose` explains any failure; `gc doctor --fix` applies the
@@ -281,8 +270,7 @@ keeps it current once per clone:
 assets/scripts/render-seed-audit.sh --install-hook
 ```
 
-Until then `check-seed-audit-current` warns rather than errors, and so it does
-for a clone that carries no render yet.
+Without the hook, a commit carries no render of the inputs it changes.
 
 The hook keeps a branch current against its own base, which is not the same as
 keeping the landing branch current: the artifact is rendered from the whole

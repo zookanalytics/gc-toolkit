@@ -598,8 +598,7 @@ nothing written.
 the bead's own waits, its holds, the review results recorded for the PR's head
 and target, GitHub's facts and the posts the city has not taken
 ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)), and
-the merge is pinned to the head the refinery validated. One anchor per PR is
-asserted structurally by `doctor/check-one-anchor-per-pr`.
+the merge is pinned to the head the refinery validated.
 
 ## The PR's conversation
 
@@ -1188,7 +1187,7 @@ which searches every store before it reopens a closed bead, `stand-down.sh` (a
 person's ruling that work a human gate holds will not go on),
 `preexisting-failure.sh` (a pre-existing-failure gate follows a closed
 tracker's edge to the live bead that carries its failure, and a `not-needed`
-close ends that chain), the doctor's I5 and I15, the board's subject resolver,
+close ends that chain), the doctor's I5, the board's subject resolver,
 and any patrol judging a closed bead.
 
 `bead-rehome.sh` proves the evidence kinds itself. Under `fixed-upstream` and

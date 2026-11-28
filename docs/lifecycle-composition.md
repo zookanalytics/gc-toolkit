@@ -70,25 +70,21 @@ repeatable, writes a `blocks` edge beside the takeaway string
 the durable record of what the sitting concluded, and it is never cleared. The
 edge is what makes the wait *machine-answerable*.
 
-`doctor/check-wait-is-an-edge` holds this clause where it is decidable. A bead
-in any non-closed status that carries a hold marker must also carry a `blocks`
-edge to a bead still live in the same store. Closed is the one status that ends
-a hold, so every other one is in scope: a hold stated by a bead already
-claimed, blocked or parked is as unanswerable as an open bead's. Only that edge
-type is checked, because only that type holds the bead out of `bd ready`.
+A bead in any non-closed status that carries a hold marker must also carry a
+`blocks` edge to a bead still live in the same store. Closed is the one status
+that ends a hold, so every other one is in scope: a hold stated by a bead
+already claimed, blocked or parked is as unanswerable as an open bead's. Only
+that edge type holds the bead out of `bd ready`. No check reads this clause, so
+a marker with no edge sits until someone notices.
 
-The markers are a declared list, `[holds]` in `lifecycle/lifecycle.toml`, and
-the check never reads prose for a hold. That boundary is this section's rule
-pointed the other way. The sentence a sitting writes is a conclusion, stored
-once and never cleared, so a check that read sentences for holds would be
-treating prose as the hold carrier again. The surface is also unbounded: no
-list of wait verbs finishes, and every phrase one missed would report a clean
-pass. A finding is graded by what the graph carries. A bead with no `blocks`
-edge at all needs one filed. A bead whose every blocker has closed, or names
-another store, has outlived its edge and needs its disposition instead. The one
-bead exempt is the terminal end of the wait itself — a gate others block on, a
-human gate or a park, can hold no forward edge, so `[holds]` names its issue
-type (`terminal_wait_type`, `gate`) and the check skips a bead of that type.
+The markers are a declared list, `[holds]` in `lifecycle/lifecycle.toml`, never
+prose. That boundary is this section's rule pointed the other way. The sentence
+a sitting writes is a conclusion, stored once and never cleared, so reading
+sentences for holds would treat prose as the hold carrier again. The surface is
+also unbounded: no list of wait verbs finishes. The one bead exempt is the
+terminal end of the wait itself — a gate others block on, a human gate or a
+park, can hold no forward edge, so `[holds]` names its issue type
+(`terminal_wait_type`, `gate`).
 
 ### 2. The waiting side re-derives; it never trusts stored state
 

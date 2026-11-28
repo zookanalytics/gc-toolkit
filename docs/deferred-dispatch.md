@@ -101,10 +101,8 @@ is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
 An arm is a dispatch path, as a route is. Both are defined once for the
-scripts, in `assets/scripts/dispatch-path.sh`, and each script that asks whether
-a bead's dispatch is already decided sources that file:
-`doctor/check-blocked-work-armed`, `doctor/check-step-terminal` and
-`assets/scripts/stand-down.sh`. The first reaction asks the same of the arm's
+scripts, in `assets/scripts/dispatch-path.sh`, which each script that asks
+whether a bead's dispatch is already decided sources. The first reaction asks the same of the arm's
 record in gctk. So an arm also keeps the bead out of the proactive sweep.
 `gctk reaction sweep` looks for raw input to react to, and it drops a bead that
 has a dispatch path. Otherwise a sweep that ran between a blocker closing and
@@ -315,8 +313,8 @@ not reach a person keeps the arm, and the next pass asks again.
 A record the start cannot read, such as arguments that name no formula alone,
 is reported as malformed, and nothing is slung on it. Such a record, and an
 arm that names no formula for a target the city's config gives no default,
-count no attempt, so the cap never asks a person about either, and
-`doctor/check-armed-dispatch-owed` reports both instead (below).
+count no attempt, so the cap never asks a person about either. Each fails the
+pass instead (below).
 
 A listing that cannot be read exits non-zero and says so. It never prints an
 empty pass, because for a dispatcher "I could not see the queue" and "nothing
@@ -324,21 +322,17 @@ was owed" reading alike is the same disappearing hold this machinery exists to
 remove. A read of what holds the arms, or of bd's ready set, that fails sends
 nothing and fails the pass, while the retires still run.
 
-Three checks keep the halves together. A test in `services/gctk/arm` asserts
-that the order ships, is a rig-scoped cooldown that does not opt out of the
-single-flight gate, runs `gctk bead start-armed` on its rig's store, and gives
-the start's deadline room below its timeout. `doctor/check-cadence-live` (I10)
-asserts the registration is live on every importing rig and has fired within
-its cadence window: `max(3×interval, floor)`, where the floor is one trip of
-the order dispatch rotation (`assets/scripts/order-cadence.sh`). Ship the arm
-without the cadence and `arm` still succeeds and writes a well-formed record,
-and nothing ever performs it. `doctor/check-armed-dispatch-owed` closes the gap
-the other two leave: the cadence can be live and the pass still leave a
-dispatch unmade, so it reads each arm from the start's dry run and flags one
-the next pass would start, or one nothing holds whose formula the start cannot
-resolve, that has stayed armed past the order's window. It also flags one armed
-at a status other than `open`, or one whose record does not decode, which the
-start never sends.
+A test in `services/gctk/arm` keeps the halves together: it asserts that the
+order ships, is a rig-scoped cooldown that does not opt out of the single-flight
+gate, runs `gctk bead start-armed` on its rig's store, and gives the start's
+deadline room below its timeout. Gas City's `order-firing-current` reports the
+order once it stops firing within its cadence, and a pass that fails an act,
+such as a malformed record or an arm whose formula the start cannot resolve,
+exits non-zero, which Gas City's `order-outcome-healthy` reports once three
+passes in a row fail. Nothing reports an order that never registers: ship the
+arm without the cadence and `arm` still succeeds and writes a well-formed
+record, and nothing ever performs it. Nothing reports an arm at a status other
+than `open` either, which `bd ready` never answers and the start never sends.
 
 ## The dispatch lock and the time bound
 

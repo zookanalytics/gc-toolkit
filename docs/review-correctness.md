@@ -162,7 +162,7 @@ defect only on a line some test executes.
   `[ … ] && x=1` fails there.
 - **Unreadable is not empty.** A read whose emptiness decides anything checks
   its exit status, and an unreadable answer holds or fails closed
-  (`doctor/check-armed-dispatch-owed/run.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
+  (`doctor/check-blocked-work-armed/run.sh`, `bd_list` in `assets/scripts/bd-lib.sh`).
   A `gc bd list … | jq …` without pipefail reads a store that did not answer as
   an empty list. `gc bd … --json` can carry a raw control byte inside a note,
   which makes jq refuse the whole payload, so store text goes through the

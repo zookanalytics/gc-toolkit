@@ -144,7 +144,7 @@ clause_epic_ruling_recorded() {
     # carries the far bead with its issue_type, so it costs no second read. A
     # show row leaves out an edge into another rig's store (DISPOSITION_JQ), so
     # an epic whose parent sits there reads as having no epic parent and is
-    # held, as I15 reports it.
+    # held, as I15 reads it.
     _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r "$DISPOSITION_JQ"'
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),

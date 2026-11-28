@@ -880,9 +880,7 @@ why a reader must know it, and the work that retires it.
   it are declared in `takeaway`, whose `bead takeaway` writes them, but shell
   reads them itself, spelling each key, against rules 1 and 6:
   `bead-context.sh`, the `converse-recheck-premise` skill's close,
-  `doctor/check-claim-advancing` and `doctor/check-root-advancing`, which count
-  a headline as a hold on purpose, `doctor/check-wait-is-an-edge`, which reads
-  the headline as a hold marker through `lifecycle/lifecycle.toml`'s `[holds]`,
+  `doctor/check-root-advancing`, which counts a headline as a hold on purpose,
   and the liveness recheck, which tk-1tfzr71.174 retires. `gctk lifecycle
   --takeaway` can also write the keys. So the keys stay registered in
   `lifecycle/lifecycle.toml`. tk-1tfzr71.216

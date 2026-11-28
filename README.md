@@ -85,10 +85,9 @@ input (`agents/`, `template-fragments/`, `formulas/`, `packs/`, `pack.toml`,
 or the renderer itself). The commit carries only the renders its change moves:
 text the `gc` binary moved lands through the default branch's re-audit, a pull
 request of its own. Nothing under `generated/` is hand-edited.
-`render-seed-audit.sh --check` verifies the artifact by re-rendering it, the
-merge gate re-renders every merge before it lands, and
-`doctor/check-seed-audit-current` warns when the artifact is absent or the
-hook is not wired. `render-seed-audit.sh --sizes [<base-rev>]` prints each
+`render-seed-audit.sh --check` verifies the artifact by re-rendering it, and
+the merge gate re-renders every merge before it lands.
+`render-seed-audit.sh --sizes [<base-rev>]` prints each
 render's byte and token counts.
 
 ## Docs
