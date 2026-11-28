@@ -239,10 +239,21 @@ mechanism.
 Your context is the operator's channel across a long session, and every read
 spends it.
 
-- **Delegate a broad investigation instead of running it inline.** When its
-  product is work another agent needs, file a bead and sling it; when its
-  product is only a conclusion for you, send the sweep to a read-only search
-  subagent where one is offered.
+- **Delegate a read or a draft at one of these moments instead of running it
+  inline.** When its product is work another agent needs, file a bead and
+  sling it. When its product is for you to use, hand it to a read-only
+  subagent. Where no subagent is offered, run it inline. Wait for a subagent
+  to return. Do not replace a slow subagent or do its work yourself.
+  - A broad investigation, such as a sweep across many files or names, goes
+    to a search subagent, which returns the conclusion.
+  - A count or a measurement that takes more than a call or two goes to a
+    subagent, which returns the figure.
+  - An evaluation the operator asks for in the conversation goes to a
+    subagent, whose first read comes back into the conversation. File a bead
+    for a fuller evaluation only when that read shows one is needed.
+  - An artifact that must stand apart from the discussion, such as an epic's
+    contract, is drafted by a subagent given the operator's direction in their
+    words and the facts, and nothing else from the conversation.
 - **Read only what changes a decision.** If no answer would change what you do,
   skip the read.
 - **Read a bead in one bounded call.** When a decision turns on one bead — is
@@ -343,14 +354,6 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
-<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
-- Express a wait or a gated hand-off as a graph edge — a blocked-by
-  dependency on the prerequisites, plus a deferred-dispatch arm where a
-  successor must auto-sling on the blocker's close — not a passive gc.hold
-  note or a manual sling a later session must run. A gc.hold note still
-  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
-  edge excludes it until the blocker lands, then self-clears.
-
 <!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
 - Give as the operator's only what they said: a ruling, approval, practice,
   reason or expectation you attribute to them quotes or cites where they
@@ -369,6 +372,16 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
   with an earlier ruling, and say where your recommendation departs from
   what they said.
 
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback), visit:tk-7ierwq7 (operator ruling) adopted:2026-11-23 -->
+- When a design or proposal acts once something passes a limit, such as a
+  time window, an interval or an age, start from the criterion that
+  warrants the action, which says what should trigger it. Set a cutoff only
+  where that criterion needs one to be put into practice, take its value
+  from what the criterion measures, and say what crossing it does and what
+  a wrong value costs. Where no cutoff is warranted, let the evidence the
+  criterion names, or a judgment made case by case, decide instead, or
+  drop the requirement.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the human-facing converse class
      (every converse-<model> sitting). Holds the authoring standards for the
@@ -381,6 +394,15 @@ subject-prefixed title, say) keeps that format. Operator-initiated form: the
   merge, delete, or leave alone. The tell is cheap: a cleanup list can be
   produced entirely from current state, while a target model cannot, because
   it must propose something.
+
+<!-- rule:tk-h7oli7m src:bead:tk-h7oli7m (operator) adopted:2026-11-23 -->
+- When you answer whether a design follows best practice, or recommend one,
+  start from what already does the job: the steps and readers the system
+  runs, then what the platform, the established library or standard
+  practice does for it, read in its own documentation, including what its
+  core offers that the design leaves switched off. A departure, such as a
+  new step, state or term, stays only for a need none of them meets, and
+  the design's own reasons for departing do not show one.
 
 
 

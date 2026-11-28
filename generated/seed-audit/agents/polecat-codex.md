@@ -81,14 +81,6 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
-<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
-- Express a wait or a gated hand-off as a graph edge — a blocked-by
-  dependency on the prerequisites, plus a deferred-dispatch arm where a
-  successor must auto-sling on the blocker's close — not a passive gc.hold
-  note or a manual sling a later session must run. A gc.hold note still
-  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
-  edge excludes it until the blocker lands, then self-clears.
-
 <!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
 - Give as the operator's only what they said: a ruling, approval, practice,
   reason or expectation you attribute to them quotes or cites where they
@@ -107,6 +99,16 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   with an earlier ruling, and say where your recommendation departs from
   what they said.
 
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback), visit:tk-7ierwq7 (operator ruling) adopted:2026-11-23 -->
+- When a design or proposal acts once something passes a limit, such as a
+  time window, an interval or an age, start from the criterion that
+  warrants the action, which says what should trigger it. Set a cutoff only
+  where that criterion needs one to be put into practice, take its value
+  from what the criterion measures, and say what crossing it does and what
+  a wrong value costs. Where no cutoff is warranted, let the evidence the
+  criterion names, or a judgment made case by case, decide instead, or
+  drop the requirement.
+
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by polecat and polecat-codex (via the
      polecat-doctrine fragment). Holds the authoring standards for the polecat
@@ -124,7 +126,7 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   waiting. An untracked spec dump, or a fix that defers to nothing, is the
   anti-pattern. The discipline is the tracked deferral, not a ban on specs.
 
-<!-- rule:tk-qenzk6e src:bead:tk-qjc4uaa, bead:tk-cxtkwyw, pr:#1008:comment:5983192498, visit:tk-z9vxelu, visit:tk-9adohq9 (operator feedback) adopted:2026-10-31 -->
+<!-- rule:tk-qenzk6e src:bead:tk-qjc4uaa, bead:tk-cxtkwyw, pr:#1008:comment:5983192498, visit:tk-z9vxelu, visit:tk-9adohq9 (operator feedback) adopted:2026-10-31 updated:2026-11-23 -->
 - Before you add or keep a compatibility, legacy or transitional path, such
   as a fallback, a lenient mode, old logic kept beside its replacement, or a
   bridge's behavior preserved in the code that replaces it, name the caller
@@ -132,7 +134,7 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   what that caller does when the strict form refuses it. When nothing
   depends on it, build only the end state, and when a real case does, file
   the bead that removes the path in the same change, blocked by what retires
-  the case and armed to dispatch when it lands.
+  the case.
 
 <!-- rule:tk-clpl8jv src:pr:#1298:comment:4310526242, pr:#1298:comment:4310543583, pr:#1220:comment:4243955265, pr:#1262:comment:4286336787, pr:#1277:comment:4303601800 (operator feedback), visit:tk-ilmnzqh (operator ruling) adopted:2026-10-31 -->
 - Before a change adds machinery, such as a script, a client for a
@@ -172,6 +174,12 @@ review bead carries `mol-review` (one verdict through `signoff.sh`).
   owner. Fix only the retellings your change has to edit. Keep a list a
   check requires, such as a registry a test compares with the code, and
   update it.
+
+<!-- rule:tk-xxb1jh src:pr:#1045:comment:4212283570, pr:#1267:review:5539030669 (operator feedback), bead:tk-riu2z5n, visit:tk-7ierwq7 (operator ruling) adopted:2026-11-23 -->
+- When a test stands in for data another program writes, such as a tool's
+  files, a command's output or a service's answers, build its fixture from
+  that program's real output, recorded or sampled, and make a case that
+  simulates its write change what the real write changes.
 
 
 ## Execute immediately

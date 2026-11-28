@@ -345,7 +345,8 @@ sending work.
 
 The default after `gc sling` is file-and-forget: the bead is the contract, and
 nothing here reads it again. A follow-up that is BLOCKED on another bead takes an
-edge and an arm, never a watcher (the `waits` skill):
+edge (the `waits` skill). It takes an arm as well when the work skill's intake
+rule lets you send it now:
 
 ```
 # >>> gctk-bin
@@ -355,8 +356,8 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
     --target <rig>/<agent> --reason "waits for <blocker>"
 ```
 
-A watch held in your context is a dispatch invisible to everyone else and gone
-when the session ends.
+A blocked follow-up never takes a watcher. A watch held in your context is a
+dispatch invisible to everyone else and gone when the session ends.
 
 The one sanctioned watch: a human is in THIS conversation right now, waiting on
 the outcome. Then spawn exactly one bounded terminal-status watch — it reports
@@ -455,14 +456,6 @@ worktree.
   punctuation doing a sentence's job — if a path has steps, give each
   step a clause.
 
-<!-- rule:tk-n7r69z src:bead:tk-to8lt9, bead:tk-kwmyg3 (operator) adopted:2026-10-02 -->
-- Express a wait or a gated hand-off as a graph edge — a blocked-by
-  dependency on the prerequisites, plus a deferred-dispatch arm where a
-  successor must auto-sling on the blocker's close — not a passive gc.hold
-  note or a manual sling a later session must run. A gc.hold note still
-  surfaces the bead in gc hook and bd ready as live demand; a blocked-by
-  edge excludes it until the blocker lands, then self-clears.
-
 <!-- rule:tk-cnzyj8p src:pr:#1269:comment:4286754857, pr:#485:comment:3867418027 (operator feedback), bead:tk-s0c1i6z, bead:tk-yqqwpp, bead:tk-irjgyll (operator) adopted:2026-10-30 -->
 - Give as the operator's only what they said: a ruling, approval, practice,
   reason or expectation you attribute to them quotes or cites where they
@@ -480,6 +473,16 @@ worktree.
   their lean before you build on it, push back where you disagree, even
   with an earlier ruling, and say where your recommendation departs from
   what they said.
+
+<!-- rule:tk-kva4vy6 src:visit:tk-2m30oko, bead:tk-0vo6nph, pr:#1474:comment:4556767542, pr:#944:comment:4167767108 (operator feedback), visit:tk-7ierwq7 (operator ruling) adopted:2026-11-23 -->
+- When a design or proposal acts once something passes a limit, such as a
+  time window, an interval or an age, start from the criterion that
+  warrants the action, which says what should trigger it. Set a cutoff only
+  where that criterion needs one to be put into practice, take its value
+  from what the criterion measures, and say what crossing it does and what
+  a wrong value costs. Where no cutoff is warranted, let the evidence the
+  criterion names, or a judgment made case by case, decide instead, or
+  drop the requirement.
 
 <!-- managed by the learning distiller; every entry carries its anchor. cap: 12 -->
 <!-- Composed after work-quality-base by the system-class roles: deacon,
