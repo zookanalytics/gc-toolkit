@@ -95,6 +95,22 @@ esac
 STUB
 chmod +x "$BIN/gh"
 
+# gctk stub: `github quote <url> --json` answers the thread in $STATE in the
+# quote's shape, each comment a conversation post whose text is barred and
+# shows the five characters a shell reads as look-alikes. GH_READ=fail fails
+# it. Every call is logged to $GHLOG beside gh's.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'STUB'
+printf 'gctk %s\n' "$*" >>"${GHLOG:?}"
+[ "${1:-} ${2:-}" = "github quote" ] || exit 2
+[ "${GH_READ:-}" = fail ] && exit 1
+STATE="${STATE:?}"
+[ -s "$STATE" ] || printf '[]' >"$STATE"
+jq -c --arg url "${3:-}" '{url: $url, own_repository: true, posts: [ .[] | {kind: "conversation", id, text:
+  ((.body // "") | gsub("`"; "ˋ") | gsub("\\$"; "＄") | gsub("\\\\"; "＼") | gsub("\""; "＂") | gsub("\u0027"; "’")
+   | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n"))} ]}' "$STATE"
+STUB
+chmod +x "$BIN/gctk"
+
 STATE="$TMPD/comments.json"
 PR41="https://github.com/acme/widgets/pull/41"
 OPENER="Why does the retry loop spin? I typed this to open the visit"
@@ -127,7 +143,7 @@ run() { # <tag> [--in <dir>] [NAME=VALUE...] -- <sut args...>
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ "${1:-}" = "--" ] && shift
   GHLOG="$TMPD/gh.$tag.log"; : >"$GHLOG"; GCLOG="$TMPD/gc.$tag.log"; : >"$GCLOG"
-  ( cd "$dir" && env PATH="$BIN:$PATH" STATE="$STATE" GHLOG="$GHLOG" GCLOG="$GCLOG" FIX="$FIX" \
+  ( cd "$dir" && env PATH="$BIN:$PATH" GCTK_BIN="$BIN/gctk" STATE="$STATE" GHLOG="$GHLOG" GCLOG="$GCLOG" FIX="$FIX" \
       PR_NUMBER="${PR_NUMBER-41}" PR_URL="${PR_URL-$PR41}" ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" ) \
     >"$TMPD/out.$tag" 2>"$TMPD/err.$tag"
   echo $?
@@ -135,7 +151,7 @@ run() { # <tag> [--in <dir>] [NAME=VALUE...] -- <sut args...>
 body_of() { jq -r --arg m "<!-- gc:sitting:$1 -->" '.[] | select(.body|contains($m)) | .body' "$STATE"; }
 # The lines this script composes, without the mark pr-post.sh adds below them.
 # A command substitution drops the blank lines it leaves at the end.
-drawn() { body_of tk-conv | grep -vx '<!-- gc:city -->'; }
+drawn() { body_of tk-conv | grep -vx -E '<!-- gc:(city|sitting-drawn:[0-9a-f]+) -->'; }
 OPEN_LINES="<!-- gc:sitting:tk-conv -->$nl### Visit tk-conv on tk-sub${nl}Topic: how the retry should work"
 
 echo "# post puts the open comment up, showing the conversation's title"

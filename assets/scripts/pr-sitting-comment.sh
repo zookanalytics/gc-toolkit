@@ -33,10 +33,11 @@
 #            run it once the conversation reads closed, and gc-helm.sh handback
 #            once it records a hand-back on a closed conversation.
 #
-# The repository every gh call is pinned to is the origin of the checkout the
-# caller runs in. A sitting runs in a worktree of its subject's rig, and dismiss
-# runs this from the subject's rig checkout. A recorded pr_url must name that
-# repository, so a PR the subject records on another repository is left alone.
+# The repository every gh and gctk call is pinned to is the origin of the
+# checkout the caller runs in. A sitting runs in a worktree of its subject's
+# rig, and dismiss runs this from the subject's rig checkout. A recorded pr_url
+# must name that repository, so a PR the subject records on another repository
+# is left alone.
 set -u
 
 PROG=pr-sitting-comment
@@ -52,7 +53,7 @@ PR_POST="$HERE/pr-post.sh"
 # dropping a structural LF or TAB just minifies.
 scrub() { tr -d '\000-\037'; }
 # <<< control-char-scrub
-# The gh REST payloads escape newlines as \n and need no scrub, and the comment
+# The quote's JSON escapes newlines as \n and needs no scrub, and the comment
 # body must keep its newlines, so it is read UNSCRUBBED below.
 MODE="${1:-}"
 case "$MODE" in post|refresh) shift ;; *) echo "$PROG: first argument must be 'post' or 'refresh'" >&2; exit 2 ;; esac
@@ -74,6 +75,8 @@ done
 for t in gh gc jq git; do command -v "$t" >/dev/null 2>&1 || exit 0; done
 # shellcheck source=conversation.sh
 . "$HERE/conversation.sh" 2>/dev/null || { echo "$PROG: cannot source conversation.sh from $HERE; nothing posted" >&2; exit 0; }
+# shellcheck source=gctk-resolve.sh
+. "$HERE/gctk-resolve.sh" 2>/dev/null || { echo "$PROG: cannot source gctk-resolve.sh from $HERE; nothing posted" >&2; exit 0; }
 
 # The conversation's row: its title, status and hand-back, and its tracks edge,
 # which names the subject. The listing row carries the edges in the shape the
@@ -155,16 +158,26 @@ if [ -n "$CLOSED" ]; then
   fi
   BODY="$BODY"$'\n'"$ENDED"$'\n'
 fi
+# The comment carries a digest of what it shows, so a later draw tells an edit
+# that would change nothing from one that would: the conversation reads back in
+# the quote's inert form, which is not the text this script composes.
+DIGEST=$(printf '%s' "$BODY" | git hash-object --stdin 2>/dev/null) || DIGEST=""
+DRAWN="<!-- gc:sitting-drawn:$DIGEST -->"
+BODY="$BODY$DRAWN"$'\n'
 
-# The one comment carrying our marker, on the PR's issue-comment thread (what
-# `gh pr comment` posts to). Unreadable is fail-safe: refresh has nothing to
-# edit, and post skips rather than risk a duplicate.
-COMMENTS=$(gh api "repos/$ORIGIN_REPO/issues/$PR/comments" --paginate --hostname "$ORIGIN_HOST" 2>/dev/null) || COMMENTS=""
-if [ -z "$COMMENTS" ]; then
+# The one comment carrying our marker, among the PR's conversation comments
+# (what `gh pr comment` posts to), read through gctk github quote. A post the
+# quote holds carries no text, so an outside account's post cannot match.
+# Unreadable is fail-safe: refresh has nothing to edit, and post skips rather
+# than risk a duplicate.
+GCTK=$(gctk_path) || GCTK=""
+QUOTE=""
+[ -z "$GCTK" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$GCTK" github quote "https://$ORIGIN_REPO_Q/pull/$PR" --json 2>/dev/null) || QUOTE=""
+if [ -z "$QUOTE" ]; then
   echo "$PROG: could not read PR#$PR comments; nothing posted" >&2
   exit 0
 fi
-MATCH=$(printf '%s' "$COMMENTS" | jq -c --arg m "$MARKER" '[ .[]? | select(((.body // "") | tostring) | contains($m)) ] | first // empty' 2>/dev/null || true)
+MATCH=$(printf '%s' "$QUOTE" | jq -c --arg m "$MARKER" '[ (.posts // [])[] | select(.kind == "conversation" and (((.text // "") | tostring) | contains($m))) ] | first // empty' 2>/dev/null || true)
 COMMENT_ID=""
 [ -z "$MATCH" ] || COMMENT_ID=$(printf '%s' "$MATCH" | jq -r '.id // ""' 2>/dev/null || true)
 
@@ -182,9 +195,7 @@ fi
 
 # An edit that would change nothing is skipped, so a redraw after a write the
 # comment does not show leaves no edit behind.
-if printf '%s' "$MATCH" | jq -e --arg b "$BODY" '
-    def bare: tostring | sub("\\s*<!-- gc:city -->\\s*$"; "") | sub("\\s+$"; "");
-    ((.body // "") | bare) == ($b | bare)' >/dev/null 2>&1; then
+if [ -n "$DIGEST" ] && printf '%s' "$MATCH" | jq -e --arg d "$DRAWN" '(.text // "") | tostring | contains($d)' >/dev/null 2>&1; then
   echo "$PROG: the comment for $SITTING on PR#$PR already shows its bead"
   exit 0
 fi
