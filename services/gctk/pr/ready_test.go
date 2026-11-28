@@ -104,7 +104,7 @@ type world struct {
 }
 
 func approve(id int64, login, at string) gh.Review {
-	return gh.Review{ID: id, State: "APPROVED", Author: login, AuthorCanPush: true, SubmittedAt: at}
+	return gh.Review{ID: id, State: "APPROVED", Author: login, AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: at}
 }
 
 func run(name, status, conclusion string) gh.CheckRun {
@@ -241,47 +241,47 @@ func TestApproval(t *testing.T) {
 		{"an approval from the city's account counts like any other account's",
 			[]gh.Review{approve(100, self, "2026-11-12T01:00:00Z")}, nil},
 		{"an approval from an account that cannot push counts for nothing",
-			[]gh.Review{{ID: 100, State: "APPROVED", Author: "visitor", SubmittedAt: "2026-11-12T01:00:00Z"}},
+			[]gh.Review{{ID: 100, State: "APPROVED", Author: "visitor", AuthorAssociation: "MEMBER", SubmittedAt: "2026-11-12T01:00:00Z"}},
 			[]pr.Kind{pr.KindApproval}},
 		{"a request for changes from an account that cannot push holds nothing",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "CHANGES_REQUESTED", Author: "visitor", SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "CHANGES_REQUESTED", Author: "visitor", AuthorAssociation: "MEMBER", SubmittedAt: "2026-11-12T02:00:00Z"}},
 			nil},
 		{"an approval followed by a review that only comments still counts",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "COMMENTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "COMMENTED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			nil},
 		{"a dismissed approval counts for nothing",
-			[]gh.Review{{ID: 100, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"}},
+			[]gh.Review{{ID: 100, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"}},
 			[]pr.Kind{pr.KindApproval}},
 		{"a request for changes after the same account's approval stands",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "CHANGES_REQUESTED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindApproval, pr.KindChangesRequested}},
 		{"an approval given before the same account's request for changes that was dismissed does not stand",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindApproval}},
 		{"…and an approval given after the dismissed request counts",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"},
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"},
 				approve(102, "operator", "2026-11-12T03:00:00Z")},
 			nil},
 		{"a dismissed request for changes holds nothing",
 			[]gh.Review{approve(100, "maintainer", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			nil},
 		{"a request for changes stays superseded once the same account's later approval is dismissed",
-			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
-				{ID: 101, State: "DISMISSED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
+				{ID: 101, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindApproval}},
 		{"an approval after the same account's request for changes lifts it",
-			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
+			[]gh.Review{{ID: 100, State: "CHANGES_REQUESTED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T01:00:00Z"},
 				approve(101, "operator", "2026-11-12T02:00:00Z")},
 			nil},
 		{"one account's request for changes holds the PR beside another's approval",
 			[]gh.Review{approve(100, "operator", "2026-11-12T01:00:00Z"),
-				{ID: 101, State: "CHANGES_REQUESTED", Author: "maintainer", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
+				{ID: 101, State: "CHANGES_REQUESTED", Author: "maintainer", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-12T02:00:00Z"}},
 			[]pr.Kind{pr.KindChangesRequested}},
 		{"no review at all leaves no approval",
 			nil, []pr.Kind{pr.KindApproval}},
@@ -594,13 +594,13 @@ func TestTheBeadsOwnWaitsAndHolds(t *testing.T) {
 func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
 	commented := func(id int64, at string, reacted ...string) gh.Review {
 		return gh.Review{ID: id, URL: fmt.Sprintf("%s#pullrequestreview-%d", prURL, id), State: "COMMENTED",
-			Author: "operator", AuthorCanPush: true, Body: "rename this", SubmittedAt: at, ViewerReactions: reacted}
+			Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "rename this", SubmittedAt: at, ViewerReactions: reacted}
 	}
 	thread := func(id string, comments ...gh.Comment) gh.Thread {
 		return gh.Thread{ID: id, Comments: comments}
 	}
 	comment := func(id int64, reacted ...string) gh.Comment {
-		return gh.Comment{ID: id, URL: fmt.Sprintf("%s#discussion_r%d", prURL, id), Author: "operator", Body: "and this",
+		return gh.Comment{ID: id, URL: fmt.Sprintf("%s#discussion_r%d", prURL, id), Author: "operator", AuthorAssociation: "MEMBER", Body: "and this",
 			CreatedAt: "2026-11-12T02:00:00Z", ViewerReactions: reacted,
 			Review: &gh.CommentReview{ID: 200, State: "COMMENTED", SubmittedAt: "2026-11-12T02:00:00Z"}}
 	}
@@ -618,7 +618,7 @@ func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
 			w := ready()
 			w.pr.Reviews = append(w.pr.Reviews, commented(200, "2026-11-12T02:00:00Z", mark))
 			w.pr.Threads = []gh.Thread{thread("T1", comment(260, mark))}
-			w.pr.Comments = []gh.IssueComment{{ID: 5, Author: "operator", Body: "one more thing", ViewerReactions: []string{mark}}}
+			w.pr.Comments = []gh.IssueComment{{ID: 5, Author: "operator", AuthorAssociation: "MEMBER", Body: "one more thing", ViewerReactions: []string{mark}}}
 			isReady(t, w.answer(t))
 		})
 	}
@@ -636,13 +636,13 @@ func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
 		w := ready()
 		approvalMessage := approve(300, "operator", "2026-11-12T03:00:00Z")
 		approvalMessage.Body = "ship it, and rename X"
-		empty := gh.Review{ID: 301, State: "COMMENTED", Author: "operator", AuthorCanPush: true, Body: " \n", SubmittedAt: "2026-11-12T03:00:00Z"}
-		dismissed := gh.Review{ID: 305, State: "DISMISSED", Author: "operator", AuthorCanPush: true, Body: "an old request",
+		empty := gh.Review{ID: 301, State: "COMMENTED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: " \n", SubmittedAt: "2026-11-12T03:00:00Z"}
+		dismissed := gh.Review{ID: 305, State: "DISMISSED", Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "an old request",
 			SubmittedAt: "2026-11-12T02:30:00Z"}
 		cityOwn := commented(302, "2026-11-12T03:00:00Z")
 		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, dismissed, cityOwn)
 		w.pr.Threads = []gh.Thread{thread("T1", comment(303))}
-		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", Body: "[vc]: #deployed"}}
+		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", AuthorAssociation: "MEMBER", Body: "[vc]: #deployed"}}
 		w.rule.notFeedback[300] = true
 		w.rule.notFeedback[302] = true
 		w.rule.notFeedback[303] = true
@@ -654,7 +654,7 @@ func TestEachPostTheCityHasNotTakenHoldsThePR(t *testing.T) {
 		w = ready()
 		w.pr.Reviews = append(w.pr.Reviews, approvalMessage, empty, dismissed, cityOwn)
 		w.pr.Threads = []gh.Thread{thread("T1", comment(303))}
-		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", Body: "[vc]: #deployed"}}
+		w.pr.Comments = []gh.IssueComment{{ID: 304, Author: "vercel", AuthorAssociation: "MEMBER", Body: "[vc]: #deployed"}}
 		a := w.answer(t)
 		only(t, a, pr.KindFeedback, pr.KindFeedback, pr.KindFeedback, pr.KindFeedback)
 		var named []string

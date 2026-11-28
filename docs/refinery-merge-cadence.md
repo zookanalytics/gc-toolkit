@@ -518,7 +518,8 @@ merge holds it,
 which the GitHub intake's design relies on, and a ruling that lands during the
 re-read is read by the decision under the lock. A re-read that finds the PR
 not ready leaves the saved read corrected, so the next run finds no merge to
-check. Every other act reads of GitHub only what it changes: a withdrawal
+check. Every other act reads of GitHub only what it changes: a take reads the
+PR's conversation, whose posts it marks (below), a withdrawal
 reads the reviews it dismisses and their threads (below), a send-back and a
 landing fetch the branch they judge, and a label write leaves the PR's labels
 to their writer, which reads them itself. An exception, a ready transition, a
@@ -593,17 +594,24 @@ carried out, so a changed head stays assigned to nobody and keeps its marker
 while one is open, and the order still reads it.
 
 **A person's post.** Each post the saved read keeps untaken becomes an ask on
-the bead that owns the PR, which the PR's review run rules. For each PR whose
-bead owns it on the record, is open or blocked and is assigned to nobody or to
-the refinery, while the saved read shows the PR open and applied the definition
-of feedback from the bead's provenance instant, an act under the record lock files the post's ask
-(`gctk review ask`'s filing), then marks the post `EYES`.
+the bead that owns the PR, which the PR's review run rules. A post
+`gctk github quote` holds from agents becomes the operator's follow-up there
+in place of an ask ([The surface](gctk-architecture.md#the-surface)). For each
+PR whose bead owns it on the record, is open or blocked and is assigned to
+nobody or to the refinery, while the saved read shows the PR open and applied
+the definition of feedback from the bead's provenance instant, an act under
+the record lock reads the PR's conversation and decides each post on it, since
+an author's standing moves no sign and the saved read keeps none. A post gone
+from the PR files nothing, and so does a held post that a read of the PR's
+quote marked since. The act files each other held post's follow-up and each
+other post's ask (`gctk review ask`'s filing), then marks the post `EYES`.
 The ask's reason is one line naming the post: its kind, its author, the PR, an
 inline comment's file and the line it was made on, and its URL, where the run
 reads the post as it stands. The reason holds no text of the post, and a filing
 finds the ask filed before for the same reason, open or closed, so a post whose
 mark did not land is marked again with no second ask, and an edit files nothing
-new. A post's mark goes only after its ask stands. A reaction moves no sign the
+new. A post's mark goes only after its ask or its follow-up stands. A
+reaction moves no sign the
 cheap question reads, so once a mark has landed and the lock is free, the act
 has the one-PR update read the PR's conversation again, and the saved read
 shows the marks before the next run decides. A take is an act like a record's,

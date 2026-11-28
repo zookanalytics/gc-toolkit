@@ -12,7 +12,7 @@
 #
 # Covered: raw-bd-invocation, mktemp-untemplated, zsh-colon-modifier,
 # bd-helper-in-scope, bd-notes-replace, formula-unquoted-for, pr-post-bypass,
-# id-read-unguarded, doc-filing, create-then-stamp.
+# id-read-unguarded, doc-filing, create-then-stamp, github-text-read.
 #
 # Every detector in the directory, one added later included, is also held to
 # the runner's rule that a broken detector never reads as a clean scan. When a
@@ -2438,6 +2438,89 @@ OUT="$(PATH="$TMP/shim-awk:$PATH" "$DET_CS" "$TMP/cs-stamp.sh" 2>&1)"; RC=$?
 eq "$RC" 2 "a failed scan exits 2, not 0 and not 1"
 has "$OUT" "detector cannot scan it" "and says which file it could not scan"
 
+echo "── github-text-read: what is a finding ──"
+
+# Spelled with placeholders, so the file that tests the detector is not itself a
+# finding when the runner scans the whole tree: @GH@ -> gh, @RT@ ->
+# reviewThreads, @CM@ -> comments.
+DET_GT="$HERE/lint-learned.d/github-text-read.sh"
+[ -x "$DET_GT" ] || { echo "no detector at $DET_GT"; exit 1; }
+rungt() { OUT="$("$DET_GT" "$@" 2>&1)"; RC=$?; }
+plantgt() { sed -e 's/@GH@/gh/g' -e 's/@RT@/reviewThreads/g' -e 's/@CM@/comments/g' > "$1"; }
+
+# Every shape a read of posted text takes, one per line, so each assertion names
+# its line.
+plantgt "$TMP/gt-violations.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr view "$PR" --json title,body --jq '.title, "", .body'
+out=$(@GH@ pr view "$PR" --comments)
+@GH@ issue view 5
+if @GH@ pr view 7 --repo "$R" --json=state,comments; then :; fi
+@GH@ api "repos/$R/issues/$N/comments" --paginate
+x=$(@GH@ api --paginate "repos/$R/pulls/$N/reviews?per_page=100" --jq '.[]')
+gh_api_origin "repos/$R/pulls/comments/$C"
+Q='query{repository(owner:"o",name:"r"){pullRequest(number:1){@RT@(first:100){nodes{id}}}}}'
+D=$(cat <<'GQL'
+{ repository(owner: "o", name: "r") { issue(number: 1) { @CM@(last: 5) { nodes { body } } } } }
+GQL
+)
+FIX
+rungt "$TMP/gt-violations.sh"
+eq "$RC" 1 "a file that reads posted text around gctk exits 1"
+for n in 2 3 4 5 6 7 8 9 11; do
+    has "$OUT" "gt-violations.sh:$n:" "line $n is reported"
+done
+eq "$(printf '%s\n' "$OUT" | grep -c 'gt-violations.sh:')" 9 "one finding per read"
+has "$OUT" 'gt-violations.sh:4: reads posted text with `gh issue view`' "the finding names the gh verb"
+has "$OUT" 'gt-violations.sh:9: a GraphQL document pages `reviewThreads`' "a GraphQL finding names the connection"
+has "$OUT" "gctk github quote" "the finding names the fix"
+has "$OUT" "github-text-read" "the finding names the rule"
+
+# Reads of no posted text, writes, and a read the detector cannot judge are
+# clean, and so is a mention in a string, a comment or a here-doc body.
+plantgt "$TMP/gt-clean.sh" <<'FIX'
+#!/usr/bin/env bash
+@GH@ pr view "$PR" --json state,url,headRefName
+st=$(@GH@ pr view "$pr" --json state -q .state)
+@GH@ pr view "$PR" --json "$PR_FIELDS"
+@GH@ pr view "$PR" --web
+@GH@ api "repos/$R/pulls/$N" --jq .head.sha
+@GH@ api -X PUT "repos/$R/pulls/$N/reviews/$RID/dismissals" -f message=x
+@GH@ api --method PATCH "repos/$R/issues/comments/$ID" -f body="$B"
+@GH@ api "repos/$R/commits/$SHA/check-runs"
+@GH@ api graphql -f query='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}' -f t="$T"
+echo "run @GH@ pr view $PR --comments by hand"
+# @GH@ issue view 5 prints the issue
+cat <<'TXT'
+@GH@ pr view 9 --comments
+TXT
+die "gh pr view $pr did not answer"
+FIX
+rungt "$TMP/gt-clean.sh"
+eq "$RC" 0 "reads of no posted text, writes, an unjudged field list and mentions are clean"
+eq "$OUT" "" "a clean file prints nothing"
+
+# Fenced code in a skill is a recipe an agent runs verbatim; prose is not.
+plantgt "$TMP/gt-skill.md" <<'FIX'
+Read the PR:
+
+```bash
+@GH@ pr view "$PR" --json title,body
+```
+
+Prose that mentions @GH@ pr view is not a recipe.
+FIX
+rungt "$TMP/gt-skill.md"
+eq "$RC" 1 "a fenced read in Markdown is a finding"
+has "$OUT" "gt-skill.md:4:" "…reported at its line"
+eq "$(printf '%s\n' "$OUT" | grep -c 'gt-skill.md:')" 1 "…and the prose is not"
+
+mkdir -p "$TMP/gt-tree/specs/x" "$TMP/gt-tree/.github/workflows"
+cp "$TMP/gt-violations.sh" "$TMP/gt-tree/specs/x/notes.sh"
+cp "$TMP/gt-violations.sh" "$TMP/gt-tree/.github/workflows/size.sh"
+OUT="$(cd "$TMP/gt-tree" && "$DET_GT" specs/x/notes.sh .github/workflows/size.sh 2>&1)"; RC=$?
+eq "$RC" 0 "specs/ and .github/, a record and the CI that runs no agent, are not scanned"
+
 echo "── every detector: a tool that fails never reads as a clean scan ──"
 
 # The runner tells a broken detector from a clean one only by its exit status,
@@ -2507,6 +2590,7 @@ printf '%s\n' "$X" | @GQ@ x
 @J@ "$ID"
 x=$(printf '%s' "$J" | tr -d '@CTL@')
 @GH@ pr comment 5 --body x
+@GH@ pr view 5 --comments
 gc @BD@ update "$ID" @NOTES@ "x"
 @BD@ close "$GC_BEAD_ID"
 ID=$(printf '%s' "$J" | jq -r '.id @OR@ .[0].id')

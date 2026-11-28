@@ -46,7 +46,7 @@ git -C "$REPO" remote add origin https://github.com/acme/widgets.git
 # The pack the sign-off runs from: the real scripts it composes, and stubs for
 # the headline writer, the rework's filer and the store resolver.
 SR="$TMPD/pack/assets/scripts"; mkdir -p "$SR"
-for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh work-outcome.sh review-verdict.sh review-dismissal.sh dispatch-path.sh; do
+for f in converse-signoff.sh pr-sitting-comment.sh pr-post.sh bd-lib.sh conversation.sh gctk-resolve.sh work-outcome.sh review-verdict.sh review-dismissal.sh dispatch-path.sh; do
   ln -s "$HERE/$f" "$SR/$f"
 done
 cat > "$SR/gc-helm.sh" <<'H'
@@ -154,9 +154,15 @@ GH
 chmod +x "$BIN/gh"
 
 # gctk stub: the title step finds gctk through $GCTK_BIN, and this one writes
-# its arguments to $GCTK_LOG, one per line.
+# its arguments to $GCTK_LOG, one per line. `github quote <url> --json`, the
+# comment's read of the thread, answers $STATE in the quote's shape, each
+# comment a conversation post whose text is its body, and logs nothing.
 cat > "$BIN/gctk" <<'K'
 #!/usr/bin/env bash
+if [ "${1:-} ${2:-}" = "github quote" ]; then
+  [ -s "$STATE" ] || printf '[]' >"$STATE"
+  exec jq -c '{own_repository: true, posts: [ .[] | {kind: "conversation", id, text: (.body // "")} ]}' "$STATE"
+fi
 printf '%s\n' "$@" > "$GCTK_LOG"
 K
 chmod +x "$BIN/gctk"

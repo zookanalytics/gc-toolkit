@@ -95,6 +95,25 @@ esac
 STUB
 chmod +x "$BIN/gh"
 
+# gctk stub: `github quote <url> --json` answers the thread in $STATE in the
+# quote's shape, each comment a conversation post whose text is barred and
+# shows the five characters a shell reads as look-alikes. GH_READ=fail fails
+# it, and GH_READ=printed exits 1 once the quote printed, as a follow-up that
+# did not file does. Every call is logged to $GHLOG beside gh's.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'STUB'
+printf 'gctk %s\n' "$*" >>"${GHLOG:?}"
+[ "${1:-} ${2:-}" = "github quote" ] || exit 2
+[ "${GH_READ:-}" = fail ] && exit 1
+STATE="${STATE:?}"
+[ -s "$STATE" ] || printf '[]' >"$STATE"
+jq -c --arg url "${3:-}" '{url: $url, own_repository: true, posts: [ .[] | {kind: "conversation", id, text:
+  ((.body // "") | gsub("`"; "ˋ") | gsub("\\$"; "＄") | gsub("\\\\"; "＼") | gsub("\""; "＂") | gsub("\u0027"; "’")
+   | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n"))} ]}' "$STATE"
+[ "${GH_READ:-}" = printed ] && exit 1
+exit 0
+STUB
+chmod +x "$BIN/gctk"
+
 STATE="$TMPD/comments.json"
 PR41="https://github.com/acme/widgets/pull/41"
 OPENER="Why does the retry loop spin? I typed this to open the visit"
@@ -127,7 +146,7 @@ run() { # <tag> [--in <dir>] [NAME=VALUE...] -- <sut args...>
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   [ "${1:-}" = "--" ] && shift
   GHLOG="$TMPD/gh.$tag.log"; : >"$GHLOG"; GCLOG="$TMPD/gc.$tag.log"; : >"$GCLOG"
-  ( cd "$dir" && env PATH="$BIN:$PATH" STATE="$STATE" GHLOG="$GHLOG" GCLOG="$GCLOG" FIX="$FIX" \
+  ( cd "$dir" && env PATH="$BIN:$PATH" GCTK_BIN="$BIN/gctk" STATE="$STATE" GHLOG="$GHLOG" GCLOG="$GCLOG" FIX="$FIX" \
       PR_NUMBER="${PR_NUMBER-41}" PR_URL="${PR_URL-$PR41}" ${envs[@]+"${envs[@]}"} bash "$SUT" "$@" ) \
     >"$TMPD/out.$tag" 2>"$TMPD/err.$tag"
   echo $?
@@ -135,7 +154,7 @@ run() { # <tag> [--in <dir>] [NAME=VALUE...] -- <sut args...>
 body_of() { jq -r --arg m "<!-- gc:sitting:$1 -->" '.[] | select(.body|contains($m)) | .body' "$STATE"; }
 # The lines this script composes, without the mark pr-post.sh adds below them.
 # A command substitution drops the blank lines it leaves at the end.
-drawn() { body_of tk-conv | grep -vx '<!-- gc:city -->'; }
+drawn() { body_of tk-conv | grep -vx -E '<!-- gc:(city|sitting-drawn:[0-9a-f]+) -->'; }
 OPEN_LINES="<!-- gc:sitting:tk-conv -->$nl### Visit tk-conv on tk-sub${nl}Topic: how the retry should work"
 
 echo "# post puts the open comment up, showing the conversation's title"
@@ -245,6 +264,15 @@ hasnt "PATCH" "$(cat "$TMPD/gh.b3.log")" "…and edits nothing"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
 rc=$(run b4 GH_READ=fail -- post --sitting tk-conv)
 hasnt "pr comment" "$(cat "$TMPD/gh.b4.log")" "post skips an unreadable thread rather than risk a second comment"
+
+printf '[]' >"$STATE"; conv in_progress "how the retry should work"
+run b5 -- post --sitting tk-conv >/dev/null
+rc=$(run b6 GH_READ=printed -- post --sitting tk-conv)
+ok "a quote that printed and then exited 1 exits 0" "[ '$rc' = 0 ]"
+hasnt "PATCH" "$(cat "$TMPD/gh.b6.log")" "…finds the comment in it and edits nothing"
+hasnt "pr comment" "$(cat "$TMPD/gh.b6.log")" "…and posts no second comment"
+has "already shows its bead" "$(cat "$TMPD/out.b6")" "…since the comment already shows the bead"
+printf '[]' >"$STATE"
 
 echo "# a bead that is not a conversation is not drawn"
 jq '.dependencies = []' "$FIX/conv.json" >"$FIX/c.t" && mv "$FIX/c.t" "$FIX/conv.json"

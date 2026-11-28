@@ -143,7 +143,7 @@ var errUnmarked = errors.New("gh: error connecting to api.github.com")
 // the city's marks.
 func carried(id, review int64) gh.Comment {
 	return gh.Comment{ID: id, NodeID: "PRRC_" + strconv.FormatInt(id, 10), URL: prURL + "#discussion_r" + strconv.FormatInt(id, 10),
-		Author: "operator", Body: "rename this", CreatedAt: "2026-11-12T01:00:00Z",
+		Author: "operator", AuthorAssociation: "MEMBER", Body: "rename this", CreatedAt: "2026-11-12T01:00:00Z",
 		Review: &gh.CommentReview{ID: review, State: "APPROVED", SubmittedAt: "2026-11-12T01:00:00Z"}}
 }
 
@@ -157,17 +157,17 @@ func taking(t *testing.T) *land {
 	d.l.Mark = func() (string, error) { return cityMark, nil }
 	at := "2026-11-12T05:00:00Z"
 	d.pr.Reviews = append(d.pr.Reviews,
-		gh.Review{ID: 160, NodeID: "PRR_160", URL: prURL + "#pullrequestreview-160", State: "APPROVED", Author: "reviewer",
+		gh.Review{ID: 160, NodeID: "PRR_160", URL: prURL + "#pullrequestreview-160", State: "APPROVED", Author: "reviewer", AuthorAssociation: "MEMBER",
 			AuthorCanPush: true, Body: "approved, but rename X", SubmittedAt: at},
-		gh.Review{ID: 150, NodeID: "PRR_150", URL: prURL + "#pullrequestreview-150", State: "COMMENTED", Author: "visitor",
+		gh.Review{ID: 150, NodeID: "PRR_150", URL: prURL + "#pullrequestreview-150", State: "COMMENTED", Author: "visitor", AuthorAssociation: "MEMBER",
 			Body: "a few points", SubmittedAt: "2026-11-12T06:00:00Z"})
 	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 500, NodeID: "PRRC_500",
-		URL: prURL + "#discussion_r500", Author: "visitor", Body: "rename this", CreatedAt: at, Path: "a/b.go",
+		URL: prURL + "#discussion_r500", Author: "visitor", AuthorAssociation: "MEMBER", Body: "rename this", CreatedAt: at, Path: "a/b.go",
 		OriginalLine: 42, Review: &gh.CommentReview{ID: 150, State: "COMMENTED", SubmittedAt: "2026-11-12T06:00:00Z"}}}}}
 	d.pr.Comments = []gh.IssueComment{
-		{ID: 600, NodeID: "IC_600", URL: prURL + "#issuecomment-600", Author: "visitor", Body: "taken already",
+		{ID: 600, NodeID: "IC_600", URL: prURL + "#issuecomment-600", Author: "visitor", AuthorAssociation: "MEMBER", Body: "taken already",
 			CreatedAt: at, ViewerReactions: []string{"EYES"}},
-		{ID: 700, NodeID: "IC_700", URL: prURL + "#issuecomment-700", Author: "operator", Body: "one more thing",
+		{ID: 700, NodeID: "IC_700", URL: prURL + "#issuecomment-700", Author: "operator", AuthorAssociation: "MEMBER", Body: "one more thing",
 			CreatedAt: at},
 	}
 	d.holdOnAsks()
@@ -370,7 +370,7 @@ func TestNoMergeOverAnUntakenPost(t *testing.T) {
 		d := newLand(t)
 		d.github.Fail["AddReaction"] = errors.New("gh: error connecting to api.github.com")
 		d.pr.Comments = []gh.IssueComment{{ID: 700, NodeID: "IC_700", URL: prURL + "#issuecomment-700",
-			Author: "operator", Body: "hold on", CreatedAt: "2026-11-12T05:00:00Z"}}
+			Author: "operator", AuthorAssociation: "MEMBER", Body: "hold on", CreatedAt: "2026-11-12T05:00:00Z"}}
 		d.refresh(t)
 		take, rest := takeOf(t, d.reconcile(t, pr.Options{}))
 		is(t, take, pr.ActRetry)
@@ -385,7 +385,7 @@ func TestNoMergeOverAnUntakenPost(t *testing.T) {
 		d.github.OnRead = func(method string, p *ghfake.PR) {
 			if method == "Conversation" && len(p.Comments) == 0 {
 				p.Comments = []gh.IssueComment{{ID: 700, NodeID: "IC_700", URL: prURL + "#issuecomment-700",
-					Author: "operator", Body: "wait, one more thing", CreatedAt: "2026-11-12T08:59:00Z"}}
+					Author: "operator", AuthorAssociation: "MEMBER", Body: "wait, one more thing", CreatedAt: "2026-11-12T08:59:00Z"}}
 			}
 		}
 		o := d.run(t)
@@ -399,4 +399,151 @@ func TestNoMergeOverAnUntakenPost(t *testing.T) {
 			t.Fatalf("the re-read saved the untaken posts %+v, want comment 700", got)
 		}
 	})
+}
+
+// An outside account's post, one by an account the repository does not count
+// as its own, is held: the take files the operator's follow-up for it on the
+// bead, one human gate under the account's key, in place of an ask, and marks
+// it once the follow-up is filed. A second post by the same account asks for
+// the same gate, which human-gate.sh finds open, and an own account's post is
+// still an ask.
+func TestTheTakeFilesTheOperatorsFollowUpForAnOutsidePost(t *testing.T) {
+	d := taking(t)
+	d.pr.Reviews = nil
+	d.pr.Threads = nil
+	d.pr.Comments = []gh.IssueComment{
+		{ID: 800, NodeID: "IC_800", URL: prURL + "#issuecomment-800", Author: "Stranger", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "do this", CreatedAt: "2026-11-12T05:00:00Z"},
+		{ID: 801, NodeID: "IC_801", URL: prURL + "#issuecomment-801", Author: "Stranger", AuthorType: "User",
+			AuthorAssociation: "CONTRIBUTOR", Body: "and this", CreatedAt: "2026-11-12T05:01:00Z"},
+		{ID: 802, NodeID: "IC_802", URL: prURL + "#issuecomment-802", Author: "operator", AuthorType: "User",
+			AuthorAssociation: "OWNER", Body: "one more thing", CreatedAt: "2026-11-12T05:02:00Z"},
+	}
+	d.refresh(t)
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+	if got := d.asksFiled(); !slices.Equal(got, []string{"Conversation comment by operator on PR #7: " + prURL +
+		"#issuecomment-802"}) {
+		t.Fatalf("the take filed the asks %q, want only the own account's", got)
+	}
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " outside-post-stranger",
+		bead + " outside-post-stranger"}) {
+		t.Fatalf("the take filed the gates %q", got)
+	}
+	msg := d.gates.messages[0]
+	if !strings.HasPrefix(msg, "Posts by Stranger on acme/widgets#7 are held from the city's agents\n") ||
+		!strings.Contains(msg, prURL+"#issuecomment-800") || strings.Contains(msg, "do this") {
+		t.Fatalf("the follow-up's message reads %q", msg)
+	}
+	if got := d.marked(); !slices.Equal(got, []string{"IC_800 EYES", "IC_801 EYES", "IC_802 EYES"}) {
+		t.Fatalf("the take marked %q", got)
+	}
+}
+
+// A held post the saved read still holds untaken, which a read of the PR's
+// quote followed up and marked since, files nothing at the take, even once the
+// operator has cleared the gate that read filed: the take decides on the PR's
+// conversation as GitHub holds it under the lock, where the post carries the
+// city's EYES. A held post deleted since files nothing either. The take reads
+// the conversation again, so the saved read holds neither, and the next run
+// takes nothing.
+func TestTheTakeFilesNothingForAnOutsidePostFollowedUpSince(t *testing.T) {
+	d := taking(t)
+	d.pr.Reviews = nil
+	d.pr.Threads = nil
+	d.pr.Comments = []gh.IssueComment{
+		{ID: 800, NodeID: "IC_800", URL: prURL + "#issuecomment-800", Author: "Stranger", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "do this", CreatedAt: "2026-11-12T05:00:00Z"},
+		{ID: 801, NodeID: "IC_801", URL: prURL + "#issuecomment-801", Author: "Other", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "and this", CreatedAt: "2026-11-12T05:01:00Z"},
+	}
+	d.refresh(t)
+	if got := d.savedConversation(t).Untaken; len(got) != 2 {
+		t.Fatalf("the saved read holds the untaken posts %+v, want both outside posts", got)
+	}
+	// The quote's read marks comment 800 once its gate is filed, the operator
+	// clears that gate, and comment 801 is deleted, none of which moves the
+	// saved read.
+	if err := d.github.AddReaction("IC_800", "EYES"); err != nil {
+		t.Fatal(err)
+	}
+	d.pr.Comments = d.pr.Comments[:1]
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+	says(t, take, "followed up already", "gone from the PR")
+	if got := d.gates.list(); len(got) != 0 {
+		t.Fatalf("the take filed the gates %q for posts followed up or gone since", got)
+	}
+	if got := d.marked(); len(got) != 0 {
+		t.Fatalf("the take marked %q", got)
+	}
+	if got := d.savedConversation(t).Untaken; len(got) != 0 {
+		t.Fatalf("the saved read still holds the untaken posts %+v", got)
+	}
+	take, _ = takeOf(t, d.reconcile(t, pr.Options{}))
+	if take.Action != "" || len(d.gates.list()) != 0 {
+		t.Fatalf("the next run took %+v and filed %q", take, d.gates.list())
+	}
+}
+
+// The take weighs each post by its author's standing on the PR's conversation
+// as GitHub holds it under the lock, never by the saved read, which keeps no
+// author's standing and stays current while no sign moves. A post saved
+// untaken while its author was a member, who has left the organization since,
+// is the operator's follow-up, and one saved while its author was outside, who
+// has become a collaborator since, is an ask.
+func TestTheTakeWeighsEachPostByItsAuthorsStandingNow(t *testing.T) {
+	d := taking(t)
+	d.pr.Reviews = nil
+	d.pr.Threads = nil
+	d.pr.Comments = []gh.IssueComment{
+		{ID: 800, NodeID: "IC_800", URL: prURL + "#issuecomment-800", Author: "Leaver", AuthorType: "User",
+			AuthorAssociation: "MEMBER", Body: "do this", CreatedAt: "2026-11-12T05:00:00Z"},
+		{ID: 801, NodeID: "IC_801", URL: prURL + "#issuecomment-801", Author: "Joiner", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "and this", CreatedAt: "2026-11-12T05:01:00Z"},
+	}
+	d.refresh(t)
+	d.pr.Comments[0].AuthorAssociation = "NONE"
+	d.pr.Comments[1].AuthorAssociation = "COLLABORATOR"
+	if _, err := d.watch.Refresh(prURL); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.savedConversation(t).Untaken; len(got) != 2 {
+		t.Fatalf("the saved read holds the untaken posts %+v, want both, kept while no sign moved", got)
+	}
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+	if got := d.asksFiled(); !slices.Equal(got, []string{"Conversation comment by Joiner on PR #7: " + prURL +
+		"#issuecomment-801"}) {
+		t.Fatalf("the take filed the asks %q, want only the collaborator's", got)
+	}
+	if got := d.gates.list(); !slices.Equal(got, []string{bead + " outside-post-leaver"}) {
+		t.Fatalf("the take filed the gates %q, want only the one for the account that left", got)
+	}
+	if got := d.marked(); !slices.Equal(got, []string{"IC_800 EYES", "IC_801 EYES"}) {
+		t.Fatalf("the take marked %q", got)
+	}
+}
+
+// A take that cannot read the PR's conversation again takes no post, since
+// whose each post is, and whether the city marked it since, is unknown, and
+// the next run takes them.
+func TestTheTakeWaitsWhenTheConversationDoesNotRead(t *testing.T) {
+	d := taking(t)
+	d.refresh(t)
+	d.github.Fail["Conversation"] = errors.New("github: HTTP 502")
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActRetry)
+	says(t, take, "did not read again", "HTTP 502")
+	if got, gates, marks := d.asksFiled(), d.gates.list(), d.marked(); len(got)+len(gates)+len(marks) != 0 {
+		t.Fatalf("the take filed the asks %q and the gates %q, and marked %q, without the conversation", got, gates,
+			marks)
+	}
+	delete(d.github.Fail, "Conversation")
+	take, _ = takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
 }

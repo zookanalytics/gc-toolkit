@@ -417,7 +417,7 @@ func TestAWithdrawalDismissesOnlyTheApprovalsOfACommitWithoutItsHead(t *testing.
 		approved(100, "operator", older),
 		approved(101, "reviewer", head),
 		approved(102, "operator", later),
-		{ID: 103, State: "CHANGES_REQUESTED", Author: "visitor", AuthorCanPush: true, Commit: older},
+		{ID: 103, State: "CHANGES_REQUESTED", Author: "visitor", AuthorAssociation: "MEMBER", AuthorCanPush: true, Commit: older},
 		approved(104, "former", rewrite),
 	}
 	d.pr.Facts.HeadRefOid = later

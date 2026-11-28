@@ -94,15 +94,16 @@ if [ -n "$(cd "$BARE" && git rev-parse --show-toplevel 2>/dev/null)" ]; then
 else
     out="$(run '[{"metadata":{"pr_number":475}}]' "$NOTOOL")"
     has "no tool: says the conversation is unread" "UNREAD" "$out"
-    has "no tool: hands over the paginate slurp, not a plain .[]?" "jq -s '[.[][]?]'" "$out"
-    has "no tool: names the PR number it could not read" "475" "$out"
+    has "no tool: hands over the read through gctk github quote" "/.gc/services/gctk/bin/gctk}\" github quote " "$out"
+    has "no tool: names the PR number it could not read" "/pull/475" "$out"
+    hasnt "no tool: hands over no gh read of the conversation" "gh pr view" "$out"
 
     out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475#discussion_r1"}}]' "$NOTOOL")"
-    has "no tool: a fragment on the pull URL still yields a bare number" "gh pr view 475 --json" "$out"
+    has "no tool: a fragment on the pull URL still yields the PR's URL" "github quote https://github.com/o/r/pull/475" "$out"
     hasnt "no tool: the fragment does not ride into the command" "475#discussion_r1" "$out"
 
     out="$(run '[{"metadata":{"pr_url":"https://github.com/o/r/pull/475?w=1"}}]' "$NOTOOL")"
-    has "no tool: a query string on the pull URL still yields a bare number" "pulls/475/comments" "$out"
+    has "no tool: a query string on the pull URL still yields the PR's URL" "github quote https://github.com/o/r/pull/475" "$out"
     hasnt "no tool: the query string does not ride into the command" "475?w=1" "$out"
 fi
 

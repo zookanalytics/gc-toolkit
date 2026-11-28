@@ -1,0 +1,104 @@
+---
+name: Gas City search for gctk github quote (tk-098e1s4)
+description: The primitives searched in Gas City, bd and GitHub for each need of gctk github quote, the one reader of the text people post on GitHub, and of the follow-up it files for an outside account's post, with what each covers and why each gap is the reader's. Read it when reviewing the reader's surface, as AGENTS.md asks of a change that adds a gctk noun or verb.
+---
+
+# Gas City search for gctk github quote
+
+This change adds a gctk noun, `github`, with one verb, `quote`, its
+`--description` and `--json` flags, and the keys its JSON carries, which the
+`quote` package declares. It files one human gate per outside account per
+item, through `human-gate.sh`, under the situation key `outside-post-<login>`,
+on the bead that owns the PR, or on a finding of its own for an issue or a PR
+no bead owns, which `patrol-finding.sh` files under the key
+`outside-posts.<owner>.<repo>.<number>`. It adds no order, no bead key and no
+lifecycle state. Each need names the primitive searched at
+`gastownhall/gascity` main 6dce31bbb68e (2026-11-27), and GitHub's own
+documentation where GitHub is the platform.
+
+## Read a PR's or an issue's posted text for an agent
+
+**Not covered.** No reader in Gas City's `cmd/` or `internal/` hands an issue's
+or a PR's conversation to an agent. The PR monitor's read,
+`internal/githubmonitor/client.go` `pullRequestsQuery`, takes each open PR's
+number, title, URL, author, branches and check states, and
+`githubPRRepairTitle` in `cmd/gc/cmd_github.go` puts the title in a repair
+bead's title as GitHub gives it.
+
+## Mark text from outside as untrusted
+
+**Covered for another construct.** `SanitizeForSystemReminder` in
+`internal/promptsafe/promptsafe.go` strips the literal system-reminder tags
+from mail, nudge and external-message text before Gas City sets it in a
+reminder block, and its comment scopes it narrowly: "This is not a general
+HTML escape". It holds no post by its author's standing with the repository,
+and it leaves every character a shell reads as it was. The quote's hold and its
+inert form are the gap.
+
+## Tell the repository's own accounts from outside ones
+
+**Covered by GitHub, which the reader composes.** GitHub's GraphQL
+`authorAssociation` on a PR, an issue, a review, a review comment and an issue
+comment, and a repository's `viewerPermission` for the account the read runs
+as, decide it. No code in Gas City's `cmd/` or `internal/`, tests aside, reads
+either field. GitHub Actions posts as a Bot with no association, so the rule
+names its account.
+
+## Keep outside accounts from posting
+
+**Not covered for the need.** GitHub's interaction limits (GitHub Docs,
+"Limiting interactions in your repository", "Limiting interactions for your
+personal account" and "Limiting interactions in your organization") restrict
+commenting on one public repository, or on every public repository a personal
+account or an organization owns, to existing users, prior contributors or the
+repository's collaborators, for at most six months at a time. A limit lapses,
+it leaves the posts made before it, and it does nothing for another
+repository's text an agent must read, such as an upstream project's issues. The
+reader holds a post whatever a limit's state.
+
+## Tell the operator of each held post
+
+**Covered by bd's human gate, which the reader files.** A gate `human-gate.sh`
+files on the bead that owns the PR is what the helm board shows as a question
+waiting on the operator (`askOf` in `services/gctk/standing/rules.go`). Gas
+City's core orders that mail a gate's addressee,
+`notify-on-human-gate-creation` and `renudge-stale-human-gates` under
+`internal/bootstrap/packs/core/orders/`, are off in this city, which reaches
+the operator through the board.
+
+## Hold the follow-up of an item no bead owns
+
+**Covered by the pack's patrol finding, which the reader files.** A human gate
+blocks a bead, and `bd gate create` requires the bead it blocks (`--blocks`),
+so an issue, or a PR no bead owns, needs a bead for its gates to go on. bd's
+`external_ref` names an external item on a bead, and `bd list --external-ref`
+finds the beads that name it, but bd indexes the field without making it
+unique (`idx_issues_external_ref` in
+`internal/storage/schema/migrations/0001_create_issues.up.sql`, beads v1.3.4),
+so it keeps no one bead per item by itself. `patrol-finding.sh` keeps one live
+bead per situation key, the pack's record of a situation no bead of its own
+holds, so the key `outside-posts.<owner>.<repo>.<number>` gives one finding per
+item, and the gates on it give one question per account. Nothing waits on the
+finding. The reaction sweep reads only ready beads
+(`ReadyByPriority` in `services/gctk/reaction/sweep.go`), so a finding's first
+reaction comes once its gates are cleared, when its message leaves an agent
+nothing to do.
+
+## File the follow-up once per account per PR
+
+**Covered by the store's record lock and the gate's key, which the reader
+composes.** Gas City has no general upsert. `SendDeduped` in
+`internal/mail/beadmail/beadmail.go` drops a repeated mail, and
+`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go` keeps one repair bead per
+PR and head for the monitor alone. bd keeps no idempotency at create, so
+`human-gate.sh`, which files one open gate per subject and key, lets two
+writers in the same instant each file one. Every filer of a follow-up, the
+landing order's take and each read, therefore decides and files under the
+store's record lock (`record.Lock` in `services/gctk/pr/record/lock.go`), and
+decides on each post as GitHub holds it once it has the lock. Under the lock
+the key `outside-post-<login>` on the owning bead gives one follow-up per
+account per PR, whichever filer holds the post first. A cleared gate is no
+open one, so once a post's gate is filed or found open the post takes the
+city's EYES, the mark the landing order's take leaves on a post it took
+(`takenMark` in `services/gctk/pr/marks.go`), and no later filer files a gate
+for a post that carries it.

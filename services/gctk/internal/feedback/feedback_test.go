@@ -169,6 +169,8 @@ func TestAwaiting(t *testing.T) {
 		{ID: "asked-again", Comments: []feedback.Comment{ask, answer, ask}},
 		{ID: "resolved", Resolved: true, Comments: []feedback.Comment{ask}},
 		{ID: "handled", Comments: []feedback.Comment{answer, handled}},
+		// A thread whose every post the quote holds is weighed with none.
+		{ID: "held", Comments: nil},
 	})
 	if err != nil {
 		t.Fatal(err)

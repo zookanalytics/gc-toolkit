@@ -230,7 +230,7 @@ cmd_lane() {
     worktree --lane "$CHECK"; wt=$WT
     print_run
     printf '%s\n' "== The PR as published: $PR"
-    gh pr view "$PR" --json title,body --jq '.title, "", .body' || die 2 "gh pr view $PR did not answer"
+    "$gctk" github quote "$PR" --description || die 2 "gctk github quote $PR did not answer"
     printf '%s\n' "== The change: git diff origin/$TARGET...HEAD in the worktree"
     git -C "$wt" diff --stat "origin/$TARGET...HEAD" || die 2 "the diff did not read"
     printf '%s\n' "== The rig's guidance for $CHECK at $HEAD, empty when it keeps none"

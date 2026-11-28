@@ -13,6 +13,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/standing/person"
 )
@@ -507,6 +508,7 @@ type spot struct {
 	id                                   int64
 	reacted                              []string
 	thread                               int
+	held                                 bool
 }
 
 // called is a post with no thread as the reply that links it names it.
@@ -543,7 +545,8 @@ func (a *answering) locate(url string) (spot, bool) {
 		for _, v := range a.reviews {
 			if v.ID == id {
 				return spot{kind: PostReview, id: id, node: v.NodeID, author: v.Author, body: v.Body, url: url,
-					state: v.State, reacted: v.ViewerReactions, thread: -1}, true
+					state: v.State, reacted: v.ViewerReactions, thread: -1,
+					held: held(v.Author, v.AuthorType, v.AuthorAssociation)}, true
 			}
 		}
 	case "discussion_r":
@@ -551,7 +554,7 @@ func (a *answering) locate(url string) (spot, bool) {
 			for _, c := range t.Comments {
 				if c.ID == id {
 					return spot{kind: PostInline, id: id, node: c.NodeID, author: c.Author, body: c.Body, url: url,
-						reacted: c.ViewerReactions, thread: i}, true
+						reacted: c.ViewerReactions, thread: i, held: held(c.Author, c.AuthorType, c.AuthorAssociation)}, true
 				}
 			}
 		}
@@ -559,7 +562,7 @@ func (a *answering) locate(url string) (spot, bool) {
 		for _, c := range a.comments {
 			if c.ID == id {
 				return spot{kind: PostConversation, id: id, node: c.NodeID, author: c.Author, body: c.Body, url: url,
-					reacted: c.ViewerReactions, thread: -1}, true
+					reacted: c.ViewerReactions, thread: -1, held: held(c.Author, c.AuthorType, c.AuthorAssociation)}, true
 			}
 		}
 	}
@@ -667,9 +670,12 @@ func (a *answering) settle() {
 			a.leave("%s carries no person's post, so it settles no question, and %s stays open", r.Ask, q.id)
 			continue
 		}
+		// The person's own words answer the question, in the one-line inert form
+		// a quote gives them, since the review run reads them from the gate. A
+		// post the quote holds lends the gate none of its text.
 		words := strings.Join(strings.Fields(r.Reason), " ")
-		if p, ok := a.locate(url); ok && strings.TrimSpace(p.body) != "" {
-			words = strings.Join(strings.Fields(p.body), " ")
+		if p, ok := a.locate(url); ok && !p.held && strings.TrimSpace(p.body) != "" {
+			words = quote.Line(p.body)
 		}
 		head := "ruled: "
 		if r.Moot {

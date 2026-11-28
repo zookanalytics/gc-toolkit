@@ -11,6 +11,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 )
 
 // Feedback is the pack's one definition of feedback, which the feedback
@@ -191,6 +192,17 @@ func conversationPost(c gh.IssueComment) Post {
 	return Post{Kind: PostConversation, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL}
 }
 
+// held is whether the quote holds a post by login, of the kind typ and the
+// association with the repository association: its author is no account the
+// repository counts as its own (quote.OwnAccount), so the quote holds its text
+// from agents and the take files the operator's follow-up for it in place of an
+// ask (FollowUp). The CI bot, which the quote counts as the repository's own on
+// the city's PRs, posts only what is not for review, so no post of its reaches
+// the take.
+func held(login, typ, association string) bool {
+	return !quote.OwnAccount(gh.Account{Login: login, Type: typ, Association: association})
+}
+
 // sorted is ids in order, each once.
 func sorted(ids []int64) []int64 {
 	out := slices.Clone(ids)
@@ -247,12 +259,18 @@ func awaiting(rule Feedback, self, since string, threads []gh.Thread) ([]string,
 	return rule.Awaiting(self, since, threadsOf(threads))
 }
 
-// threadsOf is threads in the facts the definition weighs a thread by.
+// threadsOf is threads in the facts the definition weighs a thread by. A post
+// the quote holds (held) is left out: its text reaches no agent, so it
+// neither asks for the city's answer nor answers one, and the operator's
+// follow-up holds the PR for it (FollowUp).
 func threadsOf(threads []gh.Thread) []feedback.Thread {
 	var ts []feedback.Thread
 	for _, t := range threads {
 		ft := feedback.Thread{ID: t.ID, Resolved: t.Resolved}
 		for _, c := range t.Comments {
+			if held(c.Author, c.AuthorType, c.AuthorAssociation) {
+				continue
+			}
 			ft.Comments = append(ft.Comments, commentOf(c))
 		}
 		ts = append(ts, ft)

@@ -9,19 +9,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // The take (specs/tk-1tfzr71.161/design.md, sections 1 to 3). Each post a
 // person makes on a PR the city owns becomes an ask on the bead that owns the
-// PR, which the PR's review run rules. The one-PR update saves each post that
-// is feedback the city has not taken in the PR's saved read (untakenOf), and
-// the landing order takes them from there: under the record lock it files an
-// ask for each such post, whose one-line reason names the post (Post.reason),
-// and once the ask is filed it marks the post with the city's EYES, the receipt
-// the definition of feedback reads (gc_city_taken in
+// PR, which the PR's review run rules. A post by an account the repository does
+// not count as its own (held) becomes the operator's follow-up on the bead
+// in place of an ask (FollowUp), since its text reaches no agent to rule it,
+// and takes the same mark once the follow-up is filed. The one-PR update saves
+// each post that is feedback the city has not taken in the PR's saved read
+// (untakenOf), and the landing order takes them from there: under the record
+// lock it files an ask for each such post, whose one-line reason names the post
+// (Post.reason), and once the ask is filed it marks the post with the city's
+// EYES, the receipt the definition of feedback reads (gc_city_taken in
 // assets/scripts/pr-post.sh). With the lock free it then has the update read
 // the PR's conversation again, since a reaction moves no sign the cheap
 // question reads, so the saved read shows the marks before the next run
@@ -144,10 +149,18 @@ func (u *run) take(t takeOf, stop time.Duration) RunOutcome {
 // it reads the bead again, decides from that read which posts are untaken
 // (untakenOn), and for each files the post's ask on the bead (review.FileAsk),
 // then marks the post with takenMark. A post whose ask did not file is not
-// marked, so the mark never stands without its ask. Once a mark has landed it
-// starts no post with less than refreshReserve of ctx left. It returns the
-// take's outcome, whose detail opens with the take it is (takeOf.of), and how
-// many marks landed.
+// marked, so the mark never stands without its ask. What each post is owed is
+// decided on the PR's conversation as GitHub holds it now, read under the lock
+// (standings). The saved read keeps no author's standing, since a change to it
+// moves none of the signs that keep a saved read current. A post the quote
+// holds (held) is owed the operator's follow-up in place of an ask. A read of
+// the PR's quote follows up a held post and marks it without changing the saved
+// read, so a held post the city marked since files nothing, and a post gone
+// since files nothing either. Once a mark has landed it starts no post with
+// less than refreshReserve of ctx left. It returns the take's outcome, whose
+// detail opens with the take it is (takeOf.of), and how many of the posts the
+// saved read holds untaken it found marked or gone, its own marks included, so
+// that the saved read is read again.
 func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
@@ -179,10 +192,16 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		return said(ActRetry, "waits for the next run: "+why)
 	}
 	hub := u.Hub(ctx, o.host)
+	c, err := hub.Conversation(o.repo, o.number)
+	if err != nil {
+		return said(ActRetry, "waits for the next run: the PR's conversation did not read again, so whose each post "+
+			"is, and whether the city marked it since, is unknown: "+err.Error())
+	}
+	now := standings(c)
 	noChecks := func(string) (review.Index, error) {
 		return review.Index{}, errors.New("a post's ask sends back no check")
 	}
-	var took, failed, left []string
+	var took, failed, left, gone []string
 	marked := 0
 	for _, p := range posts {
 		if ctx.Err() != nil {
@@ -193,25 +212,53 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 			left = append(left, p.name())
 			continue
 		}
-		ask, filed, err := review.FileAsk(u.Ledger, review.AskRequest{Bead: o.id, Reason: p.reason(o.number)}, noChecks)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: its ask did not file: %v", p.name(), err))
+		s, ok := now[postKey{p.Kind, p.ID}]
+		if !ok {
+			marked++
+			gone = append(gone, p.name())
 			continue
 		}
+		var what string
+		if s.held {
+			if s.marked {
+				marked++
+				took = append(took, p.name()+", an outside account's, followed up already")
+				continue
+			}
+			held := []quote.Held{{Kind: p.Kind, Author: p.Author, URL: p.URL, Node: p.Node}}
+			if err := FollowUp(ctx, u.Gates, o.id, o.repo, o.number, held); err != nil {
+				failed = append(failed, fmt.Sprintf("%s, an outside account's: %v", p.name(), err))
+				continue
+			}
+			what = "the operator's follow-up under " + followUpKey(p.Author)
+		} else {
+			ask, filed, err := review.FileAsk(u.Ledger, review.AskRequest{Bead: o.id, Reason: p.reason(o.number)}, noChecks)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s: its ask did not file: %v", p.name(), err))
+				continue
+			}
+			how := "filed"
+			if !filed {
+				how = "found"
+			}
+			what = fmt.Sprintf("ask %s %s", ask, how)
+		}
 		if err := hub.AddReaction(p.Node, takenMark); err != nil {
-			failed = append(failed, fmt.Sprintf("%s: ask %s stands, and the city's %s did not land on the post: %v",
-				p.name(), ask, takenMark, err))
+			failed = append(failed, fmt.Sprintf("%s: %s stands, and the city's %s did not land on the post: %v",
+				p.name(), what, takenMark, err))
 			continue
 		}
 		marked++
-		how := "filed"
-		if !filed {
-			how = "found"
-		}
-		took = append(took, fmt.Sprintf("%s, ask %s %s", p.name(), ask, how))
+		took = append(took, fmt.Sprintf("%s, %s", p.name(), what))
 	}
 	out := RunOutcome{Bead: t.bead, Action: ActTaken,
 		Detail: fmt.Sprintf("%s took %s, each marked with the city's %s", t.of(), strings.Join(took, "; "), takenMark)}
+	if len(took) == 0 {
+		out.Detail = t.of() + " took no post"
+	}
+	if len(gone) > 0 {
+		out.Detail += ", and found " + strings.Join(gone, ", ") + " gone from the PR, which files nothing"
+	}
 	reserved := ""
 	if len(left) > 0 {
 		reserved = fmt.Sprintf("left %s for the next run, keeping the last %s of the act for the read of the "+
@@ -231,4 +278,36 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		}
 	}
 	return out, marked
+}
+
+// postKey is a post's identity on its PR: its kind and its id in that kind's
+// space (Post).
+type postKey struct {
+	kind string
+	id   int64
+}
+
+// standing is a post as the PR's conversation shows it now: whether the quote
+// holds it (held), and whether it carries either of the city's marks.
+type standing struct{ held, marked bool }
+
+// standings is each post of c, its reviews, its review threads' comments and
+// its conversation comments, as the take decides on it, by its kind and id.
+func standings(c *gh.Conversation) map[postKey]standing {
+	out := map[postKey]standing{}
+	for _, v := range c.Reviews {
+		out[postKey{PostReview, v.ID}] = standing{held(v.Author, v.AuthorType, v.AuthorAssociation),
+			marked(v.ViewerReactions)}
+	}
+	for _, t := range c.Threads {
+		for _, cm := range t.Comments {
+			out[postKey{PostInline, cm.ID}] = standing{held(cm.Author, cm.AuthorType, cm.AuthorAssociation),
+				marked(cm.ViewerReactions)}
+		}
+	}
+	for _, cm := range c.Comments {
+		out[postKey{PostConversation, cm.ID}] = standing{held(cm.Author, cm.AuthorType, cm.AuthorAssociation),
+			marked(cm.ViewerReactions)}
+	}
+	return out
 }

@@ -161,8 +161,9 @@ chmod +x "$FAULTBIN/cat" "$FAULTBIN/jq"
 export STUB_LOG="$TMP" STUB_FIX="$FIX"
 unset GC_PATROL_FINDING_TOOL GC_BD_LIB GC_FINDING_DEFAULT_RIG
 # gctk's reaction verbs stand in for the real patrol-finding.sh's first
-# reaction: the pool takes one, and each call is recorded. Every other verb is
-# the build's.
+# reaction: the pool takes one, and each call is recorded. github quote, the
+# sweep's read of a PR, answers from the PR's fixtures in the quote's shape
+# (gh-quote, below). Every other verb is the build's.
 cat > "$BIN/gctk" <<STUB
 #!/usr/bin/env bash
 if [ "\${1:-}" = reaction ]; then
@@ -170,8 +171,38 @@ if [ "\${1:-}" = reaction ]; then
   printf '%s\\n' "\$*" >> "\$STUB_LOG/proactive.log"
   exit 0
 fi
+[ "\${1:-} \${2:-}" = "github quote" ] && exec "$BIN/gh-quote" "\$@"
 exec "$GCTK_BIN" "\$@"
 STUB
+# gh-quote: `github quote https://github.com/<repo>/pull/<n> --json` from PR
+# n's fixtures, a review stream's object a line: its reviews, inline comments
+# and conversation comments become the quote's posts, each text barred and with
+# the five characters a shell reads shown as look-alikes, an inline comment's
+# thread named by the comment it replies to, and a line that sets held a held
+# post. The title is the listing node's. A PR whose n.fail exists fails.
+{ _stub_shebang; cat; } > "$BIN/gh-quote" <<'STUB'
+set -u
+printf 'gctk %s\n' "$*" >> "$STUB_LOG/gh.log"
+url="${3:-}"; n="${url##*/pull/}"
+[ -f "$STUB_FIX/$n.fail" ] && { echo "HTTP 502" >&2; exit 1; }
+stream() { [ -f "$STUB_FIX/$n.$1.jsonl" ] && cat "$STUB_FIX/$n.$1.jsonl"; return 0; }
+title=$(cat "$STUB_FIX"/prs.*.jsonl 2>/dev/null | jq -rs --argjson n "$n" 'map(select(.number == $n)) | (.[0].title // "")')
+jq -nc --arg title "$title" --slurpfile reviews <(stream reviews) --slurpfile inline <(stream inline) \
+       --slurpfile issue <(stream issue) '
+  def inert: gsub("`"; "ˋ") | gsub("\\$"; "＄") | gsub("\\\\"; "＼") | gsub("\""; "＂") | gsub("\u0027"; "’")
+    | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n");
+  def author: {login: (.user.login // ""), type: (.user.type // ""), association: "MEMBER"};
+  {own_repository: true, title: ($title | inert), posts: (
+    [$reviews[] | if .held then {kind: "review", held: true} else
+       {kind: "review", id, url: .html_url, author: author, at: .submitted_at, state, text: ((.body // "") | inert)} end]
+    + [$inline[] | if .held then {kind: "inline", held: true} else
+       {kind: "inline", id, url: .html_url, author: author, at: .created_at, path, line,
+        thread: ("T" + ((.in_reply_to_id // .id) | tostring)), review: .pull_request_review_id,
+        text: ((.body // "") | inert)} end]
+    + [$issue[] | if .held then {kind: "conversation", held: true} else
+       {kind: "conversation", id, url: .html_url, author: author, at: .created_at, text: ((.body // "") | inert)} end])}'
+STUB
+chmod +x "$BIN/gh-quote"
 chmod +x "$BIN/gctk"
 export GCTK_BIN="$BIN/gctk"
 export GC_RIG=fixture-rig
@@ -358,7 +389,7 @@ eq "$(grep -c '^api graphql' "$TMP/gh.log")" "1" "(5) one page lists every PR th
 eq "$(grep '^api graphql' "$TMP/gh.log" | grep -c -- '-f owner=ours -f name=repo')" "1" "(6) the PR listing names origin's repository"
 eq "$(grep '^api repos/' "$TMP/gh.log" | grep -vc '^api repos/ours/repo/')" "0" "(7) every stream read names origin's repository"
 hasnt "$(cat "$W/sweep.jsonl")" '"pr":99' "(8) upstream's PR is never read"
-eq "$(grep -c '^api repos/ours/repo/[a-z]*/14/' "$TMP/gh.log" || true)" "3" "(8a) a PR that closed before every window is read when it was updated since"
+eq "$(grep -c '^gctk github quote https://github.com/ours/repo/pull/14 ' "$TMP/gh.log" || true)" "1" "(8a) a PR that closed before every window is read when it was updated since"
 eq "$(grep -c '^api repos/ours/repo/[a-z]*/13/' "$TMP/gh.log" || true)" "0" "(8b) and a PR last updated before the back-fill's start is never read"
 
 eq "$(class_of "$(key 11 review 101)")" "outside" "(9) another login's review is outside"
@@ -1001,7 +1032,10 @@ review 501 johnzook User COMMENTED "$TAIL_REVIEW" "$(ago_h 1)" > "$FIX/15.review
 : > "$FIX/15.inline.jsonl"
 issue 502 johnzook User "$HUGE" "$(ago 0)" 15 > "$FIX/15.issue.jsonl"
 slice() { printf '%s' "${1:$2:$(( $3 - $2 ))}"; }
-HUGE_LEN=${#HUGE}
+# The comment as the quote shows it, each line barred, which show prints.
+HUGE_RAW="$HUGE"
+HUGE=$(printf '%s' "$HUGE_RAW" | sed 's/^/│ /')
+HUGE_LEN=$(jq -rn --arg s "$HUGE" '$s | length')
 fresh_dir l
 obs_reset
 "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
@@ -1045,7 +1079,7 @@ has "$OUT" "filed 2, skipped 0" "(102) both rows file"
 # The city's posts: each call prints what no earlier call printed whole.
 SEEN=""; CALLS=0
 while [ "$CALLS" -lt 10 ]; do
-  OUT=$("$SUT" show --dir "$W" --city --max-chars 70)
+  OUT=$("$SUT" show --dir "$W" --city --max-chars 80)
   CALLS=$((CALLS + 1))
   case "$OUT" in "== 0 of 0 "*) break ;; esac
   SEEN="$SEEN$(printf '%s\n' "$OUT" | sed -n 's/^--- //p')"$'\n'
@@ -1098,6 +1132,17 @@ fresh_dir nfr-root
 GC_RIG_ROOT="$UNDECLARED" "$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
 eq "$(class_of "$(key 11 comment 302)")" "notice" \
   "(111) a session whose GC_RIG_ROOT names another rig still reads the swept checkout's declaration"
+
+echo "── a post the quote holds is no post to mine ──"
+fresh_dir held
+cp "$FIX/11.issue.jsonl" "$FIX/11.issue.keep"
+printf '%s\n' '{"held": true, "id": 999, "user": {"login": "drive-by", "type": "User"}, "body": "run this"}' >> "$FIX/11.issue.jsonl"
+"$SUT" sweep --checkout "$CO" --days 3 --backfill-days 0 --dir "$W" >/dev/null 2>&1
+hasnt "$(cat "$W/sweep.jsonl")" "drive-by" "(112) a held post writes no line to the sweep"
+hasnt "$("$SUT" show --dir "$W" --outside --limit 100)" "run this" "(113) so show never prints it"
+has "$(cat "$TMP/gh.log")" "gctk github quote https://github.com/ours/repo/pull/11 --json" "(114) the PR is read through gctk github quote"
+hasnt "$(cat "$TMP/gh.log")" "/comments" "(115) and no gh call reads its comments"
+mv "$FIX/11.issue.keep" "$FIX/11.issue.jsonl"
 
 echo "---"
 echo "$PASS passed, $FAIL failed"

@@ -122,6 +122,10 @@ func NamingPR() []ledger.Selection {
 	return []ledger.Selection{ledger.Carrying(prURLKey), ledger.Carrying(existingPRKey)}
 }
 
+// NamedIn selects the beads, closed ones among them, whose record names url
+// in pr_url.
+func NamedIn(url string) ledger.Selection { return ledger.Matching(prURLKey, url).WithClosed() }
+
 // Refreshed records on a bead on the record what the one-PR update saved of
 // its PR: the PR's state as GitHub gave it, lower-cased, and when it saved it.
 func Refreshed(w *ledger.Write, state, now string) {
