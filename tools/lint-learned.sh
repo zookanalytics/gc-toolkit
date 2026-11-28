@@ -29,8 +29,9 @@
 #   • Detectors must be CHEAP and DEPENDENCY-FREE (bash + POSIX userland):
 #     a rig that opts in runs this inside a gate on every bead.
 #
-# Non-executables in lint-learned.d/ (README.md) are data, not detectors, and
-# are skipped by the executable filter.
+# Non-executables in lint-learned.d/ (README.md, and shell-lines.lib, which
+# detectors source) are data, not detectors, and are skipped by the executable
+# filter.
 
 set -uo pipefail
 

@@ -7,10 +7,13 @@ shared base and one per role class — for the artifacts a role produces; and th
 per-role conventions fragments (docs/feedback-learning.md).
 
 One detector per hardened rule. Each executable here is the executable form
-of a single learned convention that graduated out of prose — run by
-`tools/lint-learned.sh` over every tracked file, exit 0 clean / 1 findings
-(`<file>:<line>: <message>` lines) / 2 when it cannot scan a file. See
-`specs/2026-08-learning-system/implementation-design.md` §8.
+of a single rule, a learned convention that graduated out of prose or a rule of
+the pack's design that only a check can hold, such as reading GitHub text only
+through gctk — run by `tools/lint-learned.sh` over every tracked file, exit 0
+clean / 1 findings (`<file>:<line>: <message>` lines) / 2 when it cannot scan a
+file. See `specs/2026-08-learning-system/implementation-design.md` §8.
+`shell-lines.lib` is not a detector: it is the line scanner the detectors that
+judge shell commands source.
 
 A file the detector cannot read, or one a tool call fails on, is a file it
 cannot scan, so the detector says so and exits 2. The runner tells a broken
@@ -52,14 +55,14 @@ not hold into a backlog item. A finding anywhere is a finding.
 
 ## Landing and retiring
 
-A detector lands via a `prompt-update: harden` PR that deletes the
-corresponding prose bullet AND its anchor from the fragment that carries it
-**in the same diff** — the rule is never stated twice and the fragment
-shrinks as rules harden. The pattern bead waits on that harden, and once it
-lands the distiller closes the pattern as resolved with a reason that names the
-detector that replaced the rule, so provenance lives on the bead and the harden
-PR, not in the fragment. A violation the detector lets through is the pattern
-recurring, and the distiller reopens it.
+A detector of a learned convention lands via a `prompt-update: harden` PR that
+deletes the corresponding prose bullet AND its anchor from the fragment that
+carries it **in the same diff** — the rule is never stated twice and the
+fragment shrinks as rules harden. The pattern bead waits on that harden, and
+once it lands the distiller closes the pattern as resolved with a reason that
+names the detector that replaced the rule, so provenance lives on the bead and
+the harden PR, not in the fragment. A violation the detector lets through is
+the pattern recurring, and the distiller reopens it.
 
 Detectors retire the same way prose rules do: a challenge that finds the rule
 no longer earns its keep produces a PR deleting the detector. A detector that
