@@ -135,9 +135,9 @@ type Author struct {
 // Post is one post as a quote holds it. A held post carries its kind and
 // nothing else. Any other carries its id and its URL, its author, when it was
 // posted, a review's state, an inline comment's file, the line it was made on
-// and its thread, and its text in the inert form. The file is named as the
-// PR's change names it, which its opener chose, so it is shown as Line shows
-// text.
+// and its thread with the review that carried it, and its text in the inert
+// form. The file is named as the PR's change names it, which its opener chose,
+// so it is shown as Line shows text.
 type Post struct {
 	Kind     string  `json:"kind"`
 	Held     bool    `json:"held,omitempty"`
@@ -150,6 +150,7 @@ type Post struct {
 	Line     int     `json:"line,omitempty"`
 	Thread   string  `json:"thread,omitempty"`
 	Resolved bool    `json:"resolved,omitempty"`
+	Review   int64   `json:"review,omitempty"`
 	Text     string  `json:"text,omitempty"`
 }
 
@@ -225,7 +226,7 @@ func Of(p *gh.Posted, only string) (Quote, error) {
 		for _, c := range t.Comments {
 			add(KindInline, account(c.Author, c.AuthorType, c.AuthorAssociation),
 				Post{ID: c.ID, URL: c.URL, At: c.CreatedAt, Path: Line(c.Path), Line: c.OriginalLine, Thread: t.ID,
-					Resolved: t.Resolved}, c.Body)
+					Resolved: t.Resolved, Review: carrier(c)}, c.Body)
 		}
 	}
 	for _, c := range p.Comments {
@@ -262,6 +263,15 @@ func ParseURL(url string) (host, repo string, number int, post string, ok bool) 
 		return "", "", 0, "", false
 	}
 	return m[1], m[2], n, m[5], true
+}
+
+// carrier is the id of the review that carried the inline comment c, 0 when
+// GitHub names none.
+func carrier(c gh.Comment) int64 {
+	if c.Review == nil {
+		return 0
+	}
+	return c.Review.ID
 }
 
 func account(login, typ, association string) gh.Account {

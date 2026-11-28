@@ -114,6 +114,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ME="$HERE/$(basename "${BASH_SOURCE[0]}")"
 PR_POST="$HERE/pr-post.sh"
 PATROL_FINDING="${GC_PATROL_FINDING_TOOL:-$HERE/patrol-finding.sh}"
+# shellcheck source=gctk-resolve.sh
+. "$HERE/gctk-resolve.sh" || { echo "$PROG: cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 
 # The outside capture's fixed category: one observation per outside post, so
 # the pair the dedup reads, (obs.provenance, obs.category), is unique per post.
@@ -248,8 +250,12 @@ meta() { jq -r --arg k "$1" '.[$k] // "" | tostring' "$DIR/meta.json"; }
 
 # --- fetch-pr: one PR's three streams, classified (a sweep worker) ------------
 # Each worker reads the PR's reviews, its inline review comments and its
-# conversation comments at once, and writes the PR's posts, classified, to
-# prs/<n>.jsonl. A PR any read failed on is marked failed and contributes
+# conversation comments through gctk github quote, the pack's one reader of the
+# text people post, and writes the PR's posts, classified, to prs/<n>.jsonl. A
+# post the quote holds for the operator carries no text, so it is no post to
+# mine. The rest are classified on their text with the bar that opens each of
+# its lines taken off, and keep the quote's text whole, which show prints and
+# file quotes. A PR the read failed on is marked failed and contributes
 # nothing, and the next run reads it again. A PR already written is kept.
 # A worker writes under its own pid and renames the posts file into place
 # whole, so a worker killed partway, or one still running when a resumed sweep
@@ -262,21 +268,33 @@ if [ "$VERB" = fetch-pr ]; then
   part="$base.$$"
   rm -f "$base.failed"
   SLUG=$(meta repo); SELF=$(meta self)
-  gh api "repos/$SLUG/pulls/$N/reviews?per_page=100" --paginate --jq '.[]' > "$part.reviews" 2>/dev/null & r1=$!
-  gh api "repos/$SLUG/pulls/$N/comments?per_page=100" --paginate --jq '.[]' > "$part.inline" 2>/dev/null & r2=$!
-  gh api "repos/$SLUG/issues/$N/comments?per_page=100" --paginate --jq '.[]' > "$part.issue" 2>/dev/null & r3=$!
-  read_ok=1
-  for r in "$r1" "$r2" "$r3"; do wait "$r" || read_ok=0; done
-  if [ "$read_ok" = 0 ]; then
-    : > "$base.failed"
-    exit 0
-  fi
-  OWN_DEF=$(cat "$DIR/feedback-def.jq") || { : > "$base.failed"; exit 0; }
+  GCTK=$(gctk_path) || { : > "$base.failed"; exit 0; }
+  # A quote that printed and then failed to file a held post's follow-up is
+  # still the PR's posts, and the follow-up is gctk's to file on a later read.
+  QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$GCTK" github quote "https://github.com/$SLUG/pull/$N" --json 2>/dev/null) || [ -n "$QUOTE" ] \
+    || { : > "$base.failed"; exit 0; }
+  printf '%s' "$QUOTE" | jq -c '
+    def bare: gsub("(?m)^│ ?"; "");
+    def user: {login: (.author.login // ""), type: (.author.type // "")};
+    (.posts // []) as $posts
+    | ([$posts[] | select(.kind == "inline" and (.held | not)) | {thread, id}]
+       | group_by(.thread) | map({key: (.[0].thread // ""), value: .[0].id}) | from_entries) as $root
+    | {title: (if .title_held then "(a title held for the operator)" else ((.title // "") | bare) end),
+       reviews: [$posts[] | select(.kind == "review" and (.held | not))
+                 | {id, user: user, state, submitted_at: .at, html_url: .url, body: ((.text // "") | bare), gc_text: (.text // "")}],
+       inline: [$posts[] | select(.kind == "inline" and (.held | not))
+                | {id, user: user, pull_request_review_id: (.review // null), created_at: .at, path, line,
+                   in_reply_to_id: ($root[.thread // ""] as $r | if $r == null or $r == .id then null else $r end),
+                   html_url: .url, body: ((.text // "") | bare), gc_text: (.text // "")}],
+       issue: [$posts[] | select(.kind == "conversation" and (.held | not))
+               | {id, user: user, created_at: .at, html_url: .url, body: ((.text // "") | bare), gc_text: (.text // "")}]}' \
+    > "$part.quote" 2>/dev/null || { rm -f "$part.quote"; : > "$base.failed"; exit 0; }
+  OWN_DEF=$(cat "$DIR/feedback-def.jq") || { rm -f "$part.quote"; : > "$base.failed"; exit 0; }
   if ! jq -nc --arg self "$SELF" --arg repo "$SLUG" --argjson pr "$N" \
-       --slurpfile prs "$DIR/prs.json" --slurpfile seen "$DIR/obs.json" \
-       --slurpfile reviews "$part.reviews" --slurpfile inline "$part.inline" --slurpfile issue "$part.issue" \
+       --slurpfile prs "$DIR/prs.json" --slurpfile seen "$DIR/obs.json" --slurpfile quote "$part.quote" \
        --arg outside_category "$OUTSIDE_CATEGORY" "$OWN_DEF"'
-    def has_text: ((.body // "") | tostring | test("\\S"));
+    ($quote[0].reviews) as $reviews | ($quote[0].inline) as $inline | ($quote[0].issue) as $issue
+    | def has_text: ((.body // "") | tostring | test("\\S"));
     def first_line: ((.body // "") | tostring | split("\n") | map(select(test("\\S"))) | (.[0] // ""));
     def code_review_signed:
       ((.body // "") | tostring | split("\n")
@@ -309,16 +327,17 @@ if [ "$VERB" = fetch-pr ]; then
        else "city" end) as $class
     | ("pr:" + $repo + "#" + ($pr | tostring) + ":" + .gc_kind + ":" + (.id | tostring)) as $key
     | ($obs[$key] // []) as $recorded
-    | { key: $key, pr: $pr, title: ($p.title // ""), in_window: ($p.in_window // false),
+    | { key: $key, pr: $pr, title: ($quote[0].title // ""), in_window: ($p.in_window // false),
         stream: .gc_stream, kind: .gc_kind, id: .id, login: $login, at: gc_city_posted_at,
         url: (.html_url // ""), path: (.path // null), line: (.line // .original_line // null),
         reply_to: (.in_reply_to_id // null), review_state: (.state // null),
         class: $class, marked: $marked, signed: $is_signed, flag: false,
         recorded: $recorded, captured: any($recorded[]; .category == $outside_category),
-        body: (.body | tostring) }' > "$part.jsonl" 2> "$part.err"; then
-    rm -f "$part.jsonl"
+        body: (.gc_text | tostring) }' > "$part.jsonl" 2> "$part.err"; then
+    rm -f "$part.jsonl" "$part.quote"
     : > "$base.failed"
   else
+    rm -f "$part.quote"
     mv -f "$part.jsonl" "$base.jsonl" || : > "$base.failed"
   fi
   exit 0
@@ -373,7 +392,7 @@ if [ "$VERB" = sweep ]; then
   # updated before SINCE, every PR after it was too, and the listing stops
   # there. GitHub's search index is not read: its closed: qualifier leaves out
   # some closed PRs.
-  Q='query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(states:[MERGED,CLOSED],first:100,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{number title closedAt mergedAt updatedAt}}}}'
+  Q='query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(states:[MERGED,CLOSED],first:100,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){pageInfo{hasNextPage endCursor} nodes{number closedAt mergedAt updatedAt}}}}'
   : > "$DIR/prs.raw"
   CURSOR=""
   while :; do
@@ -393,7 +412,7 @@ if [ "$VERB" = sweep ]; then
     map(. + {closed: ((.closedAt // .mergedAt // "") | tostring | .[0:10]),
              updated: ((.updatedAt // "") | tostring | .[0:10])})
     | map(select(.updated != "" and .updated >= $s)) | unique_by(.number)
-    | map({number, title: (.title // ""), closed, updated, in_window: (.closed != "" and .closed >= $w)})' "$DIR/prs.raw" > "$DIR/prs.json" \
+    | map({number, closed, updated, in_window: (.closed != "" and .closed >= $w)})' "$DIR/prs.raw" > "$DIR/prs.json" \
     || { err "could not read $SLUG's PR listing"; exit 1; }
   jq -n --arg repo "$SLUG" --arg self "$SELF" --arg checkout "$(pwd)" --arg rig "${GC_RIG:-}" \
         --argjson days "$DAYS" --arg since "$SINCE" --arg window_since "$WINDOW_SINCE" \
@@ -550,7 +569,7 @@ if [ "$VERB" = file ]; then
         --slurpfile items "$DIR/sweep.jsonl" --rawfile shown "$DIR/shown.tsv" '
     def trim: tostring | gsub("^\\s+|\\s+$"; "");
     def one_line($n): trim | gsub("\\s+"; " ") | if length > $n then (.[0:$n] | sub(" [^ ]*$"; "")) + " …" else . end;
-    def quote: (.body | trim) as $b
+    def quote: (.body | gsub("(?m)^│ ?"; "") | trim) as $b
       | (if ($b | length) > $qmax then ($b[0:$qmax] + " …") else $b end)
       | split("\n") | map("> " + .) | join("\n");
     def locus: if .stream == "inline"

@@ -67,7 +67,7 @@ func posted() *gh.Posted {
 		},
 		Threads: []gh.Thread{{ID: "T1", Comments: []gh.Comment{
 			{ID: 21, URL: "https://github.com/o/r/pull/7#discussion_r21", Body: "inline", Path: "a.go", OriginalLine: 3,
-				Author: "op", AuthorType: "User", AuthorAssociation: "OWNER"},
+				Author: "op", AuthorType: "User", AuthorAssociation: "OWNER", Review: &gh.CommentReview{ID: 11}},
 			{ID: 22, URL: "https://github.com/o/r/pull/7#discussion_r22", Body: "inline outside", Path: "a.go",
 				Author: "someone", AuthorType: "User", AuthorAssociation: "CONTRIBUTOR"},
 		}}},
@@ -368,6 +368,9 @@ func TestOfShowsAnInlineCommentsFileInert(t *testing.T) {
 	want := "docs/＄(touch x)ˋidˋ.md"
 	if len(q.Posts) != 1 || q.Posts[0].Path != want {
 		t.Fatalf("the inline comment's file is not inert: %+v", q.Posts)
+	}
+	if q.Posts[0].Review != 11 || q.Posts[0].Thread != "T1" {
+		t.Fatalf("the inline comment does not name its thread and the review that carried it: %+v", q.Posts[0])
 	}
 	if text := q.Text(); !strings.Contains(text, " on "+want+" line 3") || strings.ContainsAny(text, "`$") {
 		t.Fatalf("the heading shows the file raw:\n%s", text)
