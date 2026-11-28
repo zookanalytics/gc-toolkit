@@ -90,26 +90,31 @@ func TestReadAcceptedNamesTheFile(t *testing.T) {
 	}
 }
 
-// The pack's accepted file reads, and holds the two entries the operator's
-// approval of the design accepted: hold-label-routed-to with no bound, and
-// dolt-compact-state for three hours, each with its reason and that ruling.
+// The pack's accepted file reads, and holds exactly the entries below, each
+// with its reason, its bound, and a ruling that names the PR where the operator
+// gave it.
 func TestThePacksAcceptedFile(t *testing.T) {
 	es, err := ReadAccepted("../../../doctor/accepted.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := map[string]string{}
+	want := map[string]struct{ bound, ruling string }{
+		"hold-label-routed-to": {"", "PR #1537"},
+		"dolt-compact-state":   {"3h", "PR #1537"},
+		"dolt-noms-size":       {"", "PR #1726"},
+	}
+	if len(es) != len(want) {
+		t.Fatalf("the pack accepts %d checks, and this test names %d", len(es), len(want))
+	}
 	for _, e := range es {
-		got[e.Check] = e.For
-		if e.Reason == "" || !strings.Contains(e.Ruling, "PR #1537") {
-			t.Errorf("%s carries reason %q and ruling %q", e.Check, e.Reason, e.Ruling)
+		w, ok := want[e.Check]
+		if !ok {
+			t.Errorf("the pack accepts %s, which this test does not name", e.Check)
+			continue
 		}
-	}
-	if len(got) != 2 || got["dolt-compact-state"] != "3h" {
-		t.Fatalf("the pack accepts %v", got)
-	}
-	if bound, ok := got["hold-label-routed-to"]; !ok || bound != "" {
-		t.Fatalf("the pack accepts %v", got)
+		if e.For != w.bound || e.Reason == "" || !strings.Contains(e.Ruling, w.ruling) {
+			t.Errorf("%s carries for %q, reason %q and ruling %q, want for %q and a ruling that names %s", e.Check, e.For, e.Reason, e.Ruling, w.bound, w.ruling)
+		}
 	}
 }
 

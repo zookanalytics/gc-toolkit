@@ -25,3 +25,8 @@ check = "dolt-compact-state"
 for = "3h"
 reason = "It warns on every pending-GC marker, the one the compactor writes on purpose when a writer races its flatten included, and the compactor clears that marker at its next pass, every two hours. Three hours lets that pass run."
 ruling = "The operator's approval of the design for the patrols' move onto orders, PR #1537."
+
+[[accepted]]
+check = "dolt-noms-size"
+reason = "It warns once a managed Dolt store's size on disk, or the sum of all the stores', reaches 2 GB, and errors at 20 GB, and Gas City fixes both lines with no setting. This city's two largest stores keep more than 2 GB even after Gas City's compaction flattens and fully collects them, so the warning cannot clear. The entry hides the 20 GB error as well. It comes out once Gas City lets a city set the lines, which the upstream finding tk-qqyuqwz asks for."
+ruling = "The operator's ruling of 2026-11-28 in the sitting on PR #1726: \"yes accept.\""
