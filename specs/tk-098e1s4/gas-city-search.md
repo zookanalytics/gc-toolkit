@@ -46,12 +46,15 @@ names its account.
 
 ## Keep outside accounts from posting
 
-**Not covered for the need.** GitHub's interaction limits ("Limiting
-interactions in your repository", GitHub Docs) restrict commenting on one public
-repository to its collaborators, for at most six months at a time. A limit
-lapses, it covers one repository, and it does nothing for another repository's
-text an agent must read, such as an upstream project's issues. The reader holds
-a post whatever a limit's state.
+**Not covered for the need.** GitHub's interaction limits (GitHub Docs,
+"Limiting interactions in your repository", "Limiting interactions for your
+personal account" and "Limiting interactions in your organization") restrict
+commenting on one public repository, or on every public repository a personal
+account or an organization owns, to existing users, prior contributors or the
+repository's collaborators, for at most six months at a time. A limit lapses,
+it leaves the posts made before it, and it does nothing for another
+repository's text an agent must read, such as an upstream project's issues. The
+reader holds a post whatever a limit's state.
 
 ## Tell the operator of each held post
 
