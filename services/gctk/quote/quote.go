@@ -19,7 +19,9 @@ package quote
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -180,16 +182,19 @@ type Held struct {
 func (q Quote) Held() []Held { return slices.Clone(q.held) }
 
 // Of is the quote of p. With only empty it holds the description and every
-// post. With only a post's URL, as GitHub gives it, it holds that post alone,
-// and an error when p holds no post at that URL. A description is the title
-// and the body, quoted or held as its opener's post is.
+// post, and with only KindDescription the description alone. With only a
+// post's fragment, as its URL ends (issuecomment-<id>, pullrequestreview-<id>
+// or discussion_r<id>), it holds that post alone, and an error when p holds no
+// post there. A description is the title and the body, quoted or held as its
+// opener's post is.
 func Of(p *gh.Posted, only string) (Quote, error) {
 	own := OwnRepository(p.ViewerPermission)
 	opener := p.Opener
 	q := Quote{Repository: p.Repository, Number: p.Number, URL: p.URL, PullRequest: p.PullRequest,
 		OwnRepository: own, Posts: []Post{}}
+	whole, description := only == "", only == KindDescription
 	add := func(kind string, a gh.Account, post Post, body string) {
-		if only != "" && post.URL != only {
+		if !whole && !(description && kind == KindDescription) && fragment(post.URL) != only {
 			return
 		}
 		if own && !Own(a, opener) {
@@ -202,7 +207,7 @@ func Of(p *gh.Posted, only string) (Quote, error) {
 		post.Text = Inert(body)
 		q.Posts = append(q.Posts, post)
 	}
-	if only == "" {
+	if whole || description {
 		if own && !Own(opener, opener) {
 			q.TitleHeld = true
 		} else {
@@ -225,10 +230,36 @@ func Of(p *gh.Posted, only string) (Quote, error) {
 		add(KindConversation, account(c.Author, c.AuthorType, c.AuthorAssociation),
 			Post{ID: c.ID, URL: c.URL, At: c.CreatedAt}, c.Body)
 	}
-	if only != "" && len(q.Posts) == 0 {
-		return Quote{}, fmt.Errorf("%s#%d holds no post at %s", p.Repository, p.Number, only)
+	if !whole && !description && len(q.Posts) == 0 {
+		return Quote{}, fmt.Errorf("%s#%d holds no post at #%s", p.Repository, p.Number, only)
 	}
 	return q, nil
+}
+
+// fragment is what follows the # of a post's URL, empty for a URL with none.
+func fragment(url string) string {
+	_, f, _ := strings.Cut(url, "#")
+	return f
+}
+
+// itemURL is the shape of the URL of an issue or a PR on GitHub, with the
+// fragment of one post on it: its host, its repository, issues or pull, its
+// number and the fragment.
+var itemURL = regexp.MustCompile(`^https://([A-Za-z0-9.-]+)/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/(issues|pull)/([0-9]+)/?(?:#(issuecomment-[0-9]+|pullrequestreview-[0-9]+|discussion_r[0-9]+))?$`)
+
+// ParseURL reads the URL of an issue, a PR or one post on either: the host,
+// the repository as owner/name, the number, and the post's fragment, empty for
+// the item as a whole. ok is false for a URL of any other shape.
+func ParseURL(url string) (host, repo string, number int, post string, ok bool) {
+	m := itemURL.FindStringSubmatch(strings.TrimSpace(url))
+	if m == nil {
+		return "", "", 0, "", false
+	}
+	n, err := strconv.Atoi(m[4])
+	if err != nil || n < 1 {
+		return "", "", 0, "", false
+	}
+	return m[1], m[2], n, m[5], true
 }
 
 func account(login, typ, association string) gh.Account {

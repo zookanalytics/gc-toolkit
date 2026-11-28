@@ -187,22 +187,55 @@ func TestOfMarksAnotherRepositorysTextAndHoldsNothing(t *testing.T) {
 // post alone, held when its author is outside, and an error for a URL the
 // conversation does not hold.
 func TestOfOneURLHoldsThatPostAlone(t *testing.T) {
-	q, err := Of(posted(), "https://github.com/o/r/pull/7#discussion_r21")
+	q, err := Of(posted(), "discussion_r21")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(q.Posts) != 1 || q.Posts[0].ID != 21 || q.Title != "" {
 		t.Fatalf("one post: %+v", q)
 	}
-	q, err = Of(posted(), "https://github.com/o/r/pull/7#issuecomment-32")
+	q, err = Of(posted(), "issuecomment-32")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(q.Posts) != 1 || !q.Posts[0].Held || len(q.Held()) != 1 {
 		t.Fatalf("one outside post: %+v", q)
 	}
-	if _, err := Of(posted(), "https://github.com/o/r/pull/7#issuecomment-99"); err == nil {
+	if _, err := Of(posted(), "issuecomment-99"); err == nil {
 		t.Fatal("a URL the conversation does not hold read as a post")
+	}
+	q, err = Of(posted(), KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q.Posts) != 1 || q.Posts[0].Kind != KindDescription || q.Title == "" {
+		t.Fatalf("the description alone: %+v", q)
+	}
+}
+
+// TestParseURLReadsAnItemOrOnePostOnIt pins the URLs a quote reads: an issue,
+// a PR, and a post on either by its fragment, and nothing of another shape.
+func TestParseURLReadsAnItemOrOnePostOnIt(t *testing.T) {
+	for _, tc := range []struct {
+		url, host, repo, post string
+		number                int
+	}{
+		{"https://github.com/o/r/pull/7", "github.com", "o/r", "", 7},
+		{"https://github.com/o/r/pull/7#issuecomment-31", "github.com", "o/r", "issuecomment-31", 7},
+		{"https://github.com/o/r.go/issues/3#discussion_r9", "github.com", "o/r.go", "discussion_r9", 3},
+		{"https://github.com/o/r/issues/3/#pullrequestreview-5", "github.com", "o/r", "pullrequestreview-5", 3},
+	} {
+		host, repo, n, post, ok := ParseURL(tc.url)
+		if !ok || host != tc.host || repo != tc.repo || n != tc.number || post != tc.post {
+			t.Errorf("ParseURL(%q) = %q %q %d %q %v", tc.url, host, repo, n, post, ok)
+		}
+	}
+	for _, bad := range []string{"", "https://github.com/o/r", "https://github.com/o/r/pull/0",
+		"https://github.com/o/r/pull/7#issue-7", "http://github.com/o/r/pull/7", "https://github.com/o/r/pull/7/files",
+		"https://github.com/o/r/pull/7 x"} {
+		if _, _, _, _, ok := ParseURL(bad); ok {
+			t.Errorf("ParseURL(%q) read as an item", bad)
+		}
 	}
 }
 

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 )
 
@@ -77,4 +80,35 @@ func FollowUp(ctx context.Context, g Gates, subject, repo string, number int, he
 		return fmt.Errorf("the follow-up of a held post did not file: %s", strings.Join(failed, "; "))
 	}
 	return nil
+}
+
+// OwnerOf is the bead a held post's follow-up on the PR at url lands on: the
+// one live bead that owns the PR (ownersIn), else a closed bead whose record
+// named it in pr_url and that is no other bead's child, read through l, and ""
+// when the store holds neither. The board shows a gate on a closed bead as it
+// shows any other.
+func OwnerOf(l *ledger.Ledger, url string) (string, error) {
+	host, repo, number, ok := record.ParseURL(url)
+	if !ok {
+		return "", fmt.Errorf("%q names no pull request", url)
+	}
+	owners, err := ownersIn(l)
+	if err != nil {
+		return "", err
+	}
+	o, err := one(owners[identity(host, repo, number)], url)
+	if err != nil || o.id != "" {
+		return o.id, err
+	}
+	rows, err := l.Find(record.NamedIn(url))
+	if err != nil {
+		return "", err
+	}
+	slices.SortFunc(rows, func(a, b *ledger.Record) int { return strings.Compare(a.ID, b.ID) })
+	for _, r := range rows {
+		if parent, _, err := anchorKey.Get(r); err == nil && (strings.TrimSpace(parent) == "" || parent == r.ID) {
+			return r.ID, nil
+		}
+	}
+	return "", nil
 }
