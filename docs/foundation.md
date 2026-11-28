@@ -37,6 +37,14 @@ gc-toolkit uses Gas City as shipped. A pack is prose, config, thin glue and surf
 
 A claim that Gas City cannot express something carries the date it was made. Before it justifies anything, it is re-verified against Gas City's current upstream documentation. It is answered by re-expressing or reshaping the feature, never by a wrapper, a fork, or a campaign to change Gas City.
 
+A bug in Gas City is not such a claim. It is fixed on the city's fork when all of these hold, as [fork-patching.md](fork-patching.md#when-to-local-patch) says:
+
+- The city's configuration cannot fix it.
+- The fix is clear.
+- The fix is consistent with Gas City.
+
+Every fix the fork carries is offered upstream.
+
 gc-toolkit will not add process for its own sake. Review legs are partners, not walls; consults are for judgment, not ritual; metrics must trigger corrective action or they are noise.
 
 gc-toolkit will not treat cheap restart as root cause. Re-rolling an agent until a plausible diff appears launders defects into reviewer fatigue. The right answer is to make the failure legible and improve the pack.
