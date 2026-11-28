@@ -315,12 +315,15 @@ if [ "$PR_STATE" = "OPEN" ]; then
   # the city's mark. The recorded marker cannot stand in for that test: a run
   # whose comment failed recorded the marker too. The PR's conversation is read
   # through gctk github quote, where a post the quote holds carries no text, so
-  # an outside account's post cannot pass for the notice. A conversation that
+  # an outside account's post cannot pass for the notice. A quote that printed
+  # and then failed to file a held post's follow-up is still the conversation,
+  # and the follow-up is gctk's to file on a later read. A conversation that
   # does not read could hide the notice, so the PR is not closed.
   CMARK=$("$PR_POST" mark 2>/dev/null) || CMARK=""
   gctk=$(gctk_path) || gctk=""
   QUOTE=""
-  [ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$_bd_lib_dir" "$gctk" github quote "$LIVE_URL" --json 2>/dev/null) || QUOTE=""
+  [ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$_bd_lib_dir" "$gctk" github quote "$LIVE_URL" --json 2>/dev/null) || true
+  printf '%s' "$QUOTE" | jq -e '.posts | type == "array"' >/dev/null 2>&1 || QUOTE=""
   [ -n "$QUOTE" ] \
     || die "the marker is recorded but PR#$PRNUM's conversation could not be read through gctk github quote, so whether it already carries the closing comment is unknown; the PR was NOT closed and is still OPEN — close it by hand (or re-run once gctk works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
   POSTED=$(printf '%s' "$QUOTE" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '

@@ -88,7 +88,9 @@ chmod +x "$BIN/gh"
 # --json` to find its own notice. The stub answers STUB_PR_COMMENTS in the
 # quote's shape, each comment a conversation post whose text is its body with
 # each line barred, and one with held set as a held post, which carries no
-# text. STUB_QUOTE_RC fails the read. Each call is logged to $STUB_GH_LOG.
+# text. STUB_QUOTE_RC fails the read, and STUB_QUOTE_AFTER_RC exits with its
+# code once the quote printed, as a follow-up that did not file does. Each call
+# is logged to $STUB_GH_LOG.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'GCTK'
 printf 'gctk %s\n' "$*" >> "${STUB_GH_LOG:?}"
 [ "${1:-} ${2:-}" = "github quote" ] || { echo "gctk stub: only 'github quote'" >&2; exit 2; }
@@ -96,6 +98,7 @@ printf 'gctk %s\n' "$*" >> "${STUB_GH_LOG:?}"
 printf '%s' "${STUB_PR_COMMENTS:-[]}" | jq -c --arg url "${3:-}" '{url: $url, own_repository: true, posts: [ .[]
   | if .held then {kind: "conversation", held: true}
     else {kind: "conversation", text: ((.body // "") | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n"))} end ]}'
+exit "${STUB_QUOTE_AFTER_RC:-0}"
 GCTK
 chmod +x "$BIN/gctk"
 export GCTK_BIN="$BIN/gctk"
@@ -480,6 +483,16 @@ eq "$rc" 0 "the re-run closes the PR"
 hasnt "$(cat "$STUB_GH_LOG")" "pr comment" "…without posting the closing comment again"
 has "$(cat "$STUB_GH_LOG")" "pr close 97" "…and the close is made"
 has "$out" "already carries this disposition's closing comment" "…and says why it posted nothing"
+
+echo "# a quote that printed and then failed to file its follow-up is still the conversation"
+store "[$(anchor A28 98), $(succ S28)]"
+: > "$STUB_GH_LOG"
+POSTED28=$(printf '%s' "$POSTED_BODY" | sed 's/A27/A28/; s/S27/S28/')
+out=$(STUB_QUOTE_AFTER_RC=1 STUB_PR_COMMENTS="$(jq -cn --arg b "$POSTED28" '[{author:{login:"gc-city-bot"},body:$b}]')" \
+      "$SUT" --anchor A28 --successor S28 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "the re-run closes the PR"
+hasnt "$(cat "$STUB_GH_LOG")" "pr comment" "…finding its notice in the quote that printed"
+has "$(cat "$STUB_GH_LOG")" "pr close 98" "…and the close is made"
 
 echo "# a notice an outside account posts is held, so it passes for none"
 store "[$(anchor A29 99), $(succ S29)]"

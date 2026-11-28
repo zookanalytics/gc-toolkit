@@ -98,7 +98,8 @@ chmod +x "$BIN/gh"
 # gctk stub: `github quote <url> --json` answers the thread in $STATE in the
 # quote's shape, each comment a conversation post whose text is barred and
 # shows the five characters a shell reads as look-alikes. GH_READ=fail fails
-# it. Every call is logged to $GHLOG beside gh's.
+# it, and GH_READ=printed exits 1 once the quote printed, as a follow-up that
+# did not file does. Every call is logged to $GHLOG beside gh's.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'STUB'
 printf 'gctk %s\n' "$*" >>"${GHLOG:?}"
 [ "${1:-} ${2:-}" = "github quote" ] || exit 2
@@ -108,6 +109,8 @@ STATE="${STATE:?}"
 jq -c --arg url "${3:-}" '{url: $url, own_repository: true, posts: [ .[] | {kind: "conversation", id, text:
   ((.body // "") | gsub("`"; "ˋ") | gsub("\\$"; "＄") | gsub("\\\\"; "＼") | gsub("\""; "＂") | gsub("\u0027"; "’")
    | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n"))} ]}' "$STATE"
+[ "${GH_READ:-}" = printed ] && exit 1
+exit 0
 STUB
 chmod +x "$BIN/gctk"
 
@@ -261,6 +264,15 @@ hasnt "PATCH" "$(cat "$TMPD/gh.b3.log")" "…and edits nothing"
 printf '[]' >"$STATE"; conv in_progress "how the retry should work"
 rc=$(run b4 GH_READ=fail -- post --sitting tk-conv)
 hasnt "pr comment" "$(cat "$TMPD/gh.b4.log")" "post skips an unreadable thread rather than risk a second comment"
+
+printf '[]' >"$STATE"; conv in_progress "how the retry should work"
+run b5 -- post --sitting tk-conv >/dev/null
+rc=$(run b6 GH_READ=printed -- post --sitting tk-conv)
+ok "a quote that printed and then exited 1 exits 0" "[ '$rc' = 0 ]"
+hasnt "PATCH" "$(cat "$TMPD/gh.b6.log")" "…finds the comment in it and edits nothing"
+hasnt "pr comment" "$(cat "$TMPD/gh.b6.log")" "…and posts no second comment"
+has "already shows its bead" "$(cat "$TMPD/out.b6")" "…since the comment already shows the bead"
+printf '[]' >"$STATE"
 
 echo "# a bead that is not a conversation is not drawn"
 jq '.dependencies = []' "$FIX/conv.json" >"$FIX/c.t" && mv "$FIX/c.t" "$FIX/conv.json"

@@ -167,12 +167,15 @@ BODY="$BODY$DRAWN"$'\n'
 
 # The one comment carrying our marker, among the PR's conversation comments
 # (what `gh pr comment` posts to), read through gctk github quote. A post the
-# quote holds carries no text, so an outside account's post cannot match.
+# quote holds carries no text, so an outside account's post cannot match. A
+# quote that printed and then failed to file a held post's follow-up is still
+# the PR's posts, and the follow-up is gctk's to file on a later read.
 # Unreadable is fail-safe: refresh has nothing to edit, and post skips rather
 # than risk a duplicate.
 gctk=$(gctk_path) || gctk=""
 QUOTE=""
-[ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$gctk" github quote "https://$ORIGIN_REPO_Q/pull/$PR" --json 2>/dev/null) || QUOTE=""
+[ -z "$gctk" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$HERE" "$gctk" github quote "https://$ORIGIN_REPO_Q/pull/$PR" --json 2>/dev/null) || true
+printf '%s' "$QUOTE" | jq -e '.posts | type == "array"' >/dev/null 2>&1 || QUOTE=""
 if [ -z "$QUOTE" ]; then
   echo "$PROG: could not read PR#$PR comments; nothing posted" >&2
   exit 0
