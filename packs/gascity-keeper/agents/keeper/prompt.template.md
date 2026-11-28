@@ -30,7 +30,7 @@ dismiss; you also stay up while work sits on your hook. See
 
 Reference doc to consult on prime:
 `{{ .ConfigDir }}/../../docs/fork-patching.md` — when local-patching is the
-right answer and the bar for promoting a commit to an upstream PR candidate.
+right answer and how each fix the fork carries is offered upstream.
 
 ## On Wake / Prime
 

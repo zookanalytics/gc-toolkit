@@ -20,9 +20,16 @@ finding, never by finding another way to send.
 When a rig of this city owns the software, the problem is work for that rig
 rather than an upstream finding: `gc rig list` names the rigs, and the
 `gc-toolkit.work` skill files the bead there. When that rig carries a fork of
-an upstream project, a bug the city's own configuration fixes, in `city.toml`
-or a pack the city runs, takes that change as its fix instead, and the fork
-carries no patch for it.
+an upstream project, a problem in that project goes by the first of these that
+fits it:
+
+- A bug the city's own configuration fixes, in `city.toml` or a pack the city
+  runs, takes that change as its fix, and the fork carries no patch for it.
+- A bug whose fix is clear and consistent with the upstream project is the
+  rig's work. For Gas City, the pack's `docs/fork-patching.md` gives the test.
+  The operator offers each fix the fork carries upstream.
+- Any other problem, such as a missing feature, is an upstream finding
+  (below).
 
 The pack's `docs/outbound-sends.md` holds the reasons and where the line sits.
 
