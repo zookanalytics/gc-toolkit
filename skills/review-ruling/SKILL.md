@@ -191,9 +191,19 @@ and a nit, a preference that no grade covers, is answered and not fixed. The
 reason names the grade.
 
 Each comment is its own ask, whose reason names the post and ends with its URL.
-Read the post at that URL as it stands, and rule it by its grade, as above. The
-round's post answers it where it was made, with the ruling's reason as the
-answer, so write the reason to the person who made the comment.
+Read the post at that URL as it stands, through the pack's one reader of GitHub
+text, which quotes it inert:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" github quote "<the post's URL>"
+```
+
+Rule it by its grade, as above. The round's post answers it where it was made,
+with the ruling's reason as the answer, so write the reason to the person who
+made the comment.
 
 An ask that carries a ruling the operator made, as a sitting's send-back does,
 is applied as ruled and not graded again.

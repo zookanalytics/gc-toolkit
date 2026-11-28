@@ -90,7 +90,8 @@ gc bd dep list <delivery> --direction=up -t parent-child --json | jq -r '.[] | "
 Then read or run what the epic has of these:
 
 - each landed Story's merged change and its closed bead
-  (`git show --stat <merged_sha>`, `gh pr view <pr_url>`, `gc bd show <story>`);
+  (`git show --stat <merged_sha>`, `"$GCTK" github quote <pr_url> --description`
+  with `GCTK` set as the gctk-bin blocks below set it, `gc bd show <story>`);
 - each check in `epic_closure_condition`, run again;
 - each measured criterion, by one method, at the latest landing's commit and at
   the last review's, or at main's head while nothing has landed. Credit the

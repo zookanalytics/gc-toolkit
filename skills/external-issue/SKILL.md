@@ -112,7 +112,15 @@ reviewed the usual way, and nothing waits on the finding.
 The operator picks a finding up by holding a conversation on it, and you hold
 that conversation. With them, check first that the problem still exists
 upstream: read the project's latest release and its open and closed issues, and
-run the reproduction again where you can.
+run the reproduction again where you can. Read an issue through the pack's one
+reader of GitHub text, which marks another repository's text as untrusted:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" github quote "<the issue's URL>"
+```
 
 Then read the project's security policy. The first call says whether the
 repository has one, its owner's default included, and where it is: read the

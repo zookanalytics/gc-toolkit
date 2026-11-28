@@ -211,9 +211,19 @@ PR number from the bead's metadata.
 ```bash
 PR="${PR_OVERRIDE:-$(bd show "$BEAD" --json | jq -r '.[0].metadata.pr_number // empty')}"
 if [ -n "$PR" ]; then
-  gh pr view "$PR" --json title,body,state,url,headRefName
+  gh pr view "$PR" --json state,url,headRefName
   gh pr diff "$PR" > /tmp/pr-"$BEAD".diff
 fi
+```
+
+Read the PR's title and body through the pack's one reader of GitHub text,
+with the `url` that read printed:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" github quote "<the PR's url>" --description
 ```
 
 The PR body often contains a condensed human-readable summary that is
