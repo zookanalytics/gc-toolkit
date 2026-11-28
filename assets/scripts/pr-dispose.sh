@@ -77,6 +77,8 @@ scrub() { tr -d '\000-\037'; }
 _bd_lib_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=bd-lib.sh
 . "${GC_BD_LIB:-$_bd_lib_dir/bd-lib.sh}" || { echo "cannot source bd-lib.sh beside this script" >&2; exit 1; }
+# shellcheck source=gctk-resolve.sh
+. "$_bd_lib_dir/gctk-resolve.sh" || { echo "cannot source gctk-resolve.sh beside this script" >&2; exit 1; }
 
 # host/owner/repo from a PR url, so every gh call is pinned to the PR's own
 # repository: a bare #NUM names a different pull request per repo per host.
@@ -288,7 +290,7 @@ command -v gh >/dev/null 2>&1 \
 # while the PR may still be OPEN, a false success: the closer never sees a
 # CLOSED PR to consummate the disposition. pipefail (set above) makes the pipe carry
 # gh's non-zero status when gh fails.
-PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url,comments 2>/dev/null | scrub); rc=$?
+PR_JSON=$(gh pr view "$PRNUM" --repo "$PR_REPO_Q" --json state,url 2>/dev/null | scrub); rc=$?
 if [ "$rc" -ne 0 ] || [ -z "$PR_JSON" ]; then
   die "the marker is recorded but PR#$PRNUM state could not be read from $PR_REPO_Q (gh pr view failed); the PR was NOT closed and may still be OPEN — close it by hand (or re-run once gh works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
 fi
@@ -309,13 +311,21 @@ if [ "$PR_STATE" = "OPEN" ]; then
   # The comment is posted first and gates the close, so the PR never closes
   # without the reason it was closed for. A re-run after a failed close finds the
   # notice its first run posted, so it closes without posting a second one. The
-  # notice is this disposition's when it opens with the same kind and anchor and
-  # carries the city's mark. The recorded marker cannot stand in for that test: a
-  # run whose comment failed recorded the marker too.
+  # notice is this disposition's when it carries the same kind and anchor and
+  # the city's mark. The recorded marker cannot stand in for that test: a run
+  # whose comment failed recorded the marker too. The PR's conversation is read
+  # through gctk github quote, where a post the quote holds carries no text, so
+  # an outside account's post cannot pass for the notice. A conversation that
+  # does not read could hide the notice, so the PR is not closed.
   CMARK=$("$PR_POST" mark 2>/dev/null) || CMARK=""
-  POSTED=$(printf '%s' "$PR_JSON" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '
-    [ (.comments // [])[] | ((.body // "") | tostring) as $b
-      | select(($mark != "") and ($b | startswith($lead)) and ($b | contains($mark))) ] | length' 2>/dev/null)
+  GCTK=$(gctk_path) || GCTK=""
+  QUOTE=""
+  [ -z "$GCTK" ] || QUOTE=$(GCTK_SCRIPTS_DIR="$_bd_lib_dir" "$GCTK" github quote "$LIVE_URL" --json 2>/dev/null) || QUOTE=""
+  [ -n "$QUOTE" ] \
+    || die "the marker is recorded but PR#$PRNUM's conversation could not be read through gctk github quote, so whether it already carries the closing comment is unknown; the PR was NOT closed and is still OPEN — close it by hand (or re-run once gctk works), and $CLOSER disposes $ANCHOR once it reads the PR closed" 1
+  POSTED=$(printf '%s' "$QUOTE" | jq -r --arg lead "$CLEAD" --arg mark "$CMARK" '
+    [ (.posts // [])[] | select(.kind == "conversation") | ((.text // "") | tostring) as $b
+      | select(($mark != "") and ($b | contains($lead)) and ($b | contains($mark))) ] | length' 2>/dev/null)
   case "$POSTED" in ''|*[!0-9]*) POSTED=0 ;; esac
   if [ "$POSTED" -gt 0 ]; then
     echo "$PROG: PR#$PRNUM already carries this disposition's closing comment; closing it without posting another"

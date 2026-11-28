@@ -22,7 +22,9 @@
 # pr_url; a marker the store refuses, which closes no PR; the successor store carried
 # through when given and cleared when omitted; the close-mode failures that
 # record the marker but exit non-zero (gh missing, an unreadable state, a
-# failed closing comment or gh close); dry-run writing nothing; and the usage refusals (bad kind, missing
+# conversation gctk github quote does not read, a failed closing comment or gh
+# close); a notice an outside account posts, which the quote holds, passing for
+# none; dry-run writing nothing; and the usage refusals (bad kind, missing
 # args).
 set -uo pipefail
 
@@ -37,14 +39,13 @@ SD="$TMP/scripts"
 mk_sut_dir "$SD" "$HERE/pr-dispose.sh"
 SUT="$SD/pr-dispose.sh"
 
-# gh: pr-dispose reads the PR (state, url and comments) and closes it, both
-# pinned to the --repo it derives from the anchor's pr_url, and at an exception
-# it reads a PR's state by the URL the record holds. The harness gh stub cats a
-# whole fixture and has no `close`, so override it with a minimal one that
-# serves a canned state (per PR, default OPEN), a url built from the pinned
-# --repo, or from the URL it was given, and a canned conversation, and logs the
-# closing comment and the close, honouring the refusal knobs. Written after
-# harness_init so it wins on PATH.
+# gh: pr-dispose reads the PR (state and url) and closes it, both pinned to the
+# --repo it derives from the anchor's pr_url, and at an exception it reads a
+# PR's state by the URL the record holds. The harness gh stub cats a whole
+# fixture and has no `close`, so override it with a minimal one that serves a
+# canned state (per PR, default OPEN), a url built from the pinned --repo, or
+# from the URL it was given, and logs the closing comment and the close,
+# honouring the refusal knobs. Written after harness_init so it wins on PATH.
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gh" <<'GH'
 set -u
 printf '%s\n' "$*" >> "${STUB_GH_LOG:?}"
@@ -75,14 +76,29 @@ case "$v" in
          # pr_url), so its identity check certifies the live PR against the
          # anchor. STUB_PR_URL forces a mismatch to exercise that refusal.
          url="${STUB_PR_URL:-https://$repo/pull/$num}"
-         # STUB_PR_COMMENTS is the PR's conversation, as a JSON array.
-         printf '{"state":"%s","url":"%s","comments":%s}\n' "$st" "$url" "${STUB_PR_COMMENTS:-[]}" ;;
+         printf '{"state":"%s","url":"%s"}\n' "$st" "$url" ;;
   comment) exit "${STUB_PR_COMMENT_RC:-0}" ;;
   close) exit "${STUB_PR_CLOSE_RC:-0}" ;;
   *)     echo "gh pr stub: unsupported '$v'" >&2; exit 2 ;;
 esac
 GH
 chmod +x "$BIN/gh"
+
+# gctk: pr-dispose reads the PR's conversation through `gctk github quote <url>
+# --json` to find its own notice. The stub answers STUB_PR_COMMENTS in the
+# quote's shape, each comment a conversation post whose text is its body with
+# each line barred, and one with held set as a held post, which carries no
+# text. STUB_QUOTE_RC fails the read. Each call is logged to $STUB_GH_LOG.
+{ printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gctk" <<'GCTK'
+printf 'gctk %s\n' "$*" >> "${STUB_GH_LOG:?}"
+[ "${1:-} ${2:-}" = "github quote" ] || { echo "gctk stub: only 'github quote'" >&2; exit 2; }
+[ -z "${STUB_QUOTE_RC:-}" ] || { echo "gctk (stub): simulated quote failure" >&2; exit "$STUB_QUOTE_RC"; }
+printf '%s' "${STUB_PR_COMMENTS:-[]}" | jq -c --arg url "${3:-}" '{url: $url, own_repository: true, posts: [ .[]
+  | if .held then {kind: "conversation", held: true}
+    else {kind: "conversation", text: ((.body // "") | split("\n") | map("│ " + . | sub(" +$"; "")) | join("\n"))} end ]}'
+GCTK
+chmod +x "$BIN/gctk"
+export GCTK_BIN="$BIN/gctk"
 
 # bead-store.sh: pr-dispose takes the record lock of the store that holds the
 # anchor, which it asks bead-store.sh --db to name. The stub names a store
@@ -464,6 +480,24 @@ eq "$rc" 0 "the re-run closes the PR"
 hasnt "$(cat "$STUB_GH_LOG")" "pr comment" "…without posting the closing comment again"
 has "$(cat "$STUB_GH_LOG")" "pr close 97" "…and the close is made"
 has "$out" "already carries this disposition's closing comment" "…and says why it posted nothing"
+
+echo "# a notice an outside account posts is held, so it passes for none"
+store "[$(anchor A29 99), $(succ S29)]"
+: > "$STUB_GH_LOG"
+HELD=$(jq -cn --arg b "$POSTED_BODY" '[{held: true, body: ($b | sub("A27"; "A29") | sub("S27"; "S29"))}]')
+out=$(STUB_PR_COMMENTS="$HELD" "$SUT" --anchor A29 --successor S29 --kind duplicate 2>&1); rc=$?
+eq "$rc" 0 "exits 0"
+has "$(cat "$STUB_GH_LOG")" "gctk github quote https://github.com/zook/gc-toolkit/pull/99 --json" "…reading the conversation through the quote"
+eq "$(grep -c '^pr comment 99 ' "$STUB_GH_LOG")" "1" "…and posts the closing comment of its own"
+
+echo "# a conversation that does not read leaves the PR open, an error"
+store "[$(anchor A30 100), $(succ S30)]"
+: > "$STUB_GH_LOG"
+out=$(STUB_QUOTE_RC=1 "$SUT" --anchor A30 --successor S30 --kind duplicate 2>&1); rc=$?
+eq "$rc" 1 "exits non-zero — the PR was not closed"
+hasnt "$(cat "$STUB_GH_LOG")" "pr comment" "…posts no closing comment it may already have posted"
+hasnt "$(cat "$STUB_GH_LOG")" "pr close" "…and does not close the PR"
+has "$out" "still OPEN" "reports the PR is still open and needs closing"
 
 echo "# …but a notice that is not this disposition's, or carries no mark, posts a fresh one"
 store "[$(anchor A28 98), $(succ S28)]"
