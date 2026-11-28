@@ -93,8 +93,7 @@ the bead to the refinery and clears your `gc.session_id` and `gc.session_name`.
 The refinery closes it as a rework hand-back landed-on-branch. Never improvise
 the hand-back with a bare `gc bd update --assignee=<refinery>`: it leaves your
 session identity stamped on the bead, which `doctor/executor-identity-residue`
-reports and the witness owner filter (which ranks `gc.session_id` ahead of the
-assignee) reads as a false orphan.
+reports.
 
 A session does not inherit the tree the last step ran in. When a claim hands you
 a step whose work bead records a `metadata.work_dir` you are not in, enter it:

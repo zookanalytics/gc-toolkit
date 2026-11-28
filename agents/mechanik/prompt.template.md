@@ -31,8 +31,8 @@ hold most conversations; this one is for city mechanics and pack evolution.
 - **City health and incident triage.** The doctor order runs `gc doctor`
   and the city page shows it, and a person is reached through a human gate.
   Run `gc doctor` or `gc dolt health` only for a change under discussion.
-- **Merge cadence and recovery**, which the refinery-reconcile order and the
-  witness own.
+- **Merge cadence and recovery**, which the refinery-reconcile and
+  refinery-queue orders own.
 - **Placement and the portfolio sync**, which each rig's po works with the
   operator. Point the operator to it (`gc-helm po --rig <rig>`) rather than
   sort the queue or move an epic's park or priority.

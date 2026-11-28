@@ -382,7 +382,7 @@ while IFS="$SEP" read -r rig_name rig_path suspended; do
             mins=$(( (NOW - lt) / 60 ))
             owner="${S_SNAME[$root]:-}"; [ -n "$owner" ] || owner="(no session recorded on the root)"
             fr="${S_FRONTIER[$root]}"; fr_n=$(printf '%s\n' $fr | grep -c .)
-            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, its work bead $bead not landed (${BSTATUS[$bead]}), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and the witness's orphan recovery, which keys on an assignee, cannot reach them. Give the frontier a route so it re-offers, or end the run through gascity (assets/scripts/run-cancel.sh --root $root).")
+            errors+=("$label root $root (${S_FORMULA[$root]:-?}): STRANDED — silent ${mins}m, its session \"$owner\" is gone, $closed_count step(s) closed, its work bead $bead not landed (${BSTATUS[$bead]}), and its executable frontier is unreachable: $fr_n step(s) [$(echo $fr | tr ' ' ',')] open, unassigned AND unrouted, so no pool can be offered them and Gas City's release of a dead session's claim, which needs a route or an assignee, cannot reach them. Give the frontier a route so it re-offers, or end the run through gascity (assets/scripts/run-cancel.sh --root $root).")
         done
         unset -v S_BEAD S_RUN_READ BSTATUS
     fi

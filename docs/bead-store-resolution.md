@@ -82,8 +82,8 @@ permission: no owning bead, so nothing is protected, so delete. A prune run
 from inside a `tk-` rig that reads the ambient-store miss on another rig's
 bead as its absence takes a whole live rig's worktrees for unowned.
 
-So any gate whose next act is destructive — worktree prune or reclaim,
-witness salvage, source disposal — resolves the owning store from the id
+So any gate whose next act is destructive — worktree prune or reclaim, or
+source disposal — resolves the owning store from the id
 prefix BEFORE it concludes absence, and refuses when the prefix resolves to
 nothing.
 

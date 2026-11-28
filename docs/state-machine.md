@@ -44,7 +44,7 @@ reading a pull request is [pull-request-states.md](pull-request-states.md).
 No transition here is performed by a repair pass. Writers complete their own
 transitions in one atomic write; the only reactive edges respond to facts the
 pack does not write — GitHub closing or retargeting a PR (the landing order),
-a session dying (witness orphan recovery).
+a session dying (Gas City's release of its claim).
 
 ```mermaid
 stateDiagram-v2

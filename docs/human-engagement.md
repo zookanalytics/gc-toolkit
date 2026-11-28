@@ -771,9 +771,9 @@ holder, so `gc hook --claim` returns the conversation as an existing
 assignment. A sitting whose session was closed cannot replay its transcript.
 Engage starts a new session under the same alias, which a closed session does
 not reserve, and the new session takes the in-progress task as its own. The
-record carries over in the task's and the subject's notes. Nothing in Gas City
-releases a sitting's claim on its own, and the pack's witness recovery skips a
-conversation too, so the alias is the way back in.
+record carries over in the task's and the subject's notes. Gas City leaves a
+sitting's claim in place while its session is open, so the alias is the way
+back in.
 
 **The entry says where the sitting stands.** Gas City records no reason for a
 start or a wake, delivers the same prompt to each, and its claim answers a

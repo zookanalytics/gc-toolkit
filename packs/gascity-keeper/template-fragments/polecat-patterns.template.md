@@ -60,11 +60,6 @@ Two-rule policy:
 successor has already replaced `metadata.branch`. That creates a
 parallel-history conflict.
 
-This is a refinement of the witness orphan-recovery formula's
-recovery cases — those assume no successor in flight. With a
-successor active, the formula's "push to branch" step is no
-longer the right move.
-
 ### Worktree reclaim: gate on predecessor-session liveness, not staleness
 
 The rule above governs *salvaging* a dead predecessor's work. Its
@@ -105,10 +100,6 @@ says nothing about the live one.
 
 If the predecessor is still in flight, do **not** reclaim: take a
 fresh worktree (or defer) and leave its `work_dir` untouched.
-
-This sharpens the orphan-recovery assumption cited above — those
-recovery cases presume the predecessor is gone. `gc session list` is
-how you verify that; a no-beads-held / stale-files signal is not.
 
 ### Refinery PR-handoff contract
 

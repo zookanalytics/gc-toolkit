@@ -321,8 +321,8 @@ keys = [
 #   pr_reconcile_pending is true, a record the landing order's next run reads
 #   ([holds] settled_keys). Freeform.
 # work_dir — the polecat's per-bead git worktree, an absolute path, written by
-#   workspace-setup so a restart or witness recovery can find the work in flight.
-#   Absent means no worktree is recorded yet. Never cleared. Absolute path.
+#   workspace-setup so a later session can find the work in flight. Absent
+#   means no worktree is recorded yet. Never cleared. Absolute path.
 # false_completion_suspected — RETIRED. The reason the refinery refused to close
 #   a branch as merged when it carried no verified change against its target.
 #   Nothing writes or reads it now: refinery-land.sh's park puts that reason in
