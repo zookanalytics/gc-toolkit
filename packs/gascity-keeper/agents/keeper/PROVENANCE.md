@@ -63,4 +63,4 @@ hold the rest of the bundle.
   this mol hands the bead back to the keeper for the title/body conversation.
 - `docs/fork-patching.md` — the operator-level doc the keeper
   references on prime; describes when local-patching is appropriate and
-  the bar for promoting a commit to an upstream PR candidate.
+  how each fix the fork carries is offered upstream.
