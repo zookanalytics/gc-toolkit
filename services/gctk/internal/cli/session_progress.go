@@ -29,10 +29,10 @@ printed within the last 90 seconds. The seat has stalled when three hours or
 more have passed since the latest of its newest write as that identity, to the
 claim's store or the city's, its last wake (last_woke_at on its session bead,
 or when the session was created when that is absent), and the last time Gas
-City recorded its quiet stretch ending: a prompt it waited at answered
-(session.pending_cleared) or its work ladder reaching it for a quiet pane
-(work.nudged). A seat that prints after a quiet stretch has been busy only
-since then.
+City recorded a prompt it waited at answered (session.pending_cleared). A seat
+that prints after an answer has been busy only since then. A nudge from Gas
+City's work ladder (work.nudged) restarts nothing, because it shows that the
+notice reached the seat, not that its work moved.
 
 A session list that does not read, or lists no session, judges nothing, and so
 does a rig list that names no HQ, whose store holds the session beads. The
@@ -40,7 +40,7 @@ event's payload holds:
 
   read     when the look read
   stalled  each seat found: rig, bead, session, identity, agent, since, and
-           from, which names what since is: write, wake, prompt or nudge
+           from, which names what since is: write, wake or prompt
   unread   each rig or claim whose read failed, and why, when one did
 
 With --act, which the seat-progress-report order passes when the look's event

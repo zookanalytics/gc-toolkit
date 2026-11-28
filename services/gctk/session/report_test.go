@@ -14,16 +14,19 @@ import (
 	gcfake "github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity/fake"
 )
 
-// quietEnded puts an event Gas City records when a seat's quiet stretch ends.
+// quietEnded puts an event Gas City records about a seat's quiet stretch.
 func (c *city) quietEnded(typ, session string, age time.Duration) {
 	payload, _ := json.Marshal(map[string]string{"session_id": session})
 	c.Add(gascity.Event{Type: typ, Ts: ago(age), Subject: session, Payload: payload})
 }
 
-// A seat that prints after Gas City found it quiet has been busy only since
-// then: a prompt answered or a ladder nudge after its newest write is where
-// its silence is counted from, and one before that write changes nothing.
-func TestASeatsSilenceRunsFromWhenGasCityLastFoundItQuiet(t *testing.T) {
+// A seat that prints after a prompt it waited at was answered has been busy
+// only since then: an answer after its newest write is where its silence is
+// counted from, and one before that write changes nothing. Gas City's work
+// ladder reaching a quiet seat shows that its notice arrived, not that the
+// seat's work moved, so a seat nudged back every two hours with nothing
+// written for six is stalled from that write.
+func TestASeatsSilenceRunsFromAPromptAnsweredAndNotFromANudge(t *testing.T) {
 	c := newCity(gascity.Session{ID: "hq-ctl", State: "active"})
 	for _, id := range []string{"hq-prompt", "hq-nudge", "hq-before", "hq-other"} {
 		c.seat(busy(id), pool(8*time.Hour))
@@ -31,10 +34,11 @@ func TestASeatsSilenceRunsFromWhenGasCityLastFoundItQuiet(t *testing.T) {
 		c.stores[tools.Store()].SetLastWrite(id, ago(6*time.Hour))
 	}
 	c.quietEnded(PromptAnswered, "hq-prompt", 30*time.Minute)
-	c.quietEnded(Nudged, "hq-nudge", 5*time.Hour)
-	c.quietEnded(Nudged, "hq-nudge", 4*time.Hour)
+	for _, age := range []time.Duration{5 * time.Hour, 3 * time.Hour, time.Hour} {
+		c.quietEnded("work.nudged", "hq-nudge", age)
+	}
 	c.quietEnded(PromptAnswered, "hq-before", 7*time.Hour)
-	c.quietEnded(Nudged, "hq-elsewhere", 10*time.Minute)
+	c.quietEnded(PromptAnswered, "hq-elsewhere", 10*time.Minute)
 	out := c.progress(t)
 	if len(out.Failures) > 0 {
 		t.Fatal(out.Failures)
@@ -47,7 +51,7 @@ func TestASeatsSilenceRunsFromWhenGasCityLastFoundItQuiet(t *testing.T) {
 		from[s.Session] = s.From + "@" + s.Since.Format(time.RFC3339)
 	}
 	want := map[string]string{
-		"hq-nudge":  FromNudge + "@" + stamp(4*time.Hour),
+		"hq-nudge":  FromWrite + "@" + stamp(6*time.Hour),
 		"hq-before": FromWrite + "@" + stamp(6*time.Hour),
 		"hq-other":  FromWrite + "@" + stamp(6*time.Hour),
 	}
@@ -61,7 +65,7 @@ func TestASeatsSilenceRunsFromWhenGasCityLastFoundItQuiet(t *testing.T) {
 			t.Errorf("read %s over %s, not back to the oldest silent seat's write", r.Type, r.Since)
 		}
 	}
-	if !reflect.DeepEqual(types, []string{PromptAnswered, Nudged}) {
+	if !reflect.DeepEqual(types, []string{PromptAnswered}) {
 		t.Errorf("reads %v", types)
 	}
 }
@@ -77,12 +81,12 @@ func TestTheQuietReadComesOnlyForASilentSeatAndFailsTheRun(t *testing.T) {
 		t.Fatalf("failures %v, stalled %v, reads %v", out.Failures, out.Record.Stalled, c.EventLog.Reads())
 	}
 	c.stores[tools.Store()].SetLastWrite("hq-1", ago(5*time.Hour))
-	c.ReadErr = map[string]error{Nudged: errors.New("gc events did not answer")}
+	c.ReadErr = map[string]error{PromptAnswered: errors.New("gc events did not answer")}
 	out := c.progress(t)
 	if len(out.Record.Stalled) != 0 || out.Recorded {
 		t.Fatalf("stalled %v, recorded %v", out.Record.Stalled, out.Recorded)
 	}
-	if len(out.Failures) != 1 || !strings.Contains(out.Failures[0], "tk-1 in tools was not judged: when Gas City last found its seat quiet did not read") {
+	if len(out.Failures) != 1 || !strings.Contains(out.Failures[0], "tk-1 in tools was not judged: when Gas City last saw a prompt its seat waited at answered did not read") {
 		t.Errorf("failures %v", out.Failures)
 	}
 }
@@ -189,7 +193,6 @@ func TestTheFindingNamesWhatItsSilenceRunsFrom(t *testing.T) {
 		FromWrite:  "its newest write as hq-1, to the claim's store or the city's, was at ",
 		FromWake:   "since it woke at ",
 		FromPrompt: "since a prompt it waited at was answered at ",
-		FromNudge:  "since Gas City's work ladder last reached it for a quiet pane at ",
 	} {
 		args := FindingArgs(Stalled{Rig: "tools", Bead: "tk-1", Session: "hq-1", Identity: "hq-1", Since: ago(3 * time.Hour), From: from}, t0)
 		if message := args[len(args)-1]; !strings.Contains(message, want+stamp(3*time.Hour)) {

@@ -28,18 +28,16 @@ const (
 	// Bound is how long a busy seat may go without a write before the look
 	// reports it.
 	Bound = 3 * time.Hour
-	// PromptAnswered and Nudged are the events Gas City records when a seat's
-	// quiet stretch ends. The controller records session.pending_cleared once
-	// when a pending interaction, such as a permission prompt, is answered or
-	// withdrawn. It records work.nudged when its work ladder, which paces a
-	// seat whose pane has gone quiet while it holds work, reaches the seat
-	// ("work.nudged means the notice reached the seat",
-	// cmd/gc/work_ladder_notice.go; both types in internal/events/events.go,
-	// at gastownhall/gascity 6dce31bbb6). A seat that prints after either
-	// has been busy only since then, so the look counts Bound from the later
-	// of them as well.
+	// PromptAnswered is the event the controller records once a seat's pending
+	// interaction, such as a permission prompt, is answered or withdrawn. A
+	// seat that prints after an answer has been busy only since then, so the
+	// look counts Bound from the answer as well. The work.nudged event that Gas
+	// City's work ladder records on reaching a quiet seat starts no such count,
+	// because it shows that the notice reached the seat
+	// (cmd/gc/work_ladder_notice.go), not that the seat's work moved. Both
+	// types are in internal/events/events.go, at gastownhall/gascity
+	// 6dce31bbb6.
 	PromptAnswered = "session.pending_cleared"
-	Nudged         = "work.nudged"
 	// Deadline bounds the look's session list and store reads, counted from
 	// the start of its run, and CallBound the record of its event. The rig list
 	// keeps the runtime adapter's own bound (gascity.RigListWait), so a run
@@ -57,8 +55,6 @@ const (
 	FromWake = "wake"
 	// FromPrompt is when a prompt it waited at was answered (PromptAnswered).
 	FromPrompt = "prompt"
-	// FromNudge is when Gas City's work ladder last reached it (Nudged).
-	FromNudge = "nudge"
 )
 
 // City is Gas City as the look reaches it: the session list, the rig list and
@@ -158,8 +154,8 @@ func (p *Progress) Run(ctx context.Context) Outcome {
 // The seat counts when its session bead, in the city's store, marks it a pool
 // seat and its pane printed within Printing. It is stalled when the latest of
 // its newest write as that identity, to the claim's store or the city's, its
-// last wake, and the last time Gas City recorded its quiet stretch ending
-// (PromptAnswered, Nudged) is Bound old or more. A read that fails for one rig
+// last wake, and the last time Gas City recorded a prompt it waited at
+// answered (PromptAnswered) is Bound old or more. A read that fails for one rig
 // or one claim leaves it out of the record and fails the outcome. Its session
 // list and its store and event reads end when ctx does.
 func (p *Progress) Read(ctx context.Context) Outcome {
@@ -311,8 +307,8 @@ func (p *Progress) seats(city *ledger.Ledger, claims []claim, now time.Time, rec
 
 // judge reads each seat's newest write, in its claim's store and the city's,
 // and then, for a seat silent for Bound since that write or its wake, when Gas
-// City last recorded its quiet stretch ending. It records each seat whose
-// silence since the latest of the three is Bound or more.
+// City last recorded a prompt it waited at answered. It records each seat
+// whose silence since the latest of the three is Bound or more.
 func (p *Progress) judge(ctx context.Context, stores map[string]*ledger.Ledger, cityDB string, claims []claim, now time.Time, rec *Record) {
 	if len(claims) == 0 {
 		return
@@ -364,16 +360,16 @@ func (p *Progress) judge(ctx context.Context, stores map[string]*ledger.Ledger, 
 			oldest = s.Since
 		}
 	}
-	quiet, err := p.quiet(ctx, now.Sub(oldest)+time.Minute)
+	answered, err := p.answered(ctx, now.Sub(oldest)+time.Minute)
 	if err != nil {
 		for _, s := range silent {
-			rec.Unread = append(rec.Unread, Unread{Rig: s.Rig, Bead: s.Bead, Why: "when Gas City last found its seat quiet did not read: " + err.Error()})
+			rec.Unread = append(rec.Unread, Unread{Rig: s.Rig, Bead: s.Bead, Why: "when Gas City last saw a prompt its seat waited at answered did not read: " + err.Error()})
 		}
 		return
 	}
 	for _, s := range silent {
-		if q, ok := quiet[s.Session]; ok && q.at.After(s.Since) {
-			s.Since, s.From = q.at, q.from
+		if at, ok := answered[s.Session]; ok && at.After(s.Since) {
+			s.Since, s.From = at, FromPrompt
 		}
 		if now.Sub(s.Since) < Bound {
 			continue
@@ -382,35 +378,25 @@ func (p *Progress) judge(ctx context.Context, stores map[string]*ledger.Ledger, 
 	}
 }
 
-// quietEnd is the last time Gas City recorded a seat's quiet stretch ending,
-// and what recorded it, FromPrompt or FromNudge.
-type quietEnd struct {
-	at   time.Time
-	from string
-}
-
-// quiet reads, for each session, the last time within window that Gas City
-// recorded its quiet stretch ending. The window reaches back to the oldest
-// silent seat's newest write or wake, before which a quiet stretch's end
-// changes nothing. Both events carry the session's id in their payload's
-// session_id.
-func (p *Progress) quiet(ctx context.Context, window time.Duration) (map[string]quietEnd, error) {
-	out := map[string]quietEnd{}
-	for _, q := range []struct{ typ, from string }{{PromptAnswered, FromPrompt}, {Nudged, FromNudge}} {
-		events, err := p.City.Events(ctx, q.typ, window)
-		if err != nil {
-			return nil, err
+// answered reads, for each session, the last time within window that Gas City
+// recorded a prompt it waited at answered. The window reaches back to the
+// oldest silent seat's newest write or wake, before which an answer changes
+// nothing. The event carries the session's id in its payload's session_id.
+func (p *Progress) answered(ctx context.Context, window time.Duration) (map[string]time.Time, error) {
+	events, err := p.City.Events(ctx, PromptAnswered, window)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]time.Time{}
+	for _, e := range events {
+		var payload struct {
+			SessionID string `json:"session_id"`
 		}
-		for _, e := range events {
-			var payload struct {
-				SessionID string `json:"session_id"`
-			}
-			if json.Unmarshal(e.Payload, &payload) != nil || payload.SessionID == "" {
-				continue
-			}
-			if cur, ok := out[payload.SessionID]; !ok || e.Ts.After(cur.at) {
-				out[payload.SessionID] = quietEnd{at: e.Ts.UTC(), from: q.from}
-			}
+		if json.Unmarshal(e.Payload, &payload) != nil || payload.SessionID == "" {
+			continue
+		}
+		if cur, ok := out[payload.SessionID]; !ok || e.Ts.After(cur) {
+			out[payload.SessionID] = e.Ts.UTC()
 		}
 	}
 	return out, nil

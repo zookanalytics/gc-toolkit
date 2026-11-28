@@ -105,8 +105,6 @@ func silence(s Stalled) string {
 		return fmt.Sprintf("its newest write as %s, to the claim's store or the city's, was at %s", s.Identity, at)
 	case FromPrompt:
 		return fmt.Sprintf("it has written nothing as %s to the claim's store or the city's since a prompt it waited at was answered at %s", s.Identity, at)
-	case FromNudge:
-		return fmt.Sprintf("it has written nothing as %s to the claim's store or the city's since Gas City's work ladder last reached it for a quiet pane at %s", s.Identity, at)
 	default:
 		return fmt.Sprintf("it has written nothing as %s to the claim's store or the city's since it woke at %s", s.Identity, at)
 	}
