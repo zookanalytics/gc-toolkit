@@ -260,8 +260,8 @@ func TestBlockedReadThatFailsIsAReadError(t *testing.T) {
 }
 
 // A read that exits non-zero says what failed: the error bd's --json reply
-// carries on stdout, ahead of gc's notice of the store it answers from on
-// stderr, else stderr's first line, where gc reports a failure of its own.
+// carries on stdout, else stderr's first line past gc's notice of the store it
+// answers from, and never that notice.
 func TestAFailedReadSaysWhatFailed(t *testing.T) {
 	const notice = `gc bd: answering from the rig "gc-toolkit" store`
 	for _, tc := range []struct {
@@ -270,6 +270,10 @@ func TestAFailedReadSaysWhatFailed(t *testing.T) {
 		{"bd's error on stdout", `{"error":"no issues found matching the provided IDs","schema_version":1}`, notice + "\nIssue b-gone not found",
 			"gc bd show exited 1: no issues found matching the provided IDs", notice},
 		{"gc's error on stderr", "", "Error: unknown flag: --json", "gc bd show exited 1: Error: unknown flag: --json", ""},
+		{"the error after gc's notice", "", notice + "\nError: unknown flag: --json", "gc bd show exited 1: Error: unknown flag: --json", notice},
+		{"gc's own error after its notice", "", notice + "\ngc bd: only supported for bd-backed beads providers (resolved \"file\" for /city)",
+			"gc bd show exited 1: gc bd: only supported for bd-backed beads providers", notice},
+		{"gc's notice alone", "", notice, "gc bd show exited 1: it printed no error", notice},
 		{"no error printed", "", "", "gc bd show exited 1: it printed no error", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
