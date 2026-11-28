@@ -6,8 +6,9 @@
 #
 # Covers triage's read cancelling a run that must stop with no result, a run
 # that does not read as one included, cancelling nothing for a step that is not
-# triage's or whose ref does not read, stopping with nothing made when its check
-# of the run does not answer, and making the run's workspace private to its
+# triage's or whose ref does not read, or for a claim that does not read,
+# stopping with nothing made when its check of the run does not answer, and
+# making the run's workspace private to its
 # user; a verb the held step does not own refused; output writing what
 # gctk printed as the step's gc.output_json, from the step's own file, and
 # writing nothing for an output gctk refuses; triage's withdrawal; the push
@@ -75,7 +76,8 @@ export STUB_FACTS="$TMP/facts.json"
 { printf '#!%s\n' "${BASH:-/usr/bin/env bash}"; cat; } > "$BIN/gc" <<'STUB'
 printf 'gc %s\n' "$*" >> "$LOG"
 case "$1 $2" in
-    "hook current") echo "${STUB_HELD:-tk-step}" ;;
+    "hook current") [ -z "${STUB_HOOK_SAYS:-}" ] || { echo "$STUB_HOOK_SAYS" >&2; exit 1; }
+                    echo "${STUB_HELD:-tk-step}" ;;
     "bd update") exit "${STUB_RC_BD_UPDATE:-0}" ;;
     "bd show") [ -z "${STUB_RC_BD_SHOW:-}" ] || exit "$STUB_RC_BD_SHOW"
                if [ -n "${STUB_NO_POOL:-}" ]; then printf '[{"id":"%s","metadata":{}}]\n' "$3"
@@ -157,6 +159,10 @@ STUB_STEP_REF=mol-pr-review-lane.review-loop.iteration.1.triage.item.1.lane STUB
 eq "$RC/$(called decline.sh)" "3/0" "a step that is not triage's cancels nothing"
 STUB_RC_BD_SHOW=1 STUB_STANDS_OUT="x" run triage
 eq "$RC/$(called decline.sh)" "2/0" "a step whose ref does not read cancels nothing"
+STUB_HOOK_SAYS="gc hook current: open session store: connection refused" STUB_STANDS_OUT="x" run triage
+eq "$RC/$(called decline.sh)" "2/0" "a claim that does not read is a read that did not answer, and cancels nothing"
+has "$OUT" "gc hook current: open session store: connection refused" "and gc's own words reach its stderr"
+has "$OUT" "this session's claim did not read, so the step it holds is not known" "…above its own"
 run triage
 eq "$RC" 0 "triage's read goes on for a run that stands"
 has "$OUT" "The run's workspace: $WS" "and prints the run's workspace"

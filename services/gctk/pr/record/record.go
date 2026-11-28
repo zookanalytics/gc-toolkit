@@ -251,12 +251,12 @@ func Except(w *ledger.Write, result, reason string) {
 
 // Refuse records a verified merge whose close bd refused, CloseRefused: the
 // exception, with the merge's evidence beside it, so the person who clears what
-// held the close finds the landing recorded and closes the bead as landed.
+// held the close finds the landing recorded and closes the bead as landed. The
+// evidence includes the work record, so that close carries one whichever
+// command the person makes it with.
 func Refuse(w *ledger.Write, l Landing, reason string) {
 	Except(w, CloseRefused, reason)
-	mergedSHAKey.Set(w, l.MergedSHA)
-	mergedTargetKey.Set(w, l.Target)
-	mergedAtKey.Set(w, l.MergedAt)
+	evidence(w, l)
 }
 
 // Landing is a merge the landing order verified: the merge commit, the target
@@ -271,13 +271,23 @@ type Landing struct {
 func Land(w *ledger.Write, l Landing, note string) {
 	w.Status("closed")
 	mergeResultKey.Set(w, Merged)
-	mergedSHAKey.Set(w, l.MergedSHA)
-	mergedTargetKey.Set(w, l.Target)
-	mergedAtKey.Set(w, l.MergedAt)
+	evidence(w, l)
 	for _, k := range []ledger.Key[string]{rejectionReasonKey, blockedReasonKey, pendingKey} {
 		k.Clear(w)
 	}
 	w.Note(note)
+}
+
+// evidence records the verified merge l: the merge commit, the target it is on
+// and when GitHub says the PR merged, with the work record that names the work
+// shipped in that commit on the target (ledger.Write.WorkRecord). The record is
+// written whole, since workspace-setup stamps gc.work_branch with the branch the
+// work was cut on, which does not reach a squash merge's commit.
+func evidence(w *ledger.Write, l Landing) {
+	mergedSHAKey.Set(w, l.MergedSHA)
+	mergedTargetKey.Set(w, l.Target)
+	mergedAtKey.Set(w, l.MergedAt)
+	w.WorkRecord("shipped", l.MergedSHA, l.Target)
 }
 
 // Unmark clears the marker and nothing else, on a bead whose record needs no
