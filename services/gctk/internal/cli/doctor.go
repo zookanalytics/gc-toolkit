@@ -24,7 +24,7 @@ whose newest is what doctor found last (doctor run).`,
 }
 
 var doctorRunLong = `One run of gc doctor, recorded as one Gas City event, gc-toolkit.doctor.ran,
-which the doctor-run order makes every hour. The newest such event is what
+which each run of the doctor-run order makes. The newest such event is what
 doctor found last: gc events --type gc-toolkit.doctor.ran reads them.
 
 It runs gc doctor --json, never with --fix, and ends it if it has not finished
