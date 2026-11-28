@@ -8,8 +8,9 @@ compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 
 A backlog refinement sitting works your rig's queue with the operator: every
 bead in your rig's store that Gas City's `hold:mayor` label holds. Each rig has
-its own po, and another rig's queue is its po's. You propose one disposition for each bead,
-with your reasons, and the operator rules. You apply each ruling through its
+its own po, and another rig's queue is its po's. You sort the queue by the
+outcomes its beads serve, then propose one disposition for each bead, with your
+reasons. The operator rules on each. You apply each ruling through its
 lever before you bring the next piece, and the write's exit says whether it
 landed. Nothing starts without
 the operator's word, and the queue waits between sittings for as long as the
@@ -29,8 +30,8 @@ store and takes the label trimmed and in any case, as Gas City's hold does.
 `--label hold:mayor` matches only the exact text, so it would leave out a bead a
 person labeled `Hold:Mayor`, which no worker is served either.
 
-Read your rig's open epics, with what holds each, since most dispositions name
-one (your prompt's "Reads").
+Read your rig's open epics, with each one's hypothesis and what holds it, since
+the sort and most dispositions name one (your prompt's "Reads").
 
 ### When the goals are missing or change
 
@@ -78,19 +79,27 @@ agree on its words, with
 `gc bd --rig <rig> create "docs: <the change> in the rig's product goals" -t task -d "<their words>" --json`,
 and send it with `gc sling <rig>/<binding>.polecat <bead>`.
 
-## 2. Propose one disposition for each bead
+## 2. Sort by outcome, then propose one disposition for each bead
+
+Read across the whole queue before you rule on any one bead. Group the beads
+that serve one outcome: what their work changes, and for whom, as an epic's
+hypothesis states it, not the code they touch. For each group, name the open
+epic whose hypothesis covers that outcome. A group that no open epic's
+hypothesis covers is a theme. Then propose a disposition for each bead, with
+its group in view.
 
 | Disposition | When | It names |
 |---|---|---|
 | close as fixed | the default branch already has the fix; cite the commit | the bead the commit names, under `fixed-upstream` |
 | close as duplicate | a closed or shipped bead in this bead's store did the same work | that bead, under `duplicate` |
 | fold into another | an open bead carries the same need | that bead, under `folded` |
-| close as not needed | the premise is gone, or the work is not worth doing; say why | the bead the ruling rests on, under `not-needed` |
+| close as not needed | the work should not be done or kept, in a case its check below lists; say which, and why | the bead the ruling rests on, under `not-needed` |
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
-| place on its own | a defect that hurts the operator or a rig now. Its fix adds nothing new for someone to use. It is worth building without an epic. Say what it hurts, in a line of its own | nothing |
-| leave held | it waits for a later sitting, such as for an epic that does not exist yet | nothing |
+| graduate into a new epic | its group needs an epic of its own, when each condition its check below lists holds | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
+| place on its own | it cannot wait for an epic, in a case its check below lists. Say which, in a line of its own | nothing |
+| wait on a bead | it cannot go until something else happens, in a case its check below lists | the bead it waits on, or what the operator owes |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
 
 Check before you propose:
@@ -104,14 +113,84 @@ Check before you propose:
 - **Place or park:** read the epic's description and check that the bead serves
   its hypothesis, not only its area. An area that carries no hypothesis is not an
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
-- **Place on its own:** use it sparingly. Bring each such bead by itself, as one
-  line that names the harm, for the operator's answer to that line alone. It is
-  never part of a set that takes one answer. Work that adds something new for
-  someone to use, such as a command or a screen, is never proposed on its own.
-  That holds even when it answers a harm. Propose one of these for it instead:
-  - leave it held for its epic, with a reason that names the goal not yet
-    written down;
+- **Graduate into a new epic:** read the hypothesis of each open epic section 1
+  listed. Propose it when each of these holds:
+  - none of those hypotheses covers the group's outcome;
+  - the rig's goals make that outcome worth a push of its own.
+
+  Write the hypothesis from that outcome, never from the beads' own fixes. It
+  says for whom, what changes and the signal that shows it worked. Write the
+  boundaries from the hypothesis (`docs/epics.md`, "The contract an epic
+  carries"). Standing work, such as a set of failures or open bugs that keeps
+  returning, gets one bounded push. Its closure condition names the lines it
+  closes on (`docs/epics.md`, "Epics are mortal").
+- **Place on its own:** propose it in one of these cases, and name it:
+  - an emergency that cannot wait for an epic, such as the host going down;
+  - work the operator names to run on its own, with where they named it.
+
+  Bring each such bead by itself, as one line that names its case, for the
+  operator's answer to that line alone. It is never part of a set that takes
+  one answer.
+
+  That a defect hurts is not enough, since most real defects do. Such a
+  defect goes under the epic its outcome belongs to, or into its theme's new
+  epic.
+
+  Work that adds something new for someone to use, such as a command or a
+  screen, is never proposed on its own as an emergency. That holds even when
+  it answers a harm. Propose one of these for it instead:
+  - place it under the epic its outcome belongs to;
+  - graduate it into a new epic for its theme;
+  - keep it, as "Close as not needed" says of a bead that nothing would file
+    again;
   - ask, with the design or product question in the reason.
+- **Wait on a bead:** propose it in one of these cases:
+  - it cannot start until another bead lands;
+  - another bead's landing may end its job;
+  - it cannot go until the operator answers or acts.
+
+  The bead it waits on is open. One in another rig's store takes a human gate
+  in place of the edge, as the `waits` skill says. Work that goes on once that
+  bead lands is placed as any other bead, so its row names the epic too. Work
+  whose job that landing may end needs no epic, because the validating closer
+  checks it then.
+
+  A bead that waits on the operator was ruled on already. It waits for
+  something only they can give, such as a decision, an approval or a path. It
+  waits on a human gate that says what they owe, and it is placed as any other
+  bead, so its row names the epic too. A question to put to the operator in
+  the sitting is an `ask` instead.
+- **Close as not needed:** propose it in one of these cases, and say which:
+  - the premise is gone;
+  - the work is not worth doing;
+  - the bead waits on nothing, and each condition below holds.
+
+  A bead that waits on nothing closes, rather than stay held with nothing to
+  release it, when each of these holds:
+  - it serves no open epic;
+  - it belongs to no theme worth a push;
+  - something would file it again if it mattered.
+
+  Ask of it: would anything file this again if it mattered? Answer with what
+  would, and name it in the reason, such as the check, the patrol or the
+  failing run that found the defect, which files it again when it runs. A
+  defect may have nothing that would, such as one a person reported by hand,
+  or one that a single run found.
+
+  A bead is not proposed for closing for want of a release when both of these
+  hold:
+  - it serves the rig's goals;
+  - nothing would file it again.
+
+  That covers a product idea of the operator's, an opportunity an agent
+  noticed once, a risk that bites only once and a defect nothing would find
+  again. Such a bead stays held, with a note of one line that gives the
+  question that would decide it: what would make it worth doing, and what we
+  would look at to know. Once the operator agrees, write the note:
+  `gc bd --rig <rig> update <bead> --append-notes "Backlog refinement: kept, since nothing would file it again. What would decide it: <the question>."`
+
+  Work that serves none of the rig's goals is still proposed for closing, idea
+  or not.
 
 Read only what settles the bead, about two reads a bead and four at most. When
 that does not settle it, propose `ask` or say that your confidence is low.
@@ -134,7 +213,8 @@ Order the beads you propose to place by WSJF against the rig's goals, as your
 prompt's "Sequencing: WSJF" says: value, time criticality, and
 risk reduction or opportunity enablement, over job size. Compare them with one
 another and recommend each bead's priority, or its shift under its parent, with
-the reasoning in words. Store no score.
+the reasoning in words. Recommend each proposed epic's priority against the
+rig's open epics the same way. Store no score.
 
 ## 4. A queue too long to read in the sitting
 
@@ -143,15 +223,22 @@ Tell the operator how long the sort will run and that they can step away while
 it does.
 
 - Split the queue into chunks of about 20 beads, and start one sorter per chunk,
-  all at once. Give each its chunk, the open epics with what holds each, the
-  rig's goals as section 1 read them, and sections 2 and 3 of this skill.
+  all at once. Give each its chunk, the open epics with each one's hypothesis
+  and what holds it, the rig's goals as section 1 read them, and sections 2 and
+  3 of this skill.
 - A sorter changes nothing: no bead writes, no slings, no closes, no notes, and
   no edits, fetches or checkouts in any repository. It writes one file, one
-  tab-separated row per bead in its chunk: id, priority, disposition, what it
-  names (or `-`), confidence (`high`, `med` or `low`), a reason of one plain
-  sentence, and a short title. It checks its row count against its chunk.
+  tab-separated row per bead in its chunk: id, priority, the outcome it serves
+  in a few words, the open epic whose hypothesis covers that outcome (or `-`),
+  disposition, what it names (or `-`), confidence (`high`, `med` or `low`), a
+  reason of one plain sentence, and a short title. It checks its row count
+  against its chunk.
 - A sorter proposes one disposition and one sentence, so read further on any
   bead the operator asks about.
+- Once every sorter has returned, group all the rows by outcome before you
+  bring anything. A sorter sees only its chunk, so a theme can span chunks.
+  Propose each graduation from the whole group, and recheck the dispositions
+  of its beads.
 
 ## 5. Bring it in pieces
 
@@ -162,13 +249,17 @@ it does.
   your confidence is high.
 - Then bring the rest by disposition and by subject, at most about 25 items a
   piece, with the work to place in its WSJF order.
+- Each epic you propose to graduate is a piece of its own: its handle,
+  hypothesis and boundaries, its priority, the beads it would hold, and, when it
+  is a push on standing work, the lines it closes on.
 
 ## 6. Apply each ruling
 
 Apply the piece's rulings through your prompt's levers, let each write's exit
 say whether it landed, and only then bring the next piece. Each ruling's note
 gives the operator's reason in words. The note on a bead placed on its own also
-gives the harm its proposal named. When the operator turns down a proposal
+gives the case its proposal named: the emergency, or where the operator named
+the bead. When the operator turns down a proposal
 that moves no lever, append their reason to that bead's notes, so a later
 sitting reads it before proposing the same again:
 
@@ -183,8 +274,30 @@ reason in `--note`, with the commit for a fix.
 A bead sent where the rig says goes there by the commands the rig's `AGENTS.md`
 gives.
 
+A graduation runs in this order, each write taking its exit:
+
+1. File the epic in your rig's store with the `work` skill's epic writer,
+   `epic.sh`, with the fields the operator agreed to and the note that says
+   whose words each field is.
+2. Set its priority through your prompt's levers.
+3. Park it through those levers when the ruling says its push waits.
+4. Only then place each of its beads under it. A placement sends at once a
+   bead that nothing holds. Parking the epic later stops no run that has
+   started.
+
+A wait runs through the `waits` skill. Work that goes on once the bead it waits
+on lands takes that skill's edge ("Make a bead wait on other work"), then its
+placement. The placement arms it while the edge holds it. Work whose job that
+landing may end takes the close brief, the edge and the arm of "Have a bead
+checked and closed once other work lands", then the lift of its hold that
+section gives. A bead that waits on the operator takes the human gate of "Wait
+on a person", whose message says what they owe, then its placement. The
+placement arms it while the gate holds it and lifts its hold, so it leaves the
+queue and shows on the operator's board as something they owe. It starts once
+they clear the gate.
+
 ## 7. Stop when the operator says
 
-Each ruling is on its bead, and what is left stays held, so the next queue read
-shows where the next sitting starts. Run `gc runtime drain-ack` once the operator
-says the sitting is done.
+Each ruling is on its bead, and what the sitting did not reach stays held, so
+the next queue read shows where the next sitting starts. Run
+`gc runtime drain-ack` once the operator says the sitting is done.

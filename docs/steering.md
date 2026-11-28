@@ -208,19 +208,53 @@ trimmed and in any case, as Gas City's own `HasDispatchHold` does. Its readers:
 
 ## Placing a bead
 
-For each bead in the queue, the sitting does one of three things. The po
-applies each once the operator agrees to it, and the operator can apply one
-directly.
+The sitting reads the queue by outcome before it rules on any bead. It groups
+the beads that serve one outcome and names, for each group, the open epic whose
+hypothesis covers it. Then it does one of these things with each bead, so that
+the work it rules on leaves the queue placed, waiting on what releases it, or
+closed. The po applies each once the operator agrees to it, and the operator
+can apply one directly.
 
 - **Place it under an epic.** Its parent is the epic's open Delivery whose aim
   covers it, which `gc bd list --parent <epic> -t epic --limit 0` lists, and
   otherwise the epic itself ([epics.md](epics.md#deliveries-and-epic-checkpoints)):
   `gctk bead place <bead> --under <delivery-or-epic>`. A park on the Delivery
-  or the epic holds it from then on, through bd's parent-child cascade.
+  or the epic holds it from then on, through bd's parent-child cascade. The
+  epic can be one the sitting graduates from a theme, a group of beads whose
+  outcome no open epic's hypothesis covers. The po proposes an epic for that
+  outcome. On the operator's agreement, the po files it
+  ([epics.md](epics.md#the-contract-an-epic-carries)). When the ruling says its
+  push waits, the po parks it. Only then does the po place the beads under it.
+  A placement sends at once a bead that nothing holds.
 - **Place it on its own**, with no parent, at its own priority:
-  `gctk bead place <bead> --standalone`.
-- **Close it**, when the work is not wanted. Nothing reads the label on a closed
-  bead.
+  `gctk bead place <bead> --standalone`. It is for an emergency that cannot
+  wait for an epic, such as the host going down. It is also for work the
+  operator names to run on its own.
+- **Make it wait on a bead**, when it cannot start until another bead lands. It
+  also waits when that bead's landing may end its job. The waits skill writes
+  the wait, a `blocks` edge onto that bead within one store. Work that goes on
+  once that bead lands is then placed. `place` arms it while the edge holds it.
+  Work whose job may end there is armed to its validating closer, and its hold
+  is lifted. The closer checks it once that bead closes. A bead can also wait
+  on the operator, when it cannot go until they answer or act. Such a bead was
+  ruled on already. It waits on a human gate that says what they owe, which
+  the waits skill files too. It is then placed as any other bead. `place` arms
+  it while the gate holds it and lifts its hold, so it leaves the queue for the
+  operator's board. It starts once the operator clears the gate.
+- **Close it**, when the work is not wanted. Work that waits on nothing closes
+  too, when each of these holds:
+  - it is not worth an epic's time;
+  - something would file it again if it mattered, such as the check, the
+    patrol or the failing run that found a defect, run again.
+
+  The po names what would file it again. Work closed that way is filed again
+  when it bites. Nothing reads the label on a closed bead. Work is not closed
+  for want of a release when both of these hold:
+  - it serves the rig's goals;
+  - nothing would file it again, as for an idea or a defect a person reported
+    by hand.
+
+  Such work stays held, with a note of the question that would decide it.
 
 ```
 gctk bead place <bead-id> --under <parent> [--shift <±n>] [--route <rig>/<pool>] [--on <formula>]

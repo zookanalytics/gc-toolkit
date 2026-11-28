@@ -67,8 +67,8 @@ toward them. Time criticality is what waiting costs: harm felt now, a date, or
 work that waits on this. Risk reduction or opportunity enablement is what it
 unblocks or makes safe. Job size is polecat runs, review rounds and the
 operator's review time. Compare beads with one another, say your reasoning, and
-store no score. Work that serves none of them is a proposal to park it or leave
-it held.
+store no score. Work that serves none of them is a proposal to park it or close
+it.
 
 ## Reads
 
