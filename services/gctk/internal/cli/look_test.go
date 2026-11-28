@@ -401,3 +401,89 @@ func TestRefineryStuckActGatesAndRecordsNoEvent(t *testing.T) {
 		t.Errorf("human-gate.sh got:\n%s", got)
 	}
 }
+
+// blockedWriter puts a pack script named name in a scripts directory that
+// GCTK_SCRIPTS_DIR names, which writes its pid to a file and then waits, and
+// returns that pid once the script has started.
+func blockedWriter(t *testing.T, name string) (started func() int) {
+	t.Helper()
+	dir := t.TempDir()
+	pidFile, release := filepath.Join(dir, "pid"), filepath.Join(dir, "release")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o644) })
+	stub := "#!/bin/sh\necho $$ > '" + pidFile + ".tmp' && mv '" + pidFile + ".tmp' '" + pidFile + "'\n" +
+		"while [ ! -e '" + release + "' ]; do sleep 0.1; done\n"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GCTK_SCRIPTS_DIR", dir)
+	return func() int {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if raw, err := os.ReadFile(pidFile); err == nil {
+				if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+					return pid
+				}
+			}
+		}
+		t.Fatalf("%s never started", name)
+		return 0
+	}
+}
+
+// writerGone waits for the writer's process to end.
+func writerGone(t *testing.T, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the writer %d outlived the stop", pid)
+		}
+	}
+}
+
+// An act stopped while its writer runs ends the writer, prints nothing, and
+// exits with 128 plus the signal.
+func TestAnActStoppedDuringItsWriterEndsIt(t *testing.T) {
+	for _, c := range []struct {
+		act    []string
+		writer string
+		city   lookCity
+	}{
+		{[]string{"session", "progress", "--act"}, "patrol-finding.sh", lookCity{
+			sessions: `{"sessions":[{"id":"hq-1","state":"active","agent_name":"tools/gc-toolkit.polecat-1","created_at":"2026-11-01T00:00:00Z","last_active":"` + agoStamp(10*time.Second) + `"}]}`,
+			hq:       `[{"id":"hq-1","title":"s","status":"open","issue_type":"session","metadata":{"pool_managed":"true","last_woke_at":"` + agoStamp(5*time.Hour) + `"}}]`,
+			rig:      `[{"id":"tk-1","title":"t","status":"in_progress","issue_type":"task","assignee":"hq-1","metadata":{"gc.session_id":"hq-1"}}]`,
+		}},
+		{[]string{"refinery", "stuck", "--act"}, "human-gate.sh", lookCity{
+			hq:  "[]",
+			rig: `[{"id":"tk-1","title":"t","status":"open","issue_type":"task","assignee":"tools/gc-toolkit.refinery","updated_at":"` + agoStamp(6*time.Hour) + `","metadata":{"branch":"polecat/tk-1"}}]`,
+		}},
+	} {
+		t.Run(strings.Join(c.act, " "), func(t *testing.T) {
+			lookStub(t, c.city)
+			started := blockedWriter(t, c.writer)
+			held := make(chan os.Signal, 1)
+			signal.Notify(held, syscall.SIGTERM)
+			t.Cleanup(func() { signal.Stop(held) })
+
+			var out, errb bytes.Buffer
+			code := make(chan int, 1)
+			go func() { code <- Run(c.act, "", &out, &errb) }()
+			pid := started()
+			if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-code:
+				if got != 128+int(syscall.SIGTERM) {
+					t.Errorf("exit %d, want %d", got, 128+int(syscall.SIGTERM))
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("the act did not end on the SIGTERM while %s ran", c.writer)
+			}
+			if out.Len() != 0 || errb.Len() != 0 {
+				t.Errorf("a stopped act wrote stdout %q, stderr %q", out.String(), errb.String())
+			}
+			writerGone(t, pid)
+		})
+	}
+}

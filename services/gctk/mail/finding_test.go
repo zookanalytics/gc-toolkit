@@ -50,7 +50,7 @@ var notice = gascity.Message{ID: "hq-m1", From: "tools/gc-toolkit.polecat", Subj
 // witness's note, and the mail is archived only after the finding is filed.
 func TestANoticeIsFiledThenArchived(t *testing.T) {
 	m := &mailbox{msg: notice}
-	out := (&Finding{City: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "preflight-main", About: "tk-1", Note: "seen twice", Distinct: true})
+	out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "preflight-main", About: "tk-1", Note: "seen twice", Distinct: true})
 	if !out.Filed || !out.Archived || out.Why != "" {
 		t.Fatalf("%+v", out)
 	}
@@ -70,12 +70,12 @@ func TestANoticeIsFiledThenArchived(t *testing.T) {
 // not archive says that.
 func TestAFilingThatFailsLeavesTheMailUnread(t *testing.T) {
 	m := &mailbox{peekErr: errors.New("gc mail peek hq-m1 did not read")}
-	if out := (&Finding{City: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || len(m.calls) != 0 ||
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || len(m.calls) != 0 ||
 		!reflect.DeepEqual(m.done, []string{"peek hq-m1", "mark-unread hq-m1"}) {
 		t.Errorf("unread mail: %+v, done %v", out, m.done)
 	}
 	m = &mailbox{msg: notice, answer: gascity.Result{Code: Refused, Output: "patrol-finding: refused; live: tk-9"}}
-	out := (&Finding{City: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"})
+	out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"})
 	if out.Filed || !out.Refused || !strings.Contains(out.Output, "live: tk-9") || m.done[len(m.done)-1] != "mark-unread hq-m1" {
 		t.Errorf("refused: %+v, done %v", out, m.done)
 	}
@@ -83,11 +83,11 @@ func TestAFilingThatFailsLeavesTheMailUnread(t *testing.T) {
 		t.Errorf("an ask about no bead passes --about empty, and no --distinct: %q", got)
 	}
 	m = &mailbox{msg: notice, answer: gascity.Result{Code: 1}}
-	if out := (&Finding{City: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || out.Refused || m.done[len(m.done)-1] != "mark-unread hq-m1" {
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); out.Filed || out.Refused || m.done[len(m.done)-1] != "mark-unread hq-m1" {
 		t.Errorf("failed: %+v, done %v", out, m.done)
 	}
 	m = &mailbox{msg: notice, archErr: errors.New("gc mail archive hq-m1 failed")}
-	if out := (&Finding{City: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); !out.Filed || out.Archived || !strings.Contains(out.Why, "archive") {
+	if out := (&Finding{City: m, Scripts: m}).File(context.Background(), Ask{Mail: "hq-m1", Key: "k"}); !out.Filed || out.Archived || !strings.Contains(out.Why, "archive") {
 		t.Errorf("not archived: %+v", out)
 	}
 }

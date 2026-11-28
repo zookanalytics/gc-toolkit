@@ -67,7 +67,7 @@ func newRefineryStuckCmd(stdout, stderr io.Writer) *cobra.Command {
 			q := &refinery.Queue{City: city, Open: ledger.OpenStore, Now: time.Now}
 			ctx, release := stopOnSignal()
 			if act {
-				acted := (&refinery.Report{Look: q, Scripts: city}).Run(ctx)
+				acted := (&refinery.Report{Look: q, Scripts: city.Within(ctx)}).Run(ctx)
 				if sig := release(); sig != 0 {
 					return exit(128 + int(sig))
 				}

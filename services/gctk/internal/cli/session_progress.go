@@ -64,7 +64,7 @@ func newSessionProgressCmd(stdout, stderr io.Writer) *cobra.Command {
 			p := &session.Progress{City: city, Open: ledger.OpenStore, Now: time.Now}
 			ctx, release := stopOnSignal()
 			if act {
-				acted := (&session.Report{Look: p, Scripts: city}).Run(ctx)
+				acted := (&session.Report{Look: p, Scripts: city.Within(ctx)}).Run(ctx)
 				if sig := release(); sig != 0 {
 					return exit(128 + int(sig))
 				}

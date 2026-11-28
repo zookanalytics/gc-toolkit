@@ -27,11 +27,15 @@ const (
 )
 
 // FindingCity is Gas City as a mail's finding reaches it: one message, its
-// archive and its read mark, and the pack's scripts.
+// archive and its read mark.
 type FindingCity interface {
 	MailPeek(ctx context.Context, id string) (gascity.Message, error)
 	MailArchive(ctx context.Context, id string) error
 	MailMarkUnread(ctx context.Context, id string) error
+}
+
+// Scripts runs one of the pack's scripts.
+type Scripts interface {
 	Script(name string, args ...string) gascity.Result
 }
 
@@ -58,9 +62,11 @@ type Filed struct {
 // before it is archived. It reads the mail without marking it read, files the
 // finding through the writer, and archives the mail only once the finding is
 // filed. When nothing is filed it marks the mail unread, so the next turn that
-// reads the mailbox meets it again.
+// reads the mailbox meets it again. Scripts runs the writer, stopped once the
+// filing's context ends.
 type Finding struct {
-	City FindingCity
+	City    FindingCity
+	Scripts Scripts
 }
 
 // File files the mail the ask names.
@@ -75,7 +81,7 @@ func (f *Finding) File(ctx context.Context, a Ask) Filed {
 		args = append(args, "--distinct")
 	}
 	args = append(args, "--title", Title(msg), "--message", Text(msg, a.Note))
-	res := f.City.Script(FindingScript, args...)
+	res := f.Scripts.Script(FindingScript, args...)
 	if why := res.Failure(); why != "" {
 		return f.unfiled(ctx, a.Mail, Filed{Refused: res.Code == Refused, Output: res.Output, Why: FindingScript + " filed nothing: " + why})
 	}

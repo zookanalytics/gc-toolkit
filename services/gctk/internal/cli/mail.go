@@ -52,6 +52,9 @@ exit: 0 filed, and the mail archived, or a line saying it was not
       2 usage
       3 refused: a live finding shares the key or the subject, listed above`
 
+// mailFindingBound bounds one mail finding's reads and writes, from its start.
+var mailFindingBound = mail.FindingBound
+
 func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
 	var a mail.Ask
 	cmd := &cobra.Command{
@@ -65,9 +68,10 @@ func newMailFindingCmd(stdout, stderr io.Writer) *cobra.Command {
 				return exit(2)
 			}
 			a.Mail = args[0]
-			ctx, cancel := context.WithTimeout(cmd.Context(), mail.FindingBound)
+			ctx, cancel := context.WithTimeout(cmd.Context(), mailFindingBound)
 			defer cancel()
-			out := (&mail.Finding{City: gascity.New()}).File(ctx, a)
+			city := gascity.New()
+			out := (&mail.Finding{City: city, Scripts: city.Within(ctx)}).File(ctx, a)
 			if o := strings.TrimRight(out.Output, "\n"); o != "" {
 				fmt.Fprintln(stdout, o)
 			}
