@@ -148,10 +148,15 @@ func (u *run) take(t takeOf, stop time.Duration) RunOutcome {
 // it reads the bead again, decides from that read which posts are untaken
 // (untakenOn), and for each files the post's ask on the bead (review.FileAsk),
 // then marks the post with takenMark. A post whose ask did not file is not
-// marked, so the mark never stands without its ask. Once a mark has landed it
-// starts no post with less than refreshReserve of ctx left. It returns the
-// take's outcome, whose detail opens with the take it is (takeOf.of), and how
-// many marks landed.
+// marked, so the mark never stands without its ask. A held post's follow-up is
+// decided on the PR's conversation as GitHub holds it now, read under the lock,
+// since a read of the PR's quote follows up a held post and marks it without
+// changing the saved read: a held post the city marked since, or one gone
+// since, files nothing. Once a mark has landed it starts no post with less than
+// refreshReserve of ctx left. It returns the take's outcome, whose detail opens
+// with the take it is (takeOf.of), and how many of the posts the saved read
+// holds untaken it found marked or gone, its own marks included, so that the
+// saved read is read again.
 func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	unbound := u.Ledger
 	u.Ledger = unbound.Within(ctx)
@@ -186,7 +191,16 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	noChecks := func(string) (review.Index, error) {
 		return review.Index{}, errors.New("a post's ask sends back no check")
 	}
-	var took, failed, left []string
+	var current map[string][]string
+	var unread error
+	if slices.ContainsFunc(posts, func(p Post) bool { return p.Held }) {
+		if c, err := hub.Conversation(o.repo, o.number); err != nil {
+			unread = err
+		} else {
+			current = reactionsOf(c)
+		}
+	}
+	var took, failed, left, gone []string
 	marked := 0
 	for _, p := range posts {
 		if ctx.Err() != nil {
@@ -199,7 +213,21 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 		}
 		var what string
 		if p.Held {
-			held := []quote.Held{{Kind: p.Kind, Author: p.Author, URL: p.URL}}
+			if unread != nil {
+				failed = append(failed, fmt.Sprintf("%s, an outside account's: the PR's conversation did not read "+
+					"again, so whether the post is still owed its follow-up is unknown: %v", p.name(), unread))
+				continue
+			}
+			held := []quote.Held{{Kind: p.Kind, Author: p.Author, URL: p.URL, Node: p.Node}}
+			if len(stillOwed(held, current)) == 0 {
+				marked++
+				if _, ok := current[p.Node]; ok {
+					took = append(took, p.name()+", an outside account's, followed up already")
+				} else {
+					gone = append(gone, p.name())
+				}
+				continue
+			}
 			if err := FollowUp(ctx, u.Gates, o.id, o.repo, o.number, held); err != nil {
 				failed = append(failed, fmt.Sprintf("%s, an outside account's: %v", p.name(), err))
 				continue
@@ -227,6 +255,12 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 	}
 	out := RunOutcome{Bead: t.bead, Action: ActTaken,
 		Detail: fmt.Sprintf("%s took %s, each marked with the city's %s", t.of(), strings.Join(took, "; "), takenMark)}
+	if len(took) == 0 {
+		out.Detail = t.of() + " took no post"
+	}
+	if len(gone) > 0 {
+		out.Detail += ", and found " + strings.Join(gone, ", ") + " gone from the PR, which owes no follow-up"
+	}
 	reserved := ""
 	if len(left) > 0 {
 		reserved = fmt.Sprintf("left %s for the next run, keeping the last %s of the act for the read of the "+

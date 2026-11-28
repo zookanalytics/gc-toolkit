@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
@@ -166,6 +167,30 @@ func FollowUpHeld(ctx context.Context, dir string, wait time.Duration, g Gates, 
 		}
 	}
 	return followUpOwed(ctx, g, m, subject, repo, number, stillOwed(held, current))
+}
+
+// reactionsOf is the reactions the city's account has left on each post of c,
+// its reviews, its review threads' comments and its conversation comments, by
+// node id.
+func reactionsOf(c *gh.Conversation) map[string][]string {
+	out := map[string][]string{}
+	add := func(node string, reactions []string) {
+		if strings.TrimSpace(node) != "" {
+			out[node] = reactions
+		}
+	}
+	for _, v := range c.Reviews {
+		add(v.NodeID, v.ViewerReactions)
+	}
+	for _, t := range c.Threads {
+		for _, cm := range t.Comments {
+			add(cm.NodeID, cm.ViewerReactions)
+		}
+	}
+	for _, cm := range c.Comments {
+		add(cm.NodeID, cm.ViewerReactions)
+	}
+	return out
 }
 
 // followUpOwed files on subject the follow-up each post among owed is owed, one

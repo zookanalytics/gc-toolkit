@@ -440,3 +440,50 @@ func TestTheTakeFilesTheOperatorsFollowUpForAnOutsidePost(t *testing.T) {
 		t.Fatalf("the take marked %q", got)
 	}
 }
+
+// A held post the saved read still holds untaken, which a read of the PR's
+// quote followed up and marked since, files nothing at the take, even once the
+// operator has cleared the gate that read filed: the take decides on the PR's
+// conversation as GitHub holds it under the lock, where the post carries the
+// city's EYES. A held post deleted since files nothing either. The take reads
+// the conversation again, so the saved read holds neither, and the next run
+// takes nothing.
+func TestTheTakeFilesNothingForAnOutsidePostFollowedUpSince(t *testing.T) {
+	d := taking(t)
+	d.pr.Reviews = nil
+	d.pr.Threads = nil
+	d.pr.Comments = []gh.IssueComment{
+		{ID: 800, NodeID: "IC_800", URL: prURL + "#issuecomment-800", Author: "Stranger", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "do this", CreatedAt: "2026-11-12T05:00:00Z"},
+		{ID: 801, NodeID: "IC_801", URL: prURL + "#issuecomment-801", Author: "Other", AuthorType: "User",
+			AuthorAssociation: "NONE", Body: "and this", CreatedAt: "2026-11-12T05:01:00Z"},
+	}
+	d.refresh(t)
+	if got := d.savedConversation(t).Untaken; len(got) != 2 {
+		t.Fatalf("the saved read holds the untaken posts %+v, want both outside posts", got)
+	}
+	// The quote's read marks comment 800 once its gate is filed, the operator
+	// clears that gate, and comment 801 is deleted, none of which moves the
+	// saved read.
+	if err := d.github.AddReaction("IC_800", "EYES"); err != nil {
+		t.Fatal(err)
+	}
+	d.pr.Comments = d.pr.Comments[:1]
+	d.asked = len(d.github.Asks())
+	take, _ := takeOf(t, d.reconcile(t, pr.Options{}))
+	is(t, take, pr.ActTaken)
+	says(t, take, "followed up already", "gone from the PR")
+	if got := d.gates.list(); len(got) != 0 {
+		t.Fatalf("the take filed the gates %q for posts followed up or gone since", got)
+	}
+	if got := d.marked(); len(got) != 0 {
+		t.Fatalf("the take marked %q", got)
+	}
+	if got := d.savedConversation(t).Untaken; len(got) != 0 {
+		t.Fatalf("the saved read still holds the untaken posts %+v", got)
+	}
+	take, _ = takeOf(t, d.reconcile(t, pr.Options{}))
+	if take.Action != "" || len(d.gates.list()) != 0 {
+		t.Fatalf("the next run took %+v and filed %q", take, d.gates.list())
+	}
+}
