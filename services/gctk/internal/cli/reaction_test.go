@@ -211,7 +211,7 @@ case "$1" in
   blocked) cat "$STUB_DIR/blocked.json" ;;
   sql) printf '[]' ;;
   where) printf '{"path":"%s/.beads","prefix":"tk"}' "$STUB_RIG" ;;
-  update|set-state) ;;
+  update) ;;
   *) echo "unexpected call: gc bd $*" >&2; exit 1 ;;
 esac
 `
@@ -411,7 +411,7 @@ func TestReactionDisposeReadsAFalseAnchorAsNone(t *testing.T) {
 		routed := slices.ContainsFunc(calls(t, log, "sling "), func(l string) bool {
 			return strings.Contains(l, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy")
 		})
-		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " set-state tk-sub hold=mayor ") })
+		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " update tk-sub --add-label hold:mayor ") })
 		if routed != admitted || held == admitted {
 			t.Errorf("an anchor of %s was routed %t and held %t, want routed %t: %v", anchor, routed, held, admitted, calls(t, log, ""))
 		}

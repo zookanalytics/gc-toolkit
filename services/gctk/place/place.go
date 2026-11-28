@@ -239,7 +239,7 @@ func (p *Places) Place(req Request) (Placed, error) {
 			out.Already, out.How = true, strings.Join(shown, ", ")
 			return out, nil
 		}
-		return out, refuse("%s carries no hold:mayor, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd set-state %s hold=mayor --reason \"<why it waits for placement>\". Nothing was written", req.Bead, req.Bead)
+		return out, refuse("%s carries no hold:mayor, so it is not in the placement queue, and nothing shows that it was dispatched. Hold it first, then place it: gc bd update %s --add-label hold:mayor --append-notes \"<why it waits for placement>\", which keeps any other hold it carries. Nothing was written", req.Bead, req.Bead)
 	}
 	for _, l := range row.Labels() {
 		if gascity.IsDispatchHold(l) && !slices.Contains(spellings, l) {

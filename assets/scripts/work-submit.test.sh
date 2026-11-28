@@ -855,7 +855,8 @@ has "$OUT" "not mol-polecat-work.submit-and-exit" "(42b) and claim-close.sh name
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
 submit STUB_HOOK_CURRENT= -- --bead tk-w --base main --notes "n"
 refused "(43) no current claim can be read"
-has "$OUT" "gc hook current names no bead" "(43) names that"
+has "$OUT" "--bead tk-w cannot be shown to be this session's claim, because the claim did not read" "(43) names that"
+has "$OUT" "gc hook current: session sess-me has no current claim" "(43) with gc's own words on its stderr"
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-other
 direct
 refused "(44) the bead is another session's claim"

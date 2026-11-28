@@ -17,5 +17,4 @@ Keep the gadget's tests.
 - Issue: `tk-a1`
 - Source branch: `polecat/tk-a1`
 - Target: `main`
-- Gates `correctness,triage` signed off pre-open at `abcdef12`. For CI status, see the PR checks.
-- Supersedes #41 (closed unmerged at `12345678`); re-implemented and re-gated at `abcdef12`.
+- Head `abcdef12`; gates `correctness,triage,arch`; see the PR checks for current status.

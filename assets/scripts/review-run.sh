@@ -92,9 +92,11 @@ gctk=$(gctk_path) || die 2 "no gctk binary to read the run with"
 # without GCTK_SCRIPTS_DIR it asks gc for the gc-toolkit binding's.
 export GCTK_SCRIPTS_DIR="$HERE"
 
-# The step this session holds, and the run's facts for it.
-ID=$(gc hook current --id-only </dev/null 2>/dev/null) && [ -n "$ID" ] \
-    || die 3 "gc hook current names no bead this session claimed; claim the step with gc hook --claim --json"
+# The step this session holds, and the run's facts for it. A claim that does
+# not read is a read that did not answer.
+if ! ID=$(gc hook current --id-only </dev/null) || [ -z "$ID" ]; then
+    die 2 "this session's claim did not read, so the step it holds is not known; nothing was read or written"
+fi
 step_facts() {
     local out rc
     out=$("$gctk" review step "$ID" --json 2>&1); rc=$?
