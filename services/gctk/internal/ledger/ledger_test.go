@@ -303,6 +303,30 @@ func TestAStringKeyReadsAStoredFalseAsNoValue(t *testing.T) {
 	}
 }
 
+// A key of any codec holds no value when its row holds it as a blank text, as
+// when the row lacks it or holds a null, so a JSON key's blank text reads as no
+// value rather than failing to decode. Only that test trims: a text the row
+// holds reads as stored, and a blank current spelling gives way to its alias.
+func TestAKeyReadsABlankTextAsNoValue(t *testing.T) {
+	for _, stored := range []string{`""`, `"  "`, `"\t\n"`} {
+		if got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":`+stored+`}`)); got != "" || held || err != nil {
+			t.Errorf("a String key holding %s read %q, %v, %v; want no value", stored, got, held, err)
+		}
+		if got, held, err := testFlag.Get(rowOf(t, `{"test.ledger.flag":`+stored+`}`)); got || held || err != nil {
+			t.Errorf("a JSON flag holding %s read %v, %v, %v; want no value", stored, got, held, err)
+		}
+		if got, held, err := testRecord.Get(rowOf(t, `{"test.ledger.record":`+stored+`}`)); got != (record{}) || held || err != nil {
+			t.Errorf("a JSON key holding %s read %+v, %v, %v; want no value", stored, got, held, err)
+		}
+	}
+	if got, held, err := testShell.Get(rowOf(t, `{"test.ledger.shell":" x "}`)); got != " x " || !held || err != nil {
+		t.Errorf("a String key holding \" x \" read %q, %v, %v; want it as stored", got, held, err)
+	}
+	if got, held, err := testText.Get(rowOf(t, `{"test.ledger.text":"  ","test.ledger.old_text":"older"}`)); got != "older" || !held || err != nil {
+		t.Errorf("a blank current spelling read %q, %v, %v; want its alias's value", got, held, err)
+	}
+}
+
 func TestAWriteThatCannotLandFails(t *testing.T) {
 	s := fake.New()
 	s.Put(fake.Bead{ID: "b-1", Status: "open"})

@@ -708,21 +708,22 @@ func (s typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) { return s.typed(s.S
 
 func (s typedStore) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return s.typed(s.Store.Ready(q)) }
 
-// A bead whose dispatch key bd stores as a false or a null carries no arm, as
-// the pack's scripts read the key, so no pass lists it, open or closed: it gets
+// A bead whose dispatch key bd stores as a false, a null or a blank text holds
+// no target, so it carries no arm and no pass lists it, open or closed: it gets
 // no line and no write, and the arm beside it is sent as any other is.
-func TestStartListsNoArmOnAKeyThatHoldsFalseOrNull(t *testing.T) {
+func TestStartListsNoArmOnAKeyThatHoldsFalseNullOrBlank(t *testing.T) {
 	w := newWorld(t)
 	w.put(fake.Bead{ID: "armed", Metadata: armedBead("mol-x", nil)})
 	values := map[string]map[string]any{}
 	for _, b := range []struct {
 		id, status string
 		stored     any
-	}{{"false", "open", false}, {"null", "open", nil}, {"closed", "closed", false}} {
+	}{{"false", "open", false}, {"null", "open", nil}, {"closed", "closed", false},
+		{"blank", "open", ""}, {"spaces", "open", "  "}, {"closed-blank", "closed", ""}} {
 		w.put(fake.Bead{ID: b.id, Status: b.status, Metadata: map[string]string{"gc.dispatch_when_ready": "typed"}})
 		values[b.id] = map[string]any{"gc.dispatch_when_ready": b.stored}
 	}
-	w.store.MakeReady("armed", "false", "null")
+	w.store.MakeReady("armed", "false", "null", "blank", "spaces")
 	w.arms.Ledger = ledger.New(typedStore{Store: w.store, values: values})
 	for _, dry := range []bool{true, false} {
 		lines, sum := w.run(dry)

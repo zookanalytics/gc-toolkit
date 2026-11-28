@@ -93,9 +93,6 @@ func Of(r *ledger.Record) *Arm {
 		*f.dst, _, _ = f.k.Get(r)
 	}
 	var bad []string
-	if strings.TrimSpace(a.Target) == "" {
-		bad = append(bad, "it names no target")
-	}
 	if strings.TrimSpace(a.ArmedAt) == "" {
 		bad = append(bad, "it records no arm time, which the token on its pours is made from")
 	}

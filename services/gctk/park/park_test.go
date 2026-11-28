@@ -283,6 +283,30 @@ func TestParkSaysWhatItHoldsAndWhatItLeavesRunning(t *testing.T) {
 	}
 }
 
+// A member whose dispatch target is blank carries no arm, so a park that finds
+// its run at load-context names it poured, as it names any member with no arm,
+// rather than held.
+func TestParkCountsNoArmOnABlankTarget(t *testing.T) {
+	s := newStore()
+	for id, target := range map[string]string{"tk-b1": "", "tk-b2": "  "} {
+		s.Put(fake.Bead{ID: id, Status: "open", IssueType: "task", Edges: []gcbd.Edge{child("tk-epic")},
+			Metadata: map[string]string{"gc.dispatch_when_ready": target}})
+		run(s, id, id+"-root", id+"-convoy", true)
+	}
+	out, err := parks(s).Park(Request{Bead: "tk-epic", Text: "hold it"})
+	if err != nil {
+		t.Fatalf("Park: %v", err)
+	}
+	for _, id := range []string{"tk-b1", "tk-b2"} {
+		if slices.Contains(out.Held, id) {
+			t.Errorf("held = %v, which names %s, whose target is blank", out.Held, id)
+		}
+		if !slices.Contains(out.Poured, Poured{ID: id, Root: id + "-root"}) {
+			t.Errorf("poured = %+v, want %s under %s-root", out.Poured, id, id)
+		}
+	}
+}
+
 func TestParkBehindABead(t *testing.T) {
 	s := newStore()
 	out, err := parks(s).Park(Request{Bead: "tk-epic", WaitingOn: "tk-other"})

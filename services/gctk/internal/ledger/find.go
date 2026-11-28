@@ -50,8 +50,9 @@ func Typed(typ string) Selection {
 
 // Carrying selects the beads that carry k: those that hold a value of k, as
 // Get reads one. The store selects a bead whose row has the key, and a row has
-// a key bd stores as a JSON null, which Get reads as no value, or as a false,
-// which a String key reads as no value, so Find leaves out each such row.
+// a key it holds as a JSON null or a blank text, which Get reads as no value,
+// or as a false, which a String key reads as no value, so Find leaves out each
+// such row.
 func Carrying[T any](k Key[T]) Selection {
 	return Selection{q: gcbd.Query{HasKey: k.decl.name}, keep: k.held}
 }

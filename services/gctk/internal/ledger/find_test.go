@@ -141,11 +141,12 @@ func (s *typedStore) Find(q gcbd.Query) ([]gcbd.Bead, error) { return s.typed(s.
 func (s *typedStore) Ready(q gcbd.ReadyQuery) ([]gcbd.Bead, error) { return s.typed(s.Store.Ready(q)) }
 
 // A key's selection keeps the beads whose key Get reads as held. bd's row has a
-// key it stores as a JSON null or a false, and the store selects that row by
-// the key's presence, so Find and Ready leave out a row whose String key holds
-// a null or a false, and keep one that holds an empty text or the text "false".
-// A current spelling that holds false gives way to its alias, so a bead whose
-// alias holds a value is kept, and a JSON flag holds false. A pass keeps the
+// key it stores as a JSON null, a false or a blank text, and the store selects
+// that row by the key's presence, so Find and Ready leave out a row whose String
+// key holds a null, a false, an empty text or a text of spaces, and keep one
+// that holds the text "false". A current spelling that holds false gives way to
+// its alias, so a bead whose alias holds a value is kept, and a JSON flag holds
+// false, but not a blank text. A pass keeps the
 // same beads, both when it reads the store for them and when it answers from
 // the rows it holds.
 func TestCarryingKeepsTheBeadsWhoseKeyHoldsAValue(t *testing.T) {
@@ -153,6 +154,7 @@ func TestCarryingKeepsTheBeadsWhoseKeyHoldsAValue(t *testing.T) {
 	for _, b := range []struct{ id, status, metadata string }{
 		{"s-value", "open", `{"test.ledger.shell":"x"}`},
 		{"s-empty", "open", `{"test.ledger.shell":""}`},
+		{"s-blank", "open", `{"test.ledger.shell":"  "}`},
 		{"s-false-text", "open", `{"test.ledger.shell":"false"}`},
 		{"s-true", "open", `{"test.ledger.shell":true}`},
 		{"s-false", "open", `{"test.ledger.shell":false}`},
@@ -163,11 +165,12 @@ func TestCarryingKeepsTheBeadsWhoseKeyHoldsAValue(t *testing.T) {
 		{"t-false", "open", `{"test.ledger.text":false}`},
 		{"f-false", "open", `{"test.ledger.flag":false}`},
 		{"f-null", "open", `{"test.ledger.flag":null}`},
+		{"f-blank", "open", `{"test.ledger.flag":""}`},
 	} {
 		s.put(t, b.id, b.status, b.metadata)
 	}
-	s.MakeReady("s-value", "s-empty", "s-false-text", "s-true", "s-false", "s-null")
-	held := []string{"s-empty", "s-false-text", "s-true", "s-value"}
+	s.MakeReady("s-value", "s-empty", "s-blank", "s-false-text", "s-true", "s-false", "s-null")
+	held := []string{"s-false-text", "s-true", "s-value"}
 	l := New(s)
 	sorted := func(rs []*Record) []string { return slices.Sorted(slices.Values(recordIDs(rs))) }
 	for _, c := range []struct {
