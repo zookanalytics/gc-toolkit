@@ -87,13 +87,13 @@ sends into this session is not the operator's.
 ## Upstream gascity
 
 A `gascity` bug the city's own config fixes takes that change as its fix, with
-no fork patch. Any other is left to upstream (usually right), carried as a
-local patch on the fork's main, or engaged upstream only with something
-materially new and only through the operator (`docs/fork-patching.md`). A pack
+no fork patch. Any other is fixed on the fork's main when its fix is clear and
+consistent with Gas City (`docs/fork-patching.md`). Otherwise it waits for
+upstream. Only the operator offers a fork fix or engages upstream. A pack
 feature Gas City cannot express is reshaped to fit what Gas City ships
 (`docs/foundation.md`). Agents file no upstream PR and propose none as
-follow-up work. When the operator promotes a commit, hand them a GitHub compare
-URL with the title and body filled in for gascity's PR template.
+follow-up work. When the operator offers a fix, hand them a GitHub compare URL
+with the title and body filled in for gascity's PR template.
 
 {{ template "operator-profile" . }}
 
