@@ -334,12 +334,19 @@ func TestAStopEndsEveryStoreReadUnderTheLook(t *testing.T) {
 }
 
 // scriptStub puts a pack script named name in a scripts directory that
-// GCTK_SCRIPTS_DIR names, which logs each call's arguments one to a line.
-func scriptStub(t *testing.T, name string) (calls func() string) {
+// GCTK_SCRIPTS_DIR names, which logs each call's arguments one to a line and
+// prints says one to a line, or "<name>: filed" when says names nothing.
+func scriptStub(t *testing.T, name string, says ...string) (calls func() string) {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
-	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + log + "'; done\necho \"" + strings.TrimSuffix(name, ".sh") + ": filed\"\n"
+	if len(says) == 0 {
+		says = []string{strings.TrimSuffix(name, ".sh") + ": filed"}
+	}
+	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> '" + log + "'; done\n"
+	for _, s := range says {
+		stub += "printf '%s\\n' '" + s + "'\n"
+	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +392,7 @@ func TestRefineryStuckActGatesAndRecordsNoEvent(t *testing.T) {
 		hq:  "[]",
 		rig: `[{"id":"tk-1","title":"t","status":"open","issue_type":"task","assignee":"tools/gc-toolkit.refinery","updated_at":"` + agoStamp(6*time.Hour) + `","metadata":{"branch":"polecat/tk-1"}}]`,
 	})
-	gated := scriptStub(t, "human-gate.sh")
+	gated := scriptStub(t, "human-gate.sh", "human-gate: filed gate tk-g1 on tk-1 [witness-refinery-queue]", "tk-g1")
 	var out, errb bytes.Buffer
 	if code := Run([]string{"refinery", "stuck", "--act"}, "", &out, &errb); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errb.String())
@@ -399,6 +406,32 @@ func TestRefineryStuckActGatesAndRecordsNoEvent(t *testing.T) {
 	}
 	if got := gated(); !strings.HasPrefix(got, "--subject\ntk-1\n--key\nwitness-refinery-queue\n") {
 		t.Errorf("human-gate.sh got:\n%s", got)
+	}
+	if !strings.HasSuffix(errb.String(), "gctk refinery stuck --act: 1 filed\n") {
+		t.Errorf("stderr %q", errb.String())
+	}
+}
+
+// A stuck handoff human-gate.sh files no gate on, because a person answered
+// its gate moot: or benign: inside the quiet window, is not counted as filed,
+// and the writer's line says why.
+func TestRefineryStuckActCountsNoGateTheQuietWindowHoldsBack(t *testing.T) {
+	lookStub(t, lookCity{
+		hq:  "[]",
+		rig: `[{"id":"tk-1","title":"t","status":"open","issue_type":"task","assignee":"tools/gc-toolkit.refinery","updated_at":"` + agoStamp(6*time.Hour) + `","metadata":{"branch":"polecat/tk-1"}}]`,
+	})
+	held := "human-gate: tk-1 [witness-refinery-queue] was answered 18000s ago on gate tk-g0 (moot: drained by hand) — not filing another inside the declared 86400s quiet window. A situation that has CHANGED takes a new --key."
+	scriptStub(t, "human-gate.sh", held)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"refinery", "stuck", "--act"}, "", &out, &errb); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errb.String())
+	}
+	var acted refinery.Acted
+	if err := json.Unmarshal(out.Bytes(), &acted); err != nil || len(acted.Gated) != 0 {
+		t.Fatalf("stdout %q: %v", out.String(), err)
+	}
+	if !strings.Contains(errb.String(), held+"\n") || !strings.HasSuffix(errb.String(), "gctk refinery stuck --act: 0 filed\n") {
+		t.Errorf("stderr %q", errb.String())
 	}
 }
 

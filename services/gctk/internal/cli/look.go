@@ -30,7 +30,7 @@ exit: 0 every read answered, and the event was recorded when the look found
 // actHelpEnd closes the help of a look's --act.
 const actHelpEnd = `With --act, the record and each item filed go to standard output as one
 object, the writer's own lines and a summary line to standard error, and the
-exits are the look's, where 1 is also an item the writer did not file.`
+exits are the look's, where 1 is also an item the writer failed to file.`
 
 // stopOnSignal returns the context a look runs under, which a SIGTERM or
 // SIGINT this process is sent ends, and release, which stops listening for

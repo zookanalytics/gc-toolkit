@@ -51,7 +51,8 @@ witness-refinery-queue on each stuck handoff, through the pack's human-gate.sh
 in the directory GCTK_SCRIPTS_DIR names. An open gate holds the handoff, so
 the look passes over it until a person answers the gate, and the writer files
 no second gate while one is open, nor for a day after a person answers one
-moot: or benign:.
+moot: or benign:. A handoff it files no gate on for that day is not counted as
+filed, and its line says why.
 
 ` + lookHelpEnd + "\n\n" + actHelpEnd
 
@@ -71,10 +72,11 @@ func newRefineryStuckCmd(stdout, stderr io.Writer) *cobra.Command {
 				if sig := release(); sig != 0 {
 					return exit(128 + int(sig))
 				}
-				outputs := make([]string, len(acted.Gated))
-				for i, g := range acted.Gated {
-					outputs[i] = g.Output
+				outputs := make([]string, 0, len(acted.Gated)+len(acted.Quiet))
+				for _, g := range acted.Gated {
+					outputs = append(outputs, g.Output)
 				}
+				outputs = append(outputs, acted.Quiet...)
 				return reportAct("refinery stuck", acted, len(acted.Gated), outputs, acted.Failures, stdout, stderr)
 			}
 			out := q.Run(ctx)

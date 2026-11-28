@@ -3,6 +3,7 @@ package refinery
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
@@ -22,6 +23,11 @@ const (
 	QuietWindow = "86400"
 )
 
+// gateID is the shape of the gate id GateScript prints as its last line when a
+// gate asks: the one it filed or the one already open. Inside QuietWindow it
+// files nothing and prints no id.
+var gateID = regexp.MustCompile(`^[A-Za-z0-9]+-[A-Za-z0-9._-]+$`)
+
 // Scripts runs one of the pack's scripts.
 type Scripts interface {
 	Script(name string, args ...string) gascity.Result
@@ -39,8 +45,8 @@ type Report struct {
 	Scripts Scripts
 }
 
-// Gated is a gate the act's writer took: the handoff and its refinery, with
-// what the writer printed.
+// Gated is a stuck handoff a gate asks on, which the act's writer filed or
+// found open: the handoff and its refinery, with what the writer printed.
 type Gated struct {
 	Rig      string `json:"rig"`
 	Bead     string `json:"bead"`
@@ -49,16 +55,19 @@ type Gated struct {
 }
 
 // Acted is what an act's run did: the record its read composed, nil when a
-// read the whole look rests on failed, each gate filed, and each thing that
-// failed, any of which makes the run's exit non-zero.
+// read the whole look rests on failed, each gate filed, what the writer printed
+// for each stuck handoff it filed no gate on inside QuietWindow, and each thing
+// that failed, any of which makes the run's exit non-zero.
 type Acted struct {
 	Record   *Record  `json:"record"`
 	Gated    []Gated  `json:"gated"`
+	Quiet    []string `json:"-"`
 	Failures []string `json:"-"`
 }
 
 // Run reads once and files a gate on each stuck handoff. A filing the run's
-// context has ended before is not made, and fails the run.
+// context has ended before is not made, and fails the run. A handoff the writer
+// files no gate on inside QuietWindow is neither filed nor a failure.
 func (r *Report) Run(ctx context.Context) Acted {
 	read := r.Look.Read(ctx)
 	out := Acted{Record: read.Record, Gated: []Gated{}, Failures: read.Failures}
@@ -73,6 +82,10 @@ func (r *Report) Run(ctx context.Context) Acted {
 		res := r.Scripts.Script(GateScript, GateArgs(s)...)
 		if f := res.Failure(); f != "" {
 			out.Failures = append(out.Failures, fmt.Sprintf("%s filed no gate on %s, so the next look's event files it again: %s", GateScript, s.Bead, f))
+			continue
+		}
+		if !gateID.MatchString(res.Tail()) {
+			out.Quiet = append(out.Quiet, res.Output)
 			continue
 		}
 		out.Gated = append(out.Gated, Gated{Rig: s.Rig, Bead: s.Bead, Refinery: s.Refinery, Output: res.Output})
