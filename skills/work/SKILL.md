@@ -217,14 +217,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --under <parent>
 ```
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
-  `gc.execution_routed_to` on it. A raw route,
-  `gc sling <rig>/<pool> <bead> --no-formula --no-convoy`, has the pool claim
-  the bead itself, for work whose method the bead carries. It needs both flags,
-  because without them the sling pours the pool's default formula and files a
-  convoy for the bead, and it is never a `gc.routed_to` written by hand. Arming
-  the bead (`gctk bead arm`, the waits skill) has the deferred-dispatch order
-  sling it once nothing holds it. Send it one way, and disarm an armed bead
-  before you send it another. Any two start two workers on one branch.
+  `gc.execution_routed_to` on it. A pool takes work only that way. Never send a
+  pool the bead itself, with `--no-formula` or a `gc.routed_to` written by
+  hand. A bare route is how a named agent takes its work, as Send a bead to a
+  named agent says. Arming the bead (`gctk bead arm`, the waits skill) has the
+  deferred-dispatch order sling it once nothing holds it. Send it one way, and
+  disarm an armed bead before you send it another. Any two start two workers
+  on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
@@ -394,7 +393,8 @@ GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead takeaway <bead> "<wh
   `--no-wait`.
 - **Send it elsewhere.** Name where it goes in the same call: add
   `--route <rig>/<pool>` to the release, and make its sentence where the bead
-  goes now, and why. For the refinery or the keeper, pass
+  goes now, and why. The route starts a run of the pool's default formula on
+  the bead, as a plain sling does. For the refinery or the keeper, pass
   `--assign <named-agent>` in place of `--route <rig>/<pool>`, which writes the
   assignee in the release, then nudge it once the bead is ready, as Send a bead
   to a named agent says. For the mechanik, the deacon or the witness, release

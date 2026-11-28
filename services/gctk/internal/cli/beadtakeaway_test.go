@@ -33,8 +33,8 @@ func TestBeadTakeawayWritesTheHeadline(t *testing.T) {
 			t.Errorf("the update %q does not carry %q", joined, want)
 		}
 	}
-	if s := calls(t, log, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy"); len(s) != 1 {
-		t.Errorf("the bead was not routed: %v", calls(t, log, "sling"))
+	if s := calls(t, log, "sling "); len(s) != 1 || s[0] != "sling gc-toolkit/gc-toolkit.polecat tk-sub" {
+		t.Errorf("the bead was not slung to the pool as a run of its default formula: %v", s)
 	}
 	if got := strings.TrimSpace(out.String()); got != "takeaway set on tk-sub (by converse) [released to gc-toolkit/gc-toolkit.polecat]: routed to the pool" {
 		t.Errorf("standard output is %q", got)

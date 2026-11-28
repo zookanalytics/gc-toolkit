@@ -408,9 +408,7 @@ func TestReactionDisposeReadsAFalseAnchorAsNone(t *testing.T) {
 			t.Errorf("an anchor of %s: the dispose exited %d: %s", anchor, code, errb.String())
 			continue
 		}
-		routed := slices.ContainsFunc(calls(t, log, "sling "), func(l string) bool {
-			return strings.Contains(l, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy")
-		})
+		routed := slices.Contains(calls(t, log, "sling "), "sling gc-toolkit/gc-toolkit.polecat tk-sub")
 		held := slices.ContainsFunc(calls(t, log, "bd "), func(l string) bool { return strings.Contains(l, " update tk-sub --add-label hold:mayor ") })
 		if routed != admitted || held == admitted {
 			t.Errorf("an anchor of %s was routed %t and held %t, want routed %t: %v", anchor, routed, held, admitted, calls(t, log, ""))

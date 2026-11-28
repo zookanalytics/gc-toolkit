@@ -45,11 +45,15 @@ that parks the bead for a person names --waiting-on or --no-wait, unless an
 open blocker already holds the bead. It is refused on a bead whose PR waits on
 the pending record, which the landing order works.
 
---route <rig>/<agent> sends the released bead to a pool, through gc sling with
-no formula and no convoy once its run has ended, and --assign <agent> to a
-named agent, as its assignee in the release's update. Either lifts hold:mayor,
-and either is refused on a closed bead and on a bead whose work is on a blocker
-that is no human gate, the waits --waiting-on names among them for a route.
+--route <rig>/<agent> sends the released bead to a pool once its run has ended,
+through a plain gc sling, which pours the pool's default formula, and --assign
+<agent> to a named agent, as its assignee in the release's update. Either lifts
+hold:mayor, and either is refused on a closed bead and on a bead whose work is
+on a blocker that is no human gate, the waits --waiting-on names among them for
+a route. A route is also refused while this session holds a step of a run that
+already works the bead on the formula the route pours. Gas City starts no second
+live run of a formula on a bead, and the release leaves this session's own run
+to close its own chain.
 
 --db names the store, a store's .beads directory. Without it the bead's store
 is the one gc routes the bead to. GCTK_SCRIPTS_DIR names the pack's scripts,

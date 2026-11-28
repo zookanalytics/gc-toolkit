@@ -73,12 +73,14 @@ type Request struct {
 	Route, Assign  string
 }
 
-// City is Gas City as a takeaway reaches it: the sling that routes a released
-// bead, the pack's run-cancel.sh, which ends a run through Gas City's run
-// cancel, the session list that says whether a claim's holder is gone, and the
-// nudge that asks a live holder to give the bead back.
+// City is Gas City as a takeaway reaches it: the sling that sends a released
+// bead to a pool and the default formula that sling pours, the pack's
+// run-cancel.sh, which ends a run through Gas City's run cancel, the session
+// list that says whether a claim's holder is gone, and the nudge that asks a
+// live holder to give the bead back.
 type City interface {
 	Sling(s gascity.Sling) gascity.SlingResult
+	DefaultFormula(s gascity.Sling) (string, error)
 	Script(name string, args ...string) gascity.Result
 	NudgeNow(session, message, bead string) gascity.Result
 	Sessions(ctx context.Context) ([]gascity.Session, error)
@@ -376,7 +378,8 @@ func landed(w *ledger.Record) bool {
 // those are written only after the release. An assignment that names its waits
 // is gated by them, since the agent's hook offers the bead only once bd reports
 // it ready. A blocker read that fails lets the destination through, and says
-// so: a store that does not answer must not cost a sitting its disposition.
+// so: a store that does not answer must not cost a sitting its disposition. A
+// route is refused as well where guardOwnRun says.
 func (r *take) guardDestination() error {
 	dest, flag := r.req.Route, "--route"
 	if dest == "" && r.req.Assign != "" && len(r.req.WaitingOn) == 0 {
@@ -419,6 +422,56 @@ func (r *take) guardDestination() error {
 	if len(blockedBy) > 0 {
 		return refuse("--assign %s on %s, which is blocked by %s. None of those is a human gate on %s, so the work is on them: assigned, %s reaches %s once they close, as a record of work already done. Re-run with --release alone, which still lands the headline and the release and leaves the bead at rest. A bead that should reach %s once its blocker clears names that wait: gctk reaction dispose --disposition blocked --then-assign %s.",
 			dest, r.bead, strings.Join(blockedBy, " "), r.bead, r.bead, dest, dest, dest)
+	}
+	if flag == "--route" {
+		return r.guardOwnRun()
+	}
+	return nil
+}
+
+// guardOwnRun refuses a route onto a bead whose run this session holds when
+// that run's formula is the one the route pours. The release leaves this
+// session's own run to close its own chain, and Gas City starts no second live
+// run of a formula on a bead, so the route's sling would fail once the release
+// had landed and leave the bead released and sent nowhere. A run of another
+// formula, such as the first reaction a dispose runs from, takes the route's
+// run beside it. A read that fails lets the route through and says so, as the
+// blocker read does.
+func (r *take) guardOwnRun() error {
+	t := r.t
+	unchecked := func(err error) error {
+		t.say("could not read whether a run this session holds on %s already runs the formula %s pours (%v), so --route goes unchecked against it", r.bead, r.req.Route, err)
+		return nil
+	}
+	runs, err := waits.RunsOf(t.Ledger, r.bead)
+	if err != nil {
+		return unchecked(err)
+	}
+	var own []waits.Run
+	for _, run := range runs {
+		if !run.Live {
+			continue
+		}
+		holders, err := waits.RunHolders(t.Ledger, run.Root)
+		if err != nil {
+			return unchecked(err)
+		}
+		if slices.ContainsFunc(holders, func(h string) bool { return slices.Contains(t.Self, h) }) {
+			own = append(own, run)
+		}
+	}
+	if len(own) == 0 {
+		return nil
+	}
+	pours, err := t.City.DefaultFormula(gascity.Sling{Target: r.req.Route, Bead: r.bead})
+	if err != nil {
+		return unchecked(err)
+	}
+	for _, run := range own {
+		if pours != "" && run.Formula == pours {
+			return refuse("--route %s on %s pours %s, and this session holds a step of run %s, which already runs %s on %s. A release leaves this session's own run to close its own chain, and Gas City starts no second live run of a formula on a bead, so the route would release %s and send it nowhere. Finish that run, or end it with %s, whose --formula arms the bead's re-sling for when a person rules. Nothing was written.",
+				r.req.Route, r.bead, pours, run.Root, pours, r.bead, r.bead, t.script("decline.sh"))
+		}
 	}
 	return nil
 }
@@ -510,11 +563,13 @@ func (r *take) write() (string, error) {
 		return "", fmt.Errorf("a --waiting-on edge on %s did not land, as the lines above say. The headline%s stands", r.bead, r.released())
 	}
 	// The bead is released and its run has ended, so a route sends it to the
-	// pool now, through a sling that pours nothing and files no convoy.
+	// pool now. The plain sling pours the pool's default formula and files the
+	// convoy its steps read, so the pool takes the work as a started run and
+	// never as the bead itself.
 	if r.req.Route != "" {
-		res := t.City.Sling(gascity.Sling{Target: r.req.Route, Bead: r.bead, NoFormula: true})
+		res := t.City.Sling(gascity.Sling{Target: r.req.Route, Bead: r.bead})
 		if f := res.Failure(); f != "" {
-			return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not route it to %s (%s), so it rests open, unassigned and routed to no pool. Route it once the cause is fixed: gc sling %s %s --no-formula --no-convoy", r.bead, r.req.Route, f, r.req.Route, r.bead)
+			return "", fmt.Errorf("%s is released and the run beneath it has ended, but gc sling did not send it to %s (%s), so it rests open, unassigned and routed to no pool. Send it once the cause is fixed: gc sling %s %s", r.bead, r.req.Route, f, r.req.Route, r.bead)
 		}
 	}
 	note := ""

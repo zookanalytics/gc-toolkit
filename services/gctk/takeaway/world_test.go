@@ -14,6 +14,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd/fake"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/waits"
 )
 
 // pool is the pool a route names in these tests.
@@ -50,6 +51,9 @@ type world struct {
 	cancelFails, slingFails, nudgeFails bool
 	// armed says the disarm removed an arm, as gctk bead disarm says it.
 	armed bool
+	// cancelled is each root a run cancel ended, which a sling then reads as
+	// ended, as Gas City's run cancel leaves it.
+	cancelled []string
 	// fence refuses, as bd does, an update that changes the assignee of a
 	// claimed bead with no --if-assignee naming the claim's holder.
 	fence bool
@@ -80,11 +84,16 @@ func newWorld(t *testing.T) *world {
 		}
 		return nil
 	}
-	w.rt = &rtfake.Runtime{}
+	w.rt = &rtfake.Runtime{Formulas: map[string]string{pool: "mol-polecat-work"}}
 	w.rt.OnScript = func(c rtfake.Call) gascity.Result {
 		w.add("SCRIPT " + c.Name + " " + strings.Join(c.Args, " "))
 		if w.cancelFails {
 			return gascity.Result{Code: 1, Output: "run-cancel: the supervisor did not answer"}
+		}
+		if i := slices.Index(c.Args, "--root"); i >= 0 && i+1 < len(c.Args) {
+			w.mu.Lock()
+			w.cancelled = append(w.cancelled, c.Args[i+1])
+			w.mu.Unlock()
 		}
 		return gascity.Result{}
 	}
@@ -96,6 +105,9 @@ func newWorld(t *testing.T) *world {
 		w.add(line)
 		if w.slingFails {
 			return gascity.SlingResult{Result: gascity.Result{Code: 1, Output: "gc sling: fake refusal"}}
+		}
+		if live := w.liveRuns(s); len(live) > 0 {
+			return gascity.SlingResult{Result: gascity.Result{Code: 3, Output: "gc sling: a live workflow already runs that formula on " + s.Bead}, Live: live}
 		}
 		return gascity.SlingResult{}
 	}
@@ -133,11 +145,38 @@ func (w *world) run(bead, root, convoy string) {
 	w.store.Put(fake.Bead{ID: convoy, Title: "input convoy for " + bead, Status: "open", IssueType: "convoy",
 		Edges: []gcbd.Edge{{Type: "tracks", ID: bead}}})
 	w.store.Put(fake.Bead{ID: root, Title: "mol-polecat-work", Status: "in_progress", IssueType: "task",
-		Metadata: map[string]string{"gc.kind": "workflow", "gc.input_convoy_id": convoy}})
+		Metadata: map[string]string{"gc.kind": "workflow", "gc.input_convoy_id": convoy, "gc.formula_name": "mol-polecat-work"}})
 	w.store.Put(fake.Bead{ID: root + "-load", Status: "in_progress", Assignee: "polecat-dead",
 		Metadata: map[string]string{"gc.root_bead_id": root, "gc.step_ref": "mol-polecat-work.load-context"}})
 	w.store.Put(fake.Bead{ID: root + "-impl", Status: "open",
 		Metadata: map[string]string{"gc.root_bead_id": root, "gc.step_ref": "mol-polecat-work.implement"}})
+}
+
+// liveRuns is each run a sling that pours a formula meets as Gas City's
+// refusal: a live run of the formula it pours, on the bead it names, that no
+// run cancel has ended. Gas City starts no second live run of a formula on a
+// bead, and a sling that pours nothing meets none.
+func (w *world) liveRuns(s gascity.Sling) []string {
+	f := s.Formula
+	if f == "" {
+		f = w.rt.Formulas[s.Target]
+	}
+	if s.NoFormula || f == "" {
+		return nil
+	}
+	runs, err := waits.RunsOf(ledger.New(w.store), s.Bead)
+	if err != nil {
+		w.t.Fatalf("the fake sling could not read the runs on %s: %v", s.Bead, err)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var live []string
+	for _, run := range runs {
+		if run.Live && run.Formula == f && !slices.Contains(w.cancelled, run.Root) {
+			live = append(live, run.Root)
+		}
+	}
+	return live
 }
 
 // put adds a bead and makes the store's blocked answers what every bead's
