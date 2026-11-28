@@ -44,19 +44,6 @@ func TestTheHeadsComment(t *testing.T) {
 			t.Errorf("the comment lacks %q:\n%s", want, got)
 		}
 	}
-	w2 := newWorld(t)
-	w2.output(triage(1, h1, "demo"))
-	demo := lane(1, "demo", h1, review.VerdictApprove)
-	demo.Visual, demo.VisualFallbackFrom = "repo-artifact", "video"
-	w2.output(demo)
-	w2.output(repair(1, h1, ""))
-	run2, err := review.ReadRun(w2.ledger(), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := review.Comment(run2, 1, nil); !strings.Contains(got, "demo Visual: repo-artifact (author-committed; fallback from video)") {
-		t.Errorf("a demo verdict's comment does not name its visual:\n%s", got)
-	}
 	if !strings.HasPrefix(got, review.Mark(root, h1)+"\n") {
 		t.Errorf("the comment does not open with its mark:\n%s", got)
 	}
@@ -92,6 +79,53 @@ func TestTheHeadsComment(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the comment lacks %q:\n%s", want, got)
 		}
+	}
+}
+
+// A demo verdict's visual reads on the head's comment as the PR carries it:
+// its modality linked to the comment that delivered it, with a repo-artifact
+// read as author-committed and a fallback naming what stopped the one that
+// fits, or, for a visual the PR does not carry, that none was delivered and
+// what stopped it. A visual with neither a comment nor a stop, as a lane
+// output stored before the write required one can hold, reads that its
+// delivery is not recorded. What the check covered follows in a block of its
+// own.
+func TestTheHeadsCommentOnADemoVisual(t *testing.T) {
+	const at = "https://github.com/o/r/pull/7#issuecomment-42"
+	for _, c := range []struct {
+		name                           string
+		visual, from, comment, stopped string
+		want                           string
+	}{
+		{"delivered", "video", "", at, "", "demo Visual: [video](" + at + ")\n"},
+		{"a fallback", "repo-artifact", "video", at, "no app runs on this host",
+			"demo Visual: [repo-artifact](" + at + ") (author-committed; fallback from video: no app runs on this host)\n"},
+		{"not delivered", "video", "", "", "the capture toolchain does not\n resolve on this host",
+			"demo Visual: video warranted, none delivered: the capture toolchain does not resolve on this host\n"},
+		{"no visual needed", "none", "", "", "", "demo Visual: none\n"},
+		{"stored with neither a comment nor a stop", "video", "", "", "", "demo Visual: video (delivery not recorded)\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.output(triage(1, h1, "demo"))
+			demo := lane(1, "demo", h1, review.VerdictApprove)
+			demo.Visual, demo.VisualFallbackFrom, demo.VisualComment, demo.VisualStoppedBy = c.visual, c.from, c.comment, c.stopped
+			demo.Covered = "- the list page, with two items\n- not shown: the empty list"
+			w.output(demo)
+			w.output(repair(1, h1, ""))
+			run, err := review.ReadRun(w.ledger(), root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := review.Comment(run, 1, nil)
+			if !strings.Contains(got, c.want) {
+				t.Errorf("the comment lacks %q:\n%s", c.want, got)
+			}
+			covered := "<details><summary>demo: what the check covered</summary>\n\n- the list page, with two items\n- not shown: the empty list\n\n</details>"
+			if !strings.Contains(got, covered) {
+				t.Errorf("the comment lacks what the check covered:\n%s", got)
+			}
+		})
 	}
 }
 

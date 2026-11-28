@@ -185,41 +185,62 @@ func TestALanesFindingContract(t *testing.T) {
 }
 
 // A demo lane's verdict carries its visual decision, none only with an
-// approve, and a fallback cheaper than the modality it stands in for. No other
-// lane records one.
+// approve, and a fallback cheaper than the modality it stands in for. A
+// modality other than none names the comment that delivered it or what stopped
+// it, and a fallback names both. No other lane records a visual or what it
+// covered.
 func TestADemoLanesVisual(t *testing.T) {
 	w := newWorld(t)
 	w.output(triage(1, h1, "demo", "arch"))
 	st := w.step(1, "lane")
-	demo := func(verdict, visual, from string) review.Lane {
+	const at = "https://github.com/o/r/pull/7#issuecomment-42"
+	demo := func(verdict, visual, from, comment, stopped string) review.Lane {
 		ln := lane(1, "demo", h1, verdict)
 		if verdict == review.VerdictRequestChanges {
 			ln = lane(1, "demo", h1, verdict, "D1")
 		}
-		ln.Visual, ln.VisualFallbackFrom = visual, from
+		ln.Visual, ln.VisualFallbackFrom, ln.VisualComment, ln.VisualStoppedBy = visual, from, comment, stopped
 		return ln
 	}
 	var got review.Lane
-	if err := w.check(st, demo(review.VerdictApprove, "Screenshot", "video"), &got); err != nil ||
-		got.Visual != "screenshot" || got.VisualFallbackFrom != "video" {
-		t.Errorf("a screenshot standing in for a video = %v, %q from %q", err, got.Visual, got.VisualFallbackFrom)
+	if err := w.check(st, demo(review.VerdictApprove, "Screenshot", "video", " "+at, "no app runs here"), &got); err != nil ||
+		got.Visual != "screenshot" || got.VisualFallbackFrom != "video" || got.VisualComment != at {
+		t.Errorf("a screenshot standing in for a video = %v, %+v", err, got)
+	}
+	for _, ln := range []review.Lane{
+		demo(review.VerdictApprove, "none", "", "", ""),
+		demo(review.VerdictApprove, "video", "", at, ""),
+		demo(review.VerdictApprove, "video", "", "", "the capture toolchain does not resolve on this host"),
+	} {
+		if err := w.check(st, ln, nil); err != nil {
+			t.Errorf("%s from %q, at %q, stopped by %q is refused: %v", ln.Visual, ln.VisualFallbackFrom, ln.VisualComment, ln.VisualStoppedBy, err)
+		}
 	}
 	for _, c := range []struct {
 		ln  review.Lane
 		why string
 	}{
-		{demo(review.VerdictApprove, "", ""), "records its visual decision on every verdict"},
-		{demo(review.VerdictApprove, "gif", ""), "not none, repo-artifact, screenshot or video"},
-		{demo(review.VerdictRequestChanges, "none", ""), "goes with an approve only"},
-		{demo(review.VerdictApprove, "video", "screenshot"), "a fallback is cheaper"},
-		{demo(review.VerdictApprove, "none", "video"), "a visual of none delivers none"},
-		{demo(review.VerdictApprove, "screenshot", "repo-artifact"), "not screenshot or video"},
+		{demo(review.VerdictApprove, "", "", "", ""), "records its visual decision on every verdict"},
+		{demo(review.VerdictApprove, "gif", "", "", ""), "not none, repo-artifact, screenshot or video"},
+		{demo(review.VerdictRequestChanges, "none", "", "", ""), "goes with an approve only"},
+		{demo(review.VerdictApprove, "video", "screenshot", at, "x"), "a fallback is cheaper"},
+		{demo(review.VerdictApprove, "none", "video", "", ""), "a visual of none delivers none"},
+		{demo(review.VerdictApprove, "screenshot", "repo-artifact", at, "x"), "not screenshot or video"},
+		{demo(review.VerdictApprove, "none", "", at, ""), "drop visual_comment and visual_stopped_by"},
+		{demo(review.VerdictApprove, "video", "", "", ""), "says where the PR carries it"},
+		{demo(review.VerdictApprove, "video", "", "on the PR", ""), "not the URL of a pull request's comment"},
+		{demo(review.VerdictApprove, "screenshot", "video", "", "no app runs here"), "names the comment that carries it"},
+		{demo(review.VerdictApprove, "screenshot", "video", at, ""), "says what stopped the video that fits"},
+		{demo(review.VerdictApprove, "video", "", at, "x"), "name what it could not show in covered"},
 	} {
 		mustRefuse(t, w.check(st, c.ln, nil), c.why)
 	}
 	arch := lane(1, "arch", h1, review.VerdictApprove)
 	arch.Visual = "screenshot"
 	mustRefuse(t, w.check(st, arch, nil), "only the demo check records a visual decision")
+	arch = lane(1, "arch", h1, review.VerdictApprove)
+	arch.Covered = "the list page"
+	mustRefuse(t, w.check(st, arch, nil), "what it covered")
 }
 
 // A correctness approve on a change that edits its own review guidance is

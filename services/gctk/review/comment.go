@@ -62,6 +62,9 @@ func Comment(run *Run, n int, asks []Ask) string {
 		if ln.Visual != "" {
 			fmt.Fprintf(&b, "%s Visual: %s\n\n", ln.Check, visualLine(ln))
 		}
+		if ln.Covered != "" {
+			fmt.Fprintf(&b, "<details><summary>%s: what the check covered</summary>\n\n%s\n\n</details>\n\n", ln.Check, ln.Covered)
+		}
 	}
 	if len(it.Lanes) > 0 {
 		fmt.Fprintln(&b, "| Check | Verdict | Findings | Ruled |")
@@ -266,22 +269,41 @@ func Punctuated(s string) string {
 	return s + "."
 }
 
-// visualLine says what kind of visual a demo verdict rests on: its modality,
-// with a repo-artifact read as author-committed, since a committed visual is
-// what an author recorded and not a capture of the reviewed commit, and the
-// modality a fallback stands in for.
+// visualLine says what visual a demo verdict rests on and where the PR
+// carries it: its modality, linked to the comment that delivered it, or, for a
+// visual the verdict found warranted and the PR does not carry, that none was
+// delivered and what stopped it. A repo-artifact reads author-committed, since
+// a committed visual is what an author recorded and not a capture of the
+// reviewed commit, and a fallback names the modality it stands in for and what
+// stopped that one. A visual with neither a comment nor a stop, which a lane
+// output stored before the write required one can hold, reads that its
+// delivery is not recorded, so the line claims no delivery its record lacks.
 func visualLine(ln Lane) string {
+	if ln.VisualComment == "" && ln.VisualStoppedBy != "" {
+		return fmt.Sprintf("%s warranted, none delivered: %s", ln.Visual, oneLine(ln.VisualStoppedBy))
+	}
+	modality := ln.Visual
+	if ln.VisualComment != "" {
+		modality = fmt.Sprintf("[%s](%s)", ln.Visual, ln.VisualComment)
+	}
 	var notes []string
 	if ln.Visual == "repo-artifact" {
 		notes = append(notes, "author-committed")
 	}
 	if ln.VisualFallbackFrom != "" {
-		notes = append(notes, "fallback from "+ln.VisualFallbackFrom)
+		note := "fallback from " + ln.VisualFallbackFrom
+		if ln.VisualStoppedBy != "" {
+			note += ": " + oneLine(ln.VisualStoppedBy)
+		}
+		notes = append(notes, note)
+	}
+	if ln.Visual != "none" && ln.VisualComment == "" {
+		notes = append(notes, "delivery not recorded")
 	}
 	if len(notes) == 0 {
-		return ln.Visual
+		return modality
 	}
-	return fmt.Sprintf("%s (%s)", ln.Visual, strings.Join(notes, "; "))
+	return fmt.Sprintf("%s (%s)", modality, strings.Join(notes, "; "))
 }
 
 // short is a commit's first twelve characters.
