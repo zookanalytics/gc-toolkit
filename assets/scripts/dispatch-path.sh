@@ -29,9 +29,9 @@
 # The deferred-dispatch order's start (gctk bead start-armed) reads no row here:
 # it selects armed beads by Gas City's own serve rule and holds one carrying a
 # hold label in any case, as Gas City's hook does. The first reaction's check,
-# sling and sweep (gctk reaction)
-# read no row here either: they ask the arm's record and the runtime adapter's
-# dispatch hold (services/gctk/internal/gascity/hold.go).
+# sling and sweep (gctk reaction) read no row here either: they ask the arm's
+# record and the runtime adapter's dispatch hold
+# (services/gctk/internal/gascity/hold.go).
 # gctk bead place, gctk reaction accept and gctk bead takeaway, which lift
 # `hold:mayor` when they send a bead on, read no row here: they take its
 # spellings from the runtime adapter (services/gctk/internal/gascity/hold.go).

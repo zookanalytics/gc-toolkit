@@ -116,10 +116,10 @@ clause_no_open_human_gate() {
 # never reaches an undisposed epic. A
 # review of an epic (skills/converse-epic-review) runs the gate on each
 # Delivery it closes and, once it has recorded the close ruling, on the epic.
-# A bare `gc bd close` runs no gate. The
-# disposition is read off the `gc bd show` row, which carries the edge onto a
-# successor in the epic's own store; an edge into another rig's store reaches
-# this clause only through <as-disposed>.
+# A bare `gc bd close` runs no gate. The disposition is read off the
+# `gc bd show` row, which carries the edge onto a successor in the epic's own
+# store; an edge into another rig's store reaches this clause only through
+# <as-disposed>.
 clause_epic_ruling_recorded() {
     _fgr_bead="$1"
     _fgr_as_disposed="${2:-}"
@@ -144,7 +144,7 @@ clause_epic_ruling_recorded() {
     # carries the far bead with its issue_type, so it costs no second read. A
     # show row leaves out an edge into another rig's store (DISPOSITION_JQ), so
     # an epic whose parent sits there reads as having no epic parent and is
-    # held, as I15 reads it.
+    # held.
     _fgr_fields=$(printf '%s' "$_fgr_raw" | jq -r "$DISPOSITION_JQ"'
         if type != "array" then error("not an array")
         else [ (.[0].issue_type // .[0].type // ""),

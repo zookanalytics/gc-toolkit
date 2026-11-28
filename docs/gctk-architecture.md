@@ -683,8 +683,8 @@ The status rests on these answers.
 - **Which of its own waits are pending?** These are the waits on the bead
   itself that have not landed. A caller that asks what a bead records it waits
   on, what still holds its close, or whether its own work sits on another bead
-  asks this: a takeaway's waits and its route guard. An ancestor's park answers none of them, because the work it
-  holds is still the bead's own.
+  asks this: a takeaway's waits and its route guard. An ancestor's park answers
+  none of them, because the work it holds is still the bead's own.
 - **When did the last wait that applies to it land?** This is the latest close
   among the waits the rule for where its work is applies: its own, and for work
   that has not started each live ancestor's too. A caller that ages the time

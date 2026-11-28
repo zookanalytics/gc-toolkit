@@ -101,9 +101,9 @@ is silent manual-follow-up debt — the exact miss
 `doctor/check-blocked-work-armed` reports.
 
 An arm is a dispatch path, as a route is. Both are defined once for the
-scripts, in `assets/scripts/dispatch-path.sh`, which each script that asks
-whether a bead's dispatch is already decided sources. The first reaction asks the same of the arm's
-record in gctk. So an arm also keeps the bead out of the proactive sweep.
+scripts, in `assets/scripts/dispatch-path.sh`, and each script that asks whether
+a bead's dispatch is already decided sources that file. The first reaction asks
+the same of the arm's record in gctk. So an arm also keeps the bead out of the proactive sweep.
 `gctk reaction sweep` looks for raw input to react to, and it drops a bead that
 has a dispatch path. Otherwise a sweep that ran between a blocker closing and
 the deferred-dispatch order's next pass would sling a first reaction at a bead
