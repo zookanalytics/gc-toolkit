@@ -217,15 +217,13 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 GCTK_SCRIPTS_DIR="$(gc <binding> scripts-dir)" "$GCTK" bead place <bead> --under <parent>
 ```
 - **One dispatch, never two.** A sling starts a workflow on the bead and sets
-  `gc.execution_routed_to` on it, and a pool takes work only that way. Never
-  send a pool the bead itself, with `--no-formula` or a `gc.routed_to` written
-  by hand: a pool worker can claim a bead routed bare while a sling pours a
-  workflow on it, and then each stands down for the other and nothing offers
-  the bead again. A bare route is how a named agent takes its work, as Send a
-  bead to a named agent says. Arming the bead (`gctk bead arm`, the waits
-  skill) has the deferred-dispatch order sling it once nothing holds it. Send
-  it one way, and disarm an armed bead before you send it another. Any two
-  start two workers on one branch.
+  `gc.execution_routed_to` on it. A pool takes work only that way. Never send a
+  pool the bead itself, with `--no-formula` or a `gc.routed_to` written by
+  hand. A bare route is how a named agent takes its work, as Send a bead to a
+  named agent says. Arming the bead (`gctk bead arm`, the waits skill) has the
+  deferred-dispatch order sling it once nothing holds it. Send it one way, and
+  disarm an armed bead before you send it another. Any two start two workers
+  on one branch.
 - **Release its wait first.** A worker's first step builds nothing that still
   waits. It re-arms a bead with an open blocker to be sent again when the
   blocker closes, and it ends the run on a bead that carries a `merge_result`
