@@ -62,7 +62,7 @@ func (p *posts) Comment(_, _ string, _ int, body string) error {
 	p.next++
 	id := 9000 + p.next
 	p.pr.Comments = append(slices.Clone(p.pr.Comments), gh.IssueComment{ID: id, NodeID: fmt.Sprintf("IC_%d", id),
-		URL: fmt.Sprintf("%s#issuecomment-%d", prURL, id), Author: self, Body: body + "\n\n" + cityMark})
+		URL: fmt.Sprintf("%s#issuecomment-%d", prURL, id), Author: self, AuthorAssociation: "MEMBER", Body: body + "\n\n" + cityMark})
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (p *posts) Reply(_, thread, body string) error {
 			p.next++
 			id := 9000 + p.next
 			p.pr.Threads[i].Comments = append(slices.Clone(p.pr.Threads[i].Comments), gh.Comment{ID: id,
-				NodeID: fmt.Sprintf("PRRC_%d", id), URL: fmt.Sprintf("%s#discussion_r%d", prURL, id), Author: self,
+				NodeID: fmt.Sprintf("PRRC_%d", id), URL: fmt.Sprintf("%s#discussion_r%d", prURL, id), Author: self, AuthorAssociation: "MEMBER",
 				Body: body + "\n\n" + cityMark})
 			return nil
 		}
@@ -203,16 +203,16 @@ func (d *rounds) person(kind string) string {
 	switch kind {
 	case pr.PostInline:
 		d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: "T1", Comments: []gh.Comment{{ID: 260, NodeID: "PRRC_260",
-			URL: inlineURL, Author: "operator", Body: "rename this flag", ViewerReactions: taken,
+			URL: inlineURL, Author: "operator", AuthorAssociation: "MEMBER", Body: "rename this flag", ViewerReactions: taken,
 			Review: &gh.CommentReview{ID: 199, State: "COMMENTED"}}}})
 		return inlineURL
 	case pr.PostReview:
 		d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 200, NodeID: "PRR_200", URL: reviewURL, State: "COMMENTED",
-			Author: "operator", AuthorCanPush: true, Body: "the cap reads too low", SubmittedAt: "2026-11-12T02:00:00Z",
+			Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "the cap reads too low", SubmittedAt: "2026-11-12T02:00:00Z",
 			ViewerReactions: taken})
 		return reviewURL
 	}
-	d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 5, NodeID: "IC_5", URL: convoURL, Author: "operator",
+	d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 5, NodeID: "IC_5", URL: convoURL, Author: "operator", AuthorAssociation: "MEMBER",
 		Body: "is the cap right?", ViewerReactions: taken})
 	return convoURL
 }
@@ -389,7 +389,7 @@ func TestAHeadsCommentThatDoesNotLandHoldsTheLaterWrites(t *testing.T) {
 	d := newRounds(t)
 	const cr = prURL + "#pullrequestreview-210"
 	d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
-		Author: "operator", AuthorCanPush: true, Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z",
+		Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z",
 		ViewerReactions: []string{"EYES"}})
 	ask := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
 	d.rule(t, 1, head, later, review.Ruling{Ask: ask, Ruling: review.RulingMustFix, Reason: "Renamed.", Commit: later})
@@ -451,7 +451,7 @@ func TestManyLongAnswersFitTheHeadsComment(t *testing.T) {
 		id := int64(100 + i)
 		url := fmt.Sprintf("%s#issuecomment-%d", prURL, id)
 		d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: id, NodeID: fmt.Sprintf("IC_%d", id), URL: url,
-			Author: "operator", Body: "a point", ViewerReactions: []string{"EYES"}})
+			Author: "operator", AuthorAssociation: "MEMBER", Body: "a point", ViewerReactions: []string{"EYES"}})
 		ask := d.ask(t, "Conversation comment", url, "2026-11-12T03:00:00Z")
 		rs = append(rs, review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: strings.Repeat("x", 1800)})
 	}
@@ -494,7 +494,7 @@ func TestAThreadStaysOpenWhileAPostInItIsOwed(t *testing.T) {
 	d := newRounds(t)
 	url := d.person(pr.PostInline)
 	d.pr.Threads[0].Comments = append(d.pr.Threads[0].Comments, gh.Comment{ID: 263, NodeID: "PRRC_263",
-		URL: prURL + "#discussion_r263", Author: "operator", Body: "and one more thing"})
+		URL: prURL + "#discussion_r263", Author: "operator", AuthorAssociation: "MEMBER", Body: "and one more thing"})
 	ask := d.ask(t, "Inline comment", url, "2026-11-12T03:00:00Z")
 	d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "A nit."})
 	d.posted(t)
@@ -520,7 +520,7 @@ func TestAPostUnderTheCitysLoginWithoutItsMarkKeepsTheThreadOpen(t *testing.T) {
 			d := newRounds(t)
 			url := d.person(pr.PostInline)
 			d.pr.Threads[0].Comments = append(d.pr.Threads[0].Comments, gh.Comment{ID: 263, NodeID: "PRRC_263",
-				URL: prURL + "#discussion_r263", Author: self, Body: c.body})
+				URL: prURL + "#discussion_r263", Author: self, AuthorAssociation: "MEMBER", Body: c.body})
 			ask := d.ask(t, "Inline comment", url, "2026-11-12T03:00:00Z")
 			d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "A nit."})
 			d.posted(t)
@@ -541,7 +541,7 @@ func TestAPostTheDefinitionSetsAsideHoldsNoThreadOpen(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			d := newRounds(t)
 			url := d.person(pr.PostInline)
-			c := gh.Comment{ID: 263, NodeID: "PRRC_263", URL: prURL + "#discussion_r263", Author: "another",
+			c := gh.Comment{ID: 263, NodeID: "PRRC_263", URL: prURL + "#discussion_r263", Author: "another", AuthorAssociation: "MEMBER",
 				Body: "a note"}
 			if kind == "not for review" {
 				d.world.rule.notFeedback[263] = true
@@ -567,12 +567,12 @@ func TestARequestForChangesIsDismissedOnceItsLastPointIsAnswered(t *testing.T) {
 	d := newRounds(t)
 	const cr = prURL + "#pullrequestreview-210"
 	d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
-		Author: "operator", AuthorCanPush: true, Body: "two things", SubmittedAt: "2026-11-12T02:00:00Z",
+		Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "two things", SubmittedAt: "2026-11-12T02:00:00Z",
 		ViewerReactions: []string{"EYES"}})
 	point := func(thread string, id int64) string {
 		u := fmt.Sprintf("%s#discussion_r%d", prURL, id)
 		d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: thread, Comments: []gh.Comment{{ID: id,
-			NodeID: fmt.Sprintf("PRRC_%d", id), URL: u, Author: "operator", Body: "fix this",
+			NodeID: fmt.Sprintf("PRRC_%d", id), URL: u, Author: "operator", AuthorAssociation: "MEMBER", Body: "fix this",
 			ViewerReactions: []string{"EYES"}, Review: &gh.CommentReview{ID: 210, State: "CHANGES_REQUESTED"}}}})
 		return u
 	}
@@ -639,10 +639,10 @@ func TestAPointTheDefinitionSetsAsideHoldsNoDismissal(t *testing.T) {
 	d := newRounds(t)
 	const cr = prURL + "#pullrequestreview-210"
 	d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
-		Author: "operator", AuthorCanPush: true, Body: "one thing", SubmittedAt: "2026-11-12T02:00:00Z",
+		Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, Body: "one thing", SubmittedAt: "2026-11-12T02:00:00Z",
 		ViewerReactions: []string{"EYES"}})
 	d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: "T2", Comments: []gh.Comment{{ID: 261, NodeID: "PRRC_261",
-		URL: prURL + "#discussion_r261", Author: "operator", Body: "a note",
+		URL: prURL + "#discussion_r261", Author: "operator", AuthorAssociation: "MEMBER", Body: "a note",
 		Review: &gh.CommentReview{ID: 210, State: "CHANGES_REQUESTED"}}}})
 	d.world.rule.notFeedback[261] = true
 	message := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
@@ -672,7 +672,7 @@ func TestARefusedReviewRequestStillDismissesTheRequestForChanges(t *testing.T) {
 		d := newRounds(t)
 		const cr = prURL + "#pullrequestreview-210"
 		d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 210, NodeID: "PRR_210", URL: cr, State: "CHANGES_REQUESTED",
-			Author: author, Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z", ViewerReactions: []string{"EYES"}})
+			Author: author, AuthorAssociation: "MEMBER", Body: "rename it", SubmittedAt: "2026-11-12T02:00:00Z", ViewerReactions: []string{"EYES"}})
 		ask := d.ask(t, "Request for changes", cr, "2026-11-12T03:00:00Z")
 		d.rule(t, 1, head, "", review.Ruling{Ask: ask, Ruling: review.RulingDeclined, Reason: "The name stands."})
 		return d

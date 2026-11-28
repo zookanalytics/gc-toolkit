@@ -11,6 +11,7 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 )
 
 // Feedback is the pack's one definition of feedback, which the feedback
@@ -39,7 +40,12 @@ const (
 // id in that space, Node its node id, which the take marks it by, and URL its
 // address. State is a review's state, Path and Line an inline comment's file
 // and the line it was made on (originalLine), Line 0 for a comment on a file
-// as a whole, and Review the review that carried an inline comment.
+// as a whole, and Review the review that carried an inline comment. Held says
+// its author is no account the repository counts as its own
+// (quote.OwnAccount), so the quote holds its text from agents and the take
+// files the operator's follow-up for it in place of an ask (FollowUp). The CI
+// bot, which the quote counts as the repository's own on the city's PRs, posts
+// only what is not for review, so no post of its reaches the take.
 type Post struct {
 	Kind   string `json:"kind"`
 	ID     int64  `json:"id"`
@@ -50,6 +56,7 @@ type Post struct {
 	Path   string `json:"path,omitempty"`
 	Line   int    `json:"line,omitempty"`
 	Review int64  `json:"review,omitempty"`
+	Held   bool   `json:"held,omitempty"`
 }
 
 // name is the post as a sentence names it.
@@ -176,11 +183,13 @@ func untakenOf(rule Feedback, self, since string, reviews []gh.Review, threads [
 // comment and a conversation comment as a Post, with what an ask's reason names
 // it by and the node id a mark goes by.
 func reviewPost(v gh.Review) Post {
-	return Post{Kind: PostReview, ID: v.ID, Node: v.NodeID, Author: v.Author, URL: v.URL, State: v.State}
+	return Post{Kind: PostReview, ID: v.ID, Node: v.NodeID, Author: v.Author, URL: v.URL, State: v.State,
+		Held: held(v.Author, v.AuthorType, v.AuthorAssociation)}
 }
 
 func inlinePost(c gh.Comment) Post {
-	p := Post{Kind: PostInline, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL, Path: c.Path, Line: c.OriginalLine}
+	p := Post{Kind: PostInline, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL, Path: c.Path, Line: c.OriginalLine,
+		Held: held(c.Author, c.AuthorType, c.AuthorAssociation)}
 	if c.Review != nil {
 		p.Review = c.Review.ID
 	}
@@ -188,7 +197,14 @@ func inlinePost(c gh.Comment) Post {
 }
 
 func conversationPost(c gh.IssueComment) Post {
-	return Post{Kind: PostConversation, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL}
+	return Post{Kind: PostConversation, ID: c.ID, Node: c.NodeID, Author: c.Author, URL: c.URL,
+		Held: held(c.Author, c.AuthorType, c.AuthorAssociation)}
+}
+
+// held is whether the quote holds a post by login, of the kind typ and the
+// association with the repository association.
+func held(login, typ, association string) bool {
+	return !quote.OwnAccount(gh.Account{Login: login, Type: typ, Association: association})
 }
 
 // sorted is ids in order, each once.

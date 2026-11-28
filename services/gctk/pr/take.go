@@ -11,17 +11,21 @@ import (
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/pr/record"
+	"github.com/zookanalytics/gc-toolkit/services/gctk/quote"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/review"
 )
 
 // The take (specs/tk-1tfzr71.161/design.md, sections 1 to 3). Each post a
 // person makes on a PR the city owns becomes an ask on the bead that owns the
-// PR, which the PR's review run rules. The one-PR update saves each post that
-// is feedback the city has not taken in the PR's saved read (untakenOf), and
-// the landing order takes them from there: under the record lock it files an
-// ask for each such post, whose one-line reason names the post (Post.reason),
-// and once the ask is filed it marks the post with the city's EYES, the receipt
-// the definition of feedback reads (gc_city_taken in
+// PR, which the PR's review run rules. A post by an account the repository does
+// not count as its own (Post.Held) becomes the operator's follow-up on the bead
+// in place of an ask (FollowUp), since its text reaches no agent to rule it,
+// and takes the same mark once the follow-up is filed. The one-PR update saves
+// each post that is feedback the city has not taken in the PR's saved read
+// (untakenOf), and the landing order takes them from there: under the record
+// lock it files an ask for each such post, whose one-line reason names the post
+// (Post.reason), and once the ask is filed it marks the post with the city's
+// EYES, the receipt the definition of feedback reads (gc_city_taken in
 // assets/scripts/pr-post.sh). With the lock free it then has the update read
 // the PR's conversation again, since a reaction moves no sign the cheap
 // question reads, so the saved read shows the marks before the next run
@@ -193,22 +197,33 @@ func (u *run) takeLocked(ctx context.Context, t takeOf) (RunOutcome, int) {
 			left = append(left, p.name())
 			continue
 		}
-		ask, filed, err := review.FileAsk(u.Ledger, review.AskRequest{Bead: o.id, Reason: p.reason(o.number)}, noChecks)
-		if err != nil {
-			failed = append(failed, fmt.Sprintf("%s: its ask did not file: %v", p.name(), err))
-			continue
+		var what string
+		if p.Held {
+			held := []quote.Held{{Kind: p.Kind, Author: p.Author, URL: p.URL}}
+			if err := FollowUp(ctx, u.Gates, o.id, o.repo, o.number, held); err != nil {
+				failed = append(failed, fmt.Sprintf("%s, an outside account's: %v", p.name(), err))
+				continue
+			}
+			what = "the operator's follow-up under " + followUpKey(p.Author)
+		} else {
+			ask, filed, err := review.FileAsk(u.Ledger, review.AskRequest{Bead: o.id, Reason: p.reason(o.number)}, noChecks)
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s: its ask did not file: %v", p.name(), err))
+				continue
+			}
+			how := "filed"
+			if !filed {
+				how = "found"
+			}
+			what = fmt.Sprintf("ask %s %s", ask, how)
 		}
 		if err := hub.AddReaction(p.Node, takenMark); err != nil {
-			failed = append(failed, fmt.Sprintf("%s: ask %s stands, and the city's %s did not land on the post: %v",
-				p.name(), ask, takenMark, err))
+			failed = append(failed, fmt.Sprintf("%s: %s stands, and the city's %s did not land on the post: %v",
+				p.name(), what, takenMark, err))
 			continue
 		}
 		marked++
-		how := "filed"
-		if !filed {
-			how = "found"
-		}
-		took = append(took, fmt.Sprintf("%s, ask %s %s", p.name(), ask, how))
+		took = append(took, fmt.Sprintf("%s, %s", p.name(), what))
 	}
 	out := RunOutcome{Bead: t.bead, Action: ActTaken,
 		Detail: fmt.Sprintf("%s took %s, each marked with the city's %s", t.of(), strings.Join(took, "; "), takenMark)}

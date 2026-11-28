@@ -55,14 +55,19 @@ const ciBot = "github-actions"
 func OwnRepository(permission string) bool { return slices.Contains(pushPermissions, permission) }
 
 // Own reports whether a post by author, on an issue or a PR opener opened,
-// counts as the repository's own: an account the repository counts as its own,
-// or GitHub Actions on an item such an account opened.
+// counts as the repository's own: an account the repository counts as its own
+// (OwnAccount), or GitHub Actions on an item such an account opened.
 func Own(author, opener gh.Account) bool {
-	if slices.Contains(ownAssociations, author.Association) {
+	if OwnAccount(author) {
 		return true
 	}
-	return author.Type == "Bot" && author.Login == ciBot && slices.Contains(ownAssociations, opener.Association)
+	return author.Type == "Bot" && author.Login == ciBot && OwnAccount(opener)
 }
+
+// OwnAccount reports whether the repository counts a as its own by its
+// association with it: its owner, a member of the organization that owns it,
+// or a collaborator on it.
+func OwnAccount(a gh.Account) bool { return slices.Contains(ownAssociations, a.Association) }
 
 // linePrefix opens each line of a quoted post. It is no shell metacharacter, so
 // a line quoted anywhere runs nothing, and a word never opens with it, so no
@@ -99,6 +104,20 @@ func Inert(text string) string {
 		lines[i] = strings.TrimRight(linePrefix+lookAlikes.Replace(line), " ")
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Line is text as one line of a quote shows it: its words joined by single
+// spaces, each character that opens a command, a variable, an escape or a
+// quoted string in a shell shown as its look-alike, and each control character
+// shown as U+FFFD. A line opens with none of a quote's bars, so it is for text
+// set after a word of the writer's own, which no delimiter equals.
+func Line(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return unicode.ReplacementChar
+		}
+		return r
+	}, lookAlikes.Replace(strings.Join(strings.Fields(text), " ")))
 }
 
 // Placeholder is what a quote shows in place of a held post's text.

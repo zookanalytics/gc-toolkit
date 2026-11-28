@@ -32,9 +32,9 @@ func (d *watched) compare(t *testing.T) pr.PassReport {
 func discussed(t *testing.T) *watched {
 	t.Helper()
 	d := newWatched(t)
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 400, Author: "operator", Body: "rename this",
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 400, Author: "operator", AuthorAssociation: "MEMBER", Body: "rename this",
 		CreatedAt: "2026-11-16T08:00:00Z", UpdatedAt: "2026-11-16T08:00:00Z"}}}}
-	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", Body: "looks fine",
+	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", AuthorAssociation: "MEMBER", Body: "looks fine",
 		CreatedAt: "2026-11-16T08:30:00Z", UpdatedAt: "2026-11-16T08:30:00Z"}}
 	updated(t, d.poll(t), "pr, checks, conversation, labels")
 	return d
@@ -92,7 +92,7 @@ func TestTheNetSavesAThreadResolvedOrReopened(t *testing.T) {
 // and the thread leaves Awaiting.
 func TestTheNetSavesTheCitysReactionThatAnswersAThread(t *testing.T) {
 	d := newWatched(t)
-	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 400, Author: "operator", Body: "rename this",
+	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{{ID: 400, Author: "operator", AuthorAssociation: "MEMBER", Body: "rename this",
 		CreatedAt: "2026-11-16T08:00:00Z", UpdatedAt: "2026-11-16T08:00:00Z"}}}}
 	d.rule.awaits["T1"] = true
 	updated(t, d.poll(t), "pr, checks, conversation, labels")
@@ -141,7 +141,7 @@ func TestTheNetSavesAPostEditThatLeftThePRsUpdatedAtUnmoved(t *testing.T) {
 	}
 	t.Run("one that turns a post into feedback", func(t *testing.T) {
 		d := newWatched(t)
-		d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", Body: "<!-- not for review --> a note",
+		d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", AuthorAssociation: "MEMBER", Body: "<!-- not for review --> a note",
 			CreatedAt: "2026-11-16T08:30:00Z", UpdatedAt: "2026-11-16T08:30:00Z"}}
 		d.rule.notFeedback[300] = true
 		d.poll(t)

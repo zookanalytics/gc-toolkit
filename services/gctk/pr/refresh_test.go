@@ -214,16 +214,16 @@ func TestEachSignsMoveReadsItsRowOfTheTable(t *testing.T) {
 		{"the rollup's state", func(d *watched) { d.pr.Rollup = "PENDING" },
 			[]string{"PullRequestPart+checks"}, "checks"},
 		{"a conversation comment", func(d *watched) {
-			d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 300, Author: "operator", Body: "and this",
+			d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 300, Author: "operator", AuthorAssociation: "MEMBER", Body: "and this",
 				CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"})
 		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
 		{"an inline comment", func(d *watched) {
 			d.pr.Threads = append(d.pr.Threads, gh.Thread{ID: "T9", Comments: []gh.Comment{{ID: 400,
-				Author: "operator", Body: "rename", CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"}}})
+				Author: "operator", AuthorAssociation: "MEMBER", Body: "rename", CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"}}})
 		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
 		{"a review", func(d *watched) {
 			d.pr.Reviews = append(d.pr.Reviews, gh.Review{ID: 101, State: "COMMENTED", Body: "a thought",
-				Author: "operator", AuthorCanPush: true, SubmittedAt: "2026-11-16T09:10:00Z"})
+				Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: "2026-11-16T09:10:00Z"})
 		}, []string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
 		{"a dismissed review", func(d *watched) { d.pr.Reviews[0].State = "DISMISSED" },
 			[]string{"PullRequestPart", "Login", "Conversation"}, "conversation"},
@@ -320,7 +320,7 @@ func TestALaterReadOfTheSavedFactsKeepsItsInstant(t *testing.T) {
 	d := newWatched(t)
 	d.poll(t)
 	before := d.saved(t, bead).PR
-	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", Body: "looks fine", CreatedAt: "2026-11-16T09:30:00Z",
+	d.pr.Comments = []gh.IssueComment{{ID: 300, Author: "operator", AuthorAssociation: "MEMBER", Body: "looks fine", CreatedAt: "2026-11-16T09:30:00Z",
 		UpdatedAt: "2026-11-16T09:30:00Z"}}
 	crossed := false
 	var later pr.Refreshed
@@ -767,20 +767,20 @@ func TestTheConversationKeepsEachPostTheCityHasNotTaken(t *testing.T) {
 	at := "2026-11-16T08:00:00Z"
 	review := func(id int64, state, body string, reacted ...string) gh.Review {
 		return gh.Review{ID: id, NodeID: fmt.Sprintf("PRR_%d", id), URL: fmt.Sprintf("%s#pullrequestreview-%d", prURL, id),
-			State: state, Body: body, Author: "operator", AuthorCanPush: true, SubmittedAt: at, ViewerReactions: reacted}
+			State: state, Body: body, Author: "operator", AuthorAssociation: "MEMBER", AuthorCanPush: true, SubmittedAt: at, ViewerReactions: reacted}
 	}
 	d.pr.Reviews = []gh.Review{review(105, "APPROVED", "approved, but rename X"), review(101, "COMMENTED", "a thought"),
 		review(102, "APPROVED", ""), review(103, "DISMISSED", "an old request"), review(104, "CHANGES_REQUESTED", "fix", "EYES"),
 		review(106, "COMMENTED", "handled", "THUMBS_UP")}
 	inline := func(id, carrier int64, state, path string, line int) gh.Comment {
 		return gh.Comment{ID: id, NodeID: fmt.Sprintf("PRRC_%d", id), URL: fmt.Sprintf("%s#discussion_r%d", prURL, id),
-			Author: "visitor", Body: "look", CreatedAt: at, Path: path, OriginalLine: line,
+			Author: "visitor", AuthorAssociation: "MEMBER", Body: "look", CreatedAt: at, Path: path, OriginalLine: line,
 			Review: &gh.CommentReview{ID: carrier, State: state, SubmittedAt: at}}
 	}
 	d.pr.Threads = []gh.Thread{{ID: "T1", Comments: []gh.Comment{inline(301, 101, "COMMENTED", "a/b.go", 42),
 		inline(300, 101, "COMMENTED", "a/c.go", 0), inline(302, 103, "DISMISSED", "a/b.go", 7)}}}
-	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor",
-		Body: "one more thing", CreatedAt: at}, {ID: 401, NodeID: "IC_401", Author: "visitor", Body: "not for review",
+	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor", AuthorAssociation: "MEMBER",
+		Body: "one more thing", CreatedAt: at}, {ID: 401, NodeID: "IC_401", Author: "visitor", AuthorAssociation: "MEMBER", Body: "not for review",
 		CreatedAt: at}}
 	d.rule.notFeedback[401] = true
 	d.poll(t)
@@ -803,7 +803,7 @@ func TestTheConversationKeepsEachPostTheCityHasNotTaken(t *testing.T) {
 // the list, an empty one included, is read again only when its signs move.
 func TestAConversationWithNoListOfUntakenPostsIsReadAgain(t *testing.T) {
 	d := newWatched(t)
-	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor",
+	d.pr.Comments = []gh.IssueComment{{ID: 400, NodeID: "IC_400", URL: prURL + "#issuecomment-400", Author: "visitor", AuthorAssociation: "MEMBER",
 		Body: "one more thing", CreatedAt: "2026-11-16T08:00:00Z"}}
 	d.poll(t)
 	b := d.row(t, bead)
@@ -906,7 +906,7 @@ func TestTheUpdateStampsTheProvenanceInstantWithTheFirstConversation(t *testing.
 		t.Fatalf("the instant was stamped in %d writes, want the one that saved the conversation", stamped)
 	}
 	writes = len(d.store.Writes())
-	d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 500, Author: "operator", Body: "a new comment",
+	d.pr.Comments = append(d.pr.Comments, gh.IssueComment{ID: 500, Author: "operator", AuthorAssociation: "MEMBER", Body: "a new comment",
 		CreatedAt: "2026-11-16T09:10:00Z", UpdatedAt: "2026-11-16T09:10:00Z"})
 	d.poll(t)
 	if got := d.row(t, bead).Metadata["pr_provenance_since"]; got != since {
@@ -938,7 +938,7 @@ func TestThePRPartKeepsItsNodeIDAndItsMerge(t *testing.T) {
 func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
 	d := newWatched(t)
 	review := func(id int64, state, login, commit string) gh.Review {
-		return gh.Review{ID: id, State: state, Author: login, AuthorCanPush: login != "visitor", Commit: commit,
+		return gh.Review{ID: id, State: state, Author: login, AuthorAssociation: "MEMBER", AuthorCanPush: login != "visitor", Commit: commit,
 			SubmittedAt: "2026-11-16T08:00:00Z"}
 	}
 	d.pr.Reviews = []gh.Review{review(102, "APPROVED", "visitor", other), review(100, "APPROVED", "operator", head),
@@ -957,14 +957,14 @@ func TestTheConversationKeepsEachStandingApproval(t *testing.T) {
 func TestTheConversationKeepsItsNewestPostAndUnresolvedThreads(t *testing.T) {
 	d := newWatched(t)
 	d.pr.Threads = []gh.Thread{
-		{ID: "T2", Comments: []gh.Comment{{ID: 400, Author: "operator", Body: "a", CreatedAt: "2026-11-16T08:00:00Z",
+		{ID: "T2", Comments: []gh.Comment{{ID: 400, Author: "operator", AuthorAssociation: "MEMBER", Body: "a", CreatedAt: "2026-11-16T08:00:00Z",
 			UpdatedAt: "2026-11-16T09:30:00Z"}}},
-		{ID: "T1", Resolved: true, Comments: []gh.Comment{{ID: 401, Author: "operator", Body: "b",
+		{ID: "T1", Resolved: true, Comments: []gh.Comment{{ID: 401, Author: "operator", AuthorAssociation: "MEMBER", Body: "b",
 			CreatedAt: "2026-11-16T08:00:00Z", UpdatedAt: "2026-11-16T08:00:00Z"}}},
-		{ID: "T0", Comments: []gh.Comment{{ID: 402, Author: "operator", Body: "c", CreatedAt: "2026-11-16T08:00:00Z",
+		{ID: "T0", Comments: []gh.Comment{{ID: 402, Author: "operator", AuthorAssociation: "MEMBER", Body: "c", CreatedAt: "2026-11-16T08:00:00Z",
 			UpdatedAt: "2026-11-16T08:00:00Z"}}},
 	}
-	d.pr.Comments = []gh.IssueComment{{ID: 500, Author: "operator", Body: "d", CreatedAt: "2026-11-16T07:00:00Z",
+	d.pr.Comments = []gh.IssueComment{{ID: 500, Author: "operator", AuthorAssociation: "MEMBER", Body: "d", CreatedAt: "2026-11-16T07:00:00Z",
 		UpdatedAt: "2026-11-16T07:00:00Z"}}
 	d.poll(t)
 	c := d.saved(t, bead).Conversation
