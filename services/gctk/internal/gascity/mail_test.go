@@ -108,3 +108,47 @@ func TestNudgeWaitIdleNamesItsDelivery(t *testing.T) {
 		t.Error("a nudge that exited 1 reads as delivered")
 	}
 }
+
+// A send names its subject and body in gc's flags, so a body that opens with a
+// dash is never read as a flag, asks for JSON, and passes a dedup key and a
+// turn request only when the send names them. gc's result is the outcome: the
+// message's id, and whether a live copy under the key was already there.
+func TestSendMailSendsAndReadsTheResult(t *testing.T) {
+	c, log := stubGC(t, `printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"hq-m9","count":1}'
+`)
+	got, err := c.SendMail(context.Background(), MailSend{To: "human", Subject: "Prompt waiting: s-1", Body: "- it waits", Dedup: "prompt-alert:s-1"})
+	if err != nil || got != (MailSent{ID: "hq-m9"}) {
+		t.Fatalf("answered %+v, %v", got, err)
+	}
+	if want := "mail|send|human|--subject=Prompt waiting: s-1|--message=- it waits|--json|--dedup=prompt-alert:s-1"; strings.Join(log(), "|") != want {
+		t.Errorf("gc ran with %q, want %q", strings.Join(log(), "|"), want)
+	}
+	c, log = stubGC(t, `echo 'gc mail send: a notice' >&2
+printf '%s\n' '{"schema_version":"1","ok":true,"command":"mail.send","action":"send","id":"hq-m8","already_done":true,"count":0}'
+`)
+	got, err = c.SendMail(context.Background(), MailSend{To: "mayor", Subject: "s", Body: "b", Notify: true})
+	if err != nil || got != (MailSent{ID: "hq-m8", Already: true}) {
+		t.Fatalf("answered %+v, %v", got, err)
+	}
+	if want := "mail|send|mayor|--subject=s|--message=b|--json|--notify"; strings.Join(log(), "|") != want {
+		t.Errorf("gc ran with %q, want %q", strings.Join(log(), "|"), want)
+	}
+}
+
+// A send that exits non-zero, or prints no JSON result that is ok and names
+// the message, did not send, even when gc's text says it did.
+func TestSendMailFailsClosed(t *testing.T) {
+	for _, body := range []string{
+		"echo 'gc mail send: unknown recipient \"x\"' >&2\nexit 1\n",
+		"printf '%s\\n' '{\"schema_version\":\"1\",\"ok\":true,\"id\":\"hq-m9\"}'\nexit 1\n",
+		"printf '%s\\n' '{\"schema_version\":\"1\",\"ok\":false,\"id\":\"hq-m9\"}'\n",
+		"printf '%s\\n' '{\"schema_version\":\"1\",\"ok\":true}'\n",
+		"printf 'Sent message hq-m9 to human\\n'\n",
+		"exit 0\n",
+	} {
+		c, _ := stubGC(t, body)
+		if got, err := c.SendMail(context.Background(), MailSend{To: "human", Subject: "s", Body: "b"}); err == nil {
+			t.Errorf("%q answered %+v and no error", body, got)
+		}
+	}
+}
