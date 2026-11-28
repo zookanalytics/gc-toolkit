@@ -97,7 +97,7 @@ its group in view.
 | send where the rig says | the rig's `AGENTS.md` says where this kind of problem goes | the bead it names |
 | place under an epic | the work serves the hypothesis of an epic nothing parks | the epic, or its open Delivery whose aim covers the bead |
 | park with its epic | the work belongs to an epic that a park holds, so it waits with that epic | the epic |
-| graduate into a new epic | beads share an outcome that no open epic's hypothesis covers, and the rig's goals make it worth a push of its own | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
+| graduate into a new epic | its group needs an epic of its own, when each condition its check below lists holds | the beads it would hold, and the epic you propose: its handle, hypothesis and boundaries |
 | place on its own | it cannot wait for an epic, in a case its check below lists; say which | nothing |
 | wait on a bead | it cannot go until something else happens, in a case its check below lists | the bead it waits on, or what the operator owes |
 | ask | it needs the operator's judgment, such as a design or product question, or you cannot tell; put the question in the reason | nothing |
@@ -114,13 +114,16 @@ Check before you propose:
   its hypothesis, not only its area. An area that carries no hypothesis is not an
   epic (`docs/epics.md`, "Epics are mortal"), so it is never a placement target.
 - **Graduate into a new epic:** read the hypothesis of each open epic section 1
-  listed, and check that none covers the outcome. Write the hypothesis from
-  that outcome, never from the beads' own fixes. It says for whom, what changes
-  and the signal that shows it worked. Write the boundaries from the hypothesis
-  (`docs/epics.md`, "The contract an epic carries"). Standing work, such as a
-  set of failures or open bugs that keeps returning, gets one bounded push.
-  Its closure condition names the lines it closes on
-  (`docs/epics.md`, "Epics are mortal").
+  listed. Propose it when each of these holds:
+  - none of those hypotheses covers the group's outcome;
+  - the rig's goals make that outcome worth a push of its own.
+
+  Write the hypothesis from that outcome, never from the beads' own fixes. It
+  says for whom, what changes and the signal that shows it worked. Write the
+  boundaries from the hypothesis (`docs/epics.md`, "The contract an epic
+  carries"). Standing work, such as a set of failures or open bugs that keeps
+  returning, gets one bounded push. Its closure condition names the lines it
+  closes on (`docs/epics.md`, "Epics are mortal").
 - **Place on its own:** propose it in one of these cases, and name it:
   - an emergency that cannot wait for an epic, such as the host going down;
   - work the operator names to run on its own, with where they named it.
@@ -158,8 +161,8 @@ Check before you propose:
   Ask of it: would anything file this again if it mattered? Answer with what
   would, and name it in the reason, such as the check, the patrol or the
   failing run that found the defect, which files it again when it runs. A
-  defect a person reported by hand, or that one run found once, may have
-  nothing that would.
+  defect may have nothing that would, such as one a person reported by hand,
+  or one that a single run found.
 
   A bead is not proposed for closing for want of a release when both of these
   hold:

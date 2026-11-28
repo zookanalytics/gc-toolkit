@@ -159,10 +159,14 @@ every failure `gc doctor` reports today leads to a doctor that stays quiet on a
 healthy city, so a finding that fires means something just broke. The operator
 chooses when the push runs, through its priority and its park
 ([steering.md](steering.md#a-park)). Its closure condition names the lines it
-closes on: the outcome reached and held for a stated time, or a stated share of
-the set cleared, such as nine in ten of the failures standing when it began. A
-push that reaches either line is ruled closed at its review, accomplished for
-that push ([How an epic closes](#how-an-epic-closes)), and the area's next push
+closes on. A line is one of these:
+
+- the outcome reached and held for a stated time;
+- a stated share of the set cleared, such as nine in ten of the failures
+  standing when it began.
+
+A push that reaches a line it names is ruled closed at its review, accomplished
+for that push ([How an epic closes](#how-an-epic-closes)). The area's next push
 is a new epic with its own set and lines.
 
 A standing theme or initiative layer above epics, which would legitimately never
@@ -320,7 +324,7 @@ settled with the operator before the Delivery closes. Other work found after it
 lands goes under its epic. Once closed, a Delivery takes nothing. Later work for
 the same part of the product goes under the epic, and the next review gathers
 it into a Delivery it aims or leaves it there. A part of the product with a
-hypothesis of its own is an epic of its own, and one that is only ever improvable
+hypothesis of its own is an epic of its own. A part that is only ever improvable
 is worked in bounded pushes ([Epics are mortal](#epics-are-mortal)).
 
 **The Epic Checkpoint.** It is the same review as any other
