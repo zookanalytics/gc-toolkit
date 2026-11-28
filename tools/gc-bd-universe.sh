@@ -29,9 +29,10 @@ BYTES_PER_TOKEN=4
 log() { printf '%s\n' "$*" >&2; }
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 # die_unreachable — the "error" side of the null-vs-error contract: a
-# referenced/expected resource (the bead, a named neighbor, a referenced PR)
-# could not be reached. Distinct exit code so callers can tell it apart from
-# usage errors (exit 1/2) and from the expected "not yet" states (exit 0).
+# referenced/expected resource (the bead, its children, a named neighbor, a
+# referenced PR) could not be reached. Distinct exit code so callers can tell
+# it apart from usage errors (exit 1/2) and from the expected "not yet" states
+# (exit 0).
 die_unreachable() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 3; }
 
 # ---------------------------------------------------------------------------
@@ -108,7 +109,9 @@ acquire_bead() {
         || die "bead $id: malformed show output"
 }
 
-# acquire_children <id> -> children array on stdout ([] if none).
+# acquire_children <id> -> children array on stdout ([] if none). bd answers []
+# for a bead with no children, so a read that fails, or answers anything but an
+# array, is unreachable, never none.
 acquire_children() {
     local id="$1" raw
     if [ -n "$FIXTURE" ]; then
@@ -119,8 +122,10 @@ acquire_children() {
         fi
         return 0
     fi
-    raw="$(gc bd children "$id" --json 2>/dev/null || true)"
-    [ -n "$raw" ] || raw='[]'
+    raw="$(gc bd children "$id" --json 2>/dev/null)" \
+        || die_unreachable "children of bead $id unreachable (gc bd children failed)"
+    printf '%s' "$raw" | jq -e 'type == "array"' >/dev/null 2>&1 \
+        || die_unreachable "children of bead $id unreadable (gc bd children answered no list)"
     printf '%s' "$raw"
 }
 
@@ -158,8 +163,10 @@ pr_ref() {
 # slice_json <id> -> the structured fed core (the machine contract).
 slice_json() {
     local id="$1" bead children prnum pr_obj
-    bead="$(acquire_bead "$id")"
-    children="$(acquire_children "$id")"
+    # footprint and fetch neighbor run this inside a command substitution,
+    # where bash turns errexit off, so a read that fails ends it here.
+    bead="$(acquire_bead "$id")" || exit
+    children="$(acquire_children "$id")" || exit
 
     prnum="$(pr_ref "$bead")"
     if [ -n "$prnum" ]; then

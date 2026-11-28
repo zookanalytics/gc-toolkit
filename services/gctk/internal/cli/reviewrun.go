@@ -169,11 +169,14 @@ fallback, screenshot or video, costlier than the modality delivered), a visual
 on another check's verdict, a ruling of a finding no lane raised or of an ask
 the round cannot take, a finding or an ask left unruled, a must-fix with no
 fixing commit, a commit on a ruling that changes no code, a question with no
-gate, and a fix for an ask an earlier round of the run declined. A correctness
-lane's approve on a change that edits its own review guidance
-(review-checks.toml, docs/review-*.md) is refused until needs_you names the
-edit for the person who approves the merge, and when the paths cannot be
-listed, needs_you says the edit is unchecked.
+gate, a fix for an ask an earlier round of the run declined, and a settles,
+the gate of a question an ask's post settles, that is no open question gate
+holding the bead that owns the PR, that a finding's or a question's ruling
+names, that two rulings name, or that the round also puts a question to, and a
+moot with no settles beside it. A correctness lane's approve on a change that
+edits its own review guidance (review-checks.toml, docs/review-*.md) is refused
+until needs_you names the edit for the person who approves the merge, and when
+the paths cannot be listed, needs_you says the edit is unchecked.
 
 exit: 0 printed
       1 usage
@@ -218,9 +221,11 @@ func reviewOutput(bead, db, file string, stdout, stderr io.Writer) int {
 }
 
 // reviewOutputIn checks the output over l. The withdrawal a material head
-// needs is the pr domain's to answer, read through the same store.
+// needs, and the post an ask's reason names, are the pr domain's to answer,
+// the withdrawal read through the same store.
 func reviewOutputIn(l *ledger.Ledger, req review.OutputRequest, stdout, stderr io.Writer) int {
 	req.Withdrawal = func(bead, head string) (string, error) { return pr.WithdrawalFor(l, bead, head) }
+	req.Post = pr.PostNamed
 	out, err := review.Output(l, req)
 	var refused *review.Refused
 	var notRun *review.NotARun
@@ -243,6 +248,8 @@ it, and each ask the round took (services/gctk/review/comment.go). <run> is the
 run's root, or any bead poured under it. It renders --iteration, else the
 latest iteration whose round wrote its rulings, and prints nothing when that
 iteration has nothing to answer: no lane ran there and the round took no ask.
+It prints the comment whole. The round's post cuts one longer than GitHub
+takes, and the cut names this call.
 
 exit: 0 printed, nothing included
       1 usage

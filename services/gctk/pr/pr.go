@@ -13,8 +13,8 @@
 //
 // The bead's side is its pending record and branch, the holds set by hand, its
 // own waits through waits, the open beads whose anchor_bead names it, the
-// review loop's results, the receipts of the feedback the intake has handled
-// and the provenance instant the definition of feedback is applied from. A read
+// review loop's results and the provenance instant the definition of feedback
+// is applied from. A read
 // that fails returns an error and no answer, since a decision made on part of
 // the facts is a decision about another PR.
 //
@@ -85,12 +85,14 @@ const (
 	// the refinery validating a head. Value names the assignee.
 	KindAssigned Kind = "assigned"
 	// KindWait: a wait of the bead's own, such as work on the PR's branch, a
-	// human gate or a conversation's gate. ID names the bead waited on.
+	// human gate or a conversation's gate. ID names the bead waited on, and
+	// Value, on an open ask the take filed for a person's post, the post's URL.
 	KindWait Kind = "wait"
 	// KindInFlight: an open bead names the bead as its anchor. ID names it.
 	KindInFlight Kind = "in-flight"
-	// KindFeedback: a review or comment the intake counts is newer than the
-	// receipts of the feedback it has handled.
+	// KindFeedback: a post on the PR is feedback the city has not taken: it
+	// carries neither of the city's marks, so the take has not filed its ask.
+	// Value is the post's URL.
 	KindFeedback Kind = "feedback"
 	// KindThread: a review thread waits on the city's answer.
 	KindThread Kind = "thread"
@@ -98,7 +100,8 @@ const (
 
 // Condition is one condition not met: its kind, the sentence that names it,
 // the bead it is when it is one, and the value it turns on when GitHub names
-// one: the merge state, the check's name, the account or the review thread.
+// one: the merge state, the check's name, the account, the review thread or
+// the post.
 type Condition struct {
 	Kind   Kind   `json:"kind"`
 	Detail string `json:"detail"`

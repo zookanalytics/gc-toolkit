@@ -255,6 +255,90 @@ func TestTheStageOfAPRMovesByItsNodeID(t *testing.T) {
 	}
 }
 
+// A reaction names its post by the post's node id and its content by GitHub's
+// name for it. One that names no post, or a content GitHub has no name of that
+// form for, asks nothing, and a refused one is an error.
+func TestAReactionNamesThePostByItsNodeID(t *testing.T) {
+	c, r := client([2]string{"addReaction(input:{subjectId:$id,content:$content})",
+		`{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}`})
+	if err := c.AddReaction("PRRC_kw1", "EYES"); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PRRC_kw1") ||
+		!strings.Contains(args, "-f content=EYES") {
+		t.Fatalf("the request %q does not name the post and the reaction", args)
+	}
+	c, r = client()
+	for _, err := range []error{c.AddReaction("", "EYES"), c.AddReaction("PRRC_kw1", "eyes"), c.AddReaction("PRRC_kw1", "")} {
+		if err == nil {
+			t.Fatal("a reaction that names no post or no content GitHub names ran")
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a refused reaction asked GitHub: %+v", r.calls)
+	}
+	c, _ = client([2]string{"addReaction", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
+	if err := c.AddReaction("PRRC_gone", "EYES"); err == nil {
+		t.Fatal("a refused reaction read as added")
+	}
+}
+
+// A resolution names its review thread by the thread's node id. One that names
+// no thread asks nothing, and a refused one is an error.
+func TestAResolutionNamesTheThreadByItsNodeID(t *testing.T) {
+	c, r := client([2]string{"resolveReviewThread(input:{threadId:$id})",
+		`{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}`})
+	if err := c.ResolveThread("PRRT_kw1"); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.Contains(args, "-f id=PRRT_kw1") {
+		t.Fatalf("the request %q does not name the thread", args)
+	}
+	c, r = client()
+	if err := c.ResolveThread(""); err == nil || len(r.calls) != 0 {
+		t.Fatalf("a resolution that names no thread answered %v and asked %+v", err, r.calls)
+	}
+	c, _ = client([2]string{"resolveReviewThread", `{"data":null,"errors":[{"message":"Could not resolve to a node"}]}`})
+	if err := c.ResolveThread("PRRT_gone"); err == nil {
+		t.Fatal("a refused resolution read as made")
+	}
+}
+
+// A review request names the PR and the account by its login, and refuses a
+// login GitHub takes no request for before it asks, which Refused reads as
+// GitHub's refusal.
+func TestAReviewRequestNamesThePRAndTheLogin(t *testing.T) {
+	c, r := client([2]string{"/requested_reviewers", `{"number":7}`})
+	if err := c.RequestReview("acme/widgets", 7, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"api", "--hostname", "github.com", "-X", "POST", "repos/acme/widgets/pulls/7/requested_reviewers",
+		"-f", "reviewers[]=operator"}
+	if !reflect.DeepEqual(r.calls[0].args, want) {
+		t.Fatalf("the request asked %q, want %q", r.calls[0].args, want)
+	}
+	c, r = client()
+	for _, err := range []error{
+		c.RequestReview("acme/widgets", 7, ""),
+		c.RequestReview("acme/widgets", 7, "dependabot[bot]"),
+		c.RequestReview("acme/widgets", 7, "-x"),
+		c.RequestReview("widgets", 7, "operator"),
+		c.RequestReview("acme/widgets", 0, "operator"),
+	} {
+		if err == nil {
+			t.Fatal("a review request that names no login, a bot, no repository or no PR ran")
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Fatalf("a refused review request asked GitHub: %+v", r.calls)
+	}
+	for _, login := range []string{"dependabot[bot]", "", "-x"} {
+		if err := c.RequestReview("acme/widgets", 7, login); !gh.Refused(err) {
+			t.Errorf("the review request of %q returned %v, which Refused does not read as a refusal", login, err)
+		}
+	}
+}
+
 // GitHub refused a request when it answered it with a client error, other than
 // a rate limit. A request whose answer did not arrive, or that GitHub could not
 // serve, is not refused.
@@ -281,23 +365,30 @@ func TestRefusedTellsARefusalFromNoAnswer(t *testing.T) {
 
 func TestCheckSuitesReadTheLatestResultOfEachRequiredRun(t *testing.T) {
 	c, r := client([2]string{"checkSuites(first:100", `{"data":{"repository":{"object":{"checkSuites":{
-		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":116886735833,"checkRuns":{
+		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":116886735833,"status":"IN_PROGRESS",
+		"createdAt":"2026-11-16T07:00:00Z","checkRuns":{
 		"pageInfo":{"hasNextPage":false},"nodes":[
-		{"name":"test","status":"COMPLETED","conclusion":"SKIPPED","isRequired":true},
-		{"name":"go","status":"IN_PROGRESS","conclusion":null,"isRequired":false}]}}]}}}}}`})
+		{"name":"test","status":"COMPLETED","conclusion":"SKIPPED","isRequired":true,
+			"detailsUrl":"https://github.com/acme/widgets/actions/runs/42114792210/job/1"},
+		{"name":"go","status":"IN_PROGRESS","conclusion":null,"detailsUrl":null,"isRequired":false}]}},
+		{"databaseId":7,"status":"COMPLETED","createdAt":"2026-11-16T07:00:01Z","checkRuns":{
+		"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}`})
 	got, err := c.CheckSuites("acme/widgets", "abc", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []gh.CheckSuite{{ID: 116886735833, Runs: []gh.CheckRun{
-		{Name: "test", Status: "COMPLETED", Conclusion: "SKIPPED", Required: true},
-		{Name: "go", Status: "IN_PROGRESS"},
-	}}}
+	want := []gh.CheckSuite{{ID: 116886735833, Status: "IN_PROGRESS", CreatedAt: "2026-11-16T07:00:00Z",
+		Runs: []gh.CheckRun{
+			{Name: "test", Status: "COMPLETED", Conclusion: "SKIPPED", Required: true,
+				URL: "https://github.com/acme/widgets/actions/runs/42114792210/job/1"},
+			{Name: "go", Status: "IN_PROGRESS"},
+		}}, {ID: 7, Status: "COMPLETED", CreatedAt: "2026-11-16T07:00:01Z"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 	args := strings.Join(r.calls[0].args, " ")
-	for _, want := range []string{"filterBy:{checkType:LATEST}", "isRequired(pullRequestNumber:$number)", "object(oid:$oid)", "-f oid=abc", "--paginate"} {
+	for _, want := range []string{"filterBy:{checkType:LATEST}", "isRequired(pullRequestNumber:$number)", "object(oid:$oid)",
+		"-f oid=abc", "--paginate", "status createdAt", "detailsUrl"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the read %q does not ask %q", args, want)
 		}
@@ -306,10 +397,25 @@ func TestCheckSuitesReadTheLatestResultOfEachRequiredRun(t *testing.T) {
 
 func TestASuiteWithMoreRunsThanAPageIsAnError(t *testing.T) {
 	c, _ := client([2]string{"checkSuites", `{"data":{"repository":{"object":{"checkSuites":{
-		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":1,"checkRuns":{
-		"pageInfo":{"hasNextPage":true},"nodes":[]}}]}}}}}`})
+		"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[{"databaseId":1,"status":"COMPLETED",
+		"createdAt":"2026-11-16T07:00:00Z","checkRuns":{"pageInfo":{"hasNextPage":true},"nodes":[]}}]}}}}}`})
 	if _, err := c.CheckSuites("acme/widgets", "abc", 7); err == nil {
 		t.Fatal("read a suite whose check runs were cut short")
+	}
+}
+
+// A suite read with no status or creation time is a read that did not ask for
+// them, which no decision is made on.
+func TestASuiteThatNamesNoStatusOrTimeIsAnError(t *testing.T) {
+	for name, node := range map[string]string{
+		"no status":        `{"databaseId":1,"createdAt":"2026-11-16T07:00:00Z","checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}}`,
+		"no creation time": `{"databaseId":1,"status":"QUEUED","checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}}`,
+	} {
+		c, _ := client([2]string{"checkSuites", `{"data":{"repository":{"object":{"checkSuites":{
+			"pageInfo":{"hasNextPage":false,"endCursor":"c"},"nodes":[` + node + `]}}}}}`})
+		if _, err := c.CheckSuites("acme/widgets", "abc", 7); err == nil {
+			t.Errorf("%s: read a suite as whole", name)
+		}
 	}
 }
 

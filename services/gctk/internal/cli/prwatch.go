@@ -65,7 +65,12 @@ each part read after the saved one's instant: the part when it differs from
 the saved one, and its read's instant alone when it holds the same, so a read
 sent before it is never saved after it. A bead on
 Gas Town's pending record gets pr_state and pr_last_checked_at in the same
-write. A merge state GitHub reads as UNKNOWN on an open PR is saved as read,
+write. The conversation keeps each post that is feedback the city has not
+taken, one that carries neither the city's EYES nor its THUMBS_UP, with what
+the landing order's take names it by. A bead with no pr_provenance_since gets
+the instant of the conversation's read, to the second, in the write that saves
+that conversation, and the definition of feedback is applied from it. A merge
+state GitHub reads as UNKNOWN on an open PR is saved as read,
 and the PR watch's next pass reads the PR part again, until GitHub has computed
 one. It prints the bead, the PR and what it did, as <bead> <url> <action>:
 <detail>.

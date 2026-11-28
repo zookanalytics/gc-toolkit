@@ -282,9 +282,9 @@ store '[{"id":"a-p1","status":"open","metadata":{"placement":"pending"}},
         {"id":"a-p3","status":"closed","metadata":{"placement":"pending"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "2" "a live bead carrying the retired placement marker is an ERROR"
-has "$OUT" "gc bd set-state a-p1 hold=mayor" "…its finding holds it by its own id"
+has "$OUT" "gc bd update a-p1 --add-label hold:mayor" "…its finding holds it by its own id"
 has "$OUT" "gc bd update a-p1 --unset-metadata placement" "…and clears the marker"
-has "$OUT" "gc bd set-state a-p2 hold=mayor" "…and a carrier in another live status is named the same way"
+has "$OUT" "gc bd update a-p2 --add-label hold:mayor" "…and a carrier in another live status is named the same way"
 has "$OUT" "waits in no queue" "…and the finding says what the marker alone leaves undone"
 hasnt "$OUT" "a-p3" "a closed bead carrying it is history, not a finding"
 # One bead carrying two retired keys is named once for each.

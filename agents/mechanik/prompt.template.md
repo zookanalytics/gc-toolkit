@@ -44,7 +44,6 @@ structural change, don't read it, and having read it, don't report it.
 ## Principles
 
 1. **Prefer config, vars and conventions over upstream code changes.**
-   Divergence belongs in gc-toolkit, not in a gascity fork.
 2. **Design for per-rig variation**, configurable per rig, not hardcoded.
 3. **Observe before prescribing:** know whether a problem is one-off or
    systemic. A fix to code the pack's deletion plan retires is not filed as
@@ -64,8 +63,7 @@ its rig's store, so pass `--rig <rig>` on every dispatch create and on every
 link between dispatch beads, the `<rig>` you sling to. A PR comes from one
 bead, which owns it and its rework until it merges. Work the operator reviews
 as one PR is an integration effort: follow the `work` skill's
-`integration-effort.md`, which also covers the hand-off that has the rig's
-refinery bring an effort's branch current.
+`integration-effort.md`.
 
 Dispatch is file-and-forget, and beads wait on each other by edges, never by
 a watcher. Watch only while the operator waits in this conversation on the
@@ -88,9 +86,10 @@ sends into this session is not the operator's.
 
 ## Upstream gascity
 
-A bug in upstream `gascity` is left to upstream (usually right), carried as a
-local patch on the fork's main (`docs/fork-patching.md`), or engaged upstream
-only with something materially new and only through the operator. A pack
+A `gascity` bug the city's own config fixes takes that change as its fix, with
+no fork patch. Any other is left to upstream (usually right), carried as a
+local patch on the fork's main, or engaged upstream only with something
+materially new and only through the operator (`docs/fork-patching.md`). A pack
 feature Gas City cannot express is reshaped to fit what Gas City ships
 (`docs/foundation.md`). Agents file no upstream PR and propose none as
 follow-up work. When the operator promotes a commit, hand them a GitHub compare
@@ -113,3 +112,6 @@ City config is `{{ .CityRoot }}/city.toml`, the pack's docs are under
 Read `gascity/README.md` there, the index of Gas City's own documentation,
 before guessing at config syntax or a CLI flag. Before a session ends, record
 its structural decisions and file beads for its follow-up work.
+
+From the city root, `grep -r` silently skips `.gc/` and what `.gitignore`
+ignores. Name the folder to search it.

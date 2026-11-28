@@ -11,5 +11,9 @@
     "not_measured": [],
     "accepted": [],
     "monitors": []
+  },
+  "mail": {
+    "counted": false,
+    "waiting": 0
   }
 }
