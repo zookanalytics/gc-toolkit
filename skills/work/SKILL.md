@@ -28,10 +28,24 @@ gc bd create "<title>" -t task -d "<what needs doing, why, and what done looks l
 ```
 
 Add `--parent <epic>` when an epic applies, and `--labels hold:mayor` when the
-bead may not be sent yet (below). A bead that already exists is held with
-`gc bd update <id> --add-label hold:mayor --append-notes "<why it waits for placement>"`.
-The added label leaves any other hold the bead carries, such as `hold:external`,
-which `set-state` would swap out for it.
+bead may not be sent yet (below). A bead that already exists is held in two
+writes. First remove any arm it carries, so that its placement decides how it
+is sent. The disarm writes nothing on a bead that carries no arm:
+
+```bash
+# >>> gctk-bin
+GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
+# <<< gctk-bin
+"$GCTK" bead disarm <id> --reason "held for placement"
+```
+
+Once that exits 0, add the label. The added label leaves any other hold the bead
+carries, such as `hold:external`, which `set-state` would swap out for it:
+
+```bash
+gc bd update <id> --add-label hold:mayor --append-notes "<why it waits for placement>"
+```
+
 Filing starts nothing: afterwards, send the bead, make it wait (the waits
 skill), or leave it for the operator to place.
 

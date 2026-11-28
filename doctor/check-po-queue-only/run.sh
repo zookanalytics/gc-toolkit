@@ -35,8 +35,11 @@
 #     (gc.dispatch_when_ready), an assignee, or a live run that works it
 #     (assets/scripts/run-lib.sh). Each is a placement that stopped before its
 #     lift, or a sling made while the bead was held, and `gctk bead place`
-#     finishes either. An arm for the validating closer (mol-validate-close) is
-#     neither: the bead waits on another bead to land and is checked then, so
+#     finishes either. An arm can also be older than the hold, when the hold
+#     was written over it with no disarm first (docs/steering.md, "The writers
+#     that hold new work"), and a placement or a disarm settles it. An arm for
+#     the validating closer (mol-validate-close) is none of these: the bead
+#     waits on another bead to land and is checked then, so
 #     its hold is lifted, not placed (skills/waits/SKILL.md). A run of
 #     mol-first-reaction sends nothing either: a first reaction triages the
 #     bead and works none of it, and its held exit writes hold:mayor seconds
@@ -391,7 +394,7 @@ scan_store() {
                 case "$kind" in
                     R) findings+=("$label: run $id sends the po work: $rest. The po takes no work from a run, and nothing refuses \`gc sling <po> --on <formula>\`. Cancel the run, assets/scripts/run-cancel.sh --root $id --reason \"<why>\" --db $db, and send the bead it works to the agent whose work it is") ;;
                     B) IFS=$'\037' read -r what how <<< "$rest"
-                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gc bd update $id --add-label hold:mayor --append-notes \"<why it waits for placement>\" --db $db, which keeps any other hold it carries") ;;
+                       findings+=("$label bead $id ($what): $how, outside the po's queue. Route or assign it to the agent whose work it is, or hold it for the po with no assignee: gctk bead disarm $id --reason \"held for placement\" --db $db && gc bd update $id --add-label hold:mayor --append-notes \"<why it waits for placement>\" --db $db, which keeps any other hold it carries") ;;
                 esac
             done <<< "$(jq -r -s --argjson qns "$PO_QNS" --argjson addrs "$PO_ADDRS" "$REACH_JQ" "${reads[@]}" 2>/dev/null)"
         fi
@@ -460,7 +463,7 @@ done <<< "$(jq -r --argjson stores "$STORES_JSON" "$DISPATCH_PATH_JQ"'
          (if ($m["gc.dispatch_when_ready_args"] | arm_args | any(.[]; tostring | test("(^|=)mol-validate-close$"))) then
             "queued bead \($id) is armed for its validating closer (mol-validate-close) on \($m["gc.dispatch_when_ready"] | tostring): it waits on another bead to land and is checked then, so it is not new work to place, and while it is held the closer never runs. Lift its hold by removing each spelling of it the bead carries, \($lift), and keep the arm"
           else
-            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, or an arm set while it was held. Finish its placement with gctk bead place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: gctk bead disarm \($id) --reason \"<why>\""
+            "queued bead \($id) is armed for dispatch to \($m["gc.dispatch_when_ready"] | tostring): a placement that stopped before its lift, an arm set while it was held, or a hold written over an older arm. Finish its placement with gctk bead place \($id) --under <parent> or --standalone, which lifts the hold without dispatching again, or disarm it: gctk bead disarm \($id) --reason \"<why>\""
           end)
        else empty end),
       (if (.assignee | nonblank) then
