@@ -176,10 +176,9 @@ bead a live run works, and a run map that does not read drops nothing, which it
 says. It drops every bead a first reaction has finished on, unless Gas City's
 run cancel ended that reaction, and every bead a closed conversation tracks,
 and leaves a bead whose record does not read for the next sweep, which it says.
-Each reaction goes to the rig's proactive pool whether
-or not the pool runs, and each sling applies sling's refusals again. A sling gc
-sling refuses, as it refuses a pool the city does not configure, fails that
-candidate alone.
+Each reaction goes to the rig's proactive pool whether or not the pool runs,
+and each sling applies sling's refusals again. A sling gc sling refuses, as it
+refuses a pool the city does not configure, fails that candidate alone.
 
 A slung run waits for a pool slot at no cost, so the sweep has no cap. It
 starts no sling once less of its deadline is left than its slowest sling took,
