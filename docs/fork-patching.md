@@ -9,10 +9,10 @@ description: gc-toolkit's own process for a city that runs a fork of gascity —
 > a `gascity` rig before/instead of upstream.
 >
 > **The goal is for this process to go away.** Every local patch is a tax —
-> on rebase work, on review attention, on divergence risk. If you can wait
-> for upstream, wait. If upstream is already converging on a fix, contribute
-> there instead. This doc describes how to do it well *when you've decided
-> you must*.
+> on rebase work, on review attention, on divergence risk. So the fork carries
+> only the fixes [When to local-patch](#when-to-local-patch) admits, and offers
+> each one upstream, where upstream's own fix retires it. This doc describes
+> how to carry one well.
 
 ---
 
@@ -36,27 +36,34 @@ disappear](#when-this-doc-should-disappear)).
 
 ## When to local-patch
 
-When you hit a bug in `gascity` that's blocking your city, evaluate which
-of these options applies:
+When you hit a bug in `gascity`, take the first of these options that fits
+it:
 
 1. **Fix it in the city's own config.** A bug the city's own configuration
    fixes, in `city.toml` or a pack the city runs, takes that change as its
    fix, not as a stopgap, and the fork carries no patch for it. Only
    upstream's own fix, arriving through a sync, replaces the change.
-2. **Ignore.** Wait for upstream to resolve, accept the cost in the meantime.
-   This is the right answer most of the time, especially when others are
-   already working the problem.
-3. **Local patch.** Carry the fix in your fork until upstream catches up.
-   This doc is about that path, for a bug the city's config cannot fix.
-4. **Engage upstream.** Only worthwhile if you have something *materially
-   new* to contribute — a missing repro, a regression test, a consequence
-   not yet noticed, a framing nobody's used. Engaging when others are
-   already iterating on a fix is noise.
+2. **Local patch.** Fix it on the fork's main when its fix is clear and
+   consistent with Gas City, by the test below. This doc is about that path.
+   Every fix the fork carries is offered upstream
+   ([Offering a fix upstream](#offering-a-fix-upstream)).
+3. **Wait for upstream.** Accept the cost until upstream's own fix arrives
+   through a sync. This is the answer for any bug the first two do not fit.
 
-Fix the bug in the city's config when the config can fix it. Otherwise
-default to ignoring it, and carry a local patch when it is hot and you can't
-wait. Engage upstream only when you have something new, *and* you've decided
-you want the public footprint of an upstream PR.
+A fix is clear and consistent with Gas City when all of these hold:
+
+- The bug has a clean repro.
+- A regression test locks the fix in.
+- The fix is small and surgical.
+- It undoes no choice upstream made on purpose, such as behavior a deliberate
+  redesign removed.
+- It risks no regression for a city configured differently.
+- It does not diverge from a fix upstream already has in flight.
+
+Engaging upstream is a separate act, worthwhile only with something
+*materially new* to contribute — a missing repro, a regression test, a
+consequence not yet noticed, a framing nobody's used. Engaging when others
+are already iterating on a fix is noise. Only the operator engages upstream.
 
 A design gap is not a local-patch case. A gc-toolkit feature that needs
 something Gas City cannot express is reshaped to fit what Gas City ships,
@@ -113,8 +120,7 @@ exactly what your fork carries at any moment.
 
 4. **Open a PR against `origin/main`.** The PR description is where you
    pay the documentation cost. Treat it as the review packet you (or a
-   future reviewer) will use months later when deciding whether to
-   submit upstream.
+   future reviewer) will use when the fix is offered upstream.
 
 5. **Merge normally.** Delete the branch on merge. The merge commit (or
    squashed commit) is now the durable artifact.
@@ -148,49 +154,29 @@ Every local-patch commit on `origin/main` should carry, in the body:
   decision history is reachable.
 
 The shape to mirror: a commit body that reads like a self-contained
-upstream PR description. If submitted upstream later, it should be
+upstream PR description. When the fix is offered upstream, it should be
 copy-pasteable with minimal editing.
 
 ---
 
-## Promoting a commit to an upstream PR candidate
+## Offering a fix upstream
 
-The path from local patch to upstream PR has one entry point: the city
-operator picks a specific commit on `origin/main`, reviews it, and
-chooses to promote it. The flow:
+Every fix the fork carries is offered upstream, so that upstream's own fix
+retires it. The operator makes each offer and chooses the order. The flow:
 
 1. **The operator initiates.** They name a specific commit (or set of
-   commits) and start a conversation: "I want to evaluate this for
-   upstream — walk me through it."
+   commits) and start a conversation: "I want to offer this upstream —
+   walk me through it."
 2. **Agents support the evaluation.** Pull the commit message, summarize
    the change, surface adjacent upstream issues/PRs, identify what's
    materially new vs. what's already in flight upstream.
-3. **The operator decides.** If yes, agents help with prep: confirm the
+3. **The operator decides when.** Agents then help with prep: confirm the
    commit rebases cleanly onto current `upstream/main`, draft a PR
    description from the commit message, run tests on the rebased branch.
+   The keeper runs the prep (`mol-upstream-gc-pr-prep`).
 4. **Submission and follow-up are operator-driven.** Pushing to the
    upstream remote and opening the PR happen under explicit approval,
    in that conversation, not as a queued action.
-
-The bar for promotion is high. Most local patches will not clear it. A
-patch is more likely to be worth submitting when it:
-
-- Fixes a regression that affects users with default configuration
-- Has a clean repro and measured impact
-- Restores behavior dropped incidentally (e.g., during a refactor) rather
-  than removed by deliberate redesign
-- Is small, surgical, and well-tested
-
-A patch is less likely to be worth submitting when it:
-
-- Is niche to your city's topology or in-house tooling
-- Restores behavior upstream removed deliberately
-- Overlaps active upstream work converging on a different fix
-- Risks regressions for users with different configurations
-
-In ambiguous cases, default to keeping the patch local. Local-fix cost
-is bounded; an upstream PR that needs revision, stalls in review, or
-introduces a regression is not.
 
 ---
 
