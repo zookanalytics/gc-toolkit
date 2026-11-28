@@ -305,7 +305,7 @@ stop_case() { # <label> <text the fake refuses> <gate status after> <arm after> 
   eq "$(slings)" 0 "stop at $1: nothing was sent"
 }
 stop_case "the disarm" "--unset-metadata gc.dispatch_when_ready " open armed "was not removed"
-stop_case "the release" "gc.takeaway=" open gone "did not end or its route did not clear"
+stop_case "the release" "## Takeaway (host, " open gone "did not end or its route did not clear"
 stop_case "the answer" "gate resolve" open gone "did not resolve"
 stop_case "the close" "--status=closed" closed gone "bead-rehome.sh said why"
 # The writer's non-zero exit can come after its close. The bead is closed then, and
@@ -556,7 +556,7 @@ eq "$(on_gate tk-o tk-g)" 1 "…and the other bead still on it"
 eq "$(field tk-o status)" open "…and the other bead open"
 has "$OUT" "left gate tk-g, which stays open: gate tk-g also holds tk-o" "…and it says what the gate still holds"
 DISARM=$(line_of "--unset-metadata gc.dispatch_when_ready ")
-RELEASE=$(line_of "gc.takeaway=")
+RELEASE=$(line_of "## Takeaway (host, ")
 LEAVE=$(line_of "dep remove tk-w tk-g")
 CLOSE=$(close_of tk-w)
 if [ -n "$DISARM" ] && [ -n "$RELEASE" ] && [ -n "$LEAVE" ] && [ -n "$CLOSE" ] && [ "$DISARM" -lt "$RELEASE" ] && [ "$RELEASE" -lt "$LEAVE" ] && [ "$LEAVE" -lt "$CLOSE" ]; then
@@ -610,7 +610,7 @@ eq "$(slings)" 0 "…and nothing was sent"
 
 shared
 bset tk-w metadata.gc.routed_to=rig/pool
-STUB_FAIL_ON='gc.takeaway=' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
+STUB_FAIL_ON='## Takeaway (host, ' run tk-w --key polecat-x --ruling "stop" --successor tk-conv
 eq "$RC" 1 "a release the store refuses stops the stand-down before the bead leaves a shared gate"
 has "$OUT" "did not end or its route did not clear" "…and says why"
 eq "$(line_of "dep remove tk-w")" "" "…with no removal tried"

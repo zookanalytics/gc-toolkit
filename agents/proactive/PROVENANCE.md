@@ -79,8 +79,9 @@ validating closer (mol-validate-close), which re-checks the no-work call and
 closes the subject on its own confident check or escalates.
 `gctk reaction dispose` performs each of them through native writes. No key on
 the subject records that a reaction landed: the run is the record while it
-runs, `gc sling` refuses a second, and the state the exit wrote and its
-headline keep the subject out of the scan afterwards. A worker that dies
+runs, `gc sling` refuses a second, and the state the exit wrote keeps the
+subject out of the scan while that state stands, and the finished run does
+afterwards. A worker that dies
 before it closes its step leaves the step to the next, whose check passes only
 while the exit has not dispatched the subject; that worker finds the card its run
 wrote and re-runs the same exit. The card in the subject's notes records which

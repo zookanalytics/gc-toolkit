@@ -82,6 +82,12 @@ grep -q 'TRAPDELTA\[\]' <<< "$EOUT" \
 eq "$(find "$ENUMTMP" -name 'gctk-rig-map.*' | wc -l | tr -d ' ')" "0" \
    "(ENUM) …and rig-map.sh removed its stderr capture"
 
+# gc-helm.sh caps a conversation's title at the cap gctk holds a headline to,
+# and it is sh, which reads no Go, so it carries its own copy as TAKEAWAY_MAX.
+GO_CAP=$(sed -n 's/^const TakeawayMax = \([0-9]*\)$/\1/p' "$HERE/../../services/gctk/internal/lifecycle/headline.go")
+eq "$(sed -n 's/^TAKEAWAY_MAX=\([0-9]*\).*/\1/p' "$HERE/gc-helm.sh" | head -1)" "${GO_CAP:-<no TakeawayMax in headline.go>}" \
+   "(CAP) gc-helm.sh caps a conversation's title at gctk's headline cap"
+
 echo ""
 echo "gc-helm board refusal + rig enumeration: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

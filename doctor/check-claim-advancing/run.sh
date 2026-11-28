@@ -81,8 +81,8 @@
 # warning exactly as it does in arm 1.
 #
 # Held on purpose — both arms. A step nobody is meant to run is outside every
-# class above. The hold is a non-empty gc.takeaway or hold_reason, and it may
-# sit on the step or on the root the molecule was parked at, so both are read:
+# class above. The hold is a non-empty hold_reason, and it may sit on the step
+# or on the root the molecule was parked at, so both are read:
 # gc.root_bead_id names the root, and one listing per arm resolves the roots of
 # that store's candidates. A held step is a note, and the resting state it
 # names is `blocked` — the one state neither arm scans, so no pool is offered
@@ -108,8 +108,7 @@ SEP=$'\037'
 # What a hold looks like, spliced into both arms and the root lookup so the
 # three readings cannot drift. `$m` is the bead's own metadata; an EMPTY value
 # is a hold that was CLEARED, which is the state a released step is left in.
-HELD='((($m["gc.takeaway"] // "") | tostring) != "")
-      or ((($m["hold_reason"] // "") | tostring) != "")'
+HELD='((($m["hold_reason"] // "") | tostring) != "")'
 
 errors=(); warnings=(); notes=()
 unclaimed=(); occupied_list=(); occupancy_partial=0
@@ -624,7 +623,7 @@ if [ "${#held_count[@]}" -ne 0 ]; then
             in_progress) hwhy="no path reaches them, but releasing one to open would hand it to the pool its route still names" ;;
             *)           hwhy="\`bd ready\` is offering them, so the pool their route names can claim one" ;;
         esac
-        notes+=("$hlabel: ${held_count[$hkey]} step(s) held on purpose — gc.takeaway or hold_reason, on the step or on its root — resting at $hstate for up to ${held_age[$hkey]}m; $hwhy. Park them at status=blocked, which neither arm scans; reported, not judged")
+        notes+=("$hlabel: ${held_count[$hkey]} step(s) held on purpose — hold_reason, on the step or on its root — resting at $hstate for up to ${held_age[$hkey]}m; $hwhy. Park them at status=blocked, which neither arm scans; reported, not judged")
     done <<< "$(printf '%s\n' "${!held_count[@]}" | LC_ALL=C sort)"
 fi
 

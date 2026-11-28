@@ -52,15 +52,15 @@ GCTK="${GCTK_BIN:-${GC_CITY_PATH:-}/.gc/services/gctk/bin/gctk}"
 "$GCTK" bead takeaway <bead> "<what it needs now, at most 140 characters>" --no-wait
 ```
 
-Pass `--no-wait` when the bead waits on nothing. When it waits, pass
-`--waiting-on <bead>` in its place, once for each bead it waits on. Each named
-wait is also written as a `blocks` edge, after the headline. A wait in another
-store than the bead is refused before anything is written, because an edge
-there would hold nothing, and an edge the store refuses leaves the headline
-written and makes the call exit 4 (the waits skill). A headline with neither
-flag leaves the bead waiting on its text alone, which
-`doctor/check-wait-is-an-edge` reports unless a live `blocks` edge holds the
-bead.
+The headline goes into the bead's notes, under a `## Takeaway` heading that
+names who wrote it and when. Pass `--no-wait` when the bead waits on nothing.
+When it waits, pass `--waiting-on <bead>` in its place, once for each bead it
+waits on. Each named wait is also written as a `blocks` edge, after the
+headline. A wait in another store than the bead is refused before anything is
+written, because an edge there would hold nothing, and an edge the store
+refuses leaves the headline written and makes the call exit 4 (the waits
+skill). A headline with neither flag leaves any wait it names in its text
+alone, which holds nothing.
 
 In a sitting, leave the headlines to the hold and the sign-off (the
 converse-hold and converse-settle steps). The one other headline a sitting

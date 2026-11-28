@@ -45,7 +45,7 @@ func TestACloseAfterTheReadKeepsItsClose(t *testing.T) {
 	for _, never := range []string{"--status", "--assignee", "--if-", "gc.routed_to"} {
 		hasnt(t, attempts[1], never, "(RACECLOSE) the second write")
 	}
-	has(t, attempts[1], "--set-metadata gc.takeaway=parked — its premise fell", "(RACECLOSE) the second write")
+	has(t, attempts[1], "--append-notes "+Note("converse", stamp, "parked — its premise fell"), "(RACECLOSE) the second write")
 	if s := w.row("tk-a").Status; s != "closed" {
 		t.Errorf("(RACECLOSE) the close did not stand: the bead reads %s", s)
 	}
@@ -118,7 +118,7 @@ func TestALiveHoldersClaimIsKept(t *testing.T) {
 		t.Fatalf("(HELD) exits %d with %q, want 4", code, out)
 	}
 	up := w.update("tk-held")
-	has(t, up, "--set-metadata gc.takeaway=stopped — the PR it rebuilds was retired", "(HELD) the headline")
+	has(t, up, "--append-notes "+Note("converse", stamp, "stopped — the PR it rebuilds was retired"), "(HELD) the headline")
 	for _, never := range []string{"--status", "--assignee", "--if-", "gc.routed_to", "--unset-metadata"} {
 		hasnt(t, up, never, "(HELD) the write beside a live claim")
 	}

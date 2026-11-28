@@ -27,12 +27,17 @@ const tracks = "tracks"
 
 // Run is one workflow run: its root, the input convoy the root names, empty
 // when it names none, the bead the run works, empty when it names none, the
-// formula the root records it was poured from, empty when it records none, and
-// whether it is live.
+// formula the root records it was poured from, empty when it records none,
+// whether it is live, and the outcome its root records, empty while it runs or
+// when it records none.
 type Run struct {
-	Root, Convoy, Bead, Formula string
-	Live                        bool
+	Root, Convoy, Bead, Formula, Outcome string
+	Live                                 bool
 }
+
+// Canceled is the outcome Gas City's run cancel records on the root of a run it
+// ended.
+const Canceled = "canceled"
 
 // str is a String key's value on r, trimmed, empty when r does not carry it. A
 // String key's stored text always decodes.
@@ -97,6 +102,18 @@ func LiveRunsOf(l *ledger.Ledger, bead string, up []*ledger.Record) ([]Run, erro
 		return nil, err
 	}
 	return slices.DeleteFunc(runs, func(r Run) bool { return !r.Live }), nil
+}
+
+// EndedRunsOf reads the runs that work bead whose roots have closed, in root
+// order, as RunsOf reads them, over up, the beads with a tracks edge onto bead,
+// as l.Dependents reads them, which a caller that asks its own question of them
+// reads once for both. A read that fails returns its *ledger.ReadError.
+func EndedRunsOf(l *ledger.Ledger, bead string, up []*ledger.Record) ([]Run, error) {
+	runs, err := runsWorking(l, bead, up, func(s ledger.Selection) ledger.Selection { return s.WithClosed() })
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(runs, func(r Run) bool { return r.Live }), nil
 }
 
 // runsWorking is the runs that work bead, in root order, over up, the beads
@@ -205,7 +222,8 @@ func runsOver(l *ledger.Ledger, rows []*ledger.Record) ([]Run, error) {
 // returned tracks, as run-lib.sh's run_of reads it.
 func runOf(root *ledger.Record, tracked map[string][]string) Run {
 	convoy, issue := str(inputConvoyKey, root), str(issueVarKey, root)
-	run := Run{Root: root.ID, Convoy: convoy, Formula: str(formulaNameKey, root), Live: root.Status() != "closed"}
+	run := Run{Root: root.ID, Convoy: convoy, Formula: str(formulaNameKey, root), Outcome: str(outcomeKey, root),
+		Live: root.Status() != "closed"}
 	if convoy == "" {
 		run.Bead = issue
 		return run

@@ -148,8 +148,8 @@ export GCTK_BIN
 
 cat > "$TMP/pack/lifecycle/lifecycle.toml" <<'TOML'
 [holds]
-marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
-settled_keys = ["gc.takeaway=gc.takeaway_settled"]
+marker_keys = ["triage.hold", "blocked_reason", "site.hold"]
+settled_keys = ["site.hold=site.answered"]
 terminal_wait_type = "gate"
 hold_severity = "warn"
 TOML
@@ -226,14 +226,13 @@ notheld() { # <metadata-json> <label>
 }
 held '{"triage.hold":"x"}'                       "triage.hold"
 held '{"blocked_reason":"a person must rule"}'  "blocked_reason"
-held '{"gc.takeaway":"needs an operator ruling"}' "gc.takeaway"
+held '{"site.hold":"needs an operator ruling"}' "site.hold"
 notheld '{"gc.routed_to":"human"}'               "a human route"
 notheld '{"gc.routed_to":"alpha/alpha.polecat"}' "gc.routed_to on a pool"
 # merge_hold is not a marker: a hold that must show as an edge asserts it
-# through blocked_reason or gc.takeaway beside it.
+# through blocked_reason beside it.
 notheld '{"merge_hold":"operator freeze"}'       "merge_hold"
 notheld '{"blocked_reason":""}'                  "an empty blocked_reason"
-notheld '{"gc.takeaway":""}'                     "an empty gc.takeaway"
 
 # --- 8. every non-closed status is in scope -------------------------------
 for st in open in_progress blocked deferred hooked pinned; do
@@ -303,7 +302,7 @@ store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"declared only in
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "1" "a marker declared only in lifecycle.toml is asserted"
 has "$OUT" "site.hold" "and the finding names it"
-store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x","gc.takeaway":"y"}}]'
+store '[{"id":"aa-101","status":"open","metadata":{"triage.hold":"x","blocked_reason":"y"}}]'
 OUT=$(PACK="$TMP/pack2" run_check); RC=$?
 eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 
@@ -312,7 +311,7 @@ eq "$RC" "0" "a marker the declaration drops is no longer asserted"
 # fields a declaration dropped on purpose.
 mkdir -p "$TMP/pack5/lifecycle"
 { echo '[holds]'; echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack5/lifecycle/lifecycle.toml"
-for m in '{"blocked_reason":"a person must rule"}' '{"gc.takeaway":"needs an operator ruling"}'; do
+for m in '{"blocked_reason":"a person must rule"}' '{"triage.hold":"needs an operator ruling"}'; do
   store '[{"id":"aa-101","status":"open","metadata":'"$m"'}]'
   OUT=$(PACK="$TMP/pack5" run_check); RC=$?
   eq "$RC" "0" "a declaration that drops a marker does not inherit it: $m"
@@ -427,26 +426,25 @@ OUT=$(PACK="$TMP/pack4" run_check); RC=$?
 eq "$RC" "0" "the error posture still passes a store with nothing held"
 
 # --- 22. the settled-key: a marker its own writer answered ----------------
-# The two shapes one ritual produces. A sign-off stamps a headline on the
-# subject it settled and on the one it parked for a person, and the sentence
-# reads the same either way; the settled-key is the writer saying which, and
-# only the parked one is a wait nothing re-asks.
-notheld '{"gc.takeaway":"resolved — no human action was needed","gc.takeaway_settled":"1"}' \
-        "a takeaway its writer settled"
-held    '{"gc.takeaway":"retention policy UNRULED — needs the operator"}' \
-        "a takeaway that parks a bead for a person"
-held    '{"gc.takeaway":"parked","gc.takeaway_settled":""}' \
-        "a takeaway whose settled-key is empty"
+# A writer that knows whether its marker waits on anything says so in the
+# settled-key beside it: non-empty, the marker holds nothing, and absent or
+# empty, it holds, since the sentence reads the same either way.
+notheld '{"site.hold":"resolved — no human action was needed","site.answered":"1"}' \
+        "a marker its writer settled"
+held    '{"site.hold":"retention policy UNRULED — needs the operator"}' \
+        "a marker with no settled-key"
+held    '{"site.hold":"parked","site.answered":""}' \
+        "a marker whose settled-key is empty"
 # The key answers its OWN marker and nothing else, so a bead holding two
 # markers is still held by the other one.
-held '{"gc.takeaway":"settled","gc.takeaway_settled":"1","triage.hold":"waiting on the migration"}' \
-     "a settled takeaway beside another marker"
+held '{"site.hold":"settled","site.answered":"1","triage.hold":"waiting on the migration"}' \
+     "a settled marker beside another marker"
 OUT=$(run_check)
-hasnt "$OUT" "gc.takeaway=settled" "and the settled marker is not listed among what holds it"
+hasnt "$OUT" "site.hold=settled" "and the settled marker is not listed among what holds it"
 # A settled marker is answered, not exempted: the bead is judged on every other
 # marker it carries, and one whose only marker is settled leaves the store clean
 # rather than unscanned.
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"settled","site.answered":"1"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a store whose only marker is a settled one passes"
 has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
@@ -455,15 +453,15 @@ has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
 # names markers and no pairing answers no marker with a key: the settled stamp
 # is data nothing has been told to read.
 mkdir -p "$TMP/pack8/lifecycle"
-{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'; } > "$TMP/pack8/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack8/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"settled","site.answered":"1"}}]'
 OUT=$(PACK="$TMP/pack8" run_check); RC=$?
 eq "$RC" "1" "a declaration with no settled_keys answers no marker with a key"
 # Half a pair is worse than none — a marker answered by a key no writer stamps
 # reads every hold as settled — so a malformed entry is dropped.
 mkdir -p "$TMP/pack9/lifecycle"
-{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'
-  echo 'settled_keys = ["gc.takeaway=", "=gc.takeaway_settled", "gc.takeaway"]'
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'
+  echo 'settled_keys = ["site.hold=", "=site.answered", "site.hold"]'
   } > "$TMP/pack9/lifecycle/lifecycle.toml"
 OUT=$(PACK="$TMP/pack9" run_check); RC=$?
 eq "$RC" "1" "a settled_keys entry missing either half is dropped"
@@ -477,11 +475,6 @@ eq "$RC" "0" "a pairing declared only in lifecycle.toml is honored"
 store '[{"id":"aa-101","status":"open","metadata":{"site.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack10" run_check); RC=$?
 eq "$RC" "1" "...and the same marker without its key still holds"
-# With no lifecycle.toml at all the built-in pairing stands in with the
-# built-in markers, so the standby list is the shipped one.
-store '[{"id":"aa-101","status":"open","metadata":{"gc.takeaway":"settled","gc.takeaway_settled":"1"}}]'
-OUT=$(PACK="$TMP/pack3" run_check); RC=$?
-eq "$RC" "0" "the built-in list carries the built-in pairing"
 
 # --- 23. the terminal end of a wait is exempt, not a finding --------------
 # A gate is the thing others block ON: the gated bead blocks on it and it blocks
@@ -492,7 +485,7 @@ eq "$RC" "0" "the built-in list carries the built-in pairing"
 gate_row() { # <issue-type> <metadata-json> — one open bead of that type
   store '[{"id":"aa-101","status":"open","issue_type":"'"$1"'","metadata":'"$2"'}]'
 }
-gate_row gate '{"gc.takeaway":"what should happen with X?"}'
+gate_row gate '{"site.hold":"what should happen with X?"}'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a gate carrying a marker is exempt: it is the terminal end of its wait"
 gate_row gate '{"triage.hold":"x"}'
@@ -500,13 +493,13 @@ OUT=$(run_check); RC=$?
 eq "$RC" "0" "the gate type exempts the bead even beside another marker"
 # The type is the rule, not a key: a legacy demand of another type still
 # carrying gc.demand_for is judged on its markers like any bead.
-gate_row decision '{"gc.demand_for":"aa-500","gc.takeaway":"parked for a person"}'
+gate_row decision '{"gc.demand_for":"aa-500","site.hold":"parked for a person"}'
 OUT=$(run_check); RC=$?
 eq "$RC" "1" "a bead of another type is judged on its markers, gc.demand_for or not"
 has "$OUT" "aa-101" "…and it names the held bead"
 # The exemption does not skip the store: a gate is not counted as a finding,
 # and a store whose only held bead is a gate reads clean and scanned.
-store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling"}}]'
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"site.hold":"needs a ruling"}}]'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a store whose only held bead is a gate passes"
 has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
@@ -515,21 +508,21 @@ has "$OUT" "across 3 store(s)" "and the store was scanned, not skipped"
 # terminal_wait_type does not exempt the terminal end — the gate's own markers
 # still assert, which is the fail-safe an omitted field is meant to be.
 mkdir -p "$TMP/pack11/lifecycle"
-{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"needs a ruling"}}]'
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'; } > "$TMP/pack11/lifecycle/lifecycle.toml"
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"site.hold":"needs a ruling"}}]'
 OUT=$(PACK="$TMP/pack11" run_check); RC=$?
 eq "$RC" "1" "a declaration that omits terminal_wait_type does not exempt the terminal end"
 has "$OUT" "aa-101" "and the gate's own marker still asserts"
 # A terminal_wait_type declared only in lifecycle.toml is honored, for a type of
 # the declaration's own choosing.
 mkdir -p "$TMP/pack12/lifecycle"
-{ echo '[holds]'; echo 'marker_keys = ["gc.takeaway"]'
+{ echo '[holds]'; echo 'marker_keys = ["site.hold"]'
   echo 'terminal_wait_type = "site-terminus"'; } > "$TMP/pack12/lifecycle/lifecycle.toml"
-store '[{"id":"aa-101","status":"open","issue_type":"site-terminus","metadata":{"gc.takeaway":"x"}}]'
+store '[{"id":"aa-101","status":"open","issue_type":"site-terminus","metadata":{"site.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack12" run_check); RC=$?
 eq "$RC" "0" "a terminal_wait_type declared only in lifecycle.toml is honored"
 # With no lifecycle.toml at all the built-in terminal-wait type stands in.
-store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"gc.takeaway":"x"}}]'
+store '[{"id":"aa-101","status":"open","issue_type":"gate","metadata":{"triage.hold":"x"}}]'
 OUT=$(PACK="$TMP/pack3" run_check); RC=$?
 eq "$RC" "0" "the built-in list carries the built-in terminal-wait type"
 
@@ -667,10 +660,10 @@ OUT=$(PACK="$SHIPPED" run_check); RC=$?
 finding "$RC" "the record's reason with no marker beside it holds"
 has "$OUT" "held by blocked_reason=Awaiting verified merge" "and the finding names that reason"
 # The marker answers the record's reason and no other marker on the bead.
-store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true","gc.takeaway":"needs an operator ruling"}}]'
+store '[{"id":"aa-101","status":"blocked","metadata":{'"$PENDING"',"pr_reconcile_pending":"true","triage.hold":"needs an operator ruling"}}]'
 OUT=$(PACK="$SHIPPED" run_check); RC=$?
 finding "$RC" "a pending bead is still held by another marker it carries"
-has "$OUT" "gc.takeaway=needs an operator ruling" "and the finding names that marker"
+has "$OUT" "triage.hold=needs an operator ruling" "and the finding names that marker"
 hasnt "$OUT" "blocked_reason=Awaiting" "and not the reason the record's marker answers"
 # With no declaration to read, the built-in list carries the same pairing,
 # with the same statuses and value.
@@ -725,7 +718,7 @@ record_pair() { # <entry> — blocked_reason's pair, its statuses sorted
 if [ -n "$plan_statuses" ] && [ -n "$marker_key" ] && [ -n "$marked_value" ]; then
   want="$plan_statuses:$marker_key=$marked_value"
   declared=$(grep -o '"blocked_reason=[^"]*"' "$SHIPPED/lifecycle/lifecycle.toml" | head -1 | tr -d '"')
-  builtin=$(sed -n "s/^\(blocked_reason=[^']*\)'\$/\1/p" "$CHECK")
+  builtin=$(sed -n "s/^\(BUILTIN_SETTLED_KEYS='\)*\(blocked_reason=[^']*\)'\$/\2/p" "$CHECK")
   eq "$(record_pair "$declared")" "$want" "(NO-DRIFT) the declared pair answers the record at the statuses plan() decides and the value record.Read marks"
   eq "$(record_pair "$builtin")" "$want" "(NO-DRIFT) the built-in pair is the same"
 else

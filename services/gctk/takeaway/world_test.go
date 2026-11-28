@@ -16,6 +16,9 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/ledger"
 )
 
+// stamp is the time the world's clock reads, as a headline's note names it.
+const stamp = "2026-11-20T06:00:00Z"
+
 // pool is the pool a route names in these tests.
 const pool = "tk/gc-toolkit.polecat"
 

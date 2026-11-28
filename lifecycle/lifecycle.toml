@@ -40,7 +40,7 @@ approval_rule = "universal-nonself-standing"
 # and reading it for holds would make prose a hold carrier again.
 [holds]
 # Present with a non-empty value, and the bead is held, whatever it says.
-marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
+marker_keys = ["triage.hold", "blocked_reason"]
 # A marker its own writer can answer, as
 # `<marker>=[<status>,...:]<settled-key>[=<value>]`: <marker> holds while
 # <settled-key> is absent or empty on the same bead. Where the pair names a
@@ -48,14 +48,6 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # pair names statuses, it also holds on a bead at any other status. Nothing here
 # clears a marker: the sentence stands, and the second key records beside it
 # what answers it. A pair that does not parse is dropped, so its marker holds.
-#
-# gc.takeaway is stamped by every sign-off, the one that settled its subject as
-# much as the one that parked it for a person, and only the writer knows which
-# it was — `gctk bead takeaway --no-wait` says so by stamping
-# gc.takeaway_settled beside the headline, and a takeaway without it is a hold.
-# Every writer of gc.takeaway writes gc.takeaway_settled in the same statement,
-# empty unless it means settled, so a stamp cannot inherit the disposition of
-# the sitting before it (assets/scripts/takeaway-settled-pairing.test.sh).
 #
 # blocked_reason is also the pending record's reason: the merge a bead awaits,
 # or the exception that holds it. The record writes it only on a bead whose
@@ -71,10 +63,10 @@ marker_keys = ["triage.hold", "blocked_reason", "gc.takeaway"]
 # exception's human gate, and the edge an exception or a refinery park owes is
 # the human gate filed with it. doctor/check-wait-is-an-edge/run.test.sh holds
 # the pair's statuses and value to that code.
-settled_keys = ["gc.takeaway=gc.takeaway_settled", "blocked_reason=open,blocked:pr_reconcile_pending=true"]
+settled_keys = ["blocked_reason=open,blocked:pr_reconcile_pending=true"]
 # merge_hold is not a marker_key: an operator's freeze is theirs to lift, and a
-# hold that must show as an edge asserts it through blocked_reason or
-# gc.takeaway beside it, both declared above, which carry the wait's sentence.
+# hold that must show as an edge asserts it through blocked_reason beside it,
+# declared above, which carries the wait's sentence.
 # The terminal end of a wait is a bead of this issue type: the bead others
 # block ON, which by construction can hold no `blocks` edge of its own. A human
 # gate is filed blocking the bead that waits (human-gate.sh, or the native
@@ -191,10 +183,6 @@ since_format = "RFC 3339 UTC"
 # asks about the route only while the bead is unassigned. A handoff to a NAMED
 # agent clears the route; a pool route left on directly-assigned work reads as
 # demand for work no pool is offered.
-#
-# THE HEADLINE is gc.takeaway, one line read at a glance, so lifecycle.sh
-# refuses a --takeaway that normalizes to nothing, and one longer than 140
-# codepoints.
 #
 # A WAIT IS AN EDGE, never a metadata string (I1, doctor/check-wait-is-an-edge):
 # `blocks` is the edge type the pack writes for a hold, one of the three bd
@@ -944,7 +932,7 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # operator or converse writes as a plain truthy value; the landing order's
 # evaluator and gate-ensure.sh honour it. It is not itself a [holds] marker_key, so a bare
 # merge_hold owes no blocks edge; a hold that must show as an edge asserts it
-# through blocked_reason or gc.takeaway beside it. rebase_hold and tracking_only are OPERATOR freezes
+# through blocked_reason beside it. rebase_hold and tracking_only are OPERATOR freezes
 # the pack only reads. The landing order's evaluator holds a PR's merge on its
 # anchor's own rebase_hold, as on merge_hold, and files no conflict ask while a
 # hold set by hand holds the bead. Nothing reads tracking_only. The pack never
@@ -952,7 +940,7 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # hold_reason is a freeform sentence recording why a bead or step was parked in
 # place. It is not one of the [holds] marker_keys, so unlike blocked_reason it
 # owes no blocks edge; it is read only as a "held on purpose" signal.
-# doctor/check-claim-advancing exempts a step or root carrying it (or gc.takeaway)
+# doctor/check-claim-advancing exempts a step or root carrying it
 # from its stall arms with the remedy status=blocked. No pack
 # script writes it; an operator or the refinery stamps it by hand when parking a
 # branch. Never cleared. Freeform.
@@ -961,10 +949,12 @@ keys = ["merge_hold", "rebase_hold", "tracking_only", "hold_reason"]
 # The proactive first-reaction surface. A first reaction is a run of
 # formulas/mol-first-reaction.toml that gctk reaction sling slings on its
 # subject S. While it runs, the run is the record, and gc sling refuses a
-# second live run of the formula on S. Once it ends, the state its exit wrote,
-# and after that the gc.takeaway headline every exit writes, keep S out of the
-# scan (specs/tk-1tfzr71.105/design.md, section 2), so no key records that S
-# had one. The group holds the recommendation a recommend exit leaves for the
+# second live run of the formula on S. Once it ends, the state its exit wrote
+# keeps S out of the sweep while that state stands, and after that the closed
+# run itself does, unless Gas City's run cancel ended it, as a closed
+# conversation does for a sitting (gctk reaction sweep;
+# specs/tk-1tfzr71.105/design.md, section 2), so no key records that S had one.
+# The group holds the recommendation a recommend exit leaves for the
 # operator's Accept, and the retired keys of the reaction bead and of the
 # attempt record before it.
 keys = [
@@ -1143,11 +1133,8 @@ keys = [
   # gc.demand_for — RETIRED. It named the bead a demand gated. Nothing writes or
   # reads it: a human gate names the bead it gates through its blocks edge, and
   # an open human gate there is what tells a person still deciding from a
-  # sitting that ended, never the gc.takeaway headline beside it.
+  # sitting that ended, never the headline the sitting left in its notes.
   # doctor/check-state-space lists it in RETIRED_KEYS.
-  # gc.takeaway_settled is the headline's own disposition, "1" where its writer
-  # said nothing is waiting and empty where it did not: [holds] settled_keys
-  # reads it, and it is rewritten with every headline rather than surviving one.
   "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.takeaway_settled",
   "gc.demand_for", "gc.hold_demand", "gc.gate_visit",
   "gc.continuation_group", "gc.origin", "gc.outcome_reason",
@@ -1159,12 +1146,16 @@ keys = [
   "gc.ruling", "gc.folded_into", "gc.handback", "gc.handback_at",
   "gc.ruling_consequence",
 ]
-# The gc.takeaway family carries its mechanics in the comment above and in
-# [holds] (settled_keys): gctk bead takeaway and lifecycle.sh write the takeaway
-# (gc.takeaway_by records which), and gc.takeaway_settled is `1` when nothing
-# waits and empty for a live wait. The takeaway package
-# (services/gctk/takeaway) declares the family, and it stays registered here
-# while shell still reads it (docs/gctk-architecture.md, Debt).
+# gc.takeaway / _at / _by — RETIRED. A bead's headline, when it was written and
+#   who wrote it. gctk bead takeaway, and gctk reaction dispose through it,
+#   append the headline to the bead's notes under a heading that names its
+#   writer and its time, so nothing writes the keys. liveness-recheck.sh, which
+#   the deletion plan retires, still reads gc.takeaway and gc.takeaway_at into
+#   its recorded bucket. Registered so that residue on a pre-retirement bead
+#   reads as known, not as a stray.
+# gc.takeaway_settled — RETIRED. `1` where the headline's writer said nothing
+#   waited on the bead. Nothing writes or reads it. Registered so that residue
+#   on a pre-retirement bead reads as known, not as a stray.
 # gc.hold_demand — RETIRED. On a converse hold's VISIT, it named the demand the
 #   hold filed. A hold now files a human gate, and its conversation's replies-to
 #   edge names the gate, so nothing writes or reads the key, and
@@ -1190,10 +1181,9 @@ keys = [
 # gc.outcome_reason — RETIRED. On a closed visit, the one-line sentence naming
 #   why it closed, stamped beside the gc.outcome word a reader groups by.
 #   Nothing writes or reads it: a conversation's close reason carries that
-#   sentence, and the helm board's sittings card reads it there as the
-#   headline when the sitting left no takeaway. Registered so that residue on a
-#   pre-retirement bead reads as known, not as a stray; doctor/check-state-space
-#   reports a live bead that still carries it.
+#   sentence. Registered so that residue on a pre-retirement bead reads as
+#   known, not as a stray; doctor/check-state-space reports a live bead that
+#   still carries it.
 # escalation_key — RETIRED. On a visit, the situation key it was filed under.
 #   Nothing writes or reads it: a human gate carries its situation key as its
 #   await id (human-gate.sh), and the pack's readers look a gate up by that.

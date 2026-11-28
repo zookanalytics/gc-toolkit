@@ -1487,40 +1487,17 @@ have "the drafter's terminal script changes into the directory its guide names, 
     'changes into it before its other actions, as `run cd <dir>`,' "$REPO/skills/gc-demo-script/SKILL.md"
 have "…which Demo a PR captures from the worktree's root" 'A terminal script takes `--cwd .` alone,' "$DEMO_SKILL"
 have "…and so does the demo check" '`--cwd <worktree>`, the root its shell starts in on every demo path.' "$DEMO_CHECK"
-echo "── a moot or benign close settles a headline that waits on nothing ──"
-# A cut-short sitting leaves its hold's headline on the subject, and the next
-# sitting's premise re-check can find the conversation moot and close it. The
-# block runs as written, its placeholders filled, under stubs: gc answers the
-# subject's row from RL_ROW and exits RL_SHOW_RC after printing it, and gctk,
-# built from this checkout, answers what holds the subject from a store of that
-# row with an edge onto each bead RL_GATES lists, `blocks` unless the bead names
-# its `edge`, those beads, and the rows RL_MORE adds. Its reads fail at
-# RL_DEPS_RC, or when RL_GATES is not a list. gctk writes the headline into
-# that store, and each of its writes that lands is logged beside the block's
-# own calls; HOLDS_FAIL=update refuses them.
+echo "── a moot or benign close records the reading and closes the conversation ──"
+# The next sitting's premise re-check can find a conversation moot and close
+# it. The block runs as written, its placeholders filled, under a stub gc that
+# logs each call and refuses the action's comment under RL_COMMENT_REFUSE.
 RECHECK="$REPO/skills/converse-recheck-premise/SKILL.md"
 RL="$TMP/release"
 mkdir -p "$RL/bin" "$RL/pack/assets/scripts"
-export HOLDS_STUB="$REPO/assets/scripts/holds-store.stub.sh" GC_NO_API=1
-GCTK_BIN="$("$HOLDS_STUB" build "$TMP/gctk")" || { echo "FAIL - gctk did not build, so the premise re-check cannot run"; exit 1; }
-export GCTK_BIN
 cat >"$RL/bin/gc" <<'STUB'
 #!/usr/bin/env bash
-if [ -n "${HOLDS_STUB_READ:-}" ] && [ "${1:-}" = bd ]; then
-    shift
-    printf '%s\n' "$RL_GATES" | jq -e 'type == "array"' >/dev/null 2>&1 || { echo "gc bd: simulated read failure" >&2; exit 1; }
-    [ "${RL_DEPS_RC:-0}" -eq 0 ] || { echo "gc bd: simulated read failure" >&2; exit "$RL_DEPS_RC"; }
-    jq -nc --argjson row "$RL_ROW" --argjson g "$RL_GATES" --argjson more "${RL_MORE:-[]}" \
-        '[ ($row[0] + {_deps: [ $g[] | {id, dependency_type: (.edge // "blocks")} ]}) ] + $g + $more' >"$RL_DIR/holds.json" || exit 1
-    HOLDS_STORE="$RL_DIR/holds.json" "$HOLDS_STUB" answer "$@" || exit
-    case " $* " in *" update "*) printf 'gc bd %s\n' "$*" >>"$RL_DIR/log" ;; esac
-    exit 0
-fi
 printf 'gc %s\n' "$*" >>"$RL_DIR/log"
 case "$1 ${2:-} ${3:-}" in
-    "bd show "*)
-        [ -z "${RL_SHOW_DOWN:-}" ] || { printf '%s\n' '{"error":"no issues found matching the provided IDs"}'; exit 1; }
-        printf '%s\n' "$RL_ROW"; exit "${RL_SHOW_RC:-0}" ;;
     "bd comment "*) [ -z "${RL_COMMENT_REFUSE:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -1530,120 +1507,35 @@ cat >"$RL/pack/assets/scripts/pr-sitting-comment.sh" <<'STUB'
 printf 'pr-sitting-comment %s\n' "$*" >>"$RL_DIR/log"
 STUB
 chmod +x "$RL/bin/gc" "$RL/pack/assets/scripts/"*.sh
-fenced_block "$RECHECK" 'replaced the headline of $SUBJECT' | fill_block >"$RL/block"
+fenced_block "$RECHECK" 'closed $CONVERSATION as $KIND' | fill_block >"$RL/block"
 [ -s "$RL/block" ] && ok "the premise re-check's close is found" \
-    || bad "the premise re-check's close is found" "no fenced bash block replaces the headline in $RECHECK"
-# run_release <shell> <row-json> <gates-json> [NAME=VALUE...] — one run of the
-# close on a subject whose row is <row-json>; prints its status.
+    || bad "the premise re-check's close is found" "no fenced bash block closes the conversation in $RECHECK"
+# run_release <shell> [NAME=VALUE...] — one run of the close; prints its status.
 run_release() {
-    local run=$1 row=$2 gates=$3
-    shift 3
+    local run=$1
+    shift
     : >"$RL/log"
-    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" RL_ROW="$row" RL_GATES="$gates" "$@" CONV="$RL/pack/assets/scripts" \
+    (cd "$TMP/away" && env -u BASH_ENV -u ENV RL_DIR="$RL" "$@" CONV="$RL/pack/assets/scripts" \
         SUBJECT=tk-x CONVERSATION=tk-v PATH="$RL/bin:$PATH" $run "$RL/block" >"$RL/out" 2>&1)
     echo $?
 }
-WAITING='[{"id":"tk-x","metadata":{"gc.takeaway":"holding — x","gc.takeaway_settled":""}}]'
-SETTLED='[{"id":"tk-x","metadata":{"gc.takeaway":"ruled: x","gc.takeaway_settled":"1"}}]'
-NONE_HOLDS='[{"id":"tk-g1","issue_type":"gate","await_type":"human","status":"closed"},{"id":"tk-w","issue_type":"task","status":"closed"}]'
-GATE_HOLDS='[{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
-WORK_HOLDS='[{"id":"tk-w","issue_type":"task","status":"open"}]'
-# A waits-for edge of the subject's own onto a spawner whose child is open: the
-# store cannot judge it yet, so the subject reads unjudged, still held.
-SPAWN_HOLDS='[{"id":"tk-sp","issue_type":"task","status":"open","edge":"waits-for"}]'
-SPAWN_CHILD='[{"id":"tk-spc","issue_type":"task","status":"open","parent":"tk-sp"}]'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"
-    rc=$(run_release "$run" "$WAITING" "$NONE_HOLDS")
+    rc=$(run_release "$run")
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls" in
-        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
-            ok "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" ;;
-        *) bad "($sh_) recheck close: a waiting headline on a subject nothing holds is settled with the reading, before the conversation closes" "exit $rc, calls: $calls" ;;
+        "0:gc bd update tk-x --append-notes x (conversation tk-v): x;"*"gc bd close tk-v --reason x: x;gc bd comment tk-v x;pr-sitting-comment refresh --sitting tk-v;")
+            ok "($sh_) recheck close: the reading goes on the subject, the close is recorded among the visit's actions, then the visit's PR comment is drawn again" ;;
+        *) bad "($sh_) recheck close: the reading goes on the subject, the close is recorded among the visit's actions, then the visit's PR comment is drawn again" "exit $rc, calls: $calls" ;;
     esac
-    for held_by in "$GATE_HOLDS|an open human gate|[]" "$WORK_HOLDS|open work|[]" "$SPAWN_HOLDS|a waits-for edge it cannot judge yet|$SPAWN_CHILD"; do
-        gates=${held_by%%|*}; rest=${held_by#*|}; what=${rest%%|*}; more=${rest#*|}
-        rc=$(run_release "$run" "$WAITING" "$gates" RL_MORE="$more")
-        calls=$(tr '\n' ';' <"$RL/log")
-        case "$rc:$calls" in
-            *"gc.takeaway="*) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
-            0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a subject $what still holds keeps its headline, and the conversation closes" ;;
-            *) bad "($sh_) recheck close: a subject $what still holds keeps its headline" "exit $rc, calls: $calls" ;;
-        esac
-    done
-    # A conversation on an open PR holds the PR's merge through the anchor's
-    # blocks edge onto it, so on an anchor the conversation, tk-v, is among the
-    # subject's pending waits. The close ends that wait, so it keeps no
-    # headline, while any other wait beside it still does, and is named alone.
-    CONV_HOLDS='[{"id":"tk-v","issue_type":"task","status":"in_progress"}]'
-    rc=$(run_release "$run" "$WAITING" "$CONV_HOLDS")
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        0:*" update tk-x --set-metadata gc.takeaway=x: x --set-metadata gc.takeaway_at="*" --set-metadata gc.takeaway_by=converse --set-metadata gc.takeaway_settled=1;"*"gc bd close tk-v --reason x: x;"*)
-            ok "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: the conversation's own hold on the anchor keeps no headline, and the conversation closes" "exit $rc, calls: $calls" ;;
-    esac
-    CONV_AND_GATE='[{"id":"tk-v","issue_type":"task","status":"in_progress"},{"id":"tk-g2","issue_type":"gate","await_type":"human","status":"open"}]'
-    rc=$(run_release "$run" "$WAITING" "$CONV_AND_GATE")
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls:$(cat "$RL/out")" in
-        *"gc.takeaway="*) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*"tk-x keeps its headline: tk-g2 still holds it"*)
-            ok "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline, named without the conversation" ;;
-        *) bad "($sh_) recheck close: a gate beside the conversation's hold still keeps the headline" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
-    esac
-    rc=$(run_release "$run" "$SETTLED" '[]')
-    calls=$(tr '\n' ';' <"$RL/log")
-    case "$rc:$calls" in
-        *"gc.takeaway="*) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
-        0:*"gc bd close tk-v "*) ok "($sh_) recheck close: a settled headline is not written, and the conversation closes" ;;
-        *) bad "($sh_) recheck close: a settled headline is not written" "exit $rc, calls: $calls" ;;
-    esac
-    case "$rc:$calls" in
-        0:*"gc bd close tk-v --reason x: x;gc bd comment tk-v x;pr-sitting-comment refresh --sitting tk-v;"*)
-            ok "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" ;;
-        *) bad "($sh_) recheck close: the close is recorded among the visit's actions, then the visit's PR comment is drawn again" "exit $rc, calls: $calls" ;;
-    esac
-    rc=$(run_release "$run" "$SETTLED" '[]' RL_COMMENT_REFUSE=1)
+    rc=$(run_release "$run" RL_COMMENT_REFUSE=1)
     calls=$(tr '\n' ';' <"$RL/log")
     case "$rc:$calls:$(cat "$RL/out")" in
         0:*"gc bd close tk-v "*"pr-sitting-comment refresh --sitting tk-v;"*"the close was not recorded among the actions of tk-v"*)
             ok "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" ;;
         *) bad "($sh_) recheck close: an action the store will not record still closes the conversation, says so, and draws the comment" "exit $rc, calls: $calls, out: $(cat "$RL/out")" ;;
     esac
-    for stop in "HOLDS_FAIL=update|a headline that does not land|$NONE_HOLDS" "RL_SHOW_DOWN=1|a subject that does not read|$NONE_HOLDS" \
-        "RL_NONE=1|a hold read that does not answer|{\"error\":\"no issue found\"}"; do
-        IFS='|' read -r setting what gates <<EOF
-$stop
-EOF
-        rc=$(run_release "$run" "$WAITING" "$gates" "$setting")
-        calls=$(tr '\n' ';' <"$RL/log")
-        case "$rc:$calls" in
-            0:*|*"bd close"*|*"bd update"*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
-            *) ok "($sh_) recheck close: $what closes nothing" ;;
-        esac
-    done
-    # A read is an answer only when gc exits 0 and the subject's read is its own
-    # row, alone. Anything else could be read as a settled headline or as no
-    # blocker, so the close writes nothing and stops.
-    TWICE=$(printf '%s' "$WAITING" | jq -c '. + .')
-    OTHER=$(printf '%s' "$WAITING" | jq -c '.[0].id = "tk-y"')
-    for stop in "[]|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers no row" \
-        "$TWICE|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers two rows" \
-        "$OTHER|RL_SHOW_RC=0|RL_DEPS_RC=0|a subject read that answers another bead's row" \
-        "$WAITING|RL_SHOW_RC=1|RL_DEPS_RC=0|a subject read that exits non-zero, whatever it printed," \
-        "$WAITING|RL_SHOW_RC=0|RL_DEPS_RC=1|a hold read that fails,"; do
-        IFS='|' read -r row show_rc deps_rc what <<EOF
-$stop
-EOF
-        rc=$(run_release "$run" "$row" "$NONE_HOLDS" "$show_rc" "$deps_rc")
-        calls=$(tr '\n' ';' <"$RL/log")
-        case "$rc:$calls" in
-            0:*|*"bd close"*|*"bd update"*|*"gc.takeaway="*) bad "($sh_) recheck close: $what closes nothing" "exit $rc, calls: $calls" ;;
-            *) ok "($sh_) recheck close: $what closes nothing" ;;
-        esac
-    done
 done
 echo "── every answer to a gate settles the subject's dispatch path first ──"
 # The hold leaves the subject's arm and route in place, and the writer leaves
@@ -1723,7 +1615,7 @@ run_dp() {
         SUBJECT=tk-x CONVERSATION=tk-v PATH="$DP/bin:$PATH" $run "$block" >"$DP/out" 2>&1)
     echo $?
 }
-POOLED='{"gc.dispatch_when_ready":"rig-a/old-pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]","gc.routed_to":"rig-a/old-pool","gc.takeaway":"holding — x"}'
+POOLED='{"gc.dispatch_when_ready":"rig-a/old-pool","gc.dispatch_when_ready_args":"[\"--on\",\"mol-polecat-work\"]","gc.routed_to":"rig-a/old-pool"}'
 for sh_ in $shells; do
     run=$sh_
     [ "$sh_" = zsh ] && run="zsh -f"

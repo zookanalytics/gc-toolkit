@@ -8,10 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
 // `gctk lifecycle` is the plain write of a bead's merge_result, and the only
@@ -34,7 +32,7 @@ import (
 // they invoked.
 const prog = "lifecycle"
 
-const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <value> [--expect <value>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>] [--takeaway <text>] [--close] [--append-notes <text>] [--json]
+const lifecycleUsage = `usage: gctk lifecycle transition <bead-id> --to <value> [--expect <value>] [--set k=v]... [--set-dated k=<value>@<oid>]... [--unset k]... [--assignee <a>] [--route <rig>/<agent>] [--close] [--append-notes <text>] [--json]
 `
 
 // Lifecycle dispatches the subcommand's verbs. It returns a process exit code
@@ -109,63 +107,6 @@ func callerWrite(sets, unsets []string, key string) (value string, ok bool) {
 	return "", slices.Contains(unsets, key)
 }
 
-// squeezeSpace collapses every run of POSIX whitespace to one space and trims
-// the ends, which is what `tr -s '[:space:]' ' '` plus the shell's one-space
-// trims did. It runs BEFORE the empty check: whitespace normalizes to nothing,
-// and the flag's presence alone is not a takeaway.
-func squeezeSpace(s string) string {
-	isSpace := func(r rune) bool {
-		switch r {
-		case ' ', '\t', '\n', '\v', '\f', '\r':
-			return true
-		}
-		return false
-	}
-	var b strings.Builder
-	prevSpace := false
-	for _, r := range s {
-		if isSpace(r) {
-			prevSpace = true
-			continue
-		}
-		if prevSpace && b.Len() > 0 {
-			b.WriteByte(' ')
-		}
-		prevSpace = false
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-// normalizeTakeaway applies the two gates a bead's headline takes, returning
-// the text to write or the lines that refuse it.
-//
-// The flag's presence is not a takeaway: whitespace normalizes to nothing, and
-// an empty one would overwrite the headline a bead carries with nothing, under
-// a fresh date and author. The takeaway package, the other writer of the
-// headline, refuses it the same way.
-//
-// Over the cap it REJECTS rather than truncating: only the author knows which
-// clause is the headline. The length is CODEPOINTS, as lifecycle.Headline
-// counts it — counting bytes would refuse a takeaway well inside the cap the
-// moment it carried an em dash.
-func normalizeTakeaway(s string) (string, []string) {
-	s = squeezeSpace(s)
-	if s == "" {
-		return "", []string{
-			"--takeaway is empty; it is the bead's headline, and an empty one tells the operator nothing",
-			"give it the one sentence the operator needs, or drop the flag.",
-		}
-	}
-	if n := utf8.RuneCountInString(s); n > lifecycle.TakeawayMax {
-		return "", []string{
-			fmt.Sprintf("--takeaway is %d chars; the cap is %d", n, lifecycle.TakeawayMax),
-			"it is the bead's headline — one line, read at a glance. Cut it to the single sentence the operator needs and put the rest in --append-notes.",
-		}
-	}
-	return s, nil
-}
-
 // now is the clock the @<since> component is stamped from. A variable so a test
 // can pin it; every caller reads UTC.
 var now = func() time.Time { return time.Now().UTC() }
@@ -207,8 +148,6 @@ type transitionOpts struct {
 	sets        []string
 	dated       []string
 	unsets      []string
-	takeaway    string
-	takeawaySet bool
 }
 
 // parseTransition consumes the flag list. A value-taking flag with no following
@@ -251,9 +190,6 @@ func parseTransition(args []string) (transitionOpts, error) {
 		case "--route":
 			o.route, i = next(i)
 			o.routeSet = true
-		case "--takeaway":
-			o.takeaway, i = next(i)
-			o.takeawaySet = true
 		case "--close":
 			o.closeIt = true
 			i++
@@ -307,9 +243,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 		case "gc.routed_to":
 			fmt.Fprintf(stderr, "%s: route via --route, never by --set\n", prog)
 			return 1
-		case "gc.takeaway", "gc.takeaway_at", "gc.takeaway_by", "gc.takeaway_settled":
-			fmt.Fprintf(stderr, "%s: the takeaway stamp is written by --takeaway, never by --set\n", prog)
-			return 1
 		}
 	}
 	// A dated key's ARGUMENT carries the two components its writer decided; this
@@ -327,17 +260,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	if o.takeawaySet {
-		text, refusal := normalizeTakeaway(o.takeaway)
-		if refusal != nil {
-			for _, line := range refusal {
-				fmt.Fprintf(stderr, "%s: %s\n", prog, line)
-			}
-			return 1
-		}
-		o.takeaway = text
-	}
-
 	client := gcbd.New()
 	// This read governs the write: --expect's compare-and-swap, the dated-value
 	// resolution, and the idle-skip below all decide from it, and nothing
@@ -393,11 +315,11 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	// the comparison is made against the bead this transition already re-read,
 	// which carries every value the write would set.
 	//
-	// Only a pure re-assertion qualifies. --append-notes accumulates, --takeaway
-	// stamps a fresh instant, and --close and --assignee move fields this
-	// comparison does not cover, so any of them writes unconditionally. --expect
-	// has already run and is not what is being skipped.
-	if !o.notesSet && !o.takeawaySet && !o.closeIt && !o.assigneeSet && cur == o.to {
+	// Only a pure re-assertion qualifies. --append-notes accumulates, and
+	// --close and --assignee move fields this comparison does not cover, so any
+	// of them writes unconditionally. --expect has already run and is not what
+	// is being skipped.
+	if !o.notesSet && !o.closeIt && !o.assigneeSet && cur == o.to {
 		idle := true
 		for _, sv := range o.sets {
 			k, v := kv(sv)
@@ -491,18 +413,6 @@ func cmdTransition(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.routeSet {
 		updateArgs = append(updateArgs, "--set-metadata", "gc.routed_to="+o.route)
-	}
-	if o.takeawaySet {
-		takeawayAt := now().Format("2006-01-02T15:04:05Z")
-		// gc.takeaway_settled goes empty with every headline this writer stamps.
-		// A transition's takeaway names a park or an end, never a subject that
-		// settled itself while staying live, and the disposition of the sitting
-		// before it must not answer for this one (lifecycle.toml [holds]).
-		updateArgs = append(updateArgs,
-			"--set-metadata", "gc.takeaway="+o.takeaway,
-			"--set-metadata", "gc.takeaway_at="+takeawayAt,
-			"--set-metadata", "gc.takeaway_by="+prog,
-			"--set-metadata", "gc.takeaway_settled=")
 	}
 	if o.assigneeSet {
 		updateArgs = append(updateArgs, "--assignee="+o.assignee)

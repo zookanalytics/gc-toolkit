@@ -240,8 +240,9 @@ GH
 # disarm each append the note the real ones append, so a case sees the notes
 # that follow a close brief in a real store.
 #
-# bead takeaway writes the headline as the takeaway does, unless TAKEAWAY_FAIL
-# refuses it with nothing written: one update, which exits 4 when the store
+# bead takeaway appends the headline to the bead's notes under the heading the
+# takeaway writes, naming --by, unless TAKEAWAY_FAIL refuses it with nothing
+# written: one update, which exits 4 when the store
 # refuses it (the takeaway package's TestARefusedUpdateFailsTheVerb holds the
 # real one to that), then each --waiting-on as a blocks edge from the bead onto
 # it, exiting 4 once the rest is written when the store refuses one.
@@ -252,7 +253,10 @@ case "${1:-} ${2:-}" in
   "bead takeaway")
     printf 'gctk %s\n' "$*" >> "$CALLS"
     [ -n "${TAKEAWAY_FAIL:-}" ] && { echo "takeaway refused" >&2; exit 2; }
-    gc bd update "$3" --set-metadata "gc.takeaway=$4" >/dev/null \
+    _by=host; _p=""
+    for a in "$@"; do [ "$_p" = --by ] && _by="$a"; _p="$a"; done
+    gc bd update "$3" --append-notes "## Takeaway ($_by, 2026-11-09T12:00:00Z)
+$4" >/dev/null \
       || { echo "gctk bead takeaway: could not write the headline on $3" >&2; exit 4; }
     _miss=""; _p=""
     for a in "$@"; do
@@ -462,6 +466,9 @@ field() { local v; v=$(bfield "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "
 acts() { local a; a=$(bcomments "$1"); printf '%s' "${a//$'\n'/|}"; }
 # meta <id> <key> — a metadata value, empty when the bead carries none.
 meta() { local v; v=$("$HARNESS_FAKE_GC" --harness-read meta "$1" "$2"); [ "$v" = "<absent>" ] || printf '%s' "$v"; }
+# headline is the line under the last takeaway heading in the bead's notes,
+# empty when it carries none.
+headline() { field "$1" notes | awk '/^## Takeaway \(/ { getline h } END { print h }'; }
 # calls — the lines of the call log that write, in order, and nth_write <n> the
 # n-th of them.
 calls() { grep -E "$WRITES" "$CALLS" || true; }
@@ -542,7 +549,7 @@ eq "$RC" 0 "(ONLY-REPLIED) the sign-off exits 0"
 eq "$(field tk-rev status)/$(field tk-rev close_reason)" "closed/ruled: fix the retry before the merge" "(ONLY-REPLIED) the review gate it replies to is resolved with ruled: <ruling>"
 eq "$(field tk-rec status)" "open" "(ONLY-REPLIED) the recommendation's gate, which it does not reply to, stays open"
 hasnt "$(calls)" "gate resolve tk-rec" "(ONLY-REPLIED) …and is never resolved"
-eq "$(meta tk-anc gc.takeaway)" "review settled: fix the retry first" "(ONLY-REPLIED) the subject carries the headline"
+eq "$(headline tk-anc)" "review settled: fix the retry first" "(ONLY-REPLIED) the subject carries the headline"
 eq "$(field tk-conv status)" "closed" "(ONLY-REPLIED) the conversation is closed"
 eq "$(field tk-conv close_reason)" "review settled: fix the retry first" "(ONLY-REPLIED) …with the headline as its close reason"
 eq "$(meta tk-conv gc.work_outcome)" "no-op" "(ONLY-REPLIED) …and gc.work_outcome=no-op stamped before the close"
@@ -556,7 +563,7 @@ case "$(calls)" in
 esac
 acceptance
 run_signoff --conversation tk-conv --outcome "ruled — fix the retry first" "${RULED[@]}"
-eq "$(meta tk-anc gc.takeaway)" "ruled — fix the retry first" "(LABEL) the headline keeps the label the settle skill's form opens it with"
+eq "$(headline tk-anc)" "ruled — fix the retry first" "(LABEL) the headline keeps the label the settle skill's form opens it with"
 hasnt "$(acts tk-conv)" "fix the retry first" "(LABEL) …and the headline, the subject's, is none of the visit's actions"
 SIGNED="$(calls)"
 run_signoff --conversation tk-conv --outcome "review settled: fix the retry first" "${RULED[@]}"
@@ -583,8 +590,8 @@ run_signoff --conversation tk-conv --outcome "merge main in, keep the branch" "$
 eq "$RC" 0 "(SHARED) the sign-off on the anchor's sitting exits 0"
 eq "$(field tk-bc status)" "closed" "(SHARED) the gate is resolved once"
 has "$OUT" "it held tk-anc tk-kid" "(SHARED) …releasing both beads, read from its blocks dependents"
-eq "$(meta tk-anc gc.takeaway)" "merge main in, keep the branch" "(SHARED) the headline is on the anchor"
-eq "$(meta tk-kid gc.takeaway)" "" "(SHARED) …and the child's headline is unchanged"
+eq "$(headline tk-anc)" "merge main in, keep the branch" "(SHARED) the headline is on the anchor"
+eq "$(headline tk-kid)" "" "(SHARED) …and the child's headline is unchanged"
 eq "$(field tk-kid notes)" "" "(SHARED) …as are its notes: it reads the answer in the gate's resolve reason"
 hasnt "$(calls)" "update tk-kid" "(SHARED) …the child is never written"
 
@@ -594,7 +601,7 @@ conv tk-conv tk-epic; edge tk-conv replies-to tk-mg
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}"
 eq "$RC" 0 "(EPIC) the epic's sign-off exits 0"
 eq "$(field tk-mg status)" "closed" "(EPIC) the member's gate is resolved"
-eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC) the record and headline go on the epic"
+eq "$(headline tk-epic)" "the epic takes option B" "(EPIC) the record and headline go on the epic"
 hasnt "$(calls)" "update tk-mem" "(EPIC) …and the member is never written"
 
 echo "# an open PR a gate releases: a member's PR answered from the epic's sitting"
@@ -623,8 +630,8 @@ case "$(calls)" in
   *"converse-rework --anchor tk-mem"*"gate resolve tk-mg"*) ok "(EPIC-PR-REWORK) …before the member's gate is resolved" ;;
   *) bad "(EPIC-PR-REWORK) the gate was resolved before the rework was filed: $(calls)" ;;
 esac
-eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(EPIC-PR-REWORK) the record and headline stay on the epic"
-eq "$(meta tk-mem gc.takeaway)" "" "(EPIC-PR-REWORK) …and the member carries none"
+eq "$(headline tk-epic)" "the epic takes option B" "(EPIC-PR-REWORK) the record and headline stay on the epic"
+eq "$(headline tk-mem)" "" "(EPIC-PR-REWORK) …and the member carries none"
 eq "$(acts tk-conv)" "Sent PR #52 back for rework.|Ruled: fix the retry before the merge" "(EPIC-PR-REWORK) the conversation records the member's PR it sent back, then the ruling"
 eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sitting tk-conv" "(EPIC-PR-REWORK) …and the visit's comment, on the epic's own PR, is drawn again from the conversation"
 epic_pr
@@ -729,7 +736,7 @@ case "$(calls)" in
 esac
 has "$OUT" "the ruling leaves the branch of tk-pr2 as it stands" "(SHARED-PR) the other PR stands under the ruling"
 eq "$(acts tk-conv)" "Sent the PR of tk-anc back for rework.|Ruled: fix the retry before the merge" "(SHARED-PR) the conversation records the PR it sent back, named by its anchor where it records no number, then the ruling"
-eq "$(meta tk-pr2 gc.takeaway)" "" "(SHARED-PR) the headline stays off the other PR"
+eq "$(headline tk-pr2)" "" "(SHARED-PR) the headline stays off the other PR"
 shared_pr; STUB_CLOSE_FAIL=tk-conv run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --rework --pr-anchor tk-pr2
 eq "$RC" 1 "(SHARED-PR-RERUN) a sign-off whose close does not land, after resolving the shared gate, stops short"
 : > "$CALLS"
@@ -805,7 +812,7 @@ rig_pr; run_signoff --conversation tk-conv --outcome "the epic takes option B" "
 eq "$RC" 0 "(RIG-REWORK) a ruling whose gate in rig-b releases rig-b's open PR, with --rework, exits 0"
 has "$(calls)" "converse-rework --anchor rb-mem --ruling-bead tk-conv" "(RIG-REWORK) the rework is filed on rig-b's PR, the rig-a conversation its provenance"
 has "$(calls)" "converse-rework ran in GC_RIG=rig-b GC_RIG_ROOT=$RIG_B PWD=$RIG_B" "(RIG-REWORK) …and runs in rig-b: its store, its rig root and its checkout"
-eq "$(meta tk-epic gc.takeaway)" "the epic takes option B" "(RIG-REWORK) the headline stays on the epic in rig-a"
+eq "$(headline tk-epic)" "the epic takes option B" "(RIG-REWORK) the headline stays on the epic in rig-a"
 eq "$(field rb-mg status)" "closed" "(RIG-REWORK) …and the gate in rig-b is answered after the rework"
 rig_pr; run_signoff --conversation tk-conv --outcome "the member's PR moves to the new design" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(RIG-RETIRE) the same ruling with --retire exits 0"
@@ -850,14 +857,14 @@ eq "$(field tk-conv status)" "in_progress" "(HEADLINE) …or the conversation cl
 # (HEADLINE-REFUSED) a headline update the store refuses. The takeaway exits
 # non-zero, so the sign-off stops before any gate is resolved.
 acceptance
-setm tk-anc gc.takeaway "the sitting before this one parked it"
-STUB_UPDATE_FAIL_ON='gc.takeaway=settled' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
+bset tk-anc "notes=## Takeaway (converse, 2026-11-08T12:00:00Z)"$'\n'"the sitting before this one parked it"
+STUB_UPDATE_FAIL_ON='## Takeaway (converse, ' TMPDIR="$TMP" run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}"
 eq "$RC" 1 "(HEADLINE-REFUSED) a headline update the store refuses stops the sign-off"
 has "$OUT" "could not write the headline on tk-anc" "(HEADLINE-REFUSED) …after the takeaway says so"
 hasnt "$(calls)" "gate resolve" "(HEADLINE-REFUSED) …so no gate is resolved"
 eq "$(field tk-rev status)" "open" "(HEADLINE-REFUSED) …the gate stays open and owed"
 hasnt "$(calls)" "bd close tk-conv" "(HEADLINE-REFUSED) …and the conversation is not closed"
-eq "$(meta tk-anc gc.takeaway)" "the sitting before this one parked it" "(HEADLINE-REFUSED) …while the subject still carries the earlier headline"
+eq "$(headline tk-anc)" "the sitting before this one parked it" "(HEADLINE-REFUSED) …while the subject still carries the earlier headline"
 
 echo "# a ruling on an armed subject leaves its arm to send it"
 acceptance; setm tk-anc gc.dispatch_when_ready gc-toolkit/gc-toolkit.polecat
@@ -1322,7 +1329,7 @@ eq "$RC" 0 "(ANSWER) an answer on a turn that does not sign off exits 0"
 eq "$(field tk-rev status)/$(field tk-rev close_reason)" "closed/ruled: fix the retry before the merge" "(ANSWER) the gate it names is resolved with ruled: <ruling>"
 eq "$(field tk-two status)" "open" "(ANSWER) the other gate the conversation replies to stays open"
 eq "$(field tk-conv status)/$(field tk-conv assignee)" "in_progress/gc-toolkit/gc-toolkit.tk-conv" "(ANSWER) the conversation stays open under its sitting"
-eq "$(meta tk-anc gc.takeaway)" "ruled on the review; the rollout is still open" "(ANSWER) the headline is written"
+eq "$(headline tk-anc)" "ruled on the review; the rollout is still open" "(ANSWER) the headline is written"
 case "$(calls)" in
   *"gctk bead takeaway"*"gate resolve tk-rev"*) ok "(ANSWER) …before the gate" ;;
   *) bad "(ANSWER) the gate was resolved before the headline: $(calls)" ;;
@@ -1459,12 +1466,12 @@ run_signoff --conversation tk-conv --answer tk-g3 --ruling "close: the hypothesi
 eq "$RC/$(field tk-g3 status)/$(field tk-rev status)" "0/closed/open" "(REVIEW-PR-OTHER) another PR retired on its own call resolves only that PR's gate"
 has "$(calls)" "pr-dispose --anchor tk-pr3 --successor tk-conv --kind not-needed" "(REVIEW-PR-OTHER) …retiring the PR it names"
 has "$OUT" "the ruling leaves the branch of tk-anc as it stands" "(REVIEW-PR-OTHER) …and leaving the subject's PR standing"
-eq "$(meta tk-anc gc.takeaway)" "the epic is closed; PR #52 still needs your Approve on GitHub" "(REVIEW-PR-OTHER) …so the headline carries the subject's Approve clause after the outcome"
+eq "$(headline tk-anc)" "the epic is closed; PR #52 still needs your Approve on GitHub" "(REVIEW-PR-OTHER) …so the headline carries the subject's Approve clause after the outcome"
 
 echo "# cut short: the conversation goes back to the operator's queue"
 acceptance; run_signoff --conversation tk-conv --outcome "cut short: the rollout question is still owed" --ruled no
 eq "$RC" 0 "(CUT-SHORT) a cut-short sign-off exits 0"
-eq "$(meta tk-anc gc.takeaway)" "cut short: the rollout question is still owed" "(CUT-SHORT) the headline is written"
+eq "$(headline tk-anc)" "cut short: the rollout question is still owed" "(CUT-SHORT) the headline is written"
 eq "$(field tk-rev status)" "open" "(CUT-SHORT) the gate stays open and owed"
 eq "$(bedges tk-conv replies-to)" "tk-rev" "(CUT-SHORT) …with its reply in place for the next sitting"
 eq "$(field tk-conv assignee)/$(field tk-conv status)" "human/open" "(CUT-SHORT) the conversation is back in the operator's queue"
@@ -1651,10 +1658,10 @@ pr_conditions() { printf '%s' "$2" > "$ST/conditions-$1"; }
 # wrote and printed: the Approve still owed, or nothing of it.
 said() {
     if [ "$2" = owed ]; then
-        eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "$1 the headline says the Approve is owed"
+        eq "$(headline tk-anc)" "design approved; PR #77 still needs your Approve on GitHub" "$1 the headline says the Approve is owed"
         has "$OUT" "PR #77 still needs the operator's Approve review on GitHub" "$1 …and the sitting is told"
     else
-        eq "$(meta tk-anc gc.takeaway)" "design approved" "$1 the headline stays as given"
+        eq "$(headline tk-anc)" "design approved" "$1 the headline stays as given"
         hasnt "$OUT" "Approve" "$1 …and the sitting is told nothing about an Approve"
     fi
 }
@@ -1737,7 +1744,7 @@ MERGING_WRITES=$(calls)
 # status names an approval standing beside <login>'s request for changes.
 vetoed() {
     eq "$RC" 0 "$1 a ruling that leaves an approval beside a request for changes signs off"
-    eq "$(meta tk-anc gc.takeaway)" "design approved" "$1 no Approve is owed, so the headline stays as given"
+    eq "$(headline tk-anc)" "design approved" "$1 no Approve is owed, so the headline stays as given"
     eq "$(field tk-conv close_reason)" "design approved" "$1 …and so does the close reason"
     hasnt "$(grep '^bd comment' "$CALLS")" "Approve" "$1 …and no action recorded on the conversation"
     hasnt "$OUT" "Approve" "$1 …and the sitting is told to ask for none"
@@ -1754,7 +1761,7 @@ run_signoff "${STAND[@]}"
 vetoed "(APPROVE-VETO-MIRROR) the same when the request is the operator's and the approval another account's:" operator
 pending_pr "[$(requested maintainer),$(requested reviewer)]"
 run_signoff "${STAND[@]}"
-eq "$(meta tk-anc gc.takeaway)" "design approved" "(APPROVE-VETO-TWO) an approval beside two requests asks for no Approve"
+eq "$(headline tk-anc)" "design approved" "(APPROVE-VETO-TWO) an approval beside two requests asks for no Approve"
 has "$OUT" "An approval stands on PR #77, and a request for changes from maintainer holds its merge until maintainer approves or the request is dismissed. A request for changes from reviewer also holds it until reviewer approves or the request is dismissed. This ruling does neither." "(APPROVE-VETO-TWO) …and names each request that holds the merge"
 
 pending_pr "[$approval_owed,$(requested operator)]"
@@ -1774,7 +1781,7 @@ hasnt "$OUT" "An approval stands" "(APPROVE-PENDING-UNNAMED) …and does not say
 open_pr; pr_at tk-anc 77
 GCTK_DOWN=1 run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-UNREAD) a status that does not read does not stop the sign-off"
-eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-UNREAD) …and the PR counts as needing one"
+eq "$(headline tk-anc)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-UNREAD) …and the PR counts as needing one"
 has "$OUT" "The status of PR #77 could not be read" "(APPROVE-UNREAD) …and the sitting is told it did not read"
 has "$OUT" "link it: https://github.com/acme/widgets/pull/77" "(APPROVE-UNREAD) …with the PR's link"
 eq "$(field tk-conv status)" "closed" "(APPROVE-UNREAD) …and the conversation closes"
@@ -1791,7 +1798,7 @@ open_pr; pr_at tk-anc 77; pr_status tk-anc merging
 GCTK_STALL=1 run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-STALL) a status read that runs out of time does not stop the sign-off"
 has "$OUT" "The status of PR #77 could not be read" "(APPROVE-STALL) …and reads as a status that did not read"
-eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-STALL) …so the PR counts as needing one"
+eq "$(headline tk-anc)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-STALL) …so the PR counts as needing one"
 eq "$(field tk-rev status)" "closed" "(APPROVE-STALL) …and the ruling answers the gate"
 
 # A host with no timeout tool: PATH holds only links to what the sign-off and its
@@ -1807,7 +1814,7 @@ PATH="$TMP/no-timeout" run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-NO-TIMEOUT) a host with no timeout tool still signs off"
 hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-NO-TIMEOUT) …making no status read it could not bound"
 has "$OUT" "The status of PR #77 could not be read" "(APPROVE-NO-TIMEOUT) …so the PR reads as one whose status did not read, a merging one included"
-eq "$(meta tk-anc gc.takeaway)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-NO-TIMEOUT) …and counts as needing one"
+eq "$(headline tk-anc)" "design approved; PR #77 still needs your Approve on GitHub" "(APPROVE-NO-TIMEOUT) …and counts as needing one"
 eq "$(field tk-rev status)" "closed" "(APPROVE-NO-TIMEOUT) …and the ruling answers the gate"
 eq "$(field tk-conv status)" "closed" "(APPROVE-NO-TIMEOUT) …and the conversation closes"
 ln -sf "$BIN/timeout" "$TMP/no-timeout/gtimeout"
@@ -1823,45 +1830,45 @@ eq "$(writes)" 0 "(APPROVE-ROW-UNREAD) …and writes nothing"
 
 open_pr; setm tk-anc pr_url "https://github.com/acme/widgets/pull/78"
 run_signoff "${STAND[@]}"
-eq "$(meta tk-anc gc.takeaway)" "design approved; PR #78 still needs your Approve on GitHub" "(APPROVE-URL-ONLY) a PR's number comes from its url when none is recorded"
+eq "$(headline tk-anc)" "design approved; PR #78 still needs your Approve on GitHub" "(APPROVE-URL-ONLY) a PR's number comes from its url when none is recorded"
 open_pr; setm tk-anc existing_pr "https://github.com/acme/widgets/pull/79"
 run_signoff "${STAND[@]}"
-eq "$(meta tk-anc gc.takeaway)" "design approved; PR #79 still needs your Approve on GitHub" "(APPROVE-URL-ONLY) …and its url from existing_pr when no pr_url is"
+eq "$(headline tk-anc)" "design approved; PR #79 still needs your Approve on GitHub" "(APPROVE-URL-ONLY) …and its url from existing_pr when no pr_url is"
 open_pr
 run_signoff "${STAND[@]}"
 eq "$RC" 0 "(APPROVE-NO-URL) an anchor that records no PR identity signs off"
-eq "$(meta tk-anc gc.takeaway)" "design approved; tk-anc's PR still needs your Approve on GitHub" "(APPROVE-NO-URL) …naming the PR by its anchor"
+eq "$(headline tk-anc)" "design approved; tk-anc's PR still needs your Approve on GitHub" "(APPROVE-NO-URL) …naming the PR by its anchor"
 hasnt "$OUT" "link it" "(APPROVE-NO-URL) …with no link to give"
 has "$(cat "$GCTK_CALLS")" "pr status tk-anc --json" "(APPROVE-NO-URL) …its status read by its anchor"
 
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework
 eq "$RC" 0 "(APPROVE-REWORK) --rework signs off"
-eq "$(meta tk-anc gc.takeaway)" "fix the retry" "(APPROVE-REWORK) …with the headline as given: the branch is changing, so no Approve is owed yet"
+eq "$(headline tk-anc)" "fix the retry" "(APPROVE-REWORK) …with the headline as given: the branch is changing, so no Approve is owed yet"
 hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-REWORK) …and no status read"
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "it will not land" "${RETIRED[@]}" --retire not-needed
 eq "$RC" 0 "(APPROVE-RETIRE) --retire signs off"
-eq "$(meta tk-anc gc.takeaway)" "it will not land" "(APPROVE-RETIRE) …with the headline as given"
+eq "$(headline tk-anc)" "it will not land" "(APPROVE-RETIRE) …with the headline as given"
 hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-RETIRE) …and no status read"
 acceptance; run_signoff --conversation tk-conv --outcome "settled" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "settled" "(APPROVE-NO-PR) --no-rework where the ruling reaches no open PR says nothing of an Approve"
+eq "$(headline tk-anc)" "settled" "(APPROVE-NO-PR) --no-rework where the ruling reaches no open PR says nothing of an Approve"
 hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-NO-PR) …and reads no status"
 open_pr; pr_at tk-anc 77
 run_signoff --conversation tk-conv --outcome "not yet" --ruled no
 eq "$RC" 0 "(APPROVE-CUT-SHORT) a sign-off cut short exits 0"
-eq "$(meta tk-anc gc.takeaway)" "not yet" "(APPROVE-CUT-SHORT) …and, with no ruling, says nothing of an Approve"
+eq "$(headline tk-anc)" "not yet" "(APPROVE-CUT-SHORT) …and, with no ruling, says nothing of an Approve"
 hasnt "$(cat "$GCTK_CALLS")" "pr status" "(APPROVE-CUT-SHORT) …and reads no status"
 
 epic_pr; pr_at tk-mem 78
 run_signoff --conversation tk-conv --outcome "the epic takes option B" "${RULED[@]}" --no-rework
-eq "$(meta tk-epic gc.takeaway)" "the epic takes option B; PR #78 still needs your Approve on GitHub" "(APPROVE-EPIC) the epic's headline names the member's PR"
+eq "$(headline tk-epic)" "the epic takes option B; PR #78 still needs your Approve on GitHub" "(APPROVE-EPIC) the epic's headline names the member's PR"
 has "$OUT" "PR #78 still needs the operator's Approve review on GitHub" "(APPROVE-EPIC) …and the sitting is told"
-eq "$(meta tk-mem gc.takeaway)" "" "(APPROVE-EPIC) …and the member carries no headline"
+eq "$(headline tk-mem)" "" "(APPROVE-EPIC) …and the member carries no headline"
 
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are counted in the headline"
+eq "$(headline tk-anc)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) two PRs left standing are counted in the headline"
 eq "$(field tk-conv close_reason)" "the approach stands; 2 PRs still need your Approve on GitHub" "(APPROVE-TWO) …and the close reason"
 eq "$(grep '^pr-sitting-comment' "$CALLS")" "pr-sitting-comment refresh --sitting tk-conv" "(APPROVE-TWO) …and the comment on the PR is drawn again from the conversation"
 hasnt "$(grep '^bd comment' "$CALLS")" "Approve" "(APPROVE-TWO) …with no action recorded on the conversation naming them, since the lines the sitting passes on do"
@@ -1871,20 +1878,20 @@ has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …
 has "$OUT" "link it: https://github.com/acme/widgets/pull/78" "(APPROVE-TWO) …with its link"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; pr_status tk-anc merging
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) only the one needing review is named"
+eq "$(headline tk-anc)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) only the one needing review is named"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …and the sitting is told of it"
 hasnt "$OUT" "PR #77 still needs" "(APPROVE-TWO) …and not of the merging one"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78
 run_signoff --conversation tk-conv --outcome "fix the retry" "${RULED[@]}" --rework --pr-anchor tk-anc
-eq "$(meta tk-anc gc.takeaway)" "fix the retry; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR reworked beside one left standing is not named"
+eq "$(headline tk-anc)" "fix the retry; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR reworked beside one left standing is not named"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; pr_status tk-anc needs-attention
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR a person must clear first is not counted as owing one"
+eq "$(headline tk-anc)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) a PR a person must clear first is not counted as owing one"
 hasnt "$OUT" "PR #77 still needs" "(APPROVE-TWO) …and is not named"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …beside the other PR's line"
 shared_pr; pr_at tk-anc 77; pr_at tk-pr2 78; setm tk-anc merge_result pull_request_pending; setf tk-anc status blocked; pr_conditions tk-anc "[$(requested maintainer)]"
 run_signoff --conversation tk-conv --outcome "the approach stands" "${RULED[@]}" --no-rework
-eq "$(meta tk-anc gc.takeaway)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) an approval beside a request for changes is not counted as owing one"
+eq "$(headline tk-anc)" "the approach stands; PR #78 still needs your Approve on GitHub" "(APPROVE-TWO) an approval beside a request for changes is not counted as owing one"
 has "$OUT" "a request for changes from maintainer holds its merge" "(APPROVE-TWO) …and its line still prints"
 has "$OUT" "PR #78 still needs the operator's Approve review" "(APPROVE-TWO) …beside the other PR's"
 
@@ -1908,8 +1915,8 @@ under_cap() { [ "${#2}" -le "${TAKEAWAY_CAP:?}" ] && ok "$1" || bad "$1 (${#2} c
 many_prs 12
 run_signoff --conversation tk-conv --outcome x "${RULED[@]}" --no-rework
 eq "$RC" 0 "(APPROVE-MANY) a ruling that leaves twelve unapproved PRs standing signs off"
-eq "$(meta tk-anc gc.takeaway)" "x; 12 PRs still need your Approve on GitHub" "(APPROVE-MANY) …counting them in the headline"
-under_cap "(APPROVE-MANY) …which stays under the headline's cap" "$(meta tk-anc gc.takeaway)"
+eq "$(headline tk-anc)" "x; 12 PRs still need your Approve on GitHub" "(APPROVE-MANY) …counting them in the headline"
+under_cap "(APPROVE-MANY) …which stays under the headline's cap" "$(headline tk-anc)"
 eq "$(printf '%s\n' "$OUT" | grep -c "still needs the operator's Approve review")" 12 "(APPROVE-MANY) …and the sitting is told of each"
 has "$OUT" "PR #1000 still needs the operator's Approve review" "(APPROVE-MANY) the sitting is told of the first"
 has "$OUT" "PR #1011 still needs the operator's Approve review" "(APPROVE-MANY) …and of the last"
@@ -1919,7 +1926,7 @@ many_prs 12
 _FILL=$(printf 'o%.0s' $(seq 1 90))
 run_signoff --conversation tk-conv --outcome "$_FILL" "${RULED[@]}" --no-rework
 eq "$RC" 0 "(APPROVE-MANY) a shorter --outcome makes room whatever the count"
-under_cap "(APPROVE-MANY) …and a 90-character one stays under the cap" "$(meta tk-anc gc.takeaway)"
+under_cap "(APPROVE-MANY) …and a 90-character one stays under the cap" "$(headline tk-anc)"
 
 open_pr; pr_at tk-anc 77
 TAKEAWAY_FAIL=1 run_signoff "${STAND[@]}"
@@ -2211,7 +2218,7 @@ run_signoff --conversation tk-conv --outcome "staying — waits on tk-work" "${S
 setf tk-work status closed; setf tk-sub status closed; setf tk-conv status in_progress
 run_signoff --conversation tk-conv --outcome "landed as agreed" --ruled yes --ruling "build the fix" --no-wait
 eq "$RC" 0 "(STAY-RETURN-CLOSED) the return on a subject that has closed exits 0"
-eq "$(meta tk-sub gc.takeaway)" "landed as agreed" "(STAY-RETURN-CLOSED) …writing what landed as the headline"
+eq "$(headline tk-sub)" "landed as agreed" "(STAY-RETURN-CLOSED) …writing what landed as the headline"
 eq "$(field tk-conv status)" "closed" "(STAY-RETURN-CLOSED) …and closing the conversation"
 
 # A stay that stops after its first write leaves that line newest, which the

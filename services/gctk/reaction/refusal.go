@@ -191,7 +191,7 @@ func (r *Reactions) refusal(bead, run string) (*Refusal, error) {
 	if err != nil {
 		return nil, fmt.Errorf("could not read whether an open conversation tracks %s (%v)", bead, err)
 	}
-	convs, err := r.conversations(bead, up)
+	convs, err := r.conversations(bead, up, false)
 	if err != nil {
 		return nil, fmt.Errorf("could not read whether an open conversation tracks %s (%v)", bead, err)
 	}
@@ -281,19 +281,19 @@ func dispatchPaths(row *ledger.Record) []string {
 	return out
 }
 
-// conversations is the open conversations about bead, by the conversation
-// domain's shape. The tasks among up, the beads that track it, are the
-// candidates, open and assigned as a conversation is. That proves only that
-// each one tracks the bead, not that the bead is all it tracks, so the
-// candidates' own rows are read with their edges, and the shape decides. A
-// candidate whose row does not read fails the read.
-func (r *Reactions) conversations(bead string, up []*ledger.Record) ([]string, error) {
+// conversations is the conversations about bead, by the conversation domain's
+// shape: the open ones, or with ended the closed ones. The tasks among up, the
+// beads that track it, are the candidates, assigned as a conversation is. That
+// proves only that each one tracks the bead, not that the bead is all it
+// tracks, so the candidates' own rows are read with their edges, and the shape
+// decides. A candidate whose row does not read fails the read.
+func (r *Reactions) conversations(bead string, up []*ledger.Record, ended bool) ([]string, error) {
 	var cands []string
 	for _, d := range up {
 		if t := d.IssueType(); t != "" && t != conversation.IssueType {
 			continue
 		}
-		if d.Status() == "closed" || !conversation.IsAssignee(d.Assignee(), d.ID) || slices.Contains(cands, d.ID) {
+		if (d.Status() == "closed") != ended || !conversation.IsAssignee(d.Assignee(), d.ID) || slices.Contains(cands, d.ID) {
 			continue
 		}
 		cands = append(cands, d.ID)
@@ -312,7 +312,7 @@ func (r *Reactions) conversations(bead string, up []*ledger.Record) ([]string, e
 			return nil, fmt.Errorf("the row of %s, which tracks it, did not read", id)
 		}
 		c := own[i]
-		if c.Status() == "closed" || !conversation.IsCandidate(c.IssueType(), c.Assignee(), c.ID) {
+		if (c.Status() == "closed") != ended || !conversation.IsCandidate(c.IssueType(), c.Assignee(), c.ID) {
 			continue
 		}
 		edges, err := c.Edges()

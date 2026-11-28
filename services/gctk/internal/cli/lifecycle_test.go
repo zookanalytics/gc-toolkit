@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/lifecycle"
 )
 
 // The behaviour of `gctk lifecycle` against a bead store is covered by
@@ -75,7 +73,7 @@ func TestUnknownArgumentIsRefused(t *testing.T) {
 func TestValueTakingFlagRejectsAMissingValue(t *testing.T) {
 	for _, flag := range []string{
 		"--to", "--expect", "--set", "--set-dated", "--unset",
-		"--assignee", "--route", "--takeaway", "--append-notes",
+		"--assignee", "--route", "--append-notes",
 	} {
 		// The flag under test is last, with no token after it. A valid earlier
 		// --to keeps each case about the trailing flag, not a missing target.
@@ -118,7 +116,6 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		{"no --to", []string{"b-1"}, "needs --to <value>"},
 		{"--set merge_result", []string{"b-1", "--to", "blocked", "--set", "merge_result=x"}, "written by --to"},
 		{"--set gc.routed_to", []string{"b-1", "--to", "blocked", "--set", "gc.routed_to=x"}, "route via --route"},
-		{"--set gc.takeaway", []string{"b-1", "--to", "blocked", "--set", "gc.takeaway=x"}, "written by --takeaway"},
 		{"--set-dated merge_result", []string{"b-1", "--to", "blocked", "--set-dated", "merge_result=x@oid"}, "written by --to"},
 		{"--set-dated with no oid", []string{"b-1", "--to", "blocked", "--set-dated", "pr.machine=settled"}, "<value>@<oid>"},
 		{"--set-dated carrying its own instant", []string{"b-1", "--to", "blocked", "--set-dated", "pr.machine=settled@oid@2026-01-01T00:00:00Z"}, "<value>@<oid>"},
@@ -128,9 +125,6 @@ func TestPreReadRefusalsNeverTouchABead(t *testing.T) {
 		// refusal is decided on arguments alone, so it happens before any bead is
 		// read.
 		{"--route human", []string{"b-1", "--to", "blocked", "--route", "human"}, "not rig-qualified"},
-		{"empty --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", ""}, "tells the operator nothing"},
-		{"whitespace-only --takeaway", []string{"b-1", "--to", "blocked", "--takeaway", " \t\n "}, "tells the operator nothing"},
-		{"--takeaway over the cap", []string{"b-1", "--to", "blocked", "--takeaway", strings.Repeat("x", lifecycle.TakeawayMax+1)}, "the cap is 140"},
 		// A value-taking flag with no following token is malformed; the refusal is
 		// on arguments alone, ahead of any read. --expect is the one that matters:
 		// the empty string it used to take dropped the compare-and-swap guard.
@@ -189,38 +183,5 @@ func TestDatedSincePreservesWhileValueAndOIDHold(t *testing.T) {
 				t.Errorf("datedSince(%q, %q) = %q, want %q", tc.have, tc.want, got, tc.expect)
 			}
 		})
-	}
-}
-
-func TestSqueezeSpaceMatchesTheShellNormalization(t *testing.T) {
-	// `tr -s '[:space:]' ' '` plus the shell's one-space trims. It runs before
-	// the empty check, which is what makes a whitespace-only takeaway an empty
-	// one rather than a stored blank the board renders as a question nobody asked.
-	for _, tc := range []struct{ in, want string }{
-		{"already tight", "already tight"},
-		{"  leading and trailing  ", "leading and trailing"},
-		{"runs\t\tof\n\nwhitespace", "runs of whitespace"},
-		{"   ", ""},
-		{"", ""},
-		{"\t\n\v\f\r", ""},
-	} {
-		if got := squeezeSpace(tc.in); got != tc.want {
-			t.Errorf("squeezeSpace(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestTakeawayCapIsMeasuredInCodepoints(t *testing.T) {
-	// The board renders one line of text, so the cap counts what a reader sees.
-	// A byte count would refuse a takeaway well inside the cap the moment it
-	// carried an em dash — which is most of them.
-	wide := strings.Repeat("é", lifecycle.TakeawayMax)
-	if got, refusal := normalizeTakeaway(wide); refusal != nil || got != wide {
-		t.Errorf("%d codepoints was refused by a byte-counting cap: %v", lifecycle.TakeawayMax, refusal)
-	}
-	if _, refusal := normalizeTakeaway(wide + "é"); refusal == nil {
-		t.Errorf("%d codepoints was accepted over the cap", lifecycle.TakeawayMax+1)
-	} else if !strings.Contains(refusal[0], "141 chars") {
-		t.Errorf("the refusal does not report the measured length: %q", refusal[0])
 	}
 }

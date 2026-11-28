@@ -127,22 +127,37 @@ func TestTheSweepKeepsOnlyRawInput(t *testing.T) {
 	}
 }
 
-// A bead that carries a headline, gc.takeaway or gc.takeaway_by, has been
-// triaged: every exit of a first reaction writes one, a blocker a blocked exit
-// filed among the beads it lands on, so no later sweep offers it. Each key
-// drops a bead alone.
-func TestTheCandidateRuleDropsAHeadline(t *testing.T) {
+// A bead that has had a first reaction or a sitting is no fresh input: a run
+// of the first-reaction formula whose root closed works it, or a closed
+// conversation tracks it. A reaction that Gas City's run cancel ended did not
+// react, so its subject stays a candidate, and so does a bead that only a
+// closed run of another formula worked. A record that does not read leaves the
+// bead for the next sweep, which the sweep says.
+func TestTheSweepDropsWhatHadAReactionOrASitting(t *testing.T) {
 	w := newWorld(t)
-	w.ready(input("tk-fresh", nil),
-		input("tk-headline", func(b *fake.Bead) { b.Metadata["gc.takeaway"] = "blocked on tk-blocker" }),
-		input("tk-headline-by", func(b *fake.Bead) { b.Metadata["gc.takeaway_by"] = "proactive" }))
+	for _, id := range []string{"tk-built", "tk-declined", "tk-fresh", "tk-reacted", "tk-sat"} {
+		w.ready(input(id, nil))
+	}
+	w.run("tk-root-reacted", Formula, "tk-reacted", "closed")
+	w.run("tk-root-declined", Formula, "tk-declined", "closed")
+	declined, _ := w.store.Row("tk-root-declined")
+	declined.Metadata["gc.outcome"] = "canceled"
+	w.put(declined)
+	w.run("tk-root-built", "mol-polecat-work", "tk-built", "closed")
+	w.put(fake.Bead{ID: "tk-conv-sat", Status: "closed", IssueType: "task", Assignee: "human", Edges: []gcbd.Edge{{Type: "tracks", ID: "tk-sat"}}})
 	lines, _, err := w.sweep(true, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := ids(lines, WouldSling); !slices.Equal(got, []string{"tk-fresh"}) {
-		t.Errorf("(HEADLINE) the candidates are %v; want tk-fresh alone", got)
+	if got := ids(lines, WouldSling); !slices.Equal(got, []string{"tk-built", "tk-declined", "tk-fresh"}) {
+		t.Errorf("(REACTED) the candidates are %v; want tk-built, tk-declined and tk-fresh", got)
 	}
+	w.failFind(func(q gcbd.Query) bool { return q.Key == "gc.input_convoy_id" })
+	lines, _, err = w.sweep(true, time.Minute)
+	if err != nil || !slices.Equal(ids(lines, WouldSling), []string{"tk-fresh"}) {
+		t.Errorf("(REACTED-UNREAD) with the runs unread the candidates are %v (%v); want tk-fresh alone", ids(lines, ""), err)
+	}
+	w.saidHas("could not read whether tk-built tk-declined tk-reacted had a first reaction or a sitting", "(REACTED-UNREAD) naming the beads it left")
 }
 
 // A sweep slings every candidate nobody has decided on, highest priority

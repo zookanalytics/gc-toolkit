@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -28,10 +29,13 @@ func TestBeadTakeawayWritesTheHeadline(t *testing.T) {
 		t.Fatalf("the store took %d updates of tk-sub, want one: %q", len(ups), ups)
 	}
 	joined := ups[0]
-	for _, want := range []string{"--if-status=open --if-assignee= --status=open --assignee=", "gc.takeaway=routed to the pool", "gc.takeaway_by=converse", "gc.routed_to="} {
+	for _, want := range []string{"--if-status=open --if-assignee= --status=open --assignee=", "gc.routed_to=", "--append-notes ## Takeaway (converse, "} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the update %q does not carry %q", joined, want)
 		}
+	}
+	if raw, _ := os.ReadFile(log); !strings.Contains(string(raw), "Z)\nrouted to the pool\n") {
+		t.Errorf("the note under the heading is not the headline: %q", raw)
 	}
 	if s := calls(t, log, "sling gc-toolkit/gc-toolkit.polecat tk-sub --no-formula --no-convoy"); len(s) != 1 {
 		t.Errorf("the bead was not routed: %v", calls(t, log, "sling"))

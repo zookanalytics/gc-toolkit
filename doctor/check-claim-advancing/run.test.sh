@@ -522,37 +522,39 @@ agents "$(agent rig/pool.polecat false 2)"
 # --- 15. a step held on purpose leaves both arms ---------------------------
 # The shape this exists to stop: the release hint applied to a parked step puts
 # it back at `open` while it still carries its pool route, and the pool claims
-# it. A hold is a non-empty gc.takeaway or hold_reason.
+# it. A hold is a non-empty hold_reason.
 sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 agents "$(agent rig/pool.polecat false 2)"
 
-store alpha "$(unheld a-held 7200 '"gc.takeaway":"parked pending a ruling"')"
+store alpha "$(unheld a-held 7200 '"hold_reason":"parked pending a ruling"')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "a step carrying gc.takeaway is not UNHELD"
+eq "$RC" "0" "a step carrying hold_reason is not UNHELD"
 has "$OUT" "held on purpose" "the note says the step is parked, not stranded"
 has "$OUT" "status=blocked" "the note names the resting state a pool cannot reach"
 hasnt "$OUT" "status=open" "the note never recommends the state that hands it to the pool"
 hasnt "$OUT" "release it" "the release hint is withheld from a held step"
 clear_stores
 
-store alpha "$(unheld a-held 7200 '"hold_reason":"awaiting the sitting"')"
+# A headline a writer once left in gc.takeaway is no hold: the key is retired,
+# and a step that carries it is judged like any other.
+store alpha "$(unheld a-held 7200 '"gc.takeaway":"parked pending a ruling"')"
 OUT=$(run_check); RC=$?
-eq "$RC" "0" "hold_reason holds exactly as gc.takeaway does"
-has "$OUT" "held on purpose" "the hold_reason note is emitted"
+eq "$RC" "2" "a step carrying only gc.takeaway is reported"
+has "$OUT" "NO assignee" "…as UNHELD"
 clear_stores
 
 # An EMPTY marker is a hold that was CLEARED, which is the state a released
 # step is left in — reading it as a hold would silence the check forever.
-store alpha "$(unheld a-held 7200 '"gc.takeaway":""')"
+store alpha "$(unheld a-held 7200 '"hold_reason":""')"
 OUT=$(run_check); RC=$?
-eq "$RC" "2" "an EMPTY gc.takeaway is a cleared hold, not a hold"
+eq "$RC" "2" "an EMPTY hold_reason is a cleared hold, not a hold"
 has "$OUT" "NO assignee" "the cleared-hold step is still reported UNHELD"
 clear_stores
 
 # The live shape: the park was expressed on the ROOT and the step kept only its
 # route, so the step read as stranded to a check that looked at it alone.
 store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
-             "$(root r-1 blocked '{"gc.routed_to":"human","gc.takeaway":"held for a ruling"}')"
+             "$(root r-1 blocked '{"gc.routed_to":"human","hold_reason":"held for a ruling"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a step whose ROOT carries the hold is not UNHELD"
 has "$OUT" "held on purpose" "the root's hold reaches the step"
@@ -562,7 +564,7 @@ clear_stores
 # A hold outlives the root's close: a husk step under a retired root is the one
 # that must not be handed back, so the lookup asks with --all.
 store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
-             "$(root r-1 closed '{"gc.takeaway":"retired under a ruling"}')"
+             "$(root r-1 closed '{"hold_reason":"retired under a ruling"}')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a hold on a CLOSED root still holds"
 has "$OUT" "held on purpose" "the closed root is reached by the --all lookup"
@@ -578,7 +580,7 @@ hasnt "$OUT" "held on purpose" "a stranded step is not reported as held"
 clear_stores
 
 # ORPHANED reaches the same exit: its remedy is the same release.
-store alpha "$(printf '{"id":"a-orph","status":"in_progress","assignee":"rig/pool.gone","metadata":{"gc.step_ref":"mol-review.pin","gc.claimed_at":"%s","gc.takeaway":"parked"}}' "$(ago 7200)")"
+store alpha "$(printf '{"id":"a-orph","status":"in_progress","assignee":"rig/pool.gone","metadata":{"gc.step_ref":"mol-review.pin","gc.claimed_at":"%s","hold_reason":"parked"}}' "$(ago 7200)")"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a held step whose assignee names no session is a note, not ORPHANED"
 hasnt "$OUT" "names no session" "the orphan error is withheld from a held step"
@@ -588,7 +590,7 @@ clear_stores
 # Worse than arm 1: this step is `open`, routed and offered, so the advice the
 # check would otherwise give is what causes the claim.
 sessions "$(live hq-1 pool-1 "" 30 rig/pool.polecat)"
-store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.takeaway":"parked pending a ruling"')"
+store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"hold_reason":"parked pending a ruling"')"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an offered step carrying a hold is not the never-claimed ERROR"
@@ -597,7 +599,7 @@ hasnt "$OUT" "nudge the pool" "the pool is never nudged at a held step"
 clear_stores
 
 store alpha "$(openstep_md a-u1 rig/pool.polecat 7200 '"gc.root_bead_id":"r-1"')" \
-             "$(root r-1 blocked '{"gc.takeaway":"held for a ruling"}')"
+             "$(root r-1 blocked '{"hold_reason":"held for a ruling"}')"
 ready alpha '{"id":"a-u1"}'
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "an offered step whose ROOT is held is not the never-claimed ERROR"
@@ -646,7 +648,7 @@ sessions "$(live hq-1 pool-1 rig/pool.polecat 30)"
 # Bead ids are per-store, so a root that holds in one store says nothing about
 # the same id in another; carrying the answer over would silence a real strand.
 store alpha "$(unheld a-held 7200 '"gc.root_bead_id":"r-1"')" \
-            "$(root r-1 blocked '{"gc.takeaway":"held for a ruling"}')"
+            "$(root r-1 blocked '{"hold_reason":"held for a ruling"}')"
 store beta  "$(unheld b-strand 7200 '"gc.root_bead_id":"r-1"')" \
             "$(root r-1 open '{}')"
 OUT=$(run_check); RC=$?
@@ -657,9 +659,9 @@ clear_stores
 
 # --- 15e. the notes are per store, not per bead ----------------------------
 # A held cohort is one decision; a line each would bury the real findings.
-store alpha "$(unheld a-h1 7200 '"gc.takeaway":"parked"')" \
-            "$(unheld a-h2 9000 '"gc.takeaway":"parked"')" \
-            "$(unheld a-h3 3600 '"gc.takeaway":"parked"')"
+store alpha "$(unheld a-h1 7200 '"hold_reason":"parked"')" \
+            "$(unheld a-h2 9000 '"hold_reason":"parked"')" \
+            "$(unheld a-h3 3600 '"hold_reason":"parked"')"
 OUT=$(run_check); RC=$?
 eq "$RC" "0" "a cohort of held steps is silent"
 has "$OUT" "3 step(s) held on purpose" "the note counts the cohort"

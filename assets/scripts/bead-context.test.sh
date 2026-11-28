@@ -3,7 +3,7 @@
 #
 # The tool rebuilds a subject's opening context in one call, so the assertions
 # target the contract that opening reads: subject core (A) with the anchor,
-# first_reaction, origin and takeaway fields; context edges (D) — parent,
+# first_reaction and origin fields; context edges (D) — parent,
 # relates-to (both the `relates-to` and older `related` spellings), the reverse
 # `tracks` edges (a conversation about the bead), and the beads that wait on it
 # by a reverse `blocks` or `until` edge, open ones first and capped — each with
@@ -90,7 +90,8 @@ flush() {
 }
 
 # tk-anchor: a subject core (A) with every field the opening reads — anchor
-# state, first_reaction, origin, a settled takeaway, task_kind and routing. Its
+# state, first_reaction, origin, task_kind and routing, beside the residue of a
+# retired takeaway. Its
 # edges (D) are the parent tk-epic, two relates edges in each spelling, and a
 # reverse `tracks` edge from a conversation (tk-conv, below). Its blocks are all
 # closed — one same-store, one FOREIGN in the otherrig store, which a show
@@ -576,7 +577,7 @@ has "$OUT" "Task kind   rework"                  "  ... task_kind"
 has "$OUT" "Store       gc-toolkit"              "  ... store resolved from the id prefix"
 has "$OUT" "Origin      operator"                "  ... gc.origin"
 has "$OUT" "First react ruling → tk-frt"         "  ... first_reaction with its target"
-has "$OUT" "[settled]"                           "  ... a settled takeaway is marked"
+hasnt "$OUT" "Takeaway"                         "  ... and not the retired takeaway it carries"
 has "$(<"$STUB_GC_LOG")" "show tk-anchor --brief-deps" \
   "  ... via a --brief-deps read, so a hub bead's dependency bodies are never fetched"
 
@@ -596,7 +597,6 @@ FR=$(after "$J" first_reaction)
 eq "$(val "$FR" reaction)"                   ruling            "first_reaction.reaction"
 eq "$(val "$FR" target)"                     tk-frt            "first_reaction.target"
 eq "$(val "$J" origin)"                      operator          "subject.origin"
-eq "$(val "$J" takeaway_settled)"            1                 "subject.takeaway_settled returned as the field it is"
 # A bead with no merge_result carries a null anchor, not a fabricated one.
 run tk-epic --json;   eq "$(val "$J" anchor)" null        "anchor is null when the bead is not an anchor"
 

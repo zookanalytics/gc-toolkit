@@ -15,19 +15,17 @@ import (
 	"github.com/zookanalytics/gc-toolkit/services/gctk/takeaway"
 )
 
-const beadTakeawayLong = `Writes the bead's headline, the one line its handling concluded, with when it
-was written, who wrote it (--by, host when unnamed) and whether anything still
-waits on it, in one update. Whitespace runs collapse to one space, and a
-headline longer than 140 codepoints is refused, never cut.
+const beadTakeawayLong = `Appends the bead's headline, the one line its handling concluded, to its
+notes, under a heading that names who wrote it (--by, host when unnamed) and
+when, in one update. Whitespace runs collapse to one space, and a headline
+longer than 140 codepoints is refused, never cut.
 
 --waiting-on <bead> names a bead the bead waits on, and is repeatable: each
 becomes a blocks edge from the bead onto it, written after the headline. A
 wait that rode the bead's own branch and has landed its work there, closed,
 held by the refinery or its PR on the pending record, takes no edge, since the
-bead's merge lands it. --no-wait says nothing waits on the bead, and is
-stamped beside the headline, and every other headline clears that mark. The
-two contradict, and a wait in another store holds nothing, so either is
-refused.
+bead's merge lands it. --no-wait says nothing waits on the bead. The two
+contradict, and a wait in another store holds nothing, so either is refused.
 
 --release takes the bead out of play in the same update: it reopens the bead,
 assigns it to nobody, clears its route and the session pins its last executor
