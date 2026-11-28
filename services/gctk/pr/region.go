@@ -19,8 +19,7 @@ const (
 // one of the two boundaries the summary's own lines end at.
 const dispatchOpener = "<summary>Dispatch — what this work was asked to do</summary>"
 
-// Gate is one check a bead's check set resolves to at a head, and the phase it
-// gates.
+// Gate is one check the summary region names, and the phase it gates.
 type Gate struct {
 	Name, Phase string
 }
@@ -32,8 +31,8 @@ const (
 	phaseOpenAsDraft = "open-as-draft"
 )
 
-// ParseGates reads the gates `gctk review checks --resolve --with-phase` prints:
-// one `<check>\t<phase>` per line. A blank line names no gate.
+// ParseGates reads the gates gctk pr compose's --gates takes: one
+// `<check>\t<phase>` per line. A blank line names no gate.
 func ParseGates(s string) []Gate {
 	var out []Gate
 	for _, line := range strings.Split(s, "\n") {

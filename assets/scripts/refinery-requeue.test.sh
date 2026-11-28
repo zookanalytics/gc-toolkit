@@ -23,8 +23,6 @@
 #     it, and asks a person to write the record; the next patrol's find-work
 #     takes the bead, and its requeue of the same head finds the open ask and
 #     files no second, whatever its reason;
-#   - an open rework child already on the branch takes the reason in its notes,
-#     and nothing else is filed or slung;
 #   - a rework child handed back goes back itself, and its anchor is untouched;
 #   - a write whose guard no longer holds writes nothing (exit 3), and a write
 #     the store fails is no move of the bead: it stops (exit 1);
@@ -174,28 +172,6 @@ ASK=$(jq -r '[ .[] | select((.title // "") | startswith("Review ask: ")) ][0].id
 has "$(cat "$STUB_HOLDS")" "p $ASK" "…and holds the bead"
 eq "$(bstatus p) $(bassignee p) $(meta p merge_result)" "open rig-a/gc-toolkit.refinery pull_request_head_changed" "the bead is left as it stands"
 hasnt "$(logged scripts)" "human-gate" "no person is asked"
-
-echo "# an open rework child already on the branch takes the reason, and nothing else is filed"
-fresh
-branch_with polecat/q q.txt >/dev/null
-work q polecat/q '{"merge_result":"pull_request_head_changed"}'
-put '{"id":"q-kid","title":"Rework","status":"in_progress","assignee":"rig-a/gc-toolkit.polecat-2","issue_type":"task","notes":"","metadata":{"task_kind":"rework","anchor_bead":"q","branch":"polecat/q","gc.execution_routed_to":"rig-a/gc-toolkit.polecat"}}'
-prepared q polecat/q
-run --bead q --reason "Conflicts with main at def"
-eq "$RC" 0 "the requeue exits 0"
-has "$(bnotes q-kid)" "Conflicts with main at def" "the child already on the branch takes the reason"
-hasnt "$(logged gc)" "bd create" "no second child is filed"
-hasnt "$(logged gc)" "sling" "a child already dispatched is not slung again"
-for k in '"source_review_bead":"rv-1"' '"gc.dispatch_when_ready":"rig-a/gc-toolkit.polecat"'; do
-  fresh
-  branch_with polecat/u u.txt >/dev/null
-  work u polecat/u '{"merge_result":"pull_request_head_changed"}'
-  put "{\"id\":\"u-kid\",\"title\":\"Rework\",\"status\":\"open\",\"assignee\":\"\",\"issue_type\":\"task\",\"notes\":\"\",\"metadata\":{\"task_kind\":\"rework\",\"anchor_bead\":\"u\",\"branch\":\"polecat/u\",$k}}"
-  prepared u polecat/u
-  run --bead u --reason "lint fails"
-  eq "$RC" 0 "the requeue exits 0 ($k)"
-  hasnt "$(logged gc)" "sling" "a child a review filed, or one armed, is its filer's or its arm's to send ($k)"
-done
 
 echo "# a rework child handed back goes back itself, and its anchor is untouched"
 fresh

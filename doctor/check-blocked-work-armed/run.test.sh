@@ -5,7 +5,7 @@
 # only gc.execution_routed_to — provenance, not a dispatch path — and one whose
 # route or arm holds only whitespace), every exemption (routed, armed, assigned,
 # worked by a live run, merge anchor, held by either hold label in any case,
-# held by a converse sitting's gate, review/step/workflow metadata, every
+# held by a converse sitting's gate, step/workflow metadata, every
 # standing kind, decision/epic/infra types), a bead carrying only the retired
 # placement marker, the per-rig labelling, the remedy string, the fail-closed
 # probes (unreadable blocked listing, unreadable runs, unreadable gate listing,
@@ -254,8 +254,9 @@ eq "$RC" "0" "a blocked bead already routed (gc.routed_to) is not flagged"
 has "$OUT" "OK:" "clean run prints the OK line"
 clear_stores
 
-# A merge anchor (merge_result set) is driven by the merge cadence and offered
-# by no pool queue (lifecycle.toml: anchor state = status x merge_result), so
+# A merge anchor (merge_result set) is driven by the refinery and the landing
+# order, and offered by no pool queue (lifecycle.toml: anchor state = status x
+# merge_result), so
 # blocked-and-unrouted is not the anti-pattern for it — not flagged.
 blocked_store alpha "$(bmeta a-1 merge_result pre_open_gate)"
 eq "$(run_check >/dev/null; echo $?)" "0" "a blocked merge anchor (merge_result) is not flagged"
@@ -315,7 +316,7 @@ blocked_store alpha "$(bassigned a-1)"
 eq "$(run_check >/dev/null; echo $?)" "0" "an assigned blocked bead is not flagged (not unrouted-and-remember)"
 clear_stores
 
-for pair in "task_kind=review" "gc.step_ref=mol-x.step" "gc.kind=workflow"; do
+for pair in "gc.step_ref=mol-x.step" "gc.kind=workflow"; do
     k="${pair%%=*}"; v="${pair#*=}"
     blocked_store alpha "$(bmeta a-1 "$k" "$v")"
     eq "$(run_check >/dev/null; echo $?)" "0" "a blocked bead carrying $k is not plainly work — not flagged"

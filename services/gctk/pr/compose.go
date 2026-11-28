@@ -9,7 +9,7 @@ import (
 )
 
 // Request is what a composition takes besides the bead: the PR as GitHub has
-// it, and the gates its bead's check set resolves to at its head.
+// it, and the gates its summary region names at its head.
 type Request struct {
 	// Head is the commit the PR opens at, or carries now.
 	Head string
@@ -19,9 +19,9 @@ type Request struct {
 	Target string
 	// Body is the PR's body as published, nil for a PR not opened yet.
 	Body *string
-	// Gates is the gate set the bead's check set resolves to at Head, which the
-	// summary region names. Nil means it was not resolved: a region that must
-	// be written is then left as it stands, and reads NeedsGates.
+	// Gates is the gate set the summary region names at Head. Nil means none
+	// was given: a region that must be written is then left as it stands, and
+	// reads NeedsGates.
 	Gates []Gate
 }
 

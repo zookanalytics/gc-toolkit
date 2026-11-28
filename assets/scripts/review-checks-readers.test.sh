@@ -10,8 +10,8 @@
 #
 # The test looks for reads, not names: a git object read (show <oid>:<path>), a
 # file read (cat, head, tail, source, a < redirect, a -r or -f test) and an
-# index handed to `gctk review checks` as --file. signoff.sh names both files in what it
-# tells a reviewer and reads neither, and prose names them freely.
+# index handed to `gctk review checks` as --file. Prose names both files
+# freely and reads neither.
 # A fixture of each read shape proves the scan finds it, and a fixture of
 # names proves it reads past them.
 #
@@ -20,8 +20,7 @@
 #
 # A check is declared in an index and nowhere else, so no script or formula
 # lists two or more of the pack's checks, the names taken from the pack's
-# index, except where the default check_set is configured. A fixture of each
-# list shape proves the scan finds it.
+# index. A fixture of each list shape proves the scan finds it.
 #
 # Hermetic: reads this checkout's files and writes a mktemp fixture; no gc, bd,
 # git or network.
@@ -84,7 +83,7 @@ IDX=$(cat "$root/review-checks.toml")
 PURPOSE=$(head -5 "$GC_RIG_ROOT/docs/review-pm.md")
 while read -r l; do :; done < "$root/review-checks.toml"
 [ -r "$root/review-checks.toml" ] && echo readable
-"$GCTK" review checks --resolve c --through merge --file "$HERE/../../review-checks.toml"
+"$GCTK" review checks --check c --file "$HERE/../../review-checks.toml"
 FIXTURE
 eq "$(reads "$TMP/reads.sh" | wc -l | tr -d ' ')" "7" "every read shape in the fixture is found"
 
@@ -101,11 +100,7 @@ eq "$(reads "$TMP/names.sh")" "" "a name, a message, a path pattern and a resolv
 # --- One list -------------------------------------------------------------------
 # A check is declared in an index and nowhere else, so no script or formula
 # carries a list of two or more of the pack's checks, as a case alternation or a
-# comma list. The one exception is the default check_set, which is
-# configuration: gate-ensure.sh's --default, refinery-reconcile.sh's
-# REFINERY_RECONCILE_CHECK_SET and mol-refinery-patrol's check_set var, with
-# lifecycle/lifecycle.toml's check_set_default, which no scan here reads. The
-# names are the pack's index's [checks.<name>] tables.
+# comma list. The names are the pack's index's [checks.<name>] tables.
 NAMES=$(sed -n 's/^\[checks\.\([A-Za-z0-9_-]*\)\][[:space:]]*$/\1/p' "$ROOT/review-checks.toml" | paste -sd'|' -)
 case "$NAMES" in
   *'|'*) ok "the pack's index names its checks ($NAMES)" ;;
@@ -118,31 +113,17 @@ lists() {
   grep -nE "(^|[^A-Za-z0-9_./-]|:-)($NAMES)[[:space:]]*[|,][[:space:]]*($NAMES)([^A-Za-z0-9_./-]|$)" "$1" 2>/dev/null \
     | grep -vE '^[0-9]+:[[:space:]]*#'
 }
-# configured <file> <n> <line> : whether the line is a site of the default check_set.
-configured() {
-  case "$1" in
-    assets/scripts/gate-ensure.sh) case "$3" in *DEFAULT_CHECK_SET*) return 0 ;; esac ;;
-    assets/scripts/refinery-reconcile.sh) case "$3" in *REFINERY_RECONCILE_CHECK_SET*) return 0 ;; esac ;;
-    formulas/mol-refinery-patrol.toml)
-      case "$3" in *CHECK_SET=*) return 0 ;; esac
-      [ "$(awk -v n="$2" 'NR <= n && /^\[/ { h = $0 } NR == n { print h; exit }' "$ROOT/$1")" = "[vars.check_set]" ] && return 0 ;;
-  esac
-  return 1
-}
-LISTS=""; CONFIGURED=0
+LISTS=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in skills/*) continue ;; esac
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
-    if configured "$f" "${hit%%:*}" "${hit#*:}"; then CONFIGURED=$((CONFIGURED + 1)); continue; fi
     LISTS="$LISTS$f:$hit
 "
   done <<< "$(lists "$ROOT/$f")"
 done <<< "$SCOPE"
-eq "$LISTS" "" "no script or formula lists two of the pack's checks outside the default check_set's configuration"
-[ "$CONFIGURED" -gt 0 ] && ok "the default check_set's configuration is found by the scan ($CONFIGURED lines)" \
-  || bad "the default check_set's configuration is found by the scan" "no configured line matched"
+eq "$LISTS" "" "no script or formula lists two of the pack's checks"
 
 # Both list shapes are found, and names that are not a list are not.
 cat > "$TMP/lists.sh" <<'FIXTURE'
@@ -151,7 +132,7 @@ GATES="arch, pm"
 FIXTURE
 eq "$(lists "$TMP/lists.sh" | wc -l | tr -d ' ')" "2" "a case alternation and a comma list of checks are found"
 cat > "$TMP/not-lists.sh" <<'FIXTURE'
-# correctness,triage is the default check_set
+# correctness,triage are two of the checks
 SKILL=review-arch,review-pm
 cp docs/arch.md docs/pm.md
 TRIAGE_GATE=triage

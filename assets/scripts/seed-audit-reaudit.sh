@@ -126,8 +126,6 @@ if [ "$BASE" != "$DEFAULT" ]; then
   exit 0
 fi
 
-unset GC_RECONCILE_BD_CACHE
-
 # The store's re-audit lock (the header's rule), on fd 9 until the exit.
 command -v flock >/dev/null 2>&1 \
   || fail "flock is not on PATH, so the store's re-audit lock cannot be taken; nothing filed"

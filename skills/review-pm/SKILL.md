@@ -1,6 +1,6 @@
 ---
 name: review-pm
-description: Use when you hold a review bead whose check is pm, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
+description: Use when you hold a review run's pm lane, or when asked whether a change is the right thing to ship and presents itself so the operator can judge.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -22,11 +22,10 @@ is yours. Judge the intent the change serves, not the wording it satisfied.
 
 ## What it reads
 
-`docs/product-goals.md` first, then the anchor `<anchor_bead>` for the problem
-the change claims, then the diff at `<reviewed_oid>`, in `<worktree>`
-(`git diff origin/<review_base>...HEAD`), and the PR as it will reach the
-operator: the page the review formula printed from `<review_pr_url>`, or
-pre-open the anchor's pending PR summary. Then the rig's guidance for this
+`docs/product-goals.md` first, then the anchor `<pr_bead>` for the problem
+the change claims, then the diff at `<head>`, in `<worktree>`
+(`git diff origin/<target>...HEAD`), and the PR as it will reach the
+operator: the page the lane's read printed from `<pr_url>`. Then the rig's guidance for this
 check, the reviewed commit's `docs/review-pm.md`, which the review formula
 printed when the commit carries one. A rig says there where it keeps its product
 goals when that is not where this method looks.
@@ -50,12 +49,23 @@ judge the change against the anchor's stated problem alone. The missing page is
 no reason to pass or fail the change, and no finding asks the change to add it,
 because a rig's product goals come from the operator, not from its code.
 
-File one request for the page instead, the way `mol-review` files a finding the
-change did not cause, under the token `docs/product-goals.md: missing`. Add
-`--all` to that duplicate probe's `gc bd list`, so a request already answered
-and closed counts too: a rig is asked once, and a later review finds that bead
-instead of filing another, even on a branch cut before the rig answered. The
-request's body names what the page holds, as the section above does. It says
+Raise one request for the page instead, as a finding graded `P2`, which does
+not block, with the token `docs/product-goals.md: missing` in its message.
+
+The round rules that finding deferred. Before it files anything, it lists the
+beads that already carry the token, closed ones included, so a rig is asked
+once, even on a branch cut before the rig answered:
+
+```bash
+gc bd list --title-contains "docs/product-goals.md: missing" --all
+```
+
+When a bead is listed, the round files nothing, and the ruling names that bead,
+its status and what it waits on, which can be another PR than this one.
+Otherwise the round files the request with `review-run.sh defer`, under a
+title that ends in the token in parentheses, and the ruling names the bead the
+call prints. The request's body names what the page holds, as the section above
+does. It says
 that the operator states the goals, so whoever takes the bead asks the operator
 for them, or for where the rig already keeps them, and does not draw them from
 the code. The request is answered by a `docs/product-goals.md`, or by a

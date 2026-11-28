@@ -960,9 +960,9 @@ filed, once it is filed, because the store keeps no trace of which ruling
 filed a child. A re-run that finds that rework closed files no second one and
 supersedes no review again, and a stay waits on the closed rework. An attempt
 that stopped after filing its rework and before recording it leaves a rework
-no record names: a re-run adopts and records it while it is open, and once it
-has closed the sign-off refuses the re-run before any write, because the
-writer would file a second one, and the sitting holds to ask the operator. A conversation owns one live rework, so
+no record names: a re-run finds that ask by its source and reason, whether it
+is open or has closed, and records it, so it files no second one. A
+conversation owns one live rework, so
 a second PR whose branch must change waits behind its gate, left owed, for a
 ruling of its own. A
 sitting signs off only when nothing important is pending; a turn that hands
@@ -1127,8 +1127,8 @@ commits, and the commits stay local until Work's hand-off pushes them.
 asks for once the agreed steps are in, or which the operator gives when they
 rule the edit. It is Work's hand-off, `work-submit.sh --held-by <conversation>`:
 the polecat's submit, with the same branch gate, push and check of origin's ref,
-bring-current guard, anchor summary and title, three hand-off writes, refinery
-wake and removal of the tree. Under `--held-by` both writers take as proof that
+anchor summary and title, three hand-off writes, refinery wake and removal of
+the tree. Under `--held-by` both writers take as proof that
 `gc hook current` names the conversation and the bead has its edge onto it, and
 they refuse a bead assigned to anyone, the refinery included, one whose PR
 waits on the pending record, one a run works or one routed to a pool. A refusal

@@ -25,11 +25,8 @@
 # current` names, when it verifies as this session's bead for that gc.step_ref,
 # and that bead's gc.root_bead_id. When the claim cannot be read, the run is not
 # ended, since running again can change that, and the refusal carries gc hook
-# current's exit status and stderr. The script accepts a --bead argument and
-# does not read it, because mol-validate's step text passes one, always empty. A
-# --bead that names a bead other than the claim is reported, so a call by hand
-# leaves a record of the id it was given. --root names the run directly, for a
-# caller that holds no step of it.
+# current's exit status and stderr. --root names the run directly, for a caller
+# that holds no step of it.
 #
 # A run whose root is already closed is not cancelled, because gascity's cancel
 # leaves a terminal run's members as they are and answers 409. A 409 for a root
@@ -46,8 +43,8 @@
 # stays in this session's name, not started, so whichever worker the step goes
 # to next retries the cancel, this session at its next claim included.
 #
-# Callers: decline.sh; mol-review's failed gather and mol-validate's decline
-# arms; orphan-dispose.sh (--ended); gctk bead takeaway --release.
+# Callers: decline.sh; orphan-dispose.sh (--ended); gctk bead takeaway
+# --release.
 # exit: 0 the run is ended · 1 the run is not ended · 2 refused, nothing written
 set -uo pipefail
 
@@ -76,9 +73,6 @@ usage: run-cancel.sh --step <formula.step-id> --reason "<text>" [--dry-run]
   --root     the run's root bead, for a caller that holds no step of it.
   --reason   why the run ends; appended to the held step in --step mode once
              the run has ended, and printed on the result line (required)
-  --bead     accepted and not read: mol-validate's step text passes one. The
-             step is the one `gc hook current` names, and a --bead that names
-             another bead is reported.
   --ended    the caller read the root as closed: close only what the run left
              open, and refuse a root that reads live rather than cancel it.
   --db       the store the run's beads live in, for a caller outside it.
@@ -101,21 +95,20 @@ require_value() {
     exit 2
   fi
   case "$2" in
-    --step|--root|--reason|--bead|--ended|--db|--dry-run|-h|--help)
+    --step|--root|--reason|--ended|--db|--dry-run|-h|--help)
       echo "$PROG: $1 requires a value, but the next argument is the option '$2'" >&2
       usage
       exit 2 ;;
   esac
 }
 
-STEP=""; ROOT=""; REASON=""; HINT=""; ENDED=0; DB=""; DRY_RUN=0
+STEP=""; ROOT=""; REASON=""; ENDED=0; DB=""; DRY_RUN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --step)    require_value "$@"; STEP="$2";   shift 2 ;;
     --root)    require_value "$@"; ROOT="$2";   shift 2 ;;
     --reason)  require_value "$@"; REASON="$2"; shift 2 ;;
-    --bead)    require_value "$@"; HINT="$2";   shift 2 ;;
     --ended)   ENDED=1; shift ;;
     --db)      require_value "$@"; DB="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -211,9 +204,6 @@ if [ -n "$STEP" ]; then
     rm -f "$HOOK_ERR"
   fi
   [ "$HOOK_RC" -eq 0 ] || CLAIM=""
-  if [ -n "$HINT" ] && [ "$HINT" != "$CLAIM" ]; then
-    echo "$PROG: NOTE: --bead '$HINT' is not read; the step is the one gc hook current names${CLAIM:+, $CLAIM}" >&2
-  fi
   if [ -z "$CLAIM" ]; then
     echo "$PROG: cannot identify this session's bead for step '$STEP': gc hook current exited $HOOK_RC without naming a claim${HOOK_SAID:+ (it said: $HOOK_SAID)}; nothing was cancelled" >&2
     exit 1

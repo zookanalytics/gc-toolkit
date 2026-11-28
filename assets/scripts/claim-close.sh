@@ -10,12 +10,13 @@
 # its gc.step_ref is <ref>, and this session holds it. A close re-run after the
 # claim moved on therefore refuses, rather than closing the next step unrun.
 #
-# <ref> is the step's gc.step_ref, such as mol-review.review. For a check loop's
-# step it is the loop's name, such as self-review. Its claims carry the name, a
-# run's first iteration as self-review.iteration.1 and each later one with the
-# formula's name before it, as mol-polecat-work.self-review.iteration.2, and a
-# step bonded inside an iteration, such as a review lane, carries its bond's
-# formula name before that.
+# <ref> is the step's gc.step_ref, such as mol-polecat-work.implement. For a
+# check loop's step it is the loop's name, such as self-review. Its claims
+# carry the name, a run's first iteration as self-review.iteration.1 and each
+# later one with the formula's name before it, as
+# mol-polecat-work.self-review.iteration.2, and a step bonded inside an
+# iteration, such as a review lane, carries its bond's formula name before
+# that.
 #
 # A bead already closed is reported and exits 0, so a close whose call was
 # interrupted can be run again. A plain routed bead with no steps is refused like
@@ -34,8 +35,8 @@ usage() {
 usage: claim-close.sh --step <ref> [--outcome <v>] [--dry-run]
 
   --step     the gc.step_ref of the step you are finishing, as `claim-context.sh`
-             printed it, e.g. mol-review.review; a check loop's name, e.g.
-             self-review, for one of its iterations
+             printed it, e.g. mol-polecat-work.implement; a check loop's
+             name, e.g. self-review, for one of its iterations
   --outcome  value for metadata gc.outcome, default pass
   --dry-run  report what would close; write nothing
 

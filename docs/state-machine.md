@@ -129,13 +129,6 @@ same way until its hand-off to the refinery removes the edge
 | handed_off → poured | `refinery-requeue.sh`, from the refinery's rebase and handle-failures steps | a conflict with the target or a failure the branch caused, on a bead that records no open PR (`pull_request_head_changed`): one write guarded on the assignee and status reopens it unassigned with `rejection_reason` and clears the `merge_result` and `blocked_reason` a park or a half-written record left, and `gc sling` pours `mol-polecat-work` on it, keeping its branch and the PR it may reuse |
 | poured → handed_off | the pour's `mol-polecat-work` submit step | push verified on the remote |
 
-A request-changes verdict does NOT transition the anchor: `signoff.sh` files one
-routed rework child that blocks the anchor, with the reviewer's findings and the
-lane's validation pass beside it. The anchor keeps its value on the pending
-record. The child's and the
-pass's `blocks` edges hold the merge, and so does the lane, since a
-request-changes close backs no lane.
-
 ## The pending record
 
 The bead that owns a PR carries Gas Town's pending-through-merge record, with Gas Town's values and their meanings
@@ -252,9 +245,9 @@ refuses a bead on the record, and a ruling retires the PR.
 
 ## Checks
 
-A check is one review of a PR at a head, by the check's own method. On a rig on
-the pending record, a PR's checks run as the lanes of a review run,
-`mol-pr-review`, one run per head the refinery validates. The landing order
+A check is one review of a PR at a head, by the check's own method. A PR's
+checks run as the lanes of a review run, `mol-pr-review`, one run per head the
+refinery validates. The landing order
 pours it, attached to the bead that owns the PR by `gc formula cook --attach`,
 so the bead's `blocks` edge onto the run's root holds the bead while the run
 lives. It pours one when the evaluator finds no passed result at the validated
@@ -340,7 +333,7 @@ round and spends no attempt, and holds the PR by its own edge until a run takes
 it. The loop's check closes each ask the run answered as it records the result,
 with the runtime's work record.
 
-**What the run reads of the check index and of `check_set`.** The index is the
+**What the run reads of the check index.** The index is the
 pack's `review-checks.toml` with the rows of the rig's own laid over it, which
 `gctk review` reads at the commit the reader judges:
 
@@ -360,9 +353,8 @@ pack's `review-checks.toml` with the rows of the rig's own laid over it, which
 - `gctk review ask --check <name>` refuses a name the index at the record's
   validated head does not declare.
 
-No step of the run reads `check_set` or a check's phase. Every check triage
-picks runs before the run records a result, and the landing order marks the PR
-ready only on a passed result, so no phase orders the checks.
+Every check triage picks runs before the run records a result, and the landing
+order marks the PR ready only on a passed result.
 
 **Approval.** The evaluator applies the approval contract by GitHub's own
 eligibility. Each account's latest review that approves or requests changes
@@ -394,110 +386,6 @@ ask or `merge_hold` still holds the PR the order readied.
 What a person says on the PR short of a verdict is no check either: see
 [The PR's conversation](#the-prs-conversation) below.
 
-### The old path's checks
-
-The old review path runs a PR's checks as review beads. Its readers enumerate
-only `pre_open_gate` and `pull_request` anchors, which no bead carries, and its
-code stays until its retirement ([Debt](#debt)). This subsection is that path's
-account, and so are the validation pass and the review bead that
-[Operator feedback](#operator-feedback) describes after the definition of
-feedback.
-
-**Vocabulary.** The anchor declares its checks in `check_set`, a comma list of
-check names. `none` and `off` are sentinels that declare no check at all (`none`
-is the spelling the rest of this pack uses). `approval` is a third name a
-check_set may carry, but it is a universal merge rule, not a check (below). The
-one resolver, `gctk review checks --resolve <cs> --through <phase> --at <oid>`,
-reads the check index at the commit the reader judges, drops all three and
-returns the checks whose phase gates `<phase>`, so no reader of a stage
-transition re-derives that drop: `gate-ensure.sh`, `review-outcome.sh` and
-`liveness-sweep.sh` all ask it rather than tokenizing
-`check_set` themselves.
-`bring-current-guard.sh` judges no transition and asks no phase, and it reads
-`check_set`'s names itself three times. When it records a conflicted round, it
-rules on the round itself for a set of `none` or `off`, and it adds `triage` to
-a set that declares no triage lane. When it records triage's ruling, it refuses
-one that reopens a lane the anchor does not declare, and none of the three
-names counts as a lane there
-([Bringing a branch current](#bringing-a-branch-current)).
-
-Every other name is opaque to the machinery: gate-ensure dispatches whatever
-it finds there, and `signoff.sh` records the verdict on that check's review
-bead. Which names an anchor starts with is configuration, not doctrine.
-`gate-ensure.sh --default` puts them there without reading the diff: it
-normalizes an anchor whose set is absent or empty, taking its value from
-`REFINERY_RECONCILE_CHECK_SET`.
-The registry records the same value at `lifecycle/lifecycle.toml`
-`[gates] check_set_default`. Who may depart from it is
-[authority-map.md](authority-map.md).
-
-`correctness` is one such review check, opaque like the rest, and it declares a
-**phase** in the index: the stage transition by which it must derive green. The
-four phases are ordered `pre-open < open-as-draft < ready-for-review < merge`,
-each fixed by what the check consumes — a check that reads only the diff is
-`pre-open`, one that needs the deployed preview is `open-as-draft`. The stage
-transitions gate on the checks their phase reaches, not one shared list. An
-empty `check_set` is not the opt-out at any transition: it means never
-normalized, and gate-ensure stamps the default earlier in the same pass. The
-index is the pack's
-`review-checks.toml`, which declares every check the pack ships, with the rows
-of the rig's own `review-checks.toml` at the commit being judged laid over it, so
-a rig that keeps none has the pack's checks. A name no layer declares takes
-`pre-open`, so it gates every transition. A declared phase outside the four is
-an index error: every transition whose check_set names that check holds until
-the index is fixed.
-
-Each check is a **lane**. A lane's state is derived from the anchor's beads and
-never stored on the anchor, and it is a state of the lane, never a claim about a
-commit. `lane-state.sh` derives `green`, the one state every gating reader
-asks; the others name what holds a lane short of it:
-
-| State | Derives from | Merge effect |
-|---|---|---|
-| `reviewing` | a review bead for this lane on the anchor is open | holds |
-| `validating` | a validation pass on the anchor is open | holds |
-| `fixing` | a must-fix finding on this lane is open | holds |
-| `green` | a closed review backs the lane (`signoff_verdict=approve`, a `reviewed_oid`, not superseded), or an operator's APPROVED GitHub review does, and no review for the lane is open | merges |
-| `unreviewed` | nothing backs the lane and nothing is in flight on it | holds |
-
-**Green survives new commits.** A push creates and closes no bead the
-derivation reads, so it does not move a lane out of `green`, does not stale it,
-and does not buy a review, and no pass re-gates a branch for having grown a
-commit. A lane returns to `unreviewed` only when the reviews backing it are
-superseded (`review-outcome.sh`, [authority-map.md](authority-map.md)): the
-validator rules a fresh whole-diff review warranted, an operator ruling's
-rework child is dispatched, or the ruling on a conflicted bring-current round
-reopens the lane. The full lane state machine is
-[specs/tk-ztapg/review-cycle-architecture.md](../specs/tk-ztapg/review-cycle-architecture.md).
-
-`approval` is not a check and has no lane: it is a **universal merge rule**.
-The landing order's evaluator merges a PR only on a standing APPROVED review
-from an account that can push to the repository
-([refinery-merge-cadence.md](refinery-merge-cadence.md#the-landing-order)). The
-old path's readers take `review-verdict.sh`'s statement of it: a latest
-APPROVED review by an account other than the city's, with a standing
-CHANGES_REQUESTED from any other account a veto. An approval stands across later pushes until it is
-dismissed, so it counts whatever commit it was given at. A dismissed review is
-dropped before each reviewer's latest review is taken, so it neither approves
-nor vetoes, and it does not hide its author's older approval. A small fix after
-an approval lands on it. An outside approval is dismissed by
-`bring-current-guard.sh` when the ruling on a conflicted
-[bring-current round](#bringing-a-branch-current) lifts it, and by
-`approval-withdraw.sh` when the validator rules a fresh whole-diff review
-warranted. Each dismisses every approval an account has not had dismissed (the
-guard, every one given before the round), not only its latest, because an older
-approval would otherwise count again. A ruling that
-lifts the approval also draws a line on the anchor, `bring_current_lifted_at`,
-at the round's time, and no approval submitted at or before it counts, so a
-dismissal GitHub refuses cannot land the PR and an approval given after the
-round lands it. No `check_set` token arms it or opts out, and GitHub branch
-protection is an extra layer, not the authority.
-`lifecycle/lifecycle.toml` records the rule. **`signoff.sh` is the single
-writer of check verdicts** (component-model I7): it closes the review bead with
-`signoff_verdict`, the record a lane's green derives from. A verdict binds to no
-commit: the reviewed oid is recorded on the review bead and named in the posted
-artifact, and a lane's green does not compare it to a head.
-
 ### Operator feedback
 
 Feedback from a person is review the branch has never been answered against.
@@ -519,7 +407,7 @@ prefix its rig declares for a third-party integration
 approval or a change request counts whatever its body carries. The city's own
 post is one that `assets/scripts/pr-post.sh` marked, which is every post the
 pack makes —
-`signoff.sh`'s verdicts, a review run's comment
+a review run's comment
 for each head and its replies to a person's posts, the sitting reminder, a demo delivery,
 `pr-dispose.sh`'s closing comment. An unmarked post under the city's login
 after its PR's provenance cutover, described next, is feedback like a person's,
@@ -538,61 +426,15 @@ that login is the city's own. `tools/lint-learned.d/pr-post-bypass.sh` fails any
 post in the pack that does not go through the helper, and the agents' gh guard
 refuses an unmarked one an agent types ([gh-origin-guard.md](gh-origin-guard.md)).
 
-The city posts no `CHANGES_REQUESTED`: `signoff.sh` records both of its
-verdicts as COMMENT reviews, and `pr-post.sh` has no change-request verb. A
-codex veto is therefore a marked COMMENT review, the city's own, and raises no
-batch; `signoff.sh`'s rework loop answers it. A `CHANGES_REQUESTED` under the
-city's login from before the cutover is the city's own the same way. Every
+The city posts no `CHANGES_REQUESTED`, since `pr-post.sh` has no
+change-request verb. A `CHANGES_REQUESTED` under the city's login from before
+the cutover is the city's own, as its other posts from then are. Every
 other `CHANGES_REQUESTED` is feedback, including an unmarked one under the
 city's login after the cutover, and the landing order takes it on the same
 terms as any other feedback: its message and each of its inline comments
 become an ask of their own. GitHub
 refuses a change request from a PR's author, so on a PR the city opened only
 another login can leave one.
-
-The review bead carries the `mol-review` formula (attached at dispatch via
-`gc sling --on`); the reviewing polecat follows its steps. The dispatch pins
-`reviewed_oid=<live head>` on the review bead, naming the commit the reviewer
-read, and nothing moves or clears it afterwards: `signoff.sh` refuses a
-verdict that names another commit. The pin binds no lane state, and a push
-that only adds commits on top (the branch growing) leaves the pin `on` the
-branch and is not this check's business. What the pin still guards against is
-a rewrite: `signoff.sh` asks
-whether `reviewed_oid` is still an ancestor of the live head
-(`git merge-base --is-ancestor`, with a GitHub compare consulted first when a
-PR is open); a rebase, amend, or force-push that takes the pinned commit off
-the branch answers `gone`, and **both verdicts are refused** — findings about
-a diff the branch no longer carries would mint a rework child with nothing to
-implement. The refusal is not a dead end an operator must clear by hand: it
-closes the review bead `gc.outcome=superseded` with its pin in place, so
-gate-ensure's in-flight probe stops seeing it and pours a fresh review at the
-live head on its next pass. No verdict is recorded either way. A close the
-store does not take exits 2, and the next claimant reviews the same departed
-commit once more before its verdict meets the same refusal.
-
-`signoff.sh` writes the commit the verdict names back to the review bead as
-`reviewed_oid` before it posts anything, on both verdicts and whether or not
-the PR is open: the pin, or on a review whose record carries none, the commit
-the call names or else the live head. The lane state itself names no commit, so that record is
-the whole of what a city verdict leaves behind: the city posts no APPROVED
-GitHub review, and `lane-state.sh` derives a lane's green only against a
-review bead carrying it. A store that will not take the record costs a
-re-run: signoff exits 2 with nothing posted and the review left open.
-
-Pre-open, the verdict body is read back off the same bead on the same terms.
-Its notes are the only copy: a request-changes child names the bead it came
-from in `source_review_bead` and has nowhere else to read its findings. So an
-append that did not land also costs a re-run, rather than a backing or a
-rework child standing on findings nobody can read.
-
-`signoff.sh` closes the review bead itself, last, stamping
-`signoff_verdict=<approve|request-changes>` in the same write as the close —
-`lane-state.sh` reads it to tell an approving review bead from one that
-recorded request-changes, and so does `doctor/check-gate-marker-provenance`. A
-bead that is already closed therefore had its verdict recorded, was retired
-unjudged by `review-sweep.sh`, or was closed `superseded` by the ancestry
-refusal above, and either verdict against it is refused on the same terms:
-nothing written.
 
 **Merge condition.** The landing order's evaluator decides a PR's merge from
 the bead's own waits, its holds, the review results recorded for the PR's head
@@ -633,10 +475,10 @@ landing order settles a review run's root once it pours the run, and the
 priority reconcile settles that work at the rank the function reads
 ([steering.md](steering.md#pr-finishing-work)).
 
-The old path's keys, its receipts and its posture (`pr_posture`,
-`pr_merge_state`, `pr_head_oid`), `pr_finishing_settled` and `pr.conversation`
-among them, are registered in `lifecycle/lifecycle.toml`, which names what still
-reads each, so residue on a bead reads as known.
+Keys nothing writes any more, the PR's posture (`pr_posture`, `pr_merge_state`,
+`pr_head_oid`), the receipts, `pr_finishing_settled` and `pr.conversation` among
+them, stay registered in `lifecycle/lifecycle.toml` as retired, so residue on a
+bead reads as known.
 
 ## The status label (GitHub projection)
 
@@ -648,7 +490,7 @@ carries exactly one value, and setting one removes any other `status:` value.
 
 | Label | Whose move | When |
 |---|---|---|
-| `status: working` | the city's, changing the PR | an unapproved PR with the city's work left on it: live work on the anchor (a rework or fix child, a validation pass, a review, a finding), a draft the landing order has yet to mark ready, or a required check still running. Also a PR the PR watch has yet to read at the head the store holds, a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out, and a PR, approved or not, that carries a person's post the city works: one the city has not taken, or one whose ask is open |
+| `status: working` | the city's, changing the PR | an unapproved PR with the city's work left on it: live work on the anchor (its review run, or a live bead that names it in `anchor_bead`), a draft the landing order has yet to mark ready, or a required check still running. Also a PR the PR watch has yet to read at the head the store holds, a PR, approved or not, whose merge a conversation holds while its sitting stays for the work it sent, or a decision holds while the work its ruling sent is out, and a PR, approved or not, that carries a person's post the city works: one the city has not taken, or one whose ask is open |
 | `status: merging` | the city's, landing the PR | a ready PR, or an approved one with only the city's work left and no person's post it works: its required checks may still be running, a merge-in rework or other city work may be in flight, or GitHub has yet to compute its merge state |
 | `status: needs-review` | a human's review | an unapproved PR with nothing in flight and nothing holding it, such as one marked ready, reworked and handed back, or left comments by a non-blocking review: only an approval is left, or the lift of a request for changes by the account that made it |
 | `status: needs-attention` | a person's, to clear a blocker | a blocker stands that the city will not clear on its own: an operator freeze, a rebase hold, anything a `held:` label names, a required check that failed, a PR that is not open or not the one the record names, a merge state on an approved PR that nothing of the city's changes, such as a conflict or a branch behind a base that requires it current, or a failure of the city's own review machinery ([The machine axis](#the-machine-axis)) |
@@ -791,8 +633,7 @@ of the writer's that the PR watch saved on the PR's bead with the ones the
 store derives, and has the writer write them only where they differ,
 `reconcile` on an open PR and `clear` on one that merged or closed. A change on
 the store's side reaches the labels at its next run, and a label a person
-changes on GitHub once the PR watch has saved it. Other callers derive them as
-they act: `signoff.sh` re-derives them on each of the city's own verdicts.
+changes on GitHub once the PR watch has saved it.
 
 A human gate or a blocker filed or cleared reaches the labels at the landing
 order's next run, which compares every owned PR's labels with what the store
@@ -818,35 +659,6 @@ at one head both ended without a result since that gate last closed, and
 All three are the machine's fault, so none carries a `held:` value, and nothing
 reads one as a person's hold or a ruling owed. Clearing either gate gets one
 more run.
-
-### `pr.machine`, on the old path
-
-On the old review path ([Debt](#debt)), **`pr.machine`** says what the
-reconcile cadence can do with the anchor as a whole on its next pass, so a
-reader learns whether an anchor is moving without re-implementing the
-predicates. It is declared in `lifecycle/lifecycle.toml` `[machine_axis]` and
-written by `gate-ensure.sh` through `lifecycle.sh`.
-
-| Value | Meaning |
-|---|---|
-| `progressing` | some automated actor will act: a declared lane is short of green, or a fix unit, rework child or validation pass is in flight |
-| `settled` | every declared check derives `green`, and the cadence is done |
-| `blocked` | a hold no automated actor will clear, with its cause in `pr.machine_cause` and a sentence in `pr.machine_reason`. Nothing writes it |
-
-`gate-ensure.sh` replaces a `blocked` verdict at the same head only when an
-automated actor is due to act. For the `blocker` cause it asks
-`assets/scripts/blocker-holder.sh` whether an automated actor holds any of the
-anchor's live blockers, because quiescence counts a rework child or validation
-pass by its status alone. A verdict at a head the branch has left is replaced.
-
-**Dated keys.** `pr.machine` carries a third component,
-`<value>@<oid>@<since>`, under one write rule that `lifecycle.sh --set-dated`
-owns: keep the existing instant while the value and the oid both hold, stamp the
-current one when either differs. The reconcile cadence re-derives the same
-verdict at the same head every few minutes, so a naive clock would restart a
-three-day wait on every pass. The instant lives inside the value rather than in a
-key beside it, because a timestamp that can be written when the value is not ends
-up dating a state that no longer holds, with nothing in either key saying so.
 
 ## The handoff
 
@@ -888,16 +700,11 @@ A rework child is discriminable by metadata alone. It carries
 `task_kind=rework` and `anchor_bead=<anchor>`, stamped by whichever component
 files it, and it resumes the anchor's own branch. Without those two keys its
 metadata is the anchor's, and the title prefix is the only thing telling them
-apart. A review bead carries `task_kind=review`. An anchor carries
-`merge_result` and neither key. Every consumer that selects on `anchor_bead`
-also narrows by `task_kind=review` or by title, so a marked child joins no
-review's result set.
+apart. An anchor carries `merge_result` and neither key.
 
-On the pending record a PR's review run is the one worker on its branch, so
-work a loop below would send onto the branch of a PR on the record is an ask
-the run takes ([Checks](#checks)), as the Rejection, Ruling and External rework
-bullets say. The rework children, the verdict's rework, quiescence, the
-disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
+A PR's review run is the one worker on its branch, so work a loop below would
+send onto the branch of a PR is an ask the run takes ([Checks](#checks)), as the
+Rejection, Ruling and External rework bullets say.
 
 - **Rejection** (refinery judgment): the branch conflicts with its target, or
   the gate failed for a reason the branch caused. The refinery sends the work
@@ -926,18 +733,7 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   the ask holding its merge. A record that does not land for any other reason
   also leaves the ask holding the merge, and files a human gate keyed
   `refinery-requeue-failed` on the bead, which names the record to write by
-  hand. One worker per branch: when an open rework child is already on the
-  branch of a bead that records an open PR, running or parked, the reason goes
-  to that child's notes and nothing else is filed.
-- **Rework** (review verdict): `signoff.sh --verdict request-changes` files
-  and slings exactly one rework child through `rework-child.sh`, with the
-  reviewer's findings and the lane's validation pass beside it. The validator
-  rules on the findings, and once the must-fix set closes it rules whether the
-  lane has converged or owes a fresh whole-diff review. Convergence is judged by
-  the validator, not counted in rounds
-  (`specs/tk-ztapg/review-cycle-architecture.md`), so request-changes files a
-  child every round and nothing in the cadence bounds them. One writer, one
-  verdict: no second component writes a verdict.
+  hand.
 - **Ruling** (operator, via converse): a ruling that reaches an open PR,
   whether given at the sign-off or on a turn that answers a gate without
   signing off (`--answer`), must say what it does to the PR
@@ -952,9 +748,8 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   re-run of the same ruling acts on the same PR even once it has closed. The
   record names the rework too once it is filed, and a re-run that finds that
   rework closed files no second one. A re-run whose record names no rework yet
-  adopts an open one and records it, and is refused before any write while a
-  closed one stands that no recorded ruling names, since the attempt that
-  stopped may have filed it.
+  sends the ruling to `converse-rework.sh` again, which finds the ask an earlier
+  attempt filed, open or closed, by its source and reason, and records it.
   `--retire` records the
   disposition and closes the PR through `pr-dispose.sh`, and the landing order
   closes the anchor once the PR reads closed ([Disposition](#disposition)). On
@@ -968,18 +763,6 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   and answers the PR with `--no-rework`, and the head it leaves is triaged as
   any head is. Otherwise a ruling that changes an open PR's branch files this
   ask, which the PR's review run takes.
-- **Quiescence** (`gate-ensure.sh`): no review is dispatched while anything is
-  acting on the anchor — a fix unit in flight (including the one answering an
-  open `must-fix` finding on any lane), a validation pass in flight, or a full
-  review already in flight on the lane. A `must-fix` finding no fix unit answers
-  holds the merge, not the dispatch. One authority computes the set, so it
-  cannot disagree with itself about whether a review was already out, and a
-  review that read a mid-change diff would raise only the no-op rework the
-  declination texts are full of.
-  There is no dispatch ceiling: quiescence forbids the redundant round a ceiling
-  would have bounded, and the runaway shapes left — a reviewer that dies after
-  claim, a rework child filed with its dependency edge reversed — stop the PR
-  moving rather than spin the dispatcher.
 - **External rework** (the landing order): a PR that is approved, by the
   approvers its saved read names, and that GitHub reads `DIRTY`, gets one ask to
   merge its target in while nothing holds the bead and no open bead other than
@@ -996,12 +779,6 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   change that landed first deleted code the branch edits, the run's ruling on
   the conflict ask decides whether the branch still has work to do, by the
   review-ruling skill's rule for a conflict ask.
-- **Disposal** (`review-sweep.sh`, cadence arm 8): a review outlives its own
-  subject when the anchor closes and the branch is deleted before any verdict
-  lands. There is no commit left for a verdict to name, so the arm closes
-  the review with `gc.outcome=moot` and records the reason on it, and writes
-  nothing to the anchor. It requires both the closed anchor and the absent
-  branch, so an unfetched branch and a still-gating anchor each hold.
 - **Duplicate / superseded disposal** (`bead-rehome.sh`, the one evidence-gated
   close-with-successor writer): a bead that duplicates another or was fixed
   upstream closes through `bead-rehome.sh --kind duplicate|fixed-upstream`, which
@@ -1017,22 +794,8 @@ disposal sweep and the dispatch on a lane are the old path's ([Debt](#debt)).
   below). Converse and operator dispositions use the
   same writer, and so does a polecat whose work
   bead duplicates another: that close is the one a polecat makes on its work
-  bead, before it declines its run. A never-dispatched rework twin, an open
-  rework child whose same-source sibling landed, holds its anchor until a person
-  or a sitting closes it the same way. A first reaction never closes a bead: it
+  bead, before it declines its run. A first reaction never closes a bead: it
   hands a confident no-op to the validating closer (`mol-validate-close`).
-- **No re-gate on head move**: a new commit stales nothing. gate-ensure
-  dispatches on the lane — a declared check that is neither `green` nor in
-  flight gets one review bead (stamp first, then attach `mol-review` via `gc
-  sling --on`, read the pour back) — and a lane that already derives `green`
-  keeps deriving it however far the branch advances. Re-review is a judgement
-  the validator or an operator ruling makes, or triage's ruling on a
-  bring-current round that conflicted, not a trigger a push pulls.
-  gate-ensure holds dispatch rather than pouring a second review while an open
-  rework child is already in flight for the lane — a `blocks`-dep bead on the
-  anchor carrying a non-empty `source_review_bead` or `source_ruling_bead` (the
-  review or the ruling the rework answers).
-
 ### Bringing a branch current
 
 A branch is brought current by merging its base in, never by a rebase. Whoever
@@ -1050,114 +813,6 @@ from its commit, its remerge diff and its message, and rules whether the change
 is material, and a material head's withdrawal lifts the approvals that did not
 see it ([Checks](#checks)). No guard holds the repair's push for its round,
 since triage reads every head.
-
-#### The bring-current guard and audit, on the old path
-
-On the old review path ([Debt](#debt)), the shapes that bring a branch current
-are a rework answering review feedback that merges the base in as it resumes,
-and an anchor the refinery's prepare re-queues on a conflict. Each resumes
-through `mol-polecat-work`'s resume block, which starts a round: it stamps
-`bring_current_from` (the PR head the round starts from) and
-`bring_current_scope` (`merge-only` when the rejection asked for nothing but the
-bring-current, else `with-work`), and clears the previous round's audit.
-
-**The worker writes the audit.** For each file git could not merge, the worker
-resolves it, writes its account into the merge commit's message as above, and
-records one entry with `bring-current-audit.sh add`: what collided (the two
-intents), what it decided and why, what a reviewer should check, and its own
-rating, `routine` (an adjacent-line collision, an
-overlapping comment edit, an obvious composition) or `judgment` (an inferred
-intent, a side chosen on substance, something new). An edit beyond what the
-merge needed owes an entry too, and on a `merge-only` bead so does each file a
-commit of the bead's own changes. A conflict the worker cannot resolve without
-guessing is a question, not a guess: `bring-current-audit.sh ask` files a human gate
-on the anchor carrying the entries so far and the question, the merge is
-aborted, nothing is pushed, and the bead is held until a person answers.
-
-**The guard enforces coverage and routes; it weighs no round.** At the
-handoff, `bring-current-guard.sh` reads the round on any branch that carries a
-review to keep current (its anchor is gating, or a PR stands on it):
-
-- **Clean**: every commit the round adds is a merge of the base whose tree is
-  git's own result. Nothing was resolved by hand; the round is recorded on the
-  anchor and lands quietly.
-- **Conflicted**: anything else. Each item git did not produce on its own (a
-  conflicted file, an edit beyond the merge, a merge of something but the base,
-  a rewritten history) must have an audit entry, or the handoff is refused and
-  the worker completes the audit. A covered round is stored on the anchor as
-  `bring_current_record` with the guard's evidence beside each entry (what git's
-  replay of the conflict shows the resolution kept), and the triage lane is
-  reopened: it is added to `bring_current_reopened` with the round's time,
-  `bring_current_round_at`, and its standing review is superseded. An anchor
-  whose `check_set` declares no triage lane (`correctness` alone, say) gains
-  `triage` in the same write, with a note saying why, so triage rules on its
-  conflicted round and the merge, which waits on every declared lane, waits
-  for that ruling.
-- **Conflicted, on an opt-out anchor**: the `none` and `off` opt-outs are the
-  one case where the guard rules on a round itself. Only a person sets or
-  widens an opt-out, so the guard leaves the `check_set` as it is, and no
-  review weighs the round. Approval is the one merge rule the opt-out leaves,
-  so nothing reopens and the approval given before the round is lifted, the
-  lift line drawn as for triage's ruling below, with no gate. The ruling is
-  stored in the record marked `by: guard`, and a re-run of the same hand-off
-  carries it out again, so a lift that stopped half-way is finished.
-
-Generated renders (linguist-generated) owe no entry. A hand-off with no
-`bring_current_from` stamp that pushed nothing past the origin head it started
-from is refused rather than read as clean, because nothing records where its
-work began. A round whose resume stamped `bring_current_from` but not
-`bring_current_scope` owes no entries: that resume step asks for no audit, and
-the submit step poured with it drains on any refusal, so a refusal would only
-re-offer the same hand-off. Its items are stored with the guard's evidence
-alone, and the round is routed to triage like any other.
-
-**Triage decides what reopens.** gate-ensure dispatches triage again, and its
-verdict (`signoff.sh --reopen <lanes>|none --round-reason <why>
-[--dismiss-approval]`) is the round's ruling, refused when absent: nothing; lanes
-that run again on the merged code (any the anchor declares, and any it adds with
-`--add-gates`); and whether the round made a call that is the operator's to
-make. Only such a call lifts the human approval: the round changed what the PR
-does, by inferring one side's intent or by choosing between two live designs,
-and the ruling's reason names that call. A round that only changed how the
-approved behavior is achieved reopens the lanes that can check it, and the
-approval stands. `bring-current-guard.sh decide` records the ruling in the
-anchor's record and supersedes each reopened lane. A ruling that lifts the
-approval first draws the
-lift line: the round's time is stored as `bring_current_lifted_at` and read
-back, and from then on the approval rule counts no approval submitted at or
-before it. Each approver is then re-requested and each standing approval given
-before the round is dismissed; one submitted after the round saw the merged
-code and stands. When GitHub refuses a dismissal, the line still holds the
-merge, the failure is noted on the anchor, and an approval given after the
-round lands the PR with nothing else to clear. A later round whose ruling keeps
-the approval leaves the line where it was. A lane in `bring_current_reopened`
-is backed by a GitHub approval only when the approval was submitted after
-`bring_current_round_at` (`lane-state.sh`), so a standing approval neither lets
-the merge skip a reopened lane nor keeps its review from being dispatched. A
-round can therefore keep the approval while its lanes re-run, and only a call
-that is the operator's removes it.
-
-**Every message is composed from the stored record.** Triage's posted verdict
-opens, like every review comment, with the verdict and then the one decision it
-needs from the operator, or that nothing does. The round's account sits
-collapsed beneath that line, rendered from the record with
-`bring-current-audit.sh` the same way whether or not the approval was lifted:
-what the round needed and the ruling, then each judgment entry in full (what
-collided, what was decided and why, what to check) and each routine entry on
-one line. An item no entry covers is listed with the guard's evidence alone.
-When the ruling lifts the approval, the call it names opens the verdict and is
-the note on the dismissed approval. A lifted approval files no gate: the
-re-request, the dismissal note and triage's posted verdict are what a person
-reads, and the board shows the approval as owed until a new one stands. A ruling the guard made itself
-posts no verdict, so its dismissal note tells it as the guard's, points at no
-triage comment, and names the entries itself. The one human gate a round
-files is the question the worker could not resolve, rendered from its entries
-so far and its question.
-
-What no guard reaches: the refinery's own prepare merge, which aborts on any
-conflict and so only ever pushes git's own result; and a merge the worker ran
-by hand, outside the resume block, and pushed before submit, which the guard
-reads only from the push's own start.
 
 ## Disposition
 
@@ -1213,7 +868,7 @@ refuses the close too. A bead that comes to wait on the origin while it closes
 gains its edge just after the close. Under `not-needed` nothing carries the
 work, and the waits on the bead end with its close.
 Under `re-homed`, `folded` and `not-needed` it applies only the checks every
-kind gets: the origin is not a review bead, a step bead or a workflow root, and
+kind gets: the origin is not a step bead or a workflow root, and
 no other session holds it in progress. The judgment that the bead should close
 is the caller's. A hand disposition, by the mechanik, converse or the operator,
 judges the bead itself. An automated caller proves its own case before it
@@ -1240,10 +895,7 @@ branch stays while a live owner names it. A live owner is a bead in the rig's
 store whose status is outside the `done` category and whose `metadata.branch`
 or `metadata.target` is the branch: another anchor, work not yet handed off, a
 convoy or a member landing on its integration branch, or a successor that
-resumed the branch. The retired bead's own review scaffolding, the beads whose
-`anchor_bead` names it, is not an owner. `scaffolding-sweep.sh` retires that
-scaffolding, and `review-sweep.sh` closes a review only once the branch is
-gone, so counting it would keep nearly every retired branch. A ledger that does
+resumed the branch. A ledger that does
 not read keeps the branch, and the default branch, `main` and `claude/*` are
 never ended. Before the delete the tip is pinned. A pull request whose
 `refs/pull/<n>/head` on origin equals the tip already pins it, because GitHub
@@ -1297,47 +949,3 @@ changed head the refinery is already validating can reach the refinery's
 publication before that close, and the publication finds the PR closed and
 parks the anchor behind `refinery-invalid-existing-pr`, which a stand-down
 under that key answers.
-
-That drop reaches only the parked, branch-carrying children. The rest of the
-machine review scaffolding is a fix unit, the finding beads and the validation
-pass. Each holds a `blocks` edge on the anchor, and a fix unit also blocks every
-must-fix finding it answers, so an open one refuses the anchor's close the same
-way. `scaffolding-sweep.sh` retires it: the cadence runs it as arm 9 over every
-disposed anchor, and a close the scaffolding refuses is tried again by the
-landing order's next run. It closes every
-`task_kind=validation|finding|rework` bead whose `anchor_bead` names a disposed,
-non-merged anchor (its disposition edge or `gc.pr_close_disposition_kind`
-present) as `gc.outcome=moot`, reworks before the findings they block, so no
-close is refused by a blocker still open in the same pass. A bead an operator
-froze (`rebase_hold`) is left standing, like a frozen child.
-
-A finding is mooted only when it objects to the disposed diff: a machine-lane
-finding, a human finding whose locus names no file, or a human comment on a
-line the PR added or removed. A human comment on a line the PR left unchanged
-can cite code the target branch already carries, and the disposal does not
-answer it, so that finding is carried forward instead. A bug bead takes its
-objection, with no `anchor_bead`, so it reaches a first reaction like any
-discovered work, and the finding closes through `bead-rehome.sh` pointed at it.
-When a finding's comment line does not read, the sweep leaves the finding open
-for its next pass, so the anchor does not close before the finding is judged.
-The sweep never touches `task_kind=review` (`review-sweep.sh`'s) or the human
-side, a human gate or a conversation: a disposed PR does not moot the
-human conversation about why it closed, and `finalize-gate.sh` holds the
-anchor's own close while a human gate on it is open. Clearing the machine side
-is what lets that close land once the human side is done.
-
-## Debt
-
-Each entry is a place where what runs falls short of the review run this page
-describes, why a reader must know it, and the work that retires it.
-
-- **The old review path's code still runs.** It checks a PR by review beads
-  that the reconcile cadence sends out, `signoff.sh` records each verdict and
-  files its findings, and a validation pass rules them for a rework child to
-  fix. Its readers enumerate only `pre_open_gate` and `pull_request` anchors,
-  which no bead carries, so it finds no work. The lanes and `check_set`
-  ([The old path's checks](#the-old-paths-checks)), the `pr.machine` verdict
-  ([`pr.machine`, on the old path](#prmachine-on-the-old-path)) and the
-  bring-current guard and audit
-  ([on the old path](#the-bring-current-guard-and-audit-on-the-old-path)) are
-  that path's. Its retirement (tk-1tfzr71.122) deletes it, and these accounts.

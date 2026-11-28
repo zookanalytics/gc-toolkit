@@ -35,10 +35,9 @@
 # root and steps carry no shift, and a bead that follows nothing has nothing to
 # shift from, so neither reads one. The one root that reads a shift is a review
 # run's, which is PR-finishing work. Its pour writes no shift, so there absent or
-# empty reads as -1, the shift the rest of PR-finishing work is filed with,
-# until a move writes one. A shift that is not a signed integer makes its bead
-# unreadable, and so every bead that follows it: no priority is computed from a
-# guess.
+# empty reads as -1, one level sooner than its anchor, until a move writes one.
+# A shift that is not a signed integer makes its bead unreadable, and so every
+# bead that follows it: no priority is computed from a guess.
 #
 # The bd priority field holds the priority a bead competes at, because a pool's
 # claim reads it and a pour copies it once. So a bead that follows something

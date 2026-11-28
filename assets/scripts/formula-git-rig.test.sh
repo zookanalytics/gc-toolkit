@@ -2,9 +2,8 @@
 # Hermetic test: a formula step whose git calls choose a repository names it by
 # path, so the session's cwd never chooses it.
 #
-# The marked blocks of mol-review and mol-review-quorum-signoff (the review's
-# gather), mol-upstream-gc-rebase and mol-upstream-gc-pr-prep (the gascity
-# worktree setup) and
+# The marked blocks of mol-upstream-gc-rebase and mol-upstream-gc-pr-prep (the
+# gascity worktree setup) and
 # mol-feedback-miner (the repository mined) are extracted verbatim and run from
 # a WRONG cwd against real git repos. Each must act on the rig GC_RIG_ROOT
 # names, or the roster entry for GC_RIG (for the keeper formulas, the roster
@@ -19,8 +18,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-REVIEW_TOML="$ROOT/formulas/mol-review.toml"
-QUORUM_TOML="$ROOT/formulas/mol-review-quorum-signoff.toml"
 MINER_TOML="$ROOT/formulas/mol-feedback-miner.toml"
 REBASE_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-rebase.toml"
 PRPREP_TOML="$ROOT/packs/gascity-keeper/formulas/mol-upstream-gc-pr-prep.toml"
@@ -40,7 +37,7 @@ hasnt() { case "$1" in *"$2"*) bad "$3" "found '$2' in: $1" ;; *) ok "$3" ;; esa
 
 command -v jq  >/dev/null 2>&1 || { echo "jq is required"  >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
+for f in "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   [ -s "$f" ] || { echo "formula not found: $f" >&2; exit 1; }
 done
 
@@ -50,10 +47,6 @@ done
 # cwd versus -C is the only thing steering it.
 unset GC_RIG_ROOT GC_RIG GC_CITY GC_CITY_PATH GC_PACK_DIR 2>/dev/null || true
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR 2>/dev/null || true
-# The gather reads the rig's guidance through gctk, built from this checkout.
-( cd "$HERE/../../services/gctk" && go build -buildvcs=false -o "$TMP/gctk" ./cmd/gctk ) >"$TMP/gctk-build.log" 2>&1 \
-  || { echo "gctk did not build: $(tail -3 "$TMP/gctk-build.log")" >&2; exit 1; }
-export GCTK_BIN="$TMP/gctk"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
@@ -176,99 +169,7 @@ eq "$(ref "$C/cwd" origin/main)" "$MOVED" "control: a bare fetch updated the cwd
 eq "$(cd "$C/cwd" && git -C "" rev-parse --show-toplevel 2>/dev/null || true)" "$C/cwd" \
   "control: git -C \"\" runs in the cwd repo, so an empty root must refuse rather than run"
 
-# --- 2. mol-review and mol-review-quorum-signoff: the review's gather. ---------
-# The gather fetches the review's base and branch into the rig, makes the
-# review's worktree there at the reviewed commit, and leaves the shell in it,
-# where the check's method reads the diff. review-methods.test.sh holds the
-# four steps that carry it to one text, so mol-review's copy runs for all four,
-# filled in as a pour fills it for a correctness review of feature onto main.
-# gc names this checkout as the pack, so the block runs the rig-root.sh,
-# review-workspace.sh under test, and gctk built from it.
-# formula-worktree-rig.test.sh proves where the worktree is registered, and
-# that every git call in the block names its repository.
-echo "── mol-review: review-gather ──"
-GATHER="$(copy "$REVIEW_TOML" review-gather 1)"
-[ -n "$GATHER" ] && ok "review-gather: block extracted between markers" \
-  || bad "review-gather: block extracted between markers" "markers missing from ${REVIEW_TOML#"$ROOT"/}"
-gather_render() { # <reviewed oid>
-  printf '%s\n' "$GATHER" | sed -e 's|{{review_bead}}|rb|g' -e "s|{{reviewed_oid}}|$1|g" -e 's|{{review_base}}|main|g' \
-    -e 's|{{review_branch}}|feature|g' -e 's|{{anchor_bead}}|tk-anc|g' -e 's|{{check}}|correctness|g' -e 's|{{review_pr_url}}||g' \
-    -e 's|{{binding_prefix}}|gc-toolkit.|g'
-}
-gather_render 0123456789abcdef0123456789abcdef01234567 > "$TMP/gather.sh"
-case "$(cat "$TMP/gather.sh")" in
-  *'{{'*) bad "review-gather: no unrendered formula placeholder left" ;;
-  *)      ok "review-gather: no unrendered formula placeholder left" ;;
-esac
-if bash -n "$TMP/gather.sh" 2>/dev/null; then ok "review-gather: block is valid bash"; else bad "review-gather: block is valid bash"; fi
-printf '[{"id":"tk-anc","title":"the change under review"}]\n' > "$TMP/anchor.json"
-
-# gather_case <mode> <label>: an origin whose base moves on after the rig and
-# the cwd repo cloned it, then a branch cut from the moved base, so only the
-# gather's own fetch brings either new head into the rig. The cwd repo fetches
-# the branch, so a fetch or a diff that followed cwd would find the reviewed
-# commit there, against its stale base. GATHER_UNREACHABLE points the rig's
-# origin at nothing. GATHER_UNPUSHED reviews a commit no remote has. Sets RC,
-# D, OID (the branch's head), BASE_OLD, BASE_NEW and WT, the worktree the block
-# printed.
-gather_case() {
-  local d="$TMP/gather-$2" rc=0 review
-  mkdir -p "$d/tmp"
-  git init -q --bare -b main "$d/origin.git"
-  git init -q -b main "$d/seed"
-  BASE_OLD=$(commit "$d/seed" "gather base ($2)")
-  git -C "$d/seed" push -q "$d/origin.git" main
-  git clone -q "$d/origin.git" "$d/rig"
-  git clone -q "$d/origin.git" "$d/cwd"
-  BASE_NEW=$(commit "$d/seed" "base moved on ($2)")
-  git -C "$d/seed" push -q "$d/origin.git" main
-  git -C "$d/seed" checkout -q -b feature
-  OID=$(commit "$d/seed" "branch work ($2)")
-  git -C "$d/seed" push -q "$d/origin.git" feature
-  git -C "$d/cwd" fetch -q origin feature
-  review="$OID"
-  if [ -n "${GATHER_UNPUSHED:-}" ]; then
-    git -C "$d/seed" checkout -q -b local-only
-    review=$(commit "$d/seed" "never pushed ($2)")
-  fi
-  [ -z "${GATHER_UNREACHABLE:-}" ] || git -C "$d/rig" remote set-url origin "$d/gone.git"
-  FAKE_ROSTER="$d/roster.json"; pick "$1" "$d/rig"
-  gather_render "$review" > "$d/gather.sh"
-  ( cd "$d/cwd" && TMPDIR="$d/tmp" GC_RIG_ROOT="$RR" GC_RIG="$GR" FAKE_ROSTER="$d/roster.json" \
-      FAKE_META="$TMP/anchor.json" FAKE_LOG="$d/gc.log" bash "$d/gather.sh" ) >"$d/out" 2>&1 || rc=$?
-  WT=$(sed -n "s/^== The review's worktree: //p" "$d/out")
-  RC=$rc; D=$d
-}
-
-for mode in env roster; do
-  gather_case "$mode" "$mode"
-  eq "$RC" 0 "gather/$mode: the block runs from a foreign cwd"
-  eq "$(ref "$D/rig" origin/main)" "$BASE_NEW" "gather/$mode: the fetch brought the base's new head into the rig"
-  eq "$(ref "$D/rig" origin/feature)" "$OID" "gather/$mode: the fetch brought the branch's head into the rig"
-  eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "gather/$mode: the cwd repo was not fetched"
-  eq "$(git -C "${WT:-$D/no-worktree}" rev-parse HEAD 2>/dev/null || echo none)" "$OID" \
-    "gather/$mode: the review's worktree is at the reviewed commit"
-  DIFF=$(git -C "${WT:-$D/no-worktree}" diff --name-only origin/main...HEAD 2>&1 || true)
-  has "$DIFF" "branch-work" "gather/$mode: the diff read in the worktree shows the branch's change"
-  hasnt "$DIFF" "base-moved-on" "gather/$mode: the diff is taken against the base the rig fetched, not a stale one"
-done
-CONTROL=$(git -C "$D/cwd" diff --name-only "origin/main...$OID" 2>&1 || true)
-has "$CONTROL" "base-moved-on" "control: the same diff in the cwd repo, whose base is stale, shows the base's change as the branch's"
-gather_case nomatch nomatch
-[ "$RC" -ne 0 ] && ok "gather/nomatch: an unresolvable rig fails closed" || bad "gather/nomatch: an unresolvable rig fails closed"
-has "$(cat "$D/out")" "review: cannot resolve the rig root" "gather/nomatch: the block says the rig did not resolve"
-eq "$(ref "$D/rig" origin/main)" "$BASE_OLD" "gather/nomatch: refused before fetching into the rig"
-eq "$(ref "$D/cwd" origin/main)" "$BASE_OLD" "gather/nomatch: refused before fetching into the cwd repo"
-eq "$WT" "" "gather/nomatch: no worktree is made"
-GATHER_UNREACHABLE=1 gather_case env unreachable
-[ "$RC" -ne 0 ] && ok "gather/unreachable: a fetch that fails stops the review" || bad "gather/unreachable: a fetch that fails stops the review"
-eq "$WT" "" "gather/unreachable: no worktree is made from the rig's stale refs"
-GATHER_UNPUSHED=1 gather_case env missing
-[ "$RC" -ne 0 ] && ok "gather/missing: a reviewed commit the rig cannot fetch stops the review" \
-  || bad "gather/missing: a reviewed commit the rig cannot fetch stops the review"
-eq "$WT" "" "gather/missing: no worktree is made"
-
-# --- 4. mol-upstream-gc-rebase: the gascity worktree. ---------------------------
+# --- 2. mol-upstream-gc-rebase: the gascity worktree. ---------------------------
 # The keeper formulas name the gascity rig by its roster entry, so the pool the
 # run was slung to never picks the repository: GC_RIG_ROOT here names the cwd
 # repo, the wrong one, in every case.
@@ -349,7 +250,7 @@ has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper 
 hasnt "$(cat "$D/gc.log")" "session nudge" "rebase/refused: the keeper is not nudged about a hand-back the bead does not carry"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "rebase/refused: the session does not drain, so the step is retried"
 
-# --- 5. mol-upstream-gc-pr-prep: the gascity worktree. --------------------------
+# --- 3. mol-upstream-gc-pr-prep: the gascity worktree. --------------------------
 echo "── mol-upstream-gc-pr-prep: upstream-pr-prep-worktree-setup ──"
 block "$PRPREP_TOML" upstream-pr-prep-worktree-setup "$TMP/prprep.sh"
 eq "$(bare_git "$TMP/prprep.sh")" "" "pr-prep: every git call in the block names its repo with -C"
@@ -415,7 +316,7 @@ has "$(cat "$D/out")" "the hand-back of tk-iss to gascity/gascity-keeper.keeper 
 hasnt "$(cat "$D/gc.log")" "mail send" "pr-prep/refused: nobody is mailed about a hand-back the bead does not carry"
 hasnt "$(cat "$D/gc.log")" "runtime drain-ack" "pr-prep/refused: the session does not drain, so the step is retried"
 
-# --- 6. mol-feedback-miner: the repository mined. ------------------------------
+# --- 4. mol-feedback-miner: the repository mined. ------------------------------
 echo "── mol-feedback-miner: feedback-miner-repo ──"
 eq "$(copies "$MINER_TOML" feedback-miner-repo)" 2 "miner: both steps carry the feedback-miner-repo block"
 block "$MINER_TOML" feedback-miner-repo "$TMP/miner-1.sh" 1
@@ -457,17 +358,17 @@ hasnt "$OUT" "SWEEP STARTED" "miner/mine-and-file: the sweep never starts"
 has "$(cat "$MN/gc.log")" "claim-close --step mol-feedback-miner.mine-and-file --outcome pass" "miner/mine-and-file: the step closes with outcome pass"
 has "$(cat "$MN/gc.log")" "runtime drain-ack" "miner/mine-and-file: the session drains"
 
-# --- 7. One rig-root lookup. -----------------------------------------------------
+# --- 5. One rig-root lookup. -----------------------------------------------------
 # rig-root.sh holds the lookup, so a fix to it lands once. In the formulas whose
 # git calls name a rig by path no block reads the roster for a rig's path
 # itself, and the refinery scripts that resolve the rig themselves run the
 # rig-root.sh beside them. rig-root.test.sh proves the lookup, and
 # pack-self-location.test.sh how a block reaches the script.
 echo "── one rig-root lookup ──"
-for f in "$REVIEW_TOML" "$QUORUM_TOML" "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
+for f in "$MINER_TOML" "$REBASE_TOML" "$PRPREP_TOML" "$SYNC_TOML"; do
   eq "$(grep -c 'rig list --json[[:space:]]*|' "$f" || true)" 0 "${f##*/}: no block reads the roster for a rig's path itself"
 done
-for b in gather rebase prprep miner-1 miner-2; do
+for b in rebase prprep miner-1 miner-2; do
   grep -qF '/rig-root.sh"' "$TMP/$b.sh" && ok "$b: the block resolves its rig through rig-root.sh" \
     || bad "$b: the block resolves its rig through rig-root.sh"
 done

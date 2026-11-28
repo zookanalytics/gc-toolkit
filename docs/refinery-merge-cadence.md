@@ -1,258 +1,29 @@
 ---
-name: Refinery merge cadence
-description: The exec orders around a PR's merge — the merge cadence, with its driver and arms, the arm budgets, the single-flight guarantee and how to read what a pass did, the PR watch that saves GitHub's side of each PR the city owns, and the landing order that merges a PR on the pending record. Read it to know what drives merges, and why nothing else may.
+name: The orders around a PR's merge
+description: The exec orders around a PR's merge — the PR watch that saves GitHub's side of each PR the city owns, the landing order that merges a PR on the pending record, and the rig-checkout sync. Read it to know what drives merges, and why nothing else may.
 ---
 
-# Refinery merge cadence
+# The orders around a PR's merge
 
 The merge side of the anchor lifecycle is driven by orders, never by an agent.
-The landing order merges each PR on the pending record and takes each person's
-post on it, its red checks and its conflicts as work
-([The landing order](#the-landing-order)), and the merge cadence's arms keep the
-old review path's dispatch and sweeps. The cadence's liveness has its own
-doctor check (`check-cadence-live`).
+The PR watch saves GitHub's side of each PR the city owns
+([The PR watch](#the-pr-watch)), and the landing order merges each PR on the
+pending record and takes each person's post on it, its red checks and its
+conflicts as work ([The landing order](#the-landing-order)). Each order's
+liveness is the doctor check `check-cadence-live`'s.
 
 ## Scope
 
-**Mandate.** What drives the merge-side writers, what each arm of the merge
-cadence owns, what a pass of the PR watch reads and saves, what a run of the
-landing order does, and the runtime guarantees the arrangement depends on.
+**Mandate.** What drives the merge-side writers, what a pass of the PR watch
+reads and saves, what a run of the landing order does, and the runtime
+guarantees the arrangement depends on.
 
-**Boundaries.** The states the arms and the landing order move an anchor
-through are [state-machine.md](state-machine.md). The refinery *agent*'s steps,
+**Boundaries.** The states the landing order moves an anchor through are
+[state-machine.md](state-machine.md). The refinery *agent*'s steps,
 which land, publish, park or send work back, live in
 `formulas/mol-refinery-patrol.toml` and the scripts each step calls, and are not
 driven by either order. The witness patrol's `check-refinery` step watches
 that patrol's queue for a hand-off gone stuck.
-
-## Mechanism
-
-Every 60s, per rig: `orders/refinery-reconcile.toml` (`trigger = "cooldown"`,
-`scope = "rig"`) execs `assets/scripts/refinery-reconcile.sh`, the driver,
-which runs the arms in order and exits.
-
-| | |
-|---|---|
-| Cadence | `interval = "60s"`, tunable from city.toml `[[orders.overrides]]` |
-| Scope | `scope = "rig"` — one registration per importing rig |
-| Working directory | the rig's own root, so `git remote get-url origin` resolves |
-| Environment | controller-built: `GC_RIG`, `GC_RIG_ROOT`, `BEADS_DIR`, `GC_BEADS_PREFIX`, `PACK_DIR`, `GC_PACK_STATE_DIR`, the Dolt projection, the `gh` token |
-| Timeout | `timeout = "600s"`, tunable per rig from city.toml `[[orders.overrides]]` — it bounds how long a wedged pass holds the per-rig lock. It must cover a whole pass at the slow end of host load and stay under the driver's `REFINERY_RECONCILE_LOCK_STALL_SECS`, and it does *not* fit inside the controller watchdog's 2m tracking-sweep window |
-| Pass budget | `REFINERY_RECONCILE_PASS_BUDGET_SECS` (420, below the timeout; 0 = unpaced) bounds the arm that walks a set growing with the queue, listed in `PACED_ARMS` in refinery-reconcile.sh: gate-ensure. Its deadline is what the budget has left when it starts, never under `REFINERY_RECONCILE_ARM_FLOOR_SECS` (20). It visits first the anchors it can act on and then resumes its rotation from its cursor in the pass state dir. Set both per rig through the override's `env` |
-
-Anything per-rig is derived inside the driver from `GC_RIG` / `GC_RIG_ROOT`;
-one `[order.env]` serves every registration. The refinery agent does not drive
-the cadence — the arms run whether or not any refinery session is awake.
-
-## The arms
-
-Each arm keeps the number the driver logs it under.
-
-- **(6) gate-ensure.sh** — check satisfiability, on the old review path, for an
-   anchor at `pre_open_gate` or `pull_request`, which no bead carries; a PR on
-   the pending record has a review run instead ([state-machine.md](state-machine.md#checks)). Every gating
-   anchor declares a non-empty `check_set` (the default is stamped when absent;
-   the `none` sentinel is respected), and every declared check is *raisable*: the lane
-   derives `green`, or a live routed review bead is in flight, else dispatch one
-   (stamp first, then attach `mol-review` via `gc sling --on`; read the pour
-   back). A lane that derives `green` ends the arm's interest however far the
-   branch has advanced since — no lane's green compares to a head. An
-   operator's own `merge_hold` also ends the arm with no dispatch: gate-ensure
-   raises no review under a hold.
-   A review whose only reach is the pour stamp is qualified before it counts
-   as in flight: if its workflow is spent — every step closed but
-   `workflow-finalize`, which belongs to the control-dispatcher — no verdict
-   can still be coming, and the arm puts it to a person through `human-gate.sh`
-   under the `review-wedge` key rather than holding the anchor in silence. It
-   files on the second consecutive sighting, because `mol-review`'s failure arm
-   closes its chain before it restores the bead's route. No dispatch goes out
-   while anything is acting on the anchor — a fix unit in flight (including the
-   one answering an open `must-fix` finding on any lane), a validation pass in
-   flight, or a full review already in flight on the lane — which is the
-   QUIESCENCE predicate one authority computes so it cannot disagree with itself
-   about whether a review was already out. The hold names the actor. A
-   `must-fix` finding no fix unit answers is a demand on the anchor, not an
-   actor: it holds the merge through its `blocks` edge and keeps the anchor
-   `progressing`, but it does not hold the dispatch, and the arm reports it as
-   unanswered. The same authority also releases a finding: on the first pass
-   after every fix unit answering a `must-fix` finding has closed, it closes the
-   finding, so a fix that has landed on the branch stops holding the publish
-   and the merge. A review that read a mid-change diff would raise
-   only the no-op rework the declination texts are full of. There is no dispatch
-   ceiling: quiescence forbids the redundant round a ceiling would have bounded,
-   and the runaway shapes left — a reviewer that dies after claim, a fix unit
-   filed with its edge reversed, a landed fix whose finding that release missed
-   — stop the PR moving rather than spin the dispatcher.
-   It visits every gating anchor, so its cost grows with the set. It runs under
-   its share of the pass budget. It first visits the
-   anchors it can act on: one with no `check_set` (it owes the stamp), one with
-   no machine verdict (never visited; a `check_set` of `none` or `off` never
-   gets one), and one whose mark moved since this arm last visited it. The mark
-   joins `merge_result`, the draft markers and `check_set`, which decide the
-   lanes a stage dispatches, `merge_hold`, which holds the anchor's review
-   dispatch while it is set, and the ids of the anchor's live children. A hold
-   lifting, or a review, validation pass, finding or fix unit opening or
-   closing, puts the anchor first; a review this arm opens joins the mark its
-   own visit records.
-   Then it visits the rest in id order starting after the last one a pass
-   finished (`gate-ensure.cursor` in the pass state dir), wrapping, and starts no
-   new anchor once its share is spent. The first group rotates on
-   `gate-ensure.cursor.first`, and `gate-ensure.cursor.seen` holds the marks. A
-   slow walk therefore delays review dispatch for the anchors it has not reached,
-   and nothing else, and every anchor is reached within a bounded number of
-   passes. Its rc=3 (an anchor whose `check_set` stamp did not persist, or an
-   enumeration it could not read) is reported without failing the order or
-   holding anything.
-
-- **(8) review-sweep.sh** — cleanup over closed anchors on the old review path, no
-   merge authority. A
-   dispatched review whose anchor is closed and whose `review_branch` is gone
-   from origin has no verdict left to give. Both `signoff.sh` verdicts bind a
-   marker to a commit and there is no commit, and `request-changes` would
-   additionally file a rework child against work that already landed. The arm
-   closes such a review with `gc.outcome=moot` and the reason recorded on the
-   bead, and writes nothing to the anchor. Both conditions are required, so a
-   branch that is merely unfetched and an anchor that still gates are each
-   left alone. Branch existence comes from one `git ls-remote --heads origin`
-   per pass, and a listing that could not be read sweeps nothing. The release
-   verb lives here rather than as a third `signoff.sh` verdict because the
-   residue is filed by more than one dispatcher.
-- **(9) scaffolding-sweep.sh** — cleanup over DISPOSED anchors' old review
-   scaffolding, no merge authority.
-   An anchor withdrawn won't-do or closed not-planned carries a disposition —
-   the duplicates or supersedes edge `bead-rehome.sh` records onto its successor,
-   or `gc.pr_close_disposition_kind` (the intent `pr-dispose.sh` records) — but its
-   machine review scaffolding does not close with it: the validation pass, the
-   finding beads, and the rework/fix-unit beads stay open, each holding a
-   `blocks` edge on the anchor (a fix unit also blocks the must-fix findings it
-   answers), and each holding gate-ensure's quiescence, so the disposed anchor
-   stands stuck behind work that will never land. Nothing else retires them on a
-   disposal: `close-answered` keys on a fix LANDING, and `review-sweep` on an
-   anchor already closed. This arm closes each
-   `task_kind=validation|finding|rework` bead whose `anchor_bead` names a
-   disposed, non-merged anchor — `gc.outcome=moot`, the reason appended, read
-   back — reworks before the findings they block so a finding's close is not
-   refused the same pass. A finding is mooted only when it objects to the
-   disposed diff. A human review comment on a line the PR left unchanged can
-   cite code the target branch already carries, so its finding is carried
-   forward to a bug bead of its own through `bead-rehome.sh` instead; the PR's
-   inline comments are read once per anchor that carries such a candidate. It
-   leaves `task_kind=review` to review-sweep, a human gate or a conversation to
-   the human side, and a `rebase_hold` freeze to the operator, and never closes
-   the anchor itself: that is `bead-rehome.sh`'s, which the landing order runs
-   once the PR has closed, held by `finalize-gate.sh` while a human gate on the
-   anchor is open — which clearing the machine scaffolding here lets land once
-   none is. A merged anchor is a landing, never a disposal, and is skipped.
-
-## Single-flight: the tracking gate and the pass lock
-
-Two passes writing the same anchors at once is the failure this
-arrangement exists to prevent. The controller's open-tracking gate is one half
-of the guarantee and a `flock` in the driver is the other, because the gate can
-be reopened underneath a pass that is still running.
-
-The gate:
-
-- The tracking bead for a run is created **synchronously before** the run
-  launches and closed in a `defer` **after** it returns.
-- The dispatcher's first gate skips any order with an open tracking bead.
-- That gate keys on `ScopedName()` — `refinery-reconcile:rig:<rig>` — so each
-  rig has its own single-flight and co-tenant rigs never serialise against
-  each other.
-
-Why that is not sufficient: the controller runs a tracking-sweep watchdog every
-30s which closes **any** order's tracking bead older than 2m
-(`orderTrackingSweepWatchdogStaleAfter`, gascity `cmd/gc/order_dispatch.go`) —
-a separate mechanism from the `order-tracking-sweep` order's own 10m
-`--stale-after`, and much shorter. A pass that runs past two minutes has its
-gate removed while it is still working, and the next tick dispatches a second
-one onto the same anchors. gc-toolkit is where this bites, because it is the
-rig whose pass routinely outruns two minutes.
-
-The lock:
-
-- The driver takes a non-blocking exclusive `flock` on
-  `<state-dir>/<rig>/pass.lock` before the first arm and records the holder's
-  pid and start time in `pass.holder` beside it. It depends on no bead
-  surviving. The lock is `bd-lib.sh`'s `take_pass_lock`.
-- `<rig>` is the rig name with each byte outside `A-Za-z0-9._-` read as `_`,
-  and `rig` for a name of `.` or `..`. Every version of the driver must derive
-  it the same way. A deploy can start a new driver while the one it replaces
-  is still running a pass, and the two passes stay apart only when both name
-  the same lock file. So the key is not `bd-lib.sh`'s `rig_state_key`, which
-  cuts a rig name past 64 bytes and adds a checksum to any name it rewrites.
-- The driver holds the descriptor, and each arm runs through `bd-lib.sh`'s
-  `pass_child`, from a subshell that holds it until the arm exits. So the lock
-  is held for exactly as long as a writer is live, and the kernel releases it
-  on any exit, `SIGKILL` included.
-- The arm itself runs with the descriptor closed, and so does the drop-tail
-  report. An arm's store read can bring up a Dolt server, and `gc` hands the
-  descriptors it was given to what it starts. A server that kept the descriptor
-  would outlive the pass and hold the lock against every later one.
-- A tick that finds it held logs one `SKIPPED` line and exits 0 — the cadence
-  is firing and the pass in flight is doing the work.
-- A holder older than `REFINERY_RECONCILE_LOCK_STALL_SECS` (900s default) is
-  not a slow pass, because the order's timeout stops the pass's whole process
-  group well before that: a driver run by hand, or an arm still running after
-  its driver was killed by itself, holds the lock. That tick exits 1, so
-  `order.failed` names the wedge rather than letting a stopped queue look like
-  a firing one.
-- A tick that cannot take the lock at all runs no arm and exits 1. That covers
-  `flock` missing from `PATH` and a lock file the driver cannot create or open.
-  Nothing else carries single-flight, so a pass that ran anyway would be the
-  second writer.
-
-Two settings must never change, because each would undo the guarantee:
-
-- **Never set `no_work_gate` on this order.** It opts the order out of both
-  open-work gates, and the first of them is the tracking gate above.
-- **`timeout` bounds how long a wedged pass can hold the lock.** It does not
-  keep the pass inside the watchdog window, because no budget that covers a real
-  pass fits there, so the lock is what carries single-flight.
-  `refinery-reconcile.test.sh` asserts the pair mechanically: a timeout above the
-  2m window passes only in a run that also demonstrates one pass running its
-  arms across two overlapping ticks. The suite holds the upper bound the same way,
-  reading both numbers from the files that set them: a timeout at or above the
-  driver's `REFINERY_RECONCILE_LOCK_STALL_SECS` would make a pass that is still
-  running read as a wedged one.
-
-Never run a cadence driver out-of-band (by hand, cron, or a daemon). Running
-this script by hand at least serialises against the lock; anything else is a
-second writer that neither the gate nor the lock can see.
-
-## Reading what a pass did
-
-The controller keeps an exec order's output only on non-zero exit, folding a
-bounded tail into the `order.failed` event. So: an unexpected arm failure makes
-the driver exit 1 (the failing arm names reach `order.failed`); gate-ensure's
-rc=3 is reported but does not fail the order. Every pass logs to
-`<GC_PACK_STATE_DIR>/refinery-reconcile/<rig>/pass.log`, trimmed to
-`REFINERY_RECONCILE_LOG_KEEP` lines (2000 default) and not subject to bead
-retention. Arms append as they run, so the shape of the log is what tells you
-how a pass ended:
-
-| Line | Meaning |
-|---|---|
-| `=== <ts> rig=<rig> refinery=<agent>` | a pass started |
-| `-- (<n>) <arm> (started <ts>)` | an arm started; its output follows |
-| `-- (<n>) <arm>: done in <s>s (rc=<rc>)` | that arm returned after `<s>` seconds. An arm with a start line and no done line is the one the pass was killed in |
-| `<arm>: visited <k> of <n> ...` | how much of its walk the paced arm covered; `the next pass resumes at <id>` follows when the pass budget stopped it. gate-ensure's `<n>` is the size of the gating set its cost grows with. It adds `(<f> needing action first)`, and `<m> needing action wait for the next pass` when the budget left some of that group |
-| `END <ts> (<s>s)` | that pass finished after `<s>` seconds; a `FAILED:` line sits above it if any arm failed |
-| a `===` with no `END` under it | the pass was killed or hit its timeout — the arms logged above it are how far it got |
-| `--- <ts> rig=<rig> SKIPPED: ...` | the tick found a pass already in flight and did nothing |
-| `--- <ts> rig=<rig> STALLED: ...` | the lock has been held past the stall bound; the arms have stopped |
-
-**`gc order history` is store-complete only when the read is unbounded.** Any
-positive `--limit` — including the default 50, and a limit larger than the row
-count — returns runs from the city store alone, printed under a `RIG` column,
-so a single-rig answer looks city-wide. Always:
-
-```bash
-gc order history refinery-reconcile --since 30m --limit 0
-```
-
-Prefer `gc doctor` (`check-cadence-live`) over hand-rolled queries: it asserts
-per rig that the order is registered and firing within its interval.
 
 ## The PR watch
 
@@ -285,11 +56,7 @@ apart, and an order whose interval is shorter than the time those passes take
 starts later than its interval. `gc doctor`'s order-dispatch-floor check warns
 of each order whose interval is shorter than that time, and names the budget
 that fits. A budget at or above the number of those orders the city runs
-starts each of them on the pass that finds it due. The city's `city.toml`
-holds the old refinery pass, `refinery-reconcile`, at 5 minutes until the old
-review path's retirement deletes it, because one pass of it takes minutes
-whatever the order budget, and at its own minute it would run nearly back to
-back.
+starts each of them on the pass that finds it due.
 
 A PR is owned when a live bead names it as its own and is no other bead's
 child: an anchor names it in `pr_url` beside a `merge_result`, and a bead the

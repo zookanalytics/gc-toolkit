@@ -43,7 +43,7 @@
 # and goes on to the drain.
 #
 # Callers: mol-polecat-work's step scripts (work-lib.sh's callers); the decline
-# arms of mol-rig-demo and mol-review's short-record refusal; the polecat
+# arms of mol-rig-demo and of the review run (mol-pr-review); the polecat
 # doctrine's decline.
 # exit: 0 the work is ended and this session drained · 1 a part did not land ·
 #       2 usage, nothing written

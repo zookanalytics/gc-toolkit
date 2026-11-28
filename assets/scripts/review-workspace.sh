@@ -8,11 +8,11 @@
 # installed, and each checkout left behind counts against the per-uid tmpfs
 # quota (docs/scratch-reclaim.md).
 #
-# So a review's workspace is a directory named for its review bead, and any
-# shell rebuilds the path from the bead id alone:
-# <dir>/gc-review-<review-bead>, where <dir> is REVIEW_WORKSPACE_DIR, else
-# $TMPDIR, else /tmp. The worktree is <workspace>/wt, and whatever else the
-# review writes to disk goes beside it.
+# So a workspace is a directory named for the bead it serves, and any shell
+# rebuilds the path from the bead id alone: <dir>/gc-review-<bead>, where <dir>
+# is REVIEW_WORKSPACE_DIR, else $TMPDIR, else /tmp. A demo's capture names its
+# workspace for its request bead (--review-bead). The worktree is
+# <workspace>/wt, and whatever else the capture writes to disk goes beside it.
 #
 # A review run (formulas/mol-pr-review.toml) is the same, named for the run's
 # root: <dir>/gc-review-<root>. Its steps are claimed by different sessions, so
@@ -51,8 +51,8 @@
 #
 # reap reads every gc-review-* entry this user owns directly under the
 # directory, and under /tmp as well unless REVIEW_WORKSPACE_DIR names the one
-# to read. The bead an entry is named for is a review bead or a run's root,
-# and either closes when its review ends. It takes an entry only when no
+# to read. The bead an entry is named for is a run's root, which closes when
+# its review ends, or a demo's request bead. It takes an entry only when no
 # process has its cwd or an open file inside it, and either
 #   - the entry is named gc-review-<id> for a bead whose prefix is one of the
 #     city's, and that bead is closed; or
@@ -67,10 +67,9 @@
 #       left the workspace behind, or reap could not read the city's rigs ·
 #       2 usage · 3 add refused the repair part's worktree, which is not at
 #       --oid or past it, and kept it as it stands.
-# Callers: formulas/mol-review.toml and mol-review-quorum-signoff.toml (add,
-# path, remove); formulas/mol-rig-demo.toml (add); review-run.sh, for the
-# steps of formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path and
-# add with --root); orders/review-workspace-reap.toml (reap). See
+# Callers: formulas/mol-rig-demo.toml (add); review-run.sh, for the steps of
+# formulas/mol-pr-review.toml and mol-pr-review-lane.toml (path and add with
+# --root); orders/review-workspace-reap.toml (reap). See
 # docs/review-workspace.md.
 set -uo pipefail
 
@@ -102,8 +101,8 @@ while [ "$#" -gt 0 ]; do
         *) echo "$PROG: unknown argument: $1" >&2; usage ;;
     esac
 done
-# A review bead and a run's root name a workspace the same way; a part belongs
-# to a run's workspace alone.
+# A demo's request bead and a run's root name a workspace the same way; a part
+# belongs to a run's workspace alone.
 if [ -n "$ROOT" ]; then
     [ -z "$BEAD" ] || usage
     BEAD="$ROOT"

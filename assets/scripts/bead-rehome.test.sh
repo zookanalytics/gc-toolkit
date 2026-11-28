@@ -105,8 +105,8 @@
 #       fix landed move the waits on the origin onto the successor as a
 #       duplicate's close does, in one bulk write, and a successor that has
 #       shipped moves none. A waiter a ruling has recorded a PR-close
-#       disposition on closes under that ruling and gains no edge, so the anchor
-#       whose finding scaffolding-sweep.sh carries forward stays free to close.
+#       disposition on closes under that ruling and gains no edge, so it stays
+#       free to close.
 #       A successor in another store, where no edge from here holds, refuses the
 #       close while a bead waits on the origin, and names the gate that holds a
 #       waiter and the wait to end;
@@ -134,7 +134,7 @@
 #       nothing (exit 4), the close that lands is held to the judged status and
 #       assignee, and --check refuses the same judgment with exit 1.
 # The evidence gates this writer enforces for every caller:
-#   (gate-a) EVERY kind — no close over a review, step, or workflow bead;
+#   (gate-a) EVERY kind — no close over a step or workflow bead;
 #   (gate-held) EVERY kind — no close over a bead another session holds
 #       in_progress, while a bead this session holds is fine;
 #   (gate-b) fixed-upstream|duplicate — the successor is in the same store and
@@ -654,17 +654,12 @@ rc=0; run --origin al-ruledx --successor al-rxsucc --kind duplicate || rc=$?
 eq "$rc" 7 "a disposition record naming another successor is no ruling for this one"
 eq "$(field alpha status al-ruledx)" open "…and the anchor is left open"
 
-# --- (gate-a) not a review/step/workflow bead ------------------------------
+# --- (gate-a) not a step/workflow bead -------------------------------------
 mkbead alpha open al-merged
 mkbead beta  open bt-msucc
 bset al-merged metadata.merge_result=merged
 rc=0; run --origin al-merged --successor bt-msucc --kind re-homed || rc=$?
 eq "$rc" 0 "merge_result=merged is landed work and may be disposed"
-mkbead alpha open al-review
-mkbead beta  open bt-rsucc
-bset al-review metadata.task_kind=review
-rc=0; run --origin al-review --successor bt-rsucc --kind re-homed || rc=$?
-eq "$rc" 7 "a review bead is refused: its own machinery closes it"
 mkbead alpha open al-step
 mkbead beta  open bt-ssucc
 bset al-step metadata.gc.step_ref=mol-x.load
@@ -1449,8 +1444,7 @@ rc=0; run --origin al-zfu --successor al-zfu-s --kind fixed-upstream || rc=$?
 eq "$rc/$(field alpha status al-zfu)/$(edge alpha al-zfu-w al-zfu-s)" "0/closed/blocks" \
    "(az) a fixed-upstream close a ruling made before its fix landed moves the wait onto the fix"
 # A waiter a ruling has recorded a PR-close disposition on closes under that
-# ruling and waits for nothing more: the anchor whose finding scaffolding-sweep.sh
-# carries forward to a bug just before the anchor's own close.
+# ruling and waits for nothing more.
 mkbead alpha open al-zan; mkbead alpha open al-zan-f; mkbead alpha open al-zan-b; mkbead alpha open al-zan-c; mkbead alpha open al-zan-w
 bset al-zan metadata.merge_result=pull_request metadata.gc.pr_close_disposition_kind=not-needed metadata.gc.pr_close_disposition_successor=al-zan-c
 dep al-zan al-zan-f blocks; dep al-zan-w al-zan-f blocks

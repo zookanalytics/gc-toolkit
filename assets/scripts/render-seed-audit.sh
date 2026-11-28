@@ -163,9 +163,10 @@ PH_HOME="[[HOME]]"
 # script is rendered by its own copy. A tree that carries no copy is rendered by
 # this one.
 #
-# A render is bounded by `timeout` where the host has one. The merge gate runs
-# inside the refinery's merge cadence, where a `gc` that never returns would
-# stall the whole pass, and a bounded render holds a single merge instead.
+# A render is bounded by `timeout` where the host has one. The landing order
+# runs it inside its pass (`gctk pr reconcile`), where a `gc` that never
+# returns would stall the whole pass, and a bounded render holds a single merge
+# instead.
 RENDER_BOUND=180
 
 # The archive goes through a file, not a pipe. tar stops reading at the

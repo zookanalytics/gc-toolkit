@@ -236,14 +236,12 @@ assets/scripts/claim-context.sh
 assets/scripts/self-review-check.sh
 packs/gascity-keeper/assets/scripts/rebase-check.sh
 assets/scripts/work-gate.sh
-assets/scripts/gate-ensure.sh
 assets/scripts/queue-priority.sh
 assets/scripts/priority-lib.sh
 assets/scripts/liveness-sweep.sh
 doctor/check-blocked-work-armed/run.sh
 doctor/check-root-advancing/run.sh
 doctor/check-po-queue-only/run.sh
-assets/scripts/blocker-holder.sh
 assets/scripts/store-only-exit.sh"
 while IFS= read -r r; do
     [ -n "$r" ] || continue

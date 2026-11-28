@@ -444,7 +444,7 @@ func TestReactionCheckReadsAFalseRouteAsNone(t *testing.T) {
 func TestReactionSweepReadsTypedKeysAsTheScriptsDo(t *testing.T) {
 	log, store := stubCity(t, []byte("[]"))
 	keys := []string{"gc.routed_to", "gc.step_ref", "gc.step_id", "gc.root_bead_id", "gc.takeaway", "gc.takeaway_by",
-		"branch", "merge_result", "work_dir", "pr_url", "pr_number", "check_name", "anchor_bead"}
+		"branch", "merge_result", "work_dir", "pr_url", "pr_number", "anchor_bead"}
 	listed := func(metadata string) bool {
 		t.Helper()
 		withMetadata(t, log, metadata)

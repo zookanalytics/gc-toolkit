@@ -6,9 +6,8 @@
 # gc over the harness's store, which its reads serve and its writes change, and the
 # real work-lib.sh, run-lib.sh, decline.sh, claim-close.sh, hand-back.sh and
 # store-only-exit.sh, with gctk built from this checkout for the summary and a
-# retitle. The guard, the gate, the wait and the cancel are stubs that record their
-# calls, except in the cases that run the real bring-current guard over a reviewed
-# anchor, and run-lib.stub.sh answers which runs work a bead in the cases that need
+# retitle. The gate, the wait and the cancel are stubs that record their calls,
+# and run-lib.stub.sh answers which runs work a bead in the cases that need
 # a run. The fake, a wrapper of git and the stubs write one log, in order, so a case
 # can read what landed before what. No live city, Dolt, network, or PRs.
 set -uo pipefail
@@ -86,7 +85,14 @@ cat > "$BIN/reap" <<'SH'
 "$REAL_GIT" -C "$REAP_RIG" worktree remove --force "$REAP" >/dev/null 2>&1
 exit 0
 SH
-chmod +x "$BIN/git" "$BIN/find" "$BIN/reap"
+# A path left in the tree after the check for uncommitted work, which only the
+# tree's removal meets: a case runs it as the fake's hook at the refinery's wake,
+# with LATE the path.
+cat > "$BIN/late" <<'SH'
+#!/usr/bin/env bash
+printf 'late\n' > "$LATE"
+SH
+chmod +x "$BIN/git" "$BIN/find" "$BIN/reap" "$BIN/late"
 
 recorder() { # <name> <log word> <rc var>
   cat > "$PACK/$1" <<STUB
@@ -99,15 +105,6 @@ STUB
 recorder run-cancel.sh cancel CANCEL_RC
 recorder human-gate.sh gate GATE_RC
 recorder await-ruling.sh await AWAIT_RC
-# The guard runs after the check for uncommitted work and before the hand-off, so
-# GUARD_TOUCH leaves a path in the tree that only the tree's removal meets.
-cat > "$PACK/bring-current-guard.sh" <<'STUB'
-#!/usr/bin/env bash
-printf 'guard %s\n' "$*" >> "$LOG"
-[ -z "${GUARD_TOUCH:-}" ] || printf 'late\n' > "$GUARD_TOUCH"
-exit "${GUARD_RC:-0}"
-STUB
-chmod +x "$PACK/bring-current-guard.sh"
 
 # --- History: a bare origin whose main holds the base. ------------------------------
 g() { "$REAL_GIT" -C "$@"; }
@@ -170,7 +167,7 @@ field() { bfield "${2:-tk-w}" "$1"; }
 # stand-ins write. The fake's other reads are left out.
 words() {
   awk '/^bd (update|list) / { print $2 } /^bd dep remove / { print "dep-remove" } /^session (wake|nudge) / { print "session" }
-    /^runtime drain-ack$/ { print "drain" } /^(push|guard|remove|release|gate|await|cancel|storeonly) / { print $1 }' "$LOG" | tr '\n' ' '
+    /^runtime drain-ack$/ { print "drain" } /^(push|remove|release|gate|await|cancel|storeonly) / { print $1 }' "$LOG" | tr '\n' ' '
 }
 pushed() { grep -c '^push ' "$LOG" | tr -d ' '; }
 ON_ORIGIN() { g "$CO" rev-parse -q --verify "refs/heads/$1" 2>/dev/null; }
@@ -197,11 +194,10 @@ eq "$(meta work_dir)" "<absent>" "(1) work_dir is cleared"
 has "$(field notes)" "Implemented: it" "(1) the notes are appended"
 
 echo "# the handoff is ordered"
-ORDER=$(grep -E '^(push|guard|bd update (tk-w|st-submit)|session (wake|nudge)|remove|release|runtime drain-ack)( |$)' "$LOG" | sed 's/^bd //' | awk '{print $1, $2}')
+ORDER=$(grep -E '^(push|bd update (tk-w|st-submit)|session (wake|nudge)|remove|release|runtime drain-ack)( |$)' "$LOG" | sed 's/^bd //' | awk '{print $1, $2}')
 line_of() { printf '%s\n' "$ORDER" | grep -n "$1" | sed -n "${2:-1}p" | cut -d: -f1; }
 [ "$(line_of '^update tk-w')" -lt "$(line_of '^push')" ] && ok "(2) the branch is recorded before the push" || bad "(2) the branch is recorded before the push"
-[ "$(line_of '^push')" -lt "$(line_of '^guard')" ] && ok "(2) the push comes before the guard" || bad "(2) the push comes before the guard"
-[ "$(line_of '^guard')" -lt "$(line_of '^update tk-w' 2)" ] && ok "(2) the guard comes before the handoff" || bad "(2) the guard comes before the handoff"
+[ "$(line_of '^push')" -lt "$(line_of '^update tk-w' 2)" ] && ok "(2) the push comes before the handoff" || bad "(2) the push comes before the handoff"
 [ "$(line_of '^update st-submit')" -lt "$(line_of '^remove')" ] && ok "(2) the step closes before the tree goes" || bad "(2) the step closes before the tree goes"
 [ "$(line_of '^remove')" -lt "$(line_of '^release')" ] && ok "(2) the tree goes before its local branch is deleted" || bad "(2) the tree goes before its local branch is deleted"
 [ "$(line_of '^release')" -lt "$(line_of '^update tk-w' 5)" ] && ok "(2) work_dir is cleared once both are gone" || bad "(2) work_dir is cleared once both are gone"
@@ -227,7 +223,7 @@ eq "$(grep -c 'workflow-finalize' "$LOG" | tr -d ' ')" 0 "(2) workflow-finalize 
 
 echo "# the tree goes only when nothing in it or under it would go with it"
 prepare polecat/tk-w "$FRESH"
-go "GUARD_TOUCH=$C/late.txt"
+go "STUB_HOOK_AT=session wake" "STUB_HOOK=$BIN/late" "LATE=$C/late.txt"
 eq "$RC" 0 "(2b) a path left in the tree after the check: the handoff still exits 0"
 eq "$(field assignee)" "gc-toolkit/gc-toolkit.refinery" "(2b) the handoff stands"
 [ -f "$C/late.txt" ] && ok "(2b) the tree stays, with the path in it" || bad "(2b) the tree stays, with the path in it"
@@ -512,56 +508,6 @@ eq "$(field assignee)" "" "(12b) nothing is handed off"
 eq "$(closed_step)" "in_progress" "(12b) the step stays open"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(12b) the session drains"
 
-echo "# the bring-current guard holds the handoff"
-prepare polecat/tk-w "$FRESH"
-go
-GUARD=$(grep '^guard ' "$LOG")
-has "$GUARD" "guard --bead tk-w --to $HEAD_SHA" "(13) the guard reads the pushed head"
-has "$GUARD" "--from " "(13) with where origin stood before the push"
-prepare polecat/tk-w "$FRESH"
-go GUARD_RC=3
-eq "$RC" 3 "(14) an audit owed exits 3"
-has "$OUT" "BRING-CURRENT AUDIT INCOMPLETE" "(14) says so"
-eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(14) no drain: the audit is the session's to finish"
-eq "$(field assignee)" "" "(14) nothing is handed off"
-eq "$(pushed)" 1 "(14) the push stands"
-prepare polecat/tk-w "$FRESH"
-go GUARD_RC=1
-eq "$RC" 1 "(15) a guard that did not finish: stops"
-has "$OUT" "BRING-CURRENT GUARD DID NOT FINISH" "(15) says so"
-eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(15) the session drains"
-eq "$(field assignee)" "" "(15) nothing is handed off"
-# The real guard, over a work bead that names neither its branch nor an anchor while
-# a reviewed anchor stands on that branch: the guard finds the anchor only through
-# the branch this call records, and holds a merge resolved by hand with no audit.
-mv "$PACK/bring-current-guard.sh" "$TMP/guard.recorder"
-cp "$HERE/bring-current-guard.sh" "$HERE/bring-current-audit.sh" "$HERE/review-verdict.sh" "$HERE/review-dismissal.sh" "$PACK/"
-REVIEWED='[{"id":"tk-a","title":"the anchor","status":"open","assignee":"","created_at":"2026-01-01","metadata":{"branch":"polecat/tk-w","merge_result":"pull_request"}}]'
-unaudited_merge() {
-  prepare polecat/tk-w '{"target":"main"}' "$REVIEWED"
-  printf 'branch side\n' > "$C/base.txt"; g "$C" commit -qam 'branch edits base'; g "$C" push -q origin polecat/tk-w
-  M="$TMP/main-$N"; "$REAL_GIT" clone -q "$CO" "$M" 2>/dev/null
-  printf 'main side\n' > "$M/base.txt"; g "$M" commit -qam 'main edits base'; g "$M" push -q origin HEAD:main
-  g "$C" fetch -q origin; g "$C" merge -q origin/main >/dev/null 2>&1
-  printf 'resolved by hand\n' > "$C/base.txt"; g "$C" add base.txt; g "$C" commit -q --no-edit
-}
-unaudited_merge
-go
-eq "$RC" 3 "(15b) the real guard holds an unaudited merge on a branch the bead did not name: exit 3"
-has "$OUT" "base.txt: no entry" "(15b) it names the entry the merge owes"
-eq "$(meta branch)" "polecat/tk-w" "(15b) the branch it found the anchor through is recorded"
-eq "$(field assignee)" "" "(15b) nothing is handed off"
-eq "$(grep -c '^runtime drain-ack$' "$LOG" | tr -d ' ')" 0 "(15b) no drain: the audit is the session's to finish"
-# The step passes the anchor --anchor-only printed, which here is the reviewed one.
-unaudited_merge
-submit -- --convoy cv-1 --base main --notes "Implemented: it" --anchor tk-a
-eq "$RC" 3 "(15c) called as the step calls it, with --anchor tk-a: exit 3"
-has "$OUT" "base.txt: no entry" "(15c) it names the entry the merge owes"
-eq "$(meta branch)" "polecat/tk-w" "(15c) the branch is recorded on the work bead, not on the anchor"
-eq "$(field assignee)" "" "(15c) nothing is handed off"
-rm -f "$PACK/bring-current-audit.sh" "$PACK/review-verdict.sh" "$PACK/review-dismissal.sh"
-mv "$TMP/guard.recorder" "$PACK/bring-current-guard.sh"
-
 echo "# a refused handoff write stops the chain"
 for piece in "--append-notes" "--status=open" "--assignee=gc-toolkit"; do
   prepare polecat/tk-w "$FRESH"
@@ -702,7 +648,6 @@ eq "$RC" 1 "(34b) a branch the store does not record: stops"
 has "$OUT" "could not record branch=polecat/tk-w on tk-w" "(34b) says so"
 eq "$(pushed)" 0 "(34b) nothing is pushed"
 eq "$(ON_ORIGIN polecat/tk-w)" "$BEFORE" "(34b) origin's ref is unchanged"
-eq "$(grep -c '^guard ' "$LOG" | tr -d ' ')" 0 "(34b) and no guard runs"
 eq "$(meta branch)" "<absent>" "(34b) the store holds no branch"
 eq "$(closed_step)" "in_progress" "(34b) the step stays open"
 eq "$(tail -n 1 "$LOG")" "runtime drain-ack" "(34b) the step goes back to the pool"
@@ -814,7 +759,7 @@ eq "$(words)" "drain " "(39b) with no run to cancel, it only drains"
 
 # A handoff whose tree could not go leaves it on its branch, and work_dir naming it.
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
-submit STUB_HOOK_CURRENT=tk-w "GUARD_TOUCH=$C/late.txt" -- --bead tk-w --base main --notes "Implemented: it"
+submit STUB_HOOK_CURRENT=tk-w "STUB_HOOK_AT=session wake" "STUB_HOOK=$BIN/late" "LATE=$C/late.txt" -- --bead tk-w --base main --notes "Implemented: it"
 eq "$(g "$C" branch --show-current)" "polecat/tk-w" "(40) a tree that could not go keeps its branch"
 rm -f "$C/late.txt"
 : > "$LOG"
@@ -842,7 +787,7 @@ refused() { # <label> : exit 3, with no write of any kind and no drain.
   eq "$RC" 3 "$1: exit 3"
   has "$OUT" "tk-w is NOT handed off" "$1: says so"
   eq "$(pushed)" 0 "$1: nothing is pushed"
-  eq "$(grep -cE '^(bd update|runtime drain-ack|gate|cancel|guard|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
+  eq "$(grep -cE '^(bd update|runtime drain-ack|gate|cancel|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
     "$1: nothing is written, removed or drained"
 }
 prepare polecat/tk-w "$FRESH"; hold tk-w sess-me
@@ -901,7 +846,7 @@ note_count() { field notes | grep -o 'Handed off from the sitting\.' | wc -l | t
 held_refused() {
   eq "$RC" 1 "$1: exit 1"
   eq "$(pushed)" 0 "$1: nothing is pushed"
-  eq "$(grep -cE '^(bd update|bd dep remove|runtime drain-ack|gate|await|cancel|guard|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
+  eq "$(grep -cE '^(bd update|bd dep remove|runtime drain-ack|gate|await|cancel|session (wake|nudge)|remove|release)( |$)' "$LOG" | tr -d ' ')" 0 \
     "$1: nothing is written, removed or ended"
   cmp -s "$STUB_STORE" "$TMP/store-before" && cmp -s "$STUB_DEPS" "$TMP/deps-before" \
     && ok "$1: the store is as it was" || bad "$1: the store is as it was"

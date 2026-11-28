@@ -12,17 +12,15 @@ import (
 )
 
 // The check index. An index is a review-checks.toml that declares each check's
-// name, one line of purpose, and the phase it gates. A rig's effective index
-// has two layers:
+// name and one line of purpose. A rig's effective index has two layers:
 //
 //   - The pack's index, the review-checks.toml at the root of the pack. It
 //     declares every check the pack ships a skill for, so every rig gets every
 //     one of them.
 //   - The rig's index, the review-checks.toml the commit a caller judges
 //     carries. It is optional. A row for a check the pack declares changes that
-//     check's purpose or phase, key by key, and a key it leaves out or leaves
-//     empty keeps the pack's value. A row for any other check adds a check of
-//     the rig's own.
+//     check's purpose, and a row that leaves it out or leaves it empty keeps
+//     the pack's. A row for any other check adds a check of the rig's own.
 //
 // A caller names the commit it judges, and the rig's rows come from that commit
 // and from nowhere else. An index named outright stands in for both layers.
@@ -31,24 +29,10 @@ import (
 // diff is a judgment its method states in prose. A check's method is the
 // skill named from the check, so an older index's method key is not read.
 
-// The phases, in the order of the stage transitions they gate. A check that
-// reads only the diff is pre-open, and one that needs the deployed preview is
-// open-as-draft.
-var phases = []string{"pre-open", "open-as-draft", "ready-for-review", "merge"}
-
-// PhaseRank is the position of phase among the phases, from 1, and 0 for a
-// value that is not a phase.
-func PhaseRank(phase string) int {
-	return slices.Index(phases, phase) + 1
-}
-
-// Phases is every phase, in order, for a message that names them.
-func Phases() string { return strings.Join(phases, "|") }
-
-// Check is one row of an index: the check's name as the index writes it, its
-// purpose, and the phase it declares, "" when it declares none.
+// Check is one row of an index: the check's name as the index writes it, and
+// its purpose.
 type Check struct {
-	Name, Purpose, Phase string
+	Name, Purpose string
 }
 
 // checkName is the name a check's table and a guidance file take.
@@ -60,13 +44,13 @@ func ValidName(name string) bool { return checkName.MatchString(name) }
 // A check's table header, and a key line the grammar reads.
 var (
 	checkHeader = regexp.MustCompile(`^\s*\[checks\.([A-Za-z0-9_-]+)\]\s*$`)
-	keyLine     = regexp.MustCompile(`^\s*(purpose|phase)\s*=`)
+	keyLine     = regexp.MustCompile(`^\s*purpose\s*=`)
 )
 
 // Parse reads index text into its rows, in the grammar every index is written
 // in, a minimal subset of TOML: table headers, `key = "value"` lines, `#`
 // comments and blank lines. A check is a [checks.<name>] table, and its purpose
-// and phase keys are the ones read, the last line of each standing. A value is
+// key is the one read, the last line of it standing. A value is
 // the text after the line's first `=`, trimmed, with one surrounding double
 // quote stripped from each end. Any other table ends the check before it, so a
 // key outside a [checks.*] table is never read into a check.
@@ -93,19 +77,14 @@ func Parse(text string) []Check {
 		case cur == nil:
 			continue
 		}
-		m := keyLine.FindStringSubmatch(line)
-		if m == nil {
+		if !keyLine.MatchString(line) {
 			continue
 		}
 		_, v, _ := strings.Cut(line, "=")
 		v = strings.TrimSpace(v)
 		v = strings.TrimPrefix(v, `"`)
 		v = strings.TrimSuffix(v, `"`)
-		if m[1] == "purpose" {
-			cur.Purpose = v
-		} else {
-			cur.Phase = v
-		}
+		cur.Purpose = v
 	}
 	flush()
 	return out
@@ -113,7 +92,7 @@ func Parse(text string) []Check {
 
 // Overlay lays a rig's rows over the pack's. Within a layer the first row for a
 // name stands, a name compared without case. A rig row for a pack check
-// replaces each key it gives a value and keeps the pack's name. Any other rig
+// replaces the purpose when it gives one and keeps the pack's name. Any other rig
 // row is added, so the pack's checks come first in the pack's order and the
 // rig's own follow in the rig's.
 func Overlay(pack, rig []Check) []Check {
@@ -137,9 +116,6 @@ func Overlay(pack, rig []Check) []Check {
 		if i, ok := at[k]; ok {
 			if c.Purpose != "" {
 				out[i].Purpose = c.Purpose
-			}
-			if c.Phase != "" {
-				out[i].Phase = c.Phase
 			}
 			continue
 		}
@@ -174,8 +150,8 @@ var ErrNoCommit = errors.New("no commit named")
 // laid over them. A named index that does not read reads as no index at all. A
 // commit no repository holds or can fetch, a call with no repository to read
 // it in, and a rig index at a readable commit that does not read are errors,
-// since resolving under the pack's rows alone would hand a rig the pack's
-// phases in place of its own.
+// since the pack's rows alone would hand a rig the pack's checks in place of
+// its own.
 func ReadIndex(src IndexSources, at string) (Index, error) {
 	if src.Named != "" {
 		raw, err := os.ReadFile(src.Named)
@@ -265,20 +241,6 @@ func commitRepo(repos []string, at, unread string) (string, error) {
 	return "", fmt.Errorf("commit '%s' is in no repository here and could not be fetched from origin; the rig's files at that commit are unreadable", at)
 }
 
-// PhaseOf is the phase every reader takes a row to gate: a missing phase is
-// pre-open, with a warning, and a phase outside the ordered set is an error,
-// so no reader guesses one.
-func (ix Index) PhaseOf(c Check) (phase, warning string, err error) {
-	if c.Phase == "" {
-		return "pre-open", fmt.Sprintf("check '%s' is declared with no phase (%s); defaulting to pre-open", c.Name, ix.Source), nil
-	}
-	if PhaseRank(c.Phase) == 0 {
-		return "", "", fmt.Errorf("check '%s' declares phase '%s', which is not a phase (%s), in %s; fix the index",
-			c.Name, c.Phase, Phases(), ix.Source)
-	}
-	return c.Phase, "", nil
-}
-
 // Lookup is the row the index declares for name, compared without case.
 func (ix Index) Lookup(name string) (Check, bool) {
 	for _, c := range ix.Checks {
@@ -287,87 +249,6 @@ func (ix Index) Lookup(name string) (Check, bool) {
 		}
 	}
 	return Check{}, false
-}
-
-// Row is one check as a reader takes it: its name, its purpose and the phase
-// it gates.
-type Row struct {
-	Name, Purpose, Phase string
-}
-
-// Rows is every row whose phase reads, with a warning for each row it took a
-// default for and each row it left out, which names why.
-func (ix Index) Rows() (rows []Row, warnings []string) {
-	for _, c := range ix.Checks {
-		phase, warn, err := ix.PhaseOf(c)
-		if err != nil {
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		if warn != "" {
-			warnings = append(warnings, warn)
-		}
-		rows = append(rows, Row{Name: c.Name, Purpose: c.Purpose, Phase: phase})
-	}
-	return rows, warnings
-}
-
-// Gate is one check a check_set token names that gates a transition: the token
-// as the set writes it, which names a lane, and the phase it gates at.
-type Gate struct {
-	Name, Phase string
-}
-
-// The check_set tokens that name no lane: none and off are the gateless
-// sentinels, and approval is a merge rule. Resolve drops all three, so no
-// transition re-derives the drop.
-var nonLanes = []string{"none", "off", "approval"}
-
-// Resolve is the checks in the check_set set that gate the transition through:
-// every check whose phase is at or before it, each once by its name without
-// case and in the case the set first writes it. A token the index does not
-// declare, every token when nothing was read, gates at pre-open, the earliest
-// phase and the one the old path dispatches at every stage, so the token always
-// has a path to its review rather than a merge-only gate that could hold the
-// merge with no review produced. A declared check whose phase is outside the
-// ordered set is an error, so every caller holds its transition rather than
-// guess. through must be a phase.
-func (ix Index) Resolve(set, through string) (gates []Gate, warnings []string, err error) {
-	rank := PhaseRank(through)
-	if rank == 0 {
-		return nil, nil, fmt.Errorf("'%s' is not a phase (%s)", through, Phases())
-	}
-	var seen []string
-	for _, tok := range strings.Split(set, ",") {
-		tok = strings.Join(strings.Fields(tok), "")
-		low := strings.ToLower(tok)
-		if tok == "" || slices.Contains(nonLanes, low) || slices.Contains(seen, low) {
-			continue
-		}
-		seen = append(seen, low)
-		c, ok := ix.Lookup(tok)
-		if !ok {
-			if ix.Source != "" {
-				warnings = append(warnings, fmt.Sprintf("check '%s' is not declared in the index (%s); defaulting to pre-open", tok, ix.Source))
-			}
-			gates = append(gates, Gate{Name: tok, Phase: "pre-open"})
-			continue
-		}
-		phase, warn, perr := ix.PhaseOf(c)
-		if perr != nil {
-			return nil, warnings, perr
-		}
-		if warn != "" {
-			warnings = append(warnings, warn)
-		}
-		if PhaseRank(phase) <= rank {
-			gates = append(gates, Gate{Name: tok, Phase: phase})
-		}
-	}
-	if ix.Source == "" {
-		warnings = append(warnings, "no readable check index (the pack's index, the commit's and any index named outright all came up empty); every non-sentinel token takes pre-open and gates every transition")
-	}
-	return gates, warnings, nil
 }
 
 // GuidancePath is the file a rig's guidance for check is in at a commit, the

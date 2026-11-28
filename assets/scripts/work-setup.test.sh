@@ -72,18 +72,6 @@ cat > "$PACK/rig-root.sh" <<'SH'
 printf '%s\n' "$RIG_ROOT_STUB"
 SH
 chmod +x "$PACK/rig-root.sh"
-cat > "$PACK/bring-current-audit.sh" <<'SH'
-#!/usr/bin/env bash
-printf 'bca %s\n' "$*" >> "$CALLS"
-verb="${1:-}"; shift; bead=""
-while [ $# -gt 0 ]; do case "$1" in --bead) bead="${2:-}"; shift 2 ;; *) shift ;; esac; done
-case "$verb" in
-  add) gc bd update "$bead" --set-metadata 'conflict_audit=[{"path":"shared.txt"}]' ;;
-  ask) [ -z "${ASK_FAIL:-}" ] || exit 1; gc bd update "$bead" --set-metadata 'conflict_question={"paths":["shared.txt"]}' ;;
-  anchor) a=$(gc --harness-read meta "$bead" anchor_bead); [ "$a" != "<absent>" ] || a="$bead"; printf '%s\n' "$a" ;;
-esac
-SH
-chmod +x "$PACK/bring-current-audit.sh"
 
 # --- Histories. ------------------------------------------------------------------
 g() { "$REAL_GIT" -C "$@"; }
@@ -172,8 +160,7 @@ last_line() { printf '%s\n' "$OUT" | tail -n 1; }
 echo "# a rejected branch is brought current by merging the base in"
 clone polecat/w1
 MERGE_ONLY="Conflicts with $BASE at $BASE_TIP"
-setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY" '"prepare_mode":"merge","conflict_audit":"entries from an earlier round",
-  "conflict_question":"a question from an earlier round"')")"
+setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY" '"prepare_mode":"merge"')")"
 eq "$RC" "0" "(1) the resume exits 0"
 eq "$(parents)" "$W1 $BASE_TIP" "(1) HEAD is a merge commit of the PR head and origin/$BASE, in that order"
 called "git merge --no-edit origin/$BASE" \
@@ -181,10 +168,6 @@ called "git merge --no-edit origin/$BASE" \
   || bad "(1) the base is merged in by git merge --no-edit origin/$BASE" "$(grep '^git ' "$CALLS" | tr '\n' ';')"
 eq "$(rewrites)" "0" "(1) nothing rebases, resets, commits, cherry-picks or pushes"
 eq "$(g "$CO" rev-parse refs/heads/polecat/w1)" "$W1" "(1) origin's branch is untouched: the resume pushes nothing"
-eq "$(at_merge bring_current_from)" "$W1" "(1) before the merge runs, bring_current_from is the PR head"
-eq "$(at_merge bring_current_scope)" "merge-only" "(1) before the merge runs, the conflict rejection's scope is merge-only"
-eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" "(1) before the merge runs, the last round's audit and question are cleared"
-eq "$(meta bring_current_from) $(meta bring_current_scope)" "$W1 merge-only" "(1) the round stays on the bead for the hand-off to read"
 eq "$(meta rejection_reason)" "<absent>" "(1) rejection_reason is unset"
 eq "$(last_line)" "$C" "(1) the last line printed is the worktree"
 
@@ -215,21 +198,19 @@ GITDIR="$(g "$C" rev-parse --absolute-git-dir)"
 eq "$(rewrites)" "0" "(4) nothing rebases, resets, commits, cherry-picks or pushes"
 eq "$(meta rejection_reason)" "$CONFLICTS" "(4) the rejection stays while the merge is unconcluded"
 
-echo "# a local commit origin has not seen leaves the stamp at origin's copy of the branch"
+echo "# a local commit origin has not seen is kept under the merge"
 clone polecat/w1
 commit_in "$C" local.txt "local" "a commit origin has not seen"
 AHEAD="$(g "$C" rev-parse HEAD)"
 setup_run "$(bead polecat/w1 '{"rejection_reason":"tests failed"}')"
-eq "$(at_merge bring_current_from)" "$W1" "(5) bring_current_from is the PR head origin holds, not the local commit past it"
 eq "$(parents)" "$AHEAD $BASE_TIP" "(5) the base is merged into the local head"
 
-echo "# a branch origin does not have is stamped with HEAD from before the merge"
+echo "# a branch origin does not have is merged from its local head"
 clone polecat/w1
 g "$C" checkout -q -b polecat/w3
 commit_in "$C" local.txt "local" "a commit origin never saw"
 LOCAL="$(g "$C" rev-parse HEAD)"
 setup_run "$(bead polecat/w3 '{"rejection_reason":"tests failed"}')"
-eq "$(at_merge bring_current_from)" "$LOCAL" "(6) bring_current_from is the head the resume started from, not its merge commit"
 eq "$(parents)" "$LOCAL $BASE_TIP" "(6) the base is merged in"
 
 echo "# without a rejection nothing merges"
@@ -242,16 +223,7 @@ for m in '' '{"rejection_reason":""}'; do
   eq "$(grep -c '^git merge --no-edit' "$CALLS")" "0" "(7) $label: nothing merges the base in"
 done
 
-echo "# the scope is merge-only for a conflict rejection, and with-work for any other"
-scope_case() { # <label> <rejection_reason> <scope>
-  clone polecat/w1
-  setup_run "$(bead polecat/w1 "$(rejected "$2")")"
-  eq "$(at_merge bring_current_scope)" "$3" "(8) $1 is stamped $3 before the merge runs"
-}
-scope_case "a conflict rejection" "$CONFLICTS" merge-only
-scope_case "a failed-tests rejection" "tests failed" with-work
-
-echo "# a round that does not land stops before the merge"
+echo "# a record the store refuses stops before the merge"
 clone polecat/w1
 printf '%s' "$(bead polecat/w1 '{"rejection_reason":"tests failed"}')" > "$STORE"
 : > "$CALLS"; rm -f "$AT_MERGE"
@@ -284,11 +256,15 @@ eq "$RC" "1" "(13) a merge git refuses to start exits 1"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "" "(13) git refuses to start a merge over an uncommitted edit"
 eq "$(meta rejection_reason)" "$CONFLICTS" "(13) and the rejection stays"
 
+# with_anchor — the bead's store row list, with the PR anchor tk-a beside it: the
+# bead on polecat/w2 that carries a merge_result, targeting integration/c1.
+with_anchor() {
+  jq -c '. + [{id: "tk-a", status: "open", assignee: "", metadata: {branch: "polecat/w2", target: "integration/c1", merge_result: "pull_request_pending"}}]'
+}
 echo "# a stop to ask a person leaves the rejection, so the next run merges again"
 for how in molecule bare; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" in_progress sess-me)"
-  set_meta conflict_audit '[{"path":"resolved-before-the-stop.txt"}]'
+  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" in_progress sess-me | with_anchor)"
   : > "$CALLS"
   if [ "$how" = molecule ]; then
     TOOL_ENV=STUB_HOOK_CURRENT=tk-step tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
@@ -302,25 +278,24 @@ for how in molecule bare; do
     && ok "(14) $how: the bead waits on the question's gate on its anchor, armed to re-sling" \
     || bad "(14) $how: the bead waits on the question's gate on its anchor, armed to re-sling" "$(grep '^await' "$CALLS")"
   eq "$(grep -cE '^bd update tk-w .*(gc\.routed_to|gc\.takeaway)' "$CALLS")" "0" "(14) $how: and nothing parks it on a route or a headline"
-  eq "$(grep -c '^bca ask --bead tk-w --path shared.txt --collided c --question q$' "$CALLS")" "1" "(14) $how: the question is asked once, with what collided"
+  eq "$(grep -c '^gate --subject tk-a --key bring-current-question\.tk-w --message ' "$CALLS")" "1" "(14) $how: the question is asked once, on its anchor's gate"
+  has "$(cat "$CALLS")" "The question: q" "(14) $how: the gate asks the question"
+  has "$(cat "$CALLS")" 'What collided in `shared.txt`: c' "(14) $how: with what collided"
   eq "$RC" "0" "(14) $how: --stop-merge exits 0"
   grep -qx 'runtime drain-ack' "$CALLS" && ok "(14) $how: it drains" || bad "(14) $how: it drains"
   eq "$(g "$C" rev-parse HEAD) $(g "$C" rev-parse -q --verify MERGE_HEAD)" "$W2 " "(14) $how: the merge is aborted, HEAD at the PR head"
   eq "$(meta rejection_reason)" "$CONFLICTS" "(14) $how: the rejection stays on the bead"
-  [ "$(meta conflict_question)" != "<absent>" ] && ok "(14) $how: beside the question" || bad "(14) $how: beside the question"
   rm -f "$AT_MERGE"
   again
   eq "$RC" "3" "(15) $how: the next run's resume reaches the conflict again"
-  eq "$(at_merge bring_current_from) $(at_merge bring_current_scope)" "$W2 merge-only" "(15) $how: it starts a new round from the PR head"
-  eq "$(at_merge conflict_audit) $(at_merge conflict_question)" "<absent> <absent>" "(15) $how: clearing the question and the entries recorded before it, before it merges"
   eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(15) $how: and merges the base in again"
   eq "$(meta rejection_reason)" "$CONFLICTS" "(15) $how: the rejection stays until that merge concludes"
 done
 clone polecat/w2
 setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")")"
-TOOL_ENV=ASK_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+TOOL_ENV=GATE_RC=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16) a question that reaches no gate stops the stop"
-eq "$(grep -c '^bca ask ' "$CALLS")" "1" "(16) after it asked"
+eq "$(grep -c '^gate --subject tk-w --key bring-current-question\.tk-w --message ' "$CALLS")" "1" "(16) after it asked"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16) and the merge stays open"
 # gc exits 1 both for no claim and for a read of its own that failed, so this
 # session cannot tell a run's step from a claim on the work bead itself.
@@ -329,25 +304,39 @@ setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
 : > "$CALLS"
 TOOL_ENV=STUB_HOOK_CURRENT= tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
 eq "$RC" "1" "(16c) a claim that does not read stops the stop"
-eq "$(grep -cE '^(bca ask|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16c) before it asks, and nothing waits, cancels or drains"
+eq "$(grep -cE '^(gate|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16c) before it asks, and nothing waits, cancels or drains"
 eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16c) the merge stays open"
 has "$(cat "$TMP/err")" "gc hook current: session sess-me has no current claim" "(16c) with gc's own words on its stderr"
 has "$(cat "$TMP/err")" "this session's claim did not read, so it cannot tell a run's step from a claim on tk-w itself" "(16c) and saying why it stops"
 hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16c) and the notes record no stop, as a bead with no molecule's would"
 for held in tk-step tk-w; do
   clone polecat/w2
-  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')")"
+  setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS" '"anchor_bead":"tk-a"')" | with_anchor)"
   TOOL_ENV="STUB_HOOK_CURRENT=$held AWAIT_RC=1" tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
   eq "$RC" "1" "(16b) holding $held: a wait that does not land stops the stop"
   eq "$(grep -cE '^(cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16b) holding $held: and nothing cancels or drains"
   eq "$(grep -cE '^bd update tk-w .*(--status|--assignee)' "$CALLS")" "0" "(16b) holding $held: the stop releases no claim itself, so it stays held"
   hasnt "$(notes tk-w)" "Stopped bringing the branch current" "(16b) holding $held: and the notes record no stop"
 done
-
-clone polecat/w1
-setup_run "$(bead polecat/w1 "$(rejected "$MERGE_ONLY")")" STUB_UPDATE_FAIL_ON=bring_current_from
-eq "$RC" "1" "(16c) a round the store refuses stops the resume"
-called "git merge --no-edit origin/$BASE" && bad "(16c) before the merge" || ok "(16c) before the merge"
+# A bead on a PR's branch with no anchor_bead of its own asks on the bead that
+# owns the branch's merge, the one there that carries a merge_result, and names
+# that bead's target when it records none.
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")" | with_anchor)"
+: > "$CALLS"
+tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "0" "(16d) a bead with no anchor_bead: --stop-merge exits 0"
+eq "$(grep -c '^gate --subject tk-a --key bring-current-question\.tk-w --message polecat/w2 needs a decision before it can be brought current with integration/c1$' "$CALLS")" "1" "(16d) the question goes to the bead on its branch that carries a merge_result, naming that bead's target"
+grep -q '^await tk-w --key bring-current-question\.tk-w --subject tk-a --formula mol-polecat-work$' "$CALLS" \
+  && ok "(16d) and the bead waits on that gate" \
+  || bad "(16d) and the bead waits on that gate" "$(grep '^await' "$CALLS")"
+clone polecat/w2
+setup_run "$(bead polecat/w2 "$(rejected "$CONFLICTS")")"
+: > "$CALLS"
+TOOL_ENV=STUB_LIST_FAIL=1 tool --stop-merge --bead tk-w --path shared.txt --collided c --question q
+eq "$RC" "1" "(16e) a branch whose beads do not list stops the stop"
+eq "$(grep -cE '^(gate|await|cancel|runtime drain-ack)( |$)' "$CALLS")" "0" "(16e) before it asks, and nothing waits, cancels or drains"
+eq "$(g "$C" rev-parse -q --verify MERGE_HEAD)" "$BASE_TIP" "(16e) the merge stays open"
 
 echo "# a fresh run makes its worktree in the rig, whatever repo its directory is in"
 RIG="$TMP/rig"; "$REAL_GIT" clone -q "$O" "$RIG"

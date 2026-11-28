@@ -1,6 +1,6 @@
 ---
 name: review-demo
-description: Use when you hold a review bead whose check is demo, or when triage asks whether a diff warrants the demo check.
+description: Use when you hold a review run's demo lane, or when triage asks whether a diff warrants the demo check.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -28,9 +28,9 @@ presents itself so the operator can decide, is the `pm` check's.
 
 ## What it reads
 
-The anchor `<anchor_bead>` for what the change is for, then the diff at
-`<reviewed_oid>`, in `<worktree>`: `git diff origin/<review_base>...HEAD`. The
-draft PR, `<review_pr_url>`, and its deployed preview where the app target under
+The anchor `<pr_bead>` for what the change is for, then the diff at
+`<head>`, in `<worktree>`: `git diff origin/<target>...HEAD`. The
+draft PR, `<pr_url>`, and its deployed preview where the app target under
 `video` records from it. The rig's guidance for this check, the reviewed
 commit's `docs/review-demo.md`, which the review formula printed when the
 commit carries one. It is also the rig's demo guide, which the drafter and
@@ -43,12 +43,11 @@ or message.
 
 ### When it runs
 
-The check index places `demo` at the `open-as-draft` phase. Triage adds it before
-the PR exists, the refinery opens the PR as a draft, and this check runs against
-that draft. Where the rig's host deploys previews for pull requests, the draft
-has one, so a change whose demo needs the preview has it. The PR does not leave
-draft for human review until every pre-open and open-as-draft check reads
-green, this one included.
+The refinery opens every PR as a draft, and this check runs against that draft.
+Where the rig's host deploys previews for pull requests, the draft has one, so
+a change whose demo needs the preview has it. The PR does not leave draft for
+human review until the review run has passed at its head, this check
+included.
 
 ## What it judges
 
@@ -90,7 +89,7 @@ screen renders settles need, whatever its size. Capture each changed screen as
 the section Review against the rig's standards says.
 
 When no visual helps, approve with a one-line note that says why, attach
-nothing, and record `--visual none`.
+nothing, and record `visual` as `none`.
 
 ### Pick the modality
 
@@ -133,7 +132,7 @@ produced here. The sandbox is macOS's `sandbox-exec`, and a host without it
 runs no capture; `doctor/check-demo-toolchain` reports whether this one has it.
 
 Every modality reaches the PR the same way. `demo-deliver.sh --file <path>
---subject <anchor_bead>` resolves the PR from the anchor and attaches the file
+--subject <pr_bead>` resolves the PR from the anchor and attaches the file
 to it in a comment, inline and uncommitted. It refuses a PR outside the rig's
 origin and exits non-zero when it cannot attach. `doctor/check-demo-toolchain`
 reports whether the `gh` it needs is present.
@@ -174,14 +173,14 @@ reports whether the `gh` it needs is present.
   from a preview in no other case. It runs on the deployment's own data and
   live services, so its scenes can change between captures, and each capture
   can spend money on live calls. Record a preview only from an address that
-  serves `<reviewed_oid>`: one the host gives that commit's deployment alone,
+  serves `<head>`: one the host gives that commit's deployment alone,
   as the host's documentation or the rig's guidance says, or one whose app
   reports that commit. An address the host moves to each new deployment, such
   as a branch's or a pull request's, can serve a later commit, so with neither
-  there is no preview of `<reviewed_oid>` to record. Where the host records
+  there is no preview of `<head>` to record. Where the host records
   previews as GitHub deployments,
-  `gh api "repos/<owner>/<repo>/deployments?sha=<reviewed_oid>"` lists that
-  commit's deployments, in the repository `<review_pr_url>` names. A
+  `gh api "repos/<owner>/<repo>/deployments?sha=<head>"` lists that
+  commit's deployments, in the repository `<pr_url>` names. A
   deployment's state is its most recent status,
   `gh api "repos/<owner>/<repo>/deployments/<id>/statuses" --jq 'max_by(.id)'`
   with its `id`. Record from it only while that status reads `success`, which
@@ -203,7 +202,7 @@ reports whether the `gh` it needs is present.
 - `repo-artifact`: list the visuals the reviewed commit already carries.
 
   ```bash
-  "$(gc <binding> scripts-dir)/demo-repo-artifact.sh" candidates --base "origin/<review_base>" --oid "<reviewed_oid>" --anchor "<anchor_bead>" --repo "<worktree>"
+  "$(gc <binding> scripts-dir)/demo-repo-artifact.sh" candidates --base "origin/<target>" --oid "<head>" --anchor "<pr_bead>" --repo "<worktree>"
   ```
 
   Each line gives a reason and a path. `changed` is a visual the diff adds or
@@ -215,7 +214,7 @@ reports whether the `gh` it needs is present.
   commit. Pick one that matches what the diff does, because one that shows a
   state the reviewed commit no longer produces would mislead the human.
   Deliver the one you pick with `demo-repo-artifact.sh deliver --path <path>
-  --base origin/<review_base> --oid <reviewed_oid> --subject <anchor_bead>
+  --base origin/<target> --oid <head> --subject <pr_bead>
   --repo <worktree>`. It attaches the file as the reviewed commit stores it,
   through `demo-deliver.sh`. The comment says where the visual came from:
   whether this change adds, edits, moves or copies it, or leaves it unchanged,
@@ -273,7 +272,7 @@ reports whether the `gh` it needs is present.
   is no capture. The last line names the PNG and its size, and for a command it
   says how the command ended: its exit status, or that it took over the screen
   and was still running. Open the PNG before you deliver it with
-  `demo-deliver.sh --file <name>.png --subject <anchor_bead> --body "<what it
+  `demo-deliver.sh --file <name>.png --subject <pr_bead> --body "<what it
   shows, and what it was rendered from>"`.
 
 When the modality that fits cannot be produced here, a cheaper one that still
@@ -419,15 +418,14 @@ a required state. Each of those is the note below, and it never blocks.
 
 ## The verdict
 
-The verdict carries its visual on either path, where the formula you run under
-says: the check's two flags, `--visual` and `--visual-fallback-from`, or the
-output's `visual` and `visual_fallback_from`, which the flags below stand for.
-`--visual` carries the decision: `none` when no visual is needed, otherwise the
-modality you picked. A verdict that delivers more than one modality, such as a
-clip of the screens beside a screenshot of each message, names the costliest. A
-fallback adds `--visual-fallback-from <the modality that fits>`.
+The verdict carries its visual in the output's `visual` and
+`visual_fallback_from`. `visual` carries the decision: `none` when no visual is
+needed, otherwise the modality you picked. A verdict that delivers more than one
+modality, such as a clip of the screens beside a screenshot of each message,
+names the costliest. A fallback adds `visual_fallback_from`, naming the modality
+that fits.
 
-The verdict's write refuses a demo verdict without `--visual`, and refuses
+The verdict's write refuses a demo verdict without `visual`, and refuses
 `none` with `request-changes`, because a check that found no visual needed has
 nothing to block on. It records the decision with the verdict and names it on
 the posted comment's `Visual:` line. That line says what kind of visual the
@@ -456,27 +454,27 @@ which states, and each screen, message or state you could not check, with what
 stopped it. The PR shows only the demo, so this list is how a person sees what
 the check covered.
 
-- **No visual needed.** Approve with `--visual none` and a one-line note. Attach
+- **No visual needed.** Approve with `visual` as `none` and a one-line note. Attach
   nothing.
 - **Delivered, and it shows the change working.** Approve with its modality.
   If the rig names a standard, approve only when every capture meets it.
 - **Delivered, and it shows the change failing.** Request changes with its
-  modality. The finding goes in `findings.json`.
+  modality. The finding goes in the output's `findings`.
 - **Delivered, and it shows a violation of the rig's standard.** Request changes
-  with its modality. Each cause of a violation is one finding in
-  `findings.json` that names the rule, and where the demo shows it as its
+  with its modality. Each cause of a violation is one finding in the output's
+  `findings` that names the rule, and where the demo shows it as its
   evidence.
 - **Delivered as a fallback.** Judge what it shows the same way. Record the
-  modality delivered with `--visual` and the one that fits with
-  `--visual-fallback-from`, and say what stopped the one that fits.
+  modality delivered in `visual` and the one that fits in
+  `visual_fallback_from`, and say what stopped the one that fits.
 - **The fitting visual cannot be produced here.** Approve with its modality, and
   say that a visual is warranted and what stopped it: a surface none of these
   captures renders, a surface only live state produces, a required state the
   capture tools cannot reach, a capture toolchain that does not resolve, or no
   running app to capture.
-  This never blocks. A rework child cannot build the city's capture capability,
-  and a red lane would keep the PR in draft, away from the human who would judge
-  it.
+  This never blocks. The round's repair cannot build the city's capture
+  capability, and a red lane would keep the PR in draft, away from the human
+  who would judge it.
 - **A human asked for the visual and it cannot be produced.** Approve the same
   way, naming the request and what would meet it. The verdict posts on the PR the
   human reads, and the merge still waits on a human approval.

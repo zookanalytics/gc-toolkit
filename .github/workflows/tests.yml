@@ -158,8 +158,8 @@ jobs:
 
       # The image's only bash is /bin/bash 3.2. run-tests.sh needs bash 5, and
       # it runs each suite with the first bash on PATH. Scripts under test
-      # bound calls with timeout(1), and refinery-reconcile.sh and gc-helm.sh's
-      # accept take their locks with flock(1); macOS ships neither, and the pr
+      # bound calls with timeout(1), and gc-helm.sh's accept takes its lock with
+      # flock(1); macOS ships neither, and the pr
       # package's Go lock test runs flock(1) against the record lock.
       # tmux-intake-prompt.test.sh runs tmux-bindings.sh under /bin/sh against
       # a real tmux server, and skips that case without tmux. The host

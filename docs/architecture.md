@@ -21,7 +21,7 @@ and the debt where what is built falls short of it.
 
 **Boundaries.** It works at altitude. The anchor lifecycle's states, writers,
 and check mechanics are owned by [state-machine.md](state-machine.md); the
-runtime semantics of the merge cadence and the landing order by
+runtime semantics of the PR watch and the landing order by
 [refinery-merge-cadence.md](refinery-merge-cadence.md); the primitive list and
 the invariant→check binding by [component-model.md](component-model.md); the
 filing conventions by [file-structure.md](file-structure.md); how work is
@@ -50,7 +50,6 @@ flowchart LR
     FORM[formulas +<br/>agent prompts]
     REF[refinery<br/>the landing writer]
     DISP[bead-rehome.sh<br/>the disposition writer]
-    CAD[merge cadence]
     RUN[review run<br/>the result writer]
     DOC[doctor/<br/>invariant checks]
     HELM[helm board<br/>render-only]
@@ -71,12 +70,10 @@ flowchart LR
   REF -->|opens as draft / edits| PR
   REF -->|pending record| LEDGER
   FORM -->|disposition| DISP
-  CAD -->|disposition| DISP
   DISP -->|successor edge, then checked close| LEDGER
   RUN -->|review result| LEDGER
   RUN -->|repair push| BR
   RUN -->|title + summary| PR
-  ORD -->|every 60s| CAD
   ORD -->|landing order: one run per head| RUN
   ORD -.->|landing order: a PR's re-read in full before its merge| PR
   ORD -->|landing order: ready, merge request| PR
@@ -85,8 +82,6 @@ flowchart LR
   ORD -.->|PR watch: reads each PR the city owns| PR
   ORD -->|PR watch: GitHub read of a PR that moved| LEDGER
   ORD -->|PR watch's net: clears labels no bead owns| PR
-  CAD -->|reads + writes| LEDGER
-  CAD -->|labels| PR
   BR --> PR
   PR -->|GitHub merges| BR
   HELM -.->|derives per render| LEDGER
@@ -568,8 +563,3 @@ why a reader must know it, and the work that retires it.
   session's work to the pool beside Gas City's release, and the deacon runs
   `gc doctor` and files each failure as a patrol finding for a first reaction.
   The second landing of tk-1tfzr71.19 retires both.
-- **The old review path's code still runs.** The merge cadence still runs the
-  old review path beside the review run
-  ([refinery-merge-cadence.md](refinery-merge-cadence.md#the-arms)), though no
-  PR is on it, so step 7 is not yet the one review path in the code. The
-  retirement bead (tk-1tfzr71.122) deletes the old path.

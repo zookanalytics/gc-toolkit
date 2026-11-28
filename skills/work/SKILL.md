@@ -458,7 +458,7 @@ Before you run it:
   then end its wait on the closing bead as above. The refusal prints both
   commands.
 - Check that no work on the bead is under way: it is unassigned, has no branch
-  or PR that a pool still works on, and is not a review, step or workflow bead.
+  or PR that a pool still works on, and is not a step or workflow bead.
   Check it yourself, because `gc doctor` skips a bead closed this way and
   nothing checks it again. Retire a bead with an open PR instead (the prs
   skill), which closes the PR too: a bare `gc bd close` on a bead whose

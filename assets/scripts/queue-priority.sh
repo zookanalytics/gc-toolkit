@@ -116,7 +116,7 @@ trap cleanup EXIT
 # a command substitution's copy of it.
 mktemp_tracked() { REPLY="$(mktemp "${TMPDIR:-/tmp}/gctk-queue-priority.XXXXXX")" || return 1; TMPFILES+=("$REPLY"); }
 
-# The pin trails the verb, the form lane-state.sh takes too: bd reads a flag
+# The pin trails the verb: bd reads a flag
 # wherever it stands, and a stub gc that answers by the verb after `bd` reads
 # the same call.
 bd_() { gc bd "$@" --db "$BD_DB" 9>&-; }

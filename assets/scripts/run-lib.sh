@@ -53,7 +53,6 @@
 # work-setup.sh reads it for a bead whose tree holds the branch, to tell a
 # sibling from a tree left behind, and refinery-find-work.sh for a bead that
 # waits on the one it would take, to tell a writer from a bead that only waits.
-# gate-ensure.sh takes the runs poured over a review, live or not, to judge whether a pour still drives it.
 # queue-priority.sh takes the live runs that work a bead it settles, to write
 # their convoys, roots and steps, and priority-lib.sh follows a root to the
 # convoy it names and a convoy to the bead it tracks through run_convoy and
@@ -68,9 +67,6 @@
 # whether its work has landed.
 # doctor/check-po-queue-only takes the map of each store that holds a bead in
 # the po's queue, to find a held bead a live run already works.
-# blocker-holder.sh takes the runs that work each live blocker of an anchor
-# that no route or claim marks, to tell one a live run works from one nothing
-# does.
 # store-only-exit.sh takes the run whose root its session's claimed step
 # names, to confirm it is live and works the bead over the step's --convoy
 # before that root holds the validating closer it arms until the run ends.

@@ -14,8 +14,7 @@
 #     $GC_HOME/supervisor.toml gives, carrying the X-GC-Request header gascity
 #     requires on a mutation, for the city `gc cities` names at $GC_CITY_PATH;
 #   * --step resolves the run from the step `gc hook current` names, once that
-#     step shows it is this session's; a --bead is not read, and one that names
-#     another bead is reported; --root takes the run as given;
+#     step shows it is this session's; --root takes the run as given;
 #   * a CLAIM NOT READ: gc hook current exits 1 both for no claim and for a read
 #     that failed, so either is a run not ended, reported with gc's exit status
 #     and its own words, with no request and no write;
@@ -325,7 +324,7 @@ has "$(cat "$CURL_LOG")" "POST $URL " "--root: POST to the named run"
 eq "$(writes)" "" "--root: nothing is written"
 eq "$(holders)" "[\"$MINE\"]" "--root: a step a session has started is still its holder when the cancel is sent"
 
-# ── 3. the claim names the step; --bead is accepted and not read ────────────
+# ── 3. the claim names the step ─────────────────────────────────────────────
 reset
 cat > "$TMP/store2.json" <<JSON
 [
@@ -340,39 +339,21 @@ OUT=$(FAKE_HOOK_CURRENT=tk-b "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 0 "claim: gc hook current names which of two same-step beads this session runs"
 has "$(cat "$CURL_LOG")" "/runs/tk-rootB/cancel" "claim: the claimed step's root is cancelled (a graph.v2-contract root counts)"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
-OUT=$(FAKE_HOOK_CURRENT=tk-a "$SCRIPT" --step "$STEP" --bead tk-b --reason r 2>&1); RC=$?
-eq "$RC" 0 "--bead is accepted and not read: the claim names the step"
-has "$(cat "$CURL_LOG")" "/runs/tk-rootA/cancel" "--bead: the claimed step's root is cancelled, not the root of the bead --bead names"
-has "$OUT" "NOTE: --bead 'tk-b' is not read; the step is the one gc hook current names, tk-a" \
-  "--bead: one that names another bead is reported, with the claim that names the step"
-cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
-OUT=$(FAKE_HOOK_CURRENT=tk-a "$SCRIPT" --step "$STEP" --bead tk-a --reason r 2>&1); RC=$?
-eq "$RC" 0 "--bead naming the claimed step: the run is cancelled"
-hasnt "$OUT" "NOTE: --bead" "…and nothing is reported"
-cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT=tk-rootA "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 2 "claim: a current claim that is not this step is refused"
 has "$OUT" "gc hook current names tk-rootA, which is not this session's bead for that step" "…naming the claim it read"
 eq "$(calls)|$(writes)" "0|" "…with no request and no write"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
-OUT=$(FAKE_HOOK_CURRENT='' "$SCRIPT" --step "$STEP" --bead tk-b --reason r 2>&1); RC=$?
+OUT=$(FAKE_HOOK_CURRENT='' "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 1 "no claim: not ended, though two beads in the store are this session's for the step"
 has "$OUT" "gc hook current exited 1 without naming a claim (it said: gc hook current: no claim (stub)); nothing was cancelled" \
   "no claim: carries gc hook current's exit status and its own words"
-has "$OUT" "NOTE: --bead 'tk-b' is not read; the step is the one gc hook current names" "no claim: a --bead it was given is still reported"
 eq "$(calls)|$(writes)" "0|" "no claim: no request and no write"
 cp "$TMP/store2.json" "$FAKE_STORE"; : > "$CURL_LOG"; : > "$GC_LOG"
 OUT=$(FAKE_HOOK_CURRENT='' FAKE_HOOK_SAYS="gc hook current: open session store: connection refused" "$SCRIPT" --step "$STEP" --reason r 2>&1); RC=$?
 eq "$RC" 1 "a failed read of the claim: not ended, so the step stays claimed and a retry can end it"
 has "$OUT" "(it said: gc hook current: open session store: connection refused)" "…and the refusal names the read's own failure"
 eq "$(calls)|$(writes)" "0|" "…with no request and no write"
-
-# mol-validate's step text passes --bead with an empty value.
-reset
-run --step "$STEP" --bead "" --reason r
-eq "$RC" 0 "an empty --bead, as mol-validate's step text passes it, is accepted"
-has "$(cat "$CURL_LOG")" "/runs/tk-root/cancel" "…and the claimed step's run is cancelled"
-hasnt "$OUT" "NOTE: --bead" "…and nothing is reported about it"
 
 # ── 3b. a check loop's step is named by the loop ─────────────────────────────
 # Gas City writes a run's first iteration under the loop's bare name and each

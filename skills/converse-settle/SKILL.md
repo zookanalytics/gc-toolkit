@@ -408,17 +408,11 @@ closed since, and never files a second rework:
 
 - **The record names the rework an earlier attempt filed.** The re-run files no
   second one, even after that rework has closed.
-- **A rework of this conversation that no record names is open.** The re-run
-  adopts that rework and records it.
-- **A rework that no record names has closed.** An attempt that stopped after
-  filing its rework and before recording it, as one that printed
-  `REWORK NOT COMPLETE` or whose record the store refused, leaves such a
-  rework, and once it has closed, a re-run would file a second one. So the
-  sign-off refuses the re-run before any write, naming each closed rework on
-  the PR that no recorded ruling names. Run nothing again: hold (`converse-hold`), and tell
-  the operator which rework closed, because the ruling may already be carried
-  out. When the operator takes that rework as done, sign off with
-  `--no-rework`. When they ask more of the branch, that is a ruling of its own.
+- **No record names the rework yet**, as after an attempt that stopped after
+  filing its rework and before recording it, such as one that printed
+  `REWORK NOT COMPLETE` or whose record the store refused. The re-run finds the
+  ask that attempt filed, by its source and reason, whether it is open or has
+  closed, and records it, so it files no second one.
 
 **A conversation can have only one open rework.** While a rework filed for an
 earlier ruling is open, the sign-off refuses `--rework` for another ruling.

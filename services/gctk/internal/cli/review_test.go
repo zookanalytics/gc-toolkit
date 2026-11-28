@@ -22,13 +22,12 @@ func runGctk(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errb.String()
 }
 
-// The check index's calls: a call that names no commit, two forms in one call
-// and a flag only another form takes are usage errors even where the pack's
-// index cannot be found, and an index named outright answers each form with no
-// commit.
+// The check index's calls: a call that names no commit is a usage error even
+// where the pack's index cannot be found, and an index named outright answers
+// each form with no commit.
 func TestReviewChecksCalls(t *testing.T) {
 	idx := filepath.Join(t.TempDir(), "review-checks.toml")
-	if err := os.WriteFile(idx, []byte("[checks.correctness]\npurpose = \"p\"\nphase = \"pre-open\"\n[checks.demo]\npurpose = \"d\"\nphase = \"open-as-draft\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(idx, []byte("[checks.correctness]\npurpose = \"p\"\n[checks.demo]\npurpose = \"d\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GC_REVIEW_CHECKS_INDEX", "")
@@ -46,17 +45,10 @@ func TestReviewChecksCalls(t *testing.T) {
 		out  string
 	}{
 		{[]string{"review", "checks", "--show"}, 2, ""},
-		{[]string{"review", "checks", "--resolve", "correctness", "--through", "merge", "--at", ""}, 2, ""},
-		{[]string{"review", "checks", "--file", idx, "--resolve", "correctness"}, 2, ""},
-		{[]string{"review", "checks", "--file", idx, "--resolve", "correctness", "--through", "merge", "--check", "demo"}, 2, ""},
-		{[]string{"review", "checks", "--file", idx, "--through", "merge"}, 2, ""},
-		{[]string{"review", "checks", "--file", idx, "--with-phase"}, 2, ""},
-		{[]string{"review", "checks", "--file", idx}, 0, "correctness\tp\tpre-open\ndemo\td\topen-as-draft\n"},
-		{[]string{"review", "checks", "--file", idx, "--show", "--check", "DEMO"}, 0, "demo\td\topen-as-draft\n"},
+		{[]string{"review", "checks", "--check", "demo", "--at", ""}, 2, ""},
+		{[]string{"review", "checks", "--file", idx}, 0, "correctness\tp\ndemo\td\n"},
+		{[]string{"review", "checks", "--file", idx, "--show", "--check", "DEMO"}, 0, "demo\td\n"},
 		{[]string{"review", "checks", "--file", idx, "--check", "nonesuch"}, 1, ""},
-		{[]string{"review", "checks", "--file", idx, "--resolve", "correctness,demo,approval", "--through", "pre-open"}, 0, "correctness\n"},
-		{[]string{"review", "checks", "--file", idx, "--resolve", "", "--through", "merge"}, 0, ""},
-		{[]string{"review", "checks", "--file", idx, "--resolve", "demo", "--through", "merge", "--with-phase"}, 0, "demo\topen-as-draft\n"},
 		{[]string{"review", "checks", "--file", filepath.Join(t.TempDir(), "absent.toml")}, 1, ""},
 		{[]string{"review", "guidance", "arch"}, 2, ""},
 		{[]string{"review", "guidance", "../README", "--at", "HEAD"}, 2, ""},
@@ -69,8 +61,8 @@ func TestReviewChecksCalls(t *testing.T) {
 		}
 	}
 	t.Setenv("GC_REVIEW_CHECKS_INDEX", idx)
-	if code, out, _ := runGctk(t, "review", "checks", "--resolve", "correctness,demo", "--through", "pre-open"); code != 0 || out != "correctness\n" {
-		t.Errorf("with GC_REVIEW_CHECKS_INDEX naming the index, a resolve with no commit = exit %d, %q", code, out)
+	if code, out, _ := runGctk(t, "review", "checks"); code != 0 || out != "correctness\tp\ndemo\td\n" {
+		t.Errorf("with GC_REVIEW_CHECKS_INDEX naming the index, a read with no commit = exit %d, %q", code, out)
 	}
 }
 

@@ -45,8 +45,7 @@
 #
 # Arm 2 — UNCLAIMED. A claim is not the first thing that can fail to happen. A
 # step poured, routed to a pool and never claimed by anybody stays `open`, so
-# arm 1 does not see it, and gate-ensure's pour_spent reads any open step as
-# "still driven" and declines the question by design. Per store, an open step
+# arm 1 does not see it. Per store, an open step
 # that `bd ready` is offering, carrying a route, with no assignee and no
 # gc.claimed_at ever stamped, offered past the same bound, is judged against the
 # agent its route names:

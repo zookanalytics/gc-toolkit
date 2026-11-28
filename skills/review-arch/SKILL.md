@@ -1,6 +1,6 @@
 ---
 name: review-arch
-description: Use when you hold a review bead whose check is arch, or when asked whether a change fits the architecture.
+description: Use when you hold a review run's arch lane, or when asked whether a change fits the architecture.
 compatibility: Requires Gas City (gc CLI, $GC_* env, beads).
 ---
 
@@ -18,8 +18,8 @@ Read the architecture document before you judge the diff: `docs/architecture.md`
 in `<worktree>`, the reviewed commit, and the docs it links for the parts the
 diff touches. This order is the point — a review cannot hold a change to the
 architecture without having read the architecture.
-Then read the diff at `<reviewed_oid>`, `git diff origin/<review_base>...HEAD`
-in `<worktree>`, and the anchor `<anchor_bead>` for what the change is for. The
+Then read the diff at `<head>`, `git diff origin/<target>...HEAD`
+in `<worktree>`, and the anchor `<pr_bead>` for what the change is for. The
 rig's guidance for this check, the reviewed commit's `docs/review-arch.md`,
 which the review formula printed when the commit carries one, is where a rig
 says where it keeps its architecture when that is not where this method looks.
@@ -28,7 +28,7 @@ A diff that adds or changes the architecture document, `docs/architecture.md`,
 makes this check mandatory.
 
 When the reviewed commit carries no architecture document, read the one its
-target carries, `git show origin/<review_base>:docs/architecture.md` in
+target carries, `git show origin/<target>:docs/architecture.md` in
 `<worktree>`, and judge the change against that. A branch cut before its target
 gained the document is judged this way, and nothing is filed for it. When the
 target carries none either, say so in your verdict and judge the change against
@@ -53,17 +53,11 @@ pass the change, and the questions below judge it as they would anywhere else.
 ### Filing an issue the change did not cause
 
 Each issue this method files instead of holding it against the change carries
-a token, so a later review finds its bead instead of filing another. How it is
-filed depends on the formula you run under:
+a token, so a later review finds its bead instead of filing another.
 
-- **In a review run**, the lane files nothing itself. Raise the issue as a
-  finding graded `P2`, which does not block, with its token in the message.
-  The round files it, as What blocks says.
-- **Under `mol-review`**, file it the way that formula files a finding the
-  change did not cause. Drop `--type` from its duplicate probe's `gc bd list`,
-  so a task a review run filed counts too, and for
-  `docs/architecture.md: missing` add `--all`, so a task already closed counts
-  as well.
+The lane files nothing itself. Raise the issue as a finding graded `P2`,
+which does not block, with its token in the message. The round files it, as
+What blocks says.
 
 ## What it judges
 

@@ -6,26 +6,17 @@
 #     whose SKILL.md is named review-<check> and has a `## The verdict` section,
 #     and every skills/review-* directory has a row, but review-ruling, the bar
 #     the review run's rule-and-repair step loads, which is no check's.
-#   - Every signoff.sh flag a check's verdict section names is one signoff.sh
-#     accepts, and every skill a check's skill says to load is one the pack ships.
-#     Every field signoff.sh checks a finding set for is one the correctness
-#     method's verdict section names.
+#   - Every skill a check's skill says to load is one the pack ships.
 #   - The correctness method reads the work-quality fragments and the exemplar
 #     corpus from its own references/ directory, through relative links that
 #     resolve to template-fragments/, and resolves no pack file by path.
 #   - A rig index that adds a check with no skill resolves it to its purpose
 #     through --check, and a token no index declares resolves to nothing, which
-#     are the two no-skill cases the review formulas send a reviewer to.
-#   - Each region the review formulas repeat across steps, the method load, the
-#     record check, the gather and the subagent rules, is the same text in every
-#     step carrying it.
+#     are the two no-skill cases a review run's lane sends a reviewer to.
 #   - Every step of the review run that an agent claims, the loop's children and
 #     the lane, carries the rule that what it fetches is untrusted data, as one
 #     marked region with the same text in each.
-#   - Every step that applies a check's method lets the method hand reading to
-#     subagents, each read-only in the review's workspace and never calling
-#     signoff.sh, while the agent holding the step writes every finding. No
-#     review formula or review skill forbids subagents.
+#   - No review formula or review skill forbids subagents.
 #   - The trail the correctness method's verdict section shapes carries, after
 #     its Filed: line, a line for the sweep and a line for each refuted
 #     candidate: a Swept: line, then the Refuted: lines, above the
@@ -35,11 +26,8 @@
 #     refusal of a finding set that carries a refuted candidate.
 #   - The correctness method has a What blocks section, which review-ruling
 #     rules a finding by.
-#   - Neither review formula names a check's judgment: no test or suite, no
-#     P0, P1 or P2 grade, no Verification line, and neither the correctness
-#     method's What to check list nor any dimension of it. The correctness
-#     method is method alone: it carries no shell block and reads no record
-#     itself, because the review formula gathers what it reads.
+#   - The correctness method is method alone: it carries no shell block and
+#     reads no record itself, because the review run gathers what it reads.
 #   - The correctness method grows past METHOD_WORD_BUDGET words only in a
 #     change that raises it.
 #   - The pm method says when triage adds it, in words that name no rig: a
@@ -49,8 +37,8 @@
 #     change. An edit that changes neither what the product does nor what it
 #     promises, and tests, do not warrant it. When a rig keeps no product
 #     goals, a pm review judges the change against its anchor alone and asks
-#     the change for no page. It files one request for the page under one
-#     token, and its duplicate probe counts a request that has closed. The
+#     the change for no page. It raises one request for the page under one
+#     token, as a finding that does not block, which the round files. The
 #     method defines that page without the foundation doc only this repo keeps.
 #   - The pm method judges whether a change is the right thing from the side of
 #     the people it affects, whom it names from the rig's product goals, and
@@ -170,8 +158,6 @@ NAMES=$(checks --file "$INDEX" 2>/dev/null | cut -f1)
   || bad "the pack's index declares checks" "none read"
 
 echo "# every declared check has its skill, and every review skill a row"
-grep -oE -- '^    --[a-z][a-z-]*\)' "$ROOT/assets/scripts/signoff.sh" | tr -d ' )' | sort -u > "$TMP/signoff-flags"
-[ -s "$TMP/signoff-flags" ] && ok "signoff.sh's flags are read" || bad "signoff.sh's flags are read" "none"
 while IFS= read -r c; do
   [ -n "$c" ] || continue
   f="$ROOT/skills/review-$c/SKILL.md"
@@ -180,9 +166,6 @@ while IFS= read -r c; do
   eq "$(sed -n 's/^name: //p' "$f" | head -1)" "review-$c" "$c: its skill is named review-$c"
   awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$f" > "$TMP/verdict.$c"
   [ -s "$TMP/verdict.$c" ] && ok "$c: its skill has a verdict section" || bad "$c: its skill has a verdict section"
-  grep -oE -- '--[a-z][a-z-]*' "$TMP/verdict.$c" | sort -u > "$TMP/flags.$c"
-  eq "$(comm -23 "$TMP/flags.$c" "$TMP/signoff-flags" | paste -sd' ' -)" "" \
-    "$c: every flag its verdict section names is one signoff.sh accepts"
   for s in $(grep -oE 'gc-toolkit\.[a-z][a-z0-9-]*' "$f" | sed 's/^gc-toolkit\.//' | sort -u); do
     [ -r "$ROOT/skills/$s/SKILL.md" ] && ok "$c: the skill it says to load, gc-toolkit.$s, ships" \
       || bad "$c: the skill it says to load, gc-toolkit.$s, ships"
@@ -202,15 +185,6 @@ for d in "$ROOT"/skills/review-*/; do
   fi
   grep -qxF -- "$c" <<< "$NAMES" && ok "skills/review-$c has a row in the pack's index" \
     || bad "skills/review-$c has a row in the pack's index"
-done
-# The finding set signoff.sh holds to the finding contract carries the fields
-# the correctness method's verdict section tells its reviewer to write.
-FIELDS=$(grep -m1 -F '("locus", "message"' "$ROOT/assets/scripts/signoff.sh" | grep -oE '"[a-z_]+"' | tr -d '"')
-[ "$(printf '%s\n' "$FIELDS" | grep -c .)" -ge 6 ] && ok "signoff.sh's finding fields are read ($(printf '%s' "$FIELDS" | paste -sd' ' -))" \
-  || bad "signoff.sh's finding fields are read" "got '$FIELDS'"
-for f in $FIELDS; do
-  grep -qF -- "\`$f\`" "$TMP/verdict.correctness" && ok "correctness: its verdict section names \`$f\`, a field signoff.sh checks" \
-    || bad "correctness: its verdict section names \`$f\`, a field signoff.sh checks"
 done
 grep -l 'specialist-stance' "$ROOT"/skills/review-*/SKILL.md | xargs -n1 dirname | xargs -n1 basename | sort > "$TMP/stance-holders"
 [ -s "$TMP/stance-holders" ] && ok "the specialist checks load the stance ($(paste -sd' ' - < "$TMP/stance-holders"))" \
@@ -253,7 +227,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 unset GC_REVIEW_CHECKS_INDEX GC_RIG_ROOT 2>/dev/null || true
 RIG="$TMP/rig"; git init -q "$RIG"
-printf '[checks.ux]\npurpose = "Does the change keep the flows a person uses intact?"\nphase = "pre-open"\n' > "$RIG/review-checks.toml"
+printf '[checks.ux]\npurpose = "Does the change keep the flows a person uses intact?"\n' > "$RIG/review-checks.toml"
 git -C "$RIG" add review-checks.toml; git -C "$RIG" commit -q -m "a check of the rig's own"
 AT=$(git -C "$RIG" rev-parse HEAD)
 [ -d "$ROOT/skills/review-ux" ] && bad "the fixture's check has no pack skill" || ok "the fixture's check has no pack skill"
@@ -262,7 +236,7 @@ eq "$rc" "0" "--check of the rig's own check succeeds at its commit"
 eq "$(printf '%s' "$ROW" | cut -f2)" "Does the change keep the flows a person uses intact?" "…and prints the purpose the reviewer judges against"
 ERR=$(cd "$RIG" && checks --check nonesuch --at "$AT" 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check of a token no index declares exits 1"
-case "$ERR" in *"does not declare check 'nonesuch'"*) ok "…saying no index declares it, the case the formula approves with --needs-you" ;;
+case "$ERR" in *"does not declare check 'nonesuch'"*) ok "…saying no index declares it, the case the lane approves with needs_you" ;;
   *) bad "…saying no index declares it" "got '$ERR'" ;; esac
 ERR=$(cd "$RIG" && checks --check ux --at 0000000000000000000000000000000000000000 2>&1 >/dev/null); rc=$?
 eq "$rc" "1" "--check at a commit nothing can read exits 1 too"
@@ -281,12 +255,11 @@ hasF "$ARCH_SKILL" 'A branch cut before its target gained the document is judged
 hasF "$ARCH_SKILL" 'judge the change against the code it touches and the docs the repository has' "…and, when the target has none either, judges the change against its code and docs, so a missing document lets no change through unjudged"
 hasF "$ARCH_SKILL" 'The missing document is no reason to pass or fail the change, and no finding asks the change to add it' "…holds no change for the missing document and asks no change to add it"
 hasF "$ARCH_SKILL" 'under the token `docs/architecture.md: missing`' "…and files the document as work of its own under one token"
-hasF "$ARCH_SKILL" 'the lane files nothing itself. Raise the issue as a finding graded `P2`, which does not block' "…which a review run's lane raises as a finding that does not block, filing nothing itself"
+hasF "$ARCH_SKILL" 'The lane files nothing itself. Raise the issue as a finding graded `P2`' "…which a review run's lane raises as a finding that does not block, filing nothing itself"
 hasF "$ARCH_SKILL" 'In a review run the round rules its finding deferred' "…and the round rules deferred"
 hasF "$ARCH_SKILL" 'files the issue with `review-run.sh defer`' "…filing it with review-run.sh defer"
 hasF "$ARCH_SKILL" 'For `docs/architecture.md: missing` the listing takes `--all`' "…after a listing that counts a closed task, so a repository is asked for its document once"
 hasF "$ARCH_SKILL" 'the ruling names that bead, its status and what it waits on, which can be another PR than this one' "…and names a bead it lists with what that bead waits on, which this PR's landing need not start"
-hasF "$ARCH_SKILL" 'Drop `--type` from its duplicate probe' "…while under mol-review the duplicate probe counts a task a review run filed"
 notF "$ARCH_SKILL" 'A `docs/architecture.md` at the reviewed commit is a precondition of approval' "…and makes no document a precondition of approval"
 notF "$ARCH_SKILL" 'a passable account' "…asks no change for an account of the architecture it covers"
 notF "$ARCH_SKILL" '`docs/architecture.md: incomplete`' "…and files no follow-up for the rest of a document a change adds"
@@ -333,36 +306,6 @@ hasF "$TMP/own.triage" '## When `pm` is mandatory' "…says when the pm check is
 hasF "$TMP/own.triage" 'does not make `pm` mandatory, and neither do tests and the fixtures they use' \
   "…and that an edit changing no behavior, or a test, does not make it so"
 
-echo "# a region the review formulas repeat is one text in every step carrying it"
-python3 - "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" > "$TMP/regions" <<'PY'
-import sys, tomllib, re, json
-out = {}
-for path in sys.argv[1:]:
-    d = tomllib.load(open(path, 'rb'))
-    for s in d['steps']:
-        text = s['description']
-        for m in re.finditer(r'(?:<!-- |# )>>> (review-method-load|review-record-check|review-gather|review-subagents)(?: -->)?\n(.*?)\n(?:<!-- |# )<<< \1', text, re.S):
-            out.setdefault(m.group(1), []).append([d['formula'] + '.' + s['id'], m.group(2)])
-print(json.dumps(out))
-PY
-for r in review-method-load:4 review-record-check:4 review-gather:4 review-subagents:4; do
-  name=${r%%:*}; want=${r#*:}
-  eq "$(jq -r --arg r "$name" '.[$r] | length' "$TMP/regions")" "$want" "$name: the steps that carry it carry it ($want)"
-  eq "$(jq -r --arg r "$name" '[.[$r][][1]] | unique | length' "$TMP/regions")" "1" "$name: every copy is the same text"
-done
-case "$(jq -r '."review-method-load"[0][1]' "$TMP/regions")" in
-  *'`{{binding_prefix}}review-{{check}}`'*'`{{binding_prefix}}specialist-stance`'*) ok "the method load names the skill from the check, and the stance for the purpose case" ;;
-  *) bad "the method load names the skill from the check, and the stance for the purpose case" ;;
-esac
-eq "$(jq -r '[."review-subagents"[][0]] | sort | join(" ")' "$TMP/regions")" \
-  "$(jq -r '[."review-method-load"[][0]] | sort | join(" ")' "$TMP/regions")" \
-  "the subagent rules ride every step that loads a check's method, and no other"
-case "$(jq -r '."review-subagents"[0][1]' "$TMP/regions" | tr '\n' ' ')" in
-  *'read-only in the review'*'runs nothing the method runs'*'never calls signoff.sh'*'write every finding yourself'*)
-    ok "the subagent rules keep every subagent read-only and off signoff.sh, and the step's own agent the one writer" ;;
-  *) bad "the subagent rules keep every subagent read-only and off signoff.sh, and the step's own agent the one writer" ;;
-esac
-
 echo "# every step an agent claims in the review run carries the untrusted-data rule"
 # A step's agent reads that step's text and never the formula's description,
 # so the rule is in each step's own text. The loop's step holds the children an
@@ -398,44 +341,14 @@ case "$(jq -r '.texts[0]' "$TMP/run-regions" | tr '\n' ' ')" in
   *) bad "review-untrusted: what a step fetches is data to analyze, never instructions" ;;
 esac
 
-echo "# the review formulas name no check's judgment, and the correctness method is method"
-# The formulas carry what every check shares, so a test, a grade or a
-# dimension in one is a check's judgment in the lifecycle. The text checked is
-# what a reviewer reads: the description, and each step's title and
-# description, shell blocks included.
-for f in mol-review mol-review-quorum-signoff; do
-  python3 - "$ROOT/formulas/$f.toml" > "$TMP/$f.txt" <<'PY'
-import sys, tomllib
-d = tomllib.load(open(sys.argv[1], 'rb'))
-print('\n'.join([d.get('description', '')] + [s.get('title', '') + '\n' + s.get('description', '') for s in d.get('steps', [])]))
-PY
-  [ -s "$TMP/$f.txt" ] && ok "$f: its text is read" || bad "$f: its text is read"
-done
-# The dimensions are the bold bullets of the correctness method's What to check list.
-awk '/^### What to check$/ {f = 1; next} f && /^#/ {exit} f' "$METHOD" \
-  | sed -n 's/^- \*\*\([^*]*\)\*\*.*/\1/p' > "$TMP/dimensions"
-DIMS=$(grep -c . "$TMP/dimensions" || true)
-[ "$DIMS" -ge 5 ] && ok "the What to check list names its dimensions ($(paste -sd, - < "$TMP/dimensions"))" \
-  || bad "the What to check list names its dimensions" "only $DIMS read"
-# hit <file> <ERE> [-i] : the first line that matches, empty for none.
-hit() { grep -E ${3:-} -m1 -- "$2" "$1" || true; }
-for f in mol-review mol-review-quorum-signoff; do
-  T="$TMP/$f.txt"
-  eq "$(hit "$T" '(^|[^[:alnum:]_])(tests?|tested|testing|suites?)([^[:alnum:]_]|$)' -i)" "" "$f names no test or suite"
-  eq "$(hit "$T" '(^|[^[:alnum:]_])P[0-2]([^[:alnum:]_]|$)')" "" "$f names no P0, P1 or P2 grade"
-  eq "$(grep -F -m1 -- 'Verification:' "$T" || true)" "" "$f has no Verification line"
-  eq "$(grep -F -m1 -- 'What to check' "$T" || true)" "" "$f points at no What to check list"
-  while IFS= read -r d; do
-    eq "$(grep -F -m1 -- "**$d**" "$T" || true)" "" "$f carries no '$d' dimension"
-  done < "$TMP/dimensions"
-done
+echo "# the correctness method is method"
 eq "$(grep -cE '^ *```(bash|sh|zsh|shell) *$' "$METHOD" || true)" "0" "the correctness method carries no shell block"
 eq "$(grep -n -m1 -- '--check' "$METHOD" || true)" "" "the correctness method reads no record itself"
 
 echo "# no review text forbids subagents"
 # The formulas a review pours and the skills it loads, read flat so a phrase
 # may wrap.
-for f in "$ROOT/formulas/mol-review.toml" "$ROOT/formulas/mol-review-quorum-signoff.toml" \
+for f in "$ROOT/formulas/mol-pr-review.toml" "$ROOT/formulas/mol-pr-review-lane.toml" \
   "$ROOT"/skills/review-*/SKILL.md "$ROOT/skills/specialist-stance/SKILL.md"; do
   eq "$(flat "$f" | grep -Eio -- 'single honest pass|no subagents|no persona|no fan-out' | head -1)" "" \
     "${f#"$ROOT"/} forbids no subagents"
@@ -453,7 +366,7 @@ for r in CONFIRMED PLAUSIBLE REFUTED; do
 done
 awk '/^## The verdict$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/verdict.refuted"
 hasF "$TMP/verdict.refuted" 'a line for each candidate its check refuted' "…and a refuted candidate's refutation stays in the trail the verdict section shapes"
-hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names signoff.sh's refusal of a set that carries one"
+hasF "$TMP/verdict.refuted" 'an entry whose verification is REFUTED' "…and names the output check's refusal of a set that carries one"
 
 echo "# the correctness method has its What blocks section, which review-ruling rules a finding by"
 awk '/^## What blocks$/ {f = 1; next} f && /^## / {exit} f' "$METHOD" > "$TMP/blocks"
@@ -604,7 +517,7 @@ hasF "$TMP/demo.blocks" 'or the capture tools may be unable to reach a required 
   "a required state the capture tools cannot reach does not block"
 hasF "$TMP/verdict.demo" "**Delivered, and it shows a violation of the rig's standard.** Request changes" \
   "the demo verdict requests changes on a violation of the rig's standard"
-hasF "$TMP/verdict.demo" 'Each cause of a violation is one finding in `findings.json` that names the rule, and where the demo shows it as its evidence.' \
+hasF "$TMP/verdict.demo" 'Each cause of a violation is one finding in the output'"'"'s `findings` that names the rule, and where the demo shows it as its evidence.' \
   "…with one finding for each cause, naming the rule and where the demo shows it"
 hasF "$TMP/verdict.demo" 'If the rig names a standard, approve only when every capture meets it.' \
   "…approves under a standard only when every capture meets it"
@@ -627,9 +540,9 @@ hasF "$TMP/demo.produce" 'The app target is the reviewed worktree served on this
 hasF "$TMP/demo.produce" 'is the app target instead for a rig with no way to run its app on this host, and for a change whose claim exists only where it is deployed.' \
   "…and the draft's deployed preview only for a rig that cannot run its app here or a change whose claim exists only where it is deployed"
 hasF "$TMP/demo.produce" 'Record from a preview in no other case.' "…and in no other case"
-hasF "$TMP/demo.produce" "Record a preview only from an address that serves \`<reviewed_oid>\`: one the host gives that commit's deployment alone, as the host's documentation or the rig's guidance says, or one whose app reports that commit." \
+hasF "$TMP/demo.produce" "Record a preview only from an address that serves \`<head>\`: one the host gives that commit's deployment alone, as the host's documentation or the rig's guidance says, or one whose app reports that commit." \
   "…and only from an address the host gives the reviewed commit's deployment alone, or whose app reports that commit"
-hasF "$TMP/demo.produce" "An address the host moves to each new deployment, such as a branch's or a pull request's, can serve a later commit, so with neither there is no preview of \`<reviewed_oid>\` to record." \
+hasF "$TMP/demo.produce" "An address the host moves to each new deployment, such as a branch's or a pull request's, can serve a later commit, so with neither there is no preview of \`<head>\` to record." \
   "…since an address a later deployment can take over shows no preview of the reviewed commit"
 hasF "$TMP/demo.produce" "deployment's state is its most recent status, \`gh api \"repos/<owner>/<repo>/deployments/<id>/statuses\" --jq 'max_by(.id)'\` with its \`id\`. Record from it only while that status reads \`success\`, which says the deployment is up at the status's \`environment_url\`, not which commit that address serves now." \
   "…and a GitHub deployment's most recent status, not an earlier one, says it is up, never which commit its address serves"
@@ -658,7 +571,8 @@ awk '/^### A rig with no product goals$/ {f = 1; next} f && /^#/ {exit} f' "$PM"
 hasF "$TMP/pm.missing" "judge the change against the anchor's stated problem alone" "with no product goals, a pm review judges the change against its anchor alone"
 hasF "$TMP/pm.missing" 'no finding asks the change to add it' "…asks the change for no page"
 hasF "$TMP/pm.missing" '`docs/product-goals.md: missing`' "…files one request for the page under one token"
-hasF "$TMP/pm.missing" "Add \`--all\` to that duplicate probe's \`gc bd list\`" "…whose duplicate probe counts a request that has closed"
+hasF "$TMP/pm.missing" "as a finding graded \`P2\`, which does not block" "…raised as a finding that does not block"
+hasF "$TMP/pm.missing" 'gc bd list --title-contains "docs/product-goals.md: missing" --all' "…which the round looks up with --all before it files, so a rig is asked once"
 notF "$PM" 'reading of `docs/foundation.md`' "the pm method defines the goals page without the foundation doc only this repo keeps"
 
 echo "# the pm method walks the people a change affects through it"

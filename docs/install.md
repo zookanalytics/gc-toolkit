@@ -116,8 +116,7 @@ that does not import the pack itself.
   binary that the `gctk-build` order builds from `services/gctk`, so the city
   needs a Go toolchain. Until the first build lands, every such write is
   refused, and no PR merges either: the landing order runs the same binary.
-- **Orders** — the merge cadence (`refinery-reconcile`, 60s, rig-scoped),
-  `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
+- **Orders** — the landing order (`pr-reconcile`), `deferred-dispatch`, `liveness-sweep`, `reconcile-rig-checkouts`,
   `boot-health`, `witness-nudge`, `gctk-build`, `helm-build`, and the feedback
   miner/distiller.
 - **Skills** — surfaced via `gc skill list` (`gc-toolkit.handoff`,
@@ -223,11 +222,9 @@ The pack's checks, and what a failure means:
 | `check-state-space` | every open bead's `merge_result` is a value the pack writes, and no open bead carries a closed-only one (I2) | a writer minted a value nothing handles, or a landed bead was reopened |
 | `check-one-anchor-per-pr` | one open owning anchor per PR (I4) | duplicate anchors filed for one branch |
 | `check-closed-implies-landed` | closed anchor ⇒ `merged` + `merged_sha`, or explicit terminal (I5) | something closed a bead out-of-band |
-| `check-gate-integrity` | gating anchors declare a non-empty `check_set` or the `none` opt-out (I6) | an anchor normalized by no gate-ensure pass, or a `check_set` written empty by hand |
-| `check-gate-marker-provenance` | every closed approve review backing a lane on an open gating anchor records the outcome its writer stamps, `gc.outcome=recorded` or `superseded` (I7 depth) | an approve verdict whose outcome was never recorded, which still derives its lane green |
 | `check-step-terminal` | no offerable step under a closed root; no stalled frontier (I8) | a workflow died mid-molecule |
 | `check-pour-text-current` | the pack each rig executes is the pack that landed (I9) | a rig checkout lagging past the reconciler's self-heal window, or an unfetched remote-tracking ref |
-| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), a `gctk` binary is deployed for `lifecycle.sh` to exec, and `flock` resolves for the pass lock `refinery-reconcile` takes (I10) | order not registered for a rig, the controller is down, the `gctk-build` order has never published a binary, or `flock` is missing from `PATH` |
+| `check-cadence-live` | every pack order fired within its cadence window (three intervals, or one trip of the order dispatch rotation when longer), and a `gctk` binary is deployed for `lifecycle.sh` to exec (I10) | order not registered for a rig, the controller is down, or the `gctk-build` order has never published a binary |
 | `check-claim-advancing` | every step a pool should run is advancing: a claimed step is held by a running session still producing output, and an offered step has been claimed (I11) | a claimed step whose holder is gone or stalled past the bound, or a routed open step a live pool session leaves unclaimed |
 | `check-root-advancing` | a started workflow root is still advancing or reachable: no in_progress `gc.kind=workflow` root sits with a dead session, unlanded work, and an unclaimable — unrouted AND unowned — executable frontier (I13) | a molecule drained mid-flight, and its inline steps have no owner and no route, so orphan recovery and the pool both pass over them |
 | `check-epic-closed-implies-ruled` | a closed epic other than a Delivery was ruled closed with its outcome (`epic_ruling=close` and `epic_ruling_reason`) or carries an explicit disposition (a duplicates or supersedes edge onto its successor); a Delivery, an epic whose parent is an epic and that carries no hypothesis, is exempt, because its epic carries the ruling (I15) | an epic closed by a bare `gc bd close`, which runs no finalize gate, before it was ruled close, or on a continue or shift ruling |

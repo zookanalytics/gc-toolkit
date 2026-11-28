@@ -1,7 +1,5 @@
 # polecat-codex — the rig's worker pool on the codex provider. Same doctrine
-# and prompt shape as agents/polecat; the merge cadence routes review beads
-# (carrying mol-review) here via REVIEW_POOL, but any bead-with-formula is
-# claimable.
+# and prompt shape as agents/polecat; any bead with a formula is claimable.
 scope = "rig"
 provider = "codex"
 wake_mode = "fresh"

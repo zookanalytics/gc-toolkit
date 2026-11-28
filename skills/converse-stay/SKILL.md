@@ -146,9 +146,10 @@ whole call. Take the case that fits:
     work, the stay gave none, because the sign-off armed the subject no
     closer.
   - `WORK`, which the entry prints once the sign-off has finished, names its
-    work for `--waiting-on`. A bead in `WORK` whose `source_ruling_bead` is
-    this conversation is the ruling's rework, so the call takes `--rework` for
-    it, in the rework form the stay example's comment gives.
+    work for `--waiting-on`. A bead in `WORK` that is the ask the ruling
+    filed, discovered from this conversation, is the ruling's rework, so the
+    call takes `--rework` for it, in the rework form the stay example's comment
+    gives.
 - **The record does not give the whole call**, as when `WORK` is empty. Hold
   instead (`converse-hold`, after the claim-back below), and tell the operator
   that the stay stopped short and what it had done.
@@ -159,16 +160,13 @@ depends on the rework the stopped stay left:
 - **The ruling's record names the rework it filed.** The re-run files no
   second one, even after that rework has closed, and the entry then reads
   `returned`.
-- **A rework of this ruling is open, and no record names it yet.** The re-run
-  adopts that rework and records it.
-- **The stay stopped after its rework was filed and before the record named
-  it, and that rework has since closed.** The sign-off cannot tell that rework
-  from an earlier ruling's, so the call refuses before any write, saying it
-  found a closed rework that no recorded ruling names. Run nothing again: hold
-  instead (`converse-hold`, after the claim-back below), and tell the operator
-  which rework closed, because the ruling may already be carried out.
+- **No record names the rework yet**, because the stay stopped after its
+  rework was filed and before the record named it. The re-run finds the ask
+  that stay filed, by its source and reason, whether it is open or has closed,
+  and records it. It files no second one, and goes on as when the record names
+  the rework.
 
-Before either hold, claim the conversation back. A hold keeps its conversation
+Before the hold, claim the conversation back. A hold keeps its conversation
 claimed, but a second stay that stopped short leaves the conversation open,
 waiting on the first stay's work, and a hold recorded on that open conversation
 would read as a fresh sitting once that work closes. Run the claim-back, and

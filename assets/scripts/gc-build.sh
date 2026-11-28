@@ -7,10 +7,10 @@
 #         a cold build of helm-svc takes longer (5 to 6s at loads of 14 to
 #         20), so a cold build in the launcher's start path is killed
 #         mid-compile.
-#   gctk  the merge cadence's compiled data plane, exec'd by the cadence
-#         scripts whose logic it carries. A build inside the cadence would put
-#         a Go toolchain in the path of a merge, and a failed one would take the
-#         cadence down with it.
+#   gctk  the orders' compiled data plane, exec'd by the order scripts whose
+#         logic it carries. A build inside an order would put a Go toolchain in
+#         the path of a merge, and a failed one would take the order down with
+#         it.
 # Usage:
 #   gc-build.sh <component>            build iff the binary is missing or stale
 #   gc-build.sh <component> --deploy   order mode. helm is a supervisor service:

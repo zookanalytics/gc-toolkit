@@ -1,6 +1,6 @@
 # gctk-build — keep the deployed gctk binary current with its sources,
 # services/gctk and the root go.mod and go.sum.
-# The merge cadence exec's a prebuilt binary and builds nothing, so the build
+# The orders exec a prebuilt binary and build nothing, so the build
 # runs here, through the builder the helm-build order also runs. A condition
 # order: each pass runs the check, `gc-build.sh gctk --due`, and the order runs
 # only when it answers that a run is owed and due, by the rule at the script's

@@ -73,26 +73,26 @@ func newRepo(t *testing.T) string {
 func packIndex(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "review-checks.toml")
-	text := "[checks.correctness]\npurpose = \"PACK correctness\"\nphase = \"pre-open\"\n" +
-		"[checks.triage]\npurpose = \"PACK triage\"\nphase = \"pre-open\"\n" +
-		"[checks.demo]\npurpose = \"PACK demo\"\nphase = \"open-as-draft\"\n"
+	text := "[checks.correctness]\npurpose = \"PACK correctness\"\n" +
+		"[checks.triage]\npurpose = \"PACK triage\"\n" +
+		"[checks.demo]\npurpose = \"PACK demo\"\n"
 	if err := os.WriteFile(p, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
 }
 
-func names(rows []review.Row) []string {
+func names(checks []review.Check) []string {
 	var out []string
-	for _, r := range rows {
-		out = append(out, r.Name)
+	for _, c := range checks {
+		out = append(out, c.Name)
 	}
 	return out
 }
 
-// The grammar: a check is a [checks.<name>] table, an older index's method key
-// is not read, a key outside a checks table is not a check, and an empty
-// purpose stays empty.
+// The grammar: a check is a [checks.<name>] table, an older index's method and
+// phase keys are not read, a key outside a checks table is not a check, and an
+// empty purpose stays empty.
 func TestParseReadsChecksTablesAlone(t *testing.T) {
 	got := review.Parse(`# a comment line, ignored
 [checks.correctness]
@@ -108,8 +108,8 @@ purpose = "not-a-check"
 purpose = "p"
 `)
 	want := []review.Check{
-		{Name: "correctness", Purpose: "Is it = correct?", Phase: "pre-open"},
-		{Name: "bare", Phase: "merge"},
+		{Name: "correctness", Purpose: "Is it = correct?"},
+		{Name: "bare"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Parse = %+v; want %+v", got, want)
@@ -117,92 +117,27 @@ purpose = "p"
 }
 
 // A check is known by its name without case and keeps the name its index
-// writes; a missing phase is pre-open with a warning; a phase outside the
-// ordered set is refused, and Rows leaves its row out and names it.
-func TestPhasesAndLookup(t *testing.T) {
-	ix := review.Index{Source: "idx", Checks: review.Parse(
-		"[checks.Security]\npurpose = \"p\"\nphase = \"pre-open\"\n[checks.old]\npurpose = \"o\"\n[checks.weird]\nphase = \"Merge\"\n")}
+// writes.
+func TestLookup(t *testing.T) {
+	ix := review.Index{Source: "idx", Checks: review.Parse("[checks.Security]\npurpose = \"p\"\n[checks.old]\npurpose = \"o\"\n")}
 	c, ok := ix.Lookup("security")
 	if !ok || c.Name != "Security" {
 		t.Fatalf("Lookup(security) = %+v, %t; want the Security row", c, ok)
 	}
-	if phase, warn, err := ix.PhaseOf(review.Check{Name: "old"}); phase != "pre-open" || !strings.Contains(warn, "is declared with no phase") || err != nil {
-		t.Fatalf("an unphased row reads %q, %q, %v; want pre-open with a warning", phase, warn, err)
-	}
-	if _, _, err := ix.PhaseOf(review.Check{Name: "weird", Phase: "Merge"}); err == nil || !strings.Contains(err.Error(), "declares phase 'Merge', which is not a phase") {
-		t.Fatalf("a phase outside the set reads %v; want it refused", err)
-	}
-	rows, warnings := ix.Rows()
-	if got := names(rows); !reflect.DeepEqual(got, []string{"Security", "old"}) {
-		t.Fatalf("Rows = %v; want the two rows that read", got)
-	}
-	if len(warnings) != 2 || !strings.Contains(warnings[1], "check 'weird' declares phase 'Merge'") {
-		t.Fatalf("Rows warned %q; want the default and the refused row", warnings)
-	}
-}
-
-func gateNames(gs []review.Gate) []string {
-	var out []string
-	for _, g := range gs {
-		out = append(out, g.Name+"\t"+g.Phase)
-	}
-	return out
-}
-
-// The resolver: the checks at or before the phase, the three non-lanes
-// dropped, a token once by its name without case and in the case it is first
-// written, an undeclared token at pre-open with a warning that names the index,
-// and a declared phase outside the ordered set refused.
-func TestResolve(t *testing.T) {
-	ix := review.Index{Source: "idx", Checks: review.Parse(
-		"[checks.correctness]\nphase = \"pre-open\"\n[checks.triage]\nphase = \"pre-open\"\n[checks.demo]\nphase = \"open-as-draft\"\n[checks.weird]\nphase = \"Merge\"\n")}
-	for _, tc := range []struct {
-		set, through string
-		want         []string
-	}{
-		{"correctness,triage,demo", "pre-open", []string{"correctness\tpre-open", "triage\tpre-open"}},
-		{"correctness,triage,demo", "open-as-draft", []string{"correctness\tpre-open", "triage\tpre-open", "demo\topen-as-draft"}},
-		{"correctness, demo ,approval,none,off", "merge", []string{"correctness\tpre-open", "demo\topen-as-draft"}},
-		{"Correctness,correctness,TRIAGE", "merge", []string{"Correctness\tpre-open", "TRIAGE\tpre-open"}},
-		{"bogus", "merge", []string{"bogus\tpre-open"}},
-		{"", "merge", nil},
-		{"none,off,approval", "merge", nil},
-	} {
-		gates, warnings, err := ix.Resolve(tc.set, tc.through)
-		if err != nil {
-			t.Fatalf("Resolve(%q, %s): %v", tc.set, tc.through, err)
-		}
-		if got := gateNames(gates); !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("Resolve(%q, %s) = %q; want %q", tc.set, tc.through, got, tc.want)
-		}
-		if tc.set == "bogus" && (len(warnings) != 1 || !strings.Contains(warnings[0], "is not declared in the index (idx)")) {
-			t.Errorf("an undeclared token warned %q", warnings)
-		}
-	}
-	if _, _, err := ix.Resolve("weird", "merge"); err == nil {
-		t.Error("a set naming a check whose phase is outside the ordered set resolved")
-	}
-	if _, _, err := ix.Resolve("correctness", "nonsense"); err == nil {
-		t.Error("a transition that is not a phase resolved")
-	}
-	gates, warnings, err := review.Index{}.Resolve("correctness,demo,approval", "pre-open")
-	if err != nil || !reflect.DeepEqual(gateNames(gates), []string{"correctness\tpre-open", "demo\tpre-open"}) {
-		t.Errorf("with no index read, Resolve = %q, %v; want every lane token at pre-open", gateNames(gates), err)
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "no readable check index") {
-		t.Errorf("with no index read, Resolve warned %q", warnings)
+	if _, ok := ix.Lookup("absent"); ok {
+		t.Fatal("Lookup(absent) found a row")
 	}
 }
 
 // The layered index at a commit: the pack's rows where the commit carries no
-// index, never the working tree's; a rig row changes a pack check key by key
-// and keeps its name; a rig row adds a check after the pack's; and an index
-// named outright stands in for both layers.
+// index, never the working tree's; a rig row changes a pack check's purpose and
+// keeps its name; a rig row adds a check after the pack's; and an index named
+// outright stands in for both layers.
 func TestLayeredIndexAtACommit(t *testing.T) {
 	rig := newRepo(t)
 	noIndex := commit(t, rig, map[string]string{"README": "readme\n"})
 	withIndex := commit(t, rig, map[string]string{
-		"review-checks.toml": "[checks.Demo]\nmethod = \"m\"\nphase = \"pre-open\"\n[checks.ux]\npurpose = \"RIG ux\"\nphase = \"pre-open\"\n",
+		"review-checks.toml": "[checks.Demo]\nmethod = \"m\"\npurpose = \"RIG demo\"\nphase = \"pre-open\"\n[checks.ux]\npurpose = \"RIG ux\"\n[checks.triage]\nphase = \"pre-open\"\n",
 	})
 	if err := os.WriteFile(filepath.Join(rig, "review-checks.toml"), []byte("[checks.wt]\npurpose = \"WORKTREE\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -213,8 +148,7 @@ func TestLayeredIndexAtACommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, _ := ix.Rows()
-	if got := names(rows); !reflect.DeepEqual(got, []string{"correctness", "triage", "demo"}) {
+	if got := names(ix.Checks); !reflect.DeepEqual(got, []string{"correctness", "triage", "demo"}) {
 		t.Fatalf("a commit with no index reads %v; want the pack's rows alone", got)
 	}
 
@@ -222,15 +156,14 @@ func TestLayeredIndexAtACommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, _ = ix.Rows()
-	want := []review.Row{
-		{Name: "correctness", Purpose: "PACK correctness", Phase: "pre-open"},
-		{Name: "triage", Purpose: "PACK triage", Phase: "pre-open"},
-		{Name: "demo", Purpose: "PACK demo", Phase: "pre-open"},
-		{Name: "ux", Purpose: "RIG ux", Phase: "pre-open"},
+	want := []review.Check{
+		{Name: "correctness", Purpose: "PACK correctness"},
+		{Name: "triage", Purpose: "PACK triage"},
+		{Name: "demo", Purpose: "RIG demo"},
+		{Name: "ux", Purpose: "RIG ux"},
 	}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("the layered index reads %+v; want %+v", rows, want)
+	if !reflect.DeepEqual(ix.Checks, want) {
+		t.Fatalf("the layered index reads %+v; want %+v", ix.Checks, want)
 	}
 	if !strings.HasSuffix(ix.Source, withIndex+":review-checks.toml") {
 		t.Errorf("the index names its source %q", ix.Source)
@@ -244,8 +177,8 @@ func TestLayeredIndexAtACommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows, _ := ix.Rows(); !reflect.DeepEqual(names(rows), []string{"only"}) {
-		t.Fatalf("an index named outright reads %v; want its own rows alone", names(rows))
+	if !reflect.DeepEqual(names(ix.Checks), []string{"only"}) {
+		t.Fatalf("an index named outright reads %v; want its own rows alone", names(ix.Checks))
 	}
 	ix, err = review.ReadIndex(review.IndexSources{Named: filepath.Join(t.TempDir(), "absent.toml")}, "")
 	if err != nil || ix.Source != "" || len(ix.Checks) != 0 {

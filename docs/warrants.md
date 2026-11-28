@@ -96,8 +96,8 @@ no warrant.
   - `self-review` is a bounded check loop over those records, whose last attempt
     asks a person through a human gate when a check is still red, where Gas
     Town's is one inline step.
-  - `submit-and-exit` holds the anchor, the bring-current guard and the store-only
-    exit, which are nouns of the merge and review subsystems. Once the handoff is
+  - `submit-and-exit` holds the anchor and the store-only exit, which are nouns of
+    the merge and work subsystems. Once the handoff is
     written it removes the run's worktree with its local branch, as core's own
     variants remove theirs. Gas Town's detaches the tree and deletes the branch, so
     once a squash merge deletes origin's branch the tree sits on commits no ref
@@ -131,8 +131,11 @@ no warrant.
     so `gc worktree ensure` cannot make a tree inside an agent's home. The search
     is [specs/tk-1tfzr71.43/gas-city-search.md](../specs/tk-1tfzr71.43/gas-city-search.md).
   - `internal/formula/parser.go`, `mergeSteps`: a child step replaces its parent's
-    whole, so an inherited step cannot gain metadata, and a step that needs
-    `gc.continuation_group` must be overridden. The base declares none.
+    whole. The only metadata an inherited step gains without an override is
+    what a formula-level `[[scope]]` declaration stamps, its scope keys and
+    `gc.on_fail` (`applyScopeDecls` in `internal/formula/scope_decl.go`, and
+    section 3.5 of `docs/reference/specs/formula-spec-v2.md`), so a step that
+    needs `gc.continuation_group` must be overridden. The base declares none.
   - `internal/sling/sling_core.go`, `checkLegacySourceWorkflowConflict`, and
     `internal/sling/sling_attachment.go`, `liveConvoyTrackedWorkflowRoots`: a second
     live root of one formula on one bead is refused, unless `--force` skips the
@@ -142,7 +145,7 @@ no warrant.
   `.gc/worktrees/<rig>/artifacts/worktrees/<bead>` and records it as
   `artifact_dir`, rebases a rejected branch, and at the handoff detaches the tree
   and deletes its branch.
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d and
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e and
   `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** A step at a time. `load-context`: core's gate refuses finished,
   parked and held work and ends a run by cancelling it. `workspace-setup`: no end
@@ -152,8 +155,7 @@ no warrant.
   retires once the build a city runs carries `gc hook --claim --worktree` and the
   formula moves onto the tree the claim cuts.
   `preflight-tests` and `self-review`: Gas City ships a record of a check per
-  commit. `submit-and-exit`: the merge and review nouns it holds retire, the
-  bring-current guard among them with the old review path (`tk-1tfzr71.122`).
+  commit. `submit-and-exit`: the merge and work nouns it holds retire.
 
 ## Dolt reclaim
 
@@ -266,11 +268,11 @@ no warrant.
   epic's priority (bd's `cmd/bd/swarm.go`). Nothing updates the copy when the
   source's priority changes. Neither one's documentation describes a priority
   that follows another bead's.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 97c0c9b3b11b
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e
   (`readySortPriority` in `internal/beads/query.go`, `BeadPriorityOverride` in
   `internal/sling/sling.go`, `Attach` and `InstantiateFragment` in
   `internal/molecule/molecule.go`, `newFormulaCookCmd` in
-  `cmd/gc/cmd_formula.go`), and at `gastownhall/beads` main 786241099046 and
+  `cmd/gc/cmd_formula.go`), and at `gastownhall/beads` main 0c9c8e697843 and
   bd 1.3.4 (`BuildReadyWorkOrder` in `internal/storage/sqlbuild/ready.go`
   orders the priority policy by the bead's own priority).
 - **Retires when.** Gas City or bd ships an inherited or derived claim priority,
@@ -331,7 +333,7 @@ no warrant.
   launch pours again. No `gc sling` flag checks an earlier root by its title or
   by a key, and `--scope-kind` with `--scope-ref` names a logical workflow
   scope, not a caller's key (`cmd/gc/cmd_sling.go`).
-- **Verified.** 2026-11-20, at `gastownhall/gascity` main b31d0b1194.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e.
 - **Retires when.** A Gas City launch can refuse a second root under a caller's
   key whatever the first root's status.
 
@@ -392,57 +394,6 @@ no warrant.
   ffd9f6b0cb68.
 - **Retires when.** Gas Town's `pr-merge-reconcile` escalates a close it cannot
   make. The exception then moves onto what Gas Town records.
-
-## Machine axis
-
-- **Covers.** The `pr.machine`, `pr.machine_cause` and `pr.machine_reason`
-  keys: `[machine_axis]` in `lifecycle/lifecycle.toml`, with its `machines`
-  and `causes` lists, and the keys' entry in its `[metadata.pr_round_trip]`
-  table. Their writer and their one reader: the "record the pass's own verdict
-  on the anchor" section of `assets/scripts/gate-ensure.sh`, which records
-  `pr.machine` alone and reads the cause beside a `blocked` verdict it finds
-  there.
-- **Stands in for.** A merge-readiness verdict kept on the bead whose pull
-  request it is, which tells a block no automated actor will clear from a wait
-  the city is acting on, with the block's cause as a value a reader keys on.
-- **Evidence.**
-  - In `gastownhall/gascity`, the `gc` binary's PR readiness monitor
-    classifies an open PR from its draft flag, its merge state and its check
-    rollup alone, so a `BLOCKED` PR that is no draft and has no failed check
-    is `blocked` and actionable, a required check still running included (`classifyPullRequest` in
-    `internal/githubmonitor/monitor.go`). It reads no branch rule, review
-    thread or approval, and it records its class on a repair bead it files
-    (`ensureGitHubPRRepairBead` in `cmd/gc/cmd_github.go`), not on the bead
-    whose PR it is. Only `gc github pr backfill` runs it (`gc github pr
-    backfill` in `docs/reference/cli.md`, and `GitHubPRMonitor` in
-    `docs/reference/config.md`).
-  - The one state dimension Gas City reads as a bead label is `hold`, for
-    its dispatch holds `hold:mayor` and `hold:external`
-    (`engdocs/contributors/hold-label-conventions.md`, and
-    `DispatchHoldLabels` in `internal/beadmeta/hold_labels.go`). Its other
-    label reads are flags and markers, such as a convoy's `owned`
-    (`convoyStillAutocloses` in `cmd/gc/cmd_convoy.go`), and none of them is
-    a verdict tied to a head.
-  - In `gastownhall/beads`, labels as state keep one value per dimension,
-    read on its own, with an event bead as its history (*Labels as State
-    Cache* in `docs/core-concepts/labels.md`). `bd set-state` refuses an
-    empty value, and no state command removes a dimension (`setStateCmd`
-    and `runSetState` in `cmd/bd/state.go`), so a cause could not be
-    cleared when the verdict it qualifies moves on. A custom status (*Custom
-    Statuses and Types* in `docs/reference/configuration.md`) would take the
-    place of the bead's own status.
-  - In `gastownhall/gascity-packs`, no pack reads a branch's rules or a
-    check's required flag, and none records why a PR cannot merge as a value
-    a reader keys on. The `gastown` pack's `pr-merge-reconcile` records a PR's
-    lifecycle in `pr_state`, a key of its own.
-  - The search is [specs/tk-blloeo/gas-city-search.md](../specs/tk-blloeo/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68,
-  `gastownhall/gascity-packs` main 44b9db7168f6, and `gastownhall/beads` main
-  786241099046.
-- **Retires when.** Gas City records a pull request's merge readiness where a
-  reader of the PR's own bead finds it, and tells a required check still
-  running from a block, for example once its PR monitor reads the base
-  branch's rules. The axis then moves onto that record.
 
 ## Saved GitHub read
 
@@ -651,7 +602,7 @@ no warrant.
     and never the role key `task_kind` that a rework child carries. The search
     is asks in
     [specs/tk-1tfzr71.108/gas-city-search.md](../specs/tk-1tfzr71.108/gas-city-search.md).
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main ffd9f6b0cb68, with
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, with
   the `gastown` pack it bundles at 66897e7132c9, `gastownhall/gascity-packs`
   main 44b9db7168f6, and `gastownhall/beads` v1.3.4 (7ef2fd05eb0c), the bd
   the city runs.
@@ -749,14 +700,16 @@ no warrant.
     nothing reports a run that has finished, so the start titles each pour with
     its token and searches it after an earlier attempt.
   - Upstream tracks the gap as open P1 bugs: #7163, a formula slung onto a
-    blocked bead runs before its blockers close, and #8832, native execution
-    admission loses current input readiness, whose fix is the open PR #8834.
-- **Verified.** 2026-11-23, at `gastownhall/gascity` main 35e0a4c6fc, with
-  #7163, #8832 and PR #8834 open and unmerged.
+    blocked bead runs before its blockers close, whose fix is the open PR
+    #9406, and #8832, native execution admission loses current input
+    readiness, whose fix is the open PR #8834.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, with
+  #7163, #8832, PR #8834 and PR #9406 open and unmerged.
 - **Retires when.** Gas City holds a poured workflow's steps until its input
-  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163). The
-  arm then becomes a plain `gc sling <pool> <bead> --on <formula>` at arm time,
-  and the order, the dispatch lock, the title token, the cap and
+  bead is ready (gastownhall/gascity#8832, which PR #8834 fixes, and #7163,
+  which PR #9406 fixes). The arm then becomes a plain
+  `gc sling <pool> <bead> --on <formula>` at arm time, and the order, the
+  dispatch lock, the title token, the cap and
   `doctor/check-armed-dispatch-owed` retire.
 
 ## Feedback patterns
@@ -798,8 +751,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
-  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
+- **Verified.** 2026-11-27, at `gastownhall/gascity` main 6dce31bbb68e, `gastownhall/beads`
+  main 0c9c8e697843 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 

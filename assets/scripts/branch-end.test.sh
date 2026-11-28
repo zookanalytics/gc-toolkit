@@ -100,13 +100,6 @@ case "$sub" in
     if [ -n "${STUB_LIST_PAYLOAD:-}" ]; then cat "$STUB_LIST_PAYLOAD"; exit 0; fi
     jq -c --arg st "$st" --argjson mf "$mf" '[.[] | select(.status as $s | ($st | split(",") | index($s)) != null)
       | select(. as $row | all($mf[]; ($row.metadata // {})[.k] as $x | $x != null and ($x | tostring) == .v))]' "${STUB_LEDGER:?}" ;;
-  show)
-    [ "${STUB_SHOW_RC:-0}" = 0 ] || exit "$STUB_SHOW_RC"
-    out=$(jq -c --arg id "${1:-}" '[.[] | select(.id == $id)]' "${STUB_LEDGER:?}")
-    if [ "$out" = "[]" ]; then
-      printf '{"error":"no issues found matching the provided IDs","schema_version":1}\n'; exit 1
-    fi
-    printf '%s\n' "$out" ;;
   *) exit 1 ;;
 esac
 STUB
@@ -276,45 +269,6 @@ rc=0; run --rig demo --branch polecat/tk-park || rc=$?
 eq "$rc" 3 "a deferred bead still owns its branch"
 
 # =============================================================================
-# Whose branch: the retired bead's own scaffolding is not an owner
-# =============================================================================
-new_origin
-mk_branch polecat/tk-s; mk_branch polecat/tk-bystander
-ledger '[{"id":"tk-s","status":"closed","metadata":{"branch":"polecat/tk-s"}},
-         {"id":"tk-s-rework","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-s","branch":"polecat/tk-s","target":"main"}},
-         {"id":"tk-s-rebase","status":"in_progress","metadata":{"task_kind":"rework","anchor_bead":"tk-s","branch":"polecat/tk-s","target":"main"}},
-         {"id":"tk-s-review","status":"open","metadata":{"task_kind":"review","anchor_bead":"tk-s","review_branch":"polecat/tk-s"}}]'
-rc=0; run --rig demo --branch polecat/tk-s --bead tk-s || rc=$?
-eq "$rc" 0 "the retired bead's open rework, rebase and review beads do not keep its branch"
-gone_kept polecat/tk-s polecat/tk-bystander "scaffolding"
-
-# While the bead is still open it owns its branch, and its scaffolding counts.
-new_origin
-mk_branch polecat/tk-s
-ledger '[{"id":"tk-s","status":"open","metadata":{"branch":"polecat/tk-s"}},
-         {"id":"tk-s-rework","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-s","branch":"polecat/tk-s"}}]'
-rc=0; run --rig demo --branch polecat/tk-s --bead tk-s || rc=$?
-eq "$rc" 3 "a bead that is not closed keeps its branch"
-has "$(out)" "tk-s (open, metadata.branch)" "…naming the bead itself as the owner"
-has "$(out)" "tk-s-rework (open, metadata.branch)" "…and its scaffolding with it"
-
-# Scaffolding of some other anchor on the same branch is that anchor's claim.
-new_origin
-mk_branch polecat/tk-s
-ledger '[{"id":"tk-s","status":"closed","metadata":{"branch":"polecat/tk-s"}},
-         {"id":"tk-x-rework","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-x","branch":"polecat/tk-s"}}]'
-rc=0; run --rig demo --branch polecat/tk-s --bead tk-s || rc=$?
-eq "$rc" 3 "a rework child of another anchor on the branch keeps it"
-has "$(out)" "tk-x-rework" "…and is named"
-
-# With no --bead nothing is told apart as scaffolding.
-new_origin
-mk_branch polecat/tk-s
-ledger '[{"id":"tk-s-rework","status":"open","metadata":{"task_kind":"rework","anchor_bead":"tk-s","branch":"polecat/tk-s"}}]'
-rc=0; run --rig demo --branch polecat/tk-s || rc=$?
-eq "$rc" 3 "without --bead a rework child naming the branch keeps it"
-
-# =============================================================================
 # An unreadable ledger keeps the branch
 # =============================================================================
 new_origin
@@ -329,8 +283,6 @@ has "$(out)" "end it with: $SUT --rig demo --branch polecat/tk-u --bead tk-u" "�
 
 rc=0; STUB_STATUSES_RC=1 run --rig demo --branch polecat/tk-u --bead tk-u || rc=$?
 eq "$rc" 4 "a status contract that does not read is not ended"
-rc=0; STUB_SHOW_RC=1 run --rig demo --branch polecat/tk-u --bead tk-u || rc=$?
-eq "$rc" 4 "a --bead that does not read is not ended"
 # Each field's listing has to read: one that reads does not stand in for both.
 rc=0; STUB_LIST_FAIL_FIELD=target run --rig demo --branch polecat/tk-u --bead tk-u || rc=$?
 eq "$rc" 4 "a failed listing of the beads naming it in metadata.target is not ended"

@@ -330,8 +330,7 @@ func (u *run) runFailed(ctx context.Context, s state, failed []review.Ending, no
 
 // reviewVars are the vars a review run is poured with beyond the record's:
 // the pools its steps route to and the binding the pack is imported under, all
-// read off the refinery's address, <rig>/<binding>refinery, as
-// refinery-reconcile.sh reads the pools a review and a fix go to. A cooked
+// read off the refinery's address, <rig>/<binding>refinery. A cooked
 // formula takes only the vars it is given, so the binding is passed too, and an
 // address that names no binding pours nothing, since the run's steps name the
 // pack's scripts by it.

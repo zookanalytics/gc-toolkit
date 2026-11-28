@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # review-evidence.test.sh — what gctk rig recorded at the commit a review reads,
-# as review-evidence.sh prints it for the review's gather.
+# as review-evidence.sh prints it for a review run's lane.
 #
 #   - It reads each check's record with `gctk rig <check> --check`, in the
 #     worktree --worktree names, from a caller in another checkout at another
@@ -14,9 +14,8 @@
 #     commit's. The anchor is read once, and only when some record fails.
 #   - No gctk binary prints that there is none and reads nothing.
 #   - A worktree that is not at the commit, though the caller's checkout is, a
-#     worktree that cannot be entered, and a call missing a value, an empty
-#     --worktree included, print nothing and read nothing.
-#   - A call that names no worktree reads the checkout it is made in.
+#     worktree that cannot be entered, and a call missing a value, a missing or
+#     empty --worktree included, print nothing and read nothing.
 #   - Its temp file is gone once it exits.
 #
 # Hermetic: a scratch git repository, and stubs for gctk and gc's store; no
@@ -195,7 +194,7 @@ has "$ERR" "cannot enter the worktree $TMP/no-such-worktree" "…and says it cou
 eq "$(calls 'gctk ')" 0 "…reading no record"
 COMMIT=0000000000000000000000000000000000000000 evidence
 eq "$RC" 1 "a commit the worktree cannot read exits 1"
-for args in "--anchor tk-anchor1" "--commit $OID" "--anchor" "--anchor tk-anchor1 --commit $OID --worktree" "--anchor tk-anchor1 --commit $OID --other x"; do
+for args in "--anchor tk-anchor1" "--commit $OID" "--anchor" "--anchor tk-anchor1 --commit $OID" "--anchor tk-anchor1 --commit $OID --worktree" "--anchor tk-anchor1 --commit $OID --other x"; do
   RC=0
   # shellcheck disable=SC2086  # each case is its own argument list
   OUT=$(cd "$REPO" && env PATH="$BIN:$PATH" GCTK_BIN="$TMP/gctk" bash "$SUT" $args 2>/dev/null) || RC=$?
@@ -205,20 +204,6 @@ done
 OUT=$(cd "$REPO" && env PATH="$BIN:$PATH" GCTK_BIN="$TMP/gctk" bash "$SUT" --anchor tk-anchor1 --commit "$OID" --worktree "" 2>"$TMP/err") || RC=$?
 eq "$RC" 2 "an empty --worktree exits 2, though the caller's checkout is at the reviewed commit"
 has "$(cat "$TMP/err")" "--worktree needs a path" "…and says the path is missing"
-eq "$(calls 'gctk ')" 0 "…reading no record"
-
-echo "# a call that names no worktree"
-: > "$STUB_LOG"; RC=0
-OUT=$(cd "$REPO" && env PATH="$BIN:$PATH" GCTK_BIN="$TMP/gctk" STUB_RC_test=0 STUB_REC_test="$(record test pass full)" \
-  bash "$SUT" --anchor tk-anchor1 --commit "$OID" 2>/dev/null) || RC=$?
-eq "$RC" 0 "a call with no --worktree, made in the checkout at the reviewed commit, exits 0"
-eq "$(line test)" "test: pass, scope full, exit 0, command: run-the-tests" "…printing the records there"
-grep -qxF "gctk rig test --check|$REPO_REAL" "$STUB_LOG" && ok "…read in the checkout the call is made in" \
-  || bad "…read in the checkout the call is made in" "log: $(tr '\n' ';' < "$STUB_LOG")"
-: > "$STUB_LOG"; RC=0
-OUT=$(cd "$ELSEWHERE" && env PATH="$BIN:$PATH" GCTK_BIN="$TMP/gctk" bash "$SUT" --anchor tk-anchor1 --commit "$OID" 2>"$TMP/err") || RC=$?
-eq "$RC" 1 "a call with no --worktree, made in a checkout at another commit, exits 1"
-has "$(cat "$TMP/err")" "is at $LATER, not at $OID" "…and says which commit that checkout is at"
 eq "$(calls 'gctk ')" 0 "…reading no record"
 
 echo "---"

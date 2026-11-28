@@ -1,1 +1,0 @@
-description = "I6: every open gating anchor (merge_result=pre_open_gate|pull_request) declares a non-empty check_set or the explicit \"none\" sentinel"

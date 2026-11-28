@@ -265,7 +265,7 @@ nfr_defs() {
 }
 
 # What a dismissal retires. A dismissal drops the review out of the approval
-# rule (review-verdict.sh), and it retires the inline comments the review
+# rule the evaluator applies, and it retires the inline comments the review
 # carried: GitHub keeps them on /pulls/N/comments, but they stop counting as
 # feedback. live_comments gives the inline comments on input that no dismissal
 # has retired, given the review list $revs, and a reader that counts or routes
