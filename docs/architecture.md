@@ -107,6 +107,14 @@ Everything else reads.
 Dependabot's or one from a fork, stays outside the city's landing, even when it
 is open from a work bead's branch.
 
+**The text people post on GitHub.** An agent reads an issue's or a PR's title,
+body and posts only through `gctk github quote`, which quotes them so that
+nothing in them runs in a shell. On a repository the city can push to, a post
+by an account the repository does not count as its own never reaches an agent,
+and the operator learns of it through a human gate instead.
+[gctk-architecture.md](gctk-architecture.md#the-surface) states the reader's
+rules.
+
 **A gascity fork's rebase.** The gascity-keeper sub-pack rebases a city's
 gascity fork onto upstream, and the operator lands each rebase with a
 force-push onto the fork's `main`. No agent force-pushes that branch, the
@@ -460,15 +468,15 @@ standing behavior, so attention is never spent twice:
 
 1. **Capture.** Working agents self-report observation beads when a turn
    brings corrective feedback, and file their own suggestions as observations
-   too; the `feedback-miner` order sweeps merged PRs'
-   review comments, recording every review post from outside the city and
-   what self-report missed in the city's own; "learn this: …" is the
-   operator fast path. Agents' memory notes are a second intake: a note
-   holds what should change the next agent's behavior, and an observation
-   holds what is to be evaluated. The distiller judges notes beside
-   observations onto the same patterns, and a note leaves memory once its
-   pattern's fix has landed or the distiller finds nothing worth keeping in
-   it.
+   too; the `feedback-miner` order sweeps merged PRs' review comments,
+   recording every review post from outside the city that reaches an agent
+   ([the boundary](#the-boundary)) and what self-report missed in the city's
+   own; "learn this: …" is the operator fast path. Agents' memory notes are a
+   second intake: a note holds what should change the next agent's behavior,
+   and an observation holds what is to be evaluated. The distiller judges
+   notes beside observations onto the same patterns, and a note leaves memory
+   once its pattern's fix has landed or the distiller finds nothing worth
+   keeping in it.
 2. **Distill.** The `feedback-distiller` order clusters observations into
    patterns and promotes recurring ones as ordinary PRs against the pack —
    prompt edits, lint rules under `tools/lint-learned.d/`, doc changes.

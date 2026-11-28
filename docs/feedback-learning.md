@@ -116,20 +116,22 @@ Four producers file the same bead contract:
      conversation comment whose first non-blank line opens with `[vc]:`.
      Any other post is outside when another login posted it, an
      app's included, or when it is Claude Code's `/code-review` output
-     posted under the city's login. The rig's store records the day from
-     which the outside capture still owes a read of every merged or closed
-     PR updated since, and every run reads the PRs updated since then. A
-     post updates its PR, so a post made long after its PR closed is read
-     too. A rig's first run records the day `outside_backfill_days` (30)
-     back, so the capture back-fills the month before it. After each run the
-     day moves to the oldest last update among the PRs the run still owes,
-     one that did not read or has an outside post not yet recorded, or to
-     the run's own day when it owes none. So a back-fill one run could not
-     finish is finished by the runs after it, however long after they come.
-     The distiller reads these observations as a set for what the city's
-     review missed, and a proposal from them is a `review-rubric` amendment
-     or a change to the correctness method, never a rule per observation
-     (`skills/learning-distill/SKILL.md`).
+     posted under the city's login. A post `gctk github quote` holds for
+     the operator reaches no agent, so the capture records nothing of it
+     ([architecture.md](architecture.md#the-boundary)). The rig's store
+     records the day from which the outside capture still owes a read of
+     every merged or closed PR updated since, and every run reads the PRs
+     updated since then. A post updates its PR, so a post made long after its
+     PR closed is read too. A rig's first run records the day
+     `outside_backfill_days` (30) back, so the capture back-fills the month
+     before it. After each run the day moves to the oldest last update among
+     the PRs the run still owes, one that did not read or has an outside post
+     not yet recorded, or to the run's own day when it owes none. So a
+     back-fill one run could not finish is finished by the runs after it,
+     however long after they come. The distiller reads these observations as
+     a set for what the city's review missed, and a proposal from them is a
+     `review-rubric` amendment or a change to the correctness method, never a
+     rule per observation (`skills/learning-distill/SKILL.md`).
    - **The standing-behavior capture.** The city's own posts are read for
      corrective feedback about standing behavior that self-report missed, at
      most `max_obs_per_run` a run. An outside post is never read here, so the

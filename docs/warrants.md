@@ -798,8 +798,8 @@ no warrant.
     --until`), a `blocks` edge onto its follow-up, `bd close`, and `bd reopen`.
     The search is
     [specs/tk-ltcv43q/gas-city-search.md](../specs/tk-ltcv43q/gas-city-search.md).
-- **Verified.** 2026-11-26, at `gastownhall/gascity` main d38ec7842f8d, `gastownhall/beads`
-  main 786241099046 and `gastownhall/gascity-packs` main 44b9db7168f6.
+- **Verified.** 2026-11-28, at `gastownhall/gascity` main 6dce31bbb68e, `gastownhall/beads`
+  main d446beec2ea7 and `gastownhall/gascity-packs` main 44b9db7168f6.
 - **Retires when.** Gas City ships a loop that decides agents' recurring
   feedback as work, with the evidence each decision rests on.
 
