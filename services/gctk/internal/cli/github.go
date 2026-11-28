@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/feedback"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gascity"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gcbd"
 	"github.com/zookanalytics/gc-toolkit/services/gctk/internal/gh"
@@ -36,11 +38,21 @@ var newQuoteHub = func(host string) quoteHub { return gh.NewBounded(host, quoteR
 
 // quoteFollowUp files the operator's follow-up for the posts a quote held on
 // the PR at url, number in repo, on the bead that owns it in the store the
-// command runs against, and returns that bead, "" when the store holds none. A
-// variable so a test can record it.
+// command runs against, and returns that bead, "" when the store holds none.
+// The gate is filed through human-gate.sh in the pack's scripts directory,
+// which an agent's own call of gctk names in no GCTK_SCRIPTS_DIR, so it is
+// resolved as the definition of feedback resolves it. A variable so a test can
+// record it.
 var quoteFollowUp = func(url, repo string, number int, held []quote.Held) (string, error) {
 	bead, err := pr.OwnerOf(ledger.New(gcbd.New()), url)
 	if err != nil || bead == "" {
+		return bead, err
+	}
+	scripts, err := feedback.ScriptsDir()
+	if err != nil {
+		return bead, err
+	}
+	if err := os.Setenv("GCTK_SCRIPTS_DIR", scripts); err != nil {
 		return bead, err
 	}
 	return bead, pr.FollowUp(context.Background(), actGates{rt: gascity.New()}, bead, repo, number, held)
