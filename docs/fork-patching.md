@@ -11,8 +11,7 @@ description: gc-toolkit's own process for a city that runs a fork of gascity —
 > **The goal is for this process to go away.** Every local patch is a tax —
 > on rebase work, on review attention, on divergence risk. So the fork carries
 > only the fixes [When to local-patch](#when-to-local-patch) admits, and offers
-> each one upstream, where upstream's own fix retires it. This doc describes
-> how to carry one well.
+> each one upstream, where upstream's own fix retires it.
 
 ---
 
@@ -44,9 +43,8 @@ it:
    fix, not as a stopgap, and the fork carries no patch for it. Only
    upstream's own fix, arriving through a sync, replaces the change.
 2. **Local patch.** Fix it on the fork's main when its fix is clear and
-   consistent with Gas City, by the test below. This doc is about that path.
-   Every fix the fork carries is offered upstream
-   ([Offering a fix upstream](#offering-a-fix-upstream)).
+   consistent with Gas City, by the test below. Every fix the fork carries is
+   offered upstream ([Offering a fix upstream](#offering-a-fix-upstream)).
 3. **Wait for upstream.** Accept the cost until upstream's own fix arrives
    through a sync. This is the answer for any bug the first two do not fit.
 
