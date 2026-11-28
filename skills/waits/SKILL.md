@@ -32,11 +32,12 @@ decides only when the bead can go. What sends it then depends on the bead:
 
 - A routed bead is offered to its pool again once the blocker closes, and needs
   nothing more.
-- An unrouted bead that the work skill's intake rule lets you send now, and that
-  should start by itself once the blocker closes, also takes an arm (below), or
-  nothing sends it.
-- An unrouted bead that the intake rule leaves for the operator to place takes
-  no route and no arm. The edge still holds it once the operator places it.
+- A bead takes an arm (below) when all of these hold:
+  - It carries no route.
+  - The work skill's intake rule lets you send it now.
+  - It should start by itself once the blocker closes.
+- A bead the intake rule leaves for the operator to place takes no route and no
+  arm. The edge still holds it once the operator places it.
 - A bead whose whole job ends once the blocker closes is checked and closed by
   the validating closer instead (the next section).
 
